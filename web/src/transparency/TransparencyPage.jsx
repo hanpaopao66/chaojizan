@@ -6,14 +6,17 @@ import './transparency.css'
 /* 透明中心(/transparency):核账公示 / 佣金去向 / 赔付记录 / 分账公平 / 月度财报。
    所有数字来自公开接口,口径注释随数字展示——透明的透明。 */
 
-function useFetch(url) {
+function useFetch(url, pollMs = 0) {
   const [data, setData] = useState(null)
   useEffect(() => {
     let alive = true
-    fetch(url).then(r => (r.ok ? r.json() : null))
-      .then(d => alive && setData(d)).catch(() => {})
-    return () => { alive = false }
-  }, [url])
+    const load = () => fetch(url).then(r => (r.ok ? r.json() : null))
+      .then(d => alive && d && setData(d)).catch(() => {})
+    load()
+    if (!pollMs) return () => { alive = false }
+    const t = setInterval(load, pollMs)
+    return () => { alive = false; clearInterval(t) }
+  }, [url, pollMs])
   return data
 }
 
@@ -69,7 +72,8 @@ export default function TransparencyPage() {
   const comp = useFetch('/transparency/compensation')
   const fair = useFetch('/transparency/fairness')
   const reports = useFetch('/transparency/reports')
-  const uptime = useFetch('/transparency/uptime')
+  // 状态区自动刷新(与服务端 60s 缓存节奏对齐),其余区块一次性加载
+  const uptime = useFetch('/transparency/uptime', 60000)
   const changelog = useFetch('/transparency/changelog')
   const gov = useFetch('/transparency/governance')
   useEffect(() => {   // /status 直达系统状态区
@@ -384,15 +388,23 @@ export default function TransparencyPage() {
 
         <h2 id="status">系统<b>状态</b></h2>
         <p className="tp-lede">
-          后台每 {uptime?.probe_interval_minutes ?? 5} 分钟自记一次数据库与缓存健康。
-          缺一次探针就按不可用计——可用率只会算低,不会虚高。
-          {uptime?.note && <>({uptime.note})</>}
+          后台每 {uptime?.probe_interval_minutes ?? 5} 分钟自记一次数据库与缓存健康,
+          下方格子按<b>天</b>汇总(90 天 · 每格一天)。缺一次探针就按不可用计——
+          可用率只会算低,不会虚高。{uptime?.note && <>({uptime.note})</>}
         </p>
         <div className="tp-status-now">
           {uptime && (uptime.current.ok
             ? <span className="tp-ok">● 全部服务正常</span>
             : <span className="tp-bad">● 服务异常:
                 {!uptime.current.db && ' 数据库'}{!uptime.current.redis && ' 缓存'}</span>)}
+          {uptime?.today && uptime.today.probes > 0 && (
+            <span className="tp-today-probes">
+              今日已记录 {uptime.today.probes} 次探针
+              {uptime.today.ok === uptime.today.probes
+                ? ',全部正常' : `,异常 ${uptime.today.probes - uptime.today.ok} 次`}
+              {uptime.today.last_at && <> · 最近 {uptime.today.last_at}</>}
+            </span>
+          )}
         </div>
         <UptimeDays days={uptime?.days} />
 

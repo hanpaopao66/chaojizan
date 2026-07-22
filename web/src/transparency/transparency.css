@@ -116,3 +116,28 @@
 
 /* 治理公开 */
 .tp-reason { color: var(--amber); margin-left: 6px; }
+
+.tp-today-probes { display: inline-block; margin-left: 14px;
+  color: var(--muted, #7A8499); font-size: .85rem;
+  font-variant-numeric: tabular-nums; }
+
+/* ---------- 移动端适配 ---------- */
+@media (max-width: 760px) {
+  .tp-page { padding: 0 16px 56px; }
+  .tp-page h2 { font-size: 1.3rem; margin: 44px 0 8px; }
+  .tp-hero { padding: 64px 0 8px; }  /* 吸顶导航下留足,眉题不被压 */
+  .tp-hero .big { font-size: 1.55rem; }
+  .tp-cards { grid-template-columns: 1fr; }
+  .tp-funds { grid-template-columns: 1fr; }
+  .tp-rate { gap: 16px; }
+  .tp-rate .now { font-size: 2.4rem; }
+  .tp-days { gap: 4px; }
+  .tp-days .d { width: 10px; height: 10px; }
+  .tp-split { height: 40px; }
+  .tp-split .seg { font-size: .72rem; }
+  .tp-log .row { flex-wrap: wrap; row-gap: 2px; }
+  .tp-log .msg { white-space: normal; }
+  .tp-today-probes { display: block; margin: 6px 0 0; }
+  .tp-footer-links { margin-top: 36px; }
+  .tp-footer-links .btn { flex: 1 1 44%; text-align: center; }
+}

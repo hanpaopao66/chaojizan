@@ -1,0 +1,6 @@
+# autoprefixer 目标:微信内置/iOS Safari 12+/国产安卓浏览器
+> 0.3% in CN
+iOS >= 12
+Android >= 7
+last 4 versions
+not dead

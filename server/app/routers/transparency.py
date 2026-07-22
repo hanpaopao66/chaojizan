@@ -430,9 +430,23 @@ async def uptime_public(request: Request, db: AsyncSession = Depends(get_db)):
         await get_redis().ping()
     except Exception:
         redis_ok = False
+    # 今日探针明细(格子是按天的,这行让"今天只有一格"也有实时感)
+    today_row = (await db.execute(sa_text("""
+        SELECT count(*), count(*) FILTER (WHERE db_ok AND redis_ok),
+               max(created_at)
+        FROM health_probes
+        WHERE (created_at AT TIME ZONE 'Asia/Shanghai')::date
+              = (now() AT TIME ZONE 'Asia/Shanghai')::date
+    """))).one()
     data = {
         "days": days,
         "current": {"db": db_ok, "redis": redis_ok, "ok": db_ok and redis_ok},
+        "today": {
+            "probes": today_row[0],
+            "ok": today_row[1],
+            "last_at": (today_row[2].astimezone(SH).strftime("%H:%M")
+                        if today_row[2] else None),
+        },
         "probe_interval_minutes": 5,
         "note": "缺探针按不可用计;记录自探针上线之日起",
     }

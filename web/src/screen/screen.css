@@ -179,3 +179,28 @@
 .sc-hero .sub2 { color: #8B95AC; font-size: 13px; margin-top: 2px;
   font-variant-numeric: tabular-nums; }
 .sc-hero .sub2 b { color: #FFB84D; font-weight: 600; }
+
+/* 省份悬停浮层(随鼠标,在 1920 设计坐标系内定位) */
+.sc-map-tip {
+  position: absolute; z-index: 3; pointer-events: none;
+  transform: translate(-50%, -130%);
+  background: rgba(12, 18, 32, .95);
+  border: 1px solid rgba(255, 90, 31, .45); border-radius: 10px;
+  padding: 8px 14px; white-space: nowrap;
+  font-size: 14px; color: #E8ECF4;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .45);
+}
+.sc-map-tip b { color: #FFB84D; margin-right: 10px; }
+.sc-map-tip .n { color: #FF7A45; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.sc-map-tip .empty { color: #8B95AC; }
+
+/* 窄屏(手机竖屏)提示:大屏是投屏产品,保持整屏缩放不重排 */
+.sc-rotate-tip { display: none; }
+@media (max-width: 700px) {
+  .sc-rotate-tip {
+    display: block; position: fixed; top: 0; left: 0; right: 0; z-index: 9;
+    background: rgba(255, 90, 31, .92); color: #fff;
+    font-size: 13px; text-align: center; padding: 6px 12px;
+  }
+}

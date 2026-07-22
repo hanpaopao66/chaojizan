@@ -161,6 +161,7 @@ export default function ScreenPage() {
 
   return (
     <div className="screen-viewport">
+      <div className="sc-rotate-tip">📺 本页为投屏大屏,手机建议横屏观看</div>
       <div className="screen-root" ref={rootRef}>
         <header className="sc-head">
           <BrandIcon size={36} />

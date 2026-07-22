@@ -102,4 +102,11 @@ for a in gov["announcements"]:
 print(f"✓ 治理公开:开关留痕 {len(tl)} 条(含原因),处置本月"
       f" 限制{this_month['limited']}/解除{this_month['lifted']},无个案字段")
 
+# ---- 系统状态今日探针明细(状态区实时行数据源) ----
+up2 = call("GET", "/transparency/uptime")
+t = up2["today"]
+assert t["probes"] >= 0 and t["ok"] <= t["probes"]
+assert t["probes"] == 0 or t["last_at"] is not None
+print(f"✓ 今日探针明细:{t['probes']} 次,最近 {t['last_at']}")
+
 print("\ne2e_transparency 全部通过 ✅")

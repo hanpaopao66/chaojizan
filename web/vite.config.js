@@ -1,13 +1,19 @@
 import react from '@vitejs/plugin-react'
+import autoprefixer from 'autoprefixer'
 import { defineConfig } from 'vite'
 
 // 构建产物直接进 server/static/site,由 FastAPI 托管(生产机无需 node)
 export default defineConfig({
   plugins: [react()],
   base: '/site/',
+  css: {
+    postcss: { plugins: [autoprefixer()] },
+  },
   build: {
     outDir: '../server/static/site',
     emptyOutDir: true,
+    // 手机浏览器兼容:微信内置(X5/XWeb)、iOS Safari 12+、国产安卓壳浏览器
+    target: ['es2019', 'safari12'],
   },
   server: {
     // 本地开发时把数据接口代理到后端
