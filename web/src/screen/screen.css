@@ -81,6 +81,10 @@
 .sc-col { width: 430px; flex: none; display: flex; flex-direction: column; gap: 16px; }
 .sc-center { flex: 1; position: relative; min-width: 0; }
 
+/* 官网全局 `section { max-width:980px; margin:0 auto }`(styles.css)会渗入
+   本页:auto 外边距使面板收缩成内容宽、居中漂浮,左右栏参差不齐——显式归零 */
+.screen-root section { max-width: none; margin: 0; }
+
 .sc-panel {
   flex: 1; min-height: 0; position: relative; border-radius: 12px;
   border: 1px solid rgba(77, 130, 220, .18);

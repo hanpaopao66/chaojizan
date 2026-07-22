@@ -267,7 +267,11 @@ class _BrandSplash extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0B0E14),
+      // Scaffold 的 body 约束是宽松的:不写死尺寸,Container 会收缩包裹
+      // 内容并靠到左上角,开屏只剩"半截"——必须显式撑满全屏
       body: Container(
+        width: double.infinity,
+        height: double.infinity,
         decoration: const BoxDecoration(
           gradient: RadialGradient(
             center: Alignment(0, -0.2),
