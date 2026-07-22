@@ -178,18 +178,18 @@ function Home() {
           <div className="qrbox">
             <img src="/site/brand/qr_download.svg" alt="扫码打开下载页" />
             <div className="cap">手机扫码下载</div>
-            <div className="url">aikas.com.cn/download</div>
+            <div className="url">chaojizan.cc/download</div>
           </div>
           <div className="apps">
             <div className="app"><span className="emoji">🍜</span>
               <div><b>用户端</b><p>点外卖,每一单分账可查</p></div>
-              <a className="get" href="/appdist/superz-user-arm64.apk">下载 APK</a></div>
+              <a className="get" href="/appdist/chaojizan-user-arm64.apk">下载 APK</a></div>
             <div className="app"><span className="emoji">🏪</span>
               <div><b>商家端</b><p>入驻免费,总负担 5% 封顶,每日对账</p></div>
-              <a className="get" href="/appdist/superz-merchant-arm64.apk">下载 APK</a></div>
+              <a className="get" href="/appdist/chaojizan-merchant-arm64.apk">下载 APK</a></div>
             <div className="app"><span className="emoji">🛵</span>
               <div><b>骑手端</b><p>配送费 100% 归你,提现零手续费</p></div>
-              <a className="get" href="/appdist/superz-rider-arm64.apk">下载 APK</a></div>
+              <a className="get" href="/appdist/chaojizan-rider-arm64.apk">下载 APK</a></div>
           </div>
         </div>
       </Reveal>

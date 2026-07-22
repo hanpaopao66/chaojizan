@@ -12,7 +12,7 @@
   python3 superz_witness.py                        # 默认连官方服务器
   docker run -d ghcr.io/super-z/witness            # 见 README
 可选环境变量 / 参数:
-  SUPERZ_API      平台地址(默认 https://aikas.com.cn)
+  SUPERZ_API      平台地址(默认 https://chaojizan.cc)
   WITNESS_NAME    节点页上展示的名字(可留空)
   WITNESS_REGION  节点页上展示的地区(可留空)
 
@@ -180,7 +180,7 @@ class Witness:
 def main():
     parser = argparse.ArgumentParser(description="Super-Z 社区见证节点")
     parser.add_argument("--api", default=os.environ.get(
-        "SUPERZ_API", "https://aikas.com.cn"))
+        "SUPERZ_API", "https://chaojizan.cc"))
     parser.add_argument("--state", default=os.environ.get(
         "WITNESS_STATE", str(Path.home() / ".superz-witness.json")))
     parser.add_argument("--once", action="store_true",

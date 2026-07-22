@@ -31,6 +31,7 @@ PATTERNS=(
   '8\.140\.31\.213'
   'auth\.token\s*='
   'wanli'
+  'aikas'    # 历史域名:保留访问但不明文出现
   # 生产环境痕迹
   'POSTGRES_PASSWORD\s*[:=]\s*[^$?{]'   # 写死的密码(引用变量的不算)
   'JWT_SECRET\s*[:=]\s*[^$?{c]'         # 同上(change-me 默认值放行)

@@ -3,4 +3,4 @@ Allow: /
 Disallow: /admin
 Disallow: /uploads/
 
-Sitemap: https://aikas.com.cn/sitemap.xml
+Sitemap: https://chaojizan.cc/sitemap.xml

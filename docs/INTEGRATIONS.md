@@ -14,7 +14,7 @@
 1. 微信开放平台注册 App,拿 `AppID`(注意是开放平台,不是公众平台)
 2. ~~微信支付商户平台开户,拿 `商户号(mchid)`~~ **已办**(2026-07,号码在 server/.env)
 3. 商户平台 → API 安全:设置 `APIv3 密钥`、下载商户证书(得到 `apiclient_key.pem` 和证书序列号)
-4. ~~HTTPS 域名~~ **已备**:回调地址 `https://aikas.com.cn/payments/wechat/notify`(已填 .env)
+4. ~~HTTPS 域名~~ **已备**:回调地址 `https://chaojizan.cc/payments/wechat/notify`(已填 .env)
 
 **代码侧已就位**:
 - 服务端:`app/services/wechat_pay.py`(统一下单/验签解密/分账占位)、

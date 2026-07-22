@@ -86,7 +86,7 @@ class _InvitePageState extends State<InvitePage> {
                             SharePlus.instance.share(ShareParams(
                                 text: '我在用「超级赞外卖」:商家只抽 5%、'
                                     '配送费全归骑手、账目公开。'
-                                    '下载 https://aikas.com.cn/download ,'
+                                    '下载 https://chaojizan.cc/download ,'
                                     '注册后填我的邀请码 ${d['code']},'
                                     '你首单完成咱俩各得 $reward券!'));
                           },

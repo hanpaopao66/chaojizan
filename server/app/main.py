@@ -298,7 +298,7 @@ async def favicon():
 @app.get("/witness.py", include_in_schema=False)
 async def witness_script():
     """见证节点脚本直接下载(公开仓发布前的分发通道):
-    curl -O https://aikas.com.cn/witness.py && python3 witness.py"""
+    curl -O https://chaojizan.cc/witness.py && python3 witness.py"""
     return FileResponse(SERVER_DIR.parent / "witness" / "superz_witness.py",
                         media_type="text/x-python",
                         filename="superz_witness.py")

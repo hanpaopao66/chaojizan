@@ -73,12 +73,12 @@ Widget _footer() => Row(children: [
                   fontSize: 16)),
           Text('商家只抽5% · 配送费全归骑手 · 账目公开',
               style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
-          Text('aikas.com.cn',
+          Text('chaojizan.cc',
               style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
         ]),
       ),
       QrImageView(
-          data: 'https://aikas.com.cn/download?utm_source=share',
+          data: 'https://chaojizan.cc/download?utm_source=share',
           size: 56,
           padding: EdgeInsets.zero),
     ]);

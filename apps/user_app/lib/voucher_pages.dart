@@ -111,7 +111,7 @@ class _VoucherListViewState extends State<VoucherListView> {
                           text: '「${deal.merchantName}」${deal.title},'
                             '${yuan(deal.sellPriceCents)} 抵 ${yuan(deal.faceValueCents)},'
                             '未使用随时全额退。超级赞团购只收商家 2% 服务费。'
-                          '下载:https://aikas.com.cn'));
+                          '下载:https://chaojizan.cc'));
                     },
                   ),
                   const SizedBox(width: 10),

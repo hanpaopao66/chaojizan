@@ -11,8 +11,8 @@ cd "$(dirname "$0")/.."
 VERSION=${1:?用法: release_apks.sh <版本名> <build号> <更新说明>}
 BUILD=${2:?缺 build 号}
 NOTES=${3:?缺更新说明}
-API=https://aikas.com.cn
 [ -f deploy/.env.deploy ] && . deploy/.env.deploy
+API=${PUBLIC_BASE:?缺对外域名:在 deploy/.env.deploy 写 PUBLIC_BASE=https://域名(不入库)}
 DEPLOY=${DEPLOY:?缺部署机地址:在 deploy/.env.deploy 写 DEPLOY=user@host(不入库)}
 
 for app in user merchant rider; do
@@ -45,17 +45,17 @@ echo "== 上传 APK 到部署机 =="
 ssh $DEPLOY 'mkdir -p ~/super-z/appdist'
 for app in user merchant rider; do
   scp -q apps/${app}_app/build/app/outputs/flutter-apk/app-release.apk \
-      $DEPLOY:~/super-z/appdist/superz-${app}-arm64.apk
-  echo "  superz-${app}-arm64.apk ✓"
+      $DEPLOY:~/super-z/appdist/chaojizan-${app}-arm64.apk
+  echo "  chaojizan-${app}-arm64.apk ✓"
 done
 
 # 见证节点绿色版:构建过就顺带上传(scripts/build_witness_dist.sh 生成)
 if [ -d build/witness-dist ]; then
   echo "== 上传见证节点绿色版 =="
   ssh $DEPLOY 'mkdir -p ~/super-z/appdist/witness'
-  scp -q "build/witness-dist/superz-witness-windows.exe" \
-      "build/witness-dist/superz-witness-macos.zip" \
-      "build/witness-dist/superz-witness-linux.tar.gz" \
+  scp -q "build/witness-dist/chaojizan-witness-windows.exe" \
+      "build/witness-dist/chaojizan-witness-macos.zip" \
+      "build/witness-dist/chaojizan-witness-linux.tar.gz" \
       $DEPLOY:'~/super-z/appdist/witness/'
   echo "  绿色版 ×3 ✓"
 fi
@@ -68,7 +68,7 @@ for app in ['user', 'merchant', 'rider']:
     data[app] = {
         'version': '$VERSION',
         'build': $BUILD,
-        'url': '$API/appdist/superz-' + app + '-arm64.apk',
+        'url': '$API/appdist/chaojizan-' + app + '-arm64.apk',
         'notes': '''$NOTES''',
         'force': False,
     }

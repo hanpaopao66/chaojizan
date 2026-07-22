@@ -5,13 +5,14 @@
 # 首次签发(一次性,域名解析生效且 80 端口链路通了之后):
 #   cd ~/super-z/deploy && mkdir -p letsencrypt certbot-www
 #   docker run --rm -v "$PWD/letsencrypt:/etc/letsencrypt" -v "$PWD/certbot-www:/var/www/certbot" \
-#     certbot/certbot certonly -n --webroot -w /var/www/certbot -d aikas.com.cn \
+#     certbot/certbot certonly -n --webroot -w /var/www/certbot -d chaojizan.cc \
 #     --register-unsafely-without-email --agree-tos
-#   (chaojizan.cc 备案通过后同法签发,再把下面 DOMAINS 加上它)
 set -euo pipefail
 
 cd "$(dirname "$0")"
-DOMAINS=(aikas.com.cn)   # chaojizan.cc 备案后加进来
+DOMAINS=(chaojizan.cc)
+# 附加域名(如历史域名)写在服务器本地 .domains.local(每行一个,不入库)
+[ -f .domains.local ] && while read -r d; do DOMAINS+=("$d"); done < .domains.local
 
 echo "[$(date '+%F %T')] 开始检查续期"
 
@@ -24,7 +25,7 @@ docker run --rm \
 # 同步到 nginx 挂载目录(-L 解引用 live/ 符号链接)并热重载。
 # letsencrypt/ 由 certbot 容器以 root 写入,宿主用户读不了——同样借容器拷贝
 for d in "${DOMAINS[@]}"; do
-  short=${d%%.*}   # aikas.com.cn -> aikas
+  short=${d%%.*}   # 域名首段作证书目录名
   mkdir -p "certs/$short"
   docker run --rm -v "$PWD/letsencrypt:/le:ro" -v "$PWD/certs:/certs" \
     alpine sh -c "[ -d /le/live/$d ] && cp -L /le/live/$d/fullchain.pem /le/live/$d/privkey.pem /certs/$short/" \

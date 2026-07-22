@@ -4,7 +4,7 @@
 > 构建:`cd apps/<app> && flutter build apk --release`,
 > 或用 scripts/release_apks.sh 发到 appdist。
 > 后端:真机与电脑同一 WiFi,构建时加
-> `--dart-define=SUPERZ_API=http://<电脑局域网IP>:8000`;或直接连生产 aikas.com.cn。
+> `--dart-define=SUPERZ_API=http://<电脑局域网IP>:8000`;或直接连生产 chaojizan.cc。
 
 ## A. 合规首启(三端各过一遍)
 
@@ -78,7 +78,7 @@
 ## E4. 信任基建:公开账本 + 见证节点(2026-07-17 新增)
 
 - [ ] 浏览器打开 /nodes:节点数、最新锚点、运行指南正常展示(亮/暗色都看)
-- [ ] 在另一台机器(或手机 Termux)`python3 witness/superz_witness.py --api https://aikas.com.cn --once`:输出「✓ 账本可信」,/nodes 列表几秒内出现该节点
+- [ ] 在另一台机器(或手机 Termux)`python3 witness/superz_witness.py --api https://chaojizan.cc --once`:输出「✓ 账本可信」,/nodes 列表几秒内出现该节点
 - [ ] 断网重跑 --once:本地留存的锚点仍在(~/.superz-witness.json)
 - [ ] 手动改数据库某天锚点的 chain_hash 再跑节点 → 节点报「锚点被改」,/nodes 页面红色示警(验完改回来)
 - [ ] curl /ledger/days/昨天:确认只有金额与哈希,无手机号/地址/姓名/坐标

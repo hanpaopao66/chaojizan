@@ -29,20 +29,20 @@
 
 | 入口 | 内容 |
 |---|---|
-| [透明中心](https://aikas.com.cn/transparency) | 每日核账公示(差一分钱都亮红灯)、佣金去向、平台赔付记录、每 100 元分账实算、实际佣金率、规则变更留痕、系统可用率 |
-| [运营大屏](https://aikas.com.cn/screen) | 实时订单/注册规模/城市分布,店内电视可投屏 |
-| [公开账本](https://aikas.com.cn/nodes) | 全部账务流水哈希链锚点,社区见证节点持续复算——改历史上任何一分钱,全网都会知道 |
-| 版本公示 | 线上运行版本 = 本仓 tag,[透明中心·最近更新](https://aikas.com.cn/transparency#changelog) 与本仓提交一字不差 |
+| [透明中心](https://chaojizan.cc/transparency) | 每日核账公示(差一分钱都亮红灯)、佣金去向、平台赔付记录、每 100 元分账实算、实际佣金率、规则变更留痕、系统可用率 |
+| [运营大屏](https://chaojizan.cc/screen) | 实时订单/注册规模/城市分布,店内电视可投屏 |
+| [公开账本](https://chaojizan.cc/nodes) | 全部账务流水哈希链锚点,社区见证节点持续复算——改历史上任何一分钱,全网都会知道 |
+| 版本公示 | 线上运行版本 = 本仓 tag,[透明中心·最近更新](https://chaojizan.cc/transparency#changelog) 与本仓提交一字不差 |
 
 ## 下载(Android arm64)
 
 | 端 | 直链 | 定位 |
 |---|---|---|
-| 🍜 用户端 | [superz-user-arm64.apk](https://aikas.com.cn/appdist/superz-user-arm64.apk) | 点外卖,每一单分账可查 |
-| 🏪 商家端 | [superz-merchant-arm64.apk](https://aikas.com.cn/appdist/superz-merchant-arm64.apk) | 入驻免费,总负担 5% 封顶 |
-| 🛵 骑手端 | [superz-rider-arm64.apk](https://aikas.com.cn/appdist/superz-rider-arm64.apk) | 配送费 100% 归你 |
+| 🍜 用户端 | [chaojizan-user-arm64.apk](https://chaojizan.cc/appdist/chaojizan-user-arm64.apk) | 点外卖,每一单分账可查 |
+| 🏪 商家端 | [chaojizan-merchant-arm64.apk](https://chaojizan.cc/appdist/chaojizan-merchant-arm64.apk) | 入驻免费,总负担 5% 封顶 |
+| 🛵 骑手端 | [chaojizan-rider-arm64.apk](https://chaojizan.cc/appdist/chaojizan-rider-arm64.apk) | 配送费 100% 归你 |
 
-下载页(带最新版本号与更新说明):**https://aikas.com.cn/download**,App 内置更新检查。
+下载页(带最新版本号与更新说明):**https://chaojizan.cc/download**,App 内置更新检查。
 权限最小化:不收集后台定位/设备识别码/装机列表,权限清单以三端 `AndroidManifest.xml` 为准。
 
 ## 宏大路线图
@@ -170,7 +170,7 @@ cd apps/user_app && flutter run
 
 - 提 issue / PR 前请读 [CONTRIBUTING.md](CONTRIBUTING.md);提交走 Conventional Commits
 - 任何提交前跑 `scripts/security_scan.sh .`(仓库公开,密钥与内网信息零容忍)
-- 跑一个[见证节点](https://aikas.com.cn/nodes)复算我们的账本,是最硬核的参与方式
+- 跑一个[见证节点](https://chaojizan.cc/nodes)复算我们的账本,是最硬核的参与方式
 
 ## 开发日志
 

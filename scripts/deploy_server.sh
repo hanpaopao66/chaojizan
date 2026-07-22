@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 # 部署机地址不入库:deploy/.env.deploy(gitignore)写 DEPLOY=user@host,或环境变量传入
 [ -f deploy/.env.deploy ] && . deploy/.env.deploy
 DEPLOY=${DEPLOY:?缺部署机地址:在 deploy/.env.deploy 写 DEPLOY=user@host(不入库)}
+PUBLIC_BASE=${PUBLIC_BASE:?缺对外域名:在 deploy/.env.deploy 写 PUBLIC_BASE=https://域名(不入库)}
 # 注意:不能写 DEST=~/super-z,本机 shell 会把 ~ 展开成本机家目录
 DEST='~/super-z'
 
@@ -25,6 +26,7 @@ rsync -az --delete \
   --exclude 'deploy/.env.prod' --exclude 'appdist' --exclude 'deploy/letsencrypt' \
   --exclude 'deploy/certs' --exclude 'deploy/tunnel' \
   --exclude 'deploy/certbot-www' --exclude 'deploy/renew.log' \
+  --exclude 'deploy/nginx/conf.d/legacy*' --exclude 'deploy/.domains.local' \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
   --exclude 'node_modules' --exclude 'build' --exclude '.dart_tool' \
   --exclude 'server/.env' --exclude 'server/uploads' --exclude 'server/appdist' \
@@ -38,10 +40,10 @@ ssh "$DEPLOY" "cd $DEST/deploy && \
 echo "== 健康验证 =="
 sleep 8
 for i in $(seq 1 15); do
-  curl -sf -m 10 --noproxy '*' https://aikas.com.cn/health && break
+  curl -sf -m 10 --noproxy '*' $PUBLIC_BASE/health && break
   sleep 4
 done
 echo
-curl -s -m 10 --noproxy '*' "https://aikas.com.cn/stats/overview" | head -c 120
+curl -s -m 10 --noproxy '*' "$PUBLIC_BASE/stats/overview" | head -c 120
 echo
 echo "服务端发版完成 ✓ (确认上面 stats 有数据后再发 APK)"

@@ -26,7 +26,7 @@ import (
 
 const (
 	version          = "go-0.2.1"
-	defaultAPI       = "https://aikas.com.cn"
+	defaultAPI       = "https://chaojizan.cc"
 	heartbeatSeconds = 300
 	genesis          = "0000000000000000000000000000000000000000000000000000000000000000"
 

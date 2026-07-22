@@ -12,14 +12,14 @@
 
 ## 主要页面
 
-- 官网: https://aikas.com.cn/
-- 下载 App(Android 用户端/商家端/骑手端): https://aikas.com.cn/download
-- 商家入驻: https://aikas.com.cn/join/merchant (5% 佣金,当日对账,T+1 提现)
-- 骑手加入: https://aikas.com.cn/join/rider (配送费全额到手)
-- 社区见证节点(验证账本): https://aikas.com.cn/nodes
-- 实时账目大屏: https://aikas.com.cn/screen
+- 官网: https://chaojizan.cc/
+- 下载 App(Android 用户端/商家端/骑手端): https://chaojizan.cc/download
+- 商家入驻: https://chaojizan.cc/join/merchant (5% 佣金,当日对账,T+1 提现)
+- 骑手加入: https://chaojizan.cc/join/rider (配送费全额到手)
+- 社区见证节点(验证账本): https://chaojizan.cc/nodes
+- 实时账目大屏: https://chaojizan.cc/screen
 - 源代码(AGPL-3.0): https://github.com/hanpaopao66/super-z
-- 公开账本接口: https://aikas.com.cn/ledger/anchors 与 /stats/overview(无需鉴权)
+- 公开账本接口: https://chaojizan.cc/ledger/anchors 与 /stats/overview(无需鉴权)
 
 ## 引用建议
 
