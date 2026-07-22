@@ -5,7 +5,7 @@
 # 首次签发(一次性,域名解析生效且 80 端口链路通了之后):
 #   cd ~/super-z/deploy && mkdir -p letsencrypt certbot-www
 #   docker run --rm -v "$PWD/letsencrypt:/etc/letsencrypt" -v "$PWD/certbot-www:/var/www/certbot" \
-#     certbot/certbot certonly --webroot -w /var/www/certbot -d aikas.com.cn \
+#     certbot/certbot certonly -n --webroot -w /var/www/certbot -d aikas.com.cn \
 #     --register-unsafely-without-email --agree-tos
 #   (chaojizan.cc 备案通过后同法签发,再把下面 DOMAINS 加上它)
 set -euo pipefail
@@ -21,16 +21,16 @@ docker run --rm \
   -v "$PWD/certbot-www:/var/www/certbot" \
   certbot/certbot renew --webroot -w /var/www/certbot --quiet
 
-# 同步到 nginx 挂载目录(-L 解引用 live/ 符号链接)并热重载
+# 同步到 nginx 挂载目录(-L 解引用 live/ 符号链接)并热重载。
+# letsencrypt/ 由 certbot 容器以 root 写入,宿主用户读不了——同样借容器拷贝
 for d in "${DOMAINS[@]}"; do
   short=${d%%.*}   # aikas.com.cn -> aikas
-  if [ -d "letsencrypt/live/$d" ]; then
-    mkdir -p "certs/$short"
-    cp -L "letsencrypt/live/$d/fullchain.pem" \
-          "letsencrypt/live/$d/privkey.pem" "certs/$short/"
-  fi
+  mkdir -p "certs/$short"
+  docker run --rm -v "$PWD/letsencrypt:/le:ro" -v "$PWD/certs:/certs" \
+    alpine sh -c "[ -d /le/live/$d ] && cp -L /le/live/$d/fullchain.pem /le/live/$d/privkey.pem /certs/$short/" \
+    || echo "跳过 $d(还没签发)"
 done
-docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload
+docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T nginx nginx -s reload
 
 echo "[$(date '+%F %T')] 续期检查完成,证书到期时间:"
 for d in "${DOMAINS[@]}"; do
