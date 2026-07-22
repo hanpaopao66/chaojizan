@@ -1,7 +1,7 @@
 import logging
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,18 +85,59 @@ async def refresh(user: User = Depends(get_current_user)):
 
 
 # ---------- 短信验证码登录(用户端主登录方式) ----------
+def _client_ip(request: Request) -> str:
+    """真实来源 IP:生产在 nginx/隧道后面,以 X-Forwarded-For 首值为准。"""
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd.strip():
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+@router.get("/slider")
+async def slider_challenge():
+    """滑块验证挑战:返回一次性票据与目标位置(0-100)。
+
+    同号当日第 3 条短信起要求过滑块——轻量减速带,不引第三方。
+    """
+    ticket = secrets.token_hex(16)
+    target = 20 + secrets.randbelow(61)  # 20-80,避开两端
+    await get_redis().set(f"slider:{ticket}", target, ex=120)
+    return {"ticket": ticket, "target": target}
+
+
 @router.post("/sms-code")
-async def send_sms_code(payload: SmsCodeIn):
+async def send_sms_code(payload: SmsCodeIn, request: Request):
     """发验证码。60 秒防重发,验证码 5 分钟有效。
 
-    短信服务未配置时进入开发模式:验证码直接随响应返回(dev_code),
-    客户端自动填入 —— 上线前配好腾讯云短信后此字段自动消失。
+    防滥发(登录成功即清计数,长登录态本身就是最大的省短信手段):
+    同号每日 8 条、同 IP 每日 20 条;同号第 3 条起要求滑块(409 captcha_required)。
+    短信服务未配置时进入开发模式:验证码直接随响应返回(dev_code)。
     """
     await check_rate_limit("sms", payload.phone,
                            settings.rate_limit_sms_per_minute)
     redis = get_redis()
+
+    day_phone = f"sms:day:p:{payload.phone}"
+    day_ip = f"sms:day:ip:{_client_ip(request)}"
+    phone_count = int(await redis.get(day_phone) or 0)
+    ip_count = int(await redis.get(day_ip) or 0)
+    if phone_count >= 8:
+        raise HTTPException(429, "该手机号今日验证码已达上限,请明天再试")
+    if ip_count >= 20:
+        raise HTTPException(429, "当前网络今日验证码请求过多,请明天再试")
+    if phone_count >= 2:  # 第 3 条起要求滑块
+        stored = await redis.get(f"slider:{payload.ticket}") if payload.ticket else None
+        if stored is None or payload.slide is None \
+                or abs(int(stored) - payload.slide) > 4:
+            raise HTTPException(409, "captcha_required")
+        await redis.delete(f"slider:{payload.ticket}")  # 一次性
+
     if not await redis.set(f"sms:cd:{payload.phone}", 1, ex=60, nx=True):
         raise HTTPException(429, "发送太频繁,请 60 秒后再试")
+    # 计数在冷却检查后再加,连点不重复计
+    for key in (day_phone, day_ip):
+        if await redis.incr(key) == 1:
+            await redis.expire(key, 86400)
     code = f"{secrets.randbelow(1000000):06d}"
     await redis.set(f"sms:code:{payload.phone}", code, ex=300)
 
@@ -114,13 +155,16 @@ async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
     if stored is None or stored != payload.code:
         raise HTTPException(401, "验证码错误或已过期")
     await redis.delete(f"sms:code:{payload.phone}")
+    await redis.delete(f"sms:day:p:{payload.phone}")  # 登录成功,清当日频控
 
     user = await db.scalar(select(User).where(User.phone == payload.phone))
     if user is None:
+        role = UserRole(payload.role)  # 三端各传各的;已有账号走下面分支保原角色
+        prefix = {"customer": "用户", "merchant": "商家", "rider": "骑手"}[payload.role]
         user = User(
             phone=payload.phone,
-            name=f"用户{payload.phone[-4:]}",
-            role=UserRole.customer,
+            name=f"{prefix}{payload.phone[-4:]}",
+            role=role,
             device_id=payload.device_id,
             # 验证码登录的账号没有密码,置为随机串(不可能被密码登录命中)
             password_hash=hash_password(secrets.token_hex(16)),

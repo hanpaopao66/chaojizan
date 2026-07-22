@@ -85,9 +85,9 @@ class UserApp extends StatelessWidget {
       valueListenable: elderMode,
       builder: (context, elder, _) => MaterialApp(
         title: '超级赞 · 点外卖',
+        // 强制亮色:白底+品牌色。暗色曾出现黑底黑字,以后要做就做正经暗色版
         theme: superZTheme(Brightness.light),
-        darkTheme: superZTheme(Brightness.dark),
-        themeMode: ThemeMode.system,
+        themeMode: ThemeMode.light,
         // 长辈版:字号放大到 1.4×(封顶,避免溢出);关闭则尊重系统缩放
         builder: (context, child) {
           final mq = MediaQuery.of(context);
@@ -106,26 +106,29 @@ class UserApp extends StatelessWidget {
               '配送费一分不截留,全部归骑手',
               '让利于民 · 取之有道 · 账目为证',
             ],
-            child:
-                PrivacyGate(onAgreed: PushService.init, child: buildUserLogin())),
+            child: PrivacyGate(
+                onAgreed: PushService.init,
+                child: AuthGate(
+                    api: rootApi,
+                    title: '用户端 · 点外卖',
+                    role: 'customer',
+                    homeBuilder: (_, api) => HomePage(api: api)))),
       ),
     );
   }
 }
 
 /// 登录入口(退出登录后也回到这里)
+/// 全端共用的 ApiClient 单例(会话持久化在它身上)
+final rootApi = ApiClient();
+
 Widget buildUserLogin() {
   return SmsLoginPage(
     title: '用户端 · 点外卖',
+    role: 'customer',
+    api: rootApi,
     onLoggedIn: (context, api) => Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => HomePage(api: api))),
-    // 演示账号(13800000001/123456)走这里
-    passwordLoginBuilder: (_) => LoginPage(
-      title: '用户端 · 密码登录',
-      defaultPhone: '13800000001',
-      onLoggedIn: (context, api) => Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => HomePage(api: api))),
-    ),
   );
 }
 
@@ -3912,8 +3915,10 @@ class _ProfileViewState extends State<ProfileView> {
               leading: Icon(Icons.logout, color: theme.colorScheme.error),
               title: Text('退出登录',
                   style: TextStyle(color: theme.colorScheme.error)),
-              onTap: () {
+              onTap: () async {
                 PushService.onLogout(); // 解绑推送别名,失败静默
+                await widget.api.clearSession();
+                if (!context.mounted) return;
                 Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(builder: (_) => buildUserLogin()),
                     (route) => false);

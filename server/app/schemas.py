@@ -30,12 +30,17 @@ class LoginIn(BaseModel):
 
 class SmsCodeIn(BaseModel):
     phone: str = Field(pattern=r"^1\d{10}$")
+    # 滑块验证(同号当日第 3 条起要求):/auth/slider 领票,滑到位后随发码提交
+    ticket: str = Field(default="", max_length=64)
+    slide: int | None = Field(default=None, ge=0, le=100)
 
 
 class SmsLoginIn(BaseModel):
     phone: str = Field(pattern=r"^1\d{10}$")
     code: str = Field(pattern=r"^\d{6}$")
     device_id: str = Field(default="", max_length=64)
+    # 新手机号自动注册时的角色(三端各传各的;已有账号忽略此参数保原角色)
+    role: str = Field(default="customer", pattern="^(customer|merchant|rider)$")
 
 
 class TokenOut(BaseModel):

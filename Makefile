@@ -37,7 +37,8 @@ test:
 	  && python -m tests.e2e_p2_platform && python -m tests.e2e_p3_touch \
 	  && python -m tests.e2e_p4_witness && python -m tests.e2e_screen \
 	  && python -m tests.e2e_transparency && python -m tests.e2e_splash \
-	  && python -m tests.e2e_category
+	  && python -m tests.e2e_category \
+	  && python -m tests.e2e_auth_sms
 
 logs:
 	docker compose logs -f api

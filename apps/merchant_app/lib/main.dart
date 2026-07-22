@@ -12,6 +12,9 @@ import 'listen_service.dart';
 import 'printer_service.dart';
 import 'shop_tab.dart';
 
+/// 全端共用的 ApiClient 单例(会话持久化在它身上)
+final rootApi = ApiClient();
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // 推送 SDK 的初始化在用户同意隐私政策之后(PrivacyGate.onAgreed),
@@ -26,15 +29,9 @@ class MerchantApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '超级赞商家端',
-      theme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.light,
-          colorSchemeSeed: Colors.teal),
-      darkTheme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          colorSchemeSeed: Colors.teal),
-      themeMode: ThemeMode.system,
+      // 强制亮色 + 品牌主题(白底+炉火橙),不再跟随系统暗色
+      theme: brandTheme(Brightness.light),
+      themeMode: ThemeMode.light,
       home: SplashGate(
           app: 'merchant',
           tagline: '入驻免费,总负担 5% 封顶',
@@ -45,11 +42,11 @@ class MerchantApp extends StatelessWidget {
           ],
           child: PrivacyGate(
         onAgreed: PushService.init,
-        child: LoginPage(
+        child: AuthGate(
+          api: rootApi,
           title: '商家端 · 接单出餐',
-          defaultPhone: '13800000002',
-          onLoggedIn: (context, api) => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => ShopGate(api: api))),
+          role: 'merchant',
+          homeBuilder: (_, api) => ShopGate(api: api),
         ),
       )),
     );

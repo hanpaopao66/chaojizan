@@ -15,6 +15,9 @@ import 'wallet_page.dart';
 const fallbackLat = 30.6605;
 const fallbackLng = 104.0815;
 
+/// 全端共用的 ApiClient 单例(会话持久化在它身上)
+final rootApi = ApiClient();
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // 推送 SDK 的初始化在用户同意隐私政策之后(PrivacyGate.onAgreed),
@@ -29,15 +32,9 @@ class RiderApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '超级赞骑手端',
-      theme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.light,
-          colorSchemeSeed: Colors.indigo),
-      darkTheme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          colorSchemeSeed: Colors.indigo),
-      themeMode: ThemeMode.system,
+      // 强制亮色 + 品牌主题(白底+炉火橙),不再跟随系统暗色
+      theme: brandTheme(Brightness.light),
+      themeMode: ThemeMode.light,
       home: SplashGate(
           app: 'rider',
           tagline: '配送费 100% 归你',
@@ -48,13 +45,12 @@ class RiderApp extends StatelessWidget {
           ],
           child: PrivacyGate(
         onAgreed: PushService.init,
-        child: LoginPage(
+        child: AuthGate(
+          api: rootApi,
           title: '骑手端 · 抢单配送',
-          defaultPhone: '13800000003',
-          onLoggedIn: (context, api) => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(
-                  builder: (_) => RiderVerifyGate(
-                      api: api, child: RiderHomePage(api: api)))),
+          role: 'rider',
+          homeBuilder: (_, api) =>
+              RiderVerifyGate(api: api, child: RiderHomePage(api: api)),
         ),
       )),
     );

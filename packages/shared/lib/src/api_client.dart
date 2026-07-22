@@ -60,12 +60,16 @@ class ApiClient {
       final data = await _request('POST', '/auth/refresh');
       _token = data['token'] as String;
       _tokenIssuedAt = DateTime.now();
+      await _persistSession();
     } catch (_) {
       // 静默:网络抖动或 token 已失效都不打断当前操作
     } finally {
       _refreshing = false;
     }
   }
+
+  /// token 真失效(401)时的全局兜底:AuthGate 挂上后静默回到登录页
+  static void Function()? onUnauthorized;
 
   Future<dynamic> _request(String method, String path,
       {Object? body, Map<String, String>? query}) async {
@@ -82,9 +86,74 @@ class ApiClient {
         final detail = (jsonDecode(text) as Map)['detail'];
         if (detail is String) message = detail;
       } catch (_) {}
+      if (response.statusCode == 401 && _token != null &&
+          !path.startsWith('/auth/')) {
+        // 登录态失效:清会话,静默回登录页(不弹一屏报错)
+        await clearSession();
+        onUnauthorized?.call();
+      }
       throw ApiException(response.statusCode, message);
     }
     return text.isEmpty ? null : jsonDecode(text);
+  }
+
+  // ---------- 会话持久化(冷启动免登录,在线永不掉线) ----------
+  Future<void> _persistSession() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('auth_token', _token ?? '');
+      await sp.setString(
+          'auth_token_at', _tokenIssuedAt?.toIso8601String() ?? '');
+      await sp.setInt('auth_user_id', userId ?? 0);
+      await sp.setString('auth_user_name', userName ?? '');
+    } catch (_) {}
+  }
+
+  /// 冷启动恢复会话:有本地 token 即恢复,并向服务端校验一次。
+  /// 网络不通时保留本地会话(离线不登出);仅 401 才判失效。
+  Future<bool> restoreSession() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final token = sp.getString('auth_token');
+      if (token == null || token.isEmpty) return false;
+      _token = token;
+      _tokenIssuedAt =
+          DateTime.tryParse(sp.getString('auth_token_at') ?? '') ??
+              DateTime.now();
+      userId = sp.getInt('auth_user_id');
+      userName = sp.getString('auth_user_name');
+      try {
+        final me = await _request('GET', '/auth/me') as Map<String, dynamic>;
+        userId = me['id'] as int;
+        userName = me['name'] as String;
+        await _persistSession();
+      } on ApiException catch (e) {
+        if (e.statusCode == 401) {
+          await clearSession();
+          return false;
+        }
+        // 其他服务端错误不登出
+      } catch (_) {
+        // 网络不通:先信本地会话,进得去首页(数据加载各页自行兜底)
+      }
+      return _token != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> clearSession() async {
+    _token = null;
+    _tokenIssuedAt = null;
+    userId = null;
+    userName = null;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.remove('auth_token');
+      await sp.remove('auth_token_at');
+      await sp.remove('auth_user_id');
+      await sp.remove('auth_user_name');
+    } catch (_) {}
   }
 
   // ---------- 认证 ----------
@@ -129,22 +198,35 @@ class ApiClient {
   }
 
   /// 发验证码。短信服务未配置时返回开发模式验证码(devCode),已配置返回 null
-  Future<String?> sendSmsCode(String phone) async {
-    final data = await _request('POST', '/auth/sms-code', body: {'phone': phone});
+  Future<String?> sendSmsCode(String phone,
+      {String ticket = '', int? slide}) async {
+    final data = await _request('POST', '/auth/sms-code', body: {
+      'phone': phone,
+      if (ticket.isNotEmpty) 'ticket': ticket,
+      if (slide != null) 'slide': slide,
+    });
     return (data as Map)['dev_code'] as String?;
   }
 
   /// 验证码登录,新手机号自动注册为用户
-  Future<void> smsLogin(String phone, String code) async {
+  Future<void> smsLogin(String phone, String code,
+      {String role = 'customer'}) async {
     final data = await _request('POST', '/auth/sms-login', body: {
       'phone': phone,
       'code': code,
       'device_id': await _deviceId(),
+      'role': role,
     });
     _token = data['token'] as String;
     _tokenIssuedAt = DateTime.now();
     userId = data['user_id'] as int;
     userName = data['name'] as String;
+    await _persistSession();
+  }
+
+  /// 滑块验证挑战(发码被 409 captcha_required 拒绝时调用)
+  Future<Map<String, dynamic>> sliderChallenge() async {
+    return await _request('GET', '/auth/slider') as Map<String, dynamic>;
   }
 
   // ---------- 团购券 ----------

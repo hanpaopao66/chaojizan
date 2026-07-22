@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     crypto_key: str = ""
     # 7 天 + 客户端自动续期(/auth/refresh):商家端长期挂机也不会掉线,
     # 但被泄露的旧 token 一周后自然作废
-    jwt_expire_minutes: int = 10080
+    jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线
 
     # 接口限流(Redis 固定窗口,按 分钟 计):防爆破/防刷,不为限制正常用户
     rate_limit_enabled: bool = True

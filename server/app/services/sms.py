@@ -69,6 +69,8 @@ async def send_verification_code(phone: str, code: str) -> bool:
                 headers={"Content-Type": "application/x-www-form-urlencoded"})
         data = resp.json()
         if data.get("Code") == "OK":
+            logger.info("短信已提交 尾号%s BizId=%s(下发回执见控制台发送记录)",
+                        phone[-4:], data.get("BizId"))
             return True
         logger.warning("短信发送失败: %s", data)
     except (httpx.HTTPError, ValueError, KeyError) as exc:
