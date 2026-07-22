@@ -1,0 +1,181 @@
+/* 全国运营大屏:1920×1080 设计稿,整体 transform 缩放适配任意屏幕。
+   配色沿用品牌(橙 #FF5A1F / 绿 #2FBF8F / 深底),图表系列色经
+   colorblind 校验(见 charts.jsx 的 PALETTE)。 */
+
+.screen-viewport {
+  position: fixed; inset: 0; overflow: hidden;
+  background: #06090F;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.screen-root {
+  position: absolute; left: 50%; top: 50%;
+  width: 1920px; height: 1080px;
+  transform-origin: center;
+  display: flex; flex-direction: column;
+  color: #E8ECF4;
+  background:
+    radial-gradient(1200px 700px at 50% 38%, rgba(38, 76, 148, .16), transparent 62%),
+    radial-gradient(900px 500px at 50% 108%, rgba(255, 90, 31, .07), transparent 60%),
+    #06090F;
+}
+
+/* ---------- 头部 ---------- */
+.sc-head {
+  height: 64px; display: flex; align-items: center;
+  padding: 0 28px; gap: 14px; flex: none;
+  border-bottom: 1px solid rgba(77, 130, 220, .18);
+  background: linear-gradient(180deg, rgba(14, 22, 38, .9), rgba(10, 15, 26, .4));
+}
+.sc-head .title { font-size: 22px; font-weight: 700; letter-spacing: .06em; }
+.sc-head .title b { color: #FF5A1F; }
+.sc-head .slogan { color: #7A8499; font-size: 13px; margin-top: 2px; }
+.sc-head .spacer { flex: 1; }
+.sc-badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; color: #2FBF8F; padding: 5px 12px;
+  border: 1px solid rgba(47, 191, 143, .35); border-radius: 999px;
+  background: rgba(47, 191, 143, .08);
+}
+.sc-badge .dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #2FBF8F;
+  animation: sc-breath 2s ease-in-out infinite;
+}
+.sc-badge.demo { color: #FFB84D; border-color: rgba(255, 184, 77, .4);
+  background: rgba(255, 184, 77, .08); }
+.sc-badge.demo .dot { background: #FFB84D; }
+@keyframes sc-breath { 50% { opacity: .35; } }
+.sc-clock { color: #AAB3C7; font-size: 16px; font-variant-numeric: tabular-nums; }
+
+/* ---------- KPI 四宫格 ---------- */
+.sc-kpis {
+  flex: none; display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 16px; padding: 16px 28px 0;
+}
+.sc-kpi {
+  position: relative; border-radius: 12px; padding: 14px 20px 12px;
+  border: 1px solid rgba(77, 130, 220, .2);
+  background: linear-gradient(180deg, rgba(18, 28, 48, .85), rgba(12, 18, 32, .65));
+  overflow: hidden;
+}
+.sc-kpi::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--kpi, #4DA3FF);
+}
+.sc-kpi .l { color: #8B95AC; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.sc-kpi .n {
+  font-size: 40px; font-weight: 700; margin-top: 4px; line-height: 1.15;
+  font-variant-numeric: tabular-nums; color: #F2F5FB;
+  text-shadow: 0 0 24px rgba(77, 163, 255, .25);
+}
+.sc-kpi .d { color: #7A8499; font-size: 13px; margin-top: 2px;
+  font-variant-numeric: tabular-nums; }
+.sc-kpi .d b { color: #2FBF8F; font-weight: 600; }
+.sc-kpi .tag {
+  font-size: 11px; color: #FFB84D; border: 1px solid rgba(255, 184, 77, .45);
+  padding: 1px 8px; border-radius: 999px;
+}
+.sc-kpi.coming .n { color: #5A6478; text-shadow: none; }
+
+/* ---------- 主区三栏 ---------- */
+.sc-main { flex: 1; display: flex; gap: 16px; padding: 16px 28px; min-height: 0; }
+.sc-col { width: 430px; flex: none; display: flex; flex-direction: column; gap: 16px; }
+.sc-center { flex: 1; position: relative; min-width: 0; }
+
+.sc-panel {
+  flex: 1; min-height: 0; position: relative; border-radius: 12px;
+  border: 1px solid rgba(77, 130, 220, .18);
+  background: linear-gradient(180deg, rgba(15, 23, 40, .8), rgba(10, 15, 26, .55));
+  padding: 12px 16px 8px; display: flex; flex-direction: column;
+}
+.sc-panel h3 {
+  margin: 0 0 4px; font-size: 15px; font-weight: 600; color: #C6CEDF;
+  display: flex; align-items: baseline; gap: 8px;
+}
+.sc-panel h3::before { content: "▎"; color: #FF5A1F; }
+.sc-panel h3 small { color: #66708A; font-weight: 400; font-size: 12px; }
+.sc-panel .body { flex: 1; min-height: 0; position: relative; }
+
+/* 中央 3D 地图 + 悬浮大数字 */
+.sc-map-wrap {
+  position: absolute; inset: 0; border-radius: 12px; overflow: hidden;
+  border: 1px solid rgba(77, 130, 220, .14);
+  background: radial-gradient(900px 560px at 50% 42%,
+    rgba(30, 60, 120, .22), rgba(6, 9, 15, 0) 70%);
+}
+.sc-hero {
+  position: absolute; top: 10px; left: 0; right: 0; text-align: center;
+  pointer-events: none; z-index: 2;
+}
+.sc-hero .l { color: #8B95AC; font-size: 15px; letter-spacing: .3em; }
+.sc-hero .n {
+  font-size: 64px; font-weight: 800; line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, #FFD9C4, #FF5A1F);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 42px rgba(255, 90, 31, .35);
+}
+.sc-hero .sub { color: #AAB3C7; font-size: 15px; margin-top: 2px;
+  font-variant-numeric: tabular-nums; }
+.sc-hero .sub b { color: #FFB84D; font-weight: 600; }
+
+/* 配送看板双指标 */
+.sc-duo { display: flex; gap: 12px; height: 100%; align-items: stretch; }
+.sc-duo .tile {
+  flex: 1; border-radius: 10px; padding: 8px 14px; min-width: 0;
+  background: rgba(20, 30, 52, .55); border: 1px solid rgba(77, 130, 220, .15);
+  display: flex; flex-direction: column; justify-content: center; overflow: hidden;
+}
+.sc-duo .tile .v { font-size: 28px; font-weight: 700; color: #2FBF8F;
+  font-variant-numeric: tabular-nums; white-space: nowrap; line-height: 1.2; }
+.sc-duo .tile .v small { font-size: 14px; color: #7A8499; font-weight: 400; }
+.sc-duo .tile .k { color: #8B95AC; font-size: 12px; margin-top: 2px;
+  white-space: nowrap; }
+
+/* GMV 隐藏时的三原则卡 */
+.sc-principles { display: flex; flex-direction: column; gap: 10px; justify-content: center; height: 100%; }
+.sc-principles .row { display: flex; align-items: baseline; gap: 10px; }
+.sc-principles .big { font-size: 30px; font-weight: 800; width: 92px; text-align: right; }
+.sc-principles .row:nth-child(1) .big { color: #FF5A1F; }
+.sc-principles .row:nth-child(2) .big { color: #2FBF8F; }
+.sc-principles .row:nth-child(3) .big { color: #FFB84D; }
+.sc-principles .t { color: #C6CEDF; font-size: 14px; }
+
+/* ---------- 底部滚动播报 ---------- */
+.sc-ticker {
+  flex: none; height: 56px; margin: 0 28px 16px; border-radius: 12px;
+  border: 1px solid rgba(77, 130, 220, .18);
+  background: linear-gradient(90deg, rgba(255, 90, 31, .12), rgba(15, 23, 40, .7) 240px);
+  display: flex; align-items: center; overflow: hidden; position: relative;
+}
+.sc-ticker .cap {
+  flex: none; padding: 0 18px; font-size: 14px; font-weight: 600; color: #FF7A45;
+  display: flex; align-items: center; gap: 8px; z-index: 2;
+  background: linear-gradient(90deg, rgba(10, 14, 24, .95) 70%, transparent);
+  height: 100%;
+}
+.sc-ticker .win { flex: 1; overflow: hidden; height: 100%; }
+.sc-ticker .track {
+  display: flex; align-items: center; height: 100%; width: max-content;
+  animation: sc-marquee var(--dur, 40s) linear infinite;
+}
+@keyframes sc-marquee { to { transform: translateX(-50%); } }
+.sc-ticker .item {
+  flex: none; display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 26px; font-size: 15px; color: #C6CEDF; white-space: nowrap;
+}
+.sc-ticker .item .ago { color: #66708A; font-size: 13px; }
+.sc-ticker .item .city { color: #4DA3FF; }
+.sc-ticker .item .shop { color: #F2F5FB; }
+.sc-ticker .item .amt { color: #FFB84D; font-weight: 600;
+  font-variant-numeric: tabular-nums; }
+.sc-ticker .item .st { font-size: 12px; color: #2FBF8F;
+  border: 1px solid rgba(47, 191, 143, .35); border-radius: 999px; padding: 1px 8px; }
+.sc-ticker .item.fresh { animation: sc-flash 1.6s ease-out 1; border-radius: 8px; }
+@keyframes sc-flash {
+  0% { background: rgba(255, 90, 31, .35); }
+  100% { background: transparent; }
+}
+
+.sc-hero .sub2 { color: #8B95AC; font-size: 13px; margin-top: 2px;
+  font-variant-numeric: tabular-nums; }
+.sc-hero .sub2 b { color: #FFB84D; font-weight: 600; }

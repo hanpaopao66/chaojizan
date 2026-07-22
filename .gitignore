@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+server/.env
+server/uploads/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+# android/ 已入库(含手工定制的清单/签名/gradle);其余平台目录仍由 flutter create 再生
+apps/*/ios/
+apps/*/macos/
+apps/*/linux/
+apps/*/windows/
+apps/*/web/
+apps/*/test/
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+dist/
+/index.html
+server/appdist/
+
+# 官网(web/)
+web/node_modules/
+
+# 内部运营策略(不公开)
+marketing/
+server/app_version.txt
+# 部署机地址等本机部署参数(不入库)
+deploy/.env.deploy
+# 内部路线图(公开仓不发布)
+docs/ROADMAP.md

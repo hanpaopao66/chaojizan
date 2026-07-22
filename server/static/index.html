@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>超级赞 Super-Z · 不吸血的外卖平台</title>
+<style>
+  :root {
+    --primary: #d9622b;
+    --primary-deep: #b84e1f;
+    --bg: #faf6f2;
+    --card: #ffffff;
+    --ink: #2b2320;
+    --muted: #8a7d74;
+    --line: #eee4dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1613; --card: #2a211c; --ink: #f2e9e2;
+      --muted: #a89a8f; --line: #3d312a;
+    }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.7;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 20px; }
+
+  header { padding: 72px 0 40px; text-align: center; }
+  .logo {
+    font-size: 56px; font-weight: 900; letter-spacing: 2px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-deep));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .slogan { font-size: 20px; margin-top: 10px; font-weight: 600; }
+  .sub { color: var(--muted); margin-top: 6px; font-size: 14px; }
+
+  .principles { display: grid; gap: 14px; margin: 8px 0 40px; }
+  @media (min-width: 640px) { .principles { grid-template-columns: repeat(3, 1fr); } }
+  .p-card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 20px 18px;
+  }
+  .p-card .num {
+    display: inline-block; width: 30px; height: 30px; line-height: 30px;
+    text-align: center; border-radius: 50%;
+    background: var(--primary); color: #fff; font-weight: 800; margin-bottom: 10px;
+  }
+  .p-card h3 { font-size: 16px; margin-bottom: 4px; }
+  .p-card p { font-size: 13px; color: var(--muted); }
+
+  h2 { font-size: 20px; margin: 36px 0 16px; text-align: center; }
+  .downloads { display: grid; gap: 12px; margin-bottom: 12px; }
+  @media (min-width: 640px) { .downloads { grid-template-columns: repeat(3, 1fr); } }
+  .dl {
+    display: block; text-decoration: none; text-align: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 22px 16px; color: var(--ink); transition: transform .15s, box-shadow .15s;
+  }
+  .dl:hover { transform: translateY(-3px); box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+  .dl .icon { font-size: 34px; }
+  .dl .name { font-weight: 700; margin-top: 8px; }
+  .dl .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .dl .btn {
+    display: inline-block; margin-top: 12px; padding: 8px 22px; border-radius: 999px;
+    background: var(--primary); color: #fff; font-size: 14px; font-weight: 600;
+  }
+  .note { text-align: center; font-size: 12px; color: var(--muted); margin-bottom: 40px; }
+  .note a { color: var(--primary); }
+
+  .money {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 22px; margin-bottom: 44px;
+  }
+  .money h3 { text-align: center; font-size: 16px; margin-bottom: 14px; }
+  .bar { display: flex; height: 34px; border-radius: 10px; overflow: hidden; font-size: 12px; color: #fff; }
+  .bar div { display: flex; align-items: center; justify-content: center; white-space: nowrap; }
+  .bar .m { flex: 66; background: #4e9a5f; }
+  .bar .r { flex: 28; background: #4a7fc1; }
+  .bar .p { flex: 6; background: var(--primary); }
+  .legend { display: flex; justify-content: center; gap: 18px; margin-top: 12px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; }
+
+  footer {
+    border-top: 1px solid var(--line); padding: 26px 0 44px;
+    text-align: center; font-size: 13px; color: var(--muted);
+  }
+  footer a { color: var(--primary); text-decoration: none; margin: 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">超级赞 Super-Z</div>
+    <div class="slogan">一个群众帮助群众的外卖平台</div>
+    <div class="sub">不吸血 · 全透明 · 向黑心平台宣战</div>
+  </header>
+
+  <div class="principles">
+    <div class="p-card">
+      <span class="num">1</span>
+      <h3>商家只抽 5%</h3>
+      <p>行业平台抽 20% 以上。菜价里没有平台税,点单页明码标示。</p>
+    </div>
+    <div class="p-card">
+      <span class="num">2</span>
+      <h3>配送费全归骑手</h3>
+      <p>按距离计价,平台分文不取,提现零手续费。</p>
+    </div>
+    <div class="p-card">
+      <span class="num">3</span>
+      <h3>账目三方透明</h3>
+      <p>每一单「钱去哪了」,用户、商家、骑手都能查。</p>
+    </div>
+  </div>
+
+  <div class="money">
+    <h3>每 100 元订单,钱去哪了</h3>
+    <div class="bar">
+      <div class="m">商家 ~66 元</div>
+      <div class="r">骑手 ~28 元</div>
+      <div class="p">5%</div>
+    </div>
+    <div class="legend">
+      <span><i style="background:#4e9a5f"></i>商家实收(菜品的 94%)</span>
+      <span><i style="background:#4a7fc1"></i>骑手所得(配送费 100%)</span>
+      <span><i style="background:var(--primary)"></i>平台留存(仅菜品的 5%)</span>
+    </div>
+  </div>
+
+  <h2>下载 App(Android 内测版)</h2>
+  <div class="downloads">
+    <a class="dl" href="/appdist/superz-user-arm64.apk">
+      <div class="icon">🍜</div>
+      <div class="name">用户端</div>
+      <div class="hint">点外卖,让小店和骑手多挣一点</div>
+      <span class="btn">下载 APK</span>
+    </a>
+    <a class="dl" href="/appdist/superz-merchant-arm64.apk">
+      <div class="icon">🏪</div>
+      <div class="name">商家端</div>
+      <div class="hint">接单出餐、菜品管理、每日对账</div>
+      <span class="btn">下载 APK</span>
+    </a>
+    <a class="dl" href="/appdist/superz-rider-arm64.apk">
+      <div class="icon">🛵</div>
+      <div class="name">骑手端</div>
+      <div class="hint">抢单配送,每一分钱都看得见</div>
+      <span class="btn">下载 APK</span>
+    </a>
+  </div>
+  <p class="note">
+    内测阶段:短信登录验证码直接回显,任意手机号可注册体验;支付为模拟支付,不产生真实扣款。<br>
+    需要 64 位 Android 手机(2016 年后的机型均可);更多版本见
+    <a href="https://github.com/hanpaopao66/super-z/releases">全部发布</a>。
+  </p>
+
+  <footer>
+    <a href="/admin">平台管理后台</a> ·
+    <a href="/docs">开放接口文档</a> ·
+    <a href="https://github.com/hanpaopao66/super-z">源代码(GitHub)</a>
+    <div style="margin-top:10px">超级赞 Super-Z · 站在劳动者一边</div>
+    <div style="margin-top:8px">
+      <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-2</a>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

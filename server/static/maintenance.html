@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>马上回来 · Super-Z</title>
+<style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#0B0E14; color:#EAEEF6; overflow:hidden; text-align:center;
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  canvas { position:fixed; inset:0; }
+  .box { position:relative; z-index:1; padding:0 24px; }
+  .brand { color:#FF5A1F; font-weight:800; letter-spacing:.08em; margin-bottom:14px; }
+  h1 { font-size:clamp(1.6rem,5vw,2.4rem); margin:0; }
+  p { color:#8B94A9; margin-top:12px; font-size:.95rem; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="box">
+  <div class="brand">Super-Z</div>
+  <h1>火还在,马上回来。</h1>
+  <p>服务器正在维护,本页每 30 秒自动重试。<br>你的订单和账目都安全地记在账本里。</p>
+</div>
+<script>
+/* 余烬(vanilla 版,与官网同一意象):canvas 2d,几十行,无依赖 */
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const colors = ['255,90,31', '255,184,77', '179,64,15', '14,138,95'];
+let W, H, embers = [];
+function reset() {
+  W = cv.width = innerWidth * devicePixelRatio;
+  H = cv.height = innerHeight * devicePixelRatio;
+  embers = Array.from({length: 90}, () => spawn(Math.random() * H));
+}
+function spawn(y) {
+  return { x: Math.random() * W, y: y ?? H + 10,
+           r: (1 + Math.random() * 2.4) * devicePixelRatio,
+           v: (0.2 + Math.random() * 0.5) * devicePixelRatio,
+           drift: (Math.random() - 0.5) * 0.3 * devicePixelRatio,
+           a: 0.15 + Math.random() * 0.5,
+           c: colors[Math.random() < 0.06 ? 3 : Math.floor(Math.random() * 3)] };
+}
+const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function tick() {
+  ctx.clearRect(0, 0, W, H);
+  for (let i = 0; i < embers.length; i++) {
+    const e = embers[i];
+    ctx.beginPath();
+    const g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r * 3);
+    g.addColorStop(0, `rgba(${e.c},${e.a})`);
+    g.addColorStop(1, `rgba(${e.c},0)`);
+    ctx.fillStyle = g;
+    ctx.arc(e.x, e.y, e.r * 3, 0, Math.PI * 2);
+    ctx.fill();
+    if (!still) {
+      e.y -= e.v; e.x += e.drift;
+      if (e.y < -12) embers[i] = spawn();
+    }
+  }
+  if (!still) requestAnimationFrame(tick);
+}
+addEventListener('resize', reset);
+reset(); tick();
+</script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super-Z 透明经营大屏</title>
+<script src="/vendor/echarts.min.js"></script>
+<style>
+  :root { --orange:#FF5A1F; --green:#2FBF8F; --amber:#FFB84D; --blue:#4DA3FF;
+          --bg:#0B0E14; --card:#12161F; --line:#1E2430; --text:#E8ECF4; --muted:#7A8499; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); min-height:100vh; overflow-x:hidden;
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .head { display:flex; align-items:baseline; gap:16px; padding:20px 28px 8px; }
+  .head h1 { font-size:1.35rem; letter-spacing:.02em; }
+  .head h1 b { color:var(--orange); }
+  .head .sub { color:var(--muted); font-size:.82rem; }
+  .head .clock { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .grid { display:grid; gap:14px; padding:12px 28px 28px;
+          grid-template-columns:repeat(4, 1fr);
+          grid-template-rows:110px 300px 260px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px;
+          padding:14px 18px; position:relative; overflow:hidden; }
+  .kpi .l { color:var(--muted); font-size:.8rem; }
+  .kpi .n { font-size:2.1rem; font-weight:700; margin-top:6px;
+            font-variant-numeric:tabular-nums; }
+  .kpi .n small { font-size:1rem; font-weight:400; color:var(--muted); }
+  .kpi.orange .n { color:var(--orange); } .kpi.green .n { color:var(--green); }
+  .kpi.blue .n { color:var(--blue); } .kpi.amber .n { color:var(--amber); }
+  .card h3 { font-size:.85rem; color:var(--muted); font-weight:500; margin-bottom:4px; }
+  .chart { position:absolute; inset:34px 8px 6px; }
+  #flow { grid-column:1 / span 2; }
+  #hourlyCard { grid-column:3 / span 2; }
+  #ordersCard { grid-column:1 / span 2; }
+  #gaugeCard { }
+  #chainCard { display:flex; flex-direction:column; }
+  .chain-big { font-size:1.9rem; font-weight:700; color:var(--green); margin:8px 0 2px; }
+  .chain-sub { color:var(--muted); font-size:.78rem; line-height:1.6; }
+  .hash { font-family:ui-monospace,Menlo,monospace; font-size:.72rem; color:var(--amber);
+          word-break:break-all; margin-top:auto; opacity:.9; }
+  .foot { padding:0 28px 20px; color:var(--muted); font-size:.75rem; }
+  .foot a { color:var(--orange); text-decoration:none; }
+  @media (max-width: 900px) {
+    .grid { grid-template-columns:repeat(2, 1fr); grid-template-rows:auto; }
+    #flow, #hourlyCard, #ordersCard { grid-column:1 / span 2; height:280px; }
+  }
+</style>
+</head>
+<body>
+<div class="head">
+  <h1><b>Super-Z</b> 透明经营大屏</h1>
+  <span class="sub">每个数字与公开账本同源,任何人可用见证节点复核</span>
+  <span class="clock" id="clock"></span>
+</div>
+
+<div class="grid">
+  <div class="card kpi orange"><div class="l">今日订单</div><div class="n" id="kOrders">–</div></div>
+  <div class="card kpi"><div class="l">今日交易额</div><div class="n" id="kGmv">–</div></div>
+  <div class="card kpi green"><div class="l">骑手今日所得(配送费 100% 归骑手)</div><div class="n" id="kRider">–</div></div>
+  <div class="card kpi blue"><div class="l">社区见证节点在线</div><div class="n" id="kNodes">–</div></div>
+
+  <div class="card" id="flow"><h3>近 30 天 · 每一分钱的去向(来自公开账本)</h3><div class="chart" id="flowChart"></div></div>
+  <div class="card" id="gaugeCard"><h3>商家佣金率(承诺上限 5%)</h3><div class="chart" id="gauge"></div></div>
+  <div class="card" id="chainCard"><h3>公开账本哈希链</h3>
+    <div class="chain-big" id="chainCount">–</div>
+    <div class="chain-sub">个每日锚点首尾相链<br>改历史任何一分钱即断链</div>
+    <div class="hash" id="chainHash">–</div>
+  </div>
+
+  <div class="card" id="ordersCard"><h3>近 30 天 · 订单量</h3><div class="chart" id="ordersChart"></div></div>
+  <div class="card" id="hourlyCard"><h3>今日 · 分时订单</h3><div class="chart" id="hourlyChart"></div></div>
+</div>
+<div class="foot">数据接口公开:<a href="/stats/overview">/stats/overview</a> ·
+  账本原文:<a href="/ledger/anchors">/ledger/anchors</a> ·
+  <a href="/nodes">运行你自己的见证节点 →</a></div>
+
+<script>
+const css = getComputedStyle(document.documentElement);
+const C = n => css.getPropertyValue(n).trim();
+const yuan = c => (c / 100).toLocaleString('zh-CN', {maximumFractionDigits: 0});
+const base = {textStyle:{color:C('--muted')}, grid:{left:44,right:16,top:24,bottom:24},
+  xAxis:{axisLine:{lineStyle:{color:C('--line')}}, axisLabel:{color:C('--muted')}},
+  yAxis:{splitLine:{lineStyle:{color:C('--line')}}, axisLabel:{color:C('--muted')}},
+  tooltip:{trigger:'axis', backgroundColor:C('--card'), borderColor:C('--line'),
+           textStyle:{color:C('--text')}}};
+
+const flow = echarts.init(document.getElementById('flowChart'));
+const orders = echarts.init(document.getElementById('ordersChart'));
+const hourly = echarts.init(document.getElementById('hourlyChart'));
+const gauge = echarts.init(document.getElementById('gauge'));
+
+function area(name, color) {
+  return {name, type:'line', stack:'flow', smooth:true, symbol:'none',
+          lineStyle:{width:1.2, color}, areaStyle:{color, opacity:.45}};
+}
+
+async function refresh() {
+  const s = await (await fetch('/stats/overview')).json();
+  document.getElementById('kOrders').textContent = s.today.orders;
+  document.getElementById('kGmv').innerHTML = yuan(s.today.gmv_cents) + '<small> 元</small>';
+  document.getElementById('kRider').innerHTML = yuan(s.today.rider_cents) + '<small> 元</small>';
+  document.getElementById('kNodes').textContent = s.nodes.online;
+  document.getElementById('chainCount').textContent = s.chain.anchors ?? 0;
+  document.getElementById('chainHash').textContent =
+      s.chain.latest_day ? s.chain.latest_day + ' · ' + s.chain.latest_hash : '首个锚点将于明日生成';
+
+  const days = s.trend.map(t => t.day.slice(5));
+  flow.setOption({...base, color:[C('--green'), C('--blue'), C('--orange')],
+    legend:{textStyle:{color:C('--muted')}, top:0, icon:'roundRect'},
+    xAxis:{...base.xAxis, data:days},
+    series:[
+      {...area('商家净得', C('--green')), data:s.trend.map(t => t.merchant_net / 100)},
+      {...area('骑手所得', C('--blue')), data:s.trend.map(t => t.rider_amount / 100)},
+      {...area('平台留存', C('--orange')), data:s.trend.map(t => (t.commission + t.voucher_fee) / 100)},
+    ]});
+  orders.setOption({...base, xAxis:{...base.xAxis, data:days},
+    series:[{type:'bar', data:s.trend.map(t => t.orders), barWidth:'55%',
+      itemStyle:{borderRadius:[4,4,0,0],
+        color:new echarts.graphic.LinearGradient(0,0,0,1,
+          [{offset:0,color:C('--orange')},{offset:1,color:'#7A2B0F'}])}}]});
+  const hours = Array.from({length:24}, (_, h) => h);
+  const hmap = Object.fromEntries(s.hourly.map(x => [x.hour, x.orders]));
+  hourly.setOption({...base, xAxis:{...base.xAxis, data:hours.map(h => h + '时')},
+    series:[{type:'line', smooth:true, symbol:'none', data:hours.map(h => hmap[h] || 0),
+      lineStyle:{width:2, color:C('--amber')},
+      areaStyle:{color:C('--amber'), opacity:.25}}]});
+  gauge.setOption({series:[{type:'gauge', min:0, max:30, startAngle:210, endAngle:-30,
+    progress:{show:true, roundCap:true, width:10,
+              itemStyle:{color:C('--green')}},
+    axisLine:{lineStyle:{width:10, color:[[1, C('--line')]]}},
+    pointer:{show:false}, axisTick:{show:false}, splitLine:{show:false},
+    axisLabel:{show:false}, anchor:{show:false},
+    title:{show:true, offsetCenter:[0,'32%'], color:C('--muted'), fontSize:11},
+    detail:{valueAnimation:true, offsetCenter:[0,'-8%'], fontSize:30,
+            color:C('--green'), formatter:'{value}%'},
+    data:[{value:(s.principles.commission_rate * 100).toFixed(0),
+           name:'外卖 5% · 团购 2% · 骑手 0 抽成'}]}]});
+}
+
+function tick() {
+  document.getElementById('clock').textContent =
+      new Date().toLocaleString('zh-CN', {hour12:false});
+}
+tick(); setInterval(tick, 1000);
+refresh(); setInterval(refresh, 30000);
+addEventListener('resize', () => [flow, orders, hourly, gauge].forEach(c => c.resize()));
+</script>
+</body>
+</html>

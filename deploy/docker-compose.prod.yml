@@ -1,0 +1,84 @@
+# 生产栈(内网穿透部署:局域网机器上跑,经 frp 隧道对外)
+#
+#   公网用户 → aikas.com.cn (云端 frps :80/:443)
+#            → TCP 隧道(frpc,本文件) → 本机 nginx(8880/8443,本文件,TLS 终结)
+#            → superz-api:8000
+#
+# 入口自持:隧道/网关/API/数据全栈一个 compose 拉起。
+# 启动:cd deploy && docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# .env.prod 不入库,需含 POSTGRES_PASSWORD / JWT_SECRET(生成:openssl rand -hex 32);
+# SMS_* / TIANDITU_* / GITHUB_* 等运行配置也在其中,经 env_file 全量进 api 容器
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: superz
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
+      POSTGRES_DB: superz
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+
+  api:
+    build: ../server
+    container_name: superz-api
+    restart: unless-stopped
+    # .env.prod 全量注入(短信/天地图/GitHub 等开关配置改了重启即生效);
+    # 下面 environment 里的三项优先级更高,负责拼接容器内地址
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://superz:${POSTGRES_PASSWORD}@db:5432/superz
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?set in .env.prod}
+    # 127.0.0.1:8010 仅本机运维调试;公网流量走本栈 nginx 转发
+    ports:
+      - "127.0.0.1:8010:8000"
+    volumes:
+      - uploads:/srv/uploads
+      # APK 分发目录:发版脚本 scripts/release_apks.sh 往这里传包和 versions.json
+      - /home/dddd/super-z/appdist:/srv/appdist
+      # 见证节点脚本(/witness.py 下载端点读 /witness;构建上下文只有 server/,挂载补上)
+      - /home/dddd/super-z/witness:/witness:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  # 公网入口:TLS 终结 + 按域名分发。证书/挑战目录都在部署机本地(不入库,
+  # rsync 排除;见 renew-cert.sh)。8880/8443 与 frpc 的 localPort 对应
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "8880:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ./certbot-www:/var/www/certbot:ro
+    depends_on:
+      - api
+
+  # 内网穿透客户端:把云端 frps 的 80/443 引到本机 nginx。
+  # tunnel/frpc.toml 含隧道 token,只存部署机(rsync 排除)
+  frpc:
+    image: snowdreamtech/frpc
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./tunnel/frpc.toml:/etc/frp/frpc.toml:ro
+
+volumes:
+  pgdata:
+  uploads:

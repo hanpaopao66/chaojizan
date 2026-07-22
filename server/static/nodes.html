@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>社区见证节点 · Super-Z</title>
+<style>
+  :root { --orange:#FF5A1F; --green:#0E8A5F; --amber:#B25E09;
+          --bg:#FAFAFA; --card:#fff; --text:#222; --muted:#777; --line:#eee; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#101012; --card:#1B1B1E; --text:#E8E8E8; --muted:#999; --line:#2A2A2E; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); line-height:1.7;
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:760px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  h1 b { color:var(--orange); }
+  .sub { color:var(--muted); font-size:.92rem; margin-bottom:24px; }
+  .hero { background:var(--card); border:1px solid var(--line); border-radius:16px;
+          padding:24px; display:flex; gap:24px; flex-wrap:wrap; margin-bottom:16px; }
+  .stat { flex:1; min-width:130px; }
+  .stat .n { font-size:2.2rem; font-weight:700; }
+  .stat .n.green { color:var(--green); }
+  .stat .n.orange { color:var(--orange); }
+  .stat .n.red { color:#C62828; }
+  .stat .l { color:var(--muted); font-size:.85rem; }
+  .status-line { font-size:.95rem; padding:12px 16px; border-radius:12px; margin-bottom:24px; }
+  .status-ok { background:rgba(14,138,95,.08); color:var(--green);
+               border:1px solid rgba(14,138,95,.25); }
+  .status-bad { background:rgba(198,40,40,.08); color:#C62828;
+                border:1px solid rgba(198,40,40,.3); font-weight:600; }
+  h2 { font-size:1.05rem; margin:28px 0 10px; }
+  table { width:100%; border-collapse:collapse; background:var(--card);
+          border:1px solid var(--line); border-radius:12px; overflow:hidden;
+          font-size:.9rem; }
+  th, td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; font-size:.82rem; }
+  tr:last-child td { border-bottom:none; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .on { background:var(--green); } .off { background:#bbb; }
+  code, pre { font-family:ui-monospace,Menlo,monospace; font-size:.84em; }
+  pre { background:var(--card); border:1px solid var(--line); border-radius:12px;
+        padding:14px 16px; overflow-x:auto; }
+  .hash { color:var(--muted); word-break:break-all; font-size:.8rem; }
+  a { color:var(--orange); }
+  .webwitness { background:var(--card); border:1px solid var(--line);
+                border-radius:14px; padding:18px; }
+  .webwitness input { background:transparent; border:1px solid var(--line);
+                      border-radius:10px; padding:10px 12px; color:var(--text);
+                      font-size:.9rem; width:220px; max-width:100%; margin-right:10px; }
+  .btn-ww { background:var(--green); color:#fff; border:none; border-radius:10px;
+            padding:11px 20px; font-size:.92rem; font-weight:600; cursor:pointer;
+            margin-top:10px; }
+  .btn-ww:hover { filter:brightness(1.08); }
+  .ww-status { font-size:1.15rem; font-weight:700; }
+  .ww-status.ok { color:var(--green); }
+  .ww-status.bad { color:#C62828; }
+  .ww-sub { color:var(--muted); font-size:.82rem; margin-top:4px; }
+  .dlbtn { display:inline-block; background:var(--card); border:1px solid var(--line);
+           border-radius:10px; padding:9px 16px; margin:0 8px 8px 0; font-size:.88rem;
+           color:var(--text); text-decoration:none; }
+  .dlbtn:hover { border-color:var(--orange); color:var(--orange); }
+  .honest { color:var(--muted); font-size:.85rem; border-top:1px solid var(--line);
+            margin-top:32px; padding-top:16px; }
+  .mapcard { position:relative; background:var(--card); border:1px solid var(--line);
+             border-radius:16px; padding:12px 12px 8px; margin-bottom:6px; }
+  .mapcard canvas { width:100%; display:block; }
+  .maplegend { display:flex; gap:16px; flex-wrap:wrap; color:var(--muted);
+               font-size:.78rem; padding:8px 4px 4px; }
+  .maplegend i { display:inline-block; width:8px; height:8px; border-radius:50%;
+                 margin-right:5px; vertical-align:baseline; }
+  #mapTip { position:absolute; display:none; pointer-events:none; z-index:9;
+            background:var(--card); border:1px solid var(--line); border-radius:10px;
+            padding:7px 11px; font-size:.8rem; box-shadow:0 4px 16px rgba(0,0,0,.18);
+            max-width:240px; line-height:1.5; }
+  .mapnote { color:var(--muted); font-size:.8rem; margin:6px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><b>超级赞</b> 社区见证节点</h1>
+  <p class="sub">佣金只收 5%、配送费全归骑手、账目透明——承诺不靠自觉,靠数学和这些节点。</p>
+
+  <div class="hero">
+    <div class="stat"><div class="n green" id="online">–</div><div class="l">节点在线</div></div>
+    <div class="stat"><div class="n" id="total">–</div><div class="l">累计注册</div></div>
+    <div class="stat"><div class="n orange" id="okCount">–</div><div class="l">最新账本校验通过</div></div>
+    <div class="stat"><div class="n red" id="divergent" style="display:none">–</div>
+      <div class="l" id="divergentLabel" style="display:none">节点报告不一致</div></div>
+  </div>
+  <div id="statusLine" class="status-line status-ok">正在加载…</div>
+
+  <h2>见证网络 · 世界分布</h2>
+  <div class="mapcard">
+    <canvas id="worldMap"></canvas>
+    <div id="mapTip"></div>
+    <div class="maplegend">
+      <span><i style="background:var(--green)"></i>在线 · 校验通过</span>
+      <span><i style="background:#C62828"></i>报告不一致</span>
+      <span><i style="background:#9a9aa0"></i>离线</span>
+      <span id="mapUnknown" style="display:none"></span>
+    </div>
+  </div>
+  <p class="mapnote">落点来自节点<b>自愿上报的时区</b>(城市群级精度)——我们不做 IP 定位,
+    也不收集任何个人信息;不想上报时区的节点会出现在列表里但不落点。</p>
+
+  <h2>最新账本锚点</h2>
+  <p id="anchor" class="hash">–</p>
+  <p style="font-size:.88rem;color:var(--muted)">
+    每天的全部账务流水(匿名化,无任何个人信息)生成一个哈希锚点,
+    并与前一天的锚点链在一起——改历史上任何一分钱,之后所有锚点全部对不上,
+    而每个见证节点的硬盘里都留着它见过的锚点。
+    原始数据:<code>GET /ledger/anchors</code> · <code>GET /ledger/days/{day}</code></p>
+
+  <h2>成为见证者</h2>
+  <p style="font-size:.92rem">节点不收集你的任何信息,也没有、永远不会有金钱回报——
+    它的回报是:平台多一分不敢作假。</p>
+
+  <h3 style="font-size:.95rem;margin:18px 0 8px">方式一 · 打开网页就行(不用懂电脑)</h3>
+  <div class="webwitness">
+    <div id="wwIdle">
+      <p style="font-size:.9rem;margin-bottom:12px">点下面的按钮,你的浏览器就会开始
+        <b>独立复算</b>平台账本的哈希链和分账规则,每 5 分钟一轮。
+        <b>保持本页开着</b>,你就在监督我们。</p>
+      <input id="wwName" maxlength="10" placeholder="给节点起个名字(可留空,会公开展示)">
+      <button id="wwStart" class="btn-ww">开始见证 →</button>
+    </div>
+    <div id="wwRun" style="display:none">
+      <div class="ww-status" id="wwStatus">⏳ 正在校验…</div>
+      <div class="ww-sub" id="wwDetail">首轮校验需要几秒钟</div>
+      <div class="ww-sub" style="margin-top:6px">保持本页开启即持续见证 ·
+        <a href="#" id="wwStop" style="color:var(--muted)">停止并退出</a></div>
+    </div>
+  </div>
+
+  <h3 style="font-size:.95rem;margin:22px 0 8px">方式二 · 电脑绿色版(下载,双击,完事)</h3>
+  <p style="font-size:.9rem">单文件绿色软件:不用安装、不写系统、删掉即卸载。
+    双击后出现一个小窗口,每 5 分钟自动核账一轮,窗口开着就是在见证。</p>
+  <p style="margin:10px 0">
+    <a class="dlbtn" href="/appdist/witness/superz-witness-windows.exe">⊞ Windows</a>
+    <a class="dlbtn" href="/appdist/witness/superz-witness-macos.zip"> macOS</a>
+    <a class="dlbtn" href="/appdist/witness/superz-witness-linux.tar.gz">🐧 Ubuntu/Linux</a>
+  </p>
+  <p style="font-size:.8rem;color:var(--muted)">macOS 首次打开:右键 → 打开(程序未做付费签名);
+    Linux 解压后双击或 <code>./superz-witness-linux</code>。程序约 6MB,源码在 witness/go/。</p>
+
+  <h3 style="font-size:.95rem;margin:22px 0 8px">方式三 · 命令行脚本(程序员)</h3>
+  <pre>curl -O https://aikas.com.cn/witness.py
+python3 witness.py               # 只需要 Python 3.10+,每 5 分钟自动校验一轮</pre>
+  <p style="font-size:.88rem;color:var(--muted)">脚本不到 300 行、零第三方依赖,建议读一遍再运行——见证的意义在于你不需要信任任何人,包括我们。网页版的校验代码同样公开:在本页右键"查看源代码"即可审阅。开源仓库(含 Docker 方式)将随公开版一起发布。</p>
+
+  <h2>节点列表</h2>
+  <table>
+    <thead><tr><th>节点</th><th>地区</th><th>校验至</th><th>结论</th><th>心跳数</th></tr></thead>
+    <tbody id="nodeRows"><tr><td colspan="5" style="color:var(--muted)">加载中…</td></tr></tbody>
+  </table>
+
+  <p class="honest">诚实声明:节点数量是社会证明,不是共识机制;见证节点核验账目、留存锚点、
+  公开示警,但不参与订单与支付的运行——那些发生在依法备案、可被追责的平台服务器上。
+  节点网络 + <a href="https://github.com/hanpaopao66/chaojizan">AGPL 开源</a> + 公开财报,共同保证:
+  即使平台消失,任何人都有完整的重建图纸与账目存证。</p>
+</div>
+
+<script>
+/* ===== 世界地图(零依赖):手工粗轮廓 → 点阵陆地,节点按时区落点 ===== */
+/* 大洲轮廓 [lat,lng],点阵分辨率下只求形似 */
+const LAND = [
+  /* 北美 */ [[71,-158],[70,-140],[69,-125],[68,-110],[67,-96],[64,-88],[58,-94],[57,-90],[52,-82],[55,-77],[62,-78],[60,-70],[58,-68],[54,-58],[49,-55],[47,-65],[45,-61],[44,-66],[42,-70],[40,-74],[35,-76],[32,-81],[25,-80],[26,-82],[30,-84],[29,-89],[29,-95],[26,-97],[22,-98],[19,-96],[18,-94],[21,-90],[21,-87],[18,-88],[16,-89],[12,-84],[9,-82],[8,-78],[8,-83],[10,-86],[14,-92],[16,-95],[19,-104],[23,-106],[27,-112],[31,-113],[32,-117],[37,-122],[40,-124],[46,-124],[49,-125],[54,-131],[57,-136],[60,-140],[59,-146],[59,-152],[57,-156],[55,-162],[59,-162],[63,-166],[65,-168],[68,-166]],
+  /* 格陵兰 */ [[83,-38],[81,-16],[76,-20],[70,-22],[65,-38],[60,-44],[64,-52],[70,-54],[76,-60],[79,-66],[82,-54]],
+  /* 南美 */ [[11,-72],[12,-68],[10,-62],[8,-60],[6,-54],[2,-50],[-1,-48],[-3,-42],[-5,-37],[-8,-35],[-13,-38],[-18,-39],[-23,-41],[-25,-47],[-30,-50],[-34,-52],[-35,-57],[-38,-58],[-39,-62],[-42,-64],[-47,-66],[-51,-69],[-54,-68],[-55,-71],[-52,-74],[-46,-74],[-42,-73],[-37,-73],[-32,-71],[-25,-70],[-18,-70],[-13,-76],[-6,-81],[-3,-80],[0,-80],[4,-77],[7,-77],[9,-76],[12,-72]],
+  /* 欧亚 */ [[36,-9],[39,-9],[43,-9],[43,-2],[46,-1],[48,-5],[49,-2],[50,1],[51,4],[53,5],[54,9],[56,8],[58,7],[59,5],[62,5],[65,10],[68,14],[70,20],[71,26],[70,30],[69,35],[68,40],[69,60],[73,70],[76,100],[72,115],[71,130],[70,150],[68,160],[66,170],[65,178],[62,179],[60,163],[54,158],[51,157],[57,156],[59,150],[57,141],[53,141],[49,140],[43,135],[39,128],[35,127],[34,126],[36,124],[38,125],[40,122],[39,118],[37,118],[34,120],[32,121],[30,122],[27,120],[24,118],[22,114],[21,110],[21,108],[18,106],[16,108],[12,109],[10,107],[8,105],[10,104],[13,100],[12,100],[8,100],[4,101],[1.5,103],[4,100],[8,98],[10,99],[14,98],[16,94],[19,93],[22,91],[21,89],[21,87],[19,85],[16,82],[13,80],[10,79],[8,77],[9,76],[13,74],[17,73],[21,70],[22,72],[24,68],[25,66],[25,61],[26,57],[23,58],[22,60],[18,57],[15,52],[13,45],[12,44],[15,42],[20,39],[24,37],[27,34],[29,33],[31,34],[33,35],[36,36],[36,30],[37,27],[39,26],[41,26],[40,23],[37,22],[36,22],[38,20],[40,19],[42,18],[44,15],[41,16],[38,16],[38,15],[40,15],[41,13],[44,10],[43,7],[43,4],[42,3],[40,0],[38,-1],[37,-2],[36,-5],[36,-6],[37,-9]],
+  /* 非洲 */ [[35,-6],[36,0],[37,10],[33,11],[30,19],[32,23],[31,32],[27,34],[22,37],[15,39],[12,43],[11,44],[11,49],[8,50],[2,46],[-2,41],[-7,39],[-11,40],[-15,40],[-20,35],[-24,35],[-26,33],[-29,31],[-33,27],[-34,25],[-34,19],[-32,18],[-28,16],[-23,14],[-17,12],[-12,13],[-8,13],[-5,12],[0,9],[4,9],[4,6],[6,3],[6,-2],[5,-6],[7,-11],[9,-14],[12,-17],[15,-17],[20,-17],[24,-15],[27,-13],[31,-10],[33,-8]],
+  /* 澳洲 */ [[-11,132],[-12,136],[-15,136],[-17,140],[-11,142],[-14,144],[-19,147],[-21,149],[-25,153],[-28,154],[-32,153],[-37,150],[-38,147],[-39,144],[-36,140],[-35,138],[-35,136],[-32,134],[-31,131],[-33,124],[-34,120],[-33,115],[-31,115],[-26,113],[-23,114],[-20,116],[-18,122],[-15,124],[-14,127],[-12,130]],
+  /* 岛屿 */
+  [[59,-3],[57,-2],[53,0],[51,1],[50,-4],[52,-5],[54,-3],[56,-6],[58,-5]],          /* 英国 */
+  [[55,-8],[52,-6],[51,-9],[54,-10]],                                               /* 爱尔兰 */
+  [[66,-22],[66,-15],[64,-14],[63,-19],[64,-23]],                                   /* 冰岛 */
+  [[45,142],[43,145],[42,141],[38,141],[35,140],[33,135],[31,131],[33,130],[36,136],[38,139],[41,140],[43,140]], /* 日本 */
+  [[-12,49],[-16,50],[-22,48],[-25,47],[-25,44],[-20,44],[-16,44]],                 /* 马达加斯加 */
+  [[5,95],[3,99],[-1,101],[-4,104],[-6,106],[-5,102],[-2,99],[2,96]],               /* 苏门答腊 */
+  [[-6,105],[-7,110],[-8,114],[-8,110],[-7,106]],                                   /* 爪哇 */
+  [[6,116],[2,118],[-2,116],[-4,113],[-2,110],[2,109],[5,113]],                     /* 婆罗洲 */
+  [[1,120],[-2,121],[-5,120],[-3,119],[0,119]],                                     /* 苏拉威西 */
+  [[-1,131],[-2,137],[-4,141],[-7,146],[-9,148],[-9,143],[-8,139],[-5,135],[-2,131]], /* 新几内亚 */
+  [[18,121],[16,122],[13,124],[9,126],[6,125],[8,123],[11,122],[14,120],[17,120]],  /* 菲律宾 */
+  [[-35,173],[-38,178],[-40,176],[-39,174]],                                        /* 新西兰北 */
+  [[-41,172],[-44,173],[-46,169],[-44,168]],                                        /* 新西兰南 */
+  [[9,80],[7,82],[6,80],[8,79]],                                                    /* 斯里兰卡 */
+  [[25.5,121],[22,121],[23.5,120]],                                                 /* 台湾 */
+  [[23,-82],[22,-78],[20,-75],[21,-79],[22,-84]],                                   /* 古巴 */
+  [[20,-72],[18,-69],[18,-74]],                                                     /* 伊斯帕尼奥拉 */
+  [[-41,145],[-41,148],[-43,147]],                                                  /* 塔斯马尼亚 */
+];
+/* 内海挖空 */
+const WATER = [
+  [[54,10],[54,20],[57,22],[60,17],[60,25],[63,20],[65,22],[63,17],[58,17],[56,12]], /* 波罗的海 */
+  [[41,28],[42,35],[45,37],[47,32],[45,28]],                                         /* 黑海 */
+  [[37,50],[40,53],[44,51],[46,49],[44,47],[40,49]],                                 /* 里海 */
+  [[24,52],[27,50],[30,49],[29,51],[26,53],[24,55]],                                 /* 波斯湾 */
+  [[13,43],[20,38],[27,34],[29,33],[28,35],[21,40],[14,44]],                         /* 红海 */
+];
+/* IANA 时区 → 代表城市坐标(城市群级,不追求精确) */
+const TZMAP = {
+  'Asia/Shanghai':[31.2,121.5],'Asia/Chongqing':[29.6,106.5],'Asia/Harbin':[45.8,126.5],
+  'Asia/Urumqi':[43.8,87.6],'Asia/Hong_Kong':[22.3,114.2],'Asia/Macau':[22.2,113.5],
+  'Asia/Taipei':[25,121.5],'Asia/Tokyo':[35.7,139.7],'Asia/Seoul':[37.6,127],
+  'Asia/Singapore':[1.4,103.8],'Asia/Bangkok':[13.8,100.5],'Asia/Jakarta':[-6.2,106.8],
+  'Asia/Kuala_Lumpur':[3.1,101.7],'Asia/Manila':[14.6,121],'Asia/Ho_Chi_Minh':[10.8,106.7],
+  'Asia/Kolkata':[22.6,88.4],'Asia/Karachi':[24.9,67],'Asia/Dhaka':[23.8,90.4],
+  'Asia/Colombo':[6.9,79.9],'Asia/Kathmandu':[27.7,85.3],'Asia/Yangon':[16.8,96.2],
+  'Asia/Dubai':[25.2,55.3],'Asia/Riyadh':[24.7,46.7],'Asia/Tehran':[35.7,51.4],
+  'Asia/Baghdad':[33.3,44.4],'Asia/Jerusalem':[31.8,35.2],'Asia/Kabul':[34.5,69.2],
+  'Asia/Almaty':[43.2,76.9],'Asia/Tashkent':[41.3,69.2],'Asia/Vladivostok':[43.1,131.9],
+  'Asia/Novosibirsk':[55,82.9],'Asia/Yekaterinburg':[56.8,60.6],
+  'Europe/London':[51.5,-0.1],'Europe/Dublin':[53.3,-6.3],'Europe/Paris':[48.9,2.4],
+  'Europe/Berlin':[52.5,13.4],'Europe/Madrid':[40.4,-3.7],'Europe/Rome':[41.9,12.5],
+  'Europe/Amsterdam':[52.4,4.9],'Europe/Brussels':[50.8,4.4],'Europe/Zurich':[47.4,8.5],
+  'Europe/Vienna':[48.2,16.4],'Europe/Stockholm':[59.3,18.1],'Europe/Oslo':[59.9,10.7],
+  'Europe/Copenhagen':[55.7,12.6],'Europe/Helsinki':[60.2,24.9],'Europe/Warsaw':[52.2,21],
+  'Europe/Prague':[50.1,14.4],'Europe/Budapest':[47.5,19],'Europe/Athens':[38,23.7],
+  'Europe/Istanbul':[41,29],'Europe/Moscow':[55.8,37.6],'Europe/Kyiv':[50.4,30.5],
+  'Europe/Lisbon':[38.7,-9.1],'Atlantic/Reykjavik':[64.1,-21.9],
+  'America/New_York':[40.7,-74],'America/Toronto':[43.7,-79.4],'America/Chicago':[41.9,-87.6],
+  'America/Denver':[39.7,-105],'America/Phoenix':[33.4,-112.1],'America/Los_Angeles':[34.1,-118.2],
+  'America/Vancouver':[49.3,-123.1],'America/Anchorage':[61.2,-149.9],'Pacific/Honolulu':[21.3,-157.9],
+  'America/Mexico_City':[19.4,-99.1],'America/Bogota':[4.7,-74.1],'America/Lima':[-12,-77],
+  'America/Santiago':[-33.4,-70.7],'America/Sao_Paulo':[-23.5,-46.6],
+  'America/Argentina/Buenos_Aires':[-34.6,-58.4],'America/Caracas':[10.5,-66.9],
+  'America/Halifax':[44.6,-63.6],'America/St_Johns':[47.6,-52.7],
+  'Australia/Sydney':[-33.9,151.2],'Australia/Melbourne':[-37.8,145],
+  'Australia/Brisbane':[-27.5,153],'Australia/Perth':[-31.9,115.9],'Pacific/Auckland':[-36.8,174.8],
+  'Africa/Cairo':[30,31.2],'Africa/Lagos':[6.5,3.4],'Africa/Johannesburg':[-26.2,28],
+  'Africa/Nairobi':[-1.3,36.8],'Africa/Casablanca':[33.6,-7.6],'Africa/Algiers':[36.8,3.1],
+  'Africa/Tunis':[36.8,10.2],
+};
+const MAP = { minLat:-58, maxLat:82, ratio:.46, dotLng:2.1, dotLat:2.5 };
+
+function inPoly(lat, lng, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [yi, xi] = poly[i], [yj, xj] = poly[j];
+    if ((yi > lat) !== (yj > lat) &&
+        lng < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function isLand(lat, lng) {
+  return LAND.some(p => inPoly(lat, lng, p)) && !WATER.some(p => inPoly(lat, lng, p));
+}
+function project(lat, lng, W, H) {
+  return [(lng + 180) / 360 * W, (MAP.maxLat - lat) / (MAP.maxLat - MAP.minLat) * H];
+}
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+/* 节点 → 坐标:优先 IANA 表,其次 UTC±HH:MM 按经度带落在赤道北侧 */
+function nodePos(n) {
+  if (!n.tz) return null;
+  if (TZMAP[n.tz]) return TZMAP[n.tz];
+  const m = n.tz.match(/^UTC([+-])(\d{1,2}):?(\d{2})?$/);
+  if (m) {
+    const h = (+m[2]) + (+(m[3] || 0)) / 60;
+    return [22, Math.max(-178, Math.min(178, (m[1] === '-' ? -1 : 1) * h * 15))];
+  }
+  return null;
+}
+
+const mapState = { canvas:null, base:null, nodes:[], W:0, H:0, dpr:1, anim:null };
+
+function buildBase() {
+  const c = mapState.canvas, wrap = c.parentElement;
+  const W = Math.max(wrap.clientWidth - 24, 320), H = Math.round(W * MAP.ratio);
+  const dpr = window.devicePixelRatio || 1;
+  Object.assign(mapState, { W, H, dpr });
+  c.width = W * dpr; c.height = H * dpr;
+  c.style.height = H + 'px';
+  const base = document.createElement('canvas');
+  base.width = W * dpr; base.height = H * dpr;
+  const ctx = base.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  ctx.fillStyle = dark ? 'rgba(255,255,255,.16)' : 'rgba(0,0,0,.13)';
+  const r = Math.max(1.1, W / 640 * 1.5);
+  for (let lat = MAP.minLat; lat <= MAP.maxLat; lat += MAP.dotLat)
+    for (let lng = -180; lng <= 180; lng += MAP.dotLng)
+      if (isLand(lat, lng)) {
+        const [x, y] = project(lat, lng, W, H);
+        ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+      }
+  mapState.base = base;
+}
+
+function placeNodes(nodes) {
+  const seen = {};
+  mapState.nodes = [];
+  let unknown = 0;
+  for (const n of nodes) {
+    const pos = nodePos(n);
+    if (!pos) { unknown++; continue; }
+    const key = pos[0].toFixed(1) + ',' + pos[1].toFixed(1);
+    const i = seen[key] = (seen[key] ?? -1) + 1;
+    const [x, y] = project(pos[0], pos[1], mapState.W, mapState.H);
+    const a = i * 2.4, rr = i ? 5 * Math.sqrt(i) : 0;   // 同城多节点绕圈散开
+    mapState.nodes.push({ n, x: x + rr * Math.cos(a), y: y + rr * Math.sin(a) });
+  }
+  const u = document.getElementById('mapUnknown');
+  u.style.display = unknown ? '' : 'none';
+  u.textContent = unknown ? `另有 ${unknown} 个节点未上报时区,未落点` : '';
+}
+
+function drawMap(t) {
+  const { canvas, base, nodes, W, H, dpr } = mapState;
+  if (!base) return;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(base, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const green = cssVar('--green') || '#0E8A5F';
+  let hasOnline = false;
+  for (const p of nodes) {
+    const on = p.n.online, bad = !p.n.ok;
+    const color = bad ? '#C62828' : on ? green : '#9a9aa0';
+    if (on) {                                   // 呼吸圈,2.4s 一轮
+      hasOnline = true;
+      const ph = (t % 2400) / 2400;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4 + ph * 13, 0, 7);
+      ctx.strokeStyle = color; ctx.globalAlpha = .5 * (1 - ph);
+      ctx.lineWidth = 1.4; ctx.stroke(); ctx.globalAlpha = 1;
+    }
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 9);
+    g.addColorStop(0, color); g.addColorStop(1, 'transparent');
+    ctx.globalAlpha = .35; ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, on ? 3.4 : 2.6, 0, 7); ctx.fill();
+  }
+  cancelAnimationFrame(mapState.anim);
+  if (hasOnline) mapState.anim = requestAnimationFrame(drawMap);
+}
+
+function renderMap(nodes) {
+  if (!mapState.canvas) {
+    mapState.canvas = document.getElementById('worldMap');
+    const relayout = () => {
+      const w = Math.max(mapState.canvas.parentElement.clientWidth - 24, 320);
+      if (w === mapState.W) return;               // 宽度没变不重画
+      buildBase(); placeNodes(mapState.lastNodes || []); drawMap(0);
+    };
+    addEventListener('resize', relayout);
+    new ResizeObserver(relayout).observe(mapState.canvas.parentElement);
+    mapState.canvas.addEventListener('mousemove', mapHover);
+    mapState.canvas.addEventListener('mouseleave', () =>
+      document.getElementById('mapTip').style.display = 'none');
+    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',
+      () => { buildBase(); drawMap(0); });
+    buildBase();
+  }
+  mapState.lastNodes = nodes;
+  placeNodes(nodes);
+  drawMap(0);
+}
+
+function mapHover(e) {
+  const rect = mapState.canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+  let best = null, bd = 14 * 14;
+  for (const p of mapState.nodes) {
+    const d = (p.x - mx) ** 2 + (p.y - my) ** 2;
+    if (d < bd) { bd = d; best = p; }
+  }
+  const tip = document.getElementById('mapTip');
+  if (!best) { tip.style.display = 'none'; return; }
+  const n = best.n;
+  tip.innerHTML = '<b>' + esc(n.name) + '</b><br>' +
+      esc(n.region || n.tz || '') + ' · ' +
+      (n.online ? (n.ok ? '<span style="color:var(--green)">✓ 在线可信</span>'
+                        : '<span style="color:#C62828">✗ 报告不一致</span>')
+                : '离线') +
+      (n.verified_day ? '<br>校验至 ' + esc(n.verified_day) : '');
+  tip.style.display = 'block';
+  tip.style.left = Math.min(best.x + 14, mapState.W - 200) + 'px';
+  tip.style.top = (best.y + 14) + 'px';
+}
+
+async function load() {
+  const s = await (await fetch('/nodes/summary')).json();
+  document.getElementById('online').textContent = s.online;
+  document.getElementById('total').textContent = s.total;
+  document.getElementById('okCount').textContent = s.verified_ok;
+  const line = document.getElementById('statusLine');
+  if (s.divergent > 0) {
+    document.getElementById('divergent').style.display = '';
+    document.getElementById('divergentLabel').style.display = '';
+    document.getElementById('divergent').textContent = s.divergent;
+    line.className = 'status-line status-bad';
+    line.textContent = '⚠ 有 ' + s.divergent + ' 个节点报告账本历史与其本地留存不一致——请在开源仓库提 issue 公开质询。';
+  } else if (s.online > 0) {
+    line.className = 'status-line status-ok';
+    line.textContent = '✓ 此刻有 ' + s.online + ' 个社区节点在独立监督平台账目,全部校验通过。';
+  } else {
+    line.className = 'status-line status-ok';
+    line.textContent = '暂无在线节点——成为第一个见证者,方法见下方。';
+  }
+  document.getElementById('anchor').textContent = s.latest_anchor
+    ? s.latest_anchor.day + ' · ' + s.latest_anchor.chain_hash
+    : '账本刚启用,首个锚点将于明日生成';
+  const rows = (s.nodes || []).map(n =>
+    '<tr><td><span class="dot ' + (n.online ? 'on' : 'off') + '"></span>' + esc(n.name) + '</td>' +
+    '<td>' + esc(n.region || '–') + '</td>' +
+    '<td>' + esc(n.verified_day || '–') + '</td>' +
+    '<td>' + (n.ok ? '<span style="color:var(--green)">✓ 可信</span>'
+                   : '<span style="color:#C62828">✗ 存疑</span>') + '</td>' +
+    '<td>' + n.heartbeats + '</td></tr>').join('');
+  document.getElementById('nodeRows').innerHTML =
+    rows || '<tr><td colspan="5" style="color:var(--muted)">还没有节点,等你来跑第一个</td></tr>';
+  renderMap(s.nodes || []);
+}
+
+/* ===== 网页见证节点:与 witness.py 同一套算法,在你的浏览器里独立复算 ===== */
+const GENESIS = '0'.repeat(64);
+const WW_VERSION = 'web-0.1.1';
+
+/* 与服务端 canonical() 字节级一致:键排序、无空格、非 ASCII 原样 */
+function canonical(o) {
+  if (o === null || typeof o !== 'object') return JSON.stringify(o);
+  if (Array.isArray(o)) return '[' + o.map(canonical).join(',') + ']';
+  return '{' + Object.keys(o).sort()
+      .map(k => JSON.stringify(k) + ':' + canonical(o[k])).join(',') + '}';
+}
+async function sha256(s) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function verifyRows(p) {
+  const problems = [];
+  const rate = p.commission_rate_max ?? 0.06, vrate = p.voucher_rate ?? 0.03;
+  for (const r of p.merchant_rows || []) {
+    if (r.net !== r.food - r.commission) problems.push(`商家行 ${r.o}: 净额恒等式不成立`);
+    if (Math.abs(r.commission) > Math.abs(r.food) * rate + 1)
+      problems.push(`商家行 ${r.o}: 佣金超过 ${rate * 100}%`);
+  }
+  for (const r of p.rider_rows || [])
+    if (r.kind !== 'earning' || r.amount < 0) problems.push(`骑手行 ${r.o}: 配送费被冲减`);
+  for (const r of p.voucher_rows || [])
+    if (r.fee !== Math.trunc(r.gross * vrate) || r.net !== r.gross - r.fee)
+      problems.push(`团购行 ${r.p}: 服务费不是 ${vrate * 100}%`);
+  return problems;
+}
+
+const wwState = {
+  nodeId: localStorage.wwNodeId ||
+      (localStorage.wwNodeId = crypto.randomUUID().replaceAll('-', '')),
+  seen: JSON.parse(localStorage.wwSeen || '{}'),
+  timer: null,
+};
+
+async function wwCycle() {
+  const seen = wwState.seen;
+  let anchors = [], after = '';
+  while (true) {
+    const page = await (await fetch('/ledger/anchors?after=' + after)).json();
+    anchors = anchors.concat(page);
+    if (page.length < 400) break;
+    after = page[page.length - 1].day;
+  }
+  const current = Object.fromEntries(anchors.map(a => [a.day, a.chain_hash]));
+  const tampered = [
+    ...Object.keys(seen).filter(d => current[d] && current[d] !== seen[d])
+        .map(d => '锚点被改: ' + d),
+    ...Object.keys(seen).filter(d => !(d in current)).map(d => '锚点消失: ' + d),
+  ];
+  const problems = [];
+  let prev = GENESIS, verifiedDay = '', verifiedHash = '';
+  for (const a of anchors) {
+    if (seen[a.day] && !tampered.length) {
+      prev = seen[a.day]; verifiedDay = a.day; verifiedHash = seen[a.day];
+      continue;
+    }
+    const d = await (await fetch('/ledger/days/' + a.day)).json();
+    const ph = await sha256(canonical(d.payload));
+    const ch = await sha256(prev + ph);
+    if (ph !== d.payload_hash || ch !== a.chain_hash) {
+      problems.push(a.day + ': 哈希链复算不一致'); break;
+    }
+    problems.push(...verifyRows(d.payload).map(x => a.day + ': ' + x));
+    seen[a.day] = ch; prev = ch; verifiedDay = a.day; verifiedHash = ch;
+    if (problems.length > 20) break;
+  }
+  localStorage.wwSeen = JSON.stringify(seen);
+  const ok = !tampered.length && !problems.length;
+  const message = [...tampered, ...problems].join('; ').slice(0, 200);
+  try {
+    await fetch('/nodes/heartbeat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        node_id: wwState.nodeId,
+        name: (localStorage.wwName || '').slice(0, 30),
+        region: '网页节点',
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+        version: WW_VERSION,
+        verified_day: verifiedDay, chain_hash: verifiedHash, ok, message,
+      }),
+    });
+  } catch (_) {}
+  const st = document.getElementById('wwStatus');
+  const days = Object.keys(seen).length;
+  if (ok) {
+    st.className = 'ww-status ok';
+    st.textContent = '✓ 账本可信 · 已见证 ' + days + ' 天';
+    document.getElementById('wwDetail').textContent =
+        '校验至 ' + (verifiedDay || '(暂无锚点)') + ' · 锚点已留存在你的浏览器里,平台改历史你会看到红色警告';
+  } else {
+    st.className = 'ww-status bad';
+    st.textContent = '✗ 发现问题,已公开示警';
+    document.getElementById('wwDetail').textContent = message;
+  }
+  load(); // 刷新上方节点列表,自己马上出现
+}
+
+function wwStart() {
+  localStorage.wwOn = '1';
+  localStorage.wwName = document.getElementById('wwName').value.trim();
+  document.getElementById('wwIdle').style.display = 'none';
+  document.getElementById('wwRun').style.display = '';
+  const run = () => wwCycle().catch(e => {
+    const st = document.getElementById('wwStatus');
+    st.className = 'ww-status';
+    st.textContent = '⏳ 暂时连不上,5 分钟后自动重试';
+    document.getElementById('wwDetail').textContent = String(e).slice(0, 120);
+  });
+  run();
+  wwState.timer = setInterval(run, 300000);
+}
+document.getElementById('wwStart').onclick = wwStart;
+document.getElementById('wwStop').onclick = (e) => {
+  e.preventDefault();
+  delete localStorage.wwOn;
+  clearInterval(wwState.timer);
+  document.getElementById('wwRun').style.display = 'none';
+  document.getElementById('wwIdle').style.display = '';
+};
+if (localStorage.wwOn) { // 上次开着:回到页面自动继续见证
+  document.getElementById('wwName').value = localStorage.wwName || '';
+  wwStart();
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+load(); setInterval(load, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+name: superz_shared
+description: Super-Z 三端共享代码:数据模型、API 客户端、通用登录页
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.4.0
+  flutter: ">=3.22.0"
+
+dependencies:
+  crypto: ^3.0.7
+  flutter:
+    sdk: flutter
+  flutter_map: ^8.3.1
+  http: ^1.2.0
+  jpush_flutter:            # vendor 版,适配 AGP 9(见 packages/jpush_flutter)
+    path: ../jpush_flutter
+  latlong2: ^0.10.1
+  package_info_plus: ^8.0.0   # 读当前版本号(应用内更新检查)
+  shared_preferences: ^2.5.5
+  url_launcher: ^6.3.0        # 打开新版 APK 下载链接
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>超级赞 Super-Z · 5% 佣金外卖平台|配送费 100% 归骑手,账目公开可验证</title>
+  <meta name="description" content="超级赞(Super-Z)是劳动者互助外卖平台:商家佣金只收 5%(行业平台 20%+),配送费 100% 归骑手,团购到店核销才收 2%。每一单的钱去向对用户、商家、骑手三方公开,每日账本哈希链上链、社区见证节点可验证。支持到店自取免配送费,代码 AGPL-3.0 开源。" />
+  <meta name="keywords" content="超级赞,Super-Z,低佣金外卖,外卖平台,5%佣金,配送费归骑手,账目透明,开源外卖平台,到店自取,团购,劳动者互助,骑手,商家入驻" />
+  <link rel="canonical" href="https://aikas.com.cn/" />
+  <meta name="robots" content="index,follow" />
+  <link rel="icon" type="image/png" sizes="64x64" href="/site/brand/favicon_64.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/site/brand/favicon_192.png" />
+  <link rel="apple-touch-icon" href="/site/brand/favicon_192.png" />
+  <!-- Open Graph / 社交分享卡片 -->
+  <meta property="og:site_name" content="超级赞 Super-Z" />
+  <meta property="og:title" content="超级赞 Super-Z · 一场把钱分公平的运动" />
+  <meta property="og:description" content="商家佣金 5%、配送费 100% 归骑手、账目公开可验证的外卖平台。不吸血,可验证,开源。" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://aikas.com.cn/" />
+  <meta property="og:image" content="https://aikas.com.cn/site/brand/bg_github_1280x640.png" />
+  <meta property="og:locale" content="zh_CN" />
+  <!-- 结构化数据:搜索引擎与 AI 引擎(AIEO)从这里拿事实 -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://aikas.com.cn/#org",
+        "name": "超级赞",
+        "alternateName": "Super-Z",
+        "url": "https://aikas.com.cn/",
+        "description": "劳动者互助外卖平台:商家佣金 5%,配送费 100% 归骑手,账目公开、社区可验证,AGPL-3.0 开源。",
+        "sameAs": ["https://github.com/hanpaopao66/super-z"]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://aikas.com.cn/#site",
+        "name": "超级赞 Super-Z",
+        "url": "https://aikas.com.cn/",
+        "publisher": { "@id": "https://aikas.com.cn/#org" },
+        "inLanguage": "zh-CN"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "name": "超级赞(Super-Z)",
+        "operatingSystem": "Android",
+        "applicationCategory": "LifestyleApplication",
+        "downloadUrl": "https://aikas.com.cn/download",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+        "publisher": { "@id": "https://aikas.com.cn/#org" }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "超级赞(Super-Z)是什么?",
+            "acceptedAnswer": { "@type": "Answer", "text": "超级赞(Super-Z)是一个劳动者互助外卖平台,口号是「把钱分公平」:商家佣金只收 5%,配送费 100% 归骑手,账目对用户、商家、骑手三方公开,代码 AGPL-3.0 开源。" }
+          },
+          {
+            "@type": "Question",
+            "name": "超级赞向商家收多少佣金?",
+            "acceptedAnswer": { "@type": "Answer", "text": "商家总负担 5% 封顶,这是全部费用:没有履约费、没有竞价排名、没有保底费(行业平台实际负担普遍超过 20%)。到店团购只在核销时收 2%,券未使用一分不收。" }
+          },
+          {
+            "@type": "Question",
+            "name": "配送费归谁?",
+            "acceptedAnswer": { "@type": "Answer", "text": "用户支付的配送费(含夜间与恶劣天气加价)100% 归骑手,平台分文不取;骑手提现 T+1 到账、零手续费,意外保障由平台从佣金中计提,不扣骑手工资。" }
+          },
+          {
+            "@type": "Question",
+            "name": "怎么验证超级赞的账目?",
+            "acceptedAnswer": { "@type": "Answer", "text": "平台每天把全部账务流水(匿名化)生成哈希锚点并首尾相链,任何人都可以运行社区见证节点持续复算校验;改写历史上任何一分钱都会导致哈希链断裂被全网发现。见 https://aikas.com.cn/nodes 。" }
+          },
+          {
+            "@type": "Question",
+            "name": "在哪里下载超级赞 App?",
+            "acceptedAnswer": { "@type": "Answer", "text": "官网下载页 https://aikas.com.cn/download 提供用户端、商家端、骑手端三个 Android 安装包;也可从 GitHub Releases(https://github.com/hanpaopao66/super-z/releases)下载同一份安装包。" }
+          },
+          {
+            "@type": "Question",
+            "name": "超级赞收的 5% 用来做什么?",
+            "acceptedAnswer": { "@type": "Answer", "text": "5% 基本是平台的运行成本:支付通道手续费、服务器带宽、短信、地图接口、证照审核与客服。超级赞不卖用户数据、不做竞价排名、不收商家推广费、不抽配送费,5% 是唯一收入,平台自身收支定期公示。" }
+          },
+          {
+            "@type": "Question",
+            "name": "超级赞为什么不做 0 佣金?",
+            "acceptedAnswer": { "@type": "Answer", "text": "0 佣金的平台通常在别处赚钱:广告、竞价排名、卖数据,或烧完补贴后涨价。超级赞选择明着收一笔能覆盖成本的小钱(5%),不暗地里挣看不见的大钱。" }
+          },
+          {
+            "@type": "Question",
+            "name": "超级赞做大了会涨佣金吗?",
+            "acceptedAnswer": { "@type": "Answer", "text": "不会,承诺是反向的:5% 是上限不是目标,代码开源、账目公开,任何变化都可被公众验证;规模上来、成本摊薄就降佣——哪天 3% 能活就降到 3%。盈余不分红,优先用于骑手保障、商家扶持和降费率。" }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <noscript>
+    <h1>超级赞 Super-Z · 一场把钱分公平的运动</h1>
+    <p>劳动者互助外卖平台:商家佣金 5% 封顶,配送费 100% 归骑手,团购核销才收 2%。
+       每一单的钱去向三方公开,每日账本哈希链社区可验证,代码 AGPL-3.0 开源。</p>
+    <p><a href="/download">下载 App(Android)</a> ·
+       <a href="/join/merchant">商家入驻</a> ·
+       <a href="/join/rider">骑手加入</a> ·
+       <a href="/nodes">运行见证节点</a> ·
+       <a href="/screen">实时账目大屏</a></p>
+  </noscript>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

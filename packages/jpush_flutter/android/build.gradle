@@ -1,0 +1,22 @@
+// Super-Z vendor 版:官方 3.4.7 的 build.gradle 是 AGP 9 之前的老写法
+// (buildscript classpath + apply plugin + jcenter),在本仓库的 AGP 9.0.1 下
+// 配置阶段直接 NPE。此处改为 plugins DSL + namespace,其余(Java 源码/SDK 依赖)不动。
+plugins {
+    id "com.android.library"
+}
+
+group = "com.jiguang.jpush"
+version = "1.0-SNAPSHOT"
+
+android {
+    namespace = "com.jiguang.jpush"
+    compileSdk = 34
+
+    defaultConfig {
+        minSdk = 21
+    }
+}
+
+dependencies {
+    implementation("cn.jiguang.sdk:jpush:6.1.0")
+}

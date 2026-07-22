@@ -1,0 +1,40 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "web",
+      "port": 5173
+    },
+    {
+      "name": "superz-api",
+      "runtimeExecutable": ".venv/bin/uvicorn",
+      "runtimeArgs": ["app.main:app", "--host", "127.0.0.1", "--port", "8010"],
+      "cwd": "server",
+      "port": 8010
+    },
+    {
+      "name": "user-app-web",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": ["run", "-d", "web-server", "--web-port", "8090", "--dart-define=SUPERZ_API=http://127.0.0.1:8010"],
+      "cwd": "apps/user_app",
+      "port": 8090
+    },
+    {
+      "name": "merchant-app-web",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": ["run", "-d", "web-server", "--web-port", "8091", "--dart-define=SUPERZ_API=http://127.0.0.1:8010"],
+      "cwd": "apps/merchant_app",
+      "port": 8091
+    },
+    {
+      "name": "rider-app-web",
+      "runtimeExecutable": "flutter",
+      "runtimeArgs": ["run", "-d", "web-server", "--web-port", "8092", "--dart-define=SUPERZ_API=http://127.0.0.1:8010"],
+      "cwd": "apps/rider_app",
+      "port": 8092
+    }
+  ]
+}

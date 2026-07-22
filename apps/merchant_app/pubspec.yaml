@@ -1,0 +1,43 @@
+name: merchant_app
+description: Super-Z 商家端 —— 接单出餐
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.4.0
+
+dependencies:
+  share_plus: ^12.0.2
+  flutter:
+    sdk: flutter
+  superz_shared:
+    path: ../../packages/shared
+  web_socket_channel: ^3.0.0  # 实时听单
+  image_picker: ^1.1.0        # 菜品图选取
+  audioplayers: ^6.8.1
+  flutter_foreground_task: ^10.0.0
+  print_bluetooth_thermal: ^1.1.4  # 蓝牙 ESC/POS 小票机直连
+  fast_gbk: ^1.0.0                 # 小票中文用 GBK 编码(热敏机不认 UTF-8)
+  permission_handler: ^12.0.1      # Android 12+ 附近设备(蓝牙)运行时权限
+  shared_preferences: ^2.5.5       # 记住选择的打印机
+  mobile_scanner:            # vendor 版,适配 AGP 9(见 packages/mobile_scanner)
+    path: ../../packages/mobile_scanner
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/new_order.m4a
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# App 图标(生成:dart run flutter_launcher_icons)
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: ../../assets/brand/icon.png
+  adaptive_icon_background: "#F05030"
+  adaptive_icon_foreground: ../../assets/brand/icon_fg.png

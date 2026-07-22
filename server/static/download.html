@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>下载超级赞 Super-Z App · Android 用户端/商家端/骑手端</title>
+<meta name="description" content="下载超级赞(Super-Z)Android 安装包:用户端点外卖、商家端接单出餐、骑手端抢单配送。商家佣金 5%,配送费 100% 归骑手,账目公开可验证。">
+<link rel="canonical" href="https://aikas.com.cn/download">
+<style>
+  :root { --orange:#FF5A1F; --green:#2FBF8F; --bg:#0B0E14; --card:#12161F;
+          --line:#1E2430; --text:#EAEEF6; --muted:#8B94A9; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         line-height:1.8; padding:40px 20px 60px; }
+  .wrap { max-width:760px; margin:0 auto; }
+  h1 { font-size:1.7rem; } h1 b { color:var(--orange); }
+  .sub { color:var(--muted); margin:6px 0 8px; font-size:.95rem; }
+  .ver { color:var(--green); font-size:.88rem; margin-bottom:22px; min-height:1.4em; }
+  .cards { display:grid; gap:14px; }
+  .dl { display:flex; align-items:center; gap:16px; background:var(--card); border:1px solid var(--line);
+        border-radius:16px; padding:18px 20px; text-decoration:none; color:inherit; transition:border-color .25s; }
+  .dl:hover { border-color:var(--orange); }
+  .dl .icon { font-size:1.9rem; }
+  .dl .t { flex:1; }
+  .dl .t b { font-size:1.05rem; }
+  .dl .t div { color:var(--muted); font-size:.82rem; }
+  .dl .btn { background:var(--orange); color:#fff; border-radius:999px; padding:8px 18px;
+             font-size:.88rem; white-space:nowrap; }
+  .note { color:var(--muted); font-size:.8rem; margin-top:20px; }
+  .note a { color:var(--green); text-decoration:none; }
+  .back { display:inline-block; margin-top:26px; color:var(--muted); text-decoration:none; font-size:.85rem; }
+  .back:hover { color:var(--orange); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><b>超级赞</b> Super-Z 下载</h1>
+  <div class="sub">Android 安装包(arm64)。低抽成、账目透明——商家佣金 5%,配送费 100% 归骑手。</div>
+  <div class="ver" id="ver">正在读取最新版本…</div>
+
+  <div class="cards">
+    <a class="dl" href="/appdist/superz-user-arm64.apk">
+      <span class="icon">🍜</span>
+      <span class="t"><b>用户端</b><div>点外卖 / 到店自取 / 团购,每一单的钱去向可查</div></span>
+      <span class="btn">下载 APK</span>
+    </a>
+    <a class="dl" href="/appdist/superz-merchant-arm64.apk">
+      <span class="icon">🏪</span>
+      <span class="t"><b>商家端</b><div>接单出餐 / 小票打印 / 对账提现,只收 5% 服务费</div></span>
+      <span class="btn">下载 APK</span>
+    </a>
+    <a class="dl" href="/appdist/superz-rider-arm64.apk">
+      <span class="icon">🛵</span>
+      <span class="t"><b>骑手端</b><div>抢单配送,配送费全额到手,提现 T+1 零手续费</div></span>
+      <span class="btn">下载 APK</span>
+    </a>
+  </div>
+
+  <div class="note">
+    安装提示:浏览器下载后直接打开安装;系统提示"未知来源"时允许本次安装即可。
+    App 内置更新检查,装一次后有新版会自动提醒。
+    也可以从 <a href="https://github.com/hanpaopao66/super-z/releases/latest" target="_blank">GitHub Releases</a> 下载同一份安装包
+    (代码开源,欢迎自行构建校验)。
+  </div>
+  <a class="back" href="/">← 返回官网</a>
+  <div class="note" style="text-align:center">
+    <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-2</a>
+  </div>
+</div>
+<script>
+  // 版本信息与应用内更新同源(versions.json 由发版脚本维护)
+  fetch('/appdist/versions.json').then(r => r.json()).then(d => {
+    const u = d.user || {};
+    document.getElementById('ver').textContent =
+      '最新版本 v' + u.version + ' (build ' + u.build + ') · ' + (u.notes || '');
+  }).catch(() => { document.getElementById('ver').textContent = ''; });
+</script>
+</body>
+</html>

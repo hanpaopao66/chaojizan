@@ -1,0 +1,33 @@
+name: rider_app
+description: Super-Z 骑手端 —— 抢单配送
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.4.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  superz_shared:
+    path: ../../packages/shared
+  geolocator: ^14.0.0   # 真实 GPS 定位
+  url_launcher: ^6.3.0  # 唤起高德 App 导航
+  image_picker: ^1.1.0  # 实名认证证件照
+
+flutter:
+  uses-material-design: true
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# App 图标(生成:dart run flutter_launcher_icons)
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: ../../assets/brand/icon.png
+  adaptive_icon_background: "#F05030"
+  adaptive_icon_foreground: ../../assets/brand/icon_fg.png

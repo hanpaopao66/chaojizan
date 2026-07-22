@@ -1,0 +1,2321 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super-Z 管理后台 · 商家入驻审核</title>
+<style>
+  :root { --primary: #e8590c; --bg: #f6f5f4; --card: #fff; --text: #1f2328; --muted: #6a737d; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); }
+  header { background: var(--card); border-bottom: 1px solid #e5e2df; padding: 14px 24px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 17px; margin: 0; }
+  header .spacer { flex: 1; }
+  main { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+  .card { background: var(--card); border: 1px solid #e5e2df; border-radius: 10px; padding: 20px; }
+  .login-card { max-width: 360px; margin: 80px auto; display: flex; flex-direction: column; gap: 12px; }
+  input, button { font: inherit; }
+  input { padding: 9px 12px; border: 1px solid #d0ccc7; border-radius: 8px; width: 100%; }
+  button { padding: 8px 14px; border: none; border-radius: 8px; cursor: pointer; background: #ece9e6; }
+  button.primary { background: var(--primary); color: #fff; }
+  button.danger { background: #fff0f0; color: #c92a2a; }
+  button:disabled { opacity: .5; cursor: default; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .tabs button.active { background: var(--primary); color: #fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #eee9e4; vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+  .badge.pending { background: #fff4e0; color: #b45309; }
+  .badge.approved { background: #e6f6e9; color: #1a7f37; }
+  .badge.rejected { background: #ffefef; color: #c92a2a; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 10px 18px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Super-Z 管理后台 · 商家入驻审核</h1>
+  <div class="spacer"></div>
+  <button id="weatherToggle" hidden
+          title="恶劣天气配送加价 +¥2/单,全部归骑手;开关即时生效">☀️ 天气加价:关</button>
+  <button id="curfewToggle" hidden
+          title="深夜保护窗:窗口内全平台暂停接新单,已有订单正常履约">🌙 深夜保护:关</button>
+  <button id="shutdownToggle" hidden
+          title="极端天气停运:立即全平台停接新单,已下订单尽力履约,兜底取消线缩短">⛈ 停运:关</button>
+  <button id="screenGmvToggle" hidden
+          title="公开大屏(/screen)是否展示交易额/订单金额;关闭后接口直接不下发金额字段">📺 大屏金额:展示</button>
+  <span id="whoami" class="muted"></span>
+  <button id="logout" hidden>退出</button>
+</header>
+
+<main>
+  <div id="login" class="card login-card" hidden>
+    <strong>管理员登录</strong>
+    <input id="phone" placeholder="手机号" autocomplete="username">
+    <input id="password" type="password" placeholder="密码" autocomplete="current-password">
+    <button class="primary" id="loginBtn">登录</button>
+  </div>
+
+  <div id="panel" hidden>
+    <div class="tabs" style="margin-bottom:20px">
+      <button data-module="dashboard" class="active module-btn">数据看板</button>
+      <button data-module="merchants" class="module-btn">商家审核</button>
+      <button data-module="riders" class="module-btn">骑手认证</button>
+      <button data-module="withdrawals" class="module-btn">提现打款</button>
+      <button data-module="tickets" class="module-btn">客服工单</button>
+      <button data-module="aftersales" class="module-btn">售后仲裁</button>
+      <button data-module="issues" class="module-btn">配送异常</button>
+      <button data-module="foodsafety" class="module-btn" style="color:#e5484d;font-weight:700">食安投诉</button>
+      <button data-module="moderation" class="module-btn">内容审核</button>
+      <button data-module="risk" class="module-btn">风控</button>
+      <button data-module="dispatch" class="module-btn">运力</button>
+      <button data-module="appeals" class="module-btn">判责申诉</button>
+      <button data-module="marketing" class="module-btn">营销</button>
+      <button data-module="invoices" class="module-btn">开票</button>
+      <button data-module="tax" class="module-btn">税务导出</button>
+    </div>
+
+    <div id="dashboardPanel">
+      <div id="auditBanner" hidden style="background:#ffefef;border:1px solid #f3b6b6;color:#c92a2a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;line-height:1.7"></div>
+      <div id="dashMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px"></div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;align-items:start">
+        <div class="card">
+          <div style="font-weight:600;margin-bottom:10px">近 7 日订单 / GMV</div>
+          <div id="dashTrend" style="display:flex;align-items:flex-end;gap:10px;height:150px"></div>
+        </div>
+        <div class="card">
+          <div style="font-weight:600;margin-bottom:10px">待办</div>
+          <div id="dashPending"></div>
+          <div id="dashTotals" class="muted" style="margin-top:12px;font-size:12px;line-height:1.8"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="marketingPanel" hidden>
+      <div class="card" style="padding:12px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="font-weight:700">营销总开关</span>
+          <button id="mktToggle">…</button>
+          <span class="muted">默认关:关着时新客券/邀请/生日/复购/上新一张不发一条不推(没有预算就保持关)</span>
+        </div>
+        <div style="font-weight:700;margin-bottom:8px">创建券批次(成本平台承担,总量=预算封顶)</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="cbName" placeholder="批次名(如 新客5元券)" style="width:160px" />
+          <select id="cbTrigger">
+            <option value="newcomer">注册自动发(新客券)</option>
+            <option value="manual">定向发(客服补偿)</option>
+            <option value="birthday">生日券</option>
+            <option value="winback">复购提醒券</option>
+          </select>
+          <input id="cbAmount" type="number" placeholder="面额(元)" style="width:90px" />
+          <input id="cbMin" type="number" placeholder="门槛(元,0=无)" style="width:110px" />
+          <input id="cbDays" type="number" placeholder="有效天数" value="7" style="width:90px" />
+          <input id="cbTotal" type="number" placeholder="总量(张)" style="width:100px" />
+          <button class="primary" id="cbCreate">创建</button>
+        </div>
+      </div>
+      <div class="card" style="padding:12px;margin-bottom:12px">
+        <div style="font-weight:700;margin-bottom:4px">开屏运营位(App 冷启动图文开屏)</div>
+        <div class="muted" style="font-size:12px;margin-bottom:8px">
+          自营内容不是广告位;竖图建议 1080×1920(≤5MB),端上 cover 裁切;
+          没配置/过期时 App 自动回落品牌开屏。客户端本次启动缓存、下次启动展示。
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <select id="spAudience">
+            <option value="all">全部端</option>
+            <option value="user">用户端</option>
+            <option value="merchant">商家端</option>
+            <option value="rider">骑手端</option>
+          </select>
+          <input id="spTitle" placeholder="标题(选填)" style="width:160px" />
+          <input id="spSubtitle" placeholder="副文案(选填)" style="width:220px" />
+          <input id="spCountdown" type="number" value="3" min="2" max="8" style="width:70px" title="倒计时秒数(2-8)" />
+          <input id="spStarts" type="datetime-local" style="width:180px" title="开始时间(空=立即)" />
+          <input id="spEnds" type="datetime-local" style="width:180px" title="结束时间(空=长期)" />
+          <input id="spFile" type="file" accept="image/*" />
+          <button class="primary" id="spCreate">上传并发布</button>
+        </div>
+        <div class="card" style="overflow-x:auto;margin-top:10px">
+          <table>
+            <thead><tr>
+              <th>图</th><th>端</th><th>标题/副文案</th><th>倒计时</th>
+              <th>时间窗</th><th>状态</th><th>操作</th>
+            </tr></thead>
+            <tbody id="spRows"></tbody>
+          </table>
+          <div id="spEmpty" class="empty" hidden>还没配置过开屏</div>
+        </div>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr><th>批次</th><th>触发</th><th>面额/门槛</th><th>有效期</th><th>发放/总量</th><th>已使用</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody id="cbrows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="merchantsPanel" hidden>
+      <div class="tabs">
+        <button data-status="pending" class="active">待审核</button>
+        <button data-status="">全部</button>
+        <select id="cityFilter" style="margin-left:8px"><option value="">全部城市</option></select>
+        <div class="spacer" style="flex:1"></div>
+        <input id="openCities" placeholder="开城清单,逗号分隔(空=全部开放)" style="width:260px" />
+        <button id="saveOpenCities">保存开城</button>
+        <button id="refresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>店铺</th><th>店主</th><th>品类</th><th>地址</th><th>食品经营许可证</th><th>申请时间</th><th>状态</th><th>操作</th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div id="empty" class="empty" hidden>没有记录</div>
+      </div>
+    </div>
+
+    <div id="ridersPanel" hidden>
+      <div class="tabs">
+        <button data-rstatus="pending" class="active">待审核</button>
+        <button data-rstatus="">全部</button>
+        <div class="spacer" style="flex:1"></div>
+        <button id="rrefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>骑手</th><th>姓名</th><th>身份证号</th><th>证件照</th><th>申请时间</th><th>转单(30天)</th><th>上岗考试</th><th>状态</th><th>操作</th>
+          </tr></thead>
+          <tbody id="rrows"></tbody>
+        </table>
+      </div>
+      <div class="card" style="margin-top:12px;overflow-x:auto">
+        <div style="font-weight:700;padding:8px 10px 0">装备申领(待发放)</div>
+        <table><thead><tr><th>骑手</th><th>装备</th><th>申领时间</th><th>操作</th></tr></thead>
+        <tbody id="gearrows"></tbody></table>
+        <div id="gearempty" class="muted" hidden style="padding:12px">没有待发放的申领</div>
+        <div id="rempty" class="empty" hidden>没有记录</div>
+      </div>
+    </div>
+
+    <div id="withdrawalsPanel" hidden>
+      <div class="tabs">
+        <button data-wstatus="pending" class="active">待打款</button>
+        <button data-wstatus="failed">打款失败</button>
+        <button data-wstatus="">全部</button>
+        <div class="spacer" style="flex:1"></div>
+        <button id="t1pay" class="primary" title="昨天及更早申请的待打款提现(骑手+商家),一键全部标记打款并推送通知">T+1 批量打款</button>
+        <button id="wrefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>骑手</th><th>金额</th><th>申请时间</th><th>处理时间</th><th>状态</th><th>操作</th>
+          </tr></thead>
+          <tbody id="wrows"></tbody>
+        </table>
+        <div id="wempty" class="empty" hidden>没有记录</div>
+      </div>
+    </div>
+
+    <div id="issuesPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">骑手配送途中上报的异常。三种裁决:已协调(继续送)/
+          按送达处理(用户原因,骑手配送费照拿)/ 先行赔付(骑手责任如餐损:订单完成结算、用户全额退款平台承担,骑手不扣工资)。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button id="direfresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>订单/骑手</th><th>类型</th><th>说明/举证</th><th>顾客</th><th>金额</th><th>状态</th><th>操作</th>
+          </tr></thead>
+          <tbody id="dirows"></tbody>
+        </table>
+        <div id="diempty" class="muted" hidden style="padding:18px">没有待处理的配送异常</div>
+      </div>
+    </div>
+
+    <div id="foodSafetyPanel" hidden>
+      <div class="tabs">
+        <span style="font-size:12px;align-self:center;color:#e5484d;font-weight:700">⚠ 食安红线通道:不经商家、直达平台,加急处理。</span>
+        <span class="muted" style="font-size:12px;align-self:center">成立=先行全额退款(含配送费,平台垫付);可下架涉事菜品/暂停营业;30 天内成立 3 起自动停业。全部处置留痕,可导出供监管检查。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button data-fsstatus="open" class="active">待处理</button>
+        <button data-fsstatus="confirmed">已成立</button>
+        <button data-fsstatus="dismissed">已驳回</button>
+        <button data-fsstatus="">全部</button>
+        <button onclick="dlFoodSafety()">导出留痕 CSV</button>
+        <button id="fsrefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>订单/顾客</th><th>类型</th><th>描述/举证</th><th>商家</th><th>金额</th><th>提交时间</th><th>状态/留痕</th><th>操作</th>
+          </tr></thead>
+          <tbody id="fsrows"></tbody>
+        </table>
+        <div id="fsempty" class="muted" hidden style="padding:18px">没有食安投诉</div>
+      </div>
+    </div>
+
+    <div id="dispatchPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">运力总览(30 秒自动刷新)。看板只看不派:待抢单可指定派单,在途单可释放回池或改派——原骑手不计免责次数。位置仅管理员可见。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button id="dprefresh">刷新</button>
+      </div>
+      <div id="dpstats" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px"></div>
+      <div class="card" id="sosCard" style="margin-bottom:12px;border:2px solid #e5484d" hidden>
+        <div style="font-weight:800;color:#e5484d;padding:8px 10px 0">🆘 骑手紧急求助(5 分钟内电话回访!SOP 见 docs/RIDER_SOP.md)</div>
+        <table><thead><tr><th>骑手</th><th>位置</th><th>说明</th><th>时间</th><th>操作</th></tr></thead>
+        <tbody id="sosrows"></tbody></table>
+      </div>
+      <div class="card" id="accidentCard" style="margin-bottom:12px;border:1.5px solid #e5484d" hidden>
+        <div style="font-weight:800;color:#e5484d;padding:8px 10px 0">⚠ 骑手事故(加急电话回访,SOP 见 docs/RIDER_SOP.md)</div>
+        <table><thead><tr><th>骑手</th><th>伤情</th><th>说明/照片</th><th>时间</th><th>操作</th></tr></thead>
+        <tbody id="accrows"></tbody></table>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+        <div class="card" style="flex:1;min-width:340px;padding:10px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:6px">分布示意(绿=骑手 · 橙=待抢 · 灰线=在途取送 · 底色=近2小时下单热力)</div>
+          <canvas id="dpmap" width="640" height="420" style="width:100%;background:#fafafa;border-radius:10px"></canvas>
+        </div>
+        <div style="flex:1.4;min-width:420px;display:flex;flex-direction:column;gap:12px">
+          <div class="card" style="overflow-x:auto">
+            <div style="font-weight:700;padding:8px 10px 0">待抢订单</div>
+            <table><thead><tr><th>订单</th><th>商家</th><th>等待</th><th>小费</th><th>操作</th></tr></thead>
+            <tbody id="dppool"></tbody></table>
+            <div id="dppoolempty" class="muted" hidden style="padding:12px">池子是空的</div>
+          </div>
+          <div class="card" style="overflow-x:auto">
+            <div style="font-weight:700;padding:8px 10px 0">在途订单</div>
+            <table><thead><tr><th>订单</th><th>状态</th><th>骑手</th><th>时长</th><th>操作</th></tr></thead>
+            <tbody id="dpflight"></tbody></table>
+            <div id="dpflightempty" class="muted" hidden style="padding:12px">没有在途订单</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="riskPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">刷单/补贴滥用标记(只标记不拦截,资金结算照常)。确认后该单从月售/销量排行剔除;误报点解除。同商家多次确认建议线下约谈。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button data-riskstatus="" class="active">待复核</button>
+        <button data-riskstatus="confirmed">已确认</button>
+        <button data-riskstatus="cleared">已解除</button>
+        <button id="riskrefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr><th>订单/顾客</th><th>商家</th><th>命中规则</th><th>金额</th><th>时间</th><th>操作</th></tr></thead>
+          <tbody id="riskrows"></tbody>
+        </table>
+        <div id="riskempty" class="muted" hidden style="padding:18px">没有风控标记</div>
+      </div>
+    </div>
+
+    <div id="moderationPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">图片先发后审(评价图/菜品图/头像):驳回即隐藏并通知发布者。文本靠敏感词库同步拦截,词库在右侧维护。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button id="crrefresh">刷新</button>
+      </div>
+      <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+        <div class="card" style="flex:2;min-width:420px;overflow-x:auto">
+          <table>
+            <thead><tr><th>类型</th><th>图片</th><th>时间</th><th>操作</th></tr></thead>
+            <tbody id="crrows"></tbody>
+          </table>
+          <div id="crempty" class="muted" hidden style="padding:18px">没有待审核的图片</div>
+        </div>
+        <div class="card" style="flex:1;min-width:260px;padding:14px">
+          <div style="font-weight:700;margin-bottom:8px">敏感词库</div>
+          <div style="display:flex;gap:6px;margin-bottom:10px">
+            <input id="mwWord" placeholder="新词" style="flex:1">
+            <button class="primary" id="mwAdd">添加</button>
+          </div>
+          <div id="mwList" style="max-height:400px;overflow:auto;font-size:13px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="taxPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">财务报税底表(口径与公开账本/钱包同源,冲账负数行自动抵减)。
+          选月份后下载三份 CSV:平台收入明细 / 骑手所得汇总 / 商家结算汇总。</span>
+      </div>
+      <div class="card" style="padding:16px">
+        <label>月份 <input id="taxPeriod" type="month" style="padding:6px;border:1px solid #ddd;border-radius:8px"></label>
+        <button class="primary" style="margin-left:10px" onclick="dlTax('platform-income')">平台收入明细</button>
+        <button class="primary" style="margin-left:6px" onclick="dlTax('rider-income')">骑手所得汇总</button>
+        <button class="primary" style="margin-left:6px" onclick="dlTax('merchant-settlement')">商家结算汇总</button>
+        <div class="muted" style="margin-top:10px;font-size:12px">
+          骑手所得为劳务报酬性质(申报底表);商家佣金发票在「开票」模块;
+          灵工平台接入后代发批次号会写进打款凭证,与此处报表对账。
+        </div>
+      </div>
+    </div>
+
+    <div id="invoicesPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">商家索取平台服务费发票(佣金+团购服务费,系统按月聚合)。
+          线下开电子普票后把 PDF 链接回填;抬头有误就驳回,商家改好可重新申请。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button id="invrefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>商家</th><th>月份</th><th>金额</th><th>抬头/税号/邮箱</th><th>申请时间</th><th>操作</th>
+          </tr></thead>
+          <tbody id="invrows"></tbody>
+        </table>
+        <div id="invempty" class="muted" hidden style="padding:18px">没有待开票的申请</div>
+      </div>
+    </div>
+
+    <div id="appealsPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">骑手/商家对平台裁决的申诉。改判 = 平台认亏:
+          售后改判恢复商家净额(调整行)、配送异常改判为骑手消责、差评改判隐藏并回调评分;用户已得退款一律不追回。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button id="aprefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>申诉人</th><th>类型</th><th>被申诉裁决</th><th>申诉理由/证据</th><th>时间</th><th>操作</th>
+          </tr></thead>
+          <tbody id="aprows"></tbody>
+        </table>
+        <div id="apempty" class="muted" hidden style="padding:18px">没有待复核的申诉</div>
+      </div>
+    </div>
+
+    <div id="afterSalesPanel" hidden>
+      <div class="tabs">
+        <span class="muted" style="font-size:12px;align-self:center">近 7 天售后申请。商家责任由商家在商家端处理;
+          这里只处理配送事故(洒餐/丢餐):判骑手责 = 平台先行赔付全额(含配送费),骑手不扣工资(保障金覆盖)。</span>
+        <div class="spacer" style="flex:1"></div>
+        <button id="asrefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>订单</th><th>理由</th><th>举证图</th><th>金额/退款</th><th>状态</th><th>判责</th><th>操作</th>
+          </tr></thead>
+          <tbody id="asrows"></tbody>
+        </table>
+        <div id="asempty" class="empty" hidden>近 7 天没有售后申请</div>
+      </div>
+    </div>
+
+    <div id="ticketsPanel" hidden>
+      <div class="tabs">
+        <button data-tstatus="open" class="active">待回复</button>
+        <button data-tstatus="">全部</button>
+        <div class="spacer" style="flex:1"></div>
+        <button id="trefresh">刷新</button>
+      </div>
+      <div class="card" style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>用户</th><th>角色</th><th>联系方式</th><th>问题</th><th>提交时间</th><th>状态</th><th>回复</th><th>操作</th>
+          </tr></thead>
+          <tbody id="trows"></tbody>
+        </table>
+        <div id="tempty" class="empty" hidden>没有工单</div>
+      </div>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let token = localStorage.getItem('superz_admin_token') || '';
+let currentStatus = 'pending';
+
+function toast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+/* 轻量弹层:点遮罩或关闭按钮关闭。传入 HTML 字符串 */
+function openModal(html) {
+  let ov = $('#modalOverlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'modalOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);'
+      + 'display:flex;align-items:center;justify-content:center;z-index:1000';
+    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = `<div style="background:#fff;border-radius:12px;padding:20px;
+    max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    ${html}
+    <div style="text-align:right;margin-top:12px">
+      <button onclick="document.getElementById('modalOverlay').remove()">关闭</button>
+    </div></div>`;
+}
+
+async function api(method, path, body) {
+  const resp = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = resp.status === 204 ? null : await resp.json();
+  if (!resp.ok) {
+    if (resp.status === 401) showLogin();
+    throw new Error((data && data.detail) || ('请求失败 ' + resp.status));
+  }
+  return data;
+}
+
+function showLogin() {
+  token = '';
+  localStorage.removeItem('superz_admin_token');
+  $('#login').hidden = false;
+  $('#panel').hidden = true;
+  $('#logout').hidden = true;
+  $('#whoami').textContent = '';
+}
+
+function showPanel(name) {
+  $('#login').hidden = true;
+  $('#panel').hidden = false;
+  $('#logout').hidden = false;
+  if (name) $('#whoami').textContent = name;
+  loadDashboard();
+  load();
+  loadWithdrawals();
+  loadWeatherFlag();
+  loadCurfewFlag();
+  loadShutdownFlag();
+  loadScreenGmvFlag();
+}
+
+/* 恶劣天气配送加价开关(+¥2/单全归骑手,即时生效) */
+let weatherOn = false;
+function renderWeather() {
+  const btn = $('#weatherToggle');
+  btn.hidden = false;
+  btn.textContent = weatherOn ? '🌧 天气加价:开(+¥2)' : '☀️ 天气加价:关';
+  btn.style.background = weatherOn ? '#0E8A5F' : '';
+  btn.style.color = weatherOn ? '#fff' : '';
+}
+async function loadWeatherFlag() {
+  try {
+    weatherOn = (await api('GET', '/admin/flags')).weather_surcharge === 'on';
+    renderWeather();
+  } catch (e) { /* 旧服务端无此接口时静默 */ }
+}
+$('#weatherToggle').onclick = async () => {
+  const next = weatherOn ? 'off' : 'on';
+  if (!confirm(next === 'on'
+      ? '开启恶劣天气加价:此后新订单配送费 +¥2,全部归骑手。确认?'
+      : '关闭恶劣天气加价:新订单恢复正常配送费。确认?')) return;
+  const reason = prompt('原因(选填,会在透明中心公开展示,如"暴雨橙色预警"):') || '';
+  try {
+    await api('POST', '/admin/flags/weather_surcharge', { value: next, reason });
+    weatherOn = next === 'on';
+    renderWeather();
+    toast(weatherOn ? '已开启,新订单立即生效' : '已关闭');
+  } catch (e) { toast(e.message); }
+};
+
+/* 公开大屏金额展示开关(缺省=展示;关闭后 /screen 接口不下发金额字段) */
+let screenGmvOn = true;
+function renderScreenGmv() {
+  const btn = $('#screenGmvToggle');
+  btn.hidden = false;
+  btn.textContent = screenGmvOn ? '📺 大屏金额:展示' : '📺 大屏金额:隐藏';
+  btn.style.background = screenGmvOn ? '#0E8A5F' : '';
+  btn.style.color = screenGmvOn ? '#fff' : '';
+}
+async function loadScreenGmvFlag() {
+  try {
+    screenGmvOn = (await api('GET', '/admin/flags')).screen_show_gmv !== 'off';
+    renderScreenGmv();
+  } catch (e) { /* 旧服务端无此接口时静默 */ }
+}
+$('#screenGmvToggle').onclick = async () => {
+  const next = screenGmvOn ? 'off' : 'on';
+  if (!confirm(next === 'off'
+      ? '隐藏大屏金额:公开大屏与播报将不再展示交易额/订单金额。确认?'
+      : '恢复大屏金额展示。确认?')) return;
+  try {
+    await api('POST', '/admin/flags/screen_show_gmv', { value: next });
+    screenGmvOn = next === 'on';
+    renderScreenGmv();
+    toast(screenGmvOn ? '已恢复金额展示' : '已隐藏金额(1 分钟内生效)');
+  } catch (e) { toast(e.message); }
+};
+
+/* 深夜保护窗:窗口内全平台停止接新单(已有订单正常履约) */
+let curfewOn = false, curfewHours = '01:00-06:00';
+function renderCurfew() {
+  const btn = $('#curfewToggle');
+  btn.hidden = false;
+  btn.textContent = curfewOn ? `🌙 深夜保护:开(${curfewHours})` : '🌙 深夜保护:关';
+  btn.style.background = curfewOn ? '#4C3D8F' : '';
+  btn.style.color = curfewOn ? '#fff' : '';
+}
+async function loadCurfewFlag() {
+  try {
+    const flags = await api('GET', '/admin/flags');
+    curfewOn = flags.night_curfew === 'on';
+    curfewHours = flags.night_curfew_hours || '01:00-06:00';
+    renderCurfew();
+  } catch (e) { /* 旧服务端无此接口时静默 */ }
+}
+$('#curfewToggle').onclick = async () => {
+  if (!curfewOn) {
+    const hours = prompt('保护窗时段(HH:MM-HH:MM,支持跨天):', curfewHours);
+    if (hours === null) return;
+    try {
+      await api('POST', '/admin/flags/night_curfew_hours', { value: hours.trim() });
+      await api('POST', '/admin/flags/night_curfew', { value: 'on' });
+      curfewOn = true; curfewHours = hours.trim();
+      renderCurfew();
+      toast(`深夜保护已开启:${curfewHours} 内暂停接新单`);
+    } catch (e) { toast(e.message); }
+  } else {
+    if (!confirm('关闭深夜保护窗,恢复全时段接单。确认?')) return;
+    try {
+      await api('POST', '/admin/flags/night_curfew', { value: 'off' });
+      curfewOn = false;
+      renderCurfew();
+      toast('已关闭');
+    } catch (e) { toast(e.message); }
+  }
+};
+
+/* 极端天气停运:最重一档——立即全平台停接新单(已有订单尽力履约,兜底取消线缩短) */
+let shutdownOn = false;
+function renderShutdown() {
+  const btn = $('#shutdownToggle');
+  btn.hidden = false;
+  btn.textContent = shutdownOn ? '⛈ 停运中:开' : '⛈ 停运:关';
+  btn.style.background = shutdownOn ? '#B42318' : '';
+  btn.style.color = shutdownOn ? '#fff' : '';
+}
+async function loadShutdownFlag() {
+  try {
+    shutdownOn = (await api('GET', '/admin/flags')).weather_shutdown === 'on';
+    renderShutdown();
+  } catch (e) { /* 旧服务端无此接口时静默 */ }
+}
+$('#shutdownToggle').onclick = async () => {
+  const next = shutdownOn ? 'off' : 'on';
+  if (!confirm(next === 'on'
+      ? '开启极端天气停运:此后全平台立即停止接新单,已下订单尽力履约,兜底取消线缩短,三端显示停运横幅。确认?'
+      : '解除停运:全平台恢复接新单。确认?')) return;
+  const reason = prompt('原因(选填,会在透明中心公开展示,如"台风红色预警"):') || '';
+  try {
+    await api('POST', '/admin/flags/weather_shutdown', { value: next, reason });
+    shutdownOn = next === 'on';
+    renderShutdown();
+    toast(shutdownOn ? '已停运,新单立即暂停' : '已解除停运,恢复接单');
+  } catch (e) { toast(e.message); }
+};
+
+// ---------- 模块切换 ----------
+document.querySelectorAll('.module-btn').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.module-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    const m = btn.dataset.module;
+    $('#dashboardPanel').hidden = m !== 'dashboard';
+    $('#merchantsPanel').hidden = m !== 'merchants';
+    $('#ridersPanel').hidden = m !== 'riders';
+    $('#withdrawalsPanel').hidden = m !== 'withdrawals';
+    $('#afterSalesPanel').hidden = m !== 'aftersales';
+    if (m === 'aftersales') loadAfterSales();
+    $('#issuesPanel').hidden = m !== 'issues';
+    if (m === 'issues') loadIssues();
+    $('#foodSafetyPanel').hidden = m !== 'foodsafety';
+    if (m === 'foodsafety') loadFoodSafety();
+    $('#moderationPanel').hidden = m !== 'moderation';
+    if (m === 'moderation') { loadContentReviews(); loadModWords(); }
+    $('#riskPanel').hidden = m !== 'risk';
+    if (m === 'risk') loadRiskOrders();
+    $('#dispatchPanel').hidden = m !== 'dispatch';
+    if (m === 'dispatch') startDispatch(); else stopDispatch();
+    $('#appealsPanel').hidden = m !== 'appeals';
+    $('#marketingPanel').hidden = m !== 'marketing';
+    if (m === 'appeals') loadAppeals();
+    $('#invoicesPanel').hidden = m !== 'invoices';
+    if (m === 'invoices') loadInvoices();
+    $('#taxPanel').hidden = m !== 'tax';
+    if (m === 'tax' && !$('#taxPeriod').value) {
+      const d = new Date(); d.setMonth(d.getMonth() - 1);
+      $('#taxPeriod').value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+    $('#ticketsPanel').hidden = m !== 'tickets';
+    if (m === 'dashboard') loadDashboard();
+    else if (m === 'merchants') load();
+    else if (m === 'marketing') { loadBatches(); loadSplash(); }
+    else if (m === 'riders') loadRiders();
+    else if (m === 'tickets') loadTickets();
+    else loadWithdrawals();
+  };
+});
+
+$('#loginBtn').onclick = async () => {
+  try {
+    const data = await api('POST', '/auth/login', { phone: $('#phone').value.trim(), password: $('#password').value });
+    if (data.role !== 'admin') { toast('该账号不是管理员'); return; }
+    token = data.token;
+    localStorage.setItem('superz_admin_token', token);
+    showPanel(data.name + '(管理员)');
+  } catch (e) { toast(e.message); }
+};
+
+$('#logout').onclick = showLogin;
+$('#refresh').onclick = () => load();
+document.querySelectorAll('.tabs button[data-status]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button[data-status]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentStatus = btn.dataset.status;
+    load();
+  };
+});
+
+const STATUS_LABEL = { pending: '待审核', approved: '已通过', rejected: '已驳回' };
+
+const CB_TRIGGERS = { newcomer: '注册自动发', manual: '定向发', birthday: '生日券', winback: '复购提醒' };
+/* 开屏运营位:列表 + 传图发布 + 启停 */
+async function loadSplash() {
+  try {
+    const rows = await api('GET', '/admin/splash');
+    const tb = $('#spRows');
+    tb.innerHTML = '';
+    $('#spEmpty').hidden = rows.length > 0;
+    const audLabel = { all: '全部', user: '用户', merchant: '商家', rider: '骑手' };
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      const win = `${r.starts_at ? new Date(r.starts_at).toLocaleString() : '立即'} ~ ${r.ends_at ? new Date(r.ends_at).toLocaleString() : '长期'}`;
+      tr.innerHTML = `
+        <td><img src="${r.image_url}" style="width:36px;height:64px;object-fit:cover;border-radius:4px" /></td>
+        <td>${audLabel[r.audience] || r.audience}</td>
+        <td>${r.title || '<span class="muted">-</span>'}<br /><span class="muted" style="font-size:12px">${r.subtitle || ''}</span></td>
+        <td>${r.countdown_seconds}s</td>
+        <td style="font-size:12px">${win}</td>
+        <td>${r.is_active ? '<span style="color:#0E8A5F">启用</span>' : '<span class="muted">停用</span>'}</td>
+        <td><button data-spid="${r.id}">${r.is_active ? '停用' : '启用'}</button></td>`;
+      tr.querySelector('button').onclick = async (e) => {
+        try { await api('POST', `/admin/splash/${e.target.dataset.spid}/toggle`); loadSplash(); }
+        catch (err) { toast(err.message); }
+      };
+      tb.appendChild(tr);
+    }
+  } catch (e) { /* 旧服务端无此接口时静默 */ }
+}
+$('#spCreate').onclick = async () => {
+  const file = $('#spFile').files[0];
+  if (!file) return toast('请先选择开屏图片');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const up = await fetch('/upload', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: fd });
+    const upData = await up.json();
+    if (!up.ok) throw new Error(upData.detail || '图片上传失败');
+    await api('POST', '/admin/splash', {
+      audience: $('#spAudience').value,
+      title: $('#spTitle').value.trim(),
+      subtitle: $('#spSubtitle').value.trim(),
+      image_url: upData.url,
+      countdown_seconds: Number($('#spCountdown').value) || 3,
+      starts_at: $('#spStarts').value ? new Date($('#spStarts').value).toISOString() : null,
+      ends_at: $('#spEnds').value ? new Date($('#spEnds').value).toISOString() : null,
+    });
+    $('#spFile').value = ''; $('#spTitle').value = ''; $('#spSubtitle').value = '';
+    toast('已发布,App 下次启动生效');
+    loadSplash();
+  } catch (e) { toast(e.message); }
+};
+
+async function loadBatches() {
+  try {
+    const flags = await api('GET', '/admin/flags');
+    const on = flags.marketing === 'on';
+    const btn = $('#mktToggle');
+    btn.textContent = on ? '已开启(点击关闭)' : '已关闭(点击开启)';
+    btn.className = on ? 'primary' : '';
+    btn.onclick = async () => {
+      try {
+        await api('POST', '/admin/flags/marketing', { value: on ? 'off' : 'on' });
+        toast(on ? '营销已全部关闭' : '营销已开启');
+        loadBatches();
+      } catch (e) { toast(e.message); }
+    };
+    const list = await api('GET', '/admin/coupon-batches');
+    const rows = $('#cbrows');
+    rows.innerHTML = '';
+    for (const b of list) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${b.name}</td><td>${CB_TRIGGERS[b.trigger] || b.trigger}</td>
+        <td>¥${(b.amount_cents / 100).toFixed(0)}${b.min_spend_cents ? ' / 满¥' + (b.min_spend_cents / 100).toFixed(0) : ' / 无门槛'}</td>
+        <td>${b.valid_days} 天</td><td>${b.issued} / ${b.total}</td><td>${b.used}</td>
+        <td>${b.active ? (b.issued >= b.total ? '已发完' : '进行中') : '已停用'}</td>`;
+      const op = document.createElement('td');
+      const toggle = document.createElement('button');
+      toggle.textContent = b.active ? '停用' : '启用';
+      toggle.onclick = async () => {
+        try {
+          await api('POST', `/admin/coupon-batches/${b.id}/toggle`, { active: !b.active });
+          loadBatches();
+        } catch (e) { toast(e.message); }
+      };
+      op.appendChild(toggle);
+      const send = document.createElement('button');
+      send.textContent = '定向发';
+      send.style.marginLeft = '6px';
+      send.onclick = async () => {
+        const phone = prompt('发给哪个手机号?');
+        if (!phone) return;
+        try {
+          await api('POST', '/admin/coupons/issue', { phone: phone.trim(), batch_id: b.id });
+          toast('已发放'); loadBatches();
+        } catch (e) { toast(e.message); }
+      };
+      op.appendChild(send);
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+$('#cbCreate').onclick = async () => {
+  try {
+    await api('POST', '/admin/coupon-batches', {
+      name: $('#cbName').value.trim(),
+      trigger: $('#cbTrigger').value,
+      amount_cents: Math.round(parseFloat($('#cbAmount').value || '0') * 100),
+      min_spend_cents: Math.round(parseFloat($('#cbMin').value || '0') * 100),
+      valid_days: parseInt($('#cbDays').value || '7', 10),
+      total: parseInt($('#cbTotal').value || '0', 10),
+    });
+    toast('批次已创建'); loadBatches();
+  } catch (e) { toast(e.message); }
+};
+
+async function loadCities() {
+  try {
+    const d = await api('GET', '/admin/cities');
+    const sel = $('#cityFilter');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">全部城市</option>';
+    for (const c of d.cities) {
+      if (c.city === '(未标注)') continue;
+      const opt = document.createElement('option');
+      opt.value = c.city;
+      opt.textContent = `${c.city}(${c.merchants})`;
+      sel.appendChild(opt);
+    }
+    sel.value = cur;
+    $('#openCities').value = (d.open_cities || []).join(',');
+  } catch (e) { /* 静默 */ }
+}
+$('#cityFilter').onchange = () => load();
+$('#saveOpenCities').onclick = async () => {
+  try {
+    await api('POST', '/admin/flags/open_cities',
+              { value: $('#openCities').value.trim() });
+    toast('开城清单已保存(清单外城市商家不可营业)');
+  } catch (e) { toast(e.message); }
+};
+loadCities();
+
+// 品类清单(slug -> 中文名),启动时从公开接口拉一次
+let merchantCategories = { fast_food: '快餐便当' };
+(async () => {
+  try {
+    merchantCategories = await (await fetch('/merchants/categories')).json();
+  } catch (e) { /* 拉不到就只剩默认项,不影响其他功能 */ }
+})();
+
+async function load() {
+  try {
+    const params = [];
+    if (currentStatus) params.push('status=' + currentStatus);
+    if ($('#cityFilter').value) params.push('city=' + encodeURIComponent($('#cityFilter').value));
+    const list = await api('GET', '/admin/merchants' + (params.length ? '?' + params.join('&') : ''));
+    const rows = $('#rows');
+    rows.innerHTML = '';
+    $('#empty').hidden = list.length > 0;
+    for (const m of list) {
+      const tr = document.createElement('tr');
+
+      const shopTd = document.createElement('td');
+      shopTd.innerHTML = '<strong></strong><div class="muted"></div>';
+      shopTd.querySelector('strong').textContent = m.name;
+      shopTd.querySelector('div').textContent = m.description || '';
+      tr.appendChild(shopTd);
+
+      const ownerTd = document.createElement('td');
+      ownerTd.textContent = (m.owner_name || '') + ' ' + (m.owner_phone || '');
+      tr.appendChild(ownerTd);
+
+      // 品类下拉:选了即改(商家错归类时管理员纠错)
+      const catTd = document.createElement('td');
+      const catSel = document.createElement('select');
+      for (const [slug, label] of Object.entries(merchantCategories)) {
+        const opt = document.createElement('option');
+        opt.value = slug; opt.textContent = label;
+        if (slug === (m.category || 'fast_food')) opt.selected = true;
+        catSel.appendChild(opt);
+      }
+      catSel.onchange = async () => {
+        try {
+          await api('POST', `/admin/merchants/${m.id}/category`, { category: catSel.value });
+          toast('品类已改为 ' + merchantCategories[catSel.value]);
+        } catch (e) { toast(e.message); load(); }
+      };
+      catTd.appendChild(catSel);
+      tr.appendChild(catTd);
+
+      const addrTd = document.createElement('td');
+      addrTd.textContent = m.address;
+      const psDiv = document.createElement('div');
+      psDiv.className = 'muted';
+      psDiv.textContent = '分账:' + (m.sub_mchid ? (m.sub_mchid + (m.ps_ready ? '(就绪)' : '(未就绪)')) : '未登记');
+      psDiv.style.cursor = 'pointer';
+      psDiv.title = '登记微信特约商户号(进件+接收方绑定完成后打开就绪)';
+      psDiv.onclick = async () => {
+        const sub = prompt('特约商户号(留空清除):', m.sub_mchid || '');
+        if (sub === null) return;
+        const ready = sub.trim() ? confirm('分账就绪?(确定=就绪,新订单货款走分账;取消=仅登记)') : false;
+        try {
+          await api('POST', `/admin/merchants/${m.id}/sub-mchid`,
+                    { sub_mchid: sub.trim(), ready });
+          toast('分账登记已更新'); load();
+        } catch (e) { toast(e.message); }
+      };
+      const cityDiv = document.createElement('div');
+      cityDiv.className = 'muted';
+      cityDiv.textContent = '城市:' + (m.city || '未标注');
+      cityDiv.style.cursor = 'pointer';
+      cityDiv.title = '点击人工修改城市';
+      cityDiv.onclick = async () => {
+        const c = prompt('城市名(如 成都市,留空清除):', m.city || '');
+        if (c === null) return;
+        try {
+          await api('POST', `/admin/merchants/${m.id}/city`, { city: c.trim() });
+          toast('已更新城市'); load(); loadCities();
+        } catch (e) { toast(e.message); }
+      };
+      addrTd.appendChild(cityDiv);
+      addrTd.appendChild(psDiv);
+      tr.appendChild(addrTd);
+
+      const licTd = document.createElement('td');
+      licTd.textContent = m.license_no || '(未填)';
+      if (m.license_image_url) {
+        const licLink = document.createElement('a');
+        licLink.href = m.license_image_url;
+        licLink.target = '_blank';
+        licLink.textContent = ' 查看证照照片';
+        licTd.appendChild(document.createElement('br'));
+        licTd.appendChild(licLink);
+      } else {
+        const noImg = document.createElement('div');
+        noImg.className = 'muted';
+        noImg.textContent = '(无证照照片)';
+        licTd.appendChild(noImg);
+      }
+      tr.appendChild(licTd);
+
+      const timeTd = document.createElement('td');
+      timeTd.className = 'muted';
+      timeTd.textContent = m.created_at ? new Date(m.created_at).toLocaleString('zh-CN') : '';
+      tr.appendChild(timeTd);
+
+      const statusTd = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + m.status;
+      badge.textContent = STATUS_LABEL[m.status] || m.status;
+      statusTd.appendChild(badge);
+      if (m.status === 'rejected' && m.reject_reason) {
+        const reason = document.createElement('div');
+        reason.className = 'muted';
+        reason.textContent = '原因:' + m.reject_reason;
+        statusTd.appendChild(reason);
+      }
+      tr.appendChild(statusTd);
+
+      const opTd = document.createElement('td');
+      if (m.status !== 'approved') {
+        const ok = document.createElement('button');
+        ok.className = 'primary';
+        ok.textContent = '通过';
+        ok.onclick = () => act(`/admin/merchants/${m.id}/approve`, null, m.name + ' 已通过');
+        opTd.appendChild(ok);
+      }
+      if (m.status !== 'rejected') {
+        const no = document.createElement('button');
+        no.className = 'danger';
+        no.style.marginLeft = '6px';
+        no.textContent = '驳回';
+        no.onclick = () => {
+          const reason = prompt('驳回原因(会展示给商家):', '证照信息无法核实,请补充清晰的许可证号');
+          if (reason && reason.trim().length >= 2) act(`/admin/merchants/${m.id}/reject`, { reason: reason.trim() }, m.name + ' 已驳回');
+        };
+        opTd.appendChild(no);
+      }
+      tr.appendChild(opTd);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function act(path, body, okMsg) {
+  try {
+    await api('POST', path, body);
+    toast(okMsg);
+    load();
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 骑手提现 ----------
+let currentWStatus = 'pending';
+const W_LABEL = { pending: '待打款', paid: '已打款', rejected: '已驳回', failed: '打款失败' };
+const W_BADGE = { pending: 'pending', paid: 'approved', rejected: 'rejected', failed: 'rejected' };
+const yuan = (cents) => '¥' + (cents / 100).toFixed(2);
+
+$('#wrefresh').onclick = () => loadWithdrawals();
+$('#t1pay').onclick = async () => {
+  if (!confirm('把「昨天及更早申请」的全部待打款提现(骑手+商家)标记为已打款并推送通知?\n(请确认银行/微信转账已实际完成)')) return;
+  try {
+    const r = await api('POST', '/admin/withdrawals/t1-batch-paid', {});
+    toast(r.paid ? `T+1 批次完成:${r.paid} 笔,合计 ¥${(r.total_cents/100).toFixed(2)}` : '本批次没有符合条件的提现(今天刚申请的明天再打)');
+    loadWithdrawals();
+  } catch (e) { toast(e.message); }
+};
+
+const AS_LABEL = { pending: '待商家处理', accepted: '已退款', rejected: '商家已拒绝' };
+const FAULT_LABEL = { '': '未判', merchant: '商家责任', rider: '骑手责任(平台已赔付)' };
+async function loadAfterSales() {
+  try {
+    const list = await api('GET', '/admin/after-sales?days=7');
+    const rows = $('#asrows');
+    rows.innerHTML = '';
+    $('#asempty').hidden = list.length > 0;
+    for (const a of list) {
+      const tr = document.createElement('tr');
+      const c1 = document.createElement('td');
+      c1.innerHTML = `<div style="font-family:monospace;font-size:12px">${a.order_no.slice(0,10)}…</div>
+        <div class="muted" style="font-size:12px">${new Date(a.created_at).toLocaleString('zh-CN')}</div>`;
+      tr.appendChild(c1);
+      const c2 = document.createElement('td');
+      c2.style.maxWidth = '220px'; c2.style.fontSize = '13px';
+      c2.textContent = a.reason;
+      tr.appendChild(c2);
+      const c3 = document.createElement('td');
+      c3.innerHTML = (a.images || []).map((u,i) => `<a href="${u}" target="_blank">图${i+1}</a>`).join(' ') || '<span class="muted">无</span>';
+      tr.appendChild(c3);
+      const c4 = document.createElement('td');
+      c4.innerHTML = `实付 ¥${(a.total_cents/100).toFixed(2)}<br><span class="muted" style="font-size:12px">已退 ¥${(a.refund_cents/100).toFixed(2)}</span>`;
+      tr.appendChild(c4);
+      const c5 = document.createElement('td');
+      c5.textContent = AS_LABEL[a.status] || a.status;
+      tr.appendChild(c5);
+      const c6 = document.createElement('td');
+      c6.textContent = FAULT_LABEL[a.fault] ?? a.fault;
+      tr.appendChild(c6);
+      const c7 = document.createElement('td');
+      if (a.status !== 'accepted') {
+        const btn = document.createElement('button');
+        btn.textContent = '判骑手责·全额赔付';
+        btn.onclick = async () => {
+          const reason = prompt('判责说明(将回复给用户):', '配送过程餐品受损,平台先行赔付');
+          if (reason === null) return;
+          if (!confirm(`确认判骑手责任?\n将退用户全额 ¥${(a.total_cents/100).toFixed(2)}(含配送费),商家与骑手收入不受影响,损失由骑手保障金承担。`)) return;
+          try {
+            const r = await api('POST', `/admin/after-sales/${a.id}/rider-fault`, { reason });
+            toast(`已赔付 ¥${(r.refunded_cents/100).toFixed(2)}`);
+            loadAfterSales();
+          } catch (e) { toast(e.message); }
+        };
+        c7.appendChild(btn);
+      } else {
+        c7.innerHTML = '<span class="muted">—</span>';
+      }
+      tr.appendChild(c7);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+$('#asrefresh').onclick = () => loadAfterSales();
+document.querySelectorAll('.tabs button[data-wstatus]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button[data-wstatus]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentWStatus = btn.dataset.wstatus;
+    loadWithdrawals();
+  };
+});
+
+async function loadWithdrawals() {
+  try {
+    const list = await api('GET', '/admin/withdrawals' + (currentWStatus ? '?status=' + currentWStatus : ''));
+    const rows = $('#wrows');
+    rows.innerHTML = '';
+    $('#wempty').hidden = list.length > 0;
+    for (const w of list) {
+      const tr = document.createElement('tr');
+
+      const riderTd = document.createElement('td');
+      riderTd.textContent = (w.role === 'merchant' ? '[商家] ' : '[骑手] ') + w.name + ' ' + w.phone;
+      // 收款账户(申请时快照):打款照这个打;刚变更的黄标提示人工核实
+      const PA_KIND = { bank_corporate: '对公', bank_personal: '银行卡', wechat: '微信', alipay: '支付宝' };
+      const acct = document.createElement('div');
+      acct.className = 'muted';
+      if (w.account_no) {
+        acct.textContent = (PA_KIND[w.account_kind] || w.account_kind) + ' ' + w.account_holder +
+          ' ' + w.account_no + (w.account_bank ? ' · ' + w.account_bank : '');
+        const copy = document.createElement('a');
+        copy.href = 'javascript:;';
+        copy.textContent = ' [复制]';
+        copy.onclick = () => {
+          navigator.clipboard.writeText(`${w.account_holder} ${w.account_no} ${w.account_bank || ''}`.trim());
+          toast('打款信息已复制');
+        };
+        acct.appendChild(copy);
+        if (w.account_recently_changed) {
+          const warn = document.createElement('span');
+          warn.style.cssText = 'background:#fff3cd;color:#8a6d1a;border-radius:6px;padding:1px 6px;margin-left:6px;font-size:11px';
+          warn.textContent = '账户刚变更,先电话核实';
+          acct.appendChild(warn);
+        }
+      } else {
+        acct.textContent = '未登记收款账户(旧申请)';
+      }
+      riderTd.appendChild(acct);
+      tr.appendChild(riderTd);
+
+      const amountTd = document.createElement('td');
+      amountTd.innerHTML = '<strong></strong>';
+      amountTd.querySelector('strong').textContent = yuan(w.amount_cents);
+      tr.appendChild(amountTd);
+
+      const t1 = document.createElement('td');
+      t1.className = 'muted';
+      t1.textContent = new Date(w.created_at).toLocaleString('zh-CN');
+      tr.appendChild(t1);
+
+      const t2 = document.createElement('td');
+      t2.className = 'muted';
+      t2.textContent = w.processed_at ? new Date(w.processed_at).toLocaleString('zh-CN') : '—';
+      tr.appendChild(t2);
+
+      const statusTd = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + W_BADGE[w.status];
+      badge.textContent = W_LABEL[w.status] || w.status;
+      statusTd.appendChild(badge);
+      if (w.status === 'rejected' && w.reject_reason) {
+        const reason = document.createElement('div');
+        reason.className = 'muted';
+        reason.textContent = '原因:' + w.reject_reason;
+        statusTd.appendChild(reason);
+      }
+      tr.appendChild(statusTd);
+
+      const opTd = document.createElement('td');
+      if (w.status === 'paid') {
+        const fail = document.createElement('button');
+        fail.className = 'danger';
+        fail.textContent = '标记退票';
+        fail.title = '银行退回/收款信息有误:余额自动退回,通知申请人并自动开工单';
+        fail.onclick = () => {
+          const reason = prompt('退票原因(会展示给申请人):', '银行卡信息有误,款项被退回');
+          if (reason && reason.trim().length >= 2) wact(`/admin/withdrawals/${w.id}/failed`, { reason: reason.trim() }, '已标记退票,余额退回');
+        };
+        opTd.appendChild(fail);
+      }
+      if (w.status === 'pending') {
+        const ok = document.createElement('button');
+        ok.className = 'primary';
+        ok.textContent = '打款完成';
+        ok.onclick = () => {
+          if (confirm(`确认已向${w.role === 'merchant' ? '商家' : '骑手'} ${w.name}(${w.phone})打款 ${yuan(w.amount_cents)}?`)) {
+            wact(`/admin/withdrawals/${w.id}/paid`, null, '已标记打款');
+          }
+        };
+        opTd.appendChild(ok);
+        const no = document.createElement('button');
+        no.className = 'danger';
+        no.style.marginLeft = '6px';
+        no.textContent = '驳回';
+        no.onclick = () => {
+          const reason = prompt('驳回原因(会展示给申请人):', '收款信息有误,请联系平台客服');
+          if (reason && reason.trim().length >= 2) wact(`/admin/withdrawals/${w.id}/reject`, { reason: reason.trim() }, '已驳回,余额退回');
+        };
+        opTd.appendChild(no);
+      }
+      tr.appendChild(opTd);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function wact(path, body, okMsg) {
+  try {
+    await api('POST', path, body);
+    toast(okMsg);
+    loadWithdrawals();
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 配送异常仲裁 ----------
+const DI_KIND = { cannot_contact: '联系不上顾客', wrong_address: '地址错误', food_damaged: '餐品洒损', not_ready: '到店未出餐', items_missing: '餐品不齐', other: '其他' };
+const DI_RES = { continue_delivery: '已协调', mark_delivered: '按送达处理', refund: '先行赔付' };
+async function loadIssues() {
+  try {
+    const list = await api('GET', '/admin/delivery-issues?status=open');
+    const rows = $('#dirows');
+    rows.innerHTML = '';
+    $('#diempty').hidden = list.length > 0;
+    for (const it of list) {
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td');
+      td1.innerHTML = '<div></div><div class="muted"></div>';
+      td1.children[0].textContent = '#' + it.order_no.slice(-6) + ' (' + it.order_status + ')';
+      td1.children[1].textContent = it.rider_name + ' ' + it.rider_phone;
+      tr.appendChild(td1);
+      const td2 = document.createElement('td');
+      td2.textContent = DI_KIND[it.kind] || it.kind;
+      tr.appendChild(td2);
+      const td3 = document.createElement('td');
+      td3.textContent = it.note || '—';
+      if (it.photo_url) {
+        const a = document.createElement('a');
+        a.href = it.photo_url; a.target = '_blank'; a.textContent = ' [举证图]';
+        td3.appendChild(a);
+      }
+      tr.appendChild(td3);
+      const td4 = document.createElement('td');
+      td4.innerHTML = '<div></div><div class="muted"></div>';
+      td4.children[0].textContent = it.contact_phone || '—';
+      td4.children[1].textContent = it.address || '';
+      tr.appendChild(td4);
+      const td5 = document.createElement('td');
+      td5.textContent = yuan(it.total_cents);
+      tr.appendChild(td5);
+      const td6 = document.createElement('td');
+      td6.className = 'muted';
+      td6.textContent = new Date(it.created_at).toLocaleString('zh-CN');
+      tr.appendChild(td6);
+      const op = document.createElement('td');
+      const mk = (label, action, cls, confirmText) => {
+        const b = document.createElement('button');
+        if (cls) b.className = cls;
+        b.textContent = label;
+        b.style.marginRight = '6px';
+        b.onclick = async () => {
+          const note = prompt(confirmText, '') ;
+          if (note === null) return;
+          try {
+            await api('POST', `/admin/delivery-issues/${it.id}/resolve`, { action, note });
+            toast('已处理:' + DI_RES[action]);
+            loadIssues();
+          } catch (e) { toast(e.message); }
+        };
+        op.appendChild(b);
+      };
+      mk('已协调', 'continue_delivery', '', '备注(已电话协调等,可留空):');
+      if (it.order_status === 'picked_up')
+        mk('按送达处理', 'mark_delivered', 'primary', '用户原因备注(联系不上/地址错误):');
+      mk('先行赔付', 'refund', 'danger', '骑手责任备注(如:餐洒,先行赔付):');
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('direfresh');
+  if (b) b.onclick = loadIssues;
+});
+
+// ---------- 食品安全投诉(红线通道,加急) ----------
+const FS_KIND = { foreign_object: '异物', spoiled: '变质', sick: '食用后不适' };
+const FS_STATUS = { open: '待处理', confirmed: '已成立', dismissed: '已驳回' };
+const FS_ACTION = { confirmed: '成立退款', dismissed: '驳回', dish_off: '下架菜品', suspend: '暂停营业', auto_suspend: '自动停业' };
+let currentFsStatus = 'open';
+
+document.querySelectorAll('.tabs button[data-fsstatus]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button[data-fsstatus]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentFsStatus = btn.dataset.fsstatus;
+    loadFoodSafety();
+  };
+});
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('fsrefresh');
+  if (b) b.onclick = loadFoodSafety;
+});
+
+async function loadFoodSafety() {
+  try {
+    const list = await api('GET', '/admin/food-safety' + (currentFsStatus ? '?status=' + currentFsStatus : ''));
+    const rows = $('#fsrows');
+    rows.innerHTML = '';
+    $('#fsempty').hidden = list.length > 0;
+    for (const it of list) {
+      const tr = document.createElement('tr');
+      if (it.status === 'open') tr.style.background = 'rgba(229,72,77,.06)';  // 标红加急
+
+      const td1 = document.createElement('td');
+      td1.innerHTML = '<div></div><div class="muted"></div>';
+      td1.children[0].textContent = '#' + it.order_no.slice(-6);
+      td1.children[1].textContent = it.customer_phone || '';
+      tr.appendChild(td1);
+
+      const td2 = document.createElement('td');
+      td2.style.color = '#e5484d';
+      td2.style.fontWeight = '700';
+      td2.textContent = FS_KIND[it.kind] || it.kind;
+      tr.appendChild(td2);
+
+      const td3 = document.createElement('td');
+      td3.style.maxWidth = '260px';
+      td3.textContent = it.description;
+      for (const [i, url] of (it.images || []).entries()) {
+        const a = document.createElement('a');
+        a.href = url; a.target = '_blank'; a.textContent = ` [举证${i + 1}]`;
+        td3.appendChild(a);
+      }
+      for (const [i, url] of (it.medical_urls || []).entries()) {
+        const a = document.createElement('a');
+        a.href = url; a.target = '_blank'; a.textContent = ` [医疗${i + 1}]`;
+        a.style.color = '#e5484d';
+        td3.appendChild(a);
+      }
+      tr.appendChild(td3);
+
+      const td4 = document.createElement('td');
+      td4.innerHTML = '<div></div><div class="muted"></div>';
+      td4.children[0].textContent = it.merchant_name;
+      td4.children[1].textContent = it.merchant_is_open ? '营业中' : '已停业';
+      tr.appendChild(td4);
+
+      const td5 = document.createElement('td');
+      td5.textContent = yuan(it.order_total_cents);
+      tr.appendChild(td5);
+
+      const td6 = document.createElement('td');
+      td6.className = 'muted';
+      td6.textContent = new Date(it.created_at).toLocaleString('zh-CN');
+      tr.appendChild(td6);
+
+      const td7 = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + (it.status === 'open' ? 'pending' : it.status === 'confirmed' ? 'rejected' : 'approved');
+      badge.textContent = FS_STATUS[it.status] || it.status;
+      td7.appendChild(badge);
+      for (const act of it.actions || []) {
+        const div = document.createElement('div');
+        div.className = 'muted';
+        div.style.fontSize = '11px';
+        div.textContent = (FS_ACTION[act.action] || act.action) + ':' + (act.note || '');
+        td7.appendChild(div);
+      }
+      tr.appendChild(td7);
+
+      const op = document.createElement('td');
+      const mk = (label, path, cls, promptText, extra) => {
+        const b = document.createElement('button');
+        if (cls) b.className = cls;
+        b.textContent = label;
+        b.style.cssText = 'margin:0 6px 4px 0';
+        b.onclick = async () => {
+          const note = prompt(promptText, '');
+          if (note === null) return;
+          try {
+            await api('POST', `/admin/food-safety/${it.id}/${path}`, { note, ...(extra || {}) });
+            toast('已处理:' + label);
+            loadFoodSafety();
+          } catch (e) { toast(e.message); }
+        };
+        op.appendChild(b);
+      };
+      if (it.status === 'open') {
+        mk('成立并全额退款', 'confirm', 'danger', '处置备注(核实成立,先行全额退款):');
+        mk('驳回', 'dismiss', '', '驳回理由(必填,会推送给用户):');
+      }
+      if (it.status !== 'dismissed') {
+        const sel = document.createElement('select');
+        sel.style.cssText = 'margin:0 6px 4px 0;max-width:130px';
+        const opt0 = document.createElement('option');
+        opt0.value = ''; opt0.textContent = '下架涉事菜品…';
+        sel.appendChild(opt0);
+        for (const item of it.order_items || []) {
+          if (!item.dish_id || item.price_cents === 0) continue;
+          const o = document.createElement('option');
+          o.value = item.dish_id; o.textContent = item.name;
+          sel.appendChild(o);
+        }
+        sel.onchange = async () => {
+          if (!sel.value) return;
+          const note = prompt('下架备注(整改要求):', '');
+          if (note === null) { sel.value = ''; return; }
+          try {
+            await api('POST', `/admin/food-safety/${it.id}/take-down-dish`,
+              { note, dish_id: Number(sel.value) });
+            toast('菜品已下架');
+            loadFoodSafety();
+          } catch (e) { toast(e.message); sel.value = ''; }
+        };
+        op.appendChild(sel);
+        if (it.merchant_is_open)
+          mk('暂停营业', 'suspend-merchant', 'danger', '整改原因(必填,会推送给商家):');
+      }
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function dlFoodSafety() {
+  try {
+    const resp = await fetch('/admin/food-safety.csv', {
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+    });
+    if (!resp.ok) { const d = await resp.json(); throw new Error(d.detail || '下载失败'); }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'food-safety-reports.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 运力看板 + 改派 ----------
+let dpTimer = null, dpRiders = [];
+function startDispatch() { loadDispatch(); loadAccidents(); loadSos(); dpTimer = setInterval(() => { loadDispatch(); loadAccidents(); loadSos(); }, 30000); }
+function stopDispatch() { if (dpTimer) { clearInterval(dpTimer); dpTimer = null; } }
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('dprefresh');
+  if (b) b.onclick = loadDispatch;
+});
+
+async function loadSos() {
+  try {
+    const open = await api('GET', '/admin/rider-emergencies?status=open');
+    const following = await api('GET', '/admin/rider-emergencies?status=following');
+    const all = [...open, ...following];
+    $('#sosCard').hidden = all.length === 0;
+    const rows = $('#sosrows');
+    rows.innerHTML = '';
+    for (const e of all) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td style="font-weight:800">${e.rider_phone}${e.status === 'following' ? ' · 跟进中' : ''}</td>
+        <td>${e.lat != null ? e.lat.toFixed(5) + ',' + e.lng.toFixed(5) : '未知'}</td>`;
+      const td3 = document.createElement('td');
+      td3.textContent = e.note || '—';
+      tr.appendChild(td3);
+      const td4 = document.createElement('td');
+      td4.className = 'muted';
+      td4.textContent = new Date(e.created_at).toLocaleString('zh-CN');
+      tr.appendChild(td4);
+      const op = document.createElement('td');
+      const mk = (label, status, cls) => {
+        const b = document.createElement('button');
+        if (cls) b.className = cls;
+        b.textContent = label; b.style.marginRight = '6px';
+        b.onclick = async () => {
+          const note = prompt(label + '说明(留痕):', '');
+          if (!note || note.trim().length < 2) return;
+          try {
+            await api('POST', `/admin/rider-emergencies/${e.id}/update`,
+                      { status, note: note.trim() });
+            toast('已' + label); loadSos();
+          } catch (err) { toast(err.message); }
+        };
+        op.appendChild(b);
+      };
+      if (e.status === 'open') mk('跟进', 'following', 'primary');
+      mk('结案', 'closed', '');
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { /* 静默 */ }
+}
+
+const ACC_SEV = { minor: '轻微', injury: '受伤', serious: '严重' };
+async function loadAccidents() {
+  try {
+    const list = await api('GET', '/admin/rider-accidents?status=open');
+    const following = await api('GET', '/admin/rider-accidents?status=following');
+    const all = [...list, ...following];
+    $('#accidentCard').hidden = all.length === 0;
+    const rows = $('#accrows');
+    rows.innerHTML = '';
+    for (const a of all) {
+      const tr = document.createElement('tr');
+      const sev = ACC_SEV[a.severity] || a.severity;
+      tr.innerHTML = `<td>${a.rider_phone}</td>
+        <td style="color:#e5484d;font-weight:700">${sev}${a.status === 'following' ? ' · 跟进中' : ''}</td>`;
+      const td3 = document.createElement('td');
+      td3.textContent = a.description || '—';
+      for (const [i, url] of (a.photos || []).entries()) {
+        const link = document.createElement('a');
+        link.href = url; link.target = '_blank'; link.textContent = ` [现场${i + 1}]`;
+        td3.appendChild(link);
+      }
+      tr.appendChild(td3);
+      const td4 = document.createElement('td');
+      td4.className = 'muted';
+      td4.textContent = new Date(a.created_at).toLocaleString('zh-CN');
+      tr.appendChild(td4);
+      const op = document.createElement('td');
+      const mk = (label, status, cls) => {
+        const b = document.createElement('button');
+        if (cls) b.className = cls;
+        b.textContent = label; b.style.marginRight = '6px';
+        b.onclick = async () => {
+          const note = prompt(label + '说明(留痕):', '');
+          if (!note || note.trim().length < 2) return;
+          try {
+            await api('POST', `/admin/rider-accidents/${a.id}/update`, { status, note: note.trim() });
+            toast('已' + label); loadAccidents();
+          } catch (e) { toast(e.message); }
+        };
+        op.appendChild(b);
+      };
+      if (a.status === 'open') mk('跟进', 'following', 'primary');
+      mk('结案', 'closed', '');
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+function dpStatCard(label, value, color) {
+  return `<div class="card" style="padding:10px 18px;min-width:110px">
+    <div style="font-size:24px;font-weight:800;color:${color || 'inherit'}">${value}</div>
+    <div class="muted" style="font-size:12px">${label}</div></div>`;
+}
+
+async function reassign(orderNo, riderId) {
+  try {
+    await api('POST', `/admin/orders/${orderNo}/reassign`, { rider_id: riderId });
+    toast(riderId ? '已改派' : '已释放回池');
+    loadDispatch();
+  } catch (e) { toast(e.message); }
+}
+
+function riderSelect(orderNo) {
+  const sel = document.createElement('select');
+  sel.style.maxWidth = '120px';
+  const o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = '指定骑手…';
+  sel.appendChild(o0);
+  for (const r of dpRiders) {
+    const o = document.createElement('option');
+    o.value = r.id; o.textContent = `${r.name}(${r.active_orders}单)`;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => { if (sel.value) reassign(orderNo, Number(sel.value)); };
+  return sel;
+}
+
+async function loadDispatch() {
+  try {
+    const d = await api('GET', '/admin/dispatch-overview');
+    dpRiders = d.riders;
+    $('#dpstats').innerHTML =
+      dpStatCard('在线骑手', d.stats.riders_online, '#2fbf8f') +
+      dpStatCard('待抢单', d.stats.pool, '#ff5a1f') +
+      dpStatCard('在途单', d.stats.in_flight) +
+      dpStatCard('超10分钟无人接', d.stats.stuck, d.stats.stuck ? '#e5484d' : '#2fbf8f');
+
+    const pool = $('#dppool'); pool.innerHTML = '';
+    $('#dppoolempty').hidden = d.pool.length > 0;
+    for (const o of d.pool) {
+      const tr = document.createElement('tr');
+      if (o.tip_cents) tr.style.background = 'rgba(255,90,31,.08)';  // 加急单高亮
+      tr.innerHTML = `<td>#${o.order_no.slice(-6)}</td><td>${o.merchant_name}</td>
+        <td style="color:${o.wait_minutes >= 10 ? '#e5484d' : 'inherit'}">${o.wait_minutes} 分钟</td>
+        <td>${o.tip_cents ? `⚡${yuan(o.tip_cents)}` : '—'}</td>`;
+      const op = document.createElement('td');
+      op.appendChild(riderSelect(o.order_no));
+      tr.appendChild(op);
+      pool.appendChild(tr);
+    }
+
+    const fl = $('#dpflight'); fl.innerHTML = '';
+    $('#dpflightempty').hidden = d.in_flight.length > 0;
+    for (const o of d.in_flight) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>#${o.order_no.slice(-6)}</td><td>${o.status}</td>
+        <td>${o.rider_name || o.rider_id}</td><td>${o.wait_minutes} 分钟</td>`;
+      const op = document.createElement('td');
+      if (o.status !== 'picked_up') {
+        const rel = document.createElement('button');
+        rel.textContent = '释放回池';
+        rel.onclick = () => reassign(o.order_no, null);
+        op.appendChild(rel);
+        op.appendChild(document.createTextNode(' '));
+        op.appendChild(riderSelect(o.order_no));
+      } else {
+        op.className = 'muted'; op.textContent = '已取餐(走异常仲裁)';
+      }
+      tr.appendChild(op);
+      fl.appendChild(tr);
+    }
+
+    drawDispatchMap(d);
+  } catch (e) { toast(e.message); }
+}
+
+function drawDispatchMap(d) {
+  const cv = document.getElementById('dpmap');
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, cv.width, cv.height);
+  const pts = [];
+  for (const r of d.riders) if (r.lat != null) pts.push([r.lat, r.lng]);
+  for (const o of [...d.pool, ...d.in_flight]) {
+    if (o.merchant_lat != null) pts.push([o.merchant_lat, o.merchant_lng]);
+    pts.push([o.drop_lat, o.drop_lng]);
+  }
+  for (const h of d.heat) pts.push([h.lat, h.lng]);
+  if (!pts.length) { g.fillStyle = '#999'; g.fillText('暂无位置数据', 20, 30); return; }
+  let minLat = 1e9, maxLat = -1e9, minLng = 1e9, maxLng = -1e9;
+  for (const [la, ln] of pts) {
+    minLat = Math.min(minLat, la); maxLat = Math.max(maxLat, la);
+    minLng = Math.min(minLng, ln); maxLng = Math.max(maxLng, ln);
+  }
+  const pad = 0.15, dLat = (maxLat - minLat) || 0.01, dLng = (maxLng - minLng) || 0.01;
+  const X = (ln) => ((ln - minLng) / dLng * (1 - 2 * pad) + pad) * cv.width;
+  const Y = (la) => (1 - ((la - minLat) / dLat * (1 - 2 * pad) + pad)) * cv.height;
+  // 热力:0.3km 网格聚合半透明橙块
+  const grid = {};
+  for (const h of d.heat) {
+    const k = `${Math.round(h.lat / 0.003)},${Math.round(h.lng / 0.003)}`;
+    grid[k] = (grid[k] || { lat: h.lat, lng: h.lng, n: 0 });
+    grid[k].n++;
+  }
+  for (const cell of Object.values(grid)) {
+    g.fillStyle = `rgba(255,90,31,${Math.min(0.28, 0.06 * cell.n)})`;
+    g.beginPath(); g.arc(X(cell.lng), Y(cell.lat), 22, 0, 7); g.fill();
+  }
+  // 在途连线
+  g.strokeStyle = 'rgba(120,120,120,.5)'; g.lineWidth = 1;
+  for (const o of d.in_flight) {
+    if (o.merchant_lat == null) continue;
+    g.beginPath(); g.moveTo(X(o.merchant_lng), Y(o.merchant_lat));
+    g.lineTo(X(o.drop_lng), Y(o.drop_lat)); g.stroke();
+  }
+  // 待抢单(橙)与骑手(绿)
+  for (const o of d.pool) {
+    if (o.merchant_lat == null) continue;
+    g.fillStyle = '#ff5a1f';
+    g.beginPath(); g.arc(X(o.merchant_lng), Y(o.merchant_lat), 5, 0, 7); g.fill();
+  }
+  for (const r of d.riders) {
+    if (r.lat == null) continue;
+    g.fillStyle = '#2fbf8f';
+    g.beginPath(); g.arc(X(r.lng), Y(r.lat), 5, 0, 7); g.fill();
+  }
+}
+
+// ---------- 防刷单风控 ----------
+const RISK_RULE = { addr_freq: '同址高频', new_account_subsidy: '新号薅补贴',
+  merchant_related: '商家关联设备', multi_account_device: '同设备多账号' };
+let currentRiskStatus = '';
+document.querySelectorAll('.tabs button[data-riskstatus]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button[data-riskstatus]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentRiskStatus = btn.dataset.riskstatus;
+    loadRiskOrders();
+  };
+});
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('riskrefresh');
+  if (b) b.onclick = loadRiskOrders;
+});
+
+async function loadRiskOrders() {
+  try {
+    const list = await api('GET', '/admin/risk-orders?status=' + currentRiskStatus);
+    const rows = $('#riskrows');
+    rows.innerHTML = '';
+    $('#riskempty').hidden = list.length > 0;
+    for (const it of list) {
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td');
+      td1.innerHTML = '<div></div><div class="muted"></div>';
+      td1.children[0].textContent = '#' + it.order_no.slice(-6) + ' (' + it.order_status + ')';
+      td1.children[1].textContent = it.customer_phone;
+      tr.appendChild(td1);
+      const td2 = document.createElement('td');
+      td2.textContent = it.merchant_name;
+      tr.appendChild(td2);
+      const td3 = document.createElement('td');
+      td3.style.color = '#b25e09';
+      td3.textContent = (it.hits || []).map((h) => RISK_RULE[h] || h).join('、');
+      tr.appendChild(td3);
+      const td4 = document.createElement('td');
+      td4.textContent = yuan(it.total_cents);
+      tr.appendChild(td4);
+      const td5 = document.createElement('td');
+      td5.className = 'muted';
+      td5.textContent = new Date(it.created_at).toLocaleString('zh-CN');
+      tr.appendChild(td5);
+      const op = document.createElement('td');
+      if (!it.risk_status) {
+        const mk = (label, verdict, cls) => {
+          const b = document.createElement('button');
+          if (cls) b.className = cls;
+          b.textContent = label;
+          b.style.marginRight = '6px';
+          b.onclick = async () => {
+            try {
+              await api('POST', `/admin/risk-orders/${it.id}/verdict`, { verdict });
+              toast('已' + label);
+              loadRiskOrders();
+            } catch (e) { toast(e.message); }
+          };
+          op.appendChild(b);
+        };
+        mk('确认刷单', 'confirmed', 'danger');
+        mk('误报解除', 'cleared', '');
+      } else {
+        op.textContent = it.risk_status === 'confirmed' ? '已确认' : '已解除';
+      }
+      // 用户分级处置(可回滚):限制领券补贴/冻结/解除;下单永不拦
+      const disp = document.createElement('div');
+      disp.style.marginTop = '4px';
+      const lvl = it.customer_risk_level;
+      const setLvl = (label, level, cls) => {
+        const b = document.createElement('button');
+        if (cls) b.className = cls;
+        b.textContent = label;
+        b.style.marginRight = '4px';
+        b.style.fontSize = '12px';
+        b.onclick = async () => {
+          let reason = '';
+          if (level) {
+            reason = prompt('处置原因(会展示给用户,可申诉):', '疑似异常营销行为');
+            if (reason === null) return;
+          }
+          try {
+            await api('POST', `/admin/users/${it.customer_id}/risk-level`,
+                { level, reason: reason || '' });
+            toast('已' + label);
+            loadRiskOrders();
+          } catch (e) { toast(e.message); }
+        };
+        disp.appendChild(b);
+      };
+      const tag = document.createElement('span');
+      tag.className = 'muted';
+      tag.style.fontSize = '12px';
+      tag.textContent = lvl === 'limit' ? '用户:限制中 ' :
+                        lvl === 'frozen' ? '用户:冻结中 ' : '用户:正常 ';
+      disp.appendChild(tag);
+      if (lvl) setLvl('解除', '', '');
+      else { setLvl('限制', 'limit', ''); setLvl('冻结', 'frozen', 'danger'); }
+      op.appendChild(disp);
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 内容审核(图片队列 + 敏感词库) ----------
+const CR_KIND = { review: '评价图', dish: '菜品图', avatar: '头像' };
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('crrefresh');
+  if (b) b.onclick = () => { loadContentReviews(); loadModWords(); };
+  const add = document.getElementById('mwAdd');
+  if (add) add.onclick = async () => {
+    const w = $('#mwWord').value.trim();
+    if (!w) return;
+    try {
+      await api('POST', '/admin/moderation-words', { word: w });
+      $('#mwWord').value = '';
+      toast('已添加,立即生效');
+      loadModWords();
+    } catch (e) { toast(e.message); }
+  };
+});
+
+async function loadContentReviews() {
+  try {
+    const list = await api('GET', '/admin/content-reviews?status=pending');
+    const rows = $('#crrows');
+    rows.innerHTML = '';
+    $('#crempty').hidden = list.length > 0;
+    for (const it of list) {
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td');
+      td1.textContent = CR_KIND[it.kind] || it.kind;
+      tr.appendChild(td1);
+      const td2 = document.createElement('td');
+      const a = document.createElement('a');
+      a.href = it.url; a.target = '_blank';
+      const img = document.createElement('img');
+      img.src = it.url; img.style.cssText = 'width:64px;height:64px;object-fit:cover;border-radius:8px';
+      img.onerror = () => { a.textContent = '[打开图片]'; };
+      a.appendChild(img); td2.appendChild(a);
+      tr.appendChild(td2);
+      const td3 = document.createElement('td');
+      td3.className = 'muted';
+      td3.textContent = new Date(it.created_at).toLocaleString('zh-CN');
+      tr.appendChild(td3);
+      const op = document.createElement('td');
+      const ok = document.createElement('button');
+      ok.className = 'primary'; ok.textContent = '通过';
+      ok.onclick = async () => {
+        try { await api('POST', `/admin/content-reviews/${it.id}/approve`); loadContentReviews(); }
+        catch (e) { toast(e.message); }
+      };
+      const no = document.createElement('button');
+      no.className = 'danger'; no.style.marginLeft = '6px'; no.textContent = '驳回';
+      no.onclick = async () => {
+        const note = prompt('驳回原因(会通知发布者):', '图片不符合发布规范');
+        if (!note || note.trim().length < 2) return;
+        try { await api('POST', `/admin/content-reviews/${it.id}/reject`, { note: note.trim() }); toast('已驳回并隐藏'); loadContentReviews(); }
+        catch (e) { toast(e.message); }
+      };
+      op.appendChild(ok); op.appendChild(no);
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function loadModWords() {
+  try {
+    const list = await api('GET', '/admin/moderation-words');
+    const box = $('#mwList');
+    box.innerHTML = '';
+    for (const w of list) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;padding:4px 0;border-bottom:1px solid var(--line,#eee)';
+      const span = document.createElement('span');
+      span.textContent = `${w.word}(${w.category})`;
+      const del = document.createElement('button');
+      del.textContent = '删';
+      del.style.marginLeft = 'auto';
+      del.onclick = async () => {
+        try { await api('DELETE', `/admin/moderation-words/${w.id}`); loadModWords(); }
+        catch (e) { toast(e.message); }
+      };
+      row.appendChild(span); row.appendChild(del);
+      box.appendChild(row);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 税务导出(带鉴权的 CSV 下载) ----------
+async function dlTax(kind) {
+  const period = $('#taxPeriod').value;
+  if (!period) { toast('先选月份'); return; }
+  try {
+    const resp = await fetch(`/admin/tax/${kind}.csv?period=${period}`, {
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+    });
+    if (!resp.ok) { const d = await resp.json(); throw new Error(d.detail || '下载失败'); }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${kind}-${period}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 开票 ----------
+async function loadInvoices() {
+  try {
+    const list = await api('GET', '/admin/invoices?status=pending');
+    const rows = $('#invrows');
+    rows.innerHTML = '';
+    $('#invempty').hidden = list.length > 0;
+    for (const inv of list) {
+      const tr = document.createElement('tr');
+      const mk = (t, cls) => { const td = document.createElement('td'); if (cls) td.className = cls; td.textContent = t; tr.appendChild(td); return td; };
+      mk(inv.merchant_name + ' ' + inv.owner_phone);
+      mk(inv.period);
+      const amtTd = document.createElement('td');
+      amtTd.innerHTML = '<strong></strong>';
+      amtTd.querySelector('strong').textContent = yuan(inv.amount_cents);
+      tr.appendChild(amtTd);
+      const info = mk(inv.title + ' / ' + inv.tax_no + ' / ' + inv.email, 'muted');
+      const copy = document.createElement('a');
+      copy.href = 'javascript:;'; copy.textContent = ' [复制]';
+      copy.onclick = () => { navigator.clipboard.writeText(`${inv.title} ${inv.tax_no} ${inv.email} ${yuan(inv.amount_cents)}`); toast('开票信息已复制'); };
+      info.appendChild(copy);
+      mk(new Date(inv.created_at).toLocaleString('zh-CN'), 'muted');
+      const op = document.createElement('td');
+      const ok = document.createElement('button');
+      ok.className = 'primary'; ok.textContent = '已开票,填链接';
+      ok.onclick = async () => {
+        const url = prompt('电子发票 PDF 链接:', 'https://');
+        if (!url || url.length < 5) return;
+        try { await api('POST', `/admin/invoices/${inv.id}/issue`, { file_url: url.trim(), note: '' }); toast('已开票,商家可下载'); loadInvoices(); }
+        catch (e) { toast(e.message); }
+      };
+      op.appendChild(ok);
+      const no = document.createElement('button');
+      no.className = 'danger'; no.style.marginLeft = '6px'; no.textContent = '驳回';
+      no.onclick = async () => {
+        const reason = prompt('驳回原因(会推送给商家):', '发票抬头与税号不匹配,请核对后重新申请');
+        if (!reason || reason.trim().length < 2) return;
+        try { await api('POST', `/admin/invoices/${inv.id}/reject`, { reason: reason.trim() }); toast('已驳回'); loadInvoices(); }
+        catch (e) { toast(e.message); }
+      };
+      op.appendChild(no);
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('invrefresh');
+  if (b) b.onclick = loadInvoices;
+});
+
+// ---------- 判责申诉复核 ----------
+const AP_TYPE = { after_sale: '售后判责', delivery_issue: '配送异常', review: '差评' };
+async function loadAppeals() {
+  try {
+    const list = await api('GET', '/admin/appeals?status=open');
+    const rows = $('#aprows');
+    rows.innerHTML = '';
+    $('#apempty').hidden = list.length > 0;
+    for (const a of list) {
+      const tr = document.createElement('tr');
+      const td1 = document.createElement('td');
+      td1.textContent = (a.role === 'merchant' ? '[商家] ' : '[骑手] ') + a.name + ' ' + a.phone;
+      tr.appendChild(td1);
+      const td2 = document.createElement('td');
+      td2.textContent = AP_TYPE[a.target_type] || a.target_type;
+      tr.appendChild(td2);
+      const td3 = document.createElement('td');
+      td3.className = 'muted';
+      td3.textContent = a.target_summary;
+      tr.appendChild(td3);
+      const td4 = document.createElement('td');
+      td4.textContent = a.reason;
+      for (const img of (a.images || [])) {
+        const link = document.createElement('a');
+        link.href = img; link.target = '_blank'; link.textContent = ' [证据]';
+        td4.appendChild(link);
+      }
+      tr.appendChild(td4);
+      const td5 = document.createElement('td');
+      td5.className = 'muted';
+      td5.textContent = new Date(a.created_at).toLocaleString('zh-CN');
+      tr.appendChild(td5);
+      const op = document.createElement('td');
+      const mk = (label, result, cls, hint) => {
+        const b = document.createElement('button');
+        if (cls) b.className = cls;
+        b.textContent = label;
+        b.style.marginRight = '6px';
+        b.onclick = async () => {
+          const note = prompt(hint, '');
+          if (note === null) return;
+          try {
+            await api('POST', `/admin/appeals/${a.id}/resolve`, { result, note });
+            toast(result === 'overturned' ? '已改判' : '已维持原判');
+            loadAppeals();
+          } catch (e) { toast(e.message); }
+        };
+        op.appendChild(b);
+      };
+      mk('维持原判', 'upheld', '', '备注(会推送给申诉人,可留空):');
+      mk('改判成立', 'overturned', 'primary', '改判备注(会推送给申诉人):');
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('aprefresh');
+  if (b) b.onclick = loadAppeals;
+});
+
+// ---------- 骑手实名认证 ----------
+let currentRStatus = 'pending';
+const R_LABEL = { pending: '待审核', approved: '已通过', rejected: '已驳回' };
+const R_BADGE = { pending: 'pending', approved: 'approved', rejected: 'rejected' };
+
+$('#rrefresh').onclick = () => loadRiders();
+document.querySelectorAll('.tabs button[data-rstatus]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button[data-rstatus]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentRStatus = btn.dataset.rstatus;
+    loadRiders();
+  };
+});
+
+function photoLink(url, label) {
+  if (!url) return document.createTextNode('—');
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.textContent = label;
+  a.style.color = 'var(--primary)'; a.style.marginRight = '8px';
+  return a;
+}
+
+async function loadGear() {
+  try {
+    const list = await api('GET', '/admin/rider-gear?status=requested');
+    const rows = $('#gearrows');
+    rows.innerHTML = '';
+    $('#gearempty').hidden = list.length > 0;
+    for (const g of list) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${g.rider_phone}</td><td>${g.item_label}</td>
+        <td class="muted">${new Date(g.created_at).toLocaleString('zh-CN')}</td>`;
+      const op = document.createElement('td');
+      const b = document.createElement('button');
+      b.className = 'primary'; b.textContent = '标记发放';
+      b.onclick = async () => {
+        const note = prompt('发放说明(如:到站点自取/已寄出):', '');
+        if (note === null) return;
+        try { await api('POST', `/admin/rider-gear/${g.id}/issue`, { note }); toast('已发放'); loadGear(); }
+        catch (e) { toast(e.message); }
+      };
+      op.appendChild(b);
+      tr.appendChild(op);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function loadRiders() {
+  loadGear();
+  try {
+    const list = await api('GET', '/admin/rider-profiles' + (currentRStatus ? '?status=' + currentRStatus : ''));
+    const rows = $('#rrows');
+    rows.innerHTML = '';
+    $('#rempty').hidden = list.length > 0;
+    for (const r of list) {
+      const tr = document.createElement('tr');
+
+      const phoneTd = document.createElement('td');
+      phoneTd.textContent = r.rider_phone;
+      tr.appendChild(phoneTd);
+
+      const nameTd = document.createElement('td');
+      nameTd.textContent = r.real_name;
+      tr.appendChild(nameTd);
+
+      const idTd = document.createElement('td');
+      idTd.textContent = r.id_card_no;
+      tr.appendChild(idTd);
+
+      const photoTd = document.createElement('td');
+      photoTd.appendChild(photoLink(r.id_card_photo_url, '身份证'));
+      photoTd.appendChild(photoLink(r.health_cert_photo_url, '健康证'));
+      tr.appendChild(photoTd);
+
+      const timeTd = document.createElement('td');
+      timeTd.className = 'muted';
+      timeTd.textContent = r.created_at ? new Date(r.created_at).toLocaleString('zh-CN') : '';
+      tr.appendChild(timeTd);
+
+      // 近30天转单次数:每天免责 2 次,频繁转单的骑手重点关注
+      const transferTd = document.createElement('td');
+      const tc = r.transfer_count_30d || 0;
+      transferTd.textContent = tc + ' 次';
+      if (tc > 10) { transferTd.style.color = 'var(--danger, #d33)'; transferTd.style.fontWeight = 'bold'; }
+      tr.appendChild(transferTd);
+
+      // 上岗考试:已通过(分数+日期)/ 未通过(最高分)/ 未参加
+      const examTd = document.createElement('td');
+      if (r.exam_passed) {
+        examTd.innerHTML = `<span style="color:#0E8A5F;font-weight:700">已通过 ${r.exam_best_score} 分</span>`
+          + (r.exam_at ? `<div class="muted">${new Date(r.exam_at).toLocaleDateString('zh-CN')}</div>` : '');
+      } else if (r.exam_best_score != null) {
+        examTd.innerHTML = `<span style="color:#d33">未通过(最高 ${r.exam_best_score})</span>`;
+      } else {
+        examTd.innerHTML = '<span class="muted">未参加</span>';
+      }
+      tr.appendChild(examTd);
+
+      const statusTd = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + R_BADGE[r.status];
+      badge.textContent = R_LABEL[r.status] || r.status;
+      statusTd.appendChild(badge);
+      if (r.status === 'rejected' && r.reject_reason) {
+        const reason = document.createElement('div');
+        reason.className = 'muted';
+        reason.textContent = '原因:' + r.reject_reason;
+        statusTd.appendChild(reason);
+      }
+      tr.appendChild(statusTd);
+
+      const opTd = document.createElement('td');
+      if (r.status !== 'approved') {
+        const ok = document.createElement('button');
+        ok.className = 'primary';
+        ok.textContent = '通过';
+        ok.onclick = () => ract(`/admin/rider-profiles/${r.rider_id}/approve`, null, r.real_name + ' 认证通过');
+        opTd.appendChild(ok);
+      }
+      if (r.status !== 'rejected') {
+        const no = document.createElement('button');
+        no.className = 'danger';
+        no.style.marginLeft = '6px';
+        no.textContent = '驳回';
+        no.onclick = () => {
+          const reason = prompt('驳回原因(会展示给骑手):', '证件照不清晰,请重新上传');
+          if (reason && reason.trim().length >= 2) ract(`/admin/rider-profiles/${r.rider_id}/reject`, { reason: reason.trim() }, r.real_name + ' 已驳回');
+        };
+        opTd.appendChild(no);
+      }
+      // 考勤明细:近14天在线时长(只读,运力规划)
+      const wl = document.createElement('button');
+      wl.style.marginLeft = '6px';
+      wl.textContent = '考勤';
+      wl.onclick = () => showWorklog(r.rider_id, r.real_name);
+      opTd.appendChild(wl);
+      tr.appendChild(opTd);
+      rows.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+async function showWorklog(riderId, name) {
+  try {
+    const d = await api('GET', `/admin/riders/${riderId}/worklog?days=14`);
+    const h = Math.floor(d.total_minutes / 60), m = d.total_minutes % 60;
+    const avgH = Math.floor(d.avg_minutes_per_active_day / 60), avgM = d.avg_minutes_per_active_day % 60;
+    const dayRows = d.days.length ? d.days.map(day => {
+      const dh = Math.floor(day.minutes / 60), dm = day.minutes % 60;
+      const segs = day.sessions.map(s => `${s.online_at}–${s.offline_at}`).join('、');
+      return `<div style="padding:6px 0;border-bottom:1px solid #eee">
+        <b>${day.date}</b> · ${dh}h${dm}m
+        <div class="muted" style="font-size:12px">${segs}</div></div>`;
+    }).join('') : '<div class="muted">近 14 天无在线记录</div>';
+    const html = `<div style="max-width:520px">
+      <h3 style="margin:0 0 6px">${name || '骑手'} · 考勤明细(近 14 天)</h3>
+      <div class="muted" style="margin-bottom:10px">
+        总在线 <b>${h}h${m}m</b> · 活跃 <b>${d.active_days}</b> 天 · 日均 <b>${avgH}h${avgM}m</b>
+        <span style="margin-left:8px">(只统计不考核,不与结算挂钩)</span></div>
+      ${dayRows}</div>`;
+    openModal(html);
+  } catch (e) { toast(e.message); }
+}
+
+async function ract(path, body, okMsg) {
+  try {
+    await api('POST', path, body);
+    toast(okMsg);
+    loadRiders();
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 客服工单 ----------
+let ticketStatus = 'open';
+const T_LABEL = { open: '待回复', replied: '已回复', closed: '已关闭' };
+const T_BADGE = { open: 'pending', replied: 'approved', closed: 'rejected' };
+const ROLE_LABEL = { customer: '用户', merchant: '商家', rider: '骑手', admin: '管理员' };
+
+document.querySelectorAll('#ticketsPanel [data-tstatus]').forEach((btn) => {
+  btn.onclick = () => {
+    document.querySelectorAll('#ticketsPanel [data-tstatus]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    ticketStatus = btn.dataset.tstatus;
+    loadTickets();
+  };
+});
+$('#trefresh').onclick = () => loadTickets();
+
+async function loadTickets() {
+  try {
+    const list = await api('GET', '/admin/tickets' + (ticketStatus ? '?status=' + ticketStatus : ''));
+    const tbody = $('#trows');
+    tbody.innerHTML = '';
+    $('#tempty').hidden = list.length > 0;
+    for (const t of list) {
+      const tr = document.createElement('tr');
+      const cells = [
+        t.user_phone,
+        ROLE_LABEL[t.role] || t.role,
+        t.contact,
+        t.content,
+        t.created_at.replace('T', ' ').slice(0, 16),
+      ];
+      for (const c of cells) {
+        const td = document.createElement('td');
+        td.textContent = c;
+        if (c === t.content) { td.style.maxWidth = '320px'; td.style.whiteSpace = 'pre-wrap'; }
+        tr.appendChild(td);
+      }
+      const statusTd = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + T_BADGE[t.status];
+      badge.textContent = T_LABEL[t.status] || t.status;
+      statusTd.appendChild(badge);
+      tr.appendChild(statusTd);
+      const replyTd = document.createElement('td');
+      replyTd.textContent = t.reply || '—';
+      replyTd.style.maxWidth = '240px';
+      tr.appendChild(replyTd);
+      const opTd = document.createElement('td');
+      if (t.status !== 'closed') {
+        const replyBtn = document.createElement('button');
+        replyBtn.textContent = t.reply ? '再回复' : '回复';
+        replyBtn.className = 'primary';
+        replyBtn.onclick = async () => {
+          const reply = prompt('回复内容(用户会收到推送):', t.reply || '');
+          if (!reply || !reply.trim()) return;
+          try {
+            await api('POST', `/admin/tickets/${t.id}/reply`, { reply: reply.trim() });
+            toast('已回复');
+            loadTickets(); loadDashboard();
+          } catch (e) { toast(e.message); }
+        };
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '关闭';
+        closeBtn.style.marginLeft = '6px';
+        closeBtn.onclick = async () => {
+          if (!confirm('确认关闭这个工单?')) return;
+          try {
+            await api('POST', `/admin/tickets/${t.id}/close`);
+            toast('已关闭');
+            loadTickets(); loadDashboard();
+          } catch (e) { toast(e.message); }
+        };
+        opTd.appendChild(replyBtn); opTd.appendChild(closeBtn);
+      }
+      tr.appendChild(opTd);
+      tbody.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- 数据看板 ----------
+function switchModule(name) {
+  const btn = document.querySelector(`.module-btn[data-module="${name}"]`);
+  if (btn) btn.click();
+}
+
+function metricCard(label, value, sub) {
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.style.padding = '14px 16px';
+  const v = document.createElement('div');
+  v.style.cssText = 'font-size:26px;font-weight:800';
+  v.textContent = value;
+  const l = document.createElement('div');
+  l.className = 'muted';
+  l.style.fontSize = '12px';
+  l.textContent = label + (sub ? ' · ' + sub : '');
+  div.appendChild(v); div.appendChild(l);
+  return div;
+}
+
+async function loadDashboard() {
+  try {
+    const d = await api('GET', '/admin/dashboard');
+    const t = d.today;
+    const metrics = $('#dashMetrics');
+    metrics.innerHTML = '';
+    metrics.appendChild(metricCard('今日订单', t.orders));
+    metrics.appendChild(metricCard('今日 GMV', yuan(t.gmv_cents)));
+    metrics.appendChild(metricCard('今日平台佣金', yuan(t.commission_cents)));
+    metrics.appendChild(metricCard('活跃商家', t.active_merchants, '今日有单'));
+    metrics.appendChild(metricCard('活跃骑手', t.active_riders));
+    metrics.appendChild(metricCard('新用户', t.new_users));
+
+    // 7 日趋势:纯 div 柱状图,零依赖
+    const trend = $('#dashTrend');
+    trend.innerHTML = '';
+    const maxGmv = Math.max(1, ...d.trend_7d.map(x => x.gmv));
+    for (const day of d.trend_7d) {
+      const col = document.createElement('div');
+      col.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end';
+      const barVal = document.createElement('div');
+      barVal.className = 'muted';
+      barVal.style.fontSize = '10px';
+      barVal.textContent = yuan(day.gmv);
+      const bar = document.createElement('div');
+      const h = Math.max(4, Math.round(day.gmv / maxGmv * 90));
+      bar.style.cssText = `width:70%;height:${h}px;background:var(--primary);opacity:.85;border-radius:4px 4px 0 0`;
+      bar.title = `${day.day}:${day.orders} 单 / ${yuan(day.gmv)}`;
+      const lab = document.createElement('div');
+      lab.className = 'muted';
+      lab.style.fontSize = '10px';
+      lab.textContent = day.day.slice(5) + ' · ' + day.orders + '单';
+      col.appendChild(barVal); col.appendChild(bar); col.appendChild(lab);
+      trend.appendChild(col);
+    }
+
+    // 待办
+    const pendingDefs = [
+      ['待审核商家', d.pending.merchants, 'merchants'],
+      ['待认证骑手', d.pending.riders, 'riders'],
+      ['待打款提现', d.pending.withdrawals, 'withdrawals'],
+      ['待处理售后', d.pending.after_sales, null],
+      ['待回复工单', d.pending.tickets, 'tickets'],
+    ];
+    const pendingBox = $('#dashPending');
+    pendingBox.innerHTML = '';
+    for (const [label, count, module] of pendingDefs) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #eee9e4' + (module ? ';cursor:pointer' : '');
+      const l = document.createElement('span'); l.textContent = label;
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + (count > 0 ? 'pending' : 'approved');
+      badge.textContent = count;
+      row.appendChild(l); row.appendChild(badge);
+      if (module) row.onclick = () => switchModule(module);
+      pendingBox.appendChild(row);
+    }
+    $('#dashTotals').textContent =
+      `累计:用户 ${d.totals.users} · 商家 ${d.totals.merchants} · 骑手 ${d.totals.riders} · 订单 ${d.totals.orders}`;
+
+    // 账务告警:账不平是最高优先级,红条置顶
+    const banner = $('#auditBanner');
+    const alerts = d.audit_alerts || [];
+    banner.hidden = alerts.length === 0;
+    if (alerts.length) {
+      banner.innerHTML = '';
+      const title = document.createElement('div');
+      title.style.fontWeight = '700';
+      title.textContent = `⚠ 账务自检发现 ${alerts.length} 条异常(近 3 天)`;
+      banner.appendChild(title);
+      for (const a of alerts.slice(0, 5)) {
+        const line = document.createElement('div');
+        line.textContent = `${a.created_at.replace('T', ' ').slice(0, 16)} [${a.check}] ${a.detail}`;
+        banner.appendChild(line);
+      }
+      if (alerts.length > 5) {
+        const more = document.createElement('div');
+        more.textContent = `…还有 ${alerts.length - 5} 条`;
+        banner.appendChild(more);
+      }
+    }
+  } catch (e) { toast(e.message); }
+}
+
+if (token) { showPanel(''); } else { showLogin(); }
+</script>
+</body>
+</html>

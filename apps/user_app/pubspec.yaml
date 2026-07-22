@@ -1,0 +1,37 @@
+name: user_app
+description: Super-Z 用户端 —— 点外卖
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.4.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  superz_shared:
+    path: ../../packages/shared
+  web_socket_channel: ^3.0.0 # 订单状态实时推送
+  geolocator: ^14.0.0        # 附近商家用真实定位
+  url_launcher: ^6.3.2       # 一键拨号联系骑手/商家
+  image_picker: ^1.1.0       # 头像上传
+  qr_flutter: ^4.1.0
+  shared_preferences: ^2.5.5
+  share_plus: ^12.0.2
+
+flutter:
+  uses-material-design: true
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+# App 图标(生成:dart run flutter_launcher_icons)
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: ../../assets/brand/icon.png
+  adaptive_icon_background: "#F05030"
+  adaptive_icon_foreground: ../../assets/brand/icon_fg.png
