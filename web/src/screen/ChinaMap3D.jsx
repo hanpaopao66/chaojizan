@@ -334,7 +334,11 @@ export default function ChinaMap3D({ cities, pulses }) {
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
-      <Canvas dpr={[1, 2]} camera={{ position: [0, 4.6, 4.4], fov: 42 }}
+      {/* offsetSize:容器在 .screen-root 的 transform:scale 坐标系内,默认的
+          getBoundingClientRect 会量出缩放后的视觉尺寸,canvas 只铺满容器的
+          scale 倍,右/底露边,地图旋转即被裁;改用布局尺寸(offsetWidth) */}
+      <Canvas dpr={[1, 2]} camera={{ position: [0, 6.2, 6.0], fov: 42 }}
+        resize={{ offsetSize: true }}
         onCreated={({ camera }) => camera.lookAt(0, -0.3, -0.3)}
         gl={{ antialias: true, alpha: true }}>
         <ambientLight intensity={0.85} />
