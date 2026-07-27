@@ -41,8 +41,10 @@ class SmsLoginIn(BaseModel):
     phone: str = Field(pattern=r"^1\d{10}$")
     code: str = Field(pattern=r"^\d{6}$")
     device_id: str = Field(default="", max_length=64)
-    # 新手机号自动注册时的角色(三端各传各的;已有账号忽略此参数保原角色)
-    role: str = Field(default="customer", pattern="^(customer|merchant|rider)$")
+    # 新手机号自动注册时的角色(三端各传各的;已有账号忽略此参数保原角色)。
+    # admin 仅允许已存在的管理员账号登录,绝不自动注册(见 sms_login)
+    role: str = Field(default="customer",
+                      pattern="^(customer|merchant|rider|admin)$")
 
 
 class TokenOut(BaseModel):

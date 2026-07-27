@@ -55,8 +55,18 @@
 <main>
   <div id="login" class="card login-card" hidden>
     <strong>管理员登录</strong>
-    <input id="phone" placeholder="手机号" autocomplete="username">
-    <input id="password" type="password" placeholder="密码" autocomplete="current-password">
+    <input id="phone" placeholder="手机号" autocomplete="username" inputmode="numeric" maxlength="11">
+    <div style="display:flex;gap:8px">
+      <input id="smsCode" placeholder="短信验证码" inputmode="numeric" maxlength="6"
+             autocomplete="one-time-code" style="flex:1">
+      <button id="sendCodeBtn" style="white-space:nowrap">发送验证码</button>
+    </div>
+    <!-- 同号当日第 3 条短信起要求过滑块(轻量减速带),平时不出现 -->
+    <div id="sliderBox" hidden>
+      <div class="muted" style="font-size:13px">安全验证:请把滑块拖到 <b id="sliderTarget"></b> 的位置</div>
+      <input id="sliderRange" type="range" min="0" max="100" value="0" style="width:100%">
+      <button id="sliderOkBtn">验证并发送</button>
+    </div>
     <button class="primary" id="loginBtn">登录</button>
   </div>
 
@@ -801,15 +811,56 @@ document.querySelectorAll('.module-btn').forEach((btn) => {
   };
 });
 
+// ---- 验证码登录:发码(60 秒冷却)→ 输码 → /auth/sms-login(role=admin) ----
+let sendCooldown = 0;
+function tickCooldown() {
+  const btn = $('#sendCodeBtn');
+  if (sendCooldown > 0) {
+    btn.disabled = true;
+    btn.textContent = sendCooldown + 's';
+    sendCooldown -= 1;
+    setTimeout(tickCooldown, 1000);
+  } else {
+    btn.disabled = false;
+    btn.textContent = '发送验证码';
+  }
+}
+
+async function sendSmsCode(extra) {
+  const phone = $('#phone').value.trim();
+  if (!/^1\d{10}$/.test(phone)) { toast('请输入正确的手机号'); return; }
+  try {
+    const data = await api('POST', '/auth/sms-code', { phone, ...(extra || {}) });
+    $('#sliderBox').hidden = true;
+    sendCooldown = 60; tickCooldown();
+    // 短信服务未配置(本地开发)时验证码随响应回显,自动填入
+    if (data && data.dev_code) { $('#smsCode').value = data.dev_code; toast('开发模式:验证码已自动填入'); }
+    else toast('验证码已发送');
+  } catch (e) {
+    if (e.message === 'captcha_required') {
+      // 同号当日第 3 条起的减速带:领滑块票,拖到位后重发
+      const ch = await api('GET', '/auth/slider');
+      $('#sliderBox').hidden = false;
+      $('#sliderTarget').textContent = ch.target + '%';
+      $('#sliderRange').value = 0;
+      $('#sliderOkBtn').onclick = () =>
+        sendSmsCode({ ticket: ch.ticket, slide: Number($('#sliderRange').value) });
+    } else toast(e.message);
+  }
+}
+$('#sendCodeBtn').onclick = () => sendSmsCode();
+
 $('#loginBtn').onclick = async () => {
   try {
-    const data = await api('POST', '/auth/login', { phone: $('#phone').value.trim(), password: $('#password').value });
+    const data = await api('POST', '/auth/sms-login', {
+      phone: $('#phone').value.trim(), code: $('#smsCode').value.trim(), role: 'admin' });
     if (data.role !== 'admin') { toast('该账号不是管理员'); return; }
     token = data.token;
     localStorage.setItem('superz_admin_token', token);
     showPanel(data.name + '(管理员)');
   } catch (e) { toast(e.message); }
 };
+$('#smsCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#loginBtn').click(); });
 
 $('#logout').onclick = showLogin;
 $('#refresh').onclick = () => load();

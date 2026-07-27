@@ -75,6 +75,8 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
                  if verify_password(payload.password, u.password_hash)), None)
     if user is None:
         raise HTTPException(401, "手机号或密码错误")
+    if user.role == UserRole.admin and not settings.admin_password_login:
+        raise HTTPException(403, "管理员请使用手机验证码登录")
     if payload.device_id and user.device_id != payload.device_id:
         user.device_id = payload.device_id  # 风控:记录最近登录设备
         await db.commit()
@@ -169,6 +171,9 @@ async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
     role = UserRole(payload.role)
     user = await db.scalar(select(User).where(
         User.phone == payload.phone, User.role == role))
+    if user is None and role == UserRole.admin:
+        # 管理员绝不自动注册:验证码对了也不行,得先有管理员账号
+        raise HTTPException(403, "该手机号不是管理员")
     if user is None:
         prefix = {"customer": "用户", "merchant": "商家", "rider": "骑手"}[payload.role]
         user = User(

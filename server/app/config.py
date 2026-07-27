@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # 但被泄露的旧 token 一周后自然作废
     jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线
 
+    # 管理员密码登录开关:生产关闭(ADMIN_PASSWORD_LOGIN=false),
+    # 管理员只能手机验证码登录;本地开发与 e2e 保持默认开启
+    admin_password_login: bool = True
+
     # 接口限流(Redis 固定窗口,按 分钟 计):防爆破/防刷,不为限制正常用户
     rate_limit_enabled: bool = True
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
