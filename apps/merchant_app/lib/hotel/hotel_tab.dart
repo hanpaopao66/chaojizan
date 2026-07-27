@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'stay_reviews_page.dart';
+
 /// 酒店 tab:酒店信息与通用服务入口。
 /// 餐饮专属设置(起送价/打包费/出餐时长/满减满赠)在这里天然不存在——
 /// 业态分叉后各看各的,不靠隐藏开关。
@@ -37,6 +39,17 @@ class HotelTab extends StatelessWidget {
                 ],
               ],
             ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.rate_review_outlined),
+            title: const Text('住客点评'),
+            subtitle: const Text('查看与回复;评分取近 180 天滚动均分'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => StayReviewsPage(api: api))),
           ),
         ),
         const SizedBox(height: 8),

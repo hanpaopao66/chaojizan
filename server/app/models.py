@@ -1496,3 +1496,42 @@ class StayOrder(Base):
         DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+
+
+# 住宿点评一键标签白名单(客户端与校验共用)
+STAY_REVIEW_TAGS = [
+    "干净卫生", "位置方便", "隔音好", "性价比高", "服务热情",
+    "设施陈旧", "隔音差", "卫生一般",
+]
+
+
+class StayReview(Base):
+    """住宿点评:一单一评,只有已离店的订单能评(离店后 15 天内)。
+
+    酒店评分 = 近 180 天点评滚动均分,点评数 <3 不出分——
+    防一条差评定生死,也防刷高分。不做酒店间排名对比。
+    """
+
+    __tablename__ = "stay_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stay_order_id: Mapped[int] = mapped_column(
+        ForeignKey("stay_orders.id"), unique=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    rating: Mapped[int] = mapped_column(Integer)  # 1-5
+    comment: Mapped[str] = mapped_column(String(500), default="")
+    image_urls: Mapped[list] = mapped_column(JSONB, default=list)  # 最多 6 张
+    tags: Mapped[list] = mapped_column(JSONB, default=list)  # 白名单 STAY_REVIEW_TAGS
+    reply: Mapped[str] = mapped_column(String(300), default="")  # 酒店回复
+    # 真匿名:展示"匿名住客",商家侧不可反查;平台后台仍可见
+    is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 追评(首评后 7 天内一次;匿名评价的追评继承匿名)
+    append_content: Mapped[str] = mapped_column(String(500), default="")
+    append_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    append_reply: Mapped[str] = mapped_column(String(300), default="")
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

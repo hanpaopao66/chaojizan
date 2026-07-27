@@ -335,11 +335,14 @@ async def list_hotels(
     quotes = await _quotes_for(db, room_types, checkin, checkout)
 
     nights = (checkout - checkin).days
+    # 酒店评分:近 180 天滚动均分,<3 条不出分(与终身累计的外卖口径不同)
+    ratings = await hotel_ratings(db, list(id_dist))
     cards = []
     for mid, dist in id_dist.items():
         m, hp = merchants.get(mid), profiles.get(mid)
         if m is None or hp is None:
             continue
+        r_avg, r_count = ratings.get(mid, (None, 0))
         prices = [quotes[rt.id]["total"] for rt in room_types
                   if rt.merchant_id == mid and quotes[rt.id]["bookable"]]
         min_night = min(prices) // nights if prices else None
@@ -353,7 +356,7 @@ async def list_hotels(
             id=m.id, name=m.name, tier=hp.tier, address=m.address,
             lat=m.lat, lng=m.lng, logo_url=m.logo_url,
             photo_urls=m.photo_urls or [],
-            rating_avg=m.rating_avg, rating_count=m.rating_count,
+            rating_avg=r_avg, rating_count=r_count,
             distance_m=dist, min_night_price_cents=min_night,
             full=min_night is None))
 
@@ -408,6 +411,7 @@ async def hotel_detail(
             cancel_policy_text=cancel_policy_text(
                 rt.cancel_policy, rt.free_cancel_until, checkin),
         ))
+    r_avg, r_count = (await hotel_ratings(db, [m.id])).get(m.id, (None, 0))
     return HotelDetailOut(
         id=m.id, name=m.name, description=m.description,
         tier=hp.tier if hp else "economy", address=m.address,
@@ -417,7 +421,7 @@ async def hotel_detail(
         checkout_until=hp.checkout_until if hp else "12:00",
         facilities=hp.facilities if hp else [],
         logo_url=m.logo_url, photo_urls=m.photo_urls or [],
-        rating_avg=m.rating_avg, rating_count=m.rating_count,
+        rating_avg=r_avg, rating_count=r_count,
         checkin_date=checkin, checkout_date=checkout, rooms=rooms)
 
 
@@ -805,3 +809,185 @@ async def checkout_stay_order(
     await db.commit()
     await db.refresh(order)
     return _stay_out(order)
+
+
+# ---------- 住宿点评 ----------
+
+from datetime import timedelta as _rtd
+
+from ..models import STAY_REVIEW_TAGS, StayReview
+from ..schemas import StayReviewIn, StayReviewOut
+
+REVIEW_WINDOW_DAYS = 15   # 离店后可评窗口
+APPEND_WINDOW_DAYS = 7    # 追评窗口
+RATING_ROLL_DAYS = 180    # 评分滚动窗口
+RATING_MIN_COUNT = 3      # 少于 3 条不出分
+
+
+async def hotel_ratings(db: AsyncSession, merchant_ids: list[int]) -> dict[int, tuple[float, int]]:
+    """酒店滚动评分:{merchant_id: (均分, 条数)},条数 < 3 的不返回。"""
+    if not merchant_ids:
+        return {}
+    from sqlalchemy import func as sa_func
+    since = datetime.now(_tz.utc) - _rtd(days=RATING_ROLL_DAYS)
+    rows = await db.execute(
+        select(StayReview.merchant_id,
+               sa_func.avg(StayReview.rating),
+               sa_func.count(StayReview.id))
+        .where(StayReview.merchant_id.in_(merchant_ids),
+               StayReview.hidden.is_(False),
+               StayReview.created_at >= since)
+        .group_by(StayReview.merchant_id))
+    return {mid: (round(float(avg), 1), int(n))
+            for mid, avg, n in rows if n >= RATING_MIN_COUNT}
+
+
+def _review_out(r: StayReview, name: str = "", order_no: str = "") -> StayReviewOut:
+    out = StayReviewOut.model_validate(r)
+    out.reviewer_name = "匿名住客" if r.is_anonymous else (name or "住客")
+    out.order_no = order_no
+    return out
+
+
+@router.post("/orders/{order_no}/review", response_model=StayReviewOut)
+async def create_stay_review(
+    order_no: str,
+    payload: StayReviewIn,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """离店后 15 天内可评,一单一评。"""
+    order = await _customer_order(db, user, order_no)
+    if order.status != StayOrderStatus.COMPLETED:
+        raise HTTPException(409, "离店后才能评价")
+    if order.completed_at is not None and \
+            datetime.now(_tz.utc) - order.completed_at > _rtd(days=REVIEW_WINDOW_DAYS):
+        raise HTTPException(409, f"离店超过 {REVIEW_WINDOW_DAYS} 天,评价通道已关闭")
+    existing = await db.scalar(
+        select(StayReview).where(StayReview.stay_order_id == order.id))
+    if existing:
+        raise HTTPException(409, "这一单已经评价过了")
+    for tag in payload.tags:
+        if tag not in STAY_REVIEW_TAGS:
+            raise HTTPException(422, "存在无效标签")
+    if payload.comment.strip():
+        from ..services.moderation import guard_text
+        await guard_text(db, payload.comment, "评价内容")
+    review = StayReview(
+        stay_order_id=order.id,
+        customer_id=user.id,
+        merchant_id=order.merchant_id,
+        rating=payload.rating,
+        comment=payload.comment.strip(),
+        image_urls=payload.image_urls,
+        tags=payload.tags,
+        is_anonymous=payload.is_anonymous,
+    )
+    db.add(review)
+    await db.commit()
+    await db.refresh(review)
+    if payload.image_urls:
+        from ..services.moderation import submit_images
+        await submit_images(db, "stay_review", review.id, payload.image_urls)
+    return _review_out(review, user.name, order.order_no)
+
+
+@router.get("/orders/{order_no}/review", response_model=StayReviewOut)
+async def my_stay_review(
+    order_no: str,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    order = await _customer_order(db, user, order_no)
+    review = await db.scalar(
+        select(StayReview).where(StayReview.stay_order_id == order.id))
+    if review is None:
+        raise HTTPException(404, "还没有评价")
+    return _review_out(review, user.name, order.order_no)
+
+
+@router.post("/reviews/{review_id}/append", response_model=StayReviewOut)
+async def append_stay_review(
+    review_id: int,
+    payload: dict,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """追评:首评后 7 天内一次。"""
+    review = await db.get(StayReview, review_id)
+    if review is None or review.customer_id != user.id:
+        raise HTTPException(404, "评价不存在")
+    if review.append_content:
+        raise HTTPException(409, "已经追评过了")
+    if datetime.now(_tz.utc) - review.created_at > _rtd(days=APPEND_WINDOW_DAYS):
+        raise HTTPException(409, f"首评超过 {APPEND_WINDOW_DAYS} 天,不能再追评")
+    content = str(payload.get("content", "")).strip()[:500]
+    if not content:
+        raise HTTPException(422, "追评内容不能为空")
+    from ..services.moderation import guard_text
+    await guard_text(db, content, "追评内容")
+    review.append_content = content
+    review.append_at = datetime.now(_tz.utc)
+    await db.commit()
+    await db.refresh(review)
+    return _review_out(review, user.name)
+
+
+@router.get("/hotels/{hotel_id}/reviews", response_model=list[StayReviewOut])
+async def hotel_reviews(
+    hotel_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """酒店点评列表(公开,匿名保护)。"""
+    rows = (await db.execute(
+        select(StayReview, User.name)
+        .join(User, User.id == StayReview.customer_id)
+        .where(StayReview.merchant_id == hotel_id,
+               StayReview.hidden.is_(False))
+        .order_by(StayReview.created_at.desc())
+        .limit(100))).all()
+    return [_review_out(r, name) for r, name in rows]
+
+
+@router.get("/me/reviews", response_model=list[StayReviewOut])
+async def merchant_stay_reviews(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    shop = await _my_hotel(db, user)
+    rows = (await db.execute(
+        select(StayReview, StayOrder.order_no)
+        .join(StayOrder, StayOrder.id == StayReview.stay_order_id)
+        .where(StayReview.merchant_id == shop.id,
+               StayReview.hidden.is_(False))
+        .order_by(StayReview.created_at.desc())
+        .limit(100))).all()
+    return [_review_out(r, "", no) for r, no in rows]
+
+
+@router.post("/me/reviews/{review_id}/reply", response_model=StayReviewOut)
+async def reply_stay_review(
+    review_id: int,
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    shop = await _my_hotel(db, user)
+    review = await db.get(StayReview, review_id)
+    if review is None or review.merchant_id != shop.id:
+        raise HTTPException(404, "评价不存在")
+    reply = str(payload.get("reply", "")).strip()[:300]
+    if not reply:
+        raise HTTPException(422, "回复内容不能为空")
+    from ..services.moderation import guard_text
+    await guard_text(db, reply, "评价回复")
+    # 首评未回复 → 回复首评;首评已回复且有追评 → 回复追评;否则视为修改首评回复
+    if not review.reply:
+        review.reply = reply
+    elif review.append_content and not review.append_reply:
+        review.append_reply = reply
+    else:
+        review.reply = reply
+    await db.commit()
+    await db.refresh(review)
+    return _review_out(review)

@@ -56,6 +56,76 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
     }
   }
 
+  /// 点评列表(公开,匿名保护;评分是近 180 天滚动均分)
+  Future<void> _reviewsSheet(HotelDetail hotel) async {
+    List<StayReview> reviews;
+    try {
+      reviews = await widget.api.hotelReviews(hotel.id);
+    } catch (_) {
+      reviews = [];
+    }
+    if (!mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        builder: (context, controller) => ListView(
+          controller: controller,
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text('住客点评(${reviews.length})',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            if (reviews.isEmpty) const Text('离店的住客还没有留下点评'),
+            for (final r in reviews)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Text(r.reviewerName,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          for (var i = 1; i <= 5; i++)
+                            Icon(
+                                i <= r.rating
+                                    ? Icons.star
+                                    : Icons.star_border,
+                                size: 14,
+                                color: Colors.amber),
+                        ]),
+                        if (r.tags.isNotEmpty)
+                          Text(r.tags.join(' · '),
+                              style:
+                                  Theme.of(context).textTheme.bodySmall),
+                        if (r.comment.isNotEmpty) Text(r.comment),
+                        if (r.appendContent.isNotEmpty)
+                          Text('追评:${r.appendContent}',
+                              style:
+                                  Theme.of(context).textTheme.bodySmall),
+                        if (r.reply.isNotEmpty)
+                          Text('酒店回复:${r.reply}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .primary)),
+                      ]),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Color _policyColor(String policy) => switch (policy) {
         'limited_free' => const Color(0xFF0E8A5F), // 账目绿:对用户友好的政策
         'first_night' => Colors.grey.shade700,
@@ -104,9 +174,15 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
               Chip(label: Text(hotel.tierLabel)),
             ]),
             const SizedBox(height: 4),
-            Text(hotel.ratingAvg != null
-                ? '★ ${hotel.ratingAvg}(${hotel.ratingCount} 条评价)'
-                : '暂无足够评价'),
+            InkWell(
+              onTap: () => _reviewsSheet(hotel),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Text(hotel.ratingAvg != null
+                    ? '★ ${hotel.ratingAvg}(${hotel.ratingCount} 条评价)'
+                    : '暂无足够评价'),
+                const Icon(Icons.chevron_right, size: 18),
+              ]),
+            ),
             const SizedBox(height: 4),
             Row(children: [
               const Icon(Icons.location_on_outlined, size: 16),

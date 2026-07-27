@@ -1588,4 +1588,57 @@ class ApiClient {
     final data = await _request('POST', '/stays/orders/$orderNo/cancel');
     return StayOrder.fromJson(data as Map<String, dynamic>);
   }
+
+  /// 用户:提交住宿点评(离店后 15 天内,一单一评)
+  Future<StayReview> createStayReview(String orderNo,
+      {required int rating,
+      String comment = '',
+      List<String> tags = const [],
+      List<String> imageUrls = const [],
+      bool isAnonymous = false}) async {
+    final data = await _request('POST', '/stays/orders/$orderNo/review', body: {
+      'rating': rating,
+      'comment': comment,
+      'tags': tags,
+      'image_urls': imageUrls,
+      'is_anonymous': isAnonymous,
+    });
+    return StayReview.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:我的这单点评(没有则 404)
+  Future<StayReview> myStayReview(String orderNo) async {
+    final data = await _request('GET', '/stays/orders/$orderNo/review');
+    return StayReview.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:追评(首评后 7 天内一次)
+  Future<StayReview> appendStayReview(int reviewId, String content) async {
+    final data = await _request('POST', '/stays/reviews/$reviewId/append',
+        body: {'content': content});
+    return StayReview.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 公开:酒店点评列表
+  Future<List<StayReview>> hotelReviews(int hotelId) async {
+    final data = await _request('GET', '/stays/hotels/$hotelId/reviews');
+    return (data as List)
+        .map((e) => StayReview.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 商家:本店住宿点评
+  Future<List<StayReview>> merchantStayReviews() async {
+    final data = await _request('GET', '/stays/me/reviews');
+    return (data as List)
+        .map((e) => StayReview.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 商家:回复点评(首评未回复则回复首评,否则回复追评/修改)
+  Future<StayReview> replyStayReview(int reviewId, String reply) async {
+    final data = await _request('POST', '/stays/me/reviews/$reviewId/reply',
+        body: {'reply': reply});
+    return StayReview.fromJson(data as Map<String, dynamic>);
+  }
 }

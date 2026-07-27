@@ -97,6 +97,7 @@ class StayOrderDetailPage extends StatefulWidget {
 
 class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
   StayOrder? _order;
+  StayReview? _review;
   String? _error;
   Timer? _poll;
 
@@ -120,9 +121,16 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
   Future<void> _load() async {
     try {
       final order = await widget.api.stayOrderDetail(widget.orderNo);
+      StayReview? review;
+      if (order.status == 'completed') {
+        try {
+          review = await widget.api.myStayReview(widget.orderNo);
+        } catch (_) {} // 404 = 还没评价
+      }
       if (mounted) {
         setState(() {
           _order = order;
+          _review = review;
           _error = null;
         });
       }
@@ -130,6 +138,91 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
       if (mounted) {
         setState(() => _error = e is ApiException ? e.message : '$e');
       }
+    }
+  }
+
+  /// 评价弹层:星级 + 一键标签 + 文字 + 匿名
+  Future<void> _reviewSheet(StayOrder order) async {
+    var rating = 5;
+    final selected = <String>{};
+    final comment = TextEditingController();
+    var anonymous = false;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheet) => Padding(
+          padding: EdgeInsets.only(
+              left: 16, right: 16, top: 16,
+              bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 16),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('这次住得怎么样?',
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Row(children: [
+                  for (var i = 1; i <= 5; i++)
+                    IconButton(
+                      icon: Icon(
+                          i <= rating ? Icons.star : Icons.star_border,
+                          color: Colors.amber, size: 30),
+                      onPressed: () => setSheet(() => rating = i),
+                    ),
+                ]),
+                Wrap(spacing: 8, runSpacing: 4, children: [
+                  for (final tag in kStayReviewTags)
+                    FilterChip(
+                      label: Text(tag),
+                      selected: selected.contains(tag),
+                      onSelected: (v) => setSheet(() =>
+                          v ? selected.add(tag) : selected.remove(tag)),
+                    ),
+                ]),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: comment,
+                  maxLength: 500,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      hintText: '说说你的入住体验(选填)',
+                      border: OutlineInputBorder()),
+                ),
+                SwitchListTile(
+                  title: const Text('匿名评价'),
+                  subtitle: const Text('显示为「匿名住客」,酒店无法反查'),
+                  value: anonymous,
+                  onChanged: (v) => setSheet(() => anonymous = v),
+                ),
+                SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                        onPressed: () => Navigator.pop(sheetContext, true),
+                        child: const Text('提交评价'))),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.api.createStayReview(order.orderNo,
+          rating: rating,
+          comment: comment.text.trim(),
+          tags: selected.toList(),
+          isAnonymous: anonymous);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('评价成功,感谢反馈')));
+      }
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
     }
   }
 
@@ -281,6 +374,45 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
             ]),
           ),
         ),
+        // 离店后评价(15 天内);已评展示内容与酒店回复
+        if (order.status == 'completed')
+          _review == null
+              ? Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: FilledButton.tonalIcon(
+                      icon: const Icon(Icons.rate_review_outlined, size: 18),
+                      onPressed: () => _reviewSheet(order),
+                      label: const Text('评价这次入住')),
+                )
+              : Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(children: [
+                            Text('我的评价',
+                                style: theme.textTheme.titleSmall),
+                            const Spacer(),
+                            for (var i = 1; i <= 5; i++)
+                              Icon(
+                                  i <= _review!.rating
+                                      ? Icons.star
+                                      : Icons.star_border,
+                                  size: 16,
+                                  color: Colors.amber),
+                          ]),
+                          if (_review!.comment.isNotEmpty)
+                            Text(_review!.comment),
+                          if (_review!.tags.isNotEmpty)
+                            Text(_review!.tags.join(' · '),
+                                style: theme.textTheme.bodySmall),
+                          if (_review!.reply.isNotEmpty)
+                            Text('酒店回复:${_review!.reply}',
+                                style: theme.textTheme.bodySmall),
+                        ]),
+                  ),
+                ),
         const SizedBox(height: 12),
         if (cancellable)
           OutlinedButton(

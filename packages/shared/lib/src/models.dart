@@ -1203,3 +1203,38 @@ class StayCancelPreview {
   final int penaltyCents;
   final String note;
 }
+
+/// 住宿点评一键标签白名单(与服务端 STAY_REVIEW_TAGS 一致)
+const List<String> kStayReviewTags = [
+  '干净卫生', '位置方便', '隔音好', '性价比高', '服务热情',
+  '设施陈旧', '隔音差', '卫生一般',
+];
+
+class StayReview {
+  StayReview.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as int,
+        rating = json['rating'] as int,
+        comment = json['comment'] as String? ?? '',
+        imageUrls = (json['image_urls'] as List? ?? const []).cast<String>(),
+        tags = (json['tags'] as List? ?? const []).cast<String>(),
+        reply = json['reply'] as String? ?? '',
+        isAnonymous = json['is_anonymous'] as bool? ?? false,
+        appendContent = json['append_content'] as String? ?? '',
+        appendReply = json['append_reply'] as String? ?? '',
+        createdAt = json['created_at'] as String? ?? '',
+        reviewerName = json['reviewer_name'] as String? ?? '',
+        orderNo = json['order_no'] as String? ?? '';
+
+  final int id;
+  final int rating;
+  final String comment;
+  final List<String> imageUrls;
+  final List<String> tags;
+  final String reply;
+  final bool isAnonymous;
+  final String appendContent;
+  final String appendReply;
+  final String createdAt;
+  final String reviewerName;
+  final String orderNo;
+}

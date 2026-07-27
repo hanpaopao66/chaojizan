@@ -1264,3 +1264,28 @@ class StayCancelPreviewOut(BaseModel):
     refund_cents: int
     penalty_cents: int  # 扣款(=总额-退款,归商家,平台不抽佣)
     note: str
+
+
+class StayReviewIn(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: str = Field(default="", max_length=500)
+    image_urls: list[str] = Field(default=[], max_length=6)
+    tags: list[str] = Field(default=[], max_length=6)
+    is_anonymous: bool = False
+
+
+class StayReviewOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    rating: int
+    comment: str = ""
+    image_urls: list = []
+    tags: list = []
+    reply: str = ""
+    is_anonymous: bool = False
+    append_content: str = ""
+    append_reply: str = ""
+    created_at: datetime | None = None
+    reviewer_name: str = ""  # 匿名时为「匿名住客」,列表页聚合填充
+    order_no: str = ""       # 仅本人/商家视角回填
