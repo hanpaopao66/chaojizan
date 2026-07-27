@@ -235,3 +235,96 @@ export function setStayCalendar(payload: {
 }): Promise<{ created: number; updated: number }> {
   return request('PUT', '/stays/me/calendar', payload)
 }
+
+// ---------- 住宿:订单 / 售后 / 点评 ----------
+
+export interface StayOrder {
+  order_no: string
+  room_type_name: string
+  rooms_qty: number
+  checkin_date: string
+  checkout_date: string
+  nights: number
+  guest_name: string
+  guest_phone: string
+  arrival_note: string
+  total_cents: number
+  fee_cents: number
+  net_cents: number
+  refund_cents: number
+  refund_note: string
+  status: string
+  status_label: string
+  cancel_policy_text: string
+  created_at: string
+}
+
+export type StayOrderState = 'all' | 'pending' | 'arriving' | 'inhouse' | 'leaving'
+
+export function stayMerchantOrders(state: StayOrderState): Promise<StayOrder[]> {
+  return request('GET', `/stays/me/orders?state=${state}`)
+}
+
+export function stayConfirm(orderNo: string): Promise<StayOrder> {
+  return request('POST', `/stays/me/orders/${orderNo}/confirm`)
+}
+
+export function stayReject(orderNo: string, reason: string): Promise<StayOrder> {
+  return request('POST', `/stays/me/orders/${orderNo}/reject`, { reason })
+}
+
+export function stayCheckin(orderNo: string): Promise<StayOrder> {
+  return request('POST', `/stays/me/orders/${orderNo}/checkin`)
+}
+
+export function stayCheckout(orderNo: string): Promise<StayOrder> {
+  return request('POST', `/stays/me/orders/${orderNo}/checkout`)
+}
+
+export interface StayAfterSale {
+  id: number
+  kind: 'no_room' | 'nego_refund'
+  status: 'pending' | 'accepted' | 'rejected' | 'auto_accepted'
+  note: string
+  merchant_note: string
+  refund_cents: number
+  penalty_cents: number
+  order_no: string
+  guest_name: string
+  total_cents: number
+  created_at: string
+}
+
+export function merchantStayAftersales(): Promise<StayAfterSale[]> {
+  return request('GET', '/stays/me/aftersales')
+}
+
+export function respondStayAftersale(
+  id: number, accept: boolean, note: string, refundCents?: number,
+): Promise<StayAfterSale> {
+  return request('POST', `/stays/me/aftersales/${id}/respond`, {
+    accept, note,
+    ...(refundCents !== undefined ? { refund_cents: refundCents } : {}),
+  })
+}
+
+export interface StayReview {
+  id: number
+  rating: number
+  comment: string
+  tags: string[]
+  reply: string
+  append_content: string
+  append_reply: string
+  reviewer_name: string
+  order_no: string
+  created_at: string
+}
+
+export function merchantStayReviews(): Promise<StayReview[]> {
+  return request('GET', '/stays/me/reviews')
+}
+
+export function replyStayReview(id: number, reply: string): Promise<StayReview> {
+  return request('POST', `/stays/me/reviews/${id}/reply`, { reply })
+}
