@@ -41,7 +41,9 @@ class _AuthGateState extends State<AuthGate> {
       // token 真失效:静默回登录页(清栈,不弹报错)
       if (mounted) setState(() => _authed = false);
     };
-    widget.api.restoreSession().then((ok) {
+    // 恢复会话时带上本端角色:存的会话不是本端角色(历史 bug 遗留的
+    // 错角色 token)直接判失效重新登录,避免进首页后全程 403
+    widget.api.restoreSession(expectRole: widget.role).then((ok) {
       if (mounted) setState(() => _authed = ok);
     });
   }

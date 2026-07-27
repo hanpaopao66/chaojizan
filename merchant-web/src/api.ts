@@ -4,6 +4,7 @@
  */
 
 const TOKEN_KEY = 'superz_merchant_token'
+const TOKEN_AT_KEY = 'superz_merchant_token_at'
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY)
@@ -11,10 +12,38 @@ export function getToken(): string | null {
 
 export function setToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token)
+  localStorage.setItem(TOKEN_AT_KEY, String(Date.now()))
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  localStorage.removeItem(TOKEN_AT_KEY)
+}
+
+// token 无感续期(与三端 App 同款):超过 1 天龄就顺手换新,
+// 30 天有效期 + 滑动续期 = 常用的商家永不掉线;失败静默,下次请求再试
+let refreshing = false
+
+async function maybeRefreshToken(): Promise<void> {
+  const token = getToken()
+  const issuedAt = Number(localStorage.getItem(TOKEN_AT_KEY) || 0)
+  if (!token || refreshing || !issuedAt) return
+  if (Date.now() - issuedAt < 86400 * 1000) return
+  refreshing = true
+  try {
+    const resp = await fetch('/auth/refresh', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (resp.ok) {
+      const data = (await resp.json()) as TokenOut
+      setToken(data.token)
+    }
+  } catch {
+    /* 网络抖动不打断当前操作 */
+  } finally {
+    refreshing = false
+  }
 }
 
 export class ApiError extends Error {
@@ -30,6 +59,7 @@ export async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  await maybeRefreshToken()
   const headers: Record<string, string> = {}
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   const token = getToken()

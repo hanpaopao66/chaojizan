@@ -36,6 +36,11 @@ class ApiClient {
   int? userId;
   String? userName;
 
+  /// 当前会话的账号角色(customer/merchant/rider)。账号按 (手机号, 角色) 分立,
+  /// 持久化它用于冷启动校验"存的会话是不是本端的角色"——历史上曾出现
+  /// 旧代码把用户端账号的 token 存进商家端,重启后恢复出来全程 403
+  String? userRole;
+
   bool get isLoggedIn => _token != null;
 
   /// WebSocket 地址拼接用(听单通道要带 token)
@@ -106,12 +111,17 @@ class ApiClient {
           'auth_token_at', _tokenIssuedAt?.toIso8601String() ?? '');
       await sp.setInt('auth_user_id', userId ?? 0);
       await sp.setString('auth_user_name', userName ?? '');
+      await sp.setString('auth_role', userRole ?? '');
     } catch (_) {}
   }
 
   /// 冷启动恢复会话:有本地 token 即恢复,并向服务端校验一次。
   /// 网络不通时保留本地会话(离线不登出);仅 401 才判失效。
-  Future<bool> restoreSession() async {
+  ///
+  /// [expectRole] 传本端角色(customer/merchant/rider):账号按角色分立,
+  /// 存的会话若不是本端角色(如商家端里存着用户端账号的 token),
+  /// 恢复出来会全程 403——直接判失效重新登录,App 自愈不用用户猜。
+  Future<bool> restoreSession({String? expectRole}) async {
     try {
       final sp = await SharedPreferences.getInstance();
       final token = sp.getString('auth_token');
@@ -122,10 +132,23 @@ class ApiClient {
               DateTime.now();
       userId = sp.getInt('auth_user_id');
       userName = sp.getString('auth_user_name');
+      userRole = sp.getString('auth_role');
+      // 本地先核一道角色(离线也能拦住错角色会话);
+      // 旧版本没存过角色(空)的放行,交给下面 /auth/me 补齐后再核
+      if (expectRole != null &&
+          userRole != null && userRole!.isNotEmpty && userRole != expectRole) {
+        await clearSession();
+        return false;
+      }
       try {
         final me = await _request('GET', '/auth/me') as Map<String, dynamic>;
         userId = me['id'] as int;
         userName = me['name'] as String;
+        userRole = me['role'] as String?;
+        if (expectRole != null && userRole != expectRole) {
+          await clearSession();
+          return false;
+        }
         await _persistSession();
       } on ApiException catch (e) {
         if (e.statusCode == 401) {
@@ -147,12 +170,14 @@ class ApiClient {
     _tokenIssuedAt = null;
     userId = null;
     userName = null;
+    userRole = null;
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.remove('auth_token');
       await sp.remove('auth_token_at');
       await sp.remove('auth_user_id');
       await sp.remove('auth_user_name');
+      await sp.remove('auth_role');
     } catch (_) {}
   }
 
@@ -185,6 +210,7 @@ class ApiClient {
     _tokenIssuedAt = DateTime.now();
     userId = data['user_id'] as int;
     userName = data['name'] as String;
+    userRole = data['role'] as String?;
   }
 
   Future<void> register(
@@ -195,6 +221,7 @@ class ApiClient {
     _tokenIssuedAt = DateTime.now();
     userId = data['user_id'] as int;
     userName = data['name'] as String;
+    userRole = data['role'] as String?;
   }
 
   /// 发验证码。短信服务未配置时返回开发模式验证码(devCode),已配置返回 null
@@ -221,6 +248,7 @@ class ApiClient {
     _tokenIssuedAt = DateTime.now();
     userId = data['user_id'] as int;
     userName = data['name'] as String;
+    userRole = data['role'] as String?;
     await _persistSession();
   }
 

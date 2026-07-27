@@ -524,7 +524,29 @@ function openModal(html) {
     </div></div>`;
 }
 
+// token 无感续期(与三端 App 同款):超过 1 天龄就顺手换新,
+// 30 天有效期 + 滑动续期 = 常用的管理员永不掉线;失败静默,下次请求再试
+let refreshing = false;
+async function maybeRefreshToken() {
+  const issuedAt = Number(localStorage.getItem('superz_admin_token_at') || 0);
+  if (!token || refreshing || !issuedAt) return;
+  if (Date.now() - issuedAt < 86400 * 1000) return;
+  refreshing = true;
+  try {
+    const resp = await fetch('/auth/refresh', {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token } });
+    if (resp.ok) {
+      const data = await resp.json();
+      token = data.token;
+      localStorage.setItem('superz_admin_token', token);
+      localStorage.setItem('superz_admin_token_at', String(Date.now()));
+    }
+  } catch (e) { /* 网络抖动不打断当前操作 */ }
+  finally { refreshing = false; }
+}
+
 async function api(method, path, body) {
+  await maybeRefreshToken();
   const resp = await fetch(path, {
     method,
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
@@ -541,6 +563,7 @@ async function api(method, path, body) {
 function showLogin() {
   token = '';
   localStorage.removeItem('superz_admin_token');
+  localStorage.removeItem('superz_admin_token_at');
   $('#login').hidden = false;
   $('#panel').hidden = true;
   $('#logout').hidden = true;
@@ -857,6 +880,7 @@ $('#loginBtn').onclick = async () => {
     if (data.role !== 'admin') { toast('该账号不是管理员'); return; }
     token = data.token;
     localStorage.setItem('superz_admin_token', token);
+    localStorage.setItem('superz_admin_token_at', String(Date.now()));
     showPanel(data.name + '(管理员)');
   } catch (e) { toast(e.message); }
 };
