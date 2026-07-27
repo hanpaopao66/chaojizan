@@ -79,6 +79,21 @@ services:
     volumes:
       - ./tunnel/frpc.toml:/etc/frp/frpc.toml:ro
 
+  # 官方常驻见证节点:跑的是公众下载的同一份脚本,且刻意走公网域名拉账本
+  # (不内网直连 api——见证的就该是公众看到的那份数据)。锚点留存在卷里,
+  # 容器重建不丢。域名不入库:.env.prod 写 WITNESS_API=https://对外域名
+  witness:
+    build: ../witness
+    container_name: superz-witness
+    restart: unless-stopped
+    environment:
+      SUPERZ_API: ${WITNESS_API:-https://chaojizan.cc}
+      WITNESS_NAME: ${WITNESS_NAME:-官方部署机}
+      WITNESS_REGION: ${WITNESS_REGION:-}
+    volumes:
+      - witness-data:/data
+
 volumes:
   pgdata:
   uploads:
+  witness-data:
