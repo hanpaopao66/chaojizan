@@ -1153,3 +1153,55 @@ class RoomCalendarRowOut(BaseModel):
     room_type_id: int
     room_type_name: str
     days: list[RoomDayOut] = []
+
+
+class HotelCardOut(BaseModel):
+    """酒店列表卡片:带日期区间的起价与满房标记。"""
+
+    id: int
+    name: str
+    tier: str = "economy"
+    address: str = ""
+    lat: float = 0
+    lng: float = 0
+    logo_url: str = ""
+    photo_urls: list = []
+    rating_avg: float | None = None
+    rating_count: int = 0
+    distance_m: int | None = None
+    # 区间内可订房型的最低"每晚均价"(分);None = 区间内满房/未开放
+    min_night_price_cents: int | None = None
+    full: bool = False  # 区间内所有房型都订不了
+
+
+class RoomQuoteOut(BaseModel):
+    """房型报价(按查询的入住区间聚合)。"""
+
+    room_type: RoomTypeOut
+    total_cents: int | None = None      # 区间总价(一间);None = 不可订
+    nightly: list[RoomDayOut] = []      # 每晚明细(价格/余量)
+    bookable: bool = False
+    # 剩余间数:>3 不透具体数(防试探),≤3 返回真实数供"仅剩 X 间"
+    left_qty: int | None = None
+    cancel_policy_text: str = ""
+
+
+class HotelDetailOut(BaseModel):
+    id: int
+    name: str
+    description: str = ""
+    tier: str = "economy"
+    address: str = ""
+    lat: float = 0
+    lng: float = 0
+    front_desk_phone: str = ""
+    checkin_from: str = "14:00"
+    checkout_until: str = "12:00"
+    facilities: list = []
+    logo_url: str = ""
+    photo_urls: list = []
+    rating_avg: float | None = None
+    rating_count: int = 0
+    checkin_date: date | None = None
+    checkout_date: date | None = None
+    rooms: list[RoomQuoteOut] = []
