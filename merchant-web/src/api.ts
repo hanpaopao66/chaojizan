@@ -328,3 +328,68 @@ export function merchantStayReviews(): Promise<StayReview[]> {
 export function replyStayReview(id: number, reply: string): Promise<StayReview> {
   return request('POST', `/stays/me/reviews/${id}/reply`, { reply })
 }
+
+// ---------- 外卖:订单 ----------
+
+export interface FoodOrderItem {
+  dish_id: number
+  name: string
+  quantity: number
+  price_cents: number
+}
+
+export interface FoodOrder {
+  order_no: string
+  status: string
+  items: FoodOrderItem[]
+  total_cents: number
+  address: string
+  remark: string
+  pickup: boolean
+  pickup_code: string
+  self_delivery: boolean
+  ready_late: boolean
+  cancel_reason: string
+  refund_cents: number
+  refund_note: string
+  created_at: string
+  accepted_at: string | null
+  scheduled_at?: string | null
+}
+
+export const FOOD_STATUS_LABELS: Record<string, string> = {
+  pending_payment: '待支付', paid: '待接单', accepted: '制作中',
+  ready: '待取餐', picked_up: '配送中', delivered: '已送达',
+  completed: '已完成', cancelled: '已取消',
+}
+
+export function myFoodOrders(): Promise<FoodOrder[]> {
+  return request('GET', '/orders')
+}
+
+export function foodTransition(
+  orderNo: string, toStatus: string, reason = '',
+): Promise<FoodOrder> {
+  return request('POST', `/orders/${orderNo}/transition`, {
+    to_status: toStatus, reason, verify_code: '', force: false,
+  })
+}
+
+export function foodRefundItem(
+  orderNo: string, dishId: number, quantity: number,
+): Promise<FoodOrder> {
+  return request('POST', `/orders/${orderNo}/refund-item`,
+    { dish_id: dishId, quantity })
+}
+
+export function foodPickupVerify(orderNo: string, code: string): Promise<FoodOrder> {
+  return request('POST', `/orders/${orderNo}/pickup-verify`, { code })
+}
+
+export function foodReprint(orderNo: string): Promise<void> {
+  return request('POST', `/merchants/me/orders/${orderNo}/print`)
+}
+
+export function foodUrgeReply(orderNo: string, text: string): Promise<void> {
+  return request('POST', `/orders/${orderNo}/urge-reply`, { text })
+}
