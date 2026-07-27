@@ -20,6 +20,7 @@ export default defineConfig({
       '/vouchers': 'http://127.0.0.1:8010',
       '/invoices': 'http://127.0.0.1:8010',
       '/orders': 'http://127.0.0.1:8010',
+      '/upload': 'http://127.0.0.1:8010',
       '/uploads': 'http://127.0.0.1:8010',
       '/platform': 'http://127.0.0.1:8010',
       '/tickets': 'http://127.0.0.1:8010',

@@ -15,6 +15,7 @@ import { useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 import { ApiError, clearToken, Merchant, updateShop } from '../api'
+import CalendarPage from '../pages/hotel/CalendarPage'
 import PlaceholderPage from '../pages/PlaceholderPage'
 
 interface Props {
@@ -111,7 +112,7 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
             {isHotel ? (
               <>
                 <Route path="/hotel/orders" element={<PlaceholderPage title="前台工作台" note="订单确认/入住/离店(#88)" />} />
-                <Route path="/hotel/calendar" element={<PlaceholderPage title="房态中控台" note="房价房态大网格(#87)" />} />
+                <Route path="/hotel/calendar" element={<CalendarPage />} />
                 <Route path="/hotel/aftersales" element={<PlaceholderPage title="售后处理" note="到店无房/协商退(#88)" />} />
                 <Route path="/hotel/reviews" element={<PlaceholderPage title="住客点评" note="点评与回复(#88)" />} />
               </>

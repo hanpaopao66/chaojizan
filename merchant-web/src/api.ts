@@ -148,3 +148,90 @@ export function merchantWsUrl(merchantId: number): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${location.host}/ws/merchants/${merchantId}?token=${getToken()}`
 }
+
+// ---------- 图片上传 ----------
+
+export async function uploadImage(file: File): Promise<string> {
+  const form = new FormData()
+  form.append('file', file)
+  const token = getToken()
+  const resp = await fetch('/upload', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  })
+  if (!resp.ok) {
+    let detail = `上传失败(${resp.status})`
+    try {
+      const data = await resp.json()
+      if (typeof data.detail === 'string') detail = data.detail
+    } catch { /* ignore */ }
+    throw new ApiError(resp.status, detail)
+  }
+  return ((await resp.json()) as { url: string }).url
+}
+
+// ---------- 住宿:房型与房价房态 ----------
+
+export interface RoomType {
+  id: number
+  name: string
+  bed_type: string
+  area_m2: number
+  max_guests: number
+  image_urls: string[]
+  facilities: string[]
+  cancel_policy: 'limited_free' | 'first_night' | 'strict'
+  free_cancel_until: string
+  is_on_sale: boolean
+  sort: number
+}
+
+export interface RoomDay {
+  date: string
+  price_cents: number
+  total_qty: number
+  sold_qty: number
+  closed: boolean
+}
+
+export interface RoomCalendarRow {
+  room_type_id: number
+  room_type_name: string
+  days: RoomDay[]
+}
+
+export const CANCEL_POLICIES: Record<string, string> = {
+  limited_free: '限时免费取消',
+  first_night: '取消扣首晚',
+  strict: '不可退',
+}
+
+export function stayRoomTypes(): Promise<RoomType[]> {
+  return request('GET', '/stays/me/room-types')
+}
+
+export function createRoomType(fields: Record<string, unknown>): Promise<RoomType> {
+  return request('POST', '/stays/me/room-types', fields)
+}
+
+export function updateRoomType(
+  id: number, fields: Record<string, unknown>,
+): Promise<RoomType> {
+  return request('PATCH', `/stays/me/room-types/${id}`, fields)
+}
+
+export function stayCalendar(fromDate: string, days: number): Promise<RoomCalendarRow[]> {
+  return request('GET', `/stays/me/calendar?from_date=${fromDate}&days=${days}`)
+}
+
+export function setStayCalendar(payload: {
+  room_type_ids: number[]
+  from_date: string
+  to_date: string
+  price_cents?: number
+  total_qty?: number
+  closed?: boolean
+}): Promise<{ created: number; updated: number }> {
+  return request('PUT', '/stays/me/calendar', payload)
+}
