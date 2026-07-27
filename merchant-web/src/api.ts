@@ -393,3 +393,73 @@ export function foodReprint(orderNo: string): Promise<void> {
 export function foodUrgeReply(orderNo: string, text: string): Promise<void> {
   return request('POST', `/orders/${orderNo}/urge-reply`, { text })
 }
+
+// ---------- 外卖:菜品 / 店内营销 ----------
+
+export interface DishOptionItem { name: string; price_delta_cents: number }
+export interface DishOptionGroup {
+  name: string
+  required: boolean
+  items: DishOptionItem[]
+}
+
+export interface Dish {
+  id: number
+  name: string
+  category: string
+  price_cents: number
+  stock: number
+  daily_stock: number | null
+  sold_out_today: boolean
+  is_on_sale: boolean
+  is_alcohol: boolean
+  image_url: string
+  options: DishOptionGroup[]
+  monthly_sales: number
+}
+
+export function myDishes(): Promise<Dish[]> {
+  return request('GET', '/merchants/me/dishes')
+}
+
+export function createDish(fields: Record<string, unknown>): Promise<Dish> {
+  return request('POST', '/merchants/me/dishes', fields)
+}
+
+export function updateDish(id: number, fields: Record<string, unknown>): Promise<Dish> {
+  return request('PATCH', `/merchants/me/dishes/${id}`, fields)
+}
+
+export function sellOutDish(id: number, cancel: boolean): Promise<void> {
+  return request('POST',
+    `/merchants/me/dishes/${id}/sell-out${cancel ? '/cancel' : ''}`)
+}
+
+export interface PromoRule { threshold_cents: number; off_cents: number }
+export interface GiftRule { threshold_cents: number; dish_id: number; name: string }
+
+export interface ShopCouponBatch {
+  id: number
+  name: string
+  threshold_cents: number
+  off_cents: number
+  total: number
+  issued: number
+  per_user_limit: number
+  valid_days: number
+  active: boolean
+}
+
+export function shopCouponBatches(): Promise<ShopCouponBatch[]> {
+  return request('GET', '/merchants/me/coupon-batches')
+}
+
+export function createShopCouponBatch(
+  fields: Record<string, unknown>,
+): Promise<ShopCouponBatch> {
+  return request('POST', '/merchants/me/coupon-batches', fields)
+}
+
+export function toggleShopCouponBatch(id: number): Promise<ShopCouponBatch> {
+  return request('POST', `/merchants/me/coupon-batches/${id}/toggle`)
+}

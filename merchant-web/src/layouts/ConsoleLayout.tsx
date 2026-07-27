@@ -15,7 +15,9 @@ import { useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 import { ApiError, clearToken, Merchant, updateShop } from '../api'
+import DishesPage from '../pages/food/DishesPage'
 import FoodOrdersPage from '../pages/food/FoodOrdersPage'
+import MarketingPage from '../pages/food/MarketingPage'
 import AftersalesPage from '../pages/hotel/AftersalesPage'
 import CalendarPage from '../pages/hotel/CalendarPage'
 import FrontDeskPage from '../pages/hotel/FrontDeskPage'
@@ -123,8 +125,8 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
             ) : (
               <>
                 <Route path="/food/orders" element={<FoodOrdersPage shop={shop} />} />
-                <Route path="/food/dishes" element={<PlaceholderPage title="菜品管理" note="批量编辑(#86)" />} />
-                <Route path="/food/marketing" element={<PlaceholderPage title="店内营销" note="满减/满赠/店铺券(#86)" />} />
+                <Route path="/food/dishes" element={<DishesPage />} />
+                <Route path="/food/marketing" element={<MarketingPage />} />
               </>
             )}
             <Route path="/finance" element={<PlaceholderPage title="对账中心" note="流水/提现/发票(#89)" />} />
