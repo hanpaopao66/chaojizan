@@ -285,11 +285,24 @@ async def fairness_public(
         FROM reviews
     """))).one()
 
+    # 住宿真实费率(近 30 天离店结算口径):承诺 5%,离店才收,取消/未入住分文不收
+    stay_row = (await db.execute(sa_text("""
+        SELECT coalesce(sum(fee_cents), 0), coalesce(sum(total_cents), 0)
+        FROM stay_orders WHERE status = 'completed' AND completed_at >= :s
+    """), {"s": since})).one()
+    stay_real = (stay_row[0] / stay_row[1]) if stay_row[1] else None
+
     data = {
         "commission": {
             "real_rate_30d": round(real_rate, 4) if real_rate is not None else None,
             "promised_cap": 0.05,
             "tiers": tiers,
+        },
+        # 三场景费率一句话:外卖 5% 封顶 / 团购核销 2% / 住宿 5% 离店才收
+        "stay_commission": {
+            "real_rate_30d": round(stay_real, 4) if stay_real is not None else None,
+            "promised_cap": 0.05,
+            "note": "离店才计佣;取消/拒单/未入住,平台分文不取",
         },
         "per100": per100,
         "rider_income": {

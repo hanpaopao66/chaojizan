@@ -209,7 +209,7 @@ class _HomePageState extends State<HomePage> {
       ),
       // tab 切换:轻快的淡入 + 微上滑(120ms,不拖节奏)
       // 底部 tab 只放功能(首页/订单/我的),业务一律走金刚区——
-      // 业务会持续增加(团购/打车/跑腿…),金刚区横向扩展,tab 保持稳定
+      // 业务会持续增加(团购/住宿/打车…),金刚区横向扩展,tab 保持稳定
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 160),
         switchInCurve: Curves.easeOutCubic,

@@ -38,7 +38,12 @@ test:
 	  && python -m tests.e2e_p4_witness && python -m tests.e2e_screen \
 	  && python -m tests.e2e_transparency && python -m tests.e2e_splash \
 	  && python -m tests.e2e_category \
-	  && python -m tests.e2e_auth_sms
+	  && python -m tests.e2e_auth_sms && python -m tests.e2e_multi_role \
+	  && python -m tests.e2e_stays_base && python -m tests.e2e_stays_inventory \
+	  && python -m tests.e2e_stays_search && python -m tests.e2e_stays_order \
+	  && python -m tests.e2e_stays_cancel && python -m tests.e2e_stays_autoflow \
+	  && python -m tests.e2e_stays_settle && python -m tests.e2e_stays_witness \
+	  && python -m tests.e2e_stays_review && python -m tests.e2e_stays_aftersale
 
 logs:
 	docker compose logs -f api

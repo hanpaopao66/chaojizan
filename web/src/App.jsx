@@ -203,7 +203,9 @@ function Home() {
             <p>点餐、配送、售后全流程。每一单的资金流向,用户、商家、骑手三方都看得见。</p></div>
           <div className="bcard"><h3>到店团购 <span className="tag on">运营中</span></h3>
             <p>低价引流到店,核销才收 2%。扫码核销、当日对账,未使用随时全额退。</p></div>
-          <div className="bcard"><h3>打车 · 跑腿 · 家政 <span className="tag">筹备中</span></h3>
+          <div className="bcard"><h3>酒店住宿 <span className="tag on">运营中</span></h3>
+            <p>佣金 5%,离店才收;取消、未入住分文不取。无排他、无竞价排名、无年费。</p></div>
+          <div className="bcard"><h3>打车 · 家政 · 维修 <span className="tag">筹备中</span></h3>
             <p>凡是抽成不透明的行当,都值得重做一遍。低抽成,账目公开,一个一个来。</p></div>
         </div>
       </Reveal>

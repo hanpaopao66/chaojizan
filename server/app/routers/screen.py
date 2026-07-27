@@ -228,6 +228,21 @@ async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
           AND status IN ('ready','picked_up','delivered','completed')
     """))).one()
 
+    # 住宿垂类:今日订单/间夜数、在住间数、GMV(已支付口径,无数据显示 0)
+    stay_row = (await db.execute(sa_text(f"""
+        SELECT count(*) FILTER (WHERE created_at >= {_TODAY_SH}),
+               coalesce(sum(nights * rooms_qty) FILTER (
+                   WHERE created_at >= {_TODAY_SH}), 0),
+               coalesce(sum(total_cents), 0),
+               coalesce(sum(total_cents) FILTER (
+                   WHERE created_at >= {_TODAY_SH}), 0)
+        FROM stay_orders
+        WHERE status IN ('paid','confirmed','checked_in','completed','noshow')
+    """))).one()
+    inhouse_rooms = await db.scalar(sa_text(
+        "SELECT coalesce(sum(rooms_qty), 0) FROM stay_orders "
+        "WHERE status = 'checked_in'"))
+
     data = {
         "registrations": {
             "users": {"total": reg[0], "today": reg[1]},
@@ -258,6 +273,13 @@ async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
                               "industry_rate": 0.20}
                              if show_gmv else None),
         "eco": {"no_tableware_orders": eco_orders},
+        "stays": {
+            "today_orders": stay_row[0],
+            "today_roomnights": stay_row[1],
+            "inhouse_rooms": inhouse_rooms,
+            "gmv_cents": stay_row[2] if show_gmv else None,
+            "today_gmv_cents": stay_row[3] if show_gmv else None,
+        },
         "show_gmv": show_gmv,
         "demo": settings.screen_demo,
         "generated_at": datetime.now(timezone.utc).isoformat(),

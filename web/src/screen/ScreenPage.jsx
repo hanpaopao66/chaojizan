@@ -234,6 +234,13 @@ export default function ScreenPage() {
                   <> · 对比行业约 20% 总负担,累计为商家省下
                     <b> {yuanWan(stats.merchant_savings.saved_cents)}</b></>}
               </div>
+              <div className="sub2">
+                住宿今日 <b><Roll value={stats?.stays?.today_orders} /></b> 单 ·
+                <b> <Roll value={stats?.stays?.today_roomnights} /></b> 间夜 ·
+                在住 <b><Roll value={stats?.stays?.inhouse_rooms} /></b> 间
+                {showGmv && stats?.stays?.today_gmv_cents != null &&
+                  <> · 住宿交易额 <b>{yuanWan(stats.stays.today_gmv_cents)}</b></>}
+              </div>
             </div>
           </div>
 
