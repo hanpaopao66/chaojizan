@@ -1646,6 +1646,16 @@ class _ShopTabPageState extends State<ShopTabPage> {
               ),
             ),
           const SizedBox(height: 12),
+          const Card(
+            child: ListTile(
+              leading: Icon(Icons.desktop_windows_outlined),
+              title: Text('电脑上管店'),
+              subtitle: SelectableText('网页版商家后台:chaojizan.cc/merchant\n'
+                  '批量改菜、对账导出、大屏接单更顺手,与 App 同一账号'),
+              isThreeLine: true,
+            ),
+          ),
+          const SizedBox(height: 12),
           Card(
             child: ListTile(
               leading: const Icon(Icons.support_agent_outlined),

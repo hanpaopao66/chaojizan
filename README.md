@@ -106,6 +106,8 @@ chaojizan/
 │       ├── services/          # 结算/审计/账本锚点/风控/营销/定价……
 │       └── routers/           # 业务路由 + 公开数据(screen/transparency)
 ├── web/                 # 官网 + 运营大屏 + 透明中心(React + Three.js + ECharts)
+├── merchant-web/        # 商家网页工作台(React+TS+AntD):外卖接单/菜品批量、
+│                        #   酒店房态中控台/前台办理,构建产物由后端托管 /merchant
 ├── witness/             # 社区见证节点脚本(任何人可跑,复算公开账本)
 └── deploy/              # 生产部署(compose 全栈:api/nginx/frpc,内网穿透自持)
 ```

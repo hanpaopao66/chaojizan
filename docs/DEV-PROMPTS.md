@@ -6,7 +6,7 @@
 
 ## 通用约定(每条提示词都默认遵守)
 
-- 技术栈:FastAPI + SQLAlchemy(async) + PostgreSQL/PostGIS + Redis;三端 Flutter(apps/user_app、merchant_app、rider_app,共享包 packages/shared);管理后台是单文件 server/static/admin.html;官网 React 在 web/。
+- 技术栈:FastAPI + SQLAlchemy(async) + PostgreSQL/PostGIS + Redis;三端 Flutter(apps/user_app、merchant_app、rider_app,共享包 packages/shared);管理后台是单文件 server/static/admin.html;官网 React 在 web/;商家网页工作台 React+TS+AntD 在 merchant-web/(构建产物进 server/static/merchant,由 FastAPI 托管 /merchant)。
 - 关键文件:模型 server/app/models.py;配置 server/app/config.py;订单状态机 server/app/state_machine.py;清扫任务 server/app/services/auto_flow.py;审计恒等式 server/app/services/audit.py;公开账本 server/app/services/ledger.py(每日 payload 冻结、哈希链,witness/ 目录的校验器逐行复算);推送 services/push.py;退款统一入口 services/wechat_pay.py 的 request_refund。
 - 铁律:金额一律用「分」(int);流水只追加不修改(冲账=负数行);任何资金变动必须过 services/audit.py 的恒等式和公开账本 witness 校验(改动后跑 e2e_reversal_audit + e2e_p4_witness);错误信息用中文直接给用户看;推送/打印失败绝不阻塞主流程(只记日志)。
 - 迁移:alembic 版本号递增(看 server/alembic/versions/ 最新号),表结构改动必须带迁移,存量数据回填写在迁移里。

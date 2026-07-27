@@ -37,6 +37,7 @@ export function JoinMerchant() {
           </p>
           <div className="cta">
             <a className="btn primary" href="/download">下载商家端,开始入驻</a>
+            <a className="btn" href="/merchant">网页版商家后台(电脑管店/酒店房态)</a>
             <a className="btn ghost" href="/screen">看平台实时账目</a>
           </div>
         </div>

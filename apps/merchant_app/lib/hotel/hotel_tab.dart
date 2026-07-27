@@ -43,6 +43,16 @@ class HotelTab extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
+        const Card(
+          child: ListTile(
+            leading: Icon(Icons.desktop_windows_outlined),
+            title: Text('电脑上管店'),
+            subtitle: SelectableText('网页版商家后台:chaojizan.cc/merchant\n'
+                '前台电脑管房态日历、办理入住离店更顺手,与 App 同一账号'),
+            isThreeLine: true,
+          ),
+        ),
+        const SizedBox(height: 8),
         Card(
           child: ListTile(
             leading: const Icon(Icons.gavel_outlined),
