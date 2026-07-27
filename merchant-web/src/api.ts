@@ -576,3 +576,45 @@ export function applyInvoice(period: string, title: string, taxNo: string,
   return request('POST', '/invoices',
     { period, title, tax_no: taxNo, email })
 }
+
+// ---------- 店铺设置 ----------
+
+export interface StaffMember {
+  user_id: number
+  name: string
+  phone: string
+}
+
+export function myStaff(): Promise<StaffMember[]> {
+  return request('GET', '/merchants/me/staff')
+}
+
+export function addStaff(phone: string, name: string): Promise<unknown> {
+  return request('POST', '/merchants/me/staff', { phone, name })
+}
+
+export function removeStaff(userId: number): Promise<unknown> {
+  return request('DELETE', `/merchants/me/staff/${userId}`)
+}
+
+export function restShop(hours: number | null, untilClose: boolean): Promise<Merchant> {
+  return request('POST', '/merchants/me/rest',
+    untilClose ? { until_close: true } : { hours })
+}
+
+export interface HotelProfileData {
+  tier: string
+  front_desk_phone: string
+  checkin_from: string
+  checkout_until: string
+  facilities: string[]
+  special_license_no: string
+}
+
+export function myHotelProfile(): Promise<HotelProfileData> {
+  return request('GET', '/stays/me/profile')
+}
+
+export function updateHotelProfile(fields: Record<string, unknown>): Promise<unknown> {
+  return request('PATCH', '/stays/me/profile', fields)
+}

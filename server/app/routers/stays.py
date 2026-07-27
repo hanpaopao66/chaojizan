@@ -1199,3 +1199,64 @@ async def respond_stay_aftersale(
     except Exception:
         logger.exception("售后结果推送失败")
     return _aftersale_out(a, order)
+
+
+# ---------- 商家自助:酒店资料(#90 网页工作台补充) ----------
+
+@router.get("/me/profile")
+async def my_hotel_profile(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """酒店专属资料(网页设置页用):证照只读,联系与时刻可自改。"""
+    shop = await _my_hotel(db, user)
+    hp = await db.scalar(
+        select(HotelProfile).where(HotelProfile.merchant_id == shop.id))
+    if hp is None:
+        raise HTTPException(404, "酒店资料不存在")
+    return {
+        "tier": hp.tier,
+        "front_desk_phone": hp.front_desk_phone,
+        "checkin_from": hp.checkin_from,
+        "checkout_until": hp.checkout_until,
+        "facilities": hp.facilities,
+        # 证照只读展示;变更资质走客服工单人工核验
+        "special_license_no": hp.special_license_no,
+    }
+
+
+@router.patch("/me/profile")
+async def update_hotel_profile(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """酒店自改:前台电话/入退房时刻/设施标签。档次与两证不可自改
+    (资质与展示口径需平台核验,变更走客服工单)。"""
+    import re
+
+    shop = await _my_hotel(db, user)
+    hp = await db.scalar(
+        select(HotelProfile).where(HotelProfile.merchant_id == shop.id))
+    if hp is None:
+        raise HTTPException(404, "酒店资料不存在")
+    hhmm = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+    if "front_desk_phone" in payload:
+        hp.front_desk_phone = str(payload["front_desk_phone"]).strip()[:20]
+    if "checkin_from" in payload:
+        value = str(payload["checkin_from"])
+        if not hhmm.match(value):
+            raise HTTPException(422, "入住时刻格式应为 HH:MM")
+        hp.checkin_from = value
+    if "checkout_until" in payload:
+        value = str(payload["checkout_until"])
+        if not hhmm.match(value):
+            raise HTTPException(422, "退房时刻格式应为 HH:MM")
+        hp.checkout_until = value
+    if "facilities" in payload:
+        items = payload["facilities"]
+        if not isinstance(items, list) or len(items) > 20:
+            raise HTTPException(422, "设施标签最多 20 个")
+        hp.facilities = [str(x).strip()[:20] for x in items if str(x).strip()]
+    await db.commit()
+    return {"ok": True}
