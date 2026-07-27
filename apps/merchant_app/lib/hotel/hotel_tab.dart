@@ -1,0 +1,73 @@
+import 'package:flutter/material.dart';
+import 'package:superz_shared/superz_shared.dart';
+
+/// 酒店 tab:酒店信息与通用服务入口。
+/// 餐饮专属设置(起送价/打包费/出餐时长/满减满赠)在这里天然不存在——
+/// 业态分叉后各看各的,不靠隐藏开关。
+class HotelTab extends StatelessWidget {
+  const HotelTab({super.key, required this.api, required this.shop});
+
+  final ApiClient api;
+  final Merchant shop;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(
+                      child: Text(shop.name,
+                          style: Theme.of(context).textTheme.titleLarge)),
+                  Chip(label: Text('佣金 ${(shop.commissionRate * 100).toStringAsFixed(0)}%·离店才收')),
+                ]),
+                const SizedBox(height: 4),
+                Text(shop.address,
+                    style: Theme.of(context).textTheme.bodyMedium),
+                if (shop.description.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(shop.description,
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.support_agent_outlined),
+            title: const Text('联系平台客服'),
+            subtitle: const Text('对账疑问、审核进度、任何问题都可以问'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => SupportPage(api: api))),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('平台承诺', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 8),
+                const Text('· 佣金 5%,离店(核销)后才产生\n'
+                    '· 订单取消/客人未入住,平台分文不取\n'
+                    '· 无排他协议、无竞价排名、无年费\n'
+                    '· 每一笔分账都可在对账页逐单核对'),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

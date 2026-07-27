@@ -67,7 +67,8 @@ class Merchant {
         holidayPlans = (json['holiday_plans'] as List? ?? const [])
             .cast<Map<String, dynamic>>(),
         viewerIsStaff = json['viewer_is_staff'] as bool? ?? false,
-        category = json['category'] as String? ?? 'fast_food';
+        category = json['category'] as String? ?? 'fast_food',
+        bizType = json['biz_type'] as String? ?? 'food';
 
   final int id;
   final String name;
@@ -94,6 +95,7 @@ class Merchant {
   final int minOrderCents;
   final int packingFeeCents;
   final String category; // 外卖品类 slug(清单见 merchant_categories.dart)
+  final String bizType;  // 业态:food 餐饮外卖 / hotel 酒店住宿(工作台按此分叉)
 
   /// 门店相册(环境/后厨/证照实拍,最多 9 张)
   final List<String> photoUrls;
@@ -924,4 +926,280 @@ class VoucherTicket {
   /// 券码分组展示:1234 5678 9012
   String get prettyCode => code.replaceAllMapped(
       RegExp(r'.{4}'), (m) => '${m.group(0)} ').trim();
+}
+
+// ---------- 住宿(酒店垂类)----------
+
+/// 酒店档次(slug -> 中文),与服务端 HOTEL_TIERS 一致
+const kHotelTiers = {
+  'economy': '经济型',
+  'comfort': '舒适型',
+  'premium': '高档型',
+  'luxury': '豪华型',
+};
+
+/// 取消政策(slug -> 中文档位名)
+const kCancelPolicies = {
+  'limited_free': '限时免费取消',
+  'first_night': '取消扣首晚',
+  'strict': '不可退',
+};
+
+class RoomType {
+  RoomType.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as int,
+        merchantId = json['merchant_id'] as int? ?? 0,
+        name = json['name'] as String,
+        bedType = json['bed_type'] as String? ?? '',
+        areaM2 = json['area_m2'] as int? ?? 0,
+        maxGuests = json['max_guests'] as int? ?? 2,
+        imageUrls = (json['image_urls'] as List? ?? const []).cast<String>(),
+        facilities = (json['facilities'] as List? ?? const []).cast<String>(),
+        cancelPolicy = json['cancel_policy'] as String? ?? 'limited_free',
+        freeCancelUntil = json['free_cancel_until'] as String? ?? '18:00',
+        isOnSale = json['is_on_sale'] as bool? ?? true,
+        sort = json['sort'] as int? ?? 0;
+
+  final int id;
+  final int merchantId;
+  final String name;
+  final String bedType;
+  final int areaM2;
+  final int maxGuests;
+  final List<String> imageUrls;
+  final List<String> facilities;
+  final String cancelPolicy;
+  final String freeCancelUntil;
+  final bool isOnSale;
+  final int sort;
+
+  String get policyLabel => kCancelPolicies[cancelPolicy] ?? cancelPolicy;
+}
+
+/// 房价房态日历单元格(某房型某天)
+class RoomDay {
+  RoomDay.fromJson(Map<String, dynamic> json)
+      : date = json['date'] as String,
+        priceCents = json['price_cents'] as int,
+        totalQty = json['total_qty'] as int? ?? 0,
+        soldQty = json['sold_qty'] as int? ?? 0,
+        closed = json['closed'] as bool? ?? false;
+
+  final String date;
+  final int priceCents;
+  final int totalQty;
+  final int soldQty;
+  final bool closed;
+
+  int get leftQty => totalQty - soldQty;
+}
+
+/// 商家日历网格:每房型一行
+class RoomCalendarRow {
+  RoomCalendarRow.fromJson(Map<String, dynamic> json)
+      : roomTypeId = json['room_type_id'] as int,
+        roomTypeName = json['room_type_name'] as String? ?? '',
+        days = (json['days'] as List? ?? const [])
+            .map((e) => RoomDay.fromJson(e as Map<String, dynamic>))
+            .toList();
+
+  final int roomTypeId;
+  final String roomTypeName;
+  final List<RoomDay> days;
+}
+
+/// 酒店列表卡片(消费端)
+class HotelCard {
+  HotelCard.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as int,
+        name = json['name'] as String,
+        tier = json['tier'] as String? ?? 'economy',
+        address = json['address'] as String? ?? '',
+        lat = (json['lat'] as num?)?.toDouble() ?? 0,
+        lng = (json['lng'] as num?)?.toDouble() ?? 0,
+        logoUrl = json['logo_url'] as String? ?? '',
+        photoUrls = (json['photo_urls'] as List? ?? const []).cast<String>(),
+        ratingAvg = (json['rating_avg'] as num?)?.toDouble(),
+        ratingCount = json['rating_count'] as int? ?? 0,
+        distanceM = json['distance_m'] as int?,
+        minNightPriceCents = json['min_night_price_cents'] as int?,
+        full = json['full'] as bool? ?? false;
+
+  final int id;
+  final String name;
+  final String tier;
+  final String address;
+  final double lat;
+  final double lng;
+  final String logoUrl;
+  final List<String> photoUrls;
+  final double? ratingAvg;
+  final int ratingCount;
+  final int? distanceM;
+  final int? minNightPriceCents; // null = 区间内满房
+  final bool full;
+
+  String get tierLabel => kHotelTiers[tier] ?? tier;
+  String get distanceLabel {
+    final d = distanceM;
+    if (d == null) return '';
+    return d < 1000 ? '${d}m' : '${(d / 1000).toStringAsFixed(1)}km';
+  }
+}
+
+/// 房型报价(详情页,按查询区间聚合)
+class RoomQuote {
+  RoomQuote.fromJson(Map<String, dynamic> json)
+      : roomType =
+            RoomType.fromJson(json['room_type'] as Map<String, dynamic>),
+        totalCents = json['total_cents'] as int?,
+        nightly = (json['nightly'] as List? ?? const [])
+            .map((e) => RoomDay.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        bookable = json['bookable'] as bool? ?? false,
+        leftQty = json['left_qty'] as int?,
+        cancelPolicyText = json['cancel_policy_text'] as String? ?? '';
+
+  final RoomType roomType;
+  final int? totalCents; // 区间总价(一间);null = 不可订
+  final List<RoomDay> nightly;
+  final bool bookable;
+  final int? leftQty; // 仅剩 X 间(≤3 才有值)
+  final String cancelPolicyText;
+}
+
+/// 酒店详情(消费端)
+class HotelDetail {
+  HotelDetail.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as int,
+        name = json['name'] as String,
+        description = json['description'] as String? ?? '',
+        tier = json['tier'] as String? ?? 'economy',
+        address = json['address'] as String? ?? '',
+        lat = (json['lat'] as num?)?.toDouble() ?? 0,
+        lng = (json['lng'] as num?)?.toDouble() ?? 0,
+        frontDeskPhone = json['front_desk_phone'] as String? ?? '',
+        checkinFrom = json['checkin_from'] as String? ?? '14:00',
+        checkoutUntil = json['checkout_until'] as String? ?? '12:00',
+        facilities = (json['facilities'] as List? ?? const []).cast<String>(),
+        logoUrl = json['logo_url'] as String? ?? '',
+        photoUrls = (json['photo_urls'] as List? ?? const []).cast<String>(),
+        ratingAvg = (json['rating_avg'] as num?)?.toDouble(),
+        ratingCount = json['rating_count'] as int? ?? 0,
+        checkinDate = json['checkin_date'] as String? ?? '',
+        checkoutDate = json['checkout_date'] as String? ?? '',
+        rooms = (json['rooms'] as List? ?? const [])
+            .map((e) => RoomQuote.fromJson(e as Map<String, dynamic>))
+            .toList();
+
+  final int id;
+  final String name;
+  final String description;
+  final String tier;
+  final String address;
+  final double lat;
+  final double lng;
+  final String frontDeskPhone;
+  final String checkinFrom;
+  final String checkoutUntil;
+  final List<String> facilities;
+  final String logoUrl;
+  final List<String> photoUrls;
+  final double? ratingAvg;
+  final int ratingCount;
+  final String checkinDate;
+  final String checkoutDate;
+  final List<RoomQuote> rooms;
+
+  String get tierLabel => kHotelTiers[tier] ?? tier;
+}
+
+/// 住宿订单(三端共用)
+class StayOrder {
+  StayOrder.fromJson(Map<String, dynamic> json)
+      : orderNo = json['order_no'] as String,
+        merchantId = json['merchant_id'] as int? ?? 0,
+        roomTypeId = json['room_type_id'] as int? ?? 0,
+        checkinDate = json['checkin_date'] as String,
+        checkoutDate = json['checkout_date'] as String,
+        nights = json['nights'] as int? ?? 1,
+        roomsQty = json['rooms_qty'] as int? ?? 1,
+        guestName = json['guest_name'] as String? ?? '',
+        guestPhone = json['guest_phone'] as String? ?? '',
+        arrivalNote = json['arrival_note'] as String? ?? '',
+        roomTypeName = json['room_type_name'] as String? ?? '',
+        nightlyPrices = (json['nightly_prices'] as List? ?? const [])
+            .cast<Map<String, dynamic>>(),
+        totalCents = json['total_cents'] as int? ?? 0,
+        feeCents = json['fee_cents'] as int? ?? 0,
+        netCents = json['net_cents'] as int? ?? 0,
+        cancelPolicy = json['cancel_policy'] as String? ?? 'limited_free',
+        freeCancelUntil = json['free_cancel_until'] as String? ?? '18:00',
+        status = json['status'] as String,
+        statusLabel = json['status_label'] as String? ?? '',
+        cancelPolicyText = json['cancel_policy_text'] as String? ?? '',
+        rejectReason = json['reject_reason'] as String? ?? '',
+        refundCents = json['refund_cents'] as int? ?? 0,
+        refundNote = json['refund_note'] as String? ?? '',
+        hotelName = json['hotel_name'] as String? ?? '',
+        hotelAddress = json['hotel_address'] as String? ?? '',
+        hotelPhone = json['hotel_phone'] as String? ?? '',
+        createdAt = json['created_at'] as String? ?? '',
+        paidAt = json['paid_at'] as String?,
+        confirmedAt = json['confirmed_at'] as String?,
+        checkedInAt = json['checked_in_at'] as String?,
+        completedAt = json['completed_at'] as String?,
+        cancelledAt = json['cancelled_at'] as String?;
+
+  final String orderNo;
+  final int merchantId;
+  final int roomTypeId;
+  final String checkinDate;
+  final String checkoutDate;
+  final int nights;
+  final int roomsQty;
+  final String guestName;
+  final String guestPhone;
+  final String arrivalNote;
+  final String roomTypeName;
+  final List<Map<String, dynamic>> nightlyPrices;
+  final int totalCents;
+  final int feeCents;
+  final int netCents;
+  final String cancelPolicy;
+  final String freeCancelUntil;
+
+  /// created/closed/paid/confirmed/checked_in/completed/cancelled/rejected/noshow
+  final String status;
+  final String statusLabel;
+  final String cancelPolicyText;
+  final String rejectReason;
+  final int refundCents;
+  final String refundNote;
+  final String hotelName;
+  final String hotelAddress;
+  final String hotelPhone;
+  final String createdAt;
+  final String? paidAt;
+  final String? confirmedAt;
+  final String? checkedInAt;
+  final String? completedAt;
+  final String? cancelledAt;
+
+  bool get isActive => const {'created', 'paid', 'confirmed', 'checked_in'}
+      .contains(status);
+  String get stayLabel =>
+      '$checkinDate 入住 · $nights 晚 · $roomsQty 间';
+}
+
+/// 取消试算(确认弹层)
+class StayCancelPreview {
+  StayCancelPreview.fromJson(Map<String, dynamic> json)
+      : refundCents = json['refund_cents'] as int,
+        penaltyCents = json['penalty_cents'] as int,
+        note = json['note'] as String? ?? '';
+
+  final int refundCents;
+  final int penaltyCents;
+  final String note;
 }

@@ -902,6 +902,8 @@ class ApiClient {
     required String licenseNo,
     required String licenseImageUrl,
     String category = 'fast_food',
+    String bizType = 'food',
+    Map<String, dynamic>? hotel, // 酒店专属资料(biz_type=hotel 必传)
   }) async {
     final data = await _request('POST', '/merchants', body: {
       'name': name,
@@ -912,6 +914,8 @@ class ApiClient {
       'license_no': licenseNo,
       'license_image_url': licenseImageUrl,
       'category': category,
+      'biz_type': bizType,
+      if (hotel != null) 'hotel': hotel,
     });
     return Merchant.fromJson(data as Map<String, dynamic>);
   }
@@ -1393,5 +1397,195 @@ class ApiClient {
     return (data as List)
         .map((e) => Ticket.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  // ---------- 住宿(酒店垂类) ----------
+
+  /// 商家:我的房型列表
+  Future<List<RoomType>> stayRoomTypes() async {
+    final data = await _request('GET', '/stays/me/room-types');
+    return (data as List)
+        .map((e) => RoomType.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 商家:新建房型
+  Future<RoomType> createRoomType(Map<String, dynamic> fields) async {
+    final data =
+        await _request('POST', '/stays/me/room-types', body: fields);
+    return RoomType.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 商家:编辑房型(下架传 is_on_sale=false,不删)
+  Future<RoomType> updateRoomType(int id, Map<String, dynamic> fields) async {
+    final data =
+        await _request('PATCH', '/stays/me/room-types/$id', body: fields);
+    return RoomType.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 商家:日历批量设置(日期区间 × 多房型,统一改价/改总量/开关房)
+  Future<void> setStayCalendar({
+    required List<int> roomTypeIds,
+    required String fromDate,
+    required String toDate,
+    int? priceCents,
+    int? totalQty,
+    bool? closed,
+  }) async {
+    await _request('PUT', '/stays/me/calendar', body: {
+      'room_type_ids': roomTypeIds,
+      'from_date': fromDate,
+      'to_date': toDate,
+      if (priceCents != null) 'price_cents': priceCents,
+      if (totalQty != null) 'total_qty': totalQty,
+      if (closed != null) 'closed': closed,
+    });
+  }
+
+  /// 商家:日历网格(每房型一行,缺的日期表示「未设价」)
+  Future<List<RoomCalendarRow>> stayCalendar(
+      {String? fromDate, int days = 14}) async {
+    final query = fromDate == null
+        ? '?days=$days'
+        : '?from_date=$fromDate&days=$days';
+    final data = await _request('GET', '/stays/me/calendar$query');
+    return (data as List)
+        .map((e) => RoomCalendarRow.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 商家:住宿订单列表(all/pending/arriving/inhouse/leaving)
+  Future<List<StayOrder>> stayMerchantOrders({String state = 'all'}) async {
+    final data = await _request('GET', '/stays/me/orders?state=$state');
+    return (data as List)
+        .map((e) => StayOrder.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 商家:确认订单
+  Future<StayOrder> stayConfirm(String orderNo) async {
+    final data =
+        await _request('POST', '/stays/me/orders/$orderNo/confirm');
+    return StayOrder.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 商家:拒单(原因会展示给用户,全额退款)
+  Future<StayOrder> stayReject(String orderNo, String reason) async {
+    final data = await _request('POST', '/stays/me/orders/$orderNo/reject',
+        body: {'reason': reason});
+    return StayOrder.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 商家:办理入住(核销)
+  Future<StayOrder> stayCheckin(String orderNo) async {
+    final data =
+        await _request('POST', '/stays/me/orders/$orderNo/checkin');
+    return StayOrder.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 商家:办理离店(结算触发点,佣金 5% 在此产生)
+  Future<StayOrder> stayCheckout(String orderNo) async {
+    final data =
+        await _request('POST', '/stays/me/orders/$orderNo/checkout');
+    return StayOrder.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:酒店列表(按入住区间报价)
+  Future<List<HotelCard>> hotels({
+    double? lat,
+    double? lng,
+    String? checkin,
+    String? checkout,
+    String q = '',
+    String sort = 'comprehensive',
+    String? tier,
+    int? minPriceCents,
+    int? maxPriceCents,
+  }) async {
+    final params = <String, String>{
+      if (lat != null) 'lat': '$lat',
+      if (lng != null) 'lng': '$lng',
+      if (checkin != null) 'checkin': checkin,
+      if (checkout != null) 'checkout': checkout,
+      if (q.isNotEmpty) 'q': q,
+      'sort': sort,
+      if (tier != null) 'tier': tier,
+      if (minPriceCents != null) 'min_price_cents': '$minPriceCents',
+      if (maxPriceCents != null) 'max_price_cents': '$maxPriceCents',
+    };
+    final query = params.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+    final data = await _request('GET', '/stays/hotels?$query');
+    return (data as List)
+        .map((e) => HotelCard.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 用户:酒店详情 + 房型报价(改日期即重新报价)
+  Future<HotelDetail> hotelDetail(int id,
+      {String? checkin, String? checkout}) async {
+    final params = [
+      if (checkin != null) 'checkin=$checkin',
+      if (checkout != null) 'checkout=$checkout',
+    ].join('&');
+    final data = await _request(
+        'GET', '/stays/hotels/$id${params.isEmpty ? '' : '?$params'}');
+    return HotelDetail.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:住宿下单(锁定库存,15 分钟内支付)
+  Future<StayOrder> createStayOrder({
+    required int roomTypeId,
+    required String checkinDate,
+    required String checkoutDate,
+    required int roomsQty,
+    required String guestName,
+    required String guestPhone,
+    String arrivalNote = '',
+  }) async {
+    final data = await _request('POST', '/stays/orders', body: {
+      'room_type_id': roomTypeId,
+      'checkin_date': checkinDate,
+      'checkout_date': checkoutDate,
+      'rooms_qty': roomsQty,
+      'guest_name': guestName,
+      'guest_phone': guestPhone,
+      'arrival_note': arrivalNote,
+    });
+    return StayOrder.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:模拟支付(微信支付联调时替换,与外卖/团购同语义)
+  Future<StayOrder> payStayMock(String orderNo) async {
+    final data = await _request('POST', '/stays/orders/$orderNo/pay/mock');
+    return StayOrder.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:我的住宿订单
+  Future<List<StayOrder>> myStayOrders() async {
+    final data = await _request('GET', '/stays/orders/mine');
+    return (data as List)
+        .map((e) => StayOrder.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 用户:住宿订单详情
+  Future<StayOrder> stayOrderDetail(String orderNo) async {
+    final data = await _request('GET', '/stays/orders/$orderNo');
+    return StayOrder.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:取消试算(无副作用,确认弹层展示预计退款)
+  Future<StayCancelPreview> stayCancelPreview(String orderNo) async {
+    final data =
+        await _request('GET', '/stays/orders/$orderNo/cancel-preview');
+    return StayCancelPreview.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:取消订单(按取消政策退款)
+  Future<StayOrder> cancelStayOrder(String orderNo) async {
+    final data = await _request('POST', '/stays/orders/$orderNo/cancel');
+    return StayOrder.fromJson(data as Map<String, dynamic>);
   }
 }

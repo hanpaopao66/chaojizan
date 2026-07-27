@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'dish_manage_page.dart';
 import 'finance_page.dart';
+import 'hotel/hotel_home_page.dart';
 import 'listen_service.dart';
 import 'printer_service.dart';
 import 'shop_tab.dart';
@@ -139,13 +140,20 @@ class _ShopGateState extends State<ShopGate> {
                 Text('「${shop.name}」已提交审核',
                     style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 8),
-                const Text('平台正在核对你的食品经营许可证,通过后自动进入接单页',
+                Text(
+                    shop.bizType == 'hotel'
+                        ? '平台正在核对你的营业执照与特种行业许可证,通过后自动进入工作台'
+                        : '平台正在核对你的食品经营许可证,通过后自动进入接单页',
                     textAlign: TextAlign.center),
               ],
             ),
           ),
         ),
       );
+    }
+    // 业态分叉:同一个 App,登录后按 biz_type 进入不同工作台
+    if (shop.bizType == 'hotel') {
+      return HotelHomePage(api: widget.api, shop: shop, onShopChanged: _load);
     }
     return MerchantHomePage(api: widget.api, shop: shop);
   }
@@ -176,46 +184,66 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
       TextEditingController(text: widget.existing?.address ?? '');
   final _licenseNo = TextEditingController();
   late String _category = widget.existing?.category ?? 'fast_food';
+  // 业态:第一步选择,决定后续收哪些证照(重新提交时沿用原业态)
+  late String _bizType = widget.existing?.bizType ?? 'food';
   String _licenseImageUrl = '';
   bool _uploading = false;
   bool _busy = false;
+
+  // 酒店专属
+  final _frontDeskPhone = TextEditingController();
+  final _specialLicenseNo = TextEditingController();
+  String _tier = 'economy';
+  String _specialLicenseImageUrl = '';
+  String _hygieneImageUrl = '';
 
   // 演示坐标;接高德 POI 选点后替换
   static const _lat = 30.6598;
   static const _lng = 104.0810;
 
-  Future<void> _pickLicenseImage() async {
+  bool get _isHotel => _bizType == 'hotel';
+
+  Future<String?> _uploadPicked() async {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       maxWidth: 1600, // 证照要能看清文字,分辨率比菜品图高
       imageQuality: 90,
     );
-    if (picked == null) return;
+    if (picked == null) return null;
     setState(() => _uploading = true);
     try {
       final bytes = await picked.readAsBytes();
-      final url = await widget.api.uploadImage(bytes, picked.name);
-      if (mounted) setState(() => _licenseImageUrl = url);
+      return await widget.api.uploadImage(bytes, picked.name);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('上传失败:$e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('上传失败:$e')));
+      }
+      return null;
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
   }
 
   Future<void> _submit() async {
+    final licenseLabel = _isHotel ? '营业执照注册号' : '食品经营许可证号';
     if (_name.text.trim().isEmpty ||
         _address.text.trim().isEmpty ||
         _licenseNo.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('店名、地址、食品经营许可证号都是必填的')));
+          SnackBar(content: Text('店名、地址、$licenseLabel都是必填的')));
       return;
     }
     if (_licenseImageUrl.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请上传食品经营许可证照片(监管要求)')));
+          SnackBar(content: Text('请上传$licenseLabel照片(监管要求)')));
+      return;
+    }
+    if (_isHotel &&
+        (_specialLicenseNo.text.trim().isEmpty ||
+            _specialLicenseImageUrl.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('酒店入驻需要特种行业许可证(旅馆业,公安核发)号与照片')));
       return;
     }
     setState(() => _busy = true);
@@ -230,6 +258,17 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           licenseNo: _licenseNo.text.trim(),
           licenseImageUrl: _licenseImageUrl,
           category: _category,
+          bizType: _bizType,
+          hotel: _isHotel
+              ? {
+                  'tier': _tier,
+                  'front_desk_phone': _frontDeskPhone.text.trim(),
+                  'special_license_no': _specialLicenseNo.text.trim(),
+                  'special_license_image_url': _specialLicenseImageUrl,
+                  if (_hygieneImageUrl.isNotEmpty)
+                    'hygiene_image_url': _hygieneImageUrl,
+                }
+              : null,
         );
       } else {
         await widget.api.updateShop({
@@ -238,7 +277,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           'address': _address.text.trim(),
           'license_no': _licenseNo.text.trim(),
           'license_image_url': _licenseImageUrl,
-          'category': _category,
+          if (!_isHotel) 'category': _category,
         });
       }
       widget.onSubmitted();
@@ -251,11 +290,90 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
     }
   }
 
+  /// 证照上传框(入驻通用):点击选图,回显缩略图
+  Widget _licenseUpload({
+    required String label,
+    required String url,
+    required ValueChanged<String> onUploaded,
+  }) {
+    return InkWell(
+      onTap: _uploading
+          ? null
+          : () async {
+              final uploaded = await _uploadPicked();
+              if (uploaded != null && mounted) onUploaded(uploaded);
+            },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        height: 140,
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).colorScheme.outline),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: _uploading
+            ? const Center(child: CircularProgressIndicator())
+            : url.isEmpty
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.add_a_photo_outlined, size: 32),
+                      const SizedBox(height: 8),
+                      Text(label,
+                          style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  )
+                : Image.network(
+                    widget.api.resolveUrl(url),
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                  ),
+      ),
+    );
+  }
+
+  /// 业态选择卡(仅首次入驻可选;重新提交沿用原业态)
+  Widget _bizTypeCard(String value, IconData icon, String title, String promise) {
+    final selected = _bizType == value;
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: InkWell(
+        onTap: widget.existing != null
+            ? null
+            : () => setState(() => _bizType = value),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          decoration: BoxDecoration(
+            border: Border.all(
+                color: selected ? scheme.primary : scheme.outlineVariant,
+                width: selected ? 2 : 1),
+            borderRadius: BorderRadius.circular(12),
+            color: selected ? scheme.primary.withValues(alpha: 0.06) : null,
+          ),
+          child: Column(children: [
+            Icon(icon, size: 32,
+                color: selected ? scheme.primary : scheme.outline),
+            const SizedBox(height: 8),
+            Text(title,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: selected ? scheme.primary : null)),
+            const SizedBox(height: 4),
+            Text(promise,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall),
+          ]),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rejected = widget.existing?.isRejected == true;
     return Scaffold(
-      appBar: AppBar(title: Text(rejected ? '重新提交申请' : '申请开店')),
+      appBar: AppBar(title: Text(rejected ? '重新提交申请' : '申请入驻')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -269,10 +387,18 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
               ),
             ),
           const SizedBox(height: 8),
+          // 第一步:选业态(证照要求不同;重新提交沿用原业态)
+          Row(children: [
+            _bizTypeCard('food', Icons.restaurant, '餐饮外卖', '佣金 5% 封顶\n配送费全归骑手'),
+            const SizedBox(width: 12),
+            _bizTypeCard('hotel', Icons.hotel, '酒店住宿', '佣金 5%,离店才收\n取消分文不收'),
+          ]),
+          const SizedBox(height: 16),
           TextField(
               controller: _name,
-              decoration: const InputDecoration(
-                  labelText: '店铺名称 *', border: OutlineInputBorder())),
+              decoration: InputDecoration(
+                  labelText: _isHotel ? '酒店名称 *' : '店铺名称 *',
+                  border: const OutlineInputBorder())),
           const SizedBox(height: 12),
           TextField(
               controller: _description,
@@ -281,61 +407,81 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           const SizedBox(height: 12),
           TextField(
               controller: _address,
+              decoration: InputDecoration(
+                  labelText: _isHotel ? '酒店地址 *' : '门店地址 *',
+                  border: const OutlineInputBorder())),
+          const SizedBox(height: 12),
+          if (!_isHotel) ...[
+            // 外卖品类:决定出现在用户端哪个分类,入驻后可随时改
+            DropdownButtonFormField<String>(
+              initialValue: _category,
               decoration: const InputDecoration(
-                  labelText: '门店地址 *', border: OutlineInputBorder())),
-          const SizedBox(height: 12),
-          // 外卖品类:决定出现在用户端哪个分类,入驻后可随时改
-          DropdownButtonFormField<String>(
-            initialValue: _category,
-            decoration: const InputDecoration(
-                labelText: '外卖品类 *', border: OutlineInputBorder()),
-            items: [
-              for (final e in kMerchantCategories.entries)
-                DropdownMenuItem(
-                    value: e.key,
-                    child: Text(
-                        '${kMerchantCategoryEmoji[e.key] ?? ''} ${e.value}')),
-            ],
-            onChanged: (v) => setState(() => _category = v ?? 'fast_food'),
-          ),
-          const SizedBox(height: 12),
+                  labelText: '外卖品类 *', border: OutlineInputBorder()),
+              items: [
+                for (final e in kMerchantCategories.entries)
+                  DropdownMenuItem(
+                      value: e.key,
+                      child: Text(
+                          '${kMerchantCategoryEmoji[e.key] ?? ''} ${e.value}')),
+              ],
+              onChanged: (v) => setState(() => _category = v ?? 'fast_food'),
+            ),
+            const SizedBox(height: 12),
+          ] else ...[
+            DropdownButtonFormField<String>(
+              initialValue: _tier,
+              decoration: const InputDecoration(
+                  labelText: '酒店档次 *', border: OutlineInputBorder()),
+              items: [
+                for (final e in kHotelTiers.entries)
+                  DropdownMenuItem(value: e.key, child: Text(e.value)),
+              ],
+              onChanged: (v) => setState(() => _tier = v ?? 'economy'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+                controller: _frontDeskPhone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                    labelText: '前台电话',
+                    helperText: '展示给已下单的住客,方便到店联系',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+          ],
           TextField(
               controller: _licenseNo,
-              decoration: const InputDecoration(
-                  labelText: '食品经营许可证号 *',
+              decoration: InputDecoration(
+                  labelText: _isHotel ? '营业执照注册号 *' : '食品经营许可证号 *',
                   helperText: '平台会人工核对,信息不实将无法通过审核',
-                  border: OutlineInputBorder())),
+                  border: const OutlineInputBorder())),
           const SizedBox(height: 12),
           // 证照照片(监管要求留存影像,审核员对照证号人工核验)
-          InkWell(
-            onTap: _uploading ? null : _pickLicenseImage,
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              height: 140,
-              decoration: BoxDecoration(
-                border: Border.all(color: Theme.of(context).colorScheme.outline),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: _uploading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _licenseImageUrl.isEmpty
-                      ? Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.add_a_photo_outlined, size: 32),
-                            const SizedBox(height: 8),
-                            Text('上传食品经营许可证照片 *',
-                                style: Theme.of(context).textTheme.bodySmall),
-                          ],
-                        )
-                      : Image.network(
-                          widget.api.resolveUrl(_licenseImageUrl),
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                        ),
-            ),
+          _licenseUpload(
+            label: _isHotel ? '上传营业执照照片 *' : '上传食品经营许可证照片 *',
+            url: _licenseImageUrl,
+            onUploaded: (u) => setState(() => _licenseImageUrl = u),
           ),
+          if (_isHotel) ...[
+            const SizedBox(height: 12),
+            TextField(
+                controller: _specialLicenseNo,
+                decoration: const InputDecoration(
+                    labelText: '特种行业许可证号(旅馆业) *',
+                    helperText: '公安机关核发,开旅馆的硬性资质',
+                    border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            _licenseUpload(
+              label: '上传特种行业许可证照片 *',
+              url: _specialLicenseImageUrl,
+              onUploaded: (u) => setState(() => _specialLicenseImageUrl = u),
+            ),
+            const SizedBox(height: 12),
+            _licenseUpload(
+              label: '上传卫生许可证照片(选填)',
+              url: _hygieneImageUrl,
+              onUploaded: (u) => setState(() => _hygieneImageUrl = u),
+            ),
+          ],
           const SizedBox(height: 24),
           FilledButton(
             onPressed: _busy ? null : _submit,
