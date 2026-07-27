@@ -135,6 +135,145 @@ async def _sweep_voucher_purchases(db, now: datetime) -> int:
     return len(stale)
 
 
+async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
+    """住宿订单三条清扫(幂等,靠状态判重):
+
+    1. 待支付超时 → closed + 回补库存;
+    2. 入住日次日 12:00(北京)仍未入住未取消 → noshow:扣首晚归商家
+       (平台零佣),其余退用户;日期已过,库存不回补;
+    3. 已入住过了退房日次日 06:00 商家还没办离店 → 自动 completed
+       (结算口径与手动离店一致,商家忘点不能拖着不结算)。
+    """
+    from decimal import Decimal
+
+    from ..models import StayOrder
+    from ..state_machine import StayOrderStatus
+    from .stay_inventory import release
+
+    closed = noshow = autodone = 0
+    bj_now = now.astimezone(BEIJING)
+    today_bj = bj_now.date()
+
+    stale = (await db.scalars(
+        select(StayOrder)
+        .where(StayOrder.status == StayOrderStatus.CREATED,
+               StayOrder.created_at
+               < now - timedelta(minutes=settings.pay_timeout_minutes))
+        .with_for_update(skip_locked=True).limit(200))).all()
+    for o in stale:
+        o.status = StayOrderStatus.CLOSED
+        o.cancelled_at = now
+        o.refund_note = "支付超时自动关闭"
+        await release(db, o.room_type_id, o.checkin_date,
+                      o.checkout_date, o.rooms_qty)
+        closed += 1
+
+    overdue = (await db.scalars(
+        select(StayOrder)
+        .where(StayOrder.status == StayOrderStatus.CONFIRMED,
+               StayOrder.checkin_date < today_bj)
+        .with_for_update(skip_locked=True).limit(200))).all()
+    for o in overdue:
+        next_noon_passed = (today_bj - o.checkin_date).days > 1 \
+            or bj_now.hour >= 12
+        if not next_noon_passed:
+            continue
+        first = min(o.nightly_prices[0]["price_cents"] * o.rooms_qty,
+                    o.total_cents)
+        o.status = StayOrderStatus.NOSHOW
+        o.fee_cents = 0                      # 扣首晚归商家,平台分文不取
+        o.net_cents = first
+        o.refund_cents = o.total_cents - first
+        o.refund_note = "未入住:按政策扣首晚,其余已退回"
+        o.cancelled_at = now
+        noshow += 1
+
+    inhouse = (await db.scalars(
+        select(StayOrder)
+        .where(StayOrder.status == StayOrderStatus.CHECKED_IN,
+               StayOrder.checkout_date < today_bj)
+        .with_for_update(skip_locked=True).limit(200))).all()
+    for o in inhouse:
+        morning_passed = (today_bj - o.checkout_date).days > 1 \
+            or bj_now.hour >= 6
+        if not morning_passed:
+            continue
+        o.status = StayOrderStatus.COMPLETED
+        o.completed_at = now
+        o.fee_cents = int(Decimal(o.total_cents)
+                          * Decimal(str(settings.stay_commission_rate)))
+        o.net_cents = o.total_cents - o.fee_cents
+        autodone += 1
+    return closed, noshow, autodone
+
+
+async def _stay_reminders(now: datetime) -> None:
+    """住宿提醒(独立会话,推送失败只记日志):
+
+    1. 商家 2 小时未确认 → 催办(一单一次);
+    2. 入住前一天 18:00 后 → 提醒用户(含酒店信息与取消时限,一单一次);
+    3. 每天 09:00 后 → 商家今日预抵汇总一条(不逐单轰炸,一天一次)。
+    """
+    from ..models import HotelProfile, StayOrder
+    from ..redis_client import get_redis
+    from ..state_machine import StayOrderStatus
+
+    redis = get_redis()
+    bj_now = now.astimezone(BEIJING)
+    today_bj = bj_now.date()
+    async with SessionLocal() as db:
+        # 1 催确认
+        rows = (await db.execute(
+            select(StayOrder, Merchant)
+            .join(Merchant, Merchant.id == StayOrder.merchant_id)
+            .where(StayOrder.status == StayOrderStatus.PAID,
+                   StayOrder.paid_at < now - timedelta(hours=2))
+            .limit(100))).all()
+        for o, m in rows:
+            if await redis.set(f"stay:urgecfm:{o.order_no}", 1,
+                               ex=86400, nx=True):
+                await push_to_user(
+                    m.owner_id, "住宿订单待确认",
+                    f"订单#{o.order_no[-6:]} 已支付 2 小时,请尽快确认或拒单",
+                    {"type": "stay_order", "order_no": o.order_no})
+        # 2 入住前一天 18:00 用户提醒
+        if bj_now.hour >= 18:
+            rows = (await db.execute(
+                select(StayOrder, Merchant, HotelProfile)
+                .join(Merchant, Merchant.id == StayOrder.merchant_id)
+                .join(HotelProfile,
+                      HotelProfile.merchant_id == StayOrder.merchant_id)
+                .where(StayOrder.status == StayOrderStatus.CONFIRMED,
+                       StayOrder.checkin_date
+                       == today_bj + timedelta(days=1))
+                .limit(200))).all()
+            for o, m, hp in rows:
+                if await redis.set(f"stay:arrive1d:{o.order_no}", 1,
+                                   ex=86400 * 2, nx=True):
+                    await push_to_user(
+                        o.customer_id, "明天入住提醒",
+                        f"{m.name} {o.room_type_name},{hp.checkin_from} 后"
+                        f"可办理入住;地址:{m.address}",
+                        {"type": "stay_order", "order_no": o.order_no})
+        # 3 商家今日预抵汇总
+        if bj_now.hour >= 9:
+            rows = (await db.execute(
+                select(StayOrder.merchant_id,
+                       func.count(StayOrder.id))
+                .where(StayOrder.status == StayOrderStatus.CONFIRMED,
+                       StayOrder.checkin_date == today_bj)
+                .group_by(StayOrder.merchant_id))).all()
+            for mid, n in rows:
+                if await redis.set(f"stay:arrsum:{mid}:{today_bj}", 1,
+                                   ex=86400, nx=True):
+                    m = await db.get(Merchant, mid)
+                    if m:
+                        await push_to_user(
+                            m.owner_id, "今日预抵",
+                            f"今天有 {n} 笔订单预计到店,记得备房",
+                            {"type": "stay_arrivals"})
+
+
 async def _sweep_orphan_appends(db: AsyncSession, now: datetime) -> list[Order]:
     """孤儿追加单:原单被取消(任何路径)后,追加单失去配送载体,级联取消退款。
     30 秒清扫周期的最终一致足够——期间商家看到的也是"原单已取消"。"""
@@ -457,6 +596,10 @@ async def sweep_once() -> dict[str, int]:
         expired_vouchers = await _sweep_voucher_purchases(db, now)
         if expired_vouchers:
             logger.info("auto_flow: 关闭 %s 张超时未支付的团购券", expired_vouchers)
+        stay_closed, stay_noshow, stay_autodone = await _sweep_stays(db, now)
+        if stay_closed or stay_noshow or stay_autodone:
+            logger.info("auto_flow: 住宿清扫 关单%s noshow%s 自动离店%s",
+                        stay_closed, stay_noshow, stay_autodone)
         closed_unpaid = await _transition_batch(
             db,
             OrderStatus.PENDING_PAYMENT,
@@ -529,6 +672,10 @@ async def sweep_once() -> dict[str, int]:
         await _notify_ready_timeout(ready_stage1, ready_stage2)
     except Exception:  # 推送永远不能拖垮清扫主流程
         logger.exception("无人接单/出餐超时推送失败")
+    try:
+        await _stay_reminders(now)
+    except Exception:
+        logger.exception("住宿提醒推送失败")
 
     for order in [*closed_unpaid, *cancelled_unaccepted, *completed,
                   *pickup_done, *no_rider_cancelled, *orphan_appends]:
@@ -547,6 +694,9 @@ async def sweep_once() -> dict[str, int]:
         "ready_alert_2": len(ready_stage2),
         "orphan_appends_cancelled": len(orphan_appends),
         "privacy_unbound": unbound,
+        "stay_closed": stay_closed,
+        "stay_noshow": stay_noshow,
+        "stay_auto_completed": stay_autodone,
     }
 
 

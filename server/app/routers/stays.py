@@ -441,6 +441,52 @@ from ..state_machine import (
 
 _BJ = _tz(_td(hours=8))  # 取消时限按北京时间
 
+import logging
+
+logger = logging.getLogger("superz.stays")
+
+
+async def _notify_stay(db: AsyncSession, order: StayOrder, kind: str) -> None:
+    """住宿订单事件通知(推送/WS 失败绝不阻塞主流程)。"""
+    try:
+        from ..services.push import push_to_user
+        from ..ws import manager
+        tail = order.order_no[-6:]
+        stay_desc = (f"{order.room_type_name}×{order.rooms_qty} "
+                     f"{order.checkin_date.month}月{order.checkin_date.day}日"
+                     f"入住{order.nights}晚")
+        if kind == "paid":  # 新单 → 商家(WS 走语音循环播报同通道 + 推送)
+            await manager.broadcast(
+                f"merchant:{order.merchant_id}",
+                {"type": "new_stay_order", "order_no": order.order_no,
+                 "summary": stay_desc, "total_cents": order.total_cents})
+            m = await db.get(Merchant, order.merchant_id)
+            if m:
+                await push_to_user(
+                    m.owner_id, "新住宿订单",
+                    f"{stay_desc},¥{order.total_cents / 100:g},请及时确认",
+                    {"type": "stay_order", "order_no": order.order_no})
+        elif kind == "confirmed":
+            m = await db.get(Merchant, order.merchant_id)
+            await push_to_user(
+                order.customer_id, "酒店已确认你的预订",
+                f"{m.name if m else ''} {stay_desc};入住凭证见订单详情",
+                {"type": "stay_order", "order_no": order.order_no})
+        elif kind == "rejected":
+            await push_to_user(
+                order.customer_id, "预订未成功,已全额退款",
+                f"订单#{tail} 商家拒单:{order.reject_reason};"
+                f"¥{order.refund_cents / 100:g} 将原路退回",
+                {"type": "stay_order", "order_no": order.order_no})
+        elif kind == "cancelled":
+            await push_to_user(
+                order.customer_id, "取消成功",
+                f"订单#{tail} {order.refund_note},"
+                f"退款 ¥{order.refund_cents / 100:g} 将原路退回",
+                {"type": "stay_order", "order_no": order.order_no})
+    except Exception:
+        logger.exception("住宿订单通知失败: %s %s", order.order_no, kind)
+
 
 def _transit(order: StayOrder, target: StayOrderStatus, role: str) -> None:
     """状态跃迁统一入口:非法迁移 409,越权 403。"""
@@ -563,6 +609,7 @@ async def pay_stay_mock(
     order.paid_at = datetime.now(_tz.utc)
     await db.commit()
     await db.refresh(order)
+    await _notify_stay(db, order, "paid")
     return _stay_out(order)
 
 
@@ -641,6 +688,7 @@ async def cancel_stay_order(
                   order.checkout_date, order.rooms_qty)
     await db.commit()
     await db.refresh(order)
+    await _notify_stay(db, order, "cancelled")
     return _stay_out(order)
 
 
@@ -696,6 +744,7 @@ async def confirm_stay_order(
     order.confirmed_at = datetime.now(_tz.utc)
     await db.commit()
     await db.refresh(order)
+    await _notify_stay(db, order, "confirmed")
     return _stay_out(order)
 
 
@@ -718,6 +767,7 @@ async def reject_stay_order(
                   order.checkout_date, order.rooms_qty)
     await db.commit()
     await db.refresh(order)
+    await _notify_stay(db, order, "rejected")
     return _stay_out(order)
 
 
