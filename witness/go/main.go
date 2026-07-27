@@ -218,6 +218,11 @@ func verifyRows(p map[string]any) []string {
 			if fee > gross*srate+1 {
 				problems = append(problems, fmt.Sprintf("住宿行 %v: 佣金超过 %.0f%%", r["s"], srate*100))
 			}
+		} else if r["kind"] == "penalty" {
+			// 到店无房违约金:商家负行赔给用户,平台分文不取;赔付不超房费
+			if fee != 0 || net >= 0 || net < -gross {
+				problems = append(problems, fmt.Sprintf("住宿行 %v: 违约金行越界", r["s"]))
+			}
 		} else {
 			// 取消扣款/未入住:平台分文不取,商家所得不超过房费
 			if fee != 0 || net < 0 || net > gross {

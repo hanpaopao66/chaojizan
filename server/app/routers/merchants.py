@@ -1351,7 +1351,9 @@ async def finance_statement_csv(
          title.replace(",", ";"))
         for p, title in redeems
     ] + [
-        (o.completed_at or o.cancelled_at, o.order_no, stay_kind[o.status],
+        (o.completed_at or o.cancelled_at, o.order_no,
+         # 负净额 = 到店无房违约金赔付(商家承担,平台分文不取)
+         "住宿违约金赔付" if o.net_cents < 0 else stay_kind[o.status],
          o.total_cents, o.fee_cents, o.net_cents,
          f"{o.room_type_name}×{o.rooms_qty} {o.nights}晚")
         for o in stays

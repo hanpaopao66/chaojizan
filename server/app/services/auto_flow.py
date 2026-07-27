@@ -204,6 +204,33 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
                           * Decimal(str(settings.stay_commission_rate)))
         o.net_cents = o.total_cents - o.fee_cents
         autodone += 1
+
+    # 4. 售后超时:到店无房商家 2 小时未响应 → 按成立处理(客人在门口等不起);
+    #    协商退 24 小时未响应 → 维持原政策关闭(平台不替商家做主)
+    from ..models import StayAfterSale, StayAfterSaleKind, StayAfterSaleStatus
+    from ..routers.stays import AFTERSALE_AUTO_HOURS, resolve_stay_aftersale
+
+    stale_as = (await db.scalars(
+        select(StayAfterSale)
+        .where(StayAfterSale.status == StayAfterSaleStatus.pending)
+        .with_for_update(skip_locked=True).limit(100))).all()
+    for a in stale_as:
+        age_hours = (now - a.created_at).total_seconds() / 3600
+        order = await db.scalar(
+            select(StayOrder).where(StayOrder.id == a.stay_order_id)
+            .with_for_update(skip_locked=True))
+        if order is None:
+            continue
+        if a.kind == StayAfterSaleKind.no_room \
+                and age_hours >= AFTERSALE_AUTO_HOURS:
+            await resolve_stay_aftersale(
+                db, a, order, True,
+                merchant_note="商家超时未响应,按成立处理", auto=True)
+            logger.info("auto_flow: 到店无房超时自动成立 %s", order.order_no)
+        elif a.kind == StayAfterSaleKind.nego_refund and age_hours >= 24:
+            a.status = StayAfterSaleStatus.rejected
+            a.merchant_note = "商家未响应,维持原取消政策;如有异议请联系客服"
+            a.resolved_at = now
     return closed, noshow, autodone
 
 

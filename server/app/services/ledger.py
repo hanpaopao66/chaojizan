@@ -81,7 +81,9 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"FROM stay_orders WHERE status = 'completed' AND {stay_completed} "
             f"UNION ALL "
             f"SELECT order_no, total_cents, fee_cents, net_cents, "
-            f"       CASE WHEN status = 'noshow' THEN 'noshow' ELSE 'cancel' END "
+            f"       CASE WHEN net_cents < 0 THEN 'penalty' "
+            f"            WHEN status = 'noshow' THEN 'noshow' "
+            f"            ELSE 'cancel' END "  # penalty=到店无房违约金(商家负行)
             f"FROM stay_orders WHERE status IN ('cancelled', 'noshow') "
             f"  AND net_cents != 0 AND {stay_cancelled} "
             f"ORDER BY 1"), span)

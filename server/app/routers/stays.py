@@ -991,3 +991,211 @@ async def reply_stay_review(
     await db.commit()
     await db.refresh(review)
     return _review_out(review)
+
+
+# ---------- 住宿售后(到店无房赔付 + 协商退) ----------
+
+from ..models import (
+    StayAfterSale,
+    StayAfterSaleKind,
+    StayAfterSaleStatus,
+)
+from ..schemas import (
+    StayAfterSaleIn,
+    StayAfterSaleOut,
+    StayAfterSaleRespondIn,
+)
+
+NO_ROOM_PENALTY_RATE = 0.3      # 违约金 = 首晚房费 × 30%
+AFTERSALE_AUTO_HOURS = 2        # 商家响应窗口,超时按成立处理
+
+
+def _aftersale_out(a: StayAfterSale,
+                   order: StayOrder | None = None) -> StayAfterSaleOut:
+    out = StayAfterSaleOut.model_validate(a)
+    if order is not None:
+        out.order_no = order.order_no
+        out.guest_name = order.guest_name
+        out.total_cents = order.total_cents
+    return out
+
+
+async def resolve_stay_aftersale(db: AsyncSession, a: StayAfterSale,
+                                 order: StayOrder, accept: bool,
+                                 merchant_note: str = "",
+                                 nego_refund_cents: int | None = None,
+                                 auto: bool = False) -> None:
+    """售后裁决统一入口(商家响应与超时自动成立共用,调用方持有行锁并 commit)。
+
+    到店无房成立:refund = 房费 + 首晚×30% 违约金,net = -违约金(商家余额扣),
+    fee = 0——审计恒等式 net + refund == total 依然成立,平台分文不取。
+    """
+    now = datetime.now(_tz.utc)
+    a.merchant_note = merchant_note
+    a.resolved_at = now
+    if not accept:
+        a.status = StayAfterSaleStatus.rejected
+        return
+    a.status = (StayAfterSaleStatus.auto_accepted if auto
+                else StayAfterSaleStatus.accepted)
+    if a.kind == StayAfterSaleKind.no_room:
+        penalty = int(_first_night_cents(order) * NO_ROOM_PENALTY_RATE)
+        a.penalty_cents = penalty
+        a.refund_cents = order.total_cents + penalty
+        _transit(order, StayOrderStatus.CANCELLED, "system")
+        order.cancelled_at = now
+        order.fee_cents = 0
+        order.net_cents = -penalty
+        order.refund_cents = order.total_cents + penalty
+        # 微信支付联调后:房费原路退,违约金改走「转账到零钱」(退款不能超支付额)
+        order.refund_note = "到店无房:全额退款+商家违约金(首晚30%)"
+    else:  # 协商退:商家填多少退多少
+        refund = min(max(nego_refund_cents or 0, 0), order.total_cents)
+        a.refund_cents = refund
+        _transit(order, StayOrderStatus.CANCELLED, "system")
+        order.cancelled_at = now
+        order.fee_cents = 0
+        order.net_cents = order.total_cents - refund
+        order.refund_cents = refund
+        order.refund_note = "协商退款(商家同意)"
+    await release(db, order.room_type_id, order.checkin_date,
+                  order.checkout_date, order.rooms_qty)
+
+
+@router.post("/orders/{order_no}/aftersale", response_model=StayAfterSaleOut)
+async def create_stay_aftersale(
+    order_no: str,
+    payload: StayAfterSaleIn,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """发起售后。到店无房:已确认且到了入住日仍没房;
+    协商退:不可退(strict)房型行程有变,商家同意才动钱。
+    设施不符/卫生问题请走「我的-联系客服」工单。
+    """
+    order = await _customer_order(db, user, order_no, lock=True)
+    kind = StayAfterSaleKind(payload.kind)
+    if kind == StayAfterSaleKind.no_room:
+        if order.status != StayOrderStatus.CONFIRMED:
+            raise HTTPException(409, "只有已确认待入住的订单能发起「到店无房」")
+        if date.today() < order.checkin_date:
+            raise HTTPException(409, "还没到入住日;到店后确实无房再发起")
+    else:
+        if order.status not in (StayOrderStatus.PAID,
+                                StayOrderStatus.CONFIRMED):
+            raise HTTPException(409, "当前状态不能申请协商退")
+        policy = order.cancel_policy.value \
+            if hasattr(order.cancel_policy, "value") else order.cancel_policy
+        if policy != CancelPolicy.strict.value:
+            raise HTTPException(409, "该房型可直接取消,不需要协商(见订单页取消按钮)")
+    existing = await db.scalar(
+        select(StayAfterSale).where(
+            StayAfterSale.stay_order_id == order.id,
+            StayAfterSale.status == StayAfterSaleStatus.pending))
+    if existing:
+        raise HTTPException(409, "已有处理中的售后申请,请等商家响应")
+    a = StayAfterSale(
+        stay_order_id=order.id,
+        customer_id=user.id,
+        merchant_id=order.merchant_id,
+        kind=kind,
+        note=payload.note.strip(),
+    )
+    db.add(a)
+    await db.commit()
+    await db.refresh(a)
+    # 推送商家(2 小时不响应按成立处理)
+    try:
+        from ..services.push import push_to_user
+        m = await db.get(Merchant, order.merchant_id)
+        if m:
+            label = "到店无房" if kind == StayAfterSaleKind.no_room else "协商退款"
+            await push_to_user(
+                m.owner_id, f"住宿售后:{label}",
+                f"订单#{order.order_no[-6:]} 客人发起{label},"
+                f"请在 {AFTERSALE_AUTO_HOURS} 小时内处理",
+                {"type": "stay_aftersale", "order_no": order.order_no})
+    except Exception:
+        logger.exception("售后推送失败")
+    return _aftersale_out(a, order)
+
+
+@router.get("/orders/{order_no}/aftersale", response_model=StayAfterSaleOut)
+async def my_stay_aftersale(
+    order_no: str,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    order = await _customer_order(db, user, order_no)
+    a = await db.scalar(
+        select(StayAfterSale)
+        .where(StayAfterSale.stay_order_id == order.id)
+        .order_by(StayAfterSale.created_at.desc()).limit(1))
+    if a is None:
+        raise HTTPException(404, "没有售后记录")
+    return _aftersale_out(a, order)
+
+
+@router.get("/me/aftersales", response_model=list[StayAfterSaleOut])
+async def merchant_stay_aftersales(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    shop = await _my_hotel(db, user)
+    rows = (await db.execute(
+        select(StayAfterSale, StayOrder)
+        .join(StayOrder, StayOrder.id == StayAfterSale.stay_order_id)
+        .where(StayAfterSale.merchant_id == shop.id)
+        .order_by(StayAfterSale.created_at.desc()).limit(100))).all()
+    return [_aftersale_out(a, o) for a, o in rows]
+
+
+@router.post("/me/aftersales/{aftersale_id}/respond",
+             response_model=StayAfterSaleOut)
+async def respond_stay_aftersale(
+    aftersale_id: int,
+    payload: StayAfterSaleRespondIn,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """商家响应售后。到店无房同意 = 认罚(全额退+违约金);
+    协商退同意时必须带退款金额。对判罚有异议走客服工单人工复核。
+    """
+    shop = await _my_hotel(db, user)
+    a = await db.scalar(
+        select(StayAfterSale).where(StayAfterSale.id == aftersale_id)
+        .with_for_update())
+    if a is None or a.merchant_id != shop.id:
+        raise HTTPException(404, "售后申请不存在")
+    if a.status != StayAfterSaleStatus.pending:
+        raise HTTPException(409, "该申请已处理过")
+    if payload.accept and a.kind == StayAfterSaleKind.nego_refund \
+            and payload.refund_cents is None:
+        raise HTTPException(422, "同意协商退需要填写退款金额")
+    order = await db.scalar(
+        select(StayOrder).where(StayOrder.id == a.stay_order_id)
+        .with_for_update())
+    await resolve_stay_aftersale(
+        db, a, order, payload.accept,
+        merchant_note=payload.note.strip(),
+        nego_refund_cents=payload.refund_cents)
+    await db.commit()
+    await db.refresh(a)
+    # 通知用户结果
+    try:
+        from ..services.push import push_to_user
+        if payload.accept:
+            await push_to_user(
+                a.customer_id, "售后已通过",
+                f"订单#{order.order_no[-6:]} 退款 ¥{a.refund_cents / 100:g}"
+                " 将原路退回",
+                {"type": "stay_order", "order_no": order.order_no})
+        else:
+            await push_to_user(
+                a.customer_id, "售后未通过",
+                f"订单#{order.order_no[-6:]} 商家回应:{a.merchant_note or '未说明'};"
+                "如有异议可联系平台客服",
+                {"type": "stay_order", "order_no": order.order_no})
+    except Exception:
+        logger.exception("售后结果推送失败")
+    return _aftersale_out(a, order)

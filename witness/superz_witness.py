@@ -95,6 +95,10 @@ def verify_rows(payload: dict) -> list[str]:
                 problems.append(f"住宿行 {r['s']}: 净额 {net} != 房费 {gross} - 佣金 {fee}")
             if fee > gross * stay_rate + 1:
                 problems.append(f"住宿行 {r['s']}: 佣金 {fee} 超过房费 {gross} 的 {stay_rate:.0%}")
+        elif r.get("kind") == "penalty":
+            # 到店无房违约金:商家负行赔给用户,平台分文不取;赔付不超房费
+            if fee != 0 or not (-gross <= net < 0):
+                problems.append(f"住宿行 {r['s']}: 违约金行越界(fee={fee}, net={net})")
         else:
             # 取消扣款/未入住:平台分文不取,商家所得不超过房费
             if fee != 0:

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'stay_aftersales_page.dart';
 import 'stay_reviews_page.dart';
 
 /// 酒店 tab:酒店信息与通用服务入口。
@@ -39,6 +40,17 @@ class HotelTab extends StatelessWidget {
                 ],
               ],
             ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.gavel_outlined),
+            title: const Text('售后处理'),
+            subtitle: const Text('到店无房 2 小时内必须响应,超时按成立处理'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => StayAftersalesPage(api: api))),
           ),
         ),
         const SizedBox(height: 8),

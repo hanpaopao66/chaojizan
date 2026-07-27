@@ -98,6 +98,7 @@ class StayOrderDetailPage extends StatefulWidget {
 class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
   StayOrder? _order;
   StayReview? _review;
+  StayAfterSale? _aftersale;
   String? _error;
   Timer? _poll;
 
@@ -127,10 +128,15 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
           review = await widget.api.myStayReview(widget.orderNo);
         } catch (_) {} // 404 = 还没评价
       }
+      StayAfterSale? aftersale;
+      try {
+        aftersale = await widget.api.myStayAftersale(widget.orderNo);
+      } catch (_) {} // 404 = 没有售后
       if (mounted) {
         setState(() {
           _order = order;
           _review = review;
+          _aftersale = aftersale;
           _error = null;
         });
       }
@@ -413,18 +419,119 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
                         ]),
                   ),
                 ),
+        // 售后状态卡
+        if (_aftersale != null)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Text('售后:${_aftersale!.kindLabel}',
+                          style: theme.textTheme.titleSmall),
+                      const Spacer(),
+                      Text(_aftersale!.statusLabel,
+                          style: TextStyle(
+                              color: _aftersale!.resolvedOk
+                                  ? kMoneyGreen
+                                  : (_aftersale!.status == 'pending'
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.outline),
+                              fontWeight: FontWeight.bold)),
+                    ]),
+                    if (_aftersale!.resolvedOk)
+                      Text('退款 ${yuan(_aftersale!.refundCents)}'
+                          '${_aftersale!.penaltyCents > 0 ? "(含商家违约金 ${yuan(_aftersale!.penaltyCents)})" : ""}'
+                          ' 将原路退回'),
+                    if (_aftersale!.merchantNote.isNotEmpty)
+                      Text('商家回应:${_aftersale!.merchantNote}',
+                          style: theme.textTheme.bodySmall),
+                    if (_aftersale!.status == 'pending' &&
+                        _aftersale!.kind == 'no_room')
+                      Text('商家 2 小时未响应将自动按成立处理',
+                          style: theme.textTheme.bodySmall),
+                  ]),
+            ),
+          ),
         const SizedBox(height: 12),
         if (cancellable)
           OutlinedButton(
               onPressed: () => _cancel(order), child: const Text('取消订单')),
-        if (order.status == 'confirmed' && order.cancelPolicy == 'strict')
+        // 到店无房:已确认且到了入住日,前台却没房
+        if (order.status == 'confirmed' &&
+            DateTime.now().compareTo(
+                    DateTime.parse('${order.checkinDate} 00:00:00')) >=
+                0 &&
+            (_aftersale == null || _aftersale!.status != 'pending'))
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text('该房型不可退;行程有变可点上方「联系酒店」协商',
-                textAlign: TextAlign.center, style: theme.textTheme.bodySmall),
+            child: OutlinedButton.icon(
+                icon: const Icon(Icons.report_problem_outlined, size: 18),
+                onPressed: () => _aftersaleSheet(order, 'no_room'),
+                label: const Text('到店无房?发起赔付')),
+          ),
+        // strict 档协商退
+        if (const {'paid', 'confirmed'}.contains(order.status) &&
+            order.cancelPolicy == 'strict' &&
+            (_aftersale == null || _aftersale!.status != 'pending'))
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: OutlinedButton(
+                onPressed: () => _aftersaleSheet(order, 'nego_refund'),
+                child: const Text('申请协商退款')),
           ),
       ]),
     );
+  }
+
+  /// 售后发起弹层
+  Future<void> _aftersaleSheet(StayOrder order, String kind) async {
+    final controller = TextEditingController();
+    final isNoRoom = kind == 'no_room';
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(isNoRoom ? '到店无房' : '申请协商退款'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(isNoRoom
+              ? '商家确认后却没有房间?发起后商家需在 2 小时内处理,'
+                  '成立即全额退款,商家另赔首晚 30% 违约金(平台分文不取)。'
+              : '该房型不可退,但你可以说明情况请商家通融;'
+                  '商家同意多少退多少,平台只留证不强制。'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            maxLength: 300,
+            maxLines: 2,
+            decoration: const InputDecoration(
+                hintText: '说明情况', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('提交')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await widget.api.createStayAftersale(order.orderNo,
+          kind: kind, note: controller.text.trim());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已提交,等待商家处理')));
+      }
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+    }
   }
 
   Widget _moneyRow(String label, int cents,

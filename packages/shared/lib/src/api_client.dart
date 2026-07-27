@@ -1641,4 +1641,38 @@ class ApiClient {
         body: {'reply': reply});
     return StayReview.fromJson(data as Map<String, dynamic>);
   }
+
+  /// 用户:发起住宿售后(no_room 到店无房 / nego_refund 协商退)
+  Future<StayAfterSale> createStayAftersale(String orderNo,
+      {required String kind, String note = ''}) async {
+    final data = await _request('POST', '/stays/orders/$orderNo/aftersale',
+        body: {'kind': kind, 'note': note});
+    return StayAfterSale.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户:这单最近一次售后(没有则 404)
+  Future<StayAfterSale> myStayAftersale(String orderNo) async {
+    final data = await _request('GET', '/stays/orders/$orderNo/aftersale');
+    return StayAfterSale.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 商家:本店售后列表
+  Future<List<StayAfterSale>> merchantStayAftersales() async {
+    final data = await _request('GET', '/stays/me/aftersales');
+    return (data as List)
+        .map((e) => StayAfterSale.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 商家:响应售后(协商退同意时必须带 refundCents)
+  Future<StayAfterSale> respondStayAftersale(int id,
+      {required bool accept, String note = '', int? refundCents}) async {
+    final data = await _request('POST', '/stays/me/aftersales/$id/respond',
+        body: {
+          'accept': accept,
+          'note': note,
+          if (refundCents != null) 'refund_cents': refundCents,
+        });
+    return StayAfterSale.fromJson(data as Map<String, dynamic>);
+  }
 }

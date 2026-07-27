@@ -1289,3 +1289,33 @@ class StayReviewOut(BaseModel):
     created_at: datetime | None = None
     reviewer_name: str = ""  # 匿名时为「匿名住客」,列表页聚合填充
     order_no: str = ""       # 仅本人/商家视角回填
+
+
+class StayAfterSaleIn(BaseModel):
+    kind: str = Field(pattern="^(no_room|nego_refund)$")
+    note: str = Field(default="", max_length=300)
+
+
+class StayAfterSaleRespondIn(BaseModel):
+    accept: bool
+    note: str = Field(default="", max_length=300)
+    # 协商退:同意时商家填退款金额(分,0~全额);到店无房忽略此字段
+    refund_cents: int | None = Field(default=None, ge=0)
+
+
+class StayAfterSaleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    stay_order_id: int
+    kind: str
+    status: str
+    note: str = ""
+    merchant_note: str = ""
+    refund_cents: int = 0
+    penalty_cents: int = 0
+    created_at: datetime | None = None
+    resolved_at: datetime | None = None
+    order_no: str = ""       # 列表回填
+    guest_name: str = ""
+    total_cents: int = 0

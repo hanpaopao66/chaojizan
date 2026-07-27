@@ -1238,3 +1238,40 @@ class StayReview {
   final String reviewerName;
   final String orderNo;
 }
+
+/// 住宿售后(到店无房赔付 / 协商退)
+class StayAfterSale {
+  StayAfterSale.fromJson(Map<String, dynamic> json)
+      : id = json['id'] as int,
+        kind = json['kind'] as String,
+        status = json['status'] as String,
+        note = json['note'] as String? ?? '',
+        merchantNote = json['merchant_note'] as String? ?? '',
+        refundCents = json['refund_cents'] as int? ?? 0,
+        penaltyCents = json['penalty_cents'] as int? ?? 0,
+        orderNo = json['order_no'] as String? ?? '',
+        guestName = json['guest_name'] as String? ?? '',
+        totalCents = json['total_cents'] as int? ?? 0,
+        createdAt = json['created_at'] as String? ?? '';
+
+  final int id;
+  final String kind;      // no_room / nego_refund
+  final String status;    // pending / accepted / rejected / auto_accepted
+  final String note;
+  final String merchantNote;
+  final int refundCents;
+  final int penaltyCents;
+  final String orderNo;
+  final String guestName;
+  final int totalCents;
+  final String createdAt;
+
+  String get kindLabel => kind == 'no_room' ? '到店无房' : '协商退款';
+  String get statusLabel => switch (status) {
+        'pending' => '待商家处理',
+        'accepted' => '已通过',
+        'auto_accepted' => '已通过(超时自动成立)',
+        _ => '未通过',
+      };
+  bool get resolvedOk => status == 'accepted' || status == 'auto_accepted';
+}

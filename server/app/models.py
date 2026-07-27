@@ -1535,3 +1535,48 @@ class StayReview(Base):
     hidden: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class StayAfterSaleKind(str, enum.Enum):
+    no_room = "no_room"          # 到店无房(最恶性违约:全额退+商家违约金 30% 首晚)
+    nego_refund = "nego_refund"  # 协商退(strict 档,商家同意才动钱,平台只留证)
+
+
+class StayAfterSaleStatus(str, enum.Enum):
+    pending = "pending"
+    accepted = "accepted"
+    rejected = "rejected"
+    auto_accepted = "auto_accepted"  # 商家 2 小时未响应,系统按成立处理
+
+
+class StayAfterSale(Base):
+    """住宿售后。资金规则(⚖️ 2026-07-27 拍板,可推翻):
+
+    到店无房成立 = 用户收 全额房费+首晚30%违约金(随退款原路退;微信联调后
+    违约金部分改走转账到零钱),商家余额扣违约金(net=-penalty),平台分文不取
+    也不出钱——赔付是商家违约成本,符合无补贴原则。
+    协商退 = 商家填多少退多少(0~全额),不同意维持原政策。
+    设施不符/卫生问题走现有客服工单;商家对判罚有异议走工单人工复核。
+    """
+
+    __tablename__ = "stay_after_sales"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    stay_order_id: Mapped[int] = mapped_column(
+        ForeignKey("stay_orders.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    kind: Mapped[StayAfterSaleKind] = mapped_column(
+        _enum_column(StayAfterSaleKind, "stay_after_sale_kind"))
+    status: Mapped[StayAfterSaleStatus] = mapped_column(
+        _enum_column(StayAfterSaleStatus, "stay_after_sale_status"),
+        default=StayAfterSaleStatus.pending, index=True)
+    note: Mapped[str] = mapped_column(String(300), default="")           # 用户说明
+    merchant_note: Mapped[str] = mapped_column(String(300), default="")  # 商家回应
+    refund_cents: Mapped[int] = mapped_column(Integer, default=0)   # 成立后退款总额
+    penalty_cents: Mapped[int] = mapped_column(Integer, default=0)  # 其中违约金部分
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
