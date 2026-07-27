@@ -16,7 +16,7 @@ function JoinShell({ hero, children }) {
         <div><a href="/">← 回超级赞首页</a></div>
         <div className="muted">数字与公开账本同源 · 有疑问请通过 App 内客服工单联系</div>
         <div className="muted">
-          <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-2</a>
+          <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>
         </div>
       </footer>
     </>

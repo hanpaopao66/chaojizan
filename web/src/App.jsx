@@ -275,7 +275,7 @@ function Home() {
               rel="noreferrer">开源仓</a> tag 对应)</>}
         </div>
         <div className="muted">
-          <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-2</a>
+          <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>
         </div>
       </footer>
     </>

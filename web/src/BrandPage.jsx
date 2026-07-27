@@ -110,7 +110,7 @@ export default function BrandPage() {
         <div><a href="/">← 回超级赞首页</a></div>
         <div className="muted">物料可自由转发传播;商用印刷请保持数字承诺原样</div>
         <div className="muted">
-          <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-2</a>
+          <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>
         </div>
       </footer>
     </>
