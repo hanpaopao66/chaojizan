@@ -38,3 +38,4 @@ server/app_version.txt
 deploy/.env.deploy
 # 内部路线图(公开仓不发布)
 docs/ROADMAP.md
+merchant-web/node_modules/

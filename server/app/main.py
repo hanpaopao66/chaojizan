@@ -320,6 +320,23 @@ SITE_DIR = STATIC_DIR / "site"
 if SITE_DIR.exists():
     app.mount("/site", StaticFiles(directory=SITE_DIR), name="site")
 
+# 商家网页工作台(merchant-web/ 构建产物;同源部署,生产机无需 node)。
+# SPA:资源命中直接回文件,其余路径都回 index.html(前端路由刷新不 404)
+MERCHANT_WEB_DIR = STATIC_DIR / "merchant"
+
+
+@app.get("/merchant", include_in_schema=False)
+@app.get("/merchant/{path:path}", include_in_schema=False)
+async def merchant_console(path: str = ""):
+    if not MERCHANT_WEB_DIR.exists():
+        raise HTTPException(404, "商家工作台尚未构建(merchant-web/ 执行 npm run build)")
+    candidate = (MERCHANT_WEB_DIR / path).resolve()
+    # 防路径穿越:只允许构建目录内的文件
+    if path and candidate.is_file() \
+            and candidate.is_relative_to(MERCHANT_WEB_DIR.resolve()):
+        return FileResponse(candidate)
+    return FileResponse(MERCHANT_WEB_DIR / "index.html")
+
 
 @app.get("/legal/terms", include_in_schema=False)
 async def legal_terms():
