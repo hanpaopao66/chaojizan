@@ -105,6 +105,49 @@ async def _get_shop(db: AsyncSession, merchant_id: int) -> Merchant:
     return shop
 
 
+@router.get("/stay-aftersales")
+async def admin_stay_aftersales(
+    status: str = "",
+    merchant_id: int | None = None,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """住宿售后监控(平台不直接改判;异议走工单人工复核+手工冲账)。"""
+    from ..models import StayAfterSale, StayAfterSaleStatus, StayOrder
+
+    query = (
+        select(StayAfterSale, StayOrder, Merchant)
+        .join(StayOrder, StayOrder.id == StayAfterSale.stay_order_id)
+        .join(Merchant, Merchant.id == StayAfterSale.merchant_id)
+    )
+    if status:
+        try:
+            query = query.where(
+                StayAfterSale.status == StayAfterSaleStatus(status))
+        except ValueError:
+            raise HTTPException(422, "未知状态")
+    if merchant_id:
+        query = query.where(StayAfterSale.merchant_id == merchant_id)
+    rows = (await db.execute(
+        query.order_by(StayAfterSale.created_at.desc()).limit(200))).all()
+    return [{
+        "id": a.id,
+        "kind": a.kind.value,
+        "status": a.status.value,
+        "order_no": o.order_no,
+        "hotel": m.name,
+        "merchant_id": m.id,
+        "guest_name": o.guest_name,
+        "total_cents": o.total_cents,
+        "refund_cents": a.refund_cents,
+        "penalty_cents": a.penalty_cents,
+        "note": a.note,
+        "merchant_note": a.merchant_note,
+        "created_at": a.created_at.isoformat(),
+        "resolved_at": a.resolved_at.isoformat() if a.resolved_at else None,
+    } for a, o, m in rows]
+
+
 @router.get("/stay-orders")
 async def admin_stay_orders(
     status: str = "",
@@ -884,6 +927,15 @@ async def dashboard(
             select(sa_func.count()).select_from(Ticket)
             .where(Ticket.status == TicketStatus.open)),
     }
+    # 住宿待办:待确认订单与待处理售后(到店无房 2 小时红线,必须看得见)
+    from ..models import StayAfterSale, StayAfterSaleStatus, StayOrder
+    from ..state_machine import StayOrderStatus
+    pending["stay_orders"] = await _count(
+        select(sa_func.count()).select_from(StayOrder)
+        .where(StayOrder.status == StayOrderStatus.PAID))
+    pending["stay_aftersales"] = await _count(
+        select(sa_func.count()).select_from(StayAfterSale)
+        .where(StayAfterSale.status == StayAfterSaleStatus.pending))
     # 近 3 天的账务告警——账不平是最高优先级,红条置顶
     recent_alerts = (
         await db.scalars(

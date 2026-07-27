@@ -77,6 +77,7 @@
       <button data-module="marketing" class="module-btn">营销</button>
       <button data-module="invoices" class="module-btn">开票</button>
       <button data-module="tax" class="module-btn">税务导出</button>
+      <button data-module="stays" class="module-btn">住宿</button>
     </div>
 
     <div id="dashboardPanel">
@@ -91,6 +92,51 @@
           <div style="font-weight:600;margin-bottom:10px">待办</div>
           <div id="dashPending"></div>
           <div id="dashTotals" class="muted" style="margin-top:12px;font-size:12px;line-height:1.8"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="staysPanel" hidden>
+      <div class="card" style="padding:12px;margin-bottom:12px">
+        <div style="font-weight:700;margin-bottom:8px">住宿订单
+          <span class="muted" style="font-weight:400;font-size:12px">
+            资金三行(房费-佣金-实收)与商家对账页、公开账本同源
+          </span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <select id="stayStatusFilter">
+            <option value="">全部状态</option>
+            <option value="paid">待商家确认</option>
+            <option value="confirmed">待入住</option>
+            <option value="checked_in">在住</option>
+            <option value="completed">已离店</option>
+            <option value="cancelled">已取消</option>
+            <option value="rejected">商家拒单</option>
+            <option value="noshow">未入住</option>
+          </select>
+          <input id="stayDayFilter" type="date" title="按入住日筛选" />
+          <button class="primary" id="stayReload">查询</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>单号</th><th>酒店</th><th>房型×间</th><th>入住-离店</th>
+              <th>入住人</th><th>状态</th><th>房费</th><th>佣金</th><th>商家实收</th><th>退款</th></tr></thead>
+            <tbody id="stayOrderRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card" style="padding:12px">
+        <div style="font-weight:700;margin-bottom:8px">住宿售后监控
+          <span class="muted" style="font-weight:400;font-size:12px">
+            到店无房商家 2 小时不响应自动成立(全额退+首晚30%违约金);平台不直接改判,异议走工单
+          </span>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>类型</th><th>单号</th><th>酒店</th><th>客人说明</th>
+              <th>状态</th><th>退款</th><th>发起时间</th></tr></thead>
+            <tbody id="stayAfterSaleRows"></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -630,6 +676,87 @@ $('#shutdownToggle').onclick = async () => {
   } catch (e) { toast(e.message); }
 };
 
+// ---------- 住宿(订单查询 + 售后监控) ----------
+const STAY_STATUS_LABELS = {
+  created: '待支付', closed: '已关闭', paid: '待商家确认', confirmed: '待入住',
+  checked_in: '在住', completed: '已离店', cancelled: '已取消',
+  rejected: '商家拒单', noshow: '未入住',
+};
+async function loadStays() {
+  try {
+    const status = $('#stayStatusFilter').value;
+    const day = $('#stayDayFilter').value;
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (day) params.set('day', day);
+    const orders = await api('GET', '/admin/stay-orders?' + params.toString());
+    const tbody = $('#stayOrderRows');
+    tbody.innerHTML = '';
+    let sumTotal = 0, sumFee = 0, sumNet = 0;
+    for (const o of orders) {
+      sumTotal += o.total_cents; sumFee += o.fee_cents; sumNet += o.net_cents;
+      const tr = document.createElement('tr');
+      const cells = [
+        '…' + o.order_no.slice(-8), o.hotel,
+        `${o.room_type}×${o.rooms_qty}`,
+        `${o.checkin_date} → ${o.checkout_date}(${o.nights}晚)`,
+        o.guest_name, STAY_STATUS_LABELS[o.status] || o.status,
+        '¥' + (o.total_cents / 100).toFixed(2),
+        '¥' + (o.fee_cents / 100).toFixed(2),
+        '¥' + (o.net_cents / 100).toFixed(2),
+        o.refund_cents ? '¥' + (o.refund_cents / 100).toFixed(2) : '—',
+      ];
+      for (const text of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.appendChild(td);
+      }
+      if (o.net_cents < 0) tr.style.color = '#c92a2a'; // 违约金负行
+      tbody.appendChild(tr);
+    }
+    const totalTr = document.createElement('tr');
+    totalTr.style.fontWeight = '700';
+    const totalCells = ['合计', '', '', '', '', `${orders.length} 单`,
+      '¥' + (sumTotal / 100).toFixed(2), '¥' + (sumFee / 100).toFixed(2),
+      '¥' + (sumNet / 100).toFixed(2), ''];
+    for (const text of totalCells) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      totalTr.appendChild(td);
+    }
+    tbody.appendChild(totalTr);
+
+    const aftersales = await api('GET', '/admin/stay-aftersales');
+    const asBody = $('#stayAfterSaleRows');
+    asBody.innerHTML = '';
+    const AS_STATUS = { pending: '待商家处理', accepted: '已成立',
+      auto_accepted: '超时自动成立', rejected: '商家拒绝' };
+    for (const a of aftersales) {
+      const tr = document.createElement('tr');
+      const refund = a.refund_cents
+        ? '¥' + (a.refund_cents / 100).toFixed(2) +
+          (a.penalty_cents ? `(含违约金 ¥${(a.penalty_cents / 100).toFixed(2)})` : '')
+        : '—';
+      const cells = [
+        a.kind === 'no_room' ? '到店无房' : '协商退款',
+        '…' + a.order_no.slice(-8), a.hotel, a.note || '(未填)',
+        AS_STATUS[a.status] || a.status, refund,
+        a.created_at.replace('T', ' ').slice(0, 16),
+      ];
+      for (const text of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.appendChild(td);
+      }
+      if (a.status === 'pending' && a.kind === 'no_room') {
+        tr.style.color = '#c92a2a'; // 2 小时红线,盯着
+      }
+      asBody.appendChild(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+$('#stayReload').onclick = loadStays;
+
 // ---------- 模块切换 ----------
 document.querySelectorAll('.module-btn').forEach((btn) => {
   btn.onclick = () => {
@@ -658,6 +785,8 @@ document.querySelectorAll('.module-btn').forEach((btn) => {
     $('#invoicesPanel').hidden = m !== 'invoices';
     if (m === 'invoices') loadInvoices();
     $('#taxPanel').hidden = m !== 'tax';
+    $('#staysPanel').hidden = m !== 'stays';
+    if (m === 'stays') loadStays();
     if (m === 'tax' && !$('#taxPeriod').value) {
       const d = new Date(); d.setMonth(d.getMonth() - 1);
       $('#taxPeriod').value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
@@ -922,12 +1051,20 @@ async function load() {
       tr.appendChild(addrTd);
 
       const licTd = document.createElement('td');
-      licTd.textContent = m.license_no || '(未填)';
+      // 业态徽标:酒店商家的证照口径不同(营业执照+特种行业许可证)
+      if (m.biz_type === 'hotel') {
+        const bizTag = document.createElement('span');
+        bizTag.className = 'badge pending';
+        bizTag.textContent = '酒店';
+        bizTag.style.marginRight = '6px';
+        licTd.appendChild(bizTag);
+      }
+      licTd.appendChild(document.createTextNode(m.license_no || '(未填)'));
       if (m.license_image_url) {
         const licLink = document.createElement('a');
         licLink.href = m.license_image_url;
         licLink.target = '_blank';
-        licLink.textContent = ' 查看证照照片';
+        licLink.textContent = m.biz_type === 'hotel' ? ' 营业执照照片' : ' 查看证照照片';
         licTd.appendChild(document.createElement('br'));
         licTd.appendChild(licLink);
       } else {
@@ -935,6 +1072,26 @@ async function load() {
         noImg.className = 'muted';
         noImg.textContent = '(无证照照片)';
         licTd.appendChild(noImg);
+      }
+      if (m.biz_type === 'hotel') {
+        // 特种行业许可证(旅馆业,公安核发)是酒店硬资质,审核员必须对照
+        const spDiv = document.createElement('div');
+        spDiv.textContent = '特种行业:' + (m.special_license_no || '(未填)');
+        if (m.special_license_image_url) {
+          const spLink = document.createElement('a');
+          spLink.href = m.special_license_image_url;
+          spLink.target = '_blank';
+          spLink.textContent = ' 查看照片';
+          spDiv.appendChild(spLink);
+        }
+        licTd.appendChild(spDiv);
+        if (m.hygiene_image_url) {
+          const hyLink = document.createElement('a');
+          hyLink.href = m.hygiene_image_url;
+          hyLink.target = '_blank';
+          hyLink.textContent = '卫生许可证照片';
+          licTd.appendChild(hyLink);
+        }
       }
       tr.appendChild(licTd);
 
@@ -2274,6 +2431,8 @@ async function loadDashboard() {
       ['待打款提现', d.pending.withdrawals, 'withdrawals'],
       ['待处理售后', d.pending.after_sales, null],
       ['待回复工单', d.pending.tickets, 'tickets'],
+      ['住宿待确认单', d.pending.stay_orders || 0, 'stays'],
+      ['住宿售后待处理', d.pending.stay_aftersales || 0, 'stays'],
     ];
     const pendingBox = $('#dashPending');
     pendingBox.innerHTML = '';
