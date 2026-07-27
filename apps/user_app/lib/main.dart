@@ -24,6 +24,7 @@ import 'coming_soon_page.dart';
 import 'delivery_map_page.dart';
 import 'reviews_page.dart';
 import 'search_page.dart';
+import 'stay_order_pages.dart';
 import 'trust_page.dart';
 import 'voucher_pages.dart';
 
@@ -226,7 +227,7 @@ class _HomePageState extends State<HomePage> {
               key: const ValueKey('tab-food'),
               api: widget.api,
               deliveryAddress: _deliveryAddress),
-          1 => OrderListView(key: const ValueKey('tab-order'), api: widget.api),
+          1 => OrdersTab(key: const ValueKey('tab-order'), api: widget.api),
           _ => ProfileView(key: const ValueKey('tab-me'), api: widget.api),
         },
       ),
@@ -1984,6 +1985,52 @@ class _MenuPageState extends State<MenuPage>
         ),
       ),
     );
+  }
+}
+
+/// 订单 tab:类型切换(点外卖/住宿);团购券在「我的-我的券包」保持原习惯,
+/// 这里给个快捷入口不搬家
+class OrdersTab extends StatefulWidget {
+  const OrdersTab({super.key, required this.api});
+
+  final ApiClient api;
+
+  @override
+  State<OrdersTab> createState() => _OrdersTabState();
+}
+
+class _OrdersTabState extends State<OrdersTab> {
+  int _segment = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        child: Row(children: [
+          Expanded(
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 0, label: Text('点外卖')),
+                ButtonSegment(value: 1, label: Text('住宿')),
+              ],
+              selected: {_segment},
+              onSelectionChanged: (s) => setState(() => _segment = s.first),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MyVouchersPage(api: widget.api))),
+            child: const Text('券包'),
+          ),
+        ]),
+      ),
+      Expanded(
+        child: _segment == 0
+            ? OrderListView(api: widget.api)
+            : StayOrderListView(api: widget.api),
+      ),
+    ]);
   }
 }
 
