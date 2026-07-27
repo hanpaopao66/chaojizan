@@ -26,9 +26,9 @@ class InventoryError(Exception):
 
 
 async def occupy(db: AsyncSession, room_type_id: int,
-                 checkin: date, checkout: date, qty: int) -> None:
-    """区间内逐晚原子扣减 qty 间。任一晚不满足抛 InventoryError,
-    调用方事务回滚后已扣的晚自动还原。
+                 checkin: date, checkout: date, qty: int) -> list[RoomCalendar]:
+    """区间内逐晚原子扣减 qty 间,返回按日期排序的日历行(供下单快照每晚价)。
+    任一晚不满足抛 InventoryError,调用方事务回滚后已扣的晚自动还原。
     """
     days = nights_of(checkin, checkout)
     # 行锁住区间内每晚,并发下单在此排队,校验通过才扣减——不会超卖
@@ -52,6 +52,7 @@ async def occupy(db: AsyncSession, room_type_id: int,
                RoomCalendar.date.in_(days))
         .values(sold_qty=RoomCalendar.sold_qty + qty)
     )
+    return sorted(rows, key=lambda r: r.date)
 
 
 async def release(db: AsyncSession, room_type_id: int,

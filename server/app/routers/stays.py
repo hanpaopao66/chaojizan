@@ -419,3 +419,339 @@ async def hotel_detail(
         logo_url=m.logo_url, photo_urls=m.photo_urls or [],
         rating_avg=m.rating_avg, rating_count=m.rating_count,
         checkin_date=checkin, checkout_date=checkout, rooms=rooms)
+
+
+# ---------- 住宿订单(下单/支付/取消/商家处理) ----------
+
+import uuid
+from datetime import datetime, timezone as _tz, timedelta as _td
+from decimal import Decimal
+
+from ..config import settings
+from ..models import CancelPolicy, HotelProfile, StayOrder
+from ..ratelimit import check_rate_limit
+from ..schemas import RejectIn, StayCancelPreviewOut, StayOrderIn, StayOrderOut
+from ..services.stay_inventory import InventoryError, occupy, release
+from ..state_machine import (
+    STAY_STATUS_LABELS,
+    StayOrderStatus,
+    TransitionError,
+    assert_stay_transition,
+)
+
+_BJ = _tz(_td(hours=8))  # 取消时限按北京时间
+
+
+def _transit(order: StayOrder, target: StayOrderStatus, role: str) -> None:
+    """状态跃迁统一入口:非法迁移 409,越权 403。"""
+    try:
+        assert_stay_transition(order.status, target, role)
+    except TransitionError as e:
+        raise HTTPException(403 if e.forbidden else 409, e.message)
+    order.status = target
+
+
+def _first_night_cents(order: StayOrder) -> int:
+    return order.nightly_prices[0]["price_cents"] * order.rooms_qty
+
+
+def cancel_refund_cents(order: StayOrder, now: datetime) -> tuple[int, str]:
+    """按取消政策快照算退款(纯函数,试算与实退共用)。返回 (退款分, 说明)。"""
+    policy = order.cancel_policy.value if hasattr(order.cancel_policy, "value") \
+        else order.cancel_policy
+    total = order.total_cents
+    if policy == CancelPolicy.limited_free.value:
+        hh, mm = map(int, order.free_cancel_until.split(":"))
+        deadline = datetime(order.checkin_date.year, order.checkin_date.month,
+                            order.checkin_date.day, hh, mm, tzinfo=_BJ)
+        if now < deadline:
+            return total, "免费取消时限内,全额退款"
+        return max(total - _first_night_cents(order), 0), \
+            "已过免费取消时限,按政策扣首晚"
+    if policy == CancelPolicy.first_night.value:
+        return max(total - _first_night_cents(order), 0), "按取消政策扣首晚"
+    return 0, "该房型不可退(可在订单页与酒店协商)"
+
+
+def _stay_out(order: StayOrder, m: Merchant | None = None,
+              hp: HotelProfile | None = None) -> StayOrderOut:
+    out = StayOrderOut.model_validate(order)
+    status = order.status if isinstance(order.status, StayOrderStatus) \
+        else StayOrderStatus(order.status)
+    out.status_label = STAY_STATUS_LABELS[status]
+    out.cancel_policy_text = cancel_policy_text(
+        order.cancel_policy, order.free_cancel_until, order.checkin_date)
+    if m is not None:
+        out.hotel_name = m.name
+        out.hotel_address = m.address
+    if hp is not None:
+        out.hotel_phone = hp.front_desk_phone
+    return out
+
+
+@router.post("/orders", response_model=StayOrderOut)
+async def create_stay_order(
+    payload: StayOrderIn,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """下单:锁定区间库存 + 快照每晚价与取消政策。15 分钟未支付自动关闭。"""
+    await check_rate_limit("stay_order", str(user.id), 10)
+    checkin, checkout = _parse_range(payload.checkin_date, payload.checkout_date)
+    rt = await db.get(RoomType, payload.room_type_id)
+    if rt is None or not rt.is_on_sale:
+        raise HTTPException(404, "房型不存在或已下架")
+    m = await db.get(Merchant, rt.merchant_id)
+    if m is None or m.biz_type != "hotel" \
+            or m.status != MerchantStatus.approved or not m.is_open:
+        raise HTTPException(409, "酒店暂停营业,暂时不能预订")
+    try:
+        cal_rows = await occupy(db, rt.id, checkin, checkout, payload.rooms_qty)
+    except InventoryError as e:
+        await db.rollback()
+        raise HTTPException(409, e.message)
+    nightly = [{"date": str(r.date), "price_cents": r.price_cents}
+               for r in cal_rows]
+    order = StayOrder(
+        order_no="S" + uuid.uuid4().hex[:19],
+        customer_id=user.id,
+        merchant_id=m.id,
+        room_type_id=rt.id,
+        checkin_date=checkin,
+        checkout_date=checkout,
+        nights=(checkout - checkin).days,
+        rooms_qty=payload.rooms_qty,
+        guest_name=payload.guest_name.strip(),
+        guest_phone=payload.guest_phone,
+        arrival_note=payload.arrival_note.strip(),
+        room_type_name=rt.name,
+        nightly_prices=nightly,
+        total_cents=sum(x["price_cents"] for x in nightly) * payload.rooms_qty,
+        cancel_policy=rt.cancel_policy,
+        free_cancel_until=rt.free_cancel_until,
+    )
+    db.add(order)
+    await db.commit()
+    await db.refresh(order)
+    hp = await db.scalar(select(HotelProfile).where(
+        HotelProfile.merchant_id == m.id))
+    return _stay_out(order, m, hp)
+
+
+async def _customer_order(db: AsyncSession, user: User, order_no: str,
+                          lock: bool = False) -> StayOrder:
+    stmt = select(StayOrder).where(StayOrder.order_no == order_no)
+    if lock:
+        stmt = stmt.with_for_update()
+    order = await db.scalar(stmt)
+    if order is None or order.customer_id != user.id:
+        raise HTTPException(404, "订单不存在")
+    return order
+
+
+@router.post("/orders/{order_no}/pay/mock", response_model=StayOrderOut)
+async def pay_stay_mock(
+    order_no: str,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """模拟支付(与外卖/团购同语义;微信支付联调时替换为统一下单+回调)。幂等。"""
+    order = await _customer_order(db, user, order_no, lock=True)
+    if order.status == StayOrderStatus.PAID:
+        return _stay_out(order)
+    _transit(order, StayOrderStatus.PAID, "customer")
+    order.paid_at = datetime.now(_tz.utc)
+    await db.commit()
+    await db.refresh(order)
+    return _stay_out(order)
+
+
+@router.get("/orders/mine", response_model=list[StayOrderOut])
+async def my_stay_orders(
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    rows = (await db.execute(
+        select(StayOrder, Merchant)
+        .join(Merchant, Merchant.id == StayOrder.merchant_id)
+        .where(StayOrder.customer_id == user.id)
+        .order_by(StayOrder.created_at.desc())
+        .limit(100))).all()
+    return [_stay_out(o, m) for o, m in rows]
+
+
+@router.get("/orders/{order_no}", response_model=StayOrderOut)
+async def stay_order_detail(
+    order_no: str,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    order = await _customer_order(db, user, order_no)
+    m = await db.get(Merchant, order.merchant_id)
+    hp = await db.scalar(select(HotelProfile).where(
+        HotelProfile.merchant_id == order.merchant_id))
+    return _stay_out(order, m, hp)
+
+
+@router.get("/orders/{order_no}/cancel-preview",
+            response_model=StayCancelPreviewOut)
+async def cancel_preview(
+    order_no: str,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """取消试算(无副作用):确认弹层展示预计退款。"""
+    order = await _customer_order(db, user, order_no)
+    if order.status not in (StayOrderStatus.PAID, StayOrderStatus.CONFIRMED):
+        raise HTTPException(409, "当前状态不能取消")
+    refund, note = cancel_refund_cents(order, datetime.now(_tz.utc))
+    return StayCancelPreviewOut(
+        refund_cents=refund, penalty_cents=order.total_cents - refund,
+        note=note)
+
+
+@router.post("/orders/{order_no}/cancel", response_model=StayOrderOut)
+async def cancel_stay_order(
+    order_no: str,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """取消:待支付直接关;已支付按取消政策退款,扣款归商家(平台不抽佣)。
+    库存即回补(不可退档也回补,商家可二次售卖)。
+    """
+    order = await _customer_order(db, user, order_no, lock=True)
+    if order.status == StayOrderStatus.CREATED:
+        _transit(order, StayOrderStatus.CLOSED, "customer")
+        await release(db, order.room_type_id, order.checkin_date,
+                      order.checkout_date, order.rooms_qty)
+        order.cancelled_at = datetime.now(_tz.utc)
+        await db.commit()
+        await db.refresh(order)
+        return _stay_out(order)
+    now = datetime.now(_tz.utc)
+    refund, note = cancel_refund_cents(order, now)
+    _transit(order, StayOrderStatus.CANCELLED, "customer")
+    order.cancelled_at = now
+    order.refund_cents = refund
+    order.refund_note = note
+    # 扣款部分归商家,平台分文不取(fee=0);入商家流水在结算服务统一处理
+    order.fee_cents = 0
+    order.net_cents = order.total_cents - refund
+    await release(db, order.room_type_id, order.checkin_date,
+                  order.checkout_date, order.rooms_qty)
+    await db.commit()
+    await db.refresh(order)
+    return _stay_out(order)
+
+
+# ---------- 商家侧订单处理 ----------
+
+@router.get("/me/orders", response_model=list[StayOrderOut])
+async def merchant_stay_orders(
+    state: str = Query(default="all",
+                       pattern="^(all|pending|arriving|inhouse|leaving)$"),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """商家订单列表:pending 待确认 / arriving 今日预抵 / inhouse 在住 /
+    leaving 今日预离 / all 全部(近 100 条)。
+    """
+    shop = await _my_hotel(db, user)
+    query = select(StayOrder).where(StayOrder.merchant_id == shop.id)
+    today = date.today()
+    if state == "pending":
+        query = query.where(StayOrder.status == StayOrderStatus.PAID)
+    elif state == "arriving":
+        query = query.where(StayOrder.status == StayOrderStatus.CONFIRMED,
+                            StayOrder.checkin_date == today)
+    elif state == "inhouse":
+        query = query.where(StayOrder.status == StayOrderStatus.CHECKED_IN)
+    elif state == "leaving":
+        query = query.where(StayOrder.status == StayOrderStatus.CHECKED_IN,
+                            StayOrder.checkout_date == today)
+    rows = (await db.scalars(
+        query.order_by(StayOrder.created_at.desc()).limit(100))).all()
+    return [_stay_out(o) for o in rows]
+
+
+async def _merchant_order(db: AsyncSession, shop: Merchant,
+                          order_no: str) -> StayOrder:
+    order = await db.scalar(
+        select(StayOrder).where(StayOrder.order_no == order_no)
+        .with_for_update())
+    if order is None or order.merchant_id != shop.id:
+        raise HTTPException(404, "订单不存在")
+    return order
+
+
+@router.post("/me/orders/{order_no}/confirm", response_model=StayOrderOut)
+async def confirm_stay_order(
+    order_no: str,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    shop = await _my_hotel(db, user)
+    order = await _merchant_order(db, shop, order_no)
+    _transit(order, StayOrderStatus.CONFIRMED, "merchant")
+    order.confirmed_at = datetime.now(_tz.utc)
+    await db.commit()
+    await db.refresh(order)
+    return _stay_out(order)
+
+
+@router.post("/me/orders/{order_no}/reject", response_model=StayOrderOut)
+async def reject_stay_order(
+    order_no: str,
+    payload: RejectIn,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """拒单(需填原因,会展示给用户):全额退款 + 回补库存,平台不抽佣。"""
+    shop = await _my_hotel(db, user)
+    order = await _merchant_order(db, shop, order_no)
+    _transit(order, StayOrderStatus.REJECTED, "merchant")
+    order.reject_reason = payload.reason
+    order.refund_cents = order.total_cents
+    order.refund_note = f"商家拒单全额退款:{payload.reason}"
+    order.cancelled_at = datetime.now(_tz.utc)
+    await release(db, order.room_type_id, order.checkin_date,
+                  order.checkout_date, order.rooms_qty)
+    await db.commit()
+    await db.refresh(order)
+    return _stay_out(order)
+
+
+@router.post("/me/orders/{order_no}/checkin", response_model=StayOrderOut)
+async def checkin_stay_order(
+    order_no: str,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """办理入住(核销)。"""
+    shop = await _my_hotel(db, user)
+    order = await _merchant_order(db, shop, order_no)
+    _transit(order, StayOrderStatus.CHECKED_IN, "merchant")
+    order.checked_in_at = datetime.now(_tz.utc)
+    await db.commit()
+    await db.refresh(order)
+    return _stay_out(order)
+
+
+@router.post("/me/orders/{order_no}/checkout", response_model=StayOrderOut)
+async def checkout_stay_order(
+    order_no: str,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """办理离店 = 结算触发点:佣金 5% 在此产生,商家实收 = 房费 - 佣金。"""
+    shop = await _my_hotel(db, user)
+    order = await _merchant_order(db, shop, order_no)
+    _transit(order, StayOrderStatus.COMPLETED, "merchant")
+    order.completed_at = datetime.now(_tz.utc)
+    order.fee_cents = int(
+        Decimal(order.total_cents)
+        * Decimal(str(settings.stay_commission_rate)))
+    order.net_cents = order.total_cents - order.fee_cents
+    await db.commit()
+    await db.refresh(order)
+    return _stay_out(order)

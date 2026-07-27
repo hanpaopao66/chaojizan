@@ -1205,3 +1205,62 @@ class HotelDetailOut(BaseModel):
     checkin_date: date | None = None
     checkout_date: date | None = None
     rooms: list[RoomQuoteOut] = []
+
+
+class StayOrderIn(BaseModel):
+    """住宿下单:房型 + 入住区间 + 间数 + 入住人。"""
+
+    room_type_id: int = Field(gt=0)
+    checkin_date: date
+    checkout_date: date
+    rooms_qty: int = Field(default=1, ge=1, le=5)
+    guest_name: str = Field(min_length=1, max_length=50)
+    guest_phone: str = Field(pattern=r"^1\d{10}$")
+    arrival_note: str = Field(default="", max_length=100)
+
+
+class StayOrderOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    order_no: str
+    merchant_id: int
+    room_type_id: int
+    checkin_date: date
+    checkout_date: date
+    nights: int
+    rooms_qty: int
+    guest_name: str
+    guest_phone: str
+    arrival_note: str = ""
+    room_type_name: str = ""
+    nightly_prices: list = []
+    total_cents: int
+    fee_cents: int = 0
+    net_cents: int = 0
+    cancel_policy: str
+    free_cancel_until: str = "18:00"
+    status: str
+    status_label: str = ""       # 中文状态(后端统一,三端一致)
+    cancel_policy_text: str = ""
+    reject_reason: str = ""
+    refund_cents: int = 0
+    refund_note: str = ""
+    created_at: datetime | None = None
+    paid_at: datetime | None = None
+    confirmed_at: datetime | None = None
+    checked_in_at: datetime | None = None
+    completed_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    # 列表/详情回填
+    hotel_name: str = ""
+    hotel_address: str = ""
+    hotel_phone: str = ""
+
+
+class StayCancelPreviewOut(BaseModel):
+    """取消试算:确认弹层展示,无副作用。"""
+
+    refund_cents: int
+    penalty_cents: int  # 扣款(=总额-退款,归商家,平台不抽佣)
+    note: str
