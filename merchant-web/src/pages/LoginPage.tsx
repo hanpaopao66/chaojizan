@@ -119,6 +119,12 @@ export default function LoginPage() {
           </Button>
         </Form>
         <div style={{ color: '#999', fontSize: 12, marginTop: 12, textAlign: 'center' }}>
+          登录即代表已阅读并同意
+          <a href="/legal/terms" target="_blank" rel="noreferrer">《用户协议》</a>
+          和
+          <a href="/legal/privacy" target="_blank" rel="noreferrer">《隐私政策》</a>
+        </div>
+        <div style={{ color: '#999', fontSize: 12, marginTop: 6, textAlign: 'center' }}>
           首次使用?请先在「超级赞商家」App 完成入驻,网页版与 App 同一账号
         </div>
       </Card>
