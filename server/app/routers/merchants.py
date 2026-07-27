@@ -65,6 +65,7 @@ _NEARBY_SQL_TMPL = """
           AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
     WHERE m.is_open = true
       AND m.status = 'approved'
+      AND m.biz_type = 'food'
       {category_clause}
       AND ST_DWithin(
             ST_SetSRID(ST_MakePoint(m.lng, m.lat), 4326)::geography,
@@ -156,7 +157,8 @@ async def list_merchants(
         await _fill_top_dishes(db, outs)
         return outs
     query = select(Merchant).where(
-        Merchant.is_open.is_(True), Merchant.status == MerchantStatus.approved)
+        Merchant.is_open.is_(True), Merchant.status == MerchantStatus.approved,
+        Merchant.biz_type == "food")
     if category:
         query = query.where(Merchant.category == category)
     result = await db.scalars(query.limit(50))
@@ -231,6 +233,7 @@ async def search_merchants(
 
     params: dict = {"pattern": f"%{q.strip()}%"}
     where = ["m.is_open = true", "m.status = 'approved'",
+             "m.biz_type = 'food'",  # 酒店走 /stays 频道,不混进外卖搜索
              "(m.name ILIKE :pattern OR EXISTS ("
              " SELECT 1 FROM dishes d WHERE d.merchant_id = m.id"
              " AND d.is_on_sale AND d.name ILIKE :pattern))"]
@@ -295,6 +298,7 @@ async def search_suggest(
         select(Merchant.name).where(
             Merchant.is_open.is_(True),
             Merchant.status == MerchantStatus.approved,
+            Merchant.biz_type == "food",
             Merchant.name.ilike(pattern))
         .order_by(Merchant.name.ilike(prefix).desc(),
                   Merchant.rating_sum.desc())
@@ -316,13 +320,26 @@ async def apply_shop(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """提交开店申请,进入待审核。证照号+证照照片是硬要求(食品安全法,监管留存影像)。"""
-    if not payload.license_no.strip():
-        raise HTTPException(422, "请填写食品经营许可证号")
-    if not payload.license_image_url.strip():
-        raise HTTPException(422, "请上传食品经营许可证照片")
-    if payload.category not in MERCHANT_CATEGORIES:
-        raise HTTPException(422, "未知品类")
+    """提交开店申请,进入待审核。证照是硬要求(监管留存影像),按业态分叉:
+
+    餐饮 = 食品经营许可证;酒店 = 营业执照 + 特种行业许可证(旅馆业,公安核发)。
+    """
+    if payload.biz_type == "hotel":
+        if not payload.license_no.strip():
+            raise HTTPException(422, "请填写营业执照注册号")
+        if not payload.license_image_url.strip():
+            raise HTTPException(422, "请上传营业执照照片")
+        if payload.hotel is None or not payload.hotel.special_license_no.strip():
+            raise HTTPException(422, "请填写特种行业许可证号(旅馆业)")
+        if not payload.hotel.special_license_image_url.strip():
+            raise HTTPException(422, "请上传特种行业许可证照片")
+    else:
+        if not payload.license_no.strip():
+            raise HTTPException(422, "请填写食品经营许可证号")
+        if not payload.license_image_url.strip():
+            raise HTTPException(422, "请上传食品经营许可证照片")
+        if payload.category not in MERCHANT_CATEGORIES:
+            raise HTTPException(422, "未知品类")
     existing = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
     if existing:
         raise HTTPException(409, "你已提交过申请,一个账号一家店")
@@ -330,12 +347,17 @@ async def apply_shop(
         owner_id=user.id,
         status=MerchantStatus.pending,
         is_open=False,
-        **payload.model_dump(),
+        **payload.model_dump(exclude={"hotel"}),
     )
     # 所在城市:坐标逆地理解析(天地图;失败留空,管理后台人工补填)
     from ..services.geo_city import city_of
     shop.city = await city_of(payload.lat, payload.lng)
     db.add(shop)
+    await db.flush()
+    if payload.biz_type == "hotel":
+        from ..models import HotelProfile
+        db.add(HotelProfile(merchant_id=shop.id,
+                            **payload.hotel.model_dump()))
     await db.commit()
     await db.refresh(shop)
     return shop

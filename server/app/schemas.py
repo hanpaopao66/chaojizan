@@ -90,16 +90,33 @@ class IdentityOut(BaseModel):
 
 
 # ---------- 商家 / 菜品 ----------
+class HotelApplyIn(BaseModel):
+    """酒店入驻专属资料(biz_type=hotel 时必传)。"""
+
+    tier: str = Field(default="economy", pattern="^(economy|comfort|premium|luxury)$")
+    front_desk_phone: str = Field(default="", max_length=20)
+    checkin_from: str = Field(default="14:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    checkout_until: str = Field(default="12:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    facilities: list[str] = []
+    special_license_no: str = Field(default="", max_length=50)      # 特种行业许可证号
+    special_license_image_url: str = Field(default="", max_length=300)
+    hygiene_image_url: str = Field(default="", max_length=300)      # 卫生许可证(选填)
+
+
 class MerchantIn(BaseModel):
     name: str
     description: str = ""
     address: str = ""
     lat: float
     lng: float
+    # biz_type=food 时为食品经营许可证;hotel 时为营业执照
     license_no: str = ""
     license_image_url: str = ""  # 证照照片(新申请必传,老库存量允许为空)
-    # 外卖品类(白名单校验在路由,清单见 categories.py)
+    # 外卖品类(白名单校验在路由,清单见 categories.py;酒店忽略此字段)
     category: str = "fast_food"
+    # 业态:food 餐饮外卖(默认) / hotel 酒店住宿
+    biz_type: str = Field(default="food", pattern="^(food|hotel)$")
+    hotel: HotelApplyIn | None = None  # 酒店专属资料,biz_type=hotel 必传
 
 
 class MerchantOut(BaseModel):
@@ -112,6 +129,7 @@ class MerchantOut(BaseModel):
     lat: float
     lng: float
     city: str = ""  # 所在城市(入驻时逆地理解析;开城清单外不可营业)
+    biz_type: str = "food"  # 业态:food 餐饮 / hotel 酒店(三端按此分叉界面)
     category: str = "fast_food"  # 外卖品类(清单见 categories.py)
     is_open: bool
     commission_rate: Decimal
@@ -144,6 +162,10 @@ class AdminMerchantOut(MerchantOut):
 
     license_no: str = ""
     license_image_url: str = ""
+    # 酒店业态的第二证照(特种行业许可证)与卫生许可证,列表页聚合填充
+    special_license_no: str = ""
+    special_license_image_url: str = ""
+    hygiene_image_url: str = ""
     owner_name: str = ""
     owner_phone: str = ""
     # 分账(二清收口):特约商户号+就绪标记(就绪后新订单货款走分账)

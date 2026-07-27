@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     # 团购券核销服务费率(只在核销时收;券未使用平台分文不取)
     voucher_commission_rate: float = 0.02
 
+    # 住宿佣金率(离店才计佣;取消/拒单/noshow 平台分文不取)
+    stay_commission_rate: float = 0.05
+
     # 骑手保障金:每完成一单从平台佣金中计提(分),用于骑手意外险采购和
     # 骑手责任(洒餐/丢餐)的先行赔付 —— 不扣骑手工资的底气。逐日计提额
     # 写进公开账本(rider_fund 字段),社区可验证

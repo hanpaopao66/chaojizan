@@ -62,3 +62,56 @@ def assert_transition(current: OrderStatus, target: OrderStatus, role: str) -> N
         )
     if role not in allowed_roles:
         raise TransitionError(f"当前角色无权执行此操作", forbidden=True)
+
+
+# ---------- 住宿订单状态机(与外卖平行的竖井,互不共享状态) ----------
+
+class StayOrderStatus(str, Enum):
+    CREATED = "created"          # 已下单待支付(15 分钟超时关闭)
+    CLOSED = "closed"            # 超时未支付关闭(库存已回补)
+    PAID = "paid"                # 已支付,等商家确认
+    CONFIRMED = "confirmed"      # 商家已确认,等入住
+    CHECKED_IN = "checked_in"    # 已办理入住
+    COMPLETED = "completed"      # 已离店(结算触发点,佣金 5% 在此产生)
+    CANCELLED = "cancelled"      # 用户取消(退款按取消政策)
+    REJECTED = "rejected"        # 商家拒单(全额退款)
+    NOSHOW = "noshow"            # 未入住未取消(扣首晚归商家零佣金,其余退用户)
+
+
+STAY_STATUS_LABELS = {
+    StayOrderStatus.CREATED: "待支付",
+    StayOrderStatus.CLOSED: "已关闭",
+    StayOrderStatus.PAID: "待商家确认",
+    StayOrderStatus.CONFIRMED: "待入住",
+    StayOrderStatus.CHECKED_IN: "在住",
+    StayOrderStatus.COMPLETED: "已离店",
+    StayOrderStatus.CANCELLED: "已取消",
+    StayOrderStatus.REJECTED: "商家已拒单",
+    StayOrderStatus.NOSHOW: "未入住",
+}
+
+STAY_TRANSITIONS: dict[tuple[StayOrderStatus, StayOrderStatus], set[str]] = {
+    (StayOrderStatus.CREATED, StayOrderStatus.PAID): {"customer", "system"},
+    (StayOrderStatus.CREATED, StayOrderStatus.CLOSED): {"customer", "system"},
+    (StayOrderStatus.PAID, StayOrderStatus.CONFIRMED): {"merchant"},
+    (StayOrderStatus.PAID, StayOrderStatus.REJECTED): {"merchant"},
+    (StayOrderStatus.PAID, StayOrderStatus.CANCELLED): {"customer", "system"},
+    (StayOrderStatus.CONFIRMED, StayOrderStatus.CHECKED_IN): {"merchant"},
+    (StayOrderStatus.CONFIRMED, StayOrderStatus.CANCELLED): {"customer", "system"},
+    (StayOrderStatus.CONFIRMED, StayOrderStatus.NOSHOW): {"system"},
+    # 离店:商家办理,或商家忘点由清扫任务在退房日次日自动完成
+    (StayOrderStatus.CHECKED_IN, StayOrderStatus.COMPLETED): {"merchant", "system"},
+}
+
+
+def assert_stay_transition(
+    current: StayOrderStatus, target: StayOrderStatus, role: str
+) -> None:
+    allowed_roles = STAY_TRANSITIONS.get((current, target))
+    if allowed_roles is None:
+        raise TransitionError(
+            f"订单不能从「{STAY_STATUS_LABELS[current]}」变为"
+            f"「{STAY_STATUS_LABELS[target]}」"
+        )
+    if role not in allowed_roles:
+        raise TransitionError("当前角色无权执行此操作", forbidden=True)

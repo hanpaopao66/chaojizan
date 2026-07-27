@@ -65,6 +65,19 @@ async def list_merchants(
         query = query.where(Merchant.city == city)
     rows = await db.execute(query)
     outs = [_to_out(shop, owner) for shop, owner in rows]
+    # 酒店业态的第二证照(特种行业许可证等),一次聚合查询回填
+    hotel_ids = [o.id for o in outs if o.biz_type == "hotel"]
+    if hotel_ids:
+        from ..models import HotelProfile
+        profiles = await db.scalars(
+            select(HotelProfile).where(HotelProfile.merchant_id.in_(hotel_ids)))
+        by_mid = {p.merchant_id: p for p in profiles}
+        for out in outs:
+            p = by_mid.get(out.id)
+            if p is not None:
+                out.special_license_no = p.special_license_no
+                out.special_license_image_url = p.special_license_image_url
+                out.hygiene_image_url = p.hygiene_image_url
     # 近 30 天经营质量(两条聚合 SQL,不逐店查询)
     late_rows = await db.execute(text_sql("""
         SELECT merchant_id, count(*) AS n FROM orders

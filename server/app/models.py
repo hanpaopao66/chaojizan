@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
-from .state_machine import OrderStatus
+from .state_machine import OrderStatus, StayOrderStatus
 
 
 class UserRole(str, enum.Enum):
@@ -122,7 +122,12 @@ class Merchant(Base):
     # 所在城市(入驻时逆地理解析,失败留空人工填;管理后台可改)。
     # 开城清单(platform_flags.open_cities)外的城市可入驻待审但不可营业
     city: Mapped[str] = mapped_column(String(20), default="", index=True)
-    # 外卖品类(白名单见 categories.py):展示归类不是资质项,商家随时可改
+    # 业态:food=餐饮外卖(默认) / hotel=酒店住宿。经营主体(钱包/提现/分账/
+    # 发票/税务)按 Merchant 复用,业务数据走各自竖井(菜品 vs 房型)
+    biz_type: Mapped[str] = mapped_column(
+        String(10), default="food", index=True)
+    # 外卖品类(白名单见 categories.py):展示归类不是资质项,商家随时可改。
+    # 仅 biz_type=food 有意义;酒店档次在 hotel_profiles.tier
     category: Mapped[str] = mapped_column(
         String(20), default="fast_food", index=True)
     is_open: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1348,4 +1353,146 @@ class Referral(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     rewarded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+# ---------- 酒店住宿垂类(平行竖井,经营主体复用 Merchant) ----------
+
+# 酒店档次白名单(展示归类,不自称"星级"避免虚假宣传)
+HOTEL_TIERS = {
+    "economy": "经济型",
+    "comfort": "舒适型",
+    "premium": "高档型",
+    "luxury": "豪华型",
+}
+
+
+class CancelPolicy(str, enum.Enum):
+    """取消政策(房型级,下单时快照进订单)。"""
+
+    limited_free = "limited_free"  # 入住日 X 点前免费取消,之后扣首晚
+    first_night = "first_night"    # 任何时候取消扣首晚(未支付除外)
+    strict = "strict"              # 支付后不可退(可走售后协商)
+
+
+class HotelProfile(Base):
+    """酒店专属资料:与 Merchant 一对一,不污染餐饮字段。
+
+    资质:Merchant.license_no/license_image_url 在 biz_type=hotel 时
+    存「营业执照」;特种行业许可证(旅馆业,公安核发)在本表。
+    """
+
+    __tablename__ = "hotel_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), unique=True, index=True)
+    tier: Mapped[str] = mapped_column(String(10), default="economy")  # 档次白名单 HOTEL_TIERS
+    front_desk_phone: Mapped[str] = mapped_column(String(20), default="")
+    checkin_from: Mapped[str] = mapped_column(String(5), default="14:00")   # 最早入住时刻
+    checkout_until: Mapped[str] = mapped_column(String(5), default="12:00")  # 最晚退房时刻
+    facilities: Mapped[list] = mapped_column(JSONB, default=list)  # 设施标签 ["wifi","parking",...]
+    special_license_no: Mapped[str] = mapped_column(String(50), default="")     # 特种行业许可证号,入驻必填
+    special_license_image_url: Mapped[str] = mapped_column(String(300), default="")
+    hygiene_image_url: Mapped[str] = mapped_column(String(300), default="")  # 卫生许可证照片(选填)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class RoomType(Base):
+    """房型:酒店的"商品"。价格与库存不在这里——在 room_calendar 按日管理。"""
+
+    __tablename__ = "room_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), index=True)
+    name: Mapped[str] = mapped_column(String(60))            # 如「高级大床房」
+    bed_type: Mapped[str] = mapped_column(String(30), default="")  # 如「1.8m 大床」
+    area_m2: Mapped[int] = mapped_column(Integer, default=0)       # 面积(㎡),0=未填
+    max_guests: Mapped[int] = mapped_column(Integer, default=2)
+    image_urls: Mapped[list] = mapped_column(JSONB, default=list)
+    facilities: Mapped[list] = mapped_column(JSONB, default=list)
+    cancel_policy: Mapped[CancelPolicy] = mapped_column(
+        _enum_column(CancelPolicy, "cancel_policy"),
+        default=CancelPolicy.limited_free)
+    # limited_free 档的免费取消截止时刻(入住日当天 HH:MM);其余档忽略
+    free_cancel_until: Mapped[str] = mapped_column(String(5), default="18:00")
+    is_on_sale: Mapped[bool] = mapped_column(Boolean, default=True)  # 下架不删,历史订单还引用
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class RoomCalendar(Base):
+    """房价房态日历:每晚一行是刻意设计——连住 = 区间内逐行原子扣减。
+
+    无记录的日期视为不可售(商家未开放)。
+    """
+
+    __tablename__ = "room_calendar"
+    __table_args__ = (
+        UniqueConstraint("room_type_id", "date", name="uq_room_calendar_day"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    room_type_id: Mapped[int] = mapped_column(
+        ForeignKey("room_types.id"), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    price_cents: Mapped[int] = mapped_column(Integer)
+    total_qty: Mapped[int] = mapped_column(Integer, default=0)
+    sold_qty: Mapped[int] = mapped_column(Integer, default=0)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)  # 关房:暂停售卖当晚
+
+
+class StayOrder(Base):
+    """住宿订单(单号前缀 S)。佣金 5% 只在离店(completed)时产生;
+    取消扣款/noshow 首晚归商家且佣金为 0——"离店才收,取消分文不收"。
+    """
+
+    __tablename__ = "stay_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), index=True)
+    room_type_id: Mapped[int] = mapped_column(ForeignKey("room_types.id"), index=True)
+    checkin_date: Mapped[date] = mapped_column(Date, index=True)
+    checkout_date: Mapped[date] = mapped_column(Date, index=True)
+    nights: Mapped[int] = mapped_column(Integer)
+    rooms_qty: Mapped[int] = mapped_column(Integer, default=1)
+    guest_name: Mapped[str] = mapped_column(String(50))
+    guest_phone: Mapped[str] = mapped_column(String(20))
+    arrival_note: Mapped[str] = mapped_column(String(100), default="")  # 预计到店时间段等
+    # 快照:房型名与逐晚单价 [{"date":"2026-08-01","price_cents":15800},...]
+    room_type_name: Mapped[str] = mapped_column(String(60), default="")
+    nightly_prices: Mapped[list] = mapped_column(JSONB, default=list)
+    total_cents: Mapped[int] = mapped_column(Integer)  # = sum(每晚价) × 间数
+    # 佣金与商家净额:completed 时按 5% 落定;取消扣款/noshow 时 fee=0
+    fee_cents: Mapped[int] = mapped_column(Integer, default=0)
+    net_cents: Mapped[int] = mapped_column(Integer, default=0)
+    # 取消政策快照(档位 + limited_free 的截止时刻)
+    cancel_policy: Mapped[CancelPolicy] = mapped_column(
+        _enum_column(CancelPolicy, "cancel_policy"))
+    free_cancel_until: Mapped[str] = mapped_column(String(5), default="18:00")
+    status: Mapped[StayOrderStatus] = mapped_column(
+        _enum_column(StayOrderStatus, "stay_order_status"),
+        default=StayOrderStatus.CREATED,
+        index=True,
+    )
+    reject_reason: Mapped[str] = mapped_column(String(100), default="")
+    # 退款金额(取消/拒单/noshow 时落定,原路退回)
+    refund_cents: Mapped[int] = mapped_column(Integer, default=0)
+    refund_note: Mapped[str] = mapped_column(String(200), default="")
+    wx_transaction_id: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    checked_in_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
