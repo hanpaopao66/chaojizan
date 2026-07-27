@@ -85,9 +85,19 @@ async def _month_fee(db: AsyncSession, merchant_id: int, period: str) -> dict:
                VoucherPurchase.status == VoucherPurchaseStatus.redeemed,
                VoucherPurchase.redeemed_at >= start,
                VoucherPurchase.redeemed_at < end))
+    # 住宿服务费:只有离店(completed)才产生佣金,品名「平台服务费(住宿)」
+    from ..models import StayOrder
+    from ..state_machine import StayOrderStatus
+    stay_fee = await db.scalar(
+        select(sa_func.coalesce(sa_func.sum(StayOrder.fee_cents), 0))
+        .where(StayOrder.merchant_id == merchant_id,
+               StayOrder.status == StayOrderStatus.COMPLETED,
+               StayOrder.completed_at >= start,
+               StayOrder.completed_at < end))
     return {"period": period, "commission_cents": commission,
             "voucher_fee_cents": voucher_fee,
-            "total_cents": commission + voucher_fee}
+            "stay_fee_cents": stay_fee,
+            "total_cents": commission + voucher_fee + stay_fee}
 
 
 async def _my_shop(db: AsyncSession, user: User) -> Merchant:

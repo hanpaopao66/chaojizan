@@ -299,6 +299,33 @@ async def run_audit() -> list[dict]:
                               f" ≠ 售价 {p.sell_price_cents}",
                 })
 
+        # 9) 住宿:资金按状态逐单恒等——
+        #    离店: 佣金+净额 == 房费 且 佣金 <= 房费×5%;
+        #    取消/未入住/拒单: 佣金必须为 0 且 净额+退款 == 房费
+        from ..models import StayOrder
+        from ..state_machine import StayOrderStatus
+
+        settled_stays = (await db.scalars(
+            select(StayOrder).where(
+                StayOrder.status.in_([
+                    StayOrderStatus.COMPLETED, StayOrderStatus.CANCELLED,
+                    StayOrderStatus.NOSHOW, StayOrderStatus.REJECTED]),
+                StayOrder.created_at >= since))).all()
+        for o in settled_stays:
+            if o.status == StayOrderStatus.COMPLETED:
+                bad = (o.fee_cents + o.net_cents != o.total_cents
+                       or o.fee_cents * 100 > o.total_cents * 5)
+            else:
+                bad = (o.fee_cents != 0
+                       or o.net_cents + o.refund_cents != o.total_cents)
+            if bad:
+                problems.append({
+                    "check": "stay_split_mismatch",
+                    "detail": f"住宿单 {o.order_no}({o.status.value}) 资金不平:"
+                              f"房费 {o.total_cents} 佣金 {o.fee_cents}"
+                              f" 净额 {o.net_cents} 退款 {o.refund_cents}",
+                })
+
         for p in problems:
             db.add(AuditAlert(check_name=p["check"], detail=p["detail"][:500]))
             logger.error("账务告警 [%s] %s", p["check"], p["detail"])

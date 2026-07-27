@@ -105,6 +105,53 @@ async def _get_shop(db: AsyncSession, merchant_id: int) -> Merchant:
     return shop
 
 
+@router.get("/stay-orders")
+async def admin_stay_orders(
+    status: str = "",
+    merchant_id: int | None = None,
+    day: str = "",  # 按入住日筛(YYYY-MM-DD)
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """住宿订单查询:资金三行(房费-佣金-商家实收)与状态一屏看清。"""
+    from datetime import date as _date
+
+    from ..models import StayOrder
+    from ..state_machine import STAY_STATUS_LABELS, StayOrderStatus
+
+    query = select(StayOrder, Merchant).join(
+        Merchant, Merchant.id == StayOrder.merchant_id)
+    if status:
+        try:
+            query = query.where(StayOrder.status == StayOrderStatus(status))
+        except ValueError:
+            raise HTTPException(422, "未知状态")
+    if merchant_id:
+        query = query.where(StayOrder.merchant_id == merchant_id)
+    if day:
+        query = query.where(StayOrder.checkin_date == _date.fromisoformat(day))
+    rows = (await db.execute(
+        query.order_by(StayOrder.created_at.desc()).limit(200))).all()
+    return [{
+        "order_no": o.order_no,
+        "hotel": m.name,
+        "merchant_id": m.id,
+        "room_type": o.room_type_name,
+        "rooms_qty": o.rooms_qty,
+        "checkin_date": str(o.checkin_date),
+        "checkout_date": str(o.checkout_date),
+        "nights": o.nights,
+        "guest_name": o.guest_name,
+        "status": o.status.value,
+        "status_label": STAY_STATUS_LABELS[o.status],
+        "total_cents": o.total_cents,
+        "fee_cents": o.fee_cents,
+        "net_cents": o.net_cents,
+        "refund_cents": o.refund_cents,
+        "created_at": o.created_at.isoformat(),
+    } for o, m in rows]
+
+
 @router.post("/merchants/{merchant_id}/approve", response_model=AdminMerchantOut)
 async def approve(
     merchant_id: int,

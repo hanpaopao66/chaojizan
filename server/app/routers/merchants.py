@@ -21,6 +21,7 @@ from ..models import (
     MerchantEarning,
     MerchantStatus,
     Order,
+    StayOrder,
     User,
     VoucherPurchase,
     VoucherPurchaseStatus,
@@ -997,7 +998,21 @@ async def my_commission_tier(
 
 # ---------- 商家钱包与提现 ----------
 # 余额是算出来的,不是存出来的:外卖净额(merchant_earnings,含售后冲账负数行)
-# + 团购核销净额 - 提现(冻结中+已打款)。与骑手钱包同一套语义和 T+1 打款流程。
+# + 团购核销净额 + 住宿净额(离店结算/取消扣款/noshow 首晚,net 落在 stay_orders)
+# - 提现(冻结中+已打款)。与骑手钱包同一套语义和 T+1 打款流程。
+
+# 住宿资金已落定的状态(net_cents 生效):离店/取消(扣款部分)/未入住(首晚)
+_STAY_SETTLED = ("completed", "cancelled", "noshow")
+
+
+async def _stay_net(db: AsyncSession, merchant_id: int) -> int:
+    from ..state_machine import StayOrderStatus
+    return await db.scalar(
+        select(func.coalesce(func.sum(StayOrder.net_cents), 0)).where(
+            StayOrder.merchant_id == merchant_id,
+            StayOrder.status.in_([StayOrderStatus(s) for s in _STAY_SETTLED]),
+        )
+    )
 
 
 async def _merchant_wallet(db: AsyncSession, shop: Merchant, owner_id: int) -> WalletOut:
@@ -1015,7 +1030,7 @@ async def _merchant_wallet(db: AsyncSession, shop: Merchant, owner_id: int) -> W
             VoucherPurchase.status == VoucherPurchaseStatus.redeemed,
         )
     )
-    earned = food_net + voucher_net
+    earned = food_net + voucher_net + await _stay_net(db, shop.id)
     pending = await db.scalar(
         select(func.coalesce(func.sum(Withdrawal.amount_cents), 0)).where(
             Withdrawal.user_id == owner_id,
@@ -1278,8 +1293,9 @@ async def finance_statement_csv(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """对账单 CSV 导出:外卖入账/冲账 + 团购核销,按时间合并(透明三原则)。"""
+    """对账单 CSV 导出:外卖入账/冲账 + 团购核销 + 住宿,按时间合并(透明三原则)。"""
     from ..models import Voucher, VoucherPurchase, VoucherPurchaseStatus
+    from ..state_machine import StayOrderStatus
 
     shop = await _my_shop_or_404(db, user)
     since = datetime.now(timezone.utc) - timedelta(days=min(days, 90))
@@ -1304,10 +1320,25 @@ async def finance_statement_csv(
         )
     ).all()
 
+    stay_kind = {StayOrderStatus.COMPLETED: "住宿离店",
+                 StayOrderStatus.CANCELLED: "住宿取消扣款",
+                 StayOrderStatus.NOSHOW: "住宿未入住"}
+    stays = (
+        await db.scalars(
+            select(StayOrder).where(
+                StayOrder.merchant_id == shop.id,
+                StayOrder.status.in_(list(stay_kind)),
+                StayOrder.net_cents != 0,  # 全额退的取消没有资金流,不进对账
+                func.coalesce(StayOrder.completed_at, StayOrder.cancelled_at)
+                >= since,
+            )
+        )
+    ).all()
+
     def yuan(cents: int) -> str:
         return f"{cents / 100:.2f}"
 
-    # 外卖行与团购行统一成 (时间, 单号, 类型, 应收, 佣金, 实收, 备注),按时间排
+    # 外卖/团购/住宿行统一成 (时间, 单号, 类型, 应收, 佣金, 实收, 备注),按时间排
     lines = [
         (e.created_at, e.order_no,
          "外卖入账" if e.kind == EarningKind.earning else "外卖冲账",
@@ -1319,6 +1350,11 @@ async def finance_statement_csv(
          p.sell_price_cents, p.commission_cents, p.net_cents,
          title.replace(",", ";"))
         for p, title in redeems
+    ] + [
+        (o.completed_at or o.cancelled_at, o.order_no, stay_kind[o.status],
+         o.total_cents, o.fee_cents, o.net_cents,
+         f"{o.room_type_name}×{o.rooms_qty} {o.nights}晚")
+        for o in stays
     ]
     lines.sort(key=lambda x: x[0])
 
@@ -1330,7 +1366,7 @@ async def finance_statement_csv(
             yield f"{day},{no},{kind},{yuan(gross)},{yuan(comm)},{yuan(net)},{note}\n"
         total_net = sum(x[5] for x in lines)
         total_comm = sum(x[4] for x in lines)
-        yield f"合计,,,,{yuan(total_comm)},{yuan(total_net)},近{min(days, 90)}天(外卖+团购)\n"
+        yield f"合计,,,,{yuan(total_comm)},{yuan(total_net)},近{min(days, 90)}天(外卖+团购+住宿)\n"
 
     return StreamingResponse(
         generate(),

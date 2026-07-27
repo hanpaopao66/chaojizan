@@ -62,7 +62,7 @@ async def platform_income_csv(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """平台收入明细:佣金逐笔(含冲账/调整负项)+ 团购服务费逐笔。"""
+    """平台收入明细:佣金逐笔(含冲账/调整负项)+ 团购服务费 + 住宿服务费逐笔。"""
     _check_period(period)
     start, end = _period_bounds_utc(period)
     earnings = (await db.scalars(
@@ -76,6 +76,13 @@ async def platform_income_csv(
         .where(VoucherPurchase.status == VoucherPurchaseStatus.redeemed,
                VoucherPurchase.redeemed_at >= start,
                VoucherPurchase.redeemed_at < end))).all()
+    from ..models import StayOrder
+    from ..state_machine import StayOrderStatus
+    stays = (await db.scalars(
+        select(StayOrder).where(
+            StayOrder.status == StayOrderStatus.COMPLETED,
+            StayOrder.completed_at >= start,
+            StayOrder.completed_at < end))).all()
 
     rows = [
         (e.created_at, _KIND_LABELS.get(e.kind, e.kind.value), e.order_no,
@@ -87,6 +94,11 @@ async def platform_income_csv(
          shops.get(p.merchant_id, str(p.merchant_id)), p.commission_cents,
          title.replace(",", ";"))
         for p, title in redeems
+    ] + [
+        (o.completed_at, "住宿服务费", o.order_no,
+         shops.get(o.merchant_id, str(o.merchant_id)), o.fee_cents,
+         f"{o.room_type_name}×{o.rooms_qty} {o.nights}晚")
+        for o in stays
     ]
     rows.sort(key=lambda x: x[0])
 
@@ -97,8 +109,8 @@ async def platform_income_csv(
             day = at.astimezone(CN_TZ).strftime("%Y-%m-%d %H:%M")
             yield f"{day},{kind},{no},{shop_name},{_yuan(cents)},{note}\n"
         total = sum(x[4] for x in rows)
-        reversal_count = sum(1 for x in rows if x[1] != "外卖佣金"
-                             and x[1] != "团购服务费")
+        reversal_count = sum(1 for x in rows if x[1] not in
+                             ("外卖佣金", "团购服务费", "住宿服务费"))
         yield (f"合计,,,,{_yuan(total)},"
                f"{period} 平台收入(净口径,含 {reversal_count} 笔冲账/调整)\n")
 
@@ -158,7 +170,7 @@ async def merchant_settlement_csv(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """商家结算汇总(按店):外卖净额(含冲账/调整)+团购净额+当月已打款提现。"""
+    """商家结算汇总(按店):外卖净额(含冲账/调整)+团购净额+住宿净额+当月已打款提现。"""
     _check_period(period)
     start, end = _period_bounds_utc(period)
     earnings = (await db.scalars(
@@ -170,6 +182,20 @@ async def merchant_settlement_csv(
             VoucherPurchase.status == VoucherPurchaseStatus.redeemed,
             VoucherPurchase.redeemed_at >= start,
             VoucherPurchase.redeemed_at < end))).all()
+    from sqlalchemy import func as sa_fn
+
+    from ..models import StayOrder
+    from ..state_machine import StayOrderStatus
+    stay_rows = (await db.scalars(
+        select(StayOrder).where(
+            StayOrder.status.in_([StayOrderStatus.COMPLETED,
+                                  StayOrderStatus.CANCELLED,
+                                  StayOrderStatus.NOSHOW]),
+            StayOrder.net_cents != 0,
+            sa_fn.coalesce(StayOrder.completed_at, StayOrder.cancelled_at)
+            >= start,
+            sa_fn.coalesce(StayOrder.completed_at, StayOrder.cancelled_at)
+            < end))).all()
     shops = {m.id: m for m in await db.scalars(select(Merchant))}
     owners = {u.id: u for u in await db.scalars(select(User))}
     paid = (await db.scalars(
@@ -183,16 +209,20 @@ async def merchant_settlement_csv(
         paid_by_owner[w.user_id] = paid_by_owner.get(w.user_id, 0) + w.amount_cents
 
     by_shop: dict[int, dict] = {}
+    _blank = {"food_net": 0, "voucher_net": 0, "stay_net": 0}
     for e in earnings:
-        r = by_shop.setdefault(e.merchant_id, {"food_net": 0, "voucher_net": 0})
+        r = by_shop.setdefault(e.merchant_id, dict(_blank))
         r["food_net"] += e.net_cents
     for p in redeems:
-        r = by_shop.setdefault(p.merchant_id, {"food_net": 0, "voucher_net": 0})
+        r = by_shop.setdefault(p.merchant_id, dict(_blank))
         r["voucher_net"] += p.net_cents
+    for o in stay_rows:
+        r = by_shop.setdefault(o.merchant_id, dict(_blank))
+        r["stay_net"] += o.net_cents
 
     def generate():
         yield "﻿"
-        yield "商家,店主手机号,外卖净额(元),团购净额(元),当月已打款提现(元)\n"
+        yield "商家,店主手机号,外卖净额(元),团购净额(元),住宿净额(元),当月已打款提现(元)\n"
         for shop_id, r in sorted(by_shop.items()):
             shop = shops.get(shop_id)
             owner = owners.get(shop.owner_id) if shop else None
@@ -200,9 +230,11 @@ async def merchant_settlement_csv(
             phone = owner.phone if owner else ""
             paid_cents = paid_by_owner.get(shop.owner_id, 0) if shop else 0
             yield (f"{name},{phone},{_yuan(r['food_net'])},"
-                   f"{_yuan(r['voucher_net'])},{_yuan(paid_cents)}\n")
+                   f"{_yuan(r['voucher_net'])},{_yuan(r['stay_net'])},"
+                   f"{_yuan(paid_cents)}\n")
         yield (f"合计,,{_yuan(sum(r['food_net'] for r in by_shop.values()))},"
                f"{_yuan(sum(r['voucher_net'] for r in by_shop.values()))},"
+               f"{_yuan(sum(r['stay_net'] for r in by_shop.values()))},"
                f"{_yuan(sum(paid_by_owner.values()))}\n")
 
     return _csv_response(generate, f"merchant-settlement-{period}.csv")
@@ -214,10 +246,13 @@ async def commission_invoice_csv(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """佣金开票依据:按商家汇总当月平台服务费(外卖佣金净额+团购服务费),
+    """佣金开票依据:按商家汇总当月平台服务费(外卖佣金净额+团购服务费+住宿服务费),
     口径与 InvoiceRequest 申请金额、platform-income.csv 完全同源。
     向商家开具「平台服务费」发票时按这份对数。"""
     from sqlalchemy import func as sa_func
+
+    from ..models import StayOrder
+    from ..state_machine import StayOrderStatus
     _check_period(period)
     start, end = _period_bounds_utc(period)
     commission_rows = (await db.execute(
@@ -233,26 +268,37 @@ async def commission_invoice_csv(
                VoucherPurchase.redeemed_at >= start,
                VoucherPurchase.redeemed_at < end)
         .group_by(VoucherPurchase.merchant_id))).all()
+    stay_fee_rows = (await db.execute(
+        select(StayOrder.merchant_id, sa_func.sum(StayOrder.fee_cents))
+        .where(StayOrder.status == StayOrderStatus.COMPLETED,
+               StayOrder.completed_at >= start,
+               StayOrder.completed_at < end)
+        .group_by(StayOrder.merchant_id))).all()
     voucher_map = dict(voucher_rows)
+    stay_map = dict(stay_fee_rows)
     shops = {m.id: m for m in await db.scalars(select(Merchant))}
-    merged = {mid: [cents, voucher_map.pop(mid, 0) or 0]
+    merged = {mid: [cents or 0, voucher_map.pop(mid, 0) or 0]
               for mid, cents in commission_rows}
     for mid, cents in voucher_map.items():
         merged[mid] = [0, cents or 0]
+    for mid in merged:
+        merged[mid].append(stay_map.pop(mid, 0) or 0)
+    for mid, cents in stay_map.items():
+        merged[mid] = [0, 0, cents or 0]
 
     def generate():
         yield "﻿"
-        yield "商家,外卖佣金(元),团购服务费(元),合计(元),发票抬头,税号\n"
+        yield "商家,外卖佣金(元),团购服务费(元),住宿服务费(元),合计(元),发票抬头,税号\n"
         total = 0
-        for mid, (food_c, voucher_c) in sorted(merged.items()):
+        for mid, (food_c, voucher_c, stay_c) in sorted(merged.items()):
             shop = shops.get(mid)
             name = shop.name if shop else str(mid)
             title = (shop.invoice_title if shop else "").replace(",", ";")
             tax_no = shop.invoice_tax_no if shop else ""
-            subtotal = (food_c or 0) + voucher_c
+            subtotal = food_c + voucher_c + stay_c
             total += subtotal
-            yield (f"{name},{_yuan(food_c or 0)},{_yuan(voucher_c)},"
+            yield (f"{name},{_yuan(food_c)},{_yuan(voucher_c)},{_yuan(stay_c)},"
                    f"{_yuan(subtotal)},{title or '(未填)'},{tax_no}\n")
-        yield f"合计,,,{_yuan(total)},{period} 平台服务费(开票依据),\n"
+        yield f"合计,,,,{_yuan(total)},{period} 平台服务费(开票依据),\n"
 
     return _csv_response(generate, f"commission-invoice-{period}.csv")
