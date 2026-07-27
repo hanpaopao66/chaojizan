@@ -1068,3 +1068,88 @@ class AdminTicketOut(TicketOut):
 
 class TicketReplyIn(BaseModel):
     reply: str = Field(min_length=1, max_length=500)
+
+
+# ---------- 住宿(酒店垂类,方案见 docs/HOTEL_PLAN.md) ----------
+
+_HHMM_RE = r"^([01]\d|2[0-3]):[0-5]\d$"
+_POLICY_RE = "^(limited_free|first_night|strict)$"
+
+
+class RoomTypeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    bed_type: str = Field(default="", max_length=30)
+    area_m2: int = Field(default=0, ge=0, le=500)
+    max_guests: int = Field(default=2, ge=1, le=10)
+    image_urls: list[str] = Field(default=[], max_length=9)
+    facilities: list[str] = Field(default=[], max_length=20)
+    cancel_policy: str = Field(default="limited_free", pattern=_POLICY_RE)
+    free_cancel_until: str = Field(default="18:00", pattern=_HHMM_RE)
+    sort: int = Field(default=0, ge=0, le=999)
+
+
+class RoomTypePatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    bed_type: str | None = Field(default=None, max_length=30)
+    area_m2: int | None = Field(default=None, ge=0, le=500)
+    max_guests: int | None = Field(default=None, ge=1, le=10)
+    image_urls: list[str] | None = Field(default=None, max_length=9)
+    facilities: list[str] | None = Field(default=None, max_length=20)
+    # 政策改动只影响新订单(已有订单按下单时快照执行)
+    cancel_policy: str | None = Field(default=None, pattern=_POLICY_RE)
+    free_cancel_until: str | None = Field(default=None, pattern=_HHMM_RE)
+    is_on_sale: bool | None = None
+    sort: int | None = Field(default=None, ge=0, le=999)
+
+
+class RoomTypeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    merchant_id: int
+    name: str
+    bed_type: str = ""
+    area_m2: int = 0
+    max_guests: int = 2
+    image_urls: list = []
+    facilities: list = []
+    cancel_policy: str = "limited_free"
+    free_cancel_until: str = "18:00"
+    is_on_sale: bool = True
+    sort: int = 0
+
+
+class RoomCalendarSetIn(BaseModel):
+    """日历批量设置:日期区间 × 多房型,统一改价/改总量/开关房(至少一项)。"""
+
+    room_type_ids: list[int] = Field(min_length=1, max_length=50)
+    from_date: date
+    to_date: date
+    price_cents: int | None = Field(default=None, gt=0, le=10_000_000)
+    total_qty: int | None = Field(default=None, ge=0, le=999)
+    closed: bool | None = None
+
+    @model_validator(mode="after")
+    def sane(self):
+        if self.to_date < self.from_date:
+            raise ValueError("结束日期不能早于开始日期")
+        if (self.to_date - self.from_date).days > 120:
+            raise ValueError("一次最多设置 120 天")
+        if self.price_cents is None and self.total_qty is None \
+                and self.closed is None:
+            raise ValueError("请至少设置价格、间数或开关房中的一项")
+        return self
+
+
+class RoomDayOut(BaseModel):
+    date: date
+    price_cents: int
+    total_qty: int
+    sold_qty: int
+    closed: bool
+
+
+class RoomCalendarRowOut(BaseModel):
+    room_type_id: int
+    room_type_name: str
+    days: list[RoomDayOut] = []

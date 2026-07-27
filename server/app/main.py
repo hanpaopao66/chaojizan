@@ -31,6 +31,7 @@ from .routers import (
     reviews,
     riders,
     screen,
+    stays,
     tax,
     transparency,
     tickets,
@@ -120,6 +121,7 @@ app.include_router(uploads.router)
 app.include_router(payments.router)
 app.include_router(tickets.router)
 app.include_router(vouchers.router)
+app.include_router(stays.router)
 app.include_router(payout.router)
 app.include_router(appeals.router)
 app.include_router(invoices.router)
