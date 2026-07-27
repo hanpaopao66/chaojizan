@@ -15,6 +15,7 @@ import 'category_page.dart';
 import 'checkout_page.dart';
 import 'coupons_page.dart';
 import 'group_cart_page.dart';
+import 'hotel_pages.dart';
 import 'invite_page.dart';
 import 'share_card.dart';
 import 'five_percent.dart';
@@ -522,15 +523,17 @@ class _MerchantListViewState extends State<MerchantListView> {
                   builder: (_) => CategoryPage(
                       api: widget.api,
                       deliveryAddress: widget.deliveryAddress)))),
+          // 金刚区定版 8 格(2026-07-27 拍板):住宿第 2 位,跑腿移除
+          entry(Icons.hotel_outlined, '住宿',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => HotelListPage(
+                      api: widget.api, lat: _myLat, lng: _myLng)))),
           entry(Icons.local_activity_outlined, '超值团购',
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => DealsPage(api: widget.api)))),
           entry(Icons.local_taxi_outlined, '打车',
               coming: '司机不被抽走三成车费',
               blood: '司机每单被抽走两三成,高峰还有乘客看不见的差价'),
-          entry(Icons.directions_run, '跑腿',
-              coming: '跑腿费给跑腿的人,平台只收零头',
-              blood: '跑腿平台抽成 25% 起,小哥风里雨里拿的是小头'),
           entry(Icons.cleaning_services_outlined, '家政',
               coming: '阿姨的钱不过中介的手',
               blood: '中介两头收费,阿姨的月薪被抽走两到四成'),
