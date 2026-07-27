@@ -49,8 +49,9 @@ class RiderApp extends StatelessWidget {
           api: rootApi,
           title: '骑手端 · 抢单配送',
           role: 'rider',
-          homeBuilder: (_, api) =>
-              RiderVerifyGate(api: api, child: RiderHomePage(api: api)),
+          // 登录即进抢单大厅(对齐美团众包等行业惯例):实名认证不再整 App 门禁,
+          // 改为跑单前置——上线/抢单时校验并引导,首页横幅常驻提示
+          homeBuilder: (_, api) => RiderHomePage(api: api),
         ),
       )),
     );
@@ -85,6 +86,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) =>
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'rider'));
+    _loadVerify(); // 认证状态:只做提示与跑单前置,不挡浏览
     _refresh();
     _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refresh());
   }
@@ -258,7 +260,84 @@ class _RiderHomePageState extends State<RiderHomePage> {
     }
   }
 
+  // ---------- 实名认证状态(跑单前置,不挡浏览) ----------
+  RiderProfile? _verify;
+
+  Future<void> _loadVerify() async {
+    try {
+      final p = await widget.api.riderProfile();
+      if (mounted) setState(() => _verify = p);
+    } catch (_) {} // 拉不到状态不挡首页,上线/抢单时服务端仍会兜底校验
+  }
+
+  /// 跑单动作前置校验:未认证弹窗引导,审核中提示等待。返回 true = 放行
+  Future<bool> _ensureVerified() async {
+    final p = _verify;
+    if (p != null && p.isApproved) return true;
+    if (p != null && p.status == 'pending') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('实名认证审核中,通过后即可上线接单')));
+      return false;
+    }
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('跑单需要先完成实名认证'),
+        content: Text(p != null && p.status == 'rejected'
+            ? '上次认证被驳回:${p.rejectReason}\n修改后重新提交即可'
+            : '按监管要求,接单配送需实名(身份证+健康证)。'
+              '提交后平台尽快审核,通过即可开跑。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('再逛逛')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('去认证')),
+        ],
+      ),
+    );
+    if (go == true && mounted) {
+      await Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => RiderVerifyFlowPage(api: widget.api)));
+      _loadVerify();
+    }
+    return false;
+  }
+
+  /// 首页横幅:未认证/审核中/被驳回时常驻提示(通过后消失)
+  Widget? _verifyBanner() {
+    final p = _verify;
+    if (p == null || p.isApproved) return null;
+    final (text, color) = switch (p.status) {
+      'pending' => ('实名认证审核中,通过后即可上线接单', Colors.blue),
+      'rejected' => ('认证被驳回:${p.rejectReason} · 点击重新提交', Colors.red),
+      _ => ('完成实名认证(身份证+健康证),即可开始接单赚钱 →', const Color(0xFFFF5A1F)),
+    };
+    return InkWell(
+      onTap: () async {
+        await Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => RiderVerifyFlowPage(api: widget.api)));
+        _loadVerify();
+      },
+      child: Container(
+        width: double.infinity,
+        color: color.withValues(alpha: 0.10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(children: [
+          Icon(Icons.verified_user_outlined, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+              child: Text(text,
+                  style: TextStyle(color: color, fontSize: 13,
+                      fontWeight: FontWeight.w600))),
+        ]),
+      ),
+    );
+  }
+
   Future<void> _toggleOnline(bool value) async {
+    if (value && !await _ensureVerified()) return;
     try {
       await widget.api.setOnline(value);
     } catch (e) {
@@ -295,6 +374,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
   }
 
   Future<void> _grab(Order order) async {
+    if (!await _ensureVerified()) return;
     try {
       await widget.api.grabOrder(order.orderNo);
       if (!mounted) return;
@@ -806,6 +886,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final banner = _verifyBanner();
     final body = _tab == 0
         ? RefreshIndicator(
             onRefresh: _refresh,
@@ -880,7 +961,11 @@ class _RiderHomePageState extends State<RiderHomePage> {
                   ),
           );
 
-    final page = _tab == 2 ? WalletPage(api: widget.api) : body;
+    final tabBody = _tab == 2 ? WalletPage(api: widget.api) : body;
+    // 认证提示横幅置顶(通过后自动消失)
+    final page = banner == null
+        ? tabBody
+        : Column(children: [banner, Expanded(child: tabBody)]);
 
     return Scaffold(
       appBar: AppBar(

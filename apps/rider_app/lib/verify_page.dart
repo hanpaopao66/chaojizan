@@ -4,19 +4,19 @@ import 'package:superz_shared/superz_shared.dart';
 
 /// 骑手实名认证:未提交/被驳回 → 填表提交;待审核 → 等待页;通过 → 门禁放行。
 /// 作为接单前的强制门禁,套在抢单/配送/钱包之外。
-class RiderVerifyGate extends StatefulWidget {
-  const RiderVerifyGate({super.key, required this.api, required this.child});
+/// 实名认证流程页(从首页横幅/上线/抢单入口进入,可随时返回继续逛):
+/// 未提交/被驳回 → 表单;待审核 → 审核中;已通过 → 提示并返回。
+/// 不再作为整 App 门禁——登录即可进抢单大厅,跑单动作才前置校验。
+class RiderVerifyFlowPage extends StatefulWidget {
+  const RiderVerifyFlowPage({super.key, required this.api});
 
   final ApiClient api;
 
-  /// 认证通过后展示的主界面
-  final Widget child;
-
   @override
-  State<RiderVerifyGate> createState() => _RiderVerifyGateState();
+  State<RiderVerifyFlowPage> createState() => _RiderVerifyFlowPageState();
 }
 
-class _RiderVerifyGateState extends State<RiderVerifyGate> {
+class _RiderVerifyFlowPageState extends State<RiderVerifyFlowPage> {
   RiderProfile? _profile;
   bool _loaded = false;
   String? _error;
@@ -59,7 +59,23 @@ class _RiderVerifyGateState extends State<RiderVerifyGate> {
       );
     }
     final p = _profile!;
-    if (p.isApproved) return widget.child;
+    if (p.isApproved) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('实名认证')),
+        body: Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.verified, size: 56, color: Color(0xFF0E8A5F)),
+            const SizedBox(height: 16),
+            Text('认证已通过,可以上线接单了',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 20),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('去接单')),
+          ]),
+        ),
+      );
+    }
 
     if (p.status == 'pending') {
       return Scaffold(
