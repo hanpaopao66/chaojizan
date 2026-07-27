@@ -463,3 +463,116 @@ export function createShopCouponBatch(
 export function toggleShopCouponBatch(id: number): Promise<ShopCouponBatch> {
   return request('POST', `/merchants/me/coupon-batches/${id}/toggle`)
 }
+
+// ---------- 对账中心 ----------
+
+export interface Wallet {
+  balance_cents: number
+  total_earned_cents: number
+  pending_withdrawal_cents: number
+  withdrawn_cents: number
+  deposit_required_cents: number
+  deposit_held_cents: number
+  withdrawable_cents: number
+}
+
+export function merchantWallet(): Promise<Wallet> {
+  return request('GET', '/merchants/me/wallet')
+}
+
+export interface DayStat {
+  day: string
+  order_count: number
+  food_cents: number
+  commission_cents: number
+  net_cents: number
+}
+
+export function financeDaily(days = 30): Promise<DayStat[]> {
+  return request('GET', `/merchants/me/finance/daily?days=${days}`)
+}
+
+export interface FinanceOrder {
+  order_no: string
+  food_cents: number
+  commission_cents: number
+  net_cents: number
+  created_at: string
+}
+
+export function financeOrders(day: string): Promise<FinanceOrder[]> {
+  return request('GET', `/merchants/me/finance/orders?day=${day}`)
+}
+
+export interface Withdrawal {
+  id: number
+  amount_cents: number
+  status: string
+  reject_reason: string
+  paid_note: string
+  created_at: string
+  processed_at: string | null
+}
+
+export function merchantWithdrawals(): Promise<Withdrawal[]> {
+  return request('GET', '/merchants/me/withdrawals')
+}
+
+export function createWithdrawal(amountCents: number): Promise<Withdrawal> {
+  return request('POST', '/merchants/me/withdrawals',
+    { amount_cents: amountCents })
+}
+
+export interface CommissionTier {
+  commission_rate: number
+  tier_rate: number
+  tiers: { from_orders: number; rate: number }[]
+  last_month_completed: number
+  this_month_completed: number
+  next_tier_from: number | null
+  next_tier_rate: number | null
+  orders_to_next: number | null
+}
+
+export function commissionTier(): Promise<CommissionTier> {
+  return request('GET', '/merchants/me/commission-tier')
+}
+
+export interface InvoiceFee {
+  period: string
+  commission_cents: number
+  voucher_fee_cents: number
+  stay_fee_cents: number
+  total_cents: number
+}
+
+export interface InvoiceSummary extends InvoiceFee {
+  requested: boolean
+  period_ended: boolean
+  title: string
+  tax_no: string
+  email: string
+}
+
+export function invoiceSummary(period: string): Promise<InvoiceSummary> {
+  return request('GET', `/invoices/summary?period=${period}`)
+}
+
+export interface InvoiceRecord {
+  id: number
+  period: string
+  amount_cents: number
+  status: string
+  title: string
+  created_at: string
+}
+
+export function myInvoices(): Promise<InvoiceRecord[]> {
+  return request('GET', '/invoices/mine')
+}
+
+export function applyInvoice(period: string, title: string, taxNo: string,
+  email: string): Promise<InvoiceRecord> {
+  return request('POST', '/invoices',
+    { period, title, tax_no: taxNo, email })
+}

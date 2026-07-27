@@ -15,6 +15,7 @@ import { useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 import { ApiError, clearToken, Merchant, updateShop } from '../api'
+import FinancePage from '../pages/FinancePage'
 import DishesPage from '../pages/food/DishesPage'
 import FoodOrdersPage from '../pages/food/FoodOrdersPage'
 import MarketingPage from '../pages/food/MarketingPage'
@@ -129,7 +130,7 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
                 <Route path="/food/marketing" element={<MarketingPage />} />
               </>
             )}
-            <Route path="/finance" element={<PlaceholderPage title="对账中心" note="流水/提现/发票(#89)" />} />
+            <Route path="/finance" element={<FinancePage shop={shop} />} />
             <Route path="/settings" element={<PlaceholderPage title="店铺设置" note="公告/图集/店员(#90)" />} />
             <Route path="*" element={<Navigate to={home} replace />} />
           </Routes>
