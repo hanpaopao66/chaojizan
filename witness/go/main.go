@@ -202,6 +202,29 @@ func verifyRows(p map[string]any) []string {
 			problems = append(problems, fmt.Sprintf("团购行 %v: 服务费不是 %.0f%%", r["p"], vrate*100))
 		}
 	}
+	srate := 0.05
+	if r, ok := p["stay_rate"].(float64); ok {
+		srate = r
+	}
+	rows, _ = p["stay_rows"].([]any)
+	for _, ri := range rows {
+		r := ri.(map[string]any)
+		gross, fee, net := num(r["gross"]), num(r["fee"]), num(r["net"])
+		if r["kind"] == "settle" {
+			// 离店结算:净额恒等 + 佣金不超 5%(+1 分容忍取整)
+			if net != gross-fee {
+				problems = append(problems, fmt.Sprintf("住宿行 %v: 净额恒等式不成立", r["s"]))
+			}
+			if fee > gross*srate+1 {
+				problems = append(problems, fmt.Sprintf("住宿行 %v: 佣金超过 %.0f%%", r["s"], srate*100))
+			}
+		} else {
+			// 取消扣款/未入住:平台分文不取,商家所得不超过房费
+			if fee != 0 || net < 0 || net > gross {
+				problems = append(problems, fmt.Sprintf("住宿行 %v: 取消/未入住资金越界", r["s"]))
+			}
+		}
+	}
 	return problems
 }
 

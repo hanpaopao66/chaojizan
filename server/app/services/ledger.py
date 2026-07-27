@@ -68,6 +68,24 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"FROM voucher_purchases WHERE status = 'redeemed' AND {voucher_where} "
             f"ORDER BY id"), span)
     ]
+    # 住宿:离店结算行(settle,产生 5% 佣金) + 取消扣款/未入住行(佣金必须为 0)。
+    # 全额退的取消无资金流,不进账本
+    stay_completed = where.replace("created_at", "completed_at")
+    stay_cancelled = where.replace("created_at", "cancelled_at")
+    stay_rows = [
+        {"s": hash_no(r[0]), "gross": r[1], "fee": r[2], "net": r[3],
+         "kind": r[4]}
+        for r in await db.execute(text(
+            f"SELECT order_no, total_cents, fee_cents, net_cents, "
+            f"       'settle' AS kind "
+            f"FROM stay_orders WHERE status = 'completed' AND {stay_completed} "
+            f"UNION ALL "
+            f"SELECT order_no, total_cents, fee_cents, net_cents, "
+            f"       CASE WHEN status = 'noshow' THEN 'noshow' ELSE 'cancel' END "
+            f"FROM stay_orders WHERE status IN ('cancelled', 'noshow') "
+            f"  AND net_cents != 0 AND {stay_cancelled} "
+            f"ORDER BY 1"), span)
+    ]
     # 骑手保障金计提:每笔配送入账计提固定额,从平台佣金中拨出,
     # 用于骑手意外险与骑手责任先行赔付(不扣骑手工资的资金来源,公开可验)
     fund_orders = sum(1 for r in rider_rows if r["kind"] == "earning")
@@ -76,9 +94,11 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
         "day": day,
         "commission_rate_max": 0.05,   # 三原则之一:商家佣金上限(历史锚点各天冻结当天费率)
         "voucher_rate": settings.voucher_commission_rate,
+        "stay_rate": settings.stay_commission_rate,
         "merchant_rows": merchant_rows,
         "rider_rows": rider_rows,
         "voucher_rows": voucher_rows,
+        "stay_rows": stay_rows,
         "rider_fund": {
             "per_order_cents": settings.rider_fund_per_order_cents,
             "orders": fund_orders,
@@ -89,6 +109,8 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             "platform_commission": sum(r["commission"] for r in merchant_rows),
             "rider_amount": sum(r["amount"] for r in rider_rows),
             "voucher_fee": sum(r["fee"] for r in voucher_rows),
+            "stay_net": sum(r["net"] for r in stay_rows),
+            "stay_fee": sum(r["fee"] for r in stay_rows),
             "rider_fund": fund_orders * settings.rider_fund_per_order_cents,
         },
     }

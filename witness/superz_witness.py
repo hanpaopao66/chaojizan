@@ -86,9 +86,28 @@ def verify_rows(payload: dict) -> list[str]:
         if r["fee"] != expect_fee or r["net"] != r["gross"] - r["fee"]:
             problems.append(f"团购行 {r['p']}: 服务费 {r['fee']} != {r['gross']}×{voucher_rate:.0%}")
 
+    stay_rate = payload.get("stay_rate", 0.05)
+    for r in payload.get("stay_rows", []):
+        gross, fee, net = r["gross"], r["fee"], r["net"]
+        if r.get("kind") == "settle":
+            # 离店结算:净额恒等 + 佣金不超 5%(+1 分容忍取整)
+            if net != gross - fee:
+                problems.append(f"住宿行 {r['s']}: 净额 {net} != 房费 {gross} - 佣金 {fee}")
+            if fee > gross * stay_rate + 1:
+                problems.append(f"住宿行 {r['s']}: 佣金 {fee} 超过房费 {gross} 的 {stay_rate:.0%}")
+        else:
+            # 取消扣款/未入住:平台分文不取,商家所得不超过房费
+            if fee != 0:
+                problems.append(f"住宿行 {r['s']}: 取消/未入住不应产生佣金({fee})")
+            if not (0 <= net <= gross):
+                problems.append(f"住宿行 {r['s']}: 扣款 {net} 超出房费 {gross}")
+
     t = payload.get("totals", {})
     if t and t.get("rider_amount") != sum(r["amount"] for r in payload.get("rider_rows", [])):
         problems.append("骑手合计与逐行加总不一致")
+    if t and "stay_fee" in t and t.get("stay_fee") != sum(
+            r["fee"] for r in payload.get("stay_rows", [])):
+        problems.append("住宿服务费合计与逐行加总不一致")
     return problems
 
 
