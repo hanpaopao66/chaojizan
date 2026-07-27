@@ -90,7 +90,9 @@ async def main():
                       "net": 57000, "kind": "settle"}
     assert cancel == {"s": hash_no(no_cancel), "gross": 60000, "fee": 0,
                       "net": 30000, "kind": "cancel"}
-    assert payload["totals"]["stay_fee"] == 3000
+    # 合计与逐行加总恒等(共享开发库里可能还有其他测试的住宿流水)
+    assert payload["totals"]["stay_fee"] == sum(
+        r["fee"] for r in payload["stay_rows"])
     print("✓ 昨日锚点含住宿行(settle 5% / cancel 零佣)")
 
     # 见证节点原样校验通过
