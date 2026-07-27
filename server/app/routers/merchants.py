@@ -704,9 +704,11 @@ async def add_staff(
         raise HTTPException(403, "只有店主可以管理子账号")
     phone = str(payload.get("phone", "")).strip()
     name = str(payload.get("name", "")).strip()[:50]
-    target = await db.scalar(select(User).where(User.phone == phone))
+    # 账号按角色分立:店员用的是对方的商家端账号(商家端 App 登录即自动注册)
+    target = await db.scalar(select(User).where(
+        User.phone == phone, User.role == UserRole.merchant))
     if target is None:
-        raise HTTPException(404, "该手机号还没注册过,请对方先下载 App 登录一次")
+        raise HTTPException(404, "该手机号还没有商家端账号,请对方先用商家端 App 登录一次")
     if target.id == user.id:
         raise HTTPException(409, "不能把自己加为店员")
     owns = await db.scalar(select(Merchant).where(Merchant.owner_id == target.id))
@@ -716,7 +718,6 @@ async def add_staff(
         select(MerchantStaff).where(MerchantStaff.user_id == target.id))
     if existing is not None:
         raise HTTPException(409, "对方已是某店店员")
-    target.role = UserRole.merchant  # 子账号需 merchant 角色才能进商家端
     db.add(MerchantStaff(merchant_id=shop.id, user_id=target.id, name=name))
     await db.commit()
     return {"ok": True, "user_id": target.id}

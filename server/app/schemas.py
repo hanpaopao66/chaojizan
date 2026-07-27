@@ -26,6 +26,8 @@ class LoginIn(BaseModel):
     phone: str
     password: str
     device_id: str = Field(default="", max_length=64)  # 风控用轻量设备指纹
+    # 同一手机号可有多角色账号;不传则逐账号验密取首个命中(兼容旧调用方)
+    role: str = Field(default="", pattern="^(customer|merchant|rider|admin)?$")
 
 
 class SmsCodeIn(BaseModel):

@@ -42,9 +42,11 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 @router.post("/register", response_model=TokenOut)
 async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
-    existing = await db.scalar(select(User).where(User.phone == payload.phone))
+    # 账号按 (手机号, 角色) 区分:同一手机号可分别注册用户/商家/骑手
+    existing = await db.scalar(select(User).where(
+        User.phone == payload.phone, User.role == UserRole(payload.role)))
     if existing:
-        raise HTTPException(409, "手机号已注册")
+        raise HTTPException(409, "该手机号已注册过此角色的账号")
     user = User(
         phone=payload.phone,
         password_hash=hash_password(payload.password),
@@ -64,8 +66,14 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
 async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
     await check_rate_limit("login", payload.phone,
                            settings.rate_limit_login_per_minute)
-    user = await db.scalar(select(User).where(User.phone == payload.phone))
-    if user is None or not verify_password(payload.password, user.password_hash):
+    stmt = select(User).where(User.phone == payload.phone)
+    if payload.role:
+        stmt = stmt.where(User.role == UserRole(payload.role))
+    candidates = (await db.scalars(stmt)).all()
+    # 同一手机号可能有多角色账号(未传 role 时逐个验密,密码不同则无歧义)
+    user = next((u for u in candidates
+                 if verify_password(payload.password, u.password_hash)), None)
+    if user is None:
         raise HTTPException(401, "手机号或密码错误")
     if payload.device_id and user.device_id != payload.device_id:
         user.device_id = payload.device_id  # 风控:记录最近登录设备
@@ -157,9 +165,11 @@ async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
     await redis.delete(f"sms:code:{payload.phone}")
     await redis.delete(f"sms:day:p:{payload.phone}")  # 登录成功,清当日频控
 
-    user = await db.scalar(select(User).where(User.phone == payload.phone))
+    # 按 (手机号, 角色) 找账号:同一手机号在三端各有独立账号,首登该端自动注册
+    role = UserRole(payload.role)
+    user = await db.scalar(select(User).where(
+        User.phone == payload.phone, User.role == role))
     if user is None:
-        role = UserRole(payload.role)  # 三端各传各的;已有账号走下面分支保原角色
         prefix = {"customer": "用户", "merchant": "商家", "rider": "骑手"}[payload.role]
         user = User(
             phone=payload.phone,

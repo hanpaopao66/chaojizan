@@ -74,9 +74,11 @@ def _enum_column(enum_cls, name: str):
 
 class User(Base):
     __tablename__ = "users"
+    # 手机号按角色分账号:同一手机号可分别注册 用户/商家/骑手,互不影响
+    __table_args__ = (UniqueConstraint("phone", "role", name="uq_users_phone_role"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    phone: Mapped[str] = mapped_column(String(20), index=True)
     password_hash: Mapped[str] = mapped_column(String(100))
     name: Mapped[str] = mapped_column(String(50), default="")
     role: Mapped[UserRole] = mapped_column(_enum_column(UserRole, "user_role"))

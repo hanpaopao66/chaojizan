@@ -2166,16 +2166,18 @@ async def issue_coupon_directed(
     db: AsyncSession = Depends(get_db),
 ):
     """按手机号定向发券(客服补偿场景)。每人每批次一张。"""
-    from ..models import CouponBatch
+    from ..models import CouponBatch, UserRole
     from ..services.coupons import issue_from_batch
     from ..services.push import push_to_user
     phone = str(payload.get("phone", "")).strip()
     batch = await db.get(CouponBatch, int(payload.get("batch_id", 0)))
     if batch is None:
         raise HTTPException(404, "批次不存在")
-    target = await db.scalar(select(User).where(User.phone == phone))
+    # 券只发用户端账号(同手机号可能另有商家/骑手账号)
+    target = await db.scalar(select(User).where(
+        User.phone == phone, User.role == UserRole.customer))
     if target is None:
-        raise HTTPException(404, "用户不存在")
+        raise HTTPException(404, "该手机号没有注册过用户端")
     coupon = await issue_from_batch(
         db, batch, target.id,
         note=str(payload.get("note", "")).strip()[:60] or batch.name)
