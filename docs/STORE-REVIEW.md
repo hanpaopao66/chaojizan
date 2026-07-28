@@ -19,7 +19,10 @@
 
 ### App 备案 · Android 签名信息(2026-07-28 起三端共用同一正式证书)
 
-- 包名:`com.chaojizan.user` / `com.chaojizan.merchant` / `com.chaojizan.rider`
+- 包名(全平台统一约定,备案与商店后台均按此填):
+  `com.chaojizan.user` / `com.chaojizan.merchant` / `com.chaojizan.rider`
+  - Android `applicationId` 与 iOS Bundle ID 已按此配置;
+  - 鸿蒙(HarmonyOS)暂未接入,将来接入时 `bundleName` 沿用同一套,不得另起
 - 证书指纹(备案平台要求无冒号小写,实测带冒号会报"格式错误"):
   - MD5:`1c1de7ba85d5cbfab18754364e022cb0`
   - SHA-1:`e8739c5e74d87a88f2de9988056523563590f821`

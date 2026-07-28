@@ -14,8 +14,8 @@ build/
 .flutter-plugins
 .flutter-plugins-dependencies
 *.iml
-# android/ 已入库(含手工定制的清单/签名/gradle);其余平台目录仍由 flutter create 再生
-apps/*/ios/
+# android/ 与 ios/ 已入库(含手工定制的清单/权限描述/签名/Bundle ID);
+# 其余平台目录仍由 flutter create 再生
 apps/*/macos/
 apps/*/linux/
 apps/*/windows/
