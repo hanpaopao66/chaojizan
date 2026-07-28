@@ -17,6 +17,26 @@
 | 域名备案 | 陕ICP备2025064101号-5 |
 | App 备案 | ⚠️ 提审前确认 App 备案号已办理,并核对「设置-关于我们」展示 |
 
+### App 备案 · Android 签名信息(2026-07-28 起三端共用同一正式证书)
+
+- 包名:`com.chaojizan.user` / `com.chaojizan.merchant` / `com.chaojizan.rider`
+- 证书指纹(备案平台要求无冒号小写,实测带冒号会报"格式错误"):
+  - MD5:`1c1de7ba85d5cbfab18754364e022cb0`
+  - SHA-1:`e8739c5e74d87a88f2de9988056523563590f821`
+  - SHA-256:`e61ec79bae6b28fca8563bfd93bdea832b46e7214fa7412bf6c0dd581cd63249`
+- 公钥(单行 base64,392 字符):
+
+```
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArnOaFr2IxaDGX9eyukdO/oOQeLec3mCmrj0Q39RQUCfnyOllQX2zYq6SPd5G3+6nXAQ6jsvyttDzR577VHL8ZnEdrSLA/jcs+nvVkZqIaymosbtt1/Tra25N0YAiFoXvDjxUot6/O8SUMZ08R3/oToh/lhpvlFMoTWM1cLR6V7WDBbScWbVdzvcuNm0QTunVnDvG/lqKPmfngzDmP/3olL70G9tH994pdaIalG3ULKAw1C9ZPaqw1NxTc42BPuKz0WeTInJ3MClqXSa23rG1x6nh2/m19gIl4Fl6/PCZy/8W5tr5X5L5rSoaS/66pzzC7fHNyEgRPPT0c/NIYvYhxQIDAQAB
+```
+
+- 证书主体:CN=Super-Z, O=Shaanxi Aikasi Technology Co. Ltd.(有效期 30 年)
+- keystore 在打包机 `~/keystores/superz-release.jks`(密码同目录 txt,均不入库,
+  **务必异地备份**——丢了就再也发不了同签名更新);gradle 经各端
+  `android/key.properties` 读取,无该文件的机器自动回落 debug 签名
+- ⚠️ 签名已从 debug 切到正式:此前分发的调试签名安装包无法覆盖安装,
+  老用户需卸载重装一次(应用内更新会因签名不符失败,发公告说明)
+
 ## 二、审核测试账号
 
 审核员(尤其苹果海外审核)收不到国内短信,平台提供**固定验证码白名单**:
