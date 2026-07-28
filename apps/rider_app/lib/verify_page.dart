@@ -131,6 +131,10 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
   bool _busy = false;
 
   Future<void> _pick(bool isIdCard) async {
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.photos,
+        reason: '用于选取实名认证证件照并上传。\n拒绝不影响其他功能。')) {
+      return;
+    }
     final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery, maxWidth: 1280, imageQuality: 85);
     if (picked == null) return;

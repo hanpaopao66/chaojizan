@@ -214,6 +214,10 @@ class _PrinterPageState extends State<PrinterPage> {
   // ---------- 蓝牙 ----------
 
   Future<void> _pickBtDevice() async {
+    if (!await PermissionRationale.ensure(
+        context, AppPermissionKind.bluetooth)) {
+      return;
+    }
     if (!await BtPrinter.ensurePermission()) {
       return _toast('需要「附近设备/蓝牙」权限才能连接打印机');
     }

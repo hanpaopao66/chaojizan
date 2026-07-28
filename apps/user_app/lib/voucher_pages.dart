@@ -5,6 +5,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'session.dart';
+
 /// 团购页(从金刚区进入):在售代金券列表。
 class DealsPage extends StatelessWidget {
   const DealsPage({super.key, required this.api});
@@ -56,6 +58,8 @@ class _VoucherListViewState extends State<VoucherListView> {
   }
 
   Future<void> _buy(VoucherDeal deal) async {
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       builder: (sheetContext) => SafeArea(

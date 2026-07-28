@@ -3,6 +3,7 @@ import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'hotel_pages.dart';
+import 'session.dart';
 import 'stay_checkout_page.dart';
 
 /// 酒店详情:图集/设施/位置 + 房型报价卡片(取消政策明示)。
@@ -304,12 +305,17 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
                     const Spacer(),
                     FilledButton(
                       onPressed: bookable
-                          ? () => Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) => StayCheckoutPage(
-                                  api: widget.api,
-                                  hotel: hotel,
-                                  quote: quote,
-                                  range: _range)))
+                          ? () async {
+                              if (!await ensureLoggedIn(context)) return;
+                              if (!mounted) return;
+                              await Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) => StayCheckoutPage(
+                                          api: widget.api,
+                                          hotel: hotel,
+                                          quote: quote,
+                                          range: _range)));
+                            }
                           : null,
                       child: Text(bookable ? '订' : '满房'),
                     ),

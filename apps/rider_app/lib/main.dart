@@ -349,8 +349,16 @@ class _RiderHomePageState extends State<RiderHomePage> {
     setState(() => _online = value);
 
     if (value) {
-      // 真实 GPS:移动 10 米上报一次
-      final error = await _location.start(_report);
+      // 商店合规:首次调系统定位弹窗前先说明目的
+      final String? error;
+      if (mounted &&
+          !await PermissionRationale.ensure(
+              context, AppPermissionKind.locationRider)) {
+        error = '未授予定位权限,无法记录配送轨迹';
+      } else {
+        // 真实 GPS:移动 10 米上报一次
+        error = await _location.start(_report);
+      }
       _gpsActive = error == null;
       if (error != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -412,6 +420,10 @@ class _RiderHomePageState extends State<RiderHomePage> {
       );
       if (take == null || !mounted) return;
       if (take) {
+        if (!await PermissionRationale.ensure(context, AppPermissionKind.camera,
+            reason: '用于拍摄送达凭证照片。\n拒绝不影响其他功能。')) {
+          return;
+        }
         try {
           final picked = await ImagePicker().pickImage(
               source: ImageSource.camera, maxWidth: 1280, imageQuality: 80);
@@ -617,6 +629,11 @@ class _RiderHomePageState extends State<RiderHomePage> {
                     onPressed: uploading
                         ? null
                         : () async {
+                            if (!await PermissionRationale.ensure(
+                                sheetContext, AppPermissionKind.camera,
+                                reason: '用于拍摄配送异常的现场照片。\n拒绝不影响其他功能。')) {
+                              return;
+                            }
                             final picked = await ImagePicker().pickImage(
                                 source: ImageSource.camera,
                                 maxWidth: 1280,

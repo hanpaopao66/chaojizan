@@ -227,6 +227,11 @@ class _VoucherRedeemPageState extends State<VoucherRedeemPage> {
 
   /// 扫顾客的券码二维码(二维码内容即券码);相机不可用时退回手动输码
   Future<void> _scan() async {
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.camera,
+        reason: '用于扫描顾客的团购券二维码完成核销。\n拒绝可改用手动输码。')) {
+      return;
+    }
+    if (!mounted) return;
     final code = await Navigator.of(context).push<String>(
         MaterialPageRoute(builder: (_) => const _ScanPage()));
     if (code != null && mounted) {

@@ -204,6 +204,10 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   bool get _isHotel => _bizType == 'hotel';
 
   Future<String?> _uploadPicked() async {
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.photos,
+        reason: '用于选取经营证照图片并上传。\n拒绝不影响其他功能。')) {
+      return null;
+    }
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       maxWidth: 1600, // 证照要能看清文字,分辨率比菜品图高

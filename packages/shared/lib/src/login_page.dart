@@ -20,12 +20,17 @@ class AuthGate extends StatefulWidget {
     required this.title,
     required this.role, // customer / merchant / rider(新号自动注册的角色)
     required this.homeBuilder,
+    this.allowGuest = false,
   });
 
   final ApiClient api;
   final String title;
   final String role;
   final Widget Function(BuildContext context, ApiClient api) homeBuilder;
+
+  /// 游客模式(苹果审核要求):未登录也进主界面浏览,
+  /// 需要身份的动作由业务方在触发时引导登录。
+  final bool allowGuest;
 
   @override
   State<AuthGate> createState() => _AuthGateState();
@@ -53,7 +58,8 @@ class _AuthGateState extends State<AuthGate> {
     if (_authed == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    if (_authed == true) {
+    if (_authed == true || widget.allowGuest) {
+      // 游客模式:未登录也进主界面,登录由业务动作触发
       return widget.homeBuilder(context, widget.api);
     }
     return SmsLoginPage(
@@ -86,6 +92,9 @@ class SmsLoginPage extends StatefulWidget {
 }
 
 class _SmsLoginPageState extends State<SmsLoginPage> {
+  /// 0 = 登录,1 = 新用户注册。两种模式走同一验证码流程(未注册的号验证后
+  /// 自动创建账号),分开呈现是应用商店要求的"显式注册入口"。
+  int _mode = 0;
   bool _agreed = false;
   final _phone = TextEditingController();
   final _code = TextEditingController();
@@ -241,6 +250,10 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // 从游客态推入时给返回箭头;作为门禁根页面时无处可返回,不显示
+      appBar: Navigator.of(context).canPop()
+          ? AppBar(backgroundColor: Colors.transparent)
+          : null,
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 360),
@@ -261,7 +274,18 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                 Text(widget.title,
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
+                // 显式的登录/注册双入口(商店审核要求);同一验证码流程
+                SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(value: 0, label: Text('登录')),
+                    ButtonSegment(value: 1, label: Text('新用户注册')),
+                  ],
+                  selected: {_mode},
+                  onSelectionChanged: (s) =>
+                      setState(() => _mode = s.first),
+                ),
+                const SizedBox(height: 16),
                 TextField(
                   controller: _phone,
                   keyboardType: TextInputType.phone,
@@ -300,6 +324,11 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                     ),
                   ],
                 ),
+                if (_mode == 1) ...[
+                  const SizedBox(height: 8),
+                  Text('输入手机号并验证,即可完成注册并登录;已注册的手机号会直接登录。',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
                 const SizedBox(height: 12),
                 AgreementRow(
                     agreed: _agreed,
@@ -307,7 +336,9 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                 const SizedBox(height: 12),
                 FilledButton(
                   onPressed: _busy ? null : _login,
-                  child: Text(_busy ? '登录中…' : '登录 / 注册'),
+                  child: Text(_busy
+                      ? (_mode == 0 ? '登录中…' : '注册中…')
+                      : (_mode == 0 ? '登录' : '注册')),
                 ),
                 const IcpFooter(),
               ],

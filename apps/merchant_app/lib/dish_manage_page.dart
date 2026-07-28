@@ -380,6 +380,10 @@ class _DishEditPageState extends State<DishEditPage> {
   ];
 
   Future<void> _pickImage() async {
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.photos,
+        reason: '用于选取菜品图片并上传。\n拒绝不影响其他功能。')) {
+      return;
+    }
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
       maxWidth: 1024,

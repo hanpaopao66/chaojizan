@@ -15,29 +15,41 @@ import 'category_page.dart';
 import 'checkout_page.dart';
 import 'coupons_page.dart';
 import 'group_cart_page.dart';
+import 'help_page.dart';
 import 'hotel_pages.dart';
+import 'messages_page.dart';
 import 'invite_page.dart';
 import 'share_card.dart';
 import 'five_percent.dart';
 import 'identity_page.dart';
 import 'coming_soon_page.dart';
+import 'feature_flags.dart';
 import 'delivery_map_page.dart';
 import 'reviews_page.dart';
 import 'search_page.dart';
+import 'session.dart';
+import 'settings_page.dart';
 import 'stay_order_pages.dart';
 import 'trust_page.dart';
 import 'voucher_pages.dart';
 
-// 定位失败(权限拒绝/模拟器没设位置)时的兜底坐标
-const demoLat = 30.6612;
-const demoLng = 104.0823;
+// 定位失败(权限拒绝/模拟器没设位置)时的兜底坐标 demoLat/demoLng 在 session.dart
 
-/// 一次性获取当前位置(GCJ-02),失败静默退回演示坐标
-Future<({double lat, double lng, bool real})> resolveMyLocation() async {
+/// 一次性获取当前位置(GCJ-02),失败静默退回演示坐标。
+/// 传 [context] 时,首次申请权限前先弹目的说明(商店合规:先告知后申请)。
+Future<({double lat, double lng, bool real})> resolveMyLocation(
+    [BuildContext? context]) async {
   try {
     if (!await Geolocator.isLocationServiceEnabled()) throw Exception();
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
+      if (context != null) {
+        if (!context.mounted ||
+            !await PermissionRationale.ensure(
+                context, AppPermissionKind.location)) {
+          throw Exception();
+        }
+      }
       permission = await Geolocator.requestPermission();
     }
     if (permission == LocationPermission.denied ||
@@ -114,24 +126,13 @@ class UserApp extends StatelessWidget {
                     api: rootApi,
                     title: '用户端 · 点外卖',
                     role: 'customer',
+                    // 游客模式(苹果审核要求):未登录直接进首页浏览,
+                    // 下单/收藏/我的等动作触发时再引导登录
+                    allowGuest: true,
                     homeBuilder: (_, api) => HomePage(api: api)))),
       ),
     );
   }
-}
-
-/// 登录入口(退出登录后也回到这里)
-/// 全端共用的 ApiClient 单例(会话持久化在它身上)
-final rootApi = ApiClient();
-
-Widget buildUserLogin() {
-  return SmsLoginPage(
-    title: '用户端 · 点外卖',
-    role: 'customer',
-    api: rootApi,
-    onLoggedIn: (context, api) => Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomePage(api: api))),
-  );
 }
 
 class HomePage extends StatefulWidget {
@@ -149,15 +150,23 @@ class _HomePageState extends State<HomePage> {
   /// 顶部地址栏选中的收货地址;null = 用当前定位
   Address? _deliveryAddress;
 
+  /// 消息中心红点(有新公告)
+  bool _hasUnread = false;
+
   @override
   void initState() {
     super.initState();
     Analytics.instance.init(widget.api);
     WidgetsBinding.instance.addPostFrameCallback((_) =>
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'user'));
+    MessageCenterPage.hasUnread(widget.api).then((v) {
+      if (mounted && v) setState(() => _hasUnread = true);
+    });
   }
 
   Future<void> _pickDeliveryAddress() async {
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
     final picked = await Navigator.of(context).push<Address>(MaterialPageRoute(
         builder: (_) => AddressBookPage(api: widget.api, selectMode: true)));
     if (picked != null && mounted) {
@@ -197,13 +206,31 @@ class _HomePageState extends State<HomePage> {
               )
             : Text(_tab == 1 ? '我的订单' : '我的'),
         actions: [
+          // 消息中心:公告 + 订单通知,有新公告带红点
+          IconButton(
+            tooltip: '消息中心',
+            icon: Badge(
+              isLabelVisible: _hasUnread,
+              smallSize: 8,
+              child: const Icon(Icons.notifications_outlined),
+            ),
+            onPressed: () async {
+              setState(() => _hasUnread = false); // 打开即已读
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => MessageCenterPage(api: widget.api)));
+            },
+          ),
           // 搜索是主页第一交互,已做成显眼的大搜索框(点餐页顶部),
           // 这里只保留地址簿入口,避免图标堆积
           IconButton(
             icon: const Icon(Icons.place_outlined),
             tooltip: '收货地址',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => AddressBookPage(api: widget.api))),
+            onPressed: () async {
+              if (!await ensureLoggedIn(context)) return;
+              if (!context.mounted) return;
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => AddressBookPage(api: widget.api)));
+            },
           ),
         ],
       ),
@@ -300,6 +327,9 @@ class MerchantListView extends StatefulWidget {
 
 class _MerchantListViewState extends State<MerchantListView> {
   bool _realLocation = true;
+
+  /// 定位正常但该区域无商家:已降级展示演示城市数据(审核兜底)
+  bool _fellBack = false;
   double _myLat = demoLat;
   double _myLng = demoLng;
   String _sort = 'distance';
@@ -367,13 +397,27 @@ class _MerchantListViewState extends State<MerchantListView> {
       _myLat = address.lat;
       _myLng = address.lng;
     } else {
-      final location = await resolveMyLocation();
+      final location = mounted ? await resolveMyLocation(context) : await resolveMyLocation();
       _realLocation = location.real; // FutureBuilder 完成时会重建,无需 setState
       _myLat = location.lat;
       _myLng = location.lng;
     }
-    return widget.api.merchants(
+    _fellBack = false;
+    var list = await widget.api.merchants(
         lat: _myLat, lng: _myLng, sort: _sort, category: widget.category);
+    // 审核兜底:定位正常但离已开通城市远(如审核人员在外地/海外)时列表为空,
+    // 降级展示演示城市商家——数据链路与真实用户一致,可浏览可下单
+    if (list.isEmpty && _realLocation && address == null) {
+      final demo = await widget.api.merchants(
+          lat: demoLat, lng: demoLng, sort: _sort, category: widget.category);
+      if (demo.isNotEmpty) {
+        _fellBack = true;
+        _myLat = demoLat;
+        _myLng = demoLng;
+        list = demo;
+      }
+    }
+    return list;
   }
 
   /// 空品类招商位:该品类还没有商家,把空状态变成入驻引导
@@ -532,21 +576,24 @@ class _MerchantListViewState extends State<MerchantListView> {
           entry(Icons.local_activity_outlined, '超值团购',
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => DealsPage(api: widget.api)))),
-          entry(Icons.local_taxi_outlined, '打车',
-              coming: '司机不被抽走三成车费',
-              blood: '司机每单被抽走两三成,高峰还有乘客看不见的差价'),
-          entry(Icons.cleaning_services_outlined, '家政',
-              coming: '阿姨的钱不过中介的手',
-              blood: '中介两头收费,阿姨的月薪被抽走两到四成'),
-          entry(Icons.build_outlined, '维修',
-              coming: '明码标价,不搞小病大修',
-              blood: '上门费加虚报故障,"小病大修"成了行业默认'),
-          entry(Icons.local_shipping_outlined, '货运',
-              coming: '不收会员费,不用算法压价',
-              blood: '司机先交会员费才能接单,算法再一路压运价'),
-          entry(Icons.badge_outlined, '零工',
-              coming: '日结工资一分不被中介截',
-              blood: '劳务中介层层转包,日结工资被截走一两成'),
+          // 未上线业务的愿景占位:审核包里整体隐藏(feature_flags.dart)
+          if (kShowComingSoonBiz) ...[
+            entry(Icons.local_taxi_outlined, '打车',
+                coming: '司机不被抽走三成车费',
+                blood: '司机每单被抽走两三成,高峰还有乘客看不见的差价'),
+            entry(Icons.cleaning_services_outlined, '家政',
+                coming: '阿姨的钱不过中介的手',
+                blood: '中介两头收费,阿姨的月薪被抽走两到四成'),
+            entry(Icons.build_outlined, '维修',
+                coming: '明码标价,不搞小病大修',
+                blood: '上门费加虚报故障,"小病大修"成了行业默认'),
+            entry(Icons.local_shipping_outlined, '货运',
+                coming: '不收会员费,不用算法压价',
+                blood: '司机先交会员费才能接单,算法再一路压运价'),
+            entry(Icons.badge_outlined, '零工',
+                coming: '日结工资一分不被中介截',
+                blood: '劳务中介层层转包,日结工资被截走一两成'),
+          ],
         ],
       ),
     );
@@ -858,10 +905,13 @@ class _MerchantListViewState extends State<MerchantListView> {
               ),
               SliverList(
                 delegate: SliverChildListDelegate([
-              if (!_realLocation && merchants != null)
+              if ((!_realLocation || _fellBack) && merchants != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Text('未获取到定位,正在展示演示区域的商家(下拉重试)',
+                  child: Text(
+                      _fellBack
+                          ? '您所在区域暂未开通,正在展示演示城市商家'
+                          : '未获取到定位,正在展示演示区域的商家(下拉重试)',
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall
@@ -995,9 +1045,11 @@ class _MenuPageState extends State<MenuPage>
       final detail = await widget.api.merchantDetail(widget.merchant.id);
       final dishes = await widget.api.menu(widget.merchant.id);
       bool fav = _isFavorite;
-      try {
-        fav = (await widget.api.favoriteIds()).contains(widget.merchant.id);
-      } catch (_) {}
+      if (widget.api.isLoggedIn) {
+        try {
+          fav = (await widget.api.favoriteIds()).contains(widget.merchant.id);
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
         _detail = detail;
@@ -1187,6 +1239,8 @@ class _MenuPageState extends State<MenuPage>
   }
 
   Future<void> _groupCart() async {
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -1245,7 +1299,10 @@ class _MenuPageState extends State<MenuPage>
     }
   }
 
-  void _checkout() {
+  Future<void> _checkout() async {
+    // 游客加购随意,结算需要登录(登录成功后购物车原样保留)
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
     // 进正式结算页;订单在结算页最终提交时才创建(不再"先建单再确认"浪费库存)
     Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => CheckoutPage(
@@ -1928,6 +1985,8 @@ class _MenuPageState extends State<MenuPage>
               color: _isFavorite ? Colors.redAccent : null,
             ),
             onPressed: () async {
+              if (!await ensureLoggedIn(context)) return;
+              if (!mounted) return;
               final next = !_isFavorite;
               setState(() => _isFavorite = next); // 先响应再请求,失败回滚
               try {
@@ -2003,7 +2062,38 @@ class _OrdersTabState extends State<OrdersTab> {
   int _segment = 0;
 
   @override
+  void initState() {
+    super.initState();
+    authTick.addListener(_onAuthChanged); // 游客登录成功后刷新
+  }
+
+  @override
+  void dispose() {
+    authTick.removeListener(_onAuthChanged);
+    super.dispose();
+  }
+
+  void _onAuthChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (!widget.api.isLoggedIn) {
+      // 游客态:不请求订单接口,展示登录引导
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.receipt_long_outlined,
+              size: 56, color: Theme.of(context).colorScheme.outline),
+          const SizedBox(height: 12),
+          const Text('登录后查看你的订单'),
+          const SizedBox(height: 12),
+          FilledButton(
+              onPressed: () => ensureLoggedIn(context),
+              child: const Text('登录 / 注册')),
+        ]),
+      );
+    }
     return Column(children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -2371,6 +2461,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, setSheet) {
           Future<void> pick(List<String> target) async {
+            if (!await PermissionRationale.ensure(
+                sheetContext, AppPermissionKind.photos)) {
+              return;
+            }
             final picked = await ImagePicker().pickImage(
                 source: ImageSource.gallery,
                 maxWidth: 1280,
@@ -2552,6 +2646,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                     onPressed: uploading
                         ? null
                         : () async {
+                            if (!await PermissionRationale.ensure(
+                                context, AppPermissionKind.photos)) {
+                              return;
+                            }
                             final picked = await ImagePicker().pickImage(
                                 source: ImageSource.gallery,
                                 maxWidth: 1280,
@@ -3406,6 +3504,9 @@ class _ReviewFormState extends State<_ReviewForm> {
 
   /// 图评是最有说服力的口碑,选图直接上传(最多 3 张)
   Future<void> _pickImage() async {
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.photos)) {
+      return;
+    }
     final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery, maxWidth: 1280, imageQuality: 85);
     if (picked == null) return;
@@ -3618,14 +3719,25 @@ class _ProfileViewState extends State<ProfileView> {
   @override
   void initState() {
     super.initState();
+    authTick.addListener(_load); // 游客登录成功后刷新
     _load();
   }
 
+  @override
+  void dispose() {
+    authTick.removeListener(_load);
+    super.dispose();
+  }
+
   Future<void> _load() async {
-    try {
-      final profile = await widget.api.me();
-      if (mounted) setState(() => _profile = profile);
-    } catch (_) {}
+    if (widget.api.isLoggedIn) {
+      try {
+        final profile = await widget.api.me();
+        if (mounted) setState(() => _profile = profile);
+      } catch (_) {}
+    } else if (mounted) {
+      setState(() => _profile = null);
+    }
     try {
       final config = await widget.api.platformConfig();
       if (mounted) {
@@ -3683,6 +3795,10 @@ class _ProfileViewState extends State<ProfileView> {
   }
 
   Future<void> _pickAvatar() async {
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.photos,
+        reason: '用于选取头像图片并上传。\n拒绝不影响其他功能。')) {
+      return;
+    }
     final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery, maxWidth: 512, imageQuality: 85);
     if (picked == null) return;
@@ -3740,9 +3856,11 @@ class _ProfileViewState extends State<ProfileView> {
             style: TextStyle(height: 1.6)),
         actions: [
           TextButton(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.pop(context);
-                Navigator.of(this.context).push(MaterialPageRoute(
+                if (!await ensureLoggedIn(this.context)) return;
+                if (!mounted) return;
+                await Navigator.of(this.context).push(MaterialPageRoute(
                     builder: (_) => SupportPage(
                         api: widget.api, prefill: '我需要开发票,订单号:')));
               },
@@ -3759,9 +3877,22 @@ class _ProfileViewState extends State<ProfileView> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final profile = _profile;
+    final guest = !widget.api.isLoggedIn;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // 游客态:登录/注册占位卡,不请求任何个人接口
+        if (guest)
+          Card(
+            child: ListTile(
+              leading: const CircleAvatar(
+                  radius: 26, child: Icon(Icons.person_outline)),
+              title: Text('登录 / 注册', style: theme.textTheme.titleLarge),
+              subtitle: const Text('登录后查看订单、收藏与优惠券'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => ensureLoggedIn(context),
+            ),
+          ),
         // 反作弊处置提示(可见+可申诉):绝不静默处罚
         if (profile != null && profile.riskLevel.isNotEmpty)
           Card(
@@ -3788,26 +3919,27 @@ class _ProfileViewState extends State<ProfileView> {
                           '${profile.riskNote}'))),
             ),
           ),
-        Card(
-          child: ListTile(
-            leading: InkWell(
-              onTap: _pickAvatar,
-              borderRadius: BorderRadius.circular(28),
-              child: profile != null && profile.avatarUrl.isNotEmpty
-                  ? CircleAvatar(
-                      radius: 26,
-                      backgroundImage: NetworkImage(
-                          widget.api.resolveUrl(profile.avatarUrl)))
-                  : const CircleAvatar(
-                      radius: 26, child: Icon(Icons.add_a_photo, size: 20)),
+        if (!guest)
+          Card(
+            child: ListTile(
+              leading: InkWell(
+                onTap: _pickAvatar,
+                borderRadius: BorderRadius.circular(28),
+                child: profile != null && profile.avatarUrl.isNotEmpty
+                    ? CircleAvatar(
+                        radius: 26,
+                        backgroundImage: NetworkImage(
+                            widget.api.resolveUrl(profile.avatarUrl)))
+                    : const CircleAvatar(
+                        radius: 26, child: Icon(Icons.add_a_photo, size: 20)),
+              ),
+              title: Text(profile?.name ?? widget.api.userName ?? '用户',
+                  style: theme.textTheme.titleLarge),
+              subtitle: Text(profile?.phone ?? '感谢你支持劳动者互助平台'),
+              trailing: const Icon(Icons.edit, size: 18),
+              onTap: _editName,
             ),
-            title: Text(profile?.name ?? widget.api.userName ?? '用户',
-                style: theme.textTheme.titleLarge),
-            subtitle: Text(profile?.phone ?? '感谢你支持劳动者互助平台'),
-            trailing: const Icon(Icons.edit, size: 18),
-            onTap: _editName,
           ),
-        ),
         const SizedBox(height: 8),
         Card(
           color: theme.colorScheme.tertiaryContainer,
@@ -3869,8 +4001,12 @@ class _ProfileViewState extends State<ProfileView> {
                   Expanded(
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
-                      onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => page())),
+                      onTap: () async {
+                        if (!await ensureLoggedIn(context)) return;
+                        if (!context.mounted) return;
+                        await Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => page()));
+                      },
                       child: Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Column(
@@ -3902,7 +4038,7 @@ class _ProfileViewState extends State<ProfileView> {
         const SizedBox(height: 8),
         Card(
           child: Column(children: [
-            if (_marketingOn) ...[
+            if (_marketingOn && !guest) ...[
               ListTile(
                 leading: const Icon(Icons.card_giftcard_outlined),
                 title: const Text('邀请有礼'),
@@ -3942,8 +4078,44 @@ class _ProfileViewState extends State<ProfileView> {
               subtitle: const Text('购买酒类等受限商品需先实名',
                   style: TextStyle(fontSize: 11)),
               trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => IdentityPage(api: widget.api)));
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('设置'),
+              subtitle: const Text('通知/缓存/检查更新/关于我们',
+                  style: TextStyle(fontSize: 11)),
+              trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => IdentityPage(api: widget.api))),
+                  builder: (_) => SettingsPage(api: widget.api))),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.help_outline),
+              title: const Text('帮助中心'),
+              subtitle: const Text('配送范围/退款规则/常见问题',
+                  style: TextStyle(fontSize: 11)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => HelpCenterPage(api: widget.api))),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.rate_review_outlined),
+              title: const Text('意见反馈'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => FeedbackPage(api: widget.api)));
+              },
             ),
             const Divider(height: 1),
             ListTile(
@@ -3957,23 +4129,55 @@ class _ProfileViewState extends State<ProfileView> {
               leading: const Icon(Icons.support_agent_outlined),
               title: const Text('联系平台客服'),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => SupportPage(api: widget.api))),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: Icon(Icons.logout, color: theme.colorScheme.error),
-              title: Text('退出登录',
-                  style: TextStyle(color: theme.colorScheme.error)),
               onTap: () async {
-                PushService.onLogout(); // 解绑推送别名,失败静默
-                await widget.api.clearSession();
+                if (!await ensureLoggedIn(context)) return;
                 if (!context.mounted) return;
-                Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => buildUserLogin()),
-                    (route) => false);
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => SupportPage(api: widget.api)));
               },
             ),
+            const Divider(height: 1),
+            // 商店审核要求:我的页可达协议全文与注销入口
+            ListTile(
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('用户协议与隐私政策'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => showLegalSheet(context),
+            ),
+            if (!guest) ...[
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(Icons.person_off_outlined,
+                    color: theme.colorScheme.error),
+                title: Text('注销账号',
+                    style: TextStyle(color: theme.colorScheme.error)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () =>
+                    Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => AccountDeletionPage(
+                              api: widget.api,
+                              onDeleted: (ctx) {
+                                authTick.value++; // 切回游客态
+                                Navigator.of(ctx)
+                                    .popUntil((route) => route.isFirst);
+                              },
+                            ))),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(Icons.logout, color: theme.colorScheme.error),
+                title: Text('退出登录',
+                    style: TextStyle(color: theme.colorScheme.error)),
+                onTap: () async {
+                  PushService.onLogout(); // 解绑推送别名,失败静默
+                  await widget.api.clearSession();
+                  authTick.value++; // 各 tab 切回游客态
+                  if (!context.mounted) return;
+                  // 游客模式下退出登录 = 留在首页继续逛
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+              ),
+            ],
           ]),
         ),
       ],

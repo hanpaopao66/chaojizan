@@ -328,6 +328,19 @@ class _WalletPageState extends State<WalletPage> {
                   builder: (_) => SupportPage(api: widget.api))),
             ),
           ),
+          const SizedBox(height: 8),
+          // 商店审核三件套:协议全文 / 退出登录 / 注销账号
+          AccountLegalSection(
+            api: widget.api,
+            onLoggedOut: (ctx) {
+              Navigator.of(ctx).popUntil((route) => route.isFirst);
+              ApiClient.onUnauthorized?.call(); // AuthGate 切回登录页
+            },
+            onDeleted: (ctx) {
+              Navigator.of(ctx).popUntil((route) => route.isFirst);
+              ApiClient.onUnauthorized?.call();
+            },
+          ),
           const SizedBox(height: 12),
           SegmentedButton<int>(
             segments: const [

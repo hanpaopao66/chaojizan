@@ -1,5 +1,6 @@
 library superz_shared;
 
+export 'src/account_deletion_page.dart';
 export 'src/analytics.dart';
 export 'src/announcement_banner.dart';
 export 'src/api_client.dart';
@@ -11,6 +12,7 @@ export 'src/delivery_map.dart';
 export 'src/merchant_categories.dart';
 export 'src/models.dart';
 export 'src/payout_account_page.dart';
+export 'src/permission_helper.dart';
 export 'src/legal.dart';
 export 'src/login_page.dart';
 export 'src/privacy_gate.dart';

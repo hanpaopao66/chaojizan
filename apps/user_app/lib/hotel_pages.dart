@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'hotel_detail_page.dart';
+import 'session.dart';
 
 String fmtDate(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -73,6 +74,9 @@ class _HotelListPageState extends State<HotelListPage> {
   int? _minPriceCents;
   int? _maxPriceCents;
   List<HotelCard> _hotels = [];
+
+  /// 定位正常但该区域没有酒店:已降级演示城市数据(审核兜底)
+  bool _fellBack = false;
   bool _loading = true;
   String? _error;
 
@@ -92,20 +96,29 @@ class _HotelListPageState extends State<HotelListPage> {
   Future<void> _search() async {
     setState(() => _loading = true);
     try {
-      final hotels = await widget.api.hotels(
-        lat: widget.lat,
-        lng: widget.lng,
-        checkin: _range.checkinStr,
-        checkout: _range.checkoutStr,
-        q: _keyword.text.trim(),
-        sort: _sort,
-        tier: _tier,
-        minPriceCents: _minPriceCents,
-        maxPriceCents: _maxPriceCents,
-      );
+      Future<List<HotelCard>> query(double lat, double lng) =>
+          widget.api.hotels(
+            lat: lat,
+            lng: lng,
+            checkin: _range.checkinStr,
+            checkout: _range.checkoutStr,
+            q: _keyword.text.trim(),
+            sort: _sort,
+            tier: _tier,
+            minPriceCents: _minPriceCents,
+            maxPriceCents: _maxPriceCents,
+          );
+      var hotels = await query(widget.lat, widget.lng);
+      // 审核兜底:所在区域没有酒店(如审核人员定位在外地)时降级演示城市
+      var fellBack = false;
+      if (hotels.isEmpty && _keyword.text.trim().isEmpty) {
+        hotels = await query(demoLat, demoLng);
+        fellBack = hotels.isNotEmpty;
+      }
       if (mounted) {
         setState(() {
           _hotels = hotels;
+          _fellBack = fellBack;
           _loading = false;
           _error = null;
         });
@@ -277,9 +290,22 @@ class _HotelListPageState extends State<HotelListPage> {
                       : RefreshIndicator(
                           onRefresh: _search,
                           child: ListView.builder(
-                            itemCount: _hotels.length,
-                            itemBuilder: (context, i) =>
-                                _hotelCard(theme, _hotels[i]),
+                            itemCount: _hotels.length + (_fellBack ? 1 : 0),
+                            itemBuilder: (context, i) {
+                              if (_fellBack && i == 0) {
+                                return Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      16, 8, 16, 0),
+                                  child: Text('您所在区域暂未开通,正在展示演示城市酒店',
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                              color: theme
+                                                  .colorScheme.outline)),
+                                );
+                              }
+                              return _hotelCard(theme,
+                                  _hotels[_fellBack ? i - 1 : i]);
+                            },
                           ),
                         ),
         ),

@@ -13,6 +13,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:superz_shared/superz_shared.dart';
 
 bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
@@ -84,7 +85,13 @@ class ListenKeepAlive {
     if (!_isAndroid) return;
     final np = await FlutterForegroundTask.checkNotificationPermission();
     if (np != NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
+      // 商店合规:调系统通知权限弹窗前先说明目的;拒绝不阻塞听单
+      if (context.mounted &&
+          await PermissionRationale.ensure(
+              context, AppPermissionKind.notification,
+              reason: '用于在后台接收新订单提醒(实时听单)。\n拒绝后可能错过新订单。')) {
+        await FlutterForegroundTask.requestNotificationPermission();
+      }
     }
     if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) return;
     if (!context.mounted) return;

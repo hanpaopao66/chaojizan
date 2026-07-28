@@ -60,6 +60,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
   }
 
   Future<void> _pickLogo() async {
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.photos)) {
+      return;
+    }
     final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery, maxWidth: 512, imageQuality: 85);
     if (picked == null) return;
@@ -81,6 +84,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
   Future<void> _addShopPhoto() async {
     final shop = _shop;
     if (shop == null || shop.photoUrls.length >= 9) return;
+    if (!await PermissionRationale.ensure(context, AppPermissionKind.photos)) {
+      return;
+    }
     final picked = await ImagePicker().pickImage(
         source: ImageSource.gallery, maxWidth: 1280, imageQuality: 85);
     if (picked == null) return;
@@ -1665,6 +1671,19 @@ class _ShopTabPageState extends State<ShopTabPage> {
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => SupportPage(api: widget.api))),
             ),
+          ),
+          const SizedBox(height: 12),
+          // 商店审核三件套:协议全文 / 退出登录 / 注销账号
+          AccountLegalSection(
+            api: widget.api,
+            onLoggedOut: (ctx) {
+              Navigator.of(ctx).popUntil((route) => route.isFirst);
+              ApiClient.onUnauthorized?.call(); // AuthGate 切回登录页
+            },
+            onDeleted: (ctx) {
+              Navigator.of(ctx).popUntil((route) => route.isFirst);
+              ApiClient.onUnauthorized?.call();
+            },
           ),
         ],
       ),
