@@ -183,6 +183,12 @@ class Settings(BaseSettings):
     sms_template_param: str = "code"  # 模板里验证码变量名(${code} 则填 code)
     sms_region_id: str = "cn-hangzhou"
 
+    # 应用商店审核账号白名单:"手机号:固定码" 逗号分隔,如
+    # "13900000001:246810,13900000002:135790"。命中的号码发码时不真发短信,
+    # 登录时校验固定码即过(苹果海外审核员收不到国内短信,这是标准做法)。
+    # 留空 = 功能关闭;固定码只放部署机 .env.prod,不进仓库。
+    sms_review_accounts: str = ""
+
     @property
     def flexwork_configured(self) -> bool:
         return bool(self.flexwork_app_id and self.flexwork_secret)
@@ -217,6 +223,14 @@ class Settings(BaseSettings):
     def sms_configured(self) -> bool:
         return bool(self.sms_secret_id and self.sms_secret_key
                     and self.sms_sign_name and self.sms_template_id)
+
+    def sms_review_code(self, phone: str) -> str | None:
+        """审核白名单:返回该手机号的固定验证码;不在白名单返回 None。"""
+        for item in self.sms_review_accounts.split(","):
+            p, _, code = item.strip().partition(":")
+            if p == phone and code:
+                return code
+        return None
 
 
 settings = Settings()

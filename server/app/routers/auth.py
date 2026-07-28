@@ -125,6 +125,13 @@ async def send_sms_code(payload: SmsCodeIn, request: Request):
     """
     await check_rate_limit("sms", payload.phone,
                            settings.rate_limit_sms_per_minute)
+
+    # 应用商店审核白名单:不真发短信、不占频控;固定码在 sms-login 校验。
+    # 响应与正常发送一致,不向外泄露白名单存在
+    if settings.sms_review_code(payload.phone) is not None:
+        logger.info("审核白名单账号请求验证码: %s", payload.phone)
+        return {"sent": True}
+
     redis = get_redis()
 
     day_phone = f"sms:day:p:{payload.phone}"
@@ -160,12 +167,18 @@ async def send_sms_code(payload: SmsCodeIn, request: Request):
 @router.post("/sms-login", response_model=TokenOut)
 async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
     """验证码登录;新手机号自动注册为用户(customer)。"""
-    redis = get_redis()
-    stored = await redis.get(f"sms:code:{payload.phone}")
-    if stored is None or stored != payload.code:
-        raise HTTPException(401, "验证码错误或已过期")
-    await redis.delete(f"sms:code:{payload.phone}")
-    await redis.delete(f"sms:day:p:{payload.phone}")  # 登录成功,清当日频控
+    review_code = settings.sms_review_code(payload.phone)
+    if review_code is not None and secrets.compare_digest(
+            payload.code, review_code):
+        # 应用商店审核白名单:固定码即过(只豁免验证码,其余流程完全一致)
+        logger.info("审核白名单账号登录: %s role=%s", payload.phone, payload.role)
+    else:
+        redis = get_redis()
+        stored = await redis.get(f"sms:code:{payload.phone}")
+        if stored is None or stored != payload.code:
+            raise HTTPException(401, "验证码错误或已过期")
+        await redis.delete(f"sms:code:{payload.phone}")
+        await redis.delete(f"sms:day:p:{payload.phone}")  # 登录成功,清当日频控
 
     # 按 (手机号, 角色) 找账号:同一手机号在三端各有独立账号,首登该端自动注册
     role = UserRole(payload.role)
