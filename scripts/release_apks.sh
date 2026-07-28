@@ -28,6 +28,7 @@ for app in user merchant rider; do
       --build-name="$VERSION" --build-number="$BUILD" \
       --obfuscate --split-debug-info=build/symbols/$VERSION+$BUILD \
       --dart-define=SUPERZ_API=$API \
+      --dart-define=SUPERZ_ICP=陕ICP备2025064101号-5 \
       --dart-define=TIANDITU_KEY=${TIANDITU_KEY:-} | grep -E "apk|Built")
 done
 

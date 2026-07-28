@@ -260,11 +260,11 @@ HOTEL = {
 
 async def main():
     async with SessionLocal() as db:
-        # 0) 张记面馆:把测试期的 1px 图换成正经演示图
+        # 0) 张记面馆:把测试期的 1px 图换成正经演示图(生产库可能没有,跳过)
         zhang_owner = await db.scalar(
             select(User).where(User.phone == "13800000002")
         )
-        zhang = await db.scalar(
+        zhang = None if zhang_owner is None else await db.scalar(
             select(Merchant).where(Merchant.owner_id == zhang_owner.id)
         )
         if zhang is not None:
@@ -287,8 +287,18 @@ async def main():
         print(f"已隐藏测试店铺 {result.rowcount} 家")
 
         customer = await db.scalar(
-            select(User).where(User.phone == "13800000001")
+            select(User).where(
+                User.phone == "13800000001", User.role == UserRole.customer)
         )
+        if customer is None:
+            # 演示顾客(审核测试账号同号):生产库首次跑时创建
+            customer = User(
+                phone="13800000001", name="演示顾客",
+                role=UserRole.customer,
+                password_hash=hash_password("123456"),
+            )
+            db.add(customer)
+            await db.flush()
 
         for shop_def in SHOPS:
             owner = await db.scalar(
@@ -303,8 +313,12 @@ async def main():
                 db.add(owner)
                 await db.flush()
 
+            # 幂等按「老板 或 店名」查重:老库的演示店老板手机号可能对不上,
+            # 只查老板会重建同名店并撞 demo 单号
             shop = await db.scalar(
                 select(Merchant).where(Merchant.owner_id == owner.id)
+            ) or await db.scalar(
+                select(Merchant).where(Merchant.name == shop_def["name"])
             )
             if shop is not None:
                 print(f"「{shop_def['name']}」已存在,跳过")
@@ -400,12 +414,16 @@ async def main():
                   f"评分 {rating_sum / len(shop_def['reviews']):.1f}")
 
         # 4) 团购券(商店审核:已上线功能要有可浏览可下单的数据)
+        name_by_phone = {s["phone"]: s["name"] for s in SHOPS}
         for phone, deals in VOUCHERS.items():
             owner = await db.scalar(select(User).where(User.phone == phone))
-            if owner is None:
-                continue
-            shop = await db.scalar(
-                select(Merchant).where(Merchant.owner_id == owner.id))
+            shop = None
+            if owner is not None:
+                shop = await db.scalar(
+                    select(Merchant).where(Merchant.owner_id == owner.id))
+            if shop is None:  # 老库的店老板手机号对不上,按店名兜底
+                shop = await db.scalar(select(Merchant).where(
+                    Merchant.name == name_by_phone.get(phone, "")))
             if shop is None:
                 continue
             for title, desc, sell, face, total in deals:
