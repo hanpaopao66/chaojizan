@@ -25,6 +25,7 @@ echo "== 同步代码(排除依赖与产物) =="
 rsync -az --delete \
   --exclude 'deploy/.env.prod' --exclude 'appdist' --exclude 'deploy/letsencrypt' \
   --exclude 'deploy/certs' --exclude 'deploy/tunnel' \
+  --exclude 'deploy/wxpay-certs' --exclude 'server/certs' \
   --exclude 'deploy/certbot-www' --exclude 'deploy/renew.log' \
   --exclude 'deploy/nginx/conf.d/legacy*' --exclude 'deploy/.domains.local' \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \

@@ -8,7 +8,7 @@ bcrypt>=4.1
 pydantic-settings>=2.2
 httpx>=0.27
 python-multipart>=0.0.9
-wechatpayv3>=1.2
+wechatpayv3>=2.0   # 2.0+ 才支持「微信支付公钥」验签(新商户号默认模式)
 
 
 

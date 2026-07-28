@@ -45,4 +45,15 @@ docker logs -f superz-api --tail 100
 2. 域名 A 记录指向云服务器;域名需 ICP 备案(大陆云商未备案会拦 80/443)
 3. 首签证书:见 `renew-cert.sh` 头部注释(webroot 模式,经隧道完成挑战)
 4. crontab 加续期与探活(示例见各脚本头部注释)
-5. `.env.prod` 按 `server/.env.example` 补齐运行配置
+5. `.env.prod` 按 `server/.env.example` 补齐运行配置;
+   生产必须设 `ADMIN_PASSWORD_LOGIN=false`、`MOCK_PAY_ENABLED=false`
+6. 微信支付密钥手动上传一次(rsync 排除,部署机本地仅存):
+
+```bash
+ssh <部署机> "mkdir -p ~/super-z/deploy/wxpay-certs && chmod 700 ~/super-z/deploy/wxpay-certs"
+scp server/certs/apiclient_key.pem server/certs/pub_key.pem <部署机>:~/super-z/deploy/wxpay-certs/
+```
+
+   compose 把它挂到 api 容器 `/srv/certs:ro`(容器 WORKDIR=/srv),
+   所以 `.env.prod` 里写相对路径 `certs/apiclient_key.pem`、`certs/pub_key.pem`。
+   密钥缺失时 `get_client()` 记日志返回 None、支付接口 503,不会 500。

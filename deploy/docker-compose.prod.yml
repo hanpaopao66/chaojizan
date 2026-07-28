@@ -49,6 +49,9 @@ services:
       - /home/dddd/super-z/appdist:/srv/appdist
       # 见证节点脚本(/witness.py 下载端点读 /witness;构建上下文只有 server/,挂载补上)
       - /home/dddd/super-z/witness:/witness:ro
+      # 微信支付商户密钥(apiclient_key.pem + pub_key.pem)。部署机本地仅存、
+      # rsync 排除、不打进镜像;容器 WORKDIR=/srv,故 .env.prod 里写 certs/xxx.pem
+      - ./wxpay-certs:/srv/certs:ro
     depends_on:
       db:
         condition: service_healthy

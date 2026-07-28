@@ -563,7 +563,12 @@ async def mock_pay(
     user: User = Depends(require_role("customer")),
     db: AsyncSession = Depends(get_db),
 ):
-    """模拟支付。接微信支付后,这段逻辑原样搬进支付回调,幂等结构不变。"""
+    """模拟支付。接微信支付后,这段逻辑原样搬进支付回调,幂等结构不变。
+
+    生产 MOCK_PAY_ENABLED=false 封死:真实收款上线后这个口子等于白送订单。
+    """
+    if not settings.mock_pay_enabled:
+        raise HTTPException(403, "模拟支付已关闭,请使用微信支付")
     order = await db.scalar(
         select(Order).where(Order.order_no == order_no).with_for_update()
     )

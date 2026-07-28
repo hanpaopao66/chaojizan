@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # 管理员只能手机验证码登录;本地开发与 e2e 保持默认开启
     admin_password_login: bool = True
 
+    # 模拟支付开关:生产必须关闭(MOCK_PAY_ENABLED=false),否则
+    # /orders/{no}/pay/mock 能让任何用户白嫖下单;本地开发与 e2e 保持默认开启
+    mock_pay_enabled: bool = True
+
     # 接口限流(Redis 固定窗口,按 分钟 计):防爆破/防刷,不为限制正常用户
     rate_limit_enabled: bool = True
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
@@ -140,6 +144,11 @@ class Settings(BaseSettings):
     wxpay_cert_serial_no: str = ""    # 商户证书序列号
     wxpay_private_key_path: str = ""  # apiclient_key.pem 路径
     wxpay_notify_url: str = ""        # https://你的域名/payments/wechat/notify
+    # 2024 下半年后新开的商户号默认「微信支付公钥」验签(不再发平台证书)。
+    # 商户平台 API 安全页若显示的是公钥,把 pub_key.pem 放 certs/ 并填公钥 ID;
+    # 两项留空 = 老的平台证书模式(SDK 自动下载并缓存到 certs/platform)
+    wxpay_public_key_path: str = ""   # 微信支付公钥 pub_key.pem 路径
+    wxpay_public_key_id: str = ""     # 公钥 ID,形如 PUB_KEY_ID_0117...
 
     # 极光推送(JPush REST API,服务端直推)
     jpush_app_key: str = ""

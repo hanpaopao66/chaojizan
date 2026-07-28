@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 server/.env
 server/uploads/
+# 微信支付商户私钥/证书(绝不入库)
+server/certs/
 
 # Flutter / Dart
 .dart_tool/

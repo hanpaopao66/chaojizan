@@ -32,15 +32,38 @@ def get_client():
     if not settings.wxpay_configured or WeChatPay is None:
         return None
     if _client is None:
-        _client = WeChatPay(
-            wechatpay_type=WeChatPayType.APP,
-            mchid=settings.wxpay_mchid,
-            private_key=Path(settings.wxpay_private_key_path).read_text(),
-            cert_serial_no=settings.wxpay_cert_serial_no,
-            apiv3_key=settings.wxpay_api_v3_key,
-            appid=settings.wxpay_app_id,
-            notify_url=settings.wxpay_notify_url,
-        )
+        try:
+            extra = {}
+            pub_path = Path(settings.wxpay_public_key_path or "")
+            if settings.wxpay_public_key_id and pub_path.is_file():
+                # 公钥模式(2024 下半年后新开的商户号默认,本商户号即是):
+                # 微信不再发平台证书,回调验签用「微信支付公钥」
+                extra["public_key"] = pub_path.read_text()
+                extra["public_key_id"] = settings.wxpay_public_key_id
+            elif settings.wxpay_public_key_id:
+                logger.error("公钥文件缺失,微信支付未启用: %s",
+                             settings.wxpay_public_key_path)
+                return None
+            else:
+                # 平台证书模式(老商户号):SDK 自动下载,缓存避免每次重启重拉
+                cert_dir = Path(settings.wxpay_private_key_path).parent / "platform"
+                cert_dir.mkdir(parents=True, exist_ok=True)
+                extra["cert_dir"] = str(cert_dir)
+            _client = WeChatPay(
+                wechatpay_type=WeChatPayType.APP,
+                mchid=settings.wxpay_mchid,
+                private_key=Path(settings.wxpay_private_key_path).read_text(),
+                cert_serial_no=settings.wxpay_cert_serial_no,
+                apiv3_key=settings.wxpay_api_v3_key,
+                appid=settings.wxpay_app_id,
+                notify_url=settings.wxpay_notify_url,
+                logger=logger,
+                **extra,
+            )
+        except Exception:
+            # 配置有误不能把下单接口打成 500:记日志 + 返回 None(接口 503)
+            logger.exception("微信支付客户端初始化失败,请检查证书/密钥配置")
+            return None
     return _client
 
 
