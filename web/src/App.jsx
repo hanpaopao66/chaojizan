@@ -262,6 +262,22 @@ function Home() {
         </div>
       </Reveal>
 
+      <Reveal as="section" className="section" id="contact">
+        <h2>关于我们 · 联系我们</h2>
+        <p className="lead">
+          超级赞(Super-Z)由陕西爱卡斯科技有限公司运营,是低抽成、账目透明的
+          本地生活服务平台:外卖佣金 5% 封顶、团购核销 2%、配送费 100% 归骑手,
+          每一单的资金流向对用户、商家、骑手三方公开可查。
+        </p>
+        <p className="lead">
+          商务合作、商家入驻、骑手加入或任何问题,欢迎联系:
+        </p>
+        <div className="cta">
+          <a className="btn ghost" href="tel:15231109698">电话 15231109698</a>
+          <a className="btn ghost" href="mailto:support@chaojizan.cc">邮箱 support@chaojizan.cc</a>
+        </div>
+      </Reveal>
+
       <div className="pledge-band">
         <div className="q">5% 是上限,不是目标。</div>
         <div className="s">成本摊薄就降佣 · 盈余不分红 · 第一战:外卖,打穿一个再打下一个</div>
@@ -273,6 +289,11 @@ function Home() {
           {stats?.version?.version && <> · 线上版本 {stats.version.version}
             (与 <a href="https://github.com/hanpaopao66/chaojizan" target="_blank"
               rel="noreferrer">开源仓</a> tag 对应)</>}
+        </div>
+        <div className="muted">
+          运营主体:陕西爱卡斯科技有限公司 ·{' '}
+          <a href="tel:15231109698">15231109698</a> ·{' '}
+          <a href="mailto:support@chaojizan.cc">support@chaojizan.cc</a>
         </div>
         <div className="muted">
           <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>
