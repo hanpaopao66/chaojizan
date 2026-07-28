@@ -1,11 +1,10 @@
 """演示环境整备:隐藏测试残留店铺,创建一批像样的演示店。
 
-- 外卖店 7 家(品类各异,撑满首页一屏):门头图、5-7 道带图菜品
+- 外卖店 13 家(品类各异,撑满首页两屏):门头图、6-7 道带图菜品
   (纯 Python 生成的暖色渐变图,真实照片后续替换)
 - 近 30 天的已完成订单(撑起「月售」)+ 真实评价(撑起评分)
-- 团购券若干(应用商店审核要求已上线功能有真实感数据)
-- 演示酒店 1 家(2 个房型 + 未来 45 天房态,可浏览可下单)
-- 幂等:重复运行不会重复创建
+- 团购券 10 张、演示酒店 3 家(经济/舒适/高档,房型 + 未来 45 天房态)
+- 幂等:重复运行不会重复创建;清老数据用 scripts/scrub_demo.py
 
 用法(在 server/ 目录):python -m scripts.demo_seed
 """
@@ -100,6 +99,26 @@ def make_image(name: str, idx: int) -> str:
 
 
 SHOPS = [
+    {
+        "phone": "13800000002", "owner": "张老板", "name": "张记面馆",
+        "category": "noodles",
+        "description": "手工碱水面,汤头每天现吊", "address": "东风路 2 号",
+        "lat": 30.6612, "lng": 104.0823,
+        "announcement": "每天限量 200 碗,汤头卖完就收摊",
+        "dishes": [
+            ("招牌牛肉面", "招牌", 1800), ("肥肠面", "招牌", 2000),
+            ("素椒杂酱面", "面", 1300), ("清汤抄手(12个)", "抄手", 1400),
+            ("红油抄手(12个)", "抄手", 1500), ("拌鸡丝", "凉菜", 1200),
+            ("卤蛋", "加料", 300),
+        ],
+        "reviews": [
+            (5, "牛肉给得多,面条筋道"),
+            (5, "肥肠处理得很干净,无异味"),
+            (4, "好吃,辣度可以再问一下顾客"),
+            (5, "老板实在,汤都是现吊的"),
+        ],
+        "orders_30d": 68,
+    },
     {
         "phone": "13800000006", "owner": "陈姐", "name": "陈姐麻辣烫",
         "category": "malatang",
@@ -228,10 +247,142 @@ SHOPS = [
         ],
         "orders_30d": 49,
     },
+    {
+        "phone": "13800000015", "owner": "赵师傅", "name": "赵记冒菜",
+        "category": "dry_pot",
+        "description": "牛油锅底,冒菜论斤称", "address": "东风路 28 号",
+        "lat": 30.6625, "lng": 104.0812,
+        "announcement": "锅底每天一换,素菜 6 元一份不玩秤",
+        "dishes": [
+            ("冒牛肉(半斤)", "荤菜", 2800), ("冒毛肚", "荤菜", 2600),
+            ("冒鸭血", "荤菜", 1200), ("冒土豆", "素菜", 600),
+            ("冒藕片", "素菜", 600), ("冒豆皮", "素菜", 600),
+            ("米饭", "主食", 200),
+        ],
+        "reviews": [
+            (5, "牛油味正,和店里堂食一个味"),
+            (5, "分量称得足,不玩虚的"),
+            (4, "微辣也挺辣,不能吃辣的注意"),
+            (5, "鸭血嫩,土豆粉糯"),
+        ],
+        "orders_30d": 55,
+    },
+    {
+        "phone": "13800000016", "owner": "金姐", "name": "金家紫菜包饭",
+        "category": "japan_korea",
+        "description": "现卷现切,泡菜自家腌", "address": "春熙路步行街 52 号",
+        "lat": 30.6598, "lng": 104.0835,
+        "announcement": "包饭现点现卷,放凉了不好吃请尽快享用",
+        "dishes": [
+            ("经典紫菜包饭", "包饭", 1200), ("金枪鱼包饭", "包饭", 1600),
+            ("辣白菜五花肉拌饭", "拌饭", 1900), ("部队火锅(单人)", "锅物", 2600),
+            ("海带汤", "汤", 600), ("自制辣白菜", "小菜", 500),
+        ],
+        "reviews": [
+            (5, "泡菜是真自己腌的,脆"),
+            (4, "拌饭酱给得足,饭稍软"),
+            (5, "部队火锅料很实在"),
+        ],
+        "orders_30d": 41,
+    },
+    {
+        "phone": "13800000017", "owner": "大牛", "name": "大牛汉堡",
+        "category": "burger_pizza",
+        "description": "现打牛肉饼,不用冷冻饼", "address": "青年路 6 号",
+        "lat": 30.6640, "lng": 104.0820,
+        "announcement": "牛肉饼每日现打现煎,出餐 12 分钟请耐心",
+        "dishes": [
+            ("经典牛肉堡", "汉堡", 2200), ("双层芝士牛堡", "汉堡", 2800),
+            ("脆鸡腿堡", "汉堡", 1800), ("现炸薯条", "小食", 900),
+            ("洋葱圈", "小食", 1000), ("可乐(大杯)", "饮品", 600),
+        ],
+        "reviews": [
+            (5, "肉饼有颗粒感,一吃就是现打的"),
+            (5, "薯条到手还是脆的,袋子设计用心了"),
+            (4, "好吃但等得稍久,毕竟现做"),
+        ],
+        "orders_30d": 47,
+    },
+    {
+        "phone": "13800000018", "owner": "周孃", "name": "周孃卤味",
+        "category": "braised_duck",
+        "description": "老卤三十年,每天新起", "address": "东风路 55 号",
+        "lat": 30.6575, "lng": 104.0830,
+        "announcement": "下午四点出锅,卤味售完即止",
+        "dishes": [
+            ("卤鸭脖(半斤)", "卤味", 1500), ("卤鸭翅(4个)", "卤味", 1400),
+            ("卤豆干", "卤味", 800), ("卤藕片", "卤味", 900),
+            ("麻辣兔头(2个)", "招牌", 2200), ("卤鸡爪(6个)", "卤味", 1300),
+        ],
+        "reviews": [
+            (5, "兔头麻辣入味,啃得停不下来"),
+            (5, "鸭脖不柴,卤香够"),
+            (4, "豆干稍咸,下酒正好"),
+        ],
+        "orders_30d": 39,
+    },
+    {
+        "phone": "13800000019", "owner": "小轻", "name": "轻食研究所",
+        "category": "light_salad",
+        "description": "当日食材,酱汁分装", "address": "春熙路步行街 60 号",
+        "lat": 30.6608, "lng": 104.0840,
+        "announcement": "沙拉酱汁全部分装,自己控制热量",
+        "dishes": [
+            ("鸡胸肉能量碗", "主食沙拉", 2400), ("牛油果藜麦碗", "主食沙拉", 2600),
+            ("烟熏三文鱼沙拉", "主食沙拉", 2900), ("低脂鸡肉卷", "卷类", 1800),
+            ("鲜榨橙汁", "饮品", 1200), ("希腊酸奶杯", "甜品", 1000),
+        ],
+        "reviews": [
+            (5, "鸡胸肉不柴,健身餐靠它了"),
+            (5, "食材新鲜,牛油果给了整半个"),
+            (4, "好吃,就是对干饭人来说量小"),
+        ],
+        "orders_30d": 36,
+    },
+    {
+        "phone": "13800000021", "owner": "马老板", "name": "马记牛肉汤",
+        "category": "beef_lamb_soup",
+        "description": "牛骨熬汤六小时,清真", "address": "青年路 33 号",
+        "lat": 30.6560, "lng": 104.0808,
+        "announcement": "汤免费续,饼子现烙",
+        "dishes": [
+            ("招牌牛肉汤", "汤", 1600), ("牛杂汤", "汤", 1500),
+            ("羊肉汤", "汤", 1800), ("现烙饼子", "主食", 300),
+            ("凉拌牛肉", "凉菜", 2600), ("糖蒜", "小菜", 200),
+        ],
+        "reviews": [
+            (5, "汤是真熬出来的,奶白色"),
+            (5, "牛肉给得厚道,饼子香"),
+            (5, "冬天来一碗,从头暖到脚"),
+            (4, "好喝,香菜记得备注多放"),
+        ],
+        "orders_30d": 51,
+    },
+    {
+        "phone": "13800000022", "owner": "甜甜", "name": "甜言蜜语甜品",
+        "category": "pastry",
+        "description": "低糖配方,当日现做", "address": "春熙路步行街 71 号",
+        "lat": 30.6618, "lng": 104.0845,
+        "announcement": "全线低糖配方,好吃不齁",
+        "dishes": [
+            ("提拉米苏(盒)", "蛋糕", 1800), ("巴斯克芝士(块)", "蛋糕", 1600),
+            ("杨枝甘露千层", "千层", 2200), ("蛋挞(2个)", "挞类", 800),
+            ("冰醪糟汤圆", "中式", 900), ("红糖冰粉", "中式", 700),
+        ],
+        "reviews": [
+            (5, "低糖是真的,吃完不腻"),
+            (5, "千层皮薄,芒果新鲜"),
+            (4, "冰粉料足,就是冰化得快"),
+        ],
+        "orders_30d": 44,
+    },
 ]
 
 # 团购券(挂在上面演示店上;phone -> 券定义)
 VOUCHERS = {
+    "13800000002": [
+        ("20元面食代金券", "全场面食通用,堂食外带均可", 1800, 2000, 200),
+    ],
     "13800000006": [
         ("50元代金券", "全场通用,到店/外带均可核销", 4500, 5000, 200),
         ("100元代金券", "全场通用,聚餐更划算", 8800, 10000, 100),
@@ -242,20 +393,59 @@ VOUCHERS = {
     "13800000011": [
         ("60元代金券", "家常川菜全场通用", 5200, 6000, 150),
     ],
-}
-
-# 演示酒店:2 个房型 + 未来 45 天房态
-HOTEL = {
-    "phone": "13800000013", "owner": "何店长", "name": "锦里舒心酒店",
-    "description": "地铁口 200 米,免费停车,24 小时前台",
-    "address": "锦里东路 66 号", "lat": 30.6588, "lng": 104.0790,
-    "tier": "comfort",
-    "facilities": ["wifi", "parking", "breakfast", "luggage"],
-    "rooms": [
-        ("高级大床房", "1.8m 大床", 22, 2, 18800, 3),
-        ("舒适双床房", "1.2m 双床", 26, 3, 21800, 2),
+    "13800000015": [
+        ("50元冒菜代金券", "全场通用,节假日不加价", 4300, 5000, 150),
+    ],
+    "13800000017": [
+        ("30元汉堡代金券", "全场通用,现打牛肉饼", 2600, 3000, 150),
+        ("双人套餐券(两堡两小食两饮)", "指定套餐,超值拼单", 5800, 7200, 80),
+    ],
+    "13800000021": [
+        ("40元代金券", "牛肉汤全场通用,汤免费续", 3500, 4000, 120),
+    ],
+    "13800000022": [
+        ("25元甜品代金券", "全场低糖甜品通用", 2100, 2500, 150),
     ],
 }
+
+# 演示酒店:每家 2-3 个房型 + 未来 45 天房态
+HOTELS = [
+    {
+        "phone": "13800000013", "owner": "何店长", "name": "锦里舒心酒店",
+        "description": "地铁口 200 米,免费停车,24 小时前台",
+        "address": "锦里东路 66 号", "lat": 30.6588, "lng": 104.0790,
+        "tier": "comfort",
+        "facilities": ["wifi", "parking", "breakfast", "luggage"],
+        "rooms": [
+            ("高级大床房", "1.8m 大床", 22, 2, 18800, 3),
+            ("舒适双床房", "1.2m 双床", 26, 3, 21800, 2),
+            ("亲子家庭房", "1.8m+1.2m", 32, 4, 26800, 2),
+        ],
+    },
+    {
+        "phone": "13800000023", "owner": "程掌柜", "name": "青旅小筑",
+        "description": "青年旅舍,公共厨房与桌游区,近夜市",
+        "address": "青年路 88 号", "lat": 30.6635, "lng": 104.0850,
+        "tier": "economy",
+        "facilities": ["wifi", "luggage"],
+        "rooms": [
+            ("标准大床房", "1.5m 大床", 16, 2, 9800, 4),
+            ("经济双床房", "1.2m 双床", 18, 2, 11800, 3),
+        ],
+    },
+    {
+        "phone": "13800000024", "owner": "杜经理", "name": "望江雅居酒店",
+        "description": "江景房,含双早,健身房与自助洗衣",
+        "address": "望江路 9 号", "lat": 30.6550, "lng": 104.0870,
+        "tier": "premium",
+        "facilities": ["wifi", "parking", "breakfast", "gym", "laundry"],
+        "rooms": [
+            ("江景大床房", "2.0m 大床", 36, 2, 42800, 3),
+            ("行政双床房", "1.5m 双床", 38, 3, 46800, 2),
+            ("江景套房", "2.0m 大床+客厅", 52, 3, 68800, 1),
+        ],
+    },
+]
 
 
 async def main():
@@ -438,49 +628,57 @@ async def main():
                 ))
                 print(f"「{shop.name}」上架团购券:{title}")
 
-        # 5) 演示酒店:2 房型 + 未来 45 天房态
-        hotel_owner = await db.scalar(
-            select(User).where(User.phone == HOTEL["phone"]))
-        if hotel_owner is None:
-            hotel_owner = User(
-                phone=HOTEL["phone"], name=HOTEL["owner"],
-                role=UserRole.merchant,
-                password_hash=hash_password("123456"),
-            )
-            db.add(hotel_owner)
-            await db.flush()
-        hotel = await db.scalar(
-            select(Merchant).where(Merchant.owner_id == hotel_owner.id))
-        if hotel is None:
+        # 5) 演示酒店:每家 2-3 房型 + 未来 45 天房态
+        for h_idx, hotel_def in enumerate(HOTELS):
+            hotel_owner = await db.scalar(
+                select(User).where(User.phone == hotel_def["phone"]))
+            if hotel_owner is None:
+                hotel_owner = User(
+                    phone=hotel_def["phone"], name=hotel_def["owner"],
+                    role=UserRole.merchant,
+                    password_hash=hash_password("123456"),
+                )
+                db.add(hotel_owner)
+                await db.flush()
+            hotel = await db.scalar(
+                select(Merchant).where(Merchant.owner_id == hotel_owner.id)
+            ) or await db.scalar(
+                select(Merchant).where(Merchant.name == hotel_def["name"]))
+            if hotel is not None:
+                print(f"「{hotel_def['name']}」已存在,跳过")
+                continue
+            slug = hotel_def["phone"][-4:]
             hotel = Merchant(
                 owner_id=hotel_owner.id,
-                name=HOTEL["name"],
-                description=HOTEL["description"],
-                address=HOTEL["address"],
-                lat=HOTEL["lat"], lng=HOTEL["lng"],
+                name=hotel_def["name"],
+                description=hotel_def["description"],
+                address=hotel_def["address"],
+                lat=hotel_def["lat"], lng=hotel_def["lng"],
                 is_open=True,
                 status=MerchantStatus.approved,
                 biz_type="hotel",
-                license_no="91510100MA6DEMO01X",
-                logo_url=make_image("logo_hotel", 1),
-                photo_urls=[make_image(f"hotel_photo_{i}", i) for i in range(3)],
+                license_no=f"91510100MA6DM{slug}X",
+                logo_url=make_image(f"logo_hotel_{slug}", h_idx + 1),
+                photo_urls=[make_image(f"hotel_{slug}_photo_{i}", h_idx + i)
+                            for i in range(3)],
             )
             db.add(hotel)
             await db.flush()
             db.add(HotelProfile(
-                merchant_id=hotel.id, tier=HOTEL["tier"],
-                front_desk_phone=HOTEL["phone"],
-                facilities=HOTEL["facilities"],
-                special_license_no="川公旅DEMO001",
-                special_license_image_url=make_image("hotel_license", 0),
+                merchant_id=hotel.id, tier=hotel_def["tier"],
+                front_desk_phone=hotel_def["phone"],
+                facilities=hotel_def["facilities"],
+                special_license_no=f"川公旅DEMO{slug}",
+                special_license_image_url=make_image(
+                    f"hotel_{slug}_license", h_idx),
             ))
             today = datetime.now(timezone.utc).date()
             for r, (rname, bed, area, guests, price, qty) in enumerate(
-                    HOTEL["rooms"]):
+                    hotel_def["rooms"]):
                 room = RoomType(
                     merchant_id=hotel.id, name=rname, bed_type=bed,
                     area_m2=area, max_guests=guests,
-                    image_urls=[make_image(f"room_{r}_{i}", r + i)
+                    image_urls=[make_image(f"room_{slug}_{r}_{i}", r + i)
                                 for i in range(2)],
                     facilities=["wifi", "hot_water"],
                     sort=r,
@@ -491,13 +689,12 @@ async def main():
                     db.add(RoomCalendar(
                         room_type_id=room.id,
                         date=today + timedelta(days=n),
+                        # 周五周六上浮,像真实房价
                         price_cents=price + (2000 if n % 7 in (4, 5) else 0),
                         total_qty=qty,
                     ))
-            print(f"「{HOTEL['name']}」创建完成:"
-                  f"{len(HOTEL['rooms'])} 个房型 / 45 天房态")
-        else:
-            print(f"「{HOTEL['name']}」已存在,跳过")
+            print(f"「{hotel_def['name']}」创建完成:"
+                  f"{len(hotel_def['rooms'])} 个房型 / 45 天房态")
 
         await db.commit()
     print("\n演示数据集就绪 🎉(重复运行安全)")

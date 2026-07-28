@@ -1,107 +1,174 @@
-"""生产环境演示数据清理(M2 生产/演示隔离)。
+"""生产环境演示数据清理(生产/演示隔离)。
 
 删除 seed/demo_seed 灌入的演示账号及其名下全部数据(商家、菜品、订单、
-流水、评价、工单……),并把管理员密码重置为环境变量 SUPERZ_ADMIN_PASSWORD。
-演示账号的手机号约定为 138000000xx 段(seed 脚本专用,真实用户不可能撞上)。
+团购券、住宿、流水、评价、工单……),并可重置管理员密码。
+演示账号号段:138000000xx(现行 seed)与 938000000xx(历史 seed),
+真实用户不可能撞上。
 
-用法(在部署机上):
+账本:演示订单被清后,历史每日锚点必然与数据重算对不上,所以一并清空
+ledger_anchors 与内审告警,账本链从清理后的数据重新起链(开发库同款先例)。
+
+用法(在部署机上,先预览再执行):
+    docker exec superz-api python -m scripts.scrub_demo
     docker exec -e SUPERZ_ADMIN_PASSWORD='强密码' superz-api \
         python -m scripts.scrub_demo --yes
 
 幂等:重复执行无副作用。不带 --yes 时只预览将删除的内容,不动数据。
+管理员账号不删;SUPERZ_ADMIN_PASSWORD 未设置时跳过密码重置。
 """
 import argparse
 import asyncio
 import os
 import sys
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, text, update
 
 sys.path.insert(0, ".")
 
 from app.db import SessionLocal  # noqa: E402
+from app import models as m  # noqa: E402
 from app.models import (  # noqa: E402
-    Address,
-    AfterSale,
-    Dish,
-    Favorite,
     Merchant,
-    MerchantEarning,
     Order,
-    OrderEvent,
-    PushLog,
-    Review,
-    RiderEarning,
-    RiderProfile,
-    Ticket,
+    RoomType,
+    StayOrder,
     User,
     UserRole,
-    Withdrawal,
+    Voucher,
 )
 
-# seed/demo_seed 专用号段。管理员(role=admin)不删,只重置密码。
-DEMO_PHONE_PREFIX = "1380000000"
+# seed/demo_seed 专用号段(138000000xx / 938000000xx,覆盖尾号 00-99)。
+# 管理员(role=admin)不删,只重置密码。
+DEMO_PHONE_PREFIXES = ("138000000", "938000000")
+
+
+async def _wipe(db, model, apply: bool, **id_sets) -> int:
+    """按模型上实际存在的外键列删除;列不存在或集合为空则跳过。"""
+    conds = [getattr(model, col).in_(ids)
+             for col, ids in id_sets.items()
+             if ids and hasattr(model, col)]
+    if not conds:
+        return 0
+    total = 0
+    for cond in conds:  # 分列删,同一行命中多列也只是幂等重删
+        if apply:
+            result = await db.execute(delete(model).where(cond))
+            total += result.rowcount or 0
+        else:
+            total += len((await db.scalars(select(model.id).where(cond))).all())
+    return total
 
 
 async def scrub(apply: bool) -> None:
     async with SessionLocal() as db:
-        demo_users = (await db.scalars(
-            select(User).where(User.phone.startswith(DEMO_PHONE_PREFIX))
-        )).all()
-        if not demo_users:
-            print("没有找到演示账号,无需清理")
+        # 生产库迁移可能滞后于模型:不存在的表直接跳过,别让预览半途炸掉
+        existing_tables = set((await db.scalars(text(
+            "select tablename from pg_tables where schemaname='public'"))).all())
+        cond = or_(*[User.phone.startswith(p) for p in DEMO_PHONE_PREFIXES])
+        demo_users = (await db.scalars(select(User).where(cond))).all()
         admin_ids = [u.id for u in demo_users if u.role == UserRole.admin]
-        victim_ids = [u.id for u in demo_users if u.role != UserRole.admin]
+        uids = [u.id for u in demo_users if u.role != UserRole.admin]
 
-        merchant_ids = list(await db.scalars(
-            select(Merchant.id).where(Merchant.owner_id.in_(victim_ids))
-        )) if victim_ids else []
-        order_ids = list(await db.scalars(
-            select(Order.id).where(
-                Order.customer_id.in_(victim_ids)
-                | Order.merchant_id.in_(merchant_ids)
-                | Order.rider_id.in_(victim_ids)
-            )
-        )) if (victim_ids or merchant_ids) else []
+        mids = list(await db.scalars(
+            select(Merchant.id).where(Merchant.owner_id.in_(uids)))) if uids else []
+        oids = list(await db.scalars(select(Order.id).where(
+            Order.customer_id.in_(uids or [0])
+            | Order.merchant_id.in_(mids or [0])
+            | Order.rider_id.in_(uids or [0])))) if (uids or mids) else []
+        sids = list(await db.scalars(select(StayOrder.id).where(
+            StayOrder.customer_id.in_(uids or [0])
+            | StayOrder.merchant_id.in_(mids or [0])))) if (uids or mids) else []
+        vids = list(await db.scalars(
+            select(Voucher.id).where(Voucher.merchant_id.in_(mids)))) if mids else []
+        rtids = list(await db.scalars(
+            select(RoomType.id).where(RoomType.merchant_id.in_(mids)))) if mids else []
 
-        print(f"演示账号 {len(demo_users)} 个(管理员 {len(admin_ids)} 个只重置密码)")
-        print(f"待删除:商家 {len(merchant_ids)} 家、订单 {len(order_ids)} 单及其全部关联数据")
+        print(f"演示账号 {len(uids)} 个(另有管理员 {len(admin_ids)} 个只重置密码)")
+        print(f"名下:商家 {len(mids)} / 订单 {len(oids)} / 住宿单 {len(sids)}"
+              f" / 团购券 {len(vids)} / 房型 {len(rtids)}")
+
+        new_password = os.environ.get("SUPERZ_ADMIN_PASSWORD", "")
+        if apply and admin_ids and new_password and len(new_password) < 12:
+            print("✗ 未执行:SUPERZ_ADMIN_PASSWORD 至少 12 位")
+            sys.exit(1)
+
+        # FK 安全顺序:单据下游 → 单据 → 商家资产 → 商家 → 用户资产 → 用户
+        plan = [
+            # 订单/住宿单/团购的下游
+            (m.OrderEvent,          dict(order_id=oids)),
+            (m.Review,              dict(order_id=oids)),
+            (m.AfterSale,           dict(order_id=oids)),
+            (m.FoodSafetyReport,    dict(order_id=oids)),
+            (m.Refund,              dict(order_id=oids)),
+            (m.DeliveryIssue,       dict(order_id=oids)),
+            (m.Message,             dict(order_id=oids)),
+            (m.ProfitSharingRecord, dict(order_id=oids)),
+            (m.MerchantEarning,     dict(order_id=oids, merchant_id=mids)),
+            (m.RiderEarning,        dict(order_id=oids, rider_id=uids)),
+            (m.AddressFeedback,     dict(customer_id=uids, rider_id=uids)),
+            (m.StayAfterSale,       dict(stay_order_id=sids)),
+            (m.StayReview,          dict(stay_order_id=sids)),
+            (m.VoucherPurchase,     dict(voucher_id=vids, customer_id=uids)),
+            # 单据本体
+            (m.Order,               dict(id=oids)),
+            (m.StayOrder,           dict(id=sids)),
+            # 商家资产
+            (m.RoomCalendar,        dict(room_type_id=rtids)),
+            (m.RoomType,            dict(id=rtids)),
+            (m.HotelProfile,        dict(merchant_id=mids)),
+            (m.Voucher,             dict(id=vids)),
+            (m.Dish,                dict(merchant_id=mids)),
+            (m.Cart,                dict(merchant_id=mids, user_id=uids)),
+            (m.Favorite,            dict(merchant_id=mids, user_id=uids)),
+            (m.MerchantStaff,       dict(merchant_id=mids, user_id=uids)),
+            (m.Coupon,              dict(merchant_id=mids, user_id=uids)),
+            (m.CouponBatch,         dict(merchant_id=mids)),
+            (m.InvoiceRequest,      dict(merchant_id=mids)),
+            (m.Merchant,            dict(id=mids)),
+            # 用户资产
+            (m.Address,             dict(user_id=uids)),
+            (m.UserIdentity,        dict(user_id=uids)),
+            (m.RiderProfile,        dict(rider_id=uids)),
+            (m.Withdrawal,          dict(user_id=uids)),
+            (m.Ticket,              dict(user_id=uids)),
+            (m.PushLog,             dict(user_id=uids)),
+            (m.AppEvent,            dict(user_id=uids)),
+            (m.Referral,            dict(inviter_id=uids, invitee_id=uids)),
+            (m.PayoutAccount,       dict(user_id=uids)),
+            (m.RiderInsuranceDay,   dict(rider_id=uids)),
+            (m.RiderAccident,       dict(rider_id=uids)),
+            (m.RiderExam,           dict(rider_id=uids)),
+            (m.RiderGear,           dict(rider_id=uids)),
+            (m.RiderSession,        dict(rider_id=uids)),
+            (m.RiderEmergency,      dict(rider_id=uids)),
+            (m.RiskActionLog,       dict(user_id=uids)),
+            (m.Appeal,              dict(user_id=uids)),
+            (m.User,                dict(id=uids)),
+        ]
+        for model, id_sets in plan:
+            if model.__tablename__ not in existing_tables:
+                print(f"  - 跳过 {model.__tablename__}(表不存在,迁移未到)")
+                continue
+            n = await _wipe(db, model, apply, **id_sets)
+            if n:
+                print(f"  {'✓ 删除' if apply else '将删除'} "
+                      f"{model.__tablename__}: {n}")
+
         if not apply:
             print("\n预览模式,未做任何修改。确认无误后加 --yes 执行。")
             return
 
-        # 密码先行校验:不通过就一行数据都不动
-        new_password = os.environ.get("SUPERZ_ADMIN_PASSWORD", "")
-        if admin_ids and len(new_password) < 12:
-            print("\n✗ 未执行:请设置环境变量 SUPERZ_ADMIN_PASSWORD(至少 12 位)用于重置管理员密码")
-            sys.exit(1)
+        # 账本重新起链:历史锚点/内审结果引用已删单据,保留只会天天报警
+        for model in (m.LedgerAnchor, m.AuditAlert, m.AuditRun):
+            if model.__tablename__ in existing_tables:
+                await db.execute(delete(model))
+        print("  ✓ 账本锚点与内审记录已清空,从当前数据重新起链")
 
-        # FK 安全的删除顺序:订单的下游 → 订单 → 商家的下游 → 商家 → 用户的下游 → 用户
-        if order_ids:
-            for model in (OrderEvent, Review, AfterSale,
-                          MerchantEarning, RiderEarning):
-                await db.execute(delete(model).where(model.order_id.in_(order_ids)))
-            await db.execute(delete(Order).where(Order.id.in_(order_ids)))
-        if merchant_ids:
-            await db.execute(delete(Dish).where(Dish.merchant_id.in_(merchant_ids)))
-            await db.execute(
-                delete(Favorite).where(Favorite.merchant_id.in_(merchant_ids)))
-            await db.execute(delete(Merchant).where(Merchant.id.in_(merchant_ids)))
-        if victim_ids:
-            for model, col in ((Address, Address.user_id),
-                               (RiderProfile, RiderProfile.rider_id),
-                               (Withdrawal, Withdrawal.user_id),
-                               (Ticket, Ticket.user_id),
-                               (Favorite, Favorite.user_id),
-                               (PushLog, PushLog.user_id)):
-                await db.execute(delete(model).where(col.in_(victim_ids)))
-            await db.execute(delete(User).where(User.id.in_(victim_ids)))
-
-        if admin_ids:
+        if admin_ids and new_password:
             from app.security import hash_password
             await db.execute(update(User).where(User.id.in_(admin_ids))
                              .values(password_hash=hash_password(new_password)))
-            print(f"✓ 管理员({len(admin_ids)} 个)密码已重置为 SUPERZ_ADMIN_PASSWORD")
+            print(f"  ✓ 管理员({len(admin_ids)} 个)密码已重置")
 
         await db.commit()
         print("✓ 清理完成(幂等,可重复执行)")
