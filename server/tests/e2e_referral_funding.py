@@ -10,18 +10,15 @@ import asyncio
 import random
 import time
 
-from tests.util import call, login, register_fresh_rider
+from tests.util import call, login, register_fresh_rider, unique_spot
 
 admin = login("13800000000")
 merchant = login("13800000002")
 ts = int(time.time())
-# 坐标要满足两个约束,少一个都跑不过:
-#  1. 和 e2e_referral 的坐标错开——两边同公式的话同一分钟会算出同一个点,
-#     命中 #44 同址高频风控 → 奖励被挂起(设计如此),看起来像"发券坏了";
-#  2. 仍在商家 4km 配送半径内——挪太远会被「超出配送范围」直接拒单。
-# 所以只在经度上错开一小段,不整体搬到别的片区。
-LAT = 30.6650 + (ts % 20) * 1.3e-3
-LNG = 104.0823 + 8.0e-3
+# 独占坐标由 tests.util.unique_spot 统一分配:格间距 88m(> 风控的 65m
+# 包围盒)、仍在 4km 配送半径内。自己算坐标很容易踩两个坑——
+# 撞风控格子(奖励被挂起,看着像发券坏了)或挪出配送范围(直接拒单)
+LAT, LNG = unique_spot()
 
 
 def fresh(device=""):

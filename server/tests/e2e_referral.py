@@ -10,14 +10,14 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import call, login, register_fresh_rider
+from tests.util import call, login, register_fresh_rider, unique_spot
 
 admin = login("13800000000")
 merchant = login("13800000002")
 ts = int(time.time())
-# 独占坐标+地址:避开 #44 风控的同址高频标记(命中会挂起奖励,设计如此)
-LAT = 30.6650 + (ts % 20) * 1.3e-3
-LNG = 104.0823
+# 独占坐标:避开 #44 风控的同址高频标记(命中会挂起奖励,设计如此)。
+# 原先是 ts % 20——只有 20 个点且每 20 秒循环,一天里反复跑必然撞格子
+LAT, LNG = unique_spot()
 
 
 def fresh(device=""):
@@ -123,7 +123,7 @@ async def main():
     assert not referral_coupons(invitee), "商家没建批次却发了券(平台又在补贴)"
     assert not referral_coupons(inviter)
     me = call("GET", "/referrals/me", inviter)
-    assert me["invited"] == 1 and me["rewarded"] == 1
+    assert me["invited"] == 1 and me["rewarded"] == 1, me
     print("✓ 商家没建批次:关系记成 rewarded,但一张券都不发")
 
     # 商家建了批次之后的双发路径由 e2e_referral_funding 覆盖

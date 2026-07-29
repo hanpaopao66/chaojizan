@@ -3,6 +3,7 @@
 """
 import json
 import os
+import random
 import time
 import urllib.error
 import urllib.request
@@ -181,3 +182,21 @@ def register_fresh_customer(tag=None):
     phone = f"1{random.choice('3589')}{random.randrange(10**8, 10**9)}"
     code = call("POST", "/auth/sms-code", body={"phone": phone})["dev_code"]
     return call("POST", "/auth/sms-login", body={"phone": phone, "code": code})["token"]
+
+
+def unique_spot(seed: str = ""):
+    """给一次测试跑动挑一个「独占」的下单坐标(lat, lng)。
+
+    为什么需要:#44 风控的 addr_freq 规则用 ~65m 的包围盒统计——同一格子里
+    24 小时内 ≥N 单且 ≥2 个账号就标记,而被标记的单**不触发邀请奖励**
+    (services/risk.py + referrals.py,设计如此)。
+    原先各用例自己写 `30.6650 + (ts % 20) * 1.3e-3`,只有 20 个点且每 20 秒
+    循环一次——一天里反复跑必然撞格子,表现为"发券功能时好时坏",
+    很容易被误判成代码坏了。
+
+    这里在商家周边 ~2.4km 内切 30×30 的网格(格间距 ~88m > 65m 包围盒),
+    按随机 + seed 选一格,撞车概率低且仍在 4km 配送半径内。
+    """
+    base_lat, base_lng, step = 30.6650, 104.0823, 0.0008
+    n = random.randrange(900) if not seed else (hash(seed) % 900)
+    return base_lat + (n // 30) * step, base_lng + (n % 30) * step
