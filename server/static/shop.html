@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>这家店在超级赞 · Super-Z</title>
+<meta name="description" content="扫码进店:在超级赞下单,商家只被抽 5%,配送费 100% 归骑手,每一单的钱去哪了都可查。">
+<style>
+  /* 与 App 同一套令牌(docs/BRAND.md 的产品层色板):骨白纸底 + 黏土橘 */
+  :root { --paper:#F0EEE6; --surface:#FBFAF6; --line:#E2DED2;
+          --ink:#141413; --muted:#6B6862; --faint:#9A968C;
+          --clay:#C15F3C; --clay-soft:#EFDDD3; --earn:#4E6B4F; --hold:#A6763E; }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper:#1B1A17; --surface:#24231F; --line:#37342D;
+            --ink:#F2F0E8; --muted:#A8A49A; --faint:#7A766D;
+            --clay:#E08A6B; --clay-soft:#3A2C25; --earn:#8FB08D; --hold:#D2A86C; }
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--paper); color:var(--ink); line-height:1.75;
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         padding:32px 20px 56px; }
+  .wrap { max-width:520px; margin:0 auto; }
+  .shop { background:var(--surface); border:1px solid var(--line);
+          border-radius:12px; padding:20px; }
+  .shop h1 { font-size:1.35rem; font-weight:600; letter-spacing:-.02em; }
+  .shop .addr { color:var(--muted); font-size:.9rem; margin-top:6px; }
+  .shop .desc { color:var(--faint); font-size:.85rem; margin-top:4px; }
+  .rate { display:inline-block; margin-top:12px; border:1px solid var(--hold);
+          color:var(--hold); border-radius:999px; padding:2px 10px; font-size:.78rem; }
+  .promise { background:var(--clay-soft); border-radius:12px;
+             padding:14px 16px; margin:14px 0; font-size:.9rem; }
+  .promise b { color:var(--clay); font-size:1.3rem; margin-right:8px;
+               font-family:Georgia,serif; }
+  .cta { display:block; background:var(--clay); color:#FBFAF6; text-align:center;
+         border-radius:8px; padding:14px; text-decoration:none; font-size:1rem;
+         font-weight:500; margin-top:18px; }
+  ul { margin:16px 0 0; padding-left:1.1em; color:var(--muted); font-size:.88rem; }
+  li { margin:6px 0; }
+  .foot { color:var(--faint); font-size:.76rem; margin-top:24px; text-align:center; }
+  .foot a { color:var(--clay); text-decoration:none; }
+  .err { text-align:center; color:var(--muted); padding:40px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="body" class="err">正在打开店铺…</div>
+
+  <div class="foot">
+    超级赞 Super-Z · 陕西爱卡斯科技有限公司 ·
+    <a href="/">首页</a> · <a href="/transparency">账目公开</a>
+  </div>
+</div>
+
+<script>
+// 短码从路径取:/s/ABC123
+var code = (location.pathname.split('/s/')[1] || '').replace(/\/+$/, '');
+var box = document.getElementById('body');
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+  });
+}
+
+if (!code) {
+  box.textContent = '链接不完整,请重新扫码。';
+} else {
+  fetch('/merchants/by-code/' + encodeURIComponent(code))
+    .then(function (r) {
+      if (!r.ok) throw new Error('notfound');
+      return r.json();
+    })
+    .then(function (s) {
+      document.title = esc(s.name) + ' · 超级赞';
+      box.className = '';
+      box.innerHTML =
+        '<div class="shop">' +
+          '<h1>' + esc(s.name) + '</h1>' +
+          '<div class="addr">' + esc(s.address) + '</div>' +
+          (s.description ? '<div class="desc">' + esc(s.description) + '</div>' : '') +
+          // 落地页拿不到这家店的真实档位(阶梯佣金可能已降到 4.5%/4%),
+          // 所以只写平台的封顶承诺,不写具体数字,免得说高了
+          '<span class="rate">平台抽成 5% 封顶</span>' +
+        '</div>' +
+        '<div class="promise"><b>5%</b>商家总负担 5% 封顶,配送费 100% 归骑手。' +
+        '抽成低了,商家才有让利的空间。</div>' +
+        '<a class="cta" href="/download">下载超级赞,到这家店下单</a>' +
+        '<ul>' +
+          '<li>不做竞价排名,钱买不到靠前的位置</li>' +
+          '<li>不抽配送费和小费,这两项 100% 归骑手</li>' +
+          '<li>不做大数据杀熟,同一时刻同一家店,所有人同价</li>' +
+          '<li>每一单的钱去哪了,订单里逐笔可查</li>' +
+        '</ul>';
+    })
+    .catch(function () {
+      box.textContent = '没有找到这家店,可能已经下架了。';
+    });
+}
+</script>
+</body>
+</html>

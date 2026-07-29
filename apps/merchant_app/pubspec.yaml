@@ -8,6 +8,7 @@ environment:
 
 dependencies:
   share_plus: ^12.0.2
+  qr_flutter: ^4.1.0          # 店铺专属码海报(#116)
   flutter:
     sdk: flutter
   superz_shared:

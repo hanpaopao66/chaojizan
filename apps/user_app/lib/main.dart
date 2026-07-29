@@ -341,10 +341,27 @@ class _MerchantListViewState extends State<MerchantListView> {
   double _myLat = demoLat;
   double _myLng = demoLng;
   String _sort = 'distance';
+
+  // 筛选:与搜索页同一套条件。null / false = 不限
+  int? _radiusM;
+  double? _minRating;
+  bool _hasPromo = false;
+  int? _maxMinOrderCents;
+
+  int get _filterCount => [
+        _radiusM != null,
+        _minRating != null,
+        _hasPromo,
+        _maxMinOrderCents != null,
+      ].where((on) => on).length;
+
   late Future<List<Merchant>> _future = _load();
 
   /// 再来一单:最近点过的店(按商家去重,最多 6 家)
   List<Order> _reorder = [];
+
+  /// 我的常点:近 90 天点得最多的单品(#119)
+  List<FrequentDish> _frequent = [];
 
   @override
   void initState() {
@@ -367,6 +384,32 @@ class _MerchantListViewState extends State<MerchantListView> {
       }
       if (mounted) setState(() => _reorder = recent);
     } catch (_) {}
+    try {
+      final frequent = await widget.api.myFrequentDishes();
+      if (mounted) setState(() => _frequent = frequent);
+    } catch (_) {}
+  }
+
+  /// 常点单品进店:直接把这道菜预填进购物车,不用再翻菜单
+  Future<void> _openFrequent(FrequentDish f) async {
+    if (!f.merchantOpen) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${f.merchantName} 现在没营业')));
+      return;
+    }
+    try {
+      final merchant = await widget.api.merchantDetail(f.merchantId);
+      if (!mounted) return;
+      Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => MenuPage(
+              api: widget.api,
+              merchant: merchant,
+              initialCart: {f.dishId: 1})));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    }
   }
 
   /// 一键回购:拉店铺详情,带上历史购物车进店(缺货/带规格的菜会被过滤/重选)
@@ -412,12 +455,16 @@ class _MerchantListViewState extends State<MerchantListView> {
     }
     _fellBack = false;
     var list = await widget.api.merchants(
-        lat: _myLat, lng: _myLng, sort: _sort, category: widget.category);
+        lat: _myLat, lng: _myLng, sort: _sort, category: widget.category,
+        radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
+        maxMinOrderCents: _maxMinOrderCents);
     // 审核兜底:定位正常但离已开通城市远(如审核人员在外地/海外)时列表为空,
     // 降级展示演示城市商家——数据链路与真实用户一致,可浏览可下单
     if (list.isEmpty && _realLocation && address == null) {
       final demo = await widget.api.merchants(
-          lat: demoLat, lng: demoLng, sort: _sort, category: widget.category);
+          lat: demoLat, lng: demoLng, sort: _sort, category: widget.category,
+          radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
+          maxMinOrderCents: _maxMinOrderCents);
       if (demo.isNotEmpty) {
         _fellBack = true;
         _myLat = demoLat;
@@ -467,10 +514,143 @@ class _MerchantListViewState extends State<MerchantListView> {
                 }),
               ),
             ),
+          const Spacer(),
+          // 筛选与排序分开:排序改的是次序,筛选改的是集合。
+          // 选中数直接写在标签上,用户不用点开也知道自己筛过什么
+          SzChip(
+            _filterCount == 0 ? '筛选' : '筛选 · $_filterCount',
+            selected: _filterCount > 0,
+            onTap: _openFilterSheet,
+          ),
         ],
       ),
     );
   }
+
+  /// 筛选面板。条件与搜索页一致,改完点「看结果」才发请求 ——
+  /// 逐项即时重查会让用户在四个条件之间来回等
+  Future<void> _openFilterSheet() async {
+    var radius = _radiusM;
+    var rating = _minRating;
+    var promo = _hasPromo;
+    var minOrder = _maxMinOrderCents;
+
+    final applied = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheet) {
+          final sz = Theme.of(sheetContext).sz;
+          Widget group<T>(String title, T? current, List<(T?, String)> options,
+              void Function(T?) onPick) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SzSectionTitle(title),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final (value, label) in options)
+                      SzChip(label,
+                          selected: current == value,
+                          onTap: () => setSheet(() => onPick(value))),
+                  ],
+                ),
+                const SizedBox(height: 18),
+              ],
+            );
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(kPagePad),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  group<int>('配送距离', radius, const [
+                    (null, '不限'),
+                    (1000, '1km 内'),
+                    (2000, '2km 内'),
+                    (3000, '3km 内'),
+                  ], (v) => radius = v),
+                  group<double>('评分', rating, const [
+                    (null, '不限'),
+                    (4.0, '4.0 分以上'),
+                    (4.5, '4.5 分以上'),
+                  ], (v) => rating = v),
+                  group<int>('起送价', minOrder, const [
+                    (null, '不限'),
+                    (1500, '¥15 以内'),
+                    (2000, '¥20 以内'),
+                    (3000, '¥30 以内'),
+                  ], (v) => minOrder = v),
+                  const SzSectionTitle('优惠'),
+                  const SizedBox(height: 8),
+                  SzChip('只看有优惠的',
+                      selected: promo,
+                      onTap: () => setSheet(() => promo = !promo)),
+                  const SizedBox(height: 6),
+                  Text('优惠是商家自己出的满减满赠,平台不出补贴也不摊派',
+                      style: Theme.of(sheetContext)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: sz.inkMuted)),
+                  const SizedBox(height: 20),
+                  Row(children: [
+                    TextButton(
+                      onPressed: () => setSheet(() {
+                        radius = null;
+                        rating = null;
+                        promo = false;
+                        minOrder = null;
+                      }),
+                      child: const Text('清空'),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.of(sheetContext).pop(true),
+                        child: const Text('看结果'),
+                      ),
+                    ),
+                  ]),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (applied != true || !mounted) return;
+    setState(() {
+      _radiusM = radius;
+      _minRating = rating;
+      _hasPromo = promo;
+      _maxMinOrderCents = minOrder;
+      _future = _load();
+    });
+  }
+
+  /// 筛完一家不剩:别丢一个干巴巴的空状态给用户,给一键清空的出口
+  Widget _filteredEmpty() => Padding(
+        padding: const EdgeInsets.only(top: 28),
+        child: SzEmpty(
+          art: BrandArt.bowl,
+          text: '当前筛选条件下附近没有商家',
+          actionLabel: '清空筛选',
+          onAction: () => setState(() {
+            _radiusM = null;
+            _minRating = null;
+            _hasPromo = false;
+            _maxMinOrderCents = null;
+            _future = _load();
+          }),
+        ),
+      );
 
   /// 大搜索框:商业外卖首页的第一交互,直接可见可点(不藏在图标里)。
   /// 不放口号横幅——信任靠订单里可查的账单传达,不靠喊。
@@ -734,6 +914,89 @@ class _MerchantListViewState extends State<MerchantListView> {
     );
   }
 
+  /// 我的常点:比「再来一单」更细一档 —— 整单重下改一个菜就得重翻菜单,
+  /// 这里按单品复购,点一下就进店带着这道菜。次数是真实下单数,不可运营干预。
+  Widget _frequentRow() {
+    final sz = Theme.of(context).sz;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(kPagePad, 20, kPagePad, 9),
+          child: const SzSectionTitle('我的常点'),
+        ),
+        SizedBox(
+          height:
+              104 * MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.5),
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: kPagePad),
+            itemCount: _frequent.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 9),
+            itemBuilder: (context, i) {
+              final f = _frequent[i];
+              return SizedBox(
+                width: 150,
+                child: Opacity(
+                  // 打烊的店淡掉但不隐藏:藏起来用户会以为自己的常点丢了
+                  opacity: f.merchantOpen ? 1 : 0.45,
+                  child: SzCard(
+                    onTap: () => _openFrequent(f),
+                    padding: const EdgeInsets.all(10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SzImage(
+                          url: f.imageUrl.isEmpty
+                              ? ''
+                              : widget.api.resolveUrl(f.imageUrl),
+                          name: f.dishName,
+                          size: 40,
+                        ),
+                        const SizedBox(width: 9),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(f.dishName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12.5,
+                                      color: sz.ink)),
+                              Text(f.merchantName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 10.5, color: sz.inkMuted)),
+                              const Spacer(),
+                              Text(yuan(f.priceCents),
+                                  style:
+                                      szMoney(fontSize: 12.5, color: sz.ink)),
+                              Text(
+                                  f.merchantOpen
+                                      ? '点过 ${f.times} 次'
+                                      : '休息中 · 点过 ${f.times} 次',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                      fontSize: 10, color: sz.inkMuted)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   /// 商家行:62px 缩略图 + 店名 + 两行 meta,行间 1px 发丝线。
   ///
   /// 从 132px 大封面改成缩略图,是为了让店名和价格先被读到;
@@ -933,6 +1196,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                     AnnouncementBanner(api: widget.api, audience: 'user'),
                     _kingKong(),
                     _promiseStrip(),
+                    if (_frequent.isNotEmpty) _frequentRow(),
                     if (_reorder.isNotEmpty) _reorderRow(),
                   ]),
                 ),
@@ -962,8 +1226,11 @@ class _MerchantListViewState extends State<MerchantListView> {
                 _bigCardSkeleton(),
                 _bigCardSkeleton(),
               ] else if (merchants != null && merchants.isEmpty)
+                // 先认筛选:筛没了跟"这一带没商家"是两回事,给的出口也不同
+                _filterCount > 0
+                    ? _filteredEmpty()
                 // 空品类不摆烂:空状态变招商位(平台没钱补贴,但入驻免费是真的)
-                (widget.category?.isNotEmpty ?? false)
+                : (widget.category?.isNotEmpty ?? false)
                     ? _categoryVacancy()
                     : const Padding(
                         padding: EdgeInsets.only(top: 40),

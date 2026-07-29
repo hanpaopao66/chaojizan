@@ -10,6 +10,27 @@ from tests.util import call
 PHONE = "19900000001"
 
 
+def _reset_daily_quota():
+    """清掉本测试号当天的发码计数(Redis)。
+
+    用例的语义是"从零开始数到第 3 条触发滑块",但 sms:day:p:{phone}
+    是按自然日累加的 —— 一天里跑第二遍,第 1 条就已经要滑块了。
+    只清这一个测试号,不碰 IP 维度,也不放宽任何生产阈值。
+    """
+    try:
+        import redis as _redis
+
+        from app.config import settings as _settings
+        r = _redis.Redis.from_url(_settings.redis_url)
+        r.delete(f"sms:day:p:{PHONE}")
+        r.close()
+    except Exception:
+        pass
+
+
+_reset_daily_quota()
+
+
 def send(extra=None, expect_error=False):
     return call("POST", "/auth/sms-code",
                 body={"phone": PHONE, **(extra or {})}, expect_error=expect_error)

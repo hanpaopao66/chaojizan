@@ -639,7 +639,12 @@ async def sweep_once() -> dict[str, int]:
             db,
             OrderStatus.PAID,
             OrderStatus.CANCELLED,
-            Order.updated_at,
+            # 计时基准用「支付时刻」而不是 updated_at:updated_at 会被任何
+            # 一次行写入顶回当前时间(风控异步回写 risk_flags、隐私号绑定、
+            # ETA 重估都会),等于每被碰一次就重新给商家 5 分钟,
+            # 用户那边则是一直没人接也不自动退款。
+            # rider_pool_since 只在支付成功/骑手转单时刷新,不受无关写入影响
+            func.coalesce(Order.rider_pool_since, Order.updated_at),
             now - timedelta(minutes=settings.accept_timeout_minutes),
             "商家超时未接单",
             # 预约单豁免:商家不必立即接单,预约时间前 1 小时还没接才算超时

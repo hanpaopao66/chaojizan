@@ -6,7 +6,8 @@
 import asyncio
 import random
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from sqlalchemy import text
@@ -135,7 +136,12 @@ async def main():
     print("OK 协商退:strict 档商家定金额,平台只留证不抽佣")
 
     # 5) 账本违约金负行(kind=penalty)+ 见证器恒等式
-    yesterday = (today - timedelta(days=1)).isoformat()
+    # 账本按北京时区切日(services/ledger._today_beijing),而开发机的本地
+    # 时区可能落后北京(如 PDT 差 15 小时)。这里必须用北京日期,
+    # 否则昨日锚点里一行住宿都没有 —— 上面的入住日仍用本地日期,
+    # 那是给"到店"判定用的,两者不是同一把尺
+    bj_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    yesterday = (bj_today - timedelta(days=1)).isoformat()
     async with SessionLocal() as db:
         await db.execute(text(
             "UPDATE stay_orders SET cancelled_at = now() - interval '1 day' "

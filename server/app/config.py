@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     # 但被泄露的旧 token 一周后自然作废
     jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线
 
+    # 对外可访问的站点地址:店铺短链、海报二维码、分享文案里用。
+    # 默认就是生产域名 —— 海报是印出来贴墙上的,漏配一次就是一批废二维码,
+    # 宁可默认指向线上。本地联调想指到自己机器时再在 .env 覆盖
+    public_base_url: str = "https://chaojizan.cc"
+
     # 管理员密码登录开关:生产关闭(ADMIN_PASSWORD_LOGIN=false),
     # 管理员只能手机验证码登录;本地开发与 e2e 保持默认开启
     admin_password_login: bool = True

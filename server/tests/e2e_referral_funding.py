@@ -66,7 +66,8 @@ async def main() -> None:
 
     rider = await register_fresh_rider()
     dishes = call("GET", f"/merchants/{shop['id']}/dishes", invitee)
-    dish = next(d for d in dishes if d["is_on_sale"] and d["stock"] > 2)
+    dish = next(d for d in dishes if d["is_on_sale"] and d["stock"] > 2
+                and not d.get("is_alcohol"))  # 酒类要实名,普通用例账号没实名
     # 凑够起送价:/merchants/me 返回的 min_order_cents 与下单校验用的口径
     # 不是同一个(实测前者 0、后者 ¥15),别猜——直接下够 ¥25
     qty = max(2, -(-2500 // max(dish["price_cents"], 1)))

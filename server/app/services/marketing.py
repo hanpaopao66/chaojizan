@@ -43,101 +43,145 @@ async def _count_send(user_id: int) -> None:
     await redis.expire(key, 14 * 86400)
 
 
-async def _active_batch(db: AsyncSession, trigger: str,
-                        merchant_id: int | None = None) -> CouponBatch | None:
-    """取一个启用中的批次。
+async def _active_batches(db: AsyncSession, trigger: str) -> list[CouponBatch]:
+    """每家店取一张启用中的批次(同店多张取最新建的)。
 
-    营销类只认商家批次(merchant_id 非空):平台不靠补贴换增长(#115)。
-    传了 merchant_id 就取那家店的;不传则取任意商家批次(全平台生日券
-    这种没有归属商家的场景,现在等于取不到——这是有意的)。
+    钱是商家出的,触达范围就必须按店切开(#117):一店一批次,各发各的客,
+    预算也各自封顶。老口径是随便挑一家店的批次去发全平台的人——
+    那家店在替所有同行买单。
     """
-    query = select(CouponBatch).where(
-        CouponBatch.trigger == trigger,
-        CouponBatch.active.is_(True),
-        CouponBatch.merchant_id.is_not(None))
-    if merchant_id is not None:
-        query = query.where(CouponBatch.merchant_id == merchant_id)
-    return await db.scalar(
-        query.order_by(CouponBatch.created_at.desc()).limit(1))
+    rows = (await db.scalars(
+        select(CouponBatch).where(
+            CouponBatch.trigger == trigger,
+            CouponBatch.active.is_(True),
+            CouponBatch.merchant_id.is_not(None),
+            CouponBatch.issued < CouponBatch.total)
+        .order_by(CouponBatch.created_at.desc()))).all()
+    seen: set[int] = set()
+    return [b for b in rows
+            if b.merchant_id not in seen and not seen.add(b.merchant_id)]
+
+
+async def dormant_customer_ids(db: AsyncSession, merchant_id: int,
+                               dormant_days: int = 30,
+                               lookback_days: int = 180) -> list[int]:
+    """这家店的沉睡老客:在本店下过完成单,最近 dormant_days 天没再来。
+
+    lookback_days 是下限——半年前来过一次就再没出现的,多半已经搬走或
+    换了口味,再骚扰只是消耗商家预算和用户耐心。
+
+    只返回 user_id 供发券用,不带任何身份信息;对商家侧只暴露计数(#117)。
+    """
+    rows = await db.execute(
+        select(Order.customer_id, func.max(Order.created_at))
+        .where(Order.merchant_id == merchant_id,
+               Order.status == OrderStatus.COMPLETED)
+        .group_by(Order.customer_id))
+    now = datetime.now(timezone.utc)
+    dormant_before = now - timedelta(days=dormant_days)
+    active_after = now - timedelta(days=lookback_days)
+    out = []
+    for uid, last in rows:
+        last_utc = (last.replace(tzinfo=timezone.utc)
+                    if last.tzinfo is None else last)
+        if active_after <= last_utc < dormant_before:
+            out.append(uid)
+    return out
 
 
 async def run_birthday(db: AsyncSession, today_mmdd: str, year: int) -> int:
-    """生日当天发券+推送(一年一张:source=birthday:{uid}:{年})。"""
-    batch = await _active_batch(db, "birthday")
-    if batch is None:
+    """生日当天发券+推送(每店一年一张:source=birthday:{mid}:{uid}:{年})。
+
+    券是商家出的,所以只发给这家店自己的老客(在本店下过完成单的人)——
+    照 #117 的口径,商家的预算不替同行拉客。
+    """
+    batches = await _active_batches(db, "birthday")
+    if not batches:
         return 0
-    users = (await db.scalars(select(User).where(
+    birthday_ids = set((await db.scalars(select(User.id).where(
         User.birthday == today_mmdd, User.role == UserRole.customer,
-        User.marketing_push.is_(True)))).all()
+        User.marketing_push.is_(True)))).all())
+    if not birthday_ids:
+        return 0
     sent = 0
-    for user in users:
-        source = f"birthday:{user.id}:{year}"
-        if await db.scalar(select(Coupon.id).where(Coupon.source == source)):
+    for batch in batches:
+        # 本店老客(下过完成单的),与今天过生日的人取交集
+        mine = set((await db.scalars(
+            select(Order.customer_id).where(
+                Order.merchant_id == batch.merchant_id,
+                Order.status == OrderStatus.COMPLETED).distinct())).all())
+        targets = birthday_ids & mine
+        if not targets:
             continue
-        if not await _under_cap(user.id):
-            continue
-        from .coupons import issue_from_batch
-        coupon = await issue_from_batch(db, batch, user.id, note="生日快乐")
-        if coupon is None:
-            continue
-        coupon.source = source  # 覆盖为按年唯一(一年一张)
-        await db.commit()
-        await _count_send(user.id)
-        try:
-            await push_to_user(user.id, "生日快乐 🎂",
-                               f"送你 {batch.amount_cents / 100:g} 元生日券"
-                               f"({batch.valid_days} 天内有效),今天想吃点好的",
-                               {"type": "coupon"}, record_skip=True)
-        except Exception:
-            pass
-        sent += 1
+        shop_name = await db.scalar(
+            select(Merchant.name).where(Merchant.id == batch.merchant_id))
+        for uid in targets:
+            source = f"birthday:{batch.merchant_id}:{uid}:{year}"
+            if await db.scalar(select(Coupon.id).where(Coupon.source == source)):
+                continue
+            if not await _under_cap(uid):
+                continue
+            from .coupons import issue_from_batch
+            coupon = await issue_from_batch(db, batch, uid, note="生日快乐")
+            if coupon is None:
+                break  # 这家店的预算发完了
+            coupon.source = source  # 覆盖为按店按年唯一
+            await db.commit()
+            await _count_send(uid)
+            try:
+                await push_to_user(
+                    uid, "生日快乐 🎂",
+                    f"{shop_name or '你常去的店'}送你 "
+                    f"{batch.amount_cents / 100:g} 元生日券"
+                    f"({batch.valid_days} 天内有效),今天想吃点好的",
+                    {"type": "coupon"}, record_skip=True)
+            except Exception:
+                pass
+            sent += 1
     return sent
 
 
 async def run_winback(db: AsyncSession) -> int:
-    """复购提醒:30 天前有完成单、近 30 天没下过单的用户,
-    每月最多一次(Redis),推送带券(winback 批次,每批次每人一张)。"""
-    batch = await _active_batch(db, "winback")
-    if batch is None:
-        return 0
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=30)
-    # 最近一个非取消单在 30 天前的用户
-    last_order = (await db.execute(
-        select(Order.customer_id, func.max(Order.created_at))
-        .where(Order.status == OrderStatus.COMPLETED)
-        .group_by(Order.customer_id))).all()
-    dormant_ids = [uid for uid, last in last_order
-                   if (last.replace(tzinfo=timezone.utc)
-                       if last.tzinfo is None else last) < cutoff]
-    if not dormant_ids:
+    """复购提醒:按店召回本店的沉睡老客,券由这家店自己出(#115/#117)。
+
+    每人每店每月最多一次(Redis),叠加全局每周 2 条的总频控。
+    """
+    batches = await _active_batches(db, "winback")
+    if not batches:
         return 0
     redis = get_redis()
-    month = (now + timedelta(hours=8)).strftime("%Y%m")
-    users = (await db.scalars(select(User).where(
-        User.id.in_(dormant_ids), User.marketing_push.is_(True)))).all()
+    month = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%Y%m")
     sent = 0
-    for user in users[:200]:  # 每天最多触达 200 人,细水长流
-        if not await redis.set(f"mkt:winback:{user.id}:{month}", 1,
-                               ex=35 * 86400, nx=True):
+    for batch in batches:
+        dormant_ids = await dormant_customer_ids(db, batch.merchant_id)
+        if not dormant_ids:
             continue
-        if not await _under_cap(user.id):
-            continue
-        from .coupons import issue_from_batch
-        coupon = await issue_from_batch(db, batch, user.id, note="好久不见")
-        if coupon is None:
-            continue
-        await db.commit()
-        await _count_send(user.id)
-        try:
-            await push_to_user(user.id, "好久不见",
-                               f"送你 {batch.amount_cents / 100:g} 元券"
-                               f"({batch.valid_days} 天内有效),"
-                               "回来看看有什么新店新菜",
-                               {"type": "coupon"}, record_skip=True)
-        except Exception:
-            pass
-        sent += 1
+        shop_name = await db.scalar(
+            select(Merchant.name).where(Merchant.id == batch.merchant_id))
+        users = (await db.scalars(select(User).where(
+            User.id.in_(dormant_ids), User.marketing_push.is_(True)))).all()
+        for user in users[:200]:  # 每店每天最多触达 200 人,细水长流
+            if not await redis.set(
+                    f"mkt:winback:{batch.merchant_id}:{user.id}:{month}", 1,
+                    ex=35 * 86400, nx=True):
+                continue
+            if not await _under_cap(user.id):
+                continue
+            from .coupons import issue_from_batch
+            coupon = await issue_from_batch(db, batch, user.id, note="好久不见")
+            if coupon is None:
+                break  # 预算发完了,这家店本轮到此为止
+            await db.commit()
+            await _count_send(user.id)
+            try:
+                await push_to_user(
+                    user.id, f"{shop_name or '你常去的店'}:好久不见",
+                    f"送你 {batch.amount_cents / 100:g} 元券"
+                    f"({batch.valid_days} 天内有效),回来尝尝",
+                    {"type": "coupon"}, record_skip=True)
+            except Exception:
+                pass
+            sent += 1
     return sent
 
 

@@ -115,6 +115,9 @@ class Merchant(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
     name: Mapped[str] = mapped_column(String(100))
+    # 店铺专属短码(6 位):海报二维码与短链 /s/{code} 用。
+    # 懒生成(第一次要用时才建),不暴露内部 id 规律
+    short_code: Mapped[str] = mapped_column(String(8), default="", index=True)
     description: Mapped[str] = mapped_column(Text, default="")
     address: Mapped[str] = mapped_column(String(200), default="")
     lat: Mapped[float] = mapped_column(Float)

@@ -4,7 +4,9 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'appeal_page.dart';
 import 'printer_page.dart';
+import 'promo_page.dart';
 import 'voucher_manage_page.dart';
+import 'winback_page.dart';
 
 /// 店铺 Tab:门头照、公告编辑、评价管理(查看 + 回复)。
 class ShopTabPage extends StatefulWidget {
@@ -1444,6 +1446,43 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     ],
                   ),
                   Text('云打印机来单自动出票(手机不在场也能打);也可蓝牙直连通用小票机',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
+                  // 拉客物料:平台没有补贴预算,商家自己带客是唯一能规模化的获客渠道
+                  Row(
+                    children: [
+                      const Text('专属码与海报'),
+                      const Spacer(),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.qr_code_2_outlined, size: 18),
+                        label: const Text('生成'),
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    MerchantPromoPage(api: widget.api))),
+                      ),
+                    ],
+                  ),
+                  Text('一张能贴能发的海报,顾客扫码直达你的店。带来的客都是你自己的',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
+                  // 老客召回:平台只给人数不给名单,发不发商家自己定
+                  Row(
+                    children: [
+                      const Text('老客召回'),
+                      const Spacer(),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.replay_outlined, size: 18),
+                        label: const Text('查看'),
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    MerchantWinbackPage(api: widget.api))),
+                      ),
+                    ],
+                  ),
+                  Text('看看有多少老客好久没来了。平台只给人数不给名单,'
+                      '要叫人回来就发一批券,预算你定',
                       style: Theme.of(context).textTheme.bodySmall),
                   const Divider(height: 24),
                   // 判责申诉:售后判商家责/差评,72 小时内可申诉

@@ -1275,3 +1275,29 @@ class StayAfterSale {
       };
   bool get resolvedOk => status == 'accepted' || status == 'auto_accepted';
 }
+
+/// 我的常点:近 90 天点得最多的「店+菜」组合(#119)
+class FrequentDish {
+  FrequentDish.fromJson(Map<String, dynamic> json)
+      : dishId = json['dish_id'] as int,
+        dishName = json['dish_name'] as String? ?? '',
+        priceCents = json['price_cents'] as int? ?? 0,
+        imageUrl = json['image_url'] as String? ?? '',
+        merchantId = json['merchant_id'] as int,
+        merchantName = json['merchant_name'] as String? ?? '',
+        merchantOpen = json['merchant_open'] as bool? ?? true,
+        times = json['times'] as int? ?? 0,
+        lastAt = json['last_at'] as String? ?? '';
+
+  final int dishId;
+  final String dishName;
+  final int priceCents;
+  final String imageUrl;
+  final int merchantId;
+  final String merchantName;
+
+  /// 店是否在营业;没开也照常展示,只是点不了
+  final bool merchantOpen;
+  final int times;
+  final String lastAt;
+}

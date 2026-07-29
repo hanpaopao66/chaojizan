@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
+import secrets
 
 from ..categories import MERCHANT_CATEGORIES
 from ..config import settings
@@ -68,6 +69,7 @@ _NEARBY_SQL_TMPL = """
       AND m.status = 'approved'
       AND m.biz_type = 'food'
       {category_clause}
+      {filter_clause}
       AND ST_DWithin(
             ST_SetSRID(ST_MakePoint(m.lng, m.lat), 4326)::geography,
             ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
@@ -125,21 +127,46 @@ async def list_merchants(
     radius_m: int = 5000,
     sort: str = "distance",
     category: str | None = None,
+    min_rating: float | None = Query(default=None, ge=0, le=5),
+    has_promo: bool = False,          # 有满减或满赠
+    max_min_order_cents: int | None = Query(default=None, ge=0, le=100_000),
     db: AsyncSession = Depends(get_db),
 ):
-    """附近营业中的商家(带月售),sort=distance|rating|sales,category 按品类筛选。"""
+    """附近营业中的商家(带月售),sort=distance|rating|sales,category 按品类筛选。
+
+    筛选与 /merchants/search 同口径:min_rating 评分下限、has_promo 有优惠、
+    max_min_order_cents 起送价上限。首页和搜索页给的是同一套条件,
+    用户不用在两个地方学两遍。距离上限直接用已有的 radius_m。
+    """
     if sort not in _SORTS:
         raise HTTPException(422, "sort 仅支持 distance / rating / sales")
     if category is not None and category not in MERCHANT_CATEGORIES:
         raise HTTPException(422, "未知品类")
+
+    # 筛选条件三端共用:拼进 SQL 的只有固定串,取值一律走绑定参数
+    filters: list[str] = []
+    filter_params: dict = {}
+    if min_rating is not None:
+        filters.append("AND coalesce(m.rating_sum::float"
+                       " / NULLIF(m.rating_count, 0), 0) >= :min_rating")
+        filter_params["min_rating"] = min_rating
+    if has_promo:
+        filters.append("AND (m.promo_rules <> '[]'::jsonb"
+                       " OR m.gift_rules <> '[]'::jsonb)")
+    if max_min_order_cents is not None:
+        filters.append("AND m.min_order_cents <= :max_min_order")
+        filter_params["max_min_order"] = max_min_order_cents
+
     if lat is not None and lng is not None:
         rows = await db.execute(
             text(_NEARBY_SQL_TMPL.format(
                 order_by=_SORTS[sort],
                 category_clause=(
-                    "AND m.category = :category" if category else ""))),
+                    "AND m.category = :category" if category else ""),
+                filter_clause="\n      ".join(filters))),
             {"lat": lat, "lng": lng, "radius_m": radius_m,
-             **({"category": category} if category else {})},
+             **({"category": category} if category else {}),
+             **filter_params},
         )
         id_sales = [(r[0], r[1]) for r in rows]
         if not id_sales:
@@ -157,11 +184,22 @@ async def list_merchants(
             outs.append(out)
         await _fill_top_dishes(db, outs)
         return outs
+    # 无定位兜底:同样要认筛选条件,否则用户一关定位筛选就静默失效
     query = select(Merchant).where(
         Merchant.is_open.is_(True), Merchant.status == MerchantStatus.approved,
         Merchant.biz_type == "food")
     if category:
         query = query.where(Merchant.category == category)
+    if min_rating is not None:
+        query = query.where(
+            func.coalesce(Merchant.rating_sum
+                          / func.nullif(Merchant.rating_count, 0), 0)
+            >= min_rating)
+    if has_promo:
+        query = query.where(or_(Merchant.promo_rules != [],
+                                Merchant.gift_rules != []))
+    if max_min_order_cents is not None:
+        query = query.where(Merchant.min_order_cents <= max_min_order_cents)
     result = await db.scalars(query.limit(50))
     outs = [MerchantOut.model_validate(m) for m in result]
     await _fill_top_dishes(db, outs)
@@ -842,6 +880,111 @@ async def toggle_shop_coupon_batch(
     await db.commit()
     await db.refresh(batch)
     return _shop_batch_out(batch)
+
+
+@router.get("/me/promo")
+async def my_promo_material(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """推广物料:店铺短码 + 海报要印的内容。
+
+    零补贴模式下,商家自愿推广是唯一能规模化的获客渠道——他们在这里
+    每单多赚十几个点,有动力把老客带过来。平台只提供物料,不出钱。
+
+    海报由商家端离屏渲染(照 share_card 的做法),这里只给数据。
+    """
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    # 懒生成:第一次要用时才建号,不给可能永远不用的店占号段
+    if not shop.short_code:
+        for _ in range(10):
+            code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")
+                           for _ in range(6))  # 去掉易混的 I/O/0/1
+            if not await db.scalar(select(Merchant.id).where(
+                    Merchant.short_code == code)):
+                shop.short_code = code
+                await db.commit()
+                break
+        else:
+            raise HTTPException(500, "店铺码生成失败,请重试")
+    # 海报上是否印"扫码领券":只有真有在领的店铺券才印,不做空头承诺
+    coupon = await db.scalar(
+        select(CouponBatch).where(
+            CouponBatch.merchant_id == shop.id,
+            CouponBatch.trigger == "shop",
+            CouponBatch.active.is_(True),
+            CouponBatch.issued < CouponBatch.total)
+        .order_by(CouponBatch.amount_cents.desc()).limit(1))
+    return {
+        "short_code": shop.short_code,
+        "url": f"{settings.public_base_url}/s/{shop.short_code}",
+        "shop_name": shop.name,
+        # 费率取这家店的真实值:阶梯佣金下可能已经降到 4.5%,别写死 5%
+        "commission_rate": float(shop.commission_rate),
+        "coupon_off_cents": coupon.amount_cents if coupon else 0,
+        "coupon_threshold_cents": coupon.min_spend_cents if coupon else 0,
+    }
+
+
+@router.get("/me/winback")
+async def my_winback_overview(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """老客召回概览(#117):这家店有多少人好久没来了。
+
+    只给计数,不给任何顾客身份信息——商家看不到是谁、手机号、更看不到
+    能导出的名单。要召回就建一批 winback 券,平台按名单发,券钱商家出。
+    这是刻意的:名单一旦落到商家手里就再也收不回来了。
+
+    召回本身也不由商家逐个触发——那等于把骚扰权交出去。系统每天按
+    每人每店每月一次、全局每周两条的频控自动发。
+    """
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+
+    from ..services.marketing import dormant_customer_ids
+
+    # 30 天没来的(实际召回口径)与 90 天没来的(参考,更冷)
+    dormant30 = len(await dormant_customer_ids(db, shop.id, dormant_days=30))
+    dormant90 = len(await dormant_customer_ids(db, shop.id, dormant_days=90))
+    # 半年内在本店下过完成单的总人数,给个分母
+    total = await db.scalar(
+        select(func.count(func.distinct(Order.customer_id))).where(
+            Order.merchant_id == shop.id,
+            Order.status == "completed",
+            Order.created_at >= datetime.now(timezone.utc)
+            - timedelta(days=180))) or 0
+
+    batch = await db.scalar(
+        select(CouponBatch).where(
+            CouponBatch.merchant_id == shop.id,
+            CouponBatch.trigger == "winback",
+            CouponBatch.active.is_(True))
+        .order_by(CouponBatch.created_at.desc()).limit(1))
+    return {
+        "dormant_30d": dormant30,
+        "dormant_90d": dormant90,
+        "customers_180d": total,
+        "batch": _shop_batch_out(batch) if batch else None,
+    }
+
+
+@router.get("/by-code/{code}")
+async def merchant_by_code(
+    code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """短码解析成店铺(落地页与 App 深链共用)。"""
+    shop = await db.scalar(select(Merchant).where(
+        Merchant.short_code == code.upper()))
+    if shop is None or shop.status != MerchantStatus.approved:
+        raise HTTPException(404, "店铺不存在或已下架")
+    return {"id": shop.id, "name": shop.name, "address": shop.address,
+            "description": shop.description, "logo_url": shop.logo_url}
 
 
 @router.get("/{merchant_id}/coupons", response_model=list[ClaimableCouponOut])

@@ -99,7 +99,8 @@ async def check_exemption():
     async with AsyncSession(engine) as db:
         stale = datetime.now(timezone.utc) - timedelta(hours=2)
         await db.execute(update(Order).where(Order.order_no == no)
-                         .values(updated_at=stale))
+                         .values(updated_at=stale,
+                                 rider_pool_since=stale))
         await db.commit()
     await auto_flow.sweep_once()
     async with AsyncSession(engine) as db:
@@ -108,7 +109,7 @@ async def check_exemption():
         # 把预约时间改到 40 分钟后(进入 1 小时兜底窗口)
         await db.execute(update(Order).where(Order.order_no == no).values(
             scheduled_at=datetime.now(timezone.utc) + timedelta(minutes=40),
-            updated_at=stale))
+            updated_at=stale, rider_pool_since=stale))
         await db.commit()
     await auto_flow.sweep_once()
     async with AsyncSession(engine) as db:

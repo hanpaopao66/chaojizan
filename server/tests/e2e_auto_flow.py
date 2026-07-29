@@ -56,9 +56,12 @@ async def main():
     # 1. 支付超时自动关单
     no1 = make_order(pay=False)
     await backdate(no1, "created_at", "20 minutes")
-    # 2. 商家超时未接单自动取消
+    # 2. 商家超时未接单自动取消。
+    # 挪 rider_pool_since(支付时刻)而不是 updated_at:后者会被风控异步
+    # 回写 risk_flags 顶回当前时间,做旧了也白做——这正是接单超时计时
+    # 改用 rider_pool_since 的原因(services/auto_flow.py)
     no2 = make_order(pay=True)
-    await backdate(no2, "updated_at", "10 minutes")
+    await backdate(no2, "rider_pool_since", "10 minutes")
     # 3. 送达超时自动确认
     no3 = make_order(pay=True)
     call("POST", f"/orders/{no3}/transition", merchant, {"to_status": "accepted"})

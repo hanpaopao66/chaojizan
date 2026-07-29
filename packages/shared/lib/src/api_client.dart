@@ -390,6 +390,10 @@ class ApiClient {
     return data as Map<String, dynamic>;
   }
 
+  /// 商家:老客召回概览(只有计数,平台不给顾客名单)
+  Future<Map<String, dynamic>> merchantWinback() async =>
+      await _request('GET', '/merchants/me/winback') as Map<String, dynamic>;
+
   /// 用户:某店可领的店铺券
   Future<List<Map<String, dynamic>>> claimableShopCoupons(
       int merchantId) async {
@@ -476,17 +480,33 @@ class ApiClient {
 
   // ---------- 用户端 ----------
   /// sort: distance(综合) / rating(评分优先) / sales(月售优先)
+  /// 筛选(与 /merchants/search 同口径):radiusM 距离上限、minRating 评分下限、
+  /// hasPromo 只看有优惠的、maxMinOrderCents 起送价上限
   Future<List<Merchant>> merchants(
       {double? lat, double? lng, String sort = 'distance',
-      String? category}) async {
+      String? category, int? radiusM, double? minRating,
+      bool hasPromo = false, int? maxMinOrderCents}) async {
     final data = await _request('GET', '/merchants', query: {
       if (lat != null) 'lat': '$lat',
       if (lng != null) 'lng': '$lng',
       'sort': sort,
       if (category != null && category.isNotEmpty) 'category': category,
+      if (radiusM != null) 'radius_m': '$radiusM',
+      if (minRating != null) 'min_rating': '$minRating',
+      if (hasPromo) 'has_promo': 'true',
+      if (maxMinOrderCents != null) 'max_min_order_cents': '$maxMinOrderCents',
     });
     return (data as List)
         .map((e) => Merchant.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 我的常点:近 90 天点得最多的「店+菜」,只列还在售的
+  Future<List<FrequentDish>> myFrequentDishes({int limit = 5}) async {
+    final data = await _request('GET', '/orders/frequent?limit=$limit')
+        as Map<String, dynamic>;
+    return ((data['items'] as List?) ?? const [])
+        .map((e) => FrequentDish.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 
@@ -639,6 +659,10 @@ class ApiClient {
   Future<Map<String, dynamic>> merchantAnalytics({int days = 7}) async =>
       await _request('GET', '/merchants/me/analytics?days=$days')
           as Map<String, dynamic>;
+
+  /// 商家推广物料:店铺短码 + 海报要印的内容(短码首次调用时懒生成)
+  Future<Map<String, dynamic>> merchantPromo() async =>
+      await _request('GET', '/merchants/me/promo') as Map<String, dynamic>;
 
   /// 高峰备货建议(近 14 天同餐段 P80;meal 缺省按当前时刻)
   Future<Map<String, dynamic>> merchantStocking({String meal = ''}) async =>

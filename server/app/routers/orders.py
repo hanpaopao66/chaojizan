@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, update
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -757,6 +757,18 @@ async def transition(
         except Exception:
             logger.exception("超时赔付检查失败 %s", order.order_no)
     await _notify(order)
+    # 商家接单 = 这单进抢单池,推给附近在线骑手(#114)。
+    # 只在 ACCEPTED 这一次推:READY 时单子早就在池里了,再推一遍是骚扰。
+    # 自取/商家自送/追加单不进池,自然也不推
+    if (payload.to_status == OrderStatus.ACCEPTED
+            and order.rider_id is None
+            and not order.pickup
+            and not order.self_delivery
+            and not order.parent_order_no):
+        from ..services.push import notify_riders_new_grab
+        merchant_for_push = await db.get(Merchant, order.merchant_id)
+        await notify_riders_new_grab(
+            db, order, merchant_for_push.name if merchant_for_push else "商家")
     # 离线推送给用户(自己操作的除外);分账在完成时触发
     if user.id != order.customer_id:
         await notify_order_status(
@@ -1289,6 +1301,49 @@ async def my_orders(
         query = query.where(Order.merchant_id == shop.id)
     result = await db.scalars(query)
     return await orders_out(db, list(result), user)
+
+
+@router.get("/frequent")
+async def my_frequent_dishes(
+    days: int = Query(default=90, ge=7, le=365),
+    limit: int = Query(default=5, ge=1, le=20),
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的常点:近 N 天点得最多的「店+菜」组合。
+
+    外卖的真实需求大半是复购,可老口径只有「再来一单」——那是整单重下,
+    改一个菜就得重新翻菜单。这里按单品聚合,用户想点哪个点哪个。
+
+    只统计已完成的单(取消/退款的不算数),菜必须还在售且没估清,
+    否则列出来点不了比不列还糟。全程只读自己的订单,不涉及他人数据。
+    """
+    rows = await db.execute(text("""
+        SELECT d.id, d.name, d.price_cents, d.image_url,
+               m.id AS merchant_id, m.name AS merchant_name, m.is_open,
+               count(*) AS times, max(o.created_at) AS last_at
+        FROM orders o, jsonb_array_elements(o.items) it
+        JOIN dishes d ON d.id = (it->>'dish_id')::int
+        JOIN merchants m ON m.id = d.merchant_id
+        WHERE o.customer_id = :uid
+          AND o.status = 'completed'
+          AND o.created_at >= now() - make_interval(days => :days)
+          AND d.is_on_sale
+          AND d.stock > 0
+          AND m.status = 'approved'
+        GROUP BY d.id, d.name, d.price_cents, d.image_url,
+                 m.id, m.name, m.is_open
+        ORDER BY times DESC, last_at DESC
+        LIMIT :limit
+    """), {"uid": user.id, "days": days, "limit": limit})
+    return {"items": [
+        {"dish_id": r[0], "dish_name": r[1], "price_cents": r[2],
+         "image_url": r[3] or "", "merchant_id": r[4], "merchant_name": r[5],
+         # 店没开也照常列出来,只是点不了 —— 藏起来用户会以为常点丢了
+         "merchant_open": bool(r[6]), "times": r[7],
+         "last_at": r[8].isoformat() if r[8] else None}
+        for r in rows
+    ]}
 
 
 @router.get("/{order_no}", response_model=OrderOut)

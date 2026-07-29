@@ -7,7 +7,7 @@
 """
 import time
 
-from tests.util import call, login
+from tests.util import call, login, orderable_dish
 
 tag = str(int(time.time()))
 phone = "138" + tag[-8:]
@@ -32,7 +32,7 @@ print("✓ 手机号已释放,可重新注册全新账号")
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
 sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
 dishes = call("GET", f"/merchants/{sid}/dishes")
-dish = next(d for d in dishes if d["stock"] > 0 and d["price_cents"] >= 1500)
+dish = orderable_dish(dishes)  # 统一走公共挑菜:跳过酒类(要实名)与估清的菜
 order = call("POST", "/orders", token2, {
     "merchant_id": sid,
     "items": [{"dish_id": dish["id"], "quantity": 1}],

@@ -45,18 +45,20 @@ call("POST", f"/orders/{no}/transition", customer, {"to_status": "completed"})
 review = call("POST", f"/orders/{no}/review", customer,
               {"merchant_rating": 5, "rider_rating": 5,
                "comment": f"触达测试-{tag}"})
-before = len([r for r in my_push_logs() if "回复了你的评价" in r["title"]])
+# 断言按本次运行的唯一内容匹配,不数条数:/admin/push-logs 只回最近 50 条,
+# 演示账号的窗口早被历史触达撑满,新增一条就挤掉一条老的,计数恒等永远不成立
 call("POST", f"/merchants/me/reviews/{review['id']}/reply", merchant,
      {"reply": f"感谢惠顾-{tag}"})
 logs = [r for r in my_push_logs() if "回复了你的评价" in r["title"]]
-assert len(logs) == before + 1, "首次回复应产生一条触达"
-assert f"感谢惠顾-{tag}" in logs[0]["content"]
+assert any(f"感谢惠顾-{tag}" in r["content"] for r in logs), \
+    f"首次回复应产生一条触达,实际最近日志:{[r['content'][:20] for r in logs[:3]]}"
 print("✓ 商家首次回复评价 → 触达用户(push_logs 留痕)")
 
 call("POST", f"/merchants/me/reviews/{review['id']}/reply", merchant,
      {"reply": f"修改后的回复-{tag}"})
 logs2 = [r for r in my_push_logs() if "回复了你的评价" in r["title"]]
-assert len(logs2) == before + 1, "修改回复不应重复触达"
+assert not any(f"修改后的回复-{tag}" in r["content"] for r in logs2), \
+    "修改回复不应重复触达"
 print("✓ 修改回复不重复触达(防打扰)")
 
 # ---- 收藏触达:新店隔离每日上限;限时折扣触发,一天内第二次被抑制 ----

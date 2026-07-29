@@ -84,9 +84,12 @@ async def main():
         "threshold_cents": 0, "off_cents": 300, "total": 100,
         "per_user_limit": 1, "valid_days": 7})
 
-    # 1) 生日券:今天生日的发,一年一张;非今天不发
+    # 1) 生日券:今天生日的发,一年一张;非今天不发。
+    # #117 起券只发给**这家店自己的**老客(钱是这家店出的),
+    # 所以先让 u1 在本店有一笔完成单
     u1, p1 = fresh()
     call("PATCH", "/auth/me", u1, {"birthday": today})
+    await inject_completed_order(await uid_of(p1), sid, 10)
     async with SessionLocal() as db:
         n1 = await run_birthday(db, today, bj_now.year)
     assert n1 >= 1, n1
@@ -142,6 +145,7 @@ async def main():
     week = (datetime.now(timezone.utc) + timedelta(hours=8)).strftime("%G-%V")
     await get_redis().set(f"mkt:freq:{h_id}:{week}", 2)  # 已达 2 条
     call("PATCH", "/auth/me", heavy, {"birthday": today})
+    await inject_completed_order(h_id, sid, 10)  # 同上:得是本店老客
     async with SessionLocal() as db:
         await run_birthday(db, today, bj_now.year)
     assert not [c for c in call("GET", "/orders/coupons/mine", heavy)

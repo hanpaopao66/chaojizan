@@ -43,7 +43,10 @@ test:
 	  && python -m tests.e2e_stays_search && python -m tests.e2e_stays_order \
 	  && python -m tests.e2e_stays_cancel && python -m tests.e2e_stays_autoflow \
 	  && python -m tests.e2e_stays_settle && python -m tests.e2e_stays_witness \
-	  && python -m tests.e2e_stays_review && python -m tests.e2e_stays_aftersale
+	  && python -m tests.e2e_stays_review && python -m tests.e2e_stays_aftersale \
+	  && python -m tests.e2e_orders_paging && python -m tests.e2e_referral_funding \
+	  && python -m tests.e2e_merchant_promo && python -m tests.e2e_home_filters \
+	  && python -m tests.e2e_rider_new_order_push
 
 logs:
 	docker compose logs -f api

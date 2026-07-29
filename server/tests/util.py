@@ -103,12 +103,20 @@ _reset_demo_rider_transfer_count()
 
 
 def orderable_dish(dishes, min_cents=1500):
-    """挑一道单价满足平台起送价下限的菜。
+    """挑一道真能下单的菜:单价过起送价下限、在售、有库存、且不是酒类。
 
     公共演示店的菜单会被历史测试残留污染,dishes[0] 可能是低价菜,
     盲取会撞上起送价 409 —— 所有下单测试统一走这里。
+
+    酒类必须排除:买酒要先实名认证(未成年人保护,#alcohol),
+    普通用例的账号没实名,撞上就是一个跟本用例毫无关系的 422。
+    库存也要看:菜单接口照常返回估清的菜,只有下单那一刻才报库存不足。
     """
-    return next(d for d in dishes if d["price_cents"] >= min_cents)
+    return next(d for d in dishes
+                if d["price_cents"] >= min_cents
+                and d.get("is_on_sale", True)
+                and not d.get("is_alcohol")
+                and (d.get("stock") is None or d["stock"] > 0))
 
 
 async def drain_order_pool():

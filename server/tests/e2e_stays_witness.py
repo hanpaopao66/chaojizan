@@ -8,7 +8,8 @@ import asyncio
 import copy
 import random
 import sys
-from datetime import date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 from sqlalchemy import text
@@ -21,7 +22,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "witness"))
 from superz_witness import verify_rows  # noqa: E402
 
 admin_token = login(ADMIN)
-today = date.today()
+# 必须用北京时间的"今天":账本按北京时区切日(services/ledger._today_beijing),
+# 而开发机的本地时区可能落后北京(如 PDT 差 15 小时)。用 date.today() 会
+# 把资金时间戳算到前一天,昨日锚点里一行住宿都没有 —— 表现为 KeyError,
+# 且只在本地日期与北京日期不同的那段时间里复现,极难排查
+today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
 yesterday = (today - timedelta(days=1)).isoformat()
 
 # 造两笔住宿资金:离店结算 + 取消扣首晚

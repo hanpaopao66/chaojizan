@@ -169,6 +169,14 @@ async def download_page():
                         / "static" / "download.html")
 
 
+@app.get("/s/{code}", include_in_schema=False)
+async def shop_landing(code: str):
+    """商家专属码落地页(#116):海报二维码扫出来就是它。
+    页面自己拿 code 调 /merchants/by-code/{code} 取店铺信息,
+    找不到就提示已下架 —— 短码不存在也返回 200 页面而不是裸 404。"""
+    return FileResponse(STATIC_DIR / "shop.html")
+
+
 @app.get("/appdist", include_in_schema=False)
 async def appdist_redirect():
     """历史链接兜底:老页面/聊天记录里的 /appdist 全部落到下载页。"""
