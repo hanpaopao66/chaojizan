@@ -72,13 +72,17 @@ async def main():
     bj_now = datetime.now(timezone.utc) + timedelta(hours=8)
     today = bj_now.strftime("%m-%d")
 
-    # 批次:生日 + 复购
-    call("POST", "/admin/coupon-batches", admin, {
+    # 批次:生日 + 复购。#115 起这两类由**商家**建(成本商家承担),
+    # 平台侧建会被 422 拦掉——营销的钱不该平台出
+    merchant = login("13800000002")
+    call("POST", "/merchants/me/coupon-batches", merchant, {
         "name": f"生日批次{ts}", "trigger": "birthday",
-        "amount_cents": 500, "total": 100, "valid_days": 7})
-    call("POST", "/admin/coupon-batches", admin, {
+        "threshold_cents": 0, "off_cents": 500, "total": 100,
+        "per_user_limit": 1, "valid_days": 7})
+    call("POST", "/merchants/me/coupon-batches", merchant, {
         "name": f"复购批次{ts}", "trigger": "winback",
-        "amount_cents": 300, "total": 100, "valid_days": 7})
+        "threshold_cents": 0, "off_cents": 300, "total": 100,
+        "per_user_limit": 1, "valid_days": 7})
 
     # 1) 生日券:今天生日的发,一年一张;非今天不发
     u1, p1 = fresh()

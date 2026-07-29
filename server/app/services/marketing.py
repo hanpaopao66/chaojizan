@@ -1,5 +1,9 @@
 """轻量营销触达三合一:生日券 / 复购提醒 / 收藏店上新。
 
+**发券的钱由商家出**(#115):三个任务都只从商家批次(merchant_id 非空)
+发券,商家没建批次就只推不发。平台立场是不靠补贴换增长——
+用户端「我们承诺不做的事」印着这句,发钱的口子不能开在营销上。
+
 共同的克制原则:
 - 总频控:营销推送每人每自然周 ≤2 条(Redis mkt:freq:{uid}:{年-周});
 - 用户可在「我的」一键关闭营销推送(users.marketing_push);
@@ -39,10 +43,22 @@ async def _count_send(user_id: int) -> None:
     await redis.expire(key, 14 * 86400)
 
 
-async def _active_batch(db: AsyncSession, trigger: str) -> CouponBatch | None:
-    return await db.scalar(select(CouponBatch).where(
-        CouponBatch.trigger == trigger, CouponBatch.active.is_(True))
-        .order_by(CouponBatch.created_at.desc()).limit(1))
+async def _active_batch(db: AsyncSession, trigger: str,
+                        merchant_id: int | None = None) -> CouponBatch | None:
+    """取一个启用中的批次。
+
+    营销类只认商家批次(merchant_id 非空):平台不靠补贴换增长(#115)。
+    传了 merchant_id 就取那家店的;不传则取任意商家批次(全平台生日券
+    这种没有归属商家的场景,现在等于取不到——这是有意的)。
+    """
+    query = select(CouponBatch).where(
+        CouponBatch.trigger == trigger,
+        CouponBatch.active.is_(True),
+        CouponBatch.merchant_id.is_not(None))
+    if merchant_id is not None:
+        query = query.where(CouponBatch.merchant_id == merchant_id)
+    return await db.scalar(
+        query.order_by(CouponBatch.created_at.desc()).limit(1))
 
 
 async def run_birthday(db: AsyncSession, today_mmdd: str, year: int) -> int:

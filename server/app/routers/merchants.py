@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date, datetime, timedelta, timezone
@@ -771,7 +771,8 @@ async def remove_staff(
 
 def _shop_batch_out(b: CouponBatch) -> ShopCouponBatchOut:
     return ShopCouponBatchOut(
-        id=b.id, name=b.name, threshold_cents=b.min_spend_cents,
+        id=b.id, name=b.name, trigger=b.trigger,
+        threshold_cents=b.min_spend_cents,
         off_cents=b.amount_cents, total=b.total, issued=b.issued,
         per_user_limit=b.per_user_limit, valid_days=b.valid_days,
         active=b.active)
@@ -783,13 +784,26 @@ async def create_shop_coupon_batch(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """商家自建店铺券批次。成本 100% 商家承担(下单走满减同口径),
-    平台佣金按券后实收计——你让利,平台跟着少收,与满减一致。"""
+    """商家自建券批次。成本 100% 商家承担(下单走满减同口径),
+    平台佣金按券后实收计——你让利,平台跟着少收,与满减一致。
+
+    trigger=shop 是顾客主动领;referral/birthday/winback 是系统按条件自动发,
+    这三类原先由平台掏钱,#115 起归位给商家。同一家店同一 trigger
+    只保留一个启用中的批次(建新的会停掉旧的),免得两个批次互相打架。
+    """
     shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
     if shop is None:
         raise HTTPException(404, "还没开店")
+    if payload.trigger != "shop":
+        # 自动发放类:同店同类型只留一个启用中的
+        await db.execute(
+            update(CouponBatch)
+            .where(CouponBatch.merchant_id == shop.id,
+                   CouponBatch.trigger == payload.trigger,
+                   CouponBatch.active.is_(True))
+            .values(active=False))
     batch = CouponBatch(
-        name=payload.name, trigger="shop", merchant_id=shop.id,
+        name=payload.name, trigger=payload.trigger, merchant_id=shop.id,
         amount_cents=payload.off_cents, min_spend_cents=payload.threshold_cents,
         total=payload.total, per_user_limit=payload.per_user_limit,
         valid_days=payload.valid_days, active=True)
@@ -836,10 +850,15 @@ async def claimable_shop_coupons(
     user: User = Depends(require_role("customer")),
     db: AsyncSession = Depends(get_db),
 ):
-    """用户在某店可领的店铺券(含已领数与是否可再领)。"""
+    """用户在某店可领的店铺券(含已领数与是否可再领)。
+
+    只列 trigger=shop 的:referral/birthday/winback 是系统按条件自动发的,
+    列在这里会变成"人人可主动领",商家的预算立刻被薅空。
+    """
     batches = (await db.scalars(
         select(CouponBatch).where(
             CouponBatch.merchant_id == merchant_id,
+            CouponBatch.trigger == "shop",
             CouponBatch.active.is_(True)))).all()
     out = []
     for b in batches:

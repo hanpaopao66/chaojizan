@@ -602,9 +602,19 @@ class BoostTipIn(BaseModel):
 
 
 class ShopCouponBatchIn(BaseModel):
-    """商家自建店铺券:满 threshold 减 off,限量、每人限领、有效期。成本商家承担。"""
+    """商家自建券:满 threshold 减 off,限量、每人限领、有效期。成本商家承担。
+
+    trigger 决定什么时候发到用户手里:
+    - shop      顾客在店铺页主动领(默认,老行为)
+    - referral  有人通过邀请码带来的新客在本店完成首单,双方各得一张(#115)
+    - birthday  本店老客生日当天
+    - winback   本店 30 天没来的老客
+
+    后三种是平台原先掏钱做的营销,现在归位给商家——平台只提供触达机制。
+    """
 
     name: str = Field(min_length=2, max_length=50)
+    trigger: str = Field(default="shop", pattern="^(shop|referral|birthday|winback)$")
     threshold_cents: int = Field(ge=0, le=100_000)   # 满 X(0=无门槛)
     off_cents: int = Field(gt=0, le=50_000)          # 减 Y
     total: int = Field(gt=0, le=100_000)             # 发行总量(预算封顶)
@@ -622,6 +632,9 @@ class ShopCouponBatchOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
+    # 发放方式:shop 顾客主动领 / referral 新客推荐 / birthday 生日 / winback 复购。
+    # 商家列表里要能看出这一批是干什么的,否则四种批次混在一起分不清
+    trigger: str = "shop"
     threshold_cents: int = 0   # = min_spend_cents
     off_cents: int = 0         # = amount_cents
     total: int

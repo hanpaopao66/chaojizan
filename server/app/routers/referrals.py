@@ -2,7 +2,10 @@
 
 奖励挂"完成单"不挂注册,刷号无利可图;防刷三道:同设备不建立关系、
 邀请人每自然月上限、风控命中的完成单不触发(留待下一笔干净的单)。
-券为平台承担(subsidy 口径,#49 通道),source 唯一防重发。
+**券由商家出,平台不出钱**(#115):被邀请人首单落在哪家店,就由那家店的
+「新客推荐券」批次(trigger=referral)发两张,限该店可用;商家没建批次就
+不发券,只把邀请关系记成 rewarded。平台立场是不靠补贴换增长,
+用户端「我们承诺不做的事」印着这句,发钱的口子不能开在这里。
 """
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -128,25 +131,31 @@ async def reward_referral_if_first_order(db: AsyncSession, order) -> None:
         return  # 防刷三:风控命中的单不算数
     from datetime import datetime as _dt
 
-    from ..models import Coupon
+    from ..models import CouponBatch
+    from ..services.coupons import issue_from_batch
     from ..services.push import push_to_user
-    amount = settings.referral_reward_cents
-    expires = datetime.now(timezone.utc) + timedelta(days=7)
-    for uid, tag in ((referral.invitee_id, "invitee"),
-                     (referral.inviter_id, "inviter")):
-        exists = await db.scalar(select(Coupon.id).where(
-            Coupon.source == f"referral:{referral.id}:{tag}"))
-        if not exists:
-            db.add(Coupon(user_id=uid, amount_cents=amount,
-                          min_spend_cents=0, expires_at=expires,
-                          source=f"referral:{referral.id}:{tag}",
-                          note="邀请有礼"))
+
+    # 首单落在哪家店,就由那家店的新客推荐券批次出券;没建批次就不发。
+    # 平台不再兜底出钱——那正是「不靠补贴换增长」这句承诺的落点。
+    batch = await db.scalar(
+        select(CouponBatch)
+        .where(CouponBatch.merchant_id == order.merchant_id,
+               CouponBatch.trigger == "referral",
+               CouponBatch.active.is_(True))
+        .with_for_update(skip_locked=True))
+    issued = 0
+    amount = batch.amount_cents if batch else 0
+    if batch is not None:
+        for uid in (referral.invitee_id, referral.inviter_id):
+            if await issue_from_batch(db, batch, uid, note="邀请有礼") is not None:
+                issued += 1
     referral.status = "rewarded"
     referral.rewarded_at = _dt.now(timezone.utc)
     try:
-        await push_to_user(referral.inviter_id, "邀请有礼到账",
-                           f"你邀请的好友完成了首单,{amount / 100:g} 元券"
-                           "已放进你的券包(7 天内有效)",
+        # 有券就说券,没券就只报喜——不许暗示有奖励却不给
+        body = (f"你邀请的好友完成了首单,{amount / 100:g} 元券已放进你的券包"
+                if issued else "你邀请的好友已经在超级赞下单了,谢谢你带他来")
+        await push_to_user(referral.inviter_id, "邀请有礼", body,
                            {"type": "coupon"}, record_skip=True)
     except Exception:
         pass

@@ -2200,8 +2200,13 @@ async def create_coupon_batch(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """创建券批次。trigger:newcomer 注册自动发 / manual 定向发 /
-    birthday 生日券 / winback 复购提醒。总量=预算封顶,发完自动停。"""
+    """创建券批次。trigger:newcomer 注册自动发 / manual 定向补偿发。
+
+    **birthday / winback / referral 已移出平台侧**(#115):那三个是营销,
+    营销的钱该商家出——平台立场是不靠补贴换增长。商家在自己的店铺
+    设置里建同名批次即可(POST /merchants/me/coupon-batches)。
+    存量的平台批次跑完即止,不受影响。
+    """
     from ..models import CouponBatch
     name = str(payload.get("name", "")).strip()[:50]
     trigger = str(payload.get("trigger", "manual"))
@@ -2214,7 +2219,11 @@ async def create_coupon_batch(
         raise HTTPException(422, "金额/天数/总量需为整数")
     if not name:
         raise HTTPException(422, "请填写批次名称")
-    if trigger not in ("newcomer", "manual", "birthday", "winback"):
+    if trigger in ("birthday", "winback", "referral"):
+        raise HTTPException(
+            422, "生日券/复购券/新客推荐券由商家自建(成本商家承担),"
+                 "平台不再建这三类批次")
+    if trigger not in ("newcomer", "manual"):
         raise HTTPException(422, "trigger 不合法")
     if not 1 <= amount <= 5000:
         raise HTTPException(422, "面额需在 0.01-50 元之间(补贴要克制)")

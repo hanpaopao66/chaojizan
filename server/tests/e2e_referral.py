@@ -32,9 +32,20 @@ def referral_coupons(token):
             if c["note"] == "邀请有礼"]
 
 
+def _disable_referral_batches():
+    """本用例断言的是「商家没建新客推荐券批次时不发券」,
+    所以先关掉本店启用中的 referral 批次——否则会被
+    e2e_referral_funding 留下的批次污染,断言随跑序时好时坏。"""
+    for b in call("GET", "/merchants/me/coupon-batches", merchant):
+        if b.get("trigger") == "referral" and b.get("active"):
+            call("POST", f"/merchants/me/coupon-batches/{b['id']}/toggle",
+                 merchant)
+
+
 async def main():
     # 营销总开关默认关(没有预算一张不发);本测试临时打开,结尾恢复
     call("POST", "/admin/flags/marketing", admin, {"value": "on"})
+    _disable_referral_batches()
 
     inviter, _ = fresh(device=f"invdev{ts}")
     code = call("GET", "/referrals/me", inviter)["code"]
@@ -105,19 +116,21 @@ async def main():
 
     run_order(invitee, cancel=True)  # 取消单:不该触发奖励
     assert not referral_coupons(invitee) and not referral_coupons(inviter)
-    run_order(invitee)  # 首个完成单:双发券
-    assert len(referral_coupons(invitee)) == 1
-    assert len(referral_coupons(inviter)) == 1
-    run_order(invitee)  # 第二单:不再发
-    assert len(referral_coupons(invitee)) == 1
+
+    # #115:券由商家出。商家没建「新客推荐券」批次时不发券,
+    # 只把邀请关系记成 rewarded——平台不再兜底掏这笔钱
+    run_order(invitee)
+    assert not referral_coupons(invitee), "商家没建批次却发了券(平台又在补贴)"
+    assert not referral_coupons(inviter)
     me = call("GET", "/referrals/me", inviter)
     assert me["invited"] == 1 and me["rewarded"] == 1
-    print("✓ 取消单不触发;首个完成单双发券;只发一次")
+    print("✓ 商家没建批次:关系记成 rewarded,但一张券都不发")
 
-    # 4) admin 漏斗
+    # 商家建了批次之后的双发路径由 e2e_referral_funding 覆盖
+
+    # 4) admin 漏斗:关系仍要记全(发不发券是另一回事)
     funnel = call("GET", "/admin/referrals", admin)["funnel"]
     assert funnel["claimed"] >= 1 and funnel["rewarded"] >= 1
-    assert funnel["coupons_issued"] >= 2
     print("✓ admin 漏斗数字正确")
 
     call("POST", "/admin/flags/marketing", admin, {"value": "off"})

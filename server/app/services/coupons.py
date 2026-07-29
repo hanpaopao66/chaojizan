@@ -1,7 +1,14 @@
-"""平台券发放(批次制)。
+"""批次发券。
 
-成本全平台承担:下单抵扣走 subsidy 口径,与首单立减/安抚券同一条
-审计通道,资金口径零新增。防超发/防重发:
+**资金方跟着批次走**:批次挂了 merchant_id 就是商家出钱(funder=merchant,
+下单抵扣走 discount 口径,与满减同通道、限该店可用);没挂就是平台出钱
+(funder=platform,走 subsidy 口径)。
+
+平台立场是不靠补贴换增长(用户端「我们承诺不做的事」印着这句),所以
+营销类发券(邀请有礼/生日/复购召回)一律要求商家批次——见 #115。
+留 platform 分支是为了超时赔付那类**平台该赔的钱**,那不是营销。
+
+防超发/防重发:
 - 批次总量:条件 UPDATE issued < total(预算封顶,发完自动停);
 - 每人每批次一张:coupons.source = batch:{批次id}:{user_id} 唯一约束;
 - 新客券防薅:同设备已有其他账号的用户不自动发(#44 风控口径)。
@@ -45,6 +52,9 @@ async def issue_from_batch(db: AsyncSession, batch: CouponBatch,
         source=source,
         batch_id=batch.id,
         note=note or batch.name,
+        # 资金方跟着批次:商家批次发出来的券由商家承担且限本店用
+        funder="merchant" if batch.merchant_id else "platform",
+        merchant_id=batch.merchant_id,
     )
     db.add(coupon)
     return coupon
