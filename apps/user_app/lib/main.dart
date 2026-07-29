@@ -2199,6 +2199,37 @@ class OrderListView extends StatefulWidget {
 class _OrderListViewState extends State<OrderListView> {
   late Future<List<Order>> _future = widget.api.myOrders();
 
+  // 分页:老口径是服务端写死 limit(50) 不分页,用户超过 50 单后就永远看不到
+  // 更早的订单——跟「每一单的账都可查」直接冲突。改成游标分页 + 触底加载。
+  final List<Order> _loaded = [];
+  bool _loadingMore = false;
+  bool _noMore = false;
+
+  Future<void> _loadMore() async {
+    if (_loadingMore || _noMore || _loaded.isEmpty) return;
+    setState(() => _loadingMore = true);
+    try {
+      final more = await widget.api.myOrders(before: _loaded.last.createdAt);
+      if (!mounted) return;
+      setState(() {
+        _loaded.addAll(more);
+        _noMore = more.isEmpty;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  void _reset() {
+    _loaded.clear();
+    _noMore = false;
+    _future = widget.api.myOrders();
+  }
+
   /// 状态语义色:进行中 = 品牌橙(需要关注),完成 = 账目绿(钱已结清),取消 = 灰
   Color _statusColor(OrderStatus status, ThemeData theme) => switch (status) {
         OrderStatus.completed => Theme.of(context).sz.earn,
@@ -2346,31 +2377,66 @@ class _OrderListViewState extends State<OrderListView> {
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
-      onRefresh: () async => setState(() => _future = widget.api.myOrders()),
+      onRefresh: () async => setState(_reset),
       child: FutureBuilder(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return SzError(
-                error: snapshot.error,
-                onRetry: () =>
-                    setState(() => _future = widget.api.myOrders()));
+                error: snapshot.error, onRetry: () => setState(_reset));
           }
           if (!snapshot.hasData) {
             return const SkeletonList();
           }
-          final orders = snapshot.data!;
+          // 第一页由 future 给,后续页累加进 _loaded
+          if (_loaded.isEmpty) _loaded.addAll(snapshot.data!);
+          final orders = _loaded;
           if (orders.isEmpty) {
             return ListView(children: const [
               SizedBox(height: 120),
-              EmptyState(
-                  icon: Icons.receipt_long_outlined, text: '还没有订单\n去点一单支持身边小店吧'),
+              SzEmpty(
+                  art: BrandArt.receipt, text: '还没有订单\n去点一单支持身边小店吧'),
             ]);
           }
-          return ListView.builder(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemCount: orders.length,
-            itemBuilder: (context, i) => _orderCard(orders[i], i),
+          return NotificationListener<ScrollNotification>(
+            onNotification: (n) {
+              // 触底前 400px 就开始加载,滚到底时下一页通常已经在了
+              if (n.metrics.pixels >= n.metrics.maxScrollExtent - 400) {
+                _loadMore();
+              }
+              return false;
+            },
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              itemCount: orders.length + 1,
+              itemBuilder: (context, i) {
+                if (i == orders.length) {
+                  if (_loadingMore) {
+                    return const Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Center(
+                          child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2))),
+                    );
+                  }
+                  if (_noMore && orders.length > 10) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
+                      child: Text('没有更早的订单了',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              color: Theme.of(context).sz.inkFaint)),
+                    );
+                  }
+                  return const SizedBox(height: 8);
+                }
+                return _orderCard(orders[i], i);
+              },
+            ),
           );
         },
       ),

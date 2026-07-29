@@ -38,7 +38,12 @@ class _RiderVerifyFlowPageState extends State<RiderVerifyFlowPage> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _loaded = true; _error = e.toString(); });
+      if (mounted) {
+        setState(() {
+          _loaded = true;
+          _error = '$e';
+        });
+      }
     }
   }
 
@@ -156,8 +161,8 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
         !RegExp(r'^\d{17}[\dXx]$').hasMatch(_idCard.text.trim()) ||
         _idPhoto.isEmpty ||
         _healthPhoto.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('请填写真实姓名、正确身份证号,并上传身份证和健康证照片')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请填写真实姓名、正确身份证号,并上传身份证和健康证照片')));
       return;
     }
     setState(() => _busy = true);
@@ -194,8 +199,10 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
               clipBehavior: Clip.antiAlias,
               child: url.isEmpty
                   ? const Icon(Icons.add_a_photo, size: 30)
-                  : Image(image: szNetImage(widget.api.resolveUrl(url)),
-                      fit: BoxFit.cover, width: double.infinity),
+                  : Image(
+                      image: szNetImage(widget.api.resolveUrl(url)),
+                      fit: BoxFit.cover,
+                      width: double.infinity),
             ),
           ),
           const SizedBox(height: 4),
@@ -208,50 +215,60 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
   @override
   Widget build(BuildContext context) {
     final rejected = widget.existing.status == 'rejected';
-    return Scaffold(
-      appBar: AppBar(title: const Text('骑手实名认证')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (rejected)
+    return SzUnsavedGuard(
+      // 实名要填身份证号 + 拍两张证件照,误触返回就得重拍一遍
+      isDirty: () =>
+          _name.text.trim() != widget.existing.realName ||
+          _idCard.text.trim() != widget.existing.idCardNo ||
+          _idPhoto != widget.existing.idCardPhotoUrl ||
+          _healthPhoto != widget.existing.healthCertPhotoUrl,
+      message: '身份证信息和照片还没提交,现在返回会丢掉。',
+      child: Scaffold(
+        appBar: AppBar(title: const Text('骑手实名认证')),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            if (rejected)
+              Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child:
+                      Text('上次审核被驳回:${widget.existing.rejectReason}\n请修改后重新提交'),
+                ),
+              ),
             Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text('上次审核被驳回:${widget.existing.rejectReason}\n请修改后重新提交'),
+              color: Theme.of(context).colorScheme.tertiaryContainer,
+              child: const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text('按国家规定,配送员须实名认证并持有效健康证方可上岗。'
+                    '你的证件仅用于平台审核,不对外公开。'),
               ),
             ),
-          Card(
-            color: Theme.of(context).colorScheme.tertiaryContainer,
-            child: const Padding(
-              padding: EdgeInsets.all(12),
-              child: Text('按国家规定,配送员须实名认证并持有效健康证方可上岗。'
-                  '你的证件仅用于平台审核,不对外公开。'),
+            const SizedBox(height: 12),
+            TextField(
+                controller: _name,
+                decoration: const InputDecoration(
+                    labelText: '真实姓名 *', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            TextField(
+                controller: _idCard,
+                maxLength: 18,
+                decoration: const InputDecoration(
+                    labelText: '身份证号 *', border: OutlineInputBorder())),
+            const SizedBox(height: 8),
+            Row(children: [
+              _photoBox('身份证人像面', _idPhoto, true),
+              const SizedBox(width: 12),
+              _photoBox('健康证', _healthPhoto, false),
+            ]),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _busy ? null : _submit,
+              child: Text(_busy ? '提交中…' : (rejected ? '重新提交审核' : '提交认证')),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-              controller: _name,
-              decoration: const InputDecoration(
-                  labelText: '真实姓名 *', border: OutlineInputBorder())),
-          const SizedBox(height: 12),
-          TextField(
-              controller: _idCard,
-              maxLength: 18,
-              decoration: const InputDecoration(
-                  labelText: '身份证号 *', border: OutlineInputBorder())),
-          const SizedBox(height: 8),
-          Row(children: [
-            _photoBox('身份证人像面', _idPhoto, true),
-            const SizedBox(width: 12),
-            _photoBox('健康证', _healthPhoto, false),
-          ]),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _busy ? null : _submit,
-            child: Text(_busy ? '提交中…' : (rejected ? '重新提交审核' : '提交认证')),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

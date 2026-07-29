@@ -929,8 +929,13 @@ class ApiClient {
       _request('POST', '/merchants/me/orders/$orderNo/print');
 
   // ---------- 通用订单 ----------
-  Future<List<Order>> myOrders() async {
-    final data = await _request('GET', '/orders');
+  /// 我的订单(游标分页)。[before] 传上一页最后一单的 createdAt。
+  /// 不传就是第一页;服务端 limit 上限 50。
+  Future<List<Order>> myOrders({String? before, int limit = 20}) async {
+    final data = await _request('GET', '/orders', query: {
+      'limit': '$limit',
+      if (before != null && before.isNotEmpty) 'before': before,
+    });
     return (data as List)
         .map((e) => Order.fromJson(e as Map<String, dynamic>))
         .toList();

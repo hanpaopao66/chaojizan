@@ -16,7 +16,7 @@ class DeliveryMapPage extends StatefulWidget {
 }
 
 class _DeliveryMapPageState extends State<DeliveryMapPage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   RiderLocation? _rider;
   Timer? _timer;
 
@@ -42,12 +42,28 @@ class _DeliveryMapPageState extends State<DeliveryMapPage>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _poll();
     _timer = Timer.periodic(const Duration(seconds: 5), (_) => _poll());
   }
 
+  /// 看骑手到哪了:退到后台就停,回前台先刷一次。用户看不到地图时轮询没有意义
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _poll();
+      _timer?.cancel();
+      _timer =
+          Timer.periodic(const Duration(seconds: 5), (_) => _poll());
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _timer?.cancel();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _moveController.dispose();
     super.dispose();

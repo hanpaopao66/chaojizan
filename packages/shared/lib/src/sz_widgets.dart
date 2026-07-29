@@ -772,3 +772,58 @@ class SzError extends StatelessWidget {
     );
   }
 }
+
+/// 未保存内容的返回拦截:填了东西再手势返回时先问一句。
+///
+/// 商家入驻要填店名/地址/证照号 + 传两张证照图,骑手实名要填身份证 +
+/// 传照片——这两个恰好是转化率最关键的表单,误触返回一下全丢、得从头再来。
+/// 改之前三端 PopScope 用量为 0。
+///
+/// [isDirty] 每次返回时求值(不是构造时),所以传闭包而不是 bool。
+class SzUnsavedGuard extends StatelessWidget {
+  const SzUnsavedGuard({
+    super.key,
+    required this.isDirty,
+    required this.child,
+    this.message = '填的内容还没提交,现在返回会丢掉。',
+  });
+
+  final bool Function() isDirty;
+  final Widget child;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final nav = Navigator.of(context);
+        if (!isDirty()) {
+          nav.pop();
+          return;
+        }
+        final leave = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('要放弃已填的内容吗'),
+            content: Text(message),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('继续填')),
+              // 放弃是破坏性动作,用 danger 而不是主按钮色
+              TextButton(
+                  style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(context).sz.danger),
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('放弃')),
+            ],
+          ),
+        );
+        if (leave == true) nav.pop();
+      },
+      child: child,
+    );
+  }
+}

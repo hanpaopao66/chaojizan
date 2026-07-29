@@ -1255,11 +1255,26 @@ async def preview_delivery_fee(
 
 @router.get("", response_model=list[OrderOut])
 async def my_orders(
+    before: str | None = None,
+    limit: int = 20,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """按角色返回各自视角的订单列表。"""
-    query = select(Order).order_by(Order.created_at.desc()).limit(50)
+    """按角色返回各自视角的订单列表(游标分页)。
+
+    before 传上一页最后一单的 created_at(ISO),不传则取最新一页。
+    用游标不用 offset:订单在翻页期间还在新增,offset 会漏单或重复。
+    老口径是写死 limit(50) 不分页——用户超过 50 单后就永远看不到更早的,
+    与「每一单的账都可查」的承诺直接冲突。
+    """
+    limit = max(1, min(limit, 50))
+    query = select(Order).order_by(Order.created_at.desc()).limit(limit)
+    if before:
+        try:
+            cursor = datetime.fromisoformat(before)
+        except ValueError:
+            raise HTTPException(422, "分页游标格式不对")
+        query = query.where(Order.created_at < cursor)
     role = user.role.value
     if role == "customer":
         query = query.where(Order.customer_id == user.id)

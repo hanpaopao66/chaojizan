@@ -43,14 +43,14 @@ class MerchantApp extends StatelessWidget {
             '每日对账,每一笔分账可查可申诉',
           ],
           child: PrivacyGate(
-        onAgreed: PushService.init,
-        child: AuthGate(
-          api: rootApi,
-          title: '商家端 · 接单出餐',
-          role: 'merchant',
-          homeBuilder: (_, api) => ShopGate(api: api),
-        ),
-      )),
+            onAgreed: PushService.init,
+            child: AuthGate(
+              api: rootApi,
+              title: '商家端 · 接单出餐',
+              role: 'merchant',
+              homeBuilder: (_, api) => ShopGate(api: api),
+            ),
+          )),
     );
   }
 }
@@ -235,20 +235,20 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
     if (_name.text.trim().isEmpty ||
         _address.text.trim().isEmpty ||
         _licenseNo.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('店名、地址、$licenseLabel都是必填的')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('店名、地址、$licenseLabel都是必填的')));
       return;
     }
     if (_licenseImageUrl.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('请上传$licenseLabel照片(监管要求)')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('请上传$licenseLabel照片(监管要求)')));
       return;
     }
     if (_isHotel &&
         (_specialLicenseNo.text.trim().isEmpty ||
             _specialLicenseImageUrl.isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('酒店入驻需要特种行业许可证(旅馆业,公安核发)号与照片')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('酒店入驻需要特种行业许可证(旅馆业,公安核发)号与照片')));
       return;
     }
     setState(() => _busy = true);
@@ -324,11 +324,11 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
                     children: [
                       const Icon(Icons.add_a_photo_outlined, size: 32),
                       const SizedBox(height: 8),
-                      Text(label,
-                          style: Theme.of(context).textTheme.bodySmall),
+                      Text(label, style: Theme.of(context).textTheme.bodySmall),
                     ],
                   )
-                : Image(image: szNetImage(widget.api.resolveUrl(url)),
+                : Image(
+                    image: szNetImage(widget.api.resolveUrl(url)),
                     fit: BoxFit.cover,
                     width: double.infinity,
                   ),
@@ -337,7 +337,8 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   }
 
   /// 业态选择卡(仅首次入驻可选;重新提交沿用原业态)
-  Widget _bizTypeCard(String value, IconData icon, String title, String promise) {
+  Widget _bizTypeCard(
+      String value, IconData icon, String title, String promise) {
     final selected = _bizType == value;
     final scheme = Theme.of(context).colorScheme;
     return Expanded(
@@ -356,8 +357,8 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
             color: selected ? scheme.primary.withValues(alpha: 0.06) : null,
           ),
           child: Column(children: [
-            Icon(icon, size: 32,
-                color: selected ? scheme.primary : scheme.outline),
+            Icon(icon,
+                size: 32, color: selected ? scheme.primary : scheme.outline),
             const SizedBox(height: 8),
             Text(title,
                 style: TextStyle(
@@ -376,122 +377,136 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   @override
   Widget build(BuildContext context) {
     final rejected = widget.existing?.isRejected == true;
-    return Scaffold(
-      appBar: AppBar(title: Text(rejected ? '重新提交申请' : '申请入驻')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (rejected)
-            Card(
-              color: Theme.of(context).colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text('上次申请被驳回:${widget.existing!.rejectReason}\n'
-                    '请修改后重新提交'),
+    return SzUnsavedGuard(
+      // 入驻表单是转化率最关键的一屏:填了店名/地址/证照号或传了证照图,
+      // 误触返回就得从头再来
+      isDirty: () =>
+          _name.text.trim().isNotEmpty ||
+          _address.text.trim().isNotEmpty ||
+          _licenseNo.text.trim().isNotEmpty ||
+          _licenseImageUrl.isNotEmpty ||
+          _specialLicenseNo.text.trim().isNotEmpty ||
+          _specialLicenseImageUrl.isNotEmpty ||
+          _hygieneImageUrl.isNotEmpty,
+      message: '店名、证照这些还没提交,现在返回会丢掉。',
+      child: Scaffold(
+        appBar: AppBar(title: Text(rejected ? '重新提交申请' : '申请入驻')),
+        body: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            if (rejected)
+              Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text('上次申请被驳回:${widget.existing!.rejectReason}\n'
+                      '请修改后重新提交'),
+                ),
               ),
-            ),
-          const SizedBox(height: 8),
-          // 第一步:选业态(证照要求不同;重新提交沿用原业态)
-          Row(children: [
-            _bizTypeCard('food', Icons.restaurant, '餐饮外卖', '佣金 5% 封顶\n配送费全归骑手'),
-            const SizedBox(width: 12),
-            _bizTypeCard('hotel', Icons.hotel, '酒店住宿', '佣金 5%,离店才收\n取消分文不收'),
-          ]),
-          const SizedBox(height: 16),
-          TextField(
-              controller: _name,
-              decoration: InputDecoration(
-                  labelText: _isHotel ? '酒店名称 *' : '店铺名称 *',
-                  border: const OutlineInputBorder())),
-          const SizedBox(height: 12),
-          TextField(
-              controller: _description,
-              decoration: const InputDecoration(
-                  labelText: '一句话介绍', border: OutlineInputBorder())),
-          const SizedBox(height: 12),
-          TextField(
-              controller: _address,
-              decoration: InputDecoration(
-                  labelText: _isHotel ? '酒店地址 *' : '门店地址 *',
-                  border: const OutlineInputBorder())),
-          const SizedBox(height: 12),
-          if (!_isHotel) ...[
-            // 外卖品类:决定出现在用户端哪个分类,入驻后可随时改
-            DropdownButtonFormField<String>(
-              initialValue: _category,
-              decoration: const InputDecoration(
-                  labelText: '外卖品类 *', border: OutlineInputBorder()),
-              items: [
-                for (final e in kMerchantCategories.entries)
-                  DropdownMenuItem(
-                      value: e.key,
-                      child: Text(
-                          '${kMerchantCategoryEmoji[e.key] ?? ''} ${e.value}')),
-              ],
-              onChanged: (v) => setState(() => _category = v ?? 'fast_food'),
-            ),
-            const SizedBox(height: 12),
-          ] else ...[
-            DropdownButtonFormField<String>(
-              initialValue: _tier,
-              decoration: const InputDecoration(
-                  labelText: '酒店档次 *', border: OutlineInputBorder()),
-              items: [
-                for (final e in kHotelTiers.entries)
-                  DropdownMenuItem(value: e.key, child: Text(e.value)),
-              ],
-              onChanged: (v) => setState(() => _tier = v ?? 'economy'),
-            ),
+            const SizedBox(height: 8),
+            // 第一步:选业态(证照要求不同;重新提交沿用原业态)
+            Row(children: [
+              _bizTypeCard(
+                  'food', Icons.restaurant, '餐饮外卖', '佣金 5% 封顶\n配送费全归骑手'),
+              const SizedBox(width: 12),
+              _bizTypeCard('hotel', Icons.hotel, '酒店住宿', '佣金 5%,离店才收\n取消分文不收'),
+            ]),
+            const SizedBox(height: 16),
+            TextField(
+                controller: _name,
+                decoration: InputDecoration(
+                    labelText: _isHotel ? '酒店名称 *' : '店铺名称 *',
+                    border: const OutlineInputBorder())),
             const SizedBox(height: 12),
             TextField(
-                controller: _frontDeskPhone,
-                keyboardType: TextInputType.phone,
+                controller: _description,
                 decoration: const InputDecoration(
-                    labelText: '前台电话',
-                    helperText: '展示给已下单的住客,方便到店联系',
-                    border: OutlineInputBorder())),
-            const SizedBox(height: 12),
-          ],
-          TextField(
-              controller: _licenseNo,
-              decoration: InputDecoration(
-                  labelText: _isHotel ? '营业执照注册号 *' : '食品经营许可证号 *',
-                  helperText: '平台会人工核对,信息不实将无法通过审核',
-                  border: const OutlineInputBorder())),
-          const SizedBox(height: 12),
-          // 证照照片(监管要求留存影像,审核员对照证号人工核验)
-          _licenseUpload(
-            label: _isHotel ? '上传营业执照照片 *' : '上传食品经营许可证照片 *',
-            url: _licenseImageUrl,
-            onUploaded: (u) => setState(() => _licenseImageUrl = u),
-          ),
-          if (_isHotel) ...[
+                    labelText: '一句话介绍', border: OutlineInputBorder())),
             const SizedBox(height: 12),
             TextField(
-                controller: _specialLicenseNo,
+                controller: _address,
+                decoration: InputDecoration(
+                    labelText: _isHotel ? '酒店地址 *' : '门店地址 *',
+                    border: const OutlineInputBorder())),
+            const SizedBox(height: 12),
+            if (!_isHotel) ...[
+              // 外卖品类:决定出现在用户端哪个分类,入驻后可随时改
+              DropdownButtonFormField<String>(
+                initialValue: _category,
                 decoration: const InputDecoration(
-                    labelText: '特种行业许可证号(旅馆业) *',
-                    helperText: '公安机关核发,开旅馆的硬性资质',
-                    border: OutlineInputBorder())),
+                    labelText: '外卖品类 *', border: OutlineInputBorder()),
+                items: [
+                  for (final e in kMerchantCategories.entries)
+                    DropdownMenuItem(
+                        value: e.key,
+                        child: Text(
+                            '${kMerchantCategoryEmoji[e.key] ?? ''} ${e.value}')),
+                ],
+                onChanged: (v) => setState(() => _category = v ?? 'fast_food'),
+              ),
+              const SizedBox(height: 12),
+            ] else ...[
+              DropdownButtonFormField<String>(
+                initialValue: _tier,
+                decoration: const InputDecoration(
+                    labelText: '酒店档次 *', border: OutlineInputBorder()),
+                items: [
+                  for (final e in kHotelTiers.entries)
+                    DropdownMenuItem(value: e.key, child: Text(e.value)),
+                ],
+                onChanged: (v) => setState(() => _tier = v ?? 'economy'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                  controller: _frontDeskPhone,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                      labelText: '前台电话',
+                      helperText: '展示给已下单的住客,方便到店联系',
+                      border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+            ],
+            TextField(
+                controller: _licenseNo,
+                decoration: InputDecoration(
+                    labelText: _isHotel ? '营业执照注册号 *' : '食品经营许可证号 *',
+                    helperText: '平台会人工核对,信息不实将无法通过审核',
+                    border: const OutlineInputBorder())),
             const SizedBox(height: 12),
+            // 证照照片(监管要求留存影像,审核员对照证号人工核验)
             _licenseUpload(
-              label: '上传特种行业许可证照片 *',
-              url: _specialLicenseImageUrl,
-              onUploaded: (u) => setState(() => _specialLicenseImageUrl = u),
+              label: _isHotel ? '上传营业执照照片 *' : '上传食品经营许可证照片 *',
+              url: _licenseImageUrl,
+              onUploaded: (u) => setState(() => _licenseImageUrl = u),
             ),
-            const SizedBox(height: 12),
-            _licenseUpload(
-              label: '上传卫生许可证照片(选填)',
-              url: _hygieneImageUrl,
-              onUploaded: (u) => setState(() => _hygieneImageUrl = u),
+            if (_isHotel) ...[
+              const SizedBox(height: 12),
+              TextField(
+                  controller: _specialLicenseNo,
+                  decoration: const InputDecoration(
+                      labelText: '特种行业许可证号(旅馆业) *',
+                      helperText: '公安机关核发,开旅馆的硬性资质',
+                      border: OutlineInputBorder())),
+              const SizedBox(height: 12),
+              _licenseUpload(
+                label: '上传特种行业许可证照片 *',
+                url: _specialLicenseImageUrl,
+                onUploaded: (u) => setState(() => _specialLicenseImageUrl = u),
+              ),
+              const SizedBox(height: 12),
+              _licenseUpload(
+                label: '上传卫生许可证照片(选填)',
+                url: _hygieneImageUrl,
+                onUploaded: (u) => setState(() => _hygieneImageUrl = u),
+              ),
+            ],
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _busy ? null : _submit,
+              child: Text(_busy ? '提交中…' : (rejected ? '重新提交审核' : '提交申请')),
             ),
           ],
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _busy ? null : _submit,
-            child: Text(_busy ? '提交中…' : (rejected ? '重新提交审核' : '提交申请')),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -643,8 +658,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
     if (!await BtPrinter.autoPrintEnabled()) return;
     for (final order in paid) {
       if (!_btPrinted.add(order.orderNo)) continue; // 已打过(WS 和轮询会重复看到)
-      final err =
-          await BtPrinter.printOrder(order, shopName: widget.shop.name);
+      final err = await BtPrinter.printOrder(order, shopName: widget.shop.name);
       if (err != null && err != 'NO_DEVICE' && mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('蓝牙打印失败:$err')));
@@ -661,9 +675,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       await widget.api.reprintOrder(order.orderNo);
       _snack('小票已发送到云打印机');
     } catch (e) {
-      _snack(e is ApiException
-          ? '${e.message}(在「店铺-小票打印」里设置打印机)'
-          : '打印失败:$e');
+      _snack(e is ApiException ? '${e.message}(在「店铺-小票打印」里设置打印机)' : '打印失败:$e');
     }
   }
 
@@ -686,8 +698,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       _refresh();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _acting.remove(order.orderNo));
     }
@@ -703,8 +714,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           controller: controller,
           maxLength: 200,
           decoration: const InputDecoration(
-              helperText: '会展示给用户,订单将全额退款',
-              border: OutlineInputBorder()),
+              helperText: '会展示给用户,订单将全额退款', border: OutlineInputBorder()),
         ),
         actions: [
           TextButton(
@@ -755,8 +765,8 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                         style: Theme.of(context).textTheme.bodySmall),
                     const SizedBox(height: 8),
                     // 0 元赠品行不可选(无款可退,服务端也会拒)
-                    for (final item in order.items
-                        .where((i) => i.priceCents > 0))
+                    for (final item
+                        in order.items.where((i) => i.priceCents > 0))
                       ListTile(
                         dense: true,
                         selected: selectedDish == item.dishId,
@@ -916,8 +926,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                   color: urgent ? sz.danger : sz.ink)),
           const TextSpan(text: ' 分钟'),
         ]),
-        style: TextStyle(
-            fontSize: 12, color: urgent ? sz.danger : sz.inkMuted),
+        style: TextStyle(fontSize: 12, color: urgent ? sz.danger : sz.inkMuted),
       ),
     );
   }
@@ -945,8 +954,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
         return [
           printButton,
           TextButton(
-              onPressed: () => _refundSheet(order),
-              child: const Text('缺货退款')),
+              onPressed: () => _refundSheet(order), child: const Text('缺货退款')),
           OutlinedButton(
               onPressed: () => _reject(order), child: const Text('拒单')),
           const SizedBox(width: 8),
@@ -954,22 +962,19 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
               onPressed: _acting.contains(order.orderNo)
                   ? null
                   : () => _act(order, OrderStatus.accepted),
-              child: Text(
-                  _acting.contains(order.orderNo) ? '处理中…' : '接单')),
+              child: Text(_acting.contains(order.orderNo) ? '处理中…' : '接单')),
         ];
       case OrderStatus.accepted:
         return [
           printButton,
           TextButton(
-              onPressed: () => _refundSheet(order),
-              child: const Text('缺货退款')),
+              onPressed: () => _refundSheet(order), child: const Text('缺货退款')),
           const SizedBox(width: 8),
           FilledButton(
               onPressed: _acting.contains(order.orderNo)
                   ? null
                   : () => _act(order, OrderStatus.ready),
-              child: Text(
-                  _acting.contains(order.orderNo) ? '处理中…' : '出餐完成')),
+              child: Text(_acting.contains(order.orderNo) ? '处理中…' : '出餐完成')),
         ];
       case OrderStatus.ready:
         return [
@@ -1024,8 +1029,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final pending =
-        _orders.where((o) => o.status == OrderStatus.paid).length;
+    final pending = _orders.where((o) => o.status == OrderStatus.paid).length;
     return Scaffold(
       appBar: AppBar(
         title: Text(switch (_tab) {
@@ -1037,9 +1041,13 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
         actions: [
           Row(children: [
             Icon(
-              _wsConnected ? Icons.notifications_active : Icons.notifications_off,
+              _wsConnected
+                  ? Icons.notifications_active
+                  : Icons.notifications_off,
               size: 18,
-              color: _wsConnected ? Theme.of(context).sz.earn : Theme.of(context).sz.inkFaint,
+              color: _wsConnected
+                  ? Theme.of(context).sz.earn
+                  : Theme.of(context).sz.inkFaint,
             ),
             const SizedBox(width: 8),
             Text(_isOpen ? '营业中' : '已打烊'),
@@ -1061,158 +1069,197 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       body: _tab == 1
           ? DishManagePage(api: widget.api)
           : _tab == 2
-          ? FinancePage(api: widget.api)
-          : _tab == 3
-          ? ShopTabPage(api: widget.api)
-          : Column(
-        children: [
-          // 平台公告(费率调整、新功能上线等,发通知不用发版)
-          AnnouncementBanner(api: widget.api, audience: 'merchant'),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('待接单')),
-                ButtonSegment(value: 1, label: Text('进行中')),
-                ButtonSegment(value: 2, label: Text('历史')),
-              ],
-              selected: {_segment},
-              onSelectionChanged: (s) => setState(() => _segment = s.first),
-            ),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refresh,
-              child: _filteredOrders.isEmpty
-                  ? ListView(children: const [
-                      Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Center(child: Text('这一栏没有订单')))
-                    ])
-                  : ListView.builder(
-                      itemCount: _filteredOrders.length,
-                      itemBuilder: (context, i) {
-                        final order = _filteredOrders[i];
-                        final sz = Theme.of(context).sz;
-                        final isNew = order.status == OrderStatus.paid;
-                        return Container(
-                          margin: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: sz.surface,
-                            borderRadius: BorderRadius.circular(kRadiusMd),
-                            border: Border.all(
-                                // 出餐超时:整卡 danger 描边,后厨一眼看到该催
-                                color: order.readyLate ? sz.danger : sz.line,
-                                width: order.readyLate ? 1.5 : 1),
+              ? FinancePage(api: widget.api)
+              : _tab == 3
+                  ? ShopTabPage(api: widget.api)
+                  : Column(
+                      children: [
+                        // 平台公告(费率调整、新功能上线等,发通知不用发版)
+                        AnnouncementBanner(
+                            api: widget.api, audience: 'merchant'),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                          child: SegmentedButton<int>(
+                            segments: const [
+                              ButtonSegment(value: 0, label: Text('待接单')),
+                              ButtonSegment(value: 1, label: Text('进行中')),
+                              ButtonSegment(value: 2, label: Text('历史')),
+                            ],
+                            selected: {_segment},
+                            onSelectionChanged: (s) =>
+                                setState(() => _segment = s.first),
                           ),
-                          // 新单左侧一条 clay:待接单的在列表里要一眼挑出来
-                          foregroundDecoration: isNew
-                              ? BoxDecoration(
-                                  borderRadius:
-                                      BorderRadius.circular(kRadiusMd),
-                                  border: Border(
-                                      left: BorderSide(
-                                          color: sz.clay, width: 3)),
-                                )
-                              : null,
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                          child: Text(order.summary,
-                                              style: TextStyle(
-                                                  fontSize: 14.5,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: sz.ink))),
-                                      const SizedBox(width: 8),
-                                      SzChip(order.status.label,
-                                          color: isNew ? sz.clay : sz.inkFaint,
-                                          dense: true),
-                                    ]),
-                                const SizedBox(height: 5),
-                                Wrap(spacing: 6, runSpacing: 4, children: [
-                                  if (order.parentOrderNo.isNotEmpty)
-                                    SzChip(
-                                        '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}',
-                                        color: sz.earn,
-                                        dense: true),
-                                  if (_urgedOrders.contains(order.orderNo))
-                                    SzChip('催', color: sz.danger, dense: true),
-                                  if (order.pickup)
-                                    SzChip(
-                                        order.pickupCode.isEmpty
-                                            ? '自取'
-                                            : '自取 ${order.pickupCode}',
-                                        color: sz.hold,
-                                        dense: true),
-                                ]),
-                                if (order.scheduledLabel != null)
-                                  Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Text('⏰ ${order.scheduledLabel},请按时出餐',
-                                        style: TextStyle(
-                                            fontSize: 12,
-                                            color: sz.hold,
-                                            fontWeight: FontWeight.w600)),
+                        ),
+                        Expanded(
+                          child: RefreshIndicator(
+                            onRefresh: _refresh,
+                            child: _filteredOrders.isEmpty
+                                ? ListView(children: const [
+                                    Padding(
+                                        padding: EdgeInsets.all(24),
+                                        child: Center(child: Text('这一栏没有订单')))
+                                  ])
+                                : ListView.builder(
+                                    itemCount: _filteredOrders.length,
+                                    itemBuilder: (context, i) {
+                                      final order = _filteredOrders[i];
+                                      final sz = Theme.of(context).sz;
+                                      final isNew =
+                                          order.status == OrderStatus.paid;
+                                      return Container(
+                                        margin: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: sz.surface,
+                                          borderRadius:
+                                              BorderRadius.circular(kRadiusMd),
+                                          border: Border.all(
+                                              // 出餐超时:整卡 danger 描边,后厨一眼看到该催
+                                              color: order.readyLate
+                                                  ? sz.danger
+                                                  : sz.line,
+                                              width: order.readyLate ? 1.5 : 1),
+                                        ),
+                                        // 新单左侧一条 clay:待接单的在列表里要一眼挑出来
+                                        foregroundDecoration: isNew
+                                            ? BoxDecoration(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        kRadiusMd),
+                                                border: Border(
+                                                    left: BorderSide(
+                                                        color: sz.clay,
+                                                        width: 3)),
+                                              )
+                                            : null,
+                                        child: Padding(
+                                          padding: const EdgeInsets.fromLTRB(
+                                              12, 11, 12, 11),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Expanded(
+                                                        child: Text(
+                                                            order.summary,
+                                                            style: TextStyle(
+                                                                fontSize: 14.5,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                color:
+                                                                    sz.ink))),
+                                                    const SizedBox(width: 8),
+                                                    SzChip(order.status.label,
+                                                        color: isNew
+                                                            ? sz.clay
+                                                            : sz.inkFaint,
+                                                        dense: true),
+                                                  ]),
+                                              const SizedBox(height: 5),
+                                              Wrap(
+                                                  spacing: 6,
+                                                  runSpacing: 4,
+                                                  children: [
+                                                    if (order.parentOrderNo
+                                                        .isNotEmpty)
+                                                      SzChip(
+                                                          '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}',
+                                                          color: sz.earn,
+                                                          dense: true),
+                                                    if (_urgedOrders.contains(
+                                                        order.orderNo))
+                                                      SzChip('催',
+                                                          color: sz.danger,
+                                                          dense: true),
+                                                    if (order.pickup)
+                                                      SzChip(
+                                                          order.pickupCode
+                                                                  .isEmpty
+                                                              ? '自取'
+                                                              : '自取 ${order.pickupCode}',
+                                                          color: sz.hold,
+                                                          dense: true),
+                                                  ]),
+                                              if (order.scheduledLabel != null)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 4),
+                                                  child: Text(
+                                                      '⏰ ${order.scheduledLabel},请按时出餐',
+                                                      style: TextStyle(
+                                                          fontSize: 12,
+                                                          color: sz.hold,
+                                                          fontWeight:
+                                                              FontWeight.w600)),
+                                                ),
+                                              if (isNew) _waitTimer(order),
+                                              // 备餐计时:接单后按承诺出餐时长计时,超时高亮
+                                              if (order.status ==
+                                                  OrderStatus.accepted)
+                                                _prepTimer(order),
+                                              const SizedBox(height: 5),
+                                              Row(children: [
+                                                Text(yuan(order.totalCents),
+                                                    style: szMoney(
+                                                        fontSize: 14,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: sz.ink)),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(order.address,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                          fontSize: 12,
+                                                          color: sz.inkMuted)),
+                                                ),
+                                              ]),
+                                              if (order.remark.isNotEmpty)
+                                                Text('备注:${order.remark}',
+                                                    style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: sz.inkMuted)),
+                                              if (order.status ==
+                                                      OrderStatus.cancelled &&
+                                                  order.cancelReason.isNotEmpty)
+                                                Text(
+                                                    '取消原因:${order.cancelReason}',
+                                                    style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: sz.danger)),
+                                              if (order.refundCents > 0)
+                                                Text(
+                                                    '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
+                                                    style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: sz.danger)),
+                                              if (_actionsFor(order)
+                                                  .isNotEmpty) ...[
+                                                const SizedBox(height: 6),
+                                                Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.end,
+                                                  children: _actionsFor(order),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
-                                if (isNew) _waitTimer(order),
-                                // 备餐计时:接单后按承诺出餐时长计时,超时高亮
-                                if (order.status == OrderStatus.accepted)
-                                  _prepTimer(order),
-                                const SizedBox(height: 5),
-                                Row(children: [
-                                  Text(yuan(order.totalCents),
-                                      style: szMoney(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: sz.ink)),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(order.address,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                            fontSize: 12, color: sz.inkMuted)),
-                                  ),
-                                ]),
-                                if (order.remark.isNotEmpty)
-                                  Text('备注:${order.remark}',
-                                      style: TextStyle(
-                                          fontSize: 12, color: sz.inkMuted)),
-                                if (order.status == OrderStatus.cancelled &&
-                                    order.cancelReason.isNotEmpty)
-                                  Text('取消原因:${order.cancelReason}',
-                                      style: TextStyle(
-                                          fontSize: 12, color: sz.danger)),
-                                if (order.refundCents > 0)
-                                  Text(
-                                      '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
-                                      style: TextStyle(
-                                          fontSize: 12, color: sz.danger)),
-                                if (_actionsFor(order).isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: _actionsFor(order),
-                                  ),
-                                ],
-                              ],
-                            ),
                           ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
-            ),
-          ),
-        ],
-      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),

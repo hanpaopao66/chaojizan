@@ -68,7 +68,8 @@ class RiderHomePage extends StatefulWidget {
   State<RiderHomePage> createState() => _RiderHomePageState();
 }
 
-class _RiderHomePageState extends State<RiderHomePage> {
+class _RiderHomePageState extends State<RiderHomePage>
+    with WidgetsBindingObserver {
   int _tab = 0;
   bool _online = false;
   int? _grabRadiusKm; // 接单半径偏好(null=不限),服务端持久化
@@ -85,15 +86,44 @@ class _RiderHomePageState extends State<RiderHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) =>
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'rider'));
     _loadVerify(); // 认证状态:只做提示与跑单前置,不挡浏览
     _refresh();
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refresh());
+    _startPolling();
+  }
+
+  /// 轮询分三档,不能一刀切停掉。
+  ///
+  /// 骑手是全天挂机的重度用户,5 秒一次拉单在后台照跑等于白烧电。但服务端
+  /// 目前**没有骑手新单推送**(push.py 只推商家新单和用户订单状态),
+  /// 新单提醒完全依赖这个轮询——后台直接停会让骑手漏单。所以:
+  ///  - 未上线:后台彻底停(没上线时 availableOrders 本来就是空的)
+  ///  - 已上线 + 后台:降到 20 秒(仍会响铃提醒,耗电降到四分之一)
+  ///  - 前台:5 秒
+  /// 等骑手新单推送接上后,后台这一档可以彻底停掉。
+  void _startPolling({bool background = false}) {
+    _pollTimer?.cancel();
+    if (background && !_online) return;
+    final period = background ? const Duration(seconds: 20) : const Duration(seconds: 5);
+    _pollTimer = Timer.periodic(period, (_) => _refresh());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refresh();
+      _startPolling();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _startPolling(background: true);
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _keepaliveTimer?.cancel();
     _location.stop();

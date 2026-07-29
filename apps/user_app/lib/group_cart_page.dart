@@ -23,7 +23,8 @@ class GroupCartPage extends StatefulWidget {
   State<GroupCartPage> createState() => _GroupCartPageState();
 }
 
-class _GroupCartPageState extends State<GroupCartPage> {
+class _GroupCartPageState extends State<GroupCartPage>
+    with WidgetsBindingObserver {
   Map<String, dynamic>? _cart;
   List<Dish> _dishes = [];
   Timer? _timer;
@@ -31,12 +32,28 @@ class _GroupCartPageState extends State<GroupCartPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _timer = Timer.periodic(const Duration(seconds: 3), (_) => _sync());
   }
 
+  /// 拼单同步:3 秒一次很费电,退到后台就停,回前台立刻同步一次
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _sync();
+      _timer?.cancel();
+      _timer =
+          Timer.periodic(const Duration(seconds: 3), (_) => _sync());
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _timer?.cancel();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     super.dispose();
   }
