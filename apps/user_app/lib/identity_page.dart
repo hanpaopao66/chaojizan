@@ -74,8 +74,8 @@ class _IdentityPageState extends State<IdentityPage> {
                           padding: const EdgeInsets.all(20),
                           child: Column(
                             children: [
-                              const Icon(Icons.verified_user,
-                                  size: 48, color: kMoneyGreen),
+                              Icon(Icons.verified_user,
+                                  size: 48, color: Theme.of(context).sz.earn),
                               const SizedBox(height: 10),
                               Text('已完成实名认证',
                                   style: theme.textTheme.titleMedium?.copyWith(

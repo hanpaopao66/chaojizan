@@ -85,20 +85,20 @@ class _DeliveryMapPageState extends State<DeliveryMapPage>
             lng: order.merchantLng!,
             label: order.merchantName,
             icon: Icons.storefront,
-            color: kPromoAmber),
+            color: Theme.of(context).sz.hold),
       if (rider != null)
         MapPoint(
             lat: rider.lat,
             lng: rider.lng,
             label: '骑手',
             icon: Icons.sports_motorsports,
-            color: kBrandOrange),
+            color: Theme.of(context).sz.clay),
       MapPoint(
           lat: order.lat,
           lng: order.lng,
           label: '送达地址',
           icon: Icons.home,
-          color: kMoneyGreen),
+          color: Theme.of(context).sz.earn),
     ];
 
     return Scaffold(

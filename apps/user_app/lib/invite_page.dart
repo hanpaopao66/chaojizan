@@ -52,11 +52,11 @@ class _InvitePageState extends State<InvitePage> {
                     Text('我的邀请码', style: theme.textTheme.titleSmall),
                     const SizedBox(height: 8),
                     Text('${d['code']}',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 34,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 6,
-                            color: kBrandOrange)),
+                            color: Theme.of(context).sz.clay)),
                     const SizedBox(height: 8),
                     Text('好友注册 24 小时内填码,完成首单后你俩各得 $reward无门槛券',
                         textAlign: TextAlign.center,

@@ -18,7 +18,7 @@ class _StayOrderListViewState extends State<StayOrderListView> {
   late Future<List<StayOrder>> _future = widget.api.myStayOrders();
 
   Color _statusColor(String status, ThemeData theme) => switch (status) {
-        'completed' => kMoneyGreen,
+        'completed' => Theme.of(context).sz.earn,
         'cancelled' || 'closed' || 'rejected' || 'noshow' =>
           theme.colorScheme.outline,
         _ => theme.colorScheme.primary,
@@ -254,8 +254,8 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
               Text(preview.note),
               const SizedBox(height: 8),
               Text('预计退款:${yuan(preview.refundCents)}',
-                  style: const TextStyle(
-                      color: kMoneyGreen, fontWeight: FontWeight.bold)),
+                  style: TextStyle(
+                      color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
               if (preview.penaltyCents > 0)
                 Text('扣款:${yuan(preview.penaltyCents)}(归商家,平台分文不取)',
                     style: const TextStyle(fontSize: 13)),
@@ -434,7 +434,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
                       Text(_aftersale!.statusLabel,
                           style: TextStyle(
                               color: _aftersale!.resolvedOk
-                                  ? kMoneyGreen
+                                  ? Theme.of(context).sz.earn
                                   : (_aftersale!.status == 'pending'
                                       ? theme.colorScheme.primary
                                       : theme.colorScheme.outline),
@@ -538,7 +538,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
       {bool bold = false, bool green = false}) {
     final style = TextStyle(
         fontWeight: bold ? FontWeight.bold : null,
-        color: green ? kMoneyGreen : null);
+        color: green ? Theme.of(context).sz.earn : null);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(children: [

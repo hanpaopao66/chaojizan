@@ -64,7 +64,7 @@ class _CouponsPageState extends State<CouponsPage> {
                               style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w900,
-                                  color: usable ? kMoneyGreen : Colors.grey),
+                                  color: usable ? Theme.of(context).sz.earn : Colors.grey),
                             ),
                             title: Text(
                                 (c['min_spend_cents'] as int) > 0
@@ -82,7 +82,7 @@ class _CouponsPageState extends State<CouponsPage> {
                                     : (c['used'] == true ? '已使用' : '已过期'),
                                 style: TextStyle(
                                     color: usable
-                                        ? kMoneyGreen
+                                        ? Theme.of(context).sz.earn
                                         : Colors.grey,
                                     fontWeight: FontWeight.w700)),
                           ),

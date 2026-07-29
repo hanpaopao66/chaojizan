@@ -128,7 +128,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
   }
 
   Color _policyColor(String policy) => switch (policy) {
-        'limited_free' => const Color(0xFF0E8A5F), // 账目绿:对用户友好的政策
+        'limited_free' => Theme.of(context).sz.earn, // 到手的钱:对用户友好的政策
         'first_night' => Colors.grey.shade700,
         _ => Colors.deepOrange,
       };

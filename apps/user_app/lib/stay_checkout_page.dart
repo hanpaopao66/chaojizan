@@ -205,8 +205,8 @@ class _PaidPage extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.check_circle_outline,
-                size: 64, color: Color(0xFF0E8A5F)),
+            Icon(Icons.check_circle_outline,
+                size: 64, color: Theme.of(context).sz.earn),
             const SizedBox(height: 16),
             Text('已支付 ${yuan(order.totalCents)}',
                 style: Theme.of(context).textTheme.titleLarge),

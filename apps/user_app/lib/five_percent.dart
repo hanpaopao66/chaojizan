@@ -16,7 +16,7 @@ Future<void> showFivePercentSheet(BuildContext context) {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(icon, size: 18, color: kBrandOrange),
+                Icon(icon, size: 18, color: Theme.of(context).sz.clay),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -39,8 +39,8 @@ Future<void> showFivePercentSheet(BuildContext context) {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.check_circle_outline,
-                    size: 18, color: kMoneyGreen),
+                Icon(Icons.check_circle_outline,
+                    size: 18, color: Theme.of(context).sz.earn),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -104,7 +104,7 @@ Future<void> showFivePercentSheet(BuildContext context) {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: kBrandOrange.withValues(alpha: .08),
+                color: Theme.of(context).sz.clay.withValues(alpha: .08),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(

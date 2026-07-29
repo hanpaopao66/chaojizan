@@ -63,12 +63,14 @@ Widget _cardShell({required List<Widget> children}) => Container(
           crossAxisAlignment: CrossAxisAlignment.start, children: children),
     );
 
+// 分享图是离屏渲染成图片的,没有 BuildContext,而且底永远是白的——
+// 这里直接取浅色令牌值,不跟随 App 主题(跟随了反而会在深色下糊成一片)
 Widget _footer() => Row(children: [
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('超级赞外卖',
+          Text('超级赞外卖',
               style: TextStyle(
-                  color: kBrandOrange,
+                  color: SzColors.light.clay,
                   fontWeight: FontWeight.w900,
                   fontSize: 16)),
           Text('商家只抽5% · 配送费全归骑手 · 账目公开',
@@ -90,7 +92,7 @@ Widget shopShareCard(Merchant m) => _cardShell(children: [
       const SizedBox(height: 4),
       Row(children: [
         if (m.ratingAvg != null) ...[
-          const Icon(Icons.star, size: 14, color: kBrandOrange),
+          Icon(Icons.star, size: 14, color: SzColors.light.clay),
           Text(' ${m.ratingAvg}  ',
               style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
@@ -135,8 +137,8 @@ Widget orderShareCard(Order o, {required bool maskAmount}) {
     ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: Row(children: [
-        seg(kBrandOrange, merchantPart),
-        seg(kMoneyGreen, riderPart),
+        seg(SzColors.light.clay, merchantPart),
+        seg(SzColors.light.earn, riderPart),
         seg(Colors.blueGrey, platformPart),
       ]),
     ),

@@ -128,7 +128,7 @@ class _GroupCartPageState extends State<GroupCartPage> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
-                color: kMoneyGreen.withValues(alpha: .08),
+                color: Theme.of(context).sz.earn.withValues(alpha: .08),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

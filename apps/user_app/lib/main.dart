@@ -1638,8 +1638,8 @@ class _MenuPageState extends State<MenuPage>
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: ActionChip(
-                avatar: const Icon(Icons.card_giftcard,
-                    size: 16, color: kBrandOrange),
+                avatar: Icon(Icons.card_giftcard,
+                    size: 16, color: Theme.of(context).sz.clay),
                 label: Text(
                     '${b['threshold_cents'] == 0 ? "无门槛" : "满${b['threshold_cents'] ~/ 100}"}'
                     '减${b['off_cents'] ~/ 100} · 领',
@@ -1811,12 +1811,12 @@ class _MenuPageState extends State<MenuPage>
                                   horizontal: 4, vertical: 1),
                               decoration: BoxDecoration(
                                 color:
-                                    kPromoAmber.withValues(alpha: 0.15),
+                                    Theme.of(context).sz.hold.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(3),
                               ),
-                              child: const Text('限时',
+                              child: Text('限时',
                                   style: TextStyle(
-                                      fontSize: 10, color: kPromoAmber)),
+                                      fontSize: 10, color: Theme.of(context).sz.hold)),
                             ),
                           ],
                           if (dish.monthlySales > 0) ...[
@@ -2242,7 +2242,7 @@ class _OrderListViewState extends State<OrderListView> {
 
   /// 状态语义色:进行中 = 品牌橙(需要关注),完成 = 账目绿(钱已结清),取消 = 灰
   Color _statusColor(OrderStatus status, ThemeData theme) => switch (status) {
-        OrderStatus.completed => kMoneyGreen,
+        OrderStatus.completed => Theme.of(context).sz.earn,
         OrderStatus.cancelled => theme.colorScheme.outline,
         _ => theme.colorScheme.primary,
       };
@@ -2337,17 +2337,17 @@ class _OrderListViewState extends State<OrderListView> {
                 if (order.scheduledLabel != null) ...[
                   const SizedBox(height: 4),
                   Text('⏰ ${order.scheduledLabel}',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 12,
-                          color: kPromoAmber,
+                          color: Theme.of(context).sz.hold,
                           fontWeight: FontWeight.w600)),
                 ],
                 if (order.selfDelivery) ...[
                   const SizedBox(height: 4),
-                  const Text('🛵 商家自送',
+                  Text('🛵 商家自送',
                       style: TextStyle(
                           fontSize: 12,
-                          color: kMoneyGreen,
+                          color: Theme.of(context).sz.earn,
                           fontWeight: FontWeight.w600)),
                 ],
                 const SizedBox(height: 8),
@@ -3830,6 +3830,12 @@ class _ProfileViewState extends State<ProfileView> {
   // 营销总开关(服务端 /config):关着时邀请有礼等入口整体隐藏
   bool _marketingOn = false;
 
+  /// 三格数字。都从已有接口算出,拿不到就不显示那一格——
+  /// 「比别处省了多少」需要拿别家平台的费率做假设,那是造数,不做。
+  /// 这里的「累计优惠」是真金白银:历史订单的满减 + 平台补贴之和。
+  int? _doneOrders;
+  int? _savedCents;
+
   @override
   void initState() {
     super.initState();
@@ -3858,6 +3864,58 @@ class _ProfileViewState extends State<ProfileView> {
         setState(() => _marketingOn = config['marketing'] == true);
       }
     } catch (_) {}
+    if (widget.api.isLoggedIn) {
+      try {
+        final orders = await widget.api.myOrders();
+        var done = 0;
+        var saved = 0;
+        for (final o in orders) {
+          if (o.status == OrderStatus.completed ||
+              o.status == OrderStatus.delivered) {
+            done++;
+          }
+          saved += o.discountCents + o.subsidyCents;
+        }
+        if (mounted) {
+          setState(() {
+            _doneOrders = done;
+            _savedCents = saved;
+          });
+        }
+      } catch (_) {}
+    }
+  }
+
+  /// 三格数字里的一格。数字走衬线,标签弱化。
+  Widget _statCell(BuildContext context, String value, String label) {
+    final sz = Theme.of(context).sz;
+    return Expanded(
+      child: Column(children: [
+        Text(value,
+            style: szMoney(
+                fontSize: 20, fontWeight: FontWeight.w600, color: sz.ink)),
+        const SizedBox(height: 3),
+        Text(label, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+      ]),
+    );
+  }
+
+  Widget _accountRow(
+      BuildContext context, String title, String hint, VoidCallback onTap) {
+    final sz = Theme.of(context).sz;
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 14),
+        child: Row(children: [
+          Text(title, style: TextStyle(fontSize: 14, color: sz.ink)),
+          const Spacer(),
+          Text(hint, style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+          const SizedBox(width: 4),
+          Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
+        ]),
+      ),
+    );
   }
 
   Future<void> _editBirthdayAndPush() async {
@@ -4054,48 +4112,39 @@ class _ProfileViewState extends State<ProfileView> {
               onTap: _editName,
             ),
           ),
-        const SizedBox(height: 8),
-        Card(
-          color: theme.colorScheme.tertiaryContainer,
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            // 点进去是实数与公开账本,不是口号——信任的最终来源
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => TrustPage(api: widget.api))),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('为什么选择超级赞?',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                                color: theme.colorScheme.onTertiaryContainer,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                      Icon(Icons.chevron_right,
-                          size: 20,
-                          color: theme.colorScheme.onTertiaryContainer),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '· 商家只被抽成 5%(大平台 20%+),菜价更实在\n'
-                    '· 配送费 100% 归骑手,平台分文不取\n'
-                    '· 每一单的钱去了哪里,订单里全部透明可查\n\n'
-                    '点击查看实时账目、资金去向与社区见证节点。',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onTertiaryContainer,
-                        height: 1.6),
-                  ),
-                ],
-              ),
-            ),
+        const SizedBox(height: 10),
+        // 三格数字:先给"我从这平台得到了什么",再给功能入口
+        if (!guest && (_savedCents != null || _doneOrders != null))
+          SzCard(
+            child: Row(children: [
+              if (_savedCents != null)
+                _statCell(context, yuan(_savedCents!), '累计优惠'),
+              if (_savedCents != null && _doneOrders != null)
+                Container(width: 1, height: 34, color: theme.sz.line),
+              if (_doneOrders != null)
+                _statCell(context, '${_doneOrders!}', '已完成订单'),
+            ]),
           ),
+        if (!guest && (_savedCents != null || _doneOrders != null))
+          const SizedBox(height: 18),
+
+        // 「账目」排在「我的」之前:这是用户留下来的理由,不是附属功能
+        const SzSectionTitle('账目'),
+        const SizedBox(height: 9),
+        SzCard(
+          padding: EdgeInsets.zero,
+          child: Column(children: [
+            _accountRow(context, '钱去哪了', '每单可查',
+                () => openMoneyFlow(context, widget.api)),
+            Divider(height: 1, color: theme.sz.line),
+            _accountRow(context, '平台账本与见证节点', '公开可复核',
+                () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => TrustPage(api: widget.api)))),
+          ]),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 18),
+        const SzSectionTitle('我的'),
+        const SizedBox(height: 9),
         // 高频三件套:快捷格(与首页金刚区同一视觉语言)
         Card(
           child: Padding(
@@ -4126,20 +4175,19 @@ class _ProfileViewState extends State<ProfileView> {
                         child: Column(
                           children: [
                             Container(
-                              width: 44,
-                              height: 44,
+                              width: 42,
+                              height: 42,
                               decoration: BoxDecoration(
-                                color: theme.colorScheme.primary
-                                    .withValues(alpha: 0.10),
+                                color: theme.sz.surfaceAlt,
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(icon,
-                                  size: 22,
-                                  color: theme.colorScheme.primary),
+                                  size: 20, color: theme.sz.inkMuted),
                             ),
-                            const SizedBox(height: 5),
+                            const SizedBox(height: 6),
                             Text(label,
-                                style: const TextStyle(fontSize: 12)),
+                                style: TextStyle(
+                                    fontSize: 11.5, color: theme.sz.ink)),
                           ],
                         ),
                       ),
@@ -4452,7 +4500,7 @@ class _RefundProgressCard extends StatelessWidget {
   (IconData, String, Color) _statusOf(RefundRecord r, BuildContext context) {
     switch (r.status) {
       case 'success':
-        return (Icons.check_circle_rounded, '已原路退回你的支付账户', kMoneyGreen);
+        return (Icons.check_circle_rounded, '已原路退回你的支付账户', Theme.of(context).sz.earn);
       case 'failed':
         return (
           Icons.error_outline_rounded,
@@ -4463,7 +4511,7 @@ class _RefundProgressCard extends StatelessWidget {
         return (
           Icons.hourglass_top_rounded,
           '银行处理中,一般 1-3 个工作日到账',
-          kPromoAmber
+          Theme.of(context).sz.hold
         );
     }
   }
@@ -4472,7 +4520,7 @@ class _RefundProgressCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      color: kMoneyGreen.withValues(alpha: .06),
+      color: Theme.of(context).sz.earn.withValues(alpha: .06),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -4480,11 +4528,11 @@ class _RefundProgressCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.currency_yuan, size: 18, color: kMoneyGreen),
+                Icon(Icons.currency_yuan, size: 18, color: Theme.of(context).sz.earn),
                 const SizedBox(width: 8),
                 Text('退款 ${yuan(order.refundCents)}',
                     style: theme.textTheme.titleSmall
-                        ?.copyWith(color: kMoneyGreen)),
+                        ?.copyWith(color: Theme.of(context).sz.earn)),
               ],
             ),
             if (refunds.isEmpty)

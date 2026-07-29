@@ -95,12 +95,12 @@ class _TrustPageState extends State<TrustPage> {
                       // 三原则:实数,不是口号(5% 卡可点开看「5% 去哪了」)
                       Row(
                         children: [
-                          _principle(theme, '5%', '商家佣金上限', kBrandOrange,
+                          _principle(theme, '5%', '商家佣金上限', Theme.of(context).sz.clay,
                               onTap: () => showFivePercentSheet(context)),
                           const SizedBox(width: 10),
-                          _principle(theme, '100%', '配送费归骑手', kMoneyGreen),
+                          _principle(theme, '100%', '配送费归骑手', Theme.of(context).sz.earn),
                           const SizedBox(width: 10),
-                          _principle(theme, '2%', '团购核销费率', kPromoAmber),
+                          _principle(theme, '2%', '团购核销费率', Theme.of(context).sz.hold),
                         ],
                       ),
                       const SizedBox(height: 16),
@@ -172,8 +172,8 @@ class _TrustPageState extends State<TrustPage> {
           children: [
             Row(
               children: [
-                const Icon(Icons.verified_user_outlined,
-                    size: 18, color: kMoneyGreen),
+                Icon(Icons.verified_user_outlined,
+                    size: 18, color: Theme.of(context).sz.earn),
                 const SizedBox(width: 8),
                 Text('社区见证节点', style: theme.textTheme.titleSmall),
               ],
@@ -183,10 +183,10 @@ class _TrustPageState extends State<TrustPage> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text('$online',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 34,
                         fontWeight: FontWeight.w800,
-                        color: kMoneyGreen,
+                        color: Theme.of(context).sz.earn,
                         height: 1)),
                 const SizedBox(width: 8),
                 Padding(
@@ -220,7 +220,7 @@ class _TrustPageState extends State<TrustPage> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: kMoneyGreen.withValues(alpha: .07),
+                color: Theme.of(context).sz.earn.withValues(alpha: .07),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
@@ -238,7 +238,7 @@ class _TrustPageState extends State<TrustPage> {
                           color: _verifying
                               ? theme.colorScheme.outline
                               : (_witness?.ok ?? false)
-                                  ? kMoneyGreen
+                                  ? Theme.of(context).sz.earn
                                   : theme.colorScheme.error),
                       const SizedBox(width: 6),
                       Expanded(
@@ -320,21 +320,21 @@ class _TrustPageState extends State<TrustPage> {
                     children: [
                       Expanded(
                           flex: (merchant * 1000 ~/ total).clamp(1, 1000),
-                          child: const ColoredBox(color: kMoneyGreen)),
+                          child: ColoredBox(color: Theme.of(context).sz.earn)),
                       Expanded(
                           flex: (rider * 1000 ~/ total).clamp(1, 1000),
-                          child: const ColoredBox(color: Color(0xFF4DA3FF))),
+                          child: ColoredBox(color: Theme.of(context).sz.earn)),
                       Expanded(
                           flex: (platform * 1000 ~/ total).clamp(1, 1000),
-                          child: const ColoredBox(color: kBrandOrange)),
+                          child: ColoredBox(color: Theme.of(context).sz.clay)),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 10),
-              _legend(theme, kMoneyGreen, '商家净得', _yuan(merchant), total, merchant),
-              _legend(theme, const Color(0xFF4DA3FF), '骑手所得', _yuan(rider), total, rider),
-              _legend(theme, kBrandOrange, '平台留存', _yuan(platform), total, platform),
+              _legend(theme, Theme.of(context).sz.earn, '商家净得', _yuan(merchant), total, merchant),
+              _legend(theme, theme.sz.earn, '骑手所得', _yuan(rider), total, rider),
+              _legend(theme, Theme.of(context).sz.clay, '平台留存', _yuan(platform), total, platform),
             ],
           ],
         ),
