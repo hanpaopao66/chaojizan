@@ -1,6 +1,6 @@
 # 超级赞 Super-Z · 待开发功能提示词库(第八辑:三端前端视觉重构)
 
-> **执行状态(2026-07-29):#101–#111 全部完成并逐条提交。**
+> **执行状态(2026-07-29):#101–#112 全部完成并逐条提交。**
 > 走查记录见本文件末尾「#111 走查清单」;验收截图在
 > `marketing/design/screens/`,上架截图在 `screens/store/`。
 
@@ -31,6 +31,7 @@
 | 109 | 商家端重构 | `merchant_app/lib/`(17 文件 7222 行) |
 | 110 | 骑手端重构 | `rider_app/lib/`(7 文件 2704 行) |
 | 111 | 深色/无障碍/动效收口 + 上架截图重出 | 三端 |
+| 112 | 商家端住宿子目录与两端二级页的信息层级重排 | `merchant_app/lib/hotel/` + 两端二级页 |
 
 ## 设计基线(唯一数值来源)
 
@@ -278,6 +279,26 @@
 - 重出上架截图:三端各 5–8 张,浅色为主(商店展示以浅色为准),覆盖首页/核心操作/账目透明,存 marketing/design/screens/store/,并更新第七辑 #100 的提审材料清单。
 技术要点:走查用清单方式逐屏打勾,把清单写进提交说明,漏的比错的更麻烦;三档字号建议用 MediaQuery 包一层临时调试开关,别手改系统设置来回切;截图分辨率按各商店要求(华为/小米/OPPO/vivo/App Store)确认后再批量出。
 验收:三端 flutter analyze 零问题、能出 release 包;走查清单三端全绿;三端全局搜 kBrandOrange|kMoneyGreen|kInk|kPromoAmber|Color(0x 均无命中(brand.dart 内定义处除外);marketing/design/screens/store/ 截图齐全;docs/BRAND.md 与设计稿与代码一致。
+```
+
+### 112. 商家端住宿子目录与两端二级页的信息层级重排
+
+```
+把第八辑遗留的二级页做完:#109 #110 只做了令牌替换与核心屏(订单卡/抢单卡)的结构调整,住宿子目录与两端二级页观感跟上了但信息层级还是旧的。先读 docs/DEV-PROMPTS-8.md 的「设计基线」与「本辑专属拍板」。
+
+现状(2026-07-29 盘点):
+- merchant_app/lib/hotel/ 6 文件 1498 行:room_manage_page(635)、stay_orders_page(343)、stay_aftersales_page(172)、stay_reviews_page(148)、hotel_tab(108)、hotel_home_page(92)。共 6 处 ListTile、5 处裸 Chip、12 处裸 Card,0 处 SzCard/SzEmpty;
+- 商家端二级页:finance_page(439,11 Card/7 ListTile,商家最认的一屏)、shop_tab(1692)、dish_manage_page(809)、voucher_manage_page(316)、invoice_page(206)、analytics_page(201)、appeal_page(176);
+- 骑手端二级页:wallet_page(395,9 Card/11 ListTile,骑手最认的一屏)、verify_page(258)、issues_page(188)。
+业务规则(已拍板):
+- 顺序按"谁最常看"排:商家对账页 → 骑手钱包页 → 住宿子目录 → 其余二级页。前两个是两端各自最认的一屏,先做;
+- 统一四件事,不做别的:① 分组用 SzSectionTitle 起头,不用裸标题;② 成块内容换 SzCard(不带外边距,间距调用方给);③ 金额一律 szMoney、正文数字 szFigure,佣金/服务费用 hold 色、到手的钱用 earn 色;④ 状态换 SzChip,空列表换 SzEmpty;
+- 商家对账页要能一眼回答"今天挣了多少、被抽了多少、什么时候到账",明细行用 SzFeeRow 写清科目;
+- 骑手钱包页要能一眼回答"今天跑了多少、什么时候能提、提现要不要手续费",逐单明细保留;
+- 住宿页沿用外卖侧同一套语言,住宿口径文案(5% 离店计佣、取消不计佣)一字不改;
+- **不改任何业务逻辑与接口**,只动展示层。
+技术要点:ListTile 换成自绘行时注意热区不小于 48;shop_tab 1692 行体量大,按"店铺资料 / 营业设置 / 证照"分批改分批提交;商家端信息密度高于用户端,字号比用户端小一档但令牌同一套。
+验收:三端 flutter analyze 零问题;两端 release 包能出;改动屏截图存 marketing/design/screens/;住宿页与外卖页并排看观感一致。
 ```
 
 ---

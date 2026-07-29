@@ -99,7 +99,8 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
           }
           final list = snapshot.data ?? const <StayAfterSale>[];
           if (list.isEmpty) {
-            return const Center(child: Text('没有售后申请'));
+            return const SzEmpty(
+                art: BrandArt.receipt, text: '没有售后申请\n有申请会在这里提醒你');
           }
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -108,43 +109,86 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
               itemBuilder: (context, i) {
                 final a = list[i];
                 final pending = a.status == 'pending';
-                return Card(
+                final sz = theme.sz;
+                return Container(
                   margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: sz.surface,
+                    borderRadius: BorderRadius.circular(kRadiusMd),
+                    border: Border.all(color: sz.line),
+                  ),
+                  // 待处理的左侧一条 clay:超时会按成立处理,不能被翻过去
+                  foregroundDecoration: pending
+                      ? BoxDecoration(
+                          borderRadius: BorderRadius.circular(kRadiusMd),
+                          border:
+                              Border(left: BorderSide(color: sz.clay, width: 3)),
+                        )
+                      : null,
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(kCardPad),
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(children: [
-                            Chip(label: Text(a.kindLabel)),
+                            SzChip(a.kindLabel,
+                                color: pending ? sz.clay : sz.inkFaint,
+                                dense: true),
                             const SizedBox(width: 8),
                             Expanded(
                                 child: Text(
-                                    '单号 …${a.orderNo.length > 6 ? a.orderNo.substring(a.orderNo.length - 6) : a.orderNo}'
-                                    ' · ${a.guestName}')),
+                                    '…${a.orderNo.length > 6 ? a.orderNo.substring(a.orderNo.length - 6) : a.orderNo}'
+                                    ' · ${a.guestName}',
+                                    style: TextStyle(
+                                        fontSize: 12, color: sz.inkMuted))),
                             Text(a.statusLabel,
                                 style: TextStyle(
-                                    color: pending
-                                        ? theme.colorScheme.primary
-                                        : theme.colorScheme.outline,
-                                    fontWeight: FontWeight.bold)),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: pending ? sz.clay : sz.inkFaint)),
                           ]),
-                          Text('房费 ${yuan(a.totalCents)}'),
-                          if (a.note.isNotEmpty) Text('客人说明:${a.note}'),
+                          const SizedBox(height: 6),
+                          Text.rich(
+                            TextSpan(children: [
+                              const TextSpan(text: '房费 '),
+                              TextSpan(
+                                  text: yuan(a.totalCents),
+                                  style: szMoney(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: sz.ink)),
+                            ]),
+                            style:
+                                TextStyle(fontSize: 12.5, color: sz.inkMuted),
+                          ),
+                          if (a.note.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text('客人说明:${a.note}',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      height: 1.55,
+                                      color: sz.ink)),
+                            ),
                           if (a.merchantNote.isNotEmpty)
                             Text('我的回应:${a.merchantNote}',
-                                style: theme.textTheme.bodySmall),
+                                style: TextStyle(
+                                    fontSize: 11.5, color: sz.inkMuted)),
                           if (a.resolvedOk)
-                            Text('退款 ${yuan(a.refundCents)}'
+                            Text(
+                                '退款 ${yuan(a.refundCents)}'
                                 '${a.penaltyCents > 0 ? "(含违约金 ${yuan(a.penaltyCents)})" : ""}',
-                                style: theme.textTheme.bodySmall),
+                                style: TextStyle(
+                                    fontSize: 11.5, color: sz.inkMuted)),
                           if (pending) ...[
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 6),
                             if (a.kind == 'no_room')
                               Text('2 小时未响应将按成立处理',
-                                  style: theme.textTheme.bodySmall
-                                      ?.copyWith(color: Colors.deepOrange)),
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: sz.danger)),
                             Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [

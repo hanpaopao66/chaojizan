@@ -106,11 +106,48 @@ class _WalletPageState extends State<WalletPage> {
     return '${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
   }
 
+  Widget _sep() => Divider(height: 1, color: Theme.of(context).sz.line);
+
+  /// 入口行:标题 + 一句说明 + 右箭头。整行热区,高度不小于 48。
+  Widget _navRow(String title, String desc, Widget Function() page,
+      {bool danger = false}) {
+    final sz = Theme.of(context).sz;
+    return InkWell(
+      onTap: () => Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => page())),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 13),
+        child: Row(children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 14, color: danger ? sz.danger : sz.ink)),
+                const SizedBox(height: 2),
+                Text(desc,
+                    style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
+        ]),
+      ),
+    );
+  }
+
   Widget _metric(String label, int cents) {
-    return Column(children: [
-      Text(yuan(cents), style: Theme.of(context).textTheme.titleMedium),
-      Text(label, style: Theme.of(context).textTheme.bodySmall),
-    ]);
+    final sz = Theme.of(context).sz;
+    return Expanded(
+      child: Column(children: [
+        Text(yuan(cents),
+            style: szMoney(
+                fontSize: 15, fontWeight: FontWeight.w600, color: sz.ink)),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+      ]),
+    );
   }
 
   @override
@@ -136,197 +173,139 @@ class _WalletPageState extends State<WalletPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // 绿色大数卡:余额大字 + 白色提现按钮(风格系统规则④)
+          // 这一屏要能一眼回答:能提多少、今天跑了多少、什么时候能到账。
+          // 户外单手,所以金额和按钮都比另外两端再大一档
           MoneyHeroCard(
             label: '可提现余额',
             amountCents: wallet.balanceCents,
-            subtitle:
-                '今日跑单 ${todayEarnings.length} 单,入账 ${yuan(todayCents)} · 提现零手续费 T+1',
-            action: FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).sz.clay,
-                foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                minimumSize: const Size(0, 38),
-                padding: const EdgeInsets.symmetric(horizontal: 22),
-                textStyle:
-                    const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800),
-              ),
-              onPressed: wallet.balanceCents >= 1000 ? _withdraw : null,
-              child: Text(wallet.balanceCents >= 1000 ? '提现' : '满 ¥10 可提'),
-            ),
           ),
           const SizedBox(height: 8),
-          // 承诺卡:品牌渐变唯一允许出现处(规则⑦)
-          const PledgeCard(
-            title: '配送费 100% 归骑手',
-            body: '平台分文不取,提现零手续费——规则写进开源代码,欢迎监督',
+          SzCard(
+            child: Column(children: [
+              Row(children: [
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(children: [
+                      const TextSpan(text: '今天跑了 '),
+                      TextSpan(
+                          text: '${todayEarnings.length}',
+                          style: szFigure(
+                              fontSize: 15, fontWeight: FontWeight.w600)),
+                      const TextSpan(text: ' 单,入账 '),
+                      TextSpan(
+                          text: yuan(todayCents),
+                          style: szMoney(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).sz.earn)),
+                    ]),
+                    style: TextStyle(
+                        fontSize: 13, color: Theme.of(context).sz.ink),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 52)),
+                  onPressed: wallet.balanceCents >= 1000 ? _withdraw : null,
+                  child: Text(wallet.balanceCents >= 1000
+                      ? '提现 · T+1 到账,零手续费'
+                      : '满 ¥10 可提现'),
+                ),
+              ),
+            ]),
           ),
           const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _metric('累计收入', wallet.totalEarnedCents),
-                  _metric('提现中', wallet.pendingWithdrawalCents),
-                  _metric('已提现', wallet.withdrawnCents),
-                ],
-              ),
+          SzCard(
+            child: Row(
+              children: [
+                _metric('累计收入', wallet.totalEarnedCents),
+                _metric('提现中', wallet.pendingWithdrawalCents),
+                _metric('已提现', wallet.withdrawnCents),
+              ],
             ),
           ),
           if (_worklog != null) ...[
             const SizedBox(height: 8),
             // 我的数据:自我参考,不做考核
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('我的数据(仅自己可见,不做考核)',
-                        style: Theme.of(context).textTheme.titleSmall),
-                    const SizedBox(height: 6),
-                    Text(
-                      '今日在线 ${(_worklog!['today_minutes'] as int) ~/ 60} 小时'
-                      '${(_worklog!['today_minutes'] as int) % 60} 分 · '
-                      '${_worklog!['today_orders']} 单 ${yuan(_worklog!['today_earned_cents'] as int)}\n'
-                      '本周在线 ${(_worklog!['week_minutes'] as int) ~/ 60} 小时'
-                      '${(_worklog!['week_minutes'] as int) % 60} 分 · '
-                      '${_worklog!['week_orders']} 单 ${yuan(_worklog!['week_earned_cents'] as int)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: 8),
-          Card(
-            child: Column(children: [
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.school_outlined),
-                title: const Text('上岗培训考试'),
-                subtitle: const Text('交通安全/食安/平台规则,80 分通过'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => RiderExamPage(api: widget.api))),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.menu_book_outlined),
-                title: const Text('规则中心'),
-                subtitle: const Text('转单/考核/结算/申诉,规则先说清'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => RiderRulesPage(api: widget.api))),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.health_and_safety_outlined),
-                title: const Text('意外保障'),
-                subtitle: const Text('每日上线自动登记,出险有兜底'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => RiderInsurancePage(api: widget.api))),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.contact_phone_outlined),
-                title: const Text('紧急联系人'),
-                subtitle: const Text('SOS 时平台第一时间联系(加密存储)'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => EmergencyContactsPage(api: widget.api))),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.emergency_outlined,
-                    color: Colors.red),
-                title: const Text('事故上报',
-                    style: TextStyle(color: Colors.red)),
-                subtitle: const Text('人先安全;在途订单自动处理'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => RiderAccidentPage(api: widget.api))),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.checkroom_outlined),
-                title: const Text('装备申领'),
-                subtitle: const Text('头盔/保温餐箱/雨衣'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => RiderGearPage(api: widget.api))),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              dense: true,
-              leading: const Icon(Icons.report_problem_outlined),
-              title: const Text('配送异常与申诉'),
-              subtitle: const Text('上报记录;判骑手责的裁决 72 小时内可申诉'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => RiderIssuesPage(api: widget.api))),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              dense: true,
-              leading: const Icon(Icons.credit_card_outlined),
-              title: const Text('收款账户'),
-              subtitle: const Text('提现打款到这里;未登记不能提现'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => PayoutAccountPage(api: widget.api))),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Card(
-            color: Theme.of(context).colorScheme.tertiaryContainer,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
+            SzCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.handshake,
-                      color: Theme.of(context).colorScheme.onTertiaryContainer),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '超级赞承诺:配送费 100% 归骑手,平台分文不取,提现零手续费。每一分都看得见。\n'
-                      '配送收入属劳务报酬,请依法申报个税;平台接入灵活用工代发后将自动完税并另行通知。',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onTertiaryContainer,
-                          height: 1.5),
-                    ),
+                  Text('我的数据 · 仅自己可见,不做考核',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).sz.ink)),
+                  const SizedBox(height: 8),
+                  Text(
+                    '今日在线 ${(_worklog!['today_minutes'] as int) ~/ 60} 小时'
+                    '${(_worklog!['today_minutes'] as int) % 60} 分 · '
+                    '${_worklog!['today_orders']} 单 ${yuan(_worklog!['today_earned_cents'] as int)}\n'
+                    '本周在线 ${(_worklog!['week_minutes'] as int) ~/ 60} 小时'
+                    '${(_worklog!['week_minutes'] as int) % 60} 分 · '
+                    '${_worklog!['week_orders']} 单 ${yuan(_worklog!['week_earned_cents'] as int)}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        height: 1.7,
+                        color: Theme.of(context).sz.inkMuted),
                   ),
                 ],
               ),
             ),
+          ],
+          const SizedBox(height: 18),
+          const SzSectionTitle('保障与规则'),
+          const SizedBox(height: 9),
+          SzCard(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              _navRow('上岗培训考试', '交通安全 / 食安 / 平台规则,80 分通过',
+                  () => RiderExamPage(api: widget.api)),
+              _sep(),
+              _navRow('规则中心', '转单 / 考核 / 结算 / 申诉,规则先说清',
+                  () => RiderRulesPage(api: widget.api)),
+              _sep(),
+              _navRow('意外保障', '每日上线自动登记,出险有兜底',
+                  () => RiderInsurancePage(api: widget.api)),
+              _sep(),
+              _navRow('紧急联系人', 'SOS 时平台第一时间联系(加密存储)',
+                  () => EmergencyContactsPage(api: widget.api)),
+              _sep(),
+              // 事故上报是唯一该用 danger 的入口:人先安全
+              _navRow('事故上报', '人先安全;在途订单自动处理',
+                  () => RiderAccidentPage(api: widget.api),
+                  danger: true),
+              _sep(),
+              _navRow('装备申领', '头盔 / 保温餐箱 / 雨衣',
+                  () => RiderGearPage(api: widget.api)),
+            ]),
           ),
-          const SizedBox(height: 8),
-          Card(
-            child: ListTile(
-              dense: true,
-              leading: const Icon(Icons.support_agent_outlined),
-              title: const Text('联系平台客服'),
-              subtitle: const Text('提现、账目、认证有疑问?直接找平台'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => SupportPage(api: widget.api))),
-            ),
+          const SizedBox(height: 18),
+          const SzSectionTitle('账目与账户'),
+          const SizedBox(height: 9),
+          SzCard(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              _navRow('收款账户', '提现打款到这里;未登记不能提现',
+                  () => PayoutAccountPage(api: widget.api)),
+              _sep(),
+              _navRow('配送异常与申诉', '上报记录;判骑手责的裁决 72 小时内可申诉',
+                  () => RiderIssuesPage(api: widget.api)),
+              _sep(),
+              _navRow('联系平台客服', '提现、账目、认证有疑问?直接找平台',
+                  () => SupportPage(api: widget.api)),
+            ]),
+          ),
+          const SizedBox(height: 18),
+          const PledgeCard(
+            title: '配送费 100% 归骑手',
+            body: '平台分文不取,提现零手续费,每一分都看得见。\n'
+                '配送收入属劳务报酬,请依法申报个税;'
+                '平台接入灵活用工代发后将自动完税并另行通知。',
           ),
           const SizedBox(height: 8),
           // 商店审核三件套:协议全文 / 退出登录 / 注销账号

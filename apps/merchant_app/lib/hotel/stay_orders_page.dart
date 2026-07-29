@@ -240,13 +240,17 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
     }
   }
 
-  Color? _statusColor(String status) => switch (status) {
-        'paid' => Colors.orange,
-        'confirmed' => Colors.blue,
-        'checked_in' => Colors.green,
-        'noshow' || 'cancelled' || 'rejected' => Colors.grey,
-        _ => null,
-      };
+  /// 状态色沿用与外卖侧同一套语义:待处理=clay(要你动手)、
+  /// 进行中=hold、已入住=earn、终态=弱化。红色只留给报错。
+  Color _statusColor(String status) {
+    final sz = Theme.of(context).sz;
+    return switch (status) {
+      'paid' => sz.clay,
+      'confirmed' => sz.hold,
+      'checked_in' || 'completed' => sz.earn,
+      _ => sz.inkFaint,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -262,13 +266,13 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
           child: Row(children: [
             for (final (value, label) in _states)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(value == 'pending' && _pendingCount > 0
+                padding: const EdgeInsets.only(right: 7),
+                child: SzChip(
+                  value == 'pending' && _pendingCount > 0
                       ? '$label($_pendingCount)'
-                      : label),
+                      : label,
                   selected: _state == value,
-                  onSelected: (_) {
+                  onTap: () {
                     setState(() => _state = value);
                     _refresh();
                   },
@@ -282,9 +286,8 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
           onRefresh: _refresh,
           child: _orders.isEmpty
               ? ListView(children: const [
-                  Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: Text('这一栏没有订单')))
+                  SizedBox(height: 40),
+                  SzEmpty(art: BrandArt.receipt, text: '这一栏没有订单'),
                 ])
               : ListView.builder(
                   itemCount: _orders.length,
@@ -295,41 +298,84 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
     ]);
   }
 
+  /// 住宿订单卡:与外卖侧订单卡同一套语言——待处理的左侧一条 clay,
+  /// 状态走 SzChip,金额走 szMoney,到手的钱 earn、佣金 hold。
   Widget _orderCard(StayOrder order) {
-    final color = _statusColor(order.status);
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    final sz = Theme.of(context).sz;
+    final needsAction = order.status == 'paid';
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: Border.all(color: sz.line),
+      ),
+      foregroundDecoration: needsAction
+          ? BoxDecoration(
+              borderRadius: BorderRadius.circular(kRadiusMd),
+              border: Border(left: BorderSide(color: sz.clay, width: 3)),
+            )
+          : null,
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(
                 child: Text('${order.roomTypeName} × ${order.roomsQty} 间',
-                    style: Theme.of(context).textTheme.titleMedium)),
-            Chip(
-              label: Text(order.statusLabel,
-                  style: TextStyle(color: color, fontSize: 12)),
-              side: color == null ? null : BorderSide(color: color),
+                    style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: sz.ink))),
+            const SizedBox(width: 8),
+            SzChip(order.statusLabel,
+                color: _statusColor(order.status), dense: true),
+          ]),
+          const SizedBox(height: 6),
+          Row(children: [
+            Text(yuan(order.totalCents),
+                style: szMoney(
+                    fontSize: 14, fontWeight: FontWeight.w600, color: sz.ink)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                  '${order.checkinDate} → ${order.checkoutDate} · ${order.nights} 晚',
+                  style: TextStyle(fontSize: 12, color: sz.inkMuted)),
             ),
           ]),
-          const SizedBox(height: 4),
-          Text('${order.checkinDate} → ${order.checkoutDate}'
-              '(${order.nights} 晚) · ${yuan(order.totalCents)}'),
-          Text('入住人:${order.guestName} · ${order.guestPhone}'),
-          if (order.arrivalNote.isNotEmpty) Text('备注:${order.arrivalNote}'),
+          const SizedBox(height: 3),
+          Text('入住人 ${order.guestName} · ${order.guestPhone}',
+              style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+          if (order.arrivalNote.isNotEmpty)
+            Text('备注:${order.arrivalNote}',
+                style: TextStyle(fontSize: 12, color: sz.inkMuted)),
           Text(order.cancelPolicyText,
-              style: Theme.of(context).textTheme.bodySmall),
+              style: TextStyle(fontSize: 11, color: sz.inkFaint)),
           if (order.status == 'completed')
-            Text('实收 ${yuan(order.netCents)}(佣金 ${yuan(order.feeCents)})',
-                style: TextStyle(
-                    color: Colors.green.shade700,
-                    fontWeight: FontWeight.bold)),
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Text.rich(
+                TextSpan(children: [
+                  const TextSpan(text: '实收 '),
+                  TextSpan(
+                      text: yuan(order.netCents),
+                      style: szMoney(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: sz.earn)),
+                  const TextSpan(text: ' · 佣金 '),
+                  TextSpan(
+                      text: yuan(order.feeCents),
+                      style: szMoney(fontSize: 12.5, color: sz.hold)),
+                ]),
+                style: TextStyle(fontSize: 12, color: sz.inkMuted),
+              ),
+            ),
           if (order.refundCents > 0)
             Text('已退款 ${yuan(order.refundCents)}(${order.refundNote})',
-                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                style: TextStyle(fontSize: 12, color: sz.danger)),
           if (order.status == 'noshow')
             Text('系统已按政策处理:扣首晚 ${yuan(order.netCents)} 归你,其余退客人',
-                style: Theme.of(context).textTheme.bodySmall),
+                style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
           if (_actionsFor(order).isNotEmpty) ...[
             const SizedBox(height: 8),
             Row(

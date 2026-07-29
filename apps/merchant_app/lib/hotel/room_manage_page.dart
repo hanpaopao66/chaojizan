@@ -84,59 +84,100 @@ class _RoomManagePageState extends State<RoomManagePage> {
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 28),
         children: [
-          for (final rt in _roomTypes)
-            Card(
-              child: ListTile(
-                leading: rt.imageUrls.isEmpty
-                    ? const CircleAvatar(child: Icon(Icons.bed_outlined))
-                    : CircleAvatar(
-                        backgroundImage: NetworkImage(
-                            widget.api.resolveUrl(rt.imageUrls.first))),
-                title: Text(rt.name,
-                    style: TextStyle(
-                        decoration:
-                            rt.isOnSale ? null : TextDecoration.lineThrough)),
-                subtitle: Text([
-                  if (rt.bedType.isNotEmpty) rt.bedType,
-                  if (rt.areaM2 > 0) '${rt.areaM2}㎡',
-                  '住${rt.maxGuests}人',
-                  rt.policyLabel,
-                ].join(' · ')),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Switch(
-                    value: rt.isOnSale,
-                    onChanged: (v) async {
-                      try {
-                        await widget.api
-                            .updateRoomType(rt.id, {'is_on_sale': v});
-                        _refresh();
-                      } catch (e) {
-                        _snack(e is ApiException ? e.message : '$e');
-                      }
-                    },
-                  ),
-                  IconButton(
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () => _editType(rt)),
-                ]),
-              ),
-            ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.add),
-            label: const Text('新增房型'),
-            onPressed: () => _editType(null),
-          ),
           if (_roomTypes.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Text('先建房型,再到「房价房态日历」设价开卖',
-                  textAlign: TextAlign.center),
+            const SzEmpty(
+                art: BrandArt.bowl,
+                text: '还没有房型\n先建房型,再到「房价房态日历」设价开卖')
+          else
+            SzCard(
+              padding: EdgeInsets.zero,
+              child: Column(children: [
+                for (final (i, rt) in _roomTypes.indexed) ...[
+                  if (i > 0)
+                    Divider(height: 1, color: Theme.of(context).sz.line),
+                  _roomTypeRow(rt),
+                ],
+              ]),
             ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: () => _editType(null),
+            child: const Text('新增房型'),
+          ),
         ],
       ),
+    );
+  }
+
+  /// 房型一行:缩略图 + 名称与规格 + 上下架开关 + 编辑。
+  /// 下架的房型名称走弱化色而不是删除线——删除线在长名称上很难读。
+  Widget _roomTypeRow(RoomType rt) {
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 10),
+      child: Row(children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(kRadiusSm),
+          child: Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: sz.surfaceAlt,
+              border: Border.all(color: sz.line),
+              borderRadius: BorderRadius.circular(kRadiusSm),
+            ),
+            child: rt.imageUrls.isEmpty
+                ? Center(
+                    child: Text(rt.name.isEmpty ? '房' : rt.name.characters.first,
+                        style: szFigure(fontSize: 16, color: sz.inkFaint)))
+                : Image.network(widget.api.resolveUrl(rt.imageUrls.first),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+          ),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(rt.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: rt.isOnSale ? sz.ink : sz.inkFaint)),
+              const SizedBox(height: 2),
+              Text(
+                  [
+                    if (rt.bedType.isNotEmpty) rt.bedType,
+                    if (rt.areaM2 > 0) '${rt.areaM2}㎡',
+                    '住 ${rt.maxGuests} 人',
+                    rt.policyLabel,
+                  ].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+            ],
+          ),
+        ),
+        Switch(
+          value: rt.isOnSale,
+          onChanged: (v) async {
+            try {
+              await widget.api.updateRoomType(rt.id, {'is_on_sale': v});
+              _refresh();
+            } catch (e) {
+              _snack(e is ApiException ? e.message : '$e');
+            }
+          },
+        ),
+        IconButton(
+            icon: const Icon(Icons.edit_outlined, size: 19),
+            onPressed: () => _editType(rt)),
+      ]),
     );
   }
 
@@ -150,7 +191,8 @@ class _RoomManagePageState extends State<RoomManagePage> {
 
   Widget _calendarView() {
     if (_roomTypes.isEmpty) {
-      return const Center(child: Text('先到「房型管理」建房型'));
+      return const SzEmpty(
+          art: BrandArt.bowl, text: '先到「房型管理」建房型\n建好后才能在这里设价开卖');
     }
     final dates = [
       for (var i = 0; i < _days; i++) _calendarStart.add(Duration(days: i))
@@ -232,19 +274,23 @@ class _RoomManagePageState extends State<RoomManagePage> {
     }
     final isPast = d.isBefore(DateTime(
         DateTime.now().year, DateTime.now().month, DateTime.now().day));
-    final style = Theme.of(context).textTheme.bodySmall;
+    final sz = Theme.of(context).sz;
     Widget child;
     if (day == null) {
-      child = Text('未设价', style: style?.copyWith(color: Colors.grey));
+      child = Text('未设价', style: TextStyle(fontSize: 11, color: sz.inkFaint));
     } else if (day.closed) {
-      child = Text('关房', style: style?.copyWith(color: Colors.red));
+      // 关房是店家自己关的,不是错误——用弱化色不用 danger
+      child = Text('关房', style: TextStyle(fontSize: 11, color: sz.inkFaint));
     } else {
       child = Column(mainAxisSize: MainAxisSize.min, children: [
         Text('¥${(day.priceCents / 100).toStringAsFixed(0)}',
-            style: style?.copyWith(fontWeight: FontWeight.bold)),
-        Text('余${day.leftQty}',
-            style: style?.copyWith(
-                color: day.leftQty <= 0 ? Colors.red : Colors.green.shade700)),
+            style: szMoney(
+                fontSize: 12, fontWeight: FontWeight.w600, color: sz.ink)),
+        Text('余 ${day.leftQty}',
+            style: TextStyle(
+                fontSize: 10.5,
+                // 卖光了才是要你动手的信号
+                color: day.leftQty <= 0 ? sz.danger : sz.inkMuted)),
       ]);
     }
     return DataCell(

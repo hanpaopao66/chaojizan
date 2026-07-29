@@ -65,7 +65,8 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
           }
           final reviews = snapshot.data ?? const <StayReview>[];
           if (reviews.isEmpty) {
-            return const Center(child: Text('还没有住客点评'));
+            return const SzEmpty(
+                art: BrandArt.receipt, text: '还没有住客点评\n客人离店后可以评价');
           }
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -73,56 +74,83 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
               itemCount: reviews.length,
               itemBuilder: (context, i) {
                 final r = reviews[i];
-                return Card(
+                final sz = Theme.of(context).sz;
+                // 我的回复用次级块底衬出来,比换个字色更容易区分"谁说的"
+                Widget quoted(String label, String text) => Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(top: 7),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: sz.surfaceAlt,
+                        borderRadius: BorderRadius.circular(kRadiusSm),
+                      ),
+                      child: Text('$label:$text',
+                          style: TextStyle(
+                              fontSize: 12, height: 1.55, color: sz.inkMuted)),
+                    );
+                return Container(
                   margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: sz.surface,
+                    borderRadius: BorderRadius.circular(kRadiusMd),
+                    border: Border.all(color: sz.line),
+                  ),
                   child: Padding(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(kCardPad),
                     child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(children: [
                             Text(r.reviewerName,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
+                                style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: sz.ink)),
                             const SizedBox(width: 8),
                             for (var s = 1; s <= 5; s++)
                               Icon(
                                   s <= r.rating
                                       ? Icons.star
                                       : Icons.star_border,
-                                  size: 14,
-                                  color: Colors.amber),
+                                  size: 13,
+                                  color:
+                                      s <= r.rating ? sz.hold : sz.inkFaint),
                             const Spacer(),
-                            Text('单号 …${r.orderNo.length > 6 ? r.orderNo.substring(r.orderNo.length - 6) : r.orderNo}',
-                                style:
-                                    Theme.of(context).textTheme.bodySmall),
+                            Text(
+                                '…${r.orderNo.length > 6 ? r.orderNo.substring(r.orderNo.length - 6) : r.orderNo}',
+                                style: szFigure(
+                                    fontSize: 11, color: sz.inkFaint)),
                           ]),
-                          if (r.tags.isNotEmpty)
-                            Text(r.tags.join(' · '),
-                                style:
-                                    Theme.of(context).textTheme.bodySmall),
-                          if (r.comment.isNotEmpty) Text(r.comment),
-                          if (r.reply.isNotEmpty)
-                            Text('我的回复:${r.reply}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary)),
-                          if (r.appendContent.isNotEmpty)
-                            Text('追评:${r.appendContent}'),
+                          if (r.tags.isNotEmpty) ...[
+                            const SizedBox(height: 5),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: [
+                                for (final t in r.tags)
+                                  SzChip(t, color: sz.inkFaint, dense: true),
+                              ],
+                            ),
+                          ],
+                          if (r.comment.isNotEmpty) ...[
+                            const SizedBox(height: 7),
+                            Text(r.comment,
+                                style: TextStyle(
+                                    fontSize: 13, height: 1.6, color: sz.ink)),
+                          ],
+                          if (r.reply.isNotEmpty) quoted('我的回复', r.reply),
+                          if (r.appendContent.isNotEmpty) ...[
+                            const SizedBox(height: 7),
+                            Text('追评:${r.appendContent}',
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    height: 1.6,
+                                    color: sz.ink)),
+                          ],
                           if (r.appendReply.isNotEmpty)
-                            Text('追评回复:${r.appendReply}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(
-                                        color: Theme.of(context)
-                                            .colorScheme
-                                            .primary)),
+                            quoted('追评回复', r.appendReply),
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
