@@ -18,6 +18,7 @@ import 'group_cart_page.dart';
 import 'help_page.dart';
 import 'hotel_pages.dart';
 import 'messages_page.dart';
+import 'money_flow_page.dart';
 import 'invite_page.dart';
 import 'share_card.dart';
 import 'five_percent.dart';
@@ -509,7 +510,7 @@ class _MerchantListViewState extends State<MerchantListView> {
       padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
       child: InkWell(
         borderRadius: BorderRadius.circular(kRadiusMd),
-        onTap: () => showFivePercentSheet(context),
+        onTap: () => openMoneyFlow(context, widget.api),
         child: Container(
           padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
           decoration: BoxDecoration(
@@ -3292,7 +3293,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                 if (order.refundCents > 0)
                   _RefundProgressCard(order: order, refunds: _refunds),
                 if (order.commissionCents > 0) ...[
-                  _MoneyFlowCard(order: order),
+                  _MoneyFlowCard(order: order, api: widget.api),
                   const SizedBox(height: 10),
                   // 承诺卡:品牌渐变唯一允许出现处(风格系统规则⑦)
                   const PledgeCard(
@@ -3442,6 +3443,16 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                         size: 18),
                     onPressed: () => _urge(order),
                     label: const Text('催一下'),
+                  ),
+                // 账目透明是一级入口:与「催一下」平级摆着,不藏在页尾
+                if (order.commissionCents > 0)
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.pie_chart_outline, size: 18),
+                    onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => MoneyFlowPage(
+                                api: widget.api, order: order))),
+                    label: const Text('钱去哪了'),
                   ),
                 // 无人接单告警中:加急小费(100% 归骑手),更快有人接
                 if (order.noRiderAlerted &&
@@ -4388,84 +4399,44 @@ class _OrderTimeline extends StatelessWidget {
       etaText = '预计 $min 分钟内送达';
     }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (etaText != null) ...[
-              Row(children: [
-                Icon(Icons.access_time,
-                    size: 18, color: theme.colorScheme.primary),
-                const SizedBox(width: 6),
-                Text(etaText,
-                    style: TextStyle(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.bold)),
-              ]),
-              const Divider(height: 20),
-            ],
-            for (var i = 0; i < _mySteps.length; i++)
-              _timelineRow(context, i, currentIdx),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _timelineRow(BuildContext context, int i, int currentIdx) {
-    final theme = Theme.of(context);
-    final done = currentIdx >= 0 && i <= currentIdx;
-    final isCurrent = i == currentIdx;
-    final time = _timeOf(_mySteps[i].$1);
-    final color = done ? theme.colorScheme.primary : theme.colorScheme.outline;
-
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Column(
-            children: [
-              Icon(done ? Icons.check_circle : Icons.circle_outlined,
-                  size: 18, color: color),
-              if (i < _mySteps.length - 1)
-                Expanded(
-                  child: Container(
-                    width: 2,
-                    color: (currentIdx > i)
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.outlineVariant,
-                  ),
-                ),
-            ],
+    final sz = theme.sz;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 状态 eyebrow + 一句话大标题:打开订单页第一眼只想知道"还要多久"
+        if (etaText != null) ...[
+          Text(_mySteps[currentIdx.clamp(0, _mySteps.length - 1)].$2,
+              style: TextStyle(
+                  fontSize: 11, letterSpacing: 1.2, color: sz.inkFaint)),
+          const SizedBox(height: 5),
+          Text.rich(
+            TextSpan(children: [
+              const TextSpan(text: '预计 '),
+              TextSpan(
+                  text: etaText.replaceAll(RegExp(r'[^0-9]'), ''),
+                  style: szFigure(fontSize: 26, fontWeight: FontWeight.w600)),
+              const TextSpan(text: ' 分钟内送达'),
+            ]),
+            style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.w500, color: sz.ink),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      _mySteps[i].$2,
-                      style: TextStyle(
-                        color: done
-                            ? theme.colorScheme.onSurface
-                            : theme.colorScheme.outline,
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                  if (time != null)
-                    Text(time, style: theme.textTheme.bodySmall),
-                ],
-              ),
-            ),
-          ),
+          const SizedBox(height: 16),
         ],
-      ),
+        const SzSectionTitle('进度'),
+        const SizedBox(height: 10),
+        SzCard(
+          child: SzTimeline(steps: [
+            for (var i = 0; i < _mySteps.length; i++)
+              SzStep(
+                _mySteps[i].$2,
+                subtitle: _timeOf(_mySteps[i].$1),
+                state: currentIdx < 0 || i > currentIdx
+                    ? SzStepState.todo
+                    : (i == currentIdx ? SzStepState.now : SzStepState.done),
+              ),
+          ]),
+        ),
+      ],
     );
   }
 }
@@ -4561,106 +4532,64 @@ class _RefundProgressCard extends StatelessWidget {
   }
 }
 
+/// 订单详情里的分账预览:三条 SzMoneyFlow + 一句"点开看完整口径"。
+/// 完整版在 MoneyFlowPage(#107),这里只做预览,两处口径同源。
 class _MoneyFlowCard extends StatelessWidget {
-  const _MoneyFlowCard({required this.order});
+  const _MoneyFlowCard({required this.order, required this.api});
 
   final Order order;
-
-  Widget _row(BuildContext context, String who, String desc, int cents,
-      {required double fraction, required Color color, VoidCallback? onInfo}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(who, style: const TextStyle(fontWeight: FontWeight.w600)),
-              // 「5% 去哪了」说明入口:让质疑在产品里找到答案
-              if (onInfo != null)
-                GestureDetector(
-                  onTap: onInfo,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 3),
-                    child: Icon(Icons.help_outline,
-                        size: 15,
-                        color: Theme.of(context).colorScheme.outline),
-                  ),
-                ),
-              const SizedBox(width: 6),
-              Expanded(
-                  child: Text(desc,
-                      style: Theme.of(context).textTheme.bodySmall)),
-              Text(yuan(cents),
-                  style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          const SizedBox(height: 3),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: fraction,
-              minHeight: 5,
-              color: color,
-              backgroundColor:
-                  Theme.of(context).colorScheme.surfaceContainerHighest,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  final ApiClient api;
 
   @override
   Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
     final total = order.totalCents;
-    final theme = Theme.of(context);
-    return Card(
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              const Icon(Icons.visibility_outlined, size: 18),
-              const SizedBox(width: 6),
-              Text('这一单的钱去哪了',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold)),
-            ]),
-            const SizedBox(height: 8),
-            _row(context, '商家实收', '菜品+打包-满减,只扣 5% 服务费',
-                order.merchantNetCents,
+    if (total <= 0) return const SizedBox.shrink();
+    final riderGot = order.deliveryFeeCents + order.tipCents;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SzSectionTitle('这一单的钱去哪了'),
+        const SizedBox(height: 9),
+        SzCard(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => MoneyFlowPage(api: api, order: order))),
+          padding:
+              const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 2),
+          child: SzMoneyFlow(
+            whyLabel: '为什么是 5%',
+            items: [
+              SzFlowItem(
+                name: '商家实收',
+                amountCents: order.merchantNetCents,
                 fraction: order.merchantNetCents / total,
-                color: kMoneyGreen),
-            _row(
-                context,
-                '骑手所得',
-                order.tipCents > 0 ? '配送费+小费,100% 归骑手' : '配送费 100% 归骑手',
-                order.deliveryFeeCents + order.tipCents,
-                fraction: (order.deliveryFeeCents + order.tipCents) / total,
-                color: kMoneyGreen),
-            _row(context, '平台留存', '用于服务器与平台运营',
-                order.commissionCents,
+                note: '菜品 + 打包 − 满减,只扣 5% 服务费',
+              ),
+              if (riderGot > 0)
+                SzFlowItem(
+                  name: '骑手所得',
+                  amountCents: riderGot,
+                  fraction: riderGot / total,
+                  note: order.tipCents > 0
+                      ? '配送费 + 小费 100% 归骑手'
+                      : '配送费 100% 归骑手,平台分文不取',
+                ),
+              SzFlowItem(
+                name: '平台留存',
+                amountCents: order.commissionCents,
                 fraction: order.commissionCents / total,
-                color: theme.colorScheme.primary,
-                onInfo: () => showFivePercentSheet(context)),
-            if (order.discountCents > 0)
-              _row(context, '商家让利', '满减优惠,商家承担',
-                  -order.discountCents,
-                  fraction: 0, color: Colors.orange),
-            if (order.subsidyCents > 0)
-              _row(context, '平台补贴', '首单立减,平台承担',
-                  -order.subsidyCents,
-                  fraction: 0, color: Colors.pink),
-            const SizedBox(height: 4),
-            Text('超级赞不吸血:账目对用户、商家、骑手三方完全透明',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.outline)),
-          ],
+                note: '服务器、客服与赔付池',
+                isHold: true,
+                onWhy: () => showFivePercentSheet(context),
+              ),
+            ],
+          ),
         ),
-      ),
+        const SizedBox(height: 8),
+        Text('点开可看完整分账口径,账目对用户、商家、骑手三方公开。',
+            style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+      ],
     );
   }
 }
