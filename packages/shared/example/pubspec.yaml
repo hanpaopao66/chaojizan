@@ -1,0 +1,23 @@
+name: superz_gallery
+description: 设计令牌与共享组件走查页(第八辑视觉重构用,不随三端发布)
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.4.0
+
+# 只依赖 shared,且 lib/ 里只 import brand.dart / sz_widgets.dart——
+# 不碰 jpush 等平台插件,web 才编得过(走查页跑在浏览器里出截图)。
+dependencies:
+  flutter:
+    sdk: flutter
+  superz_shared:
+    path: ../
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'brand.dart';
 import 'brand_art.dart';
 
 /// 弹性入场:成功图标/空态插画用,scale 从 0.6 弹到 1 + 淡入。
@@ -77,7 +78,7 @@ class _SkeletonListState extends State<SkeletonList>
 
   @override
   Widget build(BuildContext context) {
-    final base = Theme.of(context).colorScheme.surfaceContainerHighest;
+    final base = Theme.of(context).sz.surfaceAlt;
     return FadeTransition(
       opacity: _controller,
       child: ListView.builder(
@@ -131,6 +132,9 @@ class _SkeletonListState extends State<SkeletonList>
 
 /// 空态:品牌插画(按图标语义自动匹配)+ 文案 + 可选动作按钮。
 /// 没有匹配插画的图标退回灰图标展示,调用方无需改动。
+///
+/// 新代码用 [SzEmpty](sz_widgets.dart)——直接给插画,不用靠图标反查。
+/// 这个保留是为了三端存量调用不用一次改完。
 class EmptyState extends StatelessWidget {
   const EmptyState({
     super.key,
@@ -162,7 +166,8 @@ class EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final outline = Theme.of(context).colorScheme.outline;
+    final sz = Theme.of(context).sz;
+    final outline = sz.inkMuted;
     final art = _artByIcon[icon];
     return Center(
       child: Padding(
@@ -181,7 +186,8 @@ class EmptyState extends StatelessWidget {
                 style: TextStyle(color: outline, height: 1.5)),
             if (actionLabel != null) ...[
               const SizedBox(height: 16),
-              FilledButton.tonal(onPressed: onAction, child: Text(actionLabel!)),
+              // 空态里的动作是次要出口,不该抢走本屏唯一的 clay 实底
+              OutlinedButton(onPressed: onAction, child: Text(actionLabel!)),
             ],
           ],
         ),

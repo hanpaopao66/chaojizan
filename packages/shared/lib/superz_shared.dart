@@ -22,3 +22,4 @@ export 'src/support_page.dart';
 export 'src/update_checker.dart';
 export 'src/witness_service.dart';
 export 'src/ui_bits.dart';
+export 'src/sz_widgets.dart';
