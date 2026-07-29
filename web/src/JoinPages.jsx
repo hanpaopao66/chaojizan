@@ -63,6 +63,14 @@ export function JoinMerchant() {
         </div>
       </section>
       <section className="reveal visible">
+        <h2>带来的客,是你自己的客</h2>
+        <div className="cards3">
+          <div className="bcard"><h3>店铺专属码与海报</h3><p>商家端一键生成带你店名和二维码的海报,贴在店里或发给老客。顾客扫码直达你的店,不经过任何推荐位。</p></div>
+          <div className="bcard"><h3>老客召回,名单不外流</h3><p>你能看到有多少老客好久没来了,但看不到是谁、更导不出手机号——顾客的联系方式我们不给任何人,包括你。想叫人回来就发一批券,发多少你定。</p></div>
+          <div className="bcard"><h3>不摊派、不补贴</h3><p>平台没有补贴预算,也就不会向你摊派活动费。券是你自己出的钱,预算封顶、随时可停。</p></div>
+        </div>
+      </section>
+      <section className="reveal visible">
         <h2>超级赞对商家的承诺</h2>
         <ul className="promise-list">
           <li>✅ 佣金只抽 5%,写进开源代码,全网可查</li>
@@ -103,6 +111,7 @@ export function JoinRider() {
           <div className="bcard"><h3>配送费全归你</h3><p>按距离明码计价,用户付多少你收多少。公开账本里"骑手行只进不冲"是任何人都能验证的恒等式。</p></div>
           <div className="bcard"><h3>提现零手续费</h3><p>钱包余额随时提,平台一分不扣。到账进度在 App 里全程可见。</p></div>
           <div className="bcard"><h3>不玩派单惩罚</h3><p>抢单自愿、超时豁免规则公开。恶劣天气不强派,你的安全比时效值钱。</p></div>
+          <div className="bcard"><h3>新单直接推到手机</h3><p>附近有单进池就推送提醒,按你自己设的接单范围过滤,不用一直盯着屏幕刷。推了哪些单有记录可查,不怕"我怎么没收到"说不清。</p></div>
         </div>
       </section>
     </JoinShell>
