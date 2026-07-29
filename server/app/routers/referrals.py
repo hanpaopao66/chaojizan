@@ -60,7 +60,6 @@ async def my_referral(
     return {
         "enabled": await marketing_on(db),
         "code": code,
-        "reward_cents": settings.referral_reward_cents,
         "invited": invited,
         "rewarded": rewarded,
         "can_claim": bool(in_window and not claimed),
@@ -75,6 +74,8 @@ async def claim_referral(
 ):
     """新用户填邀请码(注册后 24 小时内,过期不候)。"""
     from ..services.flags import marketing_on
+    # referral_reward_cents 现在只当总开关用(<=0 = 关掉邀请功能),
+    # 具体发多少由商家批次定——平台不再决定金额,也就不该对外播报金额
     if settings.referral_reward_cents <= 0 or not await marketing_on(db):
         raise HTTPException(409, "邀请活动暂未开启")
     code = str(payload.get("code", "")).strip()
@@ -108,8 +109,8 @@ async def claim_referral(
     db.add(Referral(inviter_id=inviter.id, invitee_id=user.id))
     await db.commit()
     return {"ok": True,
-            "hint": f"完成首单后你和好友各得 "
-                    f"{settings.referral_reward_cents / 100:g} 元券"}
+            "hint": "完成首单后,如果那家店参与了新客推荐,"
+                    "你和好友各得一张该店的券"}
 
 
 async def reward_referral_if_first_order(db: AsyncSession, order) -> None:

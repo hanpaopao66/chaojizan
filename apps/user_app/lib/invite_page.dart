@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:superz_shared/superz_shared.dart';
 
-/// 邀请有礼:好友完成首单后双方各得券。奖励挂首单不挂注册,刷号无利可图。
+/// 邀请有礼:好友完成首单后,由首单那家店送券(#115 起券由商家出,平台不补贴)。
+/// 奖励挂首单不挂注册,刷号无利可图;店家没参与就没有券,文案不许暗示有。
 class InvitePage extends StatefulWidget {
   const InvitePage({super.key, required this.api});
 
@@ -38,8 +39,6 @@ class _InvitePageState extends State<InvitePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final d = _d;
-    final reward =
-        d == null ? '' : '${(d['reward_cents'] as int) / 100} 元';
     return Scaffold(
       appBar: AppBar(title: const Text('邀请有礼')),
       body: d == null
@@ -58,9 +57,17 @@ class _InvitePageState extends State<InvitePage> {
                             letterSpacing: 6,
                             color: Theme.of(context).sz.clay)),
                     const SizedBox(height: 8),
-                    Text('好友注册 24 小时内填码,完成首单后你俩各得 $reward无门槛券',
+                    // 券由首单那家店出,不是平台发——参与的店才有,
+                    // 所以这里说"可能有"而不是承诺一定有
+                    Text('好友注册 24 小时内填码;完成首单后,'
+                        '如果那家店参与了新客推荐,你俩各得一张该店的券',
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall),
+                    const SizedBox(height: 4),
+                    Text('平台不出这笔钱——我们不靠补贴换增长',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize: 11, color: Theme.of(context).sz.inkFaint)),
                     const SizedBox(height: 12),
                     Row(children: [
                       Expanded(
@@ -88,7 +95,7 @@ class _InvitePageState extends State<InvitePage> {
                                     '配送费全归骑手、账目公开。'
                                     '下载 https://chaojizan.cc/download ,'
                                     '注册后填我的邀请码 ${d['code']},'
-                                    '你首单完成咱俩各得 $reward券!'));
+                                    '首单完成后参与的店会送咱俩券。'));
                           },
                         ),
                       ),
