@@ -100,9 +100,11 @@ class UserApp extends StatelessWidget {
       valueListenable: elderMode,
       builder: (context, elder, _) => MaterialApp(
         title: '超级赞 · 点外卖',
-        // 强制亮色:白底+品牌色。暗色曾出现黑底黑字,以后要做就做正经暗色版
+        // 深浅两套令牌都在 brand.dart 里定义(第八辑 #101),
+        // #111 三端逐屏走查通过后放开跟随系统
         theme: superZTheme(Brightness.light),
-        themeMode: ThemeMode.light,
+        darkTheme: superZTheme(Brightness.dark),
+        themeMode: ThemeMode.system,
         // 长辈版:字号放大到 1.4×(封顶,避免溢出);关闭则尊重系统缩放
         builder: (context, child) {
           final mq = MediaQuery.of(context);
@@ -677,7 +679,9 @@ class _MerchantListViewState extends State<MerchantListView> {
           child: const SzSectionTitle('再来一单'),
         ),
         SizedBox(
-          height: 88,
+          // 卡高跟着字号缩放走:写死 88 的话,长辈版/系统大字下
+          // 摘要那行会被从中间切断(1.3× 实测)
+          height: 88 * MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.5),
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: kPagePad),
@@ -706,7 +710,13 @@ class _MerchantListViewState extends State<MerchantListView> {
                       const SizedBox(height: 2),
                       Expanded(
                         child: Text(order.summary,
-                            maxLines: 2,
+                            // 字号放大后两行塞不下,降成一行省略号,
+                            // 比让第二行被从中间切断体面
+                            maxLines: MediaQuery.textScalerOf(context)
+                                        .scale(1.0) >
+                                    1.15
+                                ? 1
+                                : 2,
                             overflow: TextOverflow.ellipsis,
                             style:
                                 TextStyle(fontSize: 11, color: sz.inkMuted)),

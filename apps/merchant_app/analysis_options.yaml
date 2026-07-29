@@ -27,10 +27,3 @@ linter:
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
 
-analyzer:
-  errors:
-    # 第八辑视觉重构期间的迁移标记:brand.dart 的旧色值常量已标 @Deprecated,
-    # 由任务 103–110 逐屏清理(见 docs/DEV-PROMPTS-8.md)。迁移完成前先降噪,
-    # 否则真正的 error/warning 会被淹在几十条提示里。
-    # #111 收口时删掉这一段——那时三端旧常量引用应为 0 处。
-    deprecated_member_use: ignore

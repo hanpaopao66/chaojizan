@@ -326,6 +326,7 @@ class _MyVouchersPageState extends State<MyVouchersPage> {
               // 二维码内容就是券码本身,商家端扫码核销
               Container(
                 padding: const EdgeInsets.all(8),
+                // 二维码必须白底黑码才扫得出来,这里不跟随主题
                 color: Colors.white,
                 child: QrImageView(
                   data: t.code,

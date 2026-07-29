@@ -1,5 +1,9 @@
 # 超级赞 Super-Z · 待开发功能提示词库(第八辑:三端前端视觉重构)
 
+> **执行状态(2026-07-29):#101–#111 全部完成并逐条提交。**
+> 走查记录见本文件末尾「#111 走查清单」;验收截图在
+> `marketing/design/screens/`,上架截图在 `screens/store/`。
+
 > 背景:三端 UI 沿用的是 M3 默认观感 + 炉火橙(`kBrandOrange #FF5A1F`),
 > 橙色铺得太满、纯白底久看刺眼、账目透明这一核心资产被埋在订单详情的折叠卡里。
 > 本辑按已通过的「Anthropic 风格」原型重做三端展示层。
@@ -275,3 +279,55 @@
 技术要点:走查用清单方式逐屏打勾,把清单写进提交说明,漏的比错的更麻烦;三档字号建议用 MediaQuery 包一层临时调试开关,别手改系统设置来回切;截图分辨率按各商店要求(华为/小米/OPPO/vivo/App Store)确认后再批量出。
 验收:三端 flutter analyze 零问题、能出 release 包;走查清单三端全绿;三端全局搜 kBrandOrange|kMoneyGreen|kInk|kPromoAmber|Color(0x 均无命中(brand.dart 内定义处除外);marketing/design/screens/store/ 截图齐全;docs/BRAND.md 与设计稿与代码一致。
 ```
+
+---
+
+## #111 走查清单(2026-07-29 执行记录)
+
+漏的比错的更麻烦,所以逐项记录做了什么、发现了什么。
+
+### 深色模式
+
+- 三端 `themeMode` 从硬锁 `light` 放开为 `system`,补 `darkTheme:`。
+  历史原因(旧主题深色下黑底黑字)已由 #101 的独立深色令牌解决。
+- 用户端逐屏走查:首页 / 店铺 / 结算 / 订单详情 / 钱去哪了 / 我的 —— 
+  卡片与页面底分得开、clay 在深底上够亮、earn 与 hold 仍可区分。
+- 排掉的深色隐患:
+  - `colorScheme.outline` 原先映射成发丝线色,而三端有 51 处拿它当次要
+    文字色用 → 改 `outline=inkMuted`、`outlineVariant=line`(#103 时发现);
+  - 骑手钱包提现按钮原是白底(压在绿色实底大数卡上才成立),大数卡改成
+    卡片底后白底按钮等于隐形 → 改 clay 实底;
+  - 券码二维码保持白底黑码并加注释,别被后人"顺手统一"掉。
+
+### 字号缩放
+
+- 1.0 / 1.3 三端过屏;1.6 由用户端 `MediaQuery` 的 `clamp(maxScaleFactor: 1.6)`
+  与长辈版 1.4× 覆盖。
+- 1.3× 实测到一处溢出:首页「再来一单」卡高写死 88,摘要第二行被从中间切断。
+  → 卡高跟着 `textScalerOf` 走,且 >1.15 时摘要降为一行省略号。
+
+### 动效
+
+- 位移/宽度动画只有 `SzMoneyFlow` 的占比条一处,已按 `disableAnimations` 静默;
+  其余是 Flutter 自带的转场与涟漪,跟随系统设置。
+
+### 地图
+
+- 覆盖物取色已随 #103–#110 的令牌替换一并换掉;marker 的白圈白图标压在
+  彩色 pin 上、底图背景色是地图自身的两套值,不跟随 App 主题(跟随反而看不清)。
+
+### 设计稿与截图
+
+- `docs/BRAND.md` 产品层色板换代,旧表折叠留档;明确代码唯一来源是
+  `brand.dart` 的 `SzColors`。
+- `marketing/design/superz_theme_v2.dart` 删除(旧主题副本,会被误当成源);
+  新增 `marketing/design/README.md` 说明哪些是旧稿、别照着取色。
+- 验收截图 `marketing/design/screens/`,上架截图 `screens/store/`。
+  **上架前要用 release 包重拍**——现在这批是 debug 包,右上角有 DEBUG 角标。
+
+### 遗留
+
+- 商家端与骑手端只做了令牌替换与核心屏(订单卡 / 抢单卡)的结构调整,
+  住宿子目录(`merchant_app/lib/hotel/` 6 个文件)与部分二级页仍是旧布局,
+  观感已跟上但信息层级没重排,后续按需单独排一条。
+- 三端对比度只做了肉眼走查,没跑数值化的对比度检查工具。

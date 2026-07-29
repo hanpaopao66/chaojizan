@@ -144,8 +144,8 @@ class _WalletPageState extends State<WalletPage> {
                 '今日跑单 ${todayEarnings.length} 单,入账 ${yuan(todayCents)} · 提现零手续费 T+1',
             action: FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Theme.of(context).sz.earn,
+                backgroundColor: Theme.of(context).sz.clay,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                 minimumSize: const Size(0, 38),
                 padding: const EdgeInsets.symmetric(horizontal: 22),
                 textStyle:

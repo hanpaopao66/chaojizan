@@ -30,9 +30,10 @@ class MerchantApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '超级赞商家端',
-      // 强制亮色 + 品牌主题(白底+炉火橙),不再跟随系统暗色
+      // 深浅两套令牌都在 brand.dart 里定义(第八辑 #101),#111 走查后放开
       theme: brandTheme(Brightness.light),
-      themeMode: ThemeMode.light,
+      darkTheme: brandTheme(Brightness.dark),
+      themeMode: ThemeMode.system,
       home: SplashGate(
           app: 'merchant',
           tagline: '入驻免费,总负担 5% 封顶',
