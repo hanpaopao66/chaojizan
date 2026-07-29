@@ -241,16 +241,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
     return '预约 $day ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   }
 
-  Widget _row(String label, String value, {bool bold = false}) {
-    final style = bold ? const TextStyle(fontWeight: FontWeight.bold) : null;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [Text(label, style: style), Text(value, style: style)],
-      ),
-    );
-  }
+  /// 「已省」= 满减 + 券抵扣。都取已有字段,没有优惠时不显示这一行,不造数。
+  int get _savedCents => _discountCents + _selectedCouponOff;
 
   @override
   Widget build(BuildContext context) {
@@ -409,47 +401,75 @@ class _CheckoutPageState extends State<CheckoutPage> {
             ),
           if (!_pickup) const SizedBox(height: 8),
 
-          // 商品明细
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(widget.merchant.name,
-                      style: theme.textTheme.titleMedium),
-                  const Divider(),
-                  for (final line in widget.cart)
-                    _row('${line.label} ×${line.quantity}',
-                        yuan(line.unitCents * line.quantity)),
-                  if (packing > 0) _row('打包费', yuan(packing)),
-                  if (discount > 0)
-                    _row('满减优惠(商家承担)', '-${yuan(discount)}'),
-                  if (_giftRule != null)
-                    _row(
-                        '已享:满${_giftRule!.thresholdCents ~/ 100}'
-                        '赠${_giftRule!.name}',
-                        '¥0'),
-                  if (_pickup)
-                    _row('配送费(到店自取)', '免')
-                  else
-                    _row('配送费(按距离)',
-                        fee == null ? '选地址后计算' : yuan(fee)),
-                  if (!_pickup && tip > 0)
-                    _row('小费(100% 归骑手)', yuan(tip)),
-                  if (_selectedCouponOff > 0)
-                    _row('安抚券抵扣(平台承担)',
-                        '-${yuan(_selectedCouponOff)}'),
-                  const Divider(),
-                  _row(
-                      '合计',
-                      total == null
-                          ? '—'
-                          : yuan(total - _selectedCouponOff),
-                      bold: true),
-                ],
-              ),
+          // 商品明细。每一行都写清"谁承担"——结算页最容易被质疑,
+          // 在这里把话讲透,比事后解释便宜
+          const SzSectionTitle('费用'),
+          const SizedBox(height: 8),
+          SzCard(
+            padding: const EdgeInsets.symmetric(
+                horizontal: kCardPad, vertical: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final line in widget.cart)
+                  SzFeeRow(
+                      label: '${line.label} ×${line.quantity}',
+                      amountCents: line.unitCents * line.quantity),
+                if (packing > 0)
+                  SzFeeRow(label: '打包费', amountCents: packing),
+                if (discount > 0)
+                  SzFeeRow(
+                      label: '满减优惠',
+                      note: '商家承担',
+                      amountCents: discount,
+                      negative: true),
+                if (_giftRule != null)
+                  SzFeeRow(
+                      label: '满${_giftRule!.thresholdCents ~/ 100}'
+                          '赠${_giftRule!.name}',
+                      note: '商家承担',
+                      amountCents: 0),
+                if (_pickup)
+                  const SzFeeRow(
+                      label: '配送费', note: '到店自取,免', amountCents: 0)
+                else if (fee == null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(children: [
+                      Text('配送费',
+                          style:
+                              TextStyle(fontSize: 13, color: theme.sz.inkMuted)),
+                      const Spacer(),
+                      Text('选地址后计算',
+                          style:
+                              TextStyle(fontSize: 12, color: theme.sz.inkFaint)),
+                    ]),
+                  )
+                else
+                  SzFeeRow(
+                      label: '配送费', note: '全额归骑手', amountCents: fee),
+                if (!_pickup && tip > 0)
+                  SzFeeRow(label: '小费', note: '全额归骑手', amountCents: tip),
+                if (_selectedCouponOff > 0)
+                  SzFeeRow(
+                      label: '安抚券抵扣',
+                      note: '平台承担',
+                      amountCents: _selectedCouponOff,
+                      negative: true),
+                Divider(color: theme.sz.line, height: 17),
+                SzFeeRow(
+                    label: '实付',
+                    amountCents: total == null ? 0 : total - _selectedCouponOff,
+                    emphasized: true),
+              ],
             ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Text('没有配送费浮动、没有会员价差、没有隐藏服务费。你看到的就是全部。',
+                style: TextStyle(
+                    fontSize: 11.5, height: 1.55, color: theme.sz.inkMuted)),
           ),
           const SizedBox(height: 8),
 
@@ -494,43 +514,53 @@ class _CheckoutPageState extends State<CheckoutPage> {
           ),
           const SizedBox(height: 8),
 
-          // 透明分账预览
-          if (total != null)
-            Card(
-              color: theme.colorScheme.surfaceContainerHighest
-                  .withValues(alpha: 0.35),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Icon(Icons.visibility_outlined, size: 16),
-                      const SizedBox(width: 6),
-                      Text('这一单的钱会去哪',
-                          style: theme.textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                    ]),
-                    const SizedBox(height: 6),
-                    _row('商家实收(扣 5% 服务费)',
-                        yuan(_foodCents + packing - discount - commission)),
-                    if (!_pickup)
-                      _row(tip > 0 ? '骑手所得(配送费+小费)' : '骑手所得(配送费全额)',
-                          yuan(fee! + tip)),
-                    _row('平台留存', yuan(commission)),
-                  ],
+          // 透明分账预览。占比按用户实付算,平台留存那行同时写商家侧口径——
+          // 只写一个数会被当成玩数字(见 docs/DEV-PROMPTS-8.md 拍板)
+          if (total != null && total > 0) ...[
+            const SzSectionTitle('这一单的钱会去哪'),
+            const SizedBox(height: 8),
+            SzCard(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: kCardPad, vertical: 2),
+              child: SzMoneyFlow(items: [
+                SzFlowItem(
+                  name: '商家实收',
+                  amountCents: _foodCents + packing - discount - commission,
+                  fraction:
+                      (_foodCents + packing - discount - commission) / total,
+                  note: '菜品 + 打包 − 满减,只扣 '
+                      '${(widget.merchant.commissionRate * 100).toStringAsFixed(0)}% 服务费',
                 ),
-              ),
+                if (!_pickup)
+                  SzFlowItem(
+                    name: '骑手所得',
+                    amountCents: fee! + tip,
+                    fraction: (fee + tip) / total,
+                    note: tip > 0
+                        ? '配送费 + 小费 100% 归骑手,平台分文不取'
+                        : '配送费 100% 归骑手,平台分文不取',
+                  ),
+                SzFlowItem(
+                  name: '平台留存',
+                  amountCents: commission,
+                  fraction: commission / total,
+                  note: '服务器、客服与赔付池 · 按商家侧口径 '
+                      '${yuan(commission)} / ${yuan(_foodCents + packing - discount)}'
+                      ' = ${(widget.merchant.commissionRate * 100).toStringAsFixed(0)}%',
+                  isHold: true,
+                ),
+              ]),
             ),
+          ],
           const SizedBox(height: 80),
         ],
       ),
       bottomNavigationBar: SafeArea(
         child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
           decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8)],
+            color: theme.sz.surface,
+            border: Border(top: BorderSide(color: theme.sz.line)),
           ),
           child: Row(
             children: [
@@ -547,18 +577,37 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       child: child,
                     ),
                   ),
-                  child: Text(
-                    _belowMinOrder
-                        ? '差 ${yuan(widget.merchant.minOrderCents - _foodCents)} 起送'
-                        : total == null
-                            ? '请先选择地址'
-                            : '合计 ${yuan(total)}${_pickup ? ' · 自取' : ''}',
-                    key: ValueKey('$_belowMinOrder-$total'),
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                  child: Column(
+                    key: ValueKey('$_belowMinOrder-$total-$_selectedCouponOff'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        total == null
+                            ? '—'
+                            : yuan(total - _selectedCouponOff),
+                        style: szMoney(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: theme.sz.ink),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        _belowMinOrder
+                            ? '差 ${yuan(widget.merchant.minOrderCents - _foodCents)} 起送'
+                            : total == null
+                                ? '请先选择地址'
+                                : _savedCents > 0
+                                    ? '已省 ${yuan(_savedCents)}'
+                                    : (_pickup ? '到店自取' : '含配送费'),
+                        style: TextStyle(
+                            fontSize: 10.5, color: theme.sz.inkMuted),
+                      ),
+                    ],
                   ),
                 ),
               ),
+              const SizedBox(width: 10),
               FilledButton(
                 onPressed: _submitting || total == null || _belowMinOrder
                     ? null
@@ -567,7 +616,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     ? '未达起送价'
                     : _submitting
                         ? '下单中…'
-                        : '提交订单并支付'),
+                        : '提交订单'),
               ),
             ],
           ),
