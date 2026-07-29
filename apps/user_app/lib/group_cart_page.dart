@@ -142,9 +142,9 @@ class _GroupCartPageState extends State<GroupCartPage> {
                         '各自加菜,发起人一次性支付;起送价/满减按合计算',
                         style: theme.textTheme.bodySmall),
                     if (locked)
-                      const Text('已锁单:同伴不能再改菜',
+                      Text('已锁单:同伴不能再改菜',
                           style: TextStyle(
-                              color: Colors.orange,
+                              color: Theme.of(context).sz.hold,
                               fontWeight: FontWeight.w700)),
                   ],
                 ),

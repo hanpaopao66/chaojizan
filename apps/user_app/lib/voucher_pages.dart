@@ -244,14 +244,14 @@ class _VoucherListViewState extends State<VoucherListView> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 5, vertical: 1),
                                   decoration: BoxDecoration(
-                                    color: Colors.orange
+                                    color: Theme.of(context).sz.hold
                                         .withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(deal.discountLabel,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 11,
-                                          color: Colors.orange,
+                                          color: Theme.of(context).sz.hold,
                                           fontWeight: FontWeight.bold)),
                                 ),
                                 const Spacer(),

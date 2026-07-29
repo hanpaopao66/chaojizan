@@ -338,7 +338,7 @@ class _WalletPageState extends State<WalletPage> {
             else
               ..._earnings.map((e) => ListTile(
                     dense: true,
-                    leading: const Icon(Icons.add_circle, color: Colors.green),
+                    leading: Icon(Icons.add_circle, color: Theme.of(context).sz.earn),
                     title: Text('配送费 +${yuan(e.amountCents)}'),
                     subtitle: Text('订单 ${e.orderNo}'),
                     trailing: Text(_localTime(e.createdAt)),
@@ -357,9 +357,9 @@ class _WalletPageState extends State<WalletPage> {
                       _ => Icons.hourglass_top,
                     },
                     color: switch (w.status) {
-                      'paid' => Colors.green,
-                      'rejected' || 'failed' => Colors.red,
-                      _ => Colors.orange,
+                      'paid' => Theme.of(context).sz.earn,
+                      'rejected' || 'failed' => Theme.of(context).sz.danger,
+                      _ => Theme.of(context).sz.hold,
                     },
                   ),
                   title: Text('提现 ${yuan(w.amountCents)} · ${w.statusLabel}'),

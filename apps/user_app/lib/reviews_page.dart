@@ -61,7 +61,7 @@ class ReviewsList extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(_stars(review.merchantRating),
-                      style: const TextStyle(color: Colors.amber)),
+                      style: TextStyle(color: Theme.of(context).sz.hold)),
                   if (review.tags.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Wrap(
@@ -142,7 +142,7 @@ class ReviewsList extends StatelessWidget {
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
-                                    ?.copyWith(color: Colors.grey)),
+                                    ?.copyWith(color: Theme.of(context).sz.inkFaint)),
                         ],
                       ),
                     ),

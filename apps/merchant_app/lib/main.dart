@@ -587,7 +587,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           if (mounted) {
             setState(() => _urgedOrders.add(no));
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              backgroundColor: Colors.orange.shade800,
+              backgroundColor: Theme.of(context).sz.hold,
               duration: const Duration(seconds: 8),
               content: Text('🔥 用户催单:${data['summary']}'),
               action: SnackBarAction(
@@ -1025,7 +1025,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
             Icon(
               _wsConnected ? Icons.notifications_active : Icons.notifications_off,
               size: 18,
-              color: _wsConnected ? Colors.green : Colors.grey,
+              color: _wsConnected ? Theme.of(context).sz.earn : Theme.of(context).sz.inkFaint,
             ),
             const SizedBox(width: 8),
             Text(_isOpen ? '营业中' : '已打烊'),

@@ -63,7 +63,7 @@ class _DishManagePageState extends State<DishManagePage> {
     if (st == null || short.isEmpty) return null;
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      color: Colors.orange.withValues(alpha: .08),
+      color: Theme.of(context).sz.claySoft,
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -73,7 +73,7 @@ class _DishManagePageState extends State<DishManagePage> {
                 style: Theme.of(context)
                     .textTheme
                     .titleSmall
-                    ?.copyWith(color: Colors.orange.shade800)),
+                    ?.copyWith(color: Theme.of(context).sz.hold)),
             const SizedBox(height: 6),
             for (final s in short)
               Padding(
@@ -91,7 +91,7 @@ class _DishManagePageState extends State<DishManagePage> {
                     style: Theme.of(context)
                         .textTheme
                         .bodySmall
-                        ?.copyWith(color: Colors.grey)),
+                        ?.copyWith(color: Theme.of(context).sz.inkFaint)),
               ),
               FilledButton.tonal(
                   onPressed: _adoptStocking,

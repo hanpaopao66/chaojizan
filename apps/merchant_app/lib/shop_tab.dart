@@ -202,7 +202,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                   style: const TextStyle(fontSize: 22)),
               title: Text(entry.value),
               trailing: shop.category == entry.key
-                  ? const Icon(Icons.check, color: Colors.orange)
+                  ? Icon(Icons.check, color: Theme.of(context).sz.hold)
                   : null,
               onTap: () => Navigator.pop(context, entry.key),
             ),
@@ -590,8 +590,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
               children: [
                 Text('子账号(店员)',
                     style: Theme.of(context).textTheme.titleMedium),
-                const Text('店员能接单/出餐/估清,不能提现/改价/改设置。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                Text('店员能接单/出餐/估清,不能提现/改价/改设置。',
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkFaint)),
                 const SizedBox(height: 8),
                 if (staff.isEmpty)
                   const Padding(
@@ -696,8 +696,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('店铺券', style: Theme.of(context).textTheme.titleMedium),
-                const Text('成本你自己出,用来引流拉复购。与满减二选其一取最优。',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                Text('成本你自己出,用来引流拉复购。与满减二选其一取最优。',
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkFaint)),
                 const SizedBox(height: 8),
                 for (final b in _shopCoupons)
                   ListTile(
@@ -1141,8 +1141,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       Expanded(
                         child: Text(
                           '歇业中,${_hhmmLocal(shop.closedUntil!)} 自动恢复营业',
-                          style: const TextStyle(
-                              color: Colors.orange,
+                          style: TextStyle(
+                              color: Theme.of(context).sz.hold,
                               fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -1182,7 +1182,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                           style: TextStyle(
                               color: shop.holidayPlans.isEmpty
                                   ? null
-                                  : Colors.orange),
+                                  : Theme.of(context).sz.hold),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -1233,7 +1233,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                           style: TextStyle(
                               color: shop.promoLabels.isEmpty
                                   ? null
-                                  : Colors.orange),
+                                  : Theme.of(context).sz.hold),
                         ),
                       ),
                       TextButton(
@@ -1259,7 +1259,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                           style: TextStyle(
                               color: shop.giftRules.isEmpty
                                   ? null
-                                  : Colors.orange),
+                                  : Theme.of(context).sz.hold),
                         ),
                       ),
                       TextButton(
@@ -1285,7 +1285,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                                   .join(' · '),
                           style: TextStyle(
                               color: _shopCoupons.any((b) => b['active'] == true)
-                                  ? Colors.orange
+                                  ? Theme.of(context).sz.hold
                                   : null),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1315,7 +1315,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                           style: Theme.of(context)
                               .textTheme
                               .bodySmall
-                              ?.copyWith(color: Colors.orange)),
+                              ?.copyWith(color: Theme.of(context).sz.hold)),
                     ),
                   const Divider(height: 24),
                   // 团购(第二增长曲线:低价引流到店,核销才收 2%)
@@ -1352,7 +1352,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                           child: Text(
                               '${kMerchantCategoryEmoji[shop.category] ?? ''} '
                               '${merchantCategoryLabel(shop.category)}',
-                              style: const TextStyle(color: Colors.orange))),
+                              style: TextStyle(color: Theme.of(context).sz.hold))),
                       TextButton(
                           onPressed: _editCategory,
                           child: const Text('修改')),
@@ -1367,7 +1367,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       const SizedBox(width: 12),
                       Expanded(
                           child: Text('${shop.promiseReadyMinutes} 分钟',
-                              style: const TextStyle(color: Colors.orange))),
+                              style: TextStyle(color: Theme.of(context).sz.hold))),
                       TextButton(
                           onPressed: _editPromiseMinutes,
                           child: const Text('编辑')),
@@ -1615,7 +1615,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                             style: Theme.of(context).textTheme.titleSmall),
                         const SizedBox(width: 8),
                         Text(_stars(review.merchantRating),
-                            style: const TextStyle(color: Colors.amber)),
+                            style: TextStyle(color: Theme.of(context).sz.hold)),
                         const Spacer(),
                         Text(review.createdAt.substring(0, 10),
                             style: Theme.of(context).textTheme.bodySmall),

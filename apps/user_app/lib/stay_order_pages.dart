@@ -174,7 +174,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
                     IconButton(
                       icon: Icon(
                           i <= rating ? Icons.star : Icons.star_border,
-                          color: Colors.amber, size: 30),
+                          color: Theme.of(context).sz.hold, size: 30),
                       onPressed: () => setSheet(() => rating = i),
                     ),
                 ]),
@@ -406,7 +406,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
                                       ? Icons.star
                                       : Icons.star_border,
                                   size: 16,
-                                  color: Colors.amber),
+                                  color: Theme.of(context).sz.hold),
                           ]),
                           if (_review!.comment.isNotEmpty)
                             Text(_review!.comment),

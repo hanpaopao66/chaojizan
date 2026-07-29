@@ -201,7 +201,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
           Row(children: [
             Expanded(
               child: FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                style: FilledButton.styleFrom(backgroundColor: Theme.of(context).sz.danger),
                 icon: const Icon(Icons.emergency),
                 label: const Text('110'),
                 onPressed: () => launchUrl(Uri.parse('tel:110')),
@@ -210,7 +210,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
             const SizedBox(width: 8),
             Expanded(
               child: FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: Colors.orange),
+                style: FilledButton.styleFrom(backgroundColor: Theme.of(context).sz.hold),
                 icon: const Icon(Icons.medical_services_outlined),
                 label: const Text('120'),
                 onPressed: () => launchUrl(Uri.parse('tel:120')),
@@ -227,7 +227,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
               onPressed: () => Navigator.pop(context, false),
               child: const Text('取消')),
           FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              style: FilledButton.styleFrom(backgroundColor: Theme.of(context).sz.danger),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('向平台求助')),
         ],
@@ -818,22 +818,22 @@ class _RiderHomePageState extends State<RiderHomePage> {
             const SizedBox(height: 4),
             if (order.scheduledLabel != null)
               Text('⏰ ${order.scheduledLabel}',
-                  style: const TextStyle(
-                      color: Colors.orange, fontWeight: FontWeight.bold)),
+                  style: TextStyle(
+                      color: Theme.of(context).sz.hold, fontWeight: FontWeight.bold)),
             if (order.parentOrderNo.isNotEmpty)
               Text(
                   '📎 追加单,随#${order.parentOrderNo.substring(order.parentOrderNo.length - 6)} 一起取送',
-                  style: const TextStyle(
-                      color: Colors.teal, fontWeight: FontWeight.bold)),
+                  style: TextStyle(
+                      color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
             // 顺路标记(抢单池):同店一次取多单 / 收货点相近连着送
             if (order.sameShop || order.sameWay)
               Text(order.sameShop ? '🛵 顺路 · 与手头单同店取餐' : '🛵 顺路 · 与手头单收货点相近',
-                  style: const TextStyle(
-                      color: Colors.green, fontWeight: FontWeight.bold)),
-            if (order.hasAlcohol)
-              const Text('🍺 含酒精饮品,送达请查验收件人年龄',
                   style: TextStyle(
-                      color: Colors.orange, fontWeight: FontWeight.bold)),
+                      color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
+            if (order.hasAlcohol)
+              Text('🍺 含酒精饮品,送达请查验收件人年龄',
+                  style: TextStyle(
+                      color: Theme.of(context).sz.hold, fontWeight: FontWeight.bold)),
             Text('取餐:${order.merchantName} · ${order.merchantAddress}'),
             Text('送达:${order.address}'),
             if (order.contactPhone.isNotEmpty)
@@ -1018,7 +1018,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
           message: '长按 3 秒紧急求助',
           child: GestureDetector(
             onLongPress: _triggerSos,
-            child: const Icon(Icons.sos, color: Colors.red),
+            child: Icon(Icons.sos, color: Theme.of(context).sz.danger),
           ),
         ),
         actions: [
@@ -1026,7 +1026,7 @@ class _RiderHomePageState extends State<RiderHomePage> {
             Icon(
               _gpsActive ? Icons.gps_fixed : Icons.gps_off,
               size: 18,
-              color: _gpsActive ? Colors.green : Colors.grey,
+              color: _gpsActive ? Theme.of(context).sz.earn : Theme.of(context).sz.inkFaint,
             ),
             const SizedBox(width: 4),
             Text(_online ? '接单中' : '已下线'),

@@ -98,7 +98,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
                                     ? Icons.star
                                     : Icons.star_border,
                                 size: 14,
-                                color: Colors.amber),
+                                color: Theme.of(context).sz.hold),
                         ]),
                         if (r.tags.isNotEmpty)
                           Text(r.tags.join(' · '),
@@ -129,8 +129,8 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
 
   Color _policyColor(String policy) => switch (policy) {
         'limited_free' => Theme.of(context).sz.earn, // 到手的钱:对用户友好的政策
-        'first_night' => Colors.grey.shade700,
-        _ => Colors.deepOrange,
+        'first_night' => Theme.of(context).sz.inkMuted,
+        _ => Theme.of(context).sz.hold,
       };
 
   @override
@@ -286,9 +286,9 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
                           fontWeight: FontWeight.w500)),
                   if (quote.leftQty != null)
                     Text('仅剩 ${quote.leftQty} 间',
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 12,
-                            color: Colors.deepOrange,
+                            color: Theme.of(context).sz.hold,
                             fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   Row(children: [
@@ -300,8 +300,8 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
                       Text(' /${_range.nights}晚',
                           style: theme.textTheme.bodySmall),
                     ] else
-                      const Text('该日期订不了',
-                          style: TextStyle(color: Colors.grey)),
+                      Text('该日期订不了',
+                          style: TextStyle(color: Theme.of(context).sz.inkFaint)),
                     const Spacer(),
                     FilledButton(
                       onPressed: bookable

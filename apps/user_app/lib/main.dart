@@ -1775,12 +1775,12 @@ class _MenuPageState extends State<MenuPage>
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 4, vertical: 1),
                             decoration: BoxDecoration(
-                              color: Colors.orange.withValues(alpha: 0.15),
+                              color: Theme.of(context).sz.claySoft,
                               borderRadius: BorderRadius.circular(3),
                             ),
-                            child: const Text('酒',
+                            child: Text('酒',
                                 style: TextStyle(
-                                    fontSize: 10, color: Colors.orange)),
+                                    fontSize: 10, color: Theme.of(context).sz.hold)),
                           ),
                         ],
                       ]),
@@ -1914,7 +1914,7 @@ class _MenuPageState extends State<MenuPage>
                         const SizedBox(height: 6),
                         Text('🍺 酒类商品:未成年人禁止购买,下单需完成实名认证',
                             style: theme.textTheme.bodySmall?.copyWith(
-                                color: Colors.orange,
+                                color: Theme.of(context).sz.hold,
                                 fontWeight: FontWeight.w600)),
                       ],
                       const SizedBox(height: 12),
@@ -2083,7 +2083,7 @@ class _MenuPageState extends State<MenuPage>
             tooltip: _isFavorite ? '取消收藏' : '收藏本店',
             icon: Icon(
               _isFavorite ? Icons.favorite : Icons.favorite_outline,
-              color: _isFavorite ? Colors.redAccent : null,
+              color: _isFavorite ? Theme.of(context).sz.danger : null,
             ),
             onPressed: () async {
               if (!await ensureLoggedIn(context)) return;
@@ -2544,10 +2544,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
             const Divider(height: 1),
             ListTile(
               leading:
-                  const Icon(Icons.report_gmailerrorred, color: Colors.red),
-              title: const Text('食品安全问题',
+                  Icon(Icons.report_gmailerrorred, color: Theme.of(context).sz.danger),
+              title: Text('食品安全问题',
                   style: TextStyle(
-                      color: Colors.red, fontWeight: FontWeight.bold)),
+                      color: Theme.of(context).sz.danger, fontWeight: FontWeight.bold)),
               subtitle: const Text('异物、变质、食用后不适——不经商家,平台加急处理'),
               onTap: () => Navigator.pop(sheetContext, 'food_safety'),
             ),
@@ -2605,9 +2605,9 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('食品安全投诉',
+                  Text('食品安全投诉',
                       style: TextStyle(
-                          color: Colors.red,
+                          color: Theme.of(context).sz.danger,
                           fontWeight: FontWeight.bold,
                           fontSize: 16)),
                   Text('不经商家、直达平台加急处理;核实成立全额退款(含配送费)',
@@ -2679,7 +2679,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                     width: double.infinity,
                     child: FilledButton(
                       style: FilledButton.styleFrom(
-                          backgroundColor: Colors.red),
+                          backgroundColor: Theme.of(context).sz.danger),
                       onPressed: () => Navigator.pop(sheetContext, true),
                       child: const Text('提交食安投诉'),
                     ),
@@ -2929,14 +2929,14 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
               child: Text('加急小费,更快有人接',
                   style: TextStyle(fontWeight: FontWeight.bold)),
             ),
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(bottom: 8, left: 14, right: 14),
               child: Text('小费 100% 归骑手,平台不抽成。加了会立刻通知附近骑手。',
-                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkFaint)),
             ),
             for (final c in options)
               ListTile(
-                leading: const Icon(Icons.bolt, color: Colors.orange),
+                leading: Icon(Icons.bolt, color: Theme.of(context).sz.hold),
                 title: Text('加 ¥${(c / 100).toStringAsFixed(0)}'),
                 onTap: () => Navigator.pop(context, c),
               ),
@@ -3399,7 +3399,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                     },
                                     size: 18,
                                     color: _afterSale!.status == 'accepted'
-                                        ? Colors.green
+                                        ? Theme.of(context).sz.earn
                                         : Theme.of(context)
                                             .colorScheme
                                             .primary,
@@ -3589,7 +3589,7 @@ class _Stars extends StatelessWidget {
             visualDensity: VisualDensity.compact,
             icon: Icon(
               i <= value ? Icons.star : Icons.star_border,
-              color: Colors.amber,
+              color: Theme.of(context).sz.hold,
             ),
             onPressed: () => onChanged(i),
           ),
@@ -3810,10 +3810,10 @@ class _ReviewDisplay extends StatelessWidget {
             Text('我的评价', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
             Text('商家 ${_stars(review.merchantRating)}',
-                style: const TextStyle(color: Colors.amber)),
+                style: TextStyle(color: Theme.of(context).sz.hold)),
             if (review.riderRating != null)
               Text('骑手 ${_stars(review.riderRating!)}',
-                  style: const TextStyle(color: Colors.amber)),
+                  style: TextStyle(color: Theme.of(context).sz.hold)),
             if (review.comment.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(review.comment),

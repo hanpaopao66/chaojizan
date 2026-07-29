@@ -164,7 +164,7 @@ class _PrinterPageState extends State<PrinterPage> {
               )
             else ...[
               Row(children: [
-                const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                Icon(Icons.check_circle, color: Theme.of(context).sz.earn, size: 18),
                 const SizedBox(width: 6),
                 Expanded(child: Text('已绑定:$_cloudSn')),
               ]),
@@ -289,7 +289,7 @@ class _PrinterPageState extends State<PrinterPage> {
               )
             else ...[
               Row(children: [
-                const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                Icon(Icons.check_circle, color: Theme.of(context).sz.earn, size: 18),
                 const SizedBox(width: 6),
                 Expanded(child: Text('已选择:${_btDevice!.$2}')),
                 TextButton(

@@ -135,9 +135,9 @@ class _InvoicePageState extends State<InvoicePage> {
             ),
           const SizedBox(height: 8),
           if (requested)
-            const Card(
+            Card(
               child: ListTile(
-                leading: Icon(Icons.check_circle, color: Colors.green),
+                leading: Icon(Icons.check_circle, color: Theme.of(context).sz.earn),
                 title: Text('该月已申请开票'),
                 subtitle: Text('处理进度见下方开票记录'),
               ),

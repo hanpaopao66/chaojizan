@@ -64,14 +64,14 @@ class _CouponsPageState extends State<CouponsPage> {
                               style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w900,
-                                  color: usable ? Theme.of(context).sz.earn : Colors.grey),
+                                  color: usable ? Theme.of(context).sz.earn : Theme.of(context).sz.inkFaint),
                             ),
                             title: Text(
                                 (c['min_spend_cents'] as int) > 0
                                     ? '满 ${yuan(c['min_spend_cents'] as int)} 可用'
                                     : '无门槛',
                                 style: TextStyle(
-                                    color: usable ? null : Colors.grey)),
+                                    color: usable ? null : Theme.of(context).sz.inkFaint)),
                             subtitle: Text(
                                 '${c['note']}\n'
                                 '${expires == null ? '' : '有效期至 ${expires.month}/${expires.day}'}',
@@ -83,7 +83,7 @@ class _CouponsPageState extends State<CouponsPage> {
                                 style: TextStyle(
                                     color: usable
                                         ? Theme.of(context).sz.earn
-                                        : Colors.grey,
+                                        : Theme.of(context).sz.inkFaint,
                                     fontWeight: FontWeight.w700)),
                           ),
                         );

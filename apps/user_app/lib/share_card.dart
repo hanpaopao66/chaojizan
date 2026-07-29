@@ -74,9 +74,9 @@ Widget _footer() => Row(children: [
                   fontWeight: FontWeight.w900,
                   fontSize: 16)),
           Text('商家只抽5% · 配送费全归骑手 · 账目公开',
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+              style: TextStyle(fontSize: 10, color: SzColors.light.inkMuted)),
           Text('chaojizan.cc',
-              style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+              style: TextStyle(fontSize: 10, color: SzColors.light.inkMuted)),
         ]),
       ),
       QrImageView(
@@ -98,7 +98,7 @@ Widget shopShareCard(Merchant m) => _cardShell(children: [
         ],
         if (m.monthlySales > 0)
           Text('月售 ${m.monthlySales}',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              style: TextStyle(fontSize: 12, color: SzColors.light.inkMuted)),
       ]),
       if (m.topDishes.isNotEmpty) ...[
         const SizedBox(height: 8),
@@ -129,7 +129,7 @@ Widget orderShareCard(Order o, {required bool maskAmount}) {
     Text(o.summary,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+        style: TextStyle(fontSize: 13, color: SzColors.light.inkMuted)),
     const SizedBox(height: 12),
     const Text('这单的钱去哪了(平台公开账目)',
         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
@@ -139,7 +139,7 @@ Widget orderShareCard(Order o, {required bool maskAmount}) {
       child: Row(children: [
         seg(SzColors.light.clay, merchantPart),
         seg(SzColors.light.earn, riderPart),
-        seg(Colors.blueGrey, platformPart),
+        seg(SzColors.light.hold, platformPart),
       ]),
     ),
     const SizedBox(height: 6),

@@ -241,7 +241,7 @@ class _RiderGearPageState extends State<RiderGearPage> {
                         style: TextStyle(
                             color: g['status'] == 'issued'
                                 ? Theme.of(context).sz.earn
-                                : Colors.orange)),
+                                : Theme.of(context).sz.hold)),
                   ),
               ]),
             ),
@@ -315,7 +315,7 @@ class _RiderAccidentPageState extends State<RiderAccidentPage> {
           Expanded(
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                  backgroundColor: Colors.red, minimumSize: const Size(0, 56)),
+                  backgroundColor: Theme.of(context).sz.danger, minimumSize: const Size(0, 56)),
               icon: const Icon(Icons.emergency),
               label: const Text('拨打 120'),
               onPressed: () => launchUrl(Uri.parse('tel:120')),
@@ -325,7 +325,7 @@ class _RiderAccidentPageState extends State<RiderAccidentPage> {
           Expanded(
             child: FilledButton.icon(
               style: FilledButton.styleFrom(
-                  backgroundColor: Colors.orange,
+                  backgroundColor: Theme.of(context).sz.hold,
                   minimumSize: const Size(0, 56)),
               icon: const Icon(Icons.local_police_outlined),
               label: const Text('拨打 122'),
@@ -362,7 +362,7 @@ class _RiderAccidentPageState extends State<RiderAccidentPage> {
         SizedBox(
           width: double.infinity,
           child: FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).sz.danger),
             onPressed: _submitting ? null : _submit,
             child: Text(_submitting ? '上报中…' : '上报事故'),
           ),
@@ -438,7 +438,7 @@ class _RiderInsurancePageState extends State<RiderInsurancePage> {
                         style: TextStyle(
                             color: r['status'] == 'insured'
                                 ? Theme.of(context).sz.earn
-                                : Colors.orange)),
+                                : Theme.of(context).sz.hold)),
                   ),
               ]),
             ),
@@ -515,7 +515,7 @@ class _RiderRulesPageState extends State<RiderRulesPage> {
         if (d != null)
           Card(
             color: (d['grab_suspended_today'] == true)
-                ? Colors.orange.withValues(alpha: .12)
+                ? Theme.of(context).sz.hold.withValues(alpha: .12)
                 : null,
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -527,11 +527,11 @@ class _RiderRulesPageState extends State<RiderRulesPage> {
                   Text('非免责转单 ${d['transfer_used_today']} 次 / '
                       '达 ${d['suspend_threshold']} 次当日暂停抢单'),
                   if (d['grab_suspended_today'] == true)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 4),
                       child: Text('今日抢单已暂停,明天自动恢复(不罚款)',
                           style: TextStyle(
-                              color: Colors.orange,
+                              color: Theme.of(context).sz.hold,
                               fontWeight: FontWeight.w700)),
                     ),
                 ],

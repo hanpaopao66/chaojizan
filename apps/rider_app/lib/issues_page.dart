@@ -160,7 +160,7 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
                                   style: TextStyle(
                                       color: blamed
                                           ? theme.colorScheme.error
-                                          : Colors.green.shade700,
+                                          : Theme.of(context).sz.earn,
                                       fontSize: 13),
                                 ),
                                 if (appeal != null)

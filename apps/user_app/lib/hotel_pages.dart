@@ -366,8 +366,8 @@ class _HotelListPageState extends State<HotelListPage> {
                             ?.copyWith(color: theme.colorScheme.outline)),
                     const Spacer(),
                     hotel.full
-                        ? const Text('该日期已满房',
-                            style: TextStyle(color: Colors.grey))
+                        ? Text('该日期已满房',
+                            style: TextStyle(color: Theme.of(context).sz.inkFaint))
                         : Row(
                             crossAxisAlignment: CrossAxisAlignment.baseline,
                             textBaseline: TextBaseline.alphabetic,

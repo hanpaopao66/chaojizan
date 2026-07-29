@@ -75,8 +75,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     ),
                     if (h % 6 == 0)
                       Text('$h',
-                          style: const TextStyle(
-                              fontSize: 9, color: Colors.grey))
+                          style: TextStyle(
+                              fontSize: 9, color: Theme.of(context).sz.inkFaint))
                     else
                       const SizedBox(height: 12),
                   ],
@@ -143,7 +143,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                                         fontWeight: FontWeight.w800,
                                         color: i < 3
                                             ? Theme.of(context).sz.earn
-                                            : Colors.grey))),
+                                            : Theme.of(context).sz.inkFaint))),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment:
@@ -153,9 +153,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                                   if (t['sold_out_today'] == true)
                                     Text(
                                         '今日售罄,错过约 ${t['missed_estimate']} 单(估算)',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                             fontSize: 11,
-                                            color: Colors.orange)),
+                                            color: Theme.of(context).sz.hold)),
                                 ],
                               ),
                             ),
@@ -191,7 +191,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   const SizedBox(height: 8),
                   Text('只读统计,仅自己可见;不做同行对比,好好做菜就行。',
                       style: theme.textTheme.bodySmall
-                          ?.copyWith(color: Colors.grey)),
+                          ?.copyWith(color: Theme.of(context).sz.inkFaint)),
                   const SizedBox(height: 24),
                 ],
               ),
