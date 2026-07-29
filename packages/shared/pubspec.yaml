@@ -23,3 +23,13 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+
+flutter:
+  # 数字与拉丁字母的衬线子集(中文仍走系统字);来源与复现见
+  # assets/fonts/README.md,授权 OFL 1.1(assets/fonts/OFL.txt)
+  fonts:
+    - family: SzSerif
+      fonts:
+        - asset: assets/fonts/SzSerif-Regular.ttf
+        - asset: assets/fonts/SzSerif-Semibold.ttf
+          weight: 600
