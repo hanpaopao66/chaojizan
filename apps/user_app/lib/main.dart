@@ -744,31 +744,12 @@ class _MerchantListViewState extends State<MerchantListView> {
     final dist = distanceMeters(_myLat, _myLng, m.lat, m.lng);
     final eta = etaMinutes(dist);
 
-    Widget thumb(String url, double size, double glyphSize) => ClipRRect(
-          borderRadius: BorderRadius.circular(kRadiusSm),
-          child: Container(
-            width: size,
-            height: size,
-            decoration: BoxDecoration(
-              color: sz.surfaceAlt,
-              border: Border.all(color: sz.line),
-              borderRadius: BorderRadius.circular(kRadiusSm),
-            ),
-            child: url.isEmpty
-                ? Center(
-                    child: Text(m.name.isEmpty ? '店' : m.name.characters.first,
-                        style: szFigure(
-                            fontSize: glyphSize, color: sz.inkFaint)))
-                : Image.network(
-                    widget.api.resolveUrl(url),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Center(
-                        child: Text(
-                            m.name.isEmpty ? '店' : m.name.characters.first,
-                            style: szFigure(
-                                fontSize: glyphSize, color: sz.inkFaint))),
-                  ),
-          ),
+    // 缺图占位统一走 SzImage:底色按名称哈希取,同一家店永远同一个色
+    Widget thumb(String url, String name, double size) => SzImage(
+          url: url.isEmpty ? '' : widget.api.resolveUrl(url),
+          name: name,
+          size: size,
+          categoryIcon: merchantCategoryIcon(m.category),
         );
 
     return InkWell(
@@ -785,7 +766,7 @@ class _MerchantListViewState extends State<MerchantListView> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                thumb(m.logoUrl, 62, 21),
+                thumb(m.logoUrl, m.name, 62),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -867,7 +848,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                         padding: const EdgeInsets.only(right: 8),
                         child: Row(
                           children: [
-                            thumb(d.imageUrl, 34, 13),
+                            thumb(d.imageUrl, d.name, 34),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Column(
@@ -1550,32 +1531,11 @@ class _MenuPageState extends State<MenuPage>
   }
 
   /// 菜品缩略图。从 64 收到 58:图越小,菜名和价格越先被读到。
-  Widget _dishImage(Dish dish) {
-    final sz = Theme.of(context).sz;
-    final placeholder = Container(
-      width: 58,
-      height: 58,
-      decoration: BoxDecoration(
-        color: sz.surfaceAlt,
-        border: Border.all(color: sz.line),
-        borderRadius: BorderRadius.circular(kRadiusSm),
-      ),
-      child: Center(
-          child: Text(dish.name.isEmpty ? '菜' : dish.name.characters.first,
-              style: szFigure(fontSize: 18, color: sz.inkFaint))),
-    );
-    if (dish.imageUrl.isEmpty) return placeholder;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(kRadiusSm),
-      child: Image.network(
-        widget.api.resolveUrl(dish.imageUrl),
-        width: 58,
-        height: 58,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder,
-      ),
-    );
-  }
+  Widget _dishImage(Dish dish) => SzImage(
+        url: dish.imageUrl.isEmpty ? '' : widget.api.resolveUrl(dish.imageUrl),
+        name: dish.name,
+        size: 58,
+      );
 
   /// 购物车条的动态提示:差多少能满减最有推动力,够了就明说已减多少。
   /// 规则取商家的 promoRules(与结算页、后端同一份数据,不另算一套)。
@@ -1864,27 +1824,13 @@ class _MenuPageState extends State<MenuPage>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 大图(无图用大号占位图标)
-                SizedBox(
+                // 大图:缺图时是同一套占位(色底 + 菜名首字),不是灰图标
+                SzCover(
+                  url: dish.imageUrl.isEmpty
+                      ? ''
+                      : widget.api.resolveUrl(dish.imageUrl),
+                  name: dish.name,
                   height: 200,
-                  width: double.infinity,
-                  child: dish.imageUrl.isEmpty
-                      ? Container(
-                          color: theme.colorScheme.surfaceContainerHighest,
-                          child: Icon(Icons.ramen_dining,
-                              size: 72, color: theme.colorScheme.outline),
-                        )
-                      : Image.network(
-                          widget.api.resolveUrl(dish.imageUrl),
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            color:
-                                theme.colorScheme.surfaceContainerHighest,
-                            child: Icon(Icons.ramen_dining,
-                                size: 72,
-                                color: theme.colorScheme.outline),
-                          ),
-                        ),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(16),
@@ -4107,16 +4053,34 @@ class _ProfileViewState extends State<ProfileView> {
         if (!guest)
           Card(
             child: ListTile(
+              // 自己的头像:缺图时也用 SzImage(名字首字),但压一个相机角标
+              // 保住"点这里换头像"的提示——这里要的是促使补图,不只是好看
               leading: InkWell(
                 onTap: _pickAvatar,
-                borderRadius: BorderRadius.circular(28),
-                child: profile != null && profile.avatarUrl.isNotEmpty
-                    ? CircleAvatar(
-                        radius: 26,
-                        backgroundImage: NetworkImage(
-                            widget.api.resolveUrl(profile.avatarUrl)))
-                    : const CircleAvatar(
-                        radius: 26, child: Icon(Icons.add_a_photo, size: 20)),
+                borderRadius: BorderRadius.circular(26),
+                child: Stack(clipBehavior: Clip.none, children: [
+                  SzImage(
+                      url: profile == null || profile.avatarUrl.isEmpty
+                          ? ''
+                          : widget.api.resolveUrl(profile.avatarUrl),
+                      name: profile?.name ?? widget.api.userName ?? '我',
+                      size: 52,
+                      circle: true),
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: theme.sz.surface,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: theme.sz.line),
+                      ),
+                      child: Icon(Icons.photo_camera_outlined,
+                          size: 11, color: theme.sz.inkMuted),
+                    ),
+                  ),
+                ]),
               ),
               title: Text(profile?.name ?? widget.api.userName ?? '用户',
                   style: theme.textTheme.titleLarge),
@@ -4388,11 +4352,11 @@ class FavoritesPage extends StatelessWidget {
             itemBuilder: (context, i) {
               final m = shops[i];
               return ListTile(
-                leading: m.logoUrl.isEmpty
-                    ? const CircleAvatar(child: Icon(Icons.restaurant))
-                    : CircleAvatar(
-                        backgroundImage:
-                            NetworkImage(api.resolveUrl(m.logoUrl))),
+                leading: SzImage(
+                    url: m.logoUrl.isEmpty ? '' : api.resolveUrl(m.logoUrl),
+                    name: m.name,
+                    size: 44,
+                    categoryIcon: merchantCategoryIcon(m.category)),
                 title: Text(m.name),
                 subtitle: Text(
                     '${m.ratingLabel}${m.isOpen ? "" : " · 休息中"}'),
@@ -4715,30 +4679,11 @@ class _ShopInfoTab extends StatelessWidget {
       children: [
         Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: shop.logoUrl.isEmpty
-                  ? Container(
-                      width: 64,
-                      height: 64,
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      child: Icon(Icons.restaurant,
-                          color: theme.colorScheme.outline),
-                    )
-                  : Image.network(
-                      api.resolveUrl(shop.logoUrl),
-                      width: 64,
-                      height: 64,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        width: 64,
-                        height: 64,
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        child: Icon(Icons.restaurant,
-                            color: theme.colorScheme.outline),
-                      ),
-                    ),
-            ),
+            SzImage(
+                url: shop.logoUrl.isEmpty ? '' : api.resolveUrl(shop.logoUrl),
+                name: shop.name,
+                size: 64,
+                categoryIcon: merchantCategoryIcon(shop.category)),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

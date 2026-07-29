@@ -164,29 +164,11 @@ class _DishManagePageState extends State<DishManagePage> {
     }
   }
 
-  Widget _thumb(Dish dish) {
-    final placeholder = Container(
-      width: 48,
-      height: 48,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Icon(Icons.ramen_dining,
-          size: 22, color: Theme.of(context).colorScheme.outline),
-    );
-    if (dish.imageUrl.isEmpty) return placeholder;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Image.network(
-        widget.api.resolveUrl(dish.imageUrl),
-        width: 48,
-        height: 48,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => placeholder,
-      ),
-    );
-  }
+  Widget _thumb(Dish dish) => SzImage(
+        url: dish.imageUrl.isEmpty ? '' : widget.api.resolveUrl(dish.imageUrl),
+        name: dish.name,
+        size: 48,
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -218,11 +200,44 @@ class _DishManagePageState extends State<DishManagePage> {
       final top = ranked.where((d) => d.monthlySales > 0).take(3).toList();
       final stale =
           dishes.where((d) => d.isOnSale && d.monthlySales == 0).length;
+      final noPhoto = dishes.where((d) => d.imageUrl.isEmpty).length;
       body = RefreshIndicator(
         onRefresh: _load,
         child: ListView(
           children: [
             if (_stockingCard() != null) _stockingCard()!,
+            // 缺图汇总:占位图能让列表不难看,但真正解决问题的是把图补上。
+            // 只在确实有缺图时出现,补完自动消失,不长期占地方
+            if (noPhoto > 0)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: SzCard(
+                  child: Row(children: [
+                    Icon(Icons.photo_camera_outlined,
+                        size: 18, color: Theme.of(context).sz.hold),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(children: [
+                          TextSpan(
+                              text: '$noPhoto',
+                              style: szFigure(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context).sz.hold)),
+                          const TextSpan(text: ' 道菜还没配图。'),
+                          const TextSpan(text: '顾客看不到图会跳过——现在列表里'
+                              '显示的是店名首字占位,补一张实拍就换成你的图。'),
+                        ]),
+                        style: TextStyle(
+                            fontSize: 12,
+                            height: 1.55,
+                            color: Theme.of(context).sz.ink),
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
             if (top.isNotEmpty)
               Card(
                 margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
@@ -289,8 +304,7 @@ class _DishManagePageState extends State<DishManagePage> {
                     '${dish.flashActive ? "(限时中,原价 ${yuan(dish.priceCents)})" : ""} · '
                     '${dish.soldOutToday ? "今日售罄(明日自动恢复)" : dish.stock == 0 ? "已售罄" : "库存 ${dish.stock}"}'
                     '${dish.dailyStock != null ? " · 每日回满${dish.dailyStock}" : ""}'
-                    ' · 月售 ${dish.monthlySales}'
-                    '${dish.imageUrl.isEmpty ? " · 建议配图" : ""}',
+                    ' · 月售 ${dish.monthlySales}',
                     style: dish.stock == 0
                         ? TextStyle(
                             color: Theme.of(context).colorScheme.error)
@@ -299,6 +313,14 @@ class _DishManagePageState extends State<DishManagePage> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // 缺图从一句混在灰字里的「· 建议配图」提成 chip:
+                      // 占位图再好看也不如让商家把图补上,提示得看得见
+                      if (dish.imageUrl.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: SzChip('缺图',
+                              color: Theme.of(context).sz.hold, dense: true),
+                        ),
                       if (dish.isOnSale)
                         dish.soldOutToday
                             ? TextButton(

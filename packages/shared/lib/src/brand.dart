@@ -215,6 +215,60 @@ TextStyle szMoney({
       ],
     );
 
+/// 缺图占位的底色/字色对。
+///
+/// 不是彩虹色板——六组都在骨白纸底的同一色域里(泥土色系低饱和),
+/// 列表里十家店排下来是"有层次"而不是"花"。按名称哈希取,
+/// 同一家店每次进都是同一个色,用户能靠颜色认店。
+class SzTone {
+  const SzTone(this.bg, this.fg);
+  final Color bg;
+  final Color fg;
+}
+
+const List<SzTone> _tonesLight = [
+  SzTone(Color(0xFFE9DCD2), Color(0xFF8C5B41)), // 黏土
+  SzTone(Color(0xFFDDE3DA), Color(0xFF4E6B4F)), // 苔绿
+  SzTone(Color(0xFFEBE1CD), Color(0xFF8A6B34)), // 麦黄
+  SzTone(Color(0xFFE4E1D9), Color(0xFF6B6862)), // 中性
+  SzTone(Color(0xFFE9DDD9), Color(0xFF8A5A55)), // 陶土
+  SzTone(Color(0xFFDCE1E3), Color(0xFF566368)), // 青灰
+];
+
+const List<SzTone> _tonesDark = [
+  SzTone(Color(0xFF3A2C25), Color(0xFFD9A184)),
+  SzTone(Color(0xFF2A322A), Color(0xFF8FB08D)),
+  SzTone(Color(0xFF383026), Color(0xFFD2A86C)),
+  SzTone(Color(0xFF302E29), Color(0xFFA8A49A)),
+  SzTone(Color(0xFF362A28), Color(0xFFC79490)),
+  SzTone(Color(0xFF2A3033), Color(0xFF93A3A9)),
+];
+
+/// 按 seed 取一组占位色。seed 用店名/菜名——同名同色,与数据库 id 无关,
+/// 这样演示数据和生产数据的观感一致。
+SzTone szToneOf(String seed, {bool dark = false}) {
+  var h = 0;
+  for (final c in seed.codeUnits) {
+    h = (h * 31 + c) & 0x7fffffff;
+  }
+  final list = dark ? _tonesDark : _tonesLight;
+  return list[h % list.length];
+}
+
+/// 从名称取占位用的字:中文取第一个字,拉丁取前两个字母。
+/// 「运营测试店-1784465885」这种带编号的名字只取「运」,不带数字。
+String szInitialOf(String name) {
+  final t = name.trim();
+  if (t.isEmpty) return '·';
+  final first = t.characters.first;
+  // 拉丁开头的名字给两个字母更容易区分(如 KFC / MC)
+  if (first.codeUnitAt(0) < 128 && RegExp(r'[A-Za-z]').hasMatch(first)) {
+    final letters = t.replaceAll(RegExp(r'[^A-Za-z]'), '');
+    return letters.substring(0, letters.length >= 2 ? 2 : 1).toUpperCase();
+  }
+  return first;
+}
+
 // ---- 旧令牌:@Deprecated 别名,随第八辑 103–110 逐屏清理 ----
 // 值已指向新令牌最接近项,所以旧引用的观感立刻跟上;不要全局 sed 替换,
 // 那样没法逐屏验收(见 docs/DEV-PROMPTS-8.md 拍板)。

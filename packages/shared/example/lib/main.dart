@@ -414,6 +414,86 @@ class _ComponentSectionState extends State<_ComponentSection> {
           ),
         ),
 
+        label('SzImage · 缺图占位(列表尺寸 58/62)'),
+        SzCard(
+          padding: EdgeInsets.zero,
+          child: Column(children: [
+            for (final (i, (n, c)) in const [
+              ('老陈牛肉面', 'noodles'),
+              ('川小妹家常菜', 'sichuan_hunan'),
+              ('粤记烧腊饭', 'braised_duck'),
+              ('麦香早点铺', 'baozi_congee'),
+              ('云南小锅米线', 'noodles'),
+              ('KFC 肯德基', 'burger_pizza'),
+            ].indexed) ...[
+              if (i > 0) Divider(height: 1, color: sz.line),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: kCardPad, vertical: 11),
+                child: Row(children: [
+                  SzImage(
+                      url: '',
+                      name: n,
+                      size: 62,
+                      categoryIcon: merchantCategoryIcon(c)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(n,
+                            style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                                color: sz.ink)),
+                        const SizedBox(height: 3),
+                        Text.rich(
+                          TextSpan(children: [
+                            TextSpan(text: '4.8', style: szFigure(fontSize: 11.5)),
+                            const TextSpan(text: ' 分 · 月售 '),
+                            TextSpan(text: '302', style: szFigure(fontSize: 11.5)),
+                            const TextSpan(text: ' 单'),
+                          ]),
+                          style:
+                              TextStyle(fontSize: 11.5, color: sz.inkMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                ]),
+              ),
+            ],
+          ]),
+        ),
+
+        label('SzImage · 菜品(58)与头像(48,圆形)'),
+        SzCard(
+          child: Wrap(spacing: 10, runSpacing: 10, children: [
+            for (final n in const ['红烧牛肉面', '酸辣土豆丝', '卤蛋', '冰峰汽水'])
+              SzImage(url: '', name: n, size: 58),
+            for (final n in const ['杜先生', '王师傅'])
+              SzImage(url: '', name: n, size: 48, circle: true),
+          ]),
+        ),
+
+        label('SzCover · 店铺头图 / 房型大图(132,带品类底纹)'),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(kRadiusMd),
+          child: SzCover(
+              url: '',
+              name: '老陈牛肉面',
+              categoryIcon: merchantCategoryIcon('noodles')),
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(kRadiusMd),
+          child: SzCover(
+              url: '',
+              name: '云顶大床房',
+              height: 110,
+              categoryIcon: Icons.bed_outlined),
+        ),
+
         label('SkeletonList(骨架色改用 surfaceAlt)'),
         SzCard(
           padding: EdgeInsets.zero,

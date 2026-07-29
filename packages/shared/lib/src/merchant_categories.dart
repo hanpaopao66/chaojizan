@@ -4,6 +4,8 @@
 /// v1 图标用 emoji(零资源成本,风格统一),要换彩绘图标时只改这里。
 library;
 
+import 'package:flutter/material.dart';
+
 const Map<String, String> kMerchantCategories = {
   'premium_dining': '品质正餐',
   'drinks_dessert': '饮品甜点',
@@ -58,3 +60,36 @@ const Map<String, String> kMerchantCategoryEmoji = {
 
 String merchantCategoryLabel(String slug) =>
     kMerchantCategories[slug] ?? '快餐便当';
+
+/// 品类符号(缺图占位的底纹用)。emoji 在不同 Android 机型渲染差异很大,
+/// 而且和这套观感不搭,所以占位图用 Material 图标——它已经打进包里,
+/// 零额外体积。金刚区那些 emoji 保持不动,那是另一个用途。
+const Map<String, IconData> kMerchantCategoryIcon = {
+  'premium_dining': Icons.restaurant,
+  'drinks_dessert': Icons.local_cafe_outlined,
+  'fast_food': Icons.lunch_dining,
+  'light_salad': Icons.eco_outlined,
+  'burger_pizza': Icons.local_pizza_outlined,
+  'noodles': Icons.ramen_dining,
+  'bbq_fried': Icons.kebab_dining,
+  'braised_duck': Icons.set_meal,
+  'baozi_congee': Icons.breakfast_dining,
+  'dumplings': Icons.dinner_dining,
+  'malatang': Icons.soup_kitchen_outlined,
+  'sichuan_hunan': Icons.local_fire_department_outlined,
+  'regional': Icons.rice_bowl,
+  'snacks': Icons.bakery_dining,
+  'western': Icons.restaurant_menu,
+  'wraps': Icons.flatware,
+  'japan_korea': Icons.set_meal_outlined,
+  'dry_pot': Icons.outdoor_grill_outlined,
+  'hotpot_skewers': Icons.local_fire_department,
+  'crayfish_bbq': Icons.outdoor_grill,
+  'beef_lamb_soup': Icons.soup_kitchen,
+  'southeast_asia': Icons.rice_bowl_outlined,
+  'pastry': Icons.cake_outlined,
+};
+
+/// 取品类符号;未知品类回落到通用餐具(住宿等非餐饮业态调用方自己给)。
+IconData merchantCategoryIcon(String? category) =>
+    kMerchantCategoryIcon[category] ?? Icons.restaurant_outlined;

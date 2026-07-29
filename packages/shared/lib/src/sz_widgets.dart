@@ -565,3 +565,166 @@ class SzEmpty extends StatelessWidget {
 /// 分转元。与 models.dart 的 yuan() 同口径,这里再导一份是为了
 /// 让 design.dart 这个轻入口不必依赖 models(models 会带出网络层)。
 String yuanOf(int cents) => '¥${(cents / 100).toStringAsFixed(2)}';
+
+/// 图片位:有图显示图,没图显示成体系的占位——**三端所有会缺图的地方都走它**。
+///
+/// 为什么要收成一个组件:改之前三端有 12 处缺图兜底、12 个 CircleAvatar、
+/// 15 个灰图标,每处各写各的——有的灰图标、有的首字、有的 emoji。
+/// 列表里十家店排下来一片灰,那才是"难看"的来源。
+///
+/// 占位的构成:
+///  1. 底色按 [seed](店名/菜名)哈希取自六组泥土色(见 [szToneOf]),
+///     同一家店永远同一个色,用户能靠颜色认店;
+///  2. 中间是名称首字(中文一字、拉丁两字母),用衬线,克制的对比;
+///  3. 传了 [categoryIcon] 且尺寸够大时,右下角压一个极淡的品类符号做纹样。
+///
+/// 用于:商家 logo、菜品图、房型图、头像、店铺封面。
+class SzImage extends StatelessWidget {
+  const SzImage({
+    super.key,
+    required this.url,
+    required this.name,
+    required this.size,
+    this.radius,
+    this.circle = false,
+    this.categoryIcon,
+  });
+
+  /// 已解析好的完整图片地址;空串或加载失败都走占位。
+  final String url;
+
+  /// 名称,用来取首字与底色。
+  final String name;
+
+  final double size;
+
+  /// 圆角;不传按尺寸自动(≤48 用 8,更大用 12)。
+  final double? radius;
+
+  /// 头像用圆形。
+  final bool circle;
+
+  /// 品类符号(仅大尺寸时作为淡纹样出现)。
+  final IconData? categoryIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final sz = Theme.of(context).sz;
+    final tone = szToneOf(name, dark: dark);
+    final r = circle
+        ? size / 2
+        : (radius ?? (size <= 48 ? kRadiusSm : kRadiusMd));
+    final shape = circle
+        ? const CircleBorder()
+        : RoundedRectangleBorder(borderRadius: BorderRadius.circular(r));
+
+    Widget placeholder = Container(
+      width: size,
+      height: size,
+      color: tone.bg,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 品类纹样:只在够大的图上出现,压在右下角当底纹,不抢首字
+          if (categoryIcon != null && size >= 72)
+            Positioned(
+              right: -size * .10,
+              bottom: -size * .10,
+              child: Icon(categoryIcon,
+                  size: size * .62, color: tone.fg.withValues(alpha: .14)),
+            ),
+          Text(
+            szInitialOf(name),
+            style: szFigure(
+              // 首字占宽度的四成左右:大图上是主视觉,小图上仍认得清
+              fontSize: size * .40,
+              fontWeight: FontWeight.w600,
+              color: tone.fg,
+              height: 1.0,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: ShapeDecoration(
+        shape: shape.copyWith(side: BorderSide(color: sz.line)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: url.isEmpty
+          ? placeholder
+          : Image.network(
+              url,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              // 加载中先显示占位,不给转圈——列表里十个转圈比十个色块还难看
+              loadingBuilder: (context, child, progress) =>
+                  progress == null ? child : placeholder,
+              errorBuilder: (_, __, ___) => placeholder,
+            ),
+    );
+  }
+}
+
+/// 宽幅封面位(店铺头图、房型大图):同一套占位规则,只是不是正方形。
+class SzCover extends StatelessWidget {
+  const SzCover({
+    super.key,
+    required this.url,
+    required this.name,
+    this.height = 132,
+    this.categoryIcon,
+  });
+
+  final String url;
+  final String name;
+  final double height;
+  final IconData? categoryIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final tone = szToneOf(name, dark: dark);
+    Widget placeholder = Container(
+      height: height,
+      width: double.infinity,
+      color: tone.bg,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          if (categoryIcon != null)
+            Positioned(
+              right: height * .10,
+              bottom: -height * .18,
+              child: Icon(categoryIcon,
+                  size: height * .86, color: tone.fg.withValues(alpha: .12)),
+            ),
+          Text(szInitialOf(name),
+              style: szFigure(
+                  fontSize: height * .34,
+                  fontWeight: FontWeight.w600,
+                  color: tone.fg,
+                  height: 1.0)),
+        ],
+      ),
+    );
+    return SizedBox(
+      height: height,
+      width: double.infinity,
+      child: url.isEmpty
+          ? placeholder
+          : Image.network(url,
+              height: height,
+              width: double.infinity,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) =>
+                  progress == null ? child : placeholder,
+              errorBuilder: (_, __, ___) => placeholder),
+    );
+  }
+}

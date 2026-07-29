@@ -1055,18 +1055,41 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       InkWell(
                         onTap: _uploadingLogo ? null : _pickLogo,
                         borderRadius: BorderRadius.circular(32),
+                        // 店铺 logo:缺图时是 SzImage(店名首字),右下角压相机角标——
+                        // 商家这一侧要的是"提醒你补图",所以提示不能丢
                         child: _uploadingLogo
-                            ? const CircleAvatar(
-                                radius: 32,
-                                child: CircularProgressIndicator())
-                            : shop.logoUrl.isEmpty
-                                ? const CircleAvatar(
-                                    radius: 32,
-                                    child: Icon(Icons.add_a_photo))
-                                : CircleAvatar(
-                                    radius: 32,
-                                    backgroundImage: NetworkImage(widget.api
-                                        .resolveUrl(shop.logoUrl))),
+                            ? const SizedBox(
+                                width: 64,
+                                height: 64,
+                                child: Center(
+                                    child: CircularProgressIndicator()))
+                            : Stack(clipBehavior: Clip.none, children: [
+                                SzImage(
+                                    url: shop.logoUrl.isEmpty
+                                        ? ''
+                                        : widget.api.resolveUrl(shop.logoUrl),
+                                    name: shop.name,
+                                    size: 64,
+                                    circle: true,
+                                    categoryIcon:
+                                        merchantCategoryIcon(shop.category)),
+                                Positioned(
+                                  right: -2,
+                                  bottom: -2,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(3),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).sz.surface,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                          color: Theme.of(context).sz.line),
+                                    ),
+                                    child: Icon(Icons.photo_camera_outlined,
+                                        size: 12,
+                                        color: Theme.of(context).sz.inkMuted),
+                                  ),
+                                ),
+                              ]),
                       ),
                       const SizedBox(width: 12),
                       Expanded(

@@ -118,25 +118,13 @@ class _RoomManagePageState extends State<RoomManagePage> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 10),
       child: Row(children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(kRadiusSm),
-          child: Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              color: sz.surfaceAlt,
-              border: Border.all(color: sz.line),
-              borderRadius: BorderRadius.circular(kRadiusSm),
-            ),
-            child: rt.imageUrls.isEmpty
-                ? Center(
-                    child: Text(rt.name.isEmpty ? '房' : rt.name.characters.first,
-                        style: szFigure(fontSize: 16, color: sz.inkFaint)))
-                : Image.network(widget.api.resolveUrl(rt.imageUrls.first),
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox.shrink()),
-          ),
-        ),
+        SzImage(
+            url: rt.imageUrls.isEmpty
+                ? ''
+                : widget.api.resolveUrl(rt.imageUrls.first),
+            name: rt.name,
+            size: 46,
+            categoryIcon: Icons.bed_outlined),
         const SizedBox(width: 11),
         Expanded(
           child: Column(

@@ -247,13 +247,14 @@ class _SearchPageState extends State<SearchPage> {
                                 return FadeSlideIn(
                                   index: i,
                                   child: ListTile(
-                                    leading: m.logoUrl.isEmpty
-                                        ? const CircleAvatar(
-                                            child: Icon(Icons.restaurant))
-                                        : CircleAvatar(
-                                            backgroundImage: NetworkImage(
-                                                widget.api
-                                                    .resolveUrl(m.logoUrl))),
+                                    leading: SzImage(
+                                        url: m.logoUrl.isEmpty
+                                            ? ''
+                                            : widget.api.resolveUrl(m.logoUrl),
+                                        name: m.name,
+                                        size: 44,
+                                        categoryIcon:
+                                            merchantCategoryIcon(m.category)),
                                     title: Text(m.name),
                                     subtitle: Text(
                                         '${m.ratingLabel} · ${m.address}'),

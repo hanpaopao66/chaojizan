@@ -251,20 +251,13 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
         child: Opacity(
           opacity: bookable ? 1 : 0.55,
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 84,
-                height: 84,
-                child: rt.imageUrls.isEmpty
-                    ? Container(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        child: const Icon(Icons.bed_outlined, size: 32))
-                    : Image.network(
-                        widget.api.resolveUrl(rt.imageUrls.first),
-                        fit: BoxFit.cover),
-              ),
-            ),
+            SzImage(
+                url: rt.imageUrls.isEmpty
+                    ? ''
+                    : widget.api.resolveUrl(rt.imageUrls.first),
+                name: rt.name,
+                size: 84,
+                categoryIcon: Icons.bed_outlined),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
