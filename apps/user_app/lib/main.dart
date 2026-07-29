@@ -2110,10 +2110,13 @@ class _MenuPageState extends State<MenuPage>
           child: Row(
             children: [
               TweenAnimationBuilder<double>(
-                key: ValueKey(_totalCount), // 数量一变,重放弹跳动画
-                tween: Tween(begin: 0.7, end: 1.0),
-                duration: const Duration(milliseconds: 350),
-                curve: Curves.elasticOut,
+                key: ValueKey(_totalCount), // 数量一变,重放一次轻微放大
+                // 原来是 elasticOut 弹跳 350ms:回弹属于"卖萌"的动效,
+                // 和这套克制的观感对不上。改成 easeOutCubic 200ms,
+                // 只给一下"数字变了"的确认,不表演
+                tween: Tween(begin: 0.88, end: 1.0),
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
                 builder: (context, scale, child) =>
                     Transform.scale(scale: scale, child: child),
                 child: Badge.count(

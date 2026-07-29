@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import 'brand.dart';
 import 'brand_art.dart';
 
-/// 弹性入场:成功图标/空态插画用,scale 从 0.6 弹到 1 + 淡入。
+/// 入场:成功图标/空态插画用,轻微放大 + 淡入。
+///
+/// 原来是 easeOutBack(0.6→1,带回弹)450ms。回弹会"过冲"再弹回来,
+/// 属于卖萌型动效;这套观感要的是安静的确认,所以改成 easeOutCubic、
+/// 起始 0.92、260ms——看得出来有过渡,但不表演。
 class PopIn extends StatelessWidget {
   const PopIn({super.key, required this.child, this.delayMs = 0});
 
@@ -12,13 +16,15 @@ class PopIn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (MediaQuery.of(context).disableAnimations) return child;
+    final total = 260 + delayMs;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: 450 + delayMs),
-      curve: Interval(delayMs / (450 + delayMs), 1, curve: Curves.easeOutBack),
+      duration: Duration(milliseconds: total),
+      curve: Interval(delayMs / total, 1, curve: Curves.easeOutCubic),
       builder: (context, t, child) => Opacity(
         opacity: t.clamp(0, 1),
-        child: Transform.scale(scale: 0.6 + 0.4 * t, child: child),
+        child: Transform.scale(scale: 0.92 + 0.08 * t, child: child),
       ),
       child: child,
     );
@@ -35,15 +41,19 @@ class FadeSlideIn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (index >= 8) return child; // 首屏之外不做进场,滚动性能优先
-    final delay = index * 45;
+    if (MediaQuery.of(context).disableAnimations) return child;
+    // 位移从 16 收到 10、时长从 320 收到 240:列表进场该是"已经在那儿了"
+    // 的感觉,不是一个个飞进来
+    final delay = index * 35;
+    final total = 240 + delay;
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: 320 + delay),
-      curve: Interval(delay / (320 + delay), 1, curve: Curves.easeOutCubic),
+      duration: Duration(milliseconds: total),
+      curve: Interval(delay / total, 1, curve: Curves.easeOutCubic),
       builder: (context, t, child) => Opacity(
         opacity: t,
         child: Transform.translate(
-            offset: Offset(0, 16 * (1 - t)), child: child),
+            offset: Offset(0, 10 * (1 - t)), child: child),
       ),
       child: child,
     );
@@ -79,6 +89,12 @@ class _SkeletonListState extends State<SkeletonList>
   @override
   Widget build(BuildContext context) {
     final base = Theme.of(context).sz.surfaceAlt;
+    // 关了动效就别呼吸了,静态占位块一样能传达"在加载"
+    if (MediaQuery.of(context).disableAnimations) {
+      if (_controller.isAnimating) _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
     return FadeTransition(
       opacity: _controller,
       child: ListView.builder(

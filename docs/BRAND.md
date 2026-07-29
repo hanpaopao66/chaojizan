@@ -43,9 +43,24 @@
 | **`hold`** | `#A6763E` | `#D2A86C` | 平台留存:佣金、服务费 | 当强调色使 |
 | `danger` | `#D03030` | `#E06B6B` | 只给报错 | 表达状态(状态用 chip) |
 
-字体:数字与拉丁字母走 `SzSerif`(Source Serif 4 子集,OFL),
-中文回落系统字;正文数字用 `szFigure()`(旧式数字),
-需要竖排对齐的金额用 `szMoney()`(等宽)。详见 `packages/shared/assets/fonts/README.md`。
+**字体**(2026-07-29 对齐后):拉丁与数字打包两款 OFL 子集,中文一律回落系统字。
+
+| 用途 | claude.ai 用的 | 我们用的 | 选它的理由 |
+|---|---|---|---|
+| 衬线 · 数字 | Galaxie Copernicus | `SzSerif` = **Literata** | Copernicus 是受 Plantin 影响的过渡期衬线,Literata 同属这一脉 |
+| 无衬线 · 拉丁词 | Styrene B | `SzSans` = **Space Grotesk** | Styrene 的几何无衬线特征,公认最接近的 OFL 替代 |
+
+Copernicus 与 Styrene 都是商用授权,打不进开源仓;npm 上那个第三方
+`anthropic-fonts` 包标 MIT 是无效授权,不能用。取法:正文数字 `szFigure()`
+(旧式数字)、竖排对齐的金额 `szMoney()`(等宽)。
+详见 `packages/shared/assets/fonts/README.md`。
+
+**按钮圆角**:8 的圆角矩形,不是全胶囊——claude.ai 的按钮是圆角矩形。
+chip 仍是胶囊(那是标签不是按钮)。
+
+**动效**:只用 ease-out 一族,不用 elastic / back 这类带回弹过冲的曲线;
+UI 过渡 160–260ms,唯一的长动画是分账条的占比展开(450ms)。
+所有位移与缩放动画都尊重系统「减弱动态效果」。
 
 <details>
 <summary>v2 旧产品层色板(已废弃,留档对照)</summary>

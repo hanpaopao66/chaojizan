@@ -25,11 +25,18 @@ dev_dependencies:
     sdk: flutter
 
 flutter:
-  # 数字与拉丁字母的衬线子集(中文仍走系统字);来源与复现见
-  # assets/fonts/README.md,授权 OFL 1.1(assets/fonts/OFL.txt)
+  # 拉丁字母与数字的字体子集(中文一律回落系统字);来源与复现见
+  # assets/fonts/README.md,两款均为 OFL 1.1(各自的 OFL-*.txt)
   fonts:
+    # 衬线(Literata):金额、评分、距离等数字
     - family: SzSerif
       fonts:
         - asset: assets/fonts/SzSerif-Regular.ttf
         - asset: assets/fonts/SzSerif-Semibold.ttf
+          weight: 600
+    # 无衬线(Space Grotesk):界面里的拉丁词与英文
+    - family: SzSans
+      fonts:
+        - asset: assets/fonts/SzSans-Regular.ttf
+        - asset: assets/fonts/SzSans-Semibold.ttf
           weight: 600

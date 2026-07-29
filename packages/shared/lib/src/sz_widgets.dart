@@ -292,7 +292,7 @@ class _SzMoneyFlowState extends State<SzMoneyFlow> {
                     tween: Tween(
                         begin: 0,
                         end: (instant || _grown) ? item.fraction : 0),
-                    duration: Duration(milliseconds: instant ? 0 : 700),
+                    duration: Duration(milliseconds: instant ? 0 : 450),
                     curve: Curves.easeOutCubic,
                     builder: (context, v, _) => LinearProgressIndicator(
                       value: v.clamp(0, 1),

@@ -152,7 +152,9 @@ extension SzColorsX on ThemeData {
   SzColors get sz => extension<SzColors>() ?? SzColors.light;
 }
 
-/// 圆角:8 小(缩略图/chip 内)、12 卡片、18 大卡;按钮用 StadiumBorder。
+/// 圆角:8 小(缩略图/chip 内、按钮)、12 卡片、18 大卡。
+/// 按钮用 8 的圆角矩形而不是全胶囊——claude.ai 的按钮是圆角矩形,
+/// 胶囊是上一版留下的,和这套观感对不上。chip 仍是胶囊(那是标签不是按钮)。
 const double kRadiusSm = 8;
 const double kRadiusMd = 12;
 const double kRadiusLg = 18;
@@ -161,8 +163,16 @@ const double kRadiusLg = 18;
 const double kPagePad = 18;
 const double kCardPad = 14;
 
-/// 衬线字族(拉丁与数字);中文由 fallback 交回系统字。
+/// 衬线字族(Literata 子集):金额、评分、距离等数字。
+/// 选它是因为 Literata 与 claude.ai 大标题用的 Galaxie Copernicus 同属
+/// Plantin 一脉的过渡期衬线;Copernicus 本身是商用授权,打不进开源仓。
 const String kSerifFamily = 'SzSerif';
+
+/// 无衬线字族(Space Grotesk 子集):界面里的拉丁词与英文。
+/// claude.ai 正文用的 Styrene B 是商用授权,Space Grotesk 是它公认最接近的
+/// OFL 替代。中文一律回落系统字——这两款都不含 CJK。
+const String kSansFamily = 'SzSans';
+
 const List<String> _cjkFallback = ['PingFang SC', 'Noto Sans CJK SC', 'Heiti SC'];
 
 /// 正文里的数字:评分、月售、距离、单量。旧式数字(onum),混排更贴合文字。
@@ -292,6 +302,10 @@ ThemeData brandTheme(Brightness brightness) {
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
+    // 拉丁走 SzSans,中文回落系统字。只影响 km / CSV / T+1 这类词,
+    // 中文观感不变(子集里没有 CJK,渲染时系统自动接管)
+    fontFamily: kSansFamily,
+    fontFamilyFallback: _cjkFallback,
     scaffoldBackgroundColor: sz.paper,
     canvasColor: sz.paper,
     // 涟漪比 InkSparkle 安静,和这套克制的观感匹配
@@ -344,7 +358,8 @@ ThemeData brandTheme(Brightness brightness) {
         backgroundColor: sz.clay,
         foregroundColor: scheme.onPrimary,
         minimumSize: const Size(64, 48),
-        shape: const StadiumBorder(),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(kRadiusSm)),
         textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
       ),
     ),
@@ -354,7 +369,8 @@ ThemeData brandTheme(Brightness brightness) {
         backgroundColor: sz.clay,
         foregroundColor: scheme.onPrimary,
         minimumSize: const Size(64, 48),
-        shape: const StadiumBorder(),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(kRadiusSm)),
         textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
       ),
     ),
@@ -364,7 +380,8 @@ ThemeData brandTheme(Brightness brightness) {
         foregroundColor: sz.ink,
         side: BorderSide(color: sz.line),
         minimumSize: const Size(64, 44),
-        shape: const StadiumBorder(),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(kRadiusSm)),
         textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
       ),
     ),
@@ -442,7 +459,8 @@ ThemeData brandTheme(Brightness brightness) {
         backgroundColor: sz.surfaceAlt,
         foregroundColor: sz.inkMuted,
         side: BorderSide(color: sz.line),
-        shape: const StadiumBorder(),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(kRadiusSm)),
         textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
       ),
     ),

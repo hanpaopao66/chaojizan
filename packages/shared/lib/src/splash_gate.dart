@@ -287,7 +287,7 @@ class _BrandSplash extends StatelessWidget {
                 opacity: CurvedAnimation(parent: intro, curve: Curves.easeOut),
                 child: ScaleTransition(
                   scale: Tween(begin: 0.82, end: 1.0).animate(CurvedAnimation(
-                      parent: intro, curve: Curves.easeOutBack)),
+                      parent: intro, curve: Curves.easeOutCubic)),
                   child: Column(
                     children: [
                       Container(
