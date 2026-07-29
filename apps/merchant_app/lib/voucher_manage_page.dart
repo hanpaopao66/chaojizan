@@ -201,9 +201,9 @@ class _VoucherRedeemPageState extends State<VoucherRedeemPage> {
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
-          icon: const PopIn(
+          icon: PopIn(
               child:
-                  Icon(Icons.check_circle, color: kMoneyGreen, size: 52)),
+                  Icon(Icons.check_circle, color: Theme.of(context).sz.earn, size: 52)),
           title: const Text('核销成功'),
           content: Text(
               '${t.title}\n面值 ${yuan(t.faceValueCents)}\n\n'

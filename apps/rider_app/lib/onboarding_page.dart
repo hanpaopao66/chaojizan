@@ -240,7 +240,7 @@ class _RiderGearPageState extends State<RiderGearPage> {
                         g['status'] == 'issued' ? '已发放' : '待发放',
                         style: TextStyle(
                             color: g['status'] == 'issued'
-                                ? kMoneyGreen
+                                ? Theme.of(context).sz.earn
                                 : Colors.orange)),
                   ),
               ]),
@@ -437,7 +437,7 @@ class _RiderInsurancePageState extends State<RiderInsurancePage> {
                         r['status'] == 'insured' ? '已投保' : '保障金池兜底',
                         style: TextStyle(
                             color: r['status'] == 'insured'
-                                ? kMoneyGreen
+                                ? Theme.of(context).sz.earn
                                 : Colors.orange)),
                   ),
               ]),

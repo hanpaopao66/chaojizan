@@ -856,7 +856,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
     }
   }
 
-  /// 备餐计时:接单后已耗时;出餐超时(server 定格 readyLate)红色高亮
+  /// 备餐计时:接单后已耗时;出餐超时(server 定格 readyLate)用 danger 高亮
   Widget _prepTimer(Order order) {
     final raw = order.acceptedAt;
     if (raw == null) return const SizedBox.shrink();
@@ -864,15 +864,53 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
     if (accepted == null) return const SizedBox.shrink();
     final mins = DateTime.now().difference(accepted).inMinutes;
     final late = order.readyLate;
-    final color = late ? Colors.red : Colors.green.shade700;
-    return Row(children: [
-      Icon(late ? Icons.local_fire_department : Icons.timer_outlined,
-          size: 14, color: color),
-      const SizedBox(width: 4),
-      Text(late ? '出餐超时 · 已备餐 $mins 分钟,尽快出餐' : '备餐中 · 已 $mins 分钟',
+    final sz = Theme.of(context).sz;
+    final color = late ? sz.danger : sz.inkMuted;
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(children: [
+        Icon(late ? Icons.local_fire_department : Icons.timer_outlined,
+            size: 13, color: color),
+        const SizedBox(width: 4),
+        Text.rich(
+          TextSpan(children: [
+            TextSpan(text: late ? '出餐超时 · 已备餐 ' : '备餐中 · 已 '),
+            TextSpan(text: '$mins', style: szFigure(fontSize: 12)),
+            TextSpan(text: late ? ' 分钟,尽快出餐' : ' 分钟'),
+          ]),
           style: TextStyle(
-              color: color, fontWeight: FontWeight.bold, fontSize: 12)),
-    ]);
+              color: color,
+              fontSize: 12,
+              fontWeight: late ? FontWeight.w600 : FontWeight.w400),
+        ),
+      ]),
+    );
+  }
+
+  /// 待接单计时:顾客已经等了多久。商家端最该被盯住的数字。
+  Widget _waitTimer(Order order) {
+    final created = DateTime.tryParse(order.createdAt)?.toLocal();
+    if (created == null) return const SizedBox.shrink();
+    final mins = DateTime.now().difference(created).inMinutes;
+    final sz = Theme.of(context).sz;
+    final urgent = mins >= 3;
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Text.rich(
+        TextSpan(children: [
+          const TextSpan(text: '顾客已等 '),
+          TextSpan(
+              text: '$mins',
+              style: szFigure(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: urgent ? sz.danger : sz.ink)),
+          const TextSpan(text: ' 分钟'),
+        ]),
+        style: TextStyle(
+            fontSize: 12, color: urgent ? sz.danger : sz.inkMuted),
+      ),
+    );
   }
 
   List<Widget> _actionsFor(Order order) {
@@ -914,7 +952,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
               onPressed: () => _refundSheet(order),
               child: const Text('缺货退款')),
           const SizedBox(width: 8),
-          FilledButton.tonal(
+          FilledButton(
               onPressed: () => _act(order, OrderStatus.ready),
               child: const Text('出餐完成')),
         ];
@@ -1040,89 +1078,111 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                       itemCount: _filteredOrders.length,
                       itemBuilder: (context, i) {
                         final order = _filteredOrders[i];
-                        return Card(
+                        final sz = Theme.of(context).sz;
+                        final isNew = order.status == OrderStatus.paid;
+                        return Container(
                           margin: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
-                          // 出餐超时:整卡红色描边,后厨一眼看到该催
-                          shape: order.readyLate
-                              ? RoundedRectangleBorder(
-                                  side: const BorderSide(
-                                      color: Colors.red, width: 1.5),
-                                  borderRadius: BorderRadius.circular(12))
+                              horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: sz.surface,
+                            borderRadius: BorderRadius.circular(kRadiusMd),
+                            border: Border.all(
+                                // 出餐超时:整卡 danger 描边,后厨一眼看到该催
+                                color: order.readyLate ? sz.danger : sz.line,
+                                width: order.readyLate ? 1.5 : 1),
+                          ),
+                          // 新单左侧一条 clay:待接单的在列表里要一眼挑出来
+                          foregroundDecoration: isNew
+                              ? BoxDecoration(
+                                  borderRadius:
+                                      BorderRadius.circular(kRadiusMd),
+                                  border: Border(
+                                      left: BorderSide(
+                                          color: sz.clay, width: 3)),
+                                )
                               : null,
                           child: Padding(
-                            padding: const EdgeInsets.all(12),
+                            padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(children: [
-                                  Expanded(
-                                      child: Text(order.summary,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleMedium)),
+                                Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Expanded(
+                                          child: Text(order.summary,
+                                              style: TextStyle(
+                                                  fontSize: 14.5,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: sz.ink))),
+                                      const SizedBox(width: 8),
+                                      SzChip(order.status.label,
+                                          color: isNew ? sz.clay : sz.inkFaint,
+                                          dense: true),
+                                    ]),
+                                const SizedBox(height: 5),
+                                Wrap(spacing: 6, runSpacing: 4, children: [
                                   if (order.parentOrderNo.isNotEmpty)
-                                    Padding(
-                                      padding:
-                                          const EdgeInsets.only(right: 4),
-                                      child: Chip(
-                                          label: Text(
-                                              '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}'),
-                                          backgroundColor:
-                                              const Color(0x332FBF8F)),
-                                    ),
-                                  if (_urgedOrders
-                                      .contains(order.orderNo))
-                                    const Padding(
-                                      padding: EdgeInsets.only(right: 4),
-                                      child: Chip(
-                                          label: Text('催'),
-                                          backgroundColor: Color(0x33FF5A1F)),
-                                    ),
+                                    SzChip(
+                                        '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}',
+                                        color: sz.earn,
+                                        dense: true),
+                                  if (_urgedOrders.contains(order.orderNo))
+                                    SzChip('催', color: sz.danger, dense: true),
                                   if (order.pickup)
-                                    Padding(
-                                      padding:
-                                          const EdgeInsets.only(right: 4),
-                                      child: Chip(
-                                          label: Text(order.pickupCode.isEmpty
-                                              ? '自取'
-                                              : '自取 ${order.pickupCode}'),
-                                          backgroundColor: Theme.of(context)
-                                              .colorScheme
-                                              .primary
-                                              .withValues(alpha: 0.12)),
-                                    ),
-                                  Chip(label: Text(order.status.label)),
+                                    SzChip(
+                                        order.pickupCode.isEmpty
+                                            ? '自取'
+                                            : '自取 ${order.pickupCode}',
+                                        color: sz.hold,
+                                        dense: true),
                                 ]),
-                                const SizedBox(height: 4),
                                 if (order.scheduledLabel != null)
-                                  Text('⏰ ${order.scheduledLabel},请按时出餐',
-                                      style: const TextStyle(
-                                          color: Colors.orange,
-                                          fontWeight: FontWeight.bold)),
-                                // 备餐计时:接单后按承诺出餐时长倒计时,超时红色高亮
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text('⏰ ${order.scheduledLabel},请按时出餐',
+                                        style: TextStyle(
+                                            fontSize: 12,
+                                            color: sz.hold,
+                                            fontWeight: FontWeight.w600)),
+                                  ),
+                                if (isNew) _waitTimer(order),
+                                // 备餐计时:接单后按承诺出餐时长计时,超时高亮
                                 if (order.status == OrderStatus.accepted)
                                   _prepTimer(order),
-                                Text(
-                                    '${yuan(order.totalCents)} · ${order.address}'),
+                                const SizedBox(height: 5),
+                                Row(children: [
+                                  Text(yuan(order.totalCents),
+                                      style: szMoney(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: sz.ink)),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(order.address,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                            fontSize: 12, color: sz.inkMuted)),
+                                  ),
+                                ]),
                                 if (order.remark.isNotEmpty)
-                                  Text('备注:${order.remark}'),
+                                  Text('备注:${order.remark}',
+                                      style: TextStyle(
+                                          fontSize: 12, color: sz.inkMuted)),
                                 if (order.status == OrderStatus.cancelled &&
                                     order.cancelReason.isNotEmpty)
                                   Text('取消原因:${order.cancelReason}',
                                       style: TextStyle(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .error)),
+                                          fontSize: 12, color: sz.danger)),
                                 if (order.refundCents > 0)
                                   Text(
                                       '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
                                       style: TextStyle(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .error)),
+                                          fontSize: 12, color: sz.danger)),
                                 if (_actionsFor(order).isNotEmpty) ...[
-                                  const SizedBox(height: 8),
+                                  const SizedBox(height: 6),
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.end,
                                     children: _actionsFor(order),

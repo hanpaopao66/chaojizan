@@ -145,7 +145,7 @@ class _WalletPageState extends State<WalletPage> {
             action: FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: Colors.white,
-                foregroundColor: kMoneyGreen,
+                foregroundColor: Theme.of(context).sz.earn,
                 minimumSize: const Size(0, 38),
                 padding: const EdgeInsets.symmetric(horizontal: 22),
                 textStyle:

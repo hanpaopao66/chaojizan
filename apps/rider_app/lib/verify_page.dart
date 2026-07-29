@@ -64,7 +64,7 @@ class _RiderVerifyFlowPageState extends State<RiderVerifyFlowPage> {
         appBar: AppBar(title: const Text('实名认证')),
         body: Center(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.verified, size: 56, color: Color(0xFF0E8A5F)),
+            Icon(Icons.verified, size: 56, color: Theme.of(context).sz.earn),
             const SizedBox(height: 16),
             Text('认证已通过,可以上线接单了',
                 style: Theme.of(context).textTheme.titleLarge),

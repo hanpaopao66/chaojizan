@@ -320,7 +320,7 @@ class _FinancePageState extends State<FinancePage> {
           const SizedBox(height: 12),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.insights_outlined, color: kMoneyGreen),
+              leading: Icon(Icons.insights_outlined, color: Theme.of(context).sz.earn),
               title: const Text('经营分析'),
               subtitle: const Text('时段分布 / 菜品排行 / 客单价 / 复购(仅自己可见)'),
               trailing: const Icon(Icons.chevron_right),

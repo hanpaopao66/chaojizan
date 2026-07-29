@@ -67,8 +67,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                       height: 72.0 * (v as int) / max,
                       decoration: BoxDecoration(
                         color: v == max && v > 0
-                            ? kMoneyGreen
-                            : kMoneyGreen.withValues(alpha: .35),
+                            ? Theme.of(context).sz.earn
+                            : Theme.of(context).sz.earn.withValues(alpha: .35),
                         borderRadius: const BorderRadius.vertical(
                             top: Radius.circular(2)),
                       ),
@@ -142,7 +142,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                                     style: TextStyle(
                                         fontWeight: FontWeight.w800,
                                         color: i < 3
-                                            ? kMoneyGreen
+                                            ? Theme.of(context).sz.earn
                                             : Colors.grey))),
                             Expanded(
                               child: Column(

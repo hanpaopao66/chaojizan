@@ -309,10 +309,11 @@ class _RiderHomePageState extends State<RiderHomePage> {
   Widget? _verifyBanner() {
     final p = _verify;
     if (p == null || p.isApproved) return null;
+    final sz = Theme.of(context).sz;
     final (text, color) = switch (p.status) {
-      'pending' => ('实名认证审核中,通过后即可上线接单', Colors.blue),
-      'rejected' => ('认证被驳回:${p.rejectReason} · 点击重新提交', Colors.red),
-      _ => ('完成实名认证(身份证+健康证),即可开始接单赚钱 →', const Color(0xFFFF5A1F)),
+      'pending' => ('实名认证审核中,通过后即可上线接单', sz.inkMuted),
+      'rejected' => ('认证被驳回:${p.rejectReason} · 点击重新提交', sz.danger),
+      _ => ('完成实名认证(身份证+健康证),即可开始接单赚钱 →', sz.clay),
     };
     return InkWell(
       onTap: () async {
@@ -799,10 +800,11 @@ class _RiderHomePageState extends State<RiderHomePage> {
   }
 
   Widget _orderCard(Order order, {List<Widget> actions = const []}) {
+    // 户外 + 单手 + 可能戴手套:卡片内边距和行距都比另外两端松
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -868,20 +870,41 @@ class _RiderHomePageState extends State<RiderHomePage> {
                 if (toShop != null) '距你 ${distanceLabel(toShop)}',
                 if (trip != null) '送程 ${distanceLabel(trip)}',
               ];
-              return Row(children: [
-                Text(
-                    order.tipCents > 0
-                        ? '配送费 ${yuan(order.deliveryFeeCents)}+小费 ${yuan(order.tipCents)}'
-                        : '配送费 ${yuan(order.deliveryFeeCents)}',
-                    style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.bold)),
-                if (parts.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Text(parts.join(' · '),
-                      style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ]);
+              final sz = Theme.of(context).sz;
+              final mine = order.deliveryFeeCents + order.tipCents;
+              // 骑手端最该被一眼看到的是"这一单我能拿多少",
+              // 所以金额比别处再大一档,并明说没人从里面抽走
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(yuan(mine),
+                              style: szMoney(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: sz.earn)),
+                          Text(
+                              order.tipCents > 0
+                                  ? '配送费 + 小费,100% 归你'
+                                  : '配送费 100% 归你,平台不抽',
+                              style: TextStyle(
+                                  fontSize: 11, color: sz.inkMuted)),
+                        ],
+                      ),
+                      const Spacer(),
+                      if (parts.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(parts.join(' · '),
+                              style: TextStyle(
+                                  fontSize: 12, color: sz.inkMuted)),
+                        ),
+                    ]),
+              );
             }),
             if (actions.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -923,7 +946,10 @@ class _RiderHomePageState extends State<RiderHomePage> {
                             OutlinedButton(
                                 onPressed: () => _openMap(_available[i - 1]),
                                 child: const Text('看路线')),
+                            // 户外单手操作:主按钮高 52、宽一点,戴手套也点得中
                             FilledButton(
+                                style: FilledButton.styleFrom(
+                                    minimumSize: const Size(112, 52)),
                                 onPressed: () => _grab(_available[i - 1]),
                                 child: const Text('抢单')),
                           ],
