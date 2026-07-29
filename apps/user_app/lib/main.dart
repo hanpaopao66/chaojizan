@@ -1370,39 +1370,56 @@ class _MenuPageState extends State<MenuPage>
   Widget _header() {
     final shop = _detail ?? widget.merchant;
     final theme = Theme.of(context);
+    final sz = theme.sz;
+    final rate = (shop.commissionRate * 100).toStringAsFixed(0);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(shop.name,
-              style: theme.textTheme.headlineSmall
-                  ?.copyWith(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
+              style: TextStyle(
+                  fontSize: 21,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: -0.3,
+                  color: sz.ink)),
+          const SizedBox(height: 6),
           InkWell(
             onTap: () => _tabController.animateTo(1), // 切到「评价」Tab
             child: Row(
               children: [
-                Text(
-                    [
-                      '${shop.ratingLabel} · 月售 ${shop.monthlySales} 单 · 配送费 ¥3 起',
-                      if (shop.minOrderCents > 0)
-                        '¥${shop.minOrderCents ~/ 100} 起送',
-                      ...shop.promoLabels,
-                    ].join(' · '),
-                    style: theme.textTheme.bodySmall),
-                Icon(Icons.chevron_right,
-                    size: 14, color: theme.colorScheme.outline),
+                Flexible(
+                  child: Text(
+                      [
+                        '${shop.ratingLabel} · 月售 ${shop.monthlySales} 单 · 配送费 ¥3 起',
+                        if (shop.minOrderCents > 0)
+                          '¥${shop.minOrderCents ~/ 100} 起送',
+                        ...shop.promoLabels,
+                      ].join(' · '),
+                      style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+                ),
+                Icon(Icons.chevron_right, size: 14, color: sz.inkFaint),
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              '本店仅被抽成 ${(shop.commissionRate * 100).toStringAsFixed(0)}%,菜价里没有平台税',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.primary),
+          // 把平台主张落到这一家店:抽象的「5% 封顶」在这里变成
+          // 「你这一单便宜在哪」——这是店铺页唯一该讲平台的地方
+          const SizedBox(height: 11),
+          SzCard(
+            padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
+            child: Text.rich(
+              TextSpan(children: [
+                const TextSpan(text: '这家店在超级赞只被抽 '),
+                TextSpan(
+                    text: '$rate%',
+                    style: szFigure(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: sz.clay)),
+                const TextSpan(text: ',省下的抽成让在了菜价上——菜价里没有平台税。'),
+              ]),
+              style: TextStyle(fontSize: 12, height: 1.55, color: sz.ink),
             ),
           ),
           if (shop.announcement.isNotEmpty)
@@ -1484,10 +1501,10 @@ class _MenuPageState extends State<MenuPage>
   }
 
   Widget _categoryRail() {
-    final theme = Theme.of(context);
+    final sz = Theme.of(context).sz;
     return Container(
-      width: 92,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+      width: 84,
+      color: sz.surfaceAlt,
       child: ListView(
         children: [
           for (final c in _categories)
@@ -1495,25 +1512,23 @@ class _MenuPageState extends State<MenuPage>
               onTap: () => setState(() => _category = c),
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+                    const EdgeInsets.symmetric(vertical: 13, horizontal: 8),
                 decoration: BoxDecoration(
-                  color: c == _category
-                      ? theme.scaffoldBackgroundColor
-                      : Colors.transparent,
+                  color: c == _category ? sz.paper : Colors.transparent,
                   border: Border(
                     left: BorderSide(
-                      width: 3,
-                      color: c == _category
-                          ? theme.colorScheme.primary
-                          : Colors.transparent,
+                      width: 2,
+                      color: c == _category ? sz.clay : Colors.transparent,
                     ),
                   ),
                 ),
                 child: Text(
                   c,
                   style: TextStyle(
+                    fontSize: 12.5,
+                    color: c == _category ? sz.ink : sz.inkMuted,
                     fontWeight:
-                        c == _category ? FontWeight.bold : FontWeight.normal,
+                        c == _category ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
               ),
@@ -1523,48 +1538,66 @@ class _MenuPageState extends State<MenuPage>
     );
   }
 
+  /// 菜品缩略图。从 64 收到 58:图越小,菜名和价格越先被读到。
   Widget _dishImage(Dish dish) {
+    final sz = Theme.of(context).sz;
     final placeholder = Container(
-      width: 64,
-      height: 64,
+      width: 58,
+      height: 58,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
+        color: sz.surfaceAlt,
+        border: Border.all(color: sz.line),
+        borderRadius: BorderRadius.circular(kRadiusSm),
       ),
-      child: Icon(Icons.ramen_dining,
-          color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.45)),
+      child: Center(
+          child: Text(dish.name.isEmpty ? '菜' : dish.name.characters.first,
+              style: szFigure(fontSize: 18, color: sz.inkFaint))),
     );
     if (dish.imageUrl.isEmpty) return placeholder;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(kRadiusSm),
       child: Image.network(
         widget.api.resolveUrl(dish.imageUrl),
-        width: 64,
-        height: 64,
+        width: 58,
+        height: 58,
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => placeholder,
       ),
     );
   }
 
+  /// 购物车条的动态提示:差多少能满减最有推动力,够了就明说已减多少。
+  /// 规则取商家的 promoRules(与结算页、后端同一份数据,不另算一套)。
+  String _cartNote() {
+    if (_cart.isEmpty) return '配送费按距离结算 · 100% 归骑手';
+    final shop = _detail ?? widget.merchant;
+    final rules = List.of(shop.promoRules)
+      ..sort((a, b) => a.thresholdCents.compareTo(b.thresholdCents));
+    if (rules.isEmpty) return '配送费按距离结算 · 100% 归骑手';
+
+    // 已达成的最高档
+    final hit = rules.where((r) => _totalCents >= r.thresholdCents).toList();
+    // 下一档
+    final next =
+        rules.where((r) => _totalCents < r.thresholdCents).toList();
+    if (next.isNotEmpty) {
+      final gap = next.first.thresholdCents - _totalCents;
+      final off = yuan(next.first.offCents);
+      return hit.isEmpty
+          ? '再点 ${yuan(gap)} 可减 $off'
+          : '已减 ${yuan(hit.last.offCents)} · 再点 ${yuan(gap)} 可减 $off';
+    }
+    return '已减 ${yuan(hit.last.offCents)} · 另计配送费';
+  }
+
   Widget _stepper(Dish dish, int quantity, void Function(Dish, int) change) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (quantity > 0) ...[
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.remove_circle_outline),
-            onPressed: () => change(dish, -1),
-          ),
-          Text('$quantity'),
-        ],
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          icon: const Icon(Icons.add_circle),
-          onPressed: dish.stock > quantity ? () => change(dish, 1) : null,
-        ),
-      ],
+    return SzStepper(
+      quantity: quantity,
+      // 库存到顶就不给加(原逻辑靠 onPressed: null 置灰,这里保持同一口径)
+      onAdd: () {
+        if (dish.stock > quantity) change(dish, 1);
+      },
+      onRemove: () => change(dish, -1),
     );
   }
 
@@ -1743,6 +1776,7 @@ class _MenuPageState extends State<MenuPage>
                       const SizedBox(height: 2),
                       Row(
                         children: [
+                          // 价格用墨色不用强调色:一屏里 clay 只留给"要你点的那一个"
                           Text(
                             soldOut
                                 // 估清 = 今日售罄(明天自动恢复),区别于长期没货
@@ -1750,12 +1784,14 @@ class _MenuPageState extends State<MenuPage>
                                 : dish.hasOptions
                                     ? '${yuan(dish.effectivePriceCents)} 起'
                                     : yuan(dish.effectivePriceCents),
-                            style: TextStyle(
-                              color: soldOut
-                                  ? Theme.of(context).colorScheme.outline
-                                  : Theme.of(context).colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: soldOut
+                                ? TextStyle(
+                                    fontSize: 13,
+                                    color: Theme.of(context).sz.inkFaint)
+                                : szMoney(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Theme.of(context).sz.ink),
                           ),
                           // 限时折扣:划线原价 + 琥珀"限时"签
                           if (!soldOut && dish.flashActive) ...[
@@ -1874,9 +1910,10 @@ class _MenuPageState extends State<MenuPage>
                       Row(
                         children: [
                           Text(yuan(dish.effectivePriceCents),
-                              style: theme.textTheme.headlineSmall?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                  fontWeight: FontWeight.bold)),
+                              style: szMoney(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w600,
+                                  color: theme.sz.ink)),
                           if (dish.flashActive) ...[
                             const SizedBox(width: 6),
                             Text(yuan(dish.priceCents),
@@ -2054,12 +2091,10 @@ class _MenuPageState extends State<MenuPage>
       body: body,
       bottomNavigationBar: SafeArea(
         child: Container(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 8),
-            ],
+            color: Theme.of(context).sz.surface,
+            border: Border(top: BorderSide(color: Theme.of(context).sz.line)),
           ),
           child: Row(
             children: [
@@ -2073,21 +2108,36 @@ class _MenuPageState extends State<MenuPage>
                 child: Badge.count(
                   count: _totalCount,
                   isLabelVisible: _totalCount > 0,
-                  child: IconButton.filledTonal(
-                    icon: const Icon(Icons.shopping_cart),
+                  child: IconButton(
+                    icon: const Icon(Icons.shopping_cart_outlined),
                     onPressed: _cart.isEmpty ? null : _openCartSheet,
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  _cart.isEmpty
-                      ? '还没选商品'
-                      : '菜品 ${yuan(_totalCents)} · 配送费按距离结算',
-                  style: Theme.of(context).textTheme.titleSmall,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_cart.isEmpty ? '¥0.00' : yuan(_totalCents),
+                        style: szMoney(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: _cart.isEmpty
+                                ? Theme.of(context).sz.inkFaint
+                                : Theme.of(context).sz.ink)),
+                    const SizedBox(height: 1),
+                    Text(_cartNote(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 10.5,
+                            color: Theme.of(context).sz.inkMuted)),
+                  ],
                 ),
               ),
+              const SizedBox(width: 10),
               FilledButton(
                 onPressed: _cart.isEmpty ? null : _checkout,
                 child: const Text('去结算'),
