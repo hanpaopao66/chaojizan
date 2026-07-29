@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'api_client.dart';
 import 'brand.dart';
+import 'net_image.dart';
 
 /// 订单内聊天页(三端共用):气泡 + 快捷语 + 输入框,3 秒轮询兜底。
 /// 电话(隐私号)仍是兜底通道;终结 2 小时后只读。
@@ -110,7 +111,7 @@ class _OrderChatPageState extends State<OrderChatPage> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: m['kind'] == 'image'
-                      ? Image.network('${m['content']}',
+                      ? Image(image: szNetImage('${m['content']}'),
                           width: 180, fit: BoxFit.cover)
                       : Text('${m['content']}'),
                 ),

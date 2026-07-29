@@ -333,7 +333,7 @@ class _HotelListPageState extends State<HotelListPage> {
                   ? Container(
                       color: theme.colorScheme.surfaceContainerHighest,
                       child: const Icon(Icons.hotel, size: 36))
-                  : Image.network(widget.api.resolveUrl(photo),
+                  : Image(image: szNetImage(widget.api.resolveUrl(photo)),
                       fit: BoxFit.cover),
             ),
             Expanded(

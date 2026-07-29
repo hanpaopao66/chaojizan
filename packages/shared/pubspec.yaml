@@ -8,6 +8,10 @@ environment:
   flutter: ">=3.22.0"
 
 dependencies:
+  # 图片磁盘缓存:Flutter 自带的 Image.network 只有内存缓存,杀进程就没了。
+  # 外卖首页整屏是图,用户一天开三次就重下三次——用户流量、加载速度、
+  # 平台带宽三头都亏。只在本地落盘,不上报任何数据
+  cached_network_image: ^3.4.1
   crypto: ^3.0.7
   flutter:
     sdk: flutter

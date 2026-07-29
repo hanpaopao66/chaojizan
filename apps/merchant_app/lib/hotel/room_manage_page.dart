@@ -627,7 +627,7 @@ class _RoomTypeEditPageState extends State<RoomTypeEditPage> {
             Stack(children: [
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.network(widget.api.resolveUrl(url),
+                child: Image(image: szNetImage(widget.api.resolveUrl(url)),
                     width: 96, height: 96, fit: BoxFit.cover),
               ),
               Positioned(

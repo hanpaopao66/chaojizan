@@ -508,21 +508,34 @@ class _FinancePageState extends State<FinancePage> {
 }
 
 /// 单日入账明细,和日汇总逐单能对上。
-class DayOrdersPage extends StatelessWidget {
+class DayOrdersPage extends StatefulWidget {
   const DayOrdersPage({super.key, required this.api, required this.stat});
 
   final ApiClient api;
   final DayStat stat;
 
   @override
+  State<DayOrdersPage> createState() => _DayOrdersPageState();
+}
+
+class _DayOrdersPageState extends State<DayOrdersPage> {
+  late Future<List<FinanceOrder>> _future =
+      widget.api.financeOrders(widget.stat.day);
+  ApiClient get api => widget.api;
+  DayStat get stat => widget.stat;
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text('${stat.day} 入账明细')),
       body: FutureBuilder(
-        future: api.financeOrders(stat.day),
+        future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('${snapshot.error}'));
+            return SzError(
+                error: snapshot.error,
+                onRetry: () =>
+                    setState(() => _future = api.financeOrders(stat.day)));
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());

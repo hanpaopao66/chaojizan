@@ -9,5 +9,6 @@ library;
 export 'src/brand.dart';
 export 'src/brand_art.dart';
 export 'src/merchant_categories.dart';
+export 'src/net_image.dart';
 export 'src/sz_widgets.dart';
 export 'src/ui_bits.dart';

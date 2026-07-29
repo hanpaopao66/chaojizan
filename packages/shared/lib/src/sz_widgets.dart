@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import 'brand.dart';
 import 'brand_art.dart';
+import 'net_image.dart';
 import 'ui_bits.dart';
 
 /// 卡片:surface 底 + 1px 描边 + 圆角 12。用在所有需要"成块"的地方。
@@ -657,8 +658,8 @@ class SzImage extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: url.isEmpty
           ? placeholder
-          : Image.network(
-              url,
+          : Image(
+              image: szNetImage(url),
               width: size,
               height: size,
               fit: BoxFit.cover,
@@ -718,13 +719,56 @@ class SzCover extends StatelessWidget {
       width: double.infinity,
       child: url.isEmpty
           ? placeholder
-          : Image.network(url,
+          : Image(
+              image: szNetImage(url),
               height: height,
               width: double.infinity,
               fit: BoxFit.cover,
               loadingBuilder: (context, child, progress) =>
                   progress == null ? child : placeholder,
               errorBuilder: (_, __, ___) => placeholder),
+    );
+  }
+}
+
+/// 加载失败态:一句人话 + 一个重试按钮。
+///
+/// 改之前三端有 6 处 `snapshot.hasError` 分支,**没有一处给重试按钮**——
+/// 用户只能下拉(如果那页恰好有 RefreshIndicator)或者杀 App。
+/// 外卖场景里电梯、地库、信号弱是常态,这是高频路径。
+///
+/// 文案直接用 [error] 的 message:走 ApiClient 出来的要么是服务端的中文
+/// 业务错误,要么是翻好的网络提示(那句提示本身就带了"检查网络再试"这类
+/// 行动建议),不会是异常原文。所以这里不需要判断是不是网络错误——
+/// 设计层也就不必反过来依赖网络层。
+class SzError extends StatelessWidget {
+  const SzError({super.key, required this.error, this.onRetry});
+
+  final Object? error;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PopIn(child: BrandArtView(BrandArt.offline, size: 112)),
+            const SizedBox(height: 14),
+            Text('${error ?? '加载失败'}',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 14, height: 1.6, color: sz.ink)),
+            if (onRetry != null) ...[
+              const SizedBox(height: 18),
+              FilledButton(onPressed: onRetry, child: const Text('重试')),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

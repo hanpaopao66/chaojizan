@@ -383,8 +383,16 @@ class _RiderHomePageState extends State<RiderHomePage> {
     _refresh();
   }
 
+  /// 正在抢的单号:抢单是最会手快连点的场景,没有这个标志的话
+  /// 第一次成功、第二次被服务端拒绝,骑手会看到一个错误提示以为没抢到。
+  /// 商家「接单」和用户「提交订单」都有防重标志,这里原先漏了。
+  final Set<String> _grabbing = {};
+
   Future<void> _grab(Order order) async {
+    if (_grabbing.contains(order.orderNo)) return;
     if (!await _ensureVerified()) return;
+    if (!mounted) return;
+    setState(() => _grabbing.add(order.orderNo));
     try {
       await widget.api.grabOrder(order.orderNo);
       if (!mounted) return;
@@ -395,8 +403,10 @@ class _RiderHomePageState extends State<RiderHomePage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text('$e')));
       _refresh();
+    } finally {
+      if (mounted) setState(() => _grabbing.remove(order.orderNo));
     }
   }
 
@@ -440,6 +450,9 @@ class _RiderHomePageState extends State<RiderHomePage> {
         }
       }
     }
+    // 送达同样按单号防重:拍照上传后有一段等待,这期间很容易再点一下
+    if (_grabbing.contains(order.orderNo)) return;
+    if (mounted) setState(() => _grabbing.add(order.orderNo));
     try {
       await widget.api.transition(order.orderNo, OrderStatus.delivered,
           photoUrl: photoUrl);
@@ -447,7 +460,9 @@ class _RiderHomePageState extends State<RiderHomePage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _grabbing.remove(order.orderNo));
     }
   }
 
@@ -948,11 +963,15 @@ class _RiderHomePageState extends State<RiderHomePage> {
                                 onPressed: () => _openMap(_available[i - 1]),
                                 child: const Text('看路线')),
                             // 户外单手操作:主按钮高 52、宽一点,戴手套也点得中
-                            FilledButton(
-                                style: FilledButton.styleFrom(
-                                    minimumSize: const Size(112, 52)),
-                                onPressed: () => _grab(_available[i - 1]),
-                                child: const Text('抢单')),
+                            Builder(builder: (context) {
+                              final o = _available[i - 1];
+                              final busy = _grabbing.contains(o.orderNo);
+                              return FilledButton(
+                                  style: FilledButton.styleFrom(
+                                      minimumSize: const Size(112, 52)),
+                                  onPressed: busy ? null : () => _grab(o),
+                                  child: Text(busy ? '抢单中…' : '抢单'));
+                            }),
                           ],
                         );
                         },

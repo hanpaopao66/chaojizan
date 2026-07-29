@@ -1520,8 +1520,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                             children: [
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  widget.api.resolveUrl(url),
+                                child: Image(image: szNetImage(widget.api.resolveUrl(url)),
                                   width: 92,
                                   height: 92,
                                   fit: BoxFit.cover,
@@ -1590,8 +1589,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                             for (final img in sale.images)
                               ClipRRect(
                                 borderRadius: BorderRadius.circular(6),
-                                child: Image.network(
-                                    widget.api.resolveUrl(img),
+                                child: Image(image: szNetImage(widget.api.resolveUrl(img)),
                                     width: 64, height: 64, fit: BoxFit.cover),
                               ),
                           ]),

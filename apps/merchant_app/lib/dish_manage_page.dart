@@ -560,8 +560,7 @@ class _DishEditPageState extends State<DishEditPage> {
                               const Text('选菜品图', style: TextStyle(fontSize: 12)),
                             ],
                           )
-                        : Image.network(
-                            widget.api.resolveUrl(_imageUrl),
+                        : Image(image: szNetImage(widget.api.resolveUrl(_imageUrl)),
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) =>
                                 const Icon(Icons.broken_image),

@@ -955,9 +955,9 @@ class _MerchantListViewState extends State<MerchantListView> {
                           color: Theme.of(context).sz.inkMuted)),
                 ),
               if (snapshot.hasError)
-                Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('加载失败:${snapshot.error}')),
+                SzError(
+                    error: snapshot.error,
+                    onRetry: () => setState(() => _future = _load())),
               if (!snapshot.hasData && !snapshot.hasError) ...[
                 _bigCardSkeleton(),
                 _bigCardSkeleton(),
@@ -2351,11 +2351,10 @@ class _OrderListViewState extends State<OrderListView> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return ListView(children: [
-              Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text('${snapshot.error}'))
-            ]);
+            return SzError(
+                error: snapshot.error,
+                onRetry: () =>
+                    setState(() => _future = widget.api.myOrders()));
           }
           if (!snapshot.hasData) {
             return const SkeletonList();
@@ -2594,7 +2593,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                     for (final url in images)
                       ClipRRect(
                         borderRadius: BorderRadius.circular(6),
-                        child: Image.network(widget.api.resolveUrl(url),
+                        child: Image(image: szNetImage(widget.api.resolveUrl(url)),
                             width: 56, height: 56, fit: BoxFit.cover),
                       ),
                     if (images.length < 6)
@@ -2612,7 +2611,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                     for (final url in medical)
                       ClipRRect(
                         borderRadius: BorderRadius.circular(6),
-                        child: Image.network(widget.api.resolveUrl(url),
+                        child: Image(image: szNetImage(widget.api.resolveUrl(url)),
                             width: 56, height: 56, fit: BoxFit.cover),
                       ),
                     if (medical.length < 6)
@@ -2695,7 +2694,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                 for (final url in images)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(6),
-                    child: Image.network(widget.api.resolveUrl(url),
+                    child: Image(image: szNetImage(widget.api.resolveUrl(url)),
                         width: 56, height: 56, fit: BoxFit.cover),
                   ),
                 if (images.length < 3)
@@ -3169,8 +3168,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                         onPressed: () => showDialog<void>(
                             context: context,
                             builder: (_) => Dialog(
-                                child: Image.network(
-                                    order.deliveryPhotoUrl))),
+                                child: Image(image: szNetImage(order.deliveryPhotoUrl)))),
                         child: const Text('查看照片')),
                   ]),
                 ],
@@ -3654,8 +3652,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                              widget.api.resolveUrl(url),
+                          child: Image(image: szNetImage(widget.api.resolveUrl(url)),
                               width: 64, height: 64, fit: BoxFit.cover),
                         ),
                         Positioned(
@@ -4325,20 +4322,32 @@ class _ProfileViewState extends State<ProfileView> {
 }
 
 /// 我的收藏:店铺列表,点进店铺页。
-class FavoritesPage extends StatelessWidget {
+class FavoritesPage extends StatefulWidget {
   const FavoritesPage({super.key, required this.api});
 
   final ApiClient api;
+
+  @override
+  State<FavoritesPage> createState() => _FavoritesPageState();
+}
+
+class _FavoritesPageState extends State<FavoritesPage> {
+  // 收藏页原来直接在 build 里 api.favorites():每次 rebuild 都重新请求,
+  // 而且加载失败没有重试出口。改成持有 future,重试就是换一个 future
+  late Future<List<Merchant>> _future = widget.api.favorites();
+  ApiClient get api => widget.api;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('我的收藏')),
       body: FutureBuilder(
-        future: api.favorites(),
+        future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('${snapshot.error}'));
+            return SzError(
+                error: snapshot.error,
+                onRetry: () => setState(() => _future = api.favorites()));
           }
           if (!snapshot.hasData) return const SkeletonList(itemCount: 4);
           final shops = snapshot.data!;
@@ -4638,8 +4647,7 @@ class _ShopInfoTab extends StatelessWidget {
             itemCount: shop.photoUrls.length,
             itemBuilder: (context, i) => InteractiveViewer(
               child: Center(
-                child: Image.network(
-                  api.resolveUrl(shop.photoUrls[i]),
+                child: Image(image: szNetImage(api.resolveUrl(shop.photoUrls[i])),
                   fit: BoxFit.contain,
                   errorBuilder: (_, __, ___) => const Icon(
                       Icons.broken_image_outlined,
@@ -4724,8 +4732,7 @@ class _ShopInfoTab extends StatelessWidget {
                   onTap: () => _openPhotoViewer(context, i),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      api.resolveUrl(shop.photoUrls[i]),
+                    child: Image(image: szNetImage(api.resolveUrl(shop.photoUrls[i])),
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(
                           color: theme.colorScheme.surfaceContainerHighest,

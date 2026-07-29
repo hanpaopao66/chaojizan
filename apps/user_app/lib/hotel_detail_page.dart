@@ -162,7 +162,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
             height: 200,
             child: PageView(children: [
               for (final url in photos)
-                Image.network(widget.api.resolveUrl(url), fit: BoxFit.cover),
+                Image(image: szNetImage(widget.api.resolveUrl(url)), fit: BoxFit.cover),
             ]),
           ),
         Padding(

@@ -194,7 +194,7 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
               clipBehavior: Clip.antiAlias,
               child: url.isEmpty
                   ? const Icon(Icons.add_a_photo, size: 30)
-                  : Image.network(widget.api.resolveUrl(url),
+                  : Image(image: szNetImage(widget.api.resolveUrl(url)),
                       fit: BoxFit.cover, width: double.infinity),
             ),
           ),

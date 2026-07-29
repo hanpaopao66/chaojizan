@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:http/http.dart' as http;
@@ -12,8 +14,45 @@ class ApiException implements Exception {
   final int statusCode;
   final String message;
 
+  /// 网络层问题(断网/超时/连不上),不是服务端返回的业务错误。
+  /// 页面据此决定是"给个重试按钮"还是"照实说明原因"。
+  bool get isNetwork => statusCode == 0;
+
   @override
   String toString() => message;
+}
+
+/// 把底层网络异常翻成人话。
+///
+/// 不翻的后果实测过:首页断网时界面上会出现
+/// 「ClientException with SocketException: Connection refused (OS Error...),
+/// uri=http://10.0.2.2:8010/merchants?lat=30.66&lng=104.08&sort=distance」——
+/// 用户看不懂,而且把内部接口地址、端口、查询参数都暴露在界面上,
+/// 截图发出去就是一次信息泄露。所以网络类异常一律不许原样冒到 UI。
+ApiException _asFriendly(Object error) {
+  if (error is ApiException) return error;
+  final raw = error.toString();
+  if (error is TimeoutException || raw.contains('TimeoutException')) {
+    return ApiException(0, '连接超时,换个网络或稍后再试');
+  }
+  if (error is SocketException ||
+      raw.contains('SocketException') ||
+      raw.contains('Connection refused') ||
+      raw.contains('Network is unreachable') ||
+      raw.contains('Failed host lookup')) {
+    return ApiException(0, '网络好像断了,检查一下网络再试');
+  }
+  if (error is HandshakeException || raw.contains('HandshakeException')) {
+    return ApiException(0, '安全连接建立失败,换个网络再试');
+  }
+  if (error is http.ClientException || raw.contains('ClientException')) {
+    return ApiException(0, '网络不太顺,请稍后再试');
+  }
+  if (error is FormatException || raw.contains('FormatException')) {
+    // 服务端返回了非 JSON:多半是被网关/校园网劫持到了门户页
+    return ApiException(0, '返回内容异常,可能被网络劫持,换个网络再试');
+  }
+  return ApiException(0, '出了点问题,请稍后再试');
 }
 
 /// 三端共用的 API 客户端。
@@ -77,6 +116,17 @@ class ApiClient {
   static void Function()? onUnauthorized;
 
   Future<dynamic> _request(String method, String path,
+      {Object? body, Map<String, String>? query}) async {
+    try {
+      return await _rawRequest(method, path, body: body, query: query);
+    } catch (e) {
+      // 出口只放两种东西:服务端的业务错误(中文)、翻好的网络提示。
+      // 底层异常原文一律不许出去(见 _asFriendly 的注释)
+      throw _asFriendly(e);
+    }
+  }
+
+  Future<dynamic> _rawRequest(String method, String path,
       {Object? body, Map<String, String>? query}) async {
     if (path != '/auth/refresh') await _maybeRefreshToken();
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
@@ -560,6 +610,14 @@ class ApiClient {
 
   /// 商家月度对账单 CSV(原文;调用方存文件/系统分享)
   Future<String> merchantStatementCsv(String month) async {
+    try {
+      return await _statementCsv(month);
+    } catch (e) {
+      throw _asFriendly(e);
+    }
+  }
+
+  Future<String> _statementCsv(String month) async {
     await _maybeRefreshToken();
     final uri = Uri.parse('$baseUrl/merchants/me/statement.csv?month=$month');
     final resp = await http
@@ -1027,6 +1085,14 @@ class ApiClient {
 
   /// 上传图片(菜品图/门头照),返回相对路径,展示时用 resolveUrl 拼全
   Future<String> uploadImage(List<int> bytes, String filename) async {
+    try {
+      return await _uploadImage(bytes, filename);
+    } catch (e) {
+      throw _asFriendly(e);
+    }
+  }
+
+  Future<String> _uploadImage(List<int> bytes, String filename) async {
     final request =
         http.MultipartRequest('POST', Uri.parse('$baseUrl/upload'));
     if (_token != null) request.headers['Authorization'] = 'Bearer $_token';

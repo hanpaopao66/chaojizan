@@ -18,21 +18,34 @@ class ReviewsPage extends StatelessWidget {
 }
 
 /// 评价列表主体(店铺页「评价」Tab 与独立页复用)。
-class ReviewsList extends StatelessWidget {
+class ReviewsList extends StatefulWidget {
   const ReviewsList({super.key, required this.api, required this.merchantId});
 
   final ApiClient api;
   final int merchantId;
+
+  @override
+  State<ReviewsList> createState() => _ReviewsListState();
+}
+
+class _ReviewsListState extends State<ReviewsList> {
+  // 原来在 build 里直接发请求:每次 rebuild 重发一遍,失败也没有重试出口
+  late Future<List<Review>> _future =
+      widget.api.merchantReviews(widget.merchantId);
+  ApiClient get api => widget.api;
 
   String _stars(int n) => '★' * n + '☆' * (5 - n);
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder(
-        future: api.merchantReviews(merchantId),
+        future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return Center(child: Text('${snapshot.error}'));
+            return SzError(
+                error: snapshot.error,
+                onRetry: () => setState(() =>
+                    _future = api.merchantReviews(widget.merchantId)));
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -111,12 +124,12 @@ class ReviewsList extends StatelessWidget {
                               builder: (_) => Dialog(
                                 backgroundColor: Colors.transparent,
                                 child: InteractiveViewer(
-                                    child: Image.network(url)),
+                                    child: Image(image: szNetImage(url))),
                               ),
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.network(url,
+                              child: Image(image: szNetImage(url),
                                   width: 72,
                                   height: 72,
                                   fit: BoxFit.cover,

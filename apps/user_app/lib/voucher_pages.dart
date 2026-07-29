@@ -207,8 +207,7 @@ class _VoucherListViewState extends State<VoucherListView> {
                         child: deal.merchantLogo.isEmpty
                             ? Icon(Icons.local_activity,
                                 color: theme.colorScheme.outline)
-                            : Image.network(
-                                widget.api.resolveUrl(deal.merchantLogo),
+                            : Image(image: szNetImage(widget.api.resolveUrl(deal.merchantLogo)),
                                 fit: BoxFit.cover,
                                 errorBuilder: (_, __, ___) =>
                                     Icon(Icons.local_activity,

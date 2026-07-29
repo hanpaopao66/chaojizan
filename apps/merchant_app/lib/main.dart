@@ -328,8 +328,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
                           style: Theme.of(context).textTheme.bodySmall),
                     ],
                   )
-                : Image.network(
-                    widget.api.resolveUrl(url),
+                : Image(image: szNetImage(widget.api.resolveUrl(url)),
                     fit: BoxFit.cover,
                     width: double.infinity,
                   ),
@@ -674,14 +673,23 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// 在途的状态流转(按单号):接单/出餐/开始配送/已送达都走 _act,
+  /// 连点两下会发两个请求,第二个被服务端拒绝后弹一个错误——
+  /// 老板会以为没接上。骑手端抢单原先也有同样的问题。
+  final Set<String> _acting = {};
+
   Future<void> _act(Order order, OrderStatus to) async {
+    if (_acting.contains(order.orderNo)) return;
+    setState(() => _acting.add(order.orderNo));
     try {
       await widget.api.transition(order.orderNo, to);
       _refresh();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _acting.remove(order.orderNo));
     }
   }
 
@@ -943,8 +951,11 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
               onPressed: () => _reject(order), child: const Text('拒单')),
           const SizedBox(width: 8),
           FilledButton(
-              onPressed: () => _act(order, OrderStatus.accepted),
-              child: const Text('接单')),
+              onPressed: _acting.contains(order.orderNo)
+                  ? null
+                  : () => _act(order, OrderStatus.accepted),
+              child: Text(
+                  _acting.contains(order.orderNo) ? '处理中…' : '接单')),
         ];
       case OrderStatus.accepted:
         return [
@@ -954,8 +965,11 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
               child: const Text('缺货退款')),
           const SizedBox(width: 8),
           FilledButton(
-              onPressed: () => _act(order, OrderStatus.ready),
-              child: const Text('出餐完成')),
+              onPressed: _acting.contains(order.orderNo)
+                  ? null
+                  : () => _act(order, OrderStatus.ready),
+              child: Text(
+                  _acting.contains(order.orderNo) ? '处理中…' : '出餐完成')),
         ];
       case OrderStatus.ready:
         return [
