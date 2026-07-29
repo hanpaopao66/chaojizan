@@ -276,7 +276,11 @@ ThemeData brandTheme(Brightness brightness) {
     surface: sz.surface,
     onSurface: sz.ink,
     surfaceContainerHighest: sz.surfaceAlt,
-    outline: sz.line,
+    // 存量代码里 colorScheme.outline 有 51 处当"次要文字色"在用,
+    // 映射成发丝线色会让那些文字直接看不见 —— 所以 outline 给 inkMuted,
+    // 真正的线走 outlineVariant / dividerTheme / sz.line
+    outline: sz.inkMuted,
+    outlineVariant: sz.line,
     error: sz.danger,
   );
 

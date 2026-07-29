@@ -179,28 +179,33 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       appBar: AppBar(
         title: _tab == 0
-            // 商业平台标配:顶部地址栏,让用户知道「附近」是哪儿附近
+            // 商业平台标配:顶部地址栏,让用户知道「附近」是哪儿附近。
+            // 地址与送达时间同行——打开外卖 App 第一秒只关心这两件事。
             ? InkWell(
                 onTap: _pickDeliveryAddress,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(kRadiusSm),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
                   children: [
-                    Icon(Icons.place,
-                        size: 18,
-                        color: Theme.of(context).colorScheme.primary),
-                    const SizedBox(width: 4),
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 190),
+                      constraints: const BoxConstraints(maxWidth: 178),
                       child: Text(
                         _deliveryAddress?.address ?? '当前位置',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w600),
+                            fontSize: 17,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.2),
                       ),
                     ),
-                    const Icon(Icons.arrow_drop_down, size: 20),
+                    const SizedBox(width: 5),
+                    Text('▾',
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).sz.inkFaint)),
                   ],
                 ),
               )
@@ -422,48 +427,38 @@ class _MerchantListViewState extends State<MerchantListView> {
 
   /// 空品类招商位:该品类还没有商家,把空状态变成入驻引导
   Widget _categoryVacancy() {
-    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 48, 24, 24),
-      child: Column(children: [
-        Icon(Icons.storefront_outlined,
-            size: 56, color: theme.colorScheme.outline),
-        const SizedBox(height: 12),
-        const Text('该品类商家入驻中', style: TextStyle(fontSize: 16)),
-        const SizedBox(height: 6),
-        Text('总负担 5% 封顶 · 入驻免费 · 没有竞价排名',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.outline)),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(
-          icon: const Icon(Icons.storefront, size: 18),
-          label: const Text('我有店,去入驻'),
-          onPressed: () => launchUrl(
-              Uri.parse('${widget.api.baseUrl}/join/merchant'),
-              mode: LaunchMode.externalApplication),
-        ),
-      ]),
+      padding: const EdgeInsets.only(top: 28),
+      child: SzEmpty(
+        art: BrandArt.bowl,
+        text: '该品类商家入驻中\n总负担 5% 封顶 · 入驻免费 · 没有竞价排名',
+        actionLabel: '我有店,去入驻',
+        onAction: () => launchUrl(
+            Uri.parse('${widget.api.baseUrl}/join/merchant'),
+            mode: LaunchMode.externalApplication),
+      ),
     );
   }
 
+  /// 排序:选中态墨色实底,比描边笃定。「离我近」就是按距离排,
+  /// 别叫「综合」——叫综合就等于给暗箱排序留了口子。
   Widget _sortChips() {
     const options = [
-      ('distance', '综合'),
+      ('distance', '离我近'),
       ('rating', '评分优先'),
       ('sales', '月售优先'),
     ];
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 6),
       child: Row(
         children: [
           for (final (value, label) in options)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(
-                label: Text(label),
+              padding: const EdgeInsets.only(right: 7),
+              child: SzChip(
+                label,
                 selected: _sort == value,
-                visualDensity: VisualDensity.compact,
-                onSelected: (_) => setState(() {
+                onTap: () => setState(() {
                   _sort = value;
                   _future = _load();
                 }),
@@ -477,32 +472,28 @@ class _MerchantListViewState extends State<MerchantListView> {
   /// 大搜索框:商业外卖首页的第一交互,直接可见可点(不藏在图标里)。
   /// 不放口号横幅——信任靠订单里可查的账单传达,不靠喊。
   Widget _searchBar() {
-    final theme = Theme.of(context);
+    final sz = Theme.of(context).sz;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 0),
       child: InkWell(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(999),
         onTap: () => Navigator.of(context).push(MaterialPageRoute(
             builder: (_) =>
                 SearchPage(api: widget.api, lat: _myLat, lng: _myLng))),
         child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
+          height: 42,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: theme.brightness == Brightness.light
-                ? Colors.white
-                : theme.colorScheme.surfaceContainerHigh,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-                color: theme.colorScheme.primary.withValues(alpha: 0.5)),
+            color: sz.surface,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: sz.line),
           ),
           child: Row(
             children: [
-              Icon(Icons.search, color: theme.colorScheme.primary, size: 20),
+              Icon(Icons.search, color: sz.inkFaint, size: 19),
               const SizedBox(width: 8),
-              Text('搜店铺、搜菜品',
-                  style: TextStyle(
-                      color: theme.colorScheme.outline, fontSize: 14)),
+              Text('搜店铺、搜菜名',
+                  style: TextStyle(color: sz.inkFaint, fontSize: 13.5)),
             ],
           ),
         ),
@@ -510,158 +501,217 @@ class _MerchantListViewState extends State<MerchantListView> {
     );
   }
 
-  /// 金刚区:业务矩阵。已上线的可点,未上线的占位——每个占位都是一句
-  /// "我们打算怎么不黑"的宣言,这是愿景的展示位,不是空头支票堆
-  Widget _kingKong() {
-    final theme = Theme.of(context);
-    Widget entry(IconData icon, String label,
-        {VoidCallback? onTap, String? coming, String? blood}) {
-      final dimmed = coming != null;
-      final color =
-          dimmed ? theme.colorScheme.outline : theme.colorScheme.primary;
-      return InkWell(
-        borderRadius: BorderRadius.circular(12),
-        // 占位业务点进落地页:把行业问题和我们的姿态讲清楚,不是糊弄的"敬请期待"
-        onTap: onTap ??
-            () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => ComingSoonPage(
-                    name: label,
-                    icon: icon,
-                    blood: blood ?? '',
-                    promise: coming ?? ''))),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
+  /// 5% 承诺条:全首页唯一一处 claySoft。左侧衬线大字是这套视觉的记忆点。
+  /// 点进去看单笔分账(#107 的「钱去哪了」页;资质/入口在那条任务里收口)。
+  Widget _promiseStrip() {
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        onTap: () => showFivePercentSheet(context),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+          decoration: BoxDecoration(
+            color: sz.claySoft,
+            borderRadius: BorderRadius.circular(kRadiusMd),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: dimmed ? 0.06 : 0.10),
-                  shape: BoxShape.circle,
+              Text('5%',
+                  style: szFigure(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      color: sz.clay)),
+              const SizedBox(width: 12),
+              // 正文与链接分成两行:混在一段里,窄屏会把「这钱怎么算的 →」
+              // 从中间折断,下划线跟着断成两截
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('商家总负担 5% 封顶,配送费 100% 归骑手',
+                        style: TextStyle(
+                            fontSize: 12, height: 1.5, color: sz.ink)),
+                    const SizedBox(height: 2),
+                    Text('这钱怎么算的 →',
+                        style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: sz.clay,
+                            decoration: TextDecoration.underline,
+                            decorationColor: sz.clay)),
+                  ],
                 ),
-                child: Icon(icon, color: color, size: 23),
               ),
-              const SizedBox(height: 5),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 金刚区:业务矩阵。已上线的三项做成描述性宽卡(标题 + 一行副文案),
+  /// 未上线的愿景位仍是紧凑格——每个占位都是一句"我们打算怎么不黑"的宣言,
+  /// 是愿景展示位,不是空头支票堆。
+  ///
+  /// 图标位用衬线单字而不是 Material 图标:一屏里图标越少,
+  /// 真正要你点的那一个越显眼。
+  Widget _kingKong() {
+    final sz = Theme.of(context).sz;
+
+    Widget liveEntry(String glyph, String label, String sub, VoidCallback onTap) {
+      return Expanded(
+        child: SzCard(
+          onTap: onTap,
+          padding: const EdgeInsets.fromLTRB(11, 13, 11, 13),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(glyph,
+                  style: szFigure(
+                      fontSize: 19, color: sz.clay, height: 1.0)),
+              const SizedBox(height: 7),
               Text(label,
                   style: TextStyle(
-                      fontSize: 12,
-                      color: dimmed
-                          ? theme.colorScheme.outline
-                          : theme.colorScheme.onSurface)),
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: sz.ink)),
+              const SizedBox(height: 3),
+              Text(sub,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
             ],
           ),
         ),
       );
     }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-      child: GridView.count(
-        crossAxisCount: 4,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        childAspectRatio: 0.98,  // 每格高约 92px:圆标46+间距+单行标签,不溢出
-        children: [
-          entry(Icons.ramen_dining, '点外卖',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => CategoryPage(
-                      api: widget.api,
-                      deliveryAddress: widget.deliveryAddress)))),
-          // 金刚区定版 8 格(2026-07-27 拍板):住宿第 2 位,跑腿移除
-          entry(Icons.hotel_outlined, '住宿',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => HotelListPage(
-                      api: widget.api, lat: _myLat, lng: _myLng)))),
-          entry(Icons.local_activity_outlined, '超值团购',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => DealsPage(api: widget.api)))),
-          // 未上线业务的愿景占位:审核包里整体隐藏(feature_flags.dart)
-          if (kShowComingSoonBiz) ...[
-            entry(Icons.local_taxi_outlined, '打车',
-                coming: '司机不被抽走三成车费',
-                blood: '司机每单被抽走两三成,高峰还有乘客看不见的差价'),
-            entry(Icons.cleaning_services_outlined, '家政',
-                coming: '阿姨的钱不过中介的手',
-                blood: '中介两头收费,阿姨的月薪被抽走两到四成'),
-            entry(Icons.build_outlined, '维修',
-                coming: '明码标价,不搞小病大修',
-                blood: '上门费加虚报故障,"小病大修"成了行业默认'),
-            entry(Icons.local_shipping_outlined, '货运',
-                coming: '不收会员费,不用算法压价',
-                blood: '司机先交会员费才能接单,算法再一路压运价'),
-            entry(Icons.badge_outlined, '零工',
-                coming: '日结工资一分不被中介截',
-                blood: '劳务中介层层转包,日结工资被截走一两成'),
-          ],
-        ],
-      ),
+    Widget comingEntry(IconData icon, String label, String coming, String blood) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(kRadiusSm),
+        // 占位业务点进落地页:把行业问题和我们的姿态讲清楚,不是糊弄的"敬请期待"
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => ComingSoonPage(
+                name: label, icon: icon, blood: blood, promise: coming))),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: sz.inkFaint, size: 21),
+              const SizedBox(height: 6),
+              Text(label,
+                  style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
+          child: Row(
+            children: [
+              liveEntry('碗', '点外卖', '附近的店', () {
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => CategoryPage(
+                        api: widget.api,
+                        deliveryAddress: widget.deliveryAddress)));
+              }),
+              const SizedBox(width: 9),
+              // 金刚区定版(2026-07-27 拍板):住宿第 2 位,跑腿移除
+              liveEntry('宿', '住宿', '钟点房 / 民宿', () {
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => HotelListPage(
+                        api: widget.api, lat: _myLat, lng: _myLng)));
+              }),
+              const SizedBox(width: 9),
+              liveEntry('券', '超值团购', '到店核销', () {
+                Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => DealsPage(api: widget.api)));
+              }),
+            ],
+          ),
+        ),
+        // 未上线业务的愿景占位:审核包里整体隐藏(feature_flags.dart)
+        if (kShowComingSoonBiz)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+            child: GridView.count(
+              crossAxisCount: 5,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              childAspectRatio: 1.05,
+              children: [
+                comingEntry(Icons.local_taxi_outlined, '打车',
+                    '司机不被抽走三成车费', '司机每单被抽走两三成,高峰还有乘客看不见的差价'),
+                comingEntry(Icons.cleaning_services_outlined, '家政',
+                    '阿姨的钱不过中介的手', '中介两头收费,阿姨的月薪被抽走两到四成'),
+                comingEntry(Icons.build_outlined, '维修',
+                    '明码标价,不搞小病大修', '上门费加虚报故障,"小病大修"成了行业默认'),
+                comingEntry(Icons.local_shipping_outlined, '货运',
+                    '不收会员费,不用算法压价', '司机先交会员费才能接单,算法再一路压运价'),
+                comingEntry(Icons.badge_outlined, '零工',
+                    '日结工资一分不被中介截', '劳务中介层层转包,日结工资被截走一两成'),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
   /// 再来一单:外卖最高频的路径是回头单,抬到首屏(Grab 的 Order it again)
   Widget _reorderRow() {
-    final theme = Theme.of(context);
+    final sz = Theme.of(context).sz;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-          child: Text('再来一单',
-              style: theme.textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.bold)),
+          padding: const EdgeInsets.fromLTRB(kPagePad, 20, kPagePad, 9),
+          child: const SzSectionTitle('再来一单'),
         ),
         SizedBox(
-          height: 92,
+          height: 88,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: kPagePad),
             itemCount: _reorder.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            separatorBuilder: (_, __) => const SizedBox(width: 9),
             itemBuilder: (context, i) {
               final order = _reorder[i];
-              return InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => _openReorder(order),
-                child: Container(
-                  width: 168,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: theme.brightness == Brightness.light
-                        ? Colors.white
-                        : theme.colorScheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: theme.colorScheme.primary
-                            .withValues(alpha: 0.25)),
-                  ),
+              return SizedBox(
+                width: 168,
+                child: SzCard(
+                  onTap: () => _openReorder(order),
+                  padding: const EdgeInsets.all(11),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(order.merchantName.isEmpty
+                      Text(
+                          order.merchantName.isEmpty
                               ? '常点的店'
                               : order.merchantName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 13)),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: sz.ink)),
                       const SizedBox(height: 2),
                       Expanded(
                         child: Text(order.summary,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(fontSize: 11)),
+                            style:
+                                TextStyle(fontSize: 11, color: sz.inkMuted)),
                       ),
-                      Row(
-                        children: [
-                          Text(yuan(order.totalCents),
-                              style: theme.textTheme.bodySmall),
-                          const Spacer(),
-                          Icon(Icons.replay_circle_filled,
-                              size: 18, color: theme.colorScheme.primary),
-                        ],
-                      ),
+                      Text(yuan(order.totalCents),
+                          style: szMoney(fontSize: 12.5, color: sz.inkMuted)),
                     ],
                   ),
                 ),
@@ -673,167 +723,163 @@ class _MerchantListViewState extends State<MerchantListView> {
     );
   }
 
-  /// Grab 式大图商家卡:封面为主、信息精简
+  /// 商家行:62px 缩略图 + 店名 + 两行 meta,行间 1px 发丝线。
+  ///
+  /// 从 132px 大封面改成缩略图,是为了让店名和价格先被读到;
+  /// 但招牌菜三连保留——那是"这家卖什么、多少钱"的决策信息,
+  /// 属于功能不属于装饰,不能顺手删掉。
   Widget _bigMerchantCard(Merchant m) {
-    final theme = Theme.of(context);
+    final sz = Theme.of(context).sz;
     final dist = distanceMeters(_myLat, _myLng, m.lat, m.lng);
     final eta = etaMinutes(dist);
-    final cover = m.logoUrl.isEmpty
-        ? Container(
-            color: theme.colorScheme.primary.withValues(alpha: 0.08),
-            child: Center(
-                child: Icon(Icons.ramen_dining,
-                    size: 48,
-                    color: theme.colorScheme.primary
-                        .withValues(alpha: 0.45))),
-          )
-        : Image.network(
-            widget.api.resolveUrl(m.logoUrl),
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(
-              color: theme.colorScheme.primary.withValues(alpha: 0.08),
-              child: Center(
-                  child: Icon(Icons.ramen_dining,
-                      size: 48,
-                      color: theme.colorScheme.primary
-                          .withValues(alpha: 0.45))),
+
+    Widget thumb(String url, double size, double glyphSize) => ClipRRect(
+          borderRadius: BorderRadius.circular(kRadiusSm),
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: sz.surfaceAlt,
+              border: Border.all(color: sz.line),
+              borderRadius: BorderRadius.circular(kRadiusSm),
             ),
-          );
-    return Card(
-      margin: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => MenuPage(api: widget.api, merchant: m))),
+            child: url.isEmpty
+                ? Center(
+                    child: Text(m.name.isEmpty ? '店' : m.name.characters.first,
+                        style: szFigure(
+                            fontSize: glyphSize, color: sz.inkFaint)))
+                : Image.network(
+                    widget.api.resolveUrl(url),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Center(
+                        child: Text(
+                            m.name.isEmpty ? '店' : m.name.characters.first,
+                            style: szFigure(
+                                fontSize: glyphSize, color: sz.inkFaint))),
+                  ),
+          ),
+        );
+
+    return InkWell(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => MenuPage(api: widget.api, merchant: m))),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 14),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: sz.line)),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(height: 132, width: double.infinity, child: cover),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(m.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Row(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                thumb(m.logoUrl, 62, 21),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (m.ratingAvg != null) ...[
-                        Icon(Icons.star_rounded,
-                            size: 16, color: theme.colorScheme.primary),
-                        Text(' ${m.ratingAvg}',
-                            style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600)),
-                        Text('  ·  ', style: theme.textTheme.bodySmall),
-                      ],
-                      Text('月售 ${m.monthlySales}',
-                          style: theme.textTheme.bodySmall),
-                      Text('  ·  约 $eta 分钟  ·  ${distanceLabel(dist)}',
-                          style: theme.textTheme.bodySmall),
+                      Text(m.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w600,
+                              color: sz.ink)),
+                      const SizedBox(height: 4),
+                      Text.rich(
+                        TextSpan(children: [
+                          if (m.ratingAvg != null) ...[
+                            TextSpan(
+                                text: '${m.ratingAvg}',
+                                style: szFigure(fontSize: 11.5)),
+                            const TextSpan(text: ' 分'),
+                            TextSpan(
+                                text: '  ·  ',
+                                style: TextStyle(color: sz.inkFaint)),
+                          ],
+                          const TextSpan(text: '月售 '),
+                          TextSpan(
+                              text: '${m.monthlySales}',
+                              style: szFigure(fontSize: 11.5)),
+                          TextSpan(
+                              text: '  ·  ',
+                              style: TextStyle(color: sz.inkFaint)),
+                          TextSpan(text: distanceLabel(dist)),
+                        ]),
+                        style: TextStyle(fontSize: 11.5, color: sz.inkMuted),
+                      ),
+                      const SizedBox(height: 2),
+                      Text.rich(
+                        TextSpan(children: [
+                          const TextSpan(text: '约 '),
+                          TextSpan(
+                              text: '$eta', style: szFigure(fontSize: 11.5)),
+                          const TextSpan(text: ' 分钟送达'),
+                          if (m.minOrderCents > 0) ...[
+                            TextSpan(
+                                text: '  ·  ',
+                                style: TextStyle(color: sz.inkFaint)),
+                            TextSpan(
+                                text: '¥${m.minOrderCents ~/ 100}',
+                                style: szFigure(fontSize: 11.5)),
+                            const TextSpan(text: ' 起送'),
+                          ],
+                        ]),
+                        style: TextStyle(fontSize: 11.5, color: sz.inkMuted),
+                      ),
+                      const SizedBox(height: 7),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          SzChip('5% 封顶', color: sz.earn, dense: true),
+                          for (final label in m.promoLabels)
+                            SzChip(label, color: sz.hold, dense: true),
+                        ],
+                      ),
                     ],
                   ),
-                  if (m.promoLabels.isNotEmpty || m.minOrderCents > 0) ...[
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 4,
-                      runSpacing: 2,
-                      children: [
-                        for (final label in m.promoLabels)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 5, vertical: 1),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                  color: kPromoAmber, width: .8),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(label,
-                                style: const TextStyle(
-                                    fontSize: 10, color: kPromoAmber)),
-                          ),
-                        if (m.minOrderCents > 0)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 1),
-                            child: Text(
-                                '¥${m.minOrderCents ~/ 100} 起送',
-                                style: theme.textTheme.bodySmall
-                                    ?.copyWith(fontSize: 10)),
-                          ),
-                      ],
-                    ),
-                  ],
-                  // 招牌菜:列表页直接看到"这家卖什么、多少钱"(美团式决策信息)
-                  if (m.topDishes.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        for (final d in m.topDishes.take(3))
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(right: 6),
+                ),
+              ],
+            ),
+            // 招牌菜:列表页直接看到"这家卖什么、多少钱"(美团式决策信息)
+            if (m.topDishes.isNotEmpty) ...[
+              const SizedBox(height: 11),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final d in m.topDishes.take(3))
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Row(
+                          children: [
+                            thumb(d.imageUrl, 34, 13),
+                            const SizedBox(width: 6),
+                            Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: SizedBox(
-                                      height: 56,
-                                      width: double.infinity,
-                                      child: d.imageUrl.isEmpty
-                                          ? Container(
-                                              color: theme
-                                                  .colorScheme.primary
-                                                  .withValues(alpha: 0.07),
-                                              child: Icon(
-                                                  Icons.ramen_dining,
-                                                  size: 20,
-                                                  color: theme
-                                                      .colorScheme.primary
-                                                      .withValues(
-                                                          alpha: 0.4)),
-                                            )
-                                          : Image.network(
-                                              widget.api
-                                                  .resolveUrl(d.imageUrl),
-                                              fit: BoxFit.cover,
-                                              errorBuilder: (_, __, ___) =>
-                                                  Container(
-                                                color: theme
-                                                    .colorScheme.primary
-                                                    .withValues(
-                                                        alpha: 0.07),
-                                              ),
-                                            ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
                                   Text(d.name,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                          fontSize: 11)),
-                                  Text(yuan(d.priceCents),
                                       style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color:
-                                              theme.colorScheme.primary)),
+                                          fontSize: 10.5, color: sz.inkMuted)),
+                                  Text(yuan(d.priceCents),
+                                      style: szMoney(
+                                          fontSize: 11, color: sz.ink)),
                                 ],
                               ),
                             ),
-                          ),
-                      ],
+                          ],
+                        ),
+                      ),
                     ),
-                  ],
                 ],
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -841,32 +887,30 @@ class _MerchantListViewState extends State<MerchantListView> {
   }
 
   Widget _bigCardSkeleton() {
-    final base = Theme.of(context).colorScheme.surfaceContainerHighest;
-    return Card(
-      margin: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
+    final sz = Theme.of(context).sz;
+    Widget block(double h, double w) => Container(
+        height: h,
+        width: w,
+        decoration: BoxDecoration(
+            color: sz.surfaceAlt, borderRadius: BorderRadius.circular(4)));
+    return Container(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 14),
+      decoration:
+          BoxDecoration(border: Border(bottom: BorderSide(color: sz.line))),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(height: 132, color: base),
-          Padding(
-            padding: const EdgeInsets.all(12),
+          block(62, 62),
+          const SizedBox(width: 12),
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                    height: 16,
-                    width: 140,
-                    decoration: BoxDecoration(
-                        color: base,
-                        borderRadius: BorderRadius.circular(4))),
+                block(15, 140),
                 const SizedBox(height: 8),
-                Container(
-                    height: 12,
-                    width: 220,
-                    decoration: BoxDecoration(
-                        color: base,
-                        borderRadius: BorderRadius.circular(4))),
+                block(11, double.infinity),
+                const SizedBox(height: 6),
+                block(11, 180),
               ],
             ),
           ),
@@ -896,6 +940,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                     // 平台公告(运营配置,发通知不用发版);无公告时零高度
                     AnnouncementBanner(api: widget.api, audience: 'user'),
                     _kingKong(),
+                    _promiseStrip(),
                     if (_reorder.isNotEmpty) _reorderRow(),
                   ]),
                 ),
@@ -907,17 +952,15 @@ class _MerchantListViewState extends State<MerchantListView> {
                 delegate: SliverChildListDelegate([
               if ((!_realLocation || _fellBack) && merchants != null)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
                   child: Text(
                       _fellBack
                           ? '您所在区域暂未开通,正在展示演示城市商家'
                           : '未获取到定位,正在展示演示区域的商家(下拉重试)',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall
-                          ?.copyWith(
-                              color:
-                                  Theme.of(context).colorScheme.outline)),
+                      style: TextStyle(
+                          fontSize: 12,
+                          height: 1.5,
+                          color: Theme.of(context).sz.inkMuted)),
                 ),
               if (snapshot.hasError)
                 Padding(
@@ -931,14 +974,24 @@ class _MerchantListViewState extends State<MerchantListView> {
                 (widget.category?.isNotEmpty ?? false)
                     ? _categoryVacancy()
                     : const Padding(
-                        padding: EdgeInsets.only(top: 48),
-                        child: EmptyState(
-                            icon: Icons.storefront_outlined,
+                        padding: EdgeInsets.only(top: 40),
+                        child: SzEmpty(
+                            art: BrandArt.bowl,
                             text: '附近暂时没有营业的商家\n下拉刷新试试'),
                       ),
               if (merchants != null)
                 for (final (i, m) in merchants.indexed)
                   FadeSlideIn(index: i, child: _bigMerchantCard(m)),
+              // 排序口径的兜底承诺:钱买不到靠前的位置
+              if (merchants != null && merchants.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(kPagePad, 18, kPagePad, 0),
+                  child: Text('没有竞价排名 · 排序只按你选的口径',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 11.5,
+                          color: Theme.of(context).sz.inkFaint)),
+                ),
               const SizedBox(height: 24),
                 ]),
               ),

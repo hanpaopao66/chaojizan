@@ -262,6 +262,10 @@
 
 现状:101–110 逐屏改完,但深色模式、字号缩放、动效开关、地图页样式、上架素材都还没统一过一遍;旧设计稿 marketing/design/三端UI风格系统.html 与 superz_theme_v2.dart 已与现状不符;应用商店截图(第七辑 #100 的提审材料)还是旧界面。
 业务规则(已拍板):
+- **先把深色模式打开**:三端目前是 `themeMode: ThemeMode.light` 硬锁亮色
+  (user_app/lib/main.dart:104,历史原因是旧主题深色下黑底黑字)。#101 已经
+  给了完整的深色令牌,但在本条走查完成前不要放开——放开就等于发一个没人看过的
+  深色版。走查通过后再改成 `ThemeMode.system` 并补 `darkTheme:`;
 - 深色模式逐屏走查三端全部页面,重点看:卡片与页面底色是否分得开、clay 在深底上是否够亮、earn/hold 在深底上是否还能区分、图片与插画(brand_art)在深底上是否发灰;
 - 无障碍:textScaleFactor 1.0 / 1.3 / 1.6 三档全端过一遍,不允许溢出或截断(必要时换 Wrap/FittedBox,不许直接缩小字号);所有可点元素有语义标签(Semantics label),图标按钮不能只有图标;
 - 动效:全端确认 MediaQuery.disableAnimations 为真时无位移动画;SzMoneyFlow 的占比动画、页面转场都要遵守;
