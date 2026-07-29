@@ -97,12 +97,14 @@ class _StayCheckoutPageState extends State<StayCheckoutPage> {
                 const Text('间数'),
                 const Spacer(),
                 IconButton(
+                    tooltip: '减少',
                     icon: const Icon(Icons.remove_circle_outline),
                     onPressed: _roomsQty > 1
                         ? () => setState(() => _roomsQty--)
                         : null),
                 Text('$_roomsQty'),
                 IconButton(
+                    tooltip: '增加',
                     icon: const Icon(Icons.add_circle_outline),
                     onPressed: _roomsQty < _maxQty
                         ? () => setState(() => _roomsQty++)

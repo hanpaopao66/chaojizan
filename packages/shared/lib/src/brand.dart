@@ -747,3 +747,35 @@ class _LogoPainter extends CustomPainter {
   bool shouldRepaint(covariant _LogoPainter old) =>
       old.radiusRatio != radiusRatio;
 }
+
+/// 相对时间:近的说"多久前",远的给日期。
+///
+/// 订单列表原先全是 `7/27 17:21` 这种绝对时间——"这是刚下的单还是昨天的"
+/// 要用户自己在脑子里算。外卖是分钟级的生意,几分钟前和几小时前的语义完全不同。
+///
+/// 分档:1 分钟内「刚刚」、1 小时内「N 分钟前」、当天「N 小时前」、
+/// 昨天「昨天 HH:MM」、今年「M/D HH:MM」、跨年带上年份。
+/// [iso] 是服务端的 UTC 时间戳,内部转本地时区再比。
+String szTimeAgo(String iso) {
+  final t = DateTime.tryParse(iso)?.toLocal();
+  if (t == null) return '';
+  final now = DateTime.now();
+  final diff = now.difference(t);
+  String two(int n) => n.toString().padLeft(2, '0');
+
+  // 未来时间(预约单/时钟不准):不说"负 N 分钟前",直接给时刻
+  if (diff.isNegative) return '${t.month}/${t.day} ${two(t.hour)}:${two(t.minute)}';
+  if (diff.inMinutes < 1) return '刚刚';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} 分钟前';
+
+  final today = DateTime(now.year, now.month, now.day);
+  final that = DateTime(t.year, t.month, t.day);
+  if (that == today) return '${diff.inHours} 小时前';
+  if (that == today.subtract(const Duration(days: 1))) {
+    return '昨天 ${two(t.hour)}:${two(t.minute)}';
+  }
+  if (t.year == now.year) {
+    return '${t.month}/${t.day} ${two(t.hour)}:${two(t.minute)}';
+  }
+  return '${t.year}/${t.month}/${t.day}';
+}

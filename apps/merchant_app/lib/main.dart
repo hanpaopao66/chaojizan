@@ -790,6 +790,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                           const Text('退货份数'),
                           const Spacer(),
                           IconButton(
+                            tooltip: '减少',
                             icon: const Icon(Icons.remove_circle_outline),
                             onPressed: quantity > 1
                                 ? () => setSheet(() => quantity--)
@@ -797,6 +798,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                           ),
                           Text('$quantity'),
                           IconButton(
+                            tooltip: '增加',
                             icon: const Icon(Icons.add_circle_outline),
                             onPressed: quantity < maxQty
                                 ? () => setSheet(() => quantity++)

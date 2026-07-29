@@ -192,6 +192,7 @@ class _GroupCartPageState extends State<GroupCartPage>
                       Text(yuan(d.priceCents),
                           style: theme.textTheme.bodySmall),
                       IconButton(
+                          tooltip: '减少',
                           visualDensity: VisualDensity.compact,
                           onPressed: locked || _myQty(d.id) == 0
                               ? null
@@ -199,6 +200,7 @@ class _GroupCartPageState extends State<GroupCartPage>
                           icon: const Icon(Icons.remove_circle_outline)),
                       Text('${_myQty(d.id)}'),
                       IconButton(
+                          tooltip: '增加',
                           visualDensity: VisualDensity.compact,
                           onPressed: locked
                               ? null

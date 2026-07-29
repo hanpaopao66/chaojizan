@@ -484,6 +484,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       const Text('餐具份数'),
                       const Spacer(),
                       IconButton(
+                        tooltip: '减少',
                         icon: const Icon(Icons.remove_circle_outline),
                         onPressed: _tableware > 0
                             ? () => setState(() => _tableware--)
@@ -491,6 +492,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       ),
                       Text('$_tableware'),
                       IconButton(
+                        tooltip: '增加',
                         icon: const Icon(Icons.add_circle_outline),
                         onPressed: _tableware < 20
                             ? () => setState(() => _tableware++)

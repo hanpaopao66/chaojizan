@@ -163,6 +163,7 @@ class _RoomManagePageState extends State<RoomManagePage> {
           },
         ),
         IconButton(
+            tooltip: '编辑',
             icon: const Icon(Icons.edit_outlined, size: 19),
             onPressed: () => _editType(rt)),
       ]),
@@ -189,6 +190,7 @@ class _RoomManagePageState extends State<RoomManagePage> {
     return Column(children: [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         IconButton(
+            tooltip: '上一段日期',
             icon: const Icon(Icons.chevron_left),
             onPressed: _calendarStart.isAfter(DateTime.now())
                 ? () {
@@ -201,6 +203,7 @@ class _RoomManagePageState extends State<RoomManagePage> {
             '${_fmt(dates.first).substring(5)} ~ ${_fmt(dates.last).substring(5)}',
             style: Theme.of(context).textTheme.titleSmall),
         IconButton(
+            tooltip: '下一段日期',
             icon: const Icon(Icons.chevron_right),
             onPressed: () {
               setState(() => _calendarStart =

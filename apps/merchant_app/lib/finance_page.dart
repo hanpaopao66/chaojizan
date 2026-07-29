@@ -106,12 +106,9 @@ class _FinancePageState extends State<FinancePage> {
     }
   }
 
-  String _localTime(String iso) {
-    final t = DateTime.tryParse(iso)?.toLocal();
-    if (t == null) return '';
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(t.month)}-${two(t.day)} ${two(t.hour)}:${two(t.minute)}';
-  }
+  /// 近的说「多久前」,超过昨天自动退回「M/D HH:MM」——
+  /// 精度不丢,但「2 小时前提的」比「07-29 05:12」好读得多。
+  String _localTime(String iso) => szTimeAgo(iso);
 
   Widget _walletMetric(String label, int cents) {
     final sz = Theme.of(context).sz;

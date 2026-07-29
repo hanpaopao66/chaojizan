@@ -1944,12 +1944,14 @@ class _MenuPageState extends State<MenuPage>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
+                          tooltip: '减少',
                           visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.remove_circle_outline),
                           onPressed: () => change(line, -1),
                         ),
                         Text('${line.quantity}'),
                         IconButton(
+                          tooltip: '增加',
                           visualDensity: VisualDensity.compact,
                           icon: const Icon(Icons.add_circle),
                           onPressed: line.dish.stock > _qtyOf(line.dish)
@@ -2069,6 +2071,7 @@ class _MenuPageState extends State<MenuPage>
                   count: _totalCount,
                   isLabelVisible: _totalCount > 0,
                   child: IconButton(
+                    tooltip: '查看购物车',
                     icon: const Icon(Icons.shopping_cart_outlined),
                     onPressed: _cart.isEmpty ? null : _openCartSheet,
                   ),
@@ -2237,12 +2240,9 @@ class _OrderListViewState extends State<OrderListView> {
         _ => theme.colorScheme.primary,
       };
 
-  String _timeLabel(Order order) {
-    final t = DateTime.tryParse(order.createdAt)?.toLocal();
-    if (t == null) return '';
-    return '${t.month}/${t.day} '
-        '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-  }
+  /// 订单时间:近的说「多久前」,远的才给日期。
+  /// 外卖是分钟级的生意,「12 分钟前」和「7/27 17:21」的信息量差很远。
+  String _timeLabel(Order order) => szTimeAgo(order.createdAt);
 
   /// 一键回购:与首页「再来一单」同逻辑
   Future<void> _reorder(Order order) async {
@@ -3599,6 +3599,7 @@ class _Stars extends StatelessWidget {
       children: [
         for (var i = 1; i <= 5; i++)
           IconButton(
+            tooltip: '评分',
             visualDensity: VisualDensity.compact,
             icon: Icon(
               i <= value ? Icons.star : Icons.star_border,

@@ -117,6 +117,7 @@ class _AppendOrderPageState extends State<AppendOrderPage> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
+                                  tooltip: '减少',
                                   icon:
                                       const Icon(Icons.remove_circle_outline),
                                   onPressed: q > 0
@@ -126,6 +127,7 @@ class _AppendOrderPageState extends State<AppendOrderPage> {
                                 ),
                                 Text('$q'),
                                 IconButton(
+                                  tooltip: '增加',
                                   icon: const Icon(Icons.add_circle_outline),
                                   onPressed: q < d.stock
                                       ? () =>

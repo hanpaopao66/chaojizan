@@ -349,6 +349,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     ),
                     const Text('元'),
                     IconButton(
+                      tooltip: '减少',
                       icon: const Icon(Icons.remove_circle_outline),
                       onPressed: () => setDialog(() => rows.removeAt(i)),
                     ),
@@ -483,6 +484,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                   Row(children: [
                     Expanded(child: Text(_planLabel(plans[i]))),
                     IconButton(
+                      tooltip: '删除',
                       icon: const Icon(Icons.delete_outline, size: 20),
                       onPressed: () => setDialog(() => plans.removeAt(i)),
                     ),
@@ -605,6 +607,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     title: Text(s['name'] as String? ?? ''),
                     subtitle: Text(s['phone'] as String? ?? ''),
                     trailing: IconButton(
+                      tooltip: '移除店员',
                       icon: const Icon(Icons.person_remove_outlined),
                       onPressed: () async {
                         final messenger = ScaffoldMessenger.of(context);
@@ -904,6 +907,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       ),
                     ),
                     IconButton(
+                      tooltip: '减少',
                       icon: const Icon(Icons.remove_circle_outline),
                       onPressed: () => setDialog(() => rows.removeAt(i)),
                     ),

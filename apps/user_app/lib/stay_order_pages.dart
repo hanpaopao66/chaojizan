@@ -172,6 +172,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
                 Row(children: [
                   for (var i = 1; i <= 5; i++)
                     IconButton(
+                      tooltip: '评分',
                       icon: Icon(
                           i <= rating ? Icons.star : Icons.star_border,
                           color: Theme.of(context).sz.hold, size: 30),

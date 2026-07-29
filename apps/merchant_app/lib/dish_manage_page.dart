@@ -711,6 +711,7 @@ class _DishEditPageState extends State<DishEditPage> {
                           ),
                         ),
                         IconButton(
+                          tooltip: '删除',
                           icon: const Icon(Icons.delete_outline),
                           onPressed: () =>
                               setState(() => _groups.removeAt(gi)),
@@ -758,6 +759,7 @@ class _DishEditPageState extends State<DishEditPage> {
                             ),
                           ),
                           IconButton(
+                            tooltip: '减少',
                             visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.remove_circle_outline,
                                 size: 20),
