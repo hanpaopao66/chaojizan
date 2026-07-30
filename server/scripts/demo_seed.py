@@ -90,12 +90,58 @@ PALETTES = [
 
 
 def make_image(name: str, idx: int) -> str:
+    """纯色渐变块。只给没有真实照片的位置兜底(证照、房型等)。"""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     path = UPLOAD_DIR / f"{name}.png"
     if not path.exists():
         top, bottom = PALETTES[idx % len(PALETTES)]
         _png(path, 400, 300, top, bottom)
     return f"/uploads/demo/{name}.png"
+
+
+# ---- 演示用真实照片(scripts/fetch_demo_photos.py 抓的 Commons PD/CC0 图) ----
+#
+# 只用于演示数据。真实商家没传图时**绝不能**套用这些:
+# 给一家店配一张不属于它的诱人照片,是平台替商家做虚假宣传,
+# 与「不杀熟、不虚标」的立场直接冲突。真实商家缺图走客户端的品类占位图。
+# 图存在 seed_assets(进 git、随部署同步),运行时复制到 uploads 供 HTTP 访问 ——
+# uploads 既被 gitignore 也被 deploy 的 rsync 排除,只能当运行时目录用
+_ASSET_DIR = Path(__file__).resolve().parent.parent / "seed_assets" / "demo_photos"
+_PHOTO_DIR = UPLOAD_DIR / "photos"
+_PHOTOS: dict[str, list[str]] = {}
+try:
+    import json as _json
+    import shutil as _shutil
+    _manifest = _ASSET_DIR / "manifest.json"
+    if _manifest.exists():
+        _PHOTO_DIR.mkdir(parents=True, exist_ok=True)
+        _PHOTOS = {}
+        for cat, items in _json.loads(_manifest.read_text()).items():
+            files = []
+            for e in items:
+                src = _ASSET_DIR / e["file"]
+                if not src.exists():
+                    continue
+                dst = _PHOTO_DIR / e["file"]
+                if not dst.exists():
+                    _shutil.copy2(src, dst)
+                files.append(e["file"])
+            if files:
+                _PHOTOS[cat] = files
+except Exception:  # 图没抓过就整体退回色块,不影响 seed 跑通
+    _PHOTOS = {}
+
+
+def category_photo(category: str, idx: int, fallback_name: str) -> str:
+    """按品类取一张真实照片;该品类没图就回退成色块。
+
+    idx 用来在同品类的几张里轮换。传店铺 id 而不是常数 0 ——
+    否则同品类的每家店都取到同一张,列表里一排一模一样的图,比色块还假。
+    """
+    pool = _PHOTOS.get(category or "")
+    if not pool:
+        return make_image(fallback_name, idx)
+    return f"/uploads/demo/photos/{pool[idx % len(pool)]}"
 
 
 SHOPS = [
@@ -458,13 +504,14 @@ async def main():
             select(Merchant).where(Merchant.owner_id == zhang_owner.id)
         )
         if zhang is not None:
-            zhang.logo_url = make_image("logo_zhang", 2)
+            zhang.logo_url = category_photo("noodles", 0, "logo_zhang")
             dishes = (
                 await db.scalars(select(Dish).where(
                     Dish.merchant_id == zhang.id, Dish.is_on_sale.is_(True)))
             ).all()
             for i, d in enumerate(dishes):
-                d.image_url = make_image(f"dish_zhang_{i}", i)
+                d.image_url = category_photo("noodles", i + 1,
+                                             f"dish_zhang_{i}")
             print(f"张记面馆图片已修复({len(dishes)} 道菜)")
 
         # 1) 隐藏测试残留店铺(不删,避免外键麻烦;下架+驳回后用户端不可见)
@@ -526,7 +573,9 @@ async def main():
                 category=shop_def.get("category", "fast_food"),
                 license_no=f"JY151010009{slug}",
                 announcement=shop_def["announcement"],
-                logo_url=make_image(f"logo_{slug}", int(slug) % len(PALETTES)),
+                logo_url=category_photo(
+                    shop_def.get("category", "fast_food"), int(slug),
+                    f"logo_{slug}"),
             )
             db.add(shop)
             await db.flush()
@@ -536,7 +585,9 @@ async def main():
                 dish = Dish(
                     merchant_id=shop.id, name=dname, category=cat,
                     price_cents=price, stock=100,
-                    image_url=make_image(f"dish_{slug}_{i}", i),
+                    image_url=category_photo(
+                        shop_def.get("category", "fast_food"),
+                        int(slug) + i + 1, f"dish_{slug}_{i}"),
                 )
                 db.add(dish)
                 dishes.append(dish)
@@ -695,6 +746,41 @@ async def main():
                     ))
             print(f"「{hotel_def['name']}」创建完成:"
                   f"{len(hotel_def['rooms'])} 个房型 / 45 天房态")
+
+        # 回填真实照片:已存在的演示商家不会走上面的新建分支,
+        # 挂的还是老的色块图。这里按品类补上。
+        #
+        # **只替换色块图**(/uploads/demo/xxx.png):商家自己传的图绝不能碰。
+        # 判据是路径 —— 色块图在 /uploads/demo/ 下且是 .png,
+        # 商家上传的落在 /uploads/ 根下且带随机名
+        if _PHOTOS:
+            filled_m = filled_d = 0
+            shops = (await db.scalars(select(Merchant))).all()
+            for shop in shops:
+                url = shop.logo_url or ""
+                is_block = url.startswith("/uploads/demo/") and url.endswith(".png")
+                if not url or is_block:
+                    new_url = category_photo(
+                        shop.category, shop.id, f"logo_m{shop.id}")
+                    if new_url != url and "/photos/" in new_url:
+                        shop.logo_url = new_url
+                        filled_m += 1
+                shop_dishes = (await db.scalars(
+                    select(Dish).where(Dish.merchant_id == shop.id))).all()
+                for i, d in enumerate(shop_dishes):
+                    durl = d.image_url or ""
+                    d_block = (durl.startswith("/uploads/demo/")
+                               and durl.endswith(".png"))
+                    if durl and not d_block:
+                        continue          # 真实上传的图,不动
+                    nd = category_photo(
+                        shop.category, shop.id + i + 1, f"dish_m{d.id}")
+                    if nd != durl and "/photos/" in nd:
+                        d.image_url = nd
+                        filled_d += 1
+            if filled_m or filled_d:
+                print(f"回填真实照片:{filled_m} 家店 / {filled_d} 道菜"
+                      f"(只替换色块图,商家自传的图未动)")
 
         await db.commit()
     print("\n演示数据集就绪 🎉(重复运行安全)")
