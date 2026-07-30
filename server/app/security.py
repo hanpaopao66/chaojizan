@@ -48,6 +48,24 @@ async def get_current_user(
     return user
 
 
+async def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """未登录返回 None 而不是 401。
+
+    只给「同一个路径既服务公开内容也服务私密内容」的地方用
+    (目前是 /uploads 老 URL 兼容):公开文件不该因为没带 token 就 401,
+    私密文件再由调用方自己判 None 并抛 401。
+    """
+    if credentials is None:
+        return None
+    try:
+        return await get_current_user(credentials, db)
+    except HTTPException:
+        return None
+
+
 def require_role(*roles: str):
     async def checker(user: User = Depends(get_current_user)) -> User:
         if user.role.value not in roles:

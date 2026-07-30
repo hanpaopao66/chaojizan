@@ -512,7 +512,8 @@ class _RoomTypeEditPageState extends State<RoomTypeEditPage> {
     if (picked == null) return;
     try {
       final bytes = await picked.readAsBytes();
-      final url = await widget.api.uploadImage(bytes, picked.name);
+      final url =
+          await widget.api.uploadImage(bytes, picked.name, purpose: 'room');
       if (mounted) setState(() => _images = [..._images, url]);
     } catch (e) {
       if (mounted) {

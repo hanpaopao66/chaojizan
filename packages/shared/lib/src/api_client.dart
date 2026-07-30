@@ -1113,18 +1113,25 @@ class ApiClient {
   }
 
   /// 上传图片(菜品图/门头照),返回相对路径,展示时用 resolveUrl 拼全
-  Future<String> uploadImage(List<int> bytes, String filename) async {
+  /// 上传图片。[purpose] **必填**,决定这张图进公开桶还是私密桶(#124):
+  /// 公开 dish/shop/gallery/room/splash/avatar/review;
+  /// 私密 id_card/health_cert/license/delivery_proof/incident/after_sale/food_safety。
+  /// 服务端不给默认值 —— 猜错的那一次就是一张身份证进了公开桶。
+  Future<String> uploadImage(List<int> bytes, String filename,
+      {required String purpose}) async {
     try {
-      return await _uploadImage(bytes, filename);
+      return await _uploadImage(bytes, filename, purpose);
     } catch (e) {
       throw _asFriendly(e);
     }
   }
 
-  Future<String> _uploadImage(List<int> bytes, String filename) async {
+  Future<String> _uploadImage(
+      List<int> bytes, String filename, String purpose) async {
     final request =
         http.MultipartRequest('POST', Uri.parse('$baseUrl/upload'));
     if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+    request.fields['purpose'] = purpose;
     request.files
         .add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
     final response = await http.Response.fromStream(

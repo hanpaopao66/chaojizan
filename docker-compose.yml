@@ -20,6 +20,42 @@ services:
     ports:
       - "6379:6379"
 
+  # 本地开发用的 MinIO:与生产同一套桶名和策略,免得"本地好好的、线上炸了"。
+  # 开发环境图省事把端口放出来(9000 存储 / 9001 控制台);
+  # 生产**不 publish 端口**,只走 compose 内网 + nginx 反代
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: superz
+      MINIO_ROOT_PASSWORD: superz-dev-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # 一次性建桶 + 设策略,跑完即退
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 superz superz-dev-secret &&
+      mc mb -p local/superz-public &&
+      mc mb -p local/superz-private &&
+      mc anonymous set download local/superz-public &&
+      mc anonymous set none local/superz-private &&
+      echo 'buckets ready'
+      "
+
   api:
     build: ./server
     environment:
@@ -36,3 +72,4 @@ services:
 
 volumes:
   pgdata:
+  miniodata:

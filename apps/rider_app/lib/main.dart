@@ -474,7 +474,9 @@ class _RiderHomePageState extends State<RiderHomePage>
               source: ImageSource.camera, maxWidth: 1280, imageQuality: 80);
           if (picked == null) return;
           final bytes = await picked.readAsBytes();
-          photoUrl = await widget.api.uploadImage(bytes, picked.name);
+          // 送达留证:拍的是别人家门口,只有该单顾客和平台看得到(#124)
+          photoUrl = await widget.api
+              .uploadImage(bytes, picked.name, purpose: 'delivery_proof');
         } catch (e) {
           if (!mounted) return;
           ScaffoldMessenger.of(context)
@@ -693,7 +695,8 @@ class _RiderHomePageState extends State<RiderHomePage>
                             try {
                               final bytes = await picked.readAsBytes();
                               final url = await widget.api
-                                  .uploadImage(bytes, picked.name);
+                                  .uploadImage(bytes, picked.name,
+                                      purpose: 'incident');
                               setSheet(() => photoUrl = url);
                             } catch (_) {
                             } finally {

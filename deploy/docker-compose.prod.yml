@@ -57,6 +57,49 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      minio:
+        condition: service_healthy
+
+  # 自建对象存储(#125)。**故意不写 ports** —— 9000/9001 都不对宿主机暴露:
+  # 公开桶经本栈 nginx 的 /img/ 出去,私密桶只由 api 内网访问,
+  # 控制台要用就走 SSH 隧道。单节点单盘,不上纠删码(4 核 / 可用内存 4.4G,
+  # 机器上还有别的栈,给它 1g 上限就够)
+  minio:
+    image: minio/minio:latest
+    container_name: superz-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env.prod}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env.prod}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+
+  # 一次性建桶 + 设策略,跑完即退。每次 up 都会重跑,mb -p 与 anonymous set
+  # 都是幂等的 —— 顺带保证「私密桶不可匿名读」这条每次部署都被重新确认一遍
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in .env.prod}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in .env.prod}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb -p local/superz-public &&
+      mc mb -p local/superz-private &&
+      mc anonymous set download local/superz-public &&
+      mc anonymous set none local/superz-private &&
+      echo 'buckets ready'
+      "
 
   # 公网入口:TLS 终结 + 按域名分发。证书/挑战目录都在部署机本地(不入库,
   # rsync 排除;见 renew-cert.sh)。8880/8443 与 frpc 的 localPort 对应
@@ -98,5 +141,6 @@ services:
 
 volumes:
   pgdata:
+  minio_data:
   uploads:
   witness-data:

@@ -51,9 +51,13 @@ print("✓ 非商家角色不能看菜品管理列表(403)")
 
 
 # 图片上传(手工构造 multipart)
-def upload(token, filename, content, expect_error=False):
+def upload(token, filename, content, expect_error=False, purpose="dish"):
+    """purpose 是必填的(#124):公开/私密由它决定,服务端不给默认值。"""
     boundary = uuid.uuid4().hex
     body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="purpose"\r\n\r\n'
+        f"{purpose}\r\n"
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
         f"Content-Type: application/octet-stream\r\n\r\n"
@@ -82,12 +86,12 @@ assert err["_error"] == 422
 print(f"✓ 非图片扩展名被拒:{err['detail']}")
 
 # 批④起用户也能上传(头像),验证三角色均可用
-avatar = upload(customer, "avatar.png", PNG_BYTES)
-assert avatar["url"].startswith("/uploads/")
+avatar = upload(customer, "avatar.png", PNG_BYTES, purpose="avatar")
+assert avatar["url"].startswith("/img/"), avatar
 print("✓ 用户可上传头像图")
 
 result = upload(merchant, "dish.png", PNG_BYTES)
-assert result["url"].startswith("/uploads/")
+assert result["url"].startswith("/img/"), result
 with urllib.request.urlopen(BASE + result["url"]) as resp:
     served = resp.read()
 assert served == PNG_BYTES

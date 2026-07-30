@@ -415,7 +415,8 @@ class _DishEditPageState extends State<DishEditPage> {
     setState(() => _uploading = true);
     try {
       final bytes = await picked.readAsBytes();
-      final url = await widget.api.uploadImage(bytes, picked.name);
+      final url =
+          await widget.api.uploadImage(bytes, picked.name, purpose: 'dish');
       if (mounted) setState(() => _imageUrl = url);
     } catch (e) {
       if (!mounted) return;

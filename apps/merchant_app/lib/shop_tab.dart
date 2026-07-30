@@ -71,7 +71,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
     setState(() => _uploadingLogo = true);
     try {
       final url = await widget.api
-          .uploadImage(await picked.readAsBytes(), picked.name);
+          .uploadImage(await picked.readAsBytes(), picked.name,
+              purpose: 'shop');
       await widget.api.updateShop({'logo_url': url});
       _load();
     } catch (e) {
@@ -95,7 +96,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
     setState(() => _uploadingPhoto = true);
     try {
       final url = await widget.api
-          .uploadImage(await picked.readAsBytes(), picked.name);
+          .uploadImage(await picked.readAsBytes(), picked.name,
+              purpose: 'gallery');
       await widget.api
           .updateShop({'photo_urls': [...shop.photoUrls, url]});
       await _load();

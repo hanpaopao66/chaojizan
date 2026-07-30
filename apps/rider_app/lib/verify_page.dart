@@ -145,7 +145,8 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
     if (picked == null) return;
     try {
       final url =
-          await widget.api.uploadImage(await picked.readAsBytes(), picked.name);
+          await widget.api.uploadImage(await picked.readAsBytes(), picked.name,
+              purpose: isIdCard ? 'id_card' : 'health_cert');
       if (mounted) {
         setState(() => isIdCard ? _idPhoto = url : _healthPhoto = url);
       }

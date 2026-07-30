@@ -47,7 +47,8 @@ test:
 	  && python -m tests.e2e_orders_paging && python -m tests.e2e_referral_funding \
 	  && python -m tests.e2e_merchant_promo && python -m tests.e2e_home_filters \
 	  && python -m tests.e2e_rider_new_order_push \
-	  && python -m tests.e2e_remote_copy
+	  && python -m tests.e2e_remote_copy \
+	  && python -m tests.e2e_upload_privacy
 
 logs:
 	docker compose logs -f api

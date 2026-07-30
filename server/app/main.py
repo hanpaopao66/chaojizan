@@ -39,7 +39,7 @@ from .routers import (
     uploads,
     vouchers,
 )
-from .routers.uploads import UPLOAD_DIR
+from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
 from .services.auto_flow import auto_flow_loop
 from . import ws
 
@@ -138,7 +138,12 @@ app.include_router(admin.router)
 app.include_router(ws.router)
 
 UPLOAD_DIR.mkdir(exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
+PRIVATE_DIR.mkdir(exist_ok=True)
+# 这里**故意不再 mount StaticFiles**(#124)。
+# 老口径是 app.mount("/uploads", StaticFiles(...)),它把整个目录无鉴权直出 ——
+# 而那个目录里同时躺着菜品图和骑手身份证。静态挂载是绕过鉴权的一条路,
+# 只要它还在,routers/uploads.py 里的判权就形同虚设。
+# 现在 /uploads/{name} 由 routers/uploads.py 的 legacy_file 接管。
 
 # APK 分发目录(生产挂宿主 ~/super-z/appdist):APK 文件 + versions.json
 APPDIST_DIR = Path(__file__).resolve().parent.parent / "appdist"

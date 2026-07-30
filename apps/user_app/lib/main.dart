@@ -2877,7 +2877,8 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
             setSheet(() => uploading = true);
             try {
               final url = await widget.api
-                  .uploadImage(await picked.readAsBytes(), picked.name);
+                  .uploadImage(await picked.readAsBytes(), picked.name,
+              purpose: 'food_safety');
               setSheet(() => target.add(url));
             } catch (_) {
             } finally {
@@ -3062,6 +3063,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                             setDialog(() => uploading = true);
                             try {
                               final url = await widget.api.uploadImage(
+                                  purpose: 'after_sale',
                                   await picked.readAsBytes(), picked.name);
                               setDialog(() => images.add(url));
                             } catch (e) {
@@ -3927,7 +3929,8 @@ class _ReviewFormState extends State<_ReviewForm> {
     setState(() => _uploading = true);
     try {
       final url = await widget.api
-          .uploadImage(await picked.readAsBytes(), picked.name);
+          .uploadImage(await picked.readAsBytes(), picked.name,
+              purpose: 'review');
       if (mounted) setState(() => _imageUrls.add(url));
     } catch (e) {
       if (!mounted) return;
@@ -4275,7 +4278,8 @@ class _ProfileViewState extends State<ProfileView> {
     if (picked == null) return;
     try {
       final url = await widget.api
-          .uploadImage(await picked.readAsBytes(), picked.name);
+          .uploadImage(await picked.readAsBytes(), picked.name,
+              purpose: 'avatar');
       await widget.api.updateMe(avatarUrl: url);
       _load();
     } catch (e) {

@@ -36,7 +36,6 @@ from app.models import (
 from app.security import hash_password
 from app.state_machine import OrderStatus
 
-UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads" / "demo"
 random.seed(42)  # 每次生成结果一致
 
 
@@ -89,14 +88,54 @@ PALETTES = [
 ]
 
 
+def _put_public(key: str, data: bytes) -> str:
+    """写进公开存储并返回可访问地址。
+
+    走 storage 而不是直接写 uploads/:生产的后端是 MinIO,
+    往本地目录写文件在那边根本不会被读到 —— 而 seed 恰恰是
+    「本地跑得通、线上一片灰」最容易发生的地方。
+    """
+    from app.services import storage
+
+    if not storage.backend().exists(key, private=False):
+        storage.backend().put(data, key, private=False)
+    return f"/img/{key}"
+
+
+def _put_private(key: str, data: bytes) -> str:
+    from app.services import storage
+
+    if not storage.backend().exists(key, private=True):
+        storage.backend().put(data, key, private=True)
+    return f"/files/{key}"
+
+
+def _gradient_png(idx: int) -> bytes:
+    """纯色渐变块的字节。只给没有真实照片的位置兜底。"""
+    import tempfile
+
+    top, bottom = PALETTES[idx % len(PALETTES)]
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        tmp = Path(f.name)
+    try:
+        _png(tmp, 400, 300, top, bottom)
+        return tmp.read_bytes()
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def make_image(name: str, idx: int) -> str:
-    """纯色渐变块。只给没有真实照片的位置兜底(证照、房型等)。"""
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    path = UPLOAD_DIR / f"{name}.png"
-    if not path.exists():
-        top, bottom = PALETTES[idx % len(PALETTES)]
-        _png(path, 400, 300, top, bottom)
-    return f"/uploads/demo/{name}.png"
+    """兜底色块(公开类:房型等)。"""
+    return _put_public(f"demo/{name}.png", _gradient_png(idx))
+
+
+def make_private_image(name: str, idx: int) -> str:
+    """兜底色块(私密类:证照)。
+
+    演示证照也走私密桶 —— 演示数据和真实数据在**存储策略**上必须一致,
+    否则 e2e 和迁移对账会得到一个"看起来没问题"的假象。
+    """
+    return _put_private(f"demo/{name}.png", _gradient_png(idx))
 
 
 # ---- 演示用真实照片(scripts/fetch_demo_photos.py 抓的 Commons PD/CC0 图) ----
@@ -104,30 +143,19 @@ def make_image(name: str, idx: int) -> str:
 # 只用于演示数据。真实商家没传图时**绝不能**套用这些:
 # 给一家店配一张不属于它的诱人照片,是平台替商家做虚假宣传,
 # 与「不杀熟、不虚标」的立场直接冲突。真实商家缺图走客户端的品类占位图。
-# 图存在 seed_assets(进 git、随部署同步),运行时复制到 uploads 供 HTTP 访问 ——
-# uploads 既被 gitignore 也被 deploy 的 rsync 排除,只能当运行时目录用
+# 图存在 seed_assets(进 git、随部署同步),seed 时灌进公开存储。
 _ASSET_DIR = Path(__file__).resolve().parent.parent / "seed_assets" / "demo_photos"
-_PHOTO_DIR = UPLOAD_DIR / "photos"
 _PHOTOS: dict[str, list[str]] = {}
 try:
     import json as _json
-    import shutil as _shutil
+
     _manifest = _ASSET_DIR / "manifest.json"
     if _manifest.exists():
-        _PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-        _PHOTOS = {}
-        for cat, items in _json.loads(_manifest.read_text()).items():
-            files = []
-            for e in items:
-                src = _ASSET_DIR / e["file"]
-                if not src.exists():
-                    continue
-                dst = _PHOTO_DIR / e["file"]
-                if not dst.exists():
-                    _shutil.copy2(src, dst)
-                files.append(e["file"])
-            if files:
-                _PHOTOS[cat] = files
+        for _cat, _items in _json.loads(_manifest.read_text()).items():
+            _files = [e["file"] for e in _items
+                      if (_ASSET_DIR / e["file"]).exists()]
+            if _files:
+                _PHOTOS[_cat] = _files
 except Exception:  # 图没抓过就整体退回色块,不影响 seed 跑通
     _PHOTOS = {}
 
@@ -141,7 +169,8 @@ def category_photo(category: str, idx: int, fallback_name: str) -> str:
     pool = _PHOTOS.get(category or "")
     if not pool:
         return make_image(fallback_name, idx)
-    return f"/uploads/demo/photos/{pool[idx % len(pool)]}"
+    name = pool[idx % len(pool)]
+    return _put_public(f"demo/photos/{name}", (_ASSET_DIR / name).read_bytes())
 
 
 SHOPS = [
@@ -720,7 +749,7 @@ async def main():
                 front_desk_phone=hotel_def["phone"],
                 facilities=hotel_def["facilities"],
                 special_license_no=f"川公旅DEMO{slug}",
-                special_license_image_url=make_image(
+                special_license_image_url=make_private_image(
                     f"hotel_{slug}_license", h_idx),
             ))
             today = datetime.now(timezone.utc).date()

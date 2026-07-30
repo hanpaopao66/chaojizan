@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     # 但被泄露的旧 token 一周后自然作废
     jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线
 
+    # ---- 对象存储(#124/#125)----
+    # local:落本地磁盘,仅供本地开发。生产一律 minio。
+    # 切成 minio 后连不上会让上传**明确失败**,不会静默退回磁盘 ——
+    # 一半文件在桶里一半在磁盘上,事后根本对不齐
+    storage_backend: str = "local"
+    minio_endpoint: str = "minio:9000"       # compose 内网,不经公网
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_secure: bool = False               # 内网 http;对外由 nginx 上 TLS
+
     # 对外可访问的站点地址:店铺短链、海报二维码、分享文案里用。
     # 默认就是生产域名 —— 海报是印出来贴墙上的,漏配一次就是一批废二维码,
     # 宁可默认指向线上。本地联调想指到自己机器时再在 .env 覆盖

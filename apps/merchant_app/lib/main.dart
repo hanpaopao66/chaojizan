@@ -221,7 +221,9 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
     setState(() => _uploading = true);
     try {
       final bytes = await picked.readAsBytes();
-      return await widget.api.uploadImage(bytes, picked.name);
+      // 经营证照:私密桶,只有店主和管理员看得到(#124)
+      return await widget.api
+          .uploadImage(bytes, picked.name, purpose: 'license');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)

@@ -15,6 +15,9 @@ png = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
 boundary = uuid.uuid4().hex
 body = io.BytesIO()
 body.write(f"--{boundary}\r\n".encode())
+# purpose 必填(#124):开屏图是公开类
+body.write(b'Content-Disposition: form-data; name="purpose"\r\n\r\nsplash\r\n')
+body.write(f"--{boundary}\r\n".encode())
 body.write(b'Content-Disposition: form-data; name="file"; filename="s.png"\r\n')
 body.write(b"Content-Type: image/png\r\n\r\n")
 body.write(png)
@@ -24,7 +27,7 @@ req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
 req.add_header("Authorization", f"Bearer {admin}")
 with urllib.request.urlopen(req) as resp:
     image_url = json.loads(resp.read())["url"]
-assert image_url.startswith("/uploads/")
+assert image_url.startswith("/img/"), image_url
 print(f"✓ 管理员传图成功:{image_url}")
 
 # ---- 发布(定向用户端)→ 端定向命中/不命中 ----
