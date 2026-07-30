@@ -8,8 +8,17 @@
 # 启动:cd deploy && docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
 # .env.prod 不入库,需含 POSTGRES_PASSWORD / JWT_SECRET(生成:openssl rand -hex 32);
 # SMS_* / TIANDITU_* / GITHUB_* 等运行配置也在其中,经 env_file 全量进 api 容器
+# 日志轮转:不设上限的话 docker json 日志只增不减,最后把盘吃满 ——
+# 而磁盘满会同时干掉数据库和对象存储,是最难看的一种宕机
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   db:
+    logging: *default-logging
     image: postgis/postgis:16-3.4
     restart: unless-stopped
     environment:
@@ -25,10 +34,12 @@ services:
       retries: 20
 
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     restart: unless-stopped
 
   api:
+    logging: *default-logging
     build: ../server
     container_name: superz-api
     restart: unless-stopped
@@ -65,6 +76,7 @@ services:
   # 控制台要用就走 SSH 隧道。单节点单盘,不上纠删码(4 核 / 可用内存 4.4G,
   # 机器上还有别的栈,给它 1g 上限就够)
   minio:
+    logging: *default-logging
     image: minio/minio:latest
     container_name: superz-minio
     restart: unless-stopped
@@ -104,6 +116,7 @@ services:
   # 公网入口:TLS 终结 + 按域名分发。证书/挑战目录都在部署机本地(不入库,
   # rsync 排除;见 renew-cert.sh)。8880/8443 与 frpc 的 localPort 对应
   nginx:
+    logging: *default-logging
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
@@ -119,6 +132,7 @@ services:
   # 内网穿透客户端:把云端 frps 的 80/443 引到本机 nginx。
   # tunnel/frpc.toml 含隧道 token,只存部署机(rsync 排除)
   frpc:
+    logging: *default-logging
     image: snowdreamtech/frpc
     restart: unless-stopped
     network_mode: host
@@ -129,6 +143,7 @@ services:
   # (不内网直连 api——见证的就该是公众看到的那份数据)。锚点留存在卷里,
   # 容器重建不丢。域名不入库:.env.prod 写 WITNESS_API=https://对外域名
   witness:
+    logging: *default-logging
     build: ../witness
     container_name: superz-witness
     restart: unless-stopped

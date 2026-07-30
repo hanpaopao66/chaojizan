@@ -19,7 +19,29 @@ from app.models import (  # noqa: F401
 )
 from app.security import hash_password
 
-DEMO_PASSWORD = "123456"
+# 演示账号口令。**生产环境绝不能用弱口令** —— 这些是全网皆知的固定手机号,
+# 配上 123456 等于给任何人一个能下单、能看商家订单和对账的账号。
+# 实测过:改口令只治标,seed 一跑又写回来了,所以判据放在这里。
+#
+# SEED_DEMO_PASSWORD 有值就用它;否则本地/开发用 123456,
+# 而 STORAGE_BACKEND=minio(只有生产这么配)时直接随机生成 —— 
+# 宁可让人"登不进演示账号"去查文档,也不留一个人人可登的后门。
+def _demo_password() -> str:
+    import os
+    import secrets
+
+    explicit = os.environ.get("SEED_DEMO_PASSWORD", "").strip()
+    if explicit:
+        return explicit
+    if os.environ.get("STORAGE_BACKEND", "") == "minio":
+        pw = secrets.token_urlsafe(18)
+        print(f"⚠ 检测到生产配置,演示账号口令已随机生成:{pw}")
+        print("  (只打印这一次;要固定口令请设 SEED_DEMO_PASSWORD)")
+        return pw
+    return "123456"
+
+
+DEMO_PASSWORD = _demo_password()
 ACCOUNTS = [
     ("13800000001", "测试用户", UserRole.customer),
     ("13800000002", "张老板", UserRole.merchant),
@@ -159,7 +181,7 @@ async def main():
             ))
         await db.commit()
 
-    print("演示数据就绪。测试账号(密码均为 123456):")
+    print(f"演示数据就绪。测试账号(密码见上;本地默认 123456):")
     for phone, name, role in ACCOUNTS:
         print(f"  {role.value:10s} {phone}  {name}")
 

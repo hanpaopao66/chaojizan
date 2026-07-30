@@ -13,6 +13,14 @@
 # 这样内网整条链路(断电/断网/隧道挂)都能被外部视角发现。
 set -uo pipefail
 
+# 从 .env.prod 读 WEBHOOK_URL:这样以后配告警群机器人只要往 .env.prod 里加一行,
+# 不用再动 crontab —— 改 cron 是最容易忘、也最容易改错的一环
+_ENV_PROD="$(cd "$(dirname "$0")" && pwd)/.env.prod"
+if [ -f "$_ENV_PROD" ] && [ -z "${WEBHOOK_URL:-}" ]; then
+  WEBHOOK_URL=$(grep -E "^WEBHOOK_URL=" "$_ENV_PROD" 2>/dev/null | head -1 | cut -d= -f2-)
+  export WEBHOOK_URL
+fi
+
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8010/health}"
 WEBHOOK_URL="${WEBHOOK_URL:-}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"       # 连续失败 N 次才告警,避免抖动误报
