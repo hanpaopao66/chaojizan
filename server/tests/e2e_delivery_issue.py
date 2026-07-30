@@ -2,7 +2,7 @@
 平台三种裁决——已协调 / 按送达处理 / 骑手责任先行赔付(商家骑手收入保留)。"""
 import time
 
-from tests.util import orderable_dish, call, login
+from tests.util import demo_shop, orderable_dish, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -10,7 +10,7 @@ rider = login("13800000003")
 admin = login("13800000000")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 dishes = call("GET", f"/merchants/{shop['id']}/dishes")
 main_dish = orderable_dish(dishes)
 

@@ -3,14 +3,14 @@ import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 rider = login("13800000003")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 DROP = (30.6612, 104.0823)
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"ETA测试菜-{int(time.time())}", "price_cents": 2000,
@@ -47,11 +47,19 @@ def get_eta(order_no):
 
 
 def sweep():
+    """每次 sweep 都独立起一个事件循环,收尾必须把**数据库和 Redis**
+    的连接池都释放掉 —— 只 dispose 引擎的话,Redis 池里的连接还绑在
+    上一个已关闭的 loop 上,第二次 sweep 就炸在 read_response。
+    (同类问题在 e2e_upload_privacy 也踩过)"""
     async def _run():
         from app.db import engine
+        from app.redis_client import pool
         from app.services.auto_flow import sweep_once
-        await sweep_once()
-        await engine.dispose()
+        try:
+            await sweep_once()
+        finally:
+            await engine.dispose()
+            await pool.disconnect()
     asyncio.run(_run())
 
 

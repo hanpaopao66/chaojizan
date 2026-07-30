@@ -5,13 +5,13 @@ import asyncio
 from datetime import datetime
 
 from app.services.auto_flow import BEIJING, sync_business_hours
-from tests.util import call, login, orderable_dish
+from tests.util import demo_shop, call, login, orderable_dish
 
 customer = login("13800000001")
 merchant = login("13800000002")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 sid = shop["id"]
 dishes = call("GET", f"/merchants/{sid}/dishes")
 main_dish = orderable_dish(dishes)

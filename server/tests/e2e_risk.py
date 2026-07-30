@@ -10,7 +10,7 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import call, login
+from tests.util import unique_spot, call, login
 
 merchant = login("13800000002")
 rider = login("13800000003")
@@ -23,8 +23,11 @@ dish = call("POST", "/merchants/me/dishes", merchant,
              "stock": 50})
 
 # 每轮用独立坐标(店铺 4km 内,轮间偏移 >130m 避免历史残留触发同址规则)
-BASE_LAT = 30.6650 + (int(time.time()) % 20) * 1.3e-3
-BASE_LNG = 104.0823
+# 用公共的 unique_spot 而不是自己算坐标:老写法
+# `30.6650 + (ts % 20) * 1.3e-3` 只有 20 个点、每 20 秒循环一次,
+# 一天里反复跑必然和别的用例撞进同一个 65m 风控格子,
+# 表现为"前 3 单不该标记"随机失败。unique_spot 切了 900 格
+BASE_LAT, BASE_LNG = unique_spot("risk")
 
 
 def fresh_customer(device=""):

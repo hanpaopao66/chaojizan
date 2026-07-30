@@ -2,7 +2,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 admin = login("13800000000")
 customer = login("13800000001")
@@ -67,9 +67,7 @@ print("✓ #28 非管理员访问考勤 403")
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"停运测试菜-{int(datetime.now().timestamp())}",
              "price_cents": 2000, "stock": 50})
-body = {"merchant_id": next(m["id"] for m in
-                            call("GET", "/merchants?lat=30.6612&lng=104.0823")
-                            if m["name"] == "张记面馆"),
+body = {"merchant_id": demo_shop()["id"],
         "items": [{"dish_id": dish["id"], "quantity": 1}],
         "address": "测试地址1号", "lat": 30.6612, "lng": 104.0823,
         "contact_name": "测试", "contact_phone": "13800000001"}

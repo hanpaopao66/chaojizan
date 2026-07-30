@@ -100,9 +100,36 @@ async def html_aware_errors(request, exc):
     return await http_exception_handler(request, exc)
 
 
+@app.middleware("http")
+async def log_unhandled_errors(request, call_next):
+    """未捕获异常统一留痕(#130)。
+
+    此前线上报错只能翻 docker logs 的原始 traceback,而日志既没轮转上限、
+    也没人主动看。这里至少让 5xx 带上方法/路径/traceback,便于事后定位。
+
+    **绝不记录请求体和查询串** —— 里面有手机号、收货地址、订单内容。
+    把用户数据写进日志等于给自己造了第二个数据泄露面:
+    日志会被复制、会被转发、会进备份,而且不受 /files 那套判权保护。
+    """
+    import logging
+    import traceback
+
+    try:
+        return await call_next(request)
+    except Exception:
+        logging.getLogger("superz.error").error(
+            "未处理异常 %s %s\n%s",
+            request.method, request.url.path, traceback.format_exc())
+        raise
+
+
+# 收紧到白名单(#130)。原先是 ["*"] —— 任何网站都能拿着用户浏览器里的
+# 凭据打我们的接口。原生 App 不发 Origin 头、不受 CORS 约束,
+# 所以这一改只影响官网/管理后台,三端不会因此挂掉
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 上线前收紧到实际域名
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

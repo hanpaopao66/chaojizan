@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     # 但被泄露的旧 token 一周后自然作废
     jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线
 
+    # CORS 白名单(#130)。原先是 allow_origins=["*"],注释自己写着"上线前收紧"。
+    # 注意:**原生 App 不发 Origin 头,不受 CORS 约束** —— 收紧只影响
+    # 官网/管理后台这类浏览器页面,三端 App 不会因此挂掉。
+    # 逗号分隔;留空则用下面的默认值
+    cors_origins: str = ""
+
     # ---- 对象存储(#124/#125)----
     # local:落本地磁盘,仅供本地开发。生产一律 minio。
     # 切成 minio 后连不上会让上传**明确失败**,不会静默退回磁盘 ——
@@ -203,6 +209,18 @@ class Settings(BaseSettings):
     # 登录时校验固定码即过(苹果海外审核员收不到国内短信,这是标准做法)。
     # 留空 = 功能关闭;固定码只放部署机 .env.prod,不进仓库。
     sms_review_accounts: str = ""
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        if self.cors_origins.strip():
+            return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        return [
+            self.public_base_url.rstrip("/"),
+            "https://www.chaojizan.cc",
+            # 本地开发:官网 vite 与管理后台
+            "http://localhost:5173", "http://127.0.0.1:5173",
+            "http://localhost:8010", "http://127.0.0.1:8010",
+        ]
 
     @property
     def flexwork_configured(self) -> bool:

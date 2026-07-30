@@ -1,13 +1,13 @@
 """Super-Z 全链路验证:用户下单 -> 支付 -> 商家接单/出餐 -> 骑手抢单/取餐/送达 -> 用户确认"""
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer, merchant, rider = login("13800000001"), login("13800000002"), login("13800000003")
 print("✓ 三个角色登录成功")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop0 = next(m for m in shops if m["name"] == "张记面馆")
+shop0 = demo_shop()
 assert shop0["monthly_sales"] > 0  # 列表现在带真实月售
 print(f"✓ PostGIS 附近商家查询:找到「{shop0['name']}」(抽成 {float(shop0['commission_rate'])*100:.0f}%,月售 {shop0['monthly_sales']})")
 

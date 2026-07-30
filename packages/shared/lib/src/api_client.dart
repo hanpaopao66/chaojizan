@@ -1200,10 +1200,17 @@ class ApiClient {
         .toList();
   }
 
-  /// 对账:某日入账明细(day 格式 yyyy-MM-dd)
-  Future<List<FinanceOrder>> financeOrders(String day) async {
-    final data =
-        await _request('GET', '/merchants/me/finance/orders', query: {'day': day});
+  /// 对账:某日入账明细(day 格式 yyyy-MM-dd)。
+  ///
+  /// [before] 传上一页最后一条的 createdAt 翻下一页 —— 一天入账超过一页的
+  /// 忙店,不翻页的话明细加不出日汇总,而「每一单的账都可查」是平台的承诺。
+  Future<List<FinanceOrder>> financeOrders(String day,
+      {String? before, int limit = 200}) async {
+    final data = await _request('GET', '/merchants/me/finance/orders', query: {
+      'day': day,
+      'limit': '$limit',
+      if (before != null && before.isNotEmpty) 'before': before,
+    });
     return (data as List)
         .map((e) => FinanceOrder.fromJson(e as Map<String, dynamic>))
         .toList();

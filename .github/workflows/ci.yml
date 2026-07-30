@@ -1,0 +1,147 @@
+name: CI
+
+# 让"跑没跑测试"不再取决于人的记性(#128)。
+#
+# 此前全靠本地手动 make test,而 make test 本身只覆盖 117 个 e2e 里的 50 个。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: 服务端 e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    services:
+      db:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: superz
+          POSTGRES_PASSWORD: superz
+          POSTGRES_DB: superz
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U superz"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+      minio:
+        image: bitnami/minio:latest
+        env:
+          MINIO_ROOT_USER: superz
+          MINIO_ROOT_PASSWORD: superz-ci-secret
+          # bitnami 镜像支持声明式建桶,省掉一个 init 容器。
+          # 桶名与生产一致 —— 本地/CI/生产用同一套名字,
+          # 才不会出现"CI 绿了线上炸"
+          MINIO_DEFAULT_BUCKETS: superz-public:download,superz-private
+        ports: ["9000:9000"]
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://superz:superz@localhost:5432/superz
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-only-not-a-real-secret
+      # 生产是 minio,CI 也用 minio:两边跑同一条代码路径
+      STORAGE_BACKEND: minio
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: superz
+      MINIO_SECRET_KEY: superz-ci-secret
+      MINIO_SECURE: "false"
+      # **必须关掉**:后台清扫会和用例自己调的 sweep_once 抢同一批订单,
+      # 表现为 e2e_auto_flow 时好时坏(本地踩过)
+      AUTO_FLOW_ENABLED: "false"
+      SUPERZ_API: http://127.0.0.1:8010
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: 安装依赖
+        working-directory: server
+        run: pip install -r requirements.txt
+
+      - name: 迁移 + 种子数据
+        working-directory: server
+        run: |
+          alembic upgrade head
+          python -m scripts.seed
+          python -m scripts.demo_seed
+
+      - name: 起服务
+        working-directory: server
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8010 > /tmp/api.log 2>&1 &
+          for i in $(seq 1 40); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8010/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          [ "$code" = "200" ] || { echo "API 起不来"; tail -40 /tmp/api.log; exit 1; }
+
+      - name: e2e 回归
+        run: make test
+
+      - name: 失败时贴上服务端日志
+        if: failure()
+        run: tail -100 /tmp/api.log
+
+  unit:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - name: 安装依赖
+        working-directory: server
+        run: pip install -r requirements.txt pytest
+      # 单测不连库不起服务,几秒内跑完 —— 慢了就没人跑
+      - name: make unit
+        run: make unit
+
+  flutter:
+    name: 三端静态检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.6"
+          channel: stable
+          cache: true
+      - name: analyze
+        run: |
+          fail=0
+          for d in packages/shared apps/user_app apps/merchant_app apps/rider_app; do
+            echo "── $d"
+            (cd "$d" && flutter pub get >/dev/null && flutter analyze) || fail=1
+          done
+          exit $fail
+      - name: dart 单测
+        run: cd packages/shared && flutter test
+
+  security:
+    name: 私密信息扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # 仓库要开源:密钥/内网 IP/隧道细节/其他项目名都不该进来
+      - run: bash scripts/security_scan.sh

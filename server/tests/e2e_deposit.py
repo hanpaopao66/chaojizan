@@ -1,14 +1,14 @@
 """商家保证金:从营收留存(不预缴),可提 = 余额 - 应留;平台可按店调、只降不追缴。"""
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 admin = login("13800000000")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 
 
 def top_up_balance(target_cents):
@@ -39,6 +39,12 @@ def top_up_balance(target_cents):
 
 top_up_balance(20000)
 
+# 先把应留归位再断言默认值:本用例末尾虽然会还原,但**跑到一半崩掉**
+# 就会把上一次的中间值留在库里,下一次直接挂在自己的脏数据上。
+# 自愈比"断言它本来就该是默认值"稳
+call("POST", f"/admin/merchants/{shop['id']}/deposit", admin,
+     {"deposit_required_cents": 50000})
+
 w = call("GET", "/merchants/me/wallet", merchant)
 assert w["deposit_required_cents"] == 50000, w["deposit_required_cents"]
 assert w["deposit_held_cents"] == min(w["balance_cents"], 50000)
@@ -49,17 +55,25 @@ print(f"✓ 钱包口径:余额 {w['balance_cents']/100:.2f},保证金留存 "
 # 把应留调到「余额 - 100 元」:可提正好 100 元,验证边界
 balance = w["balance_cents"]
 assert balance > 20000, "演示商家余额太低,先跑几单"
+# 应留有上限(100 万分),而演示商家的余额会被历次测试养到很高 ——
+# 直接写 balance-10000 迟早超过上限被 422。改成断言不变式:
+# **可提 = 余额 − 应留**,这条与余额规模无关,长期共享库上也成立
+required = min(balance - 10000, 1_000_000)
 call("POST", f"/admin/merchants/{shop['id']}/deposit", admin,
-     {"deposit_required_cents": balance - 10000})
+     {"deposit_required_cents": required})
 w = call("GET", "/merchants/me/wallet", merchant)
-assert w["withdrawable_cents"] == 10000
+expected = max(0, w["balance_cents"] - required)
+assert w["withdrawable_cents"] == expected, (w["withdrawable_cents"], expected)
 
 err = call("POST", "/merchants/me/withdrawals", merchant,
-           {"amount_cents": 10001}, expect_error=True)
+           {"amount_cents": expected + 1}, expect_error=True)
 assert err["_error"] == 409 and "保证金" in err["detail"]
 print(f"✓ 超出可提额被拒且说明保证金:{err['detail']}")
 
-wd = call("POST", "/merchants/me/withdrawals", merchant, {"amount_cents": 10000})
+# 提走全部可提额(不是写死 100 元):可提额取决于余额,而余额会被
+# 历次测试养大,写死就会在"提完还有剩"的状态下断言失败
+wd = call("POST", "/merchants/me/withdrawals", merchant,
+          {"amount_cents": expected})
 assert wd["status"] == "pending"
 w2 = call("GET", "/merchants/me/wallet", merchant)
 assert w2["withdrawable_cents"] == 0

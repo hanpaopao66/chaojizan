@@ -10,7 +10,7 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import call, login, register_fresh_rider, unique_spot
+from tests.util import demo_shop, call, login, register_fresh_rider, unique_spot
 
 admin = login("13800000000")
 merchant = login("13800000002")
@@ -84,7 +84,7 @@ async def main():
 
     # 3) 首单完成 → 双方发券且只发一次;取消单不触发
     shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-    sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+    sid = demo_shop()["id"]
     dish = call("POST", "/merchants/me/dishes", merchant,
                 {"name": f"邀请测试菜-{ts}", "price_cents": 2000,
                  "stock": 30})

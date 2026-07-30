@@ -60,37 +60,37 @@ Q = f"&checkin={ci}&checkout={co}"
 mine = lambda lst: [h for h in lst if h["id"] in (a_id, b_id, c_id)]
 
 # 1) 起价 = 可订房型最低区间总价 ÷ 晚数;满房标记
-lst = mine(call("GET", f"/stays/hotels?q={quote('搜')}&sort=rating" + Q +
+lst = mine(call("GET", f"/stays/hotels?q={quote(tag)}&sort=rating" + Q +
                 f"&max_price_cents=999999"))
 by_id = {h["id"]: h for h in lst}
 assert by_id[a_id]["min_night_price_cents"] == 30000
 assert by_id[b_id]["min_night_price_cents"] == 80000
 assert c_id not in by_id, "带价格上限筛选时,满房(无价)店应被过滤"
 # 不带价格筛选时,满房店应展示且 full=true
-lst_all = mine(call("GET", f"/stays/hotels?q={quote('搜')}&sort=rating" + Q))
+lst_all = mine(call("GET", f"/stays/hotels?q={quote(tag)}&sort=rating" + Q))
 by_id = {h["id"]: h for h in lst_all}
 assert by_id[c_id]["full"] is True and by_id[c_id]["min_night_price_cents"] is None
 print("OK 起价聚合与满房标记")
 
 # 2) 排序:price 升序 A(300)→C(满房垫底或不参与价格序)→B(800)
-lst = mine(call("GET", f"/stays/hotels?q={quote('搜')}&sort=price" + Q))
+lst = mine(call("GET", f"/stays/hotels?q={quote(tag)}&sort=price" + Q))
 ids = [h["id"] for h in lst]
 assert ids.index(a_id) < ids.index(b_id), ids
 assert ids[-1] == c_id, "满房(无价)应排最后"
 # distance:A(近)在 B(远)前
 lst = mine(call("GET",
                 f"/stays/hotels?lat=30.66&lng=104.06&sort=distance"
-                f"&q={quote('搜')}" + Q))
+                f"&q={quote(tag)}" + Q))
 ids = [h["id"] for h in lst]
 assert ids.index(a_id) < ids.index(b_id)
 assert lst[0]["distance_m"] is not None
 print("OK 排序 price/distance")
 
 # 3) 筛选:tier=comfort 只剩 B;价格上限 40000 只剩 A
-lst = mine(call("GET", f"/stays/hotels?q={quote('搜')}&tier=comfort"
+lst = mine(call("GET", f"/stays/hotels?q={quote(tag)}&tier=comfort"
                 f"&sort=rating" + Q))
 assert [h["id"] for h in lst] == [b_id]
-lst = mine(call("GET", f"/stays/hotels?q={quote('搜')}&sort=rating"
+lst = mine(call("GET", f"/stays/hotels?q={quote(tag)}&sort=rating"
                 f"&max_price_cents=40000" + Q))
 assert [h["id"] for h in lst] == [a_id]
 print("OK 筛选 tier/价格区间")

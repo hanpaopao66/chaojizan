@@ -19,7 +19,7 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.models import EarningKind, MerchantEarning, Order, Refund, RefundStatus, RiderEarning
-from tests.util import BASE, call, login, register_fresh_customer
+from tests.util import demo_shop, BASE, call, login, register_fresh_customer
 
 customer = register_fresh_customer()
 merchant = login("13800000002")
@@ -31,7 +31,7 @@ print("✓ 四个角色登录成功")
 call("POST", "/admin/audit/backfill", admin)
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 tag = str(int(time.time()))
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"冲账测试菜-{tag}", "price_cents": 2000, "stock": 50})

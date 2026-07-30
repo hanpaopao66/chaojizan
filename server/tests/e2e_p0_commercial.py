@@ -4,15 +4,20 @@
 """
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 rider = login("13800000003")
 
 # ---- 招牌菜:列表接口带 top_dishes ----
-shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop0 = next(m for m in shops if m["name"] == "张记面馆")
+# 这条验的就是**列表接口**带 top_dishes,所以必须用列表而不是详情。
+# 但列表有条数上限,商家一多演示店会被挤出去 —— 用演示店自己的坐标查,
+# 按距离排序它必在第一个
+_d = demo_shop()
+shops = call("GET", f"/merchants?lat={_d['lat']}&lng={_d['lng']}")
+shop0 = next((m for m in shops if m["id"] == _d["id"]), None)
+assert shop0 is not None, f"按演示店自身坐标查,列表里仍没有它({len(shops)} 家)"
 assert "top_dishes" in shop0 and len(shop0["top_dishes"]) >= 1
 d0 = shop0["top_dishes"][0]
 assert {"name", "price_cents", "image_url"} <= set(d0)

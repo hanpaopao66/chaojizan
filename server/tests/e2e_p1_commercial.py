@@ -4,7 +4,7 @@
 """
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -12,7 +12,7 @@ rider = login("13800000003")
 
 tag = str(int(time.time()))
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 
 # ---- 限时折扣:设置 → 校验 → 按折扣价成交 → 过期不生效 ----
 dish = call("POST", "/merchants/me/dishes", merchant,

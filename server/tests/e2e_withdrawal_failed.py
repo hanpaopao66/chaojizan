@@ -1,6 +1,6 @@
 """提现打款失败闭环:paid→failed 余额退回、自动工单、终态不可再改、可重新申请。
 骑手与商家两侧共用同一张表同一套流程,两侧都验。"""
-from tests.util import orderable_dish, call, login
+from tests.util import demo_shop, orderable_dish, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -8,7 +8,7 @@ rider = login("13800000003")
 admin = login("13800000000")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 dishes = call("GET", f"/merchants/{shop['id']}/dishes")
 main_dish = orderable_dish(dishes)
 

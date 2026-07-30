@@ -6,7 +6,7 @@
 import random
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 
 def sms_login(phone):
@@ -17,7 +17,7 @@ def sms_login(phone):
 
 merchant = login("13800000002")
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 ts = int(time.time())
 d1 = call("POST", "/merchants/me/dishes", merchant,
           {"name": f"常买主菜-{ts}", "price_cents": 2000, "stock": 200})

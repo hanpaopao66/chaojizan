@@ -1,14 +1,14 @@
 """商家对账验证:完成单入账(净额=流水-佣金)、日汇总与明细对得上、权限隔离"""
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 rider = login("13800000003")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 
 # 专属菜品,金额可精确断言:2 × ¥10 = ¥20 流水,佣金 5% = ¥1.00,净得 ¥19.00
 dish = call("POST", "/merchants/me/dishes", merchant,
@@ -44,7 +44,19 @@ assert stat["commission_cents"] == before["commission_cents"] + 100
 assert stat["net_cents"] == before["net_cents"] + 1900
 print(f"✓ 完成单入账:{day} 流水 +¥20.00,佣金 +¥1.00(5%),净收入 +¥19.00")
 
-detail = call("GET", f"/merchants/me/finance/orders?day={day}", merchant)
+# 翻完整天再对账:明细接口是游标分页的,只取第一页就求和,
+# 在忙店(一天入账几百条)上必然对不上 —— 这条恒等式的意义就在于此
+detail = []
+cursor = None
+while True:
+    page = call("GET", f"/merchants/me/finance/orders?day={day}&limit=200"
+                + (f"&before={cursor}" if cursor else ""), merchant)
+    if not page:
+        break
+    detail += page
+    cursor = page[-1]["created_at"]
+    if len(page) < 200:
+        break
 mine = next(o for o in detail if o["order_no"] == no)
 assert mine["net_cents"] == 1900 and mine["commission_cents"] == 100
 print("✓ 单日明细逐单可查,金额与汇总一致")

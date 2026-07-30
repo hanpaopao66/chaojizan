@@ -1,14 +1,14 @@
 """缺货部分退款验证:单菜退款、金额/佣金重算、库存回补、全退光=整单取消"""
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 rider = login("13800000003")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 
 # 专属菜品:A ¥10×2 + B ¥6×1,金额可精确断言
 tag = str(int(time.time()))

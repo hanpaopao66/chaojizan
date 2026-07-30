@@ -1,7 +1,7 @@
 """地址簿 + POI 提示 + 订单联系人透传验证"""
 from urllib.parse import quote
 
-from tests.util import orderable_dish, call, login
+from tests.util import demo_shop, orderable_dish, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -45,7 +45,7 @@ print("✓ 非用户角色无地址簿权限(403)")
 
 # 下单带联系人,骑手视角能看到
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop0 = next(m for m in shops if m["name"] == "张记面馆")
+shop0 = demo_shop()
 dishes = call("GET", f"/merchants/{shop0['id']}/dishes")
 main_dish = orderable_dish(dishes)
 order = call("POST", "/orders", customer, {

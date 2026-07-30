@@ -6,11 +6,11 @@
 import asyncio
 import time
 
-from tests.util import call, login, register_fresh_customer
+from tests.util import demo_shop, call, login, register_fresh_customer
 
 merchant = login("13800000002")
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"拼单测试菜-{int(time.time())}", "price_cents": 2500,
              "stock": 50})

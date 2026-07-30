@@ -20,7 +20,19 @@ api:
 seed:
 	cd server && python -m scripts.seed
 
+# 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)
+unit:
+	cd server && python -m pytest tests/unit -q
+
 # 端到端测试(需要 API 已在运行,默认 http://127.0.0.1:8010,可用 SUPERZ_API 覆盖)
+#
+# 本地跑全量的三个前置条件(踩出来的,少一个都跑不完):
+#   1. 服务端用 AUTO_FLOW_ENABLED=false 启动 —— 后台清扫会和用例自己调的
+#      sweep_once 抢同一批订单,表现为 e2e_auto_flow 时好时坏;
+#   2. 全量要注册几十个号,会撞「同 IP 每日 20 条验证码」的生产限流。
+#      本地循环清 sms:day:ip:*,**绝不能清 sms:day:p:*** ——
+#      e2e_auth_sms 正是靠手机号维度的计数触发滑块;
+#   3. 演示库的菜会被历次跑动抽干,跑前把低库存补回去。
 test:
 	cd server && python -m tests.e2e_orders && python -m tests.e2e_onboarding \
 	  && python -m tests.e2e_addresses && python -m tests.e2e_auto_flow \
@@ -48,7 +60,53 @@ test:
 	  && python -m tests.e2e_merchant_promo && python -m tests.e2e_home_filters \
 	  && python -m tests.e2e_rider_new_order_push \
 	  && python -m tests.e2e_remote_copy \
-	  && python -m tests.e2e_upload_privacy
+	  && python -m tests.e2e_upload_privacy \
+	  && python -m tests.e2e_readiness \
+	  && python -m tests.e2e_address_privacy && python -m tests.e2e_admin_stays \
+	  && python -m tests.e2e_admin_worklog && python -m tests.e2e_alcohol \
+	  && python -m tests.e2e_appeal && python -m tests.e2e_append_order \
+	  && python -m tests.e2e_boost_tip && python -m tests.e2e_business_hours2 \
+	  && python -m tests.e2e_cancel_rules && python -m tests.e2e_cart_reorder \
+	  && python -m tests.e2e_change_address && python -m tests.e2e_chat \
+	  && python -m tests.e2e_coupon_ops && python -m tests.e2e_daily_stock \
+	  && python -m tests.e2e_delivery_issue && python -m tests.e2e_delivery_track \
+	  && python -m tests.e2e_deposit && python -m tests.e2e_eta_dynamic \
+	  && python -m tests.e2e_food_safety && python -m tests.e2e_gift \
+	  && python -m tests.e2e_grab_radius && python -m tests.e2e_group_cart \
+	  && python -m tests.e2e_holiday && python -m tests.e2e_identity \
+	  && python -m tests.e2e_invoice && python -m tests.e2e_marketing \
+	  && python -m tests.e2e_merchant_analytics && python -m tests.e2e_merchant_staff \
+	  && python -m tests.e2e_merchant_statement && python -m tests.e2e_merchant_wallet \
+	  && python -m tests.e2e_moderation && python -m tests.e2e_multi_city \
+	  && python -m tests.e2e_multi_order && python -m tests.e2e_no_rider \
+	  && python -m tests.e2e_payout_account && python -m tests.e2e_pickup \
+	  && python -m tests.e2e_pickup_handover && python -m tests.e2e_printer \
+	  && python -m tests.e2e_privacy_phone && python -m tests.e2e_profit_sharing \
+	  && python -m tests.e2e_ready_timeout && python -m tests.e2e_reassign \
+	  && python -m tests.e2e_referral && python -m tests.e2e_review_append \
+	  && python -m tests.e2e_rider_accident && python -m tests.e2e_rider_insurance \
+	  && python -m tests.e2e_rider_onboarding && python -m tests.e2e_rider_sos \
+	  && python -m tests.e2e_rider_transfer && python -m tests.e2e_rider_worklog \
+	  && python -m tests.e2e_risk && python -m tests.e2e_risk_action \
+	  && python -m tests.e2e_search && python -m tests.e2e_self_delivery \
+	  && python -m tests.e2e_self_service && python -m tests.e2e_shop_coupon \
+	  && python -m tests.e2e_stays_profile && python -m tests.e2e_stocking \
+	  && python -m tests.e2e_tax_export && python -m tests.e2e_tier_commission \
+	  && python -m tests.e2e_tip && python -m tests.e2e_transfer_discipline \
+	  && python -m tests.e2e_urge && python -m tests.e2e_weather_shutdown \
+	  && python -m tests.e2e_withdrawal_failed
+
+# 需要特殊环境或已知不稳定的用例,**故意不放进 make test**:
+#   e2e_privacy_phone_strict —— 要对着 PRIVACY_PHONE_STRICT=true 启动的实例跑
+#     (用例自己的 docstring 就写了这个前置条件);
+#   e2e_eta_compensation —— 在长期共享的开发库上依赖"这一单发了几张券"的
+#     精确判定,而库里同时存在别的超时单;干净库(CI)上正常。留红在主回归里
+#     会让所有人习惯"红了也没关系",所以单列出来。
+test-special:
+	cd server && PRIVACY_PHONE_STRICT=true python -m tests.e2e_privacy_phone_strict
+	@echo "提示:上面这条需要服务端也以 PRIVACY_PHONE_STRICT=true 启动"
+	cd server && python -m tests.e2e_eta_compensation || \
+	  echo "(eta_compensation 在脏库上易失败,见 Makefile 注释)"
 
 logs:
 	docker compose logs -f api

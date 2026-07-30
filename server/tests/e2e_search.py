@@ -2,7 +2,7 @@
 import time
 from urllib.parse import quote
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 
 def q(s):
@@ -14,7 +14,7 @@ merchant = login("13800000002")
 
 # 张记面馆(演示店,春熙路 30.6598,104.0810,有招牌菜)
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-zhang = next(m for m in shops if m["name"] == "张记面馆")
+zhang = demo_shop()
 LAT, LNG = 30.6612, 104.0823
 tag = int(time.time())
 uniq = call("POST", "/merchants/me/dishes", merchant,

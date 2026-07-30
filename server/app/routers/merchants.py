@@ -1430,12 +1430,22 @@ async def finance_daily(
 @router.get("/me/finance/orders", response_model=list[FinanceOrderOut])
 async def finance_orders(
     day: date,
+    before: str | None = None,
+    limit: int = 200,
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """某一天的入账明细,逐单可查,和日汇总能对上。"""
+    """某一天的入账明细,逐单可查,和日汇总能对上。
+
+    **游标分页**:before 传上一页最后一条的 created_at(ISO),不传取最新一页。
+
+    老口径是写死 limit(500) 不分页 —— 一天入账超过 500 条的商家
+    (每单可能产生入账/冲账/调整多行,忙店很容易到)看到的明细**加不出日汇总**,
+    而平台的招牌就是「每一单的账都可查」。实测演示店一天 545 条时就对不上了。
+    """
+    limit = max(1, min(limit, 500))
     shop = await _my_shop_or_404(db, user)
-    result = await db.scalars(
+    query = (
         select(MerchantEarning)
         .where(
             MerchantEarning.merchant_id == shop.id,
@@ -1443,9 +1453,16 @@ async def finance_orders(
                 day=day
             ),
         )
-        .order_by(MerchantEarning.created_at.desc())
-        .limit(500)
+        .order_by(MerchantEarning.created_at.desc(), MerchantEarning.id.desc())
+        .limit(limit)
     )
+    if before:
+        try:
+            cursor = datetime.fromisoformat(before)
+        except ValueError:
+            raise HTTPException(422, "分页游标格式不对")
+        query = query.where(MerchantEarning.created_at < cursor)
+    result = await db.scalars(query)
     return list(result)
 
 

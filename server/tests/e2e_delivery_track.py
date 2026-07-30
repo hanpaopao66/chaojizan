@@ -1,7 +1,7 @@
 """实时配送轨迹(清单#57):配送中可取骑手点、即将送达触发去重、终结后停止暴露、归属校验。"""
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -9,7 +9,7 @@ rider = login("13800000003")
 other = login("13800000004")  # 无关用户(演示商家账号,借来测越权)
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 DROP = (30.6612, 104.0823)  # 收货点
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"轨迹测试菜-{int(time.time())}", "price_cents": 2000,

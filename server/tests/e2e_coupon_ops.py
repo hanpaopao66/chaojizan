@@ -8,7 +8,7 @@ import asyncio
 import random
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 admin = login("13800000000")
 merchant = login("13800000002")
@@ -92,7 +92,7 @@ async def main():
 
     # 6) 新客券下单抵扣走 subsidy 口径(复用 #34 通道)
     shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-    sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+    sid = demo_shop()["id"]
     dish = call("POST", "/merchants/me/dishes", merchant,
                 {"name": f"券测试菜-{ts}", "price_cents": 2000, "stock": 20})
     coupon = my_batch_coupons(u1, batch_id)[0]

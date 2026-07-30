@@ -408,3 +408,77 @@ async def replace_faq(
         db.add(r)
     await db.commit()
     return {"count": len(rows)}
+
+# ---------- 外部依赖体检(#131) ----------
+def _readiness_rows() -> list[dict]:
+    """逐项列出外部依赖的配置状态、降级后的**实际行为**、以及**影响谁**。
+
+    代码早就写好且能优雅降级 —— 问题是"降级了但没人知道"。
+    最典型的:骑手新单推送做完验收全绿,而生产上 JPUSH 没配,
+    一条都发不出去。功能存在感和实际效果完全脱节。
+
+    这里只如实报告,**不替谁做决定**,更不因为"没接"就悄悄关掉功能。
+    """
+    from ..config import settings as st
+
+    def row(key, ok, degraded, affects, note=""):
+        return {"key": key, "configured": bool(ok),
+                "degraded_behavior": degraded, "affects": affects,
+                "note": note}
+
+    return [
+        row("payment_wechat", st.wxpay_mchid and st.wxpay_app_id,
+            "收不了真钱。若同时开着模拟支付,等于下单不用付款",
+            "平台收入、商家结算",
+            "关键路径:没有它就没有商业化"),
+        row("mock_pay_disabled", not st.mock_pay_enabled,
+            "任何登录用户都能把订单标成已支付(白嫖)",
+            "平台与商家的钱",
+            "生产必须为「已配置」,即 MOCK_PAY_ENABLED=false"),
+        row("jpush", st.jpush_configured if hasattr(st, "jpush_configured")
+            else bool(st.jpush_app_key),
+            "所有推送静默跳过:骑手收不到新单提醒、用户收不到订单状态",
+            "骑手接单速度、用户体验"),
+        row("privacy_phone", bool(st.ali_pnp_key_id),
+            ("未接中间号且非严格模式 → **商家和骑手看到用户真实手机号**"
+             if not st.privacy_phone_strict
+             else "未接中间号但已开严格模式 → 打码且隐藏拨打,骑手联系不上用户"),
+            "用户隐私 / 配送成功率",
+            "这是「隐私」与「送得到」的取舍,属业务决策(见 docs/DEV-PROMPTS-12.md)"),
+        row("idcheck", bool(st.idcheck_api_url),
+            "实名只校验格式与 GB 11643 校验位,不核验姓名证号是否真的一致",
+            "骑手实名的可信度、平台合规"),
+        row("insurance", bool(st.insurance_app_id),
+            "骑手意外险只登记不投保,出事靠保障金池先行赔付",
+            "骑手安全兜底"),
+        row("flexwork", bool(st.flexwork_app_id),
+            "骑手打款人工操作,个税由骑手自行申报",
+            "骑手到账效率、用工合规"),
+        row("amap", bool(st.amap_web_key),
+            "地址搜索返回演示数据,不是真实 POI",
+            "用户填地址的准确度"),
+        row("sms", bool(st.sms_secret_id),
+            "验证码不真发,开发模式直接返回 dev_code",
+            "登录注册(生产必须配置)"),
+        row("storage_minio", st.storage_backend == "minio",
+            "图片落本机磁盘,换机器/重建卷就全没了",
+            "商家图片、证照留存"),
+        row("cloud_print", bool(st.feie_user),
+            "云打印不可用,商家只能蓝牙直连小票机",
+            "商家出票"),
+    ]
+
+
+@router.get("/admin/readiness")
+async def readiness(
+    admin: User = Depends(require_role("admin")),
+):
+    """生产就绪体检。未配置的项**不是错误**,但要让人看见降级成了什么。"""
+    rows = _readiness_rows()
+    missing = [r for r in rows if not r["configured"]]
+    return {
+        "total": len(rows),
+        "configured": len(rows) - len(missing),
+        "missing": len(missing),
+        "items": rows,
+    }

@@ -5,14 +5,14 @@
 """
 import time
 
-from tests.util import call, login, register_fresh_customer
+from tests.util import demo_shop, call, login, register_fresh_customer
 from tests.e2e_identity import make_id
 
 merchant = login("13800000002")
 admin = login("13800000000")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 
 beer = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"精酿啤酒-{int(time.time())}", "price_cents": 2000,

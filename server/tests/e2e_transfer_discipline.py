@@ -12,13 +12,13 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.redis_client import get_redis
-from tests.util import call, drain_order_pool, login, register_fresh_rider
+from tests.util import demo_shop, call, drain_order_pool, login, register_fresh_rider
 
 customer = login("13800000001")
 merchant = login("13800000002")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"限抢测试菜-{int(time.time())}", "price_cents": 2000,
              "stock": 50})

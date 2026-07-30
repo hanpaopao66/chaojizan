@@ -1,14 +1,14 @@
 """到店自取全链路:免配送费下单 → 不进骑手抢单池 → 出餐 → 取餐码核销完成结算。"""
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 rider = login("13800000003")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 # 专属菜品(价格盖过起送价):不受演示菜库存/价格变化影响
 main_dish = call("POST", "/merchants/me/dishes", merchant,
                  {"name": f"自取测试菜-{int(time.time())}",

@@ -10,14 +10,14 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import call, drain_order_pool, login, register_fresh_rider
+from tests.util import demo_shop, call, drain_order_pool, login, register_fresh_rider
 
 customer = login("13800000001")
 merchant = login("13800000002")
 admin = login("13800000000")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"准时测试菜-{int(time.time())}", "price_cents": 2500,
              "stock": 50})
@@ -79,9 +79,11 @@ async def main():
     call("POST", f"/orders/{no2}/transition", rider, {"to_status": "picked_up"})
     await backdate_eta(no2, 20)
     call("POST", f"/orders/{no2}/transition", rider, {"to_status": "delivered"})
+    # 按「这一单有没有券」断言,不数总数:共享开发库里可能同时有别的超时单,
+    # 一次清扫会给它们一起发券,计数恒等永远不成立(同样的教训在推送流水那条踩过)
     coupons = my_eta_coupons()
-    assert len(coupons) == base_coupons + 1, coupons
-    coupon = next(c for c in coupons if no2[-6:] in c["note"])
+    coupon = next((c for c in coupons if no2[-6:] in c["note"]), None)
+    assert coupon is not None, f"这一单没发到安抚券:{[c['note'][:24] for c in coupons[:3]]}"
     assert coupon["amount_cents"] == 300 and coupon["usable"], coupon
     from app.services.auto_flow import sweep_once
     await sweep_once()  # 兜底补发重跑:source 唯一,不重复

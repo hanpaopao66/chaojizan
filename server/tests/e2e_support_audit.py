@@ -9,7 +9,7 @@ import asyncio
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import orderable_dish, ADMIN, CUSTOMER, MERCHANT, RIDER, call, login
+from tests.util import demo_shop, orderable_dish, ADMIN, CUSTOMER, MERCHANT, RIDER, call, login
 
 customer = login(CUSTOMER)
 merchant = login(MERCHANT)
@@ -97,7 +97,7 @@ print("✓ 补账后全量核对通过:0 问题")
 
 # 走一遍完整订单,拿到一条真实的商家入账
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 dishes = call("GET", f"/merchants/{shop['id']}/dishes")
 main_dish = orderable_dish(dishes)
 order = call("POST", "/orders", customer, {

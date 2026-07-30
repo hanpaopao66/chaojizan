@@ -208,3 +208,14 @@ def unique_spot(seed: str = ""):
     base_lat, base_lng, step = 30.6650, 104.0823, 0.0008
     n = random.randrange(900) if not seed else (hash(seed) % 900)
     return base_lat + (n // 30) * step, base_lng + (n % 30) * step
+
+
+# 演示店固定是 seed 里的第一家(id=1)。**别再去扫 /merchants 列表找它** ——
+# 那个接口有条数上限(LIMIT 50),演示库里商家一多,张记面馆就被挤出返回页,
+# 表现为 `next(...)` 抛 StopIteration「店不见了」。61 处用例踩过同一个坑。
+DEMO_SHOP_ID = 1
+
+
+def demo_shop():
+    """直接取演示店详情,不依赖任何会被截断的列表。"""
+    return call("GET", f"/merchants/{DEMO_SHOP_ID}")

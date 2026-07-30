@@ -6,7 +6,7 @@ import asyncio
 import time
 
 from app.services.auto_flow import sweep_once
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 merchant = login("13800000002")
 rider = login("13800000003")
@@ -16,7 +16,7 @@ customer = call("POST", "/auth/register",
                       "role": "customer"})["token"]
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 main_dish = call("POST", "/merchants/me/dishes", merchant,
                  {"name": f"加菜主菜-{int(time.time())}", "price_cents": 2000, "stock": 50})
 cola = call("POST", "/merchants/me/dishes", merchant,

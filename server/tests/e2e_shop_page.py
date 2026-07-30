@@ -5,14 +5,14 @@ import urllib.request
 import uuid
 from urllib.parse import quote
 
-from tests.util import BASE, call, login
+from tests.util import demo_shop, BASE, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 
 # 店铺详情:月售 + 公告
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 detail = call("GET", f"/merchants/{shop['id']}")
 assert isinstance(detail["monthly_sales"], int) and detail["monthly_sales"] >= 1
 assert detail["announcement"]

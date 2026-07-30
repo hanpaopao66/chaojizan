@@ -10,15 +10,15 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import (call, drain_order_pool, login, register_fresh_customer,
-                        register_fresh_rider)
+from tests.util import (call, demo_shop, drain_order_pool, login,
+                        register_fresh_customer, register_fresh_rider)
 
 customer = register_fresh_customer()  # 售后风控按用户30天累计,用新号
 merchant = login("13800000002")
 admin = login("13800000000")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"分账测试菜-{int(time.time())}", "price_cents": 4000,
              "stock": 50})

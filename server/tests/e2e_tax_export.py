@@ -7,7 +7,7 @@ import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from tests.util import BASE, orderable_dish, call, login
+from tests.util import demo_shop, BASE, orderable_dish, call, login
 
 merchant = login("13800000002")
 rider = login("13800000003")
@@ -20,7 +20,7 @@ customer = call("POST", "/auth/register",
                       "role": "customer"})["token"]
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 dishes = call("GET", f"/merchants/{shop['id']}/dishes")
 main_dish = orderable_dish(dishes)
 
@@ -96,7 +96,7 @@ print("✓ 骑手所得汇总:按人聚合,配送费口径正确")
 # 商家结算汇总:表头 + 含本店行
 _, mcsv = fetch_csv("merchant-settlement", admin)
 mlines = mcsv.strip().splitlines()
-assert mlines[0].lstrip("﻿") == "商家,店主手机号,外卖净额(元),团购净额(元),当月已打款提现(元)"
+assert mlines[0].lstrip("﻿") == "商家,店主手机号,外卖净额(元),团购净额(元),住宿净额(元),当月已打款提现(元)"
 assert any("张记面馆" in x for x in mlines)
 print("✓ 商家结算汇总:按店聚合,含外卖/团购/提现三列")
 
@@ -117,7 +117,7 @@ async def _check_commission_invoice():
     from app.db import SessionLocal
     _, ccsv = fetch_csv("commission-invoice", admin)
     clines = ccsv.strip().splitlines()
-    assert clines[0].lstrip("﻿") == "商家,外卖佣金(元),团购服务费(元),合计(元),发票抬头,税号"
+    assert clines[0].lstrip("﻿") == "商家,外卖佣金(元),团购服务费(元),住宿服务费(元),合计(元),发票抬头,税号"
     crow = next(x for x in clines if "张记面馆" in x)
     csv_commission = float(crow.split(",")[1])
     async with SessionLocal() as db:

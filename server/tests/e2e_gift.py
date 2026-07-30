@@ -1,13 +1,13 @@
 """满赠全链路:配置校验 → 达标出赠品行(0 元,不计佣) → 缺货自动失效 → 赠品行不可退。"""
 import time
 
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 addr = {"address": "测试地址1号", "lat": 30.6612, "lng": 104.0823,
         "contact_name": "测试", "contact_phone": "13800000001"}
 

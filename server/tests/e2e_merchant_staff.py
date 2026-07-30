@@ -5,10 +5,13 @@ import time
 from tests.util import call, login
 
 
-def sms_login(phone):
+def sms_login(phone, role="merchant"):
+    """验证码登录。**必须传 role** —— 新号自动注册时按端定角色,
+    不传就注册成顾客,加店员时会 404「该手机号还没有商家端账号」。
+    (角色化注册是后加的,这条用例一度没跟上)"""
     code = call("POST", "/auth/sms-code", body={"phone": phone})["dev_code"]
     return call("POST", "/auth/sms-login",
-                body={"phone": phone, "code": code})["token"]
+                body={"phone": phone, "code": code, "role": role})["token"]
 
 
 owner = login("13800000002")   # 张记面馆店主

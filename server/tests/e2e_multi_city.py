@@ -7,14 +7,14 @@ import asyncio
 import time
 from urllib.parse import quote
 
-from tests.util import call, drain_order_pool, login, register_fresh_rider
+from tests.util import demo_shop, call, drain_order_pool, login, register_fresh_rider
 
 customer = login("13800000001")
 merchant = login("13800000002")
 admin = login("13800000000")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"城市测试菜-{int(time.time())}", "price_cents": 2000,
              "stock": 50})
@@ -43,8 +43,12 @@ async def main():
     rider_id = call("GET", "/auth/me", rider)["id"]
 
     # 0) 逆地理未配置(测试环境无 key):商家/骑手 city 留空 = 人工填,先确认降级
-    shop = next(m for m in call("GET", "/admin/merchants?status=approved",
-                                admin) if m["id"] == sid)
+    # 给 next() 一个默认值:找不到时抛的是 StopIteration,在 async 里会被
+    # 包成 "coroutine raised StopIteration",完全看不出是"没找到这家店"。
+    # 宁可自己抛一句人话
+    # 直接取这家店,不去扫 admin 列表:列表有条数上限,商家一多演示店就被截在
+    # 页外,表现为"店不见了"。同一类坑在首页筛选那条也踩过
+    shop = call("GET", f"/merchants/{sid}")
     assert "city" in shop  # 字段存在;seed 店未回填时为空
 
     # 1) 未标注城市:不隔离,单子大家都看得见(存量宽限)
@@ -63,8 +67,14 @@ async def main():
     print("✓ 跨城看不到、同城看得到")
 
     # 3) 后台按城筛
+    # 按城筛的承诺是「筛出来的都属于这个城市」,不是「一定能在这一页里
+    # 看到某家店」—— 后台列表有条数上限,成都的店一多演示店就翻页外去了。
+    # 所以正向断言改成:逐条复核城市 + 这家店自己确实是成都的
     listed = call("GET", "/admin/merchants?city=" + quote("成都市"), admin)
-    assert any(m["id"] == sid for m in listed)
+    assert listed, "成都市一家店都没筛到"
+    for m in listed:
+        assert m.get("city") == "成都市", m
+    assert call("GET", f"/merchants/{sid}").get("city") == "成都市"
     listed = call("GET", "/admin/merchants?city=" + quote("绵阳市"), admin)
     assert not any(m["id"] == sid for m in listed)
     cities = call("GET", "/admin/cities", admin)

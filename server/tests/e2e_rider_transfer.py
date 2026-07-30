@@ -11,14 +11,14 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.services.auto_flow import sweep_once
-from tests.util import call, drain_order_pool, login, register_fresh_rider
+from tests.util import demo_shop, call, drain_order_pool, login, register_fresh_rider
 
 customer = login("13800000001")
 merchant = login("13800000002")
 rider = login("13800000003")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 dish = call("POST", "/merchants/me/dishes", merchant,
             {"name": f"转单测试菜-{int(time.time())}", "price_cents": 2000,
              "stock": 50})

@@ -3,12 +3,12 @@ import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 
-from tests.util import call, login, register_fresh_customer
+from tests.util import demo_shop, call, login, register_fresh_customer
 
 admin = login("13800000000")
 merchant = login("13800000002")
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 addr = {"address": "测试地址1号", "lat": 30.6612, "lng": 104.0823,
         "contact_name": "测试", "contact_phone": "13800000001"}
 ts = int(time.time())

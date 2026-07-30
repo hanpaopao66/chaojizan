@@ -7,7 +7,7 @@ JPush 未配置时触达类推送仍写 push_logs(意图留痕),据此断言触�
 """
 import time
 
-from tests.util import orderable_dish, ADMIN, CUSTOMER, MERCHANT, RIDER, call, login
+from tests.util import demo_shop, orderable_dish, ADMIN, CUSTOMER, MERCHANT, RIDER, call, login
 
 customer = login(CUSTOMER)
 merchant = login(MERCHANT)
@@ -24,7 +24,7 @@ def my_push_logs():
 
 # ---- 回复触达:首次回复推送用户,修改回复不重复推 ----
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+sid = demo_shop()["id"]
 dishes = call("GET", f"/merchants/{sid}/dishes")
 main_dish = orderable_dish(dishes)
 

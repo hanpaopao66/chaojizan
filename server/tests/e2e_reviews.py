@@ -1,12 +1,12 @@
 """评价体系验证:一单一评、只评完成单、评分聚合、姓名脱敏"""
-from tests.util import orderable_dish, call, login
+from tests.util import demo_shop, orderable_dish, call, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
 rider = login("13800000003")
 
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 sid = shop["id"]
 dishes = call("GET", f"/merchants/{sid}/dishes")
 main_dish = orderable_dish(dishes)
@@ -64,8 +64,9 @@ assert mine["comment"] == "面很好吃,送得快"
 print("✓ 能查到自己这单的评价")
 
 # 聚合分数
-shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["id"] == sid)
+# 用详情接口:这里验的是评分聚合,跟"在不在列表里"无关。
+# 而列表有条数上限,商家一多演示店会被挤出去(同坑已修 61 处)
+shop = call("GET", f"/merchants/{sid}")
 assert shop["rating_count"] == rating_count_before + 1
 expected_avg = round((rating_sum_before + 5) / (rating_count_before + 1), 1)
 assert shop["rating_avg"] == expected_avg, f"均分应为 {expected_avg},实际 {shop['rating_avg']}"

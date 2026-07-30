@@ -5,7 +5,7 @@ import asyncio
 import time
 
 from app.redis_client import get_redis
-from tests.util import orderable_dish, call, login
+from tests.util import demo_shop, orderable_dish, call, login
 
 # 清掉固定演示号的发送冷却,保证连续跑两遍也能过
 asyncio.run(get_redis().delete("sms:cd:13800000001"))
@@ -44,7 +44,7 @@ print("✓ 已有账号验证码登录不重复建号")
 # ---------- 微信支付降级 ----------
 customer = login("13800000001")
 shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-shop = next(m for m in shops if m["name"] == "张记面馆")
+shop = demo_shop()
 dishes = call("GET", f"/merchants/{shop['id']}/dishes")
 main_dish = orderable_dish(dishes)
 order = call("POST", "/orders", customer, {

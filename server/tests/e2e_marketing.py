@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import call, login
+from tests.util import demo_shop, call, login
 
 admin = login("13800000000")
 merchant = login("13800000002")
@@ -68,7 +68,7 @@ async def main():
     from app.services.marketing import run_birthday, run_new_dish, run_winback
 
     shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-    sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+    sid = demo_shop()["id"]
     bj_now = datetime.now(timezone.utc) + timedelta(hours=8)
     today = bj_now.strftime("%m-%d")
 

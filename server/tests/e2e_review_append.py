@@ -10,7 +10,7 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import call, login, register_fresh_rider
+from tests.util import demo_shop, call, login, register_fresh_rider
 
 merchant = login("13800000002")
 ts = int(time.time())
@@ -27,7 +27,7 @@ async def main():
     customer = fresh()
     rider = await register_fresh_rider("追评测试骑手")
     shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-    sid = next(m for m in shops if m["name"] == "张记面馆")["id"]
+    sid = demo_shop()["id"]
     dish = call("POST", "/merchants/me/dishes", merchant,
                 {"name": f"追评测试菜-{ts}", "price_cents": 2000, "stock": 20})
 
