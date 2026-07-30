@@ -1,0 +1,45 @@
+group 'cc.chaojizan.apk_installer'
+version '0.1.0'
+
+// 不自己引 Kotlin Gradle Plugin:Flutter 已内置(built-in Kotlin),
+// 插件再 apply 一遍会触发 "Future versions of Flutter will fail to build" 警告
+buildscript {
+    repositories {
+        // 国内源:官方源在服务器/家宽上经常超时
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.0'
+    }
+}
+
+rootProject.allprojects {
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'cc.chaojizan.apk_installer'
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 21
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+}

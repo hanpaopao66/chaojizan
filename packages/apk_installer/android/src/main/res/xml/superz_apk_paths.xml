@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 安装包只落应用私有的外部目录:不需要任何存储权限,
+         卸载即清理,也不会污染用户的「下载」目录 -->
+    <external-files-path name="superz_apk" path="apk/"/>
+</paths>

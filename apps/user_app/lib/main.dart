@@ -75,6 +75,9 @@ Future<void> main() async {
   // 长辈版(大字)开关:启动时从本地读一次,全程用 ValueNotifier 广播
   final prefs = await SharedPreferences.getInstance();
   elderMode.value = prefs.getBool(_elderKey) ?? false;
+  // 可下发文案:只等本地缓存(毫秒级),网络刷新后台跑,不卡冷启动
+  await RemoteCopy.loadCached();
+  unawaited(RemoteCopy.refresh(rootApi));
   runApp(const UserApp());
 }
 
@@ -481,7 +484,8 @@ class _MerchantListViewState extends State<MerchantListView> {
       padding: const EdgeInsets.only(top: 28),
       child: SzEmpty(
         art: BrandArt.bowl,
-        text: '该品类商家入驻中\n总负担 5% 封顶 · 入驻免费 · 没有竞价排名',
+        text: RemoteCopy.text('home.category_vacancy',
+            '该品类商家入驻中\n总负担 5% 封顶 · 入驻免费 · 没有竞价排名'),
         actionLabel: '我有店,去入驻',
         onAction: () => launchUrl(
             Uri.parse('${widget.api.baseUrl}/join/merchant'),
@@ -714,7 +718,9 @@ class _MerchantListViewState extends State<MerchantListView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('商家总负担 5% 封顶,配送费 100% 归骑手',
+                    Text(
+                        RemoteCopy.text('pledge.commission',
+                            '商家总负担 5% 封顶,配送费 100% 归骑手'),
                         style: TextStyle(
                             fontSize: 12, height: 1.5, color: sz.ink)),
                     const SizedBox(height: 2),
@@ -1089,7 +1095,10 @@ class _MerchantListViewState extends State<MerchantListView> {
                         spacing: 6,
                         runSpacing: 4,
                         children: [
-                          SzChip('5% 封顶', color: sz.earn, dense: true),
+                          SzChip(
+                              RemoteCopy.text(
+                                  'pledge.commission_short', '5% 封顶'),
+                              color: sz.earn, dense: true),
                           for (final label in m.promoLabels)
                             SzChip(label, color: sz.hold, dense: true),
                         ],

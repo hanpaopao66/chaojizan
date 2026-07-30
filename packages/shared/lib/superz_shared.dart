@@ -10,6 +10,7 @@ export 'src/chat_page.dart';
 export 'src/coord_utils.dart';
 export 'src/delivery_map.dart';
 export 'src/merchant_categories.dart';
+export 'src/remote_copy.dart';
 export 'src/models.dart';
 export 'src/payout_account_page.dart';
 export 'src/permission_helper.dart';

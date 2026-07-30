@@ -42,6 +42,16 @@ if [ -n "$AAPT" ]; then
   echo "  三端 versionCode == $BUILD ✓"
 fi
 
+echo "== 计算 SHA-256(应用内安装要用它校验,不校验等于给中间人开口子) =="
+# 不用关联数组:macOS 自带的是 bash 3.2,declare -A 直接报错
+apk_path() { echo "apps/${1}_app/build/app/outputs/flutter-apk/app-release.apk"; }
+SHA_user=$(shasum -a 256 "$(apk_path user)" | awk '{print $1}')
+SHA_merchant=$(shasum -a 256 "$(apk_path merchant)" | awk '{print $1}')
+SHA_rider=$(shasum -a 256 "$(apk_path rider)" | awk '{print $1}')
+for app in user merchant rider; do
+  eval "echo \"  ${app}: \$SHA_${app}\""
+done
+
 echo "== 上传 APK 到部署机 =="
 ssh $DEPLOY 'mkdir -p ~/super-z/appdist'
 for app in user merchant rider; do
@@ -49,6 +59,14 @@ for app in user merchant rider; do
       $DEPLOY:~/super-z/appdist/chaojizan-${app}-arm64.apk
   echo "  chaojizan-${app}-arm64.apk ✓"
 done
+
+echo "== 复核部署机上的文件哈希(传输途中出错就在这里拦下) =="
+for app in user merchant rider; do
+  REMOTE=$(ssh $DEPLOY "shasum -a 256 ~/super-z/appdist/chaojizan-${app}-arm64.apk | awk '{print \$1}'")
+  eval "LOCAL=\$SHA_${app}"
+  [ "$REMOTE" = "$LOCAL" ] || { echo "✗ ${app} 上传后哈希不符,中止"; exit 1; }
+done
+echo "  三端哈希一致 ✓"
 
 # 见证节点绿色版:构建过就顺带上传(scripts/build_witness_dist.sh 生成)
 if [ -d build/witness-dist ]; then
@@ -64,6 +82,8 @@ fi
 echo "== 更新 versions.json =="
 ssh $DEPLOY "python3 - << EOF
 import json
+shas = {'user': '$SHA_user', 'merchant': '$SHA_merchant',
+        'rider': '$SHA_rider'}
 data = {}
 for app in ['user', 'merchant', 'rider']:
     data[app] = {
@@ -72,6 +92,8 @@ for app in ['user', 'merchant', 'rider']:
         'url': '$API/appdist/chaojizan-' + app + '-arm64.apk',
         'notes': '''$NOTES''',
         'force': False,
+        # 应用内安装前用它校验;缺这个字段客户端会退回浏览器下载(#123)
+        'sha256': shas[app],
     }
 import os
 open(os.path.expanduser('~/super-z/appdist/versions.json'), 'w').write(

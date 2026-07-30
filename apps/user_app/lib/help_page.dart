@@ -4,11 +4,16 @@ import 'package:superz_shared/superz_shared.dart';
 import 'session.dart';
 
 /// 帮助中心:高频问题 FAQ + 客服入口。内容与平台规则口径一致。
+///
+/// FAQ 支持服务端下发(#122):后台改一条不用发版。但 [_faqs] 这份
+/// **完整**的本地默认值必须留着 —— 首次启动、断网、接口挂了,
+/// 用户点进帮助中心看到的应该是完整内容,而不是一个空列表。
 class HelpCenterPage extends StatelessWidget {
   const HelpCenterPage({super.key, required this.api});
 
   final ApiClient api;
 
+  /// 本地默认值(兜底用,不能删)
   static const _faqs = [
     (
       '配送范围是多少?为什么我看不到某家店?',
@@ -64,6 +69,9 @@ class HelpCenterPage extends StatelessWidget {
     ),
   ];
 
+  static List<FaqItem> get _localFaq =>
+      [for (final (q, a) in _faqs) FaqItem(q, a)];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -71,13 +79,14 @@ class HelpCenterPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          for (final (q, a) in _faqs)
+          for (final item in RemoteCopy.faq(_localFaq))
             ExpansionTile(
-              title: Text(q, style: const TextStyle(fontSize: 14.5)),
+              title:
+                  Text(item.question, style: const TextStyle(fontSize: 14.5)),
               childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               expandedCrossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(a,
+                Text(item.answer,
                     style: TextStyle(
                         height: 1.7,
                         color: Theme.of(context).colorScheme.onSurfaceVariant)),

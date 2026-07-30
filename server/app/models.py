@@ -894,6 +894,41 @@ class OrderEvent(Base):
     )
 
 
+class PlatformCopy(Base):
+    """可下发的说明性文案:改一句话不用发一次三端版(#122)。
+
+    只放**说明性**文案 —— FAQ、空状态、引导语、入口标题。
+    承诺类数字(「总负担 5% 封顶」「配送费 100% 归骑手」)不在这里:
+    那些由服务端按真实费率配置算出来后下发,后台看得到但改不了。
+    一旦承诺变成后台可填的自由文本,任何人都能把它改成「3% 封顶」
+    而实际照抽 5%,承诺就退化成广告词了。
+    """
+
+    __tablename__ = "platform_copy"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 点位 key,如 home.vacancy / faq.1.q;客户端按 key 取,取不到用本地默认值
+    key: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    text: Mapped[str] = mapped_column(String(1000))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PlatformFaq(Base):
+    """帮助中心问答:同上,内容可下发,客户端保留完整本地默认值兜底。"""
+
+    __tablename__ = "platform_faq"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    audience: Mapped[str] = mapped_column(String(12), default="user", index=True)
+    question: Mapped[str] = mapped_column(String(120))
+    answer: Mapped[str] = mapped_column(String(1000))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class Announcement(Base):
     """平台公告:发通知不用发版。按端(audience)定向,时间窗内生效。"""
 

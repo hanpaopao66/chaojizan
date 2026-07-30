@@ -156,7 +156,10 @@ class _AboutPageState extends State<AboutPage> {
         Text(_version.isEmpty ? '' : _version,
             textAlign: TextAlign.center, style: theme.textTheme.bodySmall),
         const SizedBox(height: 8),
-        Text('低抽成、账目透明的本地生活服务平台\n外卖 5% 封顶 · 配送费 100% 归骑手 · 每一单资金流向可查',
+        Text(
+            RemoteCopy.text('about.tagline',
+                '低抽成、账目透明的本地生活服务平台\n'
+                '外卖 5% 封顶 · 配送费 100% 归骑手 · 每一单资金流向可查'),
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(height: 1.6)),
         const SizedBox(height: 24),

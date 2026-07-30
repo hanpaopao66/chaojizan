@@ -1,0 +1,19 @@
+name: apk_installer
+description: 自建分发渠道的应用内下载与安装(#123)。仅 Android;其他平台调用即返回不支持。
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.4.0
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: cc.chaojizan.apk_installer
+        pluginClass: ApkInstallerPlugin

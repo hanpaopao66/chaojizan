@@ -5,13 +5,14 @@
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func as sa_func
 from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Announcement, AppEvent, SplashConfig, User
+from ..models import (Announcement, AppEvent, PlatformCopy, PlatformFaq,
+                      SplashConfig, User)
 from ..schemas import (
     AnnouncementIn,
     AnnouncementOut,
@@ -252,8 +253,158 @@ async def events_summary(
         {"event": r[0], "count": r[1], "users": r[2]} for r in rows]}
 
 
+# 承诺类文案的 key 前缀:这些由服务端按真实费率算出来,后台改不了(#122)。
+# 一旦承诺变成后台可填的自由文本,任何人都能把它改成「3% 封顶」而实际照抽 5%,
+# 承诺就退化成广告词了 —— 整个透明叙事的地基就在这几句话上。
+PLEDGE_PREFIX = "pledge."
+
+
+def _pledge_copy() -> dict[str, str]:
+    """按平台真实费率配置生成承诺文案。数字全部来自 settings,不手写。"""
+    from ..config import settings
+
+    tiers = settings.commission_tiers or [[0, "0.050"]]
+    cap = max(float(rate) for _, rate in tiers)      # 承诺的是上限
+    best = min(float(rate) for _, rate in tiers)     # 阶梯能降到的最低档
+
+    def pct(x: float) -> str:
+        v = x * 100
+        return f"{v:.0f}%" if v == int(v) else f"{v:.1f}%"
+
+    copy = {
+        "pledge.commission": f"商家总负担 {pct(cap)} 封顶,配送费 100% 归骑手",
+        "pledge.commission_short": f"{pct(cap)} 封顶",
+        "pledge.rider": "配送费和小费 100% 归骑手,平台分文不取",
+        "pledge.no_ranking": "不做竞价排名,钱买不到靠前的位置",
+    }
+    if best < cap:
+        copy["pledge.tiers"] = (
+            f"单量上去自动降档,最低 {pct(best)},降了不再上调")
+    return copy
+
+
 @router.get("/config")
 async def public_config(db: AsyncSession = Depends(get_db)):
-    """客户端启动配置(公开):营销开关关闭时三端隐藏相关入口。"""
+    """客户端启动配置(公开):开关 + 可下发文案 + 帮助中心问答(#122)。
+
+    copy 只是"覆盖",不是"来源" —— 客户端必须自带一份完整的本地默认值,
+    首次启动、断网、这个接口挂了,用户看到的仍应是完整内容而不是空白。
+
+    rev 是内容版本号(内容哈希),客户端可据此跳过无变化时的重建。
+    """
+    import hashlib
+    import json
+
     from ..services.flags import marketing_on
-    return {"marketing": await marketing_on(db)}
+
+    rows = (await db.scalars(select(PlatformCopy))).all()
+    copy = {r.key: r.text for r in rows if not r.key.startswith(PLEDGE_PREFIX)}
+    copy.update(_pledge_copy())  # 承诺类永远以服务端计算值为准,覆盖任何存量脏数据
+
+    faqs = (await db.scalars(
+        select(PlatformFaq)
+        .where(PlatformFaq.is_active.is_(True))
+        .order_by(PlatformFaq.sort_order, PlatformFaq.id))).all()
+
+    payload = {
+        "marketing": await marketing_on(db),
+        "copy": copy,
+        "faq": [{"audience": f.audience, "q": f.question, "a": f.answer}
+                for f in faqs],
+    }
+    payload["rev"] = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()[:12]
+    return payload
+
+
+# ---------- 文案下发的后台维护 ----------
+@router.get("/admin/copy")
+async def list_copy(
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """后台看全部文案:承诺类也列出来(标 locked),但改不了。"""
+    rows = (await db.scalars(select(PlatformCopy).order_by(PlatformCopy.key))).all()
+    out = [{"key": r.key, "text": r.text, "locked": False,
+            "updated_at": r.updated_at} for r in rows
+           if not r.key.startswith(PLEDGE_PREFIX)]
+    out += [{"key": k, "text": v, "locked": True, "updated_at": None}
+            for k, v in sorted(_pledge_copy().items())]
+    return out
+
+
+@router.put("/admin/copy/{key}")
+async def upsert_copy(
+    key: str,
+    payload: dict,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """新增/修改一条文案。承诺类 key 一律拒绝,并说明原因。"""
+    if key.startswith(PLEDGE_PREFIX):
+        raise HTTPException(
+            422, "承诺类文案由服务端按真实费率生成,不能手工改 —— "
+                 "改费率请改平台配置,文案会自动跟着变")
+    text_value = str(payload.get("text", "")).strip()
+    if not text_value:
+        raise HTTPException(422, "文案不能为空")
+    if len(text_value) > 1000:
+        raise HTTPException(422, "文案最长 1000 字")
+    row = await db.scalar(select(PlatformCopy).where(PlatformCopy.key == key))
+    if row is None:
+        row = PlatformCopy(key=key[:60], text=text_value)
+        db.add(row)
+    else:
+        row.text = text_value
+    await db.commit()
+    return {"key": key, "text": text_value}
+
+
+@router.delete("/admin/copy/{key}")
+async def delete_copy(
+    key: str,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """删掉一条下发文案 = 回退到客户端的本地默认值(不是变空白)。"""
+    if key.startswith(PLEDGE_PREFIX):
+        raise HTTPException(422, "承诺类文案不由后台维护,无从删起")
+    row = await db.scalar(select(PlatformCopy).where(PlatformCopy.key == key))
+    if row is None:
+        raise HTTPException(404, "没有这条文案")
+    await db.delete(row)
+    await db.commit()
+    return {"deleted": key}
+
+
+@router.put("/admin/faq")
+async def replace_faq(
+    payload: dict,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """整表替换帮助中心问答(全量提交,顺序即数组顺序)。
+
+    整表替换而不是逐条增删:FAQ 是一篇要通读的东西,顺序和上下文比单条重要,
+    逐条改很容易改出前后矛盾。
+    """
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise HTTPException(422, "items 必须是数组")
+    if len(items) > 50:
+        raise HTTPException(422, "帮助中心最多 50 条,再多用户读不完")
+    rows = []
+    for i, it in enumerate(items):
+        q = str(it.get("q", "")).strip()
+        a = str(it.get("a", "")).strip()
+        if not q or not a:
+            raise HTTPException(422, f"第 {i + 1} 条的问题或答案是空的")
+        rows.append(PlatformFaq(
+            audience=str(it.get("audience", "user"))[:12],
+            question=q[:120], answer=a[:1000], sort_order=i, is_active=True))
+    await db.execute(text("DELETE FROM platform_faq"))
+    for r in rows:
+        db.add(r)
+    await db.commit()
+    return {"count": len(rows)}

@@ -16,10 +16,13 @@ import 'shop_tab.dart';
 /// 全端共用的 ApiClient 单例(会话持久化在它身上)
 final rootApi = ApiClient();
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 推送 SDK 的初始化在用户同意隐私政策之后(PrivacyGate.onAgreed),
   // 同意前启动收集类 SDK 是应用商店审核红线
+  // 可下发文案:只等本地缓存(毫秒级),网络刷新后台跑,不卡冷启动
+  await RemoteCopy.loadCached();
+  unawaited(RemoteCopy.refresh(rootApi));
   runApp(const MerchantApp());
 }
 
