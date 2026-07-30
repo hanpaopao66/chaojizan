@@ -16,7 +16,11 @@ class DealsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('超值团购')),
+      appBar: AppBar(
+        title: const Text('超值团购'),
+        bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(3), child: SzChannelBar('voucher')),
+      ),
       body: VoucherListView(api: api),
     );
   }

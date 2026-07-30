@@ -28,6 +28,7 @@ class SzColors extends ThemeExtension<SzColors> {
     required this.earn,
     required this.hold,
     required this.danger,
+    required this.channelTones,
   });
 
   /// 页面底色(骨白,不是纯白——纯白久看刺眼)
@@ -66,6 +67,14 @@ class SzColors extends ThemeExtension<SzColors> {
   /// 语义色——错误。只给报错用,状态一律用 chip 表达
   final Color danger;
 
+  /// 频道色槽(#132)。**受限色板,不许自由取色** ——
+  /// 聚合平台变成彩虹糖,就是从"这个频道想要个亮蓝"开始的。
+  /// 新频道按顺序领槽位;槽位用尽再讨论扩板,那时至少是一次有意识的决定。
+  ///
+  /// 与骨白+黏土同调:全部低饱和暖色,谁也不抢平台色的戏。
+  /// **平台色 clay 不在此列** —— 它属于平台身份与主 CTA,不属于任何频道。
+  final List<Color> channelTones;
+
   static const light = SzColors(
     paper: Color(0xFFF0EEE6),
     surface: Color(0xFFFBFAF6),
@@ -79,6 +88,16 @@ class SzColors extends ThemeExtension<SzColors> {
     earn: Color(0xFF4E6B4F),
     hold: Color(0xFFA6763E),
     danger: Color(0xFFD03030),
+    channelTones: [
+      Color(0xFFB4553B),   // 0 赤陶 —— 外卖
+      Color(0xFF4E6B4F),   // 1 苔绿 —— 住宿
+      Color(0xFFA6763E),   // 2 琥珀 —— 团购
+      Color(0xFF4A6670),   // 3 青灰 —— 出行(打车)
+      Color(0xFF6B5B7B),   // 4 藕紫
+      Color(0xFF7A6248),   // 5 胡桃
+      Color(0xFF3F6B63),   // 6 松石
+      Color(0xFF8A5A5A),   // 7 陶红
+    ],
   );
 
   static const dark = SzColors(
@@ -94,6 +113,16 @@ class SzColors extends ThemeExtension<SzColors> {
     earn: Color(0xFF8FB08D),
     hold: Color(0xFFD2A86C),
     danger: Color(0xFFE06B6B),
+    channelTones: [
+      Color(0xFFD98567),   // 0 赤陶
+      Color(0xFF8FB08D),   // 1 苔绿
+      Color(0xFFD2A86C),   // 2 琥珀
+      Color(0xFF8FAAB4),   // 3 青灰
+      Color(0xFFAE9BBE),   // 4 藕紫
+      Color(0xFFC0A684),   // 5 胡桃
+      Color(0xFF7FB0A6),   // 6 松石
+      Color(0xFFCC9494),   // 7 陶红
+    ],
   );
 
   @override
@@ -110,6 +139,7 @@ class SzColors extends ThemeExtension<SzColors> {
     Color? earn,
     Color? hold,
     Color? danger,
+    List<Color>? channelTones,
   }) =>
       SzColors(
         paper: paper ?? this.paper,
@@ -124,6 +154,7 @@ class SzColors extends ThemeExtension<SzColors> {
         earn: earn ?? this.earn,
         hold: hold ?? this.hold,
         danger: danger ?? this.danger,
+        channelTones: channelTones ?? this.channelTones,
       );
 
   @override
@@ -143,6 +174,13 @@ class SzColors extends ThemeExtension<SzColors> {
       earn: c(earn, other.earn),
       hold: c(hold, other.hold),
       danger: c(danger, other.danger),
+      // 逐槽插值:深浅切换时频道色跟着一起过渡,不会闪一下
+      channelTones: [
+        for (var i = 0; i < channelTones.length; i++)
+          c(channelTones[i],
+            i < other.channelTones.length ? other.channelTones[i]
+                                          : channelTones[i]),
+      ],
     );
   }
 }

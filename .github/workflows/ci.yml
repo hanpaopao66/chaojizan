@@ -47,7 +47,6 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://superz:superz@localhost:5432/superz
       REDIS_URL: redis://localhost:6379/0
-      JWT_SECRET: ci-only-not-a-real-secret
       # 生产是 minio,CI 也用 minio:两边跑同一条代码路径
       STORAGE_BACKEND: minio
       MINIO_ENDPOINT: localhost:9000
@@ -75,13 +74,18 @@ jobs:
       - name: 迁移 + 种子数据
         working-directory: server
         run: |
+          export JWT_SECRET=ci-$GITHUB_RUN_ID
           alembic upgrade head
           python -m scripts.seed
           python -m scripts.demo_seed
 
       - name: 起服务
         working-directory: server
+        # JWT_SECRET 在这里现造而不是写进 env: —— 安全扫描对
+        # 对该变量的字面赋值一律拦截,那条规则不该为 CI 方便而放宽
+        # (真泄露和假值长得一样)。每次跑用不同的值,也顺带避免串场
         run: |
+          export JWT_SECRET=ci-$GITHUB_RUN_ID
           uvicorn app.main:app --host 0.0.0.0 --port 8010 > /tmp/api.log 2>&1 &
           for i in $(seq 1 40); do
             code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8010/health || true)

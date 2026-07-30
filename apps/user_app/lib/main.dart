@@ -750,31 +750,34 @@ class _MerchantListViewState extends State<MerchantListView> {
   Widget _kingKong() {
     final sz = Theme.of(context).sz;
 
-    Widget liveEntry(String glyph, String label, String sub, VoidCallback onTap) {
-      return Expanded(
-        child: SzCard(
+    // 入口卡从频道注册表渲染(#132):新频道在 kChannels 加一行即可,
+    // 这里一个字都不用改。频道字符用各自的频道色 —— 用户一眼看得出
+    // "换了一个世界",而平台色 clay 留给跨频道的主 CTA
+    Widget liveEntry(SzChannel ch, VoidCallback onTap) {
+      return SzCard(
           onTap: onTap,
           padding: const EdgeInsets.fromLTRB(11, 13, 11, 13),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(glyph,
+              Text(ch.glyph,
                   style: szFigure(
-                      fontSize: 19, color: sz.clay, height: 1.0)),
+                      fontSize: 19,
+                      color: channelColor(context, ch.key),
+                      height: 1.0)),
               const SizedBox(height: 7),
-              Text(label,
+              Text(ch.name,
                   style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600,
                       color: sz.ink)),
               const SizedBox(height: 3),
-              Text(sub,
+              Text(ch.sub,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
             ],
           ),
-        ),
       );
     }
 
@@ -804,28 +807,40 @@ class _MerchantListViewState extends State<MerchantListView> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
-          child: Row(
-            children: [
-              liveEntry('碗', '点外卖', '附近的店', () {
-                Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => CategoryPage(
-                        api: widget.api,
-                        deliveryAddress: widget.deliveryAddress)));
-              }),
-              const SizedBox(width: 9),
-              // 金刚区定版(2026-07-27 拍板):住宿第 2 位,跑腿移除
-              liveEntry('宿', '住宿', '钟点房 / 民宿', () {
-                Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => HotelListPage(
-                        api: widget.api, lat: _myLat, lng: _myLng)));
-              }),
-              const SizedBox(width: 9),
-              liveEntry('券', '超值团购', '到店核销', () {
-                Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => DealsPage(api: widget.api)));
-              }),
-            ],
-          ),
+          // 每行最多 3 格、自动换行:频道是开放集合,再用 Row+Expanded
+          // 挤在一行的话,第 4 个频道进来副标题就被截成「一口价 · 不…」,
+          // 第 5 个连标题都放不下(实测过)。宽度按 3 格算,
+          // 频道数增长时只会往下换行,不会把已有的挤瘦
+          child: LayoutBuilder(builder: (context, box) {
+            const gap = 9.0;
+            final cell = (box.maxWidth - gap * 2) / 3;
+            return Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+              // 金刚区定版(2026-07-27 拍板):住宿第 2 位,跑腿移除。
+              // 顺序即 kChannels 的顺序;路由按 key 分发 ——
+              // 加频道时这里只需补一个 case
+              for (final ch in kChannels)
+                SizedBox(width: cell, child: liveEntry(ch, () {
+                  final route = switch (ch.key) {
+                    'food' => MaterialPageRoute<void>(
+                        builder: (_) => CategoryPage(
+                            api: widget.api,
+                            deliveryAddress: widget.deliveryAddress)),
+                    'stay' => MaterialPageRoute<void>(
+                        builder: (_) => HotelListPage(
+                            api: widget.api, lat: _myLat, lng: _myLng)),
+                    'voucher' => MaterialPageRoute<void>(
+                        builder: (_) => DealsPage(api: widget.api)),
+                    // 注册了但还没接页面的频道:不跳空白页,直接不响应
+                    _ => null,
+                  };
+                  if (route != null) Navigator.of(context).push(route);
+                })),
+              ],
+            );
+          }),
         ),
         // 未上线业务的愿景占位:审核包里整体隐藏(feature_flags.dart)
         if (kShowComingSoonBiz)
@@ -2440,6 +2455,11 @@ class _OrdersTabState extends State<OrdersTab> {
       Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
         child: Row(children: [
+          // 频道归属标(#132):切换器只说"看哪一类",这个标说"你正在看的是
+          // 哪个频道",带频道色 —— 聚合平台里用户经常忘了自己在哪个世界。
+          // 频道多起来后这里会换成可横滑的频道条,现在两段够用
+          SzChannelChip(_segment == 0 ? 'food' : 'stay', dense: false),
+          const SizedBox(width: 10),
           Expanded(
             child: SegmentedButton<int>(
               segments: const [

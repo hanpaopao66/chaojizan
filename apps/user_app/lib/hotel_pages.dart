@@ -191,7 +191,11 @@ class _HotelListPageState extends State<HotelListPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('住宿')),
+      appBar: AppBar(
+        title: const Text('住宿'),
+        bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(3), child: SzChannelBar('stay')),
+      ),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
