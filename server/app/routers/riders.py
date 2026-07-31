@@ -1270,3 +1270,62 @@ async def my_fatigue(
         # 说清楚 throttle 是什么意思,免得骑手以为被限流封号了
         "blocks_grabbing": False,
     }
+
+
+@router.get("/me/reviews")
+async def my_reviews(
+    limit: int = 30,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """顾客对我的评价(#148)。
+
+    骑手此前**完全看不到自己的评价** —— 而顾客怎么说,直接影响骑手的
+    心情与改进方向。商家早就有 /merchants/me/reviews,骑手没有,是个疏漏。
+
+    ## 刻意不做的事
+
+    **不返回排名、不返回与其他骑手的对比、不返回任何形式的评分等级。**
+
+    那是段位体系的入口:一旦骑手看到"你排第 87 名",他就会开始为名次跑单,
+    而名次是平台单方面控制的 —— 这正是 #144 要防的「算法困住人」。
+
+    判断标准很简单:**这个数字会不会影响他能看到的单?**
+    会,就是绳索;不会,才是反馈。本平台的答案是不会 ——
+    /transparency/dispatch 的 never_do 里写着「不按骑手评分或等级差别对待」。
+    """
+    from ..models import Order, Review
+
+    rows = (await db.execute(
+        select(Review, Order.order_no)
+        .join(Order, Order.id == Review.order_id)
+        .where(Review.rider_id == user.id,
+               Review.rider_rating.is_not(None))
+        # 最新优先:骑手要看的是"最近顾客怎么说"
+        .order_by(Review.created_at.desc())
+        .limit(min(max(limit, 1), 100)))).all()
+
+    items = []
+    for r, order_no in rows:
+        items.append({
+            "id": r.id,
+            "order_no": order_no,
+            "rating": r.rider_rating,
+            # 评价正文是顾客写给「这一单」的,里面可能同时提到商家和骑手。
+            # 原样给,不做摘录 —— 断章取义比不给更糟
+            "comment": r.comment or "",
+            "created_at": r.created_at.isoformat(),
+        })
+
+    rated = [i["rating"] for i in items]
+    return {
+        "items": items,
+        # 只给**自己的**均分与条数,不给排名、不给同行对比
+        "average": round(sum(rated) / len(rated), 2) if rated else None,
+        "count": len(rated),
+        # 这句话要跟着数据一起下发:不写的话骑手会默认它影响派单,
+        # 然后开始为分数跑单 —— 那正是我们要避免的
+        "note": "评价不影响派单。同一批单,所有在线骑手看到的排序口径一致;"
+                "平台不按评分或等级差别对待骑手(见「抢单怎么排的」)。",
+        "appeal_hint": "对评价有异议可发起申诉,平台会人工复核。",
+    }

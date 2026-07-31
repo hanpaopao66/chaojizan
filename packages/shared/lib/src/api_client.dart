@@ -937,6 +937,16 @@ class ApiClient {
     return PoiTip.fromJson(data as Map<String, dynamic>);
   }
 
+  /// 顾客对我的评价(#148)。
+  ///
+  /// 返回里**没有排名、没有同行对比** —— 那是段位体系的入口。
+  /// 判断标准:这个数字会不会影响他能看到的单?会就是绳索,不会才是反馈。
+  Future<Map<String, dynamic>> riderReviews({int limit = 30}) async {
+    final data = await _request('GET', '/riders/me/reviews',
+        query: {'limit': '$limit'});
+    return data as Map<String, dynamic>;
+  }
+
   /// 连续在线时长与疲劳提醒(#144)。**只提醒不断单。**
   Future<Map<String, dynamic>> riderFatigue() async {
     final data = await _request('GET', '/riders/me/fatigue');

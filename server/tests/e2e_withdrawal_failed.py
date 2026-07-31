@@ -44,7 +44,6 @@ call("POST", f"/admin/withdrawals/{wd['id']}/paid", admin, {"note": "e2e批次"}
 w1 = wallet(rider, "/riders/wallet")
 assert w1["withdrawn_cents"] == w0["withdrawn_cents"] + 1200
 
-tickets_before = len(call("GET", "/admin/tickets", admin))
 failed = call("POST", f"/admin/withdrawals/{wd['id']}/failed", admin,
               {"reason": "银行卡信息有误"})
 assert failed["status"] == "failed" and failed["role"] == "rider"
@@ -58,9 +57,14 @@ rec = next(x for x in mine if x["id"] == wd["id"])
 assert rec["status"] == "failed" and "银行卡" in rec["reject_reason"]
 print("✓ 骑手端可见失败状态与原因")
 
+# 验**内容**不验**计数**:/admin/tickets 是 LIMIT 50,而库里工单已 243 条 ——
+# 加一条后总数仍是 50,`+1` 永远不成立。
+# 这条要守的是「退票会生成对应工单」,不是「工单总数增加了 1」
 tickets_after = call("GET", "/admin/tickets", admin)
-assert len(tickets_after) == tickets_before + 1
-assert "打款被退回" in tickets_after[0]["content"]
+hit = [t for t in tickets_after
+       if "打款被退回" in t["content"] and wd["id"] is not None]
+assert hit, f"退票没生成工单,最近 {len(tickets_after)} 条里找不到"
+assert "打款被退回" in tickets_after[0]["content"], "新工单应排在最前"
 print("✓ 退票自动生成客服工单跟进")
 
 # 终态:不可再标退票/打款/驳回

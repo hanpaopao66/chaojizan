@@ -219,3 +219,31 @@ class Test天气开关的语义:
                 return await flags.weather_surcharge_on(db, 30.66, 104.08)
 
         assert asyncio.run(go()) is False
+
+
+class Test骑手评价不得变成评分体系:
+    """#148 最容易滑向段位体系,边界在这里钉死。
+
+    判断标准:**这个数字会不会影响他能看到的单?**
+    会,就是绳索;不会,才是反馈。
+    """
+
+    def test_公开承诺里明确不按评分差别对待(self):
+        from app.services import dispatch as d
+        never = "".join(d.public_spec()["never_do"])
+        assert "评分" in never or "等级" in never
+
+    def test_排序权重里没有任何评分项(self):
+        """只要评分进了综合分,它就成了绳索 —— 用权重表逐项确认。"""
+        from app.services import dispatch as d
+        keys = {w["key"] for w in d.public_spec()["weights"]}
+        for banned in ("rating", "score", "level", "rank", "tier", "star"):
+            assert banned not in keys, f"排序权重里出现了 {banned}"
+
+    def test_Candidate里没有评分字段(self):
+        """从数据结构上堵死:评分进不了打分函数的入参,就不可能影响排序。"""
+        from app.services import dispatch as d
+        fields = set(d.Candidate.__dataclass_fields__)
+        for banned in ("rating", "score", "level", "rank", "tier"):
+            assert not any(banned in f for f in fields), \
+                f"Candidate 里出现了含 {banned} 的字段"

@@ -11,6 +11,7 @@ import 'map_page.dart';
 import 'verify_page.dart';
 import 'wallet_page.dart';
 import 'dispatch_spec_page.dart';
+import 'profile_page.dart';
 
 // GPS 不可用时(如 iOS 模拟器没设置位置)的兜底坐标,保证开发期照常演示
 const fallbackLat = 30.6605;
@@ -86,6 +87,21 @@ class _RiderHomePageState extends State<RiderHomePage>
   bool _gpsActive = false;
   List<Order> _available = [];
   List<Order> _mine = [];
+
+  /// 今日已完成的单(「我的」页的今日数据用)。
+  /// 从已有的订单列表里算,不为一个统计再开一个接口
+  List<Order> get _todayDone {
+    final now = DateTime.now();
+    return _mine.where((o) {
+      if (o.status != OrderStatus.completed &&
+          o.status != OrderStatus.delivered) {
+        return false;
+      }
+      final t = DateTime.tryParse(o.createdAt)?.toLocal();
+      return t != null &&
+          t.year == now.year && t.month == now.month && t.day == now.day;
+    }).toList();
+  }
   Timer? _pollTimer;
   Timer? _keepaliveTimer;
   final _location = LocationService();
@@ -1163,7 +1179,19 @@ class _RiderHomePageState extends State<RiderHomePage>
                   ),
           );
 
-    final tabBody = _tab == 2 ? WalletPage(api: widget.api) : body;
+    final tabBody = switch (_tab) {
+      2 => WalletPage(api: widget.api),
+      3 => RiderProfilePage(
+          api: widget.api,
+          // 今日数据从主页已有的在途/历史单里算,不再多拉一次接口
+          todayOrders: _todayDone.length,
+          todayCents: _todayDone.fold<int>(
+              0, (sum, o) => sum + o.deliveryFeeCents + o.tipCents),
+          onOpenWallet: () => setState(() => _tab = 2),
+          onOpenOrders: () => setState(() => _tab = 1),
+        ),
+      _ => body,
+    };
     // 认证提示横幅置顶(通过后自动消失)
     final page = banner == null
         ? tabBody
@@ -1171,7 +1199,12 @@ class _RiderHomePageState extends State<RiderHomePage>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(switch (_tab) { 0 => '抢单大厅', 1 => '我的配送', _ => '我的钱包' }),
+        title: Text(switch (_tab) {
+          0 => '抢单大厅',
+          1 => '我的配送',
+          2 => '我的钱包',
+          _ => '我的',
+        }),
         leading: Tooltip(
           message: '长按 3 秒紧急求助',
           child: GestureDetector(
@@ -1201,6 +1234,7 @@ class _RiderHomePageState extends State<RiderHomePage>
           NavigationDestination(icon: Icon(Icons.flash_on), label: '抢单'),
           NavigationDestination(icon: Icon(Icons.moped), label: '配送'),
           NavigationDestination(icon: Icon(Icons.account_balance_wallet), label: '钱包'),
+          NavigationDestination(icon: Icon(Icons.person_outline), label: '我的'),
         ],
       ),
     );
