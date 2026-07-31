@@ -12,6 +12,7 @@ import 'hotel/hotel_home_page.dart';
 import 'listen_service.dart';
 import 'printer_service.dart';
 import 'shop_tab.dart';
+import 'self_delivery_map_page.dart';
 
 /// 全端共用的 ApiClient 单例(会话持久化在它身上)
 final rootApi = ApiClient();
@@ -995,6 +996,15 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           ],
           if (order.selfDelivery) ...[
             const SizedBox(width: 8),
+            // 出发前先看清送去哪、多远。远近全靠猜的话,
+            // 猜错就是自己骑半小时送一单 3 块钱配送费的活
+            OutlinedButton.icon(
+                icon: const Icon(Icons.map_outlined, size: 18),
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                        builder: (_) => SelfDeliveryMapPage(order: order))),
+                label: const Text('地图')),
+            const SizedBox(width: 8),
             FilledButton.icon(
                 icon: const Icon(Icons.delivery_dining, size: 18),
                 onPressed: () => _act(order, OrderStatus.pickedUp),
@@ -1004,7 +1014,18 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       case OrderStatus.pickedUp:
         return [
           printButton,
+          // 自送的商家在路上,和骑手是同一种处境:需要导航,而不是一行文字地址。
+          // 此前商家端全程没有地图,自送只能对着地址自己找
           if (order.selfDelivery) ...[
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+                icon: const Icon(Icons.navigation_outlined, size: 18),
+                onPressed: () => navigateTo(context,
+                    lat: order.lat,
+                    lng: order.lng,
+                    name: order.address,
+                    mode: NavMode.ride),
+                label: const Text('导航')),
             const SizedBox(width: 8),
             FilledButton(
                 onPressed: () => _act(order, OrderStatus.delivered),

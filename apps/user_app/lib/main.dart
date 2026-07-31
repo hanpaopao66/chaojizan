@@ -3396,6 +3396,21 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                         Text('取餐点:${order.merchantName} ${order.merchantAddress}',
                             style: Theme.of(context).textTheme.bodySmall,
                             textAlign: TextAlign.center),
+                        // 自取单的用户是要**自己走过去**的,一行文字地址不够用。
+                        // 商家没上报坐标时不显示按钮 —— 给一个点了会导到
+                        // (0,0) 的按钮,比不给更糟
+                        if (order.merchantLat != null &&
+                            order.merchantLng != null)
+                          TextButton.icon(
+                            icon: const Icon(Icons.navigation_outlined,
+                                size: 16),
+                            label: const Text('导航去店里'),
+                            onPressed: () => navigateTo(context,
+                                lat: order.merchantLat!,
+                                lng: order.merchantLng!,
+                                name: order.merchantName,
+                                mode: NavMode.walk),
+                          ),
                       ]),
                     ),
                   ),

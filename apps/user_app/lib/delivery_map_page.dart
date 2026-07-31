@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 /// 用户看配送:商家(取餐点)、我家(送达点)、骑手实时位置(5 秒一刷)。
-/// 底图:天地图(shared/delivery_map.dart);未配 key 自动进示意模式。
+/// 底图:腾讯地图(shared/delivery_map.dart);未配 key 自动进示意模式。
 class DeliveryMapPage extends StatefulWidget {
   const DeliveryMapPage({super.key, required this.api, required this.order});
 
