@@ -47,7 +47,13 @@ class MerchantApp extends StatelessWidget {
             '每日对账,每一笔分账可查可申诉',
           ],
           child: PrivacyGate(
-            onAgreed: PushService.init,
+            onAgreed: () async {
+                  // 同意之后才初始化收集类 SDK。地图 SDK 尤其不能提前:
+                  // 腾讯的接口是"同意前调用则地图显示为空白",
+                  // 而且失败是静默的 —— 没异常没日志,只有一块白板
+                  await PushService.init();
+                  await agreeAndStart();
+                },
             child: AuthGate(
               api: rootApi,
               title: '商家端 · 接单出餐',

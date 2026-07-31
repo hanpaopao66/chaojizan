@@ -12,11 +12,10 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:flutter_tencent_map/flutter_tencent_map.dart' as tx;
 
 import 'brand.dart';
-import 'delivery_map.dart' show kTencentMapKey;
+import 'map_boot.dart';
 
 /// 选点结果。
 @immutable
@@ -56,14 +55,11 @@ class MapPickerPage extends StatefulWidget {
 }
 
 class _MapPickerPageState extends State<MapPickerPage> {
-  final _map = MapController();
-
   /// 成都春熙路:没有初始坐标时的落点
-  static const _fallback = LatLng(30.6598, 104.0810);
+  static const _fbLat = 30.6598, _fbLng = 104.0810;
 
-  late LatLng _center =
-      LatLng(widget.initialLat ?? _fallback.latitude,
-             widget.initialLng ?? _fallback.longitude);
+  late tx.LatLng _center = tx.LatLng(
+      widget.initialLat ?? _fbLat, widget.initialLng ?? _fbLng);
 
   Timer? _debounce;
   String _name = '';
@@ -83,10 +79,11 @@ class _MapPickerPageState extends State<MapPickerPage> {
     super.dispose();
   }
 
-  /// 地图停下来 400ms 才反查:拖动过程中每帧都查的话,
-  /// 一次选点能打出几十个请求,配额是按次计费的
-  void _onMoved(MapCamera cam, bool hasGesture) {
-    _center = cam.center;
+  /// 相机停下才反查。SDK 的 onCameraMoveEnd 比自己防抖准,
+  /// 但**仍然保留 400ms 防抖** —— 用户连续微调时它会连发多次,
+  /// 而反查是按次计费的
+  void _onCameraEnd(tx.CameraPosition pos) {
+    _center = pos.target;
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), _reverse);
   }
@@ -119,6 +116,13 @@ class _MapPickerPageState extends State<MapPickerPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
+    return ValueListenableBuilder<bool>(
+      valueListenable: mapReady,
+      builder: (context, ready, _) => _build(context, sz, ready),
+    );
+  }
+
+  Widget _build(BuildContext context, SzColors sz, bool ready) {
     return Scaffold(
       appBar: AppBar(title: const Text('在地图上选位置')),
       body: Column(children: [
@@ -126,38 +130,45 @@ class _MapPickerPageState extends State<MapPickerPage> {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              FlutterMap(
-                mapController: _map,
-                options: MapOptions(
-                  initialCenter: _center,
-                  initialZoom: 17,
-                  minZoom: 4,
-                  maxZoom: 18.4,
-                  onPositionChanged: _onMoved,
-                ),
-                children: [
-                  if (kTencentMapKey.isNotEmpty)
-                    TileLayer(
-                      urlTemplate: 'https://rt{s}.map.gtimg.com/tile'
-                          '?z={z}&x={x}&y={y}&styleid=1&version=117'
-                          '&key=$kTencentMapKey',
-                      subdomains: const ['0', '1', '2', '3'],
-                      // 腾讯是 TMS(y 轴自下而上),漏了这行会拿到空白瓦片
-                      tms: true,
-                      userAgentPackageName: 'cn.superz.app',
+              if (ready)
+                tx.TencentMap(
+                  apiKey: tencentApiKey,
+                  initialCameraPosition: tx.CameraPosition(
+                      target: _center, zoom: 17),
+                  compassEnabled: false,
+                  trafficEnabled: false,
+                  tiltGesturesEnabled: false,
+                  rotateGesturesEnabled: false,
+                  onCameraMoveEnd: _onCameraEnd,
+                )
+              else
+                // 没同意隐私 / 没编 key:不渲染白板,给一句能看懂的话
+                Container(
+                  color: sz.surfaceAlt,
+                  alignment: Alignment.center,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      kTencentMapKey.isEmpty
+                          ? '这个版本没有启用街道底图,\n请直接用上方搜索选地址'
+                          : '同意隐私政策后才能显示地图,\n也可以直接用上方搜索选地址',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: sz.inkMuted),
                     ),
-                ],
-              ),
-              // 图钉钉在正中间。IgnorePointer:它只是准星,
-              // 不能吃掉落在它身上的拖动手势
-              IgnorePointer(
+                  ),
+                ),
+              // 图钉钉在正中间。**不用 SDK 的 Marker** —— Marker 是贴在地图上的,
+              // 地图一动它跟着动,那就不是准星了。
+              // IgnorePointer:它只是准星,不能吃掉落在它身上的拖动手势
+              if (ready)
+                IgnorePointer(
                 child: Padding(
                   // 图钉尖在底部,往上抬半个图标高度,让**尖端**对准中心
                   padding: const EdgeInsets.only(bottom: 34),
                   child: Icon(Icons.location_on, size: 40, color: sz.clay),
                 ),
               ),
-              if (kTencentMapKey.isNotEmpty)
+              if (ready)
                 Positioned(
                   right: 6,
                   bottom: 4,

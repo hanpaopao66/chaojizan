@@ -129,7 +129,13 @@ class UserApp extends StatelessWidget {
               '让利于民 · 取之有道 · 账目为证',
             ],
             child: PrivacyGate(
-                onAgreed: PushService.init,
+                onAgreed: () async {
+                  // 同意之后才初始化收集类 SDK。地图 SDK 尤其不能提前:
+                  // 腾讯的接口是"同意前调用则地图显示为空白",
+                  // 而且失败是静默的 —— 没异常没日志,只有一块白板
+                  await PushService.init();
+                  await agreeAndStart();
+                },
                 child: AuthGate(
                     api: rootApi,
                     title: '用户端 · 点外卖',

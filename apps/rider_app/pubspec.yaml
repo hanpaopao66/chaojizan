@@ -14,6 +14,7 @@ dependencies:
   geolocator: ^14.0.0   # 真实 GPS 定位
   url_launcher: ^6.3.0  # 唤起高德 App 导航
   image_picker: ^1.1.0  # 实名认证证件照
+  flutter_tencent_map: 1.0.1
 
 flutter:
   uses-material-design: true

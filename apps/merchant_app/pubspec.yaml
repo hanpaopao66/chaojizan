@@ -23,6 +23,7 @@ dependencies:
   shared_preferences: ^2.5.5       # 记住选择的打印机
   mobile_scanner:            # vendor 版,适配 AGP 9(见 packages/mobile_scanner)
     path: ../../packages/mobile_scanner
+  flutter_tencent_map: 1.0.1
 
 flutter:
   uses-material-design: true
