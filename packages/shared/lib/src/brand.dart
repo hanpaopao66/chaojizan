@@ -28,6 +28,7 @@ class SzColors extends ThemeExtension<SzColors> {
     required this.earn,
     required this.hold,
     required this.danger,
+    required this.ledger,
     required this.channelTones,
   });
 
@@ -67,6 +68,15 @@ class SzColors extends ThemeExtension<SzColors> {
   /// 语义色——错误。只给报错用,状态一律用 chip 表达
   final Color danger;
 
+  /// 账目表面(#133):「钱去哪了」「平台账本」这类**可查账**的地方专用。
+  ///
+  /// 账目透明是唯一抄不走的差异点,却和普通卡片长得一样 —— 用一张更"硬"的
+  /// 深色台面把它从页面里托出来,让"这块是账"在视觉上先于文字被读到。
+  ///
+  /// **深浅两态用的是不同手法**:浅色页面上它是深色台面(反差);
+  /// 深色页面上它比页底更深(下沉的井)。只做一种的话,深色模式下就糊没了。
+  final Color ledger;
+
   /// 频道色槽(#132)。**受限色板,不许自由取色** ——
   /// 聚合平台变成彩虹糖,就是从"这个频道想要个亮蓝"开始的。
   /// 新频道按顺序领槽位;槽位用尽再讨论扩板,那时至少是一次有意识的决定。
@@ -88,6 +98,7 @@ class SzColors extends ThemeExtension<SzColors> {
     earn: Color(0xFF4E6B4F),
     hold: Color(0xFFA6763E),
     danger: Color(0xFFD03030),
+    ledger: Color(0xFF1F1E1B),      // 浅色页上的深台面
     channelTones: [
       Color(0xFFB4553B),   // 0 赤陶 —— 外卖
       Color(0xFF4E6B4F),   // 1 苔绿 —— 住宿
@@ -113,6 +124,7 @@ class SzColors extends ThemeExtension<SzColors> {
     earn: Color(0xFF8FB08D),
     hold: Color(0xFFD2A86C),
     danger: Color(0xFFE06B6B),
+    ledger: Color(0xFF100F0D),      // 比页底(#1B1A17)更深:下沉的井
     channelTones: [
       Color(0xFFD98567),   // 0 赤陶
       Color(0xFF8FB08D),   // 1 苔绿
@@ -139,6 +151,7 @@ class SzColors extends ThemeExtension<SzColors> {
     Color? earn,
     Color? hold,
     Color? danger,
+    Color? ledger,
     List<Color>? channelTones,
   }) =>
       SzColors(
@@ -154,6 +167,7 @@ class SzColors extends ThemeExtension<SzColors> {
         earn: earn ?? this.earn,
         hold: hold ?? this.hold,
         danger: danger ?? this.danger,
+        ledger: ledger ?? this.ledger,
         channelTones: channelTones ?? this.channelTones,
       );
 
@@ -174,6 +188,7 @@ class SzColors extends ThemeExtension<SzColors> {
       earn: c(earn, other.earn),
       hold: c(hold, other.hold),
       danger: c(danger, other.danger),
+      ledger: c(ledger, other.ledger),
       // 逐槽插值:深浅切换时频道色跟着一起过渡,不会闪一下
       channelTones: [
         for (var i = 0; i < channelTones.length; i++)
@@ -352,6 +367,45 @@ TextStyle kMoneyText(double size, {Color color = _kEarnFallback}) =>
 /// 仅供 [kMoneyText] 的默认值使用(默认值必须是编译期常量)。
 const Color _kEarnFallback = Color(0xFF4E6B4F);
 
+/// 使用密度(#134):三端的使用姿势不一样,不该共用一套尺寸。
+///
+/// - [SzDensity.browse] 用户端:躺着刷,信息可以密一点、可逛;
+/// - [SzDensity.operate] 商家端与骑手端:商家在忙碌的收银台前扫一眼,
+///   骑手戴着手套单手操作 —— 点击区要更大、信息要更少。
+///
+/// **只在主题层生效**,不去改各页面写死的 padding:Flutter 的主题会自动
+/// 传播到所有按钮、列表行、输入框,改一处覆盖全部;逐个页面改 44 处
+/// 调用点,代价大而且下次新写的页面又会漏。
+enum SzDensity {
+  browse,
+  operate;
+
+  /// 主按钮最小高度。48 是 Material 的基线,戴手套按不准 —— 提到 56
+  double get buttonHeight => this == SzDensity.operate ? 56 : 48;
+
+  /// 次按钮最小高度
+  double get secondaryHeight => this == SzDensity.operate ? 50 : 44;
+
+  /// 列表行的竖直内边距:操作态松一档,一屏少放两行但不容易点错
+  double get listVerticalPad => this == SzDensity.operate ? 10 : 4;
+
+  /// 输入框的竖直内边距**增量**。写成增量而不是绝对值,是为了让浏览态严格等于
+  /// 分化之前的老口径 —— 用户端不该因为"给商家端加大"而跟着变样
+  double get inputPadBump => this == SzDensity.operate ? 3 : 0;
+
+  /// 正文字号增量:商家端在油烟和光线不好的后厨看,骑手在阳光下看
+  double get fontBump => this == SzDensity.operate ? 1.0 : 0;
+
+  /// 图标按钮的点击区
+  double get iconButtonSize => this == SzDensity.operate ? 52 : 44;
+
+  /// Material 的全局密度。ListTile / Chip 这类**高度是算出来的**组件
+  /// 只认这个,给 minVerticalPadding 撑不开它们的默认行高(实测两态都是 72)
+  VisualDensity get visual => this == SzDensity.operate
+      ? const VisualDensity(vertical: 1)
+      : VisualDensity.standard;
+}
+
 /// 三端统一的品牌主题 v3(第八辑视觉重构)。
 ///
 /// 数值来源:docs/DEV-PROMPTS-8.md「设计基线」。七条规则:
@@ -362,7 +416,8 @@ const Color _kEarnFallback = Color(0xFF4E6B4F);
 ///  5. AppBar 与背景同色、无阴影、左对齐,标题不再是超大号
 ///  6. 页面底色是骨白(paper),卡片(surface)比它亮一档才浮得起来
 ///  7. 数字与拉丁字母走 SzSerif,中文回落系统字(见 szFigure/szMoney)
-ThemeData brandTheme(Brightness brightness) {
+ThemeData brandTheme(Brightness brightness,
+    {SzDensity density = SzDensity.browse}) {
   final light = brightness == Brightness.light;
   final sz = light ? SzColors.light : SzColors.dark;
 
@@ -449,10 +504,11 @@ ThemeData brandTheme(Brightness brightness) {
       style: FilledButton.styleFrom(
         backgroundColor: sz.clay,
         foregroundColor: scheme.onPrimary,
-        minimumSize: const Size(64, 48),
+        minimumSize: Size(64, density.buttonHeight),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(kRadiusSm)),
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        textStyle: TextStyle(
+            fontSize: 15 + density.fontBump, fontWeight: FontWeight.w600),
       ),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
@@ -460,10 +516,11 @@ ThemeData brandTheme(Brightness brightness) {
         elevation: 0,
         backgroundColor: sz.clay,
         foregroundColor: scheme.onPrimary,
-        minimumSize: const Size(64, 48),
+        minimumSize: Size(64, density.buttonHeight),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(kRadiusSm)),
-        textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        textStyle: TextStyle(
+            fontSize: 15 + density.fontBump, fontWeight: FontWeight.w600),
       ),
     ),
     // 次按钮是墨字 + 发丝描边,不再是橙字橙框——一屏只让主按钮抢眼
@@ -471,16 +528,28 @@ ThemeData brandTheme(Brightness brightness) {
       style: OutlinedButton.styleFrom(
         foregroundColor: sz.ink,
         side: BorderSide(color: sz.line),
-        minimumSize: const Size(64, 44),
+        minimumSize: Size(64, density.secondaryHeight),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(kRadiusSm)),
-        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        textStyle: TextStyle(
+            fontSize: 14 + density.fontBump, fontWeight: FontWeight.w500),
       ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
         foregroundColor: sz.clay,
-        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        minimumSize: Size(48, density.secondaryHeight),
+        textStyle: TextStyle(
+            fontSize: 14 + density.fontBump, fontWeight: FontWeight.w500),
+      ),
+    ),
+
+    visualDensity: density.visual,
+
+    // ---- 图标按钮:默认命中区只有 40,操作态提到 52 ----
+    iconButtonTheme: IconButtonThemeData(
+      style: IconButton.styleFrom(
+        minimumSize: Size.square(density.iconButtonSize),
       ),
     ),
 
@@ -488,8 +557,10 @@ ThemeData brandTheme(Brightness brightness) {
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: sz.surfaceAlt,
-      hintStyle: TextStyle(color: sz.inkFaint, fontSize: 14.5),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      hintStyle: TextStyle(
+          color: sz.inkFaint, fontSize: 14.5 + density.fontBump),
+      contentPadding: EdgeInsets.symmetric(
+          horizontal: 16, vertical: 13 + density.inputPadBump),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(kRadiusMd),
         borderSide: BorderSide.none,
@@ -588,9 +659,13 @@ ThemeData brandTheme(Brightness brightness) {
         DividerThemeData(color: sz.line, thickness: 1, space: 1),
     listTileTheme: ListTileThemeData(
       contentPadding: const EdgeInsets.symmetric(horizontal: kPagePad),
+      minVerticalPadding: density.listVerticalPad,
       titleTextStyle: TextStyle(
-          fontSize: 14.5, fontWeight: FontWeight.w500, color: sz.ink),
-      subtitleTextStyle: TextStyle(fontSize: 12.5, color: sz.inkMuted),
+          fontSize: 14.5 + density.fontBump,
+          fontWeight: FontWeight.w500,
+          color: sz.ink),
+      subtitleTextStyle:
+          TextStyle(fontSize: 12.5 + density.fontBump, color: sz.inkMuted),
       iconColor: sz.inkFaint,
     ),
     switchTheme: SwitchThemeData(

@@ -342,6 +342,7 @@ class SzFeeRow extends StatelessWidget {
     this.note,
     this.negative = false,
     this.emphasized = false,
+    this.isHold = false,
   });
 
   final String label;
@@ -349,10 +350,21 @@ class SzFeeRow extends StatelessWidget {
 
   /// 跟在标签后的小字,写清"谁承担"(如「全额归骑手」「商家承担」)。
   final String? note;
+
+  /// 只管**符号**:金额前加一个减号。不要拿它当"这是优惠"用 ——
+  /// 颜色由 [isHold] 决定。
   final bool negative;
 
   /// 合计行:加粗 + 金额放大。
   final bool emphasized;
+
+  /// 这一笔是**平台留存**(佣金、服务费),用 `hold` 琥珀。
+  ///
+  /// 默认 false 时减项走 `earn` 绿 —— 那是**用户省下的钱**(满减、抵扣、让利),
+  /// 绿色在这里读作"你赚了"。但商家看到的「平台佣金」是被抽走的钱,
+  /// 同样是减项、语义相反,再用绿色就成了"抽你的钱是好事"。
+  /// BRAND.md 写死:`earn` = 到手的钱,`hold` = 平台留存,两者不能混。
+  final bool isHold;
 
   @override
   Widget build(BuildContext context) {
@@ -376,7 +388,9 @@ class SzFeeRow extends StatelessWidget {
                         color: emphasized ? sz.ink : sz.inkMuted,
                         fontWeight: emphasized ? FontWeight.w600 : null)),
                 if (note != null)
-                  Text(note!, style: TextStyle(fontSize: 11, color: sz.earn)),
+                  Text(note!,
+                      style: TextStyle(
+                          fontSize: 11, color: isHold ? sz.hold : sz.earn)),
               ],
             ),
           ),
@@ -385,7 +399,11 @@ class SzFeeRow extends StatelessWidget {
               style: szMoney(
                 fontSize: emphasized ? 18 : 14,
                 fontWeight: emphasized ? FontWeight.w600 : FontWeight.w500,
-                color: negative ? sz.earn : sz.ink,
+                color: isHold
+                    ? sz.hold
+                    : negative
+                        ? sz.earn
+                        : sz.ink,
               )),
         ],
       ),
@@ -824,6 +842,90 @@ class SzUnsavedGuard extends StatelessWidget {
         if (leave == true) nav.pop();
       },
       child: child,
+    );
+  }
+}
+
+/// 账目台面(#133):「钱去哪了」「平台账本」这类可查账的地方专用。
+///
+/// ## 为什么单独做一个
+///
+/// 账目透明是这个平台唯一抄不走的差异点,却和普通卡片长得一样。
+/// 用一张更"硬"的深色台面把它托出来 —— 让"这块是账"在读到文字之前就被认出来。
+///
+/// ## 实现上的关键一步
+///
+/// 它**在内部把 `SzColors` 整个换掉**,而不是给每个子组件传一堆颜色参数:
+/// 台面里的 `SzMoneyFlow`、`SzFeeRow`、`Text` 照常读 `Theme.of(context).sz.ink`,
+/// 拿到的自动是适配深底的那一套。已有组件一行都不用改,
+/// 将来新写的组件掉进来也自动是对的 —— 靠约定而不是靠记得传参。
+///
+/// 语义色(earn/hold)在台面里一律取深色态的亮版:浅色态的墨绿墨褐
+/// 压在深底上根本读不出来。
+/// **调用方注意**:台面内部换的是 `SzColors`,靠的是子组件**在台面内**
+/// 调 `Theme.of(context)`。如果你在台面外先 `final sz = Theme.of(context).sz;`
+/// 再把 `sz.line` 之类传进来,拿到的还是外层浅色态 —— 画出来是一道刺眼的亮线。
+/// 台面内要用颜色,就在台面内取(必要时套一层 `Builder`)。
+class SzLedgerCard extends StatelessWidget {
+  const SzLedgerCard({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(kCardPad),
+    this.margin,
+    this.onTap,
+  });
+
+  final Widget child;
+  final EdgeInsets padding;
+  final EdgeInsets? margin;
+
+  /// 台面可点(如订单详情的分账预览点开看完整口径)
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).sz;
+    final dark = SzColors.dark;
+
+    // 台面内的令牌:底是 ledger,文字与语义色取深色态,
+    // 分隔线用一点点亮的白 —— 深色态的 line 压在更深的底上会消失
+    final inside = dark.copyWith(
+      paper: base.ledger,
+      surface: base.ledger,
+      surfaceAlt: base.ledger,
+      line: const Color(0x22FFFFFF),
+    );
+
+    final body = Padding(
+      padding: padding,
+      child: Theme(
+        data: Theme.of(context).copyWith(extensions: [inside]),
+        // DefaultTextStyle 也要换:台面里裸 Text 不带颜色时会继承页面的墨色,
+        // 压在深底上就是黑底黑字
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: inside.ink),
+          child: child,
+        ),
+      ),
+    );
+
+    // 深色页上台面与页底的明度只差 1.10(实测),光靠颜色分不出是两层 ——
+    // 补一道细边把边界画出来。浅色页上反差 14.35,不需要边框
+    final needsEdge = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      margin: margin,
+      decoration: BoxDecoration(
+        color: base.ledger,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: needsEdge
+            ? Border.all(color: const Color(0x1FFFFFFF))
+            : null,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: onTap == null
+          ? body
+          : InkWell(onTap: onTap, child: body),
     );
   }
 }

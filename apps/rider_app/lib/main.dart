@@ -36,8 +36,8 @@ class RiderApp extends StatelessWidget {
     return MaterialApp(
       title: '超级赞骑手端',
       // 深浅两套令牌都在 brand.dart 里定义(第八辑 #101),#111 走查后放开
-      theme: brandTheme(Brightness.light),
-      darkTheme: brandTheme(Brightness.dark),
+      theme: brandTheme(Brightness.light, density: SzDensity.operate),
+      darkTheme: brandTheme(Brightness.dark, density: SzDensity.operate),
       themeMode: ThemeMode.system,
       home: SplashGate(
           app: 'rider',

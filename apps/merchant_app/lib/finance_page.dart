@@ -441,7 +441,9 @@ class _FinancePageState extends State<FinancePage> {
             amountCents: todayStat?.netCents ?? 0,
           ),
           const SizedBox(height: 8),
-          SzCard(
+          // 分账明细走账目专属深色台面(#133):这是「钱去哪了」,
+          // 不是又一张卡片 —— 账目透明是唯一抄不走的差异点
+          SzLedgerCard(
             padding: const EdgeInsets.symmetric(
                 horizontal: kCardPad, vertical: 4),
             child: Column(children: [
@@ -451,7 +453,8 @@ class _FinancePageState extends State<FinancePage> {
                   label: '平台佣金',
                   note: '按 ${((_tier?['commission_rate'] as num?) ?? 0.05) * 100 ~/ 1}% 计',
                   amountCents: todayStat?.commissionCents ?? 0,
-                  negative: true),
+                  negative: true,
+                  isHold: true),
               Divider(color: Theme.of(context).sz.line, height: 17),
               SzFeeRow(
                   label: '今日实收 · ${todayStat?.orderCount ?? 0} 单',
@@ -542,7 +545,7 @@ class _DayOrdersPageState extends State<DayOrdersPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 24),
             children: [
-              SzCard(
+              SzLedgerCard(
                 padding: const EdgeInsets.symmetric(
                     horizontal: kCardPad, vertical: 4),
                 child: Column(children: [
@@ -550,8 +553,13 @@ class _DayOrdersPageState extends State<DayOrdersPage> {
                   SzFeeRow(
                       label: '平台佣金',
                       amountCents: stat.commissionCents,
-                      negative: true),
-                  Divider(color: sz.line, height: 17),
+                      negative: true,
+                      isHold: true),
+                  // 这里必须现取 Theme:外层的 sz 是浅色态,画在深色台面上
+                  // 会是一道刺眼的亮线(SzLedgerCard 只换它内部的 SzColors)
+                  Builder(
+                      builder: (c) => Divider(
+                          color: Theme.of(c).sz.line, height: 17)),
                   SzFeeRow(
                       label: '净收入 · ${stat.orderCount} 单',
                       amountCents: stat.netCents,

@@ -92,7 +92,9 @@ Future<void> setElderMode(bool on) async {
 }
 
 /// 亮/暗双主题(跟随系统),用品牌体系(炉火橙,见 shared/brand.dart)。
-ThemeData superZTheme(Brightness brightness) => brandTheme(brightness);
+/// 用户端是「逛」的姿势:躺着刷,信息可以密一点(#134)
+ThemeData superZTheme(Brightness brightness) =>
+    brandTheme(brightness, density: SzDensity.browse);
 
 class UserApp extends StatelessWidget {
   const UserApp({super.key});
@@ -4953,7 +4955,7 @@ class _MoneyFlowCard extends StatelessWidget {
       children: [
         const SzSectionTitle('这一单的钱去哪了'),
         const SizedBox(height: 9),
-        SzCard(
+        SzLedgerCard(
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => MoneyFlowPage(api: api, order: order))),
           padding:

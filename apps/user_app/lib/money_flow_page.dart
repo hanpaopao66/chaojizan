@@ -106,7 +106,9 @@ class MoneyFlowPage extends StatelessWidget {
               style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
           const SizedBox(height: 18),
 
-          SzCard(
+          // 账目台面(#133):账目透明是唯一抄不走的差异点,
+          // 用一张更"硬"的深色台面把它从页面里托出来
+          SzLedgerCard(
             padding: const EdgeInsets.symmetric(
                 horizontal: kCardPad, vertical: 2),
             child: SzMoneyFlow(
