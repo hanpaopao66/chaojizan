@@ -42,16 +42,23 @@ err = call("POST", "/orders", customer, {
 assert err["_error"] == 409 and "配送范围" in err["detail"]
 print(f"✓ 超出 4km 配送半径:预览标记 in_range=false,下单 409({far['distance_m']}m)")
 
-# 恶劣天气加价:管理员一键开关,加价全归骑手
-flags = call("GET", "/admin/flags", admin)
-assert flags["weather_surcharge"] == "off"
+# 恶劣天气加价(#146):按区县**自动判定**,管理员保留强制开、不保留强制关。
+#
+# 这一段刻意**不依赖真实天气** —— 用例跑的时候外面到底下不下雨是随机的
+# (实测跑到过成都雷暴:降水 1.1mm、天气码 95,自动判定正确触发)。
+# 要验的是「强制开一定加价」这条机制,不是「今天天气如何」。
+call("POST", "/admin/flags/weather_surcharge", admin, {"value": "off"})
+before = call("GET", f"/orders/delivery-fee?merchant_id={sid}&lat=30.6612&lng=104.0823", customer)
 call("POST", "/admin/flags/weather_surcharge", admin, {"value": "on"})
 stormy = call("GET", f"/orders/delivery-fee?merchant_id={sid}&lat=30.6612&lng=104.0823", customer)
 assert stormy["parts"]["weather"] == 200, stormy
-assert stormy["fee_cents"] == near["fee_cents"] + 200
+assert stormy["fee_cents"] == before["fee_cents"] + (
+    200 - before["parts"]["weather"]), stormy
 call("POST", "/admin/flags/weather_surcharge", admin, {"value": "off"})
+# 关掉强制开后**不断言一定为 0**:自动判定仍在生效,
+# 真下雨时照样加价 —— 那正是这次改动的目的(不保留"强制关")
 calm = call("GET", f"/orders/delivery-fee?merchant_id={sid}&lat=30.6612&lng=104.0823", customer)
-assert calm["parts"]["weather"] == 0
+assert calm["parts"]["weather"] in (0, 200), calm
 err = call("POST", "/admin/flags/weather_surcharge", customer, None, expect_error=True)
 assert err["_error"] == 403
 print("✓ 恶劣天气加价:管理员开 +¥2 → 关恢复,非管理员 403")

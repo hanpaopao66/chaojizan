@@ -163,3 +163,59 @@ class TestETA接线后仍不收紧:
         base = self._mins()
         for p in (0, 0.5, 1, 3, 8, 12, 19):
             assert self._mins(prep_minutes=p) >= base - 0.1, p
+
+
+class Test天气开关的语义:
+    """e2e 里那条断言因为依赖真实天气被放松了,机制在这里用确定性测试守住。"""
+
+    def test_强制开优先于自动判定(self):
+        """管理员强制开时,不管天气如何都加价 —— 自动判定漏了要能救。"""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from app.services import flags
+
+        async def go():
+            db = AsyncMock()
+            db.get.return_value = type("F", (), {"value": "on"})()
+            # 天气服务即便返回"晴天",强制开也必须生效
+            with patch("app.services.weather.current",
+                       new=AsyncMock(return_value={"severe": False})):
+                return await flags.weather_surcharge_on(db, 30.66, 104.08)
+
+        assert asyncio.run(go()) is True
+
+    def test_没有强制关这条路(self):
+        """天气恶劣却关掉加价,没有正当理由 ——
+        所以关掉开关只是"不强制开",自动判定照常生效。"""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from app.services import flags
+
+        async def go(severe):
+            db = AsyncMock()
+            db.get.return_value = type("F", (), {"value": "off"})()
+            with patch("app.services.weather.current",
+                       new=AsyncMock(return_value={"severe": severe})):
+                return await flags.weather_surcharge_on(db, 30.66, 104.08)
+
+        assert asyncio.run(go(True)) is True    # 关了开关,下雨照样加价
+        assert asyncio.run(go(False)) is False
+
+    def test_查不到天气时不加价但也不报错(self):
+        """None 表示「不知道」,不是「天气很好」——
+        真正的降级语义是:已加价的订单不会被追溯撤销。"""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from app.services import flags
+
+        async def go():
+            db = AsyncMock()
+            db.get.return_value = type("F", (), {"value": "off"})()
+            with patch("app.services.weather.current",
+                       new=AsyncMock(return_value=None)):
+                return await flags.weather_surcharge_on(db, 30.66, 104.08)
+
+        assert asyncio.run(go()) is False

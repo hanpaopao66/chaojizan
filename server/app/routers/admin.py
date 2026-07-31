@@ -1747,12 +1747,18 @@ async def dispatch_overview(
             Order.rider_id.is_(None), Order.status.in_(GRABBABLE_STATUSES),
             Order.pickup.is_(False), Order.parent_order_no == "")
         .order_by(Order.created_at).limit(100))).all()
-    in_flight = (await db.scalars(
+    # 在途单按**最新优先**取,不是最早优先。
+    #
+    # 运力看板要回答的是「现在有多少单在跑」,而按 created_at 升序 + limit 100
+    # 会在在途量超过 100 时**把最新的单挤出去** —— 调度员盯着看板,
+    # 却看不到刚派出去的单(实测库里在途 116 单、接口只回 100)。
+    # 这是本项目吃过多次的 LIMIT 截断:排序方向选错,截断就截在了要看的那一头
+    in_flight = list(reversed((await db.scalars(
         select(Order).where(
             Order.rider_id.is_not(None),
             Order.status.in_([OS.ACCEPTED, OS.READY, OS.PICKED_UP]),
             Order.parent_order_no == "")
-        .order_by(Order.created_at).limit(100))).all()
+        .order_by(Order.created_at.desc()).limit(100))).all()))
 
     shops = {m.id: m for m in await db.scalars(select(Merchant).where(
         Merchant.id.in_({o.merchant_id for o in [*pool_orders, *in_flight]})))}

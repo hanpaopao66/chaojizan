@@ -69,9 +69,16 @@ mine = next(o for o in detail if o["order_no"] == no)
 assert mine["net_cents"] == 2000 - fee and mine["commission_cents"] == fee
 print("✓ 单日明细逐单可查,金额与汇总一致")
 
+# 汇总要**当场重新抓**,不能用几十行之前那个快照:
+# 中间隔了翻页等多次往返,同一天里若有别的入账(并发跑的用例、后台清扫),
+# 旧快照就和新明细对不上 —— 这条恒等式要验的是「明细能不能加成汇总」,
+# 不是「两次查询之间有没有新订单」
+stat_now = next(d for d in call("GET", "/merchants/me/finance/daily", merchant)
+                if d["day"] == day)
 total_detail = sum(o["net_cents"] for o in detail)
-assert total_detail == stat["net_cents"], f"明细合计 {total_detail} ≠ 日汇总 {stat['net_cents']}"
-print(f"✓ 明细合计 = 日汇总({stat['net_cents']/100:.2f} 元),账能对上")
+assert total_detail == stat_now["net_cents"], \
+    f"明细合计 {total_detail} ≠ 日汇总 {stat_now['net_cents']}"
+print(f"✓ 明细合计 = 日汇总({stat_now['net_cents']/100:.2f} 元),账能对上")
 
 err = call("GET", "/merchants/me/finance/daily", customer, expect_error=True)
 assert err["_error"] == 403
