@@ -21,8 +21,10 @@ from .pricing import haversine_m
 
 logger = logging.getLogger("superz.eta")
 
-ETA_PREP_MINUTES = 20        # 备餐兜底时长
-ETA_MINUTES_PER_KM = 5       # 骑行折算
+ETA_PREP_MINUTES = 20        # 备餐兜底时长(商家无实测样本时用)
+# 骑行折算保留为兜底。**真实换算走 labor_guard.ride_minutes** ——
+# 那里的速度是写死的常量,不由骑手实际表现训练(见 #144 的红线)
+ETA_MINUTES_PER_KM = 5
 ETA_MIN_MINUTES = 30         # 最短承诺(别把话说太满)
 LATE_GRACE_MINUTES = 15      # 超过 ETA 这么久才算超时
 COMP_AMOUNT_CENTS = 300      # 安抚券面额(无门槛)
@@ -33,16 +35,47 @@ WEATHER_EXEMPT_SECONDS = 3600  # 停运开关切换前后 1 小时豁免
 WEATHER_TOGGLE_KEY = "weather_shutdown:last_toggle"
 
 
-def compute_eta(order: Order, merchant: Merchant) -> datetime | None:
-    """支付成功时调用;自取/追加单返回 None。"""
+def compute_eta(
+    order: Order,
+    merchant: Merchant,
+    *,
+    prep_minutes: float | None = None,
+    severe_weather: bool = False,
+) -> datetime | None:
+    """支付成功时调用;自取/追加单返回 None。
+
+    ## 劳动者保护红线(#144)
+
+    骑行时间走 `labor_guard.ride_minutes`,速度是**写死的常量**,
+    不由骑手实际表现训练 —— 用实际速度反过来收紧时限,正是把骑手逼到
+    逆行、闯灯的那套机制。
+
+    结果再过一道 `clamp_eta_minutes`:**只许放宽,不许收紧**。
+    所以传进来的 `prep_minutes`(商家实测出餐分位数)即便比兜底值小,
+    也不会让 ETA 变短 —— 出餐快是商家的功劳,不该变成骑手的压力。
+
+    `severe_weather=True` 时用更慢的速度:恶劣天气加价的同时**必须放宽时限**,
+    只加价不放宽等于用钱买骑手冒险。
+    """
     if order.pickup or order.parent_order_no:
         return None
     if order.scheduled_at is not None:
         return order.scheduled_at
-    km = haversine_m(merchant.lat, merchant.lng, order.lat, order.lng) / 1000
-    minutes = max(ETA_MIN_MINUTES,
-                  ETA_PREP_MINUTES + math.ceil(km * ETA_MINUTES_PER_KM))
-    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+    from . import labor_guard
+
+    distance_m = haversine_m(merchant.lat, merchant.lng, order.lat, order.lng)
+    ride = labor_guard.ride_minutes(distance_m, severe_weather=severe_weather)
+
+    # 备餐:有实测分位数就用,没有就用兜底。**取更大的那个** ——
+    # 实测比兜底短时不缩短 ETA(见上面的红线)
+    prep = max(prep_minutes or 0.0, float(ETA_PREP_MINUTES))
+
+    baseline = max(ETA_MIN_MINUTES, ETA_PREP_MINUTES
+                   + math.ceil(distance_m / 1000 * ETA_MINUTES_PER_KM))
+    proposed = max(ETA_MIN_MINUTES, prep + ride)
+    minutes = labor_guard.clamp_eta_minutes(proposed, baseline)
+    return datetime.now(timezone.utc) + timedelta(minutes=math.ceil(minutes))
 
 
 ETA_REFRESH_THRESHOLD_MIN = 5  # 偏差 >5 分钟才刷新+推送(克制,不频繁打扰)

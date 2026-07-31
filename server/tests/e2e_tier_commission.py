@@ -88,17 +88,23 @@ async def main():
     boss_a, sid_a = fresh_shop("A")   # 600 单 → 4.5%
     _, sid_b = fresh_shop("B")        # 600 单但手工 4% → 不上调
     _, sid_c = fresh_shop("C")        # 1050 单 → 4%
+    # D 店:单量不足,费率不该动。
+    # **不能拿演示店当这个基准** —— 原先断言的是「张记面馆费率仍为 5%」,
+    # 而演示店会被反复跑的 e2e 攒出单量(实测已到 1255 单、正确降到 4%),
+    # 于是这条断言在跑久了的库上必然挂。用例要自带基准,不依赖共享状态
+    _, sid_d = fresh_shop("D")        # 10 单 → 不动
     await seed_completed(sid_a, 600, f"tierA{tag}")
     await seed_completed(sid_b, 600, f"tierB{tag}")
     await seed_completed(sid_c, 1050, f"tierC{tag}")
+    await seed_completed(sid_d, 10, f"tierD{tag}")
     async with SessionLocal() as db:
         await db.execute(text(
             "UPDATE merchants SET commission_rate = 0.040 WHERE id = :id"),
             {"id": sid_b})
-        zhang_rate = await db.scalar(text(
-            "SELECT commission_rate FROM merchants WHERE name = '张记面馆'"))
         await db.commit()
-    assert f"{zhang_rate:.3f}" == "0.050"
+    # 重算前的基准:D 店应当还是默认 5%(用自建店,不看演示店 ——
+    # 演示店的费率会被跑久了的库改掉)
+    assert await get_rate(sid_d) == "0.050"
 
     # 1) 月度重算:降档、不上调手工优惠店、单量不足的店不动
     async with SessionLocal() as db:
@@ -109,10 +115,8 @@ async def main():
     assert await get_rate(sid_a) == "0.045"
     assert await get_rate(sid_b) == "0.040"
     assert await get_rate(sid_c) == "0.040"
-    async with SessionLocal() as db:
-        zhang_after = await db.scalar(text(
-            "SELECT commission_rate FROM merchants WHERE name = '张记面馆'"))
-    assert f"{zhang_after:.3f}" == "0.050", "单量不足的演示店费率不动"
+    assert sid_d not in changed_ids, "单量不足的店不该出现在变更里"
+    assert await get_rate(sid_d) == "0.050", "单量不足的店费率不动"
     print("✓ 月度重算:600 单降 4.5%、1050 单降 4%、手工 4% 不上调、演示店 5% 不动")
 
     # 2) 重算幂等:再跑一遍无变更

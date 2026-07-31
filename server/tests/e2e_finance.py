@@ -38,11 +38,19 @@ changed = [
 assert len(changed) == 1, changed
 day, stat = changed[0]
 before = daily_before.get(day, {"order_count": 0, "food_cents": 0, "commission_cents": 0, "net_cents": 0})
+# 佣金按**该店实际费率**算,不写死 5% —— 阶梯佣金会把老店降到 4.5% / 4%,
+# 而演示店在跑久了的库上必然进入降档区间。写死的断言挂的是对的行为
+shop_now = call("GET", "/merchants/me", merchant)
+rate = float(shop_now["commission_rate"])
+fee = int(2000 * rate)
 assert stat["order_count"] == before["order_count"] + 1
 assert stat["food_cents"] == before["food_cents"] + 2000
-assert stat["commission_cents"] == before["commission_cents"] + 100
-assert stat["net_cents"] == before["net_cents"] + 1900
-print(f"✓ 完成单入账:{day} 流水 +¥20.00,佣金 +¥1.00(5%),净收入 +¥19.00")
+assert stat["commission_cents"] == before["commission_cents"] + fee
+# 真正该守的是这条恒等式:净额 = 流水 − 佣金,与费率是多少无关
+assert stat["net_cents"] == before["net_cents"] + (2000 - fee)
+assert rate <= 0.05, "任何档位都不得高于 5% 的承诺上限"
+print(f"✓ 完成单入账:{day} 流水 +¥20.00,佣金 +¥{fee/100:.2f}"
+      f"({rate:.1%}),净收入 +¥{(2000-fee)/100:.2f}")
 
 # 翻完整天再对账:明细接口是游标分页的,只取第一页就求和,
 # 在忙店(一天入账几百条)上必然对不上 —— 这条恒等式的意义就在于此
@@ -58,7 +66,7 @@ while True:
     if len(page) < 200:
         break
 mine = next(o for o in detail if o["order_no"] == no)
-assert mine["net_cents"] == 1900 and mine["commission_cents"] == 100
+assert mine["net_cents"] == 2000 - fee and mine["commission_cents"] == fee
 print("✓ 单日明细逐单可查,金额与汇总一致")
 
 total_detail = sum(o["net_cents"] for o in detail)

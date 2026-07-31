@@ -129,6 +129,21 @@ def score(c: Candidate) -> Scored:
     )
 
 
+def _labor_promises() -> list[str]:
+    from . import labor_guard
+    return list(labor_guard.LABOR_PROMISES)
+
+
+def _labor_spec() -> dict:
+    from . import labor_guard
+    return labor_guard.public_spec()
+
+
+def _weather_spec() -> dict:
+    from . import weather
+    return weather.public_spec()
+
+
 def public_spec() -> dict:
     """给 /transparency/dispatch 用的算法说明。
 
@@ -203,12 +218,16 @@ def public_spec() -> dict:
                    "骑行 1745 米,差 19%。配送费按距离算且 100% 归骑手,"
                    "用低估的距离去算,承诺就打了折。",
         },
+        # 劳动者保护的承诺从 labor_guard 读 —— 那里是那条原则的执行点,
+        # 在这里再抄一份就会两边对不上
         "never_do": [
             "不做强制派单 —— 广播抢单,接不接始终是骑手自己的决定",
             "不按骑手评分或等级差别对待 —— 同一批单,所有在线骑手看到的口径一致",
             "不因为骑手拒过单、转过单就降权 —— 拒单不进任何权重",
             "不因为骑手在线时长短就压低他能看到的单",
-        ],
+        ] + _labor_promises(),
+        "labor_guard": _labor_spec(),
+        "weather": _weather_spec(),
         "changelog": CHANGELOG,
     }
 
@@ -216,6 +235,18 @@ def public_spec() -> dict:
 #: 权重变更历史。**改了算法就要记一笔。**
 #: 算法可以改,但不能悄悄改 —— 悄悄改就等于从没公开过。
 CHANGELOG = [
+    {
+        "date": "2026-08-01",
+        "what": "排序纳入整单预计耗时与每分钟收入;出餐等待改用商家实测分位数;"
+                "新增劳动者保护红线(ETA 只许放宽不许收紧、骑行速度写死不训练、"
+                "疲劳提醒但不断单);恶劣天气改为按区县自动判定,"
+                "加价的同时放宽时限;配送费加入等餐超时补偿(平台承担)。",
+        "why": "旧口径下,骑手看不出一单整体划不划算(只显示到店距离);"
+               "出餐等待用的是写死的 20 分钟;恶劣天气靠管理员手动全局开关 ——"
+               "成都下暴雨北京也加价,北京下雪没人开开关骑手就白挨冻。"
+               "更要紧的是:用实际表现反过来收紧时限,是把骑手逼到"
+               "逆行闯灯的那套机制,必须从代码层面堵死。",
+    },
     {
         "date": "2026-07-31",
         "what": "顺路判定由「两个送达点相距 < 800 米」改为「绕路增量分档」;"

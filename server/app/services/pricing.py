@@ -50,10 +50,36 @@ def delivery_fee_parts(
     }
 
 
+def wait_compensation_cents(wait_minutes: float) -> int:
+    """等餐超时补偿(分)。**平台承担,不转嫁商家或用户。**
+
+    骑手到店后餐没好,那段时间他没有任何收入 —— 而这不是他的问题。
+    原先这段时间是完全白等的。
+
+    为什么由平台承担:转嫁给商家会让商家宁可晚点按「出餐」(数据失真),
+    转嫁给用户则是让用户为商家的慢买单。平台承担的同时,
+    出餐时长统计(services/prep_time.py)会把慢出餐商家显出来 ——
+    治理靠数据,不靠罚钱。
+
+    注:这属于**履约成本**,不是营销补贴 —— 与"平台不做补贴烧钱"不冲突。
+    """
+    from ..config import settings
+
+    free = settings.delivery_wait_free_minutes
+    if wait_minutes <= free:
+        return 0
+    extra = math.ceil(wait_minutes - free)
+    return min(extra * settings.delivery_wait_per_min_cents,
+               settings.delivery_wait_max_cents)
+
+
 def delivery_fee_cents(
     distance_m: float,
     *,
     weather_on: bool = False,
     when: datetime | None = None,
+    wait_minutes: float = 0.0,
 ) -> int:
-    return sum(delivery_fee_parts(distance_m, weather_on=weather_on, when=when).values())
+    total = sum(delivery_fee_parts(
+        distance_m, weather_on=weather_on, when=when).values())
+    return total + wait_compensation_cents(wait_minutes)

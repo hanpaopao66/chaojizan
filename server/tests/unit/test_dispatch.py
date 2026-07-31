@@ -128,3 +128,34 @@ class Test公开的就是跑的:
     def test_距离口径写明来源与降级(self):
         dist = d.public_spec()["distance"]
         assert "骑行" in dist["source"] and "直线" in dist["source"]
+
+
+class Test劳动者保护并入公开页:
+    """承诺必须与执行点同源 —— 抄一份就会两边对不上。"""
+
+    def test_劳动保护承诺全部出现在never_do(self):
+        from app.services import labor_guard as lg
+        never = d.public_spec()["never_do"]
+        for p in lg.LABOR_PROMISES:
+            assert p in never, f"承诺没并进公开页:{p}"
+
+    def test_公开页带劳动者保护小节(self):
+        spec = d.public_spec()["labor_guard"]
+        assert "自我收紧" in spec["why"]
+        assert spec["ride_speed"]["normal"]
+
+    def test_公开页带天气判定规则(self):
+        from app.services import weather as w
+        spec = d.public_spec()["weather"]
+        assert str(w.RAIN_MM) in "".join(
+            t["value"] for t in spec["thresholds"])
+
+    def test_改了劳动保护常量公开页跟着变(self, monkeypatch):
+        from app.services import labor_guard as lg
+        monkeypatch.setattr(lg, "RIDE_SPEED_KMH", 7.0)
+        assert "7.0" in d.public_spec()["labor_guard"]["ride_speed"]["normal"]
+
+    def test_变更历史记了这次改动(self):
+        log = d.public_spec()["changelog"]
+        assert len(log) >= 2, "算法改了就要记一笔"
+        assert any("劳动者保护" in e["what"] for e in log)

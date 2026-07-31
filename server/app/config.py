@@ -61,8 +61,21 @@ class Settings(BaseSettings):
     delivery_night_surcharge_cents: int = 200
     delivery_night_start_hour: int = 21
     delivery_night_end_hour: int = 6
-    # 恶劣天气加价:管理员在后台一键开关(platform_flags.weather_surcharge),全归骑手
+    # 恶劣天气加价:按区县自动判定(services/weather.py),全归骑手。
+    # 管理员保留手动**强制开**的能力(自动判定漏了也能救),
+    # 但不保留强制关 —— 天气恶劣却关掉加价,没有正当理由
     delivery_weather_surcharge_cents: int = 200
+
+    # 等餐超时补偿(#145):骑手到店后餐没好的那段时间,原先完全没有收入。
+    # 平台承担,不转嫁商家或用户 —— 转嫁商家会让商家宁可晚点按「出餐」(数据失真),
+    # 转嫁用户则是让用户为商家的慢买单。这属于履约成本,不是营销补贴
+    delivery_wait_free_minutes: int = 15    # 前 15 分钟不补(正常出餐区间)
+    delivery_wait_per_min_cents: int = 30   # 超出部分每分钟 ¥0.3
+    delivery_wait_max_cents: int = 600      # 封顶 ¥6
+
+    # 配送费改用骑行路径距离(#145)。**直接改钱,默认关**,
+    # 灰度验证(新旧口径在真实订单上对比)后再开
+    delivery_use_route_distance: bool = False
 
     # 平台起送价下限:低于它的购物车不接单(单太小,佣金连支付通道费都覆盖不了)。
     # 商家可以设更高的起送价,但不能低于这个下限

@@ -30,8 +30,16 @@ no = order["order_no"]
 print(f"✓ 下单成功 {no},合计 ¥{order['total_cents']/100}(含配送费 ¥{order['delivery_fee_cents']/100})")
 
 paid = call("POST", f"/orders/{no}/pay/mock", customer)
-assert paid["status"] == "paid" and paid["commission_cents"] == int(paid["food_cents"] * 0.05)
-print(f"✓ 支付成功,平台抽成 ¥{paid['commission_cents']/100}(5%)")
+# 佣金按**该店实际费率**断言,不写死 5%。
+# 阶梯佣金(#tier)会按上月单量把老店降到 4.5% / 4%,而演示店在跑久了的库上
+# 必然累计到降档区间(实测已 1255 单、正确降到 4%)——
+# 写死 5% 的断言在这种库上必挂,挂的却是对的行为
+rate = float(shop0["commission_rate"])
+assert paid["status"] == "paid"
+assert paid["commission_cents"] == int(paid["food_cents"] * rate), \
+    f"佣金应为 {rate:.1%},实际 {paid['commission_cents']} / {paid['food_cents']}"
+assert rate <= 0.05, "任何档位都不得高于 5% 的承诺上限"
+print(f"✓ 支付成功,平台抽成 ¥{paid['commission_cents']/100}({rate:.1%})")
 
 paid2 = call("POST", f"/orders/{no}/pay/mock", customer)
 assert paid2["status"] == "paid" and paid2["commission_cents"] == paid["commission_cents"]
