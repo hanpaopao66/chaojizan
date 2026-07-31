@@ -16,8 +16,11 @@ admin = login("13800000000")
 merchant = login("13800000002")
 ts = int(time.time())
 # 独占坐标:避开 #44 风控的同址高频标记(命中会挂起奖励,设计如此)。
-# 原先是 ts % 20——只有 20 个点且每 20 秒循环,一天里反复跑必然撞格子
-LAT, LNG = unique_spot()
+# 原先是 ts % 20——只有 20 个点且每 20 秒循环,一天里反复跑必然撞格子。
+#
+# **每单换一格**,不是全用同一个:风控规则是「同格 24h 内 ≥4 单且多账号」,
+# 而本用例有多个被邀请人各下一单 —— 全挤在一格等于用例自己在制造风控命中,
+# 表现为"邀请奖励偶发不发",查半天才发现是自己撞的
 
 
 def fresh(device=""):
@@ -91,10 +94,11 @@ async def main():
     rider = await register_fresh_rider("邀请测试骑手")
 
     def run_order(token, cancel=False):
+        lat, lng = unique_spot()   # 每单独立取格,见文件头的说明
         order = call("POST", "/orders", token, {
             "merchant_id": sid,
             "items": [{"dish_id": dish["id"], "quantity": 1}],
-            "address": f"邀请测试地址{ts}", "lat": LAT, "lng": LNG})
+            "address": f"邀请测试地址{ts}", "lat": lat, "lng": lng})
         no = order["order_no"]
         call("POST", f"/orders/{no}/pay/mock", token)
         if cancel:

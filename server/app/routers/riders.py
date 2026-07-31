@@ -400,7 +400,7 @@ async def available_orders(
     """
     from datetime import datetime, timezone
 
-    from ..services import dispatch
+    from ..services import dispatch, prep_time
     from ..services.routing import bicycling_m, detour_m
 
     # 取 200 条进来算分、只返回前 50:若只取最老的 50 条再排序,
@@ -445,6 +445,8 @@ async def available_orders(
         rider_pos = None
 
     now = datetime.now(timezone.utc)
+    # 出餐时长分位数**批量取**:逐个查会把一次抢单变成几十次往返
+    preps = await prep_time.stats_for(db, [o.merchant_id for o in orders])
     radius_m = (user.grab_radius_km * 1000
                 if user.grab_radius_km and rider_pos else None)
     scored: list[tuple[float, OrderOut]] = []
@@ -490,6 +492,19 @@ async def available_orders(
             out.same_way_level = res.same_way_level
             out.same_way = res.same_way_level != "none"
             score_val = res.score
+
+            # 整单经济性:骑手判断「值不值得接」要的是耗时与时薪,
+            # 不是"到店多远"。等餐用该店**实测**出餐分位数,
+            # 不是写死的 20 分钟
+            ps = preps.get(order.merchant_id)
+            wait = ps.wait_minutes if ps else 15.0
+            econ = dispatch.trip_economics(
+                distance, trip, wait,
+                order.delivery_fee_cents, order.tip_cents)
+            out.est_minutes = econ["total_minutes"]
+            out.est_wait_minutes = econ["wait_minutes"]
+            out.wait_source = ps.source if ps else "declared"
+            out.cents_per_minute = econ["cents_per_minute"]
 
             # 接单半径过滤(骑手自设);同店/顺路豁免 —— 手头单顺路的永远给看
             if (radius_m is not None and distance > radius_m
@@ -1213,3 +1228,45 @@ async def cancel_sos(
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}]
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/me/fatigue")
+async def my_fatigue(
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """连续在线时长与疲劳提醒(#144)。
+
+    **只提醒,不断单。** 骑手要吃饭,一刀切断人家收入是另一种不尊重 ——
+    但平台也不能装作没看见连续在线 10 小时这件事。
+
+    level=throttle 时客户端把新单提醒调慢并置顶休息提示,
+    抢单功能照常可用。
+    """
+    from datetime import datetime, timezone
+
+    from ..models import RiderSession
+    from ..services import labor_guard
+
+    # 本次连续在线:取最近一条还没下线的会话
+    row = await db.scalar(
+        select(RiderSession)
+        .where(RiderSession.rider_id == user.id,
+               RiderSession.offline_at.is_(None))
+        .order_by(RiderSession.online_at.desc()).limit(1))
+    if row is None:
+        return {"online_minutes": 0, "level": "none", "message": None}
+
+    start = row.online_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    minutes = max(0.0,
+                  (datetime.now(timezone.utc) - start).total_seconds() / 60)
+    level = labor_guard.fatigue_level(minutes)
+    return {
+        "online_minutes": round(minutes, 1),
+        "level": level,
+        "message": labor_guard.fatigue_message(level, minutes),
+        # 说清楚 throttle 是什么意思,免得骑手以为被限流封号了
+        "blocks_grabbing": False,
+    }

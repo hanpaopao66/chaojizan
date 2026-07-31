@@ -426,6 +426,10 @@ class Order {
         sameWay = json['same_way'] as bool? ?? false,
         sameWayLevel = json['same_way_level'] as String? ?? 'none',
         detourM = json['detour_m'] as int?,
+        estMinutes = (json['est_minutes'] as num?)?.toDouble(),
+        estWaitMinutes = (json['est_wait_minutes'] as num?)?.toDouble(),
+        waitSource = json['wait_source'] as String? ?? 'declared',
+        centsPerMinute = (json['cents_per_minute'] as num?)?.toDouble(),
         createdAt = json['created_at'] as String;
 
   final String orderNo;
@@ -490,6 +494,14 @@ class Order {
   final bool sameWay;     // 顺路(strong/weak 都为 true)
   final String sameWayLevel;  // strong / weak / none
   final int? detourM;     // 绕路增量:接这单比只送手头单多跑多远
+  /// 预计总耗时(到店 + 等餐 + 送达)。骑手判断「值不值得接」看这个,
+  /// 不是只看"到店多远"
+  final double? estMinutes;
+  final double? estWaitMinutes;   // 其中在店等餐
+  /// measured=该店实测出餐 P80,declared=商家自报(样本不足)。
+  /// 要标出来:「等 22 分钟」和「大概 15 分钟(样本还少)」,决策不一样
+  final String waitSource;
+  final double? centsPerMinute;   // 每分钟收入估算(横向比较用)
   final String createdAt;
 
   String get summary =>

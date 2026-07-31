@@ -4,10 +4,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import PlatformFlag
 
 
-async def weather_surcharge_on(db: AsyncSession) -> bool:
-    """恶劣天气配送加价是否开启(加价全归骑手)。"""
+async def weather_surcharge_on(
+    db: AsyncSession,
+    lat: float | None = None,
+    lng: float | None = None,
+) -> bool:
+    """恶劣天气配送加价是否开启(加价全归骑手)。
+
+    ## 从「手动全局开关」改为「按坐标自动判定」(#146)
+
+    原先是管理员手动开、而且是**全局**的 —— 成都下暴雨,北京的骑手也拿加价;
+    北京下雪没人开开关,骑手就白挨冻。实测同一时刻成都锦江区降水 0.2mm、
+    双流区 0.1mm、北京朝阳 0.0mm,**区县级差异真实存在**。
+
+    现在:传了坐标就按该点实时天气判(services/weather.py,判定阈值公开);
+    没传坐标(历史调用/批量场景)退回全局开关。
+
+    管理员保留**强制开**的能力 —— 自动判定漏了也能救。
+    但**不保留强制关**:天气恶劣却关掉加价,没有正当理由。
+    """
     flag = await db.get(PlatformFlag, "weather_surcharge")
-    return flag is not None and flag.value == "on"
+    forced_on = flag is not None and flag.value == "on"
+    if forced_on:
+        return True
+    if lat is None or lng is None:
+        return False
+
+    from . import weather
+
+    w = await weather.current(lat, lng)
+    # 查不到时返回 False 而不是抛错;但**注意**:这不等于"天气很好",
+    # 只是"不知道"。真正的降级语义在调用侧 —— 已经加价的订单不会被追溯撤销
+    return bool(w and w.get("severe"))
 
 
 async def night_curfew_window(db: AsyncSession) -> str | None:

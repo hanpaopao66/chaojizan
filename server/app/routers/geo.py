@@ -128,3 +128,39 @@ async def reverse_geocode(
         lat=lat,
         lng=lng,
     )
+
+
+@router.get("/weather")
+async def weather_at(
+    lat: float = Query(ge=-90, le=90),
+    lng: float = Query(ge=-180, le=180),
+    user: User = Depends(get_current_user),
+):
+    """当前位置天气与是否触发恶劣天气加价(#146)。
+
+    三端共用:骑手端显示「当前恶劣天气,本单加价 ¥X」、
+    用户端显示「雨天配送,预计送达已顺延」、商家端提示可能出餐延迟。
+
+    判定阈值与 /transparency/dispatch 公开的是**同一份常量**。
+    """
+    from ..config import settings
+    from ..services import weather as wx
+
+    w = await wx.current(lat, lng)
+    if w is None:
+        # 查不到就如实说不知道,不要假装天气很好 ——
+        # 前端据此不显示天气提示,而不是显示「天气良好」
+        return {"available": False}
+    return {
+        "available": True,
+        "severe": w["severe"],
+        "temp_c": w["temp_c"],
+        "precip_mm": w["precip_mm"],
+        "wind_kmh": w["wind_kmh"],
+        "surcharge_cents": (settings.delivery_weather_surcharge_cents
+                            if w["severe"] else 0),
+        # 加价全归骑手 —— 这句每次都带上,不是废话:
+        # 用户看到加价时会问"这钱给谁了"
+        "note": ("恶劣天气配送加价,全额归骑手;预计送达时间已相应放宽"
+                 if w["severe"] else ""),
+    }

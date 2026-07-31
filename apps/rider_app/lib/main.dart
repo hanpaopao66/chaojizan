@@ -160,12 +160,26 @@ class _RiderHomePageState extends State<RiderHomePage>
         order.merchantLat!, order.merchantLng!, order.lat, order.lng);
   }
 
+  /// 疲劳状态(null = 未取到/未上线)
+  Map<String, dynamic>? _fatigue;
+
   Future<void> _refresh() async {
     try {
       // 服务端已按「综合分 = 距离 - 等待加权」排好(顺路信息也来自服务端),
       // 客户端不再自行重排,避免把等久的老单永远压在底部
       final available = _online ? await widget.api.availableOrders() : <Order>[];
       final mine = await widget.api.myOrders();
+      // 疲劳提醒:只提醒不断单(见服务端 labor_guard)。
+      // 取不到就不显示 —— 疲劳提示挂了不该影响接单
+      if (_online) {
+        try {
+          _fatigue = await widget.api.riderFatigue();
+        } catch (_) {
+          _fatigue = null;
+        }
+      } else {
+        _fatigue = null;
+      }
 
       // 新的可抢订单出现 → 响铃 + 振动提醒(首轮加载不响,避免一上线就炸铃)
       final fresh = available
@@ -816,6 +830,32 @@ class _RiderHomePageState extends State<RiderHomePage>
     }
   }
 
+  /// 疲劳提示条(#144)。**只提醒,不断单** ——
+  /// 骑手要吃饭,一刀切断人家收入是另一种不尊重;但平台不能装作没看见。
+  Widget _fatigueBar() {
+    final msg = _fatigue?['message'] as String?;
+    if (msg == null || msg.isEmpty) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    final throttle = _fatigue?['level'] == 'throttle';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: (throttle ? sz.hold : sz.earn).withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(kRadiusSm),
+      ),
+      child: Row(children: [
+        Icon(throttle ? Icons.bedtime_outlined : Icons.local_cafe_outlined,
+            size: 17, color: throttle ? sz.hold : sz.earn),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(msg,
+              style: TextStyle(fontSize: 12.5, height: 1.4, color: sz.ink)),
+        ),
+      ]),
+    );
+  }
+
   /// 接单半径 chips:只看 N 公里内的单(顺路单豁免),服务端持久化。
   Widget _radiusBar() {
     Future<void> setRadius(int? km) async {
@@ -903,14 +943,41 @@ class _RiderHomePageState extends State<RiderHomePage>
                           '比只送手头单多跑约 ${order.detourM ?? 0} 米',
                   style: TextStyle(
                       color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
-            // 整单跑程:旧版只显示「到店多远」,同一家店的 220m 单和 4km 单
-            // 看起来一模一样。骑手关心的是整单划不划算
+            // 整单跑程 + 耗时 + 时薪。
+            //
+            // 旧版只显示「到店多远」和总价 —— 而一个 3 公里 8 块的单和一个
+            // 1 公里 4 块的单哪个划算,**不看总价看时薪**。实测:前者时薪
+            // ¥14.2/小时、后者 ¥21.8/小时,总价高的反而不划算。
             if (order.tripM != null)
               Text(
                   '跑程:到店 ${order.distanceM ?? 0} 米 + 送 ${order.tripM} 米'
                   '${order.distanceSource == "straight" ? "(直线估算)" : ""}',
                   style: TextStyle(
                       fontSize: 12, color: Theme.of(context).sz.inkMuted)),
+            if (order.estMinutes != null)
+              Row(children: [
+                Text('约 ${order.estMinutes!.toStringAsFixed(0)} 分钟',
+                    style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).sz.ink)),
+                if ((order.estWaitMinutes ?? 0) > 0) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                      '(含等餐 ${order.estWaitMinutes!.toStringAsFixed(0)}'
+                      '${order.waitSource == "declared" ? "·商家自报" : ""})',
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(context).sz.inkFaint)),
+                ],
+                const Spacer(),
+                if (order.centsPerMinute != null && order.centsPerMinute! > 0)
+                  Text(
+                      '≈ ¥${(order.centsPerMinute! * 60 / 100).toStringAsFixed(0)}/小时',
+                      style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).sz.earn)),
+              ]),
             if (order.hasAlcohol)
               Text('🍺 含酒精饮品,送达请查验收件人年龄',
                   style: TextStyle(
@@ -1021,7 +1088,13 @@ class _RiderHomePageState extends State<RiderHomePage>
                 : ListView.builder(
                         itemCount: _available.length + 1,
                         itemBuilder: (context, i) {
-                          if (i == 0) return _radiusBar();
+                          if (i == 0) {
+                            // 疲劳提示置顶:它比任何一单都重要
+                            return Column(children: [
+                              _fatigueBar(),
+                              _radiusBar(),
+                            ]);
+                          }
                           return _orderCard(
                           _available[i - 1],
                           actions: [

@@ -760,6 +760,14 @@ class OrderOut(BaseModel):
     # 顺路等级:strong / weak / none。按**绕路增量**判,不按两点距离
     same_way_level: str = "none"
     detour_m: int | None = None            # 绕路增量:接这单要比只送手头单多跑多远
+    # 整单经济性(#142):骑手判断「值不值得接」要的是这三个,不是"到店多远"
+    est_minutes: float | None = None       # 预计总耗时(到店 + 等餐 + 送达)
+    est_wait_minutes: float | None = None  # 其中在店等餐(按该店实测出餐分位数)
+    # 等餐预期来源:measured=该店实测 P80,declared=商家自报(样本不足)。
+    # **必须透传** —— 「等 22 分钟」和「大概 15 分钟(样本还少)」,
+    # 骑手的决策是不一样的
+    wait_source: str = "declared"
+    cents_per_minute: float | None = None  # 每分钟收入估算(横向比较用)
     # 联系方式,仅订单详情接口填充(列表不查,避免 N+1)
     rider_name: str = ""
     rider_phone: str = ""

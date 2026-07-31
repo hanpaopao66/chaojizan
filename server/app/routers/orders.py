@@ -440,7 +440,12 @@ async def create_order(
         fee_cents = 0
         notes.append("到店自取,免配送费")
     else:
-        fee_parts = delivery_fee_parts(distance_m, weather_on=await weather_surcharge_on(db))
+        # 天气按**商家坐标**判(骑手在那一带跑),不再是全局开关 ——
+        # 成都下暴雨北京也加价、北京下雪没人开开关骑手白挨冻,都是全局开关的锅
+        fee_parts = delivery_fee_parts(
+            distance_m,
+            weather_on=await weather_surcharge_on(
+                db, merchant.lat, merchant.lng))
         fee_cents = sum(fee_parts.values())
         if fee_parts["night"]:
             notes.append(f"夜间配送+{fee_parts['night'] / 100:g}元(归骑手)")
@@ -1256,7 +1261,11 @@ async def preview_delivery_fee(
     if merchant is None:
         raise HTTPException(404, "商家不存在")
     distance = haversine_m(merchant.lat, merchant.lng, lat, lng)
-    parts = delivery_fee_parts(distance, weather_on=await weather_surcharge_on(db))
+    # 按**商家坐标**判天气:骑手是在那一带跑的。
+    # 用收货点也行,但一单里两点最远 4km,同一片天气,取商家侧即可
+    parts = delivery_fee_parts(
+        distance,
+        weather_on=await weather_surcharge_on(db, merchant.lat, merchant.lng))
     return {
         "distance_m": round(distance),
         "fee_cents": sum(parts.values()),

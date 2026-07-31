@@ -937,6 +937,12 @@ class ApiClient {
     return PoiTip.fromJson(data as Map<String, dynamic>);
   }
 
+  /// 连续在线时长与疲劳提醒(#144)。**只提醒不断单。**
+  Future<Map<String, dynamic>> riderFatigue() async {
+    final data = await _request('GET', '/riders/me/fatigue');
+    return data as Map<String, dynamic>;
+  }
+
   /// 派单算法公开说明(/transparency/dispatch,无需鉴权)。
   ///
   /// 服务端从排序代码的常量直接读,不另抄一份 —— 所以这里拿到的

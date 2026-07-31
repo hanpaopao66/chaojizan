@@ -159,3 +159,35 @@ class Test劳动者保护并入公开页:
         log = d.public_spec()["changelog"]
         assert len(log) >= 2, "算法改了就要记一笔"
         assert any("劳动者保护" in e["what"] for e in log)
+
+
+class Test整单经济性:
+    """骑手要判断的是「这一单值不值得接」,不是「到店多远」。"""
+
+    def test_总价高不等于划算(self):
+        """旧界面只显示总价和距离,看不出时薪差异。"""
+        near = d.trip_economics(500, 1000, 5, 400, 0)
+        far = d.trip_economics(1500, 3000, 20, 800, 100)
+        assert far["income_cents"] > near["income_cents"]      # 远单总价高
+        assert far["cents_per_minute"] < near["cents_per_minute"]  # 但时薪低
+
+    def test_等餐计入总耗时(self):
+        """在店干等的时间是真实成本,不算进去就低估了。"""
+        a = d.trip_economics(500, 1000, 0, 400, 0)
+        b = d.trip_economics(500, 1000, 20, 400, 0)
+        assert b["total_minutes"] > a["total_minutes"]
+        assert b["cents_per_minute"] < a["cents_per_minute"]
+
+    def test_小费计入收入(self):
+        a = d.trip_economics(500, 1000, 5, 400, 0)
+        b = d.trip_economics(500, 1000, 5, 400, 200)
+        assert b["cents_per_minute"] > a["cents_per_minute"]
+
+    def test_恶劣天气耗时更长(self):
+        a = d.trip_economics(2000, 2000, 5, 600, 0)
+        b = d.trip_economics(2000, 2000, 5, 600, 0, severe_weather=True)
+        assert b["total_minutes"] > a["total_minutes"]
+
+    def test_零耗时不除零(self):
+        """除零会让整个抢单池 500。"""
+        assert d.trip_economics(0, 0, 0, 400, 0)["cents_per_minute"] == 0

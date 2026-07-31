@@ -54,9 +54,13 @@ assert o["discount_cents"] == 800, f"店铺券应走 discount 口径,实际 {o['
 assert o["subsidy_cents"] == 0, "店铺券是商家承担,不进平台补贴"
 assert "店铺券" in o["promo_note"]
 paid = call("POST", f"/orders/{o['order_no']}/pay/mock", customer)
-# 佣金 = (food+packing-discount) * 5% = (5000-800)*0.05 = 210(支付时才算)
-assert paid["commission_cents"] == 210, \
-    f"佣金应按券后实收,实际 {paid['commission_cents']}"
+# 佣金 = (food + packing − discount) × 该店实际费率(支付时才算)。
+# 不写死 5%:阶梯佣金会把老店降档,演示店在跑久了的库上必然进入降档区间。
+# 这条真正要守的是「按**券后实收**计佣」,而不是费率具体是多少
+_rate = float(shop["commission_rate"])
+_net = 5000 - 800
+assert paid["commission_cents"] == int(_net * _rate), \
+    f"佣金应按券后实收 {_net} × {_rate:.1%},实际 {paid['commission_cents']}"
 print(f"✓ 下单抵扣走 discount(商家承担),佣金按券后实收 = {paid['commission_cents']} 分")
 
 # 用过的券不能再用

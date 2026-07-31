@@ -74,6 +74,41 @@ class Candidate:
     """绕路增量;手头没有在途单时为 None(无从谈顺路)。"""
 
 
+def trip_economics(
+    to_pickup_m: float,
+    trip_m: float,
+    wait_minutes: float,
+    fee_cents: int,
+    tip_cents: int,
+    *,
+    severe_weather: bool = False,
+) -> dict:
+    """整单的耗时与时薪估算(#142)。
+
+    骑手真正要判断的不是"到店多远",而是**这一单值不值得接**:
+    跑多远 / 花多久(含在店等餐)/ 挣多少。
+
+    每分钟收入是骑手用来横向比较的量 —— 一个 3 公里 8 块的单和一个
+    1 公里 4 块的单哪个划算,不看总价看时薪。
+
+    骑行时间走 labor_guard(速度是常量,不由骑手表现训练)。
+    """
+    from . import labor_guard
+
+    ride = (labor_guard.ride_minutes(to_pickup_m, severe_weather=severe_weather)
+            + labor_guard.ride_minutes(trip_m, severe_weather=severe_weather))
+    total = ride + max(0.0, wait_minutes)
+    income = fee_cents + tip_cents
+    return {
+        "total_minutes": round(total, 1),
+        "ride_minutes": round(ride, 1),
+        "wait_minutes": round(max(0.0, wait_minutes), 1),
+        "income_cents": income,
+        # 时薪估算:总耗时为 0 时不除(理论上不会,但除零会让整个抢单池 500)
+        "cents_per_minute": round(income / total, 1) if total > 0 else 0,
+    }
+
+
 @dataclass(frozen=True)
 class Scored:
     score: float

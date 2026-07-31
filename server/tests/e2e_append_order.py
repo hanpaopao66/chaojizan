@@ -56,9 +56,13 @@ assert a1["parent_order_no"] == p1
 assert a1["address"] == "测试小区 3 栋"
 assert p1[-6:] in a1["remark"]
 paid1 = call("POST", f"/orders/{a1['order_no']}/pay/mock", customer)
-assert paid1["commission_cents"] == 15  # 独立计佣 5%
+# 佣金按**该店实际费率**算,不写死 5% —— 阶梯佣金会把老店降到 4.5%/4%,
+# 演示店在跑久了的库上必然进入降档区间
+_rate = float(shop["commission_rate"])
+assert paid1["commission_cents"] == int(300 * _rate), \
+    f"追加单应按 {_rate:.1%} 独立计佣,实际 {paid1['commission_cents']}"
 assert paid1["total_cents"] == 300
-print("✓ 追加单免配送费免起送价,地址随原单,独立计佣 5%")
+print(f"✓ 追加单免配送费免起送价,地址随原单,独立计佣 {_rate:.1%}")
 
 # 2) 不进抢单池,不能被单独抢
 pool = call("GET", "/riders/available-orders", rider)
