@@ -1,4 +1,4 @@
-"""存量商家城市回填:逆地理批量跑一次(需 .env 配 TIANDITU_SERVER_KEY)。
+"""存量商家城市回填:逆地理批量跑一次(需 .env 配 TENCENT_MAP_KEY)。
 
 在 server/ 目录下运行:python -m scripts.backfill_city
 幂等:只处理 city 为空的商家;失败的留空下次再跑或后台人工填。

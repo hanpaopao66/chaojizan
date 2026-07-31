@@ -1,11 +1,9 @@
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// 配送地图:取餐点(商家)、送达点(顾客)、骑手实时位置。
-/// 底图:天地图(shared/delivery_map.dart);真正的骑行导航跳外部高德 App。
+/// 底图:腾讯地图(shared/delivery_map.dart);骑行导航跳外部地图 App
+/// (腾讯/高德/百度,装了哪些给哪些选)。
 class DeliveryMapPage extends StatelessWidget {
   const DeliveryMapPage({
     super.key,
@@ -18,25 +16,11 @@ class DeliveryMapPage extends StatelessWidget {
   /// 由主页持有并随 GPS 更新,地图页跟着动
   final ValueNotifier<({double lat, double lng})?> riderPosition;
 
-  /// 唤起高德 App 骑行导航;没装高德则打开网页版。
-  /// dev=0 表示传入坐标已是 GCJ-02,t=3 骑行模式。(跳转协议不需要 SDK/Key)
-  Future<void> _navigate(double lat, double lng, String name) async {
-    final encoded = Uri.encodeComponent(name);
-    final appUri = defaultTargetPlatform == TargetPlatform.iOS
-        ? Uri.parse(
-            'iosamap://path?sourceApplication=superz&dlat=$lat&dlon=$lng&dname=$encoded&dev=0&t=3')
-        : Uri.parse(
-            'amapuri://route/plan/?sourceApplication=superz&dlat=$lat&dlon=$lng&dname=$encoded&dev=0&t=3');
-    if (await canLaunchUrl(appUri)) {
-      await launchUrl(appUri);
-      return;
-    }
-    await launchUrl(
-      Uri.parse(
-          'https://uri.amap.com/navigation?to=$lng,$lat,$encoded&mode=ride&src=superz'),
-      mode: LaunchMode.externalApplication,
-    );
-  }
+  /// 唤起外部地图骑行导航。装了哪些给哪些选,只装一个就直接走。
+  /// 实现在 packages/shared/lib/src/nav_launcher.dart(纯跳转协议,不接 SDK)。
+  Future<void> _navigate(
+          BuildContext context, double lat, double lng, String name) =>
+      navigateTo(context, lat: lat, lng: lng, name: name, mode: NavMode.ride);
 
   @override
   Widget build(BuildContext context) {
@@ -81,7 +65,7 @@ class DeliveryMapPage extends StatelessWidget {
                     icon: const Icon(Icons.store),
                     label: const Text('导航去取餐'),
                     onPressed: () => _navigate(
-                        order.merchantLat!, order.merchantLng!,
+                        context, order.merchantLat!, order.merchantLng!,
                         order.merchantName),
                   ),
                 ),
@@ -90,8 +74,8 @@ class DeliveryMapPage extends StatelessWidget {
                 child: FilledButton.icon(
                   icon: const Icon(Icons.home),
                   label: const Text('导航去送餐'),
-                  onPressed: () =>
-                      _navigate(order.lat, order.lng, order.address),
+                  onPressed: () => _navigate(
+                      context, order.lat, order.lng, order.address),
                 ),
               ),
             ],

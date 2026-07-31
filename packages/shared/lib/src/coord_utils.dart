@@ -19,8 +19,8 @@ import 'dart:math';
 
 /// GCJ-02 → WGS-84 逆变换(迭代法,误差 < 1e-6 度 ≈ 0.1 米)。
 ///
-/// 用途:天地图/OSM 等 WGS-84 底图展示。全系统存储仍统一 GCJ-02,
-/// 只在贴瓦片的那一刻转回来。
+/// 用途:OSM 等 WGS-84 底图展示。全系统存储统一 GCJ-02,只在需要时转回来。
+/// (配送地图换成腾讯瓦片后不再需要这一步 —— 腾讯本身就是 GCJ-02。)
 ({double lat, double lng}) gcj02ToWgs84(double lat, double lng) {
   if (_outOfChina(lat, lng)) return (lat: lat, lng: lng);
   var wgsLat = lat;
@@ -31,6 +31,18 @@ import 'dart:math';
     wgsLng -= gcj.lng - lng;
   }
   return (lat: wgsLat, lng: wgsLng);
+}
+
+/// GCJ-02 → BD-09(百度坐标)。
+///
+/// 只在**唤起百度地图导航**时用一次:百度是国内唯一不吃 GCJ-02 的主流地图,
+/// 直接把 GCJ-02 传给它,终点会偏出去几百米 —— 骑手照着导航跑到隔壁街。
+/// 腾讯与高德都是 GCJ-02,不需要转。
+({double lat, double lng}) gcj02ToBd09(double lat, double lng) {
+  const xPi = pi * 3000.0 / 180.0;
+  final z = sqrt(lng * lng + lat * lat) + 0.00002 * sin(lat * xPi);
+  final theta = atan2(lat, lng) + 0.000003 * cos(lng * xPi);
+  return (lat: z * sin(theta) + 0.006, lng: z * cos(theta) + 0.0065);
 }
 
 /// 两点直线距离(米),骑手端"距你多远/送程多远"用

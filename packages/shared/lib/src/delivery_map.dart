@@ -1,10 +1,13 @@
-/// 配送地图(用户端/骑手端共用):flutter_map + 天地图瓦片。
+/// 配送地图(用户端/骑手端共用):flutter_map + 腾讯地图瓦片。
 ///
-/// 为什么不用高德 SDK:那个 .so 独占 31MB(APK 的 58%),而我们只画
-/// 三个点一条线。flutter_map 纯 Dart 零原生依赖,天地图是官方免费底图。
+/// 为什么不用原生地图 SDK:高德那个 .so 独占 31MB(APK 的 58%),
+/// 而我们只画三个点一条线。flutter_map 纯 Dart,零原生依赖。
 ///
-/// 坐标约定:入参一律 GCJ-02(全系统统一),贴瓦片时内部转 WGS-84。
-/// 未配置 TIANDITU_KEY 时自动降级:无街道底图,画品牌网格 + 三点连线示意,
+/// **坐标口径:全程 GCJ-02,不转换。** 腾讯地图本身就是 GCJ-02,
+/// 与本系统全局口径一致 —— 这是换掉天地图的主要理由之一:
+/// 天地图是 WGS-84,原先每次渲染都要把所有点转一道,转换本身就是错误来源。
+///
+/// 未配置 TENCENT_MAP_KEY 时自动降级:无街道底图,画品牌网格 + 三点连线示意,
 /// 功能不断(相对方位与距离仍然真实)。
 library;
 
@@ -13,10 +16,10 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import 'brand.dart';
-import 'coord_utils.dart';
 
-/// 天地图 key:--dart-define=TIANDITU_KEY=xxx 注入(tianditu.gov.cn 免费申请)
-const String kTiandituKey = String.fromEnvironment('TIANDITU_KEY');
+/// 腾讯地图 key:--dart-define=TENCENT_MAP_KEY=xxx 注入。
+/// 与服务端逆地理(services/geo_city.py)共用同一把。
+const String kTencentMapKey = String.fromEnvironment('TENCENT_MAP_KEY');
 
 /// 地图上的一个点(GCJ-02)
 class MapPoint {
@@ -47,10 +50,8 @@ class DeliveryMapView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final wgs = [
-      for (final p in points) gcj02ToWgs84(p.lat, p.lng),
-    ];
-    final latLngs = [for (final w in wgs) LatLng(w.lat, w.lng)];
+    // 腾讯瓦片是 GCJ-02,入参也是 GCJ-02 —— 直接用,不转换
+    final latLngs = [for (final p in points) LatLng(p.lat, p.lng)];
 
     final bounds = LatLngBounds.fromPoints(latLngs);
     final path = pathThrough ?? List.generate(points.length, (i) => i);
@@ -73,21 +74,23 @@ class DeliveryMapView extends StatelessWidget {
                 : const Color(0xFFEDF0F2),
           ),
           children: [
-            if (kTiandituKey.isNotEmpty) ...[
-              // 天地图矢量底图 + 中文注记(Web 墨卡托,WGS-84)
+            if (kTencentMapKey.isNotEmpty)
+              // 腾讯地图栅格瓦片。中文注记已经烘焙在这一层里,
+              // 不像天地图要底图 + 注记贴两层。
+              //
+              // **tms: true 不能省。** 腾讯的 y 轴是自下而上(TMS 口径),
+              // 而 flutter_map 默认是自上而下(XYZ)。少了这行,请求照样返回
+              // HTTP 200 —— 只是给你一张地球另一边的空白瓦片,
+              // 表现为"地图一片灰",很容易误判成 key 没生效(实测过)。
               TileLayer(
-                urlTemplate: 'https://t{s}.tianditu.gov.cn/DataServer'
-                    '?T=vec_w&x={x}&y={y}&l={z}&tk=$kTiandituKey',
-                subdomains: const ['0', '1', '2', '3', '4', '5', '6', '7'],
+                urlTemplate: 'https://rt{s}.map.gtimg.com/tile'
+                    '?z={z}&x={x}&y={y}&styleid=1&version=117'
+                    '&key=$kTencentMapKey',
+                subdomains: const ['0', '1', '2', '3'],
+                tms: true,
                 userAgentPackageName: 'cn.superz.app',
-              ),
-              TileLayer(
-                urlTemplate: 'https://t{s}.tianditu.gov.cn/DataServer'
-                    '?T=cva_w&x={x}&y={y}&l={z}&tk=$kTiandituKey',
-                subdomains: const ['0', '1', '2', '3', '4', '5', '6', '7'],
-                userAgentPackageName: 'cn.superz.app',
-              ),
-            ] else
+              )
+            else
               // 降级模式:品牌网格打底,三点方位与距离依然真实
               const _GridBackdrop(),
             if (path.length > 1)
@@ -111,11 +114,12 @@ class DeliveryMapView extends StatelessWidget {
             ]),
           ],
         ),
-        if (kTiandituKey.isNotEmpty)
+        // 版权标注是地图服务商的硬性要求,不能因为"占地方"就去掉
+        if (kTencentMapKey.isNotEmpty)
           const Positioned(
             right: 6,
             bottom: 4,
-            child: Text('© 天地图 GS(2024)0568号',
+            child: Text('© 腾讯地图',
                 style: TextStyle(fontSize: 9, color: Colors.black38)),
           )
         else

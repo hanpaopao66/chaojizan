@@ -32,6 +32,15 @@ PATTERNS=(
   'auth\.token\s*='
   'wanli'
   'aikas'    # 历史域名:保留访问但不明文出现
+  # 地图 key。腾讯地图是 5 组 5 位、连字符分隔的固定形态,拦得住;
+  # 天地图/高德是 32 位十六进制,和一堆哈希撞形,所以按变量名拦
+  '[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}'
+  # 按变量名拦时**必须同时要求值长得像真 key**(16 位以上十六进制),
+  # 否则 `--dart-define=AMAP_KEY=你的Key` 这种文档占位符全是误报,
+  # 误报多了就没人看扫描结果,等于没有扫描
+  'TENCENT_MAP_KEY\s*[:=]\s*[A-Z0-9-]{20,}'
+  'TIANDITU_[A-Z_]*KEY\s*[:=]\s*[0-9a-fA-F]{16,}'
+  'AMAP_[A-Z_]*KEY\s*[:=]\s*[0-9a-fA-F]{16,}'
   # 生产环境痕迹
   'POSTGRES_PASSWORD\s*[:=]\s*[^$?{]'   # 写死的密码(引用变量的不算)
   'JWT_SECRET\s*[:=]\s*[^$?{c]'         # 同上(change-me 默认值放行)
@@ -50,7 +59,10 @@ EXCLUDES=(
 found=0
 for pattern in "${PATTERNS[@]}"; do
   if git ls-files >/dev/null 2>&1; then
-    hits=$(git grep -InE "$pattern" -- . "${EXCLUDES[@]}" 2>/dev/null \
+    # -I 跳过二进制;--untracked 把「还没 add 但也没被 ignore」的新文件一起扫。
+    # 少了 --untracked 的话,新写的文件要等到 add 之后才进扫描范围 ——
+    # 而 `git add -A && git commit` 是一步完成的,那时已经晚了
+    hits=$(git grep -InE --untracked "$pattern" -- . "${EXCLUDES[@]}" 2>/dev/null \
            | grep -vE "$DEV_DEFAULT_FILTER")
   else
     hits=$(grep -rInE "$pattern" . \

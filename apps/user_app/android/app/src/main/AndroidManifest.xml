@@ -55,5 +55,24 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 唤起外部地图导航前要先探测装没装。Android 11+ 起,没在这里声明的
+             scheme 一律查不到 —— 表现为「明明装了高德却不给选」,
+             而且不报任何错,只会静默掉进网页版兜底 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="qqmap"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="amapuri"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="iosamap"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="baidumap"/>
+        </intent>
     </queries>
 </manifest>

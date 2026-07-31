@@ -2,8 +2,8 @@
 # 一键发版:三端打包 → 传部署机 appdist → 更新 versions.json
 # 旧版 App 打开即弹「发现新版本」,点击更新浏览器下载,覆盖安装(同签名+build 递增)。
 #
-# 用法:TIANDITU_KEY=xxx scripts/release_apks.sh 0.3.0 3 "更新说明一句话"
-#      (TIANDITU_KEY 可省;省略时配送地图为示意模式,见 docs/AMAP_SETUP.md)
+# 用法:TENCENT_MAP_KEY=xxx scripts/release_apks.sh 0.3.0 3 "更新说明一句话"
+#      (可省;省略时配送地图退化为品牌网格示意,方位与距离仍真实)
 #   $1 版本名(versionName)  $2 build 号(必须递增!)  $3 更新说明
 set -e
 cd "$(dirname "$0")/.."
@@ -29,7 +29,7 @@ for app in user merchant rider; do
       --obfuscate --split-debug-info=build/symbols/$VERSION+$BUILD \
       --dart-define=SUPERZ_API=$API \
       --dart-define=SUPERZ_ICP=陕ICP备2025064101号-5 \
-      --dart-define=TIANDITU_KEY=${TIANDITU_KEY:-} | grep -E "apk|Built")
+      --dart-define=TENCENT_MAP_KEY=${TENCENT_MAP_KEY:-} | grep -E "apk|Built")
 done
 
 echo "== 校验 versionCode 平码(防更新检查失灵) =="

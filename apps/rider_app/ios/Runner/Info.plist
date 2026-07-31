@@ -78,5 +78,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- iOS 上 canOpenURL 只对这里列出的 scheme 返回 true。
+	     没声明的话「装没装地图」一律探测为否,导航只能掉进网页版 -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>qqmap</string>
+		<string>iosamap</string>
+		<string>baidumap</string>
+	</array>
 </dict>
 </plist>

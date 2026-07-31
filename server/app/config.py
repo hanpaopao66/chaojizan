@@ -152,9 +152,14 @@ class Settings(BaseSettings):
     # 不配置时 /geo/tips 返回演示数据,开发期可跑通全流程
     amap_web_key: str = ""
 
-    # 天地图服务端 Key(逆地理解析城市,多城市隔离用)。
-    # 不配置时 city 留空人工填(空 city 不参与隔离,功能可降级)
-    tianditu_server_key: str = ""
+    # 腾讯地图 Key(#137)。一把 key 同时用于:
+    #  - 服务端逆地理解析城市(services/geo_city.py,多城市隔离用);
+    #  - 客户端配送地图底图瓦片(打包时 --dart-define=TENCENT_MAP_KEY 注入)。
+    # 不配置时 city 留空人工填、地图退化成品牌网格示意,功能都不断。
+    #
+    # 换掉天地图的原因是坐标口径:腾讯用 GCJ-02,与本系统全局一致,
+    # 而天地图是 WGS-84,每贴一次瓦片、每查一次城市都要转一道。
+    tencent_map_key: str = ""
 
     # ===== 以下三组为待联调的外部服务,拿到资质/Key 后填 .env 即可启用 =====
 

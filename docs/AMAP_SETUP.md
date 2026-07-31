@@ -1,24 +1,58 @@
 # 地图与地理服务配置指南
 
-> **2026-07-17 起客户端地图已切换到天地图**(flutter_map 纯 Dart 方案,
-> 高德 3D SDK 的 31MB .so 从用户端/骑手端移除,APK 从 54MB 瘦到 ~22MB)。
-> 高德保留两个用途:骑手跳转外部高德 App 导航(URI 协议,无需 Key)、
-> 服务端地址联想(AMAP_WEB_KEY,见第 3 节)。
+> **2026-07-31 起地图服务改用腾讯位置服务**(此前是天地图,再之前是高德 3D SDK)。
+> 高德 3D SDK 的 31MB .so 早已移除(APK 从 54MB 瘦到 ~22MB),方案仍是
+> flutter_map 纯 Dart。高德只剩一个服务端用途:地址联想(AMAP_WEB_KEY,见第 3 节)。
 
-## 0. 天地图 Key(客户端街道底图,免费)
+## 0. 腾讯地图 Key(一把 key 两处用)
 
-1. 注册 [天地图开放平台](https://www.tianditu.gov.cn/) → 控制台申请 Key。
-   **App 打包必须用「服务器端」类型的 Key**——实测(2026-07)「浏览器端」Key
-   对非浏览器请求一律 403(code 301012 权限类型错误,带 Referer 也没用),
-   而服务器端 Key 未配 IP 白名单时瓦片畅通;浏览器端 Key 留给未来 Web 地图。
-2. 打包时注入(不注入则地图自动进"示意模式":三点连线可用,无街道底图):
+同一把 key 同时用于:
+
+| 用途 | 在哪 | 不配的后果 |
+|---|---|---|
+| 客户端配送地图底图 | `packages/shared/lib/src/delivery_map.dart` | 退化为品牌网格示意,方位与距离仍真实 |
+| 服务端逆地理解析城市 | `server/app/services/geo_city.py` | city 留空,不参与多城市隔离,管理后台人工填 |
+
+1. [腾讯位置服务](https://lbs.qq.com/) 控制台申请 key。
+2. 打包时注入:
    ```bash
-   TIANDITU_KEY=服务器端key scripts/release_apks.sh 0.4.0 4 "更新说明"
-   # 或开发期:flutter run --dart-define=TIANDITU_KEY=服务器端key
+   TENCENT_MAP_KEY=你的key scripts/release_apks.sh 0.7.1 2047 "更新说明"
+   # 开发期:flutter run --dart-define=TENCENT_MAP_KEY=你的key
    ```
-   Key 本体存 server/.env(TIANDITU_SERVER_KEY / TIANDITU_BROWSER_KEY,
-   不入库)与部署机 .env.prod,发版前 source 一下即可。
-3. 免费配额:个人开发者 1 万次/天,够试运营;超量升企业配额(仍免费)
+   服务端那份存 `server/.env`(本地,不入库)与部署机 `deploy/.env.prod`,
+   变量名 `TENCENT_MAP_KEY`。
+
+### 换掉天地图的两个理由
+
+**坐标口径。** 腾讯是 GCJ-02,与本系统全局口径一致,直接传;
+天地图是 WGS-84,原先每贴一次瓦片、每查一次城市都要转一道 ——
+转换本身就是错误来源,少一层就少一类 bug。
+
+**瓦片层数。** 腾讯的中文注记烘焙在同一层里;天地图要底图 `vec_w` +
+注记 `cva_w` 贴两层,请求量翻倍。
+
+### 踩过的坑:`tms: true` 不能省
+
+腾讯瓦片的 y 轴是**自下而上**(TMS 口径),而 flutter_map 默认自上而下(XYZ)。
+少这一行,请求照样返回 **HTTP 200** —— 只是给你一张地球另一边的空白瓦片,
+表现为"地图一片灰"。极容易误判成 key 没生效或没配额。
+
+判断方法:同一坐标按两种口径各取一张,**体积差十倍**的那张大的才是对的
+(空白瓦片压缩率极高)。实测成都春熙路 z=16:TMS 17KB、XYZ 1.7KB。
+
+## 0.1 外部地图导航跳转(无需 key)
+
+骑手端「导航去取餐/送餐」唤起外部地图 App,支持腾讯/高德/百度,
+装了哪些给哪些选、只装一个就直接跳。实现在
+`packages/shared/lib/src/nav_launcher.dart`,**纯 URL Scheme,不接任何 SDK**。
+
+两个必做的声明,漏了会静默失效(探测不到 = 当成没装,直接掉进网页版):
+
+- Android:`AndroidManifest.xml` 的 `<queries>` 里声明各 scheme(11+ 起强制);
+- iOS:`Info.plist` 的 `LSApplicationQueriesSchemes`。
+
+坐标:腾讯与高德吃 GCJ-02 直接传;**百度吃 BD-09,必须转**
+(`gcj02ToBd09`),不转会偏几百米,骑手照着导航跑到隔壁街。
 
 ---
 
