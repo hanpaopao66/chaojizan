@@ -667,5 +667,44 @@
       "license": "CC0",
       "author": "Andy Li"
     }
+  ],
+  "stay_room": [
+    {
+      "file": "stay_room_2.jpg",
+      "title": "File:GD 廣東 Guangdong 廣州 Guangzhou Huangpu MUSTEL Hotel Knowledge City bed room double sigle beds June 2025 R12S 01.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:GD_%E5%BB%A3%E6%9D%B1_Guangdong_%E5%BB%A3%E5%B7%9E_Guangzhou_Huangpu_MUSTEL_Hotel_Knowledge_City_bed_room_double_sigle_beds_June_2025_R12S_01.jpg",
+      "license": "CC0",
+      "author": "MeiOLA 2290 WMENSZ"
+    },
+    {
+      "file": "stay_room_3.jpg",
+      "title": "File:GD 廣東 Guangdong 廣州 Guangzhou Huangpu MUSTEL Hotel Knowledge City 單人床 bed room double sigle beds June 2025 R12S 02.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:GD_%E5%BB%A3%E6%9D%B1_Guangdong_%E5%BB%A3%E5%B7%9E_Guangzhou_Huangpu_MUSTEL_Hotel_Knowledge_City_%E5%96%AE%E4%BA%BA%E5%BA%8A_bed_room_double_sigle_beds_June_2025_R12S_02.jpg",
+      "license": "CC0",
+      "author": "MeiOLA 2290 WMENSZ"
+    },
+    {
+      "file": "stay_room_4.jpg",
+      "title": "File:GD 廣東 Guangdong 廣州 Guangzhou Huangpu MUSTEL Hotel Knowledge City 單人床 bed room double sigle beds June 2025 R12S 03.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:GD_%E5%BB%A3%E6%9D%B1_Guangdong_%E5%BB%A3%E5%B7%9E_Guangzhou_Huangpu_MUSTEL_Hotel_Knowledge_City_%E5%96%AE%E4%BA%BA%E5%BA%8A_bed_room_double_sigle_beds_June_2025_R12S_03.jpg",
+      "license": "CC0",
+      "author": "MeiOLA 2290 WMENSZ"
+    },
+    {
+      "file": "stay_room_5.jpg",
+      "title": "File:GD 廣東 Guangdong 廣州 Guangzhou Huangpu MUSTEL Hotel Knowledge City 單人床 bed room double sigle beds June 2025 R12S 04.jpg",
+      "source": "https://commons.wikimedia.org/wiki/File:GD_%E5%BB%A3%E6%9D%B1_Guangdong_%E5%BB%A3%E5%B7%9E_Guangzhou_Huangpu_MUSTEL_Hotel_Knowledge_City_%E5%96%AE%E4%BA%BA%E5%BA%8A_bed_room_double_sigle_beds_June_2025_R12S_04.jpg",
+      "license": "CC0",
+      "author": "MeiOLA 2290 WMENSZ"
+    }
+  ],
+  "stay_lobby": [
+    {
+      "file": "stay_lobby_1.jpg",
+      "title": "File:Hotel Plaza lobby in Havana.JPG",
+      "source": "https://commons.wikimedia.org/wiki/File:Hotel_Plaza_lobby_in_Havana.JPG",
+      "license": "Public domain",
+      "author": "Callelinea"
+    }
   ]
 }

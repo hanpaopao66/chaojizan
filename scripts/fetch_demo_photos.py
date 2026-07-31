@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import urllib.parse
@@ -102,10 +103,20 @@ CATEGORY_TERMS: dict[str, list[str]] = {
     "beef_lamb_soup": ["羊肉汤", "beef soup chinese", "牛杂汤"],
     "southeast_asia": ["thai curry dish", "pad thai", "vietnamese pho"],
     "pastry": ["月饼", "蛋糕 甜点", "chinese pastry plate", "蛋挞"],
+    # 住宿频道用(酒店门头/大堂/客房)。词要写「room interior」这类具体的,
+    # 只搜 hotel 会抓到一堆外立面航拍和历史建筑
+    "stay_room": ["hotel room interior", "hotel bedroom bed",
+                  "guest room interior", "hostel dormitory room",
+                  "宾馆 客房", "旅馆 房间"],
+    "stay_lobby": ["hotel lobby interior", "hotel reception desk",
+                   "guesthouse interior", "hotel entrance facade",
+                   "酒店 大堂"],
 }
 
 TARGET = (800, 600)   # 4:3,与现有 demo 图一致(旧的是 400x300,这里给 2x)
-PER_CATEGORY = 4      # 每个品类留几张
+# 演示店每家 5-7 道菜 + 1 张门头 + 3 张相册。留 4 张的话同一家店的菜单里
+# 就会出现重复图片,比纯色块还假。留 8 张够一家店不重样
+PER_CATEGORY = int(os.environ.get("PER_CATEGORY", "8"))
 
 
 def _get(url: str) -> bytes:
@@ -131,10 +142,16 @@ def is_free(meta: dict) -> bool:
     return any(k in lic for k in FREE_LICENSES)
 
 
-def looks_like_a_dish(title: str) -> bool:
+# 住宿品类:要的恰恰是 NOT_A_DISH 里被拉黑的 interior / lobby / building。
+# 对这几个品类只过画作,不过"这不是一道菜"
+STAY_CATEGORIES = ("stay_room", "stay_lobby")
+
+
+def looks_like_a_dish(title: str, category: str = "") -> bool:
     """按标题粗筛掉画作/活体/店招。粗但便宜,剩下的靠人眼过。"""
     t = title.lower()
-    return not any(w in t for w in ART_WORDS + NOT_A_DISH)
+    words = ART_WORDS if category in STAY_CATEGORIES else ART_WORDS + NOT_A_DISH
+    return not any(w in t for w in words)
 
 
 def load_blocklist() -> set[str]:
@@ -146,14 +163,14 @@ def load_blocklist() -> set[str]:
             if ln.strip() and not ln.startswith("#")}
 
 
-def usable(page: dict) -> dict | None:
+def usable(page: dict, category: str = "") -> dict | None:
     info = (page.get("imageinfo") or [None])[0]
     if not info:
         return None
     meta = info.get("extmetadata", {})
     if not is_free(meta):
         return None
-    if not looks_like_a_dish(page["title"]):
+    if not looks_like_a_dish(page["title"], category):
         return None
     if page["title"] in _BLOCKED:
         return None
@@ -221,7 +238,7 @@ def main(only: list[str]) -> None:
             for p in pages:
                 if len(picked) >= PER_CATEGORY:
                     break
-                u = usable(p)
+                u = usable(p, cat)
                 if u and u["title"] not in seen:
                     seen.add(u["title"])
                     picked.append(u)
