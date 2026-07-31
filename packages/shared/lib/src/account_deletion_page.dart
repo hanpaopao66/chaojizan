@@ -9,6 +9,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'brand.dart';
+
 import 'api_client.dart';
 import 'legal.dart';
 import 'push_service.dart';
@@ -77,7 +79,8 @@ void showLegalSheet(BuildContext context) {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         ListTile(
           leading: const Icon(Icons.article_outlined),
-          title: const Text('《用户协议》'),
+          title: Text('《用户协议》',
+              style: TextStyle(color: Theme.of(context).sz.link)),
           onTap: () {
             Navigator.pop(sheetContext);
             LegalPage.showTerms(context);
@@ -85,7 +88,8 @@ void showLegalSheet(BuildContext context) {
         ),
         ListTile(
           leading: const Icon(Icons.privacy_tip_outlined),
-          title: const Text('《隐私政策》'),
+          title: Text('《隐私政策》',
+              style: TextStyle(color: Theme.of(context).sz.link)),
           onTap: () {
             Navigator.pop(sheetContext);
             LegalPage.showPrivacy(context);
@@ -200,6 +204,8 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
           const SizedBox(height: 8),
           TextButton(
             onPressed: () => LegalPage.showPrivacy(context),
+            style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).sz.link),
             child: const Text('查看《隐私政策》中关于注销的完整说明'),
           ),
           const SizedBox(height: 8),

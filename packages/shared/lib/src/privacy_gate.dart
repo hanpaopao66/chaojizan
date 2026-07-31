@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'brand.dart';
 import 'legal.dart';
 
 const String _kAgreedKey = 'privacy_agreed_version';
@@ -72,11 +73,17 @@ class _PrivacyGateState extends State<PrivacyGate> {
                   style: TextStyle(height: 1.6),
                 ),
                 const SizedBox(height: 8),
+                // 协议链接用 link 蓝(#136)。这个弹窗里唯一的实底按钮是
+                // 「同意」,协议入口染成橘色会跟它抢,还看不出是链接
                 TextButton(
                     onPressed: () => LegalPage.showTerms(context),
+                    style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context).sz.link),
                     child: const Text('《用户协议》全文')),
                 TextButton(
                     onPressed: () => LegalPage.showPrivacy(context),
+                    style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context).sz.link),
                     child: const Text('《隐私政策》全文')),
               ],
             ),

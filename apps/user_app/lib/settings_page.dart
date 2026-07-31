@@ -203,6 +203,8 @@ class _AboutPageState extends State<AboutPage> {
         const SizedBox(height: 16),
         TextButton(
             onPressed: () => showLegalSheet(context),
+            style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).sz.link),
             child: const Text('《用户协议》与《隐私政策》')),
       ]),
     );

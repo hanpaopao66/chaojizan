@@ -7,7 +7,11 @@
 /// ⚠️ 本文本为工程稿,正式上架前建议法务复核。
 library;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import 'brand.dart';
 
 const String kLegalVersion = '2026-07-28';
 
@@ -168,6 +172,39 @@ class LegalPage extends StatelessWidget {
       Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => const LegalPage(title: '隐私政策', body: kPrivacyText)));
 
+  /// 正文里的网址。第三方 SDK 公示段落列的是极光、高德这些的隐私政策地址,
+  /// **应用商店审核要求这些链接可点可达** —— 印在那儿点不动等于没给。
+  static final RegExp _urlRe = RegExp(r'https?://[^\s;,、。)）]+');
+
+  /// 把正文切成「普通文字 / 可点网址」两种片段。
+  ///
+  /// 用富文本而不是给每个网址单独摆一个按钮:协议是连续的段落,
+  /// 网址就长在句子中间,拆出来放按钮会把话读断。
+  List<InlineSpan> _spans(BuildContext context) {
+    final link = Theme.of(context).sz.link;
+    final spans = <InlineSpan>[];
+    var at = 0;
+    for (final m in _urlRe.allMatches(body)) {
+      if (m.start > at) spans.add(TextSpan(text: body.substring(at, m.start)));
+      final url = m.group(0)!;
+      spans.add(TextSpan(
+        text: url,
+        style: TextStyle(
+            color: link,
+            decoration: TextDecoration.underline,
+            decorationColor: link),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () => launchUrl(Uri.parse(url),
+              // 第三方隐私政策要在浏览器里开:留在 App 内的 WebView 里
+              // 会让人以为还在本平台,反而分不清是谁的政策
+              mode: LaunchMode.externalApplication),
+      ));
+      at = m.end;
+    }
+    if (at < body.length) spans.add(TextSpan(text: body.substring(at)));
+    return spans;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -175,7 +212,13 @@ class LegalPage extends StatelessWidget {
       body: Scrollbar(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-          child: Text(body, style: const TextStyle(height: 1.7)),
+          child: SelectionArea(
+            child: Text.rich(
+              TextSpan(children: _spans(context)),
+              style: TextStyle(
+                  height: 1.7, color: Theme.of(context).sz.ink),
+            ),
+          ),
         ),
       ),
     );

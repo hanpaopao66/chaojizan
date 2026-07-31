@@ -29,6 +29,7 @@ class SzColors extends ThemeExtension<SzColors> {
     required this.hold,
     required this.danger,
     required this.ledger,
+    required this.link,
     required this.channelTones,
   });
 
@@ -77,6 +78,19 @@ class SzColors extends ThemeExtension<SzColors> {
   /// 深色页面上它比页底更深(下沉的井)。只做一种的话,深色模式下就糊没了。
   final Color ledger;
 
+  /// **可跳转链接**专用蓝(#136)。整套里唯一的蓝,只给"点了会离开当前页"的字:
+  /// 协议/政策入口、协议全文里的第三方隐私政策网址。
+  ///
+  /// 为什么破例引入一个蓝:`clay` 是**行动色**,用户读作"这是本产品的按钮";
+  /// 而协议链接要传达的是"这是一条通向别处的链接",中文 App 里这个信号就是蓝色。
+  /// 拿橘色标链接,用户只会当成一句被强调的话,不会想到能点 —— 应用商店审核
+  /// 恰恰要求第三方协议**可点可达**。
+  ///
+  /// **不许**拿它当强调色、当第二主色、当按钮底色。出现范围仅限上述两处。
+  /// 取值也不是随手挑的:常见的 `#1677FF` 在骨白底上对比度只有 3.53,过不了 AA;
+  /// 这里的浅色态 5.84、深色态 7.68(实测)。
+  final Color link;
+
   /// 频道色槽(#132)。**受限色板,不许自由取色** ——
   /// 聚合平台变成彩虹糖,就是从"这个频道想要个亮蓝"开始的。
   /// 新频道按顺序领槽位;槽位用尽再讨论扩板,那时至少是一次有意识的决定。
@@ -99,6 +113,7 @@ class SzColors extends ThemeExtension<SzColors> {
     hold: Color(0xFFA6763E),
     danger: Color(0xFFD03030),
     ledger: Color(0xFF1F1E1B),      // 浅色页上的深台面
+    link: Color(0xFF2C5F87),        // 链接蓝:骨白底上 5.84,过 AA
     channelTones: [
       Color(0xFFB4553B),   // 0 赤陶 —— 外卖
       Color(0xFF4E6B4F),   // 1 苔绿 —— 住宿
@@ -125,6 +140,7 @@ class SzColors extends ThemeExtension<SzColors> {
     hold: Color(0xFFD2A86C),
     danger: Color(0xFFE06B6B),
     ledger: Color(0xFF100F0D),      // 比页底(#1B1A17)更深:下沉的井
+    link: Color(0xFF7FB2D9),        // 深色态链接蓝:各底色上 6.9~8.5
     channelTones: [
       Color(0xFFD98567),   // 0 赤陶
       Color(0xFF8FB08D),   // 1 苔绿
@@ -152,6 +168,7 @@ class SzColors extends ThemeExtension<SzColors> {
     Color? hold,
     Color? danger,
     Color? ledger,
+    Color? link,
     List<Color>? channelTones,
   }) =>
       SzColors(
@@ -168,6 +185,7 @@ class SzColors extends ThemeExtension<SzColors> {
         hold: hold ?? this.hold,
         danger: danger ?? this.danger,
         ledger: ledger ?? this.ledger,
+        link: link ?? this.link,
         channelTones: channelTones ?? this.channelTones,
       );
 
@@ -189,6 +207,7 @@ class SzColors extends ThemeExtension<SzColors> {
       hold: c(hold, other.hold),
       danger: c(danger, other.danger),
       ledger: c(ledger, other.ledger),
+      link: c(link, other.link),
       // 逐槽插值:深浅切换时频道色跟着一起过渡,不会闪一下
       channelTones: [
         for (var i = 0; i < channelTones.length; i++)

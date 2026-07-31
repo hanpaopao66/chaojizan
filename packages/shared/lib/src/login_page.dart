@@ -380,7 +380,7 @@ class AgreementRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final legalLink = Theme.of(context).sz.link;
     // 整行可点切换勾选(大 tap target),协议名单独可点查看全文
     return InkWell(
       onTap: () => onChanged(!agreed),
@@ -401,16 +401,18 @@ class AgreementRow extends StatelessWidget {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   const Text('已阅读并同意', style: TextStyle(fontSize: 12)),
+                  // 协议链接走 link 蓝而不是 clay 橘(#136):橘色是本产品的
+                  // 行动色,用户读作"按钮";蓝色才是"这是一条能点的链接"
                   GestureDetector(
                     onTap: () => LegalPage.showTerms(context),
                     child: Text('《用户协议》',
-                        style: TextStyle(fontSize: 12, color: primary)),
+                        style: TextStyle(fontSize: 12, color: legalLink)),
                   ),
                   const Text('和', style: TextStyle(fontSize: 12)),
                   GestureDetector(
                     onTap: () => LegalPage.showPrivacy(context),
                     child: Text('《隐私政策》',
-                        style: TextStyle(fontSize: 12, color: primary)),
+                        style: TextStyle(fontSize: 12, color: legalLink)),
                   ),
                 ],
               ),
