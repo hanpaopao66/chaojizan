@@ -76,6 +76,7 @@ export default function TransparencyPage() {
   const uptime = useFetch('/transparency/uptime', 60000)
   const changelog = useFetch('/transparency/changelog')
   const gov = useFetch('/transparency/governance')
+  const dispatch = useFetch('/transparency/dispatch')
   useEffect(() => {   // /status 直达系统状态区
     if (location.pathname.replace(/^\/site/, '').startsWith('/status')) {
       setTimeout(() => document.getElementById('status')
@@ -97,6 +98,7 @@ export default function TransparencyPage() {
           <a href="#fairness">分账公平</a>
           <a href="#compensation">赔付记录</a>
           <a href="#reports">月度财报</a>
+          <a href="#dispatch">派单算法</a>
           <a href="#governance">治理公开</a>
           <a href="#status">系统状态</a>
           <a href="#changelog">最近更新</a>
@@ -300,6 +302,60 @@ export default function TransparencyPage() {
             </tbody>
           </table>
         </div>
+
+        <h2 id="dispatch">骑手抢单怎么排的,<b>公式全公开</b></h2>
+        <p className="tp-lede">
+          派单算法对骑手的意义,等同于账目对商家的意义——它决定骑手今天挣多少。
+          别家的算法是黑箱,骑手只能猜"为什么好单不给我"。
+          下面这些数字就是代码里正在跑的那几个:接口从排序代码的常量直接读,
+          不是另写一份说明,改了会立刻反映在这里。
+        </p>
+        {dispatch ? (
+          <>
+            <div className="tp-formula">{dispatch.formula}</div>
+            <div className="tp-table-wrap">
+              <table className="tp-table">
+                <thead><tr>
+                  <th>项</th><th>权重</th><th>上限</th><th>为什么是这个数</th>
+                </tr></thead>
+                <tbody>
+                  {dispatch.weights.map(w => (
+                    <tr key={w.key}>
+                      <td>{w.name}</td>
+                      <td>{w.value}</td>
+                      <td>{w.cap || '—'}</td>
+                      <td className="tp-why">{w.why}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <h3 className="tp-sub">「顺路」是怎么算的</h3>
+            <p className="tp-lede">
+              <code>{dispatch.same_way_definition.formula}</code>
+            </p>
+            <p className="tp-note">{dispatch.same_way_definition.why}</p>
+            <h3 className="tp-sub">平台承诺不做的事</h3>
+            <ul className="tp-never">
+              {dispatch.never_do.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+            <h3 className="tp-sub">算法改过什么</h3>
+            <p className="tp-note">
+              算法可以改,但不会悄悄改——悄悄改就等于从没公开过。
+            </p>
+            <div className="tp-log">
+              {dispatch.changelog.map((e, i) => (
+                <div className="row" key={i}>
+                  <span className="tag">调整</span>
+                  <span className="msg">{e.what}
+                    <span className="tp-reason">(原因:{e.why})</span>
+                  </span>
+                  <span className="date">{e.date}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : <p className="tp-note">加载中……</p>}
 
         <h2 id="governance">规则怎么改的,<b>都留痕</b></h2>
         <p className="tp-lede">

@@ -750,9 +750,16 @@ class OrderOut(BaseModel):
     merchant_lng: float | None = None
     # 骑手抢单池视角(仅 available-orders 填充):
     # 到商家的直线距离(骑手最近上报位置,无定位为空)与顺路标记
-    distance_m: int | None = None
-    same_shop: bool = False   # 与手头某单同商家(顺路取)
-    same_way: bool = False    # 与手头某单收货点相近(顺路送)
+    distance_m: int | None = None          # 骑手 → 取餐点
+    trip_m: int | None = None              # 取餐点 → 送达点(整单划不划算要看它)
+    # 距离来源:route=腾讯骑行路径规划,straight=回退直线×1.2。
+    # **必须透传给骑手** —— 距离准不准,他有权知道,而不是时准时不准却不知为何
+    distance_source: str = "straight"
+    same_shop: bool = False   # 与手头某单同商家(同店多取一单,取餐几乎零成本)
+    same_way: bool = False    # 顺路(向后兼容:strong/weak 都为 true)
+    # 顺路等级:strong / weak / none。按**绕路增量**判,不按两点距离
+    same_way_level: str = "none"
+    detour_m: int | None = None            # 绕路增量:接这单要比只送手头单多跑多远
     # 联系方式,仅订单详情接口填充(列表不查,避免 N+1)
     rider_name: str = ""
     rider_phone: str = ""

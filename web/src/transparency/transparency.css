@@ -141,3 +141,34 @@
   .tp-footer-links { margin-top: 36px; }
   .tp-footer-links .btn { flex: 1 1 44%; text-align: center; }
 }
+
+/* ---- 派单算法公开(#141) ---- */
+/* 公式用等宽 + 深色台面:它是这一节的主角,要像"可以照着算"的东西,
+   而不是一句排版好看的宣传语 */
+.tp-formula {
+  background: #1F1E1B;
+  color: #F2F0E8;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 12px 0 18px;
+  overflow-x: auto;
+}
+.tp-sub { font-size: 17px; margin: 26px 0 6px; }
+/* 「为什么是这个数」是这张表最重要的一列 —— 光给数字等于没公开 */
+.tp-why { font-size: 12.5px; line-height: 1.6; color: #6B6862; max-width: 34em; }
+.tp-never { margin: 8px 0 0; padding-left: 0; list-style: none; }
+.tp-never li {
+  position: relative;
+  padding-left: 22px;
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+.tp-never li::before {
+  content: '✕';
+  position: absolute;
+  left: 0;
+  color: #4E6B4F;      /* 承诺不做 = 好事,用「到手的钱」那个绿 */
+  font-weight: 700;
+}

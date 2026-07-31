@@ -420,8 +420,12 @@ class Order {
         pickupCode = json['pickup_code'] as String? ?? '',
         parentOrderNo = json['parent_order_no'] as String? ?? '',
         distanceM = json['distance_m'] as int?,
+        tripM = json['trip_m'] as int?,
+        distanceSource = json['distance_source'] as String? ?? 'straight',
         sameShop = json['same_shop'] as bool? ?? false,
         sameWay = json['same_way'] as bool? ?? false,
+        sameWayLevel = json['same_way_level'] as String? ?? 'none',
+        detourM = json['detour_m'] as int?,
         createdAt = json['created_at'] as String;
 
   final String orderNo;
@@ -477,9 +481,15 @@ class Order {
   final String pickupCode;   // 取餐码,商家核对后完成订单
   final String parentOrderNo; // 非空 = 追加单,随原单一起配送
   // 抢单池视角(仅骑手 available-orders 返回):到商家距离与顺路标记
-  final int? distanceM;   // 骑手最近上报位置到商家的直线距离,无定位为空
-  final bool sameShop;    // 与手头某单同商家(顺路取)
-  final bool sameWay;     // 与手头某单收货点相近(顺路送)
+  final int? distanceM;   // 骑手 → 取餐点(骑行路径距离),无定位为空
+  final int? tripM;       // 取餐点 → 送达点。整单划不划算要看它
+  /// route=腾讯骑行路径规划,straight=回退直线×1.2。
+  /// 展示时要标出来 —— 距离准不准,骑手有权知道
+  final String distanceSource;
+  final bool sameShop;    // 与手头某单同商家(同店多取,取餐几乎零成本)
+  final bool sameWay;     // 顺路(strong/weak 都为 true)
+  final String sameWayLevel;  // strong / weak / none
+  final int? detourM;     // 绕路增量:接这单比只送手头单多跑多远
   final String createdAt;
 
   String get summary =>

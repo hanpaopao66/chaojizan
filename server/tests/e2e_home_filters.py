@@ -115,8 +115,14 @@ def main() -> None:
     blob = str(wb)
     for leak in ("phone", "customer_id", "user_id", "nickname", "name\":\"1"):
         assert leak not in blob, f"召回概览泄露了顾客信息:{leak} in {blob}"
-    assert "13" not in blob.replace("130", "").replace("13d", ""), \
-        f"召回概览里疑似出现手机号:{blob}"
+    # 按**手机号形态**判,不按"含不含 13"。
+    # 原先写的是 `"13" not in blob`,任何含 13 的内容都会误报 ——
+    # 实测被 `dormant_30d: 13`(沉睡用户数)打中,而那根本不是手机号。
+    # 断言要守的东西是对的(概览不能带顾客身份),但判据太粗就会变成
+    # "偶尔红一下、大家学会忽略它",那还不如没有
+    import re as _re
+    phones = _re.findall(r"1[3-9]\d{9}", blob)
+    assert not phones, f"召回概览里出现手机号 {phones}:{blob}"
     print("✓ 响应只含计数,无任何顾客身份信息")
 
     # 顾客态拿不到商家的召回数据

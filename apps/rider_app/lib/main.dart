@@ -10,6 +10,7 @@ import 'location_service.dart';
 import 'map_page.dart';
 import 'verify_page.dart';
 import 'wallet_page.dart';
+import 'dispatch_spec_page.dart';
 
 // GPS 不可用时(如 iOS 模拟器没设置位置)的兜底坐标,保证开发期照常演示
 const fallbackLat = 30.6605;
@@ -847,6 +848,14 @@ class _RiderHomePageState extends State<RiderHomePage>
               ),
           ]),
         ),
+        // 算法公开的入口就放在排序结果旁边 —— 公开给外人看却不给骑手看
+        // 是本末倒置。骑手对着这个池子最常问的就是"凭什么这么排"
+        IconButton(
+          icon: const Icon(Icons.help_outline, size: 20),
+          tooltip: '抢单怎么排的',
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => DispatchSpecPage(api: widget.api))),
+        ),
       ]),
     );
   }
@@ -882,11 +891,26 @@ class _RiderHomePageState extends State<RiderHomePage>
                   '📎 追加单,随#${order.parentOrderNo.substring(order.parentOrderNo.length - 6)} 一起取送',
                   style: TextStyle(
                       color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
-            // 顺路标记(抢单池):同店一次取多单 / 收货点相近连着送
+            // 顺路标记:**带上绕路多少米**,不给一句模糊的「顺路」。
+            // 旧口径只比两个送达点的距离,会把「送达点相邻但取餐点在反方向
+            // 3 公里」的单也标成顺路 —— 骑手信了就多跑近 6 公里。
+            // 现在按绕路增量判,并把这个数摆出来让骑手自己核
             if (order.sameShop || order.sameWay)
-              Text(order.sameShop ? '🛵 顺路 · 与手头单同店取餐' : '🛵 顺路 · 与手头单收货点相近',
+              Text(
+                  order.sameShop
+                      ? '🛵 同店取餐 · 与手头单一家店,取餐几乎不多花时间'
+                      : '🛵 ${order.sameWayLevel == "strong" ? "强" : ""}顺路 · '
+                          '比只送手头单多跑约 ${order.detourM ?? 0} 米',
                   style: TextStyle(
                       color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
+            // 整单跑程:旧版只显示「到店多远」,同一家店的 220m 单和 4km 单
+            // 看起来一模一样。骑手关心的是整单划不划算
+            if (order.tripM != null)
+              Text(
+                  '跑程:到店 ${order.distanceM ?? 0} 米 + 送 ${order.tripM} 米'
+                  '${order.distanceSource == "straight" ? "(直线估算)" : ""}',
+                  style: TextStyle(
+                      fontSize: 12, color: Theme.of(context).sz.inkMuted)),
             if (order.hasAlcohol)
               Text('🍺 含酒精饮品,送达请查验收件人年龄',
                   style: TextStyle(

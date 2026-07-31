@@ -30,6 +30,7 @@ export default defineConfig({
       '/transparency/reports': 'http://127.0.0.1:8010',
       '/transparency/changelog': 'http://127.0.0.1:8010',
       '/transparency/uptime': 'http://127.0.0.1:8010',
+      '/transparency/dispatch': 'http://127.0.0.1:8010',
       '/transparency/governance': 'http://127.0.0.1:8010',
     },
   },

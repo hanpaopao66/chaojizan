@@ -3,6 +3,8 @@
     SUPERZ_API=http://127.0.0.1:8010 python -m tests.e2e_stays_settle
 """
 import random
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import urllib.request
 from datetime import date, timedelta
 
@@ -16,8 +18,13 @@ def fetch_csv(path, token):
         return resp.read().decode("utf-8").replace("\r", "")
 
 admin_token = login(ADMIN)
-today = date.today()
-period = f"{today.year:04d}-{today.month:02d}"
+today = date.today()          # 住宿日期用本地日期即可(房态按天,不涉及账期)
+# 账期一律按**北京时间**算,和服务端 invoices._period_ended 同口径。
+# 用 date.today()(机器本地时区)的话,跨月那几个小时会算出上个月的账期,
+# 而订单已经属于新月份 —— 查不到,用例挂。实测 2026-08-01 00:03 北京时间
+# 挂过一次:本地还是 7-31,服务端已经是 8 月
+_bj = datetime.now(ZoneInfo("Asia/Shanghai"))
+period = f"{_bj.year:04d}-{_bj.month:02d}"
 
 phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
 mt = call("POST", "/auth/register",

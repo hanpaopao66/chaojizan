@@ -937,6 +937,15 @@ class ApiClient {
     return PoiTip.fromJson(data as Map<String, dynamic>);
   }
 
+  /// 派单算法公开说明(/transparency/dispatch,无需鉴权)。
+  ///
+  /// 服务端从排序代码的常量直接读,不另抄一份 —— 所以这里拿到的
+  /// 就是抢单池真正在用的那几个数。
+  Future<Map<String, dynamic>> dispatchSpec() async {
+    final data = await _request('GET', '/transparency/dispatch');
+    return data as Map<String, dynamic>;
+  }
+
   Future<Order> mockPay(String orderNo) async {
     final data = await _request('POST', '/orders/$orderNo/pay/mock');
     return Order.fromJson(data as Map<String, dynamic>);

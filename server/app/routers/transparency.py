@@ -1,12 +1,13 @@
 """透明中心数据源(/transparency 页面,公开无鉴权)。
 
-六组接口,全部平台级聚合、无任何个人/单店信息:
+各组接口全部平台级聚合、无任何个人/单店信息:
   /audit          每日核账运行记录 + 连续无差错天数(账本的守夜人,公开值守)
   /funds          佣金收入 vs 支出去向(与公开账本同一套 ledger 口径)
   /compensation   平台"赔钱记录":安抚券/餐损赔付/退款——主动亮赔付
   /reports        月度财报(收入侧自动聚合,口径与 scripts/finance_report.py 一致)
   /fairness       分账公平证据:真实佣金率/每100元去向/骑手收入/评价不删
   /changelog      最近更新(GitHub 同源)+ 线上运行版本——代码即承诺
+  /dispatch       派单算法:完整公式、每个权重的取值与理由、承诺不做的事
   /uptime         90 天可用率(auto_flow 自记探针,缺档按不可用计,只低不虚高)
 
 缓存与限流复用大屏(routers/screen.py)的进程内小缓存 + 按 IP 限流。
@@ -478,6 +479,22 @@ _PUBLIC_FLAGS = {
     "open_cities": "开城清单",
     "screen_show_gmv": "公开大屏金额展示",
 }
+
+
+@router.get("/dispatch")
+async def dispatch_spec():
+    """派单算法公开(#141)。
+
+    为什么要公开:**派单算法对骑手的意义,等同于账目对商家的意义** ——
+    它决定骑手今天挣多少。资本平台的算法是黑箱,骑手只能猜"为什么好单不给我"。
+
+    这里返回的权重**从 services/dispatch.py 的常量直接读**,不另抄一份 ——
+    抄的那份迟早和真实算法对不上,那时公开的就是假的,比不公开更坏。
+    有测试钉着这件事(tests/unit/test_dispatch.py)。
+    """
+    from ..services import dispatch as d
+
+    return d.public_spec()
 
 
 @router.get("/governance")

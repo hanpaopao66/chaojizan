@@ -369,9 +369,8 @@ async def my_delivery_issues(
 # 骑手在途状态(并发上限与顺路判断的口径)
 _IN_FLIGHT_STATUSES = (OrderStatus.ACCEPTED, OrderStatus.READY,
                        OrderStatus.PICKED_UP)
-_SAME_WAY_MAX_M = 800          # 收货点相距 <800m 视为顺路
-_WAIT_WEIGHT_M_PER_MIN = 150   # 综合分:每等 1 分钟 ≈ 靠近骑手 150 米
-_TIP_WEIGHT_M_PER_YUAN = 300   # 综合分:每 1 元小费 ≈ 靠近骑手 300 米(加急单往前提)
+# 排序权重全部在 services/dispatch.py —— 那里是公开算法的唯一事实来源,
+# /transparency/dispatch 从同一处读。在这里再留一份就迟早对不上。
 
 
 async def _my_in_flight(db: AsyncSession, rider_id: int) -> list[Order]:
@@ -392,14 +391,17 @@ async def available_orders(
 ):
     """可抢订单池:商家已接单/已出餐、且还没有骑手的订单。
 
-    保持广播抢单不做强制派单,但给骑手决策信息:到店距离、顺路标记
-    (same_shop 与手头单同商家、same_way 与手头单收货点相近),
-    并按「综合分 = 距离 - 等待时长加权」排序——近的靠前,等久的也不垫底。
+    保持广播抢单**不做强制派单** —— 算法只负责把信息排得更有用,
+    接不接始终是骑手自己的决定。
+
+    排序口径见 services/dispatch.py,那里是**公开算法的唯一事实来源**
+    (/transparency/dispatch 从同一处读权重,不另抄一份)。
     骑手位置取不到(未上报/过期)时退化为按等待时长排(老单在前)。
     """
     from datetime import datetime, timezone
 
-    from ..services.pricing import haversine_m
+    from ..services import dispatch
+    from ..services.routing import bicycling_m, detour_m
 
     # 取 200 条进来算分、只返回前 50:若只取最老的 50 条再排序,
     # 离骑手近的新单会被挤在池外,「新单不垫底」就落空了
@@ -448,25 +450,52 @@ async def available_orders(
     scored: list[tuple[float, OrderOut]] = []
     for order, out in zip(orders, outs):
         out.same_shop = order.merchant_id in my_shops
-        out.same_way = any(
-            haversine_m(order.lat, order.lng, lat, lng) < _SAME_WAY_MAX_M
-            for lat, lng in my_drops)
-        score = 0.0
+        score_val = 0.0
         if rider_pos and out.merchant_lat is not None:
-            distance = haversine_m(rider_pos[0], rider_pos[1],
-                                   out.merchant_lat, out.merchant_lng)
+            # 到店距离用真实骑行路径(不可用时回退直线×1.2 并标明来源)——
+            # 直线系统性低估,实测成都两点直线 1467m / 骑行 1745m,差 19%
+            distance, src = await bicycling_m(
+                rider_pos[0], rider_pos[1], out.merchant_lat, out.merchant_lng)
             out.distance_m = int(distance)
-            # 接单半径过滤(骑手自设);顺路单豁免——手头单顺路的永远给看
-            if (radius_m is not None and distance > radius_m
-                    and not out.same_shop and not out.same_way):
-                continue
+            out.distance_source = src
+            trip, _ = await bicycling_m(
+                out.merchant_lat, out.merchant_lng, order.lat, order.lng)
+            out.trip_m = int(trip)
+
+            # 顺路按**绕路增量**判,不按两点距离。
+            # 旧口径(两个送达点相距 <800m)的实测反例:送达点相邻但取餐点在
+            # 反方向 3km 的单也判顺路 —— 骑手照着接会多跑近 6 公里
+            best_detour = None
+            for dlat, dlng in my_drops:
+                inc, _ = await detour_m(
+                    rider_pos, (out.merchant_lat, out.merchant_lng),
+                    (order.lat, order.lng), (dlat, dlng))
+                if best_detour is None or inc < best_detour:
+                    best_detour = inc
+            out.detour_m = None if best_detour is None else int(best_detour)
+
             created = order.created_at
             if created.tzinfo is None:
                 created = created.replace(tzinfo=timezone.utc)
             wait_minutes = max(0.0, (now - created).total_seconds() / 60)
-            score = (distance - wait_minutes * _WAIT_WEIGHT_M_PER_MIN
-                     - order.tip_cents / 100 * _TIP_WEIGHT_M_PER_YUAN)
-        scored.append((score, out))
+
+            res = dispatch.score(dispatch.Candidate(
+                to_pickup_m=distance,
+                trip_m=trip,
+                wait_minutes=wait_minutes,
+                tip_yuan=order.tip_cents / 100,
+                same_shop=out.same_shop,
+                detour_m=best_detour,
+            ))
+            out.same_way_level = res.same_way_level
+            out.same_way = res.same_way_level != "none"
+            score_val = res.score
+
+            # 接单半径过滤(骑手自设);同店/顺路豁免 —— 手头单顺路的永远给看
+            if (radius_m is not None and distance > radius_m
+                    and not out.same_shop and not out.same_way):
+                continue
+        scored.append((score_val, out))
     if rider_pos:
         # 综合分越小越靠前;分数相同(理论上极少)按原有等待顺序稳定排
         scored.sort(key=lambda pair: pair[0])
