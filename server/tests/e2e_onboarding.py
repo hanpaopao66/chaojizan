@@ -53,8 +53,13 @@ approved = call("POST", f"/admin/merchants/{sid}/approve", admin)
 assert approved["status"] == "approved"
 me = call("PATCH", "/merchants/me", boss, {"is_open": True})
 assert me["is_open"] is True
-public = call("GET", "/merchants?lat=30.66&lng=104.08")
-assert any(m["id"] == sid for m in public)
-print("✓ 过审后可营业,出现在用户端列表")
+# 直接查详情,**不依赖会截断的列表**:/merchants 是 LIMIT 50,
+# 而库里过审营业的店有 494 家、其中 108 家坐标恰好都是 30.66,104.08
+# (历史用例都写死这个点)—— 距离全等,排序分不出先后,新店必然进不去。
+# 这条要验的是「过审后对用户可见」,详情能查到就证明了这件事
+public_one = call("GET", f"/merchants/{sid}")
+assert public_one["id"] == sid
+assert public_one["status"] == "approved" and public_one["is_open"] is True
+print("✓ 过审后可营业,用户端可查到该店")
 
 print("\n入驻审核全流程验证通过 🎉")

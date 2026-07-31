@@ -40,9 +40,15 @@ def main():
     no = o["order_no"]
     call("POST", f"/orders/{no}/pay/mock", customer)
     paid = call("GET", f"/orders/{no}", customer)
+    # 费率取该店实际值,不写死 5%(阶梯佣金会降档)。
+    # 这条要守的是「**佣金基数不含小费**」—— 小费 100% 归骑手,
+    # 平台不从中抽一分钱
+    _shop = call("GET", f"/merchants/{paid['merchant_id']}")
+    _rate = float(_shop["commission_rate"])
     expected_comm = round((paid["food_cents"] + paid["packing_fee_cents"]
-                           - paid["discount_cents"]) * 0.05)
+                           - paid["discount_cents"]) * _rate)
     assert paid["commission_cents"] == expected_comm, "佣金基数不含小费"
+    assert paid["tip_cents"] > 0, "这条用例要有小费才有意义"
     print("✓ 带小费下单:实付含小费,佣金基数不含小费")
 
     # 2) 骑手结算 = 配送费 + 小费

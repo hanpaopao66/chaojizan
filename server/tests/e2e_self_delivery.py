@@ -71,11 +71,17 @@ async def main():
              {"to_status": "completed"})
         print("✓ 商家操作 出餐→取餐出发→送达,用户确认完成")
 
-        # 4) 结算:配送费归商家(并入商家入账行),佣金只抽餐费 5%
+        # 4) 结算:配送费归商家(并入商家入账行),佣金**只抽餐费**。
+        # 费率按该店实际值取,不写死 5% —— 阶梯佣金会把老店降到 4.5%/4%,
+        # 演示店在跑久了的库上必然进入降档区间。
+        # 这条真正要守的是「佣金基数只含餐费」,不是费率具体多少
         detail = call("GET", f"/orders/{no}", customer)
+        shop_now = call("GET", f"/merchants/{detail['merchant_id']}")
+        rate = float(shop_now["commission_rate"])
         gross_food = detail["food_cents"]
         commission = detail["commission_cents"]
-        assert commission == int(gross_food * 0.05), (commission, gross_food)
+        assert commission == int(gross_food * rate), (commission, gross_food, rate)
+        assert rate <= 0.05, "任何档位都不得高于 5% 的承诺上限"
         from app.db import SessionLocal
         from sqlalchemy import text as sql
         async with SessionLocal() as db:

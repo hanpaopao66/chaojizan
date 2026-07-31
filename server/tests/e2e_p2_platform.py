@@ -62,7 +62,9 @@ resp = call("POST", "/events/batch", customer, {"events": [
     {"name": event_name, "props": {"q": "面"}},
 ]})
 assert resp["accepted"] == 2
-summary = call("GET", "/admin/events/summary", admin)["events"]
+# 按事件名精确查,不在 Top 30 里捞 —— 跑久了的库有 35+ 种事件,
+# 而本用例刚上报的事件只有 2 次,必然挤不进计数前 30
+summary = call("GET", f"/admin/events/summary?event={event_name}", admin)["events"]
 row = next(e for e in summary if e["event"] == event_name)
 assert row["count"] == 2 and row["users"] == 1
 print("✓ 埋点批量入库,管理端 7 天汇总正确(2 次 / 1 独立用户)")

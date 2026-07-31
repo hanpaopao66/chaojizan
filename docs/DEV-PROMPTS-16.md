@@ -289,3 +289,50 @@ e2e_append_order / e2e_shop_coupon 都把佣金**写死成 5%**。挂的是对�
 
 **e2e_tier_commission 不再拿演示店当基准**,改为自建低单量店 ——
 共享状态做基准,在跑久了的库上必然失效。
+
+---
+
+## LIMIT 截断:判据沉淀
+
+这一辑的回归里又撞出两处 LIMIT 截断(累计第三、第四次了),
+所以把判据写下来,别再靠回归一个个撞。
+
+### 危险模式:跨实体全局查询 + 升序 + LIMIT
+
+```
+select(X).where(<跨实体的条件>).order_by(X.created_at).limit(N)
+                                        ^^^^^^^^^^^^ 升序
+```
+
+**截断会截在"最新"那一头** —— 而看板、监控、"刚发生了什么"这类需求,
+要看的恰恰是最新。
+
+本轮实例:`/admin/dispatch-overview` 的 in_flight 按 created_at 升序取 100,
+而库里在途 116 单 —— **调度员看不到最新派出的 16 单**。
+
+### 安全模式(不用改)
+
+| 模式 | 为什么安全 |
+|---|---|
+| `order_by(X.created_at.desc()).limit(N)` | 截掉的是最老的,通常正是意图 |
+| 按 `order_id` / 单实体过滤 + limit | 单笔订单的消息/事件到不了上限 |
+| 抢单池的升序 | **有意为之** —— 池子该先给等久的单 |
+| Top-N 排行(`ORDER BY n DESC LIMIT 30`) | 就是要 Top N |
+
+### Top-N 类要额外留一个精确查询入口
+
+`/admin/events/summary` 是 `ORDER BY n DESC LIMIT 30`,排行本身没问题。
+但实测近 7 天有 **35 种事件**,一个刚上线、量还小的新事件**永远进不了前 30** ——
+而「新功能有没有人用」恰恰是最需要查的。
+
+已加 `?event=xxx` 精确过滤。**凡是 Top-N 接口,都该留一个按名字精确查的入口。**
+
+### 自查命令
+
+```bash
+# 升序 + LIMIT(逐个确认是否跨实体)
+grep -rnE "order_by\([A-Za-z]+\.[a-z_]+\)\.limit" server/app/routers/*.py | grep -v desc
+```
+
+本轮已全量自查:五处升序 LIMIT,四处安全(抢单池有意为之、其余按单实体过滤),
+一处已修。

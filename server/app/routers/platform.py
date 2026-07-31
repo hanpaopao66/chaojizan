@@ -238,10 +238,27 @@ async def push_logs(
 
 @router.get("/admin/events/summary")
 async def events_summary(
+    event: str | None = None,
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """近 7 天事件计数 + 独立用户数(产品决策的最小数据面)。"""
+    """近 7 天事件计数 + 独立用户数(产品决策的最小数据面)。
+
+    默认返回计数 Top 30 —— 那是产品决策要看的面。
+    但**查具体某个事件时必须能查到**:`?event=xxx` 精确过滤,不受 Top 30 限制。
+    没有这个入口的话,一个刚上线、量还小的新事件就查不到,
+    而"新功能有没有人用"恰恰是最需要查的(实测:近 7 天 35 种事件、
+    接口只回 30,新事件的 2 次计数正好卡在边界外)。
+    """
+    if event:
+        rows = await db.execute(text("""
+            SELECT event, count(*) AS n, count(DISTINCT user_id) AS users
+            FROM app_events
+            WHERE created_at >= now() - interval '7 days' AND event = :e
+            GROUP BY event
+        """), {"e": event})
+        return {"events": [
+            {"event": r[0], "count": r[1], "users": r[2]} for r in rows]}
     rows = await db.execute(text("""
         SELECT event, count(*) AS n, count(DISTINCT user_id) AS users
         FROM app_events
