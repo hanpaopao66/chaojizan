@@ -794,6 +794,14 @@ class PayoutAccount {
 }
 
 class PoiTip {
+  /// 地图选点等本地来源用(不是所有 POI 都来自服务端 JSON)
+  const PoiTip({
+    required this.name,
+    required this.district,
+    required this.lat,
+    required this.lng,
+  });
+
   PoiTip.fromJson(Map<String, dynamic> json)
       : name = json['name'] as String,
         district = json['district'] as String? ?? '',

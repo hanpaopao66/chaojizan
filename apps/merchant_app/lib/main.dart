@@ -202,9 +202,16 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   String _specialLicenseImageUrl = '';
   String _hygieneImageUrl = '';
 
-  // 演示坐标;接高德 POI 选点后替换
-  static const _lat = 30.6598;
-  static const _lng = 104.0810;
+  /// 店铺坐标。**入驻必须在地图上选**,不再用写死的演示值。
+  ///
+  /// 原先这里是常量 (30.6598, 104.0810) = 春熙路,注释写着"接 POI 选点后替换" ——
+  /// 后果是**每个注册商家都被放在春熙路**:附近商家搜索(PostGIS)按坐标算,
+  /// 真实位置在别的区的店,对自己周边的用户是隐形的,却对春熙路的人显示
+  /// "0.1km";配送费和配送范围同样全错。
+  /// 编辑已有店铺时回填原坐标 —— 不回填的话商家改个电话就把位置清空了,
+  /// 而位置清空 = 这家店从附近搜索里消失
+  late double? _lat = widget.existing?.lat;
+  late double? _lng = widget.existing?.lng;
 
   bool get _isHotel => _bizType == 'hotel';
 
@@ -236,6 +243,32 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
     }
   }
 
+  /// 在地图上标店铺位置。默认落点用已标坐标,没有就让地图页自己兜底。
+  Future<void> _pickShopSpot() async {
+    final picked = await Navigator.of(context).push<PickedPlace>(
+      MaterialPageRoute(
+        builder: (_) => MapPickerPage(
+          initialLat: _lat,
+          initialLng: _lng,
+          onReverse: (lat, lng) async {
+            final t = await widget.api.geoReverse(lat, lng);
+            return (name: t.name, district: t.district);
+          },
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _lat = picked.lat;
+      _lng = picked.lng;
+      // 地址框空着就用反查结果填上,已经写了就不覆盖 ——
+      // 商家写的往往比反查更准(带门牌号)
+      if (_address.text.trim().isEmpty && picked.name.isNotEmpty) {
+        _address.text = picked.name;
+      }
+    });
+  }
+
   Future<void> _submit() async {
     final licenseLabel = _isHotel ? '营业执照注册号' : '食品经营许可证号';
     if (_name.text.trim().isEmpty ||
@@ -243,6 +276,13 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
         _licenseNo.text.trim().isEmpty) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('店名、地址、$licenseLabel都是必填的')));
+      return;
+    }
+    // 单独提示:少了这一条,商家只会看到"都是必填的"然后反复检查文字框,
+    // 找不到缺的其实是地图定位
+    if (_lat == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('请在地图上标出店铺位置——用户按坐标搜附近的店,标错就没人看得到你')));
       return;
     }
     if (_licenseImageUrl.isEmpty) {
@@ -264,8 +304,8 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           name: _name.text.trim(),
           description: _description.text.trim(),
           address: _address.text.trim(),
-          lat: _lat,
-          lng: _lng,
+          lat: _lat!,
+          lng: _lng!,
           licenseNo: _licenseNo.text.trim(),
           licenseImageUrl: _licenseImageUrl,
           category: _category,
@@ -434,6 +474,41 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
                 decoration: InputDecoration(
                     labelText: _isHotel ? '酒店地址 *' : '门店地址 *',
                     border: const OutlineInputBorder())),
+            const SizedBox(height: 6),
+            // 文字地址给人看,坐标给系统算 —— 两者都要。
+            //
+            // 入驻时必须自己标;入驻后**不给自助改**:坐标决定谁能搜到这家店,
+            // 自助改等于绕过审核把自己挪到人流密集区。要挪店走客服重审。
+            if (widget.existing == null)
+              Row(children: [
+                Expanded(
+                  child: Text(
+                    _lat == null
+                        ? '还没标位置:用户按坐标搜附近的店'
+                        : '已标位置 ${_lat!.toStringAsFixed(5)},'
+                            '${_lng!.toStringAsFixed(5)}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: _lat == null
+                            ? Theme.of(context).sz.danger
+                            : Theme.of(context).sz.earn),
+                  ),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: Text(_lat == null ? '在地图上标位置 *' : '重新标'),
+                  onPressed: _pickShopSpot,
+                ),
+              ])
+            else
+              Text(
+                _lat == null
+                    ? '本店尚未标定位置,请联系客服补录'
+                    : '店铺位置 ${_lat!.toStringAsFixed(5)},'
+                        '${_lng!.toStringAsFixed(5)}(如需迁址请联系客服)',
+                style: TextStyle(
+                    fontSize: 12, color: Theme.of(context).sz.inkMuted),
+              ),
             const SizedBox(height: 12),
             if (!_isHotel) ...[
               // 外卖品类:决定出现在用户端哪个分类,入驻后可随时改

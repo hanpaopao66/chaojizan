@@ -917,13 +917,24 @@ class ApiClient {
 
   Future<void> deleteAddress(int id) => _request('DELETE', '/addresses/$id');
 
-  /// POI 输入提示(服务端代理高德,Key 不下发)
+  /// POI 输入提示(服务端代理腾讯位置服务,Key 不下发 ——
+  /// key 一旦进了 APK 就等于公开,配额按 key 计费,被盗刷是迟早的事)
   Future<List<PoiTip>> geoTips(String keywords, {String city = '成都'}) async {
     final data = await _request('GET', '/geo/tips',
         query: {'keywords': keywords, 'city': city});
     return (data as List)
         .map((e) => PoiTip.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// 坐标 → 地址(地图选点用)。
+  ///
+  /// 回来的 lat/lng 是**你传进去的那个坐标**,不是匹配到的 POI 坐标 ——
+  /// 用户拖到自家单元门口,不该被吸附到几十米外的小区大门。
+  Future<PoiTip> geoReverse(double lat, double lng) async {
+    final data = await _request('GET', '/geo/reverse',
+        query: {'lat': '$lat', 'lng': '$lng'});
+    return PoiTip.fromJson(data as Map<String, dynamic>);
   }
 
   Future<Order> mockPay(String orderNo) async {

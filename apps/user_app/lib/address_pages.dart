@@ -165,6 +165,42 @@ class _AddressEditPageState extends State<AddressEditPage> {
     });
   }
 
+  /// 在地图上选点。
+  ///
+  /// 搜索联想只覆盖已收录的 POI —— 新交付的小区、城中村、园区里的某栋楼,
+  /// 搜出来要么没有、要么只能选到几百米外的地标。而**配送费和配送范围
+  /// 都是按坐标算的**,差 500 米骑手就白跑一趟。
+  Future<void> _pickOnMap() async {
+    final picked = await Navigator.of(context).push<PickedPlace>(
+      MaterialPageRoute(
+        builder: (_) => MapPickerPage(
+          initialLat: _selected?.lat,
+          initialLng: _selected?.lng,
+          onReverse: (lat, lng) async {
+            final t = await widget.api.geoReverse(lat, lng);
+            return (name: t.name, district: t.district);
+          },
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _selected = PoiTip(
+        // 反查不出名字时用坐标兜底,让用户知道"位置存下了、名字得自己写",
+        // 而不是看到一个空白以为没选上
+        name: picked.name.isEmpty
+            ? '地图选点 ${picked.lat.toStringAsFixed(5)},'
+                '${picked.lng.toStringAsFixed(5)}'
+            : picked.name,
+        district: picked.district,
+        lat: picked.lat,
+        lng: picked.lng,
+      );
+      _search.text = _selected!.name;
+      _tips = [];
+    });
+  }
+
   Future<void> _save() async {
     if (_selected == null) {
       ScaffoldMessenger.of(context)
@@ -214,6 +250,14 @@ class _AddressEditPageState extends State<AddressEditPage> {
               prefixIcon: const Icon(Icons.search),
               border: const OutlineInputBorder(),
               helperText: _selected == null ? '从搜索结果里选一个定位点' : null,
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.my_location, size: 18),
+              label: const Text('搜不到?在地图上选位置'),
+              onPressed: _pickOnMap,
             ),
           ),
           if (_selected == null)

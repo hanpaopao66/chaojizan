@@ -148,10 +148,6 @@ class Settings(BaseSettings):
     feie_user: str = ""    # 飞鹅后台的 USER(注册邮箱/账号)
     feie_ukey: str = ""    # 飞鹅后台的 UKEY
 
-    # 高德 Web 服务 Key(POI 输入提示用,与客户端 SDK Key 是两种 Key)
-    # 不配置时 /geo/tips 返回演示数据,开发期可跑通全流程
-    amap_web_key: str = ""
-
     # 腾讯地图 Key(#137)。一把 key 同时用于:
     #  - 服务端逆地理解析城市(services/geo_city.py,多城市隔离用);
     #  - 客户端配送地图底图瓦片(打包时 --dart-define=TENCENT_MAP_KEY 注入)。

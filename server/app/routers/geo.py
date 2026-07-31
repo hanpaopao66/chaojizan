@@ -1,7 +1,10 @@
 """地理服务代理。
 
-高德 Web 服务 Key 只放在服务端,客户端一律走这里,避免 Key 泄露被盗刷。
+腾讯位置服务的 Key 只放在服务端,客户端一律走这里 —— Key 一旦进了 APK
+就等于公开,被盗刷是迟早的事(配额是按 key 计费的)。
 没配 Key 时返回演示数据,保证开发环境全流程能跑。
+
+坐标口径:腾讯返回 GCJ-02,与本系统全局一致,直接透传不转换。
 """
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,7 +16,8 @@ from ..security import get_current_user
 
 router = APIRouter(prefix="/geo", tags=["地理服务"])
 
-AMAP_TIPS_URL = "https://restapi.amap.com/v3/assistant/inputtips"
+SUGGESTION_URL = "https://apis.map.qq.com/ws/place/v1/suggestion"
+REVERSE_URL = "https://apis.map.qq.com/ws/geocoder/v1/"
 
 # 演示模式的基准点:成都春熙路
 _DEMO_LAT, _DEMO_LNG = 30.6598, 104.0810
@@ -26,11 +30,11 @@ async def poi_tips(
     user: User = Depends(get_current_user),
 ):
     """POI 输入提示(选收货地址/店铺选点用)。"""
-    if not settings.amap_web_key:
+    if not settings.tencent_map_key:
         return [
             PoiTipOut(
                 name=f"{keywords}·演示地点{i + 1}",
-                district=f"{city} 演示数据(服务端未配置 AMAP_WEB_KEY)",
+                district=f"{city} 演示数据(服务端未配置 TENCENT_MAP_KEY)",
                 lat=_DEMO_LAT + i * 0.002,
                 lng=_DEMO_LNG + i * 0.002,
             )
@@ -40,39 +44,87 @@ async def poi_tips(
     async with httpx.AsyncClient(timeout=5) as client:
         try:
             resp = await client.get(
-                AMAP_TIPS_URL,
+                SUGGESTION_URL,
                 params={
-                    "key": settings.amap_web_key,
-                    "keywords": keywords,
-                    "city": city,
-                    "citylimit": "true",
-                    "datatype": "poi",
+                    "keyword": keywords,
+                    "region": city,
+                    # region_fix=1:**只在本市内搜**。不加的话搜「一号店」
+                    # 会把全国同名地点都返回,用户很容易选中外地的那个,
+                    # 下单后才发现超出配送范围
+                    "region_fix": 1,
+                    "key": settings.tencent_map_key,
                 },
             )
             data = resp.json()
         except httpx.HTTPError:
             raise HTTPException(502, "地图服务暂时不可用,请稍后再试")
 
-    if data.get("status") != "1":
-        raise HTTPException(502, f"高德接口错误:{data.get('info', '未知')}")
+    if data.get("status") != 0:
+        raise HTTPException(502, f"地图接口错误:{data.get('message', '未知')}")
 
     tips = []
-    for tip in data.get("tips", []):
-        location = tip.get("location")
-        if not isinstance(location, str) or "," not in location:
-            continue  # 过滤没有坐标的模糊提示
-        lng, lat = location.split(",", 1)
-        district = tip.get("district") or ""
-        # 高德的 address 字段偶尔是空数组,只拼接字符串
-        addr = tip.get("address")
-        if isinstance(addr, str):
-            district += addr
+    for item in data.get("data") or []:
+        loc = item.get("location") or {}
+        lat, lng = loc.get("lat"), loc.get("lng")
+        if lat is None or lng is None:
+            continue  # 过滤没有坐标的模糊提示 —— 没坐标就没法算配送费
         tips.append(
             PoiTipOut(
-                name=tip.get("name", ""),
-                district=district,
+                name=item.get("title", ""),
+                district=item.get("address", "") or "",
                 lat=float(lat),
                 lng=float(lng),
             )
         )
     return tips[:10]
+
+
+@router.get("/reverse", response_model=PoiTipOut)
+async def reverse_geocode(
+    lat: float = Query(ge=-90, le=90),
+    lng: float = Query(ge=-180, le=180),
+    user: User = Depends(get_current_user),
+):
+    """坐标 → 地址(地图选点用)。
+
+    用户在地图上拖动图钉选位置后,要把坐标换成人能看懂的地址填进去。
+    没有这一步的话,用户存下来的地址是一串经纬度 —— 骑手看不懂,
+    商家也没法判断这单送不送得到。
+    """
+    if not settings.tencent_map_key:
+        return PoiTipOut(
+            name="演示地点(服务端未配置 TENCENT_MAP_KEY)",
+            district="演示数据", lat=lat, lng=lng)
+
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            resp = await client.get(REVERSE_URL, params={
+                "location": f"{lat},{lng}",
+                "key": settings.tencent_map_key,
+                # 这里**要** POI:纯行政区划("锦江区")当收货地址没用,
+                # 得给出"XX 大厦""XX 小区"这种骑手找得到的参照物
+                "get_poi": 1,
+            })
+            data = resp.json()
+        except httpx.HTTPError:
+            raise HTTPException(502, "地图服务暂时不可用,请稍后再试")
+
+    if data.get("status") != 0:
+        raise HTTPException(502, f"地图接口错误:{data.get('message', '未知')}")
+
+    result = data.get("result") or {}
+    # 优先用「推荐地址」:腾讯已经按"适合作为收货地址"挑过一轮,
+    # 比原始的 address 字段更像人会写的地址
+    formatted = result.get("formatted_addresses") or {}
+    name = (formatted.get("recommend")
+            or formatted.get("rough")
+            or result.get("address")
+            or "")
+    return PoiTipOut(
+        name=name,
+        district=result.get("address", "") or "",
+        # 回传的是**用户点的那个坐标**,不是腾讯匹配到的 POI 坐标 ——
+        # 用户拖到自家单元门口,不该被吸附到几十米外的小区大门
+        lat=lat,
+        lng=lng,
+    )
