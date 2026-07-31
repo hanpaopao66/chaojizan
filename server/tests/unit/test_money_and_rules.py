@@ -135,7 +135,9 @@ class TestRiskBox:
     def test_测试用坐标网格间距大于包围盒(self):
         """tests/util.unique_spot 的网格必须比包围盒宽,
         否则相邻用例会互相判成同址高频(这条真实翻过车)。"""
-        from tests.util import unique_spot
+        # 从 tests.geo 取而不是 tests.util:后者 import 时会调 API,
+        # 让这条纯函数测试隐式依赖起着的服务(CI 上就是这么红的)
+        from tests.geo import unique_spot
 
         a = unique_spot("seed-a")
         b = (a[0] + 0.0008, a[1])          # 网格步长

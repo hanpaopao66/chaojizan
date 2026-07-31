@@ -33,16 +33,6 @@ jobs:
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
-      minio:
-        image: bitnami/minio:latest
-        env:
-          MINIO_ROOT_USER: superz
-          MINIO_ROOT_PASSWORD: superz-ci-secret
-          # bitnami 镜像支持声明式建桶,省掉一个 init 容器。
-          # 桶名与生产一致 —— 本地/CI/生产用同一套名字,
-          # 才不会出现"CI 绿了线上炸"
-          MINIO_DEFAULT_BUCKETS: superz-public:download,superz-private
-        ports: ["9000:9000"]
 
     env:
       DATABASE_URL: postgresql+asyncpg://superz:superz@localhost:5432/superz
@@ -70,6 +60,40 @@ jobs:
       - name: 安装依赖
         working-directory: server
         run: pip install -r requirements.txt
+
+      # MinIO 不作为 service 容器起:它需要 `server /data` 这个 command,
+      # 而 GitHub 的 service 容器给不了 command。
+      #
+      # 镜像用**生产同款** minio/minio。原先用的 bitnami/minio 公开 tag 已被
+      # 下架(Bitnami 2025 年把免费镜像挪走了),CI 直接拉不到 ——
+      # 而且 CI 和生产用不同的镜像本来就违背"同一套东西"的原则
+      - name: 起 MinIO(生产同款镜像)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=superz \
+            -e MINIO_ROOT_PASSWORD=superz-ci-secret \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:9000/minio/health/live && break
+            sleep 2
+          done
+          curl -sf http://127.0.0.1:9000/minio/health/live \
+            || { echo "MinIO 起不来"; docker logs minio; exit 1; }
+
+      # 桶名与生产一致 —— 本地/CI/生产用同一套名字,才不会"CI 绿了线上炸"。
+      # 用服务端本来就依赖的 python minio 客户端建,不为 CI 再装一个 mc
+      - name: 建桶
+        working-directory: server
+        run: |
+          python - <<'PY'
+          from minio import Minio
+          c = Minio("localhost:9000", access_key="superz",
+                    secret_key="superz-ci-secret", secure=False)
+          for b in ("superz-public", "superz-private"):
+              if not c.bucket_exists(b):
+                  c.make_bucket(b)
+              print("bucket", b, "ok")
+          PY
 
       - name: 迁移 + 种子数据
         working-directory: server
