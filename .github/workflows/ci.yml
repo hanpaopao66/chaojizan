@@ -47,6 +47,10 @@ jobs:
       # 表现为 e2e_auto_flow 时好时坏(本地踩过)
       AUTO_FLOW_ENABLED: "false"
       SUPERZ_API: http://127.0.0.1:8010
+      # seed.py 见到 STORAGE_BACKEND=minio 会认定"这是生产",把演示口令随机化
+      # (不留人人可登的后门)。CI 偏偏要用 minio 跑生产的存储路径,所以在这里
+      # 显式给一个口令 —— 那条生产保护本身不该为 CI 放宽。每次跑都不一样
+      SEED_DEMO_PASSWORD: ci-${{ github.run_id }}
 
     steps:
       - uses: actions/checkout@v4

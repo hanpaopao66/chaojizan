@@ -15,7 +15,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from app.db import SessionLocal
 from app.models import (
@@ -523,6 +523,72 @@ HOTELS = [
 ]
 
 
+async def _fill_history(db, shop, shop_def, dishes, customer, slug):
+    """给一家店补近 30 天的已完成订单、商家账本与评价。
+
+    抽成函数是因为**两条路径都要用它**:新建的演示店,以及
+    「已经存在但一单都没有」的店(scripts/seed.py 建的张记面馆就是后者)。
+    原先这段只长在新建分支里,于是全新部署的门面店月售恒为 0。
+    """
+    # 2) 近 30 天完成订单(撑月售;演示数据不挂骑手,不影响真实骑手钱包)
+    now = datetime.now(timezone.utc)
+    orders = []
+    for n in range(shop_def["orders_30d"]):
+        dish = random.choice(dishes)
+        qty = random.randint(1, 2)
+        food = dish.price_cents * qty
+        fee = 300
+        commission = int(food * 0.05)
+        created = now - timedelta(
+            days=random.uniform(0, 29), minutes=random.uniform(0, 600)
+        )
+        order = Order(
+            order_no=f"demo{slug}{n:04d}" + "0" * 8,
+            customer_id=customer.id,
+            merchant_id=shop.id,
+            rider_id=None,
+            status=OrderStatus.COMPLETED,
+            items=[{"dish_id": dish.id, "name": dish.name,
+                    "price_cents": dish.price_cents, "quantity": qty}],
+            food_cents=food, delivery_fee_cents=fee,
+            total_cents=food + fee, commission_cents=commission,
+            address="演示订单", lat=shop.lat, lng=shop.lng,
+            created_at=created,
+        )
+        db.add(order)
+        orders.append((order, food, commission, created))
+    await db.flush()
+
+    # 商家账本同步(对账页数据一致)
+    for order, food, commission, created in orders:
+        db.add(MerchantEarning(
+            merchant_id=shop.id, order_id=order.id,
+            order_no=order.order_no, food_cents=food,
+            commission_cents=commission, net_cents=food - commission,
+            created_at=created,
+        ))
+        db.add(OrderEvent(
+            order_id=order.id, from_status="delivered",
+            to_status="completed", actor_role="system",
+            created_at=created,
+        ))
+
+    # 3) 评价(挂在前几笔订单上)+ 评分聚合
+    rating_sum = 0
+    for i, (stars, comment) in enumerate(shop_def["reviews"]):
+        order = orders[i][0]
+        db.add(Review(
+            order_id=order.id, customer_id=customer.id,
+            merchant_id=shop.id, rider_id=None,
+            merchant_rating=stars, comment=comment,
+            created_at=orders[i][3],
+        ))
+        rating_sum += stars
+    shop.rating_sum = rating_sum
+    shop.rating_count = len(shop_def["reviews"])
+    return len(orders)
+
+
 async def main():
     async with SessionLocal() as db:
         # 0) 张记面馆:把测试期的 1px 图换成正经演示图(生产库可能没有,跳过)
@@ -586,11 +652,31 @@ async def main():
             ) or await db.scalar(
                 select(Merchant).where(Merchant.name == shop_def["name"])
             )
+            slug = shop_def["phone"][-4:]
+
             if shop is not None:
-                print(f"「{shop_def['name']}」已存在,跳过")
+                # 已存在**且已有历史单** → 真的没事可做。
+                #
+                # 但「存在却一单都没有」是有的:张记面馆由 scripts/seed.py 建,
+                # 走不到下面的造单分支,于是**全新部署里门面店月售是 0** ——
+                # 用户看到的是一家没人点过的店,e2e 的 monthly_sales 断言也挂。
+                # 老开发库因为跑过上百次 e2e 攒出了单子,恰好盖住了这个洞。
+                n_orders = await db.scalar(
+                    select(func.count()).select_from(Order)
+                    .where(Order.merchant_id == shop.id))
+                if n_orders:
+                    print(f"「{shop_def['name']}」已存在,跳过")
+                    continue
+                dishes = list(await db.scalars(
+                    select(Dish).where(Dish.merchant_id == shop.id,
+                                       Dish.is_on_sale.is_(True))))
+                if not dishes:
+                    print(f"「{shop_def['name']}」已存在但没有在售菜品,跳过")
+                    continue
+                print(f"「{shop_def['name']}」已存在但没有历史单,补月售")
+                await _fill_history(db, shop, shop_def, dishes, customer, slug)
                 continue
 
-            slug = shop_def["phone"][-4:]
             shop = Merchant(
                 owner_id=owner.id,
                 name=shop_def["name"],
@@ -622,66 +708,13 @@ async def main():
                 dishes.append(dish)
             await db.flush()
 
-            # 2) 近 30 天完成订单(撑月售;演示数据不挂骑手,不影响真实骑手钱包)
-            now = datetime.now(timezone.utc)
-            orders = []
-            for n in range(shop_def["orders_30d"]):
-                dish = random.choice(dishes)
-                qty = random.randint(1, 2)
-                food = dish.price_cents * qty
-                fee = 300
-                commission = int(food * 0.05)
-                created = now - timedelta(
-                    days=random.uniform(0, 29), minutes=random.uniform(0, 600)
-                )
-                order = Order(
-                    order_no=f"demo{slug}{n:04d}" + "0" * 8,
-                    customer_id=customer.id,
-                    merchant_id=shop.id,
-                    rider_id=None,
-                    status=OrderStatus.COMPLETED,
-                    items=[{"dish_id": dish.id, "name": dish.name,
-                            "price_cents": dish.price_cents, "quantity": qty}],
-                    food_cents=food, delivery_fee_cents=fee,
-                    total_cents=food + fee, commission_cents=commission,
-                    address="演示订单", lat=shop.lat, lng=shop.lng,
-                    created_at=created,
-                )
-                db.add(order)
-                orders.append((order, food, commission, created))
-            await db.flush()
-
-            # 商家账本同步(对账页数据一致)
-            for order, food, commission, created in orders:
-                db.add(MerchantEarning(
-                    merchant_id=shop.id, order_id=order.id,
-                    order_no=order.order_no, food_cents=food,
-                    commission_cents=commission, net_cents=food - commission,
-                    created_at=created,
-                ))
-                db.add(OrderEvent(
-                    order_id=order.id, from_status="delivered",
-                    to_status="completed", actor_role="system",
-                    created_at=created,
-                ))
-
-            # 3) 评价(挂在前几笔订单上)+ 评分聚合
-            rating_sum = 0
-            for i, (stars, comment) in enumerate(shop_def["reviews"]):
-                order = orders[i][0]
-                db.add(Review(
-                    order_id=order.id, customer_id=customer.id,
-                    merchant_id=shop.id, rider_id=None,
-                    merchant_rating=stars, comment=comment,
-                    created_at=orders[i][3],
-                ))
-                rating_sum += stars
-            shop.rating_sum = rating_sum
-            shop.rating_count = len(shop_def["reviews"])
+            # 2) 近 30 天完成订单 + 账本 + 评价(与"补月售"分支共用同一段逻辑)
+            n_orders = await _fill_history(
+                db, shop, shop_def, dishes, customer, slug)
 
             print(f"「{shop_def['name']}」创建完成:"
-                  f"{len(dishes)} 道菜 / 月售 {shop_def['orders_30d']} / "
-                  f"评分 {rating_sum / len(shop_def['reviews']):.1f}")
+                  f"{len(dishes)} 道菜 / 月售 {n_orders} / "
+                  f"评分 {shop.rating_sum / shop.rating_count:.1f}")
 
         # 4) 团购券(商店审核:已上线功能要有可浏览可下单的数据)
         name_by_phone = {s["phone"]: s["name"] for s in SHOPS}

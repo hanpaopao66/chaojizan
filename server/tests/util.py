@@ -35,8 +35,18 @@ def call(method, path, token=None, body=None, expect_error=False, _retried=False
         raise SystemExit(f"FAIL {method} {path}: {e.code} {detail}")
 
 
-def login(phone, password="123456"):
-    return call("POST", "/auth/login", body={"phone": phone, "password": password})["token"]
+# 演示口令默认 123456,但 scripts/seed.py 在 STORAGE_BACKEND=minio 时会
+# **随机生成**(它把这个当成"跑在生产上"的信号,不留人人可登的后门)。
+# CI 恰恰要用 minio 跑生产的存储路径,于是撞上这条 —— 两边都对,只是没对齐。
+# 解法是 CI 显式给 SEED_DEMO_PASSWORD,seed 和用例都读它,
+# 而不是把 seed 那条生产保护放宽。
+DEMO_PASSWORD = os.environ.get("SEED_DEMO_PASSWORD") or "123456"
+
+
+def login(phone, password=None):
+    return call("POST", "/auth/login",
+                body={"phone": phone,
+                      "password": password or DEMO_PASSWORD})["token"]
 
 
 # seed.py 里的演示账号
