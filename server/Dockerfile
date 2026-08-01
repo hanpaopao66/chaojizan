@@ -1,8 +1,28 @@
 FROM python:3.11-slim
 
 WORKDIR /srv
+
+# ffmpeg 给明厨亮灶探测抽帧用(#156)。没有它只能验"连不连得上",
+# 验不了**黑屏和镜头对着天花板** —— 而后者正是行业里最普遍的乱象,
+# 也正是平台会被追连带责任的那一种(标着「有」实际啥也看不见)。
+#
+# 代码在没有 ffmpeg 时会照实降级并说明(kitchen_cam.capabilities()),
+# 不会假装验过 —— 但生产上我们要的是完整检测。
+#
+# apt 走阿里云:官方源在国内服务器会超时
+ARG APT_MIRROR=mirrors.aliyun.com
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
+# pip 也走阿里云:服务器上 PyPI 官方源直接不通
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i "${PIP_INDEX_URL}" -r requirements.txt
 
 COPY app ./app
 COPY scripts ./scripts

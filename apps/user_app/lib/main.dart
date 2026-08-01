@@ -1117,11 +1117,22 @@ class _MerchantListViewState extends State<MerchantListView> {
                       Wrap(
                         spacing: 6,
                         runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           SzChip(
                               RemoteCopy.text(
                                   'pledge.commission_short', '5% 封顶'),
                               color: sz.earn, dense: true),
+                          // 明厨亮灶(#155)。**这一项是法定要求**:总局令第 123 号
+                          // 第十三条要求平台在商家列表页展示「有明厨亮灶」
+                          // 「无明厨亮灶」标识 —— 要标的是**两种**,
+                          // 所以没装的店也渲染,只是渲染成一行浅灰小字
+                          // (compact 版),不做成大红标签去羞辱他 ——
+                          // 法规对商家是「倡导」不是强制
+                          SzKitchenCamChip(
+                              has: m.kitchenCam,
+                              label: m.kitchenCamLabel,
+                              compact: true),
                           for (final label in m.promoLabels)
                             SzChip(label, color: sz.hold, dense: true),
                         ],
@@ -1693,6 +1704,23 @@ class _MenuPageState extends State<MenuPage>
                 Icon(Icons.chevron_right, size: 14, color: sz.inkFaint),
               ],
             ),
+          ),
+          // 明厨亮灶的链接标识(#155)。**位置是法规指定的**:
+          // 总局令第 123 号第二十五条要求"在其主页面显著位置设置
+          // 「明厨亮灶」的链接标识" —— 店铺页顶部信息行的正下方,
+          // 就是这家店的"主页面显著位置"。
+          //
+          // 没装的店也显示(灰色「无明厨亮灶」),因为第十三条要标的是两种。
+          const SizedBox(height: 9),
+          SzKitchenCamChip(
+            has: shop.kitchenCam,
+            label: shop.kitchenCamLabel,
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => KitchenCamPage(
+                shopName: shop.name,
+                load: () => widget.api.kitchenCamOf(shop.id),
+              ),
+            )),
           ),
           // 把平台主张落到这一家店:抽象的「5% 封顶」在这里变成
           // 「你这一单便宜在哪」——这是店铺页唯一该讲平台的地方

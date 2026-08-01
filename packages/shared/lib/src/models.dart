@@ -68,6 +68,9 @@ class Merchant {
             .cast<Map<String, dynamic>>(),
         viewerIsStaff = json['viewer_is_staff'] as bool? ?? false,
         category = json['category'] as String? ?? 'fast_food',
+        kitchenCam = json['kitchen_cam'] as bool? ?? false,
+        kitchenCamLabel =
+            json['kitchen_cam_label'] as String? ?? '无明厨亮灶',
         bizType = json['biz_type'] as String? ?? 'food';
 
   final int id;
@@ -95,6 +98,16 @@ class Merchant {
   final int minOrderCents;
   final int packingFeeCents;
   final String category; // 外卖品类 slug(清单见 merchant_categories.dart)
+
+  /// 明厨亮灶(#155)。**列表页展示这两个字段是法定要求**:
+  /// 总局令第 123 号第十三条要求平台"根据商家是否实施,在列表页展示
+  /// 「无明厨亮灶」「有明厨亮灶」标识" —— 要标的是**两种**,
+  /// 所以每家店都有,不是给装了的加徽章。
+  ///
+  /// 只有服务端判定 active 才是 true:待核验、掉线都算「无」——
+  /// 看不到就是没有。
+  final bool kitchenCam;
+  final String kitchenCamLabel;
   final String bizType;  // 业态:food 餐饮外卖 / hotel 酒店住宿(工作台按此分叉)
 
   /// 门店相册(环境/后厨/证照实拍,最多 9 张)

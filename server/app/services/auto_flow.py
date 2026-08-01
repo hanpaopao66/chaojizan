@@ -1037,6 +1037,10 @@ async def auto_flow_loop() -> None:
             from .marketing import maybe_run_marketing
             await maybe_run_marketing(datetime.now(BEIJING))
             await maybe_recalc_commission_tiers()
+            # 明厨亮灶探测(#156):标识必须能自动降级 ——
+            # 挂着不管的「有明厨亮灶」就是在给虚假标识背书
+            from .kitchen_cam import maybe_sweep as _cam_sweep
+            await _cam_sweep()
             await maybe_run_daily_audit()
             await maybe_record_health_probe()
             # 公开账本锚点补到昨天(幂等,通常零工作量;见 services/ledger.py)

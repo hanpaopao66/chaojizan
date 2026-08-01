@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2040,3 +2041,162 @@ async def my_statement_csv(
         generate(), media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition":
                  f"attachment; filename=statement-{month}.csv"})
+
+
+# ---------------------------------------------------------------------------
+# 明厨亮灶(#155/#156/#157)
+#
+# 这不是产品选择,是法定义务:总局令第 123 号第十三条,2026-06-01 已施行。
+# 平台的三项义务 —— 要求商家设链接标识、在列表页展示「有/无」、提供技术支持。
+#
+# 完整背景与红线见 services/kitchen_cam.py 的模块文档。
+# ---------------------------------------------------------------------------
+
+
+class KitchenCamIn(BaseModel):
+    """接入明厨亮灶。"""
+    url: str = Field(max_length=300)
+    vendor: str = Field(default="", max_length=20)
+    #: 商家自己拍的画面截图。人工核验时对着它看两件事:
+    #: ① 镜头对的是不是操作区;② 有没有拍到不该拍的(#157)
+    shot_url: str = Field(default="", max_length=300)
+    #: 已告知后厨全体员工该区域有对外直播的摄像头。
+    #: **必须为 true 才能提交** —— 后厨里站着的也是劳动者,
+    #: 个保法第二十六条的精神是"先告知,再采集"
+    notified: bool = False
+
+
+def _cam_out(shop: Merchant) -> dict:
+    from ..services import kitchen_cam as kc
+    return {
+        "status": shop.kitchen_cam_status,
+        "listed_label": kc.listed_label(shop.kitchen_cam_status),
+        "url": shop.kitchen_cam_url,
+        "vendor": shop.kitchen_cam_vendor,
+        "shot_url": shop.kitchen_cam_shot_url,
+        "notified": shop.kitchen_cam_notified,
+        "reason": shop.kitchen_cam_reason,
+        "note": shop.kitchen_cam_note,
+        "verified_at": shop.kitchen_cam_verified_at,
+        "checked_at": shop.kitchen_cam_checked_at,
+        "capabilities": kc.capabilities(),
+        "should_cover": kc.SHOULD_COVER,
+        "must_not_cover": kc.MUST_NOT_COVER,
+        "probe_interval_minutes": kc.PROBE_INTERVAL_MINUTES,
+    }
+
+
+@router.get("/me/kitchen-cam")
+async def my_kitchen_cam(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的明厨亮灶状态。"""
+    return _cam_out(await _my_shop_or_404(db, user))
+
+
+@router.put("/me/kitchen-cam")
+async def set_kitchen_cam(
+    payload: KitchenCamIn,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """接入或更新明厨亮灶地址。
+
+    提交后进 pending,等平台看一眼首帧再放行 —— 这一步**不能省**:
+    行业里「摄像头对着天花板」的乱象,就是因为没人看过一眼就发标识了。
+    平台标了「有明厨亮灶」而实际是天花板,用户因此下单出了事,
+    平台是要负连带责任的(食品安全法第一百三十一条)。
+    """
+    from ..services import kitchen_cam as kc
+
+    shop = await _my_shop_or_404(db, user)
+    try:
+        url = kc.normalize_url(payload.url)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+
+    if not payload.notified:
+        # 这一条不是走过场。后厨里站着的是劳动者,他们有权知道自己在被拍
+        raise HTTPException(
+            422, "请先确认已告知后厨全体员工该区域有对外直播的摄像头 —— "
+                 "接入说明里有可打印的告知牌")
+
+    shop.kitchen_cam_url = url
+    shop.kitchen_cam_vendor = payload.vendor.strip()[:20]
+    shop.kitchen_cam_shot_url = payload.shot_url.strip()[:300]
+    shop.kitchen_cam_notified = True
+    shop.kitchen_cam_status = kc.STATUS_PENDING
+    shop.kitchen_cam_reason = ""
+    shop.kitchen_cam_note = "已提交,平台会看一眼画面再放行(通常 1 个工作日内)"
+    shop.kitchen_cam_fail_streak = 0
+    shop.kitchen_cam_ok_streak = 0
+    shop.kitchen_cam_sequence = None
+    shop.kitchen_cam_verified_at = None
+    await db.commit()
+    await db.refresh(shop)
+    return _cam_out(shop)
+
+
+@router.delete("/me/kitchen-cam")
+async def remove_kitchen_cam(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """撤下明厨亮灶。商家随时可以撤 —— 法规对商家是「倡导」不是强制。"""
+    from ..services import kitchen_cam as kc
+
+    shop = await _my_shop_or_404(db, user)
+    shop.kitchen_cam_status = kc.STATUS_NONE
+    shop.kitchen_cam_url = ""
+    shop.kitchen_cam_reason = ""
+    shop.kitchen_cam_note = ""
+    shop.kitchen_cam_sequence = None
+    shop.kitchen_cam_verified_at = None
+    await db.commit()
+    await db.refresh(shop)
+    return _cam_out(shop)
+
+
+@router.get("/{merchant_id}/kitchen-cam")
+async def public_kitchen_cam(
+    merchant_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """顾客看的明厨亮灶(公开,无需登录 —— 法规要的是"接受社会监督")。
+
+    **只有 active 才给播放地址。** pending/degraded 一律按「无明厨亮灶」对外,
+    并且如实告诉用户为什么现在看不了 —— 转圈转到天荒地老比直说更糟。
+    """
+    from ..services import kitchen_cam as kc
+
+    shop = await db.get(Merchant, merchant_id)
+    if shop is None:
+        raise HTTPException(404, "店铺不存在")
+
+    active = shop.kitchen_cam_status == kc.STATUS_ACTIVE
+    return {
+        "merchant_id": shop.id,
+        "has_kitchen_cam": active,
+        "label": kc.listed_label(shop.kitchen_cam_status),
+        # 不 active 就不给地址,连"你自己试试"的机会都不给 ——
+        # 给了等于把一个我们判定为不可用的流推给用户
+        "url": shop.kitchen_cam_url if active else "",
+        "checked_at": shop.kitchen_cam_checked_at,
+        "message": ("" if active else _cam_public_message(shop)),
+        "coverage_note": "画面只覆盖加工制作的关键环节;"
+                         "休息区、更衣区、卫生间不在拍摄范围内",
+        "no_playback": "只提供实时画面,不提供历史录像回看",
+    }
+
+
+def _cam_public_message(shop: Merchant) -> str:
+    """不可用时给用户的人话。**不甩锅给商家,也不含糊。**"""
+    from ..services import kitchen_cam as kc
+
+    if shop.kitchen_cam_status == kc.STATUS_NONE:
+        return "这家店还没有接入明厨亮灶"
+    if shop.kitchen_cam_status == kc.STATUS_PENDING:
+        return "这家店刚接入,平台还在核验画面,暂时按「无明厨亮灶」显示"
+    return ("这家店的摄像头现在连不上,我们已经把标识改回「无明厨亮灶」。"
+            "等它恢复了会自动改回来")

@@ -497,6 +497,39 @@ async def dispatch_spec():
     return d.public_spec()
 
 
+@router.get("/kitchen-cam")
+async def kitchen_cam_spec(db: AsyncSession = Depends(get_db)):
+    """明厨亮灶的规则与现状(#155-#157,公开)。
+
+    为什么要公开:平台在列表页给商家标「有明厨亮灶」,用户据此下单 ——
+    那这个标识是**怎么发的、怎么验的、什么情况下会撤**,用户有权知道。
+
+    行业里「标着明厨亮灶却黑屏、镜头对着天花板」的乱象,根子就在于
+    标识只是个开关、发了没人管。我们把校验规则摆出来,是为了让人能对着查。
+
+    数值全部从 services/kitchen_cam.py 的常量读,**不另抄一份**。
+    """
+    from ..services import kitchen_cam as kc
+
+    spec = kc.public_spec()
+    # 带上真实的接入现状 —— 只给计数,绝无个案
+    counts = dict((await db.execute(sa_text("""
+        SELECT kitchen_cam_status, count(*) FROM merchants
+        WHERE status = 'approved' GROUP BY 1
+    """))).all())
+    spec["current"] = {
+        "active": counts.get("active", 0),
+        "degraded": counts.get("degraded", 0),
+        "pending": counts.get("pending", 0),
+        "none": counts.get("none", 0),
+        "note": "degraded 是装了但当前连不上的 —— 这些店在列表页显示的是"
+                "「无明厨亮灶」。我们把这个数也公开,是因为藏起来就等于"
+                "默认可以挂着不管",
+    }
+    spec["changelog"] = kc.CHANGELOG
+    return spec
+
+
 @router.get("/governance")
 async def governance_public(
     request: Request, db: AsyncSession = Depends(get_db),

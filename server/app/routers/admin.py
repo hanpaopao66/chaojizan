@@ -2,6 +2,8 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+from pydantic import BaseModel, Field
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy import text as text_sql
@@ -2342,3 +2344,100 @@ async def list_referrals(
             "created_at": r.created_at.isoformat(),
         } for r, phone in rows],
     }
+
+
+# ---------------------------------------------------------------------------
+# 明厨亮灶首帧核验(#155/#157)
+#
+# 这一步**不能省**。行业里「摄像头对着天花板」的乱象,就是因为没人看过一眼
+# 就把标识发出去了。平台在列表页标「有明厨亮灶」而实际是天花板,
+# 用户因此下单出了事 —— 食品安全法第一百三十一条,平台负连带责任。
+#
+# 人工要看两件事,缺一不可:
+#   ① 镜头对的是不是加工制作的关键环节(操作台/灶台/备餐/洗消);
+#   ② **有没有拍到不该拍的**(休息区/更衣/卫生间/顾客面部)——
+#      后厨里站着的也是劳动者,这条和第一条一样重要。
+# ---------------------------------------------------------------------------
+
+
+@router.get("/kitchen-cams/pending")
+async def list_pending_kitchen_cams(
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """待核验的明厨亮灶接入申请。"""
+    from ..services import kitchen_cam as kc
+
+    rows = (await db.scalars(
+        select(Merchant)
+        .where(Merchant.kitchen_cam_status == kc.STATUS_PENDING)
+        .order_by(Merchant.id.desc()).limit(100))).all()
+    return {
+        "items": [{
+            "merchant_id": m.id, "name": m.name, "address": m.address,
+            "url": m.kitchen_cam_url, "vendor": m.kitchen_cam_vendor,
+            "shot_url": m.kitchen_cam_shot_url,
+            "notified": m.kitchen_cam_notified,
+        } for m in rows],
+        # 核验清单随接口下发,避免审核员凭印象判
+        "checklist_pass": kc.SHOULD_COVER,
+        "checklist_reject": kc.MUST_NOT_COVER,
+        "how_to": "自己打开播放地址看一眼。两件事都要看:"
+                  "镜头对的是不是操作区;有没有拍到不该拍的。"
+                  "拍到休息区/更衣/卫生间/顾客面部的一律退回",
+    }
+
+
+class KitchenCamReviewIn(BaseModel):
+    approve: bool
+    reason: str = Field(default="", max_length=200)
+
+
+@router.post("/kitchen-cams/{merchant_id}/review")
+async def review_kitchen_cam(
+    merchant_id: int,
+    payload: KitchenCamReviewIn,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """核验通过/退回。
+
+    退回时**必须写理由** —— 商家要知道该怎么调镜头才能过,
+    否则他只会反复提交。这也是法规里平台"提供技术支持"的一部分。
+    """
+    from ..services import kitchen_cam as kc
+
+    shop = await db.get(Merchant, merchant_id, with_for_update=True)
+    if shop is None:
+        raise HTTPException(404, "店铺不存在")
+    if shop.kitchen_cam_status != kc.STATUS_PENDING:
+        raise HTTPException(409, "该店铺不在待核验状态")
+
+    from ..services.push import push_to_user
+
+    if payload.approve:
+        shop.kitchen_cam_status = kc.STATUS_ACTIVE
+        shop.kitchen_cam_verified_at = datetime.now(timezone.utc)
+        shop.kitchen_cam_reason = ""
+        shop.kitchen_cam_note = "核验通过,顾客可以看到「有明厨亮灶」"
+        shop.kitchen_cam_ok_streak = 1
+        shop.kitchen_cam_fail_streak = 0
+        await push_to_user(
+            shop.owner_id, "明厨亮灶已通过核验",
+            "顾客在列表里能看到你的店标着「有明厨亮灶」了",
+            {"type": "kitchen_cam"})
+    else:
+        if not payload.reason.strip():
+            raise HTTPException(422, "退回必须写明理由 —— "
+                                     "商家要知道镜头该怎么调才能过")
+        shop.kitchen_cam_status = kc.STATUS_NONE
+        shop.kitchen_cam_reason = "rejected"
+        shop.kitchen_cam_note = payload.reason.strip()[:200]
+        await push_to_user(
+            shop.owner_id, "明厨亮灶未通过核验",
+            f"{payload.reason.strip()[:80]};调整后可以再提交",
+            {"type": "kitchen_cam"})
+
+    await db.commit()
+    return {"merchant_id": shop.id, "status": shop.kitchen_cam_status,
+            "note": shop.kitchen_cam_note}

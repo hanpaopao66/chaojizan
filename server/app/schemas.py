@@ -158,6 +158,16 @@ class MerchantOut(BaseModel):
     # 当前查看者是否为店员(仅 GET /merchants/me 填充,客户端据此隐藏提现/改价入口)
     viewer_is_staff: bool = False
 
+    # 明厨亮灶(#155)。**这两个字段是法定要求,不是可选的展示项**:
+    # 总局令第 123 号第十三条要求平台"根据商家是否实施,在商家列表页展示
+    # 「无明厨亮灶」「有明厨亮灶」标识" —— 注意要标的是**两种**,
+    # 所以每一个商家都带这个字段,不是给装了的加徽章。
+    #
+    # 口径只认 active:pending(待核验)和 degraded(掉线)一律算「无」。
+    # 看不到就是没有 —— 标识和实际能不能看必须是同一件事
+    kitchen_cam: bool = False
+    kitchen_cam_label: str = "无明厨亮灶"
+
 
 class AdminMerchantOut(MerchantOut):
     """审核后台视角:多了证照和店主联系方式。"""

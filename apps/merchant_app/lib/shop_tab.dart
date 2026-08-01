@@ -4,6 +4,7 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'appeal_page.dart';
 import 'dashboard_page.dart';
+import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
 import 'promises_page.dart';
 import 'promo_page.dart';
@@ -36,6 +37,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
   /// 实测出餐时长(#150)。拿不到不影响这一页 —— 承诺值该能改还是能改
   Map<String, dynamic>? _prepTime;
 
+  /// 明厨亮灶状态(#155)
+  Map<String, dynamic>? _cam;
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +59,10 @@ class _ShopTabPageState extends State<ShopTabPage> {
       try {
         prep = await widget.api.merchantPrepTime();
       } catch (_) {}
+      Map<String, dynamic>? cam = _cam;
+      try {
+        cam = await widget.api.merchantKitchenCam();
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _shop = shop;
@@ -62,6 +70,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
           _afterSales = afterSales;
           _shopCoupons = coupons;
           _prepTime = prep;
+          _cam = cam;
           if (_announcement.text.isEmpty) {
             _announcement.text = shop?.announcement ?? '';
           }
@@ -311,6 +320,18 @@ class _ShopTabPageState extends State<ShopTabPage> {
         Text('${p['never_used_for']}',
             style: TextStyle(fontSize: 11, height: 1.4, color: sz.inkFaint)),
       ]),
+    );
+  }
+
+  /// 店铺 tab 里的明厨亮灶状态徽章。显示的是**顾客看到的那个标识** ——
+  /// 商家最该知道的是"顾客现在看到我是有还是无",不是内部状态词
+  Widget _kitchenCamBadge() {
+    final c = _cam;
+    if (c == null) return const SizedBox.shrink();
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SzKitchenCamChip(
+          has: c['status'] == 'active', label: '${c['listed_label']}'),
     );
   }
 
@@ -1610,6 +1631,29 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     ],
                   ),
                   Text('对售后判责或差评有异议?72 小时内申诉,平台人工复核',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
+                  // 明厨亮灶(#155)。放在「判责申诉」之后、「经营看板」之前 ——
+                  // 它属于"对外怎么呈现这家店"这一类,和看板那种自用工具不同
+                  Row(
+                    children: [
+                      const Text('明厨亮灶'),
+                      const SizedBox(width: 10),
+                      Expanded(child: _kitchenCamBadge()),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.videocam_outlined, size: 18),
+                        label: const Text('设置'),
+                        onPressed: () async {
+                          await Navigator.of(context).push(MaterialPageRoute(
+                              builder: (_) =>
+                                  KitchenCamSetupPage(api: widget.api)));
+                          _load();
+                        },
+                      ),
+                    ],
+                  ),
+                  Text('把后厨实时画面开放给顾客看。用你现有的摄像头就行,'
+                      '平台不卖硬件也不挑品牌',
                       style: Theme.of(context).textTheme.bodySmall),
                   const Divider(height: 24),
                   // #154 经营看板:打烊后坐下来复盘的那一屏

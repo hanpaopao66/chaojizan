@@ -28,4 +28,5 @@ export 'src/net_image.dart';
 export 'src/sz_widgets.dart';
 export 'src/nav_launcher.dart';
 export 'src/map_picker.dart';
+export 'src/kitchen_cam.dart';
 export 'src/map_boot.dart';

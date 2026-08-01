@@ -178,6 +178,51 @@ class Merchant(Base):
     printer_auto: Mapped[bool] = mapped_column(Boolean, default=True)
     license_no: Mapped[str] = mapped_column(String(50), default="")  # 食品经营许可证号,入驻审核必填
     license_image_url: Mapped[str] = mapped_column(String(300), default="")  # 证照照片,监管要求留存影像
+
+    # 明厨亮灶(#155)。**不塞 JSONB** —— 列表页要按 status 展示「有/无」标识,
+    # 那是法规第十三条的硬要求,得能索引能筛
+    #
+    # none 没装 / pending 待首帧人工核验 / active 在线 / degraded 装了但当前不可用。
+    # **列表页只把 active 显示成「有明厨亮灶」** —— 看不到就是没有
+    kitchen_cam_status: Mapped[str] = mapped_column(
+        String(10), default="none", index=True)
+    kitchen_cam_url: Mapped[str] = mapped_column(String(300), default="")
+    kitchen_cam_vendor: Mapped[str] = mapped_column(String(20), default="")
+    #: 商家自己拍的画面截图,首帧人工核验用(顺便查有没有拍到不该拍的,#157)
+    kitchen_cam_shot_url: Mapped[str] = mapped_column(String(300), default="")
+    #: 商家确认已告知后厨员工该区域对外直播(#157,个保法第二十六条的精神)
+    kitchen_cam_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    kitchen_cam_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    kitchen_cam_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 降级原因(机器可读)与给商家看的人话
+    kitchen_cam_reason: Mapped[str] = mapped_column(String(20), default="")
+    kitchen_cam_note: Mapped[str] = mapped_column(String(200), default="")
+    #: 连续失败/成功次数 —— 降级要迟钝、恢复要灵敏,见 kitchen_cam.next_status
+    kitchen_cam_fail_streak: Mapped[int] = mapped_column(Integer, default=0)
+    kitchen_cam_ok_streak: Mapped[int] = mapped_column(Integer, default=0)
+    #: HLS media sequence,用于判断"能连上但画面停了"
+    kitchen_cam_sequence: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
+
+    @property
+    def kitchen_cam(self) -> bool:
+        """列表页的「有/无明厨亮灶」。
+
+        **放在模型上而不是逐个端点填** —— 法规第十三条要求的是商家列表页,
+        而商家列表不止一个(首页、搜索、收藏、附近……)。逐个端点填一定会漏,
+        漏掉的那个列表就是个合规缺口。挂在模型上,MerchantOut 的
+        from_attributes 会自动带出去,新加的列表也天然带上。
+
+        只认 active:pending(待核验)、degraded(掉线)都算「无」。
+        """
+        return self.kitchen_cam_status == "active"
+
+    @property
+    def kitchen_cam_label(self) -> str:
+        return "有明厨亮灶" if self.kitchen_cam else "无明厨亮灶"
+
     status: Mapped[MerchantStatus] = mapped_column(
         _enum_column(MerchantStatus, "merchant_status"),
         default=MerchantStatus.pending,

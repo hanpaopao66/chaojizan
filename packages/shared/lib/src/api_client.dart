@@ -672,6 +672,37 @@ class ApiClient {
       await _request('GET', '/merchants/me/trend?weeks=$weeks')
           as Map<String, dynamic>;
 
+  /// 我的明厨亮灶状态(#155)
+  Future<Map<String, dynamic>> merchantKitchenCam() async =>
+      await _request('GET', '/merchants/me/kitchen-cam')
+          as Map<String, dynamic>;
+
+  /// 接入/更新明厨亮灶。notified 必须为 true —— 后厨里站着的也是劳动者,
+  /// 服务端会拒绝未确认"已告知员工"的提交(#157)
+  Future<Map<String, dynamic>> setMerchantKitchenCam({
+    required String url,
+    required bool notified,
+    String vendor = '',
+    String shotUrl = '',
+  }) async =>
+      await _request('PUT', '/merchants/me/kitchen-cam', body: {
+        'url': url,
+        'notified': notified,
+        'vendor': vendor,
+        'shot_url': shotUrl,
+      }) as Map<String, dynamic>;
+
+  /// 撤下明厨亮灶(法规对商家是「倡导」,随时可撤)
+  Future<Map<String, dynamic>> removeMerchantKitchenCam() async =>
+      await _request('DELETE', '/merchants/me/kitchen-cam')
+          as Map<String, dynamic>;
+
+  /// 顾客看的明厨亮灶。只有 active 才给播放地址 ——
+  /// 不可用时 url 为空、message 说明原因
+  Future<Map<String, dynamic>> kitchenCamOf(int merchantId) async =>
+      await _request('GET', '/merchants/$merchantId/kitchen-cam')
+          as Map<String, dynamic>;
+
   /// 商家推广物料:店铺短码 + 海报要印的内容(短码首次调用时懒生成)
   Future<Map<String, dynamic>> merchantPromo() async =>
       await _request('GET', '/merchants/me/promo') as Map<String, dynamic>;
