@@ -95,12 +95,21 @@ class KitchenCamPage extends StatefulWidget {
     super.key,
     required this.shopName,
     required this.load,
+    this.playerBuilder,
   });
 
   final String shopName;
 
   /// 通常是 `() => api.kitchenCamOf(merchantId)`
   final Future<Map<String, dynamic>> Function() load;
+
+  /// 播放器构建器,由宿主 App 注入(用户端接 video_player)。
+  ///
+  /// **shared 不依赖任何播放器实现** —— 骑手端/商家端不需要看直播,
+  /// 让它们跟着装一个几 MB 的原生播放器不划算。
+  ///
+  /// 不注入时退化为"给地址不给画面",页面其余部分照常可用。
+  final Widget Function(String url)? playerBuilder;
 
   @override
   State<KitchenCamPage> createState() => _KitchenCamPageState();
@@ -164,36 +173,38 @@ class _KitchenCamPageState extends State<KitchenCamPage> {
             ]),
           )
         else ...[
-          // 播放器本身留给宿主 App(用户端接 video_player)。
-          // 这里给的是地址与说明 —— 组件不绑定播放器实现,
-          // 三端谁需要谁自己接
-          SzCard(
-            padding: EdgeInsets.zero,
-            child: AspectRatio(
-              aspectRatio: 16 / 9,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(kRadiusSm),
-                ),
-                child: Center(
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.play_circle_outline,
-                        size: 44, color: Colors.white70),
-                    const SizedBox(height: 8),
-                    Text('实时画面',
-                        style: TextStyle(
-                            fontSize: 12.5, color: Colors.white.withValues(alpha: .7))),
-                  ]),
+          // 播放器由宿主注入(用户端接 video_player);
+          // 没注入就退化成占位 —— 骑手端/商家端不看直播,
+          // 不该为此各装一个几 MB 的原生播放器
+          if (widget.playerBuilder != null && url.isNotEmpty)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(kRadiusSm),
+              child: widget.playerBuilder!(url),
+            )
+          else
+            SzCard(
+              padding: EdgeInsets.zero,
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(kRadiusSm),
+                  ),
+                  child: Center(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      const Icon(Icons.play_circle_outline,
+                          size: 44, color: Colors.white70),
+                      const SizedBox(height: 8),
+                      Text('这一端不播放直播',
+                          style: TextStyle(
+                              fontSize: 12.5,
+                              color: Colors.white.withValues(alpha: .7))),
+                    ]),
+                  ),
                 ),
               ),
             ),
-          ),
-          if (url.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            SelectableText(url,
-                style: szFigure(fontSize: 10.5, color: sz.inkFaint)),
-          ],
         ],
 
         const SizedBox(height: 18),

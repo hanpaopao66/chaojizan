@@ -987,6 +987,11 @@ class RiderProfileOut(BaseModel):
     reject_reason: str = ""
     #: 是否经过二要素核验(区别于历史的人工审核路径)
     id_verified: bool = False
+    #: **本市**是否要求健康证。国家层面不要求(送餐员不属于"直接接触
+    #: 入口食品的人员",四川已取消),只有查证过本地有规章的城市才为 true
+    health_cert_required: bool = False
+    #: 骑手所在城市(首次上线按定位解析);空 = 还没上线过
+    city: str = ""
 
 
 class AdminRiderProfileOut(RiderProfileOut):

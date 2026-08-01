@@ -215,4 +215,64 @@ err = call("POST", "/riders/online", rider, {"is_online": True},
 assert err["_error"] == 403, err
 print("✓ 后台撤销后立即不能上线(当场核验不等于此后不可复核)")
 
-print("\n骑手入驻(实名当场核验 + 食安培训)全部通过 🎉")
+# ---------- 8. 健康证:只有本地有规章的城市才卡 ----------
+#
+# 国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员",
+# 四川已明确取消)。杭州等地有地方规章 —— 做成城市级清单,默认空。
+def set_cities(value):
+    call("POST", "/admin/flags/health_cert_cities", admin, {"value": value})
+
+
+rider2, phone2 = fresh_rider("健康证测试")
+call("POST", "/riders/profile", rider2,
+     {"real_name": "钱七", "id_card_no": make_id("51010119900202002")})
+qs = call("GET", "/riders/exam/questions", rider2)
+call("POST", "/riders/exam/submit", rider2,
+     {"answers": {str(q["id"]): bank[q["id"]]["answer"] for q in qs}})
+
+# city 是首次上线按定位解析出来的,这里直接落库模拟"已知城市"
+async def _set_city(city):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.config import settings
+    engine = create_async_engine(settings.database_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE users SET city = :c WHERE phone = :p"),
+                {"c": city, "p": phone2})
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(_set_city("成都"))
+
+set_cities("")
+p2 = call("GET", "/riders/profile", rider2)
+assert p2["health_cert_required"] is False, p2
+assert p2["city"] == "成都", p2
+assert call("POST", "/riders/online", rider2,
+            {"is_online": True})["is_online"] is True
+call("POST", "/riders/online", rider2, {"is_online": False})
+print("✓ 城市不在清单里:不要健康证,正常上线")
+
+# 中文逗号也要认 —— 后台是人在填
+set_cities("杭州，成都")
+p2 = call("GET", "/riders/profile", rider2)
+assert p2["health_cert_required"] is True, \
+    "本市要不要健康证得**提前**告知,等上线被拦才发现时人已经在路上了"
+err = call("POST", "/riders/online", rider2, {"is_online": True},
+           expect_error=True)
+assert err["_error"] == 403 and "健康证" in err["detail"], err
+assert "国家层面并不要求" in err["detail"], \
+    "要说清楚这是本地规定而不是我们加的门槛"
+print("✓ 城市在清单里:提前告知 + 上线卡住,并说明是地方规定")
+
+set_cities("")
+assert call("POST", "/riders/online", rider2,
+            {"is_online": True})["is_online"] is True
+call("POST", "/riders/online", rider2, {"is_online": False})
+print("✓ 移出清单后恢复正常")
+
+print("\n骑手入驻(实名当场核验 + 食安培训 + 健康证按城市)全部通过 🎉")

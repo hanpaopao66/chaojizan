@@ -96,3 +96,24 @@ async def marketing_on(db: AsyncSession) -> bool:
     开预算后 POST /admin/flags/marketing on 即可整体启用。"""
     flag = await db.get(PlatformFlag, "marketing")
     return flag is not None and flag.value == "on"
+
+
+async def health_cert_cities(db: AsyncSession) -> list[str]:
+    """要求骑手持健康证的城市清单(逗号分隔)。**默认空 = 都不要求。**
+
+    国家层面并不要求送餐员持健康证:《网络餐饮服务食品安全监督管理办法》
+    要求餐食封装、避免送餐人员直接接触食品,送餐员因此不属于
+    「直接接触入口食品的人员」,不在预防性健康检查范围内。
+    **四川已明确取消。**
+
+    但杭州等地有地方性的网络餐饮配送监管办法,可能另有要求 ——
+    所以不能一刀切说"全国都不要",做成城市级清单:
+    **默认不要求,只有明确查证过本地有规定的城市才加进来。**
+
+    加城市的判据是"查到了本地的规章条文",不是"别的平台都要"。
+    跟着行业惯性加门槛,就是我们原来那个毛病。
+    """
+    flag = await db.get(PlatformFlag, "health_cert_cities")
+    if flag is None or not flag.value.strip():
+        return []
+    return [c.strip() for c in flag.value.split(",") if c.strip()]

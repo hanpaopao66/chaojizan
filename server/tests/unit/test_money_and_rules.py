@@ -266,3 +266,77 @@ class Test订单信息法定留存:
         src = inspect.getsource(auth)
         assert "已注销用户" in src, "注销应当匿名化"
         assert "delete(Order)" not in src and "DELETE FROM orders" not in src
+
+
+class Test明厨亮灶标识是法定要求:
+    """总局令第 123 号第十三条:平台应当"根据入网餐饮服务提供者是否实施
+    「互联网+明厨亮灶」,在入网餐饮服务提供者列表页面展示
+    「无明厨亮灶」、「有明厨亮灶」标识"。
+
+    要标的是**两种**,而且是**每一个商家列表**。
+    """
+
+    def test_列表返回体带标识且两种都有(self):
+        from app.schemas import MerchantOut
+        for f in ("kitchen_cam", "kitchen_cam_label"):
+            assert f in MerchantOut.model_fields, f"列表返回体缺 {f}"
+
+    def test_标识挂在模型属性上而不是逐端点填(self):
+        """商家列表不止一个(首页、搜索、收藏、附近……)。
+        逐个端点填一定会漏,漏掉的那个列表就是个合规缺口。
+        挂在模型属性上,from_attributes 会自动带出去。
+        """
+        from app.models import Merchant
+        assert isinstance(
+            Merchant.__dict__.get("kitchen_cam"), property), \
+            "kitchen_cam 应当是模型属性,这样新加的列表天然带上"
+
+    def test_只认在线可看(self):
+        """待核验、掉线一律算「无」—— 标识和实际能不能看必须是同一件事。
+        行业乱象正是"标着明厨亮灶却黑屏"。
+        """
+        from app.services import kitchen_cam as kc
+        assert kc.LISTED_AS_HAS == (kc.STATUS_ACTIVE,)
+        for s in (kc.STATUS_PENDING, kc.STATUS_DEGRADED, kc.STATUS_NONE):
+            assert kc.listed_label(s) == "无明厨亮灶", s
+
+    def test_降级要迟钝恢复要灵敏(self):
+        """一次失败就降级会让商家疲于奔命,最后没人愿意装 ——
+        而我们要的是更多人装。修好了则要让他快点回来。
+        """
+        from app.services import kitchen_cam as kc
+        assert kc.FAIL_STREAK_TO_DEGRADE >= 2
+        assert kc.OK_STREAK_TO_RECOVER <= kc.FAIL_STREAK_TO_DEGRADE
+
+    def test_不给明厨亮灶加权排序(self):
+        """一旦标识能换流量,就会有人对着天花板装一个来骗标识。"""
+        from app.services import kitchen_cam as kc
+        blob = " ".join(kc.NEVER_DO)
+        assert "加权排序" in blob or "流量倾斜" in blob
+
+
+class Test健康证按城市:
+    """国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员",
+    四川已明确取消),但地方可能另有规章 —— 做成城市级清单。
+    """
+
+    def test_默认不要求(self):
+        from app.schemas import RiderProfileIn
+        assert not RiderProfileIn.model_fields[
+            "health_cert_photo_url"].is_required()
+
+    def test_城市清单默认为空(self):
+        """**默认空 = 都不要求。** 加城市的判据是"查到了本地条文",
+        不是"别的平台都要" —— 跟着行业惯性加门槛正是原来那个毛病。
+        """
+        import inspect
+
+        from app.services import flags
+        src = inspect.getsource(flags.health_cert_cities)
+        assert "return []" in src, "未配置时必须返回空清单(= 不要求)"
+
+    def test_档案接口提前告知本市要不要(self):
+        """等到上线被拦才发现,那时候他人已经在路上了。"""
+        from app.schemas import RiderProfileOut
+        assert "health_cert_required" in RiderProfileOut.model_fields
+        assert "city" in RiderProfileOut.model_fields

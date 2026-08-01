@@ -6,6 +6,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
+
+import 'kitchen_cam_player.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -1094,6 +1096,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                         ]),
                         style: TextStyle(fontSize: 11.5, color: sz.inkMuted),
                       ),
+
                       const SizedBox(height: 2),
                       Text.rich(
                         TextSpan(children: [
@@ -1719,6 +1722,9 @@ class _MenuPageState extends State<MenuPage>
               builder: (_) => KitchenCamPage(
                 shopName: shop.name,
                 load: () => widget.api.kitchenCamOf(shop.id),
+                // 真播放器只在用户端注入 —— 骑手端/商家端不看直播,
+                // 不该为此各装一个原生播放器
+                playerBuilder: (url) => KitchenCamPlayer(url: url),
               ),
             )),
           ),
@@ -4785,8 +4791,19 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     size: 44,
                     categoryIcon: merchantCategoryIcon(m.category)),
                 title: Text(m.name),
-                subtitle: Text(
-                    '${m.ratingLabel}${m.isOpen ? "" : " · 休息中"}'),
+                // 明厨亮灶标识:收藏也是商家列表页面 ——
+                // 法规要求的不是"首页那一个列表",漏掉的那个就是合规缺口
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('${m.ratingLabel}${m.isOpen ? "" : " · 休息中"}'),
+                    SzKitchenCamChip(
+                        has: m.kitchenCam,
+                        label: m.kitchenCamLabel,
+                        compact: true),
+                  ],
+                ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => MenuPage(api: api, merchant: m))),

@@ -1115,6 +1115,11 @@ _KNOWN_FLAGS = {
     # 写错也硬卡是刻意的 —— 配置错误不该让合规卡点形同虚设
     "rider_training_grace_until",
     "open_cities",          # 开城清单(逗号分隔城市名,空=全部开放)
+    # 要求骑手持健康证的城市(逗号分隔)。**默认空 = 都不要求** ——
+    # 国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员",
+    # 四川已明确取消),只有查证过本地有规章的城市才加进来。
+    # 判据是"查到了本地条文",不是"别的平台都要"
+    "health_cert_cities",
     "marketing",            # 营销总开关(默认关):新客券/邀请/生日/复购/上新
     "screen_show_gmv",      # 公开大屏是否展示交易额(缺省=展示,off=接口不下发金额)
 }
@@ -1142,11 +1147,21 @@ async def set_flag(
     if key not in _KNOWN_FLAGS:
         raise HTTPException(404, "未知开关")
     value = str(payload.get("value", "")).strip()
-    if key == "open_cities":
+    if key in ("open_cities", "health_cert_cities"):
         # 逗号分隔城市清单(空=不限制);顺手归一化中文逗号与空白
         value = ",".join(
             c.strip() for c in value.replace("，", ",").split(",")
             if c.strip())[:200]
+    elif key == "rider_training_grace_until":
+        # 宽限截止日:ISO 日期或空(空=立即生效)。
+        # 写错**不能**当"没配置"处理 —— 运行时 _parse_grace 解析失败会硬卡,
+        # 但那时候管理员已经以为自己设好了。在入口就拦下
+        if value:
+            from datetime import date as _date
+            try:
+                _date.fromisoformat(value)
+            except ValueError:
+                raise HTTPException(422, "宽限截止日要写成 YYYY-MM-DD,或留空表示立即生效")
     elif key in ("night_curfew_hours", "alcohol_curfew_hours"):
         if not re.fullmatch(
                 r"([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d", value):

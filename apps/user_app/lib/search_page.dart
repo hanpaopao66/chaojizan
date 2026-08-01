@@ -256,8 +256,20 @@ class _SearchPageState extends State<SearchPage> {
                                         categoryIcon:
                                             merchantCategoryIcon(m.category)),
                                     title: Text(m.name),
-                                    subtitle: Text(
-                                        '${m.ratingLabel} · ${m.address}'),
+                                    // 明厨亮灶标识:法规要求的是**商家列表页面**,
+                                    // 不止首页那一个。搜索结果也是列表
+                                    subtitle: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text('${m.ratingLabel} · ${m.address}'),
+                                        SzKitchenCamChip(
+                                            has: m.kitchenCam,
+                                            label: m.kitchenCamLabel,
+                                            compact: true),
+                                      ],
+                                    ),
                                     onTap: () => Navigator.of(context).push(
                                         MaterialPageRoute(
                                             builder: (_) => MenuPage(

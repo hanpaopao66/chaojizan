@@ -743,6 +743,8 @@ class RiderProfile {
         healthCertPhotoUrl = json['health_cert_photo_url'] as String? ?? '',
         status = json['status'] as String,
         idVerified = json['id_verified'] as bool? ?? false,
+        healthCertRequired = json['health_cert_required'] as bool? ?? false,
+        city = json['city'] as String? ?? '',
         rejectReason = json['reject_reason'] as String? ?? '';
 
   /// 打码姓名(如「王**」);证号不下发
@@ -757,6 +759,13 @@ class RiderProfile {
 
   /// 是否经过二要素核验(区别于历史的人工审核路径)
   final bool idVerified;
+
+  /// **本市**是否要求健康证。国家层面不要求(送餐员不属于"直接接触入口
+  /// 食品的人员",四川已取消),只有查证过本地有规章的城市才为 true
+  final bool healthCertRequired;
+
+  /// 骑手所在城市(首次上线按定位解析);空 = 还没上线过
+  final String city;
 
   final String rejectReason;
 

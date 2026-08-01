@@ -254,9 +254,14 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
                     '核验查的是国家人口库,不需要照片。照片是敏感信息,不收就不会泄露'),
                 _no(sz, '不要人脸',
                     '法规明写:有别的方式能达到同样目的时,不得把人脸作为唯一验证方式'),
-                _no(sz, '不要健康证',
-                    '送餐员不属于「直接接触入口食品的人员」,国家层面不要求 —— '
-                    '四川已经取消了。只有个别城市另有规定时才会让你补'),
+                if (widget.existing.healthCertRequired)
+                  _yes(sz, '${widget.existing.city}需要健康证',
+                      '国家层面不要求送餐员持健康证,但你所在的城市另有规定 —— '
+                      '实名可以先做完,健康证在这一页补传即可')
+                else
+                  _no(sz, '不要健康证',
+                      '送餐员不属于「直接接触入口食品的人员」,国家层面不要求 —— '
+                      '四川已经取消了。只有个别城市另有规定时才会让你补'),
                 const SizedBox(height: 4),
                 Text('身份证号加密保存,任何接口都不会把它发出去。',
                     style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
@@ -282,6 +287,27 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
       ),
     );
   }
+
+  /// 本市另有规定时用这个 —— 和「我们不要的东西」并排,
+  /// 但视觉上要一眼能区分,否则骑手会以为这条也是"不要"
+  Widget _yes(SzColors sz, String title, String why) => Padding(
+        padding: const EdgeInsets.only(bottom: 9),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(Icons.info_outline, size: 14, color: sz.hold),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(fontSize: 13, color: sz.hold)),
+                Text(why,
+                    style: TextStyle(
+                        fontSize: 11.5, height: 1.45, color: sz.inkMuted)),
+              ],
+            ),
+          ),
+        ]),
+      );
 
   Widget _no(SzColors sz, String title, String why) => Padding(
         padding: const EdgeInsets.only(bottom: 9),

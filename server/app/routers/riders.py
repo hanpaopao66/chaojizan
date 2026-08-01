@@ -84,13 +84,22 @@ async def get_profile(
     profile = await db.scalar(
         select(RiderProfile).where(RiderProfile.rider_id == user.id)
     )
+    from ..services.flags import health_cert_cities
+    # 本市要不要健康证,要**提前**告诉他 —— 等到上线被拦才发现,
+    # 那时候他人已经在路上了
+    cert_required = bool(
+        user.city and user.city in await health_cert_cities(db))
     if profile is None:
         # 还没提交:返回 unsubmitted 空档案,客户端据此显示提交表单
         return RiderProfileOut(
             real_name="", health_cert_photo_url="",
             status=VerifyStatus.unsubmitted, reject_reason="",
+            health_cert_required=cert_required, city=user.city,
         )
-    return _profile_out(profile)
+    out = _profile_out(profile)
+    out.health_cert_required = cert_required
+    out.city = user.city
+    return out
 
 
 @router.post("/profile", response_model=RiderProfileOut)
@@ -177,7 +186,22 @@ async def set_online(
 
     warning = ""
     if payload.is_online:
-        await _require_verified(db, user.id)  # 上线前卡实名
+        profile = await _require_verified(db, user.id)  # 上线前卡实名
+        # ---- 健康证:**只有本地有规章的城市才卡** ----
+        #
+        # 国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员",
+        # 四川已明确取消)。但杭州等地有地方性规章,所以做成城市级清单。
+        #
+        # 卡在上线而不是认证:注册时我们还不知道他在哪个城市 ——
+        # user.city 是首次上线按定位解析出来的。卡在认证等于要求他
+        # 先报城市,那是给所有人加一步,只为了极少数城市的规定
+        if not profile.health_cert_photo_url and user.city:
+            from ..services.flags import health_cert_cities
+            if user.city in await health_cert_cities(db):
+                raise HTTPException(
+                    403, f"{user.city}有地方规定要求送餐员持健康证,"
+                         "请在「我的」→ 实名认证里补传一张。"
+                         "(国家层面并不要求,是你所在城市另有规定)")
         # ---- 食品安全培训卡点(法定,见 exam_submit 的说明)----
         #
         # 123 号令第二十九条要求受托方对配送人员进行食安培训并留存记录。

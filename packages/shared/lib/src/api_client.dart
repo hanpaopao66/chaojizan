@@ -703,6 +703,14 @@ class ApiClient {
       await _request('GET', '/merchants/$merchantId/kitchen-cam')
           as Map<String, dynamic>;
 
+  /// 某家店的明厨亮灶(公开,无需登录 —— 法规要的是"接受社会监督")。
+  ///
+  /// **只有在线可看时才给播放地址。** 待核验、掉线一律按「无明厨亮灶」
+  /// 对外,并如实说明为什么现在看不了 —— 转圈转到天荒地老比直说更糟。
+  Future<Map<String, dynamic>> kitchenCam(int merchantId) async =>
+      await _request('GET', '/merchants/$merchantId/kitchen-cam')
+          as Map<String, dynamic>;
+
   /// 商家推广物料:店铺短码 + 海报要印的内容(短码首次调用时懒生成)
   Future<Map<String, dynamic>> merchantPromo() async =>
       await _request('GET', '/merchants/me/promo') as Map<String, dynamic>;
