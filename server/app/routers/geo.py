@@ -130,6 +130,77 @@ async def reverse_geocode(
     )
 
 
+@router.get("/around")
+async def poi_around(
+    lat: float = Query(ge=-90, le=90),
+    lng: float = Query(ge=-180, le=180),
+    user: User = Depends(get_current_user),
+):
+    """地图选点页下方的周边地点列表(#170)。
+
+    ## 为什么要有这个列表
+
+    光给一个中心图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——
+    反查给的往往是路名,而他要的是「XX 小区 10 号楼」。
+
+    主流外卖 App 的做法是:地图下面列一串周边地点,带距离,直接点选。
+    用户认地名比认坐标容易得多。
+
+    ## 一次调用拿全
+
+    腾讯的逆地理编码带 `get_poi=1` 时会一并返回周边 POI 与距离,
+    不用再打一次周边搜索 —— **少一次调用就少一份配额和延迟**。
+
+    坐标口径:腾讯返回 GCJ-02,与本系统全局一致,直接透传。
+    """
+    if not settings.tencent_map_key:
+        return {"current": f"演示地点(未配置 TENCENT_MAP_KEY)",
+                "items": [
+                    {"name": f"演示地点{i + 1}", "address": "演示数据",
+                     "distance_m": i * 50,
+                     "lat": lat + i * 0.0005, "lng": lng + i * 0.0005}
+                    for i in range(3)]}
+
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            resp = await client.get(REVERSE_URL, params={
+                "location": f"{lat},{lng}",
+                "key": settings.tencent_map_key,
+                "get_poi": 1,
+                # 只要"适合当收货地址"的类别:小区/楼宇/学校/医院/写字楼。
+                # 不加的话周边全是餐馆和便利店 —— 那不是收货地址
+                "poi_options": "address_format=short;radius=500;policy=4",
+            })
+            data = resp.json()
+        except httpx.HTTPError:
+            raise HTTPException(502, "地图服务暂时不可用,请稍后再试")
+
+    if data.get("status") != 0:
+        raise HTTPException(502, f"地图接口错误:{data.get('message', '未知')}")
+
+    result = data.get("result") or {}
+    formatted = result.get("formatted_addresses") or {}
+    items = []
+    for poi in (result.get("pois") or [])[:15]:
+        loc = poi.get("location") or {}
+        if loc.get("lat") is None or loc.get("lng") is None:
+            continue  # 没坐标的选了也没用 —— 骑手送不到
+        items.append({
+            "name": poi.get("title", ""),
+            "address": poi.get("address", "") or "",
+            # 距离让用户一眼判断"是不是我家那栋" —— 比看地图快
+            "distance_m": round(float(poi.get("_distance") or 0)),
+            "lat": float(loc["lat"]),
+            "lng": float(loc["lng"]),
+        })
+    items.sort(key=lambda x: x["distance_m"])
+    return {
+        # 图钉正下方是哪儿(地图上那个气泡显示它)
+        "current": (formatted.get("recommend") or result.get("address") or ""),
+        "items": items,
+    }
+
+
 @router.get("/weather")
 async def weather_at(
     lat: float = Query(ge=-90, le=90),

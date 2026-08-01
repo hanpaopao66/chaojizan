@@ -56,12 +56,24 @@ async def run_audit() -> list[dict]:
                 )
             )
         ).all()
-        order_ids = [o.id for o in completed] or [0]
+        # **用子查询,不要把 id 列表逐个绑成参数。**
+        #
+        # `in_([...])` 会给每个 id 绑一个占位符,而 PostgreSQL 的单条语句
+        # 参数上限是 32767 —— 一个月完成单超过这个数,每日核账就直接抛
+        # `the number of query arguments cannot exceed 32767` 挂掉。
+        #
+        # 挂掉的后果不是"少一条告警",是**整个核账不再运行** ——
+        # 而这套东西的全部意义就是"差一分钱系统报警"。
+        # 它必须随单量增长而继续能跑,不能到某个量级就自己停了。
+        completed_ids = select(Order.id).where(
+            Order.status == OrderStatus.COMPLETED,
+            Order.created_at >= since,
+        )
         m_earnings = {
             e.order_id: e
             for e in await db.scalars(
                 select(MerchantEarning).where(
-                    MerchantEarning.order_id.in_(order_ids),
+                    MerchantEarning.order_id.in_(completed_ids),
                     MerchantEarning.kind == EarningKind.earning,
                 )
             )
@@ -70,7 +82,7 @@ async def run_audit() -> list[dict]:
             e.order_id
             for e in await db.scalars(
                 select(MerchantEarning).where(
-                    MerchantEarning.order_id.in_(order_ids),
+                    MerchantEarning.order_id.in_(completed_ids),
                     MerchantEarning.kind == EarningKind.reversal,
                 )
             )
@@ -79,7 +91,7 @@ async def run_audit() -> list[dict]:
             e.order_id: e
             for e in await db.scalars(
                 select(RiderEarning).where(
-                    RiderEarning.order_id.in_(order_ids),
+                    RiderEarning.order_id.in_(completed_ids),
                     RiderEarning.kind == EarningKind.earning,
                 )
             )
@@ -230,7 +242,8 @@ async def run_audit() -> list[dict]:
             for a in await db.scalars(
                 select(AfterSale).where(
                     AfterSale.fault.in_(["rider", "platform"]),
-                    AfterSale.order_id.in_(order_ids),
+                    # 同上:子查询,不要绑一万个参数
+                    AfterSale.order_id.in_(completed_ids),
                 )
             )
         }

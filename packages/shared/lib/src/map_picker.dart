@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tencent_map/flutter_tencent_map.dart' as tx;
 
 import 'brand.dart';
+import 'models.dart';
 import 'map_boot.dart';
 
 /// 选点结果。
@@ -39,6 +40,7 @@ class MapPickerPage extends StatefulWidget {
   const MapPickerPage({
     super.key,
     required this.onReverse,
+    this.onAround,
     this.initialLat,
     this.initialLng,
   });
@@ -46,6 +48,12 @@ class MapPickerPage extends StatefulWidget {
   /// 坐标 → 地址。由调用方注入,避免 shared 依赖具体的 ApiClient
   final Future<({String name, String district})> Function(double, double)
       onReverse;
+
+  /// 坐标 → 周边地点列表(可选)。注入后地图下方会列出周边地点,
+  /// 用户可直接点选 —— **认地名比认坐标容易得多**。
+  ///
+  /// 不注入时退化为原来的「一行反查地址 + 确认」,页面照常可用。
+  final Future<List<NearbyPlace>> Function(double, double)? onAround;
 
   final double? initialLat;
   final double? initialLng;
@@ -65,6 +73,10 @@ class _MapPickerPageState extends State<MapPickerPage> {
   String _name = '';
   String _district = '';
   bool _loading = false;
+
+  List<NearbyPlace> _around = const [];
+  /// 用户在列表里点中的那个;null = 用图钉当前位置
+  NearbyPlace? _picked;
 
   @override
   void initState() {
@@ -101,7 +113,14 @@ class _MapPickerPageState extends State<MapPickerPage> {
         _name = r.name;
         _district = r.district;
         _loading = false;
+        // 地图动过 = 之前选中的那个地点已经不相干了
+        _picked = null;
       });
+      if (widget.onAround != null) {
+        final list = await widget.onAround!(target.latitude, target.longitude);
+        if (!mounted || target != _center) return;
+        setState(() => _around = list);
+      }
     } catch (_) {
       if (!mounted) return;
       // 反查失败不阻断:坐标本身是准的,让用户自己写地址名
@@ -113,6 +132,114 @@ class _MapPickerPageState extends State<MapPickerPage> {
     }
   }
 
+  void _confirm() {
+    final p = _picked;
+    Navigator.of(context).pop(PickedPlace(
+      // 选了列表里的地点就用它的坐标(那是这栋楼的准确位置);
+      // 没选就用图钉 —— 用户拖到自家单元门口,不该被吸附到几十米外的大门
+      lat: p?.lat ?? _center.latitude,
+      lng: p?.lng ?? _center.longitude,
+      name: p?.name ?? _name,
+      district: p?.address ?? _district,
+    ));
+  }
+
+  /// 周边地点列表。第一项是「图钉当前位置」—— 用户可能就是要那个点,
+  /// 不能只给他一串 POI 而没有"我就要这儿"的选项。
+  Widget _aroundList(SzColors sz) {
+    if (_loading && _around.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: kPagePad),
+      children: [
+        _row(
+          sz,
+          selected: _picked == null,
+          title: _name.isEmpty ? '图钉当前位置' : _name,
+          subtitle: _district,
+          distance: null,
+          onTap: () => setState(() => _picked = null),
+        ),
+        if (_around.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 2),
+            child: Text('周边地点',
+                style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+          ),
+        for (final p in _around)
+          _row(
+            sz,
+            selected: _picked == p,
+            title: p.name,
+            subtitle: p.address,
+            distance: p.distanceM,
+            onTap: () => setState(() => _picked = p),
+          ),
+        if (_around.isEmpty && !_loading)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18),
+            child: Text('这附近没找到可选的地点,拖动地图试试',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12.5, color: sz.inkFaint)),
+          ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+
+  Widget _row(
+    SzColors sz, {
+    required bool selected,
+    required String title,
+    required String subtitle,
+    required int? distance,
+    required VoidCallback onTap,
+  }) =>
+      InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(
+              selected
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_unchecked,
+              size: 18,
+              color: selected ? sz.clay : sz.inkFaint,
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.w400,
+                          color: selected ? sz.clay : sz.ink)),
+                  if (subtitle.isNotEmpty)
+                    Text(subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style:
+                            TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+                ],
+              ),
+            ),
+            if (distance != null) ...[
+              const SizedBox(width: 8),
+              // 距离让用户一眼判断"是不是我家那栋" —— 比看地图快
+              Text(distance < 1000 ? '${distance}m' : '${(distance / 1000).toStringAsFixed(1)}km',
+                  style: szFigure(fontSize: 11.5, color: sz.inkFaint)),
+            ],
+          ]),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
@@ -123,11 +250,9 @@ class _MapPickerPageState extends State<MapPickerPage> {
   }
 
   Widget _build(BuildContext context, SzColors sz, bool ready) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('在地图上选位置')),
-      body: Column(children: [
-        Expanded(
-          child: Stack(
+    // 抽成局部变量:有/无周边列表时外层容器不同(Expanded vs 固定高),
+    // 但里面的地图和准星是同一份
+    final mapStack = Stack(
             alignment: Alignment.center,
             children: [
               if (ready)
@@ -176,51 +301,76 @@ class _MapPickerPageState extends State<MapPickerPage> {
                       style: TextStyle(fontSize: 9, color: sz.inkFaint)),
                 ),
             ],
+          );
+    return Scaffold(
+      appBar: AppBar(title: const Text('在地图上选位置')),
+      body: Column(children: [
+        // 有周边列表时地图给固定高度(约 38% 屏高),把下面让给列表 ——
+        // 用户主要靠读地名确认"这是不是我家",地图是辅助。
+        // 没有列表时地图占满剩余空间:那时它是唯一的信息源。
+        //
+        // **不能用 MediaQuery 的整屏高**:Column 里下面还有确认栏,
+        // 那样会溢出
+        if (widget.onAround == null)
+          Expanded(child: mapStack)
+        else
+          SizedBox(
+            height: MediaQuery.of(context).size.height * .38,
+            child: mapStack,
           ),
-        ),
+        // ---- 下半屏:周边地点列表 ----
+        //
+        // 光给一个图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——
+        // 反查给的往往是路名,而他要的是「XX 小区 10 号楼」。
+        // 列一串周边地点带距离,**认地名比认坐标容易得多**。
+        if (widget.onAround != null)
+          Expanded(child: _aroundList(sz))
+        else
+          const SizedBox.shrink(),
         SafeArea(
           top: false,
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 12),
+            padding: EdgeInsets.fromLTRB(
+                kPagePad, widget.onAround == null ? 12 : 8, kPagePad, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(children: [
-                  Expanded(
-                    child: Text(
-                      _loading ? '正在识别位置…' : (_name.isEmpty ? '未识别到地址' : _name),
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: _name.isEmpty ? sz.inkMuted : sz.ink),
+                // 没有周边列表时,这里就是唯一的地址显示
+                if (widget.onAround == null) ...[
+                  Row(children: [
+                    Expanded(
+                      child: Text(
+                        _loading
+                            ? '正在识别位置…'
+                            : (_name.isEmpty ? '未识别到地址' : _name),
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: _name.isEmpty ? sz.inkMuted : sz.ink),
+                      ),
                     ),
-                  ),
-                  if (_loading)
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: sz.inkFaint),
-                    ),
-                ]),
-                if (_district.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(_district,
-                      style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+                    if (_loading)
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: sz.inkFaint),
+                      ),
+                  ]),
+                  if (_district.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(_district,
+                        style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+                  ],
+                  const SizedBox(height: 10),
                 ],
-                const SizedBox(height: 10),
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
                     // 反查还没回来也允许确认:坐标已经是准的,
                     // 地址名用户可以自己写。卡着不让点才是帮倒忙
-                    onPressed: () => Navigator.of(context).pop(PickedPlace(
-                      lat: _center.latitude,
-                      lng: _center.longitude,
-                      name: _name,
-                      district: _district,
-                    )),
-                    child: const Text('就选这里'),
+                    onPressed: _confirm,
+                    child: Text(_picked == null ? '就选这里' : '选「${_picked!.name}」'),
                   ),
                 ),
               ],

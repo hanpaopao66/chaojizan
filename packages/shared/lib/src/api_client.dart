@@ -1001,6 +1001,18 @@ class ApiClient {
         query: {'lat': '$lat', 'lng': '$lng'});
     return PoiTip.fromJson(data as Map<String, dynamic>);
   }
+  /// 图钉周边的可选地点(地图选点页下方的列表)。
+  ///
+  /// 光给一个图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——
+  /// 反查给的往往是路名,而他要的是「XX 小区 10 号楼」。
+  /// 列一串周边地点带距离,**认地名比认坐标容易得多**。
+  Future<List<NearbyPlace>> geoAround(double lat, double lng) async {
+    final data = await _request('GET', '/geo/around?lat=$lat&lng=$lng');
+    return ((data as Map<String, dynamic>)['items'] as List)
+        .map((e) => NearbyPlace.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
 
   /// 顾客对我的评价(#148)。
   ///

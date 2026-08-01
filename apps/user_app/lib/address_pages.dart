@@ -2,14 +2,29 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 /// 地址簿。selectMode = true 时点选地址直接返回(下单选址用)。
 class AddressBookPage extends StatefulWidget {
-  const AddressBookPage({super.key, required this.api, this.selectMode = false});
+  const AddressBookPage({
+    super.key,
+    required this.api,
+    this.selectMode = false,
+    this.myLat,
+    this.myLng,
+  });
 
   final ApiClient api;
   final bool selectMode;
+
+  /// 当前位置。给了就按距离排序、给最近的打「距离最近」标签,
+  /// 选址模式下还会自动选中它。
+  ///
+  /// **不给也能用** —— 定位失败/没授权时退回原来的顺序(默认地址在前),
+  /// 不能因为拿不到定位就让用户选不了地址。
+  final double? myLat;
+  final double? myLng;
 
   @override
   State<AddressBookPage> createState() => _AddressBookPageState();
@@ -18,6 +33,9 @@ class AddressBookPage extends StatefulWidget {
 class _AddressBookPageState extends State<AddressBookPage> {
   List<Address> _list = [];
   bool _loaded = false;
+  /// 离当前位置最近的那个地址;没定位时为 null
+  int? _nearestId;
+  double _nearestM = 0;
 
   @override
   void initState() {
@@ -28,12 +46,51 @@ class _AddressBookPageState extends State<AddressBookPage> {
   Future<void> _load() async {
     try {
       final list = await widget.api.addresses();
-      if (mounted) {
-        setState(() {
-          _list = list;
-          _loaded = true;
-        });
+      if (!mounted) return;
+      // 调用方没给位置时,自己取一次**最后已知位置**:
+      // 不弹权限、不等 GPS 定位、拿不到就算了 ——
+      // 「哪个地址离我近」这件事,几分钟前的位置足够用了,
+      // 而为它卡住整个地址簿的加载是不划算的
+      var myLat = widget.myLat, myLng = widget.myLng;
+      if (myLat == null || myLng == null) {
+        try {
+          final last = await Geolocator.getLastKnownPosition();
+          if (last != null) {
+            myLat = last.latitude;
+            myLng = last.longitude;
+          }
+        } catch (_) {
+          // 没授权/不可用都走这里 —— 退回原来的顺序,功能不受影响
+        }
       }
+      if (!mounted) return;
+      // 按离当前位置的远近排。**默认地址仍然排最前** ——
+      // 用户特意设过"默认",那是他的明确意愿,不该被算出来的距离盖过去
+      final lat = myLat, lng = myLng;
+      if (lat != null && lng != null && list.length > 1) {
+        list.sort((a, b) {
+          if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
+          return distanceMeters(lat, lng, a.lat, a.lng)
+              .compareTo(distanceMeters(lat, lng, b.lat, b.lng));
+        });
+        // 「距离最近」标签给的是**真的最近的那个**,不是排序后的第一个 ——
+        // 默认地址排在最前,但它未必是最近的
+        var best = 0;
+        var bestD = double.infinity;
+        for (var i = 0; i < list.length; i++) {
+          final d = distanceMeters(lat, lng, list[i].lat, list[i].lng);
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+        _nearestId = list[best].id;
+        _nearestM = bestD;
+      }
+      setState(() {
+        _list = list;
+        _loaded = true;
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -69,9 +126,31 @@ class _AddressBookPageState extends State<AddressBookPage> {
                   ),
                 )
               : ListView.builder(
-                  itemCount: _list.length,
-                  itemBuilder: (context, i) {
+                  // +1 是顶部那条说明
+                  itemCount: _list.length + (_nearestId != null ? 1 : 0),
+                  itemBuilder: (context, rawIndex) {
+                    // **不自动 pop 选中最近的那个。**
+                    //
+                    // 截图里那句"已为你自动选中"是在一个**单选列表**里预选,
+                    // 用户仍能改。而我们这个列表点一下就返回了 ——
+                    // 在这里"自动选中"等于替他做决定,他连别的地址都没看见。
+                    // 所以只标出来 + 说一句,选还是他选。
+                    if (_nearestId != null && rawIndex == 0) {
+                      final sz = Theme.of(context).sz;
+                      return Padding(
+                        padding:
+                            const EdgeInsets.fromLTRB(kPagePad, 10, kPagePad, 2),
+                        child: Text(
+                          '已按离你的远近排好序,最近的那个标了「距离最近」',
+                          style:
+                              TextStyle(fontSize: 11.5, color: sz.inkFaint),
+                        ),
+                      );
+                    }
+                    final i = _nearestId != null ? rawIndex - 1 : rawIndex;
                     final addr = _list[i];
+                    final nearest = addr.id == _nearestId;
+                    final sz = Theme.of(context).sz;
                     return ListTile(
                       leading: Icon(
                         addr.isDefault ? Icons.star : Icons.place_outlined,
@@ -79,9 +158,28 @@ class _AddressBookPageState extends State<AddressBookPage> {
                             ? Theme.of(context).colorScheme.primary
                             : null,
                       ),
-                      title: Text(addr.fullAddress),
-                      subtitle:
-                          Text('${addr.contactName} ${addr.contactPhone}'),
+                      title: Row(children: [
+                        // 「距离最近」+ 标签:让用户一眼挑出要哪个,
+                        // 不用逐字读三个「XX路XX号」
+                        if (nearest) ...[
+                          _Pill('距离最近', sz.clay),
+                          const SizedBox(width: 5),
+                        ],
+                        if (addr.tag.isNotEmpty) ...[
+                          _Pill(addr.tag, sz.inkMuted),
+                          const SizedBox(width: 5),
+                        ],
+                        Expanded(
+                          child: Text(addr.fullAddress,
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                        ),
+                      ]),
+                      subtitle: Text(
+                        nearest && _nearestM > 0
+                            ? '${addr.contactName} ${addr.contactPhone}'
+                                ' · 离你 ${distanceLabel(_nearestM)}'
+                            : '${addr.contactName} ${addr.contactPhone}',
+                      ),
                       trailing: widget.selectMode
                           ? const Icon(Icons.chevron_right)
                           : PopupMenuButton<String>(
@@ -183,6 +281,8 @@ class _AddressEditPageState extends State<AddressEditPage> {
             final t = await widget.api.geoReverse(lat, lng);
             return (name: t.name, district: t.district);
           },
+          // 周边地点列表:用户认地名比认坐标容易得多
+          onAround: widget.api.geoAround,
         ),
       ),
     );
@@ -458,4 +558,27 @@ class _TagPicker extends StatelessWidget {
       ],
     ]);
   }
+}
+
+/// 地址前面的小标签(「距离最近」/「家」)。
+///
+/// 做成扁的小药丸而不是彩色徽章:地址簿是个功能列表,
+/// 标签是用来**快速区分**的,不是用来吸引注意的。
+class _Pill extends StatelessWidget {
+  const _Pill(this.text, this.color);
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: .12),
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: 10.5, fontWeight: FontWeight.w600, color: color)),
+      );
 }

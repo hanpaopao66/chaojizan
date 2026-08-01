@@ -340,3 +340,77 @@ class Test健康证按城市:
         from app.schemas import RiderProfileOut
         assert "health_cert_required" in RiderProfileOut.model_fields
         assert "city" in RiderProfileOut.model_fields
+
+
+class Test地图选点的周边地点:
+    """地图选点页下方的周边列表(#170)。
+
+    光给一个图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——
+    反查给的往往是路名,而他要的是「XX 小区 10 号楼」。
+    """
+
+    def test_一次调用拿全不额外打周边搜索(self):
+        """腾讯的逆地理编码带 get_poi=1 时会一并返回周边 POI 与距离。
+        少一次调用就少一份配额和延迟。"""
+        import inspect
+
+        from app.routers import geo
+        src = inspect.getsource(geo.poi_around)
+        assert "REVERSE_URL" in src, "应复用逆地理编码,不另打周边搜索接口"
+        assert '"get_poi": 1' in src
+
+    def test_没坐标的地点要过滤掉(self):
+        """选了也没用 —— 骑手送不到。"""
+        import inspect
+
+        from app.routers import geo
+        src = inspect.getsource(geo.poi_around)
+        assert "continue" in src and "lat" in src
+
+    def test_按距离排序(self):
+        import inspect
+
+        from app.routers import geo
+        assert 'sort(key=lambda x: x["distance_m"])' in \
+            inspect.getsource(geo.poi_around)
+
+    def test_未配置key时给演示数据而不是报错(self):
+        """开发环境没配 key 也要能把流程走完。"""
+        import inspect
+
+        from app.routers import geo
+        src = inspect.getsource(geo.poi_around)
+        assert "if not settings.tencent_map_key" in src
+
+
+class Test核账要随单量增长仍能跑:
+    """每日自动核账用的是 `order_id.in_(...)`。
+
+    如果传的是 **Python 列表**,SQLAlchemy 会给每个 id 绑一个占位符,
+    而 PostgreSQL 单条语句的参数上限是 **32767** —— 一个月完成单超过这个数,
+    核账就直接抛 `the number of query arguments cannot exceed 32767` 挂掉。
+
+    后果不是"少一条告警",是**整个核账不再运行** ——
+    而这套东西的全部意义就是"差一分钱系统报警"。
+    它必须随单量增长而继续能跑,不能到某个量级就自己停了。
+    """
+
+    def test_用子查询而不是id列表(self):
+        import inspect
+
+        from app.services import audit
+        src = inspect.getsource(audit.run_audit)
+        assert "completed_ids = select(Order.id)" in src, \
+            "应当用子查询,不要把 id 列表逐个绑成参数"
+        # 旧写法的痕迹不能残留
+        assert "order_ids = [o.id for o in completed]" not in src
+
+    def test_三处入账查询都走子查询(self):
+        import inspect
+
+        from app.services import audit
+        src = inspect.getsource(audit.run_audit)
+        # 商家入账 / 商家冲账 / 骑手入账 / 售后判责,四处都要走子查询 ——
+        # 漏一处,核账照样会在那个量级挂掉
+        assert src.count(".in_(completed_ids)") >= 4, \
+            "四处按订单 id 查的地方都要走子查询"

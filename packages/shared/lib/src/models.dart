@@ -1376,3 +1376,30 @@ class FrequentDish {
   final int times;
   final String lastAt;
 }
+
+/// 地图下方列出的一个周边地点。
+class NearbyPlace {
+  const NearbyPlace({
+    required this.name,
+    required this.address,
+    required this.distanceM,
+    required this.lat,
+    required this.lng,
+  });
+
+  factory NearbyPlace.fromJson(Map<String, dynamic> j) => NearbyPlace(
+        name: j['name'] as String? ?? '',
+        address: j['address'] as String? ?? '',
+        distanceM: (j['distance_m'] as num?)?.round() ?? 0,
+        lat: (j['lat'] as num).toDouble(),
+        lng: (j['lng'] as num).toDouble(),
+      );
+
+  final String name;
+  final String address;
+
+  /// 距图钉多少米。让用户一眼判断"是不是我家那栋" —— 比看地图快
+  final int distanceM;
+  final double lat;
+  final double lng;
+}
