@@ -397,6 +397,10 @@ class Address(Base):
     protect: Mapped[bool] = mapped_column(Boolean, default=False)
     # 中性称呼(如"顾客"/"李女士"),骑手/商家侧替代真实姓名;空=「顾客」
     salutation: Mapped[str] = mapped_column(String(12), default="")
+    #: 标签:家 / 公司 / 学校(或自定义,最多 8 字)。空 = 没打标签。
+    #: 用处是让地址簿一眼可辨 —— 三个"XX路XX号"排在一起,
+    #: 用户得逐字读才知道哪个是家
+    tag: Mapped[str] = mapped_column(String(8), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

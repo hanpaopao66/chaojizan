@@ -946,6 +946,7 @@ class ApiClient {
     bool isDefault = false,
     bool protect = false,
     String salutation = '',
+    String tag = '',
   }) async {
     final data = await _request('POST', '/addresses', body: {
       'contact_name': contactName,
@@ -957,6 +958,7 @@ class ApiClient {
       'is_default': isDefault,
       'protect': protect,
       'salutation': salutation,
+      'tag': tag,
     });
     return Address.fromJson(data as Map<String, dynamic>);
   }
@@ -967,6 +969,18 @@ class ApiClient {
   }
 
   Future<void> deleteAddress(int id) => _request('DELETE', '/addresses/$id');
+
+  /// 智能识别:一段粘贴文本 → {name, phone, address, detail, salutation}。
+  ///
+  /// 用户的地址往往已经存在于别处(微信里同事发的、上一个平台复制的)。
+  /// 让他对着现成的文字重新手打一遍是在制造错误 —— 打错一个数字,
+  /// 骑手就打不通电话。
+  ///
+  /// **返回的是建议值,必须填进表单让用户过目** —— 服务端用本地正则
+  /// (不把姓名手机号外发给第三方),解析不了刁钻写法是常态。
+  Future<Map<String, dynamic>> parseAddress(String text) async =>
+      await _request('POST', '/addresses/parse', body: {'text': text})
+          as Map<String, dynamic>;
 
   /// POI 输入提示(服务端代理腾讯位置服务,Key 不下发 ——
   /// key 一旦进了 APK 就等于公开,配额按 key 计费,被盗刷是迟早的事)

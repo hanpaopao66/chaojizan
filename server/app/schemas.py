@@ -926,6 +926,9 @@ class AddressIn(BaseModel):
     # 保护模式:骑手只见粗地址;中性称呼替代真实姓名(空=「顾客」)
     protect: bool = False
     salutation: str = Field(default="", max_length=12)
+    #: 标签:家 / 公司 / 学校(或自定义)。地址簿里三个"XX路XX号"排在一起时,
+    #: 用户得逐字读才知道哪个是家
+    tag: str = Field(default="", max_length=8)
 
 
 class AddressPatch(BaseModel):
@@ -953,6 +956,7 @@ class AddressOut(BaseModel):
     is_default: bool
     protect: bool = False
     salutation: str = ""
+    tag: str = ""
 
 
 class PoiTipOut(BaseModel):

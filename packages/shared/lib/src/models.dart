@@ -561,7 +561,8 @@ class Address {
         lng = (json['lng'] as num).toDouble(),
         isDefault = json['is_default'] as bool,
         protect = json['protect'] as bool? ?? false,
-        salutation = json['salutation'] as String? ?? '';
+        salutation = json['salutation'] as String? ?? '',
+        tag = json['tag'] as String? ?? '';
 
   final int id;
   final String contactName;
@@ -573,6 +574,10 @@ class Address {
   final bool isDefault;
   final bool protect;      // 保护模式:骑手只见粗地址,门牌送达前不下发
   final String salutation; // 中性称呼(空=「顾客」)
+
+  /// 标签:家 / 公司 / 学校(或自定义)。空 = 没打标签。
+  /// 地址簿里三个「XX路XX号」排在一起时,用户得逐字读才知道哪个是家
+  final String tag;
 
   String get fullAddress => detail.isEmpty ? address : '$address $detail';
 }

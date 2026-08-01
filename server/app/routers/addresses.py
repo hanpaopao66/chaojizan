@@ -1,3 +1,5 @@
+from pydantic import BaseModel, Field
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,3 +82,34 @@ async def delete_address(
         raise HTTPException(404, "地址不存在")
     await db.delete(addr)
     await db.commit()
+
+
+class AddrParseIn(BaseModel):
+    """一段粘贴文本。上限 400 字 —— 再长多半是误粘了整段聊天记录。"""
+
+    text: str = Field(min_length=1, max_length=400)
+
+
+@router.post("/parse")
+async def parse_address(
+    payload: AddrParseIn,
+    user: User = Depends(require_role("customer")),
+):
+    """智能识别:把粘贴的一段文字拆成 姓名 / 电话 / 地址 / 门牌 / 称谓。
+
+    ## 为什么值得做
+
+    用户的地址往往已经存在于别处:微信里同事发的、上一个平台复制的、
+    快递单上抄的。让他对着现成的文字**重新手打一遍**是在制造错误 ——
+    打错一个数字,骑手就打不通电话。
+
+    ## 纯本地正则,不外发
+
+    这段文本里有姓名和手机号,**送去第三方解析等于把用户的个人信息交出去**。
+    本地能做就不该外发;顺带也不花按次计费的钱。
+
+    代价是解析不了特别刁钻的写法,所以返回的一律是**建议值** ——
+    客户端必须填进表单让用户过目,不能直接保存。
+    """
+    from ..services.addr_parse import parse
+    return parse(payload.text)

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 /// 地址簿。selectMode = true 时点选地址直接返回(下单选址用)。
@@ -143,6 +144,8 @@ class _AddressEditPageState extends State<AddressEditPage> {
   bool _isDefault = false;
   bool _protect = false; // 保护模式:骑手只见小区/楼栋,门牌送达前不下发
   final _salutation = TextEditingController();
+  String _tag = '';          // 家 / 公司 / 学校(空 = 不打标签)
+  bool _parsing = false;     // 智能识别中
   bool _busy = false;
 
   @override
@@ -224,6 +227,7 @@ class _AddressEditPageState extends State<AddressEditPage> {
         isDefault: _isDefault,
         protect: _protect,
         salutation: _salutation.text.trim(),
+        tag: _tag,
       );
       if (mounted) Navigator.of(context).pop(created);
     } catch (e) {
@@ -235,6 +239,54 @@ class _AddressEditPageState extends State<AddressEditPage> {
     }
   }
 
+  /// 智能识别:粘贴板里的一段文字 → 自动填进各栏。
+  ///
+  /// 用户的地址往往已经存在于别处(微信里同事发的、上一个平台复制的)。
+  /// 让他对着现成的文字重新手打一遍是在制造错误 ——
+  /// 打错一个数字,骑手就打不通电话。
+  ///
+  /// **识别结果只是填进表单,不直接保存** —— 服务端用的是本地正则,
+  /// 解析不了刁钻写法是常态,得让用户过目。
+  Future<void> _smartParse() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = (data?.text ?? '').trim();
+    if (text.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('剪贴板是空的 —— 先复制一段带地址的文字')));
+      return;
+    }
+    setState(() => _parsing = true);
+    try {
+      final r = await widget.api.parseAddress(text);
+      if (!mounted) return;
+      setState(() {
+        if ('${r['name']}'.isNotEmpty) _name.text = '${r['name']}';
+        if ('${r['phone']}'.isNotEmpty) _phone.text = '${r['phone']}';
+        if ('${r['detail']}'.isNotEmpty) _detail.text = '${r['detail']}';
+        if ('${r['salutation']}'.isNotEmpty) {
+          _salutation.text = '${r['salutation']}';
+        }
+        // 地址要走 POI 搜索定位(得有经纬度),所以只填进搜索框触发搜索,
+        // **不直接当成选中的地址** —— 没有坐标的地址骑手送不到
+        final addr = '${r['address']}';
+        if (addr.isNotEmpty) {
+          _search.text = addr;
+          _onSearchChanged(addr);
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${r['note']}')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('\$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _parsing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -242,6 +294,10 @@ class _AddressEditPageState extends State<AddressEditPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 智能识别放最上面:用户手里多半已经有一段现成的地址文字,
+          // 先给他"一键填好"的路,再给"一栏栏填"的路
+          _SmartParseBar(busy: _parsing, onTap: _smartParse),
+          const SizedBox(height: 14),
           TextField(
             controller: _search,
             onChanged: _onSearchChanged,
@@ -299,6 +355,10 @@ class _AddressEditPageState extends State<AddressEditPage> {
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(
                   labelText: '手机号 *', border: OutlineInputBorder())),
+          // 标签:地址簿里三个「XX路XX号」排在一起时,
+          // 用户得逐字读才知道哪个是家 —— 一个标签省掉这次阅读
+          _TagPicker(value: _tag, onChanged: (v) => setState(() => _tag = v)),
+          const SizedBox(height: 6),
           SwitchListTile(
             title: const Text('设为默认地址'),
             value: _isDefault,
@@ -331,5 +391,71 @@ class _AddressEditPageState extends State<AddressEditPage> {
         ],
       ),
     );
+  }
+}
+
+
+/// 智能识别条:粘贴一段文字,自动拆成各栏(对齐主流外卖 App)。
+class _SmartParseBar extends StatelessWidget {
+  const _SmartParseBar({required this.busy, required this.onTap});
+
+  final bool busy;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 11, 10, 11),
+      decoration: BoxDecoration(
+        color: sz.surfaceAlt,
+        borderRadius: BorderRadius.circular(kRadiusSm),
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Text(
+            '复制一段带地址的文字,点右边自动拆成收货人、电话和地址\n'
+            '例:成都市锦江区春熙路8号 3栋502 张三 13800138000',
+            style: TextStyle(fontSize: 11.5, height: 1.5, color: sz.inkMuted),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton.tonal(
+          onPressed: busy ? null : onTap,
+          child: Text(busy ? '识别中' : '智能识别'),
+        ),
+      ]),
+    );
+  }
+}
+
+/// 标签选择:家 / 公司 / 学校。再点一次取消。
+class _TagPicker extends StatelessWidget {
+  const _TagPicker({required this.value, required this.onChanged});
+
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  static const _tags = ['家', '公司', '学校'];
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Row(children: [
+      Text('标签', style: TextStyle(fontSize: 13.5, color: sz.inkMuted)),
+      const SizedBox(width: 14),
+      for (final t in _tags) ...[
+        ChoiceChip(
+          label: Text(t),
+          selected: value == t,
+          // 选中时**不显示对勾**:默认的对勾会把「家」这一个字挤没,
+          // 屏幕上只剩一个勾,用户不知道自己选的是什么(实机撞过)
+          showCheckmark: false,
+          // 再点一次取消 —— 标签是可选的,不该点了就摘不掉
+          onSelected: (on) => onChanged(on ? t : ''),
+        ),
+        const SizedBox(width: 8),
+      ],
+    ]);
   }
 }
