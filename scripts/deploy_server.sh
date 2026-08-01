@@ -38,6 +38,21 @@ echo "== 重建容器(alembic 迁移在启动时自动执行) =="
 ssh "$DEPLOY" "cd $DEST/deploy && \
   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build"
 
+# nginx **必须最后重启一次**。
+#
+# nginx 在启动时把 upstream 的容器名解析成 IP 就**缓存住不再解析**,
+# 而 compose 重建时 api 容器会换 IP。表现是:部署当下健康检查是绿的
+# (那一刻 IP 还没变),十几分钟后全站 502,错误日志里是
+# 「connect() failed (113: Host is unreachable) ... upstream: 172.24.0.7」——
+# 那个 IP 是上一代 api 容器的。
+#
+# 2026-08-01 的 v0.8.0 发版就是这么挂的:APK 都发出去了、健康检查也过了,
+# 十分钟后官网和接口全 502,静态文件也一起挂(它们同在一个 server 块)。
+echo "== 重启 nginx(让它重新解析 api 的新 IP) =="
+ssh "$DEPLOY" "cd $DEST/deploy && \
+  docker compose -f docker-compose.prod.yml --env-file .env.prod restart nginx"
+sleep 3
+
 echo "== 健康验证 =="
 sleep 8
 for i in $(seq 1 15); do
@@ -45,6 +60,13 @@ for i in $(seq 1 15); do
   sleep 4
 done
 echo
+# 静态文件单独验一次:appdist 是旧版 App 检查更新的入口,
+# 它挂了等于所有用户都收不到更新 —— 而它和接口同在一个 server 块,
+# nginx upstream 一坏是一起坏的
+VJSON=$(curl -s -o /dev/null -w '%{http_code}' -m 10 --noproxy '*' \
+  "$PUBLIC_BASE/appdist/versions.json")
+[ "$VJSON" = "200" ] || { echo "✗ appdist/versions.json 返回 $VJSON,更新入口是坏的"; exit 1; }
+echo "  appdist/versions.json 200 ✓"
 curl -s -m 10 --noproxy '*' "$PUBLIC_BASE/stats/overview" | head -c 120
 echo
 echo "服务端发版完成 ✓ (确认上面 stats 有数据后再发 APK)"
