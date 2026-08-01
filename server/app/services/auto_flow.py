@@ -79,6 +79,16 @@ async def _transition_batch(
     ).all()
     for order in orders:
         order.status = to_status
+        # **法定记录**(123 号令第十五条要求如实记录送达时间):
+        # 清扫自动完成的单也要落时间,不能只有走 /transition 的那些有
+        if to_status == OrderStatus.DELIVERED and order.delivered_at is None:
+            order.delivered_at = datetime.now(timezone.utc)
+        if to_status == OrderStatus.COMPLETED:
+            now_utc = datetime.now(timezone.utc)
+            if order.completed_at is None:
+                order.completed_at = now_utc
+            if order.delivered_at is None:
+                order.delivered_at = now_utc
         if to_status == OrderStatus.CANCELLED:
             order.cancel_reason = reason
             if from_status in RESTOCK_FROM_STATUSES:

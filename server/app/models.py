@@ -346,6 +346,20 @@ class Order(Base):
     # 接单时刻:出餐超时判定与用户 2 分钟反悔窗口的共同基准
     accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+    # 送达/完成时刻。**这两个是法定要记录的字段,不是产品数据。**
+    #
+    # 《网络餐饮服务经营者落实食品安全主体责任监督管理规定》(总局令第 123 号)
+    # 第十五条:平台应当如实记录并保存订单信息 —— 含食品名称、下单时间、
+    # **送餐人员、送达时间**、收货地址,保存时间自交易完成之日起**不少于三年**。
+    #
+    # 此前只有 order_events 里的状态流转事件能推出送达时间,那不够:
+    # 事件表是流水,查一单的送达时间要 join + 过滤,而且直接落库的订单
+    # (清扫任务自动完成、历史数据迁移)根本没有对应事件。
+    # 法定要记录的字段就该有自己的列。
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     ready_alert_stage: Mapped[int] = mapped_column(Integer, default=0)  # 出餐催单档位 0/1/2
     ready_late: Mapped[bool] = mapped_column(Boolean, default=False)    # 出餐超时(定格)
     # AXB 隐私中间号(X 号):绑定后商家/骑手看到与拨打的都是它,订单终结后解绑清空

@@ -209,3 +209,60 @@ class Test住宿清扫的顺序:
         from app.state_machine import STAY_TRANSITIONS, StayOrderStatus
         assert (StayOrderStatus.NOSHOW,
                 StayOrderStatus.CANCELLED) not in STAY_TRANSITIONS
+
+
+class Test订单信息法定留存:
+    """《网络餐饮服务经营者落实食品安全主体责任监督管理规定》
+    (总局令第 123 号,2026-06-01 施行)第十五条:
+
+    > 平台提供者……应当如实记录并保存网络餐饮服务的订单信息……
+    > **保存时间自交易完成之日起不少于三年。**
+
+    注意这比旧规(36 号令的六个月)长得多。旧口径下写的任何"清理历史订单"
+    的想法,现在都是违规的。
+    """
+
+    def test_法定要记录的五项都有落点(self):
+        """食品名称、下单时间、送餐人员、送达时间、收货地址。"""
+        from app.models import Order
+        for field in ("items", "created_at", "rider_id",
+                      "delivered_at", "address"):
+            assert hasattr(Order, field), f"法定记录项缺字段:{field}"
+
+    def test_送达时间有独立列而不是只靠事件表(self):
+        """order_events 是流水:查一单的送达时间要 join + 过滤,
+        而且**直接落库的订单没有对应事件** —— 实测 35042 单已送达/完成,
+        delivered 事件只有 2055 条。法定要记录的字段就该有自己的列。
+        """
+        from app.models import Order
+        assert hasattr(Order, "delivered_at")
+        assert hasattr(Order, "completed_at")
+
+    def test_没有任何地方删订单(self):
+        """保存期是**三年**,而这套代码的清理逻辑一律只碰缓存和会话。
+
+        这条测试是给未来的人看的:想加"清理历史订单"之前先看这里 ——
+        三年内删一条都是违规。
+        """
+        import pathlib
+        import re
+
+        root = pathlib.Path(__file__).resolve().parents[2] / "app"
+        bad = []
+        for f in root.rglob("*.py"):
+            src = f.read_text(encoding="utf-8")
+            for m in re.finditer(
+                    r"(delete\(\s*Order\s*\)|DELETE\s+FROM\s+orders\b)", src):
+                bad.append(f"{f.name}:{src[:m.start()].count(chr(10)) + 1}")
+        assert not bad, f"有地方在删订单,而法定保存期是三年:{bad}"
+
+    def test_注销账号不删订单只匿名化(self):
+        """个保法第四十七条把"法律、行政法规规定的保存期限未届满"
+        列为删除义务的例外。订单要留三年,所以注销是匿名化用户,不是删单。
+        """
+        import inspect
+
+        from app.routers import auth
+        src = inspect.getsource(auth)
+        assert "已注销用户" in src, "注销应当匿名化"
+        assert "delete(Order)" not in src and "DELETE FROM orders" not in src

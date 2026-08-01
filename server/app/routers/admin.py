@@ -2453,3 +2453,89 @@ async def review_kitchen_cam(
     await db.commit()
     return {"merchant_id": shop.id, "status": shop.kitchen_cam_status,
             "note": shop.kitchen_cam_note}
+
+
+# ---------------------------------------------------------------------------
+# 食安培训:通知存量骑手(#167 的过渡动作)
+# ---------------------------------------------------------------------------
+
+
+class TrainingRolloutIn(BaseModel):
+    #: 宽限截止日(ISO)。空 = 立即生效,没做培训的当场上不了线
+    grace_until: str = Field(default="", max_length=10)
+    #: 只统计不推送(先看看影响面有多大)
+    dry_run: bool = False
+
+
+@router.post("/riders/training-rollout")
+async def training_rollout(
+    payload: TrainingRolloutIn,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """把食安培训要求推给全体存量骑手。
+
+    ## 为什么不是"直接给他们补一条培训记录"
+
+    培训记录是**法定记录**(123 号令第二十九条,保存不少于二年,
+    监管可以调取)。给没培训过的人补一条"已通过",是在伪造一份
+    随时可能被查的合规记录 —— 一旦被查出来,平台面对的不是
+    "没培训"的处罚,而是"造假"。
+
+    **所以这里做的是通知 + 设窗口,让人真去做那三分钟。**
+
+    ## grace_until 的语义
+
+    - 传日期:窗口内没做培训的骑手照常上线,每次上线带一条提醒;
+    - 传空:立即生效 —— 没做培训的下次上线就会被拦。
+
+    立即生效是合规上最干净的,但会让一批骑手当天跑不了单。
+    传日期给几天缓冲更稳妥,由调用方决定。
+    """
+    from ..models import RiderExam, RiderProfile
+    from ..services.push import push_to_user
+
+    trained = select(RiderExam.rider_id).where(RiderExam.passed.is_(True))
+    rows = (await db.execute(
+        select(RiderProfile.rider_id, User.name)
+        .join(User, User.id == RiderProfile.rider_id)
+        .where(RiderProfile.status == VerifyStatus.approved,
+               RiderProfile.rider_id.notin_(trained)))).all()
+
+    grace = payload.grace_until.strip()
+    if grace:
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(grace)
+        except ValueError:
+            raise HTTPException(422, "宽限截止日要写成 YYYY-MM-DD")
+
+    if not payload.dry_run:
+        flag = await db.get(PlatformFlag, "rider_training_grace_until")
+        # 空串 = 解析不出日期 = 立即生效(_parse_grace 解析失败即硬卡,
+        # 这是刻意的:配置错误不该让合规卡点形同虚设)
+        if flag is None:
+            db.add(PlatformFlag(key="rider_training_grace_until", value=grace))
+        else:
+            flag.value = grace
+        await db.commit()
+
+        body = (f"请在 {grace} 前完成(三分钟)" if grace
+                else "现在需要先完成才能上线(三分钟)")
+        for rider_id, _name in rows:
+            await push_to_user(
+                rider_id, "需要完成一次食品安全培训",
+                f"这是监管对平台的要求,不是给你加的规矩 —— {body}。"
+                "「我的」→ 上岗培训,答错有讲解、可以重来",
+                {"type": "training"})
+
+    return {
+        "pending": len(rows),
+        "grace_until": grace or None,
+        "dry_run": payload.dry_run,
+        "note": ("已通知全体未完成培训的骑手" if not payload.dry_run
+                 else "只统计未推送"),
+        "why_not_backfill": "培训记录是法定记录(保存≥2 年、监管可调取),"
+                            "给没培训的人补一条「已通过」是伪造合规记录 —— "
+                            "查出来面对的不是「没培训」的处罚,是「造假」",
+    }

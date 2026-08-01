@@ -675,6 +675,14 @@ async def transition(
     # 接单时刻落库:出餐超时判定与用户反悔窗口的共同基准
     if payload.to_status == OrderStatus.ACCEPTED:
         order.accepted_at = now
+    # 送达/完成时刻落库。**法定记录**(123 号令第十五条要求如实记录送达时间,
+    # 且订单信息自交易完成之日起保存不少于三年)—— 不能只靠 order_events 推
+    if payload.to_status == OrderStatus.DELIVERED:
+        order.delivered_at = now
+    if payload.to_status == OrderStatus.COMPLETED:
+        order.completed_at = now
+        if order.delivered_at is None:
+            order.delivered_at = now   # 自取单没有"送达"这一步
     # 出餐瞬间定格是否超时(承诺时长口径;预约单以预约前推为基准)
     if payload.to_status == OrderStatus.READY and order.accepted_at is not None:
         shop_for_promise = (shop if role == "merchant"
