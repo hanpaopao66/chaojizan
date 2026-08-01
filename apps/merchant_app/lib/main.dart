@@ -1180,7 +1180,9 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           : _tab == 2
               ? FinancePage(api: widget.api)
               : _tab == 3
-                  ? ShopTabPage(api: widget.api)
+                  ? ShopTabPage(
+                      api: widget.api,
+                      onOpenFinance: () => setState(() => _tab = 2))
                   : Column(
                       children: [
                         // 平台公告(费率调整、新功能上线等,发通知不用发版)

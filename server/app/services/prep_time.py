@@ -55,6 +55,20 @@ MIN_SAMPLES = 10
 #: 不是真实出餐时长。不剔掉的话 P95 会被这些垃圾数据拉飞
 OUTLIER_MAX_MINUTES = 120.0
 
+#: 异常值下限(分钟)。**做一份饭不可能不花时间。**
+#:
+#: 低于这个数的样本几乎都来自商家习惯性连点「接单」→「出餐」
+#: (很多店接单后先点出餐、等真做好了再叫骑手),不是真实出餐时长。
+#:
+#: 不剔掉的后果是实打实的:实测算出来是 0 分钟,商家端会显示
+#: 「比承诺快 15 分钟,承诺值可以往下调」—— 他真去调低,
+#: 然后每单都超时:超时安抚券由平台掏、骑手到店干等、顾客看到的
+#: 送达时间也不准。**三方一起受损,起因只是一个不该采信的 0。**
+#:
+#: 定 1 分钟是保守的:只剔掉物理上不可能的,不剔掉"很快但真实"的
+#: (热一份便当装盒,现实里也要一分钟以上)。
+OUTLIER_MIN_MINUTES = 1.0
+
 
 @dataclass(frozen=True)
 class PrepStat:
@@ -157,7 +171,7 @@ async def stats_for(
             continue
         minutes = (at - start).total_seconds() / 60
         # 负数(时钟回拨/数据错乱)与超长(商家忘了点出餐)都不是真实出餐时长
-        if 0 <= minutes <= OUTLIER_MAX_MINUTES:
+        if OUTLIER_MIN_MINUTES <= minutes <= OUTLIER_MAX_MINUTES:
             buckets.setdefault(mid, []).append(minutes)
 
     out: dict[int, PrepStat] = {}

@@ -3,16 +3,21 @@ import 'package:image_picker/image_picker.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'appeal_page.dart';
+import 'dashboard_page.dart';
 import 'printer_page.dart';
+import 'promises_page.dart';
 import 'promo_page.dart';
 import 'voucher_manage_page.dart';
 import 'winback_page.dart';
 
 /// 店铺 Tab:门头照、公告编辑、评价管理(查看 + 回复)。
 class ShopTabPage extends StatefulWidget {
-  const ShopTabPage({super.key, required this.api});
+  const ShopTabPage({super.key, required this.api, this.onOpenFinance});
 
   final ApiClient api;
+
+  /// 承诺页里「去对账页验」由外层切底部 tab
+  final VoidCallback? onOpenFinance;
 
   @override
   State<ShopTabPage> createState() => _ShopTabPageState();
@@ -27,6 +32,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
   bool _savingAnnouncement = false;
   bool _uploadingLogo = false;
   bool _uploadingPhoto = false;
+
+  /// 实测出餐时长(#150)。拿不到不影响这一页 —— 承诺值该能改还是能改
+  Map<String, dynamic>? _prepTime;
 
   @override
   void initState() {
@@ -43,12 +51,17 @@ class _ShopTabPageState extends State<ShopTabPage> {
       try {
         coupons = await widget.api.myShopCouponBatches();
       } catch (_) {}
+      Map<String, dynamic>? prep = _prepTime;
+      try {
+        prep = await widget.api.merchantPrepTime();
+      } catch (_) {}
       if (mounted) {
         setState(() {
           _shop = shop;
           _reviews = reviews;
           _afterSales = afterSales;
           _shopCoupons = coupons;
+          _prepTime = prep;
           if (_announcement.text.isEmpty) {
             _announcement.text = shop?.announcement ?? '';
           }
@@ -224,6 +237,83 @@ class _ShopTabPageState extends State<ShopTabPage> {
     }
   }
 
+  /// 实测出餐时长条(#150):承诺值旁边的那一行。
+  ///
+  /// 展示口径用 **P80** 而不是平均或中位数,和骑手抢单时看到的等待预期
+  /// 是**同一个数** —— 商家看到的和骑手看到的必须一致,不然商家会觉得
+  /// 「我明明 15 分钟就出餐了,骑手凭什么说要等 22 分钟」。
+  ///
+  /// 样本不足时明说样本少,不给假装精确的数。
+  Widget _measuredPrep() {
+    final p = _prepTime;
+    final sz = Theme.of(context).sz;
+    if (p == null) return const SizedBox(height: 4);
+
+    if (p['enough'] != true) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 4, bottom: 2),
+        child: Text(
+            '近 ${p['window_days']} 天完成 ${p['samples']} 单,'
+            '还不够算实测值(要 ${p['min_samples']} 单)',
+            style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+      );
+    }
+
+    final p80 = (p['p80'] as num).toDouble();
+    final gap = (p['gap_minutes'] as num?)?.toDouble();
+    final peer = (p['peer_median_p50'] as num?)?.toDouble();
+
+    String line;
+    Color color;
+    if (gap == null) {
+      line = '实测:十单里有八单在 ${p80.toStringAsFixed(0)} 分钟内出餐';
+      color = sz.inkMuted;
+    } else if (gap > 3) {
+      // 慢了就直说慢了多少。含糊其辞("略有超出")商家不会当回事
+      line = '实测 ${p80.toStringAsFixed(0)} 分钟(八成的单)—— '
+          '比你承诺的慢 ${gap.toStringAsFixed(0)} 分钟';
+      color = sz.hold;
+    } else if (gap < -3) {
+      // 比承诺快也要说:承诺值调低,用户端看到的送达时间就更短,
+      // 这是白拿的转化率 —— 商家自己往往想不到这一层
+      line = '实测 ${p80.toStringAsFixed(0)} 分钟(八成的单)—— '
+          '比承诺快 ${gap.abs().toStringAsFixed(0)} 分钟,承诺值可以往下调';
+      color = sz.earn;
+    } else {
+      line = '实测 ${p80.toStringAsFixed(0)} 分钟(八成的单),与承诺基本吻合';
+      color = sz.earn;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Icon(Icons.timer_outlined, size: 14, color: color),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(line,
+                style: TextStyle(fontSize: 12.5, height: 1.4, color: color)),
+          ),
+        ]),
+        const SizedBox(height: 3),
+        Text(
+          [
+            'P50 ${(p['p50'] as num).toStringAsFixed(0)} / '
+                'P80 ${p80.toStringAsFixed(0)} / '
+                'P95 ${(p['p95'] as num).toStringAsFixed(0)} 分钟',
+            if (peer != null) '同品类中位 ${peer.toStringAsFixed(0)} 分钟(参照系,不是排名)',
+          ].join(' · '),
+          style: TextStyle(fontSize: 11, color: sz.inkFaint),
+        ),
+        const SizedBox(height: 3),
+        // 红线原样显示。不写清楚,商家会担心这个数影响生意,
+        // 然后开始为它经营 —— 比如菜还没好就先点「出餐」,数据反而失真
+        Text('${p['never_used_for']}',
+            style: TextStyle(fontSize: 11, height: 1.4, color: sz.inkFaint)),
+      ]),
+    );
+  }
+
   /// 承诺出餐时长(5-60 分钟)
   Future<void> _editPromiseMinutes() async {
     final shop = _shop!;
@@ -233,14 +323,26 @@ class _ShopTabPageState extends State<ShopTabPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('承诺出餐时长(分钟)'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-              helperText: '5-60 分钟;定得实在比定得短更重要',
-              border: OutlineInputBorder()),
-        ),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+                helperText: '5-60 分钟;定得实在比定得短更重要',
+                border: OutlineInputBorder()),
+          ),
+          // 填的这一刻最需要看到实测值 —— 否则他还是在闭着眼填
+          if (_prepTime?['enough'] == true) ...[
+            const SizedBox(height: 12),
+            Text(
+              '你近 ${_prepTime!['window_days']} 天的实测:'
+              '八成的单在 ${(_prepTime!['p80'] as num).toStringAsFixed(0)} 分钟内出餐',
+              style: TextStyle(
+                  fontSize: 12.5, color: Theme.of(context).sz.inkMuted),
+            ),
+          ],
+        ]),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -1404,6 +1506,11 @@ class _ShopTabPageState extends State<ShopTabPage> {
                           child: const Text('编辑')),
                     ],
                   ),
+                  // #150:承诺值旁边直接给实测值。
+                  // 在这之前商家是**闭着眼填**的 —— 平台替他的慢出餐掏钱赔付
+                  // (超时安抚券由平台承担),而他零反馈,不知道自己慢多少。
+                  // 平台掏钱、商家无感、问题不改,这个闭环不通治理就无从谈起
+                  _measuredPrep(),
                   Text('接单后超过承诺时长未出餐,平台会催单并统计超时率(对账页可见)',
                       style: Theme.of(context).textTheme.bodySmall),
                   const Divider(height: 24),
@@ -1503,6 +1610,43 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     ],
                   ),
                   Text('对售后判责或差评有异议?72 小时内申诉,平台人工复核',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
+                  // #154 经营看板:打烊后坐下来复盘的那一屏
+                  Row(
+                    children: [
+                      const Text('经营看板'),
+                      const Spacer(),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.insights_outlined, size: 18),
+                        label: const Text('查看'),
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    DashboardPage(api: widget.api))),
+                      ),
+                    ],
+                  ),
+                  Text('趋势、时段、出餐时长、菜品贡献、流失去向 —— 打烊后坐下来看',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
+                  // #153 平台承诺:和骑手端那份对称,每条都能自己验
+                  Row(
+                    children: [
+                      const Text('平台对你的承诺'),
+                      const Spacer(),
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.verified_outlined, size: 18),
+                        label: const Text('查看'),
+                        onPressed: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) => MerchantPromisesPage(
+                                    api: widget.api,
+                                    onOpenFinance: widget.onOpenFinance))),
+                      ),
+                    ],
+                  ),
+                  Text('佣金封顶只降不升、配送费不抽成、券未核销不收费…… 每条写了在哪儿验',
                       style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),

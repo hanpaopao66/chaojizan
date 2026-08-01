@@ -76,6 +76,7 @@ test:
 	  && python -m tests.e2e_holiday && python -m tests.e2e_identity \
 	  && python -m tests.e2e_invoice && python -m tests.e2e_marketing \
 	  && python -m tests.e2e_merchant_analytics && python -m tests.e2e_merchant_staff \
+	  && python -m tests.e2e_merchant_insight \
 	  && python -m tests.e2e_merchant_statement && python -m tests.e2e_merchant_wallet \
 	  && python -m tests.e2e_moderation && python -m tests.e2e_multi_city \
 	  && python -m tests.e2e_multi_order && python -m tests.e2e_no_rider \

@@ -70,6 +70,22 @@ class Test异常值:
         不剔掉的话 P95 会被垃圾数据拉飞。"""
         assert 30 <= pt.OUTLIER_MAX_MINUTES <= 240
 
+    def test_有下限且不能是0(self):
+        """**做一份饭不可能不花时间。**
+
+        下限如果是 0,商家习惯性连点「接单」→「出餐」的样本会全被采信,
+        实测算出来是 0 分钟 —— 商家端会显示「承诺值可以往下调」,
+        他真去调低,然后每单超时:平台掏安抚券、骑手干等、顾客 ETA 不准。
+        三方一起受损,起因只是一个不该采信的 0。
+        """
+        assert pt.OUTLIER_MIN_MINUTES > 0, "下限是 0 等于没有下限"
+        # 上限不能太高:一份便当热好装盒也就一两分钟,
+        # 卡到 5 分钟会把真实的快店误判成异常
+        assert pt.OUTLIER_MIN_MINUTES <= 3
+
+    def test_区间是闭合且非空的(self):
+        assert pt.OUTLIER_MIN_MINUTES < pt.OUTLIER_MAX_MINUTES
+
     def test_窗口不至于被半年前的旧状态拖住(self):
         assert 7 <= pt.WINDOW_DAYS <= 90
 

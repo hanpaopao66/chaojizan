@@ -660,6 +660,18 @@ class ApiClient {
       await _request('GET', '/merchants/me/analytics?days=$days')
           as Map<String, dynamic>;
 
+  /// 我的实测出餐时长(#150)。P50/P80/P95 + 与自己承诺值的差距。
+  ///
+  /// 这个数**不用于**给商家排名、扣分或影响曝光 —— 服务端的
+  /// `never_used_for` 字段把这条红线一并返回,界面上要原样显示出来。
+  Future<Map<String, dynamic>> merchantPrepTime() async =>
+      await _request('GET', '/merchants/me/prep-time') as Map<String, dynamic>;
+
+  /// 经营趋势与流失诊断(#151/#152)。按自然周聚合,含环比与可归因流失。
+  Future<Map<String, dynamic>> merchantTrend({int weeks = 8}) async =>
+      await _request('GET', '/merchants/me/trend?weeks=$weeks')
+          as Map<String, dynamic>;
+
   /// 商家推广物料:店铺短码 + 海报要印的内容(短码首次调用时懒生成)
   Future<Map<String, dynamic>> merchantPromo() async =>
       await _request('GET', '/merchants/me/promo') as Map<String, dynamic>;

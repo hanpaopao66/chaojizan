@@ -1085,6 +1085,244 @@ async def _my_shop_or_404(db: AsyncSession, user: User) -> Merchant:
     return shop
 
 
+@router.get("/me/trend")
+async def my_trend(
+    weeks: int = 8,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """经营趋势与流失诊断(#151/#152)。
+
+    ## 为什么按周不按天
+
+    外卖有很强的**周内节律**(周末 ≠ 周三)。按天做环比会把节律当成趋势,
+    得出「周一生意变差了」这种废话 —— 每个周一都比周日差,那不是趋势。
+
+    ## 诊断:单量掉了,掉在哪一环
+
+    商家真正的问题不是「这是你的数据」,是「我该改什么」。
+    所以除了趋势,还把可归因的流失拆开:拒单、歇业、缺货、出餐超时。
+
+    每条都标 `estimated: true` —— 这些是**估算**,不是精确值。
+    给一个精确到个位的假数字,比给区间更坏。
+    """
+    shop = await _my_shop_or_404(db, user)
+    n = min(max(weeks, 2), 26)
+
+    # 按自然周聚合(北京时间)。date_trunc 用 UTC 会把周界切在周日早八点,
+    # 对商家来说那是周日营业中,不是新的一周
+    rows = (await db.execute(text("""
+        SELECT date_trunc('week', created_at AT TIME ZONE 'Asia/Shanghai') AS wk,
+               count(*) AS orders,
+               coalesce(sum(food_cents), 0) AS food,
+               count(DISTINCT customer_id) AS customers
+        FROM orders
+        WHERE merchant_id = :mid AND status = 'completed'
+          AND created_at >= now() - make_interval(days => :days)
+        GROUP BY wk ORDER BY wk
+    """), {"mid": shop.id, "days": n * 7})).all()
+
+    by_week = {r[0].date(): r for r in rows}
+
+    # **把没有订单的周补齐**。GROUP BY 只会返回有单的周,直接拿去画折线,
+    # 图会把 6/22 和 7/13 之间的两个空周**连成一条直线** ——
+    # 商家看到的是"这几周挺平稳",实际是"这几周一单没有"。
+    # 补 0 是如实的:那几周确实是 0 单,不是"没数据"。
+    # 本周还没过完。周一(北京时间)是周界
+    today_bj = (datetime.now(timezone.utc) + timedelta(hours=8)).date()
+    this_week = today_bj - timedelta(days=today_bj.weekday())
+
+    series: list[dict] = []
+    if rows:
+        wk = rows[0][0].date()
+        last = rows[-1][0].date()
+        while wk <= last:
+            r = by_week.get(wk)
+            orders = r[1] if r else 0
+            food = int(r[2]) if r else 0
+            series.append({
+                "week": wk.isoformat(),
+                "orders": orders,
+                "food_cents": food,
+                "customers": r[3] if r else 0,
+                # 客单价:没有单就不给 0,给 None —— 0 会被读成"客单价跌到零",
+                # 而实际是"这周没单,客单价无从谈起"。图上应该断线,不是落到 0
+                "avg_cents": int(food // orders) if orders else None,
+                # 本周还没过完,单量天然偏低 —— 图上要标出来
+                "partial": wk >= this_week,
+            })
+            wk += timedelta(days=7)
+
+    def delta(cur, prev):
+        """环比。前一周为 0 时不给百分比 —— 除零和「增长 ∞%」都没意义。"""
+        if prev in (None, 0) or cur is None:
+            return None
+        return round((cur - prev) / prev * 100, 1)
+
+    # **环比只拿完整的周比。**
+    #
+    # 直接拿 series[-1] 比 series[-2] 是个陷阱:series[-1] 是本周,还没过完。
+    # 周二拿两天的数据去比上周整七天,每个周一、周二商家都会看到
+    # 「单量比上周少了 70%」然后白慌一场 —— 这跟"按天比会把周内节律当趋势"
+    # 是同一类错误,只是换了个尺度。
+    #
+    # 所以比的是**最近两个完整周**,本周照常画在图上但标成 partial。
+    compare = None
+    full = [w for w in series if not w["partial"]]
+    if len(full) >= 2:
+        a, b = full[-1], full[-2]
+        compare = {
+            "week": a["week"],
+            "prev_week": b["week"],
+            "orders": {"cur": a["orders"], "prev": b["orders"],
+                       "pct": delta(a["orders"], b["orders"])},
+            "food_cents": {"cur": a["food_cents"], "prev": b["food_cents"],
+                           "pct": delta(a["food_cents"], b["food_cents"])},
+            "avg_cents": {"cur": a["avg_cents"], "prev": b["avg_cents"],
+                          "pct": delta(a["avg_cents"], b["avg_cents"])},
+            "customers": {"cur": a["customers"], "prev": b["customers"],
+                          "pct": delta(a["customers"], b["customers"])},
+        }
+
+    # ---- 流失诊断:把已有信号串成解释 ----
+    #
+    # 归因**不猜 cancel_reason 的文本** —— 那是自由文本(「牛肉卖完了,抱歉」
+    # 这种商家随手写的),按关键词分类今天能对、明天商家换个说法就错。
+    # 用 order_events 的结构化信号:
+    #   - actor_role='merchant'         → 商家主动拒单
+    #   - actor_role='system' 且 from='paid' → 商家一直没接,系统超时替他取消
+    #     (停在 paid 说明这单商家连看都没看,这才是最该让他知道的一类)
+    diag = (await db.execute(text("""
+        SELECT
+          count(*) FILTER (WHERE e.actor_role = 'merchant')          AS rejected,
+          count(*) FILTER (WHERE e.actor_role = 'system'
+                             AND e.from_status = 'paid')             AS timeout
+        FROM order_events e JOIN orders o ON o.id = e.order_id
+        WHERE o.merchant_id = :mid
+          AND e.to_status = 'cancelled'
+          AND e.created_at >= now() - interval '7 days'
+    """), {"mid": shop.id})).first()
+
+    late = await db.scalar(text("""
+        SELECT count(*) FROM orders
+        WHERE merchant_id = :mid AND status = 'completed' AND ready_late
+          AND created_at >= now() - interval '7 days'
+    """), {"mid": shop.id})
+
+    # 用 sold_out_today 而**不是** is_on_sale=false:后者包含商家主动永久
+    # 下架的菜(换季、停售),那是正常菜单管理不是流失原因。
+    # 今天卖光的菜才是"你还想卖但顾客搜不到"
+    sold_out = await db.scalar(text("""
+        SELECT count(*) FROM dishes
+        WHERE merchant_id = :mid AND sold_out_today = true
+    """), {"mid": shop.id})
+
+    causes = []
+    if diag and diag[0]:
+        causes.append({"key": "rejected", "name": "商家拒单",
+                       "orders": int(diag[0]), "estimated": False,
+                       "hint": "拒单会直接丢掉这一单,且顾客大概率不再回来"})
+    if diag and diag[1]:
+        causes.append({"key": "timeout", "name": "超时未接单",
+                       "orders": int(diag[1]), "estimated": False,
+                       "hint": "这些单你还没点过就被系统取消了 —— "
+                               "开着提示音,或在「店铺」里把自动接单打开"})
+    if late:
+        causes.append({"key": "late", "name": "出餐超时",
+                       "orders": int(late), "estimated": False,
+                       "hint": "超时的安抚券由平台承担,但顾客的体验损失在你这边"})
+    if sold_out:
+        causes.append({"key": "sold_out", "name": "菜品下架/售罄",
+                       "dishes": int(sold_out), "estimated": True,
+                       "hint": "下架的菜顾客搜不到;主力菜下架影响最大"})
+
+    return {
+        "weeks": series,
+        "compare": compare,
+        "causes": causes,
+        "note": "按自然周聚合(北京时间)。外卖周内节律强,"
+                "按天做环比会把节律当成趋势。",
+        "estimate_note": "标了「估算」的条目是根据现有信号推算的,不是精确值。",
+    }
+
+
+@router.get("/me/prep-time")
+async def my_prep_time(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的实测出餐时长(#150)。
+
+    ## 为什么必须有这个
+
+    在此之前链路是断的:商家在店铺设置里**自己填**「承诺出餐时长」、没人核;
+    骑手抢单看到的等待预期已经用上**实测 P80**;超时赔付**由平台承担**;
+    而商家**零反馈** —— 他不知道自己实际比承诺慢多少,
+    更不知道这让平台掏了多少钱。
+
+    **平台掏钱、商家无感、问题不改。** 这个闭环不通,治理就无从谈起。
+
+    ## 红线(承接 #144)
+
+    这个数**只用于**:给商家反馈、给骑手更准的等待预期、给用户更准的 ETA。
+
+    **不用于**给商家排名、扣分、或影响用户端曝光 ——
+    一旦分数影响生意,商家就会开始为分数经营(比如提前点「出餐」而实际没好),
+    数据反而失真。同品类中位数是**参照系,不是排名**。
+    """
+    from ..services import prep_time
+
+    shop = await _my_shop_or_404(db, user)
+    stat = await prep_time.stat_for(db, shop.id)
+
+    # 同品类参照系:取同品类其他店的 P50 中位数。
+    # **不返回名次、不返回店名** —— 只给一个「大家大概多久」的参照
+    peer_ids = [r for r in (await db.scalars(
+        select(Merchant.id).where(
+            Merchant.category == shop.category,
+            Merchant.id != shop.id,
+            Merchant.status == MerchantStatus.approved).limit(80)))]
+    peer_median = None
+    if peer_ids:
+        peers = await prep_time.stats_for(db, peer_ids)
+        vals = sorted(x.p50 for x in peers.values()
+                      if x.enough and x.p50 is not None)
+        if vals:
+            peer_median = round(vals[len(vals) // 2], 1)
+
+    promised = shop.promise_ready_minutes
+    gap = None
+    if stat.enough and stat.p80 is not None:
+        # 商家最该看到的一个数:实际(P80)比承诺慢多少
+        gap = round(stat.p80 - promised, 1)
+
+    # 样本不足时**一个分位数都不给**。3 单算出来的 P80 是噪声,
+    # 而商家会拿它去跟承诺值比、去改后厨流程 —— 给一个假装精确的数
+    # 比不给更坏。这跟 prep_time 自己的契约(MIN_SAMPLES)是一致的:
+    # 那边样本不足就回退商家自报值,这边就不该把生数据端出来
+    def q(v: float | None) -> float | None:
+        return None if (v is None or not stat.enough) else round(v, 1)
+
+    return {
+        "samples": stat.samples,
+        "enough": stat.enough,
+        "p50": q(stat.p50),
+        "p80": q(stat.p80),
+        "p95": q(stat.p95),
+        "promised_minutes": promised,
+        # 正数 = 实际比承诺慢;负数 = 比承诺快
+        "gap_minutes": gap,
+        "peer_median_p50": peer_median,
+        "window_days": prep_time.WINDOW_DAYS,
+        "min_samples": prep_time.MIN_SAMPLES,
+        "note": ("样本还少,下面的数只作参考;骑手看到的等待预期仍用你填的承诺值"
+                 if not stat.enough else
+                 "骑手抢单时看到的等待预期用的是这里的 P80"),
+        "never_used_for": "出餐时长不用于给商家排名、不作为扣分依据、"
+                          "不影响你在用户端的曝光。同品类中位数是参照系,不是排名。",
+    }
+
+
 @router.get("/me/quality")
 async def my_quality(
     user: User = Depends(require_role("merchant")),
