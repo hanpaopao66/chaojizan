@@ -711,6 +711,21 @@ class ApiClient {
       await _request('GET', '/merchants/$merchantId/kitchen-cam')
           as Map<String, dynamic>;
 
+  /// 可选城市(地址搜索的城市切换器用)。清单来自**实际有商家的城市**
+  /// 或管理员配置的开城清单 —— 列一个没有商家的城市,
+  /// 用户切过去只会看到空列表。
+  ///
+  /// 公开接口:选城市这一步在登录前就可能发生。
+  Future<List<({String name, int merchants})>> openCities() async {
+    final d = await _request('GET', '/geo/cities') as Map<String, dynamic>;
+    return (d['items'] as List)
+        .map((e) => (
+              name: (e as Map<String, dynamic>)['name'] as String,
+              merchants: e['merchants'] as int? ?? 0,
+            ))
+        .toList();
+  }
+
   /// 商家推广物料:店铺短码 + 海报要印的内容(短码首次调用时懒生成)
   Future<Map<String, dynamic>> merchantPromo() async =>
       await _request('GET', '/merchants/me/promo') as Map<String, dynamic>;
@@ -984,7 +999,13 @@ class ApiClient {
 
   /// POI 输入提示(服务端代理腾讯位置服务,Key 不下发 ——
   /// key 一旦进了 APK 就等于公开,配额按 key 计费,被盗刷是迟早的事)
-  Future<List<PoiTip>> geoTips(String keywords, {String city = '成都'}) async {
+  /// POI 输入提示。
+  ///
+  /// ⚠️ [city] **必须传对**:服务端用腾讯的 `region_fix=1` 把结果限死在
+  /// 指定城市 —— 城市选错,用户搜自己家会**一条都搜不到**
+  /// (实测:西安的「紫薇臻品」在 city=成都 时返回 0 条)。
+  /// 所以这个参数没有安全的默认值,调用方要从城市切换器/定位拿。
+  Future<List<PoiTip>> geoTips(String keywords, {required String city}) async {
     final data = await _request('GET', '/geo/tips',
         query: {'keywords': keywords, 'city': city});
     return (data as List)

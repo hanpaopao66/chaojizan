@@ -414,3 +414,49 @@ class Test核账要随单量增长仍能跑:
         # 漏一处,核账照样会在那个量级挂掉
         assert src.count(".in_(completed_ids)") >= 4, \
             "四处按订单 id 查的地方都要走子查询"
+
+
+class Test城市切换器:
+    """地址搜索的城市必须能切(#172)。
+
+    服务端的 POI 搜索用腾讯 `region_fix=1` 把结果**限死在指定城市** ——
+    不加的话搜「一号店」会把全国同名地点都返回,用户容易选中外地那个,
+    下单后才发现超出配送范围。
+
+    但代价是:**城市选错,用户搜自己家一条都搜不到**。
+    实测西安的「紫薇臻品」在 city=成都 时返回 0 条,而客户端此前
+    一直传写死的「成都」—— 成都以外的用户根本搜不出自己的地址。
+    """
+
+    def test_城市清单来自实际有商家的城市(self):
+        """列一个没有商家的城市,用户切过去只会看到空列表。"""
+        import inspect
+
+        from app.routers import geo
+        src = inspect.getsource(geo.open_city_list)
+        assert "status = 'approved'" in src, "应当只数已通过审核的商家"
+        assert "open_cities" in src, "配了开城清单时以清单为准"
+
+    def test_开城清单里没商家的城市要标出来(self):
+        """开城清单是管理员圈的经营范围,可能有刚开城还没商家的 ——
+        用户切过去会看到空列表,得先告诉他。"""
+        import inspect
+
+        from app.routers import geo
+        src = inspect.getsource(geo.open_city_list)
+        assert 'by_name.get(c, 0)' in src, "清单里没商家的城市要给 0 而不是漏掉"
+
+    def test_搜索仍然限定城市(self):
+        """限定本身是对的(防止选中外地同名地点),要保留。"""
+        import inspect
+
+        from app.routers import geo
+        assert '"region_fix": 1' in inspect.getsource(geo.poi_tips)
+
+    def test_城市清单公开不要求登录(self):
+        """选城市这一步在登录前就可能发生(先看有没有店再决定注册)。"""
+        import inspect
+
+        from app.routers import geo
+        sig = inspect.signature(geo.open_city_list)
+        assert "user" not in sig.parameters, "选城市不该要求先登录"

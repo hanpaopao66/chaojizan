@@ -243,8 +243,41 @@ class _AddressEditPageState extends State<AddressEditPage> {
   bool _protect = false; // 保护模式:骑手只见小区/楼栋,门牌送达前不下发
   final _salutation = TextEditingController();
   String _tag = '';          // 家 / 公司 / 学校(空 = 不打标签)
+  /// 搜索所在城市。**必须对**:服务端把 POI 搜索限死在这个城市里,
+  /// 选错了用户搜自己家会一条都搜不到(实测西安的小区在 city=成都 时返回 0 条)
+  String _city = '';
   bool _parsing = false;     // 智能识别中
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initCity();
+  }
+
+  /// 城市优先级:**用户记住的选择 > 定位解析 > 留空让他自己选**。
+  ///
+  /// 留空时切换器显示「选择城市」——**不猜一个填进去**:
+  /// 猜错了用户会以为已经选对,然后搜不出东西也不知道为什么。
+  Future<void> _initCity() async {
+    final saved = await CityPref.load();
+    if (saved.isNotEmpty) {
+      if (mounted) setState(() => _city = saved);
+      return;
+    }
+    try {
+      // 用**最后已知位置**:不弹权限、不等 GPS —— 解析城市这件事
+      // 不值得为它卡住表单;拿不到就留空让用户自己选
+      final me = await Geolocator.getLastKnownPosition();
+      if (me == null) return;
+      final t = await widget.api.geoReverse(me.latitude, me.longitude);
+      // 逆地理的 district 形如「四川省成都市锦江区…」,取出「XX市」
+      final m = RegExp(r'([\u4e00-\u9fa5]{2,8}市)').firstMatch(t.district);
+      if (m != null && mounted) setState(() => _city = m.group(1)!);
+    } catch (_) {
+      // 拿不到就留空,让用户自己选 —— 比猜一个强
+    }
+  }
 
   @override
   void dispose() {
@@ -260,7 +293,7 @@ class _AddressEditPageState extends State<AddressEditPage> {
     }
     _debounce = Timer(const Duration(milliseconds: 400), () async {
       try {
-        final tips = await widget.api.geoTips(text.trim());
+        final tips = await widget.api.geoTips(text.trim(), city: _city);
         if (mounted) setState(() => _tips = tips);
       } catch (_) {}
     });
@@ -397,7 +430,32 @@ class _AddressEditPageState extends State<AddressEditPage> {
           // 智能识别放最上面:用户手里多半已经有一段现成的地址文字,
           // 先给他"一键填好"的路,再给"一栏栏填"的路
           _SmartParseBar(busy: _parsing, onTap: _smartParse),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
+          // 城市切换器紧挨着搜索框:服务端把 POI 搜索限死在这个城市里,
+          // 选错了搜不出自己家 —— 它得和搜索框在一起,用户才会把两者关联起来
+          Row(children: [
+            SzCityChip(
+              city: _city,
+              loadCities: widget.api.openCities,
+              onChanged: (c) {
+                setState(() {
+                  _city = c;
+                  _tips = [];        // 换了城市,上一个城市的结果不作数
+                });
+                CityPref.save(c);
+                if (_search.text.trim().isNotEmpty) {
+                  _onSearchChanged(_search.text);   // 用新城市重搜一次
+                }
+              },
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text('搜索只在这个城市里找',
+                  style: TextStyle(
+                      fontSize: 11.5, color: Theme.of(context).sz.inkFaint)),
+            ),
+          ]),
+          const SizedBox(height: 6),
           TextField(
             controller: _search,
             onChanged: _onSearchChanged,

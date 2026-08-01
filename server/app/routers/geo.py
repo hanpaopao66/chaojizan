@@ -9,6 +9,11 @@
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..db import get_db
+
 from ..config import settings
 from ..models import User
 from ..schemas import PoiTipOut
@@ -235,3 +240,41 @@ async def weather_at(
         "note": ("恶劣天气配送加价,全额归骑手;预计送达时间已相应放宽"
                  if w["severe"] else ""),
     }
+
+
+@router.get("/cities")
+async def open_city_list(db: AsyncSession = Depends(get_db)):
+    """可选城市(地址搜索的城市切换器用,#172)。
+
+    ## 清单从哪来:**实际有商家的城市**,不是编一个名单
+
+    腾讯的 POI 搜索用 `region_fix=1` 把结果限死在指定城市 ——
+    城市选错,用户搜自己家会一条都搜不到。所以这个清单必须准。
+
+    准的定义是「这里点得到外卖」,而不是「我们打算开这里」:
+    - 配了 `open_cities` 就以它为准(管理员明确圈定的经营范围);
+    - 没配就取**已通过审核的商家所在城市** —— 有店才叫开城,
+      列一个没有商家的城市,用户切过去只会看到空列表。
+
+    公开接口:选城市这一步在登录前就可能发生(先看有没有店再决定注册)。
+    """
+    from ..services.flags import open_cities
+
+    allow = await open_cities(db)
+    rows = (await db.execute(text("""
+        SELECT city, count(*) AS n FROM merchants
+        WHERE status = 'approved' AND city <> ''
+        GROUP BY city ORDER BY n DESC
+    """))).all()
+    have = [{"name": c, "merchants": n} for c, n in rows]
+
+    if allow:
+        # 开城清单是权威:清单里的城市即便还没有商家也列出来(可能刚开城),
+        # 但**标出来没有店** —— 让用户知道切过去会看到什么
+        by_name = {h["name"]: h["merchants"] for h in have}
+        return {
+            "items": [{"name": c, "merchants": by_name.get(c, 0)}
+                      for c in allow],
+            "source": "open_cities",
+        }
+    return {"items": have, "source": "merchants"}
