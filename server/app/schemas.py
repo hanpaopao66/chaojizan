@@ -824,6 +824,9 @@ class DayStatOut(BaseModel):
 class FinanceOrderOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    #: 分页游标要用:排序是 (created_at, id) 两列,
+    #: 只拿 created_at 翻页会把同一秒的行整组跳过(实测漏过一条冲账)
+    id: int
     order_no: str
     food_cents: int
     commission_cents: int
@@ -961,21 +964,29 @@ class PoiTipOut(BaseModel):
 
 # ---------- 骑手实名认证 ----------
 class RiderProfileIn(BaseModel):
+    """骑手实名:只要姓名 + 身份证号。
+
+    **不收身份证照片** —— 二要素核验(查国家人口基础信息库)不需要它,
+    而它是敏感个人影像,不收就没有泄露面。
+
+    健康证选填:国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员"),
+    四川已明确取消;只有地方另有要求的城市才会卡。
+    """
+
     real_name: str = Field(min_length=2, max_length=50)
     id_card_no: str = Field(pattern=r"^\d{17}[\dXx]$")
-    id_card_photo_url: str = Field(min_length=1)
-    health_cert_photo_url: str = Field(min_length=1)
+    health_cert_photo_url: str = Field(default="", max_length=300)
 
 
 class RiderProfileOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    """**不回证号,姓名打码** —— 和用户侧 UserIdentity 一个口径。"""
 
-    real_name: str
-    id_card_no: str
-    id_card_photo_url: str
-    health_cert_photo_url: str
+    real_name: str          # 打码后的
+    health_cert_photo_url: str = ""
     status: VerifyStatus
-    reject_reason: str
+    reject_reason: str = ""
+    #: 是否经过二要素核验(区别于历史的人工审核路径)
+    id_verified: bool = False
 
 
 class AdminRiderProfileOut(RiderProfileOut):

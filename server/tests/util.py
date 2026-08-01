@@ -182,9 +182,16 @@ async def register_fresh_rider(name="测试骑手"):
             {"id": uid})
         await db.execute(
             text("INSERT INTO rider_profiles (rider_id, real_name, "
-                 "id_card_no, id_card_photo_url, health_cert_photo_url, "
+                 "id_no_encrypted, id_card_photo_url, health_cert_photo_url, "
                  "status, reject_reason) VALUES (:id, :name, '', "
                  "'', '', 'approved', '')"), {"id": uid, "name": name})
+        # 食安培训记录:法定要求(123 号令第二十九条),没有它上不了线。
+        # 这个助手造的是**完整入驻**的骑手,所以要带上 ——
+        # 少了它,所有依赖骑手上线的用例都会挂在合规卡点上
+        await db.execute(
+            text("INSERT INTO rider_exams (rider_id, score, passed, answers, "
+                 "content_version) VALUES (:id, 100, true, '{}'::jsonb, "
+                 "'test')"), {"id": uid})
         await db.commit()
     # require_role 每次请求都从 DB 读角色,原 token 直接可用
     return token

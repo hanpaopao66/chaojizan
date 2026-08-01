@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import and_, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date, datetime, timedelta, timezone
@@ -1670,6 +1670,9 @@ async def finance_daily(
 async def finance_orders(
     day: date,
     before: str | None = None,
+    #: 与 before 同一行的 id。**两个一起传才是正确的分页** ——
+    #: 见下面对"同秒多行会被整组跳过"的说明
+    before_id: int | None = None,
     limit: int = 200,
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
@@ -1696,11 +1699,30 @@ async def finance_orders(
         .limit(limit)
     )
     if before:
+        # **游标必须带全排序键。**
+        #
+        # 排序是 (created_at DESC, id DESC) 两列,而老游标只带 created_at
+        # 并用严格 `<` —— 页边界落在同一秒的多行中间时,
+        # 这一秒剩下的行会被**整组跳过**。
+        #
+        # 实测演示库:一天 1030 行入账里同秒最多 9 行,翻页只取到 1029 行,
+        # 漏掉的恰好是一条 -¥30 的冲账 —— 于是商家看到的明细
+        # **比他实际到手的钱多 ¥30**。对账页漏行比慢更严重。
+        #
+        # 兼容老调用方:只传 created_at 时退化为原行为(仍可能漏,
+        # 但不会更糟);带上 before_id 才是正确的 keyset 分页。
         try:
             cursor = datetime.fromisoformat(before)
         except ValueError:
             raise HTTPException(422, "分页游标格式不对")
-        query = query.where(MerchantEarning.created_at < cursor)
+        if before_id is not None:
+            query = query.where(or_(
+                MerchantEarning.created_at < cursor,
+                and_(MerchantEarning.created_at == cursor,
+                     MerchantEarning.id < before_id),
+            ))
+        else:
+            query = query.where(MerchantEarning.created_at < cursor)
     result = await db.scalars(query)
     return list(result)
 

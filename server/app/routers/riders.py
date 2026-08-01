@@ -42,6 +42,29 @@ from .orders import order_out, orders_out
 router = APIRouter(prefix="/riders", tags=["骑手"])
 
 
+def _profile_out(p: RiderProfile) -> RiderProfileOut:
+    """对外只回打码姓名与状态。**证号明文不出接口** ——
+    和用户侧 UserIdentity 一个口径。"""
+    name = p.real_name or ""
+    return RiderProfileOut(
+        real_name=(name[0] + "*" * (len(name) - 1)) if len(name) > 1 else name,
+        health_cert_photo_url=p.health_cert_photo_url,
+        status=p.status,
+        reject_reason=p.reject_reason,
+        id_verified=p.id_verified_at is not None,
+    )
+
+
+def _parse_grace(value: str):
+    """宽限截止日(ISO)。解析不了就当没有宽限 —— **不能因为配置写错就放行**,
+    那样等于合规卡点形同虚设。"""
+    from datetime import date as _date
+    try:
+        return _date.fromisoformat((value or "").strip())
+    except ValueError:
+        return None
+
+
 async def _require_verified(db: AsyncSession, rider_id: int) -> RiderProfile:
     """接单相关操作的前置:必须实名认证通过。"""
     profile = await db.scalar(
@@ -64,11 +87,10 @@ async def get_profile(
     if profile is None:
         # 还没提交:返回 unsubmitted 空档案,客户端据此显示提交表单
         return RiderProfileOut(
-            real_name="", id_card_no="", id_card_photo_url="",
-            health_cert_photo_url="", status=VerifyStatus.unsubmitted,
-            reject_reason="",
+            real_name="", health_cert_photo_url="",
+            status=VerifyStatus.unsubmitted, reject_reason="",
         )
-    return profile
+    return _profile_out(profile)
 
 
 @router.post("/profile", response_model=RiderProfileOut)
@@ -77,22 +99,70 @@ async def submit_profile(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    """提交/重新提交实名认证。已通过的不允许再改(改信息要走客服)。"""
+    """实名认证:姓名 + 身份证号,**核验通过当场生效,不用等人工审**。
+
+    ## 为什么门槛只有这两样
+
+    逐条核过法规:
+
+    - **健康证不是法定要求**(送餐员不属于"直接接触入口食品的人员",
+      四川已明确取消)—— 这里选填,只有地方另有要求的城市才卡;
+    - **人脸认证不做**:《人脸识别技术应用安全管理办法》(2025-06-01 施行)
+      明写"存在其他非人脸方式能达到同等业务要求的,不得将人脸识别作为
+      唯一验证方式",并鼓励优先用国家人口基础信息库 —— 二要素正是那个方式;
+    - **身份证照片不收**:二要素核验不需要它,而它是敏感个人影像。
+      不收就没有泄露面。
+
+    ## 为什么改成当场生效
+
+    原来是"传照片 → pending → 等管理员看照片审批"。这套既慢又不准:
+    人工看一眼照片判断不了真伪,而二要素查的是公安人口库。
+    **真正的门槛从来不是填资料,是等审批。**
+
+    注意:二要素只证明"这个姓名+证号真实且匹配",**不证明拿手机的人就是他**。
+    账号出租、顶替跑单防不住 —— 那个风险留给异常触发的核身去处理,
+    不该拿它当理由给所有人加一道人脸门槛。
+    """
+    from datetime import datetime, timezone
+
+    from ..services.crypto import encrypt
+    from ..services.idcheck import is_adult, validate_id_no, verify_two_elements
+
     profile = await db.scalar(
         select(RiderProfile).where(RiderProfile.rider_id == user.id)
     )
     if profile and profile.status == VerifyStatus.approved:
         raise HTTPException(409, "已通过认证,如需修改请联系平台客服")
+
+    real_name = payload.real_name.strip()
+    birth, err = validate_id_no(payload.id_card_no)
+    if err:
+        raise HTTPException(422, err)
+    if not is_adult(birth):
+        raise HTTPException(422, "未满 18 周岁不能接单")
+
+    try:
+        ok = await verify_two_elements(real_name, payload.id_card_no)
+    except RuntimeError as exc:
+        # 核验服务挂了要如实说,**不要放行** —— 放行等于没有实名
+        raise HTTPException(503, str(exc))
+    if not ok:
+        raise HTTPException(422, "姓名与身份证号不一致,请核对后重新提交")
+
     if profile is None:
         profile = RiderProfile(rider_id=user.id)
         db.add(profile)
-    for field, value in payload.model_dump().items():
-        setattr(profile, field, value)
-    profile.status = VerifyStatus.pending
+    profile.real_name = real_name
+    profile.id_no_encrypted = encrypt(payload.id_card_no.strip().upper())
+    profile.birth_date = birth
+    profile.id_verified_at = datetime.now(timezone.utc)
+    # 健康证选填:填了就存(地方要求的城市用得上),没填也照样通过
+    profile.health_cert_photo_url = (payload.health_cert_photo_url or "").strip()
+    profile.status = VerifyStatus.approved
     profile.reject_reason = ""
     await db.commit()
     await db.refresh(profile)
-    return profile
+    return _profile_out(profile)
 
 
 @router.post("/online")
@@ -101,18 +171,34 @@ async def set_online(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
 
     from ..models import PlatformFlag, RiderSession
 
+    warning = ""
     if payload.is_online:
-        await _require_verified(db, user.id)  # 上线前卡认证
-        # 培训考试卡点(platform_flags 开关,默认关=存量骑手宽限期)
-        flag = await db.get(PlatformFlag, "rider_exam_required")
-        if (flag is not None and flag.value == "on"
-                and not await _exam_passed(db, user.id)):
-            raise HTTPException(
-                403, "上线前需完成上岗培训考试(钱包页 → 上岗培训),80 分通过,可重考")
+        await _require_verified(db, user.id)  # 上线前卡实名
+        # ---- 食品安全培训卡点(法定,见 exam_submit 的说明)----
+        #
+        # 123 号令第二十九条要求受托方对配送人员进行食安培训并留存记录。
+        # **默认必需** —— 这不是产品选择,是有罚则的条款。
+        #
+        # 但不能某天早上让存量骑手全部上不了线:平台标志
+        # rider_training_grace_until 给一个宽限截止(ISO 日期),
+        # 窗口内未完成培训的照常上线,只是每次上线带一条提醒。
+        if not await _exam_passed(db, user.id):
+            grace = await db.get(PlatformFlag, "rider_training_grace_until")
+            deadline = _parse_grace(grace.value if grace else "")
+            now_bj = datetime.now(timezone.utc) + timedelta(hours=8)
+            if deadline is not None and now_bj.date() <= deadline:
+                warning = (f"请在 {deadline.isoformat()} 前完成食品安全培训"
+                           f"(三分钟,「我的」→ 上岗培训)—— "
+                           "这是监管对平台的要求,过期未完成会影响上线")
+            else:
+                raise HTTPException(
+                    403, "上线前需完成食品安全培训(三分钟,「我的」→ 上岗培训)。"
+                         "这是《网络餐饮服务经营者落实食品安全主体责任监督管理"
+                         "规定》对平台的要求,我们已经把它压到最短")
     now = datetime.now(timezone.utc)
     # 在线时长记录(只统计不考核):先关掉可能残留的开区间,防重复
     open_session = await db.scalar(
@@ -144,7 +230,9 @@ async def set_online(
         open_session.offline_at = now
     user.is_online = payload.is_online
     await db.commit()
-    return {"is_online": payload.is_online}
+    # warning 非空 = 在宽限窗口内还没做培训。客户端要显示出来,
+    # 但**不能挡住他上线** —— 挡了就是让他今天没饭吃
+    return {"is_online": payload.is_online, "warning": warning}
 
 
 @router.patch("/me/preferences")
@@ -848,7 +936,22 @@ async def request_withdrawal(
     return withdrawal
 
 
-# ---------- 上岗管理:培训考试 + 装备申领 ----------
+# ---------- 上岗管理:食品安全培训 + 装备申领 ----------
+#
+# **这是法定动作,不是产品功能。**
+#
+# 《网络餐饮服务经营者落实食品安全主体责任监督管理规定》(总局令第 123 号,
+# 2026-06-01 施行)第二十九条:商家委托开展配送业务的,**受托方应当对配送
+# 人员进行食品安全培训、管理,培训记录保存期限不得少于二年**。
+# 商家把配送委托给平台,平台就是受托方。罚则见第四十四条。
+#
+# 但法规要的是**培训**,不是考试 —— 它没说必须考 80 分。
+# 所以这里的形态是:先看内容(三分钟),再用几道题确认看懂了;
+# **答错当场讲解、可以重来**,而不是判他不及格把他挡在外面。
+# 记录照存(谁、什么时候、培训的哪一版内容、答题结果)。
+
+_TRAINING_QUESTIONS = 5
+
 
 def _quiz_bank() -> dict:
     import json
@@ -857,11 +960,38 @@ def _quiz_bank() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _training_content() -> dict:
+    import json
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "data" / "rider_training.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 async def _exam_passed(db: AsyncSession, rider_id: int) -> bool:
     from ..models import RiderExam
     return bool(await db.scalar(
         select(RiderExam.id).where(RiderExam.rider_id == rider_id,
                                    RiderExam.passed.is_(True)).limit(1)))
+
+
+@router.get("/training")
+async def training_content(
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """培训内容 + 我的完成状态。**先给内容,再谈答题。**"""
+    content = _training_content()
+    return {
+        "done": await _exam_passed(db, user.id),
+        "version": content["version"],
+        "minutes": content["minutes"],
+        # 为什么要做这一步,给骑手一个真实的理由 ——
+        # 不说清楚他会觉得又是平台在给他加规矩
+        "why": content["why"],
+        "sections": content["sections"],
+        "question_count": _TRAINING_QUESTIONS,
+        "note": "答错不算不合格,会当场告诉你为什么,改完就能继续",
+    }
 
 
 @router.get("/exam/status")
@@ -874,15 +1004,17 @@ async def exam_status(
         select(func.max(RiderExam.score)).where(RiderExam.rider_id == user.id))
     return {"passed": await _exam_passed(db, user.id),
             "best_score": best or 0,
-            "pass_score": _quiz_bank()["pass_score"]}
+            "pass_score": 100,
+            "version": _training_content()["version"]}
 
 
 @router.get("/exam/questions")
 async def exam_questions(user: User = Depends(require_role("rider"))):
-    """随机抽 10 题(不含答案);交卷按题目 id 判分,抽题无状态。"""
+    """抽题(不含答案)。交卷按题目 id 判分,抽题无状态。"""
     import random
     bank = _quiz_bank()
-    picked = random.sample(bank["questions"], k=min(10, len(bank["questions"])))
+    picked = random.sample(
+        bank["questions"], k=min(_TRAINING_QUESTIONS, len(bank["questions"])))
     return [{"id": q["id"], "cat": q["cat"], "q": q["q"],
              "options": q["options"]} for q in picked]
 
@@ -893,22 +1025,49 @@ async def exam_submit(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    """交卷:answers = {题目id: 选项下标}。10 题每题 10 分,80 过。"""
+    """交卷。**全对即完成;答错当场给正确答案和理由,可以立刻重来。**
+
+    为什么不设"及格线"再判他不及格:法规要的是培训到位,
+    而"考了 70 分,不让你跑"既不合规也没意义 —— 他没看懂的那两条,
+    正是最该讲给他听的。所以答错就讲,讲完重答。
+    """
     from ..models import RiderExam
     answers = payload.get("answers") or {}
-    if not isinstance(answers, dict) or len(answers) < 10:
-        raise HTTPException(422, "请完成全部 10 题后交卷")
+    if not isinstance(answers, dict) or len(answers) < _TRAINING_QUESTIONS:
+        raise HTTPException(422, f"请完成全部 {_TRAINING_QUESTIONS} 题")
     bank = {q["id"]: q for q in _quiz_bank()["questions"]}
-    graded = list(answers.items())[:10]
-    correct = sum(1 for qid, choice in graded
-                  if bank.get(int(qid)) is not None
-                  and bank[int(qid)]["answer"] == choice)
-    score = correct * 10
-    passed = score >= _quiz_bank()["pass_score"]
+    graded = list(answers.items())[:_TRAINING_QUESTIONS]
+
+    wrong = []
+    correct = 0
+    for qid, choice in graded:
+        q = bank.get(int(qid))
+        if q is None:
+            continue
+        if q["answer"] == choice:
+            correct += 1
+        else:
+            # 答错要讲清楚 —— 这才是培训。只回一个"错了"等于什么都没培训
+            wrong.append({
+                "id": q["id"], "q": q["q"],
+                "your_choice": choice,
+                "answer": q["answer"],
+                "answer_text": q["options"][q["answer"]],
+            })
+
+    score = round(correct * 100 / max(1, len(graded)))
+    passed = not wrong
+    content = _training_content()
     db.add(RiderExam(rider_id=user.id, score=score, passed=passed,
-                     answers={str(k): v for k, v in graded}))
+                     answers={str(k): v for k, v in graded},
+                     content_version=content["version"]))
     await db.commit()
-    return {"score": score, "passed": passed}
+    return {
+        "score": score, "passed": passed, "wrong": wrong,
+        "message": ("培训完成,现在就可以上线接单" if passed else
+                    f"有 {len(wrong)} 题需要再看一眼 —— 下面是正确答案和原因,"
+                    "看完直接重答就行"),
+    }
 
 
 @router.get("/gear")

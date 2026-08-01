@@ -260,7 +260,7 @@ class _WalletPageState extends State<WalletPage> {
           SzCard(
             padding: EdgeInsets.zero,
             child: Column(children: [
-              _navRow('上岗培训考试', '交通安全 / 食安 / 平台规则,80 分通过',
+              _navRow('食品安全培训', '三分钟看完 —— 监管对平台的要求,不是给你加规矩',
                   () => RiderExamPage(api: widget.api)),
               _sep(),
               _navRow('规则中心', '转单 / 考核 / 结算 / 申诉,规则先说清',

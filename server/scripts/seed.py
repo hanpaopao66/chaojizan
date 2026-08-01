@@ -8,6 +8,20 @@ import asyncio
 from sqlalchemy import select, text
 
 from app.db import Base, SessionLocal, engine
+from datetime import datetime, timezone
+
+
+def _seed_training(db, rider_id: int) -> None:
+    """给演示骑手补一条食安培训记录。
+
+    123 号令第二十九条要求受托方对配送人员进行食安培训并留存记录 ——
+    没有这条记录的骑手上不了线(这是对的)。演示数据要模拟一个
+    **完整入驻**的骑手,所以带上。
+    """
+    from app.models import RiderExam
+    db.add(RiderExam(rider_id=rider_id, score=100, passed=True,
+                     answers={}, content_version="seed"))
+
 from app.models import (  # noqa: F401
     Dish,
     Merchant,
@@ -144,11 +158,14 @@ async def main():
         if rp is None:
             db.add(RiderProfile(
                 rider_id=rider.id, real_name="王小王",
-                id_card_no="51010119900101001X",
-                id_card_photo_url="/uploads/demo_idcard.jpg",
-                health_cert_photo_url="/uploads/demo_health.jpg",
+                # 实名已核验(演示数据不放真证号;新流程本来也不收照片)
+                id_verified_at=datetime.now(timezone.utc),
                 status=VerifyStatus.approved,
             ))
+            # 食安培训记录:法定要求(123 号令第二十九条),
+            # 完整入驻的骑手本来就该有。演示数据也要带上,
+            # 否则演示骑手一上线就被合规卡点拦住
+            _seed_training(db, rider.id)
 
         # 收款账户:演示商家(对公)与骑手(支付宝),提现全链路开箱即用
         from app.models import PayoutAccount
@@ -174,9 +191,8 @@ async def main():
         if rp2 is None:
             db.add(RiderProfile(
                 rider_id=rider2.id, real_name="李小李",
-                id_card_no="51010119920202002X",
-                id_card_photo_url="/uploads/demo_idcard2.jpg",
-                health_cert_photo_url="/uploads/demo_health2.jpg",
+                # 实名已核验(演示数据不放真证号;新流程本来也不收照片)
+                id_verified_at=datetime.now(timezone.utc),
                 status=VerifyStatus.pending,
             ))
         await db.commit()

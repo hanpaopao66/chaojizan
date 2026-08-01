@@ -170,3 +170,42 @@ class TestLedgerCanonical:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+class Test住宿清扫的顺序:
+    """有挂起售后的订单不能被判「未入住」。
+
+    这个顺序错了会**把责任判反**:客人提的是「到店无房」——
+    他没入住恰恰是因为商家没房。而 noshow 分支会扣他首晚房费归商家,
+    等于商家的过失让客人买单。
+
+    而且判了 noshow 之后,售后自动成立会撞状态机
+    (未入住 → 已取消不是合法转换)并抛异常,**整轮清扫就地中断** ——
+    后面所有订单的退款和离店结算全都不执行。一笔卡住的售后能让所有人拿不到钱。
+    """
+
+    def test_noshow_查询排除了挂起售后(self):
+        import inspect
+
+        from app.services import auto_flow
+        src = inspect.getsource(auto_flow._sweep_stays)
+        # noshow 那段必须带上"排除有挂起售后的订单"这个条件
+        assert "notin_(pending_as_orders)" in src or \
+               "not_in(pending_as_orders)" in src, \
+            "未入住的筛选没有排除有挂起售后的订单 —— 会把商家的过失算到客人头上"
+
+    def test_单条售后失败不拖垮整轮(self):
+        import inspect
+
+        from app.services import auto_flow
+        src = inspect.getsource(auto_flow._sweep_stays)
+        assert "except Exception" in src and "continue" in src, \
+            "一笔处理不了的售后不该让其余订单的退款全部停摆"
+        # 但不能静默吞掉
+        assert "logger.exception" in src, "跳过要留 error 日志,否则永远发现不了"
+
+    def test_未入住到已取消不是合法转换(self):
+        """钉住这个前提 —— 上面两条的必要性建立在它之上。"""
+        from app.state_machine import STAY_TRANSITIONS, StayOrderStatus
+        assert (StayOrderStatus.NOSHOW,
+                StayOrderStatus.CANCELLED) not in STAY_TRANSITIONS

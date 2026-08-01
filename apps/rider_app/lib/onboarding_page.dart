@@ -2,7 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// 上岗培训考试:题库抽 10 题,80 分过,可重考。
+/// 食品安全培训(#167)。**先看内容,再确认;答错当场讲解,可以重来。**
+///
+/// ## 这是法定动作,不是平台给骑手加的规矩
+///
+/// 《网络餐饮服务经营者落实食品安全主体责任监督管理规定》
+/// (总局令第 123 号,2026-06-01 施行)第二十九条:商家把配送委托给平台的,
+/// **受托方应当对配送人员进行食品安全培训、管理,培训记录保存不少于二年**。
+/// 罚则见第四十四条。
+///
+/// 所以这一页不能省。但法规要的是**培训**,不是考试 —— 它没说必须考 80 分。
+/// 于是形态是:三分钟看完内容 → 几道确认题 → 答错当场讲清楚为什么、可以重来。
+///
+/// **不判他"不及格"把他挡在外面** —— 他没看懂的那两条,
+/// 正是最该讲给他听的。
 class RiderExamPage extends StatefulWidget {
   const RiderExamPage({super.key, required this.api});
 
@@ -13,150 +26,278 @@ class RiderExamPage extends StatefulWidget {
 }
 
 class _RiderExamPageState extends State<RiderExamPage> {
-  Map<String, dynamic>? _status;
+  Map<String, dynamic>? _training;
   List<dynamic>? _questions;
   final Map<int, int> _answers = {};
-  bool _submitting = false;
+  List<dynamic> _wrong = const [];
+  bool _busy = false;
+  Object? _error;
 
   @override
   void initState() {
     super.initState();
-    _loadStatus();
+    _load();
   }
 
-  Future<void> _loadStatus() async {
+  Future<void> _load() async {
     try {
-      final s = await widget.api.riderExamStatus();
-      if (mounted) setState(() => _status = s);
-    } catch (_) {}
+      final t = await widget.api.riderTraining();
+      if (mounted) setState(() => _training = t);
+    } catch (e) {
+      if (mounted) setState(() => _error = e);
+    }
   }
 
-  Future<void> _start() async {
+  Future<void> _startQuestions() async {
+    setState(() => _busy = true);
     try {
       final qs = await widget.api.riderExamQuestions();
       if (mounted) {
         setState(() {
           _questions = qs;
           _answers.clear();
+          _wrong = const [];
         });
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _submit() async {
-    if (_answers.length < (_questions?.length ?? 10)) {
+    if (_answers.length < (_questions?.length ?? 0)) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('还有题没答完')));
+          .showSnackBar(const SnackBar(content: Text('还有题没答')));
       return;
     }
-    setState(() => _submitting = true);
+    setState(() => _busy = true);
     try {
       final r = await widget.api.riderExamSubmit(
           _answers.map((k, v) => MapEntry('$k', v)));
       if (!mounted) return;
       final passed = r['passed'] == true;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(passed
-              ? '恭喜!${r['score']} 分,考试通过 🎉'
-              : '${r['score']} 分,未达 80 分,再看看题目重考一次')));
-      setState(() => _questions = null);
-      _loadStatus();
-    } catch (e) {
-      if (!mounted) return;
+      setState(() {
+        _wrong = (r['wrong'] as List?) ?? const [];
+        if (passed) _questions = null;
+      });
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text('${r['message']}')));
+      if (passed) await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$e')));
+      }
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final s = _status;
+    final sz = Theme.of(context).sz;
     return Scaffold(
-      appBar: AppBar(title: const Text('上岗培训考试')),
-      body: _questions == null
-          ? ListView(padding: const EdgeInsets.all(16), children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                          s?['passed'] == true
-                              ? '✅ 已通过(最高 ${s?['best_score']} 分)'
-                              : '还未通过考试',
-                          style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 8),
-                      Text(
-                        '内容:交通安全 / 食安卫生 / 平台规则,共 10 题,'
-                        '每题 10 分,${s?['pass_score'] ?? 80} 分通过,可无限次重考。\n'
-                        '考试是为了你和顾客的安全,不为难人。',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          onPressed: _start,
-                          child: Text(
-                              s?['passed'] == true ? '再练一次' : '开始考试'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+      appBar: AppBar(title: const Text('食品安全培训')),
+      body: _error != null
+          ? SzError(error: _error, onRetry: _load)
+          : _training == null
+              ? const Center(child: CircularProgressIndicator())
+              : _questions == null
+                  ? _contentView(sz)
+                  : _quizView(sz),
+    );
+  }
+
+  /// 先给内容。**内容是主体,题目只是确认他看进去了。**
+  Widget _contentView(SzColors sz) {
+    final t = _training!;
+    final done = t['done'] == true;
+    final sections = (t['sections'] as List).cast<Map<String, dynamic>>();
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 28),
+      children: [
+        if (done)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: sz.earn.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(kRadiusSm),
+            ),
+            child: Row(children: [
+              Icon(Icons.verified_outlined, size: 18, color: sz.earn),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('已完成培训,可以上线接单',
+                    style: TextStyle(fontSize: 13, color: sz.ink)),
               ),
-            ])
-          : ListView(padding: const EdgeInsets.all(16), children: [
-              for (final (i, q) in _questions!.indexed)
-                Card(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
+            ]),
+          ),
+        if (done) const SizedBox(height: 14),
+
+        // 为什么要做这一步 —— 不说清楚,他会觉得又是平台在加规矩
+        SzCard(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Icon(Icons.schedule, size: 15, color: sz.inkMuted),
+              const SizedBox(width: 6),
+              Text('${t['minutes']} 分钟看完',
+                  style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+            ]),
+            const SizedBox(height: 8),
+            Text('${t['why']}',
+                style: TextStyle(
+                    fontSize: 12, height: 1.6, color: sz.inkMuted)),
+          ]),
+        ),
+        const SizedBox(height: 14),
+
+        for (final s in sections) ...[
+          SzCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${s['title']}',
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 9),
+                for (final pt in (s['points'] as List))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 7),
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('${i + 1}. [${q['cat']}] ${q['q']}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w700)),
-                        RadioGroup<int>(
-                          groupValue: _answers[q['id'] as int],
-                          onChanged: (v) => setState(
-                              () => _answers[q['id'] as int] = v!),
-                          child: Column(children: [
-                            for (final (j, opt)
-                                in (q['options'] as List).indexed)
-                              RadioListTile<int>(
-                                  dense: true,
-                                  value: j,
-                                  title: Text('$opt')),
-                          ]),
+                        Text('· ', style: TextStyle(color: sz.inkFaint)),
+                        Expanded(
+                          child: Text(
+                            // 服务端文案里的 ** 是给文档看的,界面不渲染 markdown
+                            '$pt'.replaceAll('**', ''),
+                            style: TextStyle(
+                                fontSize: 13, height: 1.6, color: sz.ink),
+                          ),
                         ),
                       ],
                     ),
                   ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+
+        const SizedBox(height: 6),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: _busy ? null : _startQuestions,
+            child: Text(done
+                ? '再做一次(${t['question_count']} 题)'
+                : '看完了,做 ${t['question_count']} 道确认题'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text('${t['note']}',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+      ],
+    );
+  }
+
+  Widget _quizView(SzColors sz) {
+    final qs = _questions!;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 28),
+      children: [
+        // 答错的讲解放最上面 —— 这才是培训的主体部分
+        if (_wrong.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: sz.hold.withValues(alpha: .10),
+              borderRadius: BorderRadius.circular(kRadiusSm),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('这几题再看一眼',
+                    style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: sz.hold)),
+                const SizedBox(height: 8),
+                for (final w in _wrong)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${w['q']}',
+                            style: TextStyle(fontSize: 12.5, color: sz.ink)),
+                        Text('正确答案:${w['answer_text']}',
+                            style: TextStyle(
+                                fontSize: 12.5, height: 1.5, color: sz.earn)),
+                      ],
+                    ),
+                  ),
+                Text('看完直接重答就行,不影响你接单',
+                    style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+
+        for (final (i, q) in qs.indexed) ...[
+          SzCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${i + 1}. ${q['q']}',
+                    style: const TextStyle(fontSize: 14, height: 1.5)),
+                const SizedBox(height: 6),
+                RadioGroup<int>(
+                  groupValue: _answers[q['id'] as int],
+                  onChanged: (v) =>
+                      setState(() => _answers[q['id'] as int] = v!),
+                  child: Column(children: [
+                    for (final (j, opt) in (q['options'] as List).indexed)
+                      RadioListTile<int>(
+                        value: j,
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        title: Text('$opt',
+                            style: const TextStyle(fontSize: 13)),
+                      ),
+                  ]),
                 ),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: _submitting ? null : _submit,
-                  child: Text(_submitting ? '交卷中…' : '交卷'),
-                ),
-              ),
-              const SizedBox(height: 24),
-            ]),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            onPressed: _busy ? null : _submit,
+            child: Text(_busy ? '提交中…' : '提交'),
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: () => setState(() => _questions = null),
+          child: const Text('回去再看看内容'),
+        ),
+      ],
     );
   }
 }
 
-/// 装备申领:头盔/餐箱/雨衣,申领后平台发放留痕。
 class RiderGearPage extends StatefulWidget {
   const RiderGearPage({super.key, required this.api});
 

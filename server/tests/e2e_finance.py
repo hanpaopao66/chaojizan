@@ -54,31 +54,62 @@ print(f"✓ 完成单入账:{day} 流水 +¥20.00,佣金 +¥{fee/100:.2f}"
 
 # 翻完整天再对账:明细接口是游标分页的,只取第一页就求和,
 # 在忙店(一天入账几百条)上必然对不上 —— 这条恒等式的意义就在于此
-detail = []
-cursor = None
-while True:
-    page = call("GET", f"/merchants/me/finance/orders?day={day}&limit=200"
-                + (f"&before={cursor}" if cursor else ""), merchant)
-    if not page:
+#
+# **两次读之间不能有新入账,否则验的就不是恒等式了。**
+# 之前的写法是"先读明细、后重新抓汇总",理由写的是"避免用旧快照" ——
+# 但这个顺序是反的:后读的汇总天然更新,中间只要落一条入账,汇总就比明细大。
+#
+# 正确做法:汇总 → 明细 → 汇总,两次汇总一致才说明这个窗口是静的;
+# 不一致就重来一次。要验的是「明细能不能加成汇总」,
+# 不是「两次查询之间有没有新订单」。
+def read_day():
+    """读一遍(汇总,明细,汇总)。两次汇总不等 = 窗口不静。"""
+    def summary():
+        row = next((d for d in call(
+            "GET", "/merchants/me/finance/daily", merchant)
+            if d["day"] == day), None)
+        return row["net_cents"] if row else 0
+
+    before = summary()
+    rows = []
+    cursor = cursor_id = None
+    while True:
+        q = f"/merchants/me/finance/orders?day={day}&limit=200"
+        if cursor:
+            # **游标要带 id**:排序是 (created_at, id) 两列,
+            # 只带时间会把同一秒的行整组跳过 —— 演示库一天 1030 行里
+            # 同秒最多 9 行,只带时间时漏过一条 -¥30 的冲账,
+            # 明细因此比日汇总多 ¥30
+            q += f"&before={cursor}&before_id={cursor_id}"
+        page = call("GET", q, merchant)
+        if not page:
+            break
+        rows += page
+        cursor, cursor_id = page[-1]["created_at"], page[-1]["id"]
+        if len(page) < 200:
+            break
+    return before, rows, summary()
+
+
+for attempt in range(3):
+    stat_net, detail, stat_after = read_day()
+    if stat_net == stat_after:
         break
-    detail += page
-    cursor = page[-1]["created_at"]
-    if len(page) < 200:
-        break
+    print(f"  (第 {attempt + 1} 次读到的窗口不静:{stat_net} → {stat_after},重读)")
+else:
+    raise AssertionError("连续 3 次都有并发入账,无法验证明细/汇总恒等式")
+
 mine = next(o for o in detail if o["order_no"] == no)
 assert mine["net_cents"] == 2000 - fee and mine["commission_cents"] == fee
 print("✓ 单日明细逐单可查,金额与汇总一致")
 
-# 汇总要**当场重新抓**,不能用几十行之前那个快照:
-# 中间隔了翻页等多次往返,同一天里若有别的入账(并发跑的用例、后台清扫),
-# 旧快照就和新明细对不上 —— 这条恒等式要验的是「明细能不能加成汇总」,
-# 不是「两次查询之间有没有新订单」
-stat_now = next(d for d in call("GET", "/merchants/me/finance/daily", merchant)
-                if d["day"] == day)
+# 行数也要对得上 —— 只验金额的话,"漏一条正的又漏一条负的"能互相抵消
+assert len({o["id"] for o in detail}) == len(detail), "翻页取到了重复行"
+
 total_detail = sum(o["net_cents"] for o in detail)
-assert total_detail == stat_now["net_cents"], \
-    f"明细合计 {total_detail} ≠ 日汇总 {stat_now['net_cents']}"
-print(f"✓ 明细合计 = 日汇总({stat_now['net_cents']/100:.2f} 元),账能对上")
+assert total_detail == stat_net, \
+    f"明细合计 {total_detail} ≠ 日汇总 {stat_net}"
+print(f"✓ 明细合计 = 日汇总({stat_net/100:.2f} 元),账能对上")
 
 err = call("GET", "/merchants/me/finance/daily", customer, expect_error=True)
 assert err["_error"] == 403

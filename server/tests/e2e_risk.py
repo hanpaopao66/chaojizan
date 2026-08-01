@@ -26,8 +26,14 @@ dish = call("POST", "/merchants/me/dishes", merchant,
 # 用公共的 unique_spot 而不是自己算坐标:老写法
 # `30.6650 + (ts % 20) * 1.3e-3` 只有 20 个点、每 20 秒循环一次,
 # 一天里反复跑必然和别的用例撞进同一个 65m 风控格子,
-# 表现为"前 3 单不该标记"随机失败。unique_spot 切了 900 格
-BASE_LAT, BASE_LNG = unique_spot("risk")
+# 表现为"前 3 单不该标记"随机失败。unique_spot 切了 900 格。
+#
+# **但 900 格也不够。** 整轮回归会在默认网格里落几百单,
+# 而本用例要验的恰恰是"第几单才触发标记" —— 它必须从一个**干净的格子**
+# 开始数,否则别的用例先在这格里落了 3 单,第 1 单就被标记了。
+#
+# band=2:独占带(referral 用 band=1,两条带互不相交)。
+BASE_LAT, BASE_LNG = unique_spot("risk", band=2)
 
 
 def fresh_customer(device=""):

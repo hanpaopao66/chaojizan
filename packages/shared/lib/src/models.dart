@@ -709,14 +709,21 @@ class DayStat {
   final int netCents;
 }
 
+/// 一条入账/冲账明细。
+///
+/// [id] 是**分页游标的一部分**:接口按 (created_at, id) 两列排序,
+/// 只拿 createdAt 翻页会把同一秒的行整组跳过 —— 实测演示库因此漏过
+/// 一条 -¥30 的冲账,商家看到的明细比实际到手的钱多。
 class FinanceOrder {
   FinanceOrder.fromJson(Map<String, dynamic> json)
-      : orderNo = json['order_no'] as String,
+      : id = json['id'] as int? ?? 0, orderNo = json['order_no'] as String,
         foodCents = json['food_cents'] as int,
         commissionCents = json['commission_cents'] as int,
         netCents = json['net_cents'] as int,
         createdAt = json['created_at'] as String;
 
+  /// 分页游标的一部分,和 createdAt 一起传
+  final int id;
   final String orderNo;
   final int foodCents;
   final int commissionCents;
@@ -724,22 +731,33 @@ class FinanceOrder {
   final String createdAt;
 }
 
+/// 骑手实名档案。
+///
+/// **服务端不再下发身份证号,也不再收身份证照片。**
+/// 二要素核验(姓名+证号查国家人口基础信息库)不需要照片,
+/// 而照片是敏感个人影像 —— 不收就没有泄露面。
+/// [realName] 是打码后的(如「王**」)。
 class RiderProfile {
   RiderProfile.fromJson(Map<String, dynamic> json)
       : realName = json['real_name'] as String? ?? '',
-        idCardNo = json['id_card_no'] as String? ?? '',
-        idCardPhotoUrl = json['id_card_photo_url'] as String? ?? '',
         healthCertPhotoUrl = json['health_cert_photo_url'] as String? ?? '',
         status = json['status'] as String,
+        idVerified = json['id_verified'] as bool? ?? false,
         rejectReason = json['reject_reason'] as String? ?? '';
 
+  /// 打码姓名(如「王**」);证号不下发
   final String realName;
-  final String idCardNo;
-  final String idCardPhotoUrl;
+
+  /// 健康证:**选填**。国家层面不要求送餐员持健康证,
+  /// 只有地方另有要求的城市才需要
   final String healthCertPhotoUrl;
 
   /// unsubmitted / pending / approved / rejected
   final String status;
+
+  /// 是否经过二要素核验(区别于历史的人工审核路径)
+  final bool idVerified;
+
   final String rejectReason;
 
   bool get isApproved => status == 'approved';

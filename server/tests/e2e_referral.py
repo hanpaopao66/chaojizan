@@ -94,7 +94,9 @@ async def main():
     rider = await register_fresh_rider("邀请测试骑手")
 
     def run_order(token, cancel=False):
-        lat, lng = unique_spot()   # 每单独立取格,见文件头的说明
+        # band=1:独占带。本用例验的是"邀请奖励发不发",而被风控标记的单
+        # 不触发奖励 —— 落在默认网格里就是把成败押在别的用例用了哪几格上
+        lat, lng = unique_spot(band=1)
         order = call("POST", "/orders", token, {
             "merchant_id": sid,
             "items": [{"dish_id": dish["id"], "quantity": 1}],

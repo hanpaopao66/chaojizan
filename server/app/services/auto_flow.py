@@ -144,6 +144,8 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
     3. 已入住过了退房日次日 06:00 商家还没办离店 → 自动 completed
        (结算口径与手动离店一致,商家忘点不能拖着不结算)。
     """
+    # 未入住那条规则也要用到售后表(有挂起售后的不判 noshow),所以提到最前
+    from ..models import StayAfterSale, StayAfterSaleKind, StayAfterSaleStatus
     from decimal import Decimal
 
     from ..models import StayOrder
@@ -168,10 +170,24 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
                       o.checkout_date, o.rooms_qty)
         closed += 1
 
+    # **有挂起售后的订单不判「未入住」。**
+    #
+    # 这个顺序错了会把责任判反:客人提的是「到店无房」——他没入住恰恰是因为
+    # 商家没房。而 NOSHOW 分支会**扣他首晚房费归商家**,等于商家的过失
+    # 让客人买单。
+    #
+    # 而且判了 NOSHOW 之后,售后自动成立那一步会撞状态机
+    # (未入住 → 已取消不是合法转换)并抛异常,**整个清扫循环就地中断** ——
+    # 后面所有订单的退款、离店结算全都不会执行。
+    #
+    # 所以:先把售后处理掉,没有挂起售后的才判未入住。
+    pending_as_orders = select(StayAfterSale.stay_order_id).where(
+        StayAfterSale.status == StayAfterSaleStatus.pending)
     overdue = (await db.scalars(
         select(StayOrder)
         .where(StayOrder.status == StayOrderStatus.CONFIRMED,
-               StayOrder.checkin_date < today_bj)
+               StayOrder.checkin_date < today_bj,
+               StayOrder.id.notin_(pending_as_orders))
         .with_for_update(skip_locked=True).limit(200))).all()
     for o in overdue:
         next_noon_passed = (today_bj - o.checkin_date).days > 1 \
@@ -207,7 +223,6 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
 
     # 4. 售后超时:到店无房商家 2 小时未响应 → 按成立处理(客人在门口等不起);
     #    协商退 24 小时未响应 → 维持原政策关闭(平台不替商家做主)
-    from ..models import StayAfterSale, StayAfterSaleKind, StayAfterSaleStatus
     from ..routers.stays import AFTERSALE_AUTO_HOURS, resolve_stay_aftersale
 
     stale_as = (await db.scalars(
@@ -223,10 +238,19 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
             continue
         if a.kind == StayAfterSaleKind.no_room \
                 and age_hours >= AFTERSALE_AUTO_HOURS:
-            await resolve_stay_aftersale(
-                db, a, order, True,
-                merchant_note="商家超时未响应,按成立处理", auto=True)
-            logger.info("auto_flow: 到店无房超时自动成立 %s", order.order_no)
+            # 单条失败不能拖垮整轮清扫 —— 一笔处理不了的售后
+            # 不该让其余订单的退款和离店结算全部停摆。
+            # 但也**不能静默吞掉**:记 error 让它能被发现
+            try:
+                await resolve_stay_aftersale(
+                    db, a, order, True,
+                    merchant_note="商家超时未响应,按成立处理", auto=True)
+                logger.info("auto_flow: 到店无房超时自动成立 %s", order.order_no)
+            except Exception:
+                logger.exception(
+                    "auto_flow: 售后自动成立失败,已跳过 order=%s status=%s",
+                    order.order_no, order.status)
+                continue
         elif a.kind == StayAfterSaleKind.nego_refund and age_hours >= 24:
             a.status = StayAfterSaleStatus.rejected
             a.merchant_note = "商家未响应,维持原取消政策;如有异议请联系客服"

@@ -1,5 +1,7 @@
 """运力后台补全:骑手考试成绩可见(#27)+ 在线时长考勤明细(#28)+ 天气停运开关(#26)。"""
 import asyncio
+
+from sqlalchemy import text as sa_text
 from datetime import datetime, timedelta, timezone
 
 from tests.util import demo_shop, call, login
@@ -22,6 +24,11 @@ def seed():
         from app.models import RiderExam, RiderSession
         now = datetime.now(timezone.utc)
         async with SessionLocal() as db:
+            # 先清掉这个骑手已有的培训记录 —— 骑手助手会自动写一条
+            # 100 分的(食安培训是法定要求,完整入驻的骑手都该有),
+            # 不清的话"取最高分"验的就是那条,而不是本用例造的这两条
+            await db.execute(sa_text(
+                "DELETE FROM rider_exams WHERE rider_id = :r"), {"r": RID})
             db.add(RiderExam(rider_id=RID, score=70, passed=False, answers={}))
             db.add(RiderExam(rider_id=RID, score=90, passed=True, answers={}))
             # 昨天在线 2 小时(闭区间)+ 今天在线中(开区间,1 小时前上线)

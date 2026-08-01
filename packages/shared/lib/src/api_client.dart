@@ -1281,14 +1281,19 @@ class ApiClient {
 
   /// 对账:某日入账明细(day 格式 yyyy-MM-dd)。
   ///
-  /// [before] 传上一页最后一条的 createdAt 翻下一页 —— 一天入账超过一页的
-  /// 忙店,不翻页的话明细加不出日汇总,而「每一单的账都可查」是平台的承诺。
+  /// 翻页要**同时传 [before] 和 [beforeId]**(上一页最后一条的
+  /// createdAt 与 id)。
+  ///
+  /// 接口按 (created_at, id) 两列排序,只传 createdAt 会把同一秒的行
+  /// 整组跳过 —— 实测演示库一天 1030 行里同秒最多 9 行,漏掉一条 -¥30
+  /// 的冲账,**商家看到的明细比实际到手的钱多**。对账页漏行比慢更严重。
   Future<List<FinanceOrder>> financeOrders(String day,
-      {String? before, int limit = 200}) async {
+      {String? before, int? beforeId, int limit = 200}) async {
     final data = await _request('GET', '/merchants/me/finance/orders', query: {
       'day': day,
       'limit': '$limit',
       if (before != null && before.isNotEmpty) 'before': before,
+      if (beforeId != null) 'before_id': '$beforeId',
     });
     return (data as List)
         .map((e) => FinanceOrder.fromJson(e as Map<String, dynamic>))
@@ -1393,20 +1398,30 @@ class ApiClient {
     return RiderProfile.fromJson(data as Map<String, dynamic>);
   }
 
+  /// 提交实名认证:**只要姓名 + 身份证号**。
+  ///
+  /// 核验通过当场生效,不用等人工审。健康证选填 ——
+  /// 国家层面不要求送餐员持健康证,只有地方另有要求的城市才传。
   Future<RiderProfile> submitRiderProfile({
     required String realName,
     required String idCardNo,
-    required String idCardPhotoUrl,
-    required String healthCertPhotoUrl,
+    String healthCertPhotoUrl = '',
   }) async {
     final data = await _request('POST', '/riders/profile', body: {
       'real_name': realName,
       'id_card_no': idCardNo,
-      'id_card_photo_url': idCardPhotoUrl,
       'health_cert_photo_url': healthCertPhotoUrl,
     });
     return RiderProfile.fromJson(data as Map<String, dynamic>);
   }
+
+  /// 食品安全培训内容(#167)。三分钟看完 + 几道确认题。
+  ///
+  /// 这是法定动作:总局令第 123 号第二十九条要求受托方对配送人员
+  /// 进行食安培训并留存记录 —— 不是平台给骑手加的规矩。
+  Future<Map<String, dynamic>> riderTraining() async =>
+      await _request('GET', '/riders/training') as Map<String, dynamic>;
+
 
   // uploadImage 定义在下方(商家/骑手共用)
 

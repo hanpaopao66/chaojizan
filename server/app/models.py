@@ -409,16 +409,46 @@ class UserIdentity(Base):
 
 
 class RiderProfile(Base):
-    """骑手实名认证 + 健康证。未认证(非 approved)不得上线接单——合规硬要求。"""
+    """骑手实名认证。未认证不得上线接单。
+
+    ## 门槛只有两样:姓名 + 身份证号
+
+    逐条核过法规之后确认的口径:
+
+    - **健康证不是法定要求。** 《网络餐饮服务食品安全监督管理办法》要求餐食封装、
+      避免送餐人员直接接触食品 —— 送餐员因此不属于"直接接触入口食品的人员",
+      不在预防性健康检查范围内。四川已明确取消。所以这里是**选填**,
+      只在地方另有要求的城市才卡(见 riders.py 的城市判断);
+    - **人脸认证不做。** 《人脸识别技术应用安全管理办法》(网信办+公安部,
+      2025-06-01 施行)明写:存在其他非人脸方式能达到同等业务要求的,
+      **不得将人脸识别作为唯一验证方式**;并鼓励优先用国家人口基础信息库。
+      二要素核验正是那个"其他方式";
+    - **身份证照片不收。** 二要素核验(姓名+证号查人口库)不需要照片,
+      而照片是敏感个人影像 —— 不收就没有泄露面。字段保留只为兼容历史数据。
+
+    ## 证号加密落库
+
+    照 UserIdentity 的口径:Fernet 加密,明文不入库、不出任何接口。
+    此前骑手侧是**明文存 18 位并直接出接口**,而用户侧早就加密了 ——
+    同一个项目两套标准,这里对齐到严的那个。
+    """
 
     __tablename__ = "rider_profiles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
     real_name: Mapped[str] = mapped_column(String(50), default="")
-    id_card_no: Mapped[str] = mapped_column(String(18), default="")
-    id_card_photo_url: Mapped[str] = mapped_column(String(300), default="")   # 身份证人像面
-    health_cert_photo_url: Mapped[str] = mapped_column(String(300), default="")  # 健康证
+    #: Fernet 加密的身份证号。明文不入库不出接口
+    id_no_encrypted: Mapped[str] = mapped_column(String(500), default="")
+    #: 出生日期(从证号解析,用于年龄核验;比留着证号安全)
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    #: 二要素核验通过的时刻。空 = 走的是历史人工审核路径
+    id_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 历史字段,新流程不再写入(旧数据迁移时保留照片 URL 以备追溯)
+    id_card_photo_url: Mapped[str] = mapped_column(String(300), default="")
+    #: 健康证:**选填**。仅地方另有要求的城市才卡
+    health_cert_photo_url: Mapped[str] = mapped_column(String(300), default="")
     # 紧急联系人(最多2人,JSON 加密串,同收款账户口径;明文不出接口)
     emergency_contacts_enc: Mapped[str] = mapped_column(String(800), default="")
     status: Mapped[VerifyStatus] = mapped_column(
@@ -1074,8 +1104,23 @@ class RiderAccident(Base):
 
 
 class RiderExam(Base):
-    """骑手上岗培训考试记录:题库 20 题抽 10,80 分过;
-    强制开关走 platform_flags(存量骑手宽限)。"""
+    """骑手食品安全培训记录。**这是法定记录,不是产品功能。**
+
+    《网络餐饮服务经营者落实食品安全主体责任监督管理规定》(总局令第 123 号,
+    2026-06-01 施行):
+
+    > 第二十九条 网络餐饮服务经营者委托开展配送业务的……**受托方应当对配送
+    > 人员进行食品安全培训、管理,培训记录保存期限不得少于二年。**
+
+    商家把配送委托给平台,平台就是"受托方" —— 对骑手做食安培训、
+    留存记录 ≥2 年是我们的法定义务(罚则见第四十四条)。
+
+    所以:
+    - **这张表的记录不随账号注销删除。** 个保法第四十七条把"法律、行政法规
+      规定的保存期限未届满"列为删除义务的例外,法定保存优先;
+    - `content_version` 必须记 —— 法规要的是"培训记录",
+      光有分数证明不了培训了什么。内容改版后旧记录仍能说明当时培训的是哪一版。
+    """
 
     __tablename__ = "rider_exams"
 
@@ -1084,6 +1129,8 @@ class RiderExam(Base):
     score: Mapped[int] = mapped_column(Integer)
     passed: Mapped[bool] = mapped_column(Boolean)
     answers: Mapped[dict] = mapped_column(JSONB, default=dict)
+    #: 培训内容版本。法规要的是"培训记录",得能说明当时培训的是什么
+    content_version: Mapped[str] = mapped_column(String(20), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

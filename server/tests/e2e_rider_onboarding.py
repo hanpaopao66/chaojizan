@@ -21,38 +21,80 @@ def take_exam(rider, correct=10):
     answers = {}
     for i, q in enumerate(qs):
         right = BANK[q["id"]]["answer"]
+        # correct 给大数 = 全对。题数由服务端决定(现在是 5),
+        # 这里不写死题数,免得服务端一调就挂
         answers[str(q["id"])] = right if i < correct else (right + 1) % 4
     return call("POST", "/riders/exam/submit", rider, {"answers": answers})
 
 
+async def set_grace(value: str):
+    """宽限截止日。测试必须自己控制 —— 否则跑在窗口开着的库上,
+    硬卡点那条会被静默跳过。"""
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.config import settings
+    engine = create_async_engine(settings.database_url)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                INSERT INTO platform_flags (key, value)
+                VALUES ('rider_training_grace_until', :v)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """), {"v": value})
+    finally:
+        await engine.dispose()
+
+
 async def main():
     rider = await register_fresh_rider("上岗测试骑手")
+    # 助手会给新骑手写一条培训记录(完整入驻的骑手都该有)。
+    # 本用例要验的是"没培训会怎样",所以先清掉
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
 
-    # 1) 开关关(默认):未考试也能上线(存量宽限)
-    call("POST", "/riders/online", rider, {"is_online": True})
-    call("POST", "/riders/online", rider, {"is_online": False})
-    print("✓ 考试开关默认关:存量骑手不受影响")
-
-    call("POST", "/admin/flags/rider_exam_required", admin, {"value": "on"})
+    from app.config import settings
+    me = call("GET", "/auth/me", rider)["id"]
+    engine = create_async_engine(settings.database_url)
     try:
-        # 2) 开关开:未通过考试上线 403
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("DELETE FROM rider_exams WHERE rider_id = :r"), {"r": me})
+    finally:
+        await engine.dispose()
+
+    # 1) 宽限窗口内:没培训也能上线,但要提醒 ——
+    #    存量骑手不能某天早上全部上不了线,挡了就是让他今天没饭吃
+    await set_grace("2099-12-31")
+    on = call("POST", "/riders/online", rider, {"is_online": True})
+    assert on["is_online"] is True, on
+    assert on.get("warning") and "培训" in on["warning"], on
+    call("POST", "/riders/online", rider, {"is_online": False})
+    print("✓ 宽限窗口内:放行 + 提醒(存量骑手不受硬卡)")
+
+    try:
+        # 2) 宽限过期:没培训不能上线。
+        #    食安培训是法定要求(123 号令第二十九条,罚则第四十四条)
+        await set_grace("2020-01-01")
         err = call("POST", "/riders/online", rider, {"is_online": True},
                    expect_error=True)
-        assert err["_error"] == 403 and "培训考试" in err["detail"], err
-        print("✓ 强制开启后,未通过考试上线 403")
+        assert err["_error"] == 403 and "培训" in err["detail"], err
+        print("✓ 宽限过期:未完成食安培训不能上线")
 
-        # 3) 不及格(7 题对=70 分)不通过,可重考;满分通过后可上线
-        r = take_exam(rider, correct=7)
-        assert r["score"] == 70 and r["passed"] is False, r
-        status = call("GET", "/riders/exam/status", rider)
-        assert status["passed"] is False and status["best_score"] == 70
-        r = take_exam(rider, correct=10)
-        assert r["score"] == 100 and r["passed"] is True, r
-        call("POST", "/riders/online", rider, {"is_online": True})
-        print("✓ 70 分不过可重考,100 分通过后正常上线")
+        # 3) 答错当场讲解、可重来;全对即完成 ——
+        #    法规要的是培训到位,不是判他不及格把他挡在外面
+        r = take_exam(rider, correct=3)
+        assert r["passed"] is False, r
+        assert r["wrong"], "答错要把错在哪讲出来"
+        assert all(w.get("answer_text") for w in r["wrong"]), \
+            "只回一个「错了」等于什么都没培训"
+        r = take_exam(rider, correct=99)   # 全对
+        assert r["passed"] is True and r["score"] == 100, r
+        on = call("POST", "/riders/online", rider, {"is_online": True})
+        assert on["is_online"] is True and not on.get("warning"), on
+        print("✓ 答错有讲解可重来;全对后正常上线")
     finally:
-        call("POST", "/admin/flags/rider_exam_required", admin,
-             {"value": "off"})
+        await set_grace("2020-01-01")
 
     # 4) 装备:申领→重复 409→发放留痕
     call("POST", "/riders/gear", rider, {"item": "helmet"})

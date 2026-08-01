@@ -597,8 +597,16 @@ async def resolve_delivery_issue(
 
 # ---------- 骑手实名认证审核 ----------
 def _rider_profile_out(p: RiderProfile, rider: User) -> AdminRiderProfileOut:
-    out = AdminRiderProfileOut.model_validate(p)
-    out.rider_id = p.rider_id
+    # 审核后台也不给证号明文。管理员要核身份走人工工单并留痕 ——
+    # 一个后台列表接口不该批量吐出几百个身份证号
+    out = AdminRiderProfileOut(
+        rider_id=p.rider_id,
+        real_name=p.real_name,       # 后台看真名(审核需要),但证号仍不给
+        health_cert_photo_url=p.health_cert_photo_url,
+        status=p.status,
+        reject_reason=p.reject_reason,
+        id_verified=p.id_verified_at is not None,
+    )
     out.rider_phone = rider.phone
     out.created_at = p.created_at
     return out
@@ -1101,7 +1109,11 @@ _KNOWN_FLAGS = {
     "alcohol_curfew",       # 酒类禁售时段开关(on/off):窗口内含酒订单拒单
     "alcohol_curfew_hours", # 禁售时段 "HH:MM-HH:MM",没配默认 22:00-08:00
     "weather_shutdown",     # 极端天气停运(on/off):停接新单+兜底取消线缩短+三端横幅
-    "rider_exam_required",  # 骑手上岗考试强制(on/off,默认关=存量宽限)
+    # 食安培训现在是**默认必需**(123 号令第二十九条,有罚则),
+    # 不再有"要不要强制"这个开关。留下的只是给存量骑手的宽限截止日:
+    # ISO 日期,窗口内未完成培训的照常上线但带提醒;过期或写错都硬卡。
+    # 写错也硬卡是刻意的 —— 配置错误不该让合规卡点形同虚设
+    "rider_training_grace_until",
     "open_cities",          # 开城清单(逗号分隔城市名,空=全部开放)
     "marketing",            # 营销总开关(默认关):新客券/邀请/生日/复购/上新
     "screen_show_gmv",      # 公开大屏是否展示交易额(缺省=展示,off=接口不下发金额)
