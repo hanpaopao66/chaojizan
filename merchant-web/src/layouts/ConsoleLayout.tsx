@@ -205,7 +205,8 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
               </Badge>
             </Tooltip>
           )}
-          {!isHotel && (
+          {/* 忙碌模式走 owner-only 接口,店员不给入口 */}
+          {!isHotel && !shop.viewer_is_staff && (
             <Button size="small" danger={busyActive} onClick={busyDialog}>
               {busyActive ? '🔥 忙碌中' : '忙碌模式'}
             </Button>

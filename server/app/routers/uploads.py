@@ -100,7 +100,7 @@ async def upload_image(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(422, "仅支持 jpg / png / webp 图片")
     try:
-        stored = storage.save(data, ext, purpose)
+        stored = storage.save(data, ext, purpose, uploader_id=user.id)
     except storage.StorageError as e:
         # 明确失败,不静默退回本地磁盘:一半文件在桶里一半在磁盘上,事后对不齐
         raise HTTPException(503, f"图片存储暂时不可用,请稍后重试({e})")
@@ -119,6 +119,12 @@ async def _may_read_private(
     """
     if user.role == UserRole.admin:
         return True                      # 审核要看
+
+    # 上传者本人:key 里编着 u{id}-(见 storage._new_key)。
+    # 入驻/认证表单在「上传成功」到「提交落库」之间,文件不被任何行引用,
+    # 只按归属判权会让上传者自己都看不了刚传的证照(缩略图破图、OCR 失效)
+    if f"/u{user.id}-" in f"/{ref}":
+        return True
 
     # 骑手证件:只有本人
     if await db.scalar(select(RiderProfile.rider_id).where(

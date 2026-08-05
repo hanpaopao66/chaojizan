@@ -75,9 +75,15 @@ def is_private(purpose: str) -> bool:
     return PURPOSES[purpose]
 
 
-def _new_key(purpose: str, ext: str) -> str:
-    """key 带用途前缀:出了事一眼看得出哪类文件,也便于按前缀做策略。"""
-    return f"{purpose}/{uuid.uuid4().hex}{ext}"
+def _new_key(purpose: str, ext: str, uploader_id: int | None = None) -> str:
+    """key 带用途前缀:出了事一眼看得出哪类文件,也便于按前缀做策略。
+
+    再编入上传者(u{id}-):私密文件在「上传成功」到「提交表单落库」之间
+    不被任何 DB 行引用,按归属判权必 403 —— 入驻表单的证照缩略图会破图,
+    OCR 在唯一被设计的场景里永远失败。key 里带上传者,判权多一条
+    「本人可读」的通路,且不用为此加表。"""
+    owner = f"u{uploader_id}-" if uploader_id else ""
+    return f"{purpose}/{owner}{uuid.uuid4().hex}{ext}"
 
 
 # ---------------- local 后端(本地开发) ----------------
@@ -192,9 +198,10 @@ def url_for(key: str, private: bool) -> str:
     return f"/files/{key}" if private else f"/img/{key}"
 
 
-def save(data: bytes, ext: str, purpose: str) -> Stored:
+def save(data: bytes, ext: str, purpose: str,
+         uploader_id: int | None = None) -> Stored:
     private = is_private(purpose)
-    key = _new_key(purpose, ext)
+    key = _new_key(purpose, ext, uploader_id)
     backend().put(data, key, private)
     return Stored(key=key, private=private, url=url_for(key, private))
 

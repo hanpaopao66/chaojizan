@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
+import mimetypes
 import secrets
 
 from ..categories import MERCHANT_CATEGORIES
@@ -482,6 +483,14 @@ async def update_my_shop(
             if dish is None or not dish.is_on_sale:
                 raise HTTPException(422, "赠品必须是本店在售菜品")
             rule["name"] = dish.name
+
+    # 主证照与酒店第二证照同一口径:只有**被驳回重提**时可改,
+    # 平时资质变更走客服人工核验 —— 通过审核的店随手改证号不重审,
+    # 等于让「亮照公示」页给假证号背书;改 image_url 还能把无鉴权的
+    # 公示出口指到私密桶里的任意文件
+    if (("license_no" in changes or "license_image_url" in changes)
+            and shop.status != MerchantStatus.rejected):
+        raise HTTPException(403, "资质变更需平台核验,请联系客服")
 
     # 酒店第二证照(特种行业许可证/卫生许可证)只在**被驳回重提**时随表单更新;
     # 平时资质变更走客服人工核验(见 stays.update_hotel_profile 的口径)
@@ -2106,20 +2115,42 @@ async def merchant_license_image(
         key, private = url[len("/files/"):], True
     elif url.startswith("/img/"):
         key, private = url[len("/img/"):], False
-    elif url.startswith("/uploads/"):
-        key, private = f"legacy/{url[len('/uploads/'):]}", True
     else:
         raise HTTPException(404, "文件不存在")
+    # 私密桶只放行 license/ 目录:license_image_url 终归是个可写字段,
+    # 没有这道前缀闸门,这个**无鉴权**出口就能被指到桶里任何文件
+    # (身份证/健康证/送达留证都在同一个桶)。老 /uploads/ 存量同理不放行,
+    # 公示页对无图的店只展示证号
+    if private and not key.startswith("license/"):
+        raise HTTPException(404, "文件不存在")
+
+    # 水印结果进 Redis 缓存:这是个无鉴权出口,每次请求都做
+    # 存储回读 + PIL 解码合成,等于白送一个 CPU 消耗面
+    from ..redis_client import get_redis
+    cache_key = f"license_wm:{key}"
+    redis = get_redis()
+    try:
+        cached = await redis.get(cache_key)
+    except Exception:
+        cached = None
+    if cached:
+        return Response(cached, media_type="image/jpeg",
+                        headers={"Cache-Control": "public, max-age=86400"})
     try:
         data = storage.read(key, private=private)
-        if data is None and url.startswith("/uploads/"):
-            # 老文件没迁进私密区的,还平铺在公开存储里
-            data = storage.read(url[len("/uploads/"):], private=False)
     except storage.StorageError as e:
         raise HTTPException(503, f"存储暂时不可用({e})")
     if data is None:
         raise HTTPException(404, "文件不存在")
-    return Response(_watermark_license(data), media_type="image/jpeg",
+    marked = _watermark_license(data)
+    # 水印失败原图直出时,类型按原文件猜,别把 PNG 硬标成 JPEG
+    media = ("image/jpeg" if marked is not data
+             else mimetypes.guess_type(key)[0] or "image/jpeg")
+    try:
+        await redis.set(cache_key, marked, ex=86400)
+    except Exception:
+        pass  # 缓存挂了照常出图
+    return Response(marked, media_type=media,
                     headers={"Cache-Control": "public, max-age=86400"})
 
 

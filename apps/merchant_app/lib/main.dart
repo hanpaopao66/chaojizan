@@ -1001,7 +1001,8 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
               icon: const Icon(Icons.search),
               onPressed: () => setState(() => _searchMode = true),
             ),
-          if (!_searchMode)
+          // 忙碌模式走 owner-only 接口,店员点了只会报错 —— 不给店员看入口
+          if (!_searchMode && !widget.shop.viewerIsStaff)
             IconButton(
               tooltip: _busyActive ? '忙碌中,点击查看' : '高峰忙碌模式',
               icon: Icon(

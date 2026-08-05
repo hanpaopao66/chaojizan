@@ -77,9 +77,11 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
   }
 
   Future<void> _reload() async {
+    // 弱网下快速切筛选:先发后至的旧筛选响应不能覆盖新筛选的列表
+    final filterAtStart = _filter;
     try {
       final list = await _fetch();
-      if (mounted) {
+      if (mounted && _filter == filterAtStart) {
         setState(() {
           _reviews = list;
           _loaded = true;
@@ -87,7 +89,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && _filter == filterAtStart) {
         setState(() => _loaded = true);
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('$e')));
@@ -97,10 +99,12 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
 
   Future<void> _loadMore() async {
     if (_loadingMore || !_hasMore || _reviews.isEmpty) return;
+    final filterAtStart = _filter;
     setState(() => _loadingMore = true);
     try {
       final more = await _fetch(before: _reviews.last.id);
-      if (mounted) {
+      // 在途时切了筛选:旧筛选的下一页不能 append 进新筛选的列表
+      if (mounted && _filter == filterAtStart) {
         setState(() {
           _reviews.addAll(more);
           _hasMore = more.length >= 100;
@@ -293,6 +297,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
                 _filter = s.first;
                 _loaded = false;
                 _reviews = [];
+                _hasMore = true; // 上个筛选翻到底不该锁死新筛选的分页
               });
               _reload();
             },

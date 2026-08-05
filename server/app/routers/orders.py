@@ -1473,6 +1473,13 @@ async def rider_location(
         from ..services.staff import operable_shop
         shop, _ = await operable_shop(db, user)
         allowed = shop is not None and shop.id == order.merchant_id
+        # 商家侧只看**履约中**的位置:送达后到自动确认最长 24 小时,
+        # 期间骑手早在送别的单 —— 店家没有继续追踪的正当理由
+        if allowed and order.status not in (
+                OrderStatus.ACCEPTED, OrderStatus.READY,
+                OrderStatus.PICKED_UP):
+            return RiderLocationOut(rider_id=order.rider_id, lat=None,
+                                    lng=None, updated_at=None)
     if not allowed:
         raise HTTPException(403, "无权查看该订单")
     # 隐私最小化:订单终结后不再暴露骑手实时位置

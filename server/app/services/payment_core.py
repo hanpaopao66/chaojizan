@@ -96,11 +96,22 @@ async def mark_order_paid(
 async def _auto_accept(db: AsyncSession, order: Order) -> None:
     """system 身份执行 PAID→ACCEPTED,副作用与商家手动接单对齐:
     记 accepted_at(备餐计时起点)、事件流水、推骑手抢单、告知用户。"""
+    from sqlalchemy import select
+
+    # **重新上锁并确认仍是 PAID**。PAID commit 释放行锁之后到这里,
+    # 隔着广播/推送/打印几次慢 IO(JPush 超时可达数秒),期间订单可能
+    # 已被顾客取消退款,也可能商家已经手动接单 —— 盲写 stale 对象会把
+    # 已退款的单复活成 ACCEPTED 继续履约,那是资损级的竞态
+    locked = await db.scalar(
+        select(Order).where(Order.id == order.id).with_for_update())
+    if locked is None or locked.status != OrderStatus.PAID:
+        await db.rollback()  # 释放锁,别拖住别人的事务
+        return
     now = datetime.now(timezone.utc)
-    order.status = OrderStatus.ACCEPTED
-    order.accepted_at = now
+    locked.status = OrderStatus.ACCEPTED
+    locked.accepted_at = now
     db.add(OrderEvent(
-        order_id=order.id,
+        order_id=locked.id,
         from_status=OrderStatus.PAID.value,
         to_status=OrderStatus.ACCEPTED.value,
         actor_role="system",
@@ -108,21 +119,25 @@ async def _auto_accept(db: AsyncSession, order: Order) -> None:
         note="自动接单",
     ))
     await db.commit()
-    await db.refresh(order)
-    await manager.broadcast(
-        f"order:{order.order_no}",
-        {"type": "order_status", "order_no": order.order_no,
-         "status": order.status.value},
-    )
-    # 与手动接单同口径:自取/自送/追加单不进抢单池
-    if (order.rider_id is None and not order.pickup
-            and not order.self_delivery and not order.parent_order_no):
-        from ..models import Merchant as _M
-        from .push import notify_riders_new_grab
-        shop = await db.get(_M, order.merchant_id)
-        await notify_riders_new_grab(db, order, shop.name if shop else "商家")
-    from .push import notify_order_status
+    await db.refresh(locked)
+    # 提交之后接单已生效:通知失败只记日志,**不能**让调用方的
+    # 「留在待接单」日志把排查带偏
     try:
-        await notify_order_status(order.customer_id, order.order_no, "制作中")
+        await manager.broadcast(
+            f"order:{locked.order_no}",
+            {"type": "order_status", "order_no": locked.order_no,
+             "status": locked.status.value},
+        )
+        # 与手动接单同口径:自取/自送/追加单不进抢单池
+        if (locked.rider_id is None and not locked.pickup
+                and not locked.self_delivery and not locked.parent_order_no):
+            from ..models import Merchant as _M
+            from .push import notify_riders_new_grab
+            shop = await db.get(_M, locked.merchant_id)
+            await notify_riders_new_grab(
+                db, locked, shop.name if shop else "商家")
+        from .push import notify_order_status
+        await notify_order_status(
+            locked.customer_id, locked.order_no, "制作中")
     except Exception:
-        logger.exception("自动接单用户推送失败")
+        logger.exception("自动接单通知失败 %s(接单已生效)", locked.order_no)
