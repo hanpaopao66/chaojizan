@@ -29,6 +29,45 @@ router = APIRouter(tags=["上传"])
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 MAX_SIZE = 5 * 1024 * 1024  # 5MB
 
+# HEIF 家族的 ftyp brand(iPhone 相册默认格式)。判格式看**内容**不看文件名:
+# 商家把 HEIC 改名成 .jpg 骗过后缀检查后,存进去的是所有浏览器都打不开的图
+_HEIF_BRANDS = {b"heic", b"heix", b"heif", b"hevc", b"mif1", b"msf1"}
+
+
+def _sniff_ext(data: bytes) -> str | None:
+    """按魔数识别图片真实格式;认不出返回 None(回退到文件名后缀)。"""
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if len(data) > 12 and data[4:8] == b"ftyp" and data[8:12] in _HEIF_BRANDS:
+        return ".heic"
+    return None
+
+
+def _heic_to_jpeg(data: bytes) -> bytes:
+    """iPhone 的 HEIC 转 JPEG 再入库,商家不用知道格式这回事。
+    依赖装不上时给明确指引而不是 500。"""
+    try:
+        from io import BytesIO
+
+        import pillow_heif
+        from PIL import Image
+
+        pillow_heif.register_heif_opener()
+        img = Image.open(BytesIO(data))
+        out = BytesIO()
+        img.convert("RGB").save(out, format="JPEG", quality=90)
+        return out.getvalue()
+    except ImportError:
+        raise HTTPException(
+            422, "暂不支持 HEIC 格式,请在相册设置里改用「最兼容」格式,"
+                 "或换一张 jpg / png 图片")
+    except Exception:
+        raise HTTPException(422, "图片解析失败,请换一张 jpg / png 图片重试")
+
 
 @router.post("/upload")
 async def upload_image(
@@ -39,9 +78,6 @@ async def upload_image(
     # 商家传菜品/门头照,骑手传证件照,用户传头像,管理员传开屏运营图
     user: User = Depends(require_role("merchant", "rider", "customer", "admin")),
 ):
-    ext = Path(file.filename or "").suffix.lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(422, "仅支持 jpg / png / webp 图片")
     try:
         private = storage.is_private(purpose)
     except KeyError:
@@ -51,6 +87,14 @@ async def upload_image(
     data = await file.read()
     if len(data) > MAX_SIZE:
         raise HTTPException(413, "图片不能超过 5MB")
+    ext = _sniff_ext(data)
+    if ext == ".heic":
+        data = _heic_to_jpeg(data)
+        ext = ".jpg"
+    if ext is None:
+        ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(422, "仅支持 jpg / png / webp 图片")
     try:
         stored = storage.save(data, ext, purpose)
     except storage.StorageError as e:
@@ -83,6 +127,16 @@ async def _may_read_private(
     if await db.scalar(select(Merchant.id).where(
             Merchant.owner_id == user.id,
             Merchant.license_image_url.contains(ref))):
+        return True
+
+    # 酒店的第二证照落在 HotelProfile 上,单独查(否则店主看不了自己的证)
+    from ..models import HotelProfile
+    if await db.scalar(
+            select(HotelProfile.merchant_id)
+            .join(Merchant, Merchant.id == HotelProfile.merchant_id)
+            .where(Merchant.owner_id == user.id,
+                   HotelProfile.special_license_image_url.contains(ref)
+                   | HotelProfile.hygiene_image_url.contains(ref))):
         return True
 
     # 送达留证:只有该订单的顾客。骑手拍完就不该再看得到 ——

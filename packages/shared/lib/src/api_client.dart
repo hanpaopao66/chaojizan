@@ -1252,24 +1252,25 @@ class ApiClient {
   /// 私密 id_card/health_cert/license/delivery_proof/incident/after_sale/food_safety。
   /// 服务端不给默认值 —— 猜错的那一次就是一张身份证进了公开桶。
   Future<String> uploadImage(List<int> bytes, String filename,
-      {required String purpose}) async {
+      {required String purpose,
+      Duration timeout = const Duration(seconds: 30)}) async {
     try {
-      return await _uploadImage(bytes, filename, purpose);
+      return await _uploadImage(bytes, filename, purpose, timeout);
     } catch (e) {
       throw _asFriendly(e);
     }
   }
 
-  Future<String> _uploadImage(
-      List<int> bytes, String filename, String purpose) async {
+  Future<String> _uploadImage(List<int> bytes, String filename, String purpose,
+      Duration timeout) async {
     final request =
         http.MultipartRequest('POST', Uri.parse('$baseUrl/upload'));
     if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
     request.fields['purpose'] = purpose;
     request.files
         .add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-    final response = await http.Response.fromStream(
-        await request.send().timeout(const Duration(seconds: 30)));
+    final response =
+        await http.Response.fromStream(await request.send().timeout(timeout));
     final text = utf8.decode(response.bodyBytes);
     if (response.statusCode >= 400) {
       String message = '上传失败(${response.statusCode})';
@@ -1280,6 +1281,16 @@ class ApiClient {
       throw ApiException(response.statusCode, message);
     }
     return (jsonDecode(text) as Map)['url'] as String;
+  }
+
+  /// 证照 OCR 识别:传已上传的证照 URL,返回识别出的字段。
+  /// 服务端没接识别模型时 `enabled=false`,调用方**静默跳过**即可 ——
+  /// OCR 只是省几下手输,不是流程的一环,不可用时不打扰商家。
+  /// 返回示例:{enabled: true, ok: true, license_no: '...', name: '...'}
+  Future<Map<String, dynamic>> ocrLicense(String imageUrl) async {
+    final data =
+        await _request('POST', '/ocr/license', body: {'image_url': imageUrl});
+    return (data as Map).cast<String, dynamic>();
   }
 
   /// 本单退款流水(退款进度时间轴)

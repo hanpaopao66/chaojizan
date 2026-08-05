@@ -560,6 +560,33 @@ async function api(method, path, body) {
   return data;
 }
 
+/* 私密文件(证照/证件/留证)预览:GET /files/* 必须带 Bearer 头,
+   裸 <a target="_blank"> 打开的新标签页不带头必 401 ——
+   这里统一代理点击:fetch → blob → 弹层展示。 */
+async function openAuthedFile(url) {
+  try {
+    await maybeRefreshToken();
+    const resp = await fetch(url, {
+      headers: token ? { Authorization: 'Bearer ' + token } : {} });
+    if (!resp.ok) throw new Error('文件加载失败 ' + resp.status);
+    const blob = await resp.blob();
+    const obj = URL.createObjectURL(blob);
+    if ((blob.type || '').startsWith('image/')) {
+      openModal(`<img src="${obj}" style="max-width:min(1000px,85vw);max-height:70vh;display:block">`);
+    } else {
+      window.open(obj, '_blank');
+    }
+    setTimeout(() => URL.revokeObjectURL(obj), 120000);
+  } catch (e) { toast(e.message); }
+}
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('a[href^="/files/"], a[href^="/uploads/"]');
+  if (!a) return;
+  e.preventDefault();
+  openAuthedFile(a.getAttribute('href'));
+});
+
 function showLogin() {
   token = '';
   localStorage.removeItem('superz_admin_token');

@@ -16,3 +16,18 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/widgets.dart';
 
 ImageProvider szNetImage(String url) => CachedNetworkImageProvider(url);
+
+/// 私密文件(`/files/*`:证照/证件照)的图片入口:请求要带 Bearer 头,
+/// 不带的话服务端 401,商家看到的就是一张破图 ——
+/// 明明上传成功了,却会误以为失败反复重传。
+///
+/// [token] 传 ApiClient.token;URL 不是 /files/ 开头时退化为普通加载。
+ImageProvider szAuthedImage(String url, {String? token}) {
+  final needsAuth = url.contains('/files/') || url.contains('/uploads/');
+  return CachedNetworkImageProvider(
+    url,
+    headers: needsAuth && token != null
+        ? {'Authorization': 'Bearer $token'}
+        : null,
+  );
+}

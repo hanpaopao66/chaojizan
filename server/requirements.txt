@@ -15,3 +15,5 @@ wechatpayv3>=2.0   # 2.0+ 才支持「微信支付公钥」验签(新商户号�
 alembic>=1.13
 cryptography>=42  # 收款账号等敏感字段加密(services/crypto.py)
 minio==7.2.20        # 自建对象存储 SDK(#125)
+Pillow>=10           # HEIC 转码(iPhone 相册默认格式,浏览器打不开)
+pillow-heif>=0.16    # Pillow 的 HEIF 解码插件

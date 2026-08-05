@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ApiError, HotelProfileData, Merchant, StaffMember, addStaff, myHotelProfile,
   myShop, myStaff, removeStaff, restShop, updateHotelProfile, updateShop,
-  uploadImage,
+  UPLOAD_ACCEPT, uploadImage,
 } from '../api'
 
 /** 店铺设置:通用区(公告/图集/营业时间/临时歇业/店员)+ 业态区分叉渲染。
@@ -108,9 +108,10 @@ function GeneralCard({ shop, onChanged }: { shop: Merchant; onChanged: () => voi
             fileList={photos.map((url, i) => ({
               uid: String(i), name: `图${i + 1}`, status: 'done' as const, url,
             }))}
-            customRequest={async ({ file, onSuccess, onError }) => {
+            customRequest={async ({ file, onSuccess, onError, onProgress }) => {
               try {
-                const url = await uploadImage(file as File)
+                const url = await uploadImage(file as File, 'gallery',
+                  (percent) => onProgress?.({ percent }))
                 setPhotos((prev) => [...prev, url])
                 onSuccess?.(url)
               } catch (e) {
@@ -119,7 +120,7 @@ function GeneralCard({ shop, onChanged }: { shop: Merchant; onChanged: () => voi
               }
             }}
             onRemove={(file) => setPhotos((prev) => prev.filter((u) => u !== file.url))}
-            accept="image/*"
+            accept={UPLOAD_ACCEPT}
             showUploadList={{ showPreviewIcon: false }}
           >
             {photos.length < 9 && <div>+ 上传</div>}

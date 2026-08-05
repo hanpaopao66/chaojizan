@@ -40,6 +40,7 @@ from ..schemas import (
     DishPatch,
     FinanceOrderOut,
     MerchantIn,
+    MerchantMeOut,
     MerchantOut,
     MerchantPatch,
     PrinterBindIn,
@@ -403,7 +404,7 @@ async def apply_shop(
     return shop
 
 
-@router.get("/me", response_model=MerchantOut)
+@router.get("/me", response_model=MerchantMeOut)
 async def my_shop(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
@@ -413,8 +414,20 @@ async def my_shop(
     shop, is_owner = await operable_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
-    out = MerchantOut.model_validate(shop)
+    out = MerchantMeOut.model_validate(shop)
     out.viewer_is_staff = not is_owner
+    # 证照只给店主(驳回后回填重提表单用);店员清空 —— 资质材料不是接单要用的
+    if not is_owner:
+        out.license_no = ""
+        out.license_image_url = ""
+    elif shop.biz_type == "hotel":
+        from ..models import HotelProfile
+        hp = await db.scalar(
+            select(HotelProfile).where(HotelProfile.merchant_id == shop.id))
+        if hp is not None:
+            out.special_license_no = hp.special_license_no
+            out.special_license_image_url = hp.special_license_image_url
+            out.hygiene_image_url = hp.hygiene_image_url
     return out
 
 
@@ -470,7 +483,28 @@ async def update_my_shop(
                 raise HTTPException(422, "赠品必须是本店在售菜品")
             rule["name"] = dish.name
 
-    info_changed = any(k != "is_open" for k in changes)
+    # 酒店第二证照(特种行业许可证/卫生许可证)只在**被驳回重提**时随表单更新;
+    # 平时资质变更走客服人工核验(见 stays.update_hotel_profile 的口径)
+    hotel_fields = {
+        k: changes.pop(k)
+        for k in ("special_license_no", "special_license_image_url",
+                  "hygiene_image_url")
+        if k in changes
+    }
+    if hotel_fields:
+        if shop.biz_type != "hotel":
+            raise HTTPException(422, "特种行业许可证是酒店业态的资质项")
+        if shop.status != MerchantStatus.rejected:
+            raise HTTPException(403, "资质变更需平台核验,请联系客服")
+        from ..models import HotelProfile
+        hp = await db.scalar(
+            select(HotelProfile).where(HotelProfile.merchant_id == shop.id))
+        if hp is None:
+            raise HTTPException(404, "酒店资料不存在")
+        for field, value in hotel_fields.items():
+            setattr(hp, field, value)
+
+    info_changed = bool(hotel_fields) or any(k != "is_open" for k in changes)
     for field, value in changes.items():
         setattr(shop, field, value)
     # 被驳回后修改资料 = 重新提交审核

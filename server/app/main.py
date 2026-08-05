@@ -25,6 +25,7 @@ from .routers import (
     invoices,
     ledger,
     merchants,
+    ocr,
     orders,
     payments,
     payout,
@@ -145,6 +146,7 @@ app.include_router(after_sales.router)
 app.include_router(favorites.router)
 app.include_router(food_safety.router)
 app.include_router(uploads.router)
+app.include_router(ocr.router)
 app.include_router(payments.router)
 app.include_router(tickets.router)
 app.include_router(vouchers.router)

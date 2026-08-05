@@ -71,7 +71,13 @@ class Merchant {
         kitchenCam = json['kitchen_cam'] as bool? ?? false,
         kitchenCamLabel =
             json['kitchen_cam_label'] as String? ?? '无明厨亮灶',
-        bizType = json['biz_type'] as String? ?? 'food';
+        bizType = json['biz_type'] as String? ?? 'food',
+        licenseNo = json['license_no'] as String? ?? '',
+        licenseImageUrl = json['license_image_url'] as String? ?? '',
+        specialLicenseNo = json['special_license_no'] as String? ?? '',
+        specialLicenseImageUrl =
+            json['special_license_image_url'] as String? ?? '',
+        hygieneImageUrl = json['hygiene_image_url'] as String? ?? '';
 
   final int id;
   final String name;
@@ -109,6 +115,14 @@ class Merchant {
   final bool kitchenCam;
   final String kitchenCamLabel;
   final String bizType;  // 业态:food 餐饮外卖 / hotel 酒店住宿(工作台按此分叉)
+
+  /// 本店证照(仅 GET /merchants/me 且店主可见;其余接口为空串)。
+  /// 被驳回后重新提交时回填表单 —— 不回填的话商家要把证号照片全部重来一遍
+  final String licenseNo;
+  final String licenseImageUrl;
+  final String specialLicenseNo;       // 酒店:特种行业许可证号
+  final String specialLicenseImageUrl; // 酒店:特种行业许可证照片
+  final String hygieneImageUrl;        // 酒店:卫生许可证照片(选填)
 
   /// 门店相册(环境/后厨/证照实拍,最多 9 张)
   final List<String> photoUrls;

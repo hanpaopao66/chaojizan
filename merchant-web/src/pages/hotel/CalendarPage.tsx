@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   ApiError, CANCEL_POLICIES, RoomCalendarRow, RoomType, createRoomType,
-  setStayCalendar, stayCalendar, stayRoomTypes, updateRoomType, uploadImage,
+  setStayCalendar, stayCalendar, stayRoomTypes, updateRoomType, UPLOAD_ACCEPT,
+  uploadImage,
 } from '../../api'
 
 const DAYS = 30 // 一屏 30 天
@@ -663,9 +664,10 @@ function RoomTypeDrawer({ existing, onClose }: {
             fileList={images.map((url, i) => ({
               uid: String(i), name: `图${i + 1}`, status: 'done' as const, url,
             }))}
-            customRequest={async ({ file, onSuccess, onError }) => {
+            customRequest={async ({ file, onSuccess, onError, onProgress }) => {
               try {
-                const url = await uploadImage(file as File)
+                const url = await uploadImage(file as File, 'room',
+                  (percent) => onProgress?.({ percent }))
                 setImages((prev) => [...prev, url])
                 onSuccess?.(url)
               } catch (e) {
@@ -676,7 +678,7 @@ function RoomTypeDrawer({ existing, onClose }: {
             onRemove={(file) => {
               setImages((prev) => prev.filter((u) => u !== file.url))
             }}
-            accept="image/*"
+            accept={UPLOAD_ACCEPT}
             showUploadList={{ showPreviewIcon: false }}
           >
             {images.length < 9 && <div>+ 上传</div>}

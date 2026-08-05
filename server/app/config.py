@@ -205,6 +205,14 @@ class Settings(BaseSettings):
     insurance_app_id: str = ""
     insurance_secret: str = ""
 
+    # 证照 OCR(入驻表单自动填充)。默认关闭;接的是**自部署的识别服务**
+    # (本地模型起个 HTTP 服务),不走三方付费 API。配好 OCR_ENDPOINT 自动启用,
+    # 未配置时 /ocr/license 返回 enabled=false,客户端静默跳过 ——
+    # OCR 只是省几下手输,不是入驻流程的一环。
+    # 对接契约见 routers/ocr.py 模块注释。
+    ocr_endpoint: str = ""            # 如 http://127.0.0.1:18080/ocr
+    ocr_timeout_seconds: float = 8.0  # 识别超时:超了就当没识别,不卡表单
+
     # 身份证二要素核验(姓名+证号一致性,照支付桩模式)。未配置走开发模式:
     # 格式与 GB 11643 校验位真实校验,通过即算实名;配置后调三方 API 核验一致性
     idcheck_api_url: str = ""
@@ -261,6 +269,10 @@ class Settings(BaseSettings):
     @property
     def idcheck_configured(self) -> bool:
         return bool(self.idcheck_api_url and self.idcheck_app_code)
+
+    @property
+    def ocr_configured(self) -> bool:
+        return bool(self.ocr_endpoint)
 
     @property
     def insurance_configured(self) -> bool:

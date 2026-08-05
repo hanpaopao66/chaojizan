@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import {
   ApiError, Dish, DishOptionGroup, createDish, myDishes, sellOutDish,
-  updateDish, uploadImage, yuan,
+  updateDish, UPLOAD_ACCEPT, uploadImage, yuan,
 } from '../../api'
 
 /** 菜品管理:表格批量效率是网页价值(多选批量上下架/改分类,单击进抽屉编辑)。 */
@@ -236,9 +236,10 @@ function DishDrawer({ existing, onClose }: {
             fileList={imageUrl
               ? [{ uid: '1', name: '图', status: 'done' as const, url: imageUrl }]
               : []}
-            customRequest={async ({ file, onSuccess, onError }) => {
+            customRequest={async ({ file, onSuccess, onError, onProgress }) => {
               try {
-                const url = await uploadImage(file as File)
+                const url = await uploadImage(file as File, 'dish',
+                  (percent) => onProgress?.({ percent }))
                 setImageUrl(url)
                 onSuccess?.(url)
               } catch (e) {
@@ -247,7 +248,7 @@ function DishDrawer({ existing, onClose }: {
               }
             }}
             onRemove={() => setImageUrl('')}
-            accept="image/*"
+            accept={UPLOAD_ACCEPT}
           >
             {!imageUrl && <div>+ 上传</div>}
           </Upload>

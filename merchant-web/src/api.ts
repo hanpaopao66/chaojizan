@@ -181,24 +181,79 @@ export function merchantWsUrl(merchantId: number): string {
 
 // ---------- 图片上传 ----------
 
-export async function uploadImage(file: File): Promise<string> {
-  const form = new FormData()
-  form.append('file', file)
-  const token = getToken()
-  const resp = await fetch('/upload', {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  })
-  if (!resp.ok) {
-    let detail = `上传失败(${resp.status})`
-    try {
-      const data = await resp.json()
-      if (typeof data.detail === 'string') detail = data.detail
-    } catch { /* ignore */ }
-    throw new ApiError(resp.status, detail)
+/** 与后端 storage.PURPOSES 对齐:决定这张图进公开桶还是私密桶 */
+export type UploadPurpose =
+  | 'dish' | 'shop' | 'gallery' | 'room' | 'avatar' | 'review'
+  | 'license' | 'id_card' | 'health_cert'
+
+/** 上传输入框统一的格式白名单(和后端 ALLOWED_EXTENSIONS 一致) */
+export const UPLOAD_ACCEPT = '.jpg,.jpeg,.png,.webp'
+
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+/**
+ * 前端压缩:长边 ≤1600、转 JPEG。商家直接拖单反原图会超后端 5MB 限制,
+ * 压不动或浏览器不支持时原样返回,让后端来兜底判。
+ */
+async function compressImage(file: File): Promise<Blob> {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type)) return file
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height))
+    if (scale === 1 && file.size <= 2 * 1024 * 1024) return file
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bitmap.width * scale)
+    canvas.height = Math.round(bitmap.height * scale)
+    canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', 0.85))
+    return blob && blob.size < file.size ? blob : file
+  } catch {
+    return file
   }
-  return ((await resp.json()) as { url: string }).url
+}
+
+export async function uploadImage(
+  file: File,
+  purpose: UploadPurpose,
+  onProgress?: (percent: number) => void,
+): Promise<string> {
+  const blob = await compressImage(file)
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    throw new ApiError(413, '图片压缩后仍超过 5MB,请更换更小的图片')
+  }
+  const form = new FormData()
+  const name = blob === file
+    ? file.name
+    : `${file.name.replace(/\.[^.]*$/, '')}.jpg`
+  form.append('file', blob, name)
+  form.append('purpose', purpose)
+  const token = getToken()
+  // XMLHttpRequest 而非 fetch:要给 antd Upload 回报上传进度
+  return await new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', '/upload')
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.timeout = 60_000
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100))
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve((JSON.parse(xhr.responseText) as { url: string }).url)
+        return
+      }
+      let detail = `上传失败(${xhr.status})`
+      try {
+        const data = JSON.parse(xhr.responseText) as { detail?: unknown }
+        if (typeof data.detail === 'string') detail = data.detail
+      } catch { /* 非 JSON 响应,用默认文案 */ }
+      reject(new ApiError(xhr.status, detail))
+    }
+    xhr.onerror = () => reject(new ApiError(0, '网络异常,上传失败,请重试'))
+    xhr.ontimeout = () => reject(new ApiError(0, '上传超时,请检查网络后重试'))
+    xhr.send(form)
+  })
 }
 
 // ---------- 住宿:房型与房价房态 ----------

@@ -169,6 +169,17 @@ class MerchantOut(BaseModel):
     kitchen_cam_label: str = "无明厨亮灶"
 
 
+class MerchantMeOut(MerchantOut):
+    """店主自查视角(仅 GET /merchants/me):多了本店证照,驳回后回填表单用。
+    店员拿到的是空串 —— 资质材料不是接单要用的东西。"""
+
+    license_no: str = ""
+    license_image_url: str = ""
+    special_license_no: str = ""
+    special_license_image_url: str = ""
+    hygiene_image_url: str = ""
+
+
 class AdminMerchantOut(MerchantOut):
     """审核后台视角:多了证照和店主联系方式。"""
 
@@ -281,6 +292,10 @@ class MerchantPatch(BaseModel):
     photo_urls: list[str] | None = Field(default=None, max_length=9)  # 门店相册
     promise_ready_minutes: int | None = Field(default=None, ge=5, le=60)
     self_delivery: bool | None = None  # 自配送开关(只影响之后的新订单)
+    # 酒店第二证照:仅**被驳回后重新提交**时可带(平时资质变更走客服人工核验)
+    special_license_no: str | None = Field(default=None, max_length=50)
+    special_license_image_url: str | None = Field(default=None, max_length=300)
+    hygiene_image_url: str | None = Field(default=None, max_length=300)
 
 
 class PrinterOut(BaseModel):
