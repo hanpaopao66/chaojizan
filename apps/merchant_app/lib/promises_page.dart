@@ -132,9 +132,19 @@ class _MerchantPromisesPageState extends State<MerchantPromisesPage> {
                 builder: (_) => DashboardPage(api: widget.api))),
           ),
 
+          _promise(
+            sz,
+            '配送的锅不用商家背',
+            '配送由平台负责。用户评价时,配送方面的标签(送得慢/餐洒了等)'
+            '只挂在骑手评分上,**从结构上就进不了你的店铺评分**。\n\n'
+            '如果差评明明是配送超时导致的,你发起申诉时,系统会自动把这单的'
+            '接单/出餐/送达时间线附给审核员 —— 出餐正常而配送晚了,证据替你说话。',
+            verify: '评价页的「问题归因」里,配送类标签标着"不计入你的评分"',
+          ),
+
           const SizedBox(height: 8),
           Text(
-            '这五条写进代码里,不是写在这一页上。'
+            '这几条写进代码里,不是写在这一页上。'
             '哪天我们自己违背了,你在对账页和看板上会先看出来。',
             style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkFaint),
           ),

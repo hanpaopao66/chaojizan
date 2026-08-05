@@ -184,7 +184,47 @@ async def _target_summary(db: AsyncSession, appeal: Appeal) -> str:
     review = await db.get(Review, appeal.target_id)
     if review is None:
         return "(记录不存在)"
-    return f"{review.merchant_rating} 星差评:{review.comment[:60]}"
+    summary = f"{review.merchant_rating} 星差评:{review.comment[:60]}"
+    # 自动附配送证据:接单/出餐/送达时间线摆在审核员面前 ——
+    # 配送超时导致的差评不该商家背,但商家自己举证不到平台的数据
+    order = await db.get(Order, review.order_id)
+    if order is not None:
+        from ..models import OrderEvent
+        events: dict[str, datetime] = {}
+        for e in await db.scalars(
+                select(OrderEvent).where(OrderEvent.order_id == order.id)
+                .order_by(OrderEvent.created_at)):
+            events.setdefault(e.to_status, e.created_at)
+
+        def hhmm(dt: datetime) -> str:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return (dt + timedelta(hours=8)).strftime("%H:%M")
+
+        parts = []
+        if "accepted" in events:
+            parts.append(f"接单 {hhmm(events['accepted'])}")
+        if "ready" in events:
+            parts.append(f"出餐 {hhmm(events['ready'])}"
+                         + ("(出餐超时)" if order.ready_late else ""))
+        if "delivered" in events:
+            delivered = events["delivered"]
+            note = f"送达 {hhmm(delivered)}"
+            eta = order.eta_at
+            if eta is not None:
+                if eta.tzinfo is None:
+                    eta = eta.replace(tzinfo=timezone.utc)
+                if delivered.tzinfo is None:
+                    delivered = delivered.replace(tzinfo=timezone.utc)
+                late = int((delivered - eta).total_seconds() // 60)
+                if late > 0:
+                    note += f"(比预计晚 {late} 分钟"
+                    note += ",出餐正常,系配送/等待因素)" \
+                        if not order.ready_late else ")"
+            parts.append(note)
+        if parts:
+            summary += " | 配送证据:" + "、".join(parts)
+    return summary
 
 
 @router.get("/admin/appeals", response_model=list[AdminAppealOut])

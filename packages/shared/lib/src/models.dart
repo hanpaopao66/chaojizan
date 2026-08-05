@@ -18,9 +18,21 @@ enum OrderStatus {
       values.firstWhere((s) => s.value == value, orElse: () => cancelled);
 }
 
-/// 评价一键标签白名单(与服务端 schemas.REVIEW_TAGS 保持一致)。
+/// 评价一键标签白名单(与服务端 schemas 保持一致)。
+/// **按责任方分组**:配送是平台的事,配送标签只随骑手评分落库,
+/// 从结构上进不了商家维度 —— 锅不该商家背。
 const List<String> kReviewTags = [
   '味道好', '分量足', '包装好', '配送快', '干净卫生', '回头客',
+];
+
+/// 商家侧负向标签(菜品/包装/出餐,商家自己能改的事)
+const List<String> kMerchantNegTags = [
+  '太咸了', '分量不足', '包装洒漏', '出餐慢', '和图不符',
+];
+
+/// 配送侧标签(正负都有;只挂骑手评分)
+const List<String> kRiderReviewTags = [
+  '送得快', '服务周到', '送得慢', '态度不好', '餐洒了',
 ];
 
 /// 分 → 元的展示格式。金额在前后端之间永远以「分」传输。
@@ -72,6 +84,10 @@ class Merchant {
         kitchenCamLabel =
             json['kitchen_cam_label'] as String? ?? '无明厨亮灶',
         bizType = json['biz_type'] as String? ?? 'food',
+        autoAccept = json['auto_accept'] as bool? ?? false,
+        busyActive = json['busy_active'] as bool? ?? false,
+        busyUntil = json['busy_until'] as String?,
+        busyExtraMinutes = json['busy_extra_minutes'] as int? ?? 10,
         licenseNo = json['license_no'] as String? ?? '',
         licenseImageUrl = json['license_image_url'] as String? ?? '',
         specialLicenseNo = json['special_license_no'] as String? ?? '',
@@ -115,6 +131,14 @@ class Merchant {
   final bool kitchenCam;
   final String kitchenCamLabel;
   final String bizType;  // 业态:food 餐饮外卖 / hotel 酒店住宿(工作台按此分叉)
+
+  /// 自动接单(仅 GET /merchants/me 下发;支付成功即进入制作)
+  final bool autoAccept;
+
+  /// 忙碌模式(高峰压单):生效期 ETA/出餐超时判定放宽,用户端亮「出餐较慢」标
+  final bool busyActive;
+  final String? busyUntil;
+  final int busyExtraMinutes;
 
   /// 本店证照(仅 GET /merchants/me 且店主可见;其余接口为空串)。
   /// 被驳回后重新提交时回填表单 —— 不回填的话商家要把证号照片全部重来一遍
@@ -604,6 +628,7 @@ class Review {
         comment = json['comment'] as String? ?? '',
         imageUrls = (json['image_urls'] as List? ?? const []).cast<String>(),
         tags = (json['tags'] as List? ?? const []).cast<String>(),
+        riderTags = (json['rider_tags'] as List? ?? const []).cast<String>(),
         reply = json['reply'] as String? ?? '',
         isAnonymous = json['is_anonymous'] as bool? ?? false,
         appendContent = json['append_content'] as String? ?? '',
@@ -622,6 +647,7 @@ class Review {
   final String comment;
   final List<String> imageUrls;
   final List<String> tags;
+  final List<String> riderTags; // 配送维度标签(不进商家维度)
   final String reply;
   final bool isAnonymous;      // 真匿名(商家侧不可反查)
   final String appendContent;  // 追评(首评后 7 天内一次)

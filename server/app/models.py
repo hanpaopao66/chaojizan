@@ -1,5 +1,5 @@
 import enum
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -173,6 +173,27 @@ class Merchant(Base):
     # 保证金:从营收自动留存(不强制预缴)——可提余额 = 余额 - 应留保证金。
     # 用途:售后冲账余额为负时的兜底;退店无纠纷全额退还(走客服)。平台可按店调
     deposit_required_cents: Mapped[int] = mapped_column(Integer, default=50000)
+    # 自动接单:支付成功即进入制作,高峰期不用守着屏幕点(仅营业中生效)
+    auto_accept: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false")
+
+    # 忙碌模式:高峰压单的中间态 —— 不闭店,但把预期先说清楚。
+    # busy_until 之前 ETA/出餐超时判定放宽 busy_extra_minutes,
+    # 用户端展示「出餐较慢」标;到点自动失效(读取时判断,无需清扫任务)
+    busy_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    busy_extra_minutes: Mapped[int] = mapped_column(
+        Integer, default=10, server_default="10")
+
+    @property
+    def busy_active(self) -> bool:
+        until = self.busy_until
+        if until is None:
+            return False
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        return until > datetime.now(timezone.utc)
+
     # 云打印机(飞鹅):绑定 SN 后支付成功自动出小票;printer_auto 商家可关
     printer_sn: Mapped[str] = mapped_column(String(32), default="")
     printer_auto: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -829,7 +850,11 @@ class Review(Base):
     rider_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5
     comment: Mapped[str] = mapped_column(String(500), default="")
     image_urls: Mapped[list] = mapped_column(JSONB, default=list)  # 图片评价,最多 6 张
-    tags: Mapped[list] = mapped_column(JSONB, default=list)  # 一键标签(白名单见 schemas)
+    tags: Mapped[list] = mapped_column(JSONB, default=list)  # 商家维度标签(白名单见 schemas)
+    # 配送维度标签:只随 rider_rating,**不进商家维度** ——
+    # 配送是平台的事,配送差评从结构上就不该落到商家头上
+    rider_tags: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default="[]")
     reply: Mapped[str] = mapped_column(String(300), default="")  # 商家回复
     # 真匿名:展示"匿名用户",商家侧完全不可反查;平台后台仍可见(处理恶意评价)
     is_anonymous: Mapped[bool] = mapped_column(Boolean, default=False)

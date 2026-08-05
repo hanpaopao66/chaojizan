@@ -163,6 +163,9 @@ export interface Merchant {
   self_delivery: boolean
   commission_rate: string | number
   viewer_is_staff: boolean
+  busy_active: boolean
+  busy_until: string | null
+  busy_extra_minutes: number
 }
 
 export function myShop(): Promise<Merchant> {
@@ -171,6 +174,17 @@ export function myShop(): Promise<Merchant> {
 
 export function updateShop(fields: Record<string, unknown>): Promise<Merchant> {
   return request('PATCH', '/merchants/me', fields)
+}
+
+/** 忙碌模式:开(minutes 时长 / extraMinutes 出餐加时)或关(off);到点自动失效 */
+export function setBusy(opts: {
+  minutes?: number
+  extraMinutes?: number
+  off?: boolean
+}): Promise<Merchant> {
+  return request('POST', '/merchants/me/busy', opts.off
+    ? { off: true }
+    : { minutes: opts.minutes, extra_minutes: opts.extraMinutes })
 }
 
 /** WebSocket 地址(同源;dev 走 vite ws 代理) */
@@ -448,8 +462,9 @@ export const FOOD_STATUS_LABELS: Record<string, string> = {
   completed: '已完成', cancelled: '已取消',
 }
 
-export function myFoodOrders(): Promise<FoodOrder[]> {
-  return request('GET', '/orders')
+export function myFoodOrders(q?: string): Promise<FoodOrder[]> {
+  return request('GET',
+    q ? `/orders?limit=50&q=${encodeURIComponent(q)}` : '/orders')
 }
 
 export function foodTransition(
@@ -477,6 +492,72 @@ export function foodReprint(orderNo: string): Promise<void> {
 
 export function foodUrgeReply(orderNo: string, text: string): Promise<void> {
   return request('POST', `/orders/${orderNo}/urge-reply`, { text })
+}
+
+// ---------- 今日看板 / 待办 ----------
+
+export interface DaySummary {
+  orders: number
+  gmv_cents: number
+  ongoing: number
+  done: number
+  cancelled: number
+  pickup_orders: number
+}
+
+export function merchantToday(): Promise<{ today: DaySummary; yesterday: DaySummary }> {
+  return request('GET', '/merchants/me/today')
+}
+
+export interface Todos {
+  pending_orders: number
+  after_sales: number
+  bad_reviews_unreplied: number
+  coupon_batches_low: number
+  flash_expiring: number
+}
+
+export function merchantTodos(): Promise<Todos> {
+  return request('GET', '/merchants/me/todos')
+}
+
+// ---------- 外卖:评价 ----------
+
+export interface FoodReview {
+  id: number
+  merchant_rating: number
+  rider_rating: number | null
+  comment: string
+  image_urls: string[]
+  tags: string[]
+  reply: string
+  append_content: string
+  append_images: string[]
+  append_at: string | null
+  append_reply: string
+  customer_name: string
+  created_at: string
+}
+
+export function myFoodReviews(opts: {
+  maxRating?: number
+  unreplied?: boolean
+  before?: number
+} = {}): Promise<FoodReview[]> {
+  const params = new URLSearchParams()
+  if (opts.maxRating !== undefined) params.set('max_rating', String(opts.maxRating))
+  if (opts.unreplied) params.set('unreplied', 'true')
+  if (opts.before !== undefined) params.set('before', String(opts.before))
+  const qs = params.toString()
+  return request('GET', `/merchants/me/reviews${qs ? `?${qs}` : ''}`)
+}
+
+export function replyFoodReview(id: number, reply: string): Promise<FoodReview> {
+  return request('POST', `/merchants/me/reviews/${id}/reply`, { reply })
+}
+
+export function replyFoodAppend(id: number, reply: string): Promise<FoodReview> {
+  return request('POST', `/merchants/me/reviews/${id}/append-reply`, { reply })
 }
 
 // ---------- 外卖:菜品 / 店内营销 ----------

@@ -33,7 +33,8 @@ STATUS_LABELS = {
 TRANSITIONS: dict[tuple[OrderStatus, OrderStatus], set[str]] = {
     (OrderStatus.PENDING_PAYMENT, OrderStatus.PAID): {"customer", "system"},
     (OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED): {"customer", "system"},
-    (OrderStatus.PAID, OrderStatus.ACCEPTED): {"merchant"},
+    # system = 自动接单(商家开关 Merchant.auto_accept,见 payment_core)
+    (OrderStatus.PAID, OrderStatus.ACCEPTED): {"merchant", "system"},
     (OrderStatus.PAID, OrderStatus.CANCELLED): {"customer", "merchant", "system"},
     (OrderStatus.ACCEPTED, OrderStatus.READY): {"merchant"},
     # 用户在接单后有 2 分钟反悔窗口(时间校验在路由层,状态机只放行角色)

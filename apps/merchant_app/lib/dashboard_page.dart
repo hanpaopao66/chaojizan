@@ -46,6 +46,7 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   Map<String, dynamic>? _trend;
+  Map<String, dynamic>? _today;
   Map<String, dynamic>? _prep;
   Map<String, dynamic>? _analytics;
   String? _error;
@@ -65,6 +66,10 @@ class _DashboardPageState extends State<DashboardPage> {
         err ??= '$e';
         return null;
       }),
+      widget.api.merchantToday().then<Object?>((v) => v).catchError((Object e) {
+        err ??= '$e';
+        return null;
+      }),
       widget.api.merchantPrepTime().then<Object?>((v) => v).catchError((Object e) {
         err ??= '$e';
         return null;
@@ -80,8 +85,9 @@ class _DashboardPageState extends State<DashboardPage> {
     if (!mounted) return;
     setState(() {
       _trend = results[0] as Map<String, dynamic>?;
-      _prep = results[1] as Map<String, dynamic>?;
-      _analytics = results[2] as Map<String, dynamic>?;
+      _today = results[1] as Map<String, dynamic>?;
+      _prep = results[2] as Map<String, dynamic>?;
+      _analytics = results[3] as Map<String, dynamic>?;
       _error = (_trend == null && _prep == null && _analytics == null) ? err : null;
     });
   }
@@ -101,6 +107,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: ListView(
                     padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 32),
                     children: [
+                      if (_today != null) ...[
+                        _todayCard(sz),
+                        const SizedBox(height: 12),
+                      ],
                       if (_trend != null) ...[
                         _trendCard(sz),
                         const SizedBox(height: 14),
@@ -130,6 +140,51 @@ class _DashboardPageState extends State<DashboardPage> {
                     ],
                   ),
                 ),
+    );
+  }
+
+  // ---------------- 0. 今日实况(下单口径,与对账入账口径有别) ----------------
+
+  Widget _todayCard(SzColors sz) {
+    final today = _today!['today'] as Map<String, dynamic>? ?? const {};
+    final yesterday = _today!['yesterday'] as Map<String, dynamic>?;
+    Widget cell(String label, String value) => Expanded(
+          child: Column(children: [
+            Text(value,
+                style: szFigure(
+                    fontSize: 18, fontWeight: FontWeight.w700, color: sz.ink)),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: Border.all(color: sz.line),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('今日实况', style: TextStyle(
+              fontWeight: FontWeight.w600, color: sz.ink)),
+          const Spacer(),
+          if (yesterday != null)
+            Text('昨日 ${yesterday['orders']} 单 · '
+                '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
+                style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+        ]),
+        const SizedBox(height: 10),
+        Row(children: [
+          cell('订单', '${today['orders'] ?? 0}'),
+          cell('营业额', yuan(today['gmv_cents'] as int? ?? 0)),
+          cell('进行中', '${today['ongoing'] ?? 0}'),
+          cell('已取消', '${today['cancelled'] ?? 0}'),
+        ]),
+        const SizedBox(height: 6),
+        Text('按今日下单统计,是生意热度;对账页按结算入账,两边对不上是正常的',
+            style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
+      ]),
     );
   }
 

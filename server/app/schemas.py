@@ -168,6 +168,12 @@ class MerchantOut(BaseModel):
     kitchen_cam: bool = False
     kitchen_cam_label: str = "无明厨亮灶"
 
+    # 忙碌模式(高峰压单):生效期 ETA/出餐超时判定放宽 busy_extra_minutes,
+    # 用户端亮「出餐较慢」标。busy_active 读 ORM 的 property,到点自动变 False
+    busy_active: bool = False
+    busy_until: datetime | None = None
+    busy_extra_minutes: int = 10
+
 
 class MerchantMeOut(MerchantOut):
     """店主自查视角(仅 GET /merchants/me):多了本店证照,驳回后回填表单用。
@@ -178,6 +184,7 @@ class MerchantMeOut(MerchantOut):
     special_license_no: str = ""
     special_license_image_url: str = ""
     hygiene_image_url: str = ""
+    auto_accept: bool = False  # 自动接单开关(店铺 tab 展示/切换)
 
 
 class AdminMerchantOut(MerchantOut):
@@ -292,6 +299,7 @@ class MerchantPatch(BaseModel):
     photo_urls: list[str] | None = Field(default=None, max_length=9)  # 门店相册
     promise_ready_minutes: int | None = Field(default=None, ge=5, le=60)
     self_delivery: bool | None = None  # 自配送开关(只影响之后的新订单)
+    auto_accept: bool | None = None    # 自动接单(支付成功即进入制作)
     # 酒店第二证照:仅**被驳回后重新提交**时可带(平时资质变更走客服人工核验)
     special_license_no: str | None = Field(default=None, max_length=50)
     special_license_image_url: str | None = Field(default=None, max_length=300)
@@ -884,8 +892,15 @@ class MerchantAfterSaleOut(AfterSaleOut):
 
 
 # ---------- 评价 ----------
-# 评价一键标签白名单(只做正向/中性,负面反馈用文字说清楚更公平)
+# 评价一键标签白名单。**按责任方分组**:配送是平台的事,配送问题的标签
+# 只随骑手评分落库,从结构上就进不了商家维度 —— 锅不该商家背。
 REVIEW_TAGS = ["味道好", "分量足", "包装好", "配送快", "干净卫生", "回头客"]
+# 商家侧负向(归因到菜品/包装/出餐,商家能改的事)
+MERCHANT_NEG_TAGS = ["太咸了", "分量不足", "包装洒漏", "出餐慢", "和图不符"]
+# 骑手/配送侧(正负都有;只挂 rider_rating)
+RIDER_REVIEW_TAGS = ["送得快", "服务周到", "送得慢", "态度不好", "餐洒了"]
+
+_MERCHANT_TAG_WHITELIST = set(REVIEW_TAGS) | set(MERCHANT_NEG_TAGS)
 
 
 class ReviewIn(BaseModel):
@@ -894,13 +909,17 @@ class ReviewIn(BaseModel):
     rider_rating: int | None = Field(default=None, ge=1, le=5)
     comment: str = Field(default="", max_length=500)
     image_urls: list[str] = Field(default=[], max_length=6)  # 图片评价
-    tags: list[str] = Field(default=[], max_length=4)        # 一键标签
+    tags: list[str] = Field(default=[], max_length=4)        # 商家维度标签
+    rider_tags: list[str] = Field(default=[], max_length=3)  # 配送维度标签
 
     @model_validator(mode="after")
     def tags_in_whitelist(self):
-        bad = [t for t in self.tags if t not in REVIEW_TAGS]
+        bad = [t for t in self.tags if t not in _MERCHANT_TAG_WHITELIST]
         if bad:
             raise ValueError(f"不支持的标签:{'、'.join(bad)}")
+        bad_rider = [t for t in self.rider_tags if t not in RIDER_REVIEW_TAGS]
+        if bad_rider:
+            raise ValueError(f"不支持的配送标签:{'、'.join(bad_rider)}")
         return self
 
 
@@ -913,6 +932,7 @@ class ReviewOut(BaseModel):
     comment: str
     image_urls: list = []
     tags: list = []
+    rider_tags: list = []  # 配送维度标签(不进商家维度)
     reply: str = ""  # 商家回复
     is_anonymous: bool = False
     # 追评(带"追评"标展示在首评下方)

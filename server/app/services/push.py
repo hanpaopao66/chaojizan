@@ -160,6 +160,19 @@ async def notify_riders_new_grab(db, order, shop_name: str) -> int:
         return 0
 
 
+async def notify_bad_review(merchant_owner_id: int, rating: int,
+                            summary: str) -> None:
+    """来了差评(≤3 星)→ 推给店主。差评响应越快挽回余地越大,
+    等商家自己翻到店铺页最底下再发现,黄花菜都凉了。"""
+    await push_to_user(
+        merchant_owner_id,
+        f"收到一条 {rating} 星评价",
+        summary or "(未留言)",
+        {"type": "bad_review"},
+        record_skip=True,
+    )
+
+
 async def notify_review_reply(customer_id: int, shop_name: str, reply: str) -> None:
     """商家回复了评价 → 推给写评价的用户(回复不触达 = 白写)。"""
     await push_to_user(

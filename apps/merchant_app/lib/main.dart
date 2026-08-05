@@ -11,6 +11,8 @@ import 'hotel/hotel_home_page.dart';
 import 'listen_service.dart';
 import 'onboarding.dart';
 import 'printer_service.dart';
+import 'reviews_page.dart';
+import 'rider_track_page.dart';
 import 'shop_tab.dart';
 import 'self_delivery_map_page.dart';
 
@@ -176,6 +178,136 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
   WebSocketChannel? _ws;
   bool _wsConnected = false;
 
+  // 今日 · 待办卡(工作台第一眼):30 秒一刷,失败保留上次的数
+  Map<String, dynamic>? _today;
+  Map<String, dynamic>? _todos;
+  Timer? _todayTimer;
+
+  // 忙碌模式:高峰压单的中间态(不闭店,ETA 放宽 + 用户端亮"出餐较慢"标)
+  late DateTime? _busyUntil = DateTime.tryParse(widget.shop.busyUntil ?? '');
+
+  bool get _busyActive =>
+      _busyUntil != null && _busyUntil!.isAfter(DateTime.now().toUtc());
+
+  Future<void> _busySheet() async {
+    if (_busyActive) {
+      final minutesLeft =
+          _busyUntil!.difference(DateTime.now().toUtc()).inMinutes + 1;
+      final end = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('忙碌模式生效中'),
+          content: Text('还剩约 $minutesLeft 分钟自动恢复。\n'
+              '期间新单的预计送达时间已放宽,用户端显示「出餐较慢」。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('继续忙碌')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('提前结束')),
+          ],
+        ),
+      );
+      if (end != true) return;
+      try {
+        final shop = await widget.api.setBusy(off: true);
+        if (mounted) {
+          setState(() =>
+              _busyUntil = DateTime.tryParse(shop.busyUntil ?? ''));
+        }
+      } catch (e) {
+        _snack(e is ApiException ? e.message : '$e');
+      }
+      return;
+    }
+    int minutes = 60;
+    int extra = 10;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => StatefulBuilder(
+        builder: (dialog, setDialog) => AlertDialog(
+          title: const Text('开启忙碌模式'),
+          content: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('高峰压单不用闭店:新单预计送达自动放宽,'
+                    '用户下单前就看到「出餐较慢」。到点自动恢复。'),
+                const SizedBox(height: 12),
+                const Text('忙碌时长'),
+                const SizedBox(height: 4),
+                SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(value: 30, label: Text('30分')),
+                    ButtonSegment(value: 60, label: Text('1小时')),
+                    ButtonSegment(value: 120, label: Text('2小时')),
+                  ],
+                  selected: {minutes},
+                  onSelectionChanged: (s) =>
+                      setDialog(() => minutes = s.first),
+                ),
+                const SizedBox(height: 12),
+                const Text('出餐加时'),
+                const SizedBox(height: 4),
+                SegmentedButton<int>(
+                  segments: const [
+                    ButtonSegment(value: 10, label: Text('+10分')),
+                    ButtonSegment(value: 15, label: Text('+15分')),
+                    ButtonSegment(value: 20, label: Text('+20分')),
+                  ],
+                  selected: {extra},
+                  onSelectionChanged: (s) => setDialog(() => extra = s.first),
+                ),
+              ]),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('开启')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final shop =
+          await widget.api.setBusy(minutes: minutes, extraMinutes: extra);
+      if (mounted) {
+        setState(() => _busyUntil = DateTime.tryParse(shop.busyUntil ?? ''));
+        _snack('忙碌模式已开启,$minutes 分钟后自动恢复');
+      }
+    } catch (e) {
+      _snack(e is ApiException ? e.message : '$e');
+    }
+  }
+
+  // 搜单:顾客打电话来查单,翻列表翻不到才需要这个框
+  bool _searchMode = false;
+  final _searchCtrl = TextEditingController();
+  List<Order> _searchResults = [];
+  Timer? _searchDebounce;
+
+  bool get _searchActive => _searchMode && _searchCtrl.text.trim().length >= 3;
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    final q = value.trim();
+    if (q.length < 3) {
+      setState(() => _searchResults = []);
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        final results = await widget.api.myOrders(q: q, limit: 50);
+        if (mounted && _searchCtrl.text.trim() == q) {
+          setState(() => _searchResults = results);
+        }
+      } catch (_) {/* 搜索失败不打扰,继续输入会重试 */}
+    });
+  }
+
   final OrderAnnouncer _announcer = OrderAnnouncer();
 
   @override
@@ -188,8 +320,11 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       await ListenKeepAlive.start();
     });
     _refresh();
+    _refreshToday();
     // 轮询保底(WebSocket 断线期间也不会漏单)
     _timer = Timer.periodic(const Duration(seconds: 15), (_) => _refresh());
+    _todayTimer = Timer.periodic(
+        const Duration(seconds: 30), (_) => _refreshToday());
     // 持续催单:只要有待接订单,每 10 秒语音播报一次,直到商家处理
     _alertTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (_orders.any((o) => o.status == OrderStatus.paid)) {
@@ -203,6 +338,9 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
   void dispose() {
     _timer?.cancel();
     _alertTimer?.cancel();
+    _todayTimer?.cancel();
+    _searchDebounce?.cancel();
+    _searchCtrl.dispose();
     _wsPing?.cancel();
     _ws?.sink.close();
     _announcer.dispose();
@@ -237,6 +375,22 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
             ));
           }
           _refresh();
+        } else if (data['type'] == 'bad_review') {
+          // 差评即时横幅:响应越快挽回余地越大;点按钮直达评价页
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              backgroundColor: Theme.of(context).sz.danger,
+              duration: const Duration(seconds: 8),
+              content: Text(
+                  '💬 收到 ${data['rating']} 星评价:${data['summary'] ?? ''}'),
+              action: SnackBarAction(
+                label: '去回复',
+                textColor: Colors.white,
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantReviewsPage(api: widget.api))),
+              ),
+            ));
+          }
         } else if (data['type'] == 'urge') {
           // 用户催单:语音 + 橙色横幅 + 一键回复
           _announcer.announce();
@@ -282,6 +436,100 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       if (mounted) setState(() => _orders = orders);
       _autoPrintNew(orders);
     } catch (_) {}
+  }
+
+  Future<void> _refreshToday() async {
+    try {
+      final today = await widget.api.merchantToday();
+      final todos = await widget.api.merchantTodos();
+      if (mounted) {
+        setState(() {
+          _today = today;
+          _todos = todos;
+        });
+      }
+    } catch (_) {/* 看板拉不到不打扰接单主流程 */}
+  }
+
+  /// 今日 · 待办卡:今天卖了多少 + 欠着什么没处理,数字非零才显示行
+  Widget _todayCard() {
+    final sz = Theme.of(context).sz;
+    final today = _today?['today'] as Map<String, dynamic>?;
+    final yesterday = _today?['yesterday'] as Map<String, dynamic>?;
+    final todos = _todos;
+    if (today == null && todos == null) return const SizedBox.shrink();
+
+    final todoRows = <(String, VoidCallback)>[];
+    if (todos != null) {
+      void addRow(String key, String label, VoidCallback onTap) {
+        final n = todos[key] as int? ?? 0;
+        if (n > 0) todoRows.add(('$label $n', onTap));
+      }
+
+      addRow('after_sales', '售后待处理',
+          () => setState(() => _tab = 3));
+      addRow('bad_reviews_unreplied', '差评待回复', () {
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => MerchantReviewsPage(api: widget.api)));
+      });
+      addRow('coupon_batches_low', '券快发完',
+          () => setState(() => _tab = 3));
+      addRow('flash_expiring', '折扣将到期',
+          () => setState(() => _tab = 1));
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: Border.all(color: sz.line),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (today != null)
+          InkWell(
+            onTap: () => setState(() => _tab = 2),
+            child: Row(children: [
+              Text('今日 ', style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+              Text('${today['orders']}',
+                  style: szFigure(
+                      fontSize: 16, fontWeight: FontWeight.w700,
+                      color: sz.ink)),
+              Text(' 单 · ', style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+              Text(yuan(today['gmv_cents'] as int? ?? 0),
+                  style: szMoney(
+                      fontSize: 16, fontWeight: FontWeight.w700,
+                      color: sz.ink)),
+              const Spacer(),
+              if (yesterday != null)
+                Text('昨日 ${yesterday['orders']} 单·'
+                    '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
+                    style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+            ]),
+          ),
+        if (todoRows.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            for (final (label, onTap) in todoRows)
+              InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: sz.danger.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(label,
+                      style: TextStyle(fontSize: 12, color: sz.danger)),
+                ),
+              ),
+          ]),
+        ],
+      ]),
+    );
   }
 
   // ---------- 蓝牙自动出票 ----------
@@ -624,6 +872,19 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       case OrderStatus.ready:
         return [
           printButton,
+          // 平台配送且骑手已接:看骑手到哪了(顾客催单先打给店家,
+          // 店家不该两眼一抹黑)
+          if (!order.pickup && !order.selfDelivery &&
+              order.riderId != null) ...[
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+                icon: const Icon(Icons.delivery_dining, size: 18),
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                        builder: (_) => RiderTrackPage(
+                            api: widget.api, order: order))),
+                label: const Text('骑手位置')),
+          ],
           if (order.pickup) ...[
             const SizedBox(width: 8),
             FilledButton.icon(
@@ -651,6 +912,16 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       case OrderStatus.pickedUp:
         return [
           printButton,
+          if (!order.selfDelivery && order.riderId != null) ...[
+            const SizedBox(width: 8),
+            OutlinedButton.icon(
+                icon: const Icon(Icons.delivery_dining, size: 18),
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                        builder: (_) => RiderTrackPage(
+                            api: widget.api, order: order))),
+                label: const Text('骑手位置')),
+          ],
           // 自送的商家在路上,和骑手是同一种处境:需要导航,而不是一行文字地址。
           // 此前商家端全程没有地图,自送只能对着地址自己找
           if (order.selfDelivery) ...[
@@ -675,6 +946,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
   }
 
   List<Order> get _filteredOrders {
+    if (_searchActive) return _searchResults;
     const ongoing = {
       OrderStatus.accepted,
       OrderStatus.ready,
@@ -697,13 +969,49 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
     final pending = _orders.where((o) => o.status == OrderStatus.paid).length;
     return Scaffold(
       appBar: AppBar(
-        title: Text(switch (_tab) {
-          1 => '菜品管理',
-          2 => '对账',
-          3 => '店铺',
-          _ => pending > 0 ? '订单($pending 单待接)' : '订单',
-        }),
+        leading: _searchMode && _tab == 0
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => setState(() {
+                  _searchMode = false;
+                  _searchCtrl.clear();
+                  _searchResults = [];
+                }),
+              )
+            : null,
+        title: _searchMode && _tab == 0
+            ? TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                    hintText: '订单号后几位 / 取餐码 / 手机尾号',
+                    border: InputBorder.none),
+                onChanged: _onSearchChanged,
+              )
+            : Text(switch (_tab) {
+                1 => '菜品管理',
+                2 => '对账',
+                3 => '店铺',
+                _ => pending > 0 ? '订单($pending 单待接)' : '订单',
+              }),
         actions: [
+          if (_tab == 0 && !_searchMode)
+            IconButton(
+              tooltip: '搜单',
+              icon: const Icon(Icons.search),
+              onPressed: () => setState(() => _searchMode = true),
+            ),
+          if (!_searchMode)
+            IconButton(
+              tooltip: _busyActive ? '忙碌中,点击查看' : '高峰忙碌模式',
+              icon: Icon(
+                _busyActive
+                    ? Icons.local_fire_department
+                    : Icons.local_fire_department_outlined,
+                color: _busyActive ? Theme.of(context).sz.hold : null,
+              ),
+              onPressed: _busySheet,
+            ),
           Row(children: [
             Icon(
               _wsConnected
@@ -744,27 +1052,34 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                         // 平台公告(费率调整、新功能上线等,发通知不用发版)
                         AnnouncementBanner(
                             api: widget.api, audience: 'merchant'),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                          child: SegmentedButton<int>(
-                            segments: const [
-                              ButtonSegment(value: 0, label: Text('待接单')),
-                              ButtonSegment(value: 1, label: Text('进行中')),
-                              ButtonSegment(value: 2, label: Text('历史')),
-                            ],
-                            selected: {_segment},
-                            onSelectionChanged: (s) =>
-                                setState(() => _segment = s.first),
+                        if (!_searchMode) _todayCard(),
+                        if (!_searchMode)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                            child: SegmentedButton<int>(
+                              segments: const [
+                                ButtonSegment(value: 0, label: Text('待接单')),
+                                ButtonSegment(value: 1, label: Text('进行中')),
+                                ButtonSegment(value: 2, label: Text('历史')),
+                              ],
+                              selected: {_segment},
+                              onSelectionChanged: (s) =>
+                                  setState(() => _segment = s.first),
+                            ),
                           ),
-                        ),
                         Expanded(
                           child: RefreshIndicator(
                             onRefresh: _refresh,
                             child: _filteredOrders.isEmpty
-                                ? ListView(children: const [
+                                ? ListView(children: [
                                     Padding(
-                                        padding: EdgeInsets.all(24),
-                                        child: Center(child: Text('这一栏没有订单')))
+                                        padding: const EdgeInsets.all(24),
+                                        child: Center(
+                                            child: Text(_searchMode
+                                                ? (_searchActive
+                                                    ? '没有匹配的订单'
+                                                    : '输入订单号后几位、取餐码或手机尾号(至少 3 位)')
+                                                : '这一栏没有订单')))
                                   ])
                                 : ListView.builder(
                                     itemCount: _filteredOrders.length,

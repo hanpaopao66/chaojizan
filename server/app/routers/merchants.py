@@ -1965,6 +1965,271 @@ async def my_analytics(
     }
 
 
+# ---------- 忙碌模式(高峰压单:不闭店,先把预期说清楚) ----------
+
+@router.post("/me/busy", response_model=MerchantMeOut)
+async def set_busy(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """开/关忙碌模式。{minutes: 30|60|120, extra_minutes: 10|15|20}
+    或 {off: true} 提前结束。到点自动失效,不需要记得来关。"""
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    if payload.get("off"):
+        shop.busy_until = None
+    else:
+        try:
+            minutes = int(payload.get("minutes", 60))
+            extra = int(payload.get("extra_minutes", shop.busy_extra_minutes))
+        except (TypeError, ValueError):
+            raise HTTPException(422, "minutes / extra_minutes 需为整数")
+        if not 10 <= minutes <= 240:
+            raise HTTPException(422, "忙碌时长需在 10-240 分钟之间")
+        if not 5 <= extra <= 30:
+            raise HTTPException(422, "出餐加时需在 5-30 分钟之间")
+        shop.busy_until = (datetime.now(timezone.utc)
+                           + timedelta(minutes=minutes))
+        shop.busy_extra_minutes = extra
+    await db.commit()
+    await db.refresh(shop)
+    return shop
+
+
+# ---------- 证照公示(亮照经营,电商法要求) ----------
+
+# 公示只放行**本就该公示**的证照类型。身份证/健康证这类绝不能出现在这里
+_PUBLIC_LICENSE_KINDS = ("license", "special", "hygiene")
+
+
+async def _license_url_of(db: AsyncSession, shop: Merchant,
+                          kind: str) -> str:
+    """某类证照的存储 URL;酒店第二证照在 HotelProfile 上。"""
+    if kind == "license":
+        return shop.license_image_url or ""
+    if shop.biz_type != "hotel":
+        return ""
+    from ..models import HotelProfile
+    hp = await db.scalar(
+        select(HotelProfile).where(HotelProfile.merchant_id == shop.id))
+    if hp is None:
+        return ""
+    return (hp.special_license_image_url if kind == "special"
+            else hp.hygiene_image_url) or ""
+
+
+def _watermark_license(data: bytes) -> bytes:
+    """公示图加半透明平铺水印:公示是义务,但公示出去的图不该能被
+    原样拿去二次使用(冒充资质)。字体只有内置拉丁位图,所以水印
+    用域名而不是中文 —— 一样能表明出处。失败原图返回,公示义务优先。"""
+    try:
+        from io import BytesIO
+
+        from PIL import Image, ImageDraw, ImageFont
+
+        img = Image.open(BytesIO(data)).convert("RGBA")
+        layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        font = ImageFont.load_default(size=max(img.width // 18, 16))
+        text = "chaojizan.cc"
+        step_x, step_y = img.width // 2 + 1, max(img.height // 4, 60)
+        for y in range(0, img.height, step_y):
+            for x in range(0, img.width, step_x):
+                draw.text((x + 10, y + 10), text, font=font,
+                          fill=(120, 120, 120, 90))
+        out = BytesIO()
+        Image.alpha_composite(img, layer).convert("RGB").save(
+            out, format="JPEG", quality=85)
+        return out.getvalue()
+    except Exception:
+        return data
+
+
+@router.get("/{merchant_id}/licenses")
+async def merchant_licenses(
+    merchant_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """店铺证照公示(公开):证号 + 公示图入口。仅审核通过的店。
+    老库存量商家可能没传图(入驻早于强制上传),只公示证号不报错。"""
+    shop = await db.get(Merchant, merchant_id)
+    if shop is None or shop.status != MerchantStatus.approved:
+        raise HTTPException(404, "店铺不存在")
+    items = []
+    labels = ({"license": "营业执照", "special": "特种行业许可证(旅馆业)",
+               "hygiene": "卫生许可证"} if shop.biz_type == "hotel"
+              else {"license": "食品经营许可证"})
+    for kind, label in labels.items():
+        no = ""
+        if kind == "license":
+            no = shop.license_no or ""
+        elif kind == "special" and shop.biz_type == "hotel":
+            from ..models import HotelProfile
+            hp = await db.scalar(select(HotelProfile).where(
+                HotelProfile.merchant_id == shop.id))
+            no = (hp.special_license_no or "") if hp else ""
+        url = await _license_url_of(db, shop, kind)
+        if not no and not url:
+            continue
+        items.append({
+            "kind": kind,
+            "label": label,
+            "no": no,
+            "image_url": (f"/merchants/{merchant_id}/licenses/{kind}"
+                          if url else ""),
+        })
+    return {"items": items}
+
+
+@router.get("/{merchant_id}/licenses/{kind}")
+async def merchant_license_image(
+    merchant_id: int,
+    kind: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """公示证照图(公开出口,服务端回读私密桶并加水印)。
+    这是私密桶除 /files/ 鉴权出口之外唯一的放行口,且只认三类公示证照。"""
+    from fastapi.responses import Response
+
+    from ..services import storage
+    if kind not in _PUBLIC_LICENSE_KINDS:
+        raise HTTPException(404, "文件不存在")
+    shop = await db.get(Merchant, merchant_id)
+    if shop is None or shop.status != MerchantStatus.approved:
+        raise HTTPException(404, "店铺不存在")
+    url = await _license_url_of(db, shop, kind)
+    if not url:
+        raise HTTPException(404, "该店未上传此证照")
+    if url.startswith("/files/"):
+        key, private = url[len("/files/"):], True
+    elif url.startswith("/img/"):
+        key, private = url[len("/img/"):], False
+    elif url.startswith("/uploads/"):
+        key, private = f"legacy/{url[len('/uploads/'):]}", True
+    else:
+        raise HTTPException(404, "文件不存在")
+    try:
+        data = storage.read(key, private=private)
+        if data is None and url.startswith("/uploads/"):
+            # 老文件没迁进私密区的,还平铺在公开存储里
+            data = storage.read(url[len("/uploads/"):], private=False)
+    except storage.StorageError as e:
+        raise HTTPException(503, f"存储暂时不可用({e})")
+    if data is None:
+        raise HTTPException(404, "文件不存在")
+    return Response(_watermark_license(data), media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ---------- 今日看板 + 待办聚合(工作台第一眼) ----------
+
+def _bj_day_bounds(offset_days: int = 0) -> tuple[datetime, datetime]:
+    """北京时间某天的 UTC 起止(offset_days=0 今天,-1 昨天)。"""
+    now_bj = datetime.now(timezone.utc).astimezone(CN_TZ)
+    day = (now_bj + timedelta(days=offset_days)).date()
+    start = datetime.combine(day, datetime.min.time(), tzinfo=CN_TZ)
+    return start.astimezone(timezone.utc), \
+        (start + timedelta(days=1)).astimezone(timezone.utc)
+
+
+async def _day_summary(db: AsyncSession, merchant_id: int,
+                       start: datetime, end: datetime) -> dict:
+    """某天的下单口径汇总。**这是「生意热度」,不是「实际入账」**:
+    对账页(finance/daily)按 merchant_earnings 结算口径,未完成的单不在里面;
+    这里按 created_at 数今天发生了什么,两边数字对不上是正常的。"""
+    rows = await db.execute(
+        select(Order.status, Order.total_cents, Order.refund_cents,
+               Order.pickup)
+        .where(Order.merchant_id == merchant_id,
+               Order.created_at >= start, Order.created_at < end,
+               Order.status != OrderStatus.PENDING_PAYMENT))
+    ongoing_states = {OrderStatus.PAID, OrderStatus.ACCEPTED,
+                      OrderStatus.READY, OrderStatus.PICKED_UP}
+    done_states = {OrderStatus.DELIVERED, OrderStatus.COMPLETED}
+    orders = ongoing = done = cancelled = pickup_n = 0
+    gmv = 0
+    for status, total, refund, pickup in rows:
+        if status == OrderStatus.CANCELLED:
+            cancelled += 1
+            continue
+        orders += 1
+        gmv += total - refund
+        pickup_n += 1 if pickup else 0
+        if status in ongoing_states:
+            ongoing += 1
+        elif status in done_states:
+            done += 1
+    return {"orders": orders, "gmv_cents": gmv, "ongoing": ongoing,
+            "done": done, "cancelled": cancelled, "pickup_orders": pickup_n}
+
+
+@router.get("/me/today")
+async def my_today(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """今日实时经营(下单口径,北京时区),附昨日全天做参照。"""
+    shop = await _my_shop_or_404(db, user)
+    today = await _day_summary(db, shop.id, *_bj_day_bounds(0))
+    yesterday = await _day_summary(db, shop.id, *_bj_day_bounds(-1))
+    return {"today": today, "yesterday": yesterday}
+
+
+@router.get("/me/todos")
+async def my_todos(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """待办聚合:商家当下欠着的事,数字非零才值得展示。
+    只聚合已有数据,不引入新状态 —— 每一项点进去都有现成的处理界面。"""
+    from ..models import AfterSale, AfterSaleStatus, Review
+    shop = await _my_shop_or_404(db, user)
+    now = datetime.now(timezone.utc)
+
+    pending_orders = await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.merchant_id == shop.id,
+            Order.status == OrderStatus.PAID)) or 0
+    after_sales = await db.scalar(
+        select(func.count(AfterSale.id)).where(
+            AfterSale.merchant_id == shop.id,
+            AfterSale.status == AfterSaleStatus.pending)) or 0
+    # 差评待回复:近 7 天 ≤3 星还没回应的 —— 回应越快挽回余地越大
+    bad_unreplied = await db.scalar(
+        select(func.count(Review.id)).where(
+            Review.merchant_id == shop.id,
+            Review.merchant_rating <= 3,
+            Review.reply == "",
+            Review.hidden.is_(False),
+            Review.created_at > now - timedelta(days=7))) or 0
+    # 临期营销:店铺券快发完(余量 <10% 或已发完但还挂着)
+    batches = (await db.scalars(
+        select(CouponBatch).where(
+            CouponBatch.merchant_id == shop.id,
+            CouponBatch.active.is_(True)))).all()
+    coupon_low = sum(
+        1 for b in batches
+        if b.total > 0 and (b.total - b.issued) <= max(b.total // 10, 0))
+    # 限时折扣 24h 内到期(到期自动失效,提醒续期或收手)
+    flash_expiring = await db.scalar(
+        select(func.count(Dish.id)).where(
+            Dish.merchant_id == shop.id,
+            Dish.flash_price_cents.is_not(None),
+            Dish.flash_until.is_not(None),
+            Dish.flash_until > now,
+            Dish.flash_until < now + timedelta(hours=24))) or 0
+
+    return {
+        "pending_orders": pending_orders,
+        "after_sales": after_sales,
+        "bad_reviews_unreplied": bad_unreplied,
+        "coupon_batches_low": coupon_low,
+        "flash_expiring": flash_expiring,
+    }
+
+
 # ---------- 高峰备货(纯建议,不自动改库存) ----------
 
 @router.get("/me/stocking")

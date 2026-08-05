@@ -80,6 +80,8 @@ async def create_review(
         comment=payload.comment.strip(),
         image_urls=payload.image_urls[:6],
         tags=payload.tags,
+        # 配送标签只在有骑手的单上有意义(自取/自送没有平台配送)
+        rider_tags=payload.rider_tags if order.rider_id else [],
         is_anonymous=payload.is_anonymous,
         flagged=bool(flag_reason),
         flag_reason=flag_reason or "",
@@ -98,6 +100,31 @@ async def create_review(
     await submit_images(db, "review", review.id, payload.image_urls[:6])
     await db.commit()
     await db.refresh(review)
+
+    # 差评(≤3 星)即时触达商家:WS(前台响横幅)+ 推送(App 在后台)双通道,
+    # 与 new_order 同构。失败绝不拖垮评价主流程。
+    if payload.merchant_rating <= 3:
+        try:
+            from ..services.push import notify_bad_review
+            from ..ws import manager
+            shop = await db.get(Merchant, order.merchant_id)
+            summary = (review.comment or "、".join(review.tags))[:60]
+            await manager.broadcast(
+                f"merchant:{order.merchant_id}",
+                {
+                    "type": "bad_review",
+                    "review_id": review.id,
+                    "rating": payload.merchant_rating,
+                    "summary": summary,
+                    "order_no": order.order_no,
+                },
+            )
+            if shop is not None:
+                await notify_bad_review(
+                    shop.owner_id, payload.merchant_rating, summary)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("差评通知失败")
     return _to_out(review, user.name)
 
 
@@ -117,21 +144,76 @@ async def get_order_review(
 
 
 # ---------- 商家侧:查看 + 回复 ----------
-@router.get("/merchants/me/reviews", response_model=list[ReviewOut])
-async def my_shop_reviews(
+@router.get("/merchants/me/reviews/tag-stats")
+async def my_review_tag_stats(
+    days: int = 30,
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
+    """近 N 天负向标签聚合:"送得慢×8"比翻 50 条评价更快看清问题在哪一环。
+    商家组(自己能改的)与配送组(平台的责任)分开给。"""
+    from datetime import datetime, timedelta, timezone
+
+    from ..schemas import MERCHANT_NEG_TAGS, RIDER_REVIEW_TAGS
+    days = max(7, min(days, 90))
     shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
     if shop is None:
         raise HTTPException(404, "还没开店")
-    rows = await db.execute(
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        select(Review.tags, Review.rider_tags).where(
+            Review.merchant_id == shop.id,
+            Review.hidden.is_(False),
+            Review.created_at > since))).all()
+    merchant_counts: dict[str, int] = {}
+    rider_counts: dict[str, int] = {}
+    rider_neg = {"送得慢", "态度不好", "餐洒了"}
+    for tags, rider_tags in rows:
+        for t in tags or []:
+            if t in MERCHANT_NEG_TAGS:
+                merchant_counts[t] = merchant_counts.get(t, 0) + 1
+        for t in rider_tags or []:
+            if t in RIDER_REVIEW_TAGS and t in rider_neg:
+                rider_counts[t] = rider_counts.get(t, 0) + 1
+    return {
+        "days": days,
+        "reviews": len(rows),
+        "merchant_neg": sorted(
+            ({"tag": k, "count": v} for k, v in merchant_counts.items()),
+            key=lambda x: -x["count"]),
+        "delivery_neg": sorted(
+            ({"tag": k, "count": v} for k, v in rider_counts.items()),
+            key=lambda x: -x["count"]),
+    }
+
+
+@router.get("/merchants/me/reviews", response_model=list[ReviewOut])
+async def my_shop_reviews(
+    max_rating: int | None = None,   # 只看 ≤N 星(差评筛选)
+    unreplied: bool = False,         # 只看还没回复的
+    before: int | None = None,       # 游标:上一页最后一条的 review id
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """本店评价列表。无参调用行为与从前一致(最新 100 条);
+    带筛选/游标供独立评价页用。"""
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    stmt = (
         select(Review, User.name)
         .join(User, User.id == Review.customer_id)
         .where(Review.merchant_id == shop.id)
-        .order_by(Review.created_at.desc())
-        .limit(100)
     )
+    if max_rating is not None:
+        stmt = stmt.where(Review.merchant_rating <= max_rating)
+    if unreplied:
+        stmt = stmt.where(Review.reply == "")
+    if before is not None:
+        # id 与 created_at 同序,用 id 当游标不怕同秒并列
+        stmt = stmt.where(Review.id < before)
+    rows = await db.execute(
+        stmt.order_by(Review.id.desc()).limit(100))
     return [_to_out(review, name) for review, name in rows]
 
 

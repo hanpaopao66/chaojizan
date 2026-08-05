@@ -19,6 +19,7 @@ import 'coupons_page.dart';
 import 'group_cart_page.dart';
 import 'help_page.dart';
 import 'hotel_pages.dart';
+import 'licenses_page.dart';
 import 'messages_page.dart';
 import 'money_flow_page.dart';
 import 'invite_page.dart';
@@ -1136,6 +1137,10 @@ class _MerchantListViewState extends State<MerchantListView> {
                               has: m.kitchenCam,
                               label: m.kitchenCamLabel,
                               compact: true),
+                          // 忙碌模式:商家自己声明"现在出餐慢",
+                          // 下单前就让用户看到,而不是下了单再超时
+                          if (m.busyActive)
+                            SzChip('出餐较慢', color: sz.hold, dense: true),
                           for (final label in m.promoLabels)
                             SzChip(label, color: sz.hold, dense: true),
                         ],
@@ -1747,6 +1752,26 @@ class _MenuPageState extends State<MenuPage>
               style: TextStyle(fontSize: 12, height: 1.55, color: sz.ink),
             ),
           ),
+          // 忙碌模式:先说清楚再让用户下单,而不是下了单再超时
+          if (shop.busyActive)
+            Container(
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: sz.hold.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(children: [
+                Icon(Icons.schedule, size: 16, color: sz.hold),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                      '商家高峰忙碌中,出餐较慢,预计送达时间已相应放宽',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: sz.hold)),
+                ),
+              ]),
+            ),
           if (shop.announcement.isNotEmpty)
             Container(
               margin: const EdgeInsets.only(top: 8),
@@ -3216,7 +3241,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
 
   Future<void> _submitReview(int merchantRating, int? riderRating,
       String comment, List<String> imageUrls, List<String> tags,
-      bool isAnonymous) async {
+      List<String> riderTags, bool isAnonymous) async {
     try {
       final review = await widget.api.submitReview(
         widget.orderNo,
@@ -3225,6 +3250,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         comment: comment,
         imageUrls: imageUrls,
         tags: tags,
+        riderTags: riderTags,
         isAnonymous: isAnonymous,
       );
       if (mounted) setState(() => _review = review);
@@ -3979,6 +4005,7 @@ class _ReviewForm extends StatefulWidget {
       String comment,
       List<String> imageUrls,
       List<String> tags,
+      List<String> riderTags,
       bool isAnonymous) onSubmit;
 
   @override
@@ -3991,6 +4018,8 @@ class _ReviewFormState extends State<_ReviewForm> {
   final _comment = TextEditingController();
   final List<String> _imageUrls = [];
   final Set<String> _tags = {};
+  // 配送标签单独收:配送是平台的事,这组标签只挂骑手评分,不进商家维度
+  final Set<String> _riderTags = {};
   bool _anonymous = false; // 真匿名:商家侧完全不可反查
   bool _uploading = false;
   bool _busy = false;
@@ -4034,18 +4063,12 @@ class _ReviewFormState extends State<_ReviewForm> {
                   value: _merchantRating,
                   onChanged: (v) => setState(() => _merchantRating = v)),
             ]),
-            if (widget.hasRider)
-              Row(children: [
-                const Text('骑手'),
-                _Stars(
-                    value: _riderRating,
-                    onChanged: (v) => setState(() => _riderRating = v)),
-              ]),
+            // 商家维度标签(正向 + 负向,归因到商家能改的事)
             Wrap(
               spacing: 6,
               runSpacing: 2,
               children: [
-                for (final tag in kReviewTags)
+                for (final tag in [...kReviewTags, ...kMerchantNegTags])
                   FilterChip(
                     label: Text(tag, style: const TextStyle(fontSize: 12)),
                     selected: _tags.contains(tag),
@@ -4060,6 +4083,38 @@ class _ReviewFormState extends State<_ReviewForm> {
                   ),
               ],
             ),
+            if (widget.hasRider) ...[
+              Row(children: [
+                const Text('骑手'),
+                _Stars(
+                    value: _riderRating,
+                    onChanged: (v) => setState(() => _riderRating = v)),
+              ]),
+              // 配送标签只挂骑手评分:配送由平台负责,
+              // 配送原因的反馈不计入商家评分
+              Wrap(
+                spacing: 6,
+                runSpacing: 2,
+                children: [
+                  for (final tag in kRiderReviewTags)
+                    FilterChip(
+                      label: Text(tag, style: const TextStyle(fontSize: 12)),
+                      selected: _riderTags.contains(tag),
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (on) => setState(() {
+                        if (on && _riderTags.length < 3) {
+                          _riderTags.add(tag);
+                        } else {
+                          _riderTags.remove(tag);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+              Text('配送由平台负责,配送方面的反馈不计入商家评分',
+                  style: TextStyle(
+                      fontSize: 11, color: Theme.of(context).sz.inkFaint)),
+            ],
             TextField(
               controller: _comment,
               maxLength: 500,
@@ -4139,6 +4194,32 @@ class _ReviewFormState extends State<_ReviewForm> {
                 onPressed: _busy
                     ? null
                     : () async {
+                        // 轻提示(可跳过不强制):给商家打了低分,但选的全是
+                        // 配送标签 —— 配送由平台负责,别让商家背骑手的锅
+                        if (_merchantRating <= 3 &&
+                            _tags.isEmpty &&
+                            _riderTags.isNotEmpty) {
+                          final go = await showDialog<bool>(
+                            context: context,
+                            builder: (dialog) => AlertDialog(
+                              content: const Text(
+                                  '你选的都是配送方面的反馈 —— 配送由平台负责,'
+                                  '建议低分打给骑手评分,不影响商家。\n'
+                                  '当然,如果对商家也不满意,可以直接提交。'),
+                              actions: [
+                                TextButton(
+                                    onPressed: () =>
+                                        Navigator.pop(dialog, true),
+                                    child: const Text('直接提交')),
+                                FilledButton(
+                                    onPressed: () =>
+                                        Navigator.pop(dialog, false),
+                                    child: const Text('回去改一下')),
+                              ],
+                            ),
+                          );
+                          if (go != true) return;
+                        }
                         setState(() => _busy = true);
                         await widget.onSubmit(
                           _merchantRating,
@@ -4146,6 +4227,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                           _comment.text.trim(),
                           _imageUrls,
                           _tags.toList(),
+                          widget.hasRider ? _riderTags.toList() : const [],
                           _anonymous,
                         );
                         if (mounted) setState(() => _busy = false);
@@ -5147,8 +5229,23 @@ class _ShopInfoTab extends StatelessWidget {
           _row(context, Icons.storefront_outlined, shop.description),
         if (shop.announcement.isNotEmpty)
           _row(context, Icons.campaign_outlined, '公告:${shop.announcement}'),
-        _row(context, Icons.verified_outlined,
-            '食品经营许可证已由平台人工审核'),
+        // 证照公示(亮照经营,电商法要求):从"一句话声明"升级为可查验的公示页
+        InkWell(
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => ShopLicensesPage(
+                  api: api, merchantId: shop.id, shopName: shop.name))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(children: [
+              Icon(Icons.verified_outlined,
+                  size: 18, color: Theme.of(context).sz.inkMuted),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('证照信息(平台人工审核)')),
+              Icon(Icons.chevron_right,
+                  size: 18, color: Theme.of(context).sz.inkFaint),
+            ]),
+          ),
+        ),
         // 门店相册:商家自传的环境/后厨实拍,点开大图
         if (shop.photoUrls.isNotEmpty) ...[
           const SizedBox(height: 12),

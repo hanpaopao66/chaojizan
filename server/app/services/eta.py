@@ -70,6 +70,11 @@ def compute_eta(
     # 备餐:有实测分位数就用,没有就用兜底。**取更大的那个** ——
     # 实测比兜底短时不缩短 ETA(见上面的红线)
     prep = max(prep_minutes or 0.0, float(ETA_PREP_MINUTES))
+    # 忙碌模式:商家自己声明"现在出餐慢",承诺随之放宽 ——
+    # 先说清楚再让用户下单,而不是下了单再超时。
+    # getattr 防御:单元测试用 SimpleNamespace 模拟商家,没有这两个字段
+    if getattr(merchant, "busy_active", False):
+        prep += getattr(merchant, "busy_extra_minutes", 10)
 
     baseline = max(ETA_MIN_MINUTES, ETA_PREP_MINUTES
                    + math.ceil(distance_m / 1000 * ETA_MINUTES_PER_KM))

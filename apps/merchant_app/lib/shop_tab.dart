@@ -4,6 +4,7 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'appeal_page.dart';
 import 'dashboard_page.dart';
+import 'reviews_page.dart';
 import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
 import 'promises_page.dart';
@@ -1128,41 +1129,6 @@ class _ShopTabPageState extends State<ShopTabPage> {
     }
   }
 
-  Future<void> _reply(Review review) async {
-    final controller = TextEditingController(text: review.reply);
-    final text = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('回复评价'),
-        content: TextField(
-          controller: controller,
-          maxLength: 300,
-          maxLines: 3,
-          decoration: const InputDecoration(
-              hintText: '感谢惠顾,欢迎再来!', border: OutlineInputBorder()),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context), child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('回复')),
-        ],
-      ),
-    );
-    if (text == null || text.isEmpty) return;
-    try {
-      await widget.api.replyReview(review.id, text);
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
-
-  String _stars(int n) => '★' * n + '☆' * (5 - n);
-
   @override
   Widget build(BuildContext context) {
     final shop = _shop;
@@ -1559,6 +1525,29 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       '平台照常只抽餐费佣金。只影响开启之后的新订单',
                       style: Theme.of(context).textTheme.bodySmall),
                   const Divider(height: 24),
+                  Row(
+                    children: [
+                      const Text('自动接单'),
+                      const Spacer(),
+                      Switch(
+                        value: shop.autoAccept,
+                        onChanged: (v) async {
+                          try {
+                            await widget.api.updateShop({'auto_accept': v});
+                            _load();
+                          } catch (e) {
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(e.toString())));
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  Text('开启后来单免确认直接进入制作(仅营业中生效);'
+                      '拒单、缺货退款仍可在订单页手动操作',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
                   // 小票打印:云打印机(服务端直推)+ 蓝牙小票机(App 直连)
                   Row(
                     children: [
@@ -1848,63 +1837,26 @@ class _ShopTabPageState extends State<ShopTabPage> {
               ),
             const SizedBox(height: 12),
           ],
-          Text('顾客评价(${_reviews.length})',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          if (_reviews.isEmpty)
-            const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: Text('还没有评价'))),
-          for (final review in _reviews)
-            Card(
-              margin: const EdgeInsets.symmetric(vertical: 4),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(review.customerName,
-                            style: Theme.of(context).textTheme.titleSmall),
-                        const SizedBox(width: 8),
-                        Text(_stars(review.merchantRating),
-                            style: TextStyle(color: Theme.of(context).sz.hold)),
-                        const Spacer(),
-                        Text(review.createdAt.substring(0, 10),
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ],
-                    ),
-                    if (review.comment.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Text(review.comment),
-                    ],
-                    if (review.reply.isNotEmpty)
-                      Container(
-                        margin: const EdgeInsets.only(top: 6),
-                        padding: const EdgeInsets.all(8),
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest
-                              .withValues(alpha: 0.5),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text('我的回复:${review.reply}',
-                            style: Theme.of(context).textTheme.bodySmall),
-                      ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () => _reply(review),
-                        child: Text(review.reply.isEmpty ? '回复' : '修改回复'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          // 评价升级为独立页(reviews_page.dart):筛选/图片/追评/申诉都在那边,
+          // 这里只留入口。待回复数比总数更该被看到 —— 那是欠着顾客的话
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.rate_review_outlined),
+              title: Text('顾客评价(${_reviews.length})'),
+              subtitle: Text(() {
+                final unreplied =
+                    _reviews.where((r) => r.reply.isEmpty).length;
+                return unreplied > 0
+                    ? '$unreplied 条还没回复,尽量 24 小时内回应'
+                    : '筛差评、看图片、回追评都在这里';
+              }()),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context)
+                  .push(MaterialPageRoute(
+                      builder: (_) => MerchantReviewsPage(api: widget.api)))
+                  .then((_) => _load()),
             ),
+          ),
           const SizedBox(height: 12),
           const Card(
             child: ListTile(

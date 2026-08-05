@@ -20,7 +20,24 @@ const DONE = new Set(['delivered', 'completed', 'cancelled'])
 export default function FoodOrdersPage({ shop }: { shop: Merchant }) {
   const [orders, setOrders] = useState<FoodOrder[]>([])
   const [urged, setUrged] = useState<Set<string>>(new Set())
+  const [searchQ, setSearchQ] = useState('')
+  const [searchResults, setSearchResults] = useState<FoodOrder[] | null>(null)
   const pendingRef = useRef(0)
+
+  // 搜单:顾客打电话来查单时用(订单号片段/取餐码/手机尾号,≥3 字符)
+  async function doSearch(q: string) {
+    const trimmed = q.trim()
+    if (trimmed.length < 3) {
+      setSearchResults(null)
+      if (trimmed) message.warning('至少输入 3 个字符')
+      return
+    }
+    try {
+      setSearchResults(await myFoodOrders(trimmed))
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e))
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -102,7 +119,37 @@ export default function FoodOrdersPage({ shop }: { shop: Merchant }) {
       <Space style={{ marginBottom: 8, fontSize: 12, color: '#888' }}>
         <Badge status={connected ? 'success' : 'error'} />
         {connected ? '实时听单中' : '连接中断,轮询保底'}
+        <Input.Search
+          size="small"
+          allowClear
+          placeholder="搜单:订单号/取餐码/手机尾号"
+          style={{ width: 240 }}
+          value={searchQ}
+          onChange={(e) => {
+            setSearchQ(e.target.value)
+            if (!e.target.value.trim()) setSearchResults(null)
+          }}
+          onSearch={doSearch}
+        />
       </Space>
+      {searchResults !== null && (
+        <Card size="small" title={`搜索结果(${searchResults.length})`}
+          style={{ marginBottom: 12 }}
+          extra={<Button size="small" onClick={() => {
+            setSearchQ(''); setSearchResults(null)
+          }}>清除</Button>}>
+          {searchResults.length === 0 && (
+            <span style={{ color: '#999' }}>没有匹配的订单</span>
+          )}
+          <Row gutter={12}>
+            {searchResults.map((o) => (
+              <Col key={o.order_no} span={8}>
+                <OrderCard order={o} urged={false} onChanged={load} />
+              </Col>
+            ))}
+          </Row>
+        </Card>
+      )}
       <Row gutter={12}>
         <BoardColumn title={`待接单(${pending.length})`} highlight={pending.length > 0}>
           {pending.map((o) => (

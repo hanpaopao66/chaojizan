@@ -881,6 +881,7 @@ class ApiClient {
     bool isAnonymous = false,
     List<String> imageUrls = const [],
     List<String> tags = const [],
+    List<String> riderTags = const [], // 配送标签(只挂骑手评分)
   }) async {
     final data = await _request('POST', '/orders/$orderNo/review', body: {
       'merchant_rating': merchantRating,
@@ -888,8 +889,16 @@ class ApiClient {
       'comment': comment,
       'image_urls': imageUrls,
       'tags': tags,
+      'rider_tags': riderTags,
     });
     return Review.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 商家:近 N 天负向标签聚合({merchant_neg, delivery_neg, reviews, days})
+  Future<Map<String, dynamic>> myReviewTagStats({int days = 30}) async {
+    final data = await _request(
+        'GET', '/merchants/me/reviews/tag-stats', query: {'days': '$days'});
+    return (data as Map).cast<String, dynamic>();
   }
 
   /// 热搜词(近 30 天热销菜名)
@@ -916,9 +925,17 @@ class ApiClient {
         .toList();
   }
 
-  /// 商家看自己店的评价
-  Future<List<Review>> myReviews() async {
-    final data = await _request('GET', '/merchants/me/reviews');
+  /// 商家看自己店的评价。[maxRating] 只看 ≤N 星;[unreplied] 只看未回复;
+  /// [before] 游标分页(上一页最后一条的 id)
+  Future<List<Review>> myReviews(
+      {int? maxRating, bool unreplied = false, int? before}) async {
+    final query = <String, String>{
+      if (maxRating != null) 'max_rating': '$maxRating',
+      if (unreplied) 'unreplied': 'true',
+      if (before != null) 'before': '$before',
+    };
+    final data = await _request('GET', '/merchants/me/reviews',
+        query: query.isEmpty ? null : query);
     return (data as List)
         .map((e) => Review.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -1089,10 +1106,13 @@ class ApiClient {
   // ---------- 通用订单 ----------
   /// 我的订单(游标分页)。[before] 传上一页最后一单的 createdAt。
   /// 不传就是第一页;服务端 limit 上限 50。
-  Future<List<Order>> myOrders({String? before, int limit = 20}) async {
+  /// [q] 商家搜单:订单号片段/取餐码/顾客手机尾号(≥3 字符)
+  Future<List<Order>> myOrders(
+      {String? before, int limit = 20, String? q}) async {
     final data = await _request('GET', '/orders', query: {
       'limit': '$limit',
       if (before != null && before.isNotEmpty) 'before': before,
+      if (q != null && q.isNotEmpty) 'q': q,
     });
     return (data as List)
         .map((e) => Order.fromJson(e as Map<String, dynamic>))
@@ -1281,6 +1301,39 @@ class ApiClient {
       throw ApiException(response.statusCode, message);
     }
     return (jsonDecode(text) as Map)['url'] as String;
+  }
+
+  /// 忙碌模式:开([minutes] 时长,[extraMinutes] 出餐加时)或关([off])。
+  /// 到点自动失效,不需要记得来关
+  Future<Merchant> setBusy(
+      {int? minutes, int? extraMinutes, bool off = false}) async {
+    final data = await _request('POST', '/merchants/me/busy', body: {
+      if (off) 'off': true,
+      if (!off && minutes != null) 'minutes': minutes,
+      if (!off && extraMinutes != null) 'extra_minutes': extraMinutes,
+    });
+    return Merchant.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 店铺证照公示(公开,亮照经营):{items: [{kind,label,no,image_url}]}
+  /// image_url 为空串 = 老库存量商家未传图,只公示证号
+  Future<List<Map<String, dynamic>>> merchantLicenses(int merchantId) async {
+    final data = await _request('GET', '/merchants/$merchantId/licenses');
+    return ((data as Map)['items'] as List).cast<Map<String, dynamic>>();
+  }
+
+  /// 今日实时经营(下单口径)+ 昨日全天参照:
+  /// {today: {orders, gmv_cents, ongoing, done, cancelled, pickup_orders}, yesterday: {...}}
+  Future<Map<String, dynamic>> merchantToday() async {
+    final data = await _request('GET', '/merchants/me/today');
+    return (data as Map).cast<String, dynamic>();
+  }
+
+  /// 待办聚合:{pending_orders, after_sales, bad_reviews_unreplied,
+  /// coupon_batches_low, flash_expiring}
+  Future<Map<String, dynamic>> merchantTodos() async {
+    final data = await _request('GET', '/merchants/me/todos');
+    return (data as Map).cast<String, dynamic>();
   }
 
   /// 证照 OCR 识别:传已上传的证照 URL,返回识别出的字段。

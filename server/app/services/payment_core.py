@@ -81,4 +81,48 @@ async def mark_order_paid(
         print_order_async(order, merchant)
     except Exception:
         logger.exception("云打印任务创建失败")
+
+    # 自动接单(商家开了开关且在营业):支付即进入制作,高峰期不用守着屏幕点。
+    # 预约单照常自动接 —— 备餐提醒按预约时间走,不受接单时刻影响。
+    # 失败只记日志,单子留在 PAID 等商家手动接,绝不因此丢单
+    if merchant.auto_accept and merchant.is_open:
+        try:
+            await _auto_accept(db, order)
+        except Exception:
+            logger.exception("自动接单失败 %s(留在待接单)", order.order_no)
     return order
+
+
+async def _auto_accept(db: AsyncSession, order: Order) -> None:
+    """system 身份执行 PAID→ACCEPTED,副作用与商家手动接单对齐:
+    记 accepted_at(备餐计时起点)、事件流水、推骑手抢单、告知用户。"""
+    now = datetime.now(timezone.utc)
+    order.status = OrderStatus.ACCEPTED
+    order.accepted_at = now
+    db.add(OrderEvent(
+        order_id=order.id,
+        from_status=OrderStatus.PAID.value,
+        to_status=OrderStatus.ACCEPTED.value,
+        actor_role="system",
+        actor_id=None,
+        note="自动接单",
+    ))
+    await db.commit()
+    await db.refresh(order)
+    await manager.broadcast(
+        f"order:{order.order_no}",
+        {"type": "order_status", "order_no": order.order_no,
+         "status": order.status.value},
+    )
+    # 与手动接单同口径:自取/自送/追加单不进抢单池
+    if (order.rider_id is None and not order.pickup
+            and not order.self_delivery and not order.parent_order_no):
+        from ..models import Merchant as _M
+        from .push import notify_riders_new_grab
+        shop = await db.get(_M, order.merchant_id)
+        await notify_riders_new_grab(db, order, shop.name if shop else "商家")
+    from .push import notify_order_status
+    try:
+        await notify_order_status(order.customer_id, order.order_no, "制作中")
+    except Exception:
+        logger.exception("自动接单用户推送失败")

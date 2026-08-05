@@ -3,6 +3,7 @@ import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'hotel_pages.dart';
+import 'licenses_page.dart';
 import 'session.dart';
 import 'stay_checkout_page.dart';
 
@@ -199,6 +200,23 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
             ]),
             Text('${hotel.checkinFrom} 后入住 · ${hotel.checkoutUntil} 前退房',
                 style: theme.textTheme.bodySmall),
+            // 证照公示(亮照经营):营业执照 + 特种行业许可证
+            InkWell(
+              onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => ShopLicensesPage(
+                      api: widget.api,
+                      merchantId: hotel.id,
+                      shopName: hotel.name))),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.verified_outlined, size: 16),
+                  const SizedBox(width: 4),
+                  Text('证照信息', style: theme.textTheme.bodySmall),
+                  const Icon(Icons.chevron_right, size: 16),
+                ]),
+              ),
+            ),
             if (hotel.facilities.isNotEmpty) ...[
               const SizedBox(height: 8),
               Wrap(spacing: 8, runSpacing: 4, children: [

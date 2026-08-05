@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, text, update
+from sqlalchemy import false, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -690,7 +690,12 @@ async def transition(
         accepted_at = order.accepted_at
         if accepted_at.tzinfo is None:
             accepted_at = accepted_at.replace(tzinfo=timezone.utc)
-        promise = timedelta(minutes=shop_for_promise.promise_ready_minutes)
+        # 忙碌模式生效期出餐超时判定同步放宽(按判定时刻的忙碌状态,
+        # 接单后忙碌恰好结束的边界单按常规口径,不做更细的追溯)
+        promise_minutes = shop_for_promise.promise_ready_minutes + (
+            shop_for_promise.busy_extra_minutes
+            if shop_for_promise.busy_active else 0)
+        promise = timedelta(minutes=promise_minutes)
         # 「or」保持粘性:骑手上报「到店未出餐」已标过延误的,不因补出餐而清掉
         if order.scheduled_at is not None:
             scheduled_at = order.scheduled_at
@@ -1286,6 +1291,8 @@ async def preview_delivery_fee(
 async def my_orders(
     before: str | None = None,
     limit: int = 20,
+    status: str | None = None,
+    q: str | None = None,  # 商家搜单:订单号片段/取餐码/顾客手机尾号
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1304,6 +1311,11 @@ async def my_orders(
         except ValueError:
             raise HTTPException(422, "分页游标格式不对")
         query = query.where(Order.created_at < cursor)
+    if status:
+        try:
+            query = query.where(Order.status == OrderStatus(status))
+        except ValueError:
+            raise HTTPException(422, "未知的订单状态")
     role = user.role.value
     if role == "customer":
         query = query.where(Order.customer_id == user.id)
@@ -1316,6 +1328,20 @@ async def my_orders(
         if shop is None:
             return []
         query = query.where(Order.merchant_id == shop.id)
+        # 搜索(仅商家视角):顾客打电话来查单,翻列表翻不到才有这个框。
+        # 匹配在服务端做,响应字段口径不变 —— 不为搜索多下发一位手机号。
+        # like '%q%' 走不了索引,但先按本店过滤后基数很小,不值得建索引
+        if q:
+            if len(q) < 3:
+                raise HTTPException(422, "搜索至少输入 3 个字符")
+            pattern = f"%{q}%"
+            phone_match = select(User.id).where(
+                User.id == Order.customer_id, User.phone.like(f"%{q}"))
+            query = query.where(or_(
+                Order.order_no.ilike(pattern),
+                Order.pickup_code == q,
+                phone_match.exists() if q.isdigit() else false(),
+            ))
     result = await db.scalars(query)
     return await orders_out(db, list(result), user)
 
@@ -1439,9 +1465,15 @@ async def rider_location(
     order = await db.scalar(select(Order).where(Order.order_no == order_no))
     if order is None or order.rider_id is None:
         raise HTTPException(404, "订单不存在或还没有骑手接单")
-    # 归属校验:只有下单用户本人、该单骑手、管理员能看骑手位置
-    if user.id not in (order.customer_id, order.rider_id) \
-            and user.role.value != "admin":
+    # 归属校验:下单用户本人、该单骑手、管理员,以及**本店商家**(含店员)。
+    # 商家看骑手位置的正当性:顾客催单先打给店家,店家不能两眼一抹黑
+    allowed = (user.id in (order.customer_id, order.rider_id)
+               or user.role.value == "admin")
+    if not allowed and user.role.value == "merchant":
+        from ..services.staff import operable_shop
+        shop, _ = await operable_shop(db, user)
+        allowed = shop is not None and shop.id == order.merchant_id
+    if not allowed:
         raise HTTPException(403, "无权查看该订单")
     # 隐私最小化:订单终结后不再暴露骑手实时位置
     if order.status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED):
