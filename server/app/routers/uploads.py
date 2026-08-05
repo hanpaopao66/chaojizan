@@ -91,6 +91,10 @@ async def upload_image(
     if ext == ".heic":
         data = _heic_to_jpeg(data)
         ext = ".jpg"
+        # HEIC 压缩率比 JPEG 高一截,转码后可能反超 5MB 上限 ——
+        # 入库前再查一遍,别让"合规的原图"变出一个超限的存量文件
+        if len(data) > MAX_SIZE:
+            raise HTTPException(413, "图片转换后超过 5MB,请压缩后重试")
     if ext is None:
         ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
