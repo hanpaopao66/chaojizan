@@ -85,6 +85,11 @@ class _RiderHomePageState extends State<RiderHomePage>
   int _tab = 0;
   bool _online = false;
   int? _grabRadiusKm; // 接单半径偏好(null=不限),服务端持久化
+  /// 被骑手自己的偏好挡掉的单数。摆出来是**这一批的重点**:
+  /// 悄悄过滤会变成"今天怎么没单",他不会想到是两个月前设的一个开关
+  int _filteredByPrefs = 0;
+  /// 其余接单偏好(单价下限 / 只看顺路 / 避开酒类)
+  Map<String, dynamic> _prefs = const {};
   bool _gpsActive = false;
   List<Order> _available = [];
   List<Order> _mine = [];
@@ -177,6 +182,21 @@ class _RiderHomePageState extends State<RiderHomePage>
         order.merchantLat!, order.merchantLng!, order.lat, order.lng);
   }
 
+  /// 配送费构成一行文案:`基础 4.00 · 夜间 1.00 · 上楼 3.00`。
+  ///
+  /// 中文名一律用服务端下发的 `fee_part_labels`,不在客户端另写一份 ——
+  /// 两份口径迟早会分叉,而这里分叉的后果是"骑手端说 3 块爬楼费、
+  /// 顾客端说 3 块远距离费",两边都不信平台了。
+  /// 服务端漏给名字时退回原始 key,总比吞掉这一项强。
+  String _feePartsLine(Order order) {
+    final parts = <String>[];
+    order.feeParts.forEach((k, v) {
+      if (v <= 0) return;
+      parts.add('${order.feePartLabels[k] ?? k} ${(v / 100).toStringAsFixed(2)}');
+    });
+    return parts.join(' · ');
+  }
+
   /// 疲劳状态(null = 未取到/未上线)
   Map<String, dynamic>? _fatigue;
 
@@ -184,7 +204,13 @@ class _RiderHomePageState extends State<RiderHomePage>
     try {
       // 服务端已按「综合分 = 距离 - 等待加权」排好(顺路信息也来自服务端),
       // 客户端不再自行重排,避免把等久的老单永远压在底部
-      final available = _online ? await widget.api.availableOrders() : <Order>[];
+      // with_meta 版:除了单子还带回「被你自己的偏好挡掉了几单」。
+      // 挡掉的单还在池子里等别人抢 —— 不说出来,骑手只会以为"今天没单"
+      final pool = _online
+          ? await widget.api.availablePool()
+          : (items: <Order>[], filteredByPrefs: 0);
+      final available = pool.items;
+      _filteredByPrefs = pool.filteredByPrefs;
       final mine = await widget.api.myOrders();
       // 疲劳提醒:只提醒不断单(见服务端 labor_guard)。
       // 取不到就不显示 —— 疲劳提示挂了不该影响接单
@@ -924,6 +950,11 @@ class _RiderHomePageState extends State<RiderHomePage>
               ),
           ]),
         ),
+        IconButton(
+          icon: const Icon(Icons.tune, size: 20),
+          tooltip: '接单偏好',
+          onPressed: _openPrefs,
+        ),
         // 算法公开的入口就放在排序结果旁边 —— 公开给外人看却不给骑手看
         // 是本末倒置。骑手对着这个池子最常问的就是"凭什么这么排"
         IconButton(
@@ -934,6 +965,212 @@ class _RiderHomePageState extends State<RiderHomePage>
         ),
       ]),
     );
+  }
+
+  /// 「被你自己的设置挡掉了 N 单」。
+  ///
+  /// 这一条是接单偏好这个功能能不能做的**前提**:过滤器悄悄生效,
+  /// 表现出来就是"今天怎么一直没单",而骑手不会想到去翻两个月前
+  /// 设过的一个开关 —— 他只会觉得平台不给他派单。
+  Widget _filteredHint() {
+    if (_filteredByPrefs <= 0) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: Row(children: [
+        Icon(Icons.filter_alt_outlined, size: 15, color: sz.inkMuted),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text('另有 $_filteredByPrefs 单被你自己的接单偏好挡住了',
+              style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+        ),
+        TextButton(
+          onPressed: _openPrefs,
+          style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 8)),
+          child: const Text('去看看', style: TextStyle(fontSize: 12)),
+        ),
+      ]),
+    );
+  }
+
+  /// 接单偏好设置面板。
+  ///
+  /// 每一项都写清楚"这只影响你看到什么" —— 骑手很容易把它理解成
+  /// "平台按这个给我派单",然后指望调高下限就能多挣钱。
+  Future<void> _openPrefs() async {
+    try {
+      _prefs = await widget.api.riderPreferences();
+    } catch (_) {
+      // 读不到就用手上这份(可能为空):设置页打不开比显示旧值更糟
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => StatefulBuilder(builder: (sheet, setSheet) {
+        Future<void> patch(Map<String, dynamic> body) async {
+          try {
+            final saved = await widget.api.updateRiderPreferences(body);
+            setSheet(() => _prefs = saved);
+            setState(() => _grabRadiusKm = saved['grab_radius_km'] as int?);
+            _refresh();
+          } catch (e) {
+            if (!sheet.mounted) return;
+            ScaffoldMessenger.of(sheet).showSnackBar(
+                SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+          }
+        }
+
+        final minFee = (_prefs['grab_min_fee_cents'] as num?)?.toInt() ?? 0;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Row(children: [
+                Text('接单偏好',
+                    style: Theme.of(sheet).textTheme.titleMedium),
+                const Spacer(),
+              ]),
+              const Padding(
+                padding: EdgeInsets.only(top: 4, bottom: 8),
+                child: Text(
+                    '这几项只改「你看到哪些单」。被挡掉的单还在池子里等别人抢,'
+                    '平台不会因为你设了偏好就少派单给你。',
+                    style: TextStyle(fontSize: 12)),
+              ),
+              const Divider(height: 1),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _prefs['grab_same_way_only'] == true,
+                onChanged: (v) => patch({'grab_same_way_only': v}),
+                title: const Text('只看顺路单'),
+                subtitle: const Text(
+                    '下班捎一单的话开这个。手上没单时不生效 ——'
+                    '那时无所谓顺不顺路',
+                    style: TextStyle(fontSize: 12)),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _prefs['grab_avoid_alcohol'] == true,
+                onChanged: (v) => patch({'grab_avoid_alcohol': v}),
+                title: const Text('不看含酒的单'),
+                subtitle: const Text('送达要查收件人年龄,不想沾这个麻烦就关掉',
+                    style: TextStyle(fontSize: 12)),
+              ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('低于这个价的不显示',
+                    style: Theme.of(sheet).textTheme.bodySmall),
+              ),
+              Wrap(spacing: 6, children: [
+                for (final (cents, label) in const [
+                  (0, '不限'), (400, '4元'), (600, '6元'),
+                  (800, '8元'), (1200, '12元'),
+                ])
+                  ChoiceChip(
+                    label: Text(label, style: const TextStyle(fontSize: 12)),
+                    visualDensity: VisualDensity.compact,
+                    selected: minFee == cents,
+                    onSelected: (_) => patch({'grab_min_fee_cents': cents}),
+                  ),
+              ]),
+              const SizedBox(height: 8),
+              const Text(
+                  '想彻底歇一会儿就用上面的「下线」开关,别把下限拉满 ——'
+                  '那样你会以为是平台没给你派单。',
+                  style: TextStyle(fontSize: 11)),
+            ]),
+          ),
+        );
+      }),
+    );
+  }
+
+  /// 同店多单时的批量条:「这家店的 3 单一起标到店 / 一起取餐」。
+  ///
+  /// 午高峰一家店压着三四单是常态,而「到店」这个动作**物理上只发生
+  /// 一次** —— 站在店门口点三次,第三次点的时候等餐时长已经比第一次
+  /// 少了半分钟,这个证据本身就被操作方式污染了。
+  ///
+  /// 只有真的同店多单才出现;一单的时候不显示,免得占掉一整行。
+  Widget _batchBar() {
+    final byShop = <int, List<Order>>{};
+    for (final o in _mine) {
+      if (o.status == OrderStatus.pickedUp) continue;
+      if (o.parentOrderNo.isNotEmpty) continue; // 追加单随原单,不单独算
+      byShop.putIfAbsent(o.merchantId, () => []).add(o);
+    }
+    final groups = byShop.entries.where((e) => e.value.length >= 2).toList();
+    if (groups.isEmpty) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    return Column(
+      children: [
+        for (final g in groups)
+          Card(
+            margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            color: sz.earn.withValues(alpha: .08),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+              child: Row(children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${g.value.first.merchantName} · ${g.value.length} 单',
+                          style: const TextStyle(
+                              fontSize: 13.5, fontWeight: FontWeight.w600)),
+                      Text('同一家店,一次点完就行',
+                          style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+                    ],
+                  ),
+                ),
+                if (g.value.any((o) => o.arrivedShopAt.isEmpty))
+                  OutlinedButton(
+                      onPressed: () => _batch(g.key, arrived: true),
+                      child: const Text('全到店')),
+                if (g.value.any((o) => o.status == OrderStatus.ready)) ...[
+                  const SizedBox(width: 8),
+                  FilledButton(
+                      onPressed: () => _batch(g.key, arrived: false),
+                      child: const Text('全取餐')),
+                ],
+              ]),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// 逐单执行不整体回滚 —— 所以结果也要逐单说。
+  /// 骑手站在店门口要的是"哪几单好了、哪单还得再点一下",不是一个 409。
+  Future<void> _batch(int merchantId, {required bool arrived}) async {
+    try {
+      final fix = _location.lastFix;
+      final r = arrived
+          ? await widget.api.batchArrived(merchantId,
+              lat: fix?.lat, lng: fix?.lng)
+          : await widget.api.batchPicked(merchantId);
+      if (!mounted) return;
+      final failed = ((r['items'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>()
+          .where((i) => i['ok'] != true)
+          .toList();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(failed.isEmpty
+            ? '${r['note']}'
+            : '${r['note']};没成的:'
+                '${failed.map((f) => "${f["order_no"]} ${f["reason"]}").join("、")}'),
+        duration: Duration(seconds: failed.isEmpty ? 3 : 8),
+      ));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+    }
   }
 
   void _openMap(Order order) {
@@ -1078,6 +1315,18 @@ class _RiderHomePageState extends State<RiderHomePage>
                                   : '配送费 100% 归你,平台不抽',
                               style: TextStyle(
                                   fontSize: 11, color: sz.inkMuted)),
+                          // 这 8 块钱是怎么来的 —— **接单前就摊开**。
+                          // 别家骑手端只给一个总数,骑手要跑到楼下才知道
+                          // 是 6 楼没电梯;知道钱里有 3 块是爬楼费,
+                          // 才谈得上"判断这单值不值"
+                          if (order.feeParts.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                  _feePartsLine(order),
+                                  style: TextStyle(
+                                      fontSize: 11, color: sz.inkFaint)),
+                            ),
                         ],
                       ),
                       const Spacer(),
@@ -1129,6 +1378,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                             return Column(children: [
                               _fatigueBar(),
                               _radiusBar(),
+                              _filteredHint(),
                             ]);
                           }
                           return _orderCard(
@@ -1160,9 +1410,10 @@ class _RiderHomePageState extends State<RiderHomePage>
                         padding: EdgeInsets.all(24), child: Text('没有进行中的配送'))
                   ])
                 : ListView.builder(
-                    itemCount: _mine.length,
+                    itemCount: _mine.length + 1,
                     itemBuilder: (context, i) {
-                      final order = _mine[i];
+                      if (i == 0) return _batchBar();
+                      final order = _mine[i - 1];
                       final actions = <Widget>[
                         OutlinedButton.icon(
                             icon: const Icon(Icons.map, size: 18),

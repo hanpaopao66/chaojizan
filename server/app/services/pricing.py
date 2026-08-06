@@ -34,19 +34,58 @@ def is_night(now: datetime | None = None) -> bool:
     return hour >= settings.delivery_night_start_hour or hour < settings.delivery_night_end_hour
 
 
+def door_fee_cents(floor: int | None, has_elevator: bool | None,
+                   to_door: bool = True) -> int:
+    """上门难度费(分)。**顾客付,全额归骑手。**
+
+    ## 为什么只算无电梯
+
+    等电梯的时间已经在 ETA 里补过(labor_guard.floor_minutes),再收一笔
+    就是同一件事收两次钱。真正吃力气的是**背着餐爬楼梯**,
+    而骑手的原话是:爬 1–4 楼勉强能被派费覆盖,**从 5 楼开始就不合理了**。
+
+    ## 为什么按声明的楼层算,不按实际爬了几层
+
+    事后按实际结算需要骑手举证 —— 那又回到"让在马路上跑车的人
+    收集材料"的坑里。按下单时声明的楼层计费;声明错了(填 1 楼实际 6 楼)
+    走骑手的异常上报通道,那一单**送到楼下即算完成**。
+
+    ## 顾客选了「送到楼下」就不收
+
+    不收这笔钱,骑手也没有义务上楼。这一条必须同时写进骑手端和规则页,
+    否则这笔费用就是白收的。
+    """
+    if not to_door or has_elevator or not floor:
+        return 0
+    over = floor - settings.door_fee_free_floor
+    if over <= 0:
+        return 0
+    return min(over * settings.door_fee_per_floor_cents,
+               settings.door_fee_max_cents)
+
+
 def delivery_fee_parts(
     distance_m: float,
     *,
     weather_on: bool = False,
     when: datetime | None = None,
+    floor: int | None = None,
+    has_elevator: bool | None = None,
+    to_door: bool = True,
 ) -> dict[str, int]:
-    """配送费组成(分)。键固定:base/night/weather,前端与测试按键取用。"""
+    """配送费组成(分)。键固定:base/night/weather/door,前端与测试按键取用。
+
+    **这份拆分要一路带到订单里**(Order.fee_parts),不是只在预览时露一次。
+    顾客要知道 8 块钱花在哪、骑手要在**接单前**就知道这单为什么值 8 块。
+    """
     extra_km = max(0.0, distance_m / 1000 - settings.delivery_base_km)
     base = settings.delivery_base_fee_cents + math.ceil(extra_km) * settings.delivery_per_km_cents
     return {
         "base": min(base, settings.delivery_max_fee_cents),
         "night": settings.delivery_night_surcharge_cents if is_night(when) else 0,
         "weather": settings.delivery_weather_surcharge_cents if weather_on else 0,
+        # 上门难度:无电梯高楼层。有电梯不收(等电梯已在 ETA 里补过)
+        "door": door_fee_cents(floor, has_elevator, to_door),
     }
 
 

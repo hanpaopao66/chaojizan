@@ -859,6 +859,9 @@ class OrderCreateIn(BaseModel):
     # 爬 6 楼和 1 楼临街是两种活
     floor: int | None = Field(default=None, ge=-5, le=200)
     has_elevator: bool | None = None
+    # 送上门 / 送到楼下。**顾客自己选** —— 选楼下就不收上门难度费,
+    # 骑手也没有义务上楼。默认 true 与此前行为一致
+    to_door: bool = True
     lat: float | None = None
     lng: float | None = None
     contact_name: str = ""
@@ -901,6 +904,12 @@ class OrderOut(BaseModel):
     eta_at: datetime | None = None
     # 骑手到店时刻:骑手端据此决定还要不要显示「我到店了」按钮
     arrived_shop_at: datetime | None = None
+    # 配送费构成 {base, night, weather, door}(分)+ 中文名。
+    # **四端都给**:顾客要知道这 8 块钱花在哪、骑手要在接单前就知道
+    # 这单为什么值 8 块、商家被问起配送费贵时能解释
+    fee_parts: dict = {}
+    fee_part_labels: dict = {}
+    to_door: bool = True
     address: str
     lat: float
     lng: float
@@ -950,6 +959,11 @@ class OrderOut(BaseModel):
     # 整单经济性(#142):骑手判断「值不值得接」要的是这三个,不是"到店多远"
     est_minutes: float | None = None       # 预计总耗时(到店 + 等餐 + 送达)
     est_wait_minutes: float | None = None  # 其中在店等餐(按该店实测出餐分位数)
+    # 配送费构成 + 中文名。**接单前就给** —— 骑手要知道这单 8 块里
+    # 有 3 块是因为要爬 6 楼,才判断得了值不值。
+    # (美团官方只说"接单前能看到价格",看不到明细;这一步我们做了)
+    fee_parts: dict = {}
+    fee_part_labels: dict = {}
     # 等餐预期来源:measured=该店实测 P80,declared=商家自报(样本不足)。
     # **必须透传** —— 「等 22 分钟」和「大概 15 分钟(样本还少)」,
     # 骑手的决策是不一样的

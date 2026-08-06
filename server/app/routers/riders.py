@@ -265,15 +265,85 @@ async def update_preferences(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    """骑手偏好:接单半径(km,null=不限)。顺路单永远豁免半径。"""
+    """骑手接单偏好。四项都**只改他自己看到什么**,不改订单本身。
+
+    - `grab_radius_km`:接单半径(km,null=不限)。顺路单永远豁免半径;
+    - `grab_min_fee_cents`:低于这个数的不显示(0=不限)。
+      一个 3 块的单他看一眼就划走,却要一天划几百次;
+    - `grab_same_way_only`:只看同店/顺路。兼职骑手要的不是"5 公里内",
+      是"下班这条路上";
+    - `grab_avoid_alcohol`:不看酒类。要查收件人年龄,有人不想沾这麻烦。
+
+    **过滤掉的单不会消失**,还在池子里等别人抢 —— 所以抢单池返回体里
+    带 `filtered_by_prefs`,把"被你自己的设置挡掉了几单"摆出来。
+    悄悄过滤会变成"今天怎么没单",他不会想到是两个月前设的一个开关。
+    """
     if "grab_radius_km" in payload:
         radius = payload["grab_radius_km"]
         if radius is not None and (not isinstance(radius, int)
                                    or not 1 <= radius <= 20):
             raise HTTPException(422, "接单半径需为 1-20 的整数公里数,或 null 不限")
         user.grab_radius_km = radius
+    if "grab_min_fee_cents" in payload:
+        v = payload["grab_min_fee_cents"]
+        # 上限 2000 分:再高就等于"我不接单了",那该用下线开关而不是
+        # 一个看不见的过滤器 —— 否则他会以为平台没派单给他
+        if not isinstance(v, int) or not 0 <= v <= 2000:
+            raise HTTPException(422, "单价下限需为 0-2000 分(0=不限)")
+        user.grab_min_fee_cents = v
+    for key in ("grab_same_way_only", "grab_avoid_alcohol"):
+        if key in payload:
+            if not isinstance(payload[key], bool):
+                raise HTTPException(422, f"{key} 需为 true/false")
+            setattr(user, key, payload[key])
     await db.commit()
-    return {"grab_radius_km": user.grab_radius_km}
+    return {
+        "grab_radius_km": user.grab_radius_km,
+        "grab_min_fee_cents": user.grab_min_fee_cents,
+        "grab_same_way_only": user.grab_same_way_only,
+        "grab_avoid_alcohol": user.grab_avoid_alcohol,
+    }
+
+
+@router.get("/me/preferences")
+async def my_preferences(user: User = Depends(require_role("rider"))):
+    """当前偏好。客户端设置页进来先读,免得显示成默认值把他的设置盖掉。"""
+    return {
+        "grab_radius_km": user.grab_radius_km,
+        "grab_min_fee_cents": user.grab_min_fee_cents,
+        "grab_same_way_only": user.grab_same_way_only,
+        "grab_avoid_alcohol": user.grab_avoid_alcohol,
+    }
+
+
+@router.get("/me/messages")
+async def my_messages(
+    category: str | None = None,   # money / safety / appeal / system
+    before: int | None = None,     # push_logs 游标(上一页最后一条 id)
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手消息中心:平台公告 + 发给我的通知。
+
+    ## 为什么骑手比商家更需要这一页
+
+    商家至少还有个后台天天开着。骑手在马路上,推送弹出来那一下没看到
+    就**永远找不回来了** —— 而发给他的偏偏是最要紧的几类:申诉结果、
+    提现到账、极端天气预警、装备发放。此前这些只走推送,没有归档页。
+
+    订单类不进这里(订单页本身就是它们的家),分类口径见
+    services/message_center.py。
+    """
+    from ..services import message_center
+    return await message_center.fetch(db, "rider", user.id,
+                                      category=category, before=before)
+
+
+@router.post("/me/messages/read")
+async def mark_messages_read(user: User = Depends(require_role("rider"))):
+    """记已读水位到当前时刻。"""
+    from ..services import message_center
+    return await message_center.mark_read("rider", user.id)
 
 
 @router.get("/me/worklog")
@@ -496,8 +566,9 @@ async def _my_in_flight(db: AsyncSession, rider_id: int) -> list[Order]:
     ))
 
 
-@router.get("/available-orders", response_model=list[OrderOut])
+@router.get("/available-orders")
 async def available_orders(
+    with_meta: bool = False,
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -509,6 +580,10 @@ async def available_orders(
     排序口径见 services/dispatch.py,那里是**公开算法的唯一事实来源**
     (/transparency/dispatch 从同一处读权重,不另抄一份)。
     骑手位置取不到(未上报/过期)时退化为按等待时长排(老单在前)。
+
+    `with_meta=true` 时返回 `{items, filtered_by_prefs, prefs}` 而不是裸数组:
+    骑手自己设的偏好挡掉了几单要**摆出来**,否则"今天怎么没单"这个疑问
+    没有答案。不传时保持裸数组 —— 老版本客户端拿到对象会直接崩。
     """
     from datetime import datetime, timezone
 
@@ -562,6 +637,8 @@ async def available_orders(
     radius_m = (user.grab_radius_km * 1000
                 if user.grab_radius_km and rider_pos else None)
     scored: list[tuple[float, OrderOut]] = []
+    # 被骑手自己的偏好挡掉的单数。**必须回报** —— 见下方 with_meta
+    filtered = 0
     for order, out in zip(orders, outs):
         out.same_shop = order.merchant_id in my_shops
         score_val = 0.0
@@ -617,16 +694,55 @@ async def available_orders(
             out.est_wait_minutes = econ["wait_minutes"]
             out.wait_source = ps.source if ps else "declared"
             out.cents_per_minute = econ["cents_per_minute"]
+            # 配送费构成:**接单前**就摊开给骑手看。
+            # 8 块里有 3 块是因为要爬 6 楼 —— 知道这个才判断得了值不值
+            from .orders import FEE_PART_LABELS
+            out.fee_parts = {k: v for k, v in (order.fee_parts or {}).items()
+                             if v}
+            out.fee_part_labels = {k: FEE_PART_LABELS[k]
+                                   for k in out.fee_parts
+                                   if k in FEE_PART_LABELS}
 
             # 接单半径过滤(骑手自设);同店/顺路豁免 —— 手头单顺路的永远给看
             if (radius_m is not None and distance > radius_m
                     and not out.same_shop and not out.same_way):
+                filtered += 1
                 continue
+            # 只看顺路(兼职骑手:他要的不是"5 公里内",是"下班这条路上")。
+            # 手上没单时不生效 —— 那时无所谓顺不顺路,一刀切会让他
+            # 一整天看到 0 单还找不到原因
+            if (user.grab_same_way_only and my_drops
+                    and not out.same_shop and not out.same_way):
+                filtered += 1
+                continue
+        # 下面两条不依赖定位,放在距离分支外 —— 否则关掉定位权限的骑手
+        # 设了偏好却完全不生效,而界面上还显示着开着
+        if (user.grab_min_fee_cents
+                and order.delivery_fee_cents + order.tip_cents
+                < user.grab_min_fee_cents):
+            filtered += 1
+            continue
+        # 酒类看订单条目快照上的 is_alcohol(客户端也是按这个字段
+        # 显示「送达请查验年龄」的,同一个事实来源)
+        if (user.grab_avoid_alcohol
+                and any(i.get("is_alcohol") for i in (order.items or []))):
+            filtered += 1
+            continue
         scored.append((score_val, out))
     if rider_pos:
         # 综合分越小越靠前;分数相同(理论上极少)按原有等待顺序稳定排
         scored.sort(key=lambda pair: pair[0])
-    return [out for _, out in scored[:50]]
+    items = [out for _, out in scored[:50]]
+    if not with_meta:
+        return items
+    # 带上"被你自己的设置挡掉了几单"。悄悄过滤会变成"今天怎么没单",
+    # 骑手不会想到是两个月前设的一个开关 —— 这个数就是那条线索。
+    # 老版本客户端不传 with_meta,拿到的还是原来的数组,不会崩
+    return {"items": items, "filtered_by_prefs": filtered,
+            "prefs": {"grab_radius_km": user.grab_radius_km,
+                      "grab_min_fee_cents": user.grab_min_fee_cents,
+                      "grab_same_way_only": user.grab_same_way_only,
+                      "grab_avoid_alcohol": user.grab_avoid_alcohol}}
 
 
 # ---------- 骑手申诉(超时/差评非我责任) ----------
@@ -800,6 +916,90 @@ async def mark_arrived_shop(
     await db.refresh(order)
     merchant = await db.get(Merchant, order.merchant_id)
     return order_out(order, merchant, viewer=user)
+
+
+@router.post("/orders/batch-arrived")
+async def batch_arrived(
+    payload: dict,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """同一家店的在手单,一次全标到店。
+
+    ## 为什么值得单开一个端点
+
+    同店多单是常态(午高峰一家店压着三四单),而"到店"这个动作
+    **物理上只发生一次** —— 让骑手站在店门口点三次,第三次点的时候
+    等餐时长已经比第一次少了半分钟,这个证据本身就被操作方式污染了。
+    批量标记让三单共用同一个到店时刻,才是事实。
+
+    ## 不整体回滚
+
+    三单里有一单状态不对(比如已经取过了),不该把另外两单一起打回。
+    逐单执行、逐单报结果,失败的那条给出原因就行 —— 骑手在店门口,
+    要的是"哪几单好了、哪单还得点一下",不是一个 409。
+    """
+    merchant_id = payload.get("merchant_id")
+    if not isinstance(merchant_id, int):
+        raise HTTPException(422, "缺少 merchant_id")
+    orders = [o for o in await _my_in_flight(db, user.id)
+              if o.merchant_id == merchant_id]
+    if not orders:
+        raise HTTPException(404, "你在这家店没有在手的单")
+    results = []
+    for o in orders:
+        try:
+            await mark_arrived_shop(o.order_no, payload, user, db)
+            results.append({"order_no": o.order_no, "ok": True})
+        except HTTPException as exc:
+            results.append({"order_no": o.order_no, "ok": False,
+                            "reason": exc.detail})
+    done = sum(1 for r in results if r["ok"])
+    return {"items": results, "ok_count": done,
+            "note": f"{len(orders)} 单里标记成功 {done} 单"}
+
+
+@router.post("/orders/batch-picked")
+async def batch_picked(
+    payload: dict,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """同一家店的在手单,一次全标取餐。
+
+    取餐码按单传(`codes` 是 `{订单号: 尾号后 4 位}`),没传的单不核验 ——
+    与单单取餐同一口径:核验是防拿错的工具,不是新门槛。
+    同样逐单执行不整体回滚。
+    """
+    from ..schemas import TransitionIn
+    from .orders import transition
+
+    merchant_id = payload.get("merchant_id")
+    if not isinstance(merchant_id, int):
+        raise HTTPException(422, "缺少 merchant_id")
+    codes = payload.get("codes") or {}
+    orders = [o for o in await _my_in_flight(db, user.id)
+              if o.merchant_id == merchant_id]
+    if not orders:
+        raise HTTPException(404, "你在这家店没有在手的单")
+    results = []
+    for o in orders:
+        try:
+            # 走同一个 transition,而不是自己写一遍改状态 ——
+            # 那里面挂着推送、回调、事件留痕,复制一份必然漏
+            await transition(
+                o.order_no,
+                TransitionIn(to_status=OrderStatus.PICKED_UP,
+                             verify_code=str(codes.get(o.order_no, "")),
+                             force=bool(payload.get("force"))),
+                user, db)
+            results.append({"order_no": o.order_no, "ok": True})
+        except HTTPException as exc:
+            results.append({"order_no": o.order_no, "ok": False,
+                            "reason": exc.detail})
+    done = sum(1 for r in results if r["ok"])
+    return {"items": results, "ok_count": done,
+            "note": f"{len(orders)} 单里取餐成功 {done} 单"}
 
 
 @router.post("/grab/{order_no}", response_model=OrderOut)

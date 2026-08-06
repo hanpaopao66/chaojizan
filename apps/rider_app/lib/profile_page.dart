@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'dispatch_spec_page.dart';
+import 'messages_page.dart';
 import 'reviews_page.dart';
 
 /// 骑手「我的」中心(#147)。
@@ -54,6 +55,7 @@ class RiderProfilePage extends StatefulWidget {
 class _RiderProfilePageState extends State<RiderProfilePage> {
   Map<String, dynamic>? _fatigue;
   Map<String, dynamic>? _worklog;
+  int _unread = 0;
 
   @override
   void initState() {
@@ -70,6 +72,16 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
     try {
       final w = await widget.api.riderWorklog();
       if (mounted) setState(() => _worklog = w);
+    } catch (_) {}
+    await _loadUnread();
+  }
+
+  /// 未读数取不到就当 0:入口照常在,只是不显角标 ——
+  /// 为了一个数字把整页搞崩不值得
+  Future<void> _loadUnread() async {
+    try {
+      final m = await widget.api.riderMessages();
+      if (mounted) setState(() => _unread = (m['unread'] as num?)?.toInt() ?? 0);
     } catch (_) {}
   }
 
@@ -99,6 +111,16 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
                   () => _snack('工时明细在钱包页「工时」区块')),
               _Item('顾客评价', '看看顾客怎么说(不影响派单)',
                   Icons.reviews_outlined, () => _push(RiderReviewsPage(api: widget.api))),
+              // 推送弹出来那一下没看到就永远找不回来了 ——
+              // 而发给骑手的偏偏是申诉结果、提现到账、极端天气这几类
+              _Item(
+                  '消息',
+                  _unread > 0 ? '$_unread 条未读' : '申诉结果、到账、天气预警',
+                  Icons.notifications_none,
+                  () async {
+                    await _push(RiderMessagesPage(api: widget.api));
+                    _loadUnread();
+                  }),
             ]),
             const SizedBox(height: 18),
             const SzSectionTitle('保障'),
@@ -238,8 +260,8 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
     return (m / 60).toStringAsFixed(1);
   }
 
-  void _push(Widget page) => Navigator.of(context)
-      .push(MaterialPageRoute<void>(builder: (_) => page));
+  Future<void> _push(Widget page) => Navigator.of(context)
+      .push<void>(MaterialPageRoute<void>(builder: (_) => page));
 
   void _toWallet() {
     widget.onOpenWallet?.call();

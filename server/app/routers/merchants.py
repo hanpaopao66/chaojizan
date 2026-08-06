@@ -3236,8 +3236,11 @@ async def my_todos(
             Dish.flash_until > now,
             Dish.flash_until < now + timedelta(hours=24))) or 0
 
-    # 未读消息(评价/系统触达;订单类与公告不计):与消息中心同一口径
-    messages_unread = await _unread_count(db, user.id)
+    # 未读消息(评价/系统触达;订单类与公告不计):与消息中心同一口径 ——
+    # 走同一个函数,而不是"照着写一遍",两处数字对不上比不显示更糟
+    from ..services import message_center
+    messages_unread = await message_center.unread_count(db, "merchant",
+                                                        user.id)
 
     # 超过 24 小时还没回的差评:行业里"差评 24 小时内必回"是常识,
     # 拖过一天再回,顾客早就走了。单列出来而不是混在 bad_reviews_unreplied 里
@@ -3877,64 +3880,9 @@ async def revoke_api_key(
 
 
 # ---------- 消息中心(公告 + 触达记录,订单类不进这里) ----------
-
-# 已读水位存 Redis:一人一条时间戳。Redis 无持久化卷,水位可能整体丢失 ——
-# 丢了不能退化成"未读=开店以来全部推送",见 _unread_since
-_MSG_READ_KEY = "msg:read:merchant:{user_id}"
-# 没有水位时(新商家/Redis 重建)只看最近这些天,免得徽标显示"新消息 8342"
-_MSG_FALLBACK_DAYS = 7
-
-# 订单类推送**不进消息中心**:订单页本身就是它们的家,
-# 一家日 300 单的店配好推送后,消息中心第一页会全是"新订单来了"。
-# 按标题关键词排除 —— push 的标题是我们自己写死的常量(services/push.py),
-# 不是用户输入,匹配稳定
-_ORDER_TITLE_KEYWORDS = ("订单", "新单", "催单", "骑手", "配送", "送达",
-                         "售后", "退款", "取餐")
-_REVIEW_TITLE_KEYWORDS = ("评价", "回复", "点评")
-
-
-def _message_filters():
-    """SQL 层过滤条件(排除订单类)。**必须在 SQL 里做**:
-    在 Python 里对取回的一页做 filter,会出现"这一页恰好全被过滤掉 →
-    客户端拿到空列表 → 没有游标可以继续翻"的死局。"""
-    from ..models import PushLog
-    conds = [PushLog.title.notlike(f"%{kw}%")
-             for kw in _ORDER_TITLE_KEYWORDS]
-    return conds
-
-
-def _classify_message(title: str) -> str:
-    """按标题归类:评价类要醒目,其余归系统。"""
-    return ("review" if any(kw in title for kw in _REVIEW_TITLE_KEYWORDS)
-            else "system")
-
-
-async def _unread_since(user_id: int) -> datetime:
-    """未读统计的起点:有水位用水位,没有(新商家/Redis 重建)退回最近 N 天。
-    Redis 故障时同样退回 —— 未读数偏大可以忍,首屏 500 不行。"""
-    from ..redis_client import get_redis
-    fallback = datetime.now(timezone.utc) - timedelta(days=_MSG_FALLBACK_DAYS)
-    try:
-        raw = await get_redis().get(_MSG_READ_KEY.format(user_id=user_id))
-    except Exception:
-        return fallback
-    if not raw:
-        return fallback
-    try:
-        return datetime.fromisoformat(
-            raw.decode() if isinstance(raw, bytes) else raw)
-    except ValueError:
-        return fallback
-
-
-async def _unread_count(db: AsyncSession, user_id: int) -> int:
-    from ..models import PushLog
-    since = await _unread_since(user_id)
-    return await db.scalar(
-        select(func.count(PushLog.id)).where(
-            PushLog.user_id == user_id,
-            PushLog.created_at > since,
-            *_message_filters())) or 0
+#
+# 实现搬到了 services/message_center.py —— 骑手端要的是同一件事,
+# 复制一份的代价不是多几十行,是两份口径会分叉。这里只留路由。
 
 
 @router.get("/me/messages")
@@ -3944,49 +3892,15 @@ async def my_messages(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """消息中心:置顶当前生效的平台公告 + 本人触达记录(评价/系统)。"""
-    from ..models import Announcement, PushLog
-    from ..redis_client import get_redis
+    """消息中心:置顶当前生效的平台公告 + 本人触达记录(评价/系统)。
+
+    未读只算触达条数,**公告不计未读** —— 横幅本来就常驻在页面顶上,
+    再给它记一个红点,红点就永远消不掉。
+    """
+    from ..services import message_center
     await _my_shop_or_404(db, user)
-
-    now = datetime.now(timezone.utc)
-    ann_rows = await db.scalars(
-        select(Announcement).where(
-            Announcement.is_active.is_(True),
-            Announcement.audience.in_(["merchant", "all"]),
-            or_(Announcement.starts_at.is_(None), Announcement.starts_at <= now),
-            or_(Announcement.ends_at.is_(None), Announcement.ends_at >= now),
-        ).order_by(Announcement.created_at.desc()).limit(10))
-    announcements = [{
-        "id": a.id, "title": a.title, "content": a.content,
-        "created_at": a.created_at,
-    } for a in ann_rows]
-
-    # 分类过滤下推到 SQL:在 Python 里过滤取回的一页,会出现
-    # "这页恰好全被滤掉 → 返回空 → 客户端没有游标可翻"的死局
-    stmt = select(PushLog).where(PushLog.user_id == user.id,
-                                 *_message_filters())
-    if category == "review":
-        stmt = stmt.where(or_(*[PushLog.title.like(f"%{kw}%")
-                                for kw in _REVIEW_TITLE_KEYWORDS]))
-    elif category == "system":
-        stmt = stmt.where(*[PushLog.title.notlike(f"%{kw}%")
-                            for kw in _REVIEW_TITLE_KEYWORDS])
-    if before is not None:
-        stmt = stmt.where(PushLog.id < before)
-    rows = (await db.scalars(
-        stmt.order_by(PushLog.id.desc()).limit(50))).all()
-    messages = [{
-        "id": log.id, "kind": _classify_message(log.title),
-        "title": log.title, "content": log.content,
-        "created_at": log.created_at,
-    } for log in rows]
-
-    # 未读 = 水位之后的触达条数(公告不计未读:横幅本来就常驻)
-    unread = await _unread_count(db, user.id)
-
-    return {"announcements": announcements, "messages": messages,
-            "unread": unread, "page_size": 50}
+    return await message_center.fetch(db, "merchant", user.id,
+                                      category=category, before=before)
 
 
 @router.post("/me/messages/read")
@@ -3994,17 +3908,10 @@ async def mark_messages_read(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """记已读水位到当前时刻。Redis 挂了不报错 ——
-    看消息这个动作本身成功了,未读数下次再对齐就是。"""
-    from ..redis_client import get_redis
+    """记已读水位到当前时刻。"""
+    from ..services import message_center
     await _my_shop_or_404(db, user)
-    try:
-        await get_redis().set(
-            _MSG_READ_KEY.format(user_id=user.id),
-            datetime.now(timezone.utc).isoformat())
-    except Exception:
-        return {"ok": False, "reason": "缓存暂时不可用,未读数稍后自动对齐"}
-    return {"ok": True}
+    return await message_center.mark_read("merchant", user.id)
 
 
 # ---------- 合规档案(不是违规积分) ----------

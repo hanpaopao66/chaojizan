@@ -3,7 +3,9 @@ import {
   BellOutlined,
   CalendarOutlined,
   CommentOutlined,
+  FieldTimeOutlined,
   GiftOutlined,
+  ImportOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
   ProfileOutlined,
@@ -31,6 +33,8 @@ import DishesPage from '../pages/food/DishesPage'
 import FoodOrdersPage from '../pages/food/FoodOrdersPage'
 import FoodReviewsPage from '../pages/food/ReviewsPage'
 import MarketingPage from '../pages/food/MarketingPage'
+import MenuImportPage from '../pages/food/MenuImportPage'
+import SchedulesPage from '../pages/food/SchedulesPage'
 import ChainPage from '../pages/food/ChainPage'
 import LicenseBanner from '../pages/LicenseBanner'
 import HealthCertsPage from '../pages/HealthCertsPage'
@@ -162,6 +166,13 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
     : [
         { key: '/food/orders', icon: <ProfileOutlined />, label: '接单台' },
         { key: '/food/dishes', icon: <MenuFoldOutlined />, label: '菜品管理' },
+        // 导入和定时改价是**改价格**的两条路,店员不给 ——
+        // 与菜品编辑同一条边界(改价影响的是老板的钱)
+        ...(shop.viewer_is_staff ? [] : [
+          { key: '/food/import', icon: <ImportOutlined />, label: '菜单导入' },
+          { key: '/food/schedules', icon: <FieldTimeOutlined />,
+            label: '定时改价' },
+        ]),
         { key: '/food/marketing', icon: <GiftOutlined />, label: '店内营销' },
         { key: '/food/reviews', icon: <CommentOutlined />, label: '顾客评价' },
         ...(shop.viewer_is_owner === false ? [] : [
@@ -312,6 +323,8 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
                 <Route path="/food/orders" element={<FoodOrdersPage shop={shop} />} />
                 <Route path="/food/dishes" element={<DishesPage />} />
                 <Route path="/food/marketing" element={<MarketingPage />} />
+                <Route path="/food/import" element={<MenuImportPage />} />
+                <Route path="/food/schedules" element={<SchedulesPage />} />
                 <Route path="/food/chain" element={<ChainPage shop={shop} />} />
                 <Route path="/health-certs" element={<HealthCertsPage />} />
                 <Route path="/purchases" element={<PurchasesPage />} />

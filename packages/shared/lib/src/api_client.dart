@@ -628,6 +628,31 @@ class ApiClient {
 
   /// 下单。items 每行 {dish_id, quantity, choices:[规格/加料名]};
   /// scheduledAt 为预约送达时间(null = 尽快送)。
+  /// 配送费预览。**别在客户端复算** —— 夜间加价、恶劣天气、上门难度
+  /// 都在服务端判,客户端自己算一遍就会漏(结算页显示 ¥3、实际收 ¥5,
+  /// 用户到付款那一步才发现)。
+  ///
+  /// 返回 parts(拆分)+ labels(中文名)+ door_fee_cents(送上门要多少,
+  /// 让顾客在选之前就能比较)。
+  Future<Map<String, dynamic>> previewDeliveryFee({
+    required int merchantId,
+    required double lat,
+    required double lng,
+    int? floor,
+    bool? hasElevator,
+    bool toDoor = true,
+  }) async {
+    final data = await _request('GET', '/orders/delivery-fee', query: {
+      'merchant_id': '\$merchantId',
+      'lat': '\$lat',
+      'lng': '\$lng',
+      if (floor != null) 'floor': '\$floor',
+      if (hasElevator != null) 'has_elevator': '\$hasElevator',
+      'to_door': '\$toDoor',
+    });
+    return data as Map<String, dynamic>;
+  }
+
   Future<Order> createOrder({
     required int merchantId,
     required List<Map<String, dynamic>> items,
@@ -639,6 +664,9 @@ class ApiClient {
     int tipCents = 0, // 小费,100% 归骑手
     int? couponId, // 平台券抵扣(超时安抚券等,平台承担)
     String groupCode = '', // 拼单码(发起人结算,原子关车)
+    /// 送上门 / 送到楼下。**顾客自己选** —— 选楼下就不收上门难度费,
+    /// 骑手也没有义务上楼。默认送上门(与此前行为一致)
+    bool toDoor = true,
   }) async {
     final data = await _request('POST', '/orders', body: {
       'merchant_id': merchantId,
@@ -655,6 +683,12 @@ class ApiClient {
         'contact_name': address.contactName,
         'contact_phone': address.contactPhone,
         // 地址保护:骑手只见粗地址(POI/小区)与中性称呼,门牌送达前不下发
+        'to_door': toDoor,
+        // 楼层:无电梯高楼层会收上门难度费(全额归骑手),
+        // 也会让 ETA 诚实一点 —— 爬 6 楼确实更慢
+        if (address.floor != null) 'floor': address.floor,
+        if (address.hasElevator != null)
+          'has_elevator': address.hasElevator,
         'addr_protect': address.protect,
         if (address.protect) 'address_public': address.address,
         'salutation': address.salutation,
@@ -1017,6 +1051,10 @@ class ApiClient {
     bool protect = false,
     String salutation = '',
     String tag = '',
+    /// 楼层与电梯(选填)。填了两件事会变准:ETA 更诚实(爬 6 楼确实更慢)、
+    /// 无电梯高楼层可以选「送上门」并付一笔归骑手的上门难度费
+    int? floor,
+    bool? hasElevator,
   }) async {
     final data = await _request('POST', '/addresses', body: {
       'contact_name': contactName,
@@ -1029,6 +1067,8 @@ class ApiClient {
       'protect': protect,
       'salutation': salutation,
       'tag': tag,
+      if (floor != null) 'floor': floor,
+      if (hasElevator != null) 'has_elevator': hasElevator,
     });
     return Address.fromJson(data as Map<String, dynamic>);
   }
@@ -1780,6 +1820,56 @@ class ApiClient {
         .toList();
   }
 
+  /// 抢单池 + 「被你自己的偏好挡掉了几单」。
+  ///
+  /// 服务端对不带 `with_meta` 的老客户端仍返回裸数组,所以这里两个方法
+  /// 并存而不是改掉上面那个 —— 装着旧版 App 的骑手不会因为服务端
+  /// 升级就打不开抢单页。
+  Future<({List<Order> items, int filteredByPrefs})> availablePool() async {
+    final data = await _request('GET',
+        '/riders/available-orders?with_meta=true') as Map<String, dynamic>;
+    return (
+      items: ((data['items'] as List?) ?? const [])
+          .map((e) => Order.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      filteredByPrefs: (data['filtered_by_prefs'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  /// 同一家店的在手单,一次全标到店 / 全标取餐。
+  /// 逐单执行不整体回滚,返回体里 items 逐条给结果。
+  Future<Map<String, dynamic>> batchArrived(int merchantId,
+      {double? lat, double? lng}) async {
+    final body = <String, dynamic>{'merchant_id': merchantId};
+    if (lat != null && lng != null) {
+      body['lat'] = lat;
+      body['lng'] = lng;
+    }
+    return await _request('POST', '/riders/orders/batch-arrived', body: body)
+        as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> batchPicked(int merchantId,
+          {Map<String, String>? codes}) async =>
+      await _request('POST', '/riders/orders/batch-picked',
+          body: {'merchant_id': merchantId, 'codes': codes ?? {}})
+          as Map<String, dynamic>;
+
+  /// 骑手消息中心:公告 + 发给我的通知 + 未读数
+  Future<Map<String, dynamic>> riderMessages({String? category,
+      int? before}) async {
+    final q = <String>[
+      if (category != null) 'category=$category',
+      if (before != null) 'before=$before',
+    ];
+    return await _request('GET',
+        '/riders/me/messages${q.isEmpty ? '' : '?${q.join('&')}'}')
+        as Map<String, dynamic>;
+  }
+
+  Future<void> markRiderMessagesRead() =>
+      _request('POST', '/riders/me/messages/read');
+
   Future<Order> grabOrder(String orderNo) async {
     final data = await _request('POST', '/riders/grab/$orderNo');
     return Order.fromJson(data as Map<String, dynamic>);
@@ -1800,6 +1890,17 @@ class ApiClient {
         body: {'grab_radius_km': km});
     return (data as Map)['grab_radius_km'] as int?;
   }
+
+  /// 全部接单偏好(半径 / 单价下限 / 只看顺路 / 避开酒类)。
+  /// 设置页进来先读一次 —— 直接显示默认值会把他之前设的盖掉。
+  Future<Map<String, dynamic>> riderPreferences() async =>
+      await _request('GET', '/riders/me/preferences') as Map<String, dynamic>;
+
+  /// 只改传进来的那几项(服务端按 key 是否存在判断,不是按值)
+  Future<Map<String, dynamic>> updateRiderPreferences(
+          Map<String, dynamic> patch) async =>
+      await _request('PATCH', '/riders/me/preferences', body: patch)
+          as Map<String, dynamic>;
 
   /// 我的数据:今日/本周在线时长与单量收入(只统计不考核)
   Future<Map<String, dynamic>> riderWorklog() async =>

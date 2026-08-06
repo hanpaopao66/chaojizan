@@ -243,6 +243,11 @@ class _AddressEditPageState extends State<AddressEditPage> {
   bool _protect = false; // 保护模式:骑手只见小区/楼栋,门牌送达前不下发
   final _salutation = TextEditingController();
   String _tag = '';          // 家 / 公司 / 学校(空 = 不打标签)
+  // 楼层与电梯(选填)。填了两件事会变准:
+  // ETA 更诚实(爬 6 楼确实更慢)、无电梯高楼层下单时可以选「送上门」
+  // 并付一笔**全额归骑手**的上门难度费(也可以选送到楼下不收)
+  final _floor = TextEditingController();
+  bool? _hasElevator;
   /// 搜索所在城市。**必须对**:服务端把 POI 搜索限死在这个城市里,
   /// 选错了用户搜自己家会一条都搜不到(实测西安的小区在 city=成都 时返回 0 条)
   String _city = '';
@@ -361,6 +366,8 @@ class _AddressEditPageState extends State<AddressEditPage> {
         protect: _protect,
         salutation: _salutation.text.trim(),
         tag: _tag,
+        floor: int.tryParse(_floor.text.trim()),
+        hasElevator: _hasElevator,
       );
       if (mounted) Navigator.of(context).pop(created);
     } catch (e) {
@@ -517,6 +524,44 @@ class _AddressEditPageState extends State<AddressEditPage> {
           // 用户得逐字读才知道哪个是家 —— 一个标签省掉这次阅读
           _TagPicker(value: _tag, onChanged: (v) => setState(() => _tag = v)),
           const SizedBox(height: 6),
+          // 楼层与电梯:两个都选填。填了 ETA 会准一点,
+          // 无电梯高楼层还能选「送上门」——那笔钱全额归骑手
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _floor,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                    labelText: '楼层(选填)',
+                    hintText: '如 6',
+                    border: OutlineInputBorder()),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButtonFormField<bool?>(
+                initialValue: _hasElevator,
+                decoration: const InputDecoration(
+                    labelText: '电梯(选填)', border: OutlineInputBorder()),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('不填')),
+                  DropdownMenuItem(value: true, child: Text('有电梯')),
+                  DropdownMenuItem(value: false, child: Text('无电梯')),
+                ],
+                onChanged: (v) => setState(() => _hasElevator = v),
+              ),
+            ),
+          ]),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 6),
+            child: Text(
+              '填了楼层,预计送达会更准;无电梯的高楼层下单时可以选'
+              '「送上门」,那笔钱全额归骑手,也可以选送到楼下不加钱。',
+              style: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ),
           SwitchListTile(
             title: const Text('设为默认地址'),
             value: _isDefault,

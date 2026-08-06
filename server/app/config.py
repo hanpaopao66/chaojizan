@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     # 等餐超时补偿(#145):骑手到店后餐没好的那段时间,原先完全没有收入。
     # 平台承担,不转嫁商家或用户 —— 转嫁商家会让商家宁可晚点按「出餐」(数据失真),
     # 转嫁用户则是让用户为商家的慢买单。这属于履约成本,不是营销补贴
+    # 上门难度费(顾客付,全额归骑手)。**只对无电梯的高楼层收** ——
+    # 等电梯的时间已经在 ETA 里补过,再收钱就是同一件事收两次。
+    # 起收楼层取 5:骑手的原话是"爬 1–4 楼勉强能被派费覆盖,
+    # 从 5 楼开始就不合理了"
+    door_fee_free_floor: int = 4        # 4 楼及以下不收
+    door_fee_per_floor_cents: int = 100  # 超出部分每层 ¥1
+    door_fee_max_cents: int = 500       # 封顶 ¥5
+
     delivery_wait_free_minutes: int = 15    # 前 15 分钟不补(正常出餐区间)
     delivery_wait_per_min_cents: int = 30   # 超出部分每分钟 ¥0.3
     delivery_wait_max_cents: int = 600      # 封顶 ¥6

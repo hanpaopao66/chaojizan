@@ -31,6 +31,16 @@ from zoneinfo import ZoneInfo
 
 from ..services.flags import in_hhmm_range, night_curfew_window, weather_surcharge_on
 from ..services.pricing import delivery_fee_parts, haversine_m, in_delivery_range
+
+# 配送费拆分项的中文名。**放服务端,四端共用一份** ——
+# 三个客户端各写一遍,迟早写得不一样,而这是要给顾客看的账
+FEE_PART_LABELS = {
+    "base": "基础配送费",
+    "night": "夜间配送",
+    "weather": "恶劣天气",
+    "door": "上门难度(无电梯高楼层)",
+    "wait": "等餐补偿",
+}
 from ..services.privacy_phone import dialable_phone, mask_phone
 from ..services.push import notify_order_status, push_to_user
 from ..services.settlement import settle_order
@@ -86,6 +96,11 @@ def order_out(order: Order, merchant: Merchant | None,
     脱敏是一整块,漏传一次就是门牌和真名一起下发出去。
     """
     out = OrderOut.model_validate(order)
+    # 拆分项的中文名跟着数一起给 —— 客户端不用各写一份映射
+    if out.fee_parts:
+        out.fee_part_labels = {k: FEE_PART_LABELS[k]
+                               for k in out.fee_parts
+                               if k in FEE_PART_LABELS}
     out.no_rider_alerted = order.no_rider_alerted_at is not None
     if merchant is not None:
         out.merchant_name = merchant.name
@@ -522,6 +537,9 @@ async def create_order(
 
     # 配送费 = 距离阶梯 + 夜间/恶劣天气加价,每一分都归骑手(加价原因写进订单备注);
     # 自取单免配送费,取餐码随单生成、印在小票上
+    # 三条分支都要给 fee_parts 赋值 —— 只在配送分支里赋,
+    # 追加单和自取单走到下面引用时就是 UnboundLocalError(整条下单路径 500)
+    fee_parts: dict[str, int] = {}
     if parent is not None:
         fee_cents = 0
         notes.append(f"追加到订单#{parent.order_no[-6:]},随原单配送免配送费")
@@ -534,12 +552,18 @@ async def create_order(
         fee_parts = delivery_fee_parts(
             distance_m,
             weather_on=await weather_surcharge_on(
-                db, merchant.lat, merchant.lng))
+                db, merchant.lat, merchant.lng),
+            floor=payload.floor, has_elevator=payload.has_elevator,
+            to_door=payload.to_door)
         fee_cents = sum(fee_parts.values())
         if fee_parts["night"]:
             notes.append(f"夜间配送+{fee_parts['night'] / 100:g}元(归骑手)")
         if fee_parts["weather"]:
             notes.append(f"恶劣天气+{fee_parts['weather'] / 100:g}元(归骑手)")
+        if fee_parts["door"]:
+            notes.append(
+                f"{payload.floor}楼无电梯送上门+"
+                f"{fee_parts['door'] / 100:g}元(归骑手)")
 
     if group_members > 1:
         notes.append(f"拼单×{group_members}人")
@@ -588,6 +612,10 @@ async def create_order(
         # 楼层快照:自取没有爬楼,追加单跟父单一致
         floor=(parent.floor if parent is not None
                else (None if payload.pickup else payload.floor)),
+        # 配送费构成快照:此前这份拆分只在预览里露一次,下单后就没人看得到
+        # 追加单/自取单没有配送费,拆分自然是空的
+        fee_parts=fee_parts,
+        to_door=payload.to_door,
         has_elevator=(parent.has_elevator if parent is not None
                       else (None if payload.pickup
                             else payload.has_elevator)),
@@ -1378,13 +1406,20 @@ async def preview_delivery_fee(
     merchant_id: int,
     lat: float,
     lng: float,
+    floor: int | None = None,
+    has_elevator: bool | None = None,
+    to_door: bool = True,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """下单前预览配送费(点单页选完地址就能展示)。
 
-    返回组成明细:base 距离阶梯 / night 夜间加价 / weather 恶劣天气加价,
-    全部归骑手;in_range=false 表示超出配送半径,下单会被拒。
+    返回组成明细:base 距离阶梯 / night 夜间加价 / weather 恶劣天气加价
+    / door 上门难度(无电梯高楼层),**全部归骑手**;
+    in_range=false 表示超出配送半径,下单会被拒。
+
+    door_fee_cents 单独给一份:让顾客在选「送上门 / 送到楼下」**之前**
+    就看到差价,而不是选完才发现多收了钱。
     """
     merchant = await db.get(Merchant, merchant_id)
     if merchant is None:
@@ -1394,11 +1429,18 @@ async def preview_delivery_fee(
     # 用收货点也行,但一单里两点最远 4km,同一片天气,取商家侧即可
     parts = delivery_fee_parts(
         distance,
-        weather_on=await weather_surcharge_on(db, merchant.lat, merchant.lng))
+        weather_on=await weather_surcharge_on(db, merchant.lat, merchant.lng),
+        floor=floor, has_elevator=has_elevator, to_door=to_door)
+    # 送到楼下时能省多少:让顾客在选之前就看到差价,而不是选完才发现
+    door_saving = delivery_fee_parts(
+        distance, weather_on=False, floor=floor,
+        has_elevator=has_elevator, to_door=True)["door"]
     return {
         "distance_m": round(distance),
         "fee_cents": sum(parts.values()),
         "parts": parts,
+        "labels": FEE_PART_LABELS,
+        "door_fee_cents": door_saving,
         "in_range": in_delivery_range(distance),
     }
 

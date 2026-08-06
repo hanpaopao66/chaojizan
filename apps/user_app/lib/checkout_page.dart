@@ -78,6 +78,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
               list.firstOrNull;
           _loadingAddress = false;
         });
+        await _refreshFee();
       }
     } catch (_) {
       if (mounted) setState(() => _loadingAddress = false);
@@ -87,7 +88,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
   Future<void> _pickAddress() async {
     final picked = await Navigator.of(context).push<Address>(MaterialPageRoute(
         builder: (_) => AddressBookPage(api: widget.api, selectMode: true)));
-    if (picked != null && mounted) setState(() => _address = picked);
+    if (picked != null && mounted) {
+      setState(() => _address = picked);
+      await _refreshFee();
+    }
   }
 
   int get _foodCents => widget.cart
@@ -117,16 +121,105 @@ class _CheckoutPageState extends State<CheckoutPage> {
 
   bool get _belowMinOrder => _foodCents < widget.merchant.minOrderCents;
 
-  /// 配送费与后端同公式(pricing.py):2km 内 ¥3,每 km +¥1,封顶 ¥10
+  /// 服务端算好的配送费与拆分。
+  ///
+  /// **不在客户端复算**。原先这里照抄了 pricing.py 的距离公式,
+  /// 但夜间加价、恶劣天气、上门难度都在服务端判 —— 客户端算的那个数
+  /// 在晚上九点之后和下雨天**是错的**,用户到付款那一步才发现变贵了。
+  Map<String, dynamic>? _feePreview;
+  bool _toDoor = true;
+
   int? get _feeCents {
     if (_pickup) return 0; // 自取免配送费
+    if (_address == null) return null;
+    final p = _feePreview;
+    return p == null ? null : p['fee_cents'] as int?;
+  }
+
+  /// 拉一次配送费预览。地址、自取、送上门开关任一变化都要重拉。
+  Future<void> _refreshFee() async {
     final a = _address;
-    if (a == null) return null;
-    final dist = distanceMeters(
-        widget.merchant.lat, widget.merchant.lng, a.lat, a.lng);
-    final extraKm = ((dist / 1000 - 2.0).clamp(0, double.infinity)).ceil();
-    final fee = 300 + extraKm * 100;
-    return fee > 1000 ? 1000 : fee;
+    if (_pickup || a == null) {
+      if (mounted) setState(() => _feePreview = null);
+      return;
+    }
+    try {
+      final p = await widget.api.previewDeliveryFee(
+        merchantId: widget.merchant.id,
+        lat: a.lat, lng: a.lng,
+        floor: a.floor, hasElevator: a.hasElevator, toDoor: _toDoor,
+      );
+      if (mounted) setState(() => _feePreview = p);
+    } catch (_) {
+      // 拉不到就不显示,别拿一个可能错的数糊弄用户
+      if (mounted) setState(() => _feePreview = null);
+    }
+  }
+
+  /// 配送费拆分的逐行展示。基础项不重复列(上面那行就是总额),
+  /// 只把**加价的原因**摊开 —— 顾客要知道多出来的钱是为什么。
+  List<Widget> _feeBreakdownRows(ThemeData theme) {
+    final p = _feePreview;
+    if (p == null) return const [];
+    final parts = (p['parts'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final labels = (p['labels'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final rows = <Widget>[];
+    for (final key in parts.keys) {
+      final v = parts[key] as int? ?? 0;
+      if (key == 'base' || v <= 0) continue;
+      rows.add(Padding(
+        padding: const EdgeInsets.only(left: 12, bottom: 2),
+        child: Row(children: [
+          Text('· ${labels[key] ?? key}',
+              style: TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
+          const Spacer(),
+          Text('¥${(v / 100).toStringAsFixed(2)}',
+              style: TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
+        ]),
+      ));
+    }
+    return rows;
+  }
+
+  /// 送上门 / 送到楼下。只在**这个地址真的会产生上门难度费**时才出现 ——
+  /// 1 楼或有电梯的地址不该被问这个问题。
+  Widget? _toDoorCard(ThemeData theme) {
+    final p = _feePreview;
+    if (_pickup || p == null) return null;
+    final doorFee = p['door_fee_cents'] as int? ?? 0;
+    if (doorFee <= 0) return null;
+    final a = _address;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${a?.floor} 楼无电梯,要送上门吗?',
+                style: theme.textTheme.titleSmall),
+            const SizedBox(height: 2),
+            Text('这笔钱**全额归骑手** —— 背着餐爬 ${a?.floor} 层楼,'
+                '不该由他自己承担。选送到楼下则不收。',
+                style: TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
+            const SizedBox(height: 8),
+            SegmentedButton<bool>(
+              segments: [
+                ButtonSegment(
+                    value: true,
+                    label: Text('送上门 +¥${(doorFee / 100).toStringAsFixed(0)}')),
+                const ButtonSegment(value: false, label: Text('送到楼下 免费')),
+              ],
+              selected: {_toDoor},
+              showSelectedIcon: false,
+              onSelectionChanged: (v) {
+                setState(() => _toDoor = v.first);
+                _refreshFee();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// 已选券的抵扣额(不超过 菜品+打包-满减)
@@ -167,6 +260,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
         remark: remark,
         scheduledAt: _scheduledAt,
         tipCents: _pickup ? 0 : _tipCents,
+        // 顾客选的送上门/送楼下要跟着下单一起走 —— 只在预览里选了不算数
+        toDoor: _toDoor,
         couponId: _couponId,
         groupCode: widget.groupCode,
       );
@@ -280,7 +375,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       label: Text('到店自取(免配送费)')),
                 ],
                 selected: {_pickup},
-                onSelectionChanged: (v) => setState(() => _pickup = v.first),
+                onSelectionChanged: (v) {
+                  setState(() => _pickup = v.first);
+                  _refreshFee();
+                },
               ),
             ),
           ),
@@ -376,6 +474,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 ),
               ),
             ),
+          if (_toDoorCard(theme) != null) _toDoorCard(theme)!,
           // 小费:可选,全归骑手(自取单无配送环节不显示)
           if (!_pickup)
             Card(
@@ -445,9 +544,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
                               TextStyle(fontSize: 12, color: theme.sz.inkFaint)),
                     ]),
                   )
-                else
+                else ...[
                   SzFeeRow(
                       label: '配送费', note: '全额归骑手', amountCents: fee),
+                  // 拆分逐行列出:夜间、恶劣天气、上门难度此前都是
+                  // "悄悄加上去的",顾客只看到总数变了
+                  ..._feeBreakdownRows(theme),
+                ],
                 if (!_pickup && tip > 0)
                   SzFeeRow(label: '小费', note: '全额归骑手', amountCents: tip),
                 if (_selectedCouponOff > 0)

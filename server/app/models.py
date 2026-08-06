@@ -87,6 +87,13 @@ class User(Base):
     device_id: Mapped[str] = mapped_column(String(64), default="")
     # 骑手接单半径偏好(km,空=不限;顺路单豁免半径)
     grab_radius_km: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 骑手接单偏好(0/False 一律表示"不限",没有"未设置"这档)。
+    # 三个都**只影响他自己看到什么** —— 订单照样存在、照样派给别人。
+    # 正因如此,抢单池必须回报"被你的偏好挡掉了几单"(见 riders.py):
+    # 悄悄过滤会变成"今天怎么没单",他不会想到是自己设过一个开关
+    grab_min_fee_cents: Mapped[int] = mapped_column(Integer, default=0)
+    grab_same_way_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    grab_avoid_alcohol: Mapped[bool] = mapped_column(Boolean, default=False)
     # 骑手所在城市(上线时按定位逆地理解析一次,管理后台可改)。
     # 只看/只抢本城订单;空 = 未标注,不参与隔离(存量宽限)
     city: Mapped[str] = mapped_column(String(20), default="")
@@ -452,6 +459,20 @@ class Order(Base):
     subsidy_cents: Mapped[int] = mapped_column(Integer, default=0)       # 平台补贴(首单立减),平台承担
     promo_note: Mapped[str] = mapped_column(String(100), default="")     # 如「满30减5;首单立减3」
     delivery_fee_cents: Mapped[int] = mapped_column(Integer)
+    # 配送费的构成快照 {base, night, weather, door}(分)。
+    #
+    # **存快照而不是事后重算**:费率会调、天气开关会关,重算出来的数
+    # 和当时真正收的对不上 —— 那就不叫透明了,叫"我们现在觉得应该是多少"。
+    #
+    # 这份拆分给四端看:顾客(我这 8 块钱花在哪)、骑手(**接单前**就知道
+    # 这单为什么值 8 块)、商家(顾客问起配送费贵时能解释)、小票。
+    # 此前它只在预览接口里露过一次,下单之后就没人看得到了。
+    fee_parts: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default="{}")
+    # 送上门 / 送到楼下。**顾客自己选**:选了楼下就不收上门难度费,
+    # 骑手也没有义务上楼(这一点写进骑手端与规则页,否则那笔钱是白收的)
+    to_door: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true")
     # 小费:100% 归骑手,不计佣金基数;骑手结算行 = 配送费 + 小费
     tip_cents: Mapped[int] = mapped_column(Integer, default=0)
     # total = food + packing - discount + delivery + tip - subsidy(用户实付)

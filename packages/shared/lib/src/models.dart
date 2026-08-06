@@ -573,6 +573,12 @@ class Order {
         estWaitMinutes = (json['est_wait_minutes'] as num?)?.toDouble(),
         waitSource = json['wait_source'] as String? ?? 'declared',
         centsPerMinute = (json['cents_per_minute'] as num?)?.toDouble(),
+        // 配送费构成 + 中文名:**接单前就给**。8 块里有 3 块是因为
+        // 要爬 6 楼 —— 知道这个才判断得了值不值
+        feeParts = ((json['fee_parts'] as Map?) ?? const {})
+            .map((k, v) => MapEntry('$k', v as int)),
+        feePartLabels = ((json['fee_part_labels'] as Map?) ?? const {})
+            .map((k, v) => MapEntry('$k', '$v')),
         createdAt = json['created_at'] as String;
 
   final String orderNo;
@@ -647,6 +653,11 @@ class Order {
   /// 要标出来:「等 22 分钟」和「大概 15 分钟(样本还少)」,决策不一样
   final String waitSource;
   final double? centsPerMinute;   // 每分钟收入估算(横向比较用)
+
+  /// 配送费构成(分)与中文名。接单前可见 ——
+  /// 美团官方只承诺"接单前能看到价格",看不到明细;这一步我们做了
+  final Map<String, int> feeParts;
+  final Map<String, String> feePartLabels;
   final String createdAt;
 
   String get summary =>
@@ -692,6 +703,8 @@ class Address {
         lat = (json['lat'] as num).toDouble(),
         lng = (json['lng'] as num).toDouble(),
         isDefault = json['is_default'] as bool,
+        floor = json['floor'] as int?,
+        hasElevator = json['has_elevator'] as bool?,
         protect = json['protect'] as bool? ?? false,
         salutation = json['salutation'] as String? ?? '',
         tag = json['tag'] as String? ?? '';
@@ -704,6 +717,12 @@ class Address {
   final double lat;
   final double lng;
   final bool isDefault;
+
+  /// 楼层与电梯(选填,null = 没填)。填了两件事会变准:
+  /// ETA 更诚实(爬 6 楼确实更慢)、无电梯高楼层送上门会收上门难度费
+  /// (顾客付、**全额归骑手**,也可以选送到楼下不收)
+  final int? floor;
+  final bool? hasElevator;
   final bool protect;      // 保护模式:骑手只见粗地址,门牌送达前不下发
   final String salutation; // 中性称呼(空=「顾客」)
 

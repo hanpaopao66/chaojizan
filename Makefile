@@ -74,6 +74,8 @@ test:
 	  && python -m tests.e2e_printers \
 	  && python -m tests.e2e_merchant_ops \
 	  && python -m tests.e2e_rider_appeal \
+	  && python -m tests.e2e_fee_transparency \
+	  && python -m tests.e2e_rider_prefs \
 	  && python -m tests.e2e_daily_stock \
 	  && python -m tests.e2e_delivery_issue && python -m tests.e2e_delivery_track \
 	  && python -m tests.e2e_deposit && python -m tests.e2e_eta_dynamic \
