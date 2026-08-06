@@ -615,6 +615,8 @@ class _DishEditPageState extends State<DishEditPage> {
   late final _description =
       TextEditingController(text: widget.dish?.description ?? '');
   late final Set<String> _badges = {...?widget.dish?.badges};
+  late final _serveWindow =
+      TextEditingController(text: widget.dish?.serveWindow ?? '');
   late String _imageUrl = widget.dish?.imageUrl ?? '';
   late bool _isAlcohol = widget.dish?.isAlcohol ?? false;
   bool _uploading = false;
@@ -736,6 +738,7 @@ class _DishEditPageState extends State<DishEditPage> {
           imageUrl: _imageUrl,
           description: _description.text.trim(),
           badges: _badges.toList(),
+          serveWindow: _serveWindow.text.trim(),
           options: options,
           dailyStock: dailyStock,
           isAlcohol: _isAlcohol,
@@ -751,6 +754,7 @@ class _DishEditPageState extends State<DishEditPage> {
           'image_url': _imageUrl,
           'description': _description.text.trim(),
           'badges': _badges.toList(),
+          'serve_window': _serveWindow.text.trim(),
           'options': options,
           ...flashFields,
         });
@@ -849,6 +853,16 @@ class _DishEditPageState extends State<DishEditPage> {
                 }),
               ),
           ]),
+          const SizedBox(height: 12),
+          // 供应时段:早餐/夜宵这类只在某个时段卖的菜。
+          // 留空 = 全天;非供应时段用户端置灰不消失
+          TextField(
+              controller: _serveWindow,
+              decoration: const InputDecoration(
+                  labelText: '供应时段(选填)',
+                  hintText: '06:00-10:30',
+                  helperText: '留空=全天供应;非供应时段顾客看得到但点不了',
+                  border: OutlineInputBorder())),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(

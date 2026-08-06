@@ -252,7 +252,7 @@ async def create_order(
             .values(stock=Dish.stock - item.quantity)
             .returning(Dish.name, Dish.price_cents, Dish.options,
                        Dish.flash_price_cents, Dish.flash_until,
-                       Dish.is_alcohol)
+                       Dish.is_alcohol, Dish.serve_window, Dish.combo_items)
         )
         row = result.first()
         if row is None:
@@ -270,7 +270,43 @@ async def create_order(
             await db.rollback()
             raise HTTPException(409, detail)
         name, price_cents, option_groups, flash_price, flash_until, \
-            dish_is_alcohol = row
+            dish_is_alcohol, serve_window, combo_items = row
+        # 分时段供应:菜单里非供应时段是灰态可见的(不消失,免得用户以为没这道菜),
+        # 真正的闸门在这里 —— 前端灰态挡不住直接调接口
+        # in_hhmm_range 已在模块顶部导入 —— **不能在这里再 import 一次**:
+        # 函数体内的 import 会让这个名字变成整个函数的局部变量,
+        # 把函数开头(宵禁/酒类禁售)那两处早于此行的调用打成 UnboundLocalError
+        if serve_window:
+            now_bj = (datetime.now(timezone.utc)
+                      + timedelta(hours=8)).strftime("%H:%M")
+            if not in_hhmm_range(serve_window, now_bj):
+                await db.rollback()
+                raise HTTPException(
+                    409, f"「{name}」仅 {serve_window} 供应")
+        # 套餐:逐个子项扣库存(复用同一条条件 UPDATE 的形状)。
+        # 任一子项不够就整单回滚 —— 套餐少一样东西送出去,顾客的体验
+        # 比缺货退款更差
+        if combo_items:
+            for sub in combo_items:
+                sub_qty = int(sub.get("quantity", 1)) * item.quantity
+                sub_result = await db.execute(
+                    update(Dish)
+                    .where(
+                        Dish.id == sub.get("dish_id"),
+                        Dish.merchant_id == merchant.id,
+                        Dish.is_on_sale.is_(True),
+                        Dish.stock >= sub_qty,
+                    )
+                    .values(stock=Dish.stock - sub_qty)
+                    .returning(Dish.name)
+                )
+                sub_row = sub_result.first()
+                if sub_row is None:
+                    sub_dish = await db.get(Dish, sub.get("dish_id"))
+                    sub_name = sub_dish.name if sub_dish else "套餐内菜品"
+                    await db.rollback()
+                    raise HTTPException(
+                        409, f"「{name}」里的「{sub_name}」不够了,换一个吧")
         # 限时折扣生效则按折扣价成交(折扣价即成交价,佣金自动按折后实收计)
         if (flash_price is not None and flash_until is not None
                 and flash_until > datetime.now(timezone.utc)):
@@ -294,6 +330,16 @@ async def create_order(
         if dish_is_alcohol:
             # 快照记酒类标记:小票与骑手端据此提示「查验收件人」
             snapshot_entry["is_alcohol"] = True
+        if combo_items:
+            # 套餐仍是**一行**(账目口径零影响),但带上子项明细 ——
+            # 后厨看的是"要做哪几样",不是套餐名
+            names = {d.id: d.name for d in (await db.scalars(
+                select(Dish).where(Dish.id.in_(
+                    [s.get("dish_id") for s in combo_items]))))}
+            snapshot_entry["combo"] = [
+                {"name": names.get(s.get("dish_id"), ""),
+                 "quantity": int(s.get("quantity", 1))}
+                for s in combo_items]
         items_snapshot.append(snapshot_entry)
 
     # 起送价:商家自设,但不低于平台下限(小单佣金连支付通道费都不够,商业上不可持续)。

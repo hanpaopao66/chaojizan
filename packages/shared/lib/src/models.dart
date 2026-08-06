@@ -293,6 +293,13 @@ class Dish {
         isAlcohol = json['is_alcohol'] as bool? ?? false,
         imageUrl = json['image_url'] as String? ?? '',
         sort = json['sort'] as int? ?? 0,
+        comboItems = (json['combo_items'] as List? ?? const [])
+            .cast<Map<String, dynamic>>(),
+        comboDishes = (json['combo_dishes'] as List? ?? const [])
+            .cast<Map<String, dynamic>>(),
+        comboOriginalCents = json['combo_original_cents'] as int? ?? 0,
+        serveWindow = json['serve_window'] as String? ?? '',
+        servableNow = json['servable_now'] as bool? ?? true,
         description = json['description'] as String? ?? '',
         badges = (json['badges'] as List? ?? const []).cast<String>(),
         options = (json['options'] as List? ?? const [])
@@ -313,6 +320,30 @@ class Dish {
 
   /// 菜单顺序(小的在前,同值按 id):商家排的顺序,用户端照着看
   final int sort;
+
+  /// 套餐子项 [{dish_id, quantity}];非空 = 这是个套餐
+  final List<Map<String, dynamic>> comboItems;
+
+  /// 套餐子项明细 [{name, quantity}](菜单接口填充,给用户看"套餐里有什么")
+  final List<Map<String, dynamic>> comboDishes;
+
+  /// 子项单点合计:比套餐价高的那部分就是"省了多少"
+  final int comboOriginalCents;
+
+  /// 供应时段 "06:00-10:30"(空 = 全天供应)
+  final String serveWindow;
+
+  /// 此刻是否在供应时段内。非供应时段**照常展示**(灰态),
+  /// 不从菜单里消失 —— 消失会让用户以为这家店没这道菜
+  final bool servableNow;
+
+  bool get isCombo => comboItems.isNotEmpty;
+
+  /// 套餐省了多少(非套餐或没便宜时为 0)
+  int get comboSaveCents =>
+      isCombo && comboOriginalCents > priceCents
+          ? comboOriginalCents - priceCents
+          : 0;
 
   /// 菜品描述(用户点之前想知道这菜里有什么)
   final String description;

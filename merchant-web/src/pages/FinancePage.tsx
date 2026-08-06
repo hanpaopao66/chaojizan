@@ -7,10 +7,11 @@ import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, CommissionTier, DayStat, FinanceOrder, InvoiceRecord,
-  InvoiceSummary, Merchant, Wallet, Withdrawal, applyInvoice, commissionTier,
-  createWithdrawal, downloadFile, financeDaily, financeOrders, invoiceSummary,
-  merchantWallet, merchantWithdrawals, myInvoices, yuan,
+  ApiError, CommissionTier, Compliance, DayStat, FinanceOrder, Funnel,
+  InvoiceRecord, InvoiceSummary, Merchant, Wallet, Withdrawal, applyInvoice,
+  commissionTier, createWithdrawal, downloadFile, financeDaily, financeOrders,
+  invoiceSummary, merchantCompliance, merchantFunnel, merchantWallet,
+  merchantWithdrawals, myInvoices, yuan,
 } from '../api'
 
 /** 对账中心:钱包 / 日流水(逐单可查) / 提现 / 发票 / 阶梯佣金。
@@ -87,6 +88,8 @@ export default function FinancePage({ shop }: { shop: Merchant }) {
             label: shop.biz_type === 'hotel' ? '费率说明' : '阶梯佣金',
             children: <TierTab shop={shop} />,
           },
+          { key: 'funnel', label: '流量漏斗', children: <FunnelTab /> },
+          { key: 'compliance', label: '合规档案', children: <ComplianceTab /> },
         ]}
       />
     </Space>
@@ -390,5 +393,121 @@ function TierTab({ shop }: { shop: Merchant }) {
         )}
       </div>
     </Card>
+  )
+}
+
+/** 流量漏斗:平台不卖曝光位,但把真实的转化给商家看。 */
+function FunnelTab() {
+  const [days, setDays] = useState(7)
+  const [data, setData] = useState<Funnel | null>(null)
+
+  useEffect(() => {
+    merchantFunnel(days).then(setData).catch((e) => {
+      message.error(e instanceof ApiError ? e.message : String(e))
+    })
+  }, [days])
+
+  if (!data) return <Card size="small" loading />
+
+  const steps: [string, number, number | null][] = [
+    ['看到你的店', data.impression, null],
+    ['进店看菜单', data.visit, data.visit_rate],
+    ['进入结算', data.checkout, data.checkout_rate],
+    ['下单', data.ordered, data.order_rate],
+  ]
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }}>
+      <Space>
+        {[7, 14, 30].map((d) => (
+          <Button key={d} size="small" type={days === d ? 'primary' : 'default'}
+            onClick={() => setDays(d)}>近 {d} 天</Button>
+        ))}
+      </Space>
+      <Card size="small">
+        {steps.map(([label, value, rate]) => (
+          <div key={label} style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0',
+          }}>
+            <span style={{ width: 96, color: '#666' }}>{label}</span>
+            <b style={{ width: 60, fontSize: 18 }}>{value}</b>
+            {rate != null && (
+              <span style={{ color: rate >= 0.3 ? '#389e0d' : '#d46b08' }}>
+                转化 {(rate * 100).toFixed(1)}%
+              </span>
+            )}
+          </div>
+        ))}
+        <div style={{ marginTop: 8, fontSize: 12, color: '#999', lineHeight: 1.8 }}>
+          {data.note}
+        </div>
+      </Card>
+    </Space>
+  )
+}
+
+/** 合规档案:平台记了什么,一次看全。刻意不做「违规积分」。 */
+function ComplianceTab() {
+  const [data, setData] = useState<Compliance | null>(null)
+
+  useEffect(() => {
+    merchantCompliance().then(setData).catch((e) => {
+      message.error(e instanceof ApiError ? e.message : String(e))
+    })
+  }, [])
+
+  if (!data) return <Card size="small" loading />
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }}>
+      <Alert type="info" showIcon message={data.used_for}
+        description={data.never_used_for} />
+      <Card size="small" title="近 30 天经营">
+        <Space size="large">
+          <Statistic title="取消/拒单" value={data.quality_30d.cancelled} />
+          <Statistic title="出餐超时" value={data.quality_30d.ready_late} />
+        </Space>
+      </Card>
+      <Card size="small" title={`食品安全投诉(${data.food_safety.length})`}>
+        {data.food_safety.length === 0
+          ? <span style={{ color: '#999' }}>没有记录</span>
+          : (
+            <Table
+              rowKey="id"
+              size="small"
+              pagination={{ pageSize: 10 }}
+              dataSource={data.food_safety}
+              columns={[
+                { title: '类型', dataIndex: 'kind' },
+                { title: '状态', dataIndex: 'status' },
+                { title: '订单', dataIndex: 'order_no',
+                  render: (v: string) => `…${v.slice(-6)}` },
+                { title: '处置', render: (_, r) => r.actions.length === 0
+                  ? '—'
+                  : r.actions.map((a) => a.action).join(' / ') },
+                { title: '时间', dataIndex: 'created_at',
+                  render: (v: string) => new Date(v).toLocaleDateString('zh-CN') },
+              ]}
+            />
+          )}
+      </Card>
+      <Card size="small" title={`图片被驳回(${data.rejected_images.length})`}>
+        {data.rejected_images.length === 0
+          ? <span style={{ color: '#999' }}>没有记录</span>
+          : (
+            <Space wrap>
+              {data.rejected_images.map((r) => (
+                <div key={r.id} style={{ width: 120 }}>
+                  <img src={r.url} alt="" style={{
+                    width: 120, height: 90, objectFit: 'cover', borderRadius: 6,
+                    filter: 'grayscale(1)',
+                  }} />
+                  <div style={{ fontSize: 12, color: '#cf1322' }}>{r.note || '未说明'}</div>
+                </div>
+              ))}
+            </Space>
+          )}
+      </Card>
+    </Space>
   )
 }

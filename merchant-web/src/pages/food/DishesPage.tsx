@@ -169,6 +169,7 @@ export default function DishesPage() {
       />
       {editing !== null && (
         <DishDrawer
+          allDishes={dishes}
           existing={editing === 'new' ? null : editing}
           onClose={(changed) => {
             setEditing(null)
@@ -180,8 +181,9 @@ export default function DishesPage() {
   )
 }
 
-function DishDrawer({ existing, onClose }: {
+function DishDrawer({ existing, allDishes, onClose }: {
   existing: Dish | null
+  allDishes: Dish[]
   onClose: (changed: boolean) => void
 }) {
   const [name, setName] = useState(existing?.name ?? '')
@@ -194,6 +196,9 @@ function DishDrawer({ existing, onClose }: {
   const [imageUrl, setImageUrl] = useState(existing?.image_url ?? '')
   const [description, setDescription] = useState(existing?.description ?? '')
   const [badges, setBadges] = useState<string[]>(existing?.badges ?? [])
+  const [serveWindow, setServeWindow] = useState(existing?.serve_window ?? '')
+  const [comboItems, setComboItems] = useState<{ dish_id: number; quantity: number }[]>(
+    existing?.combo_items ?? [])
   const [groups, setGroups] = useState<DishOptionGroup[]>(
     existing?.options ?? [])
   const [busy, setBusy] = useState(false)
@@ -220,6 +225,8 @@ function DishDrawer({ existing, onClose }: {
       image_url: imageUrl,
       description: description.trim(),
       badges,
+      serve_window: serveWindow.trim(),
+      combo_items: comboItems,
       options: cleanGroups,
     }
     try {
@@ -280,6 +287,32 @@ function DishDrawer({ existing, onClose }: {
               >{b}</Tag.CheckableTag>
             ))}
           </Space>
+        </Form.Item>
+        <Form.Item label="供应时段(选填)"
+          extra="留空=全天供应;非供应时段顾客看得到但点不了,如 06:00-10:30">
+          <Input
+            value={serveWindow}
+            placeholder="06:00-10:30"
+            style={{ width: 180 }}
+            onChange={(e) => setServeWindow(e.target.value.trim())}
+          />
+        </Form.Item>
+        <Form.Item label="套餐(选填)"
+          extra="选中的菜组成套餐,本菜价格即套餐价;下单时逐个扣子项库存">
+          <Select
+            mode="multiple"
+            allowClear
+            style={{ width: '100%' }}
+            placeholder="不选 = 这是一道普通菜"
+            value={comboItems.map((c) => c.dish_id)}
+            onChange={(ids: number[]) => setComboItems(ids.slice(0, 8).map((id) => ({
+              dish_id: id,
+              quantity: comboItems.find((c) => c.dish_id === id)?.quantity ?? 1,
+            })))}
+            options={allDishes
+              .filter((d) => d.id !== existing?.id && !(d.combo_items?.length))
+              .map((d) => ({ value: d.id, label: `${d.name}(${yuan(d.price_cents)})` }))}
+          />
         </Form.Item>
         <Form.Item label="菜品图">
           <Upload

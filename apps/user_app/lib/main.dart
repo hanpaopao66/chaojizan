@@ -350,6 +350,15 @@ class MerchantListView extends StatefulWidget {
 class _MerchantListViewState extends State<MerchantListView> {
   bool _realLocation = true;
 
+  /// 已上报过曝光的店(本次进程内去重):列表滚动来回划不该刷出几十条事件
+  static final Set<int> _impressed = {};
+
+  void _trackImpression(int merchantId) {
+    if (_impressed.add(merchantId)) {
+      Analytics.track('impression_shop', {'merchant_id': merchantId});
+    }
+  }
+
   /// 定位正常但该区域无商家:已降级展示演示城市数据(审核兜底)
   bool _fellBack = false;
   double _myLat = demoLat;
@@ -1038,6 +1047,10 @@ class _MerchantListViewState extends State<MerchantListView> {
     final sz = Theme.of(context).sz;
     final dist = distanceMeters(_myLat, _myLng, m.lat, m.lng);
     final eta = etaMinutes(dist);
+    // 曝光埋点:商家漏斗最上面那一级(此前只有"进店"往下)。
+    // 每店每次冷启动只报一次 —— 滚动列表来回划不该刷出几十条,
+    // 且埋点口径不变:只记登录用户的产品行为,不采设备指纹
+    _trackImpression(m.id);
 
     // 缺图占位统一走 SzImage:底色按名称哈希取,同一家店永远同一个色
     Widget thumb(String url, String name, double size) => SzImage(
@@ -2068,7 +2081,8 @@ class _MenuPageState extends State<MenuPage>
         final i = showFrequent ? rawIndex - 1 : rawIndex;
         final dish = dishes[i];
         final quantity = _qtyOf(dish);
-        final soldOut = dish.stock <= 0;
+        // 非供应时段与售罄同等对待:能看见、看得懂为什么、但点不了
+        final soldOut = dish.stock <= 0 || !dish.servableNow;
         return InkWell(
           onTap: () => _showDishDetail(dish),
           child: Padding(
@@ -2117,6 +2131,28 @@ class _MenuPageState extends State<MenuPage>
                                       : Theme.of(context).sz.inkMuted,
                                   dense: true),
                           ]),
+                        ),
+                      // 套餐:直接把"里面有什么"写在列表行,
+                      // 用户不用点进去才知道自己买的是什么
+                      if (dish.isCombo && dish.comboDishes.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                              '含 ${dish.comboDishes.map((c) => '${c['name']}×${c['quantity']}').join(' + ')}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Theme.of(context).sz.inkMuted)),
+                        ),
+                      // 非供应时段:说清楚什么时候能点,而不是让菜凭空消失
+                      if (!dish.servableNow && dish.serveWindow.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text('${dish.serveWindow} 供应',
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Theme.of(context).sz.hold)),
                         ),
                       if (dish.description.isNotEmpty)
                         Padding(
@@ -2173,6 +2209,33 @@ class _MenuPageState extends State<MenuPage>
                                       fontSize: 10, color: Theme.of(context).sz.hold)),
                             ),
                           ],
+                          // 套餐:划线单点合计 + "省 X" —— 省多少是套餐
+                          // 唯一要说清楚的事
+                          if (!soldOut && dish.comboSaveCents > 0) ...[
+                            const SizedBox(width: 4),
+                            Text(yuan(dish.comboOriginalCents),
+                                style: TextStyle(
+                                    fontSize: 11,
+                                    color:
+                                        Theme.of(context).colorScheme.outline,
+                                    decoration: TextDecoration.lineThrough)),
+                            const SizedBox(width: 3),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context)
+                                    .sz
+                                    .earn
+                                    .withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text('省${yuan(dish.comboSaveCents)}',
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: Theme.of(context).sz.earn)),
+                            ),
+                          ],
                           if (dish.monthlySales > 0) ...[
                             const SizedBox(width: 6),
                             Text('月售 ${dish.monthlySales}',
@@ -2202,7 +2265,7 @@ class _MenuPageState extends State<MenuPage>
         builder: (sheetContext, setSheet) {
           final theme = Theme.of(context);
           final quantity = _qtyOf(dish);
-          final soldOut = dish.stock <= 0;
+          final soldOut = dish.stock <= 0 || !dish.servableNow;
           return SafeArea(
             // 必须可滚动:菜品描述最长 200 字,加上忌口标签换行,
             // 在小屏或大字号(textScaler 上限 1.6)下会把底部的

@@ -307,6 +307,18 @@ class Dish(Base):
     flash_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
+    # 套餐:[{"dish_id":1,"quantity":2},...]。非空 = 这道"菜"是套餐,
+    # 自身 price_cents 就是套餐价(天然低于单点合计,不用负价 delta ——
+    # 那会打破"改价就改基础价"的既有约定)。下单时逐个子项扣库存,
+    # 任一缺货整单回滚;账目上仍是一行,口径零影响
+    combo_items: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default="[]")
+
+    # 供应时段 "06:00-10:30"(空=全天供应,支持跨天如 22:00-02:00)。
+    # 非供应时段**不从菜单里消失**,只置灰 —— 消失会让用户以为没这道菜
+    serve_window: Mapped[str] = mapped_column(
+        String(11), default="", server_default="")
+
 
 class Order(Base):
     __tablename__ = "orders"

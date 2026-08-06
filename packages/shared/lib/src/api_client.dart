@@ -1224,6 +1224,8 @@ class ApiClient {
     String description = '',
     List<String> badges = const [],
     List<Map<String, dynamic>> options = const [],
+    List<Map<String, dynamic>> comboItems = const [],
+    String serveWindow = '',
   }) async {
     final data = await _request('POST', '/merchants/me/dishes', body: {
       'name': name,
@@ -1236,6 +1238,8 @@ class ApiClient {
       'description': description,
       'badges': badges,
       'options': options,
+      'combo_items': comboItems,
+      'serve_window': serveWindow,
     });
     return Dish.fromJson(data as Map<String, dynamic>);
   }
@@ -1317,6 +1321,19 @@ class ApiClient {
   /// 评分概览:总分/星级分布/近 30-90 天走势/差评待回复
   Future<Map<String, dynamic>> ratingOverview() async {
     final data = await _request('GET', '/merchants/me/reviews/overview');
+    return (data as Map).cast<String, dynamic>();
+  }
+
+  /// 流量漏斗:曝光 → 进店 → 结算 → 下单(按人去重)
+  Future<Map<String, dynamic>> merchantFunnel({int days = 7}) async {
+    final data = await _request('GET', '/merchants/me/funnel',
+        query: {'days': '$days'});
+    return (data as Map).cast<String, dynamic>();
+  }
+
+  /// 合规档案:平台记在名下的事(食安处置/图片驳回/申诉/质量),不含积分
+  Future<Map<String, dynamic>> merchantCompliance() async {
+    final data = await _request('GET', '/merchants/me/compliance');
     return (data as Map).cast<String, dynamic>();
   }
 

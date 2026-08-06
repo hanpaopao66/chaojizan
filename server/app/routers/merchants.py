@@ -547,9 +547,12 @@ async def my_dishes(
     sales_rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": shop.id})
     sales = {row.dish_id: row.sold for row in sales_rows}
     outs = []
+    combo_ref = await _combo_reference(db, shop.id, dishes)
+    now_hhmm = datetime.now(CN_TZ).strftime("%H:%M")
     for dish in dishes:
         out = DishOut.model_validate(dish)
         out.monthly_sales = sales.get(dish.id, 0)
+        _fill_combo_and_window(out, dish, combo_ref, now_hhmm)
         outs.append(out)
     return outs
 
@@ -586,9 +589,12 @@ async def menu(merchant_id: int, db: AsyncSession = Depends(get_db)):
     sales_rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": merchant_id})
     sales = {row.dish_id: row.sold for row in sales_rows}
     outs = []
+    combo_ref = await _combo_reference(db, merchant_id, dishes)
+    now_hhmm = datetime.now(CN_TZ).strftime("%H:%M")
     for dish in dishes:
         out = DishOut.model_validate(dish)
         out.monthly_sales = sales.get(dish.id, 0)
+        _fill_combo_and_window(out, dish, combo_ref, now_hhmm)
         outs.append(out)
     return outs
 
@@ -629,6 +635,63 @@ async def frequent_dishes(
     return [DishOut.model_validate(d) for d in dishes]
 
 
+async def _combo_reference(db: AsyncSession, merchant_id: int,
+                           dishes: list) -> dict[int, tuple[str, int]]:
+    """套餐子项的名字与单价。子项可能已下架(菜单查询只取在售),
+    所以单独查一次,不从 dishes 里捞 —— 否则套餐里少一样东西却不说。"""
+    ids = {it.get("dish_id") for d in dishes for it in (d.combo_items or [])}
+    ids.discard(None)
+    if not ids:
+        return {}
+    rows = (await db.execute(
+        select(Dish.id, Dish.name, Dish.price_cents).where(
+            Dish.id.in_(ids), Dish.merchant_id == merchant_id))).all()
+    return {r[0]: (r[1], r[2]) for r in rows}
+
+
+def _fill_combo_and_window(out, dish, combo_ref: dict, now_hhmm: str) -> None:
+    """填套餐明细与供应时段的派生字段。"""
+    if dish.combo_items:
+        detail, original = [], 0
+        for it in dish.combo_items:
+            ref = combo_ref.get(it.get("dish_id"))
+            if ref is None:
+                continue
+            name, price = ref
+            qty = int(it.get("quantity", 1))
+            detail.append({"name": name, "quantity": qty})
+            original += price * qty
+        out.combo_dishes = detail
+        out.combo_original_cents = original
+    if dish.serve_window:
+        from ..services.flags import in_hhmm_range
+        out.servable_now = in_hhmm_range(dish.serve_window, now_hhmm)
+
+
+async def _validate_combo(db: AsyncSession, merchant_id: int, items: list,
+                          self_id: int | None = None) -> None:
+    """套餐子项校验:必须是本店的、非套餐的菜,且不能把自己装进自己。
+
+    禁套娃不是洁癖:套餐嵌套会让下单时的库存扣减变成递归,
+    一个环就能把下单请求打挂。
+    """
+    ids = [it.dish_id for it in items]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(422, "套餐里同一道菜只能出现一次(用份数表示多份)")
+    if self_id is not None and self_id in ids:
+        raise HTTPException(422, "套餐不能包含它自己")
+    rows = (await db.execute(
+        select(Dish.id, Dish.combo_items).where(
+            Dish.id.in_(ids), Dish.merchant_id == merchant_id))).all()
+    found = {r[0] for r in rows}
+    missing = set(ids) - found
+    if missing:
+        raise HTTPException(422, "套餐子项必须是本店已有的菜品")
+    nested = [r[0] for r in rows if r[1]]
+    if nested:
+        raise HTTPException(422, "套餐里不能再放套餐")
+
+
 @router.post("/me/dishes", response_model=DishOut)
 async def add_dish(
     payload: DishIn,
@@ -644,6 +707,8 @@ async def add_dish(
     # 全站每一处自由文本都过 guard_text,这里漏掉就是引流话术的入口
     if payload.description:
         await guard_text(db, payload.description, "菜品描述")
+    if payload.combo_items:
+        await _validate_combo(db, shop.id, payload.combo_items)
     dish = Dish(merchant_id=shop.id, **payload.model_dump())
     db.add(dish)
     await db.flush()
@@ -674,6 +739,9 @@ async def update_dish(
         await guard_text(db, changes["name"], "菜品名称")
     if changes.get("description"):
         await guard_text(db, changes["description"], "菜品描述")
+    if changes.get("combo_items"):
+        await _validate_combo(db, dish.merchant_id, payload.combo_items or [],
+                              self_id=dish.id)
     if changes.get("image_url") and changes["image_url"] != dish.image_url:
         await submit_images(db, "dish", dish.id, [changes["image_url"]])
     for field, value in changes.items():
@@ -2613,6 +2681,151 @@ async def mark_messages_read(
     except Exception:
         return {"ok": False, "reason": "缓存暂时不可用,未读数稍后自动对齐"}
     return {"ok": True}
+
+
+# ---------- 合规档案(不是违规积分) ----------
+
+@router.get("/me/compliance")
+async def my_compliance(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的合规档案:平台记在你名下的事,一次看全。
+
+    **这里刻意不做"违规积分"**。代码里三处写死的承诺是同一个立场:
+    出餐时长「不用于排名、扣分、影响曝光」(见 /me/prep-time 的
+    never_used_for)、/me/quality「只统计不处罚」、明厨亮灶「不做 AI 打分」。
+    一旦有了分数,它迟早会影响谁被看见,而误判会落到具体的人身上。
+
+    所以这一页只做两件事:把已经存在的记录摊开给你看,
+    并告诉你每一条能不能申诉、申诉到哪一步了。
+    """
+    from ..models import Appeal, ContentReview, FoodSafetyReport
+    shop = await _my_shop_or_404(db, user)
+    now = datetime.now(timezone.utc)
+
+    # 食安投诉:只给商家看得到的部分 —— 投诉人是谁、哪个管理员处理的都不给
+    reports = (await db.scalars(
+        select(FoodSafetyReport)
+        .where(FoodSafetyReport.merchant_id == shop.id)
+        .order_by(FoodSafetyReport.id.desc()).limit(50))).all()
+    food_safety = [{
+        "id": r.id,
+        "kind": r.kind,
+        "status": r.status,
+        "order_no": r.order_no,
+        "created_at": r.created_at,
+        # 处置动作对商家公开,但抹掉 admin_id 与投诉人信息
+        "actions": [{"action": a.get("action"), "note": a.get("note", ""),
+                     "at": a.get("at")}
+                    for a in (r.actions or [])],
+    } for r in reports]
+
+    # 菜品图被驳回的(先发后审):商家往往不知道自己的图被隐藏了
+    dish_ids = [d for d in (await db.scalars(
+        select(Dish.id).where(Dish.merchant_id == shop.id)))]
+    rejected_images = []
+    if dish_ids:
+        rejected_images = [{
+            "id": c.id, "url": c.url, "note": c.note,
+            "created_at": c.created_at,
+        } for c in (await db.scalars(
+            select(ContentReview).where(
+                ContentReview.kind == "dish",
+                ContentReview.ref_id.in_(dish_ids),
+                ContentReview.status == "rejected")
+            .order_by(ContentReview.id.desc()).limit(30)))]
+
+    # 已提交的申诉(让商家知道自己申诉到哪一步了)
+    appeals = [{
+        "target_type": a.target_type, "target_id": a.target_id,
+        "status": a.status, "created_at": a.created_at,
+    } for a in (await db.scalars(
+        select(Appeal).where(Appeal.user_id == user.id)
+        .order_by(Appeal.id.desc()).limit(50)))]
+
+    # 近 30 天经营质量(与 /me/quality 同源,这里只取结论)
+    since30 = now - timedelta(days=30)
+    rejects = await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.merchant_id == shop.id,
+            Order.status == OrderStatus.CANCELLED,
+            Order.created_at > since30)) or 0
+    late = await db.scalar(
+        select(func.count(Order.id)).where(
+            Order.merchant_id == shop.id,
+            Order.ready_late.is_(True),
+            Order.created_at > since30)) or 0
+
+    return {
+        "shop_status": shop.status.value,
+        "reject_reason": shop.reject_reason or "",
+        "food_safety": food_safety,
+        "rejected_images": rejected_images,
+        "appeals": appeals,
+        "quality_30d": {"cancelled": rejects, "ready_late": late},
+        # 说清楚这些数用来干什么、不用来干什么(与 prep-time 同款做法)
+        "used_for": "让你知道平台记了什么、哪些可以申诉。食安投诉的处置"
+                    "(下架/停业)会直接影响经营,其余仅供你自查。",
+        "never_used_for": "不折算成分数、不用于排名、不影响你在用户端的曝光。"
+                          "平台没有「违规积分」这种东西。",
+    }
+
+
+# ---------- 流量转化漏斗 ----------
+
+@router.get("/me/funnel")
+async def my_funnel(
+    days: int = Query(default=7, ge=1, le=30),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """曝光 → 进店 → 结算 → 下单,每一级有多少人。
+
+    **这是"不做竞价排名"的正面替代**:我们不卖曝光位,
+    但把真实的漏斗给商家看 —— 哪一环在漏,自己就知道该改什么。
+
+    口径:按**人**去重(同一个人看十次算一个),不是按次。
+    埋点只记登录用户的产品行为,不采设备指纹(见 models.AppEvent),
+    所以未登录的浏览不在其中,绝对值会低于真实流量,看趋势和转化率更有意义。
+    """
+    from ..models import AppEvent
+    shop = await _my_shop_or_404(db, user)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    mid = str(shop.id)
+
+    async def uniq(event: str) -> int:
+        return await db.scalar(
+            select(func.count(func.distinct(AppEvent.user_id))).where(
+                AppEvent.event == event,
+                AppEvent.created_at > since,
+                AppEvent.props["merchant_id"].astext == mid)) or 0
+
+    impression = await uniq("impression_shop")
+    visit = await uniq("view_menu")
+    checkout = await uniq("checkout_view")
+    ordered = await db.scalar(
+        select(func.count(func.distinct(Order.customer_id))).where(
+            Order.merchant_id == shop.id,
+            Order.created_at > since,
+            Order.status != OrderStatus.PENDING_PAYMENT)) or 0
+
+    def rate(a: int, b: int) -> float:
+        return round(a / b, 3) if b else 0.0
+
+    return {
+        "days": days,
+        "impression": impression,
+        "visit": visit,
+        "checkout": checkout,
+        "ordered": ordered,
+        "visit_rate": rate(visit, impression),      # 看到 → 进店
+        "checkout_rate": rate(checkout, visit),     # 进店 → 结算
+        "order_rate": rate(ordered, checkout),      # 结算 → 下单
+        "overall_rate": rate(ordered, impression),
+        "note": "按人去重,只统计登录用户的浏览(平台不采设备指纹)。"
+                "平台不卖曝光位——这些数字是给你自己看的,不影响排序。",
+    }
 
 
 # ---------- 高峰备货(纯建议,不自动改库存) ----------

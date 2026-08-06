@@ -350,6 +350,17 @@ DISH_BADGES = [
     "新品", "招牌", "微辣", "中辣", "特辣", "不辣",
     "含花生", "含香菜", "素食", "儿童友好",
 ]
+
+# 供应时段 "06:00-10:30";空串=全天供应(与 open_time 同款正则口径)
+SERVE_WINDOW_RE = r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$|^$"
+
+
+class ComboItem(BaseModel):
+    """套餐子项:哪道菜、几份。套餐价是套餐自身的 price_cents,
+    子项只用来扣库存和给后厨看,不参与计价。"""
+
+    dish_id: int
+    quantity: int = Field(default=1, ge=1, le=20)
 # 互斥组:同一道菜挂"不辣"又挂"特辣",用户不知道该信哪个
 _BADGE_EXCLUSIVE = [{"微辣", "中辣", "特辣", "不辣"}]
 
@@ -377,6 +388,8 @@ class DishIn(BaseModel):
     description: str = Field(default="", max_length=200)
     badges: list[str] = Field(default=[], max_length=4)
     options: list[OptionGroup] = Field(default=[], max_length=5)
+    combo_items: list[ComboItem] = Field(default=[], max_length=8)
+    serve_window: str = Field(default="", pattern=SERVE_WINDOW_RE)
 
     @model_validator(mode="after")
     def badges_in_whitelist(self):
@@ -399,6 +412,8 @@ class DishPatch(BaseModel):
     description: str | None = Field(default=None, max_length=200)
     badges: list[str] | None = Field(default=None, max_length=4)
     options: list[OptionGroup] | None = Field(default=None, max_length=5)
+    combo_items: list[ComboItem] | None = Field(default=None, max_length=8)
+    serve_window: str | None = Field(default=None, pattern=SERVE_WINDOW_RE)
 
     @model_validator(mode="after")
     def badges_in_whitelist(self):
@@ -426,6 +441,11 @@ class DishOut(BaseModel):
     sort: int = 0  # 菜单顺序(小的在前),商家排的顺序用户端照着看
     description: str = ""  # 菜品描述(用户点之前想知道这菜里有什么)
     badges: list = []      # 标签角标(白名单 DISH_BADGES)
+    combo_items: list = []         # 套餐子项(非空 = 这是个套餐)
+    combo_dishes: list = []        # 子项明细 [{name, quantity}],菜单接口填充
+    combo_original_cents: int = 0  # 子项单点合计,前端划线显示"省 X 元"
+    serve_window: str = ""         # 供应时段(空=全天)
+    servable_now: bool = True      # 此刻是否在供应时段内,菜单接口填充
     options: list = []
     flash_price_cents: int | None = None
     flash_until: datetime | None = None

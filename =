@@ -1,0 +1,32 @@
+error: pathspec '¥100。改为按 promo_note 拆分,各数一遍
+- 券的三个数完全不受 days 窗口约束(where 里只有 merchant_id):
+  7/30/90 天切换纹丝不动,近' did not match any file(s) known to git
+error: pathspec '7' did not match any file(s) known to git
+error: pathspec '天让利会显示开店以来的全部券让利。
+  发放按券创建时间、核销按订单时间,都进窗口
+- 全额退款单仍被计入(状态机没有 refunded 态,售后退款只累加 refund_cents):
+  改为按退款' did not match any file(s) known to git
+error: pathspec '商家实收剔除;客单价从折前菜品额-用户实付退款两个
+  口径相减,改为统一的商家实收口径
+
+P1:
+- 菜品描述绕开了全站唯一的文本审核闸门 —— 昵称/评价/公告/菜名都过
+  guard_text,新增的 description 是唯一例外,引流话术可直达用户端。补上
+- 用户端菜品详情弹层没有滚动容器:200 字描述 + 标签换行,在小屏或
+  大字号(textScaler 上限 1.6)下会把「加入购物车」按钮挤出屏幕,
+  release 构建静默裁切 = 这道菜点不了。改为可滚动 + 高度封顶 85%
+
+P2/P3:
+- 评分走势用已四舍五入的均分反推更早均分,误差被样本比放大:
+  近 30 天 1000 条、更早 3 条时偏差达 +1.34 星。改用原始星级总和
+- App 长按语义被重载(第一次长按进多选、第二次才置顶):老用户按肌肉记忆
+  连按两下会置顶错的菜且无撤销。恢复长按=置顶,多选改走显式「批量」按钮
+- 批量执行期间行内控件未锁,能对正在处理的菜发反向请求;多选态改为显式
+  开关,不再由选中集非空推导(中途取消勾选会让进度圈整个消失)
+- 批量估清跳过已估清的菜(服务端 409 会被汇总成失败' did not match any file(s) known to git
+error: pathspec 'N' did not match any file(s) known to git
+error: pathspec '道,像是故障)
+- 忌口标签(含花生/含香菜/特辣)对比度只有 2.5 不过 AA:关乎安全的标签
+  改用 danger 色,其余用 inkMuted
+- 标签白名单补去重与辣度互斥校验(同一道菜不能既不辣又特辣)
+- 改分类对话框补 maxLength(50,库里 varchar(50) 超长整批 500)与 dispose' did not match any file(s) known to git

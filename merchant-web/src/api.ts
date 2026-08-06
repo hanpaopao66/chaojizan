@@ -647,8 +647,55 @@ export interface Dish {
   sort: number
   description: string
   badges: string[]
+  /** 套餐子项(非空 = 这是个套餐);自身 price_cents 即套餐价 */
+  combo_items: { dish_id: number; quantity: number }[]
+  combo_dishes: { name: string; quantity: number }[]
+  combo_original_cents: number
+  /** 供应时段 "06:00-10:30"(空 = 全天) */
+  serve_window: string
+  servable_now: boolean
   options: DishOptionGroup[]
   monthly_sales: number
+}
+
+// ---------- 流量漏斗 / 合规档案 ----------
+
+export interface Funnel {
+  days: number
+  impression: number
+  visit: number
+  checkout: number
+  ordered: number
+  visit_rate: number
+  checkout_rate: number
+  order_rate: number
+  overall_rate: number
+  note: string
+}
+
+export function merchantFunnel(days = 7): Promise<Funnel> {
+  return request('GET', `/merchants/me/funnel?days=${days}`)
+}
+
+export interface Compliance {
+  shop_status: string
+  reject_reason: string
+  food_safety: {
+    id: number; kind: string; status: string; order_no: string
+    created_at: string
+    actions: { action: string; note: string; at: string }[]
+  }[]
+  rejected_images: { id: number; url: string; note: string; created_at: string }[]
+  appeals: {
+    target_type: string; target_id: number; status: string; created_at: string
+  }[]
+  quality_30d: { cancelled: number; ready_late: number }
+  used_for: string
+  never_used_for: string
+}
+
+export function merchantCompliance(): Promise<Compliance> {
+  return request('GET', '/merchants/me/compliance')
 }
 
 /** 菜品标签白名单(与服务端 schemas.DISH_BADGES 一致) */

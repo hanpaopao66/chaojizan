@@ -47,6 +47,7 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   Map<String, dynamic>? _trend;
   Map<String, dynamic>? _today;
+  Map<String, dynamic>? _funnel;
   Map<String, dynamic>? _prep;
   Map<String, dynamic>? _analytics;
   String? _error;
@@ -70,6 +71,10 @@ class _DashboardPageState extends State<DashboardPage> {
         err ??= '$e';
         return null;
       }),
+      widget.api.merchantFunnel().then<Object?>((v) => v).catchError((Object e) {
+        err ??= '$e';
+        return null;
+      }),
       widget.api.merchantPrepTime().then<Object?>((v) => v).catchError((Object e) {
         err ??= '$e';
         return null;
@@ -86,8 +91,9 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() {
       _trend = results[0] as Map<String, dynamic>?;
       _today = results[1] as Map<String, dynamic>?;
-      _prep = results[2] as Map<String, dynamic>?;
-      _analytics = results[3] as Map<String, dynamic>?;
+      _funnel = results[2] as Map<String, dynamic>?;
+      _prep = results[3] as Map<String, dynamic>?;
+      _analytics = results[4] as Map<String, dynamic>?;
       _error = (_trend == null && _prep == null && _analytics == null) ? err : null;
     });
   }
@@ -113,6 +119,10 @@ class _DashboardPageState extends State<DashboardPage> {
                       ],
                       if (_trend != null) ...[
                         _trendCard(sz),
+                        const SizedBox(height: 14),
+                      ],
+                      if (_funnel != null) ...[
+                        _funnelCard(sz),
                         const SizedBox(height: 14),
                       ],
                       if (_analytics != null) ...[
@@ -184,6 +194,53 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 6),
         Text('按今日下单统计,是生意热度;对账页按结算入账,两边对不上是正常的',
             style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
+      ]),
+    );
+  }
+
+  // ---------------- 0.5 流量漏斗:哪一环在漏 ----------------
+
+  Widget _funnelCard(SzColors sz) {
+    final f = _funnel!;
+    Widget step(String label, int value, double? rate) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3),
+          child: Row(children: [
+            SizedBox(
+                width: 78,
+                child: Text(label,
+                    style: TextStyle(fontSize: 12.5, color: sz.inkMuted))),
+            Text('$value',
+                style: szFigure(
+                    fontSize: 16, fontWeight: FontWeight.w700, color: sz.ink)),
+            const Spacer(),
+            if (rate != null)
+              Text('转化 ${(rate * 100).toStringAsFixed(1)}%',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: rate >= 0.3 ? sz.earn : sz.hold)),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: Border.all(color: sz.line),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('近 ${f['days']} 天流量漏斗',
+            style: TextStyle(fontWeight: FontWeight.w600, color: sz.ink)),
+        const SizedBox(height: 8),
+        step('看到你的店', f['impression'] as int? ?? 0, null),
+        step('进店看菜单', f['visit'] as int? ?? 0,
+            (f['visit_rate'] as num?)?.toDouble()),
+        step('进入结算', f['checkout'] as int? ?? 0,
+            (f['checkout_rate'] as num?)?.toDouble()),
+        step('下单', f['ordered'] as int? ?? 0,
+            (f['order_rate'] as num?)?.toDouble()),
+        const SizedBox(height: 6),
+        Text('${f['note']}',
+            style: TextStyle(fontSize: 10.5, height: 1.5, color: sz.inkFaint)),
       ]),
     );
   }
