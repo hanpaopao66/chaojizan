@@ -180,6 +180,10 @@ async def my_rating_overview(
             "avg": round(total / count, 2) if count else None,
             "dist": dist,
             "bad_unreplied": unreplied_bad,
+            # 原始星级总和:走势要用它反推,不能用已四舍五入的 avg ——
+            # 两个 ±0.005 的误差被 earlier_count 一除会放大到 1 星以上
+            # (近 30 天 1000 条、更早 3 条时实测偏差 +1.34)
+            "_total": total,
         }
 
     all_time = await window(None)
@@ -189,10 +193,12 @@ async def my_rating_overview(
     earlier_count = d90["count"] - d30["count"]
     trend = None
     if d30["avg"] is not None and earlier_count >= 3:
-        earlier_total = (d90["avg"] * d90["count"]
-                         - d30["avg"] * d30["count"])
+        earlier_total = d90["_total"] - d30["_total"]
         earlier_avg = earlier_total / earlier_count
-        trend = round(d30["avg"] - earlier_avg, 2)
+        trend = round(d30["_total"] / d30["count"] - earlier_avg, 2)
+
+    for w in (all_time, d30, d90):
+        w.pop("_total", None)  # 内部量,不进响应
 
     return {
         "all_time": all_time,

@@ -194,8 +194,18 @@ class _DishManagePageState extends State<DishManagePage> {
   // ---- 批量操作(网页端早有,App 端此前只能一道一道点) ----
   final Set<int> _selected = {};
   bool _batching = false;
+  // 多选态是**显式开关**,不由"选中集非空"推导:否则批量执行中途
+  // 取消最后一个勾选,底栏和进度圈会整个消失,看起来像已经跑完了
+  bool _selectMode = false;
 
-  bool get _selecting => _selected.isNotEmpty;
+  bool get _selecting => _selectMode;
+
+  void _exitSelect() {
+    setState(() {
+      _selectMode = false;
+      _selected.clear();
+    });
+  }
 
   void _toggleSelect(Dish dish) {
     setState(() {
@@ -204,9 +214,22 @@ class _DishManagePageState extends State<DishManagePage> {
   }
 
   /// 批量执行:逐个调既有接口(菜品几十道,不值得为此加批量端点)。
-  /// 单个失败不中断其余,最后汇总告诉商家成功几道
-  Future<void> _batch(String label, Future<void> Function(int id) act) async {
-    final ids = _selected.toList();
+  /// 单个失败不中断其余,最后汇总告诉商家成功几道。
+  /// [skip] 命中的菜直接跳过且不计失败 —— 批量估清一批混合状态的菜时,
+  /// 已估清的那几道会被服务端 409 拒,算成"失败 2 道"会让商家以为出了故障
+  Future<void> _batch(String label, Future<void> Function(int id) act,
+      {bool Function(Dish dish)? skip}) async {
+    final byId = {for (final d in (_dishes ?? const <Dish>[])) d.id: d};
+    final ids = _selected
+        .where((id) => byId[id] != null && !(skip?.call(byId[id]!) ?? false))
+        .toList();
+    final skipped = _selected.length - ids.length;
+    if (ids.isEmpty) {
+      _exitSelect();
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$label:选中的菜已经是这个状态了')));
+      return;
+    }
     setState(() => _batching = true);
     var ok = 0;
     for (final id in ids) {
@@ -218,41 +241,49 @@ class _DishManagePageState extends State<DishManagePage> {
     if (!mounted) return;
     setState(() {
       _batching = false;
+      _selectMode = false;
       _selected.clear();
     });
     _load();
+    final tail = skipped > 0 ? '(另有 $skipped 道无需处理)' : '';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(ok == ids.length
-            ? '$label:${ids.length} 道已处理'
-            : '$label:成功 $ok 道,失败 ${ids.length - ok} 道')));
+            ? '$label:${ids.length} 道已处理$tail'
+            : '$label:成功 $ok 道,失败 ${ids.length - ok} 道$tail')));
   }
 
   Future<void> _batchCategory() async {
     final controller = TextEditingController();
-    final category = await showDialog<String>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text('把 ${_selected.length} 道菜改到新分类'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-              labelText: '分类名', hintText: '如 招牌/主食/饮品',
-              border: OutlineInputBorder()),
+    try {
+      final category = await showDialog<String>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: Text('把 ${_selected.length} 道菜改到新分类'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            // 库里 category 是 varchar(50),不限长度就会整批 500
+            maxLength: 50,
+            decoration: const InputDecoration(
+                labelText: '分类名', hintText: '如 招牌/主食/饮品',
+                border: OutlineInputBorder()),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialog),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialog, controller.text.trim()),
+                child: const Text('确认')),
+          ],
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialog),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.pop(dialog, controller.text.trim()),
-              child: const Text('确认')),
-        ],
-      ),
-    );
-    if (category == null || category.isEmpty) return;
-    await _batch('改分类',
-        (id) => widget.api.updateDish(id, {'category': category}));
+      );
+      if (category == null || category.isEmpty) return;
+      await _batch('改分类',
+          (id) => widget.api.updateDish(id, {'category': category}));
+    } finally {
+      controller.dispose();
+    }
   }
 
   Widget _thumb(Dish dish) => SzImage(
@@ -296,6 +327,22 @@ class _DishManagePageState extends State<DishManagePage> {
         onRefresh: _load,
         child: ListView(
           children: [
+            // 多选的显式入口(长按留给置顶,不重载手势)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Row(children: [
+                Text('共 ${dishes.length} 道 · 长按可置顶',
+                    style: TextStyle(
+                        fontSize: 12, color: Theme.of(context).sz.inkMuted)),
+                const Spacer(),
+                if (!_selecting)
+                  TextButton.icon(
+                    icon: const Icon(Icons.checklist, size: 18),
+                    label: const Text('批量'),
+                    onPressed: () => setState(() => _selectMode = true),
+                  ),
+              ]),
+            ),
             if (_stockingCard() != null) _stockingCard()!,
             // 缺图汇总:占位图能让列表不难看,但真正解决问题的是把图补上。
             // 只在确实有缺图时出现,补完自动消失,不长期占地方
@@ -384,11 +431,15 @@ class _DishManagePageState extends State<DishManagePage> {
                   selected: _selected.contains(dish.id),
                   selectedTileColor:
                       Theme.of(context).sz.claySoft.withValues(alpha: 0.4),
-                  // 长按:进多选态(批量上下架/改分类/估清);
-                  // 已在多选态时长按改为置顶到本分类最前
-                  onLongPress: () => _selecting
-                      ? _pinToTop(dish, entry.value)
-                      : _toggleSelect(dish),
+                  // **长按始终是置顶**:这是上一版就教给商家的手势,
+                  // 改成"第一次长按进多选、第二次才置顶"会让老用户
+                  // 按肌肉记忆连按两下,结果置顶了错的那道菜(写库且无撤销)。
+                  // 多选走上方显式的「批量」按钮进入
+                  onLongPress: _batching
+                      ? null
+                      : () => _selecting
+                          ? _toggleSelect(dish)
+                          : _pinToTop(dish, entry.value),
                   leading: _selecting
                       ? Icon(
                           _selected.contains(dish.id)
@@ -429,26 +480,37 @@ class _DishManagePageState extends State<DishManagePage> {
                           child: SzChip('缺图',
                               color: Theme.of(context).sz.hold, dense: true),
                         ),
+                      // 批量执行中锁掉行内控件:否则能对正在批量处理的
+                      // 同一道菜发一个反向请求,最后谁赢看运气
                       if (dish.isOnSale)
                         dish.soldOutToday
                             ? TextButton(
-                                onPressed: () => _cancelSellOut(dish),
+                                onPressed: _batching
+                                    ? null
+                                    : () => _cancelSellOut(dish),
                                 child: const Text('恢复'))
                             : dish.stock > 0
                                 ? TextButton(
-                                    onPressed: () => _sellOut(dish),
+                                    onPressed: _batching
+                                        ? null
+                                        : () => _sellOut(dish),
                                     child: const Text('估清'))
                                 : TextButton(
-                                    onPressed: () => _setStock(dish, 100),
+                                    onPressed: _batching
+                                        ? null
+                                        : () => _setStock(dish, 100),
                                     child: const Text('补货')),
                       Switch(
                         value: dish.isOnSale,
-                        onChanged: (v) => _toggleOnSale(dish, v),
+                        onChanged: _batching
+                            ? null
+                            : (v) => _toggleOnSale(dish, v),
                       ),
                     ],
                   ),
-                  onTap: () =>
-                      _selecting ? _toggleSelect(dish) : _edit(dish),
+                  onTap: _batching
+                      ? null
+                      : () => _selecting ? _toggleSelect(dish) : _edit(dish),
                 ),
             ],
             const SizedBox(height: 80),
@@ -481,9 +543,7 @@ class _DishManagePageState extends State<DishManagePage> {
                           child: CircularProgressIndicator(strokeWidth: 2)),
                     ),
                   TextButton(
-                      onPressed: _batching
-                          ? null
-                          : () => setState(_selected.clear),
+                      onPressed: _batching ? null : _exitSelect,
                       child: const Text('取消')),
                   TextButton(
                       onPressed: _batching ? null : _batchCategory,
@@ -491,8 +551,15 @@ class _DishManagePageState extends State<DishManagePage> {
                   TextButton(
                       onPressed: _batching
                           ? null
-                          : () => _batch('估清',
-                              (id) => widget.api.sellOutDish(id)),
+                          // 已估清/已售罄的跳过:服务端会 409,
+                          // 算进"失败"会让商家以为出了故障
+                          : () => _batch(
+                                '估清',
+                                (id) => widget.api.sellOutDish(id),
+                                skip: (d) => d.soldOutToday ||
+                                    !d.isOnSale ||
+                                    d.stock <= 0,
+                              ),
                       child: const Text('估清')),
                   TextButton(
                       onPressed: _batching

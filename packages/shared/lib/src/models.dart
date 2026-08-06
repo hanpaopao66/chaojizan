@@ -33,6 +33,9 @@ const List<String> kDishBadges = [
   '含花生', '含香菜', '素食', '儿童友好',
 ];
 
+/// 忌口/过敏相关:这几个关乎安全,用户端要用醒目色而不是最淡的墨色
+const Set<String> kAllergenBadges = {'含花生', '含香菜', '特辣'};
+
 /// 商家侧负向标签(菜品/包装/出餐,商家自己能改的事)
 const List<String> kMerchantNegTags = [
   '太咸了', '分量不足', '包装洒漏', '出餐慢', '和图不符',

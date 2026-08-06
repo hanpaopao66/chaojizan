@@ -640,6 +640,10 @@ async def add_dish(
         raise HTTPException(404, "先开店再上菜")
     from ..services.moderation import guard_text, submit_images
     await guard_text(db, payload.name, "菜品名称")
+    # 描述同样是面向用户的自由文本,和店铺公告/评价一个口径过审 ——
+    # 全站每一处自由文本都过 guard_text,这里漏掉就是引流话术的入口
+    if payload.description:
+        await guard_text(db, payload.description, "菜品描述")
     dish = Dish(merchant_id=shop.id, **payload.model_dump())
     db.add(dish)
     await db.flush()
@@ -668,6 +672,8 @@ async def update_dish(
     from ..services.moderation import guard_text, submit_images
     if changes.get("name"):
         await guard_text(db, changes["name"], "菜品名称")
+    if changes.get("description"):
+        await guard_text(db, changes["description"], "菜品描述")
     if changes.get("image_url") and changes["image_url"] != dish.image_url:
         await submit_images(db, "dish", dish.id, [changes["image_url"]])
     for field, value in changes.items():
@@ -2284,44 +2290,64 @@ async def my_marketing_stats(
 ):
     """满减 / 店铺券 / 限时折扣各带来多少单、让利多少。
 
-    口径说明(写在返回体里给商家看):这是**相关性不是因果性** ——
-    "用了满减的单客单价更高"不等于"满减让客单价变高",
-    也可能是本来就买得多的人才够得着门槛。不替商家下结论,只给事实。
+    ## 口径(踩过的坑写在这里)
+
+    **店铺券和满减共用 `Order.discount_cents`** —— 下单时二选一取最优
+    (见 orders.py 的 shop_off 分支),券生效时 `discount = shop_off`
+    并在 promo_note 里留「店铺券-N元(商家)」。所以:
+    - 直接 `Σ discount_cents` 当"满减让利"会把券算进去;
+    - 再单独加一遍券面额,商家看到的让利总额就翻倍了。
+    这里按 promo_note 把两者拆开,**总额只数一遍**。
+
+    **退款单不算生意**:售后全额退款不改订单状态(状态机里没有 refunded
+    这一态),只累加 refund_cents —— 只按状态过滤会把全退单算成有效单。
+
+    最后:这是**相关性不是因果性**。"用了活动的单客单价更高"不等于
+    "活动让客单价变高",也可能是本来就买得多的人才够得着门槛。
     """
     from ..models import Coupon, CouponBatch
     shop = await _my_shop_or_404(db, user)
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # 完成的单才算数:取消/退款的单不能算活动带来的生意
     rows = (await db.execute(
-        select(Order.discount_cents, Order.food_cents, Order.total_cents,
-               Order.refund_cents)
+        select(Order.discount_cents, Order.food_cents, Order.packing_fee_cents,
+               Order.refund_cents, Order.promo_note)
         .where(Order.merchant_id == shop.id,
                Order.created_at > since,
                Order.status.in_([OrderStatus.DELIVERED,
                                  OrderStatus.COMPLETED])))).all()
     promo_orders = promo_give = promo_food = 0
+    coupon_orders = coupon_give = 0
     plain_orders = plain_food = 0
-    for discount, food, _total, refund in rows:
-        net_food = max(food - refund, 0)
-        if discount > 0:
+    for discount, food, packing, refund, note in rows:
+        # 商家实收口径(与佣金基数同源),再扣掉退款
+        gross = max(food + packing - discount, 0)
+        if refund >= gross:
+            continue  # 全额退款:这单没做成,不算任何一类的生意
+        net = gross - refund
+        if discount <= 0:
+            plain_orders += 1
+            plain_food += net
+            continue
+        # 券与满减共用 discount_cents,按 promo_note 分流,各数各的
+        if "店铺券" in (note or ""):
+            coupon_orders += 1
+            coupon_give += discount
+        else:
             promo_orders += 1
             promo_give += discount
-            promo_food += net_food
-        else:
-            plain_orders += 1
-            plain_food += net_food
+        promo_food += net  # 客单价对比按"用了活动"整体算
 
-    # 店铺券:发出去多少、核销多少、让利多少(商家承担的那部分)
+    # 店铺券批次与发放量(**批次是全时段的**,核销才按窗口算 ——
+    # 已在上面按订单时间统计,这里只给发放面)
     batches = (await db.scalars(
         select(CouponBatch).where(CouponBatch.merchant_id == shop.id))).all()
-    coupon_rows = (await db.execute(
-        select(Coupon.amount_cents, Coupon.used_order_no)
-        .where(Coupon.merchant_id == shop.id,
-               Coupon.funder == "merchant"))).all()
-    coupon_issued = len(coupon_rows)
-    coupon_used = sum(1 for _a, used in coupon_rows if used)
-    coupon_give = sum(a for a, used in coupon_rows if used)
+    coupon_issued = await db.scalar(
+        select(func.count(Coupon.id)).where(
+            Coupon.merchant_id == shop.id,
+            Coupon.funder == "merchant",
+            Coupon.created_at > since)) or 0
+    coupon_used = coupon_orders
 
     # 限时折扣:当前在跑的折扣菜及其近 N 天销量
     now = datetime.now(timezone.utc)
@@ -2337,12 +2363,14 @@ async def my_marketing_stats(
     def avg(total: int, count: int) -> int:
         return int(total / count) if count else 0
 
+    active_orders = promo_orders + coupon_orders
     return {
         "days": days,
         "promo": {
             "orders": promo_orders,
             "give_cents": promo_give,
-            "avg_ticket_cents": avg(promo_food, promo_orders),
+            # 客单价按"用了活动的单"整体算(满减 + 券),与 plain 同基准
+            "avg_ticket_cents": avg(promo_food, active_orders),
         },
         "plain": {
             "orders": plain_orders,
@@ -2350,8 +2378,8 @@ async def my_marketing_stats(
         },
         "coupon": {
             "batches": len(batches),
-            "issued": coupon_issued,
-            "used": coupon_used,
+            "issued": coupon_issued,   # 窗口内发出的张数
+            "used": coupon_used,       # 窗口内核销的张数(按订单时间)
             "use_rate": (round(coupon_used / coupon_issued, 3)
                          if coupon_issued else 0.0),
             "give_cents": coupon_give,

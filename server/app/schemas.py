@@ -350,6 +350,20 @@ DISH_BADGES = [
     "新品", "招牌", "微辣", "中辣", "特辣", "不辣",
     "含花生", "含香菜", "素食", "儿童友好",
 ]
+# 互斥组:同一道菜挂"不辣"又挂"特辣",用户不知道该信哪个
+_BADGE_EXCLUSIVE = [{"微辣", "中辣", "特辣", "不辣"}]
+
+
+def _validate_badges(badges: list[str]) -> None:
+    bad = [b for b in badges if b not in DISH_BADGES]
+    if bad:
+        raise ValueError(f"不支持的标签:{'、'.join(bad)}")
+    if len(set(badges)) != len(badges):
+        raise ValueError("标签不能重复")
+    for group in _BADGE_EXCLUSIVE:
+        hit = group & set(badges)
+        if len(hit) > 1:
+            raise ValueError(f"辣度只能选一个,现在选了:{'、'.join(sorted(hit))}")
 
 
 class DishIn(BaseModel):
@@ -366,9 +380,7 @@ class DishIn(BaseModel):
 
     @model_validator(mode="after")
     def badges_in_whitelist(self):
-        bad = [b for b in self.badges if b not in DISH_BADGES]
-        if bad:
-            raise ValueError(f"不支持的标签:{'、'.join(bad)}")
+        _validate_badges(self.badges)
         return self
 
 
@@ -390,9 +402,7 @@ class DishPatch(BaseModel):
 
     @model_validator(mode="after")
     def badges_in_whitelist(self):
-        bad = [b for b in (self.badges or []) if b not in DISH_BADGES]
-        if bad:
-            raise ValueError(f"不支持的标签:{'、'.join(bad)}")
+        _validate_badges(self.badges or [])
         return self
     # 限时折扣:两者同传开启,同传 null 关闭(折扣价必须低于现价,服务端校验)
     flash_price_cents: int | None = Field(default=None, gt=0)

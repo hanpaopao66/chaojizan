@@ -2109,8 +2109,12 @@ class _MenuPageState extends State<MenuPage>
                           padding: const EdgeInsets.only(top: 2),
                           child: Wrap(spacing: 4, runSpacing: 2, children: [
                             for (final badge in dish.badges)
+                              // 忌口类("含花生")关乎安全,不能用最淡的墨色:
+                              // inkFaint 在骨白底上对比度只有 2.5,不过 AA(4.5)
                               SzChip(badge,
-                                  color: Theme.of(context).sz.inkFaint,
+                                  color: kAllergenBadges.contains(badge)
+                                      ? Theme.of(context).sz.danger
+                                      : Theme.of(context).sz.inkMuted,
                                   dense: true),
                           ]),
                         ),
@@ -2200,10 +2204,18 @@ class _MenuPageState extends State<MenuPage>
           final quantity = _qtyOf(dish);
           final soldOut = dish.stock <= 0;
           return SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            // 必须可滚动:菜品描述最长 200 字,加上忌口标签换行,
+            // 在小屏或大字号(textScaler 上限 1.6)下会把底部的
+            // 「加入购物车」按钮挤出屏幕 —— release 构建是**静默裁切**,
+            // 那道菜就变成点不了了。高度也封顶,不让弹层顶满全屏
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(sheetContext).size.height * 0.85),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 // 大图:缺图时是同一套占位(色底 + 菜名首字),不是灰图标
                 SzCover(
                   url: dish.imageUrl.isEmpty
@@ -2241,7 +2253,9 @@ class _MenuPageState extends State<MenuPage>
                         Wrap(spacing: 6, runSpacing: 4, children: [
                           for (final badge in dish.badges)
                             SzChip(badge,
-                                color: Theme.of(context).sz.inkFaint,
+                                color: kAllergenBadges.contains(badge)
+                                    ? Theme.of(context).sz.danger
+                                    : Theme.of(context).sz.inkMuted,
                                 dense: true),
                         ]),
                       ],
@@ -2294,7 +2308,9 @@ class _MenuPageState extends State<MenuPage>
                     ],
                   ),
                 ),
-              ],
+                  ],
+                ),
+              ),
             ),
           );
         },
