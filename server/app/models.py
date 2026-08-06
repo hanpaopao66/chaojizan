@@ -283,6 +283,14 @@ class Dish(Base):
     # 菜单排序:小的在前(默认 0,同值按 id)。招牌放最前、饮品小食垫后
     # 是商家最常做的"装修"动作,此前只能靠改分类名硬凑
     sort: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 菜品描述:用户点之前想知道"这菜里有什么"。此前只有店铺介绍,
+    # 单菜一个字都没有 —— 有忌口的人只能靠猜或者备注里写一长串
+    description: Mapped[str] = mapped_column(
+        String(200), default="", server_default="")
+    # 菜品标签(白名单见 schemas.DISH_BADGES):新品/招牌/辣度等,
+    # 用户端角标。**不含"平台推荐"这类** —— 那会变成竞价位
+    badges: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default="[]")
     # 酒类标记:商家上架自助勾选(法律义务在商家,平台提供工具与拦截)。
     # 含酒订单要求用户已实名且成年(#14),小票/骑手端提示查验收件人
     is_alcohol: Mapped[bool] = mapped_column(Boolean, default=False)

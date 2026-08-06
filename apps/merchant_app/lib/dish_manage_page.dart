@@ -191,6 +191,70 @@ class _DishManagePageState extends State<DishManagePage> {
     }
   }
 
+  // ---- 批量操作(网页端早有,App 端此前只能一道一道点) ----
+  final Set<int> _selected = {};
+  bool _batching = false;
+
+  bool get _selecting => _selected.isNotEmpty;
+
+  void _toggleSelect(Dish dish) {
+    setState(() {
+      if (!_selected.remove(dish.id)) _selected.add(dish.id);
+    });
+  }
+
+  /// 批量执行:逐个调既有接口(菜品几十道,不值得为此加批量端点)。
+  /// 单个失败不中断其余,最后汇总告诉商家成功几道
+  Future<void> _batch(String label, Future<void> Function(int id) act) async {
+    final ids = _selected.toList();
+    setState(() => _batching = true);
+    var ok = 0;
+    for (final id in ids) {
+      try {
+        await act(id);
+        ok++;
+      } catch (_) {/* 汇总里体现 */}
+    }
+    if (!mounted) return;
+    setState(() {
+      _batching = false;
+      _selected.clear();
+    });
+    _load();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok == ids.length
+            ? '$label:${ids.length} 道已处理'
+            : '$label:成功 $ok 道,失败 ${ids.length - ok} 道')));
+  }
+
+  Future<void> _batchCategory() async {
+    final controller = TextEditingController();
+    final category = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('把 ${_selected.length} 道菜改到新分类'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+              labelText: '分类名', hintText: '如 招牌/主食/饮品',
+              border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialog),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(dialog, controller.text.trim()),
+              child: const Text('确认')),
+        ],
+      ),
+    );
+    if (category == null || category.isEmpty) return;
+    await _batch('改分类',
+        (id) => widget.api.updateDish(id, {'category': category}));
+  }
+
   Widget _thumb(Dish dish) => SzImage(
         url: dish.imageUrl.isEmpty ? '' : widget.api.resolveUrl(dish.imageUrl),
         name: dish.name,
@@ -317,9 +381,24 @@ class _DishManagePageState extends State<DishManagePage> {
               ),
               for (final dish in entry.value)
                 ListTile(
-                  // 长按置顶:排在本分类最前(招牌菜该在第一屏)
-                  onLongPress: () => _pinToTop(dish, entry.value),
-                  leading: _thumb(dish),
+                  selected: _selected.contains(dish.id),
+                  selectedTileColor:
+                      Theme.of(context).sz.claySoft.withValues(alpha: 0.4),
+                  // 长按:进多选态(批量上下架/改分类/估清);
+                  // 已在多选态时长按改为置顶到本分类最前
+                  onLongPress: () => _selecting
+                      ? _pinToTop(dish, entry.value)
+                      : _toggleSelect(dish),
+                  leading: _selecting
+                      ? Icon(
+                          _selected.contains(dish.id)
+                              ? Icons.check_circle
+                              : Icons.radio_button_unchecked,
+                          color: _selected.contains(dish.id)
+                              ? Theme.of(context).colorScheme.primary
+                              : Theme.of(context).sz.inkFaint,
+                        )
+                      : _thumb(dish),
                   title: Text(
                     dish.name,
                     style: dish.isOnSale
@@ -368,7 +447,8 @@ class _DishManagePageState extends State<DishManagePage> {
                       ),
                     ],
                   ),
-                  onTap: () => _edit(dish),
+                  onTap: () =>
+                      _selecting ? _toggleSelect(dish) : _edit(dish),
                 ),
             ],
             const SizedBox(height: 80),
@@ -379,11 +459,64 @@ class _DishManagePageState extends State<DishManagePage> {
 
     return Scaffold(
       body: body,
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _edit(),
-        icon: const Icon(Icons.add),
-        label: const Text('新增菜品'),
-      ),
+      // 多选态:底部条给批量动作,别占常驻空间
+      bottomNavigationBar: _selecting
+          ? SafeArea(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).sz.surface,
+                  border: Border(
+                      top: BorderSide(color: Theme.of(context).sz.line)),
+                ),
+                child: Row(children: [
+                  Text('已选 ${_selected.length}'),
+                  const Spacer(),
+                  if (_batching)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 12),
+                      child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2)),
+                    ),
+                  TextButton(
+                      onPressed: _batching
+                          ? null
+                          : () => setState(_selected.clear),
+                      child: const Text('取消')),
+                  TextButton(
+                      onPressed: _batching ? null : _batchCategory,
+                      child: const Text('改分类')),
+                  TextButton(
+                      onPressed: _batching
+                          ? null
+                          : () => _batch('估清',
+                              (id) => widget.api.sellOutDish(id)),
+                      child: const Text('估清')),
+                  TextButton(
+                      onPressed: _batching
+                          ? null
+                          : () => _batch('下架', (id) => widget.api
+                              .updateDish(id, {'is_on_sale': false})),
+                      child: const Text('下架')),
+                  FilledButton(
+                      onPressed: _batching
+                          ? null
+                          : () => _batch('上架', (id) => widget.api
+                              .updateDish(id, {'is_on_sale': true})),
+                      child: const Text('上架')),
+                ]),
+              ),
+            )
+          : null,
+      floatingActionButton: _selecting
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => _edit(),
+              icon: const Icon(Icons.add),
+              label: const Text('新增菜品'),
+            ),
     );
   }
 }
@@ -412,6 +545,9 @@ class _DishEditPageState extends State<DishEditPage> {
   // 每日回满目标(空=不启用)
   late final _dailyStock = TextEditingController(
       text: widget.dish?.dailyStock == null ? '' : '${widget.dish!.dailyStock}');
+  late final _description =
+      TextEditingController(text: widget.dish?.description ?? '');
+  late final Set<String> _badges = {...?widget.dish?.badges};
   late String _imageUrl = widget.dish?.imageUrl ?? '';
   late bool _isAlcohol = widget.dish?.isAlcohol ?? false;
   bool _uploading = false;
@@ -531,6 +667,8 @@ class _DishEditPageState extends State<DishEditPage> {
           priceCents: priceCents,
           stock: stock,
           imageUrl: _imageUrl,
+          description: _description.text.trim(),
+          badges: _badges.toList(),
           options: options,
           dailyStock: dailyStock,
           isAlcohol: _isAlcohol,
@@ -544,6 +682,8 @@ class _DishEditPageState extends State<DishEditPage> {
           'daily_stock': dailyStock, // null = 关闭每日回满
           'is_alcohol': _isAlcohol,
           'image_url': _imageUrl,
+          'description': _description.text.trim(),
+          'badges': _badges.toList(),
           'options': options,
           ...flashFields,
         });
@@ -610,6 +750,38 @@ class _DishEditPageState extends State<DishEditPage> {
                   labelText: '分类(如 招牌/主食/饮品)',
                   helperText: '同分类的菜在点单页归为一组',
                   border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          // 菜品描述:用户点之前想知道"这菜里有什么"。有忌口的人尤其需要
+          TextField(
+              controller: _description,
+              maxLength: 200,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                  labelText: '菜品描述',
+                  helperText: '写清用料和口味,有忌口的顾客不用猜',
+                  border: OutlineInputBorder())),
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('标签(最多 4 个,用户端显示角标)',
+                style: Theme.of(context).textTheme.bodySmall),
+          ),
+          const SizedBox(height: 4),
+          Wrap(spacing: 6, runSpacing: 2, children: [
+            for (final badge in kDishBadges)
+              FilterChip(
+                label: Text(badge, style: const TextStyle(fontSize: 12)),
+                selected: _badges.contains(badge),
+                visualDensity: VisualDensity.compact,
+                onSelected: (on) => setState(() {
+                  if (on && _badges.length < 4) {
+                    _badges.add(badge);
+                  } else {
+                    _badges.remove(badge);
+                  }
+                }),
+              ),
+          ]),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(

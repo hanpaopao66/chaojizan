@@ -1221,6 +1221,8 @@ class ApiClient {
     int? dailyStock,
     bool isAlcohol = false,
     String imageUrl = '',
+    String description = '',
+    List<String> badges = const [],
     List<Map<String, dynamic>> options = const [],
   }) async {
     final data = await _request('POST', '/merchants/me/dishes', body: {
@@ -1231,6 +1233,8 @@ class ApiClient {
       'daily_stock': dailyStock,
       'is_alcohol': isAlcohol,
       'image_url': imageUrl,
+      'description': description,
+      'badges': badges,
       'options': options,
     });
     return Dish.fromJson(data as Map<String, dynamic>);
@@ -1301,6 +1305,19 @@ class ApiClient {
       throw ApiException(response.statusCode, message);
     }
     return (jsonDecode(text) as Map)['url'] as String;
+  }
+
+  /// 营销效果:满减/店铺券/限时折扣各带来多少单、让利多少
+  Future<Map<String, dynamic>> marketingStats({int days = 30}) async {
+    final data = await _request('GET', '/merchants/me/marketing-stats',
+        query: {'days': '$days'});
+    return (data as Map).cast<String, dynamic>();
+  }
+
+  /// 评分概览:总分/星级分布/近 30-90 天走势/差评待回复
+  Future<Map<String, dynamic>> ratingOverview() async {
+    final data = await _request('GET', '/merchants/me/reviews/overview');
+    return (data as Map).cast<String, dynamic>();
   }
 
   /// 批量写菜单顺序(小的在前);置顶 = 给它一个比现有最小值更小的 sort

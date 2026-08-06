@@ -25,6 +25,14 @@ const List<String> kReviewTags = [
   '味道好', '分量足', '包装好', '配送快', '干净卫生', '回头客',
 ];
 
+/// 菜品标签白名单(与服务端 schemas.DISH_BADGES 一致)。
+/// 只收商家自述的客观项;**故意不含"平台推荐""热销第一"** ——
+/// 那种标签一旦存在,迟早变成可以买的位置,与"没有竞价排名"冲突。
+const List<String> kDishBadges = [
+  '新品', '招牌', '微辣', '中辣', '特辣', '不辣',
+  '含花生', '含香菜', '素食', '儿童友好',
+];
+
 /// 商家侧负向标签(菜品/包装/出餐,商家自己能改的事)
 const List<String> kMerchantNegTags = [
   '太咸了', '分量不足', '包装洒漏', '出餐慢', '和图不符',
@@ -282,6 +290,8 @@ class Dish {
         isAlcohol = json['is_alcohol'] as bool? ?? false,
         imageUrl = json['image_url'] as String? ?? '',
         sort = json['sort'] as int? ?? 0,
+        description = json['description'] as String? ?? '',
+        badges = (json['badges'] as List? ?? const []).cast<String>(),
         options = (json['options'] as List? ?? const [])
             .map((e) => OptionGroup.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -300,6 +310,12 @@ class Dish {
 
   /// 菜单顺序(小的在前,同值按 id):商家排的顺序,用户端照着看
   final int sort;
+
+  /// 菜品描述(用户点之前想知道这菜里有什么)
+  final String description;
+
+  /// 标签角标(白名单 kDishBadges):新品/招牌/辣度/忌口提示
+  final List<String> badges;
 
   /// 每日回满目标(空=未启用):每天 04:00 库存自动重置为该值
   final int? dailyStock;

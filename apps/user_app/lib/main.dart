@@ -2102,6 +2102,28 @@ class _MenuPageState extends State<MenuPage>
                           ),
                         ],
                       ]),
+                      // 商家自述的客观标签(新品/招牌/辣度/忌口提示)。
+                      // 含"含花生""含香菜"这类是为了让有忌口的人一眼看到
+                      if (dish.badges.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Wrap(spacing: 4, runSpacing: 2, children: [
+                            for (final badge in dish.badges)
+                              SzChip(badge,
+                                  color: Theme.of(context).sz.inkFaint,
+                                  dense: true),
+                          ]),
+                        ),
+                      if (dish.description.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(dish.description,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Theme.of(context).sz.inkMuted)),
+                        ),
                       const SizedBox(height: 2),
                       Row(
                         children: [
@@ -2214,6 +2236,21 @@ class _MenuPageState extends State<MenuPage>
                           ),
                         ],
                       ),
+                      if (dish.badges.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Wrap(spacing: 6, runSpacing: 4, children: [
+                          for (final badge in dish.badges)
+                            SzChip(badge,
+                                color: Theme.of(context).sz.inkFaint,
+                                dense: true),
+                        ]),
+                      ],
+                      if (dish.description.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(dish.description,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).sz.inkMuted)),
+                      ],
                       if (dish.isAlcohol) ...[
                         const SizedBox(height: 6),
                         Text('🍺 酒类商品:未成年人禁止购买,下单需完成实名认证',

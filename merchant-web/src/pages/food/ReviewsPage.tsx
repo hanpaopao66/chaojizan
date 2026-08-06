@@ -1,11 +1,13 @@
 import { StarFilled, StarOutlined } from '@ant-design/icons'
 import {
-  Button, Card, Empty, Image, Input, Modal, Segmented, Space, Tag, message,
+  Button, Card, Empty, Image, Input, Modal, Progress, Segmented, Space,
+  Statistic, Tag, message,
 } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, FoodReview, myFoodReviews, replyFoodAppend, replyFoodReview,
+  ApiError, FoodReview, RatingOverview, myFoodReviews, ratingOverview,
+  replyFoodAppend, replyFoodReview,
 } from '../../api'
 
 /** 外卖顾客评价:筛选(全部/差评/待回复)+ 回复 + 追评回复。
@@ -85,6 +87,7 @@ export default function ReviewsPage() {
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
+      <OverviewCard />
       <Segmented
         value={filter}
         onChange={setFilter}
@@ -141,5 +144,61 @@ export default function ReviewsPage() {
         </Card>
       ))}
     </Space>
+  )
+}
+
+/** 评分概览:总分不够用 —— 商家要知道是被几条差评拉的、最近在变好还是变坏。 */
+function OverviewCard() {
+  const [data, setData] = useState<RatingOverview | null>(null)
+
+  useEffect(() => {
+    ratingOverview().then(setData).catch(() => { /* 不打断列表 */ })
+  }, [])
+
+  if (!data?.all_time.avg) return null
+  const { all_time: all, last_30d: d30 } = data
+  const trend = data.trend_30d_vs_earlier
+
+  return (
+    <Card size="small">
+      <Space size="large" align="start" wrap>
+        <Statistic title={`店铺评分(${all.count} 条)`} value={all.avg ?? 0}
+          precision={2} />
+        <div style={{ minWidth: 220 }}>
+          {[5, 4, 3, 2, 1].map((star) => (
+            <div key={star} style={{
+              display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+            }}>
+              <span style={{ width: 24 }}>{star}★</span>
+              <Progress
+                percent={all.count ? Math.round(
+                  ((all.dist[String(star)] ?? 0) / all.count) * 100) : 0}
+                size="small"
+                showInfo={false}
+                strokeColor={star <= 3 ? '#cf1322' : '#faad14'}
+                style={{ flex: 1, margin: 0 }}
+              />
+              <span style={{ width: 28, textAlign: 'right', color: '#888' }}>
+                {all.dist[String(star)] ?? 0}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 12, lineHeight: 2 }}>
+          {trend != null && (
+            <div style={{ color: trend > 0 ? '#389e0d' : trend < 0 ? '#cf1322' : '#888' }}>
+              近 30 天 {trend > 0 ? `↑${trend}` : trend < 0 ? `↓${-trend}` : '持平'}
+              <span style={{ color: '#999' }}>（对比更早)</span>
+            </div>
+          )}
+          <div>近 30 天 {d30.count} 条,均分 {d30.avg ?? '—'}</div>
+          {d30.bad_unreplied > 0 && (
+            <div style={{ color: '#cf1322' }}>
+              还有 {d30.bad_unreplied} 条差评没回
+            </div>
+          )}
+        </div>
+      </Space>
+    </Card>
   )
 }

@@ -144,6 +144,65 @@ async def get_order_review(
 
 
 # ---------- 商家侧:查看 + 回复 ----------
+@router.get("/merchants/me/reviews/overview")
+async def my_rating_overview(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """评分概览:总分、星级分布、近 30/90 天走势、待回复数。
+
+    商家最盯的数字是店铺分,但此前只能看到一个总分 ——
+    不知道是被几条差评拉的,也不知道最近在变好还是变坏。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    now = datetime.now(timezone.utc)
+
+    async def window(days: int | None) -> dict:
+        stmt = select(Review.merchant_rating, Review.reply).where(
+            Review.merchant_id == shop.id, Review.hidden.is_(False))
+        if days is not None:
+            stmt = stmt.where(Review.created_at > now - timedelta(days=days))
+        rows = (await db.execute(stmt)).all()
+        dist = {star: 0 for star in range(1, 6)}
+        unreplied_bad = 0
+        for rating, reply in rows:
+            dist[rating] = dist.get(rating, 0) + 1
+            if rating <= 3 and not reply:
+                unreplied_bad += 1
+        count = len(rows)
+        total = sum(star * n for star, n in dist.items())
+        return {
+            "count": count,
+            "avg": round(total / count, 2) if count else None,
+            "dist": dist,
+            "bad_unreplied": unreplied_bad,
+        }
+
+    all_time = await window(None)
+    d30 = await window(30)
+    d90 = await window(90)
+    # 走势:近 30 天 vs 前 60 天(即 90 天窗口里除去最近 30 天的部分)
+    earlier_count = d90["count"] - d30["count"]
+    trend = None
+    if d30["avg"] is not None and earlier_count >= 3:
+        earlier_total = (d90["avg"] * d90["count"]
+                         - d30["avg"] * d30["count"])
+        earlier_avg = earlier_total / earlier_count
+        trend = round(d30["avg"] - earlier_avg, 2)
+
+    return {
+        "all_time": all_time,
+        "last_30d": d30,
+        "last_90d": d90,
+        # 正数=最近 30 天比之前更好;样本不足时为 null(不拿 1-2 条评价说事)
+        "trend_30d_vs_earlier": trend,
+    }
+
+
 @router.get("/merchants/me/reviews/tag-stats")
 async def my_review_tag_stats(
     days: int = 30,

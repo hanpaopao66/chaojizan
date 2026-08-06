@@ -343,6 +343,15 @@ class OptionGroup(BaseModel):
         return self
 
 
+# 菜品标签白名单。只收**商家自述的客观项**:新品/招牌是事实,辣度是口味,
+# 忌口提示关乎安全。**故意不含「平台推荐」「热销第一」这类** ——
+# 那种标签一旦存在,迟早会变成可以买的位置,与"没有竞价排名"直接冲突
+DISH_BADGES = [
+    "新品", "招牌", "微辣", "中辣", "特辣", "不辣",
+    "含花生", "含香菜", "素食", "儿童友好",
+]
+
+
 class DishIn(BaseModel):
     name: str
     category: str = ""
@@ -351,7 +360,16 @@ class DishIn(BaseModel):
     daily_stock: int | None = Field(default=None, ge=0, le=100_000)
     is_alcohol: bool = False  # 酒类:购买需实名且成年,商家上架自助勾选
     image_url: str = ""
+    description: str = Field(default="", max_length=200)
+    badges: list[str] = Field(default=[], max_length=4)
     options: list[OptionGroup] = Field(default=[], max_length=5)
+
+    @model_validator(mode="after")
+    def badges_in_whitelist(self):
+        bad = [b for b in self.badges if b not in DISH_BADGES]
+        if bad:
+            raise ValueError(f"不支持的标签:{'、'.join(bad)}")
+        return self
 
 
 class DishPatch(BaseModel):
@@ -366,7 +384,16 @@ class DishPatch(BaseModel):
     is_alcohol: bool | None = None
     image_url: str | None = None
     sort: int | None = Field(default=None, ge=-9999, le=9999)  # 菜单顺序,小的在前
+    description: str | None = Field(default=None, max_length=200)
+    badges: list[str] | None = Field(default=None, max_length=4)
     options: list[OptionGroup] | None = Field(default=None, max_length=5)
+
+    @model_validator(mode="after")
+    def badges_in_whitelist(self):
+        bad = [b for b in (self.badges or []) if b not in DISH_BADGES]
+        if bad:
+            raise ValueError(f"不支持的标签:{'、'.join(bad)}")
+        return self
     # 限时折扣:两者同传开启,同传 null 关闭(折扣价必须低于现价,服务端校验)
     flash_price_cents: int | None = Field(default=None, gt=0)
     flash_until: datetime | None = None
@@ -387,6 +414,8 @@ class DishOut(BaseModel):
     is_alcohol: bool = False  # 酒类:「酒」角标 + 未成年人禁止购买提示
     image_url: str
     sort: int = 0  # 菜单顺序(小的在前),商家排的顺序用户端照着看
+    description: str = ""  # 菜品描述(用户点之前想知道这菜里有什么)
+    badges: list = []      # 标签角标(白名单 DISH_BADGES)
     options: list = []
     flash_price_cents: int | None = None
     flash_until: datetime | None = None

@@ -6,8 +6,8 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, Dish, DishOptionGroup, createDish, myDishes, reorderDishes,
-  sellOutDish, updateDish, UPLOAD_ACCEPT, uploadImage, yuan,
+  ApiError, Dish, DISH_BADGES, DishOptionGroup, createDish, myDishes,
+  reorderDishes, sellOutDish, updateDish, UPLOAD_ACCEPT, uploadImage, yuan,
 } from '../../api'
 
 /** 菜品管理:表格批量效率是网页价值(多选批量上下架/改分类,单击进抽屉编辑)。 */
@@ -192,6 +192,8 @@ function DishDrawer({ existing, onClose }: {
   const [dailyStock, setDailyStock] = useState<number | null>(
     existing?.daily_stock ?? null)
   const [imageUrl, setImageUrl] = useState(existing?.image_url ?? '')
+  const [description, setDescription] = useState(existing?.description ?? '')
+  const [badges, setBadges] = useState<string[]>(existing?.badges ?? [])
   const [groups, setGroups] = useState<DishOptionGroup[]>(
     existing?.options ?? [])
   const [busy, setBusy] = useState(false)
@@ -216,6 +218,8 @@ function DishDrawer({ existing, onClose }: {
       stock,
       daily_stock: dailyStock,
       image_url: imageUrl,
+      description: description.trim(),
+      badges,
       options: cleanGroups,
     }
     try {
@@ -254,6 +258,29 @@ function DishDrawer({ existing, onClose }: {
             <InputNumber min={0} value={dailyStock} onChange={setDailyStock} />
           </Form.Item>
         </Space>
+        <Form.Item label="菜品描述"
+          extra="写清用料和口味,有忌口的顾客不用猜">
+          <Input.TextArea
+            value={description}
+            maxLength={200}
+            rows={2}
+            showCount
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </Form.Item>
+        <Form.Item label="标签(最多 4 个,用户端显示角标)">
+          <Space wrap>
+            {DISH_BADGES.map((b) => (
+              <Tag.CheckableTag
+                key={b}
+                checked={badges.includes(b)}
+                onChange={(on) => setBadges(on
+                  ? (badges.length < 4 ? [...badges, b] : badges)
+                  : badges.filter((x) => x !== b))}
+              >{b}</Tag.CheckableTag>
+            ))}
+          </Space>
+        </Form.Item>
         <Form.Item label="菜品图">
           <Upload
             listType="picture-card"

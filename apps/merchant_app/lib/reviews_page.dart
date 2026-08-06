@@ -29,6 +29,8 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
 
   // 近 30 天负向标签聚合:"送得慢×8"比翻 50 条评价更快看清问题在哪一环
   Map<String, dynamic>? _tagStats;
+  // 评分概览:商家最盯的数字,但光一个总分看不出是被几条差评拉的
+  Map<String, dynamic>? _overview;
 
   @override
   void initState() {
@@ -37,6 +39,97 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
     widget.api.myReviewTagStats().then((stats) {
       if (mounted) setState(() => _tagStats = stats);
     }).catchError((_) {/* 聚合拉不到不影响列表 */});
+    widget.api.ratingOverview().then((o) {
+      if (mounted) setState(() => _overview = o);
+    }).catchError((_) {/* 同上 */});
+  }
+
+  /// 评分概览条:总分 + 星级分布 + 近 30 天走势
+  Widget _overviewBar() {
+    final data = _overview;
+    if (data == null) return const SizedBox.shrink();
+    final all = data['all_time'] as Map<String, dynamic>? ?? const {};
+    final d30 = data['last_30d'] as Map<String, dynamic>? ?? const {};
+    final avg = all['avg'];
+    if (avg == null) return const SizedBox.shrink();
+    final dist = (all['dist'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final count = all['count'] as int? ?? 0;
+    final trend = data['trend_30d_vs_earlier'] as num?;
+    final sz = Theme.of(context).sz;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: Border.all(color: sz.line),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('$avg',
+              style: szFigure(
+                  fontSize: 26, fontWeight: FontWeight.w700, color: sz.ink)),
+          Text('$count 条评价',
+              style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+          if (trend != null)
+            Text(
+                trend > 0
+                    ? '近 30 天 ↑${trend.toStringAsFixed(2)}'
+                    : trend < 0
+                        ? '近 30 天 ↓${(-trend).toStringAsFixed(2)}'
+                        : '近 30 天持平',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: trend > 0
+                        ? sz.earn
+                        : trend < 0
+                            ? sz.danger
+                            : sz.inkMuted)),
+        ]),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(children: [
+            for (var star = 5; star >= 1; star--)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Row(children: [
+                  Text('$star★',
+                      style: TextStyle(fontSize: 10, color: sz.inkMuted)),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: LinearProgressIndicator(
+                        minHeight: 6,
+                        value: count == 0
+                            ? 0
+                            : (dist['$star'] as int? ?? 0) / count,
+                        backgroundColor: sz.line,
+                        valueColor: AlwaysStoppedAnimation(
+                            star <= 3 ? sz.danger : sz.hold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  SizedBox(
+                    width: 26,
+                    child: Text('${dist['$star'] ?? 0}',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(fontSize: 10, color: sz.inkMuted)),
+                  ),
+                ]),
+              ),
+            if ((d30['bad_unreplied'] as int? ?? 0) > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('近 30 天还有 ${d30['bad_unreplied']} 条差评没回',
+                    style: TextStyle(fontSize: 11, color: sz.danger)),
+              ),
+          ]),
+        ),
+      ]),
+    );
   }
 
   /// 标签聚合条:商家组(自己能改的)红色,配送组(平台的责任)灰色注明不计分
@@ -283,6 +376,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('顾客评价')),
       body: Column(children: [
+        _overviewBar(),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
           child: SegmentedButton<int>(

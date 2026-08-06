@@ -522,6 +522,46 @@ export function merchantTodos(): Promise<Todos> {
   return request('GET', '/merchants/me/todos')
 }
 
+// ---------- 营销效果 / 评分概览 ----------
+
+export interface MarketingStats {
+  days: number
+  promo: { orders: number; give_cents: number; avg_ticket_cents: number }
+  plain: { orders: number; avg_ticket_cents: number }
+  coupon: {
+    batches: number; issued: number; used: number
+    use_rate: number; give_cents: number
+  }
+  flash: {
+    dish_id: number; name: string; price_cents: number
+    flash_price_cents: number; until: string; monthly_sales: number
+  }[]
+  total_give_cents: number
+  note: string
+}
+
+export function marketingStats(days = 30): Promise<MarketingStats> {
+  return request('GET', `/merchants/me/marketing-stats?days=${days}`)
+}
+
+export interface RatingWindow {
+  count: number
+  avg: number | null
+  dist: Record<string, number>
+  bad_unreplied: number
+}
+
+export interface RatingOverview {
+  all_time: RatingWindow
+  last_30d: RatingWindow
+  last_90d: RatingWindow
+  trend_30d_vs_earlier: number | null
+}
+
+export function ratingOverview(): Promise<RatingOverview> {
+  return request('GET', '/merchants/me/reviews/overview')
+}
+
 // ---------- 开放接口凭证(POS 对接) ----------
 
 export interface ApiKey {
@@ -605,9 +645,17 @@ export interface Dish {
   is_alcohol: boolean
   image_url: string
   sort: number
+  description: string
+  badges: string[]
   options: DishOptionGroup[]
   monthly_sales: number
 }
+
+/** 菜品标签白名单(与服务端 schemas.DISH_BADGES 一致) */
+export const DISH_BADGES = [
+  '新品', '招牌', '微辣', '中辣', '特辣', '不辣',
+  '含花生', '含香菜', '素食', '儿童友好',
+]
 
 /** 批量写菜单顺序(小的在前);置顶 = 给一个比同分类现有最小值更小的 sort */
 export function reorderDishes(

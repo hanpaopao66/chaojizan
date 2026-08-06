@@ -2274,6 +2274,102 @@ async def my_todos(
     }
 
 
+# ---------- 营销效果(花出去的钱换回了什么) ----------
+
+@router.get("/me/marketing-stats")
+async def my_marketing_stats(
+    days: int = Query(default=30, ge=7, le=90),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """满减 / 店铺券 / 限时折扣各带来多少单、让利多少。
+
+    口径说明(写在返回体里给商家看):这是**相关性不是因果性** ——
+    "用了满减的单客单价更高"不等于"满减让客单价变高",
+    也可能是本来就买得多的人才够得着门槛。不替商家下结论,只给事实。
+    """
+    from ..models import Coupon, CouponBatch
+    shop = await _my_shop_or_404(db, user)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # 完成的单才算数:取消/退款的单不能算活动带来的生意
+    rows = (await db.execute(
+        select(Order.discount_cents, Order.food_cents, Order.total_cents,
+               Order.refund_cents)
+        .where(Order.merchant_id == shop.id,
+               Order.created_at > since,
+               Order.status.in_([OrderStatus.DELIVERED,
+                                 OrderStatus.COMPLETED])))).all()
+    promo_orders = promo_give = promo_food = 0
+    plain_orders = plain_food = 0
+    for discount, food, _total, refund in rows:
+        net_food = max(food - refund, 0)
+        if discount > 0:
+            promo_orders += 1
+            promo_give += discount
+            promo_food += net_food
+        else:
+            plain_orders += 1
+            plain_food += net_food
+
+    # 店铺券:发出去多少、核销多少、让利多少(商家承担的那部分)
+    batches = (await db.scalars(
+        select(CouponBatch).where(CouponBatch.merchant_id == shop.id))).all()
+    coupon_rows = (await db.execute(
+        select(Coupon.amount_cents, Coupon.used_order_no)
+        .where(Coupon.merchant_id == shop.id,
+               Coupon.funder == "merchant"))).all()
+    coupon_issued = len(coupon_rows)
+    coupon_used = sum(1 for _a, used in coupon_rows if used)
+    coupon_give = sum(a for a, used in coupon_rows if used)
+
+    # 限时折扣:当前在跑的折扣菜及其近 N 天销量
+    now = datetime.now(timezone.utc)
+    flash_dishes = (await db.scalars(
+        select(Dish).where(
+            Dish.merchant_id == shop.id,
+            Dish.flash_price_cents.is_not(None),
+            Dish.flash_until.is_not(None),
+            Dish.flash_until > now))).all()
+    sales_rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": shop.id})
+    sales = {row.dish_id: row.sold for row in sales_rows}
+
+    def avg(total: int, count: int) -> int:
+        return int(total / count) if count else 0
+
+    return {
+        "days": days,
+        "promo": {
+            "orders": promo_orders,
+            "give_cents": promo_give,
+            "avg_ticket_cents": avg(promo_food, promo_orders),
+        },
+        "plain": {
+            "orders": plain_orders,
+            "avg_ticket_cents": avg(plain_food, plain_orders),
+        },
+        "coupon": {
+            "batches": len(batches),
+            "issued": coupon_issued,
+            "used": coupon_used,
+            "use_rate": (round(coupon_used / coupon_issued, 3)
+                         if coupon_issued else 0.0),
+            "give_cents": coupon_give,
+        },
+        "flash": [{
+            "dish_id": d.id, "name": d.name,
+            "price_cents": d.price_cents,
+            "flash_price_cents": d.flash_price_cents,
+            "until": d.flash_until,
+            "monthly_sales": sales.get(d.id, 0),
+        } for d in flash_dishes],
+        # 商家最该知道的一句话:让利总额与它换回的营业额
+        "total_give_cents": promo_give + coupon_give,
+        "note": "这里给的是相关性不是因果:用了活动的单客单价更高,"
+                "不等于活动让客单价变高。判断值不值得,还要看你的毛利。",
+    }
+
+
 # ---------- 开放接口凭证(POS/收银系统对接) ----------
 
 _MAX_API_KEYS = 5
