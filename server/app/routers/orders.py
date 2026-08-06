@@ -963,8 +963,12 @@ async def change_address(
                            {"type": "order", "order_no": order.order_no})
     # 地址变了小票就旧了:云打印自动补打(失败只记日志)
     try:
+        from ..models import MerchantPrinter
         from ..services.cloud_print import print_order_async
-        print_order_async(order, merchant)
+        printers = list(await db.scalars(
+            select(MerchantPrinter).where(
+                MerchantPrinter.merchant_id == merchant.id)))
+        print_order_async(order, merchant, printers)
     except Exception:
         pass
     return order_out(order, merchant, user)

@@ -61,11 +61,26 @@ def _yuan(cents: int) -> str:
     return f"{cents / 100:.2f}"
 
 
-def build_ticket(order: Order, shop_name: str) -> str:
+def build_ticket(order: Order, shop_name: str, *, purpose: str = "front",
+                 options: dict | None = None) -> str:
     """58mm 小票排版(飞鹅标签:<CB>居中放大 <B>放大 <C>居中 <BR>换行)。
 
-    给后厨和打包员看的单据:菜品和地址电话用大字,金额明细常规字号。
+    [purpose] 决定这张单印什么:
+    - **front(前厅)**:全量 —— 骑手来取要核对收件人与地址;
+    - **kitchen(后厨)**:菜品、备注、取餐码,**不印顾客手机号和地址**。
+      后厨不需要这两项,而备餐单会被随手丢在操作台上、下班扫进垃圾桶,
+      一张纸就是一条个人信息泄露。金额也不印 —— 后厨看单价没有用。
+    - **label(标签)**:一句话贴袋子上,只要店名和取餐码/单号后六位。
+
+    [options] 是几个开关(不做自由排版编辑器,维护成本远超收益):
+    show_price / show_remark / big_pickup_code。
     """
+    opt = options or {}
+    if purpose == "label":
+        return _build_label(order, shop_name)
+    kitchen = purpose == "kitchen"
+    show_price = opt.get("show_price", not kitchen)
+    show_remark = opt.get("show_remark", True)
     created = order.created_at
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
@@ -87,14 +102,20 @@ def build_ticket(order: Order, shop_name: str) -> str:
         if sched.tzinfo is None:
             sched = sched.replace(tzinfo=timezone.utc)
         lines.append(f"<B>预约 {sched.astimezone(_CST).strftime('%m-%d %H:%M')} 送达</B>")
-    if order.remark:
+    if order.remark and show_remark:
         lines.append(f"<B>备注:{order.remark}</B>")
     if any(item.get("is_alcohol") for item in order.items):
         lines.append("<B>含酒精饮品 请查验收件人年龄</B>")
     lines.append("--------------------------------")
     for item in order.items:
         amt = _yuan(item["price_cents"] * item["quantity"])
-        lines.append(f"<B>{item['name']} x{item['quantity']}</B>  {amt}")
+        lines.append(f"<B>{item['name']} x{item['quantity']}</B>"
+                     + (f"  {amt}" if show_price else ""))
+    if not show_price:
+        # 后厨单到此为止:金额、收件人、地址都不印
+        lines.append("--------------------------------")
+        lines.append("<C>备餐单</C>")
+        return "<BR>".join(lines)
     lines.append("--------------------------------")
     lines.append(f"菜品 {_yuan(order.food_cents)}"
                  + (f"  打包费 {_yuan(order.packing_fee_cents)}"
@@ -121,6 +142,17 @@ def build_ticket(order: Order, shop_name: str) -> str:
     return "<BR>".join(lines)
 
 
+def _build_label(order: Order, shop_name: str) -> str:
+    """标签机:贴在打包袋上的一小张。只要认得出是哪一单就够了。"""
+    tail = order.order_no[-6:]
+    lines = [f"<CB>{shop_name}</CB>"]
+    if order.pickup:
+        lines.append(f"<CB>取餐码 {order.pickup_code}</CB>")
+    lines.append(f"<CB>#{tail}</CB>")
+    lines.append(f"<C>{sum(i['quantity'] for i in order.items)} 件</C>")
+    return "<BR>".join(lines)
+
+
 async def print_content(sn: str, content: str) -> None:
     """推送打印。失败抛 ValueError(给补打接口回显)。"""
     body = await _call("Open_printMsg", sn=sn, content=content, times="1")
@@ -128,18 +160,53 @@ async def print_content(sn: str, content: str) -> None:
         raise ValueError(f"打印失败:{body.get('msg', '未知错误')}")
 
 
-def print_order_async(order: Order, merchant: Merchant) -> None:
-    """支付成功后的自动出票:后台任务,任何失败只记日志,绝不阻塞订单流程。"""
-    if not (settings.feie_configured and merchant.printer_sn and merchant.printer_auto):
-        return
-    content = build_ticket(order, merchant.name)
-    sn, order_no = merchant.printer_sn, order.order_no
+def print_order_async(order: Order, merchant: Merchant,
+                      printers: list | None = None) -> None:
+    """支付成功后的自动出票:后台任务,任何失败只记日志,绝不阻塞订单流程。
 
-    async def _task() -> None:
+    多台打印机时**按用途各出各的**:前厅一张全量、后厨一张不带
+    顾客手机号和地址、标签机一小张。每台独立成任务 ——
+    后厨那台离线不该让前厅也没单。
+    """
+    if not settings.feie_configured:
+        return
+    order_no = order.order_no
+    # 在这里就把内容排好:任务是异步跑的,而 order/merchant 是 ORM 对象,
+    # 外层 session 一关就过期,到任务里再读属性会炸 DetachedInstanceError
+    jobs = [(p["sn"], build_ticket(order, merchant.name,
+                                   purpose=p["purpose"],
+                                   options=p.get("options") or {}))
+            for p in _auto_printers(merchant, printers)]
+    if not jobs:
+        return
+
+    async def _one(sn: str, content: str) -> None:
         try:
             await print_content(sn, content)
             logger.info("云打印出票 %s -> %s", order_no, sn)
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("云打印失败 %s -> %s: %s", order_no, sn, exc)
 
-    asyncio.get_running_loop().create_task(_task())
+    loop = asyncio.get_running_loop()
+    for sn, content in jobs:
+        loop.create_task(_one(sn, content))
+
+
+def _auto_printers(merchant: Merchant, printers: list | None) -> list[dict]:
+    """这家店要自动出票的打印机。
+
+    **优先用调用方查好的 merchant_printers**;没有时退回老的
+    Merchant.printer_sn 单字段 —— 迁移已经把存量搬过去了,这条是兜底
+    (迁移之后、商家还没在新界面上动过的那段时间,以及任何忘了传的调用点)。
+
+    打印机由调用方查好传进来而不是在这里查:这个函数被支付回调调用,
+    那里的 session 生命周期不归我们管,在这里另起一个查询容易踩到
+    "外层事务还没提交、查出来的是旧数据"。
+    """
+    if printers:
+        return [{"sn": p.sn, "purpose": p.purpose, "options": p.options}
+                for p in printers if p.auto and p.sn]
+    if merchant.printer_sn and merchant.printer_auto:
+        return [{"sn": merchant.printer_sn, "purpose": "front",
+                 "options": {}}]
+    return []

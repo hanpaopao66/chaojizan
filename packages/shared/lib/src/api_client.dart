@@ -1215,6 +1215,51 @@ class ApiClient {
     });
   }
 
+  // ---------- 多台云打印机 ----------
+
+  /// 本店绑定的打印机(前厅 / 后厨 / 标签)。
+  Future<Map<String, dynamic>> printers() async {
+    final data = await _request('GET', '/merchants/me/printers');
+    return data as Map<String, dynamic>;
+  }
+
+  /// 绑一台。purpose: front 前厅小票 / kitchen 后厨备餐单 / label 标签。
+  ///
+  /// **后厨那张不印顾客手机号和地址** —— 后厨用不到,而备餐单会被
+  /// 随手丢在操作台上。用途不只是个标签,它决定小票印什么。
+  Future<Map<String, dynamic>> addPrinter({
+    required String sn,
+    required String key,
+    String purpose = 'front',
+    String name = '',
+  }) async {
+    final data = await _request('POST', '/merchants/me/printers', body: {
+      'sn': sn, 'key': key, 'purpose': purpose, 'name': name,
+    });
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updatePrinter(
+      int id, Map<String, dynamic> fields) async {
+    final data = await _request('PATCH', '/merchants/me/printers/\$id',
+        body: fields);
+    return data as Map<String, dynamic>;
+  }
+
+  Future<void> removePrinter(int id) async {
+    await _request('DELETE', '/merchants/me/printers/\$id');
+  }
+
+  /// 补打。[printerId] 只补某一台(后厨的单丢了就只补后厨那张);
+  /// 不传则所有自动出票的机器各补一张。
+  Future<Map<String, dynamic>> reprintOrder(String orderNo,
+      {int? printerId}) async {
+    final data = await _request(
+        'POST', '/merchants/me/orders/\$orderNo/print',
+        query: printerId == null ? null : {'printer_id': '\$printerId'});
+    return (data as Map<String, dynamic>?) ?? {};
+  }
+
   // ---------- 进货查验台账(食品溯源) ----------
 
   /// 进货台账。[q] 按食材名反查 —— 出食安问题时问的就是

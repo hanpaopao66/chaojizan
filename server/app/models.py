@@ -2048,3 +2048,104 @@ class PurchaseRecord(Base):
     note: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class MerchantPrinter(Base):
+    """商家绑定的云打印机(飞鹅)。一家店可以挂多台。
+
+    ## 为什么要多台
+
+    前厅一台出顾客小票、后厨一台出备餐单,是餐饮的标配。原先只有
+    Merchant.printer_sn 一个字段,后厨想要单子就只能跟前厅共用一台,
+    出餐的人得跑到前台去拿。飞鹅本身一个账号就支持挂多台设备。
+
+    ## 用途决定印什么
+
+    **后厨那张不该印顾客的手机号和地址** —— 后厨不需要,而单子会被
+    随手丢在操作台上。前厅那张要印(骑手来取要核对)。所以 purpose
+    不只是个标签,它决定 build_ticket 隐藏哪几行。
+    """
+
+    __tablename__ = "merchant_printers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    sn: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(30), default="")
+    # front 前厅小票 / kitchen 后厨备餐单 / label 标签机
+    purpose: Mapped[str] = mapped_column(
+        String(10), default="front", server_default="front")
+    # 支付成功自动出票;关掉的话只能手动补打
+    auto: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true")
+    # 小票开关(不做自由排版编辑器 —— 维护成本远超收益):
+    # {"show_price": bool, "show_remark": bool, "big_pickup_code": bool}
+    options: Mapped[dict] = mapped_column(
+        JSONB, default=dict, server_default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class MerchantWebhook(Base):
+    """商家系统回调(收银/ERP 主动收单)。
+
+    此前开放接口只有两个 GET,商家的收银系统只能轮询 —— 要么慢(轮询
+    间隔就是延迟),要么把我们的接口打爆(为了快就 1 秒一次)。回调是
+    "来单就推过去"。
+
+    ## secret 只在创建时给一次明文
+
+    库里存哈希。签名用的是明文,所以商家丢了只能重置 ——
+    这和 API Key 是同一套做法,理由也一样:库被拖走时,
+    拿到的哈希签不出有效请求。
+    """
+
+    __tablename__ = "merchant_webhooks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    url: Mapped[str] = mapped_column(String(300))
+    secret_hash: Mapped[str] = mapped_column(String(64))
+    # 订阅的事件:order.paid / order.cancelled / order.delivered ……
+    events: Mapped[list] = mapped_column(JSONB, default=list)
+    active: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true")
+    # 连续失败计数:到阈值自动停用并提示商家(一直推一个死地址,
+    # 既浪费我们的连接,也让商家以为还在收单)
+    fail_streak: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
+    last_error: Mapped[str] = mapped_column(String(200), default="")
+    last_ok_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class WebhookDelivery(Base):
+    """回调投递记录(死信队列 + 商家自查"我到底收到没有")。
+
+    只留最近一段时间的:这张表写入量和订单量同阶,不清理会变成最大的表。
+    """
+
+    __tablename__ = "webhook_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    webhook_id: Mapped[int] = mapped_column(
+        ForeignKey("merchant_webhooks.id"), index=True)
+    event: Mapped[str] = mapped_column(String(30))
+    # 幂等 id:商家侧据此去重(我们会重试,同一件事可能到两次)
+    delivery_id: Mapped[str] = mapped_column(String(36), index=True)
+    order_no: Mapped[str] = mapped_column(String(32), default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # pending / ok / failed(重试用尽)
+    status: Mapped[str] = mapped_column(
+        String(10), default="pending", server_default="pending", index=True)
+    last_status_code: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str] = mapped_column(String(200), default="")
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

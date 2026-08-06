@@ -1089,6 +1089,10 @@ async def auto_flow_loop() -> None:
             await maybe_recalc_commission_tiers()
             # 证照到期提醒(09:00,按日防重):证过期是静默失效,
             # 商家不会自己记得,而无证经营违法、平台有连带责任
+            # 商家系统回调:投递 + 重试。放在这里而不是主流程里同步 POST ——
+            # 商家的服务器不该有能力拖慢我们的支付回调
+            from .webhooks import sweep_webhooks
+            await sweep_webhooks()
             from .licenses import sweep_health_certs, sweep_license_expiry
             await sweep_license_expiry(datetime.now(BEIJING))
             # 健康证与证照判定同一套,但**后果不同**:证照过期落闸停业,

@@ -1060,6 +1060,54 @@ export function archiveHealthCert(id: number): Promise<unknown> {
   return request('DELETE', `/merchants/me/health-certs/${id}`)
 }
 
+// ---------- 商家系统回调(收银/ERP 主动收单) ----------
+
+export interface WebhookRow {
+  id: number
+  url: string
+  events: string[]
+  active: boolean
+  fail_streak: number
+  last_error: string
+  last_ok_at: string | null
+  created_at: string
+}
+
+export interface FailedDelivery {
+  id: number
+  event: string
+  order_no: string
+  attempts: number
+  last_error: string
+  created_at: string
+}
+
+export function webhooks(): Promise<{
+  events: { value: string; label: string }[]
+  items: WebhookRow[]
+  /** 死信:推了五次都没成功的。**摊开给商家看,而不是默默丢掉** */
+  failed: FailedDelivery[]
+  note: string
+}> {
+  return request('GET', '/merchants/me/webhooks')
+}
+
+/** 新增回调。**返回体里的 secret 是唯一一次看到明文的机会**。 */
+export function addWebhook(url: string, events: string[]): Promise<{
+  id: number; url: string; events: string[]; secret: string; note: string
+}> {
+  return request('POST', '/merchants/me/webhooks', { url, events })
+}
+
+export function removeWebhook(id: number): Promise<unknown> {
+  return request('DELETE', `/merchants/me/webhooks/${id}`)
+}
+
+/** 把死信重新排队(商家修好自己的服务之后手动补推)。 */
+export function retryWebhook(id: number): Promise<{ requeued: number }> {
+  return request('POST', `/merchants/me/webhooks/${id}/retry`)
+}
+
 // ---------- 进货查验台账(食品溯源) ----------
 
 export interface PurchaseRecord {

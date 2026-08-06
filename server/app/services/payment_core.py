@@ -76,9 +76,24 @@ async def mark_order_paid(
         await notify_new_order(merchant.owner_id, order.order_no, summary)
     except Exception:  # 推送永远不能拖垮支付主流程
         logger.exception("新订单推送失败")
-    # 云打印小票(商家绑定了打印机才会真的打;后台任务,失败只记日志)
+    # 商家系统回调入队(只入队不投递:投递走清扫任务,
+    # 对方慢 8 秒不该把支付回调也卡 8 秒)
     try:
-        print_order_async(order, merchant)
+        from .webhooks import enqueue as _wh_enqueue
+        await _wh_enqueue(db, merchant.id, "order.paid", order)
+    except Exception:
+        logger.exception("回调入队失败")
+
+    # 云打印小票(商家绑定了打印机才会真的打;后台任务,失败只记日志)。
+    # 多台时按用途各出各的:前厅全量、后厨不带顾客手机号和地址
+    try:
+        from sqlalchemy import select as _select
+
+        from ..models import MerchantPrinter
+        printers = list(await db.scalars(
+            _select(MerchantPrinter).where(
+                MerchantPrinter.merchant_id == merchant.id)))
+        print_order_async(order, merchant, printers)
     except Exception:
         logger.exception("云打印任务创建失败")
 

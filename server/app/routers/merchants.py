@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+import logging
+
 import httpx
 import mimetypes
 import secrets
@@ -60,6 +62,8 @@ from ..security import require_role
 from ..services.staff import owned_shop
 
 router = APIRouter(prefix="/merchants", tags=["商家"])
+
+logger = logging.getLogger(__name__)
 
 # 附近商家 + 近 30 天完成单数(月售),按指定方式排序
 _NEARBY_SQL_TMPL = """
@@ -1773,6 +1777,295 @@ async def request_merchant_withdrawal(
 _FEIE_DISABLED = "云打印未启用:平台还未配置打印服务商账号,可先用商家端的蓝牙小票机直连"
 
 
+# ---------- 商家系统回调(收银/ERP 主动收单) ----------
+
+@router.get("/me/webhooks")
+async def my_webhooks(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """回调配置 + 最近的投递情况。"""
+    from ..models import MerchantWebhook, WebhookDelivery
+    from ..services.webhooks import EVENTS
+
+    shop = await _my_shop_or_404(db, user)
+    hooks = (await db.scalars(
+        select(MerchantWebhook)
+        .where(MerchantWebhook.merchant_id == shop.id)
+        .order_by(MerchantWebhook.id))).all()
+    ids = [h.id for h in hooks]
+    dead = []
+    if ids:
+        dead = [{
+            "id": d.id, "event": d.event, "order_no": d.order_no,
+            "attempts": d.attempts, "last_error": d.last_error,
+            "created_at": d.created_at,
+        } for d in (await db.scalars(
+            select(WebhookDelivery)
+            .where(WebhookDelivery.webhook_id.in_(ids),
+                   WebhookDelivery.status == "failed")
+            .order_by(WebhookDelivery.id.desc()).limit(50)))]
+    return {
+        "events": [{"value": k, "label": v} for k, v in EVENTS.items()],
+        "items": [{
+            "id": h.id, "url": h.url, "events": h.events, "active": h.active,
+            "fail_streak": h.fail_streak, "last_error": h.last_error,
+            "last_ok_at": h.last_ok_at, "created_at": h.created_at,
+        } for h in hooks],
+        # 死信:推了五次都没成功的。**摊开给商家看,而不是默默丢掉** ——
+        # 他以为收到了、实际没有,比明确失败糟得多
+        "failed": dead,
+        "note": "签名在 X-SuperZ-Signature 头:HMAC-SHA256(时间戳.请求体)。"
+                "请拒绝时间戳偏差超过 5 分钟的请求,并按 X-SuperZ-Delivery "
+                "去重 —— 我们会重试,同一件事可能到两次。",
+    }
+
+
+@router.post("/me/webhooks")
+async def add_webhook(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """新增回调地址。**密钥明文只在这里给一次**。"""
+    import secrets as _secrets
+
+    from ..models import MerchantWebhook
+    from ..redis_client import get_redis
+    from ..services.webhooks import EVENTS, UnsafeUrl, validate_url
+    from .open_api import hash_key
+
+    shop = await _money_shop_or_403(db, user)   # 对外通道属于经营者本人
+    url = str(payload.get("url", "")).strip()[:300]
+    try:
+        validate_url(url)
+    except UnsafeUrl as exc:
+        raise HTTPException(422, str(exc))
+    events = [e for e in (payload.get("events") or []) if e in EVENTS]
+    if not events:
+        raise HTTPException(422, "至少订阅一个事件")
+    n = await db.scalar(select(func.count(MerchantWebhook.id)).where(
+        MerchantWebhook.merchant_id == shop.id))
+    if n >= 3:
+        raise HTTPException(422, "最多配置 3 个回调地址")
+
+    secret = _secrets.token_urlsafe(32)
+    hook = MerchantWebhook(merchant_id=shop.id, url=url,
+                           secret_hash=hash_key(secret), events=events)
+    db.add(hook)
+    await db.commit()
+    await db.refresh(hook)
+    # 明文放 Redis 供签名用(库里只有哈希)。不设过期 ——
+    # 回调是长期配置,过期了商家会莫名其妙收不到单
+    await get_redis().set(f"webhook:secret:{hook.id}", secret)
+    return {
+        "id": hook.id, "url": hook.url, "events": hook.events,
+        "secret": secret,
+        "note": "这是唯一一次看到密钥明文的机会,请立刻保存。"
+                "丢了只能重置(重置后旧签名立即失效)。",
+    }
+
+
+@router.delete("/me/webhooks/{hook_id}")
+async def remove_webhook(
+    hook_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..models import MerchantWebhook
+    from ..redis_client import get_redis
+
+    shop = await _money_shop_or_403(db, user)
+    hook = await db.get(MerchantWebhook, hook_id)
+    if hook is None or hook.merchant_id != shop.id:
+        raise HTTPException(404, "回调不存在")
+    await get_redis().delete(f"webhook:secret:{hook.id}")
+    await db.delete(hook)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/me/webhooks/{hook_id}/retry")
+async def retry_failed_deliveries(
+    hook_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """把死信重新排队(商家修好自己的服务之后手动补推)。"""
+    from datetime import datetime as _dt
+
+    from ..models import MerchantWebhook, WebhookDelivery
+
+    shop = await _money_shop_or_403(db, user)
+    hook = await db.get(MerchantWebhook, hook_id)
+    if hook is None or hook.merchant_id != shop.id:
+        raise HTTPException(404, "回调不存在")
+    rows = list(await db.scalars(
+        select(WebhookDelivery).where(
+            WebhookDelivery.webhook_id == hook.id,
+            WebhookDelivery.status == "failed").limit(200)))
+    for d in rows:
+        d.status = "pending"
+        d.attempts = 0
+        d.next_retry_at = _dt.now(timezone.utc)
+    # 补推前先把闸门打开:停用状态下清扫任务会直接把它们再判死
+    hook.active = True
+    hook.fail_streak = 0
+    await db.commit()
+    return {"ok": True, "requeued": len(rows)}
+
+
+# ---------- 多台云打印机(前厅 / 后厨 / 标签) ----------
+
+_PURPOSES = {"front": "前厅小票", "kitchen": "后厨备餐单", "label": "标签"}
+_MAX_PRINTERS = 8
+
+
+def _printer_out(p) -> dict:
+    return {"id": p.id, "sn": p.sn, "name": p.name, "purpose": p.purpose,
+            "purpose_label": _PURPOSES.get(p.purpose, p.purpose),
+            "auto": p.auto, "options": p.options or {},
+            "created_at": p.created_at}
+
+
+@router.get("/me/printers")
+async def my_printers(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """本店绑定的打印机。前厅一台出顾客小票、后厨一台出备餐单是标配。"""
+    from ..models import MerchantPrinter
+
+    shop = await _my_shop_or_404(db, user)
+    rows = (await db.scalars(
+        select(MerchantPrinter)
+        .where(MerchantPrinter.merchant_id == shop.id)
+        .order_by(MerchantPrinter.id))).all()
+    return {
+        "enabled": settings.feie_configured,
+        "purposes": [{"value": k, "label": v} for k, v in _PURPOSES.items()],
+        "items": [_printer_out(p) for p in rows],
+        "note": "后厨那张**不印顾客手机号和地址** —— 后厨用不到,"
+                "而备餐单会被随手丢在操作台上。前厅那张要印(骑手来取要核对)。",
+    }
+
+
+@router.post("/me/printers")
+async def add_printer(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """绑一台新打印机(机身贴纸上的 SN 与 KEY)。"""
+    from ..models import MerchantPrinter
+    from ..services.moderation import guard_text
+
+    if not settings.feie_configured:
+        raise HTTPException(503, _FEIE_DISABLED)
+    shop = await _my_shop_or_404(db, user)
+    sn = str(payload.get("sn", "")).strip()[:32]
+    key = str(payload.get("key", "")).strip()[:32]
+    if not sn or not key:
+        raise HTTPException(422, "请填写机身贴纸上的 SN 与 KEY")
+    purpose = str(payload.get("purpose") or "front")
+    if purpose not in _PURPOSES:
+        raise HTTPException(422, "用途只支持:前厅小票 / 后厨备餐单 / 标签")
+    name = str(payload.get("name", "")).strip()[:30] or _PURPOSES[purpose]
+    await guard_text(db, name, "打印机名称")
+
+    n = await db.scalar(select(func.count(MerchantPrinter.id)).where(
+        MerchantPrinter.merchant_id == shop.id))
+    if n >= _MAX_PRINTERS:
+        raise HTTPException(422, f"最多绑定 {_MAX_PRINTERS} 台")
+    dup = await db.scalar(select(MerchantPrinter).where(
+        MerchantPrinter.merchant_id == shop.id, MerchantPrinter.sn == sn))
+    if dup is not None:
+        raise HTTPException(409, "这台打印机已经绑过了")
+
+    # 先在飞鹅那边绑,成功了再落库 —— 反过来的话库里有一条打不出东西的记录,
+    # 商家看着"已绑定"却永远收不到单
+    try:
+        await cloud_print.bind_printer(sn, key, name)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except httpx.HTTPError:
+        raise HTTPException(502, "云打印服务暂时不可用,请稍后再试")
+
+    p = MerchantPrinter(merchant_id=shop.id, sn=sn, name=name,
+                        purpose=purpose, auto=True, options={})
+    db.add(p)
+    # 兼容老字段:第一台前厅机同时写回 Merchant.printer_sn,
+    # 让还没升级的客户端/兜底逻辑照样能出票
+    if purpose == "front" and not shop.printer_sn:
+        shop.printer_sn = sn
+        shop.printer_auto = True
+    await db.commit()
+    await db.refresh(p)
+    return _printer_out(p)
+
+
+@router.patch("/me/printers/{printer_id}")
+async def update_printer(
+    printer_id: int,
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """改用途 / 改名 / 开关自动出票 / 改小票开关。"""
+    from ..models import MerchantPrinter
+    from ..services.moderation import guard_text
+
+    shop = await _my_shop_or_404(db, user)
+    p = await db.get(MerchantPrinter, printer_id)
+    if p is None or p.merchant_id != shop.id:
+        raise HTTPException(404, "打印机不存在")
+    if "purpose" in payload:
+        if payload["purpose"] not in _PURPOSES:
+            raise HTTPException(422, "未知用途")
+        p.purpose = payload["purpose"]
+    if payload.get("name"):
+        name = str(payload["name"]).strip()[:30]
+        await guard_text(db, name, "打印机名称")
+        p.name = name
+    if "auto" in payload:
+        p.auto = bool(payload["auto"])
+    if "options" in payload:
+        opt = payload["options"] or {}
+        # 白名单:只认这三个开关。不做自由排版编辑器 ——
+        # 那个的维护成本远超收益,而且商家排错版就是一屏乱码
+        p.options = {k: bool(opt.get(k)) for k in
+                     ("show_price", "show_remark", "big_pickup_code")
+                     if k in opt}
+    await db.commit()
+    await db.refresh(p)
+    return _printer_out(p)
+
+
+@router.delete("/me/printers/{printer_id}")
+async def remove_printer(
+    printer_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..models import MerchantPrinter
+
+    shop = await _my_shop_or_404(db, user)
+    p = await db.get(MerchantPrinter, printer_id)
+    if p is None or p.merchant_id != shop.id:
+        raise HTTPException(404, "打印机不存在")
+    try:
+        await cloud_print.unbind_printer(p.sn)
+    except (ValueError, httpx.HTTPError):
+        # 飞鹅那边解绑失败不该卡住本地删除:商家的诉求是"别再往这台打了",
+        # 本地删掉就已经达成了
+        logger.warning("飞鹅解绑失败,仍删除本地记录: %s", p.sn)
+    if shop.printer_sn == p.sn:
+        shop.printer_sn = ""
+    await db.delete(p)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/me/printer", response_model=PrinterOut)
 async def my_printer(
     user: User = Depends(require_role("merchant")),
@@ -1861,27 +2154,56 @@ async def test_my_printer(
 @router.post("/me/orders/{order_no}/print")
 async def reprint_order(
     order_no: str,
+    printer_id: int | None = None,
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """补打小票:自动出票失败、纸打完了、单据丢了,都从这里再打一张。"""
+    """补打小票:自动出票失败、纸打完了、单据丢了,都从这里再打一张。
+
+    [printer_id] 指定补打哪一台(后厨的单丢了就只补后厨那张);
+    不传则**所有自动出票的机器各补一张**,与支付成功时那次一致。
+    """
+    from ..models import MerchantPrinter
+
     if not settings.feie_configured:
         raise HTTPException(503, _FEIE_DISABLED)
     shop = await _my_shop_or_404(db, user)
-    if not shop.printer_sn:
-        raise HTTPException(422, "还没绑定云打印机")
     order = await db.scalar(select(Order).where(
         Order.order_no == order_no, Order.merchant_id == shop.id))
     if order is None:
         raise HTTPException(404, "订单不存在")
-    try:
-        await cloud_print.print_content(
-            shop.printer_sn, cloud_print.build_ticket(order, shop.name))
-    except ValueError as exc:
-        raise HTTPException(422, str(exc))
-    except httpx.HTTPError:
-        raise HTTPException(502, "云打印服务暂时不可用,请稍后再试")
-    return {"ok": True}
+
+    stmt = select(MerchantPrinter).where(
+        MerchantPrinter.merchant_id == shop.id)
+    if printer_id is not None:
+        stmt = stmt.where(MerchantPrinter.id == printer_id)
+    else:
+        stmt = stmt.where(MerchantPrinter.auto.is_(True))
+    targets = list(await db.scalars(stmt))
+    if not targets and shop.printer_sn and printer_id is None:
+        # 兜底:还没在新界面绑过、只有老字段的店
+        targets = [MerchantPrinter(sn=shop.printer_sn, purpose="front",
+                                   options={})]
+    if not targets:
+        raise HTTPException(422, "还没绑定云打印机")
+
+    failed = []
+    for p in targets:
+        try:
+            await cloud_print.print_content(
+                p.sn, cloud_print.build_ticket(
+                    order, shop.name, purpose=p.purpose,
+                    options=p.options or {}))
+        except ValueError as exc:
+            failed.append(f"{p.name or p.sn}:{exc}")
+        except httpx.HTTPError:
+            failed.append(f"{p.name or p.sn}:云打印服务暂时不可用")
+    # **部分成功不算失败**:两台机器补打,后厨那台缺纸不该让前厅那张
+    # 也白打一次。全失败才报错,部分失败在返回体里说清是哪台
+    if failed and len(failed) == len(targets):
+        raise HTTPException(422, ";".join(failed))
+    return {"ok": True, "printed": len(targets) - len(failed),
+            "failed": failed}
 
 
 @router.get("/me/finance/daily", response_model=list[DayStatOut])

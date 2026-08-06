@@ -7,6 +7,7 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   ProfileOutlined,
+  ApiOutlined,
   InboxOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
@@ -34,6 +35,7 @@ import ChainPage from '../pages/food/ChainPage'
 import LicenseBanner from '../pages/LicenseBanner'
 import HealthCertsPage from '../pages/HealthCertsPage'
 import PurchasesPage from '../pages/PurchasesPage'
+import WebhooksPage from '../pages/WebhooksPage'
 import AftersalesPage from '../pages/hotel/AftersalesPage'
 import CalendarPage from '../pages/hotel/CalendarPage'
 import FrontDeskPage from '../pages/hotel/FrontDeskPage'
@@ -170,6 +172,10 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
           { key: '/health-certs', icon: <SafetyCertificateOutlined />,
             label: '健康证台账' },
           { key: '/purchases', icon: <InboxOutlined />, label: '进货台账' },
+          // 回调是对外通道,与提现同一条边界(经营者本人)
+          ...(shop.viewer_is_owner === false ? [] : [
+            { key: '/webhooks', icon: <ApiOutlined />, label: '系统对接' },
+          ]),
         ]),
         // 店员不给连锁入口:开店、拉人、跨店营业额都是老板的事
         ...(shop.viewer_is_staff ? [] : [
@@ -309,6 +315,7 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
                 <Route path="/food/chain" element={<ChainPage shop={shop} />} />
                 <Route path="/health-certs" element={<HealthCertsPage />} />
                 <Route path="/purchases" element={<PurchasesPage />} />
+                <Route path="/webhooks" element={<WebhooksPage />} />
                 <Route path="/food/reviews" element={<FoodReviewsPage />} />
               </>
             )}
