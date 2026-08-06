@@ -29,6 +29,9 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
 
   // 近 30 天负向标签聚合:"送得慢×8"比翻 50 条评价更快看清问题在哪一环
   Map<String, dynamic>? _tagStats;
+
+  // 回复模板(平台预置的起手式,商家改完再发)
+  Map<String, dynamic>? _templates;
   // 评分概览:商家最盯的数字,但光一个总分看不出是被几条差评拉的
   Map<String, dynamic>? _overview;
 
@@ -39,6 +42,9 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
     widget.api.myReviewTagStats().then((stats) {
       if (mounted) setState(() => _tagStats = stats);
     }).catchError((_) {/* 聚合拉不到不影响列表 */});
+    widget.api.replyTemplates().then((t) {
+      if (mounted) setState(() => _templates = t);
+    }).catchError((_) {/* 模板拉不到照样能手写 */});
     widget.api.ratingOverview().then((o) {
       if (mounted) setState(() => _overview = o);
     }).catchError((_) {/* 同上 */});
@@ -211,18 +217,49 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
   Future<void> _reply(Review review, {required bool append}) async {
     final controller = TextEditingController(
         text: append ? review.appendReply : review.reply);
+    // 模板按星级给:差评给道歉+方案的起手式,好评给感谢
+    final group = review.merchantRating <= 3 ? 'bad' : 'good';
+    final tpls = ((_templates?['templates']
+            as Map<String, dynamic>?)?[group] as List? ??
+        const []).cast<Map<String, dynamic>>();
     final text = await showDialog<String>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(append ? '回复追评' : '回复评价'),
-        content: TextField(
-          controller: controller,
-          maxLength: 300,
-          maxLines: 4,
-          autofocus: true,
-          decoration: const InputDecoration(
-              helperText: '回复对所有用户可见;先道歉再给方案,别争对错',
-              border: OutlineInputBorder()),
+        content: StatefulBuilder(
+          builder: (dialog, setDialog) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (tpls.isNotEmpty) ...[
+                Text('套用模板(改成自家的话再发)',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Theme.of(context).sz.inkMuted)),
+                const SizedBox(height: 4),
+                Wrap(spacing: 6, runSpacing: 2, children: [
+                  for (final t in tpls)
+                    ActionChip(
+                      label: Text('${t['label']}',
+                          style: const TextStyle(fontSize: 12)),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => setDialog(
+                          () => controller.text = '${t['text']}'),
+                    ),
+                ]),
+                const SizedBox(height: 8),
+              ],
+              TextField(
+                controller: controller,
+                maxLength: 300,
+                maxLines: 4,
+                autofocus: true,
+                decoration: const InputDecoration(
+                    helperText: '回复对所有用户可见;先道歉再给方案,别争对错',
+                    border: OutlineInputBorder()),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(

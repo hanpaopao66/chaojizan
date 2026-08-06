@@ -469,6 +469,12 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
 
       addRow('after_sales', '售后待处理',
           () => setState(() => _tab = 3));
+      // 超 24 小时的单独提示:差评 24 小时内必回是行业口径,
+      // 拖过一天再回,顾客早走了
+      addRow('bad_reviews_overdue', '差评超24h未回', () {
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => MerchantReviewsPage(api: widget.api)));
+      });
       addRow('bad_reviews_unreplied', '差评待回复', () {
         Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => MerchantReviewsPage(api: widget.api)));

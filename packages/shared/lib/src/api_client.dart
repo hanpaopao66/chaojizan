@@ -1329,6 +1329,12 @@ class ApiClient {
     return (data as Map).cast<String, dynamic>();
   }
 
+  /// 回复话术模板(平台预置,商家改完再发)
+  Future<Map<String, dynamic>> replyTemplates() async {
+    final data = await _request('GET', '/merchants/me/reply-templates');
+    return (data as Map).cast<String, dynamic>();
+  }
+
   /// 平台规则(数字从服务端常量算出,后台改不了)
   Future<Map<String, dynamic>> merchantRules() async {
     final data = await _request('GET', '/merchants/me/rules');

@@ -62,7 +62,10 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
     : 0
   const todoTip = todos ? [
     todos.after_sales > 0 && `售后待处理 ${todos.after_sales}`,
-    todos.bad_reviews_unreplied > 0 && `差评待回复 ${todos.bad_reviews_unreplied}`,
+    todos.bad_reviews_unreplied > 0 && (
+      (todos.bad_reviews_overdue ?? 0) > 0
+        ? `差评待回复 ${todos.bad_reviews_unreplied}(${todos.bad_reviews_overdue} 条已超 24 小时)`
+        : `差评待回复 ${todos.bad_reviews_unreplied}`),
     todos.coupon_batches_low > 0 && `券快发完 ${todos.coupon_batches_low}`,
     todos.flash_expiring > 0 && `限时折扣将到期 ${todos.flash_expiring}`,
     (todos.messages_unread ?? 0) > 0 && `未读消息 ${todos.messages_unread}`,

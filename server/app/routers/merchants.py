@@ -2388,10 +2388,22 @@ async def my_todos(
     # 未读消息(评价/系统触达;订单类与公告不计):与消息中心同一口径
     messages_unread = await _unread_count(db, user.id)
 
+    # 超过 24 小时还没回的差评:行业里"差评 24 小时内必回"是常识,
+    # 拖过一天再回,顾客早就走了。单列出来而不是混在 bad_reviews_unreplied 里
+    bad_overdue = await db.scalar(
+        select(func.count(Review.id)).where(
+            Review.merchant_id == shop.id,
+            Review.merchant_rating <= 3,
+            Review.reply == "",
+            Review.hidden.is_(False),
+            Review.created_at < now - timedelta(hours=24),
+            Review.created_at > now - timedelta(days=7))) or 0
+
     return {
         "pending_orders": pending_orders,
         "after_sales": after_sales,
         "bad_reviews_unreplied": bad_unreplied,
+        "bad_reviews_overdue": bad_overdue,  # 其中超 24 小时的
         "coupon_batches_low": coupon_low,
         "flash_expiring": flash_expiring,
         "messages_unread": messages_unread,

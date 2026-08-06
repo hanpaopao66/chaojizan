@@ -1,6 +1,6 @@
 import {
-  Alert, Button, Card, Form, InputNumber, Input, Space, Statistic, Switch,
-  Table, message,
+  Alert, Button, Card, Form, InputNumber, Input, Select, Space, Statistic,
+  Switch, Table, message,
 } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
@@ -205,6 +205,7 @@ function CouponCreator({ onCreated }: { onCreated: () => void }) {
   const [total, setTotal] = useState<number | null>(100)
   const [perUser, setPerUser] = useState<number | null>(1)
   const [validDays, setValidDays] = useState<number | null>(7)
+  const [trigger, setTrigger] = useState('shop')
   const [busy, setBusy] = useState(false)
 
   async function create() {
@@ -215,13 +216,16 @@ function CouponCreator({ onCreated }: { onCreated: () => void }) {
     try {
       await createShopCouponBatch({
         name: name.trim(),
+        trigger,
         threshold_cents: Math.round((threshold ?? 0) * 100),
         off_cents: Math.round(off * 100),
         total,
         per_user_limit: perUser ?? 1,
         valid_days: validDays ?? 7,
       })
-      message.success('店铺券已创建并开始发放')
+      message.success(trigger === 'favorite'
+        ? '收藏有礼已开启:顾客收藏你的店就自动发这张券'
+        : '店铺券已创建并开始发放')
       setName('')
       onCreated()
     } catch (e) {
@@ -233,6 +237,17 @@ function CouponCreator({ onCreated }: { onCreated: () => void }) {
 
   return (
     <Form layout="inline" style={{ marginBottom: 12, rowGap: 8 }}>
+      <Form.Item label="发放方式">
+        <Select
+          value={trigger}
+          style={{ width: 150 }}
+          onChange={setTrigger}
+          options={[
+            { value: 'shop', label: '顾客主动领' },
+            { value: 'favorite', label: '收藏即送' },
+          ]}
+        />
+      </Form.Item>
       <Form.Item label="券名">
         <Input value={name} onChange={(e) => setName(e.target.value)}
           placeholder="如 新店尝鲜券" maxLength={50} style={{ width: 150 }} />

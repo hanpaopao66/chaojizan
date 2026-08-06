@@ -515,6 +515,8 @@ export interface Todos {
   pending_orders: number
   after_sales: number
   bad_reviews_unreplied: number
+  /** 其中超过 24 小时还没回的(差评 24h 内必回是行业口径) */
+  bad_reviews_overdue: number
   coupon_batches_low: number
   flash_expiring: number
   messages_unread: number

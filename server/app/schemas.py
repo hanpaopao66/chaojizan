@@ -737,7 +737,9 @@ class ShopCouponBatchIn(BaseModel):
     """
 
     name: str = Field(min_length=2, max_length=50)
-    trigger: str = Field(default="shop", pattern="^(shop|referral|birthday|winback)$")
+    trigger: str = Field(
+        default="shop",
+        pattern="^(shop|referral|birthday|winback|favorite)$")
     threshold_cents: int = Field(ge=0, le=100_000)   # 满 X(0=无门槛)
     off_cents: int = Field(gt=0, le=50_000)          # 减 Y
     total: int = Field(gt=0, le=100_000)             # 发行总量(预算封顶)
