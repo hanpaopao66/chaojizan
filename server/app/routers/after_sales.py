@@ -21,6 +21,7 @@ from ..services.push import push_to_user
 from ..services.settlement import reverse_merchant_earning
 from ..services.wechat_pay import request_refund
 from ..state_machine import OrderStatus
+from ..services.staff import owned_shop
 
 router = APIRouter(tags=["售后"])
 
@@ -121,7 +122,7 @@ async def my_shop_after_sales(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     query = (
@@ -140,7 +141,7 @@ async def my_shop_after_sales(
 async def _get_pending(
     db: AsyncSession, after_sale_id: int, user: User
 ) -> tuple[AfterSale, Order]:
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     after_sale = await db.get(AfterSale, after_sale_id, with_for_update=True)
     if shop is None or after_sale is None or after_sale.merchant_id != shop.id:
         raise HTTPException(404, "售后申请不存在")

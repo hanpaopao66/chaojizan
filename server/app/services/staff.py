@@ -11,18 +11,44 @@
 
 ## 连锁怎么接进来的
 
-`resolve_shop(db, user, merchant_id)` 是**唯一的入口**:
-- 不传 merchant_id → 退化成"我的唯一一家店"(单店商家的老行为,一字不变);
-- 传了 → 校验这个人对这家店到底有没有权限。
+`resolve_shop(db, user, merchant_id)` 是**唯一的入口**,按这个顺序定店:
+1. 显式传了 merchant_id → 用它;
+2. 没传 → 读请求头 X-Shop-Id(客户端的门店选择器写的);
+3. 还是没有 → 退化成"我的唯一一家店"(单店商家的老行为,一字不变);
+4. 名下不止一家却没说是哪家 → **不猜,直接拒**。
+
+拿到店之后一律走完整的权限校验 —— 所以第 2 步那个头只是"选哪家",
+不是"有权限",伪造别家的 id 只会拿到 404。
 
 一号一店的假设原先散在 80 多处调用点里,把判定收敛到这一个函数,
 是为了让"漏一处就是越权(A 店店长能改 B 店的价)"这件事只可能发生在
 一个地方 —— 而不是每加一个端点就多一次机会。
+
+三档权限,按用途选:
+- `operable_shop` 运营(接单/出餐/估清/看单):店员可以;
+- `owned_shop`   店主级(改价/改设置/开放接口):店员拒,品牌授权者放行;
+- `money_shop`   资金(钱包/提现/对账明细):**只认店铺登记的 owner 本人**,
+  品牌层也不放行 —— 运营授权不等于可以把店里的钱提到自己卡上。
 """
+from contextvars import ContextVar
+
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Brand, BrandMember, Merchant, MerchantStaff, User
+
+# 当前请求选中的门店(来自 X-Shop-Id 头,由 main.py 的中间件写入)。
+#
+# **为什么用请求头而不是给 33 个端点各加一个 query 参数**:
+# 连锁只是换了"这次操作哪家店",端点的语义一个都没变。
+# 用头的话客户端在 API 客户端里设一次就够,服务端在权限解析这一处读,
+# 端点签名一行不用改 —— 改 33 处签名的那个版本,漏一处就是一个
+# 「切了门店但这个页面还在改老店」的 bug。
+#
+# 安全上这个头只是**选择**不是授权:resolve_shop 拿到它之后照样
+# 走完整的权限校验,伪造一个别家的 id 只会拿到 404。
+current_shop_id: ContextVar[int | None] = ContextVar(
+    "current_shop_id", default=None)
 
 
 async def _brand_scope(db: AsyncSession, user: User) -> tuple[list[int], bool]:
@@ -75,19 +101,29 @@ async def resolve_shop(
 ) -> tuple[Merchant | None, bool]:
     """解析这个请求要操作哪家店,并校验权限。返回 (店, 是否具备店主级权限)。
 
-    [merchant_id] 不传 = 单店商家的老行为(取我唯一的那家店);
-    传了 = 连锁场景显式指定门店,**必须过权限校验**。
+    [merchant_id] 不传 = 先看请求头选了哪家(连锁),没有则退回
+    "我唯一的那家店"(单店商家的老行为);
+    传了 = 显式指定门店,**必须过权限校验**。
     [need_owner] True 时店员一律拒(提现/改价/改设置这类)。
     """
+    if merchant_id is None:
+        merchant_id = current_shop_id.get()
     brand_ids, brand_owner = await _brand_scope(db, user)
 
     if merchant_id is None:
-        own = await db.scalar(
-            select(Merchant).where(Merchant.owner_id == user.id))
-        if own is not None:
-            return own, True
-        # 品牌成员没指定门店时不猜:连锁下"我的店"是有歧义的,
-        # 让客户端显式选一家(总部视角的门店选择器就是干这个的)
+        own = list(await db.scalars(
+            select(Merchant).where(Merchant.owner_id == user.id)
+            .order_by(Merchant.id).limit(2)))
+        if len(own) == 1:
+            return own[0], True
+        # **名下不止一家店却没说是哪家:不猜。**
+        # 老写法是 db.scalar(...),不带 ORDER BY —— 返回哪一家由数据库
+        # 心情决定。单店时永远只有一个候选所以看不出问题,连锁一来就变成
+        # 「切了门店,改的还是另一家的菜单和价格」,而且改成功了、没有报错。
+        # 宁可 404 让客户端显式选,也不要静默改错店。
+        if len(own) > 1:
+            return None, False
+        # 品牌成员(自己不拥有店)同理,让客户端走门店选择器
         if brand_ids:
             return None, False
         if need_owner:
@@ -131,3 +167,23 @@ async def owned_shop(
     shop, is_owner = await resolve_shop(db, user, merchant_id,
                                         need_owner=True)
     return shop if is_owner else None
+
+
+async def money_shop(
+    db: AsyncSession, user: User, merchant_id: int | None = None,
+) -> Merchant | None:
+    """**资金动作专用**:必须是店铺登记的那个 owner 本人,品牌层不放行。
+
+    与 owned_shop 的区别只有一句 `shop.owner_id == user.id`,但这一句
+    是钱的边界。品牌 manager 在 owned_shop 里算"店主级权限"(能改价、
+    改设置),那是运营授权;**运营授权不等于可以把店里的钱提到自己卡上**。
+
+    具体的坑:钱包余额是按 `merchant_id` 算出来的(整店营收),而已提现
+    是按 `user_id` 减的。这两个 id 一旦不是同一个人,就同时出两个洞 ——
+    manager 能把整店余额提到自己的收款账户,而且店主那边的已提现不计入
+    manager 的可提额度,两个人各提一次全额。所以资金路径只认 owner。
+    """
+    shop = await owned_shop(db, user, merchant_id)
+    if shop is None or shop.owner_id != user.id:
+        return None
+    return shop

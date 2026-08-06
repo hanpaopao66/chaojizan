@@ -84,6 +84,9 @@ class _ShopGateState extends State<ShopGate> {
   String? _error;
   Timer? _pollTimer;
 
+  /// 我能操作的全部门店(单店商家就一个元素)。给顶栏的切店入口用。
+  List<Map<String, dynamic>> _shops = const [];
+
   @override
   void initState() {
     super.initState();
@@ -102,9 +105,24 @@ class _ShopGateState extends State<ShopGate> {
 
   Future<void> _load() async {
     try {
-      final shop = await widget.api.myShop();
+      // **先问有哪些店,再问当前这家**。顺序不能反 —— 连锁账号没选门店时
+      // /merchants/me 是 404(后端不猜是哪家),先调它会把连锁老板
+      // 一路带进"还没开店"的入驻引导页。
+      final brand = await widget.api.myBrand();
+      final shops = ((brand['shops'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>();
+      if (shops.isNotEmpty) {
+        final current = widget.api.shopId;
+        // 存的门店已不在可操作范围(被移出品牌/店被划走)就退回第一家,
+        // 否则会一直卡在 404
+        if (current == null || !shops.any((s) => s['id'] == current)) {
+          await widget.api.setShopId(shops.first['id'] as int);
+        }
+      }
+      final shop = shops.isEmpty ? null : await widget.api.myShop();
       if (mounted) {
         setState(() {
+          _shops = shops;
           _shop = shop;
           _loaded = true;
           _error = null;
@@ -142,27 +160,92 @@ class _ShopGateState extends State<ShopGate> {
     if (shop == null) {
       return OnboardingWelcomePage(api: widget.api, onSubmitted: _load);
     }
+    // 连锁:一家新店在审或被驳回,不该把整个总部也挡在门外 ——
+    // 那几家正常营业的店还在等着接单
     if (shop.isRejected) {
-      return RejectedShopPage(
-          api: widget.api, shop: shop, onSubmitted: _load);
+      return _withShopEscape(
+          RejectedShopPage(api: widget.api, shop: shop, onSubmitted: _load),
+          shop);
     }
     if (shop.isPending) {
-      return PendingReviewPage(api: widget.api, shop: shop);
+      return _withShopEscape(
+          PendingReviewPage(api: widget.api, shop: shop), shop);
     }
     // 业态分叉:同一个 App,登录后按 biz_type 进入不同工作台
+    // **key 绑门店 id**:切店时强制换一个 State。
+    // 不加的话 Flutter 会复用同一个 State(同类型同位置),initState 不再跑 ——
+    // 听单 WebSocket 还连着上一家店、营业开关还是上一家的值,
+    // 而屏幕上的店名已经变了。这种错屏商家看不出来。
     if (shop.bizType == 'hotel') {
-      return HotelHomePage(api: widget.api, shop: shop, onShopChanged: _load);
+      return HotelHomePage(
+          key: ValueKey('shop-${shop.id}'),
+          api: widget.api,
+          shop: shop,
+          onShopChanged: _load);
     }
-    return MerchantHomePage(api: widget.api, shop: shop);
+    return MerchantHomePage(
+      key: ValueKey('shop-${shop.id}'),
+      api: widget.api,
+      shop: shop,
+      // 单店商家传空:工作台据此完全不渲染切店入口,界面与从前一样
+      shops: _shops.length > 1 ? _shops : const [],
+      onSwitchShop: _switchShop,
+    );
+  }
+
+  /// 给"在审/被驳回"这类整屏拦截页挂一个切到其他门店的出口。
+  /// 单店商家没有其他门店可切,原样返回(界面与从前一字不差)。
+  Widget _withShopEscape(Widget page, Merchant shop) {
+    final others = _shops
+        .where((s) => s['id'] != shop.id && s['status'] == 'approved')
+        .toList();
+    if (others.isEmpty) return page;
+    return Stack(children: [
+      page,
+      Positioned(
+        left: 0,
+        right: 0,
+        bottom: 24,
+        child: Center(
+          child: FilledButton.tonalIcon(
+            icon: const Icon(Icons.swap_horiz),
+            label: Text('切换到其他门店(${others.length} 家在营业)'),
+            onPressed: () => _switchShop(others.first['id'] as int),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  /// 切店:换 id 后把整个 Gate 重新加载一遍。
+  ///
+  /// 不做局部刷新是有意的 —— 工作台里挂着上一家店的订单列表、听单
+  /// WebSocket、今日营业额,漏掉任何一处就是"切到二店,屏幕上还是总店的
+  /// 单",而这种错屏商家完全看不出来。切店是低频动作,重来一次不亏。
+  Future<void> _switchShop(int id) async {
+    if (id == widget.api.shopId) return;
+    await widget.api.setShopId(id);
+    if (mounted) setState(() => _loaded = false);
+    await _load();
   }
 }
 
 
 class MerchantHomePage extends StatefulWidget {
-  const MerchantHomePage({super.key, required this.api, required this.shop});
+  const MerchantHomePage({
+    super.key,
+    required this.api,
+    required this.shop,
+    this.shops = const [],
+    this.onSwitchShop,
+  });
 
   final ApiClient api;
   final Merchant shop;
+
+  /// 连锁:可切换的门店。单店商家为空,顶栏就不出切店入口。
+  final List<Map<String, dynamic>> shops;
+  final Future<void> Function(int shopId)? onSwitchShop;
 
   @override
   State<MerchantHomePage> createState() => _MerchantHomePageState();
@@ -1009,12 +1092,25 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                     border: InputBorder.none),
                 onChanged: _onSearchChanged,
               )
-            : Text(switch (_tab) {
-                1 => '菜品管理',
-                2 => '对账',
-                3 => '店铺',
-                _ => pending > 0 ? '订单($pending 单待接)' : '订单',
-              }),
+            : widget.shops.length > 1
+                ? _ShopSwitcher(
+                    shops: widget.shops,
+                    currentId: widget.shop.id,
+                    currentName: widget.shop.name,
+                    subtitle: switch (_tab) {
+                      1 => '菜品管理',
+                      2 => '对账',
+                      3 => '店铺',
+                      _ => pending > 0 ? '$pending 单待接' : '订单',
+                    },
+                    onSwitch: widget.onSwitchShop,
+                  )
+                : Text(switch (_tab) {
+                    1 => '菜品管理',
+                    2 => '对账',
+                    3 => '店铺',
+                    _ => pending > 0 ? '订单($pending 单待接)' : '订单',
+                  }),
         actions: [
           if (_tab == 0 && !_searchMode)
             IconButton(
@@ -1070,7 +1166,11 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       body: _tab == 1
           ? DishManagePage(api: widget.api)
           : _tab == 2
-              ? FinancePage(api: widget.api)
+              ? (widget.shop.viewerIsOwner
+                  // 连锁的区域经理拿不到资金视图(服务端 403)。与其让人点进来
+                  // 看一个红色报错,不如直接说清楚这不是给他看的
+                  ? FinancePage(api: widget.api)
+                  : const _NoFinanceForManager())
               : _tab == 3
                   ? ShopTabPage(
                       api: widget.api,
@@ -1279,6 +1379,124 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           NavigationDestination(icon: Icon(Icons.bar_chart), label: '对账'),
           NavigationDestination(icon: Icon(Icons.store), label: '店铺'),
         ],
+      ),
+    );
+  }
+}
+
+/// 顶栏门店切换(仅连锁可见)。
+///
+/// 做成"店名 + 小箭头"而不是一个独立的设置项:切店是接单过程中随时会做的
+/// 动作(总部同时盯三家),埋进二级菜单等于没有。单店商家看不到它。
+class _ShopSwitcher extends StatelessWidget {
+  const _ShopSwitcher({
+    required this.shops,
+    required this.currentId,
+    required this.currentName,
+    required this.subtitle,
+    required this.onSwitch,
+  });
+
+  final List<Map<String, dynamic>> shops;
+  final int currentId;
+  final String currentName;
+  final String subtitle;
+  final Future<void> Function(int shopId)? onSwitch;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onSwitch == null ? null : () => _pick(context),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(currentName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600)),
+              Text(subtitle,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ],
+          ),
+        ),
+        const Icon(Icons.expand_more, size: 20),
+      ]),
+    );
+  }
+
+  Future<void> _pick(BuildContext context) async {
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text('切换门店',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+          ),
+          for (final s in shops)
+            ListTile(
+              leading: Icon(
+                s['id'] == currentId
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                color: s['id'] == currentId
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
+              ),
+              title: Text('${s['name']}'),
+              subtitle: Text('${s['address'] ?? ''}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              // 审核中/打烊直接标出来:切过去发现一片空白再回头找原因,
+              // 比在这里多两个字贵得多
+              trailing: s['status'] != 'approved'
+                  ? const Text('审核中', style: TextStyle(fontSize: 12))
+                  : (s['is_open'] == false
+                      ? const Text('打烊', style: TextStyle(fontSize: 12))
+                      : null),
+              onTap: () => Navigator.pop(sheet, s['id'] as int),
+            ),
+        ]),
+      ),
+    );
+    if (picked != null && picked != currentId) await onSwitch!(picked);
+  }
+}
+
+
+/// 非经营者本人(连锁区域经理)看到的对账页占位。
+class _NoFinanceForManager extends StatelessWidget {
+  const _NoFinanceForManager();
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.lock_outline, size: 40, color: muted),
+          const SizedBox(height: 12),
+          const Text('对账只对经营者本人开放',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Text(
+            '你是这家店的区域经理:改价、改设置、接单出餐都能做,'
+            '但营业额、提现和收款账户只有店铺登记的经营者本人能看。',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: muted),
+          ),
+        ]),
       ),
     );
   }

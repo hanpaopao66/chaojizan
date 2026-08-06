@@ -7,6 +7,7 @@ from ..models import Merchant, Order, Review, User
 from ..schemas import ReplyIn, ReviewIn, ReviewOut
 from ..security import require_role
 from ..state_machine import OrderStatus
+from ..services.staff import owned_shop
 
 router = APIRouter(tags=["评价"])
 
@@ -201,7 +202,7 @@ async def my_rating_overview(
     """
     from datetime import datetime, timedelta, timezone
 
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     now = datetime.now(timezone.utc)
@@ -266,7 +267,7 @@ async def my_review_tag_stats(
 
     from ..schemas import MERCHANT_NEG_TAGS, RIDER_REVIEW_TAGS
     days = max(7, min(days, 90))
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -307,7 +308,7 @@ async def my_shop_reviews(
 ):
     """本店评价列表。无参调用行为与从前一致(最新 100 条);
     带筛选/游标供独立评价页用。"""
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     stmt = (
@@ -335,7 +336,7 @@ async def reply_review(
     db: AsyncSession = Depends(get_db),
 ):
     """商家回复评价(可修改,回复对所有用户可见)。"""
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     review = await db.get(Review, review_id)
     if shop is None or review is None or review.merchant_id != shop.id:
         raise HTTPException(404, "评价不存在")
@@ -417,7 +418,7 @@ async def reply_append(
     db: AsyncSession = Depends(get_db),
 ):
     """商家回复追评(一次,可修改)。"""
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     review = await db.get(Review, review_id, with_for_update=True)
     if shop is None or review is None or review.merchant_id != shop.id:
         raise HTTPException(404, "评价不存在")

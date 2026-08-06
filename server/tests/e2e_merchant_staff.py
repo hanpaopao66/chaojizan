@@ -67,7 +67,11 @@ print("✓ 店员能看单/接单/出餐")
 
 # 店员不能:提现、改价、改店铺设置、加店员(敏感=店主专属)
 err = call("GET", "/merchants/me/withdrawals", staff, expect_error=True)
-assert err["_error"] == 404, "店员访问提现应被拒(非店主,还没开店口径)"
+# 403 而不是 404:店员明明有店,回"还没开店"本来就是句假话。
+# 连锁引入 money_shop 闸门后统一成"只有经营者本人能操作资金" ——
+# 同一条闸门也拦住了品牌区域经理(见 e2e_chain_stores)
+assert err["_error"] == 403, f"店员访问提现应被拒:{err}"
+assert "经营者本人" in (err["detail"] or ""), err
 err = call("PATCH", f"/merchants/me/dishes/{dish['id']}", staff,
            {"price_cents": 9999}, expect_error=True)
 assert err["_error"] == 404, "店员改价应被拒(非店主)"

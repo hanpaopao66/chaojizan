@@ -34,6 +34,7 @@ from ..models import (
 )
 from ..security import require_role
 from ..services.push import push_to_user
+from ..services.staff import owned_shop
 
 router = APIRouter(tags=["判责申诉"])
 
@@ -93,8 +94,7 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         if user.role.value != "merchant":
             raise HTTPException(403, "售后判责只有商家可以申诉")
         a = await db.get(AfterSale, payload.target_id)
-        shop = await db.scalar(
-            select(Merchant).where(Merchant.owner_id == user.id))
+        shop = await owned_shop(db, user)
         if a is None or shop is None or a.merchant_id != shop.id:
             raise HTTPException(404, "售后记录不存在")
         if a.status.value != "accepted" or a.fault == "rider":
@@ -115,8 +115,7 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         if user.role.value != "merchant":
             raise HTTPException(403, "差评只有商家可以申诉")
         review = await db.get(Review, payload.target_id)
-        shop = await db.scalar(
-            select(Merchant).where(Merchant.owner_id == user.id))
+        shop = await owned_shop(db, user)
         if review is None or shop is None or review.merchant_id != shop.id:
             raise HTTPException(404, "评价不存在")
         if review.hidden:

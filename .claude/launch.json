@@ -1,7 +1,27 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "web", "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "web"], "port": 5173 }
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "web"
+      ],
+      "port": 5173
+    },
+    {
+      "name": "merchant-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "merchant-web"
+      ],
+      "port": 5174
+    }
   ]
 }

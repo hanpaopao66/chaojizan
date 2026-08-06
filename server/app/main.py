@@ -104,6 +104,27 @@ async def html_aware_errors(request, exc):
 
 
 @app.middleware("http")
+async def select_shop(request, call_next):
+    """连锁门店选择:X-Shop-Id 头写进 ContextVar,供权限解析读取。
+
+    **这个头只是「选哪家」不是「有权限」** —— services.staff.resolve_shop
+    拿到之后照样走完整校验,伪造别家的 id 只会拿到 404。
+    没有这个头时一切照旧(单店商家零感知)。
+    """
+    from .services.staff import current_shop_id
+
+    raw = request.headers.get("x-shop-id")
+    token = None
+    if raw and raw.isdigit():
+        token = current_shop_id.set(int(raw))
+    try:
+        return await call_next(request)
+    finally:
+        if token is not None:
+            current_shop_id.reset(token)
+
+
+@app.middleware("http")
 async def log_unhandled_errors(request, call_next):
     """未捕获异常统一留痕(#130)。
 

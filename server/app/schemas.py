@@ -157,6 +157,11 @@ class MerchantOut(BaseModel):
     top_dishes: list = []
     # 当前查看者是否为店员(仅 GET /merchants/me 填充,客户端据此隐藏提现/改价入口)
     viewer_is_staff: bool = False
+    # 当前查看者是否是这家店登记的经营者本人(仅 GET /merchants/me 填充)。
+    # **和 not viewer_is_staff 不是一回事**:连锁的区域经理不是店员
+    # (能改价、能改设置),但也不是经营者本人 —— 资金动作服务端一律 403。
+    # 客户端据此隐藏对账/提现入口,别把人领到一堵墙前面再报错。
+    viewer_is_owner: bool = True
 
     # 明厨亮灶(#155)。**这两个字段是法定要求,不是可选的展示项**:
     # 总局令第 123 号第十三条要求平台"根据商家是否实施,在商家列表页展示

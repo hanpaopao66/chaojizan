@@ -52,12 +52,25 @@ async def create_brand(
 
     只有店主能建;一个人一个品牌 —— 再多就该是两家公司的事了。
     """
+    from ..services.moderation import guard_text
+
     name = str(payload.get("name", "")).strip()[:50]
     if len(name) < 2:
         raise HTTPException(422, "品牌名至少 2 个字")
+    await guard_text(db, name, "品牌名")
     if await _my_brand(db, user) is not None:
         raise HTTPException(409, "你已经有品牌了")
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    # 客户端会把 shop_id 传过来(它知道当前选的是哪家)。**不能收下就用** ——
+    # 校验归属之后才认,否则等于让人把别人的店挂到自己品牌下
+    wanted = payload.get("shop_id")
+    if wanted:
+        shop = await db.get(Merchant, int(wanted))
+        if shop is None or shop.owner_id != user.id:
+            raise HTTPException(404, "门店不存在")
+    else:
+        shop = await db.scalar(
+            select(Merchant).where(Merchant.owner_id == user.id)
+            .order_by(Merchant.id))
     if shop is None:
         raise HTTPException(404, "先有一家店才能建品牌")
     brand = Brand(name=name, owner_id=user.id,
@@ -90,6 +103,98 @@ async def my_brand(
             "in_brand": s.brand_id is not None,
         } for s in shops],
     }
+
+
+@router.get("/me/members")
+async def list_members(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """品牌成员(区域经理)。只有品牌所有者看得到 ——
+    谁能管哪几家店属于组织内部信息。"""
+    brand = await _my_brand(db, user)
+    if brand is None or brand.owner_id != user.id:
+        raise HTTPException(403, "只有品牌所有者能查看成员")
+    rows = (await db.execute(
+        select(BrandMember, User.name, User.phone)
+        .join(User, User.id == BrandMember.user_id)
+        .where(BrandMember.brand_id == brand.id)
+        .order_by(BrandMember.id))).all()
+    return [{
+        "id": m.id, "user_id": m.user_id, "role": m.role,
+        "name": name,
+        # 手机号打码:成员列表是给品牌老板看谁在管店的,不是通讯录
+        "phone": f"{phone[:3]}****{phone[-4:]}" if len(phone) >= 7 else "",
+        "shop_ids": m.shop_ids,
+        "created_at": m.created_at,
+    } for m, name, phone in rows]
+
+
+@router.post("/me/members")
+async def add_member(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """按手机号把人加成区域经理,并指定管辖门店(空 = 全部门店)。
+
+    对方必须**已经用商家端登录过**(同手机号的商家账号) ——
+    与店员的加入方式一致,不替人开账号。
+    """
+    from ..models import UserRole
+
+    brand = await _my_brand(db, user)
+    if brand is None or brand.owner_id != user.id:
+        raise HTTPException(403, "只有品牌所有者能加成员")
+    phone = str(payload.get("phone", "")).strip()
+    target = await db.scalar(select(User).where(
+        User.phone == phone, User.role == UserRole.merchant))
+    if target is None:
+        raise HTTPException(
+            404, "对方需先用商家端 App 或网页登录过一次(同手机号的商家账号)")
+    if target.id == user.id:
+        raise HTTPException(422, "你已经是品牌所有者了")
+    # 对方自己有品牌的话,_brand_scope 会优先认他自己的品牌、直接忽略这条
+    # 成员记录 —— 加进来是个静默空操作:界面上显示"已添加",实际一点权限
+    # 都没给。宁可在这里说清楚
+    if await db.scalar(select(Brand.id).where(Brand.owner_id == target.id)):
+        raise HTTPException(
+            422, "对方自己已经是某个品牌的所有者,不能同时受雇于本品牌")
+    shop_ids = [int(i) for i in (payload.get("shop_ids") or [])]
+    if shop_ids:
+        valid = set(await db.scalars(
+            select(Merchant.id).where(Merchant.id.in_(shop_ids),
+                                      Merchant.brand_id == brand.id)))
+        if valid != set(shop_ids):
+            raise HTTPException(422, "授权门店必须是本品牌的店")
+    existing = await db.scalar(select(BrandMember).where(
+        BrandMember.brand_id == brand.id, BrandMember.user_id == target.id))
+    if existing is not None:
+        existing.shop_ids = shop_ids   # 已在品牌里 = 改授权范围
+    else:
+        db.add(BrandMember(brand_id=brand.id, user_id=target.id,
+                           role="manager", shop_ids=shop_ids))
+    await db.commit()
+    return {"ok": True, "name": target.name,
+            "shops": len(shop_ids) or "全部"}
+
+
+@router.delete("/me/members/{member_id}")
+async def remove_member(
+    member_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """移出品牌:立即失去所有门店权限。"""
+    brand = await _my_brand(db, user)
+    if brand is None or brand.owner_id != user.id:
+        raise HTTPException(403, "只有品牌所有者能移除成员")
+    member = await db.get(BrandMember, member_id)
+    if member is None or member.brand_id != brand.id:
+        raise HTTPException(404, "成员不存在")
+    await db.delete(member)
+    await db.commit()
+    return {"ok": True}
 
 
 @router.get("/me/overview")
@@ -178,6 +283,8 @@ async def open_brand_shop(
     if src is None or src.brand_id != brand.id:
         raise HTTPException(422, "参照门店必须是本品牌的店")
 
+    from ..services.moderation import guard_text
+
     required = ("name", "address", "lat", "lng", "license_no",
                 "license_image_url")
     missing = [k for k in required if not payload.get(k)]
@@ -186,6 +293,8 @@ async def open_brand_shop(
             422, "新门店必须自己提交证照与地址(食品经营许可证按门店核发,"
                  "不能复用总部或其他门店的)")
 
+    await guard_text(db, str(payload["name"]), "门店名称")
+    await guard_text(db, str(payload["address"]), "门店地址")
     shop = Merchant(
         name=str(payload["name"])[:50],
         description=src.description,

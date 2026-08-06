@@ -11,11 +11,14 @@ import urllib.request
 BASE = os.environ.get("SUPERZ_API", "http://127.0.0.1:8010")
 
 
-def call(method, path, token=None, body=None, expect_error=False, _retried=False):
+def call(method, path, token=None, body=None, expect_error=False,
+         _retried=False, headers=None):
     req = urllib.request.Request(BASE + path, method=method)
     req.add_header("Content-Type", "application/json")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
+    for k, v in (headers or {}).items():
+        req.add_header(k, str(v))
     data = json.dumps(body).encode() if body is not None else None
     try:
         with urllib.request.urlopen(req, data) as resp:
@@ -31,7 +34,8 @@ def call(method, path, token=None, body=None, expect_error=False, _retried=False
             wait = 61 - int(time.time()) % 60
             print(f"  (限流 429,等 {wait}s 窗口翻转后重试)")
             time.sleep(wait)
-            return call(method, path, token, body, expect_error, _retried=True)
+            return call(method, path, token, body, expect_error,
+                        _retried=True, headers=headers)
         raise SystemExit(f"FAIL {method} {path}: {e.code} {detail}")
 
 

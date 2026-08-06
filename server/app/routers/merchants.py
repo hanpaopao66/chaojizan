@@ -56,6 +56,7 @@ from ..schemas import (
     WithdrawalOut,
 )
 from ..security import require_role
+from ..services.staff import owned_shop
 
 router = APIRouter(prefix="/merchants", tags=["商家"])
 
@@ -417,6 +418,7 @@ async def my_shop(
         raise HTTPException(404, "还没开店")
     out = MerchantMeOut.model_validate(shop)
     out.viewer_is_staff = not is_owner
+    out.viewer_is_owner = shop.owner_id == user.id
     # 证照只给店主(驳回后回填重提表单用);店员清空 —— 资质材料不是接单要用的
     if not is_owner:
         out.license_no = ""
@@ -438,7 +440,7 @@ async def update_my_shop(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
 
@@ -541,7 +543,7 @@ async def my_dishes(
     db: AsyncSession = Depends(get_db),
 ):
     """商家管理视角:含已下架菜品。注意必须注册在 /{merchant_id}/dishes 之前。"""
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     result = await db.scalars(
@@ -733,7 +735,7 @@ async def add_dish(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "先开店再上菜")
     from ..services.moderation import guard_text, submit_images
@@ -762,7 +764,7 @@ async def update_dish(
     db: AsyncSession = Depends(get_db),
 ):
     """改价/改库存/上下架/限时折扣。已有订单存的是快照,不受影响。"""
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     dish = await db.get(Dish, dish_id)
     if shop is None or dish is None or dish.merchant_id != shop.id:
         raise HTTPException(404, "菜品不存在")
@@ -831,7 +833,7 @@ async def rest_temporarily(
     区别于手动关店(容易忘了开):忙不过来/临时有事点一下,不影响后面生意。
     提前想恢复直接开店即可(开店动作会清掉歇业标记)。
     """
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     now = datetime.now(timezone.utc)
@@ -912,7 +914,7 @@ async def list_staff(
 ):
     """店主查看自己店的子账号列表。店员访问返回空(自己非店主)。"""
     from ..models import MerchantStaff
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         return []
     rows = (await db.execute(
@@ -937,7 +939,7 @@ async def add_staff(
     不能已是别家店员。
     """
     from ..models import MerchantStaff, UserRole
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(403, "只有店主可以管理子账号")
     phone = str(payload.get("phone", "")).strip()
@@ -969,7 +971,7 @@ async def remove_staff(
 ):
     """移除店员。仅店主可操作。"""
     from ..models import MerchantStaff
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(403, "只有店主可以管理子账号")
     link = await db.scalar(select(MerchantStaff).where(
@@ -1006,7 +1008,7 @@ async def create_shop_coupon_batch(
     这三类原先由平台掏钱,#115 起归位给商家。同一家店同一 trigger
     只保留一个启用中的批次(建新的会停掉旧的),免得两个批次互相打架。
     """
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     if payload.trigger != "shop":
@@ -1033,7 +1035,7 @@ async def list_shop_coupon_batches(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         return []
     rows = (await db.scalars(
@@ -1049,7 +1051,7 @@ async def toggle_shop_coupon_batch(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     batch = await db.get(CouponBatch, batch_id)
     if shop is None or batch is None or batch.merchant_id != shop.id:
         raise HTTPException(404, "券批次不存在")
@@ -1071,7 +1073,7 @@ async def my_promo_material(
 
     海报由商家端离屏渲染(照 share_card 的做法),这里只给数据。
     """
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     # 懒生成:第一次要用时才建号,不给可能永远不用的店占号段
@@ -1119,7 +1121,7 @@ async def my_winback_overview(
     召回本身也不由商家逐个触发——那等于把骚扰权交出去。系统每天按
     每人每店每月一次、全局每周两条的频控自动发。
     """
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
 
@@ -1269,6 +1271,21 @@ async def _my_shop_or_404(db: AsyncSession, user: User,
                                         need_owner=True)
     if shop is None or not is_owner:
         raise HTTPException(404, "还没开店")
+    return shop
+
+
+async def _money_shop_or_403(db: AsyncSession, user: User,
+                             merchant_id: int | None = None) -> Merchant:
+    """资金动作的店(必须是登记的 owner 本人)。
+
+    品牌 manager 在别处算"店主级权限"(改价、改设置都放行),
+    但钱不走那条线 —— 运营授权不等于可以把店里的钱提到自己卡上。
+    """
+    from ..services.staff import money_shop
+    shop = await money_shop(db, user, merchant_id)
+    if shop is None:
+        raise HTTPException(
+            403, "只有店铺登记的经营者本人能操作资金(提现、收款账户)")
     return shop
 
 
@@ -1602,7 +1619,14 @@ async def _stay_net(db: AsyncSession, merchant_id: int) -> int:
     )
 
 
-async def _merchant_wallet(db: AsyncSession, shop: Merchant, owner_id: int) -> WalletOut:
+async def _merchant_wallet(db: AsyncSession, shop: Merchant) -> WalletOut:
+    """店铺钱包。
+
+    **已提现一律按 shop.owner_id 减,不按调用者。** 余额是拿
+    merchant_id 算出来的整店营收,两边口径不是同一个人的话,
+    非店主看到的"可提现"里不含店主已经提走的部分 —— 同一笔钱能被算两遍。
+    """
+    owner_id = shop.owner_id
     # 只计平台代收口径:profit_sharing 行的钱已直达商家微信商户号,
     # 不进平台侧可提现余额(否则一笔钱发两遍)
     food_net = await db.scalar(
@@ -1650,8 +1674,8 @@ async def merchant_wallet(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    shop = await _my_shop_or_404(db, user)
-    return await _merchant_wallet(db, shop, user.id)
+    shop = await _money_shop_or_403(db, user)
+    return await _merchant_wallet(db, shop)
 
 
 @router.get("/me/withdrawals", response_model=list[WithdrawalOut])
@@ -1659,7 +1683,7 @@ async def merchant_withdrawals(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    await _my_shop_or_404(db, user)
+    await _money_shop_or_403(db, user)
     result = await db.scalars(
         select(Withdrawal)
         .where(Withdrawal.user_id == user.id, Withdrawal.role == "merchant")
@@ -1680,7 +1704,7 @@ async def request_merchant_withdrawal(
         raise HTTPException(
             422, f"最低提现 ¥{settings.min_withdrawal_cents / 100:.0f}"
         )
-    shop = await _my_shop_or_404(db, user)
+    shop = await _money_shop_or_403(db, user)
     from ..models import PayoutAccount
     from .payout import account_recently_changed
     account = await db.scalar(
@@ -1688,7 +1712,7 @@ async def request_merchant_withdrawal(
     if account is None:
         raise HTTPException(422, "请先在对账页登记收款账户(建议对公户),再申请提现")
     await db.execute(select(User).where(User.id == user.id).with_for_update())
-    current = await _merchant_wallet(db, shop, user.id)
+    current = await _merchant_wallet(db, shop)
     if payload.amount_cents > current.withdrawable_cents:
         raise HTTPException(
             409,
@@ -1923,7 +1947,8 @@ async def finance_statement_csv(
     from ..models import Voucher, VoucherPurchase, VoucherPurchaseStatus
     from ..state_machine import StayOrderStatus
 
-    shop = await _my_shop_or_404(db, user)
+    # 每单分账明细,与 /me/wallet 同口径:只对经营者本人
+    shop = await _money_shop_or_403(db, user)
     since = datetime.now(timezone.utc) - timedelta(days=min(days, 90))
     earnings = (
         await db.scalars(
@@ -2127,7 +2152,7 @@ async def set_busy(
 ):
     """开/关忙碌模式。{minutes: 30|60|120, extra_minutes: 10|15|20}
     或 {off: true} 提前结束。到点自动失效,不需要记得来关。"""
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     if payload.get("off"):
@@ -2551,7 +2576,7 @@ async def list_api_keys(
     """本店的 API Key 列表。**只回前缀,不回明文** ——
     库里存的就是哈希,明文只在创建那一刻给过一次。"""
     from ..models import MerchantApiKey
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     rows = await db.scalars(
@@ -2577,7 +2602,7 @@ async def create_api_key(
     """生成新 Key。返回体里的 token 是**唯一一次**能看到明文的机会。"""
     from ..models import MerchantApiKey
     from .open_api import new_key
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     if shop.status != MerchantStatus.approved:
@@ -2614,7 +2639,7 @@ async def revoke_api_key(
 ):
     """吊销:立即失效,不可撤销。记录留着(谁在什么时候用过要查得到)。"""
     from ..models import MerchantApiKey
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     key = await db.get(MerchantApiKey, key_id)
     if shop is None or key is None or key.merchant_id != shop.id:
         raise HTTPException(404, "Key 不存在")
@@ -3194,7 +3219,8 @@ async def my_statement_csv(
 
     if not _re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
         raise HTTPException(422, "月份格式:YYYY-MM")
-    shop = await _my_shop_or_404(db, user)
+    # 对账明细含每单分账与平台佣金 —— 与 /me/wallet 同口径,只对经营者本人
+    shop = await _money_shop_or_403(db, user)
     redis = get_redis()
     key = f"stmt:{shop.id}:{month}:{__import__('datetime').date.today()}"
     n = await redis.incr(key)

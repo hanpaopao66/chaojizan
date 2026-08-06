@@ -18,6 +18,36 @@ export function setToken(token: string) {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(TOKEN_AT_KEY)
+  localStorage.removeItem(SHOP_KEY)
+}
+
+// ---------- 当前门店(连锁) ----------
+//
+// 单店商家永远用不到这个:不设置时后端退回"我唯一的那家店",
+// 与加连锁之前一字不差。连锁下所有请求带 X-Shop-Id,后端在权限解析
+// 那一处统一读 —— 这个头只是**选哪家**,权限仍由后端另判,
+// 手改成别人家的 id 只会拿到 404。
+const SHOP_KEY = 'superz_merchant_shop_id'
+
+export function getShopId(): number | null {
+  const v = Number(localStorage.getItem(SHOP_KEY) || 0)
+  return v > 0 ? v : null
+}
+
+export function setShopId(id: number) {
+  localStorage.setItem(SHOP_KEY, String(id))
+}
+
+/** 切店:整页重载。
+ *
+ * 看着粗暴,但比逐页失效可靠得多 —— 页面里缓存着上一家店的订单、
+ * 菜单、营业额,漏掉任何一处就是"切到二店,屏幕上还是总店的数",
+ * 而这种错屏用户完全看不出来。切店本来就是低频动作,重载一次不亏。
+ */
+export function switchShop(id: number) {
+  if (id === getShopId()) return
+  setShopId(id)
+  location.reload()
 }
 
 // token 无感续期(与三端 App 同款):超过 1 天龄就顺手换新,
@@ -64,6 +94,8 @@ export async function request<T>(
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   const token = getToken()
   if (token) headers['Authorization'] = `Bearer ${token}`
+  const shopId = getShopId()
+  if (shopId) headers['X-Shop-Id'] = String(shopId)
   const resp = await fetch(path, {
     method,
     headers,
@@ -97,9 +129,12 @@ export async function request<T>(
 /** 下载需要带 token 的文件(如对账 CSV):fetch blob 落地,URL 不带凭证 */
 export async function downloadFile(path: string, filename: string) {
   const token = getToken()
-  const resp = await fetch(path, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  })
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const shopId = getShopId()
+  // 对账 CSV 也要跟着当前门店走,否则切了店导出的还是上一家的账
+  if (shopId) headers['X-Shop-Id'] = String(shopId)
+  const resp = await fetch(path, { headers })
   if (!resp.ok) throw new ApiError(resp.status, `下载失败(${resp.status})`)
   const blob = await resp.blob()
   const url = URL.createObjectURL(blob)
@@ -163,6 +198,9 @@ export interface Merchant {
   self_delivery: boolean
   commission_rate: string | number
   viewer_is_staff: boolean
+  /** 是不是这家店登记的经营者本人。连锁的区域经理不是店员但也不是本人,
+   *  资金动作(对账/提现)服务端一律 403 —— 据此隐藏入口 */
+  viewer_is_owner: boolean
   busy_active: boolean
   busy_until: string | null
   busy_extra_minutes: number
@@ -940,4 +978,97 @@ export function myHotelProfile(): Promise<HotelProfileData> {
 
 export function updateHotelProfile(fields: Record<string, unknown>): Promise<unknown> {
   return request('PATCH', '/stays/me/profile', fields)
+}
+
+// ---------- 连锁店群 ----------
+
+export interface BrandShop {
+  id: number
+  name: string
+  address: string
+  status: string
+  is_open: boolean
+  in_brand: boolean
+}
+
+export interface MyBrand {
+  brand: { id: number; name: string; logo_url: string; is_owner: boolean } | null
+  shops: BrandShop[]
+}
+
+/** 我的品牌与门店列表。
+ *
+ * 单店商家也能调:brand 为 null、shops 一个元素 —— 门店选择器用同一份
+ * 数据,客户端不用为"是不是连锁"分两套逻辑。 */
+export function myBrand(): Promise<MyBrand> {
+  return request('GET', '/brands/me')
+}
+
+export function createBrand(name: string, shopId: number): Promise<unknown> {
+  return request('POST', '/brands/me', { name, shop_id: shopId })
+}
+
+export interface BrandShopStat {
+  shop_id: number
+  name: string
+  status: string
+  is_open: boolean
+  orders: number
+  net_cents: number
+  ready_late: number
+  rating_avg: number | null
+  bad_unreplied: number
+}
+
+export interface BrandOverview {
+  days: number
+  shops: BrandShopStat[]
+  total: { shops: number; orders: number; net_cents: number; bad_unreplied: number }
+  note: string
+}
+
+export function brandOverview(days: number): Promise<BrandOverview> {
+  return request('GET', `/brands/me/overview?days=${days}`)
+}
+
+export function openBrandShop(fields: Record<string, unknown>): Promise<Merchant> {
+  return request('POST', '/brands/me/shops', fields)
+}
+
+export interface MenuSyncResult {
+  from_shop: number
+  dishes: number
+  results: { shop_id: number; name: string; created: number; updated: number }[]
+  note: string
+}
+
+/** 菜单下发:把源门店在售的菜应用到目标门店(按菜名匹配)。
+ *  库存与上下架不覆盖 —— 那是各店当天的经营决策。 */
+export function syncBrandMenu(
+  fromShop: number, toShops: number[],
+): Promise<MenuSyncResult> {
+  return request('POST', '/brands/me/menu-sync',
+    { from_shop: fromShop, to_shops: toShops })
+}
+
+export interface BrandMemberRow {
+  id: number
+  user_id: number
+  role: string
+  name: string
+  phone: string
+  shop_ids: number[]
+  created_at: string
+}
+
+export function brandMembers(): Promise<BrandMemberRow[]> {
+  return request('GET', '/brands/me/members')
+}
+
+export function addBrandMember(phone: string, shopIds: number[]): Promise<unknown> {
+  return request('POST', '/brands/me/members', { phone, shop_ids: shopIds })
+}
+
+export function removeBrandMember(id: number): Promise<unknown> {
+  return request('DELETE', `/brands/me/members/${id}`)
 }

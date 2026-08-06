@@ -12,11 +12,10 @@ from collections import defaultdict
 
 import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import select
-
 from .config import settings
 from .db import SessionLocal
-from .models import Merchant
+from .models import User
+from .services.staff import operable_shop
 
 router = APIRouter()
 
@@ -64,15 +63,23 @@ async def order_ws(ws: WebSocket, order_no: str):
 
 @router.websocket("/ws/merchants/{merchant_id}")
 async def merchant_ws(ws: WebSocket, merchant_id: int, token: str = Query("")):
-    """商家听单通道:验 token + 店铺归属,防止别人偷听你的订单流水。"""
+    """商家听单通道:验 token + 店铺归属,防止别人偷听你的订单流水。
+
+    归属判定走 services.staff.operable_shop —— 与所有商家端点同一套。
+    老写法是 `db.scalar(owner_id == 我)` 再比对 merchant_id,不带
+    ORDER BY:单店时永远只有一个候选看不出问题,**连锁老板名下三家店时
+    返回哪家由数据库决定**,于是另外两家的听单通道随机连不上 ——
+    而"听不到新单"这种故障商家只会以为是今天没生意。
+    """
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
         if payload.get("role") != "merchant":
             raise ValueError
         async with SessionLocal() as db:
-            shop = await db.scalar(
-                select(Merchant).where(Merchant.owner_id == int(payload["sub"]))
-            )
+            user = await db.get(User, int(payload["sub"]))
+            if user is None:
+                raise ValueError
+            shop, _ = await operable_shop(db, user, merchant_id)
         if shop is None or shop.id != merchant_id:
             raise ValueError
     except Exception:

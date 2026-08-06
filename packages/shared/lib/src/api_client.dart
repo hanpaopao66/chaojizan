@@ -87,10 +87,31 @@ class ApiClient {
   String get wsBaseUrl =>
       baseUrl.replaceFirst('https://', 'wss://').replaceFirst('http://', 'ws://');
 
+  /// 连锁:当前操作的门店 id。
+  ///
+  /// 单店商家永远是 null —— 不发这个头时后端退回"我唯一的那家店",
+  /// 与加连锁之前一字不差。这个头只是**选哪家**不是**有权限**:
+  /// 后端在权限解析那一处照样全量校验,填别人家的 id 只会拿到 404。
+  int? shopId;
+
   Map<String, String> get _headers => {
         'Content-Type': 'application/json',
         if (_token != null) 'Authorization': 'Bearer $_token',
+        if (shopId != null) 'X-Shop-Id': '$shopId',
       };
+
+  /// 切换当前门店并落盘(冷启动后仍停在上次那家)。
+  Future<void> setShopId(int? id) async {
+    shopId = id;
+    try {
+      final sp = await SharedPreferences.getInstance();
+      if (id == null) {
+        await sp.remove('merchant_shop_id');
+      } else {
+        await sp.setInt('merchant_shop_id', id);
+      }
+    } catch (_) {}
+  }
 
   /// token 无感续期:服务端 token 7 天过期,超过 1 天龄就顺手换新。
   /// 商家端接单机长期挂机,靠这里保持不掉线;失败静默(下次请求再试)。
@@ -187,6 +208,7 @@ class ApiClient {
       userId = sp.getInt('auth_user_id');
       userName = sp.getString('auth_user_name');
       userRole = sp.getString('auth_role');
+      shopId = sp.getInt('merchant_shop_id');
       // 本地先核一道角色(离线也能拦住错角色会话);
       // 旧版本没存过角色(空)的放行,交给下面 /auth/me 补齐后再核
       if (expectRole != null &&
@@ -225,6 +247,9 @@ class ApiClient {
     userId = null;
     userName = null;
     userRole = null;
+    // 门店选择跟着会话一起清:不清的话换个商家账号登录,请求还带着
+    // 上一个人的 X-Shop-Id,轻则全程 404,重则看着别人的店名发懵
+    shopId = null;
     onSessionCleared?.call();  // 会话级状态(如埋点去重)跟着会话走
     try {
       final sp = await SharedPreferences.getInstance();
@@ -233,6 +258,7 @@ class ApiClient {
       await sp.remove('auth_user_id');
       await sp.remove('auth_user_name');
       await sp.remove('auth_role');
+      await sp.remove('merchant_shop_id');
     } catch (_) {}
   }
 
@@ -1159,6 +1185,61 @@ class ApiClient {
       if (photoUrl.isNotEmpty) 'photo_url': photoUrl,
     });
     return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  // ---------- 连锁店群 ----------
+  /// 我的品牌与门店列表。
+  ///
+  /// 单店商家也能调:brand 为 null、shops 只有一家 —— 门店选择器用同一份
+  /// 数据,客户端不用为"是不是连锁"分两套逻辑。
+  ///
+  /// **冷启动必须先调它再调 myShop()**:连锁账号在没选门店时
+  /// /merchants/me 是 404(后端不猜是哪家),顺序反了会把连锁老板
+  /// 一路带进"还没开店"的入驻引导。
+  Future<Map<String, dynamic>> myBrand() async {
+    final data = await _request('GET', '/brands/me');
+    return data as Map<String, dynamic>;
+  }
+
+  /// 把现有的店升级成品牌总部(第一家店成为品牌首店)。
+  Future<Map<String, dynamic>> createBrand({
+    required String name,
+    required int shopId,
+  }) async {
+    final data = await _request('POST', '/brands/me',
+        body: {'name': name, 'shop_id': shopId});
+    return data as Map<String, dynamic>;
+  }
+
+  /// 新开一家品牌门店。
+  ///
+  /// **证照参数不是可选的** —— 食品经营许可证按门店核发,不能复用总部或
+  /// 其他门店的。服务端同样硬拦(422),这里做成必填只是别让人白填一遍表。
+  Future<Merchant> openBrandShop({
+    required int copyFrom,
+    required String name,
+    required String address,
+    required double lat,
+    required double lng,
+    required String licenseNo,
+    required String licenseImageUrl,
+  }) async {
+    final data = await _request('POST', '/brands/me/shops', body: {
+      'copy_from': copyFrom,
+      'name': name,
+      'address': address,
+      'lat': lat,
+      'lng': lng,
+      'license_no': licenseNo,
+      'license_image_url': licenseImageUrl,
+    });
+    return Merchant.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> brandOverview({int days = 7}) async {
+    final data = await _request('GET', '/brands/me/overview',
+        query: {'days': '$days'});
+    return data as Map<String, dynamic>;
   }
 
   // ---------- 商家端 ----------

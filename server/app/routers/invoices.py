@@ -24,6 +24,7 @@ from ..models import (
 )
 from ..security import require_role
 from ..services.push import push_to_user
+from ..services.staff import owned_shop
 
 router = APIRouter(tags=["发票"])
 
@@ -101,7 +102,7 @@ async def _month_fee(db: AsyncSession, merchant_id: int, period: str) -> dict:
 
 
 async def _my_shop(db: AsyncSession, user: User) -> Merchant:
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
     return shop

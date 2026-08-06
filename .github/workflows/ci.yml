@@ -51,6 +51,10 @@ jobs:
       # (不留人人可登的后门)。CI 偏偏要用 minio 跑生产的存储路径,所以在这里
       # 显式给一个口令 —— 那条生产保护本身不该为 CI 放宽。每次跑都不一样
       SEED_DEMO_PASSWORD: ci-${{ github.run_id }}
+      # 全套 e2e 从同一个 127.0.0.1 发几十条注册短信,会撞上"同 IP 每日 20 条"
+      # 的防刷闸门。生产那个 20 是对的,不能为 CI 调低 —— 这里只在 CI 抬高。
+      # 注意仍**不放宽同手机号 8 条/滑块**那两条,e2e_auth_sms 正是在测它们。
+      SMS_DAILY_IP_LIMIT: "100000"
 
     steps:
       - uses: actions/checkout@v4

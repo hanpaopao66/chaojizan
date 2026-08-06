@@ -38,6 +38,7 @@ from ..services.wechat_pay import request_refund
 from ..state_machine import STATUS_LABELS
 from ..state_machine import OrderStatus, TransitionError, assert_transition
 from ..ws import manager
+from ..services.staff import owned_shop
 
 logger = logging.getLogger("superz.orders")
 
@@ -1179,7 +1180,7 @@ async def urge_reply(
     order = await db.scalar(select(Order).where(Order.order_no == order_no))
     if order is None:
         raise HTTPException(404, "订单不存在")
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None or order.merchant_id != shop.id:
         raise HTTPException(403, "这不是你店里的订单")
     urged = await db.scalar(
@@ -1246,7 +1247,7 @@ async def refund_item(
     只允许在「待接单/制作中」阶段操作(出餐后缺货说不过去);
     退光所有菜品 = 整单取消,配送费一并退。
     """
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     order = await db.scalar(
         select(Order).where(Order.order_no == order_no).with_for_update()
     )
@@ -1601,8 +1602,7 @@ async def _chat_context(db, order_no: str, user: User):
             raise HTTPException(403, "这不是你接的订单")
         peers = {"customer"}
     elif role == "merchant":
-        shop = await db.scalar(
-            select(Merchant).where(Merchant.owner_id == user.id))
+        shop = await owned_shop(db, user)
         if shop is None or order.merchant_id != shop.id:
             raise HTTPException(403, "这不是你店里的订单")
         peers = {"customer"}

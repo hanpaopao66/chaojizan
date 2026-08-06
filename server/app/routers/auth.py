@@ -140,7 +140,7 @@ async def send_sms_code(payload: SmsCodeIn, request: Request):
     ip_count = int(await redis.get(day_ip) or 0)
     if phone_count >= 8:
         raise HTTPException(429, "该手机号今日验证码已达上限,请明天再试")
-    if ip_count >= 20:
+    if ip_count >= settings.sms_daily_ip_limit:
         raise HTTPException(429, "当前网络今日验证码请求过多,请明天再试")
     if phone_count >= 2:  # 第 3 条起要求滑块
         stored = await redis.get(f"slider:{payload.ticket}") if payload.ticket else None

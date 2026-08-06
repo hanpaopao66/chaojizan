@@ -6,6 +6,7 @@ import 'appeal_page.dart';
 import 'dashboard_page.dart';
 import 'messages_page.dart';
 import 'reviews_page.dart';
+import 'chain_page.dart';
 import 'rules_page.dart';
 import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
@@ -1907,6 +1908,22 @@ class _ShopTabPageState extends State<ShopTabPage> {
           ),
           const SizedBox(height: 12),
           if (!shop.viewerIsStaff) ...[
+            // 店员不给连锁入口:开店、看跨店营业额都是老板的事,
+            // 而且这些接口本来就按品牌所有者判权,给了也只会报错
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.store_mall_directory_outlined),
+                title: const Text('连锁店群'),
+                subtitle: const Text('跨店看数、开新门店(新店证照要单独提交)'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context)
+                    .push(MaterialPageRoute(
+                        builder: (_) =>
+                            MerchantChainPage(api: widget.api, shop: shop)))
+                    .then((_) => _load()),
+              ),
+            ),
+            const SizedBox(height: 12),
             Card(
               child: ListTile(
                 leading: const Icon(Icons.notifications_none),

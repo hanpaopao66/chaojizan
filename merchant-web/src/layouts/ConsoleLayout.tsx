@@ -9,15 +9,18 @@ import {
   ProfileOutlined,
   SettingOutlined,
   ShopOutlined,
+  ClusterOutlined,
 } from '@ant-design/icons'
 import {
-  Badge, Button, Layout, Menu, Modal, Radio, Switch, Tag, Tooltip, message,
+  Badge, Button, Layout, Menu, Modal, Radio, Select, Switch, Tag, Tooltip,
+  message,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 import {
-  ApiError, clearToken, Merchant, merchantTodos, setBusy, Todos, updateShop,
+  ApiError, BrandShop, clearToken, Merchant, merchantTodos, setBusy,
+  switchShop, Todos, updateShop,
 } from '../api'
 import FinancePage from '../pages/FinancePage'
 import SettingsPage from '../pages/SettingsPage'
@@ -25,6 +28,7 @@ import DishesPage from '../pages/food/DishesPage'
 import FoodOrdersPage from '../pages/food/FoodOrdersPage'
 import FoodReviewsPage from '../pages/food/ReviewsPage'
 import MarketingPage from '../pages/food/MarketingPage'
+import ChainPage from '../pages/food/ChainPage'
 import AftersalesPage from '../pages/hotel/AftersalesPage'
 import CalendarPage from '../pages/hotel/CalendarPage'
 import FrontDeskPage from '../pages/hotel/FrontDeskPage'
@@ -32,11 +36,13 @@ import ReviewsPage from '../pages/hotel/ReviewsPage'
 
 interface Props {
   shop: Merchant
+  /** 我能操作的全部门店(单店商家就一个元素) */
+  shops: BrandShop[]
   onShopChanged: () => void
 }
 
 /** 工作台外壳:左侧菜单按业态渲染,顶栏营业开关与 App 语义一致。 */
-export default function ConsoleLayout({ shop, onShopChanged }: Props) {
+export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
   const [collapsed, setCollapsed] = useState(false)
   const [isOpen, setIsOpen] = useState(shop.is_open)
   const [todos, setTodos] = useState<Todos | null>(null)
@@ -140,7 +146,10 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
         { key: '/hotel/calendar', icon: <CalendarOutlined />, label: '房态中控台' },
         { key: '/hotel/aftersales', icon: <BellOutlined />, label: '售后处理' },
         { key: '/hotel/reviews', icon: <CommentOutlined />, label: '住客点评' },
-        { key: '/finance', icon: <AccountBookOutlined />, label: '对账中心' },
+        // 对账是资金视图,只对经营者本人开放(连锁区域经理服务端 403)
+        ...(shop.viewer_is_owner === false ? [] : [
+          { key: '/finance', icon: <AccountBookOutlined />, label: '对账中心' },
+        ]),
         { key: '/settings', icon: <SettingOutlined />, label: '店铺设置' },
       ]
     : [
@@ -148,7 +157,13 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
         { key: '/food/dishes', icon: <MenuFoldOutlined />, label: '菜品管理' },
         { key: '/food/marketing', icon: <GiftOutlined />, label: '店内营销' },
         { key: '/food/reviews', icon: <CommentOutlined />, label: '顾客评价' },
-        { key: '/finance', icon: <AccountBookOutlined />, label: '对账中心' },
+        ...(shop.viewer_is_owner === false ? [] : [
+          { key: '/finance', icon: <AccountBookOutlined />, label: '对账中心' },
+        ]),
+        // 店员不给连锁入口:开店、拉人、跨店营业额都是老板的事
+        ...(shop.viewer_is_staff ? [] : [
+          { key: '/food/chain', icon: <ClusterOutlined />, label: '连锁店群' },
+        ]),
         { key: '/settings', icon: <SettingOutlined />, label: '店铺设置' },
       ]
 
@@ -192,7 +207,40 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
           background: '#fff', padding: '0 20px', display: 'flex',
           alignItems: 'center', gap: 12, borderBottom: '1px solid #eee',
         }}>
-          <span style={{ fontWeight: 600, fontSize: 16 }}>{shop.name}</span>
+          {/* 单店商家看到的还是一行店名(shops 只有一家时不渲染下拉),
+              与加连锁之前完全一样 */}
+          {shops.length > 1 ? (
+            <Select
+              value={shop.id}
+              onChange={switchShop}
+              variant="borderless"
+              style={{ minWidth: 200, fontWeight: 600, fontSize: 16 }}
+              popupMatchSelectWidth={280}
+              options={shops.map((s) => ({
+                value: s.id,
+                label: s.name,
+                // 下拉里带状态:总部切到一家待审/打烊的店时,
+                // 不该等页面全空了才反应过来
+                title: s.status !== 'approved' ? '审核中' : undefined,
+              }))}
+              optionRender={(opt) => {
+                const s = shops.find((x) => x.id === opt.value)!
+                return (
+                  <span>
+                    {s.name}
+                    {s.status !== 'approved' && (
+                      <Tag color="gold" style={{ marginLeft: 6 }}>审核中</Tag>
+                    )}
+                    {s.status === 'approved' && !s.is_open && (
+                      <Tag style={{ marginLeft: 6 }}>已打烊</Tag>
+                    )}
+                  </span>
+                )
+              }}
+            />
+          ) : (
+            <span style={{ fontWeight: 600, fontSize: 16 }}>{shop.name}</span>
+          )}
           <Tag color={isHotel ? 'blue' : 'orange'}>
             {isHotel ? '酒店住宿' : '餐饮外卖'}
           </Tag>
@@ -244,6 +292,7 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
                 <Route path="/food/orders" element={<FoodOrdersPage shop={shop} />} />
                 <Route path="/food/dishes" element={<DishesPage />} />
                 <Route path="/food/marketing" element={<MarketingPage />} />
+                <Route path="/food/chain" element={<ChainPage shop={shop} />} />
                 <Route path="/food/reviews" element={<FoodReviewsPage />} />
               </>
             )}

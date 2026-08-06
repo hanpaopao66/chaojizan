@@ -12,10 +12,16 @@ export default defineConfig({
     target: ['es2019', 'safari12'],
   },
   server: {
+    // 固定 5174:用户端 web 占着默认的 5173,两个 vite 抢同一个端口时
+    // 后起的会静默换号,调试时很容易对着错的应用改半天
+    port: 5174,
+    strictPort: true,
     // 本地开发把接口代理到后端(含 WebSocket)
     proxy: {
       '/auth': 'http://127.0.0.1:8010',
       '/merchants': 'http://127.0.0.1:8010',
+      '/brands': 'http://127.0.0.1:8010',
+      '/files': 'http://127.0.0.1:8010',
       '/stays': 'http://127.0.0.1:8010',
       '/vouchers': 'http://127.0.0.1:8010',
       '/invoices': 'http://127.0.0.1:8010',

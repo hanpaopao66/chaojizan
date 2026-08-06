@@ -90,6 +90,7 @@ class Merchant {
         holidayPlans = (json['holiday_plans'] as List? ?? const [])
             .cast<Map<String, dynamic>>(),
         viewerIsStaff = json['viewer_is_staff'] as bool? ?? false,
+        viewerIsOwner = json['viewer_is_owner'] as bool? ?? true,
         category = json['category'] as String? ?? 'fast_food',
         kitchenCam = json['kitchen_cam'] as bool? ?? false,
         kitchenCamLabel =
@@ -180,6 +181,12 @@ class Merchant {
 
   /// 当前登录者是本店店员(而非店主):客户端据此隐藏提现/改价/子账号入口
   final bool viewerIsStaff;
+
+  /// 当前登录者是这家店登记的经营者本人。
+  /// **和 !viewerIsStaff 不是一回事**:连锁的区域经理不是店员(能改价、
+  /// 能改设置),但也不是经营者本人 —— 资金动作服务端一律 403。
+  /// 老服务端不下发这个字段时默认 true(单店商家的老行为)。
+  final bool viewerIsOwner;
 
   /// 今天生效的节假日计划(没有返回 null)
   Map<String, dynamic>? get todayHolidayPlan {

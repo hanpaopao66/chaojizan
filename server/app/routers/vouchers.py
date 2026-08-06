@@ -34,6 +34,7 @@ from ..schemas import (
     VoucherRedeemIn,
 )
 from ..security import require_role
+from ..services.staff import owned_shop
 
 router = APIRouter(prefix="/vouchers", tags=["团购券"])
 
@@ -42,7 +43,7 @@ ACTIVE_HOLD = (VoucherPurchaseStatus.pending_payment, VoucherPurchaseStatus.paid
 
 
 async def _my_shop(db: AsyncSession, user: User) -> Merchant:
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    shop = await owned_shop(db, user)
     if shop is None or shop.status != MerchantStatus.approved:
         raise HTTPException(404, "还没有已过审的店铺")
     return shop
