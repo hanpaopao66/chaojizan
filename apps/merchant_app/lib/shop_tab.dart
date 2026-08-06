@@ -8,6 +8,7 @@ import 'messages_page.dart';
 import 'reviews_page.dart';
 import 'chain_page.dart';
 import 'health_certs_page.dart';
+import 'purchases_page.dart';
 import 'license_page.dart';
 import 'rules_page.dart';
 import 'kitchen_cam_page.dart';
@@ -1936,6 +1937,17 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     .push(MaterialPageRoute(
                         builder: (_) => HealthCertsPage(api: widget.api)))
                     .then((_) => _load()),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.inventory_2_outlined),
+                title: const Text('进货查验台账'),
+                subtitle: const Text('收货时拍张票据就录完 —— 出事时靠它反查供货商'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => PurchasesPage(api: widget.api))),
               ),
             ),
             const SizedBox(height: 12),

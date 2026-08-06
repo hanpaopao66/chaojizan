@@ -17,6 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from urllib.parse import quote  # noqa: E402
+
 from sqlalchemy import text  # noqa: E402
 
 from app.db import SessionLocal  # noqa: E402
@@ -65,6 +67,15 @@ async def set_hold(shop_id: int, reason: str):
             text("UPDATE merchants SET food_safety_hold = true, "
                  "hold_reason = :r, is_open = false WHERE id = :i"),
             {"r": reason, "i": shop_id})
+        await db.commit()
+
+
+async def backdate_purchase(record_id: int, day):
+    """把一条进货记录的日期拨到过去,用来验"反查不受默认时间窗限制"。"""
+    async with SessionLocal() as db:
+        await db.execute(
+            text("UPDATE purchase_records SET purchased_on = :d "
+                 "WHERE id = :i"), {"d": day, "i": record_id})
         await db.commit()
 
 
@@ -316,6 +327,108 @@ async def main():
                  other_tok, expect_error=True)
     assert steal["_error"] == 404, f"不能归档别人家的记录:{steal}"
     print("✓ 跨店归档被拒")
+
+
+
+    # ================= X:进货查验台账 =================
+    #
+    # 《食品安全法》五十三条要求记录名称/规格/数量/生产日期或批号/保质期/
+    # 进货日期/供货者名称地址联系方式并保存凭证;留存期(五十条二款)
+    # 不少于保质期满后六个月,没有明确保质期的不少于二年。
+    #
+    # 本段守两条:
+    # 1. **出事时能按食材名反查** —— 这是整个台账唯一的存在理由;
+    # 2. **不拦但要说清缺什么** —— 这个台账最大的敌人不是填不全,
+    #    是根本没人填。
+    tok6, shop6 = new_shop(f"进货台账店{random.randrange(10**4)}")
+
+    empty = call("GET", "/merchants/me/purchases", tok6)
+    assert empty["items"] == [], empty
+    print("✓ 进货台账初始为空")
+
+    bad = call("POST", "/merchants/me/purchases", tok6,
+               {"purchased_on": today.isoformat()}, expect_error=True)
+    assert bad["_error"] == 422, f"食材名必填:{bad}"
+    bad = call("POST", "/merchants/me/purchases", tok6,
+               {"name": "牛肉"}, expect_error=True)
+    assert bad["_error"] == 422, f"进货日期必填:{bad}"
+    bad = call("POST", "/merchants/me/purchases", tok6,
+               {"name": "加微信转账便宜点",
+                "purchased_on": today.isoformat()}, expect_error=True)
+    assert bad["_error"] == 422, f"食材名要过敏感词:{bad}"
+    print("✓ 只有食材名与进货日期必填,且过敏感词闸门")
+
+    # 只填最少两项也能录进来,但要当场说清还缺哪些法定必记项
+    lite = call("POST", "/merchants/me/purchases", tok6, {
+        "name": "土豆", "purchased_on": today.isoformat()})
+    assert "规格" in lite["missing"] and "供货商名称" in lite["missing"], lite
+    assert "生产日期或批号" in lite["missing"] and "保质期" in lite["missing"]
+    assert "进货凭证照片" in lite["missing"], lite
+    print(f"✓ 缺项当场列出({len(lite['missing'])} 项)但不拦 —— 先让人记下来")
+
+    # 完整一条:留存期 = 保质期满 + 六个月
+    shelf_end = today + timedelta(days=30)
+    full = call("POST", "/merchants/me/purchases", tok6, {
+        "name": "牛腩", "spec": "冷鲜/10kg", "qty": "2 箱",
+        "batch_no": "B20260801", "shelf_life_end": shelf_end.isoformat(),
+        "purchased_on": today.isoformat(),
+        "supplier_name": "蓉城冻品有限公司",
+        "supplier_address": "成都市青白江区物流大道 1 号",
+        "supplier_phone": "02887654321",
+        "supplier_license_url": "/uploads/sup-lic.jpg",
+        "receipt_url": "/uploads/receipt.jpg"})
+    assert full["missing"] == [], f"填全了不该还有缺项:{full['missing']}"
+    assert full["keep_until"] == (shelf_end + timedelta(days=183)).isoformat(), \
+        f"留存期该是保质期满后六个月:{full}"
+    print(f"✓ 留存期算给商家看:保质期至 {shelf_end} → 至少留到 "
+          f"{full['keep_until']}")
+
+    # 没填保质期的:进货日起两年
+    assert lite["keep_until"] == (today + timedelta(days=730)).isoformat(), \
+        f"没有明确保质期的按两年:{lite}"
+    print("✓ 没填保质期的按进货日起两年(法条的另一半)")
+
+    # ---- 按食材名反查:整个台账唯一的存在理由 ----
+    hit = call("GET", f"/merchants/me/purchases?q={quote('牛腩')}", tok6)
+    assert len(hit["items"]) == 1, hit
+    got = hit["items"][0]
+    assert got["supplier_name"] == "蓉城冻品有限公司"
+    assert got["supplier_phone"] == "02887654321"
+    assert got["batch_no"] == "B20260801"
+    print("✓ 按食材名反查得到供货商、批号、进货日 —— 出事时要的就是这几项")
+
+    # 反查不受默认时间窗限制:要追的往往就是久一点的那批
+    import asyncio as _a  # noqa: F401
+    await backdate_purchase(got["id"], today - timedelta(days=400))
+    stale = call("GET", f"/merchants/me/purchases?q={quote('牛腩')}", tok6)
+    assert len(stale["items"]) == 1, \
+        f"反查是往回追,不能被默认 90 天窗口滤掉:{stale}"
+    recent = call("GET", "/merchants/me/purchases", tok6)
+    assert all(i["name"] != "牛腩" for i in recent["items"]), \
+        f"不带 q 时才按窗口过滤:{recent}"
+    print("✓ 反查不受默认时间窗限制(不带 q 时才按窗口过滤)")
+
+    # ---- 供货商去重复用:录第三次还要重填,这台账就没人填了 ----
+    call("POST", "/merchants/me/purchases", tok6, {
+        "name": "肥牛卷", "purchased_on": today.isoformat(),
+        "supplier_name": "蓉城冻品有限公司",
+        "supplier_address": "成都市青白江区物流大道 1 号",
+        "supplier_phone": "02887654321"})
+    sups = call("GET", "/merchants/me/purchases/suppliers", tok6)
+    assert len(sups) == 1, f"同一供货商该去重:{sups}"
+    assert sups[0]["phone"] == "02887654321", sups
+    print("✓ 供货商去重可复用(免得录第三次就没人录了)")
+
+    # ---- 别人家的记录看不到也删不掉 ----
+    other2, _ = new_shop(f"路人进货店{random.randrange(10**4)}")
+    assert call("GET", f"/merchants/me/purchases?q={quote('牛腩')}", other2)["items"] == []
+    steal = call("DELETE", f"/merchants/me/purchases/{got['id']}", other2,
+                 expect_error=True)
+    assert steal["_error"] == 404, f"不能删别人家的记录:{steal}"
+    print("✓ 跨店查询与删除都被拒")
+
+    call("DELETE", f"/merchants/me/purchases/{lite['id']}", tok6)
+    print("✓ 录错的可以删")
 
     print("\ne2e_license_expiry 全部通过 ✅")
 

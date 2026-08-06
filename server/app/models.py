@@ -1982,3 +1982,56 @@ class StaffHealthCert(Base):
         Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class PurchaseRecord(Base):
+    """进货查验台账(食品溯源)。
+
+    《食品安全法》第五十三条:食品经营者采购食品应当查验供货者的许可证和
+    合格证明;食品经营企业应当建立进货查验记录制度,如实记录**食品名称、
+    规格、数量、生产日期或生产批号、保质期、进货日期以及供货者名称、地址、
+    联系方式**,并保存相关凭证。
+
+    保存期限(第五十条第二款):不少于产品**保质期满后六个月**;
+    没有明确保质期的,不少于**二年**。
+
+    ## 为什么值得做
+
+    这是餐饮小商家普遍不做的一件事,而出事时它是**唯一能自证清白的东西**
+    —— "这批肉是谁供的、什么时候进的、票在哪",答不上来就只能自己扛。
+    做成"拍一张进货单 + 填几个字"之后,平台替他算留存到期日、
+    出事时按食材名一秒反查。
+
+    ## 平台不替商家删记录
+
+    keep_until 只是**最短留存期**,到了只代表"法律上可以删了",
+    不代表该删。所以它是算出来给人看的,没有任何自动清理任务 ——
+    自动删掉商家的合规证据,风险全在他身上而收益是我们省几行存储。
+    """
+
+    __tablename__ = "purchase_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    # 法定必记项
+    name: Mapped[str] = mapped_column(String(60), index=True)   # 食品名称
+    spec: Mapped[str] = mapped_column(String(40), default="")   # 规格
+    qty: Mapped[str] = mapped_column(String(30), default="")    # 数量(带单位)
+    # 生产日期**或**生产批号(法条是"或者",有一个即可)
+    produced_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    batch_no: Mapped[str] = mapped_column(String(40), default="")
+    # 保质期:存"保质期至"而不是天数 —— 天数还要商家自己算,而且算错了
+    # 留存期限也跟着错
+    shelf_life_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    purchased_on: Mapped[date] = mapped_column(Date, index=True)  # 进货日期
+    # 供货者三项
+    supplier_name: Mapped[str] = mapped_column(String(60), default="")
+    supplier_address: Mapped[str] = mapped_column(String(120), default="")
+    supplier_phone: Mapped[str] = mapped_column(String(20), default="")
+    # 凭证:供货者许可证 + 进货票据。都走私密桶(别人的营业执照/票据)
+    supplier_license_url: Mapped[str] = mapped_column(String(300), default="")
+    receipt_url: Mapped[str] = mapped_column(String(300), default="")
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

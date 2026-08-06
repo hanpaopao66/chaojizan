@@ -2486,6 +2486,197 @@ async def my_todos(
     }
 
 
+# ---------- 进货查验台账(食品溯源) ----------
+
+def _keep_until(shelf_life_end: date | None, purchased_on: date) -> date:
+    """这条记录**最短**要留到哪天(《食品安全法》第五十条第二款)。
+
+    保质期满后六个月;没有明确保质期的,进货日起两年。
+    算给商家看,不是拿来自动删的 —— 到期只代表"法律上可以删了",
+    不代表该删。自动清掉商家的合规证据,风险全在他身上,
+    而我们省下的只是几行存储。
+    """
+    if shelf_life_end is not None:
+        # 六个月按 183 天算:法条说的是"六个月",不是"180 天",
+        # 宁可多留几天也不要算短
+        return shelf_life_end + timedelta(days=183)
+    return purchased_on + timedelta(days=730)
+
+
+def _purchase_out(r) -> dict:
+    return {
+        "id": r.id, "name": r.name, "spec": r.spec, "qty": r.qty,
+        "produced_on": r.produced_on, "batch_no": r.batch_no,
+        "shelf_life_end": r.shelf_life_end,
+        "purchased_on": r.purchased_on,
+        "supplier_name": r.supplier_name,
+        "supplier_address": r.supplier_address,
+        "supplier_phone": r.supplier_phone,
+        "supplier_license_url": r.supplier_license_url,
+        "receipt_url": r.receipt_url,
+        "note": r.note,
+        "keep_until": _keep_until(r.shelf_life_end, r.purchased_on),
+        "created_at": r.created_at,
+    }
+
+
+@router.get("/me/purchases")
+async def my_purchases(
+    q: str | None = None,
+    days: int = Query(default=90, ge=1, le=1095),
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """进货台账。[q] 按食材名反查 —— 出食安问题时问的就是
+    "这批肉是谁供的、什么时候进的",答不上来只能自己扛。
+
+    **q 有值时不受 days 限制**:反查是往回追,而追的那批货往往就是
+    久一点的那批;用默认窗口把它滤掉,这个功能就白做了。
+    """
+    from ..models import PurchaseRecord
+
+    shop = await _my_shop_or_404(db, user)
+    stmt = select(PurchaseRecord).where(
+        PurchaseRecord.merchant_id == shop.id)
+    if q:
+        stmt = stmt.where(PurchaseRecord.name.ilike(f"%{q.strip()[:30]}%"))
+    else:
+        since = date.today() - timedelta(days=days)
+        stmt = stmt.where(PurchaseRecord.purchased_on >= since)
+    rows = (await db.scalars(
+        stmt.order_by(PurchaseRecord.purchased_on.desc(),
+                      PurchaseRecord.id.desc()).limit(limit))).all()
+    return {
+        "items": [_purchase_out(r) for r in rows],
+        "note": "记录与凭证至少留到「最短留存」那天(保质期满后六个月;"
+                "没有明确保质期的两年)。平台不会替你删 —— 到期只代表"
+                "法律上可以删,不代表该删。",
+    }
+
+
+@router.get("/me/purchases/suppliers")
+async def my_suppliers(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """用过的供货商(去重,最近在前)。
+
+    同一个供货商反复进货,每次重填名称/地址/电话是这个台账最容易
+    半途而废的地方 —— 录第三次就没人录了。
+    """
+    from ..models import PurchaseRecord
+
+    shop = await _my_shop_or_404(db, user)
+    rows = (await db.execute(
+        select(PurchaseRecord.supplier_name,
+               func.max(PurchaseRecord.supplier_address),
+               func.max(PurchaseRecord.supplier_phone),
+               func.max(PurchaseRecord.supplier_license_url),
+               func.max(PurchaseRecord.purchased_on).label("last"))
+        .where(PurchaseRecord.merchant_id == shop.id,
+               PurchaseRecord.supplier_name != "")
+        .group_by(PurchaseRecord.supplier_name)
+        .order_by(func.max(PurchaseRecord.purchased_on).desc())
+        .limit(50))).all()
+    return [{"name": n, "address": a, "phone": p, "license_url": lic,
+             "last_purchased_on": last} for n, a, p, lic, last in rows]
+
+
+@router.post("/me/purchases")
+async def add_purchase(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """录一条进货记录。
+
+    法定必记项里我们只把**食材名**和**进货日期**做成必填,其余尽量宽松 ——
+    这个台账最大的敌人不是填得不全,是**根本没人填**。先让人记下来,
+    界面上再提示哪几项还缺,比一上来就八个必填要现实。
+    """
+    from ..models import PurchaseRecord
+    from ..services.moderation import guard_text
+
+    shop = await _my_shop_or_404(db, user)
+    name = str(payload.get("name", "")).strip()[:60]
+    if len(name) < 1:
+        raise HTTPException(422, "请填写食材名称")
+    await guard_text(db, name, "食材名称")
+    supplier = str(payload.get("supplier_name", "")).strip()[:60]
+    if supplier:
+        await guard_text(db, supplier, "供货商名称")
+
+    def _date(key, required=False):
+        raw = payload.get(key)
+        if not raw:
+            if required:
+                raise HTTPException(422, "请填写进货日期")
+            return None
+        try:
+            return date.fromisoformat(str(raw))
+        except ValueError:
+            raise HTTPException(422, f"{key} 日期格式:YYYY-MM-DD")
+
+    rec = PurchaseRecord(
+        merchant_id=shop.id,
+        name=name,
+        spec=str(payload.get("spec", "")).strip()[:40],
+        qty=str(payload.get("qty", "")).strip()[:30],
+        produced_on=_date("produced_on"),
+        batch_no=str(payload.get("batch_no", "")).strip()[:40],
+        shelf_life_end=_date("shelf_life_end"),
+        purchased_on=_date("purchased_on", required=True),
+        supplier_name=supplier,
+        supplier_address=str(
+            payload.get("supplier_address", "")).strip()[:120],
+        supplier_phone=str(payload.get("supplier_phone", "")).strip()[:20],
+        supplier_license_url=str(
+            payload.get("supplier_license_url", "")).strip()[:300],
+        receipt_url=str(payload.get("receipt_url", "")).strip()[:300],
+        note=str(payload.get("note", "")).strip()[:200],
+    )
+    db.add(rec)
+    await db.commit()
+    await db.refresh(rec)
+    out = _purchase_out(rec)
+    # 缺哪几项法定必记项,当场说清楚 —— 但不拦,拦了就没人录了
+    missing = [label for key, label in (
+        ("spec", "规格"), ("qty", "数量"), ("supplier_name", "供货商名称"),
+        ("supplier_address", "供货商地址"), ("supplier_phone", "联系方式"),
+    ) if not getattr(rec, key)]
+    if not rec.produced_on and not rec.batch_no:
+        missing.append("生产日期或批号")
+    if not rec.shelf_life_end:
+        missing.append("保质期")
+    if not rec.receipt_url:
+        missing.append("进货凭证照片")
+    out["missing"] = missing
+    return out
+
+
+@router.delete("/me/purchases/{record_id}")
+async def delete_purchase(
+    record_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """删一条录错的记录。
+
+    **只给删录错的**,不是清理工具 —— 到了最短留存期也不会有任何
+    自动清理任务来删它(见 _keep_until 的说明)。
+    """
+    from ..models import PurchaseRecord
+
+    shop = await _my_shop_or_404(db, user)
+    rec = await db.get(PurchaseRecord, record_id)
+    if rec is None or rec.merchant_id != shop.id:
+        raise HTTPException(404, "记录不存在")
+    await db.delete(rec)
+    await db.commit()
+    return {"ok": True}
+
+
 # ---------- 从业人员健康证台账 ----------
 
 def _mask_cert_no(no: str) -> str:

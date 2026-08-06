@@ -1215,6 +1215,37 @@ class ApiClient {
     });
   }
 
+  // ---------- 进货查验台账(食品溯源) ----------
+
+  /// 进货台账。[q] 按食材名反查 —— 出食安问题时问的就是
+  /// "这批肉是谁供的、什么时候进的",答不上来只能自己扛。
+  /// **带 q 时不受默认时间窗限制**:要追的往往就是久一点的那批。
+  Future<Map<String, dynamic>> purchases({String? q, int days = 90}) async {
+    final data = await _request('GET', '/merchants/me/purchases',
+        query: q != null && q.isNotEmpty
+            ? {'q': q}
+            : {'days': '\$days'});
+    return data as Map<String, dynamic>;
+  }
+
+  /// 用过的供货商(去重,最近在前)。同一家录第三次还要重填,这台账就没人填了。
+  Future<List<Map<String, dynamic>>> purchaseSuppliers() async {
+    final data = await _request('GET', '/merchants/me/purchases/suppliers');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  /// 录一条进货记录。返回体里的 missing 是**还缺哪几项法定必记项** ——
+  /// 不拦,只是说清楚(这本台账最大的敌人是根本没人填,不是填得不全)。
+  Future<Map<String, dynamic>> addPurchase(Map<String, dynamic> fields) async {
+    final data = await _request('POST', '/merchants/me/purchases',
+        body: fields);
+    return data as Map<String, dynamic>;
+  }
+
+  Future<void> deletePurchase(int id) async {
+    await _request('DELETE', '/merchants/me/purchases/\$id');
+  }
+
   // ---------- 从业人员健康证台账 ----------
 
   /// 本店健康证台账,快到期的排前面。

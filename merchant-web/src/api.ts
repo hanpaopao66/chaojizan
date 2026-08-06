@@ -1055,6 +1055,61 @@ export function archiveHealthCert(id: number): Promise<unknown> {
   return request('DELETE', `/merchants/me/health-certs/${id}`)
 }
 
+// ---------- 进货查验台账(食品溯源) ----------
+
+export interface PurchaseRecord {
+  id: number
+  name: string
+  spec: string
+  qty: string
+  produced_on: string | null
+  batch_no: string
+  shelf_life_end: string | null
+  purchased_on: string
+  supplier_name: string
+  supplier_address: string
+  supplier_phone: string
+  supplier_license_url: string
+  receipt_url: string
+  note: string
+  /** 最短留存到期日:保质期满后六个月;没有明确保质期的两年。
+   *  **平台不会替你删** —— 到期只代表法律上可以删,不代表该删。 */
+  keep_until: string
+  created_at: string
+  /** 仅新建返回:还缺哪几项法定必记项(不拦,只是说清楚) */
+  missing?: string[]
+}
+
+/** [q] 按食材名反查(出食安问题时用,不受默认时间窗限制)。 */
+export function purchases(q?: string, days = 90):
+Promise<{ items: PurchaseRecord[]; note: string }> {
+  const qs = q ? `q=${encodeURIComponent(q)}` : `days=${days}`
+  return request('GET', `/merchants/me/purchases?${qs}`)
+}
+
+export interface SupplierRow {
+  name: string
+  address: string
+  phone: string
+  license_url: string
+  last_purchased_on: string
+}
+
+/** 用过的供货商(去重,最近在前) —— 免得同一家录第三次就没人录了。 */
+export function purchaseSuppliers(): Promise<SupplierRow[]> {
+  return request('GET', '/merchants/me/purchases/suppliers')
+}
+
+export function addPurchase(
+  fields: Record<string, unknown>,
+): Promise<PurchaseRecord> {
+  return request('POST', '/merchants/me/purchases', fields)
+}
+
+export function deletePurchase(id: number): Promise<unknown> {
+  return request('DELETE', `/merchants/me/purchases/${id}`)
+}
+
 // ---------- 连锁店群 ----------
 
 export interface BrandShop {
