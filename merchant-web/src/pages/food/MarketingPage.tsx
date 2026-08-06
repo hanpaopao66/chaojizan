@@ -261,7 +261,9 @@ function CouponCreator({ onCreated }: { onCreated: () => void }) {
       <Form.Item label="总量">
         <InputNumber min={1} value={total} onChange={setTotal} style={{ width: 90 }} />
       </Form.Item>
-      <Form.Item label="每人限领">
+      <Form.Item label="每人限领"
+        hidden={trigger === 'favorite'}
+        tooltip="收藏即送固定一店一人一张,此项不适用">
         <InputNumber min={1} max={10} value={perUser} onChange={setPerUser} style={{ width: 70 }} />
       </Form.Item>
       <Form.Item label="有效天数">

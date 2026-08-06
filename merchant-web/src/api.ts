@@ -762,6 +762,8 @@ export interface GiftRule { threshold_cents: number; dish_id: number; name: stri
 export interface ShopCouponBatch {
   id: number
   name: string
+  /** shop 顾客主动领 / favorite 收藏即送 / referral / birthday / winback */
+  trigger: string
   threshold_cents: number
   off_cents: number
   total: number

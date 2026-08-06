@@ -12,16 +12,24 @@ import 'package:superz_shared/superz_shared.dart';
 import 'appeal_page.dart';
 
 class MerchantReviewsPage extends StatefulWidget {
-  const MerchantReviewsPage({super.key, required this.api});
+  const MerchantReviewsPage({
+    super.key,
+    required this.api,
+    this.initialFilter = 0,
+  });
 
   final ApiClient api;
+
+  /// 0 全部 / 1 差评 / 2 待回复。待办里点「差评待回复」进来就该落在差评页,
+  /// 不然商家还得自己再点一次筛选
+  final int initialFilter;
 
   @override
   State<MerchantReviewsPage> createState() => _MerchantReviewsPageState();
 }
 
 class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
-  int _filter = 0; // 0 全部 / 1 差评(≤3星) / 2 待回复
+  late int _filter = widget.initialFilter; // 0 全部 / 1 差评(≤3星) / 2 待回复
   List<Review> _reviews = [];
   bool _loaded = false;
   bool _loadingMore = false;
@@ -215,56 +223,69 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
   }
 
   Future<void> _reply(Review review, {required bool append}) async {
-    final controller = TextEditingController(
-        text: append ? review.appendReply : review.reply);
+    final controller =
+        TextEditingController(text: append ? review.appendReply : review.reply);
     // 模板按星级给:差评给道歉+方案的起手式,好评给感谢
     final group = review.merchantRating <= 3 ? 'bad' : 'good';
-    final tpls = ((_templates?['templates']
-            as Map<String, dynamic>?)?[group] as List? ??
-        const []).cast<Map<String, dynamic>>();
     final text = await showDialog<String>(
       context: context,
       builder: (dialog) => AlertDialog(
+        // 内容区必须可滚动:模板 chip 折两三行 + autofocus 弹键盘后,
+        // 小屏可用高度只剩百来点,固定 Column 会直接溢出
+        scrollable: true,
         title: Text(append ? '回复追评' : '回复评价'),
         content: StatefulBuilder(
-          builder: (dialog, setDialog) => Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (tpls.isNotEmpty) ...[
-                Text('套用模板(改成自家的话再发)',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: Theme.of(context).sz.inkMuted)),
-                const SizedBox(height: 4),
-                Wrap(spacing: 6, runSpacing: 2, children: [
-                  for (final t in tpls)
-                    ActionChip(
-                      label: Text('${t['label']}',
-                          style: const TextStyle(fontSize: 12)),
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => setDialog(
-                          () => controller.text = '${t['text']}'),
-                    ),
-                ]),
-                const SizedBox(height: 8),
+          // 模板在 builder 里现读:initState 的请求还没回来时打开弹窗,
+          // 之前的写法会永远没有 chip
+          builder: (dialog, setDialog) {
+            final tpls = ((_templates?['templates']
+                        as Map<String, dynamic>?)?[group] as List? ??
+                    const [])
+                .cast<Map<String, dynamic>>();
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (tpls.isNotEmpty) ...[
+                  Text('套用模板(改成自家的话再发)',
+                      style: TextStyle(
+                          fontSize: 11, color: Theme.of(context).sz.inkMuted)),
+                  const SizedBox(height: 4),
+                  Wrap(spacing: 6, runSpacing: 2, children: [
+                    for (final t in tpls)
+                      ActionChip(
+                        label: Text('${t['label']}',
+                            style: const TextStyle(fontSize: 12)),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => setDialog(() {
+                          // 直接赋 text 会把光标置为 -1,后续编辑跳到开头
+                          final v = '${t['text']}';
+                          controller.value = TextEditingValue(
+                            text: v,
+                            selection:
+                                TextSelection.collapsed(offset: v.length),
+                          );
+                        }),
+                      ),
+                  ]),
+                  const SizedBox(height: 8),
+                ],
+                TextField(
+                  controller: controller,
+                  maxLength: 300,
+                  maxLines: 4,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                      helperText: '回复对所有用户可见;先道歉再给方案,别争对错',
+                      border: OutlineInputBorder()),
+                ),
               ],
-              TextField(
-                controller: controller,
-                maxLength: 300,
-                maxLines: 4,
-                autofocus: true,
-                decoration: const InputDecoration(
-                    helperText: '回复对所有用户可见;先道歉再给方案,别争对错',
-                    border: OutlineInputBorder()),
-              ),
-            ],
-          ),
+            );
+          },
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(dialog),
-              child: const Text('取消')),
+              onPressed: () => Navigator.pop(dialog), child: const Text('取消')),
           FilledButton(
               onPressed: () => Navigator.pop(dialog, controller.text.trim()),
               child: const Text('发布')),
@@ -333,8 +354,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
             .withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text('$label:$text',
-          style: Theme.of(context).textTheme.bodySmall),
+      child: Text('$label:$text', style: Theme.of(context).textTheme.bodySmall),
     );
   }
 
@@ -386,17 +406,14 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
             // 差评申诉:恶意/配送责任的差评走复核,不该商家硬扛
             if (bad)
               TextButton(
-                onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            MerchantAppealPage(api: widget.api))),
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantAppealPage(api: widget.api))),
                 child: const Text('申诉'),
               ),
             if (review.appendAt != null)
               TextButton(
                 onPressed: () => _reply(review, append: true),
-                child:
-                    Text(review.appendReply.isEmpty ? '回复追评' : '改追评回复'),
+                child: Text(review.appendReply.isEmpty ? '回复追评' : '改追评回复'),
               ),
             TextButton(
               onPressed: () => _reply(review, append: false),
@@ -455,15 +472,13 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
                             return false;
                           },
                           child: ListView.builder(
-                            itemCount:
-                                _reviews.length + (_loadingMore ? 1 : 0),
+                            itemCount: _reviews.length + (_loadingMore ? 1 : 0),
                             itemBuilder: (context, i) => i < _reviews.length
                                 ? _card(_reviews[i])
                                 : const Padding(
                                     padding: EdgeInsets.all(16),
                                     child: Center(
-                                        child:
-                                            CircularProgressIndicator())),
+                                        child: CircularProgressIndicator())),
                           ),
                         ),
                 ),

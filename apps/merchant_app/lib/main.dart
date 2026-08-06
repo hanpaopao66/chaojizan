@@ -388,7 +388,8 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                 label: '去回复',
                 textColor: Colors.white,
                 onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => MerchantReviewsPage(api: widget.api))),
+                    builder: (_) => MerchantReviewsPage(
+                        api: widget.api, initialFilter: 1))),
               ),
             ));
           }
@@ -469,16 +470,23 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
 
       addRow('after_sales', '售后待处理',
           () => setState(() => _tab = 3));
-      // 超 24 小时的单独提示:差评 24 小时内必回是行业口径,
-      // 拖过一天再回,顾客早走了
-      addRow('bad_reviews_overdue', '差评超24h未回', () {
-        Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => MerchantReviewsPage(api: widget.api)));
-      });
-      addRow('bad_reviews_unreplied', '差评待回复', () {
-        Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => MerchantReviewsPage(api: widget.api)));
-      });
+      // 差评只出一行:overdue 是 unreplied 的**子集**,分两行的话
+      // 同一条差评会被数两遍,商家看到"2 件事"其实只有 1 条。
+      // 超 24 小时的把紧迫性写进同一行文案(与 merchant-web 同口径)
+      final badUnreplied = todos['bad_reviews_unreplied'] as int? ?? 0;
+      final badOverdue = todos['bad_reviews_overdue'] as int? ?? 0;
+      if (badUnreplied > 0) {
+        todoRows.add((
+          badOverdue > 0
+              ? '差评待回复 $badUnreplied(超24h $badOverdue)'
+              : '差评待回复 $badUnreplied',
+          () {
+            Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MerchantReviewsPage(
+                    api: widget.api, initialFilter: 1)));
+          }
+        ));
+      }
       addRow('coupon_batches_low', '券快发完',
           () => setState(() => _tab = 3));
       addRow('flash_expiring', '折扣将到期',

@@ -480,8 +480,15 @@ class ApiClient {
         .toList();
   }
 
-  Future<void> setFavorite(int merchantId, bool favorited) => _request(
-      favorited ? 'POST' : 'DELETE', '/favorites/$merchantId');
+  /// 收藏/取消收藏。收藏时如果商家开了「收藏有礼」,返回体里带 coupon ——
+  /// **调用方要把它告诉用户**:商家掏了钱,券却默默躺进券包的话,
+  /// 「收藏即送」想促成的下一单根本不会发生
+  Future<Map<String, dynamic>> setFavorite(
+      int merchantId, bool favorited) async {
+    final data = await _request(
+        favorited ? 'POST' : 'DELETE', '/favorites/$merchantId');
+    return data is Map ? data.cast<String, dynamic>() : <String, dynamic>{};
+  }
 
   // ---------- 用户端 ----------
   /// sort: distance(综合) / rating(评分优先) / sales(月售优先)

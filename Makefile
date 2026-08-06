@@ -68,7 +68,8 @@ test:
 	  && python -m tests.e2e_boost_tip && python -m tests.e2e_business_hours2 \
 	  && python -m tests.e2e_cancel_rules && python -m tests.e2e_cart_reorder \
 	  && python -m tests.e2e_change_address && python -m tests.e2e_chat \
-	  && python -m tests.e2e_coupon_ops && python -m tests.e2e_daily_stock \
+	  && python -m tests.e2e_coupon_ops && python -m tests.e2e_favorite_coupon \
+	  && python -m tests.e2e_daily_stock \
 	  && python -m tests.e2e_delivery_issue && python -m tests.e2e_delivery_track \
 	  && python -m tests.e2e_deposit && python -m tests.e2e_eta_dynamic \
 	  && python -m tests.e2e_food_safety && python -m tests.e2e_gift \

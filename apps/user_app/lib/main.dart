@@ -2528,7 +2528,27 @@ class _MenuPageState extends State<MenuPage>
               final next = !_isFavorite;
               setState(() => _isFavorite = next); // 先响应再请求,失败回滚
               try {
-                await widget.api.setFavorite(widget.merchant.id, next);
+                final res =
+                    await widget.api.setFavorite(widget.merchant.id, next);
+                // 收藏有礼:券到手要让人看见,不然商家的钱白花
+                final coupon = res['coupon'] as Map<String, dynamic>?;
+                // 用 context.mounted:这里的 context 来自外层 builder,
+                // 与 State.mounted 不是同一个东西
+                if (coupon != null && context.mounted) {
+                  final off = yuan(coupon['amount_cents'] as int? ?? 0);
+                  final min = coupon['min_spend_cents'] as int? ?? 0;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(min > 0
+                        ? '收藏成功,商家送你一张满${yuan(min)}减$off 的券'
+                        : '收藏成功,商家送你一张 $off 无门槛券'),
+                    action: SnackBarAction(
+                      label: '看券包',
+                      onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                              builder: (_) => CouponsPage(api: widget.api))),
+                    ),
+                  ));
+                }
               } catch (_) {
                 if (mounted) setState(() => _isFavorite = !next);
               }
