@@ -398,6 +398,183 @@ async def my_worklog(
     }
 
 
+@router.get("/me/weekly-report")
+async def my_weekly_report(
+    week_offset: int = 0,          # 0 本周,1 上周,以此类推
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手周报:逐日单量/在线时长/收入 + **收入构成**。
+
+    ## 红线:只统计,不考核
+
+    这一页里不会出现排名、等级、"超过了 X% 的骑手"、"再跑 3 单解锁"。
+    一旦出现,它就从"我这周跑得怎么样"变成了平台的另一根鞭子 ——
+    而平台既定立场是不做骑手评分体系。
+
+    ## 收入构成是这一页真正的新东西
+
+    别处的周报只给一个总数。有了配送费拆分之后,能告诉他
+    「这周 8% 的收入来自爬楼费」「夜间跑的那两晚多挣了 30 块」——
+    这才谈得上让他自己判断怎么跑更划算。
+
+    构成读**订单快照**(fee_parts),不按当前费率重算:费率调过之后
+    重算出来的和当时到手的对不上,那种周报还不如不给。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from ..models import Order, RiderSession
+
+    now = datetime.now(timezone.utc)
+    bj_now = now + timedelta(hours=8)
+    today_start = (bj_now.replace(hour=0, minute=0, second=0, microsecond=0)
+                   - timedelta(hours=8))
+    # 周一为一周之首(北京时区);week_offset 往前推整周
+    week_start = (today_start - timedelta(days=bj_now.weekday())
+                  - timedelta(weeks=max(0, week_offset)))
+    week_end = week_start + timedelta(days=7)
+
+    earnings = (await db.scalars(
+        select(RiderEarning).where(
+            RiderEarning.rider_id == user.id,
+            RiderEarning.created_at >= week_start,
+            RiderEarning.created_at < week_end))).all()
+    sessions = (await db.scalars(
+        select(RiderSession).where(
+            RiderSession.rider_id == user.id,
+            RiderSession.online_at < week_end,
+            RiderSession.online_at > week_start - timedelta(days=1)))).all()
+
+    def bj_day(dt) -> int:
+        """落在本周第几天(0=周一)。统一按北京自然日切,
+        否则跨零点的单会算到前一天,骑手对不上自己的记忆。"""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (dt - week_start).days
+
+    days = [{"orders": 0, "earned_cents": 0, "minutes": 0} for _ in range(7)]
+    for e in earnings:
+        i = bj_day(e.created_at)
+        if 0 <= i < 7:
+            days[i]["orders"] += 1 if e.amount_cents > 0 else 0
+            days[i]["earned_cents"] += e.amount_cents
+    for s in sessions:
+        start = (s.online_at if s.online_at.tzinfo
+                 else s.online_at.replace(tzinfo=timezone.utc))
+        end = s.offline_at or now
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+        # 一段在线可能跨天,按天切开算 —— 整段记到开始那天的话,
+        # 跑通宵的骑手会看到"周一在线 14 小时、周二 0 小时"
+        for i in range(7):
+            d0 = week_start + timedelta(days=i)
+            d1 = d0 + timedelta(days=1)
+            lo, hi = max(start, d0), min(end, d1)
+            if hi > lo:
+                days[i]["minutes"] += int((hi - lo).total_seconds() / 60)
+
+    # 收入构成:读订单上的拆分快照
+    order_nos = [e.order_no for e in earnings if e.amount_cents > 0]
+    parts: dict[str, int] = {}
+    tip_total = 0
+    if order_nos:
+        rows = (await db.scalars(select(Order).where(
+            Order.order_no.in_(order_nos)))).all()
+        for o in rows:
+            tip_total += o.tip_cents or 0
+            for k, v in (o.fee_parts or {}).items():
+                if v:
+                    parts[k] = parts.get(k, 0) + v
+    if tip_total:
+        parts["tip"] = tip_total
+
+    from .orders import FEE_PART_LABELS
+    labels = dict(FEE_PART_LABELS)
+    labels.setdefault("tip", "顾客小费")
+
+    total_cents = sum(d["earned_cents"] for d in days)
+    total_orders = sum(d["orders"] for d in days)
+    total_minutes = sum(d["minutes"] for d in days)
+    return {
+        "week_start": week_start.isoformat(),
+        "days": days,
+        "orders": total_orders,
+        "earned_cents": total_cents,
+        "online_minutes": total_minutes,
+        # 时薪自己算给他看:总额高不等于划算,这是骑手最该拿到的一个数。
+        # **在线不足 1 小时不给** —— 分母太小算出来是个荒唐数字,
+        # 而他会拿这个数去判断"今天值不值得跑"。宁可不显示
+        "cents_per_hour": (round(total_cents / (total_minutes / 60))
+                           if total_minutes >= 60 else None),
+        "fee_parts": parts,
+        "fee_part_labels": {k: labels[k] for k in parts if k in labels},
+        "note": "只统计,不考核 —— 这里没有评分、等级和排名,"
+                "平台也不会拿这些数字对你做任何处理。"
+                "构成读的是每一单当时的拆分快照,不按现在的费率重算。",
+    }
+
+
+@router.post("/feedback")
+async def submit_feedback(
+    payload: dict,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """给平台提意见。与申诉的区别:申诉是"这一单不怪我",
+    这里是"你们这个东西不好用 / 这条规则不合理"。
+
+    **必须有回音** —— 不回复的反馈通道等于没有,而且比没有更糟:
+    提过一次没人理,以后连提都懒得提。平台回复时走推送 + 消息中心。
+    """
+    from ..models import RiderFeedback
+
+    content = str(payload.get("content") or "").strip()
+    if len(content) < 4:
+        raise HTTPException(422, "说具体一点(至少 4 个字),不然没法处理")
+    kind = str(payload.get("kind") or "other")
+    if kind not in ("bug", "rule", "feature", "other"):
+        raise HTTPException(422, "kind 只能是 bug/rule/feature/other")
+    # 同时挂着的**未回复**意见最多 10 条。
+    #
+    # 卡的是"没处理完的堆积",不是"你一年能提几条" —— 按时间窗口
+    # 卡的话,一个认真提意见的骑手会先被自己的历史堵住嘴,
+    # 而平台回过的那些本来就已经了结了,不该继续占他的额度。
+    # 到了上限也照常告诉他为什么,不做静默丢弃
+    pending = await db.scalar(select(func.count(RiderFeedback.id)).where(
+        RiderFeedback.rider_id == user.id,
+        RiderFeedback.status == "open")) or 0
+    if pending >= 10:
+        raise HTTPException(
+            429, "你还有 10 条意见我们没回,先让我们把这些处理完 —— "
+                 "已经提过的都在队列里,一条都不会丢")
+    row = RiderFeedback(rider_id=user.id, kind=kind, content=content[:1000])
+    db.add(row)
+    await db.commit()
+    return {"id": row.id, "status": "open",
+            "note": "收到了。有回复会推送给你,也会进「消息」页。"}
+
+
+@router.get("/me/feedback")
+async def my_feedback(
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我提过的意见与平台的回复。"""
+    from ..models import RiderFeedback
+
+    rows = (await db.scalars(
+        select(RiderFeedback)
+        .where(RiderFeedback.rider_id == user.id)
+        .order_by(RiderFeedback.id.desc()).limit(50))).all()
+    return {
+        "items": [{"id": r.id, "kind": r.kind, "content": r.content,
+                   "status": r.status, "reply": r.reply,
+                   "replied_at": r.replied_at, "created_at": r.created_at}
+                  for r in rows],
+        "note": "提了就一定会有人看。回复会推送给你。",
+    }
+
+
 _ARRIVE_NOTIFY_M = 500  # 距收货点 <500m 触发一次"即将送达"
 
 
@@ -1013,7 +1190,7 @@ async def grab_order(
     # 转单软约束:当日非免责转单达阈值,今日暂停抢单(次日自动恢复)。
     # 不罚钱不封号;等餐超时/事故释放的无责转单不计数,不受影响
     used = await _transfer_used_today(user.id)
-    if used >= settings.transfer_daily_suspend_threshold:
+    if used >= await _suspend_threshold(db, user.id):
         raise HTTPException(
             409, f"今日转单已达 {used} 次,抢单暂停到明天(次日自动恢复,"
                  "不罚款不扣钱);手头的单照常配送,有困难随时联系平台")
@@ -1077,6 +1254,61 @@ async def grab_order(
 
 # ---------- 转单 ----------
 
+async def _novice_window(db: AsyncSession, rider_id: int) -> bool:
+    """还在新手期吗(实名认证起 7 天内**且**完成单不足 20)。
+
+    起点取**实名认证记录**的创建时刻,不是注册时刻:注册完不认证的人
+    根本抢不了单,从注册开始计时会让一个隔了两个月才来认证的人
+    一上来就不在新手期。
+
+
+    ## 保护的是什么,不保护什么
+
+    只做一件事:**把转单的每日暂停阈值放宽几次**。头几天路不熟、
+    进不去小区、拿错单,他会比老手更频繁地转单 —— 而转单达阈值就
+    暂停抢单,等于第一周就把人劝退了。
+
+    **不做**"给新手派更好的单":那要动派单权重,而派单公平性是
+    公开算法承诺过的东西,为谁开一个口子都会让整个承诺打折。
+    新手需要的是别被自己的手忙脚乱卡死,不是特权。
+
+    两个条件是**与**不是或:跑满 20 单说明已经上手了,哪怕还在
+    第七天;反过来第八天还没跑够 20 单的,多半是兼职,他也不该
+    因为"注册久了"就被当老手对待 —— 这一条上宁可宽松,
+    因为放宽的只是一个软阈值,代价很小。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from ..models import RiderProfile
+
+    profile = await db.scalar(
+        select(RiderProfile).where(RiderProfile.rider_id == rider_id))
+    if profile is None:
+        return False
+    created = profile.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - created > timedelta(
+            days=settings.rider_novice_days):
+        return False
+    done = await db.scalar(select(func.count(RiderEarning.id)).where(
+        RiderEarning.rider_id == rider_id)) or 0
+    return done < settings.rider_novice_orders
+
+
+async def _suspend_threshold(db: AsyncSession, rider_id: int) -> int:
+    """当日转单暂停阈值(新手期放宽后的**实际**值)。
+
+    抢单那里判一次、规则中心显示一次、转单回执里再回显一次 ——
+    三处各自算的话必然分叉,而这里分叉的表现是最难受的一种:
+    界面写着"已暂停",他一点却抢到了;或者写着"还能转 2 次",
+    转完发现已经停了。口径只能有一处。
+    """
+    return settings.transfer_daily_suspend_threshold + (
+        settings.rider_novice_extra_transfers
+        if await _novice_window(db, rider_id) else 0)
+
+
 async def _transfer_used_today(rider_id: int) -> int:
     """当日(北京自然日)非免责转单次数;免责转单与事故释放不计入。"""
     from datetime import datetime, timedelta, timezone
@@ -1088,15 +1320,21 @@ async def _transfer_used_today(rider_id: int) -> int:
 @router.get("/discipline")
 async def my_discipline(
     user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
 ):
-    """规则中心数据:当日转单计数与软约束阈值(规则文案在客户端)。"""
+    """规则中心数据:当日转单计数与软约束阈值(规则文案在客户端)。
+
+    阈值给的是**他自己的**那个 —— 新手期放宽过的话这里就该显示放宽后的,
+    否则界面写着"已暂停"他一点却抢到了,或者反过来。
+    """
     used = await _transfer_used_today(user.id)
-    threshold = settings.transfer_daily_suspend_threshold
+    threshold = await _suspend_threshold(db, user.id)
     return {
         "transfer_used_today": used,
         "free_times": settings.transfer_free_times_per_day,
         "suspend_threshold": threshold,
         "grab_suspended_today": used >= threshold,
+        "novice_window": threshold > settings.transfer_daily_suspend_threshold,
     }
 
 
@@ -1178,8 +1416,9 @@ async def transfer_order(
     else:
         count = await redis.incr(key)
         await redis.expire(key, 172800)
-        # 软约束触达:临近阈值提前提醒,到阈值告知今日暂停(次日自动恢复)
-        threshold = settings.transfer_daily_suspend_threshold
+        # 软约束触达:临近阈值提前提醒,到阈值告知今日暂停(次日自动恢复)。
+        # 阈值取他自己的那个(新手期放宽过),否则提醒会提前两次响
+        threshold = await _suspend_threshold(db, user.id)
         left = threshold - count
         try:
             from ..services.push import push_to_user
@@ -1220,7 +1459,7 @@ async def transfer_order(
     return TransferOut(
         today_count=count,
         free_times=settings.transfer_free_times_per_day,
-        suspend_threshold=settings.transfer_daily_suspend_threshold,
+        suspend_threshold=await _suspend_threshold(db, user.id),
     )
 
 

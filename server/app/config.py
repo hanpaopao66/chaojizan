@@ -110,6 +110,14 @@ class Settings(BaseSettings):
     # 次日自动恢复;免责转单与事故释放永不计入)
     transfer_daily_suspend_threshold: int = 5
 
+    # 新骑手保护期:实名认证起 N 天内**且**完成单不足 M 单时,
+    # 转单的每日暂停阈值多给几次。头几天路不熟、进不去小区、拿错单,
+    # 转单会比老手频繁 —— 达阈值就暂停抢单,等于第一周把人劝退。
+    # 只放宽这一个软阈值,**不动派单权重**(公平性是公开承诺过的)
+    rider_novice_days: int = 7
+    rider_novice_orders: int = 20
+    rider_novice_extra_transfers: int = 3
+
     # 防刷单风控:同收货位置 24h 内达到 N 单(且多账号)触发标记
     risk_addr_orders_24h: int = 4
     # 骑手同时在途上限(ACCEPTED/READY/PICKED_UP,追加单随原单不占额度)

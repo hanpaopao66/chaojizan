@@ -31,9 +31,21 @@ deal = call("POST", "/vouchers", boss, {
     "face_value_cents": 5000, "total_count": 2, "per_user_limit": 2})
 print(f"✓ 发券:{deal['title']},¥45 购 ¥50,共 2 张")
 
-deals = call("GET", "/vouchers")
-assert any(d["id"] == deal["id"] and d["merchant_name"] for d in deals)
+# 按店筛选来断言,**不去全平台榜单里找自己** —— 榜单有 100 条上限、
+# 按销量排,开发库里券一多,新券(销量 0)就被挤出去,这条会莫名其妙红。
+# 用店铺维度既是店铺页的真实用法,也不受库里存量影响
+deals = call("GET", f"/vouchers?merchant_id={shop['id']}")
+assert any(d["id"] == deal["id"] and d["merchant_name"] for d in deals), deals
 print("✓ 在售列表可见(带商家名)")
+
+# 新券在全平台榜单里也不该完全消失:同销量按新到旧,
+# 至少排在同样没卖过的那些前面 —— 否则新券要等有人买才看得见,
+# 而没人看得见就不会有人买
+top = call("GET", "/vouchers")
+zero = [d for d in top if d["sold_count"] == 0]
+assert not zero or zero[0]["id"] >= deal["id"], \
+    "同销量应按新到旧排,新券不该垫在老的零销量券后面"
+print("✓ 同销量按新到旧,新券不被历史销量永久埋掉")
 
 # ---- 用户抢购 ----
 customer = call("POST", "/auth/register", body={

@@ -703,11 +703,18 @@ async def sweep_once() -> dict[str, int]:
                 | (Order.scheduled_at < now + timedelta(hours=1))
             ),
         )
+        # 从**送达时刻**起算,不从 updated_at 起算。
+        #
+        # updated_at 会被任何一次写这行的操作顶到当前时间 —— 包括风控
+        # 异步回写 risk_flags 这种和订单流转毫无关系的写入。用它计时,
+        # 一个已送达的单可能被无关写入一次次推迟自动确认,钱就一直压着
+        # 不结算(接单超时那一条早就因为同样的原因改用 rider_pool_since 了)。
+        # coalesce 兜住 delivered_at 落库之前的历史单
         completed = await _transition_batch(
             db,
             OrderStatus.DELIVERED,
             OrderStatus.COMPLETED,
-            Order.updated_at,
+            func.coalesce(Order.delivered_at, Order.updated_at),
             now - timedelta(hours=settings.auto_confirm_hours),
             "超时自动确认收货",
         )

@@ -4,6 +4,7 @@ import 'package:superz_shared/superz_shared.dart';
 import 'dispatch_spec_page.dart';
 import 'messages_page.dart';
 import 'reviews_page.dart';
+import 'weekly_page.dart';
 
 /// 骑手「我的」中心(#147)。
 ///
@@ -102,6 +103,9 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
             _group(sz, [
               _Item('我的订单', '进行中与历史订单', Icons.receipt_long_outlined,
                   widget.onOpenOrders),
+              _Item('我的周报', '每天跑了多少、钱是怎么来的(只统计不考核)',
+                  Icons.insights_outlined,
+                  () => _push(RiderWeeklyPage(api: widget.api))),
               _Item(
                   '工时统计',
                   _worklog == null
@@ -156,6 +160,11 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
                   () => _snack('在「配送」页的异常上报里发起申诉')),
               _Item('上岗培训', '80 分通过,可重考', Icons.school_outlined,
                   () => _toWallet()),
+              // 平台自己也得有个挨骂的地方。与申诉分开:
+              // 申诉是"这一单不怪我",这里是"你们这东西不好用"
+              _Item('给平台提意见', '哪不好用、哪条规则不合理,一定有人看',
+                  Icons.forum_outlined,
+                  () => _push(RiderFeedbackPage(api: widget.api))),
             ]),
             const SizedBox(height: 22),
             _promises(sz),

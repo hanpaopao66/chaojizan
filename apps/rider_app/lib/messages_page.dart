@@ -28,6 +28,7 @@ class _RiderMessagesPageState extends State<RiderMessagesPage> {
     ('money', '钱'),
     ('safety', '安全'),
     ('appeal', '申诉'),
+    ('feedback', '我的意见'),
     ('system', '其他'),
   ];
 
@@ -134,6 +135,7 @@ class _RiderMessagesPageState extends State<RiderMessagesPage> {
       'money' => (Icons.account_balance_wallet_outlined, Colors.green),
       'safety' => (Icons.health_and_safety_outlined, Colors.orange),
       'appeal' => (Icons.record_voice_over_outlined, scheme.primary),
+      'feedback' => (Icons.forum_outlined, scheme.primary),
       _ => (Icons.notifications_none, scheme.onSurfaceVariant),
     };
     final at = DateTime.tryParse('${m['created_at']}')?.toLocal();

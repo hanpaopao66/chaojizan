@@ -1870,6 +1870,21 @@ class ApiClient {
   Future<void> markRiderMessagesRead() =>
       _request('POST', '/riders/me/messages/read');
 
+  /// 骑手周报:逐日单量/时长/收入 + 收入构成。只统计不考核
+  Future<Map<String, dynamic>> riderWeeklyReport({int weekOffset = 0}) async =>
+      await _request('GET',
+              '/riders/me/weekly-report?week_offset=$weekOffset')
+          as Map<String, dynamic>;
+
+  /// 给平台提意见(不是针对某一单 —— 那个走申诉)
+  Future<Map<String, dynamic>> submitRiderFeedback(
+          {required String kind, required String content}) async =>
+      await _request('POST', '/riders/feedback',
+          body: {'kind': kind, 'content': content}) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> myRiderFeedback() async =>
+      await _request('GET', '/riders/me/feedback') as Map<String, dynamic>;
+
   Future<Order> grabOrder(String orderNo) async {
     final data = await _request('POST', '/riders/grab/$orderNo');
     return Order.fromJson(data as Map<String, dynamic>);

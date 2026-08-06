@@ -69,7 +69,10 @@ async def main():
     call("POST", f"/orders/{no3}/transition", merchant, {"to_status": "ready"})
     call("POST", f"/orders/{no3}/transition", rider, {"to_status": "picked_up"})
     call("POST", f"/orders/{no3}/transition", rider, {"to_status": "delivered"})
-    await backdate(no3, "updated_at", "25 hours")
+    # 挪 delivered_at 而不是 updated_at:后者会被风控异步回写 risk_flags
+    # 顶回当前时间,做旧了也白做 —— 和上面 no2 改用 rider_pool_since 是
+    # 同一个坑。自动确认本来就该从送达时刻起算(services/auto_flow.py)
+    await backdate(no3, "delivered_at", "25 hours")
 
     await sweep_once()
 

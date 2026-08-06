@@ -2329,3 +2329,38 @@ class RiderAppeal(Base):
         DateTime(timezone=True), server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+
+
+class RiderFeedback(Base):
+    """骑手意见反馈:针对**平台本身**,不是针对某一单。
+
+    申诉(RiderAppeal)解决的是"这一单不怪我"。但骑手对平台的意见没有
+    任何出口 —— 抢单页太卡、某条提示看不懂、某条规则不合理,这些他只能
+    在群里骂,平台永远听不到。
+
+    ## 一条硬要求:必须有回音
+
+    不回复的反馈通道等于没有,而且比没有更糟 —— 提过一次没人理,
+    以后连提都懒得提了。所以平台回复时走推送 + 骑手消息中心,
+    而不是让他自己回来翻。
+
+    ## 没有"已关闭"这个状态
+
+    关闭是平台单方面宣布这件事结束。骑手要的是回复,不是一个状态位。
+    """
+
+    __tablename__ = "rider_feedbacks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # bug 故障 / rule 规则不合理 / feature 想要的功能 / other
+    kind: Mapped[str] = mapped_column(String(12), default="other")
+    content: Mapped[str] = mapped_column(String(1000), default="")
+    # open 待处理 / replied 已回复
+    status: Mapped[str] = mapped_column(
+        String(12), default="open", server_default="open", index=True)
+    reply: Mapped[str] = mapped_column(String(1000), default="")
+    replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

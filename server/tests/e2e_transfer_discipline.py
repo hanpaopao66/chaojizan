@@ -1,4 +1,4 @@
-"""转单考核软约束验证:非免责转单达 5 次当日暂停抢单(409 含次日恢复文案)、
+"""转单考核软约束验证:非免责转单达阈值当日暂停抢单(409 含次日恢复文案)、
 免责转单(到店等餐超时)不计数、次日自动恢复(清 Redis 键模拟)、
 规则中心计数接口。
 
@@ -56,24 +56,33 @@ async def main():
     r = call("POST", f"/riders/transfer/{no_free}", rider,
              {"reason": "other"})
     assert r["today_count"] == 0, r  # 免责:不计数
-    assert r["suspend_threshold"] == 5, r
+    # 阈值**从接口读**,不写死 —— 新骑手在保护期内会放宽几次,
+    # 而这个用例正好用的是刚注册的骑手。写死 5 的话,
+    # 一加新手期这条就红,红得毫无意义
+    threshold = r["suspend_threshold"]
     d = call("GET", "/riders/discipline", rider)
     assert d["transfer_used_today"] == 0 and not d["grab_suspended_today"], d
-    print("✓ 到店等餐超时的免责转单不计数")
+    # 三处口径必须一致:抢单那里判的、规则中心显示的、转单回执回显的。
+    # 分叉的表现最难受 —— 界面写着"已暂停",他一点却抢到了
+    assert d["suspend_threshold"] == threshold, (d, threshold)
+    assert d["novice_window"] is True, "刚注册的骑手应当在新手保护期内"
+    assert threshold > 5, f"新手期应当比基础阈值宽:{threshold}"
+    print(f"✓ 到店等餐超时的免责转单不计数;新手期阈值放宽到 {threshold} 次")
 
-    # 2) 非免责转单 5 次:计数递增,第 5 次后抢单 409(文案含次日恢复)
-    for i in range(1, 6):
+    # 2) 非免责转单到阈值:计数递增,达阈值后抢单 409(文案含次日恢复)
+    for i in range(1, threshold + 1):
         no = make_order()
         call("POST", f"/riders/grab/{no}", rider)
         r = call("POST", f"/riders/transfer/{no}", rider,
                  {"reason": "route_conflict"})
         assert r["today_count"] == i, (i, r)
     d = call("GET", "/riders/discipline", rider)
-    assert d["transfer_used_today"] == 5 and d["grab_suspended_today"], d
+    assert d["transfer_used_today"] == threshold and d["grab_suspended_today"], d
     no_more = make_order()
     err = call("POST", f"/riders/grab/{no_more}", rider, expect_error=True)
     assert err["_error"] == 409 and "次日自动恢复" in err["detail"], err
-    print("✓ 非免责转单达 5 次,当日抢单 409(不罚款,次日自动恢复)")
+    print(f"✓ 非免责转单达 {threshold} 次,当日抢单 409"
+          "(不罚款,次日自动恢复);显示的阈值就是真正生效的那个")
 
     # 3) 次日自动恢复:清掉当日计数键(模拟跨天)后可正常抢单
     await get_redis().delete(redis_key)

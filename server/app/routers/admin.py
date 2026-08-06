@@ -1634,6 +1634,66 @@ async def resolve_rider_appeal(
     return {"ok": True, "status": row.status}
 
 
+@router.get("/rider-feedback")
+async def list_rider_feedback(
+    status: str = "open",
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手意见队列(针对平台本身,不是针对某一单)。
+
+    最老的排在最前 —— 按新到旧排的话,积压的老意见会永远沉底,
+    而"提了没人理"正是这个通道最容易死掉的方式。
+    """
+    from ..models import RiderFeedback
+
+    rows = (await db.execute(
+        select(RiderFeedback, User.name)
+        .join(User, User.id == RiderFeedback.rider_id)
+        .where(RiderFeedback.status == status)
+        .order_by(RiderFeedback.id).limit(200))).all()
+    return [{
+        "id": r.id, "kind": r.kind, "content": r.content,
+        "status": r.status, "reply": r.reply,
+        "rider_name": name, "created_at": r.created_at,
+    } for r, name in rows]
+
+
+@router.post("/rider-feedback/{feedback_id}/reply")
+async def reply_rider_feedback(
+    feedback_id: int,
+    payload: dict,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """回复一条意见。
+
+    **回复是这个功能的全部意义。** 只存不回的话,这张表就是一个
+    许愿池 —— 骑手提过一次没人理,以后连提都懒得提。
+    所以回复必须推送出去,并进他的消息中心(骑手在马路上,
+    推送那一下没看到就找不回来了)。
+
+    没有"已关闭":关闭是平台单方面宣布这件事结束。
+    """
+    from ..models import RiderFeedback
+    from ..services.push import push_to_user
+
+    reply = str(payload.get("reply") or "").strip()
+    if len(reply) < 2:
+        raise HTTPException(422, "回复不能为空 —— 空回复比不回复更伤人")
+    row = await db.get(RiderFeedback, feedback_id)
+    if row is None:
+        raise HTTPException(404, "反馈不存在")
+    row.reply = reply[:1000]
+    row.status = "replied"
+    row.replied_at = datetime.now(timezone.utc)
+    await db.commit()
+    await push_to_user(
+        row.rider_id, "你的意见有回复了", reply[:200],
+        {"type": "rider_feedback", "id": row.id}, record_skip=True)
+    return {"ok": True, "status": row.status}
+
+
 @router.get("/license-renewals")
 async def list_license_renewals(
     status: str = "pending",

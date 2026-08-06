@@ -131,14 +131,34 @@ async def update_voucher(
 
 # ---------- 用户侧 ----------
 @router.get("", response_model=list[VoucherOut])
-async def list_deals(db: AsyncSession = Depends(get_db)):
-    """在售团购(已过审商家的上架券,还有库存)。"""
-    rows = await db.execute(
+async def list_deals(
+    merchant_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """在售团购(已过审商家的上架券,还有库存)。
+
+    `merchant_id` 只看某一家店的券 —— 店铺页要的是这个,
+    而不是从全平台榜单里翻找自己那几张。
+
+    ## 排序里的第二个键不是可有可无的
+
+    只按销量排的话,**新上架的券永远排在所有卖过的券后面**,
+    而列表是有上限的:券多起来之后,一张新券在有人买之前根本
+    看不见,于是永远不会有人买。这是个死循环,和"不做付费排名"
+    是同一件事的两面 —— 没有钱能买位置,但也不能让位置只由
+    历史销量决定。同销量按新到旧,至少让新券排在同样没卖过的前面。
+
+    真正的解法是分页,不是把上限调大。等券的量级到了再说。
+    """
+    stmt = (
         select(Voucher, Merchant)
         .join(Merchant, Merchant.id == Voucher.merchant_id)
         .where(Voucher.is_active.is_(True), Voucher.total_count > 0,
-               Merchant.status == MerchantStatus.approved)
-        .order_by(Voucher.sold_count.desc())
+               Merchant.status == MerchantStatus.approved))
+    if merchant_id is not None:
+        stmt = stmt.where(Voucher.merchant_id == merchant_id)
+    rows = await db.execute(
+        stmt.order_by(Voucher.sold_count.desc(), Voucher.id.desc())
         .limit(100))
     return [_deal_out(v, shop) for v, shop in rows]
 

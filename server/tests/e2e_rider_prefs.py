@@ -101,8 +101,12 @@ def run():
     # ---- 消息中心:角色分开的分类口径 ----
     msgs = call("GET", "/riders/me/messages", rider)
     assert set(msgs) >= {"announcements", "messages", "unread", "page_size"}
+    # 允许的分类从**服务端那份定义**里取,不在这里另抄一份 ——
+    # 抄一份的下场:服务端加一类,这条断言就红,而它红得毫无意义
+    from app.services.message_center import ROLE_RULES
+    allowed = set(ROLE_RULES["rider"].categories) | {"system"}
     kinds = {m["kind"] for m in msgs["messages"]}
-    assert kinds <= {"money", "safety", "appeal", "system"}, kinds
+    assert kinds <= allowed, (kinds, allowed)
     # 订单类不进消息中心:订单页本身就是它们的家
     assert not any("新单" in m["title"] or "催单" in m["title"]
                    for m in msgs["messages"]), \

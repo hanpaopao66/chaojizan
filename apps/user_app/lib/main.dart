@@ -3838,6 +3838,21 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                 ListTile(
                   dense: true,
                   title: const Text('配送费'),
+                  // 下单前看得到、下单后看不到,等于没说清楚 ——
+                  // 顾客回头质疑"为什么这单贵两块"时,拆分要还在这里。
+                  // 读的是下单那一刻的快照,不按现在的费率重算
+                  subtitle: order.feeParts.isEmpty
+                      ? null
+                      : Text(
+                          order.feeParts.entries
+                              .where((e) => e.value > 0)
+                              .map((e) =>
+                                  '${order.feePartLabels[e.key] ?? e.key} '
+                                  '${(e.value / 100).toStringAsFixed(2)}')
+                              .join(' · '),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Theme.of(context).sz.inkMuted)),
                   trailing: Text(yuan(order.deliveryFeeCents)),
                 ),
                 ListTile(
