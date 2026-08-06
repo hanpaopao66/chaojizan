@@ -701,6 +701,17 @@ class FoodSafetyActionIn(BaseModel):
     dish_id: int | None = None   # take-down-dish 用
 
 
+class AppealVerdictIn(BaseModel):
+    """骑手申诉核定。
+
+    accept 单独一个字段而不是复用 FoodSafetyActionIn —— 后者没有这一项,
+    复用的话"驳回"这条路径根本走不到(每条都会判成立)。
+    """
+
+    accept: bool
+    note: str = Field(min_length=2, max_length=200)
+
+
 class TransferIn(BaseModel):
     """骑手转单:已抢未取餐的单退回抢单池。原因只留痕不判责。"""
 
@@ -844,6 +855,10 @@ class OrderCreateIn(BaseModel):
     # 到店自取:免配送费、不走骑手,地址三件套可不传(服务端落商家坐标)
     pickup: bool = False
     address: str = ""
+    # 楼层与电梯:客户端从所选地址带过来。填了 ETA 会诚实一点 ——
+    # 爬 6 楼和 1 楼临街是两种活
+    floor: int | None = Field(default=None, ge=-5, le=200)
+    has_elevator: bool | None = None
     lat: float | None = None
     lng: float | None = None
     contact_name: str = ""
@@ -884,6 +899,8 @@ class OrderOut(BaseModel):
     scheduled_at: datetime | None = None
     # 预计送达时间(支付时生成;超过 15 分钟自动发安抚券,平台承担)
     eta_at: datetime | None = None
+    # 骑手到店时刻:骑手端据此决定还要不要显示「我到店了」按钮
+    arrived_shop_at: datetime | None = None
     address: str
     lat: float
     lng: float
@@ -1095,6 +1112,10 @@ class AddressIn(BaseModel):
     lat: float
     lng: float
     is_default: bool = False
+    #: 楼层与电梯(选填)。填了 ETA 会诚实一点 —— 爬 6 楼和 1 楼临街
+    #: 是两种活。**不填就是不填**,我们不猜(猜错就是个假承诺)
+    floor: int | None = Field(default=None, ge=-5, le=200)
+    has_elevator: bool | None = None
     # 保护模式:骑手只见粗地址;中性称呼替代真实姓名(空=「顾客」)
     protect: bool = False
     salutation: str = Field(default="", max_length=12)
@@ -1104,6 +1125,10 @@ class AddressIn(BaseModel):
 
 
 class AddressPatch(BaseModel):
+    # floor 的 null 是**有语义的**(清掉重填),所以路由用 exclude_unset
+    # 区分"没传"和"显式传 null" —— 与菜品的额外打包费同一个处理
+    floor: int | None = Field(default=None, ge=-5, le=200)
+    has_elevator: bool | None = None
     protect: bool | None = None
     salutation: str | None = Field(default=None, max_length=12)
     contact_name: str | None = None
@@ -1126,6 +1151,8 @@ class AddressOut(BaseModel):
     lat: float
     lng: float
     is_default: bool
+    floor: int | None = None
+    has_elevator: bool | None = None
     protect: bool = False
     salutation: str = ""
     tag: str = ""

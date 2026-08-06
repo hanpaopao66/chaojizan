@@ -76,9 +76,15 @@ def compute_eta(
     if getattr(merchant, "busy_active", False):
         prep += getattr(merchant, "busy_extra_minutes", 10)
 
+    # 爬楼:6 楼无电梯和 1 楼临街是两种活。**加进给顾客看的 ETA** ——
+    # 一个诚实的 35 分钟好过一个乐观的 28 分钟再超时赔付。
+    # 顾客没填楼层时是 0,不猜
+    stairs = labor_guard.floor_minutes(
+        getattr(order, "floor", None), getattr(order, "has_elevator", None))
+
     baseline = max(ETA_MIN_MINUTES, ETA_PREP_MINUTES
                    + math.ceil(distance_m / 1000 * ETA_MINUTES_PER_KM))
-    proposed = max(ETA_MIN_MINUTES, prep + ride)
+    proposed = max(ETA_MIN_MINUTES, prep + ride + stairs)
     minutes = labor_guard.clamp_eta_minutes(proposed, baseline)
     return datetime.now(timezone.utc) + timedelta(minutes=math.ceil(minutes))
 

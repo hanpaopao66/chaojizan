@@ -549,6 +549,9 @@ class Order {
         refundNote = json['refund_note'] as String? ?? '',
         scheduledAt = json['scheduled_at'] as String?,
         etaAt = json['eta_at'] as String?,
+        // 到店时刻:骑手端据此决定还要不要显示「我到店了」。
+        // 等餐时长 = 取餐 − 到店,是申诉超时时的证据
+        arrivedShopAt = json['arrived_shop_at'] as String? ?? '',
         selfDelivery = json['self_delivery'] as bool? ?? false,
         noRiderAlerted = json['no_rider_alerted'] as bool? ?? false,
         acceptedAt = json['accepted_at'] as String?,
@@ -614,6 +617,8 @@ class Order {
   final String refundNote;
   final String? scheduledAt; // 预约送达时间(空 = 尽快送)
   final String? etaAt;       // 预计送达时间(超时 15 分钟平台自动赔安抚券)
+  /// 骑手到店时刻(空 = 还没标记)。等餐时长 = 取餐 − 到店,申诉的证据
+  final String arrivedShopAt;
   final bool selfDelivery;   // 商家自送(不走骑手,配送费归商家)
   final bool noRiderAlerted; // 无人接单告警中(可加急小费)
   final String? acceptedAt;  // 接单时刻(商家端备餐计时基准)

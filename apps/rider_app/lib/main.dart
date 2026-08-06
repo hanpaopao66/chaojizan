@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'appeal_page.dart';
 import 'location_service.dart';
 import 'map_page.dart';
 import 'verify_page.dart';
@@ -651,6 +652,25 @@ class _RiderHomePageState extends State<RiderHomePage>
     if (done == true) _refresh();
   }
 
+  /// 标记到店。等餐时长 = 取餐时刻 − 到店时刻,是**申诉超时时的证据**。
+  ///
+  /// 带上当前坐标让服务端校验一下(离店太远会被拒,防随手乱点把证据搞脏);
+  /// 没定位就不带 —— 定位取不到不该让人连到店都标不了。
+  Future<void> _markArrived(Order order) async {
+    try {
+      await widget.api.markArrivedShop(order.orderNo,
+          lat: _riderPosition.value?.lat, lng: _riderPosition.value?.lng);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已记录到店时间 —— 等餐太久时这是你的凭据')));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+    }
+  }
+
   /// 配送异常上报:途中(联系不上/地址错/餐损)+ 交接(到店未出餐/餐不齐)。
   /// 到店未出餐 = 催商家出餐,等满 10 分钟还可无责转单;
   /// 餐损/餐不齐必须拍照,走平台仲裁。
@@ -1154,6 +1174,16 @@ class _RiderHomePageState extends State<RiderHomePage>
                             onPressed: () => _reportIssue(order),
                             label: const Text('异常')),
                       ];
+                      // 未取餐时给「我到店了」:等餐时长 = 取餐 − 到店,
+                      // 是申诉超时时的证据。在店里干等二十分钟不该算到
+                      // 骑手头上,而在这之前他没有办法证明这件事
+                      if (order.status != OrderStatus.pickedUp &&
+                          order.arrivedShopAt.isEmpty) {
+                        actions.add(OutlinedButton.icon(
+                            icon: const Icon(Icons.storefront, size: 18),
+                            onPressed: () => _markArrived(order),
+                            label: const Text('我到店了')));
+                      }
                       // 未取餐(接单中/待取餐)且非追加单可转单;追加单随原单一起转
                       if (order.status != OrderStatus.pickedUp &&
                           order.parentOrderNo.isEmpty) {
@@ -1166,6 +1196,16 @@ class _RiderHomePageState extends State<RiderHomePage>
                         actions.add(FilledButton(
                             onPressed: () => _pickUp(order),
                             child: const Text('已取餐')));
+                      } else if (order.status == OrderStatus.delivered ||
+                          order.status == OrderStatus.completed) {
+                        // 送完了才谈得上「这单超时不怪我」——
+                        // 进行中的单该先把它送完
+                        actions.add(TextButton(
+                            onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => RiderAppealPage(
+                                        api: widget.api, order: order))),
+                            child: const Text('申诉')));
                       } else if (order.status == OrderStatus.pickedUp) {
                         actions.add(TextButton(
                             onPressed: () => _reportAddress(order),

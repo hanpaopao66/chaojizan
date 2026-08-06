@@ -29,6 +29,7 @@ from ..schemas import (
     BatchPaidIn,
     DeliveryIssueOut,
     DeliveryIssueResolveIn,
+    AppealVerdictIn,
     FoodSafetyActionIn,
     PaidNoteIn,
     RejectIn,
@@ -1572,6 +1573,65 @@ async def license_alerts(
         "note": "过期后有 %d 天宽限期照常接单;期满自动停业,"
                 "核验新证后走食安闸门的解除接口恢复。" % GRACE_DAYS,
     }
+
+
+@router.get("/rider-appeals")
+async def list_rider_appeals(
+    status: str = "pending",
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手申诉队列。**证据是系统自己附的**,审核员看的是同一份数据 ——
+    不用两边各说各话。"""
+    from ..models import RiderAppeal
+
+    rows = (await db.execute(
+        select(RiderAppeal, User.name, User.phone)
+        .join(User, User.id == RiderAppeal.rider_id)
+        .where(RiderAppeal.status == status)
+        .order_by(RiderAppeal.id))).all()
+    return [{
+        "id": r.id, "order_no": r.order_no, "kind": r.kind,
+        "reason": r.reason, "photo_url": r.photo_url,
+        "evidence": r.evidence,
+        "rider_name": name,
+        # 手机号打码:队列是给审核用的,不是通讯录
+        "rider_phone": f"{phone[:3]}****{phone[-4:]}" if len(phone) >= 7
+        else "",
+        "created_at": r.created_at,
+    } for r, name, phone in rows]
+
+
+@router.post("/rider-appeals/{appeal_id}/resolve")
+async def resolve_rider_appeal(
+    appeal_id: int,
+    payload: AppealVerdictIn,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """核定申诉。accept=true 判为非骑手责任。
+
+    **成立不加分也不补钱** —— 平台没有骑手评分体系,所以没有分可加;
+    补偿是另一条线(超时判赔已经由平台自动承担,见 eta.compensate_if_late)。
+    成立的意义是这条记录上写着不怪他,以及平台据此去看商家出餐这一环。
+    """
+    from ..models import RiderAppeal
+    from ..services.push import push_to_user
+
+    row = await db.get(RiderAppeal, appeal_id)
+    if row is None or row.status != "pending":
+        raise HTTPException(404, "申诉不存在或已处理")
+    accept = payload.accept
+    row.status = "accepted" if accept else "rejected"
+    row.verdict_note = payload.note.strip()[:200]
+    row.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await push_to_user(
+        row.rider_id,
+        "申诉已核定:" + ("非你的责任" if accept else "未采纳"),
+        f"{row.order_no}:{row.verdict_note}",
+        {"type": "appeal"}, record_skip=True)
+    return {"ok": True, "status": row.status}
 
 
 @router.get("/license-renewals")

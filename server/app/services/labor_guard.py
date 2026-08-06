@@ -53,6 +53,34 @@ def ride_minutes(distance_m: float, *, severe_weather: bool = False) -> float:
     return distance_m / 1000 / speed * 60
 
 
+# 爬楼:每层多算的分钟数。上楼提着餐、下楼还要走一趟,
+# 一层一分钟是保守估计。有电梯的按 2 分钟固定(等电梯 + 上下),
+# 不按层数累加 —— 20 楼有电梯并不比 5 楼有电梯慢多少
+STAIR_MINUTES_PER_FLOOR = 1.0
+ELEVATOR_MINUTES = 2.0
+# 一楼不算爬楼
+GROUND_FLOOR = 1
+
+
+def floor_minutes(floor: int | None, has_elevator: bool | None) -> float:
+    """楼层带来的额外时长(分钟)。
+
+    **没填就是 0**:猜一个出来会让 ETA 变成假承诺 —— 顾客看到的时间
+    不该建立在我们对他家几楼的猜测上。
+
+    这个数**加进给顾客看的 ETA**,不是只放宽骑手的判定 ——
+    因为爬 6 楼确实更慢,一个诚实的 30 分钟好过一个乐观的 25 分钟再超时。
+    平台的立场一贯是"先说清楚再让用户下单",这里是同一条。
+    """
+    if not floor or floor <= GROUND_FLOOR:
+        return 0.0
+    if has_elevator:
+        return ELEVATOR_MINUTES
+    # 无电梯:爬到几楼算几层。上限 30 层 —— 再高的多半是填错了,
+    # 而一个填错的楼层不该把 ETA 撑到离谱
+    return min(floor, 30) * STAIR_MINUTES_PER_FLOOR
+
+
 def clamp_eta_minutes(proposed: float, baseline: float) -> float:
     """**ETA 单向钳制:只许放宽,不许收紧。**
 

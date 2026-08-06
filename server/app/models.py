@@ -459,6 +459,11 @@ class Order(Base):
     # 支付成功时按商家费率计算,基数是商家实收口径(food+packing-discount)
     commission_cents: Mapped[int] = mapped_column(Integer, default=0)
     address: Mapped[str] = mapped_column(String(200))
+    # 楼层快照(下单当时的地址信息)。null = 顾客没填,不加时 ——
+    # 猜一个出来会让 ETA 变成假承诺
+    floor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_elevator: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True)
     lat: Mapped[float] = mapped_column(Float)
     lng: Mapped[float] = mapped_column(Float)
     contact_name: Mapped[str] = mapped_column(String(50), default="")
@@ -498,6 +503,19 @@ class Order(Base):
     rider_pool_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     # 接单时刻:出餐超时判定与用户 2 分钟反悔窗口的共同基准
+    # 骑手到店时刻。等餐时长 = picked_up_at − arrived_shop_at。
+    #
+    # **这个时间戳只记录、不判罚**。有了它之后很容易顺手加一条
+    # 「等餐超 X 分钟扣商家分」—— 不做,与「不做违规积分」一致。
+    # 它的作用是**让争议有据可查**:骑手申诉超时时不用自己举证,
+    # 商家看自己的出餐表现时有真数,ETA 也能拿它修正。
+    arrived_shop_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # 骑手取餐时刻(此前只有状态流转事件,没有单独字段 ——
+    # 从 order_events 里捞是能捞,但那张表是给审计用的,
+    # 每次算等餐时长都去 join 它,索引和口径都不合适)
+    picked_up_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     # 送达/完成时刻。**这两个是法定要记录的字段,不是产品数据。**
@@ -546,6 +564,13 @@ class Address(Base):
     lat: Mapped[float] = mapped_column(Float)
     lng: Mapped[float] = mapped_column(Float)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 楼层与电梯。**null = 没填**,不是 0 也不是"有" —— 没填时不加时,
+    # 猜一个出来会让 ETA 变成假承诺。
+    #
+    # 爬 6 楼和 1 楼临街是两种活,用同一个 ETA 对骑手不公平,
+    # 对顾客也是个不准的承诺。填了之后 ETA 会诚实一点。
+    floor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    has_elevator: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # 保护模式:骑手只看到粗地址(POI/小区),门牌详情送达前不下发;
     # 深夜独居场景的安全开关(下单页 21:00-06:00 主动提示可开)
     protect: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -2238,3 +2263,48 @@ class OrderFlag(Base):
         String(10), default="pending", server_default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class RiderAppeal(Base):
+    """骑手申诉(超时/差评非我责任)。
+
+    ## 为什么必须有
+
+    商家早就能对差评申诉,骑手不能 —— 被判超时、收到差评时**完全没有
+    说话的地方**。而超时的成因里,商家出餐慢、地址填错、顾客不接电话
+    占了相当一部分,这些都不是骑手能控制的。
+
+    ## 申诉成立之后发生什么
+
+    **只把这一单标注为「非骑手责任」,不加回任何分数** —— 因为平台本来
+    就没有骑手评分体系(不做服务分、不做违规积分)。所以申诉的价值是
+    "这条记录上写着不怪我",不是换钱。界面上必须说清楚,
+    否则骑手会以为申诉能拿到补偿。
+
+    ## 证据由系统自动附上
+
+    骑手不用自己举证:等餐时长、天气豁免、订单实际距离这些平台都有,
+    提交时一并快照进 evidence。让一个在马路上跑车的人去截图收集材料,
+    这个通道就等于不存在。
+    """
+
+    __tablename__ = "rider_appeals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    order_no: Mapped[str] = mapped_column(String(32), index=True)
+    # late 超时非我责任 / review 差评非我责任 / other
+    kind: Mapped[str] = mapped_column(String(10), default="late")
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    photo_url: Mapped[str] = mapped_column(String(300), default="")
+    # 提交时的系统证据快照(等餐时长/天气/距离……)。**存快照不存引用**:
+    # 事后重算的话,天气开关早就关了、ETA 也重估过,证据会自己变
+    evidence: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # pending 待核 / accepted 成立(非骑手责任) / rejected 不成立
+    status: Mapped[str] = mapped_column(
+        String(10), default="pending", server_default="pending", index=True)
+    verdict_note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)

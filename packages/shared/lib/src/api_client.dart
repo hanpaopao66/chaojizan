@@ -1260,6 +1260,44 @@ class ApiClient {
     return (data as Map<String, dynamic>?) ?? {};
   }
 
+  // ---------- 骑手:到店标记与申诉 ----------
+
+  /// 骑手点「我到店了」。
+  ///
+  /// 等餐时长 = 取餐时刻 − 到店时刻,是**申诉超时时的证据** ——
+  /// 在店里干等二十分钟不该算到骑手头上,而现在他没有办法证明这件事。
+  /// **只记录不判罚**:不会因此扣商家分(平台不做违规积分)。
+  Future<Order> markArrivedShop(String orderNo,
+      {double? lat, double? lng}) async {
+    final data = await _request(
+        'POST', '/riders/orders/\$orderNo/arrived',
+        body: lat == null ? {} : {'lat': lat, 'lng': lng});
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 提交申诉。**证据由系统自动附上**(等餐时长、实际距离、天气豁免) ——
+  /// 让一个在马路上跑车的人去截图收集材料,这个通道就等于不存在。
+  ///
+  /// 成立只把这一单标注为「非骑手责任」,**不加分也不补钱** ——
+  /// 平台没有骑手评分体系,所以没有分可加。
+  Future<Map<String, dynamic>> submitRiderAppeal({
+    required String orderNo,
+    required String kind,
+    required String reason,
+    String photoUrl = '',
+  }) async {
+    final data = await _request('POST', '/riders/appeals', body: {
+      'order_no': orderNo, 'kind': kind, 'reason': reason,
+      'photo_url': photoUrl,
+    });
+    return data as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> myRiderAppeals() async {
+    final data = await _request('GET', '/riders/appeals');
+    return data as Map<String, dynamic>;
+  }
+
   // ---------- 进货查验台账(食品溯源) ----------
 
   /// 进货台账。[q] 按食材名反查 —— 出食安问题时问的就是

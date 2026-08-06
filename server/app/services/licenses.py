@@ -32,7 +32,7 @@
 存量商家都是这个状态,等他们下次编辑资质时补录。
 给存量数据瞎猜一个日期,猜错就是把正常营业的店误判成过期。
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 # 到期前哪几档发提醒(天)。降序,取第一个命中的档。
 NOTIFY_DAYS = (30, 7, 1)

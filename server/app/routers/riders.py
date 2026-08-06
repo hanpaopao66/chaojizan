@@ -629,6 +629,179 @@ async def available_orders(
     return [out for _, out in scored[:50]]
 
 
+# ---------- 骑手申诉(超时/差评非我责任) ----------
+
+async def _appeal_evidence(db, order) -> dict:
+    """把平台已有的证据快照下来。**骑手不用自己举证** ——
+    让一个在马路上跑车的人去截图收集材料,这个通道就等于不存在。
+
+    存快照不存引用:事后重算的话天气开关早关了、ETA 也重估过,
+    证据会自己变。
+    """
+    from datetime import datetime, timezone
+
+    from ..services.eta import _weather_exempt
+    from ..services.pricing import haversine_m
+
+    ev: dict = {}
+    if order.arrived_shop_at and order.picked_up_at:
+        wait = (order.picked_up_at - order.arrived_shop_at).total_seconds()
+        ev["wait_minutes"] = round(wait / 60, 1)
+    if order.eta_at:
+        ev["eta_at"] = order.eta_at.isoformat()
+    if order.delivered_at:
+        ev["delivered_at"] = order.delivered_at.isoformat()
+        if order.eta_at:
+            ev["late_minutes"] = round(
+                (order.delivered_at - order.eta_at).total_seconds() / 60, 1)
+    merchant = await db.get(Merchant, order.merchant_id)
+    if merchant is not None and order.lat is not None:
+        ev["distance_m"] = int(haversine_m(
+            merchant.lat, merchant.lng, order.lat, order.lng))
+    try:
+        ev["weather_exempt"] = await _weather_exempt(
+            db, order.delivered_at or order.created_at)
+    except Exception:
+        pass
+    ev["snapshot_at"] = datetime.now(timezone.utc).isoformat()
+    return ev
+
+
+@router.post("/appeals")
+async def submit_appeal(
+    payload: dict,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交申诉。系统自动附上它已经知道的证据。
+
+    ## 申诉成立之后会发生什么(界面上要原样说清楚)
+
+    **只把这一单标注为「非骑手责任」,不加回任何分数、不补偿金额** ——
+    平台本来就没有骑手评分体系(不做服务分、不做违规积分),所以没有
+    "分"可加。申诉的价值是这条记录上写着不怪你。
+    不说清楚的话骑手会以为申诉能拿到钱。
+    """
+    from datetime import datetime, timezone
+
+    from ..models import RiderAppeal
+    from ..services.moderation import guard_text
+
+    order_no = str(payload.get("order_no", "")).strip()[:32]
+    order = await db.scalar(select(Order).where(Order.order_no == order_no))
+    if order is None or order.rider_id != user.id:
+        raise HTTPException(404, "这不是你的单")
+    kind = str(payload.get("kind") or "late")
+    if kind not in ("late", "review", "other"):
+        raise HTTPException(422, "类型只支持:超时非我责任 / 差评非我责任 / 其他")
+    reason = str(payload.get("reason", "")).strip()[:300]
+    if len(reason) < 5:
+        raise HTTPException(422, "说明一下当时的情况(至少 5 个字),"
+                                 "平台要靠这段话去核实")
+    await guard_text(db, reason, "申诉说明")
+
+    dup = await db.scalar(select(RiderAppeal).where(
+        RiderAppeal.rider_id == user.id, RiderAppeal.order_no == order_no))
+    if dup is not None:
+        raise HTTPException(409, "这一单已经申诉过了,等结果就好")
+
+    row = RiderAppeal(
+        rider_id=user.id, order_no=order_no, kind=kind, reason=reason,
+        photo_url=str(payload.get("photo_url", "")).strip()[:300],
+        evidence=await _appeal_evidence(db, order))
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return {
+        "id": row.id, "status": row.status, "evidence": row.evidence,
+        "note": "已提交。平台会核实 —— 系统已经自动附上了等餐时长、"
+                "实际距离、天气豁免这些记录,你不用再去找证据。"
+                "**申诉成立只会把这一单标注为「非骑手责任」,"
+                "不加分也不补钱** —— 平台没有骑手评分这种东西。",
+    }
+
+
+@router.get("/appeals")
+async def my_appeals(
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的申诉与进度。"""
+    from ..models import RiderAppeal
+
+    rows = (await db.scalars(
+        select(RiderAppeal).where(RiderAppeal.rider_id == user.id)
+        .order_by(RiderAppeal.id.desc()).limit(100))).all()
+    return {
+        "items": [{
+            "id": r.id, "order_no": r.order_no, "kind": r.kind,
+            "reason": r.reason, "status": r.status,
+            "verdict_note": r.verdict_note, "evidence": r.evidence,
+            "created_at": r.created_at, "reviewed_at": r.reviewed_at,
+        } for r in rows],
+        "note": "成立 = 这一单标注为非骑手责任。平台没有骑手服务分,"
+                "所以没有分可加 —— 但记录上会写清楚不怪你。",
+    }
+
+
+# 到店围栏半径(米)。100 米:商圈里店挨着店,再大就会在隔壁店门口
+# 误触发;再小则 GPS 漂移会让人明明站在门口却点不了
+_ARRIVE_RADIUS_M = 100
+
+
+@router.post("/orders/{order_no}/arrived", response_model=OrderOut)
+async def mark_arrived_shop(
+    order_no: str,
+    payload: dict | None = None,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手点「我到店了」。
+
+    ## 这个时间戳是干什么的
+
+    等餐时长 = 取餐时刻 − 到店时刻。它是**骑手申诉超时时的证据** ——
+    在店里干等二十分钟不该算到骑手头上,而现在他没有任何办法证明这件事。
+    同时给商家 /me/quality 一个真实的出餐表现数,给 ETA 一个修正输入。
+
+    **只记录,不判罚。** 有了它之后很容易顺手加一条「等餐超 X 分钟扣商家分」
+    —— 不做,与平台「不做违规积分」的立场一致。
+
+    ## 手动优先于围栏
+
+    带了坐标就顺手校验一下距离(离店 100 米外点了会被拒,防随手乱点),
+    但**判定用的是骑手主动点的那一刻**,不是围栏自动触发 ——
+    商圈里店挨着店,自动触发会在隔壁店门口就记上,反而把证据搞脏。
+    """
+    from datetime import datetime, timezone
+
+    from ..services.pricing import haversine_m
+
+    order = await db.scalar(select(Order).where(Order.order_no == order_no))
+    if order is None or order.rider_id != user.id:
+        raise HTTPException(404, "订单不存在")
+    if order.status not in (OrderStatus.ACCEPTED, OrderStatus.READY):
+        raise HTTPException(409, "只有待取餐的单能标记到店")
+    if order.arrived_shop_at is not None:
+        # 幂等:重复点不刷新时间 —— 刷新的话骑手多点一次就把等餐时长清零了
+        merchant = await db.get(Merchant, order.merchant_id)
+        return order_out(order, merchant, viewer=user)
+
+    if payload and payload.get("lat") is not None:
+        merchant = await db.get(Merchant, order.merchant_id)
+        if merchant is not None:
+            dist = haversine_m(float(payload["lat"]), float(payload["lng"]),
+                               merchant.lat, merchant.lng)
+            if dist > _ARRIVE_RADIUS_M * 5:
+                raise HTTPException(
+                    409, f"离店还有约 {int(dist)} 米,到店门口再点")
+    order.arrived_shop_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(order)
+    merchant = await db.get(Merchant, order.merchant_id)
+    return order_out(order, merchant, viewer=user)
+
+
 @router.post("/grab/{order_no}", response_model=OrderOut)
 async def grab_order(
     order_no: str,

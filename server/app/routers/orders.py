@@ -585,6 +585,12 @@ async def create_order(
                      + tip_cents - subsidy),
         address=(parent.address if parent is not None
                  else ("到店自取" if payload.pickup else payload.address)),
+        # 楼层快照:自取没有爬楼,追加单跟父单一致
+        floor=(parent.floor if parent is not None
+               else (None if payload.pickup else payload.floor)),
+        has_elevator=(parent.has_elevator if parent is not None
+                      else (None if payload.pickup
+                            else payload.has_elevator)),
         lat=(parent.lat if parent is not None
              else (merchant.lat if payload.pickup else payload.lat)),
         lng=(parent.lng if parent is not None
@@ -842,6 +848,14 @@ async def transition(
     # 订单完成 = 结算点:骑手配送费、商家净收入分别入账
     if payload.to_status == OrderStatus.COMPLETED:
         await settle_order(db, order)
+    # 取餐时刻落库:等餐时长 = 它 − arrived_shop_at,骑手申诉时的证据
+    if payload.to_status == OrderStatus.PICKED_UP and order.picked_up_at is None:
+        order.picked_up_at = datetime.now(timezone.utc)
+        # 没点过「我到店了」就按取餐时刻兜底 —— 等餐时长记为 0 而不是 null,
+        # 免得下游到处判空;真实为 0 和"没记录"的区别由 arrived_shop_at
+        # 是否等于 picked_up_at 体现
+        if order.arrived_shop_at is None:
+            order.arrived_shop_at = order.picked_up_at
     # 取餐节点:按骑手实时位置重估 ETA(只剩配送段,更准)
     if payload.to_status == OrderStatus.PICKED_UP and order.rider_id:
         try:
