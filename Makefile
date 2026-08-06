@@ -20,6 +20,24 @@ api:
 seed:
 	cd server && python -m scripts.seed
 
+# Dart 静态检查。**必须带上 packages/shared** ——
+# 在 app 目录里跑 flutter analyze 不会检查 path 依赖的 shared 包,
+# 而客户端大部分代码就在那儿。曾因此漏掉一个重复定义的方法,
+# 直到 release 构建才炸出来(analyze 全绿、e2e 全绿,APK 打不出来)。
+#
+# 另外扫一遍 Dart 字符串里的 \$:'\$id' 在 Dart 里是字面量 $id 不是插值,
+# 请求会带着字面的 $orderNo 发出去。这个 analyze 不报(语法合法)、
+# e2e 也照不到(测的是服务端),只能靠扫。
+analyze:
+	@for d in packages/shared apps/user_app apps/merchant_app apps/rider_app; do \
+	  echo "== $$d =="; (cd $$d && flutter analyze --no-pub) || exit 1; \
+	done
+	@echo "== 扫 Dart 字符串里的转义美元符 =="
+	@! grep -rn '\\$$' --include="*.dart" packages/ apps/ \
+	  || { echo "✗ 上面这些 '\\$$x' 是字面量,不是插值"; exit 1; }
+	@echo "  没有转义美元符 ✓"
+	@cd merchant-web && npx tsc --noEmit && echo "== merchant-web tsc ✓"
+
 # 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)
 unit:
 	cd server && python -m pytest tests/unit -q

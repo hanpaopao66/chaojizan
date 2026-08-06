@@ -420,7 +420,7 @@ class _AddressEditPageState extends State<AddressEditPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('\$e')));
+            .showSnackBar(SnackBar(content: Text('$e')));
       }
     } finally {
       if (mounted) setState(() => _parsing = false);

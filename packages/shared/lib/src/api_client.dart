@@ -643,12 +643,12 @@ class ApiClient {
     bool toDoor = true,
   }) async {
     final data = await _request('GET', '/orders/delivery-fee', query: {
-      'merchant_id': '\$merchantId',
-      'lat': '\$lat',
-      'lng': '\$lng',
-      if (floor != null) 'floor': '\$floor',
-      if (hasElevator != null) 'has_elevator': '\$hasElevator',
-      'to_door': '\$toDoor',
+      'merchant_id': '$merchantId',
+      'lat': '$lat',
+      'lng': '$lng',
+      if (floor != null) 'floor': '$floor',
+      if (hasElevator != null) 'has_elevator': '$hasElevator',
+      'to_door': '$toDoor',
     });
     return data as Map<String, dynamic>;
   }
@@ -1177,9 +1177,10 @@ class ApiClient {
 
   Future<void> printerTest() => _request('POST', '/merchants/me/printer/test');
 
-  /// 云打印补打某一单的小票
-  Future<void> reprintOrder(String orderNo) =>
-      _request('POST', '/merchants/me/orders/$orderNo/print');
+  // 补打在下面「多台打印机」那一节,支持只补某一台。
+  // 这里原本还有一个单参数的 reprintOrder —— 多打印机那批加新方法时
+  // 没删旧的,两个同名方法并存。**release 构建直接编译失败**,
+  // 而 flutter analyze 在 app 目录里跑不到 packages/shared,所以一直没露头
 
   // ---------- 通用订单 ----------
   /// 我的订单(游标分页)。[before] 传上一页最后一单的 createdAt。
@@ -1281,13 +1282,13 @@ class ApiClient {
 
   Future<Map<String, dynamic>> updatePrinter(
       int id, Map<String, dynamic> fields) async {
-    final data = await _request('PATCH', '/merchants/me/printers/\$id',
+    final data = await _request('PATCH', '/merchants/me/printers/$id',
         body: fields);
     return data as Map<String, dynamic>;
   }
 
   Future<void> removePrinter(int id) async {
-    await _request('DELETE', '/merchants/me/printers/\$id');
+    await _request('DELETE', '/merchants/me/printers/$id');
   }
 
   /// 补打。[printerId] 只补某一台(后厨的单丢了就只补后厨那张);
@@ -1295,8 +1296,8 @@ class ApiClient {
   Future<Map<String, dynamic>> reprintOrder(String orderNo,
       {int? printerId}) async {
     final data = await _request(
-        'POST', '/merchants/me/orders/\$orderNo/print',
-        query: printerId == null ? null : {'printer_id': '\$printerId'});
+        'POST', '/merchants/me/orders/$orderNo/print',
+        query: printerId == null ? null : {'printer_id': '$printerId'});
     return (data as Map<String, dynamic>?) ?? {};
   }
 
@@ -1310,7 +1311,7 @@ class ApiClient {
   Future<Order> markArrivedShop(String orderNo,
       {double? lat, double? lng}) async {
     final data = await _request(
-        'POST', '/riders/orders/\$orderNo/arrived',
+        'POST', '/riders/orders/$orderNo/arrived',
         body: lat == null ? {} : {'lat': lat, 'lng': lng});
     return Order.fromJson(data as Map<String, dynamic>);
   }
@@ -1347,7 +1348,7 @@ class ApiClient {
     final data = await _request('GET', '/merchants/me/purchases',
         query: q != null && q.isNotEmpty
             ? {'q': q}
-            : {'days': '\$days'});
+            : {'days': '$days'});
     return data as Map<String, dynamic>;
   }
 
@@ -1366,7 +1367,7 @@ class ApiClient {
   }
 
   Future<void> deletePurchase(int id) async {
-    await _request('DELETE', '/merchants/me/purchases/\$id');
+    await _request('DELETE', '/merchants/me/purchases/$id');
   }
 
   // ---------- 从业人员健康证台账 ----------
@@ -1379,7 +1380,7 @@ class ApiClient {
   Future<Map<String, dynamic>> healthCerts(
       {bool includeArchived = false}) async {
     final data = await _request('GET', '/merchants/me/health-certs',
-        query: {'include_archived': '\$includeArchived'});
+        query: {'include_archived': '$includeArchived'});
     return data as Map<String, dynamic>;
   }
 
@@ -1405,7 +1406,7 @@ class ApiClient {
 
   /// 员工离职:**归档不删除** —— 监管查的是"当时在岗的人有没有证"。
   Future<void> archiveHealthCert(int id) async {
-    await _request('DELETE', '/merchants/me/health-certs/\$id');
+    await _request('DELETE', '/merchants/me/health-certs/$id');
   }
 
   // ---------- 连锁店群 ----------
