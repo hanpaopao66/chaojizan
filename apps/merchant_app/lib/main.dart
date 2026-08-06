@@ -9,6 +9,7 @@ import 'dish_manage_page.dart';
 import 'finance_page.dart';
 import 'hotel/hotel_home_page.dart';
 import 'listen_service.dart';
+import 'messages_page.dart';
 import 'onboarding.dart';
 import 'printer_service.dart';
 import 'reviews_page.dart';
@@ -476,6 +477,12 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           () => setState(() => _tab = 3));
       addRow('flash_expiring', '折扣将到期',
           () => setState(() => _tab = 1));
+      addRow('messages_unread', '新消息', () {
+        Navigator.of(context)
+            .push(MaterialPageRoute(
+                builder: (_) => MerchantMessagesPage(api: widget.api)))
+            .then((_) => _refreshToday());
+      });
     }
 
     return Container(

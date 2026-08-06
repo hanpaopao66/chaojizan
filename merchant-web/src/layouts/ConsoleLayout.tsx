@@ -58,12 +58,14 @@ export default function ConsoleLayout({ shop, onShopChanged }: Props) {
   const todoCount = todos
     ? todos.after_sales + todos.bad_reviews_unreplied
       + todos.coupon_batches_low + todos.flash_expiring
+      + (todos.messages_unread ?? 0)
     : 0
   const todoTip = todos ? [
     todos.after_sales > 0 && `售后待处理 ${todos.after_sales}`,
     todos.bad_reviews_unreplied > 0 && `差评待回复 ${todos.bad_reviews_unreplied}`,
     todos.coupon_batches_low > 0 && `券快发完 ${todos.coupon_batches_low}`,
     todos.flash_expiring > 0 && `限时折扣将到期 ${todos.flash_expiring}`,
+    (todos.messages_unread ?? 0) > 0 && `未读消息 ${todos.messages_unread}`,
   ].filter(Boolean).join(' · ') : ''
 
   // 忙碌模式:高峰压单不闭店,ETA 放宽 + 用户端亮"出餐较慢"标

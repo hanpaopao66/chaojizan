@@ -281,6 +281,7 @@ class Dish {
         isOnSale = json['is_on_sale'] as bool? ?? true,
         isAlcohol = json['is_alcohol'] as bool? ?? false,
         imageUrl = json['image_url'] as String? ?? '',
+        sort = json['sort'] as int? ?? 0,
         options = (json['options'] as List? ?? const [])
             .map((e) => OptionGroup.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -296,6 +297,9 @@ class Dish {
   final String category;
   final int priceCents;
   final int stock;
+
+  /// 菜单顺序(小的在前,同值按 id):商家排的顺序,用户端照着看
+  final int sort;
 
   /// 每日回满目标(空=未启用):每天 04:00 库存自动重置为该值
   final int? dailyStock;

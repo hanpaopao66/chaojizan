@@ -1303,6 +1303,26 @@ class ApiClient {
     return (jsonDecode(text) as Map)['url'] as String;
   }
 
+  /// 批量写菜单顺序(小的在前);置顶 = 给它一个比现有最小值更小的 sort
+  Future<void> reorderDishes(List<Map<String, int>> items) =>
+      _request('POST', '/merchants/me/dishes/reorder', body: {'items': items});
+
+  /// 消息中心:{announcements: [...], messages: [{id,kind,title,content,created_at}], unread}
+  Future<Map<String, dynamic>> merchantMessages(
+      {String? category, int? before}) async {
+    final query = <String, String>{
+      if (category != null) 'category': category,
+      if (before != null) 'before': '$before',
+    };
+    final data = await _request('GET', '/merchants/me/messages',
+        query: query.isEmpty ? null : query);
+    return (data as Map).cast<String, dynamic>();
+  }
+
+  /// 消息已读水位记到现在
+  Future<void> merchantMessagesRead() =>
+      _request('POST', '/merchants/me/messages/read');
+
   /// 忙碌模式:开([minutes] 时长,[extraMinutes] 出餐加时)或关([off])。
   /// 到点自动失效,不需要记得来关
   Future<Merchant> setBusy(

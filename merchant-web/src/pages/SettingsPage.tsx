@@ -5,8 +5,9 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, HotelProfileData, Merchant, StaffMember, addStaff, myHotelProfile,
-  myShop, myStaff, removeStaff, restShop, updateHotelProfile, updateShop,
+  ApiError, ApiKey, HotelProfileData, Merchant, StaffMember, addStaff,
+  createApiKey, myApiKeys, myHotelProfile, myShop, myStaff, removeStaff,
+  restShop, revokeApiKey, updateHotelProfile, updateShop,
   UPLOAD_ACCEPT, uploadImage,
 } from '../api'
 
@@ -33,6 +34,7 @@ export default function SettingsPage({ shop: initialShop, onShopChanged }: {
       <GeneralCard shop={shop} onChanged={reload} />
       {isHotel ? <HotelCard /> : <FoodCard shop={shop} onChanged={reload} />}
       <StaffCard />
+      {!shop.viewer_is_staff && <ApiKeyCard />}
       <Card size="small">
         <Alert
           type="info"
@@ -331,6 +333,114 @@ function StaffCard() {
                 }
               }}>
                 移除
+              </Button>
+            ),
+          },
+        ]}
+      />
+    </Card>
+  )
+}
+
+/** 开放接口(POS 对接):生成/吊销只读 Key + 接入说明。
+ *  明文只在生成那一刻显示一次,库里存的是哈希。 */
+function ApiKeyCard() {
+  const [keys, setKeys] = useState<ApiKey[]>([])
+  const [name, setName] = useState('')
+  const [fresh, setFresh] = useState('')
+
+  const load = useCallback(() => {
+    myApiKeys().then(setKeys).catch(() => { /* 店员无权,静默 */ })
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function create() {
+    try {
+      const created = await createApiKey(name.trim())
+      setFresh(created.token)
+      setName('')
+      load()
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e))
+    }
+  }
+
+  const base = location.origin
+
+  return (
+    <Card size="small" title="开放接口(收银系统/POS 对接)">
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 12 }}
+        message="用收银系统的商家可以用它自动拉单,不用两块屏抄单"
+        description={
+          <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+            当前版本<b>只读</b>(查店铺信息、拉订单),不能接单或改价。<br />
+            调用方式:请求头带 <code>Authorization: Bearer 你的Key</code><br />
+            · 店铺信息 <code>GET {base}/open/v1/shop</code><br />
+            · 拉订单 <code>GET {base}/open/v1/orders?since=上次拉到的时间&amp;limit=50</code><br />
+            顾客手机号按商家视角脱敏,与你在 App 里看到的一致。
+          </div>
+        }
+      />
+      {fresh && (
+        <Alert
+          type="success"
+          showIcon
+          closable
+          onClose={() => setFresh('')}
+          style={{ marginBottom: 12 }}
+          message="Key 已生成——只显示这一次,请立即复制保存"
+          description={
+            <Space>
+              <Input.Password readOnly value={fresh} style={{ width: 380 }} />
+              <Button size="small" onClick={() => {
+                navigator.clipboard?.writeText(fresh)
+                message.success('已复制')
+              }}>复制</Button>
+            </Space>
+          }
+        />
+      )}
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Input value={name} placeholder="备注(如 收银台1)" maxLength={30}
+          style={{ width: 180 }} onChange={(e) => setName(e.target.value)} />
+        <Button type="primary" onClick={create}>生成新 Key</Button>
+      </Space>
+      <Table<ApiKey>
+        rowKey="id"
+        dataSource={keys}
+        size="small"
+        pagination={false}
+        columns={[
+          { title: '备注', dataIndex: 'name', render: (v) => v || '—' },
+          { title: 'Key', dataIndex: 'prefix', render: (v) => `${v}…` },
+          {
+            title: '状态',
+            render: (_, k) => k.revoked
+              ? <Tag>已吊销</Tag>
+              : <Tag color="green">有效</Tag>,
+          },
+          {
+            title: '创建时间',
+            dataIndex: 'created_at',
+            render: (v: string) => new Date(v).toLocaleString('zh-CN'),
+          },
+          {
+            title: '操作',
+            render: (_, k) => k.revoked ? null : (
+              <Button size="small" danger onClick={async () => {
+                try {
+                  await revokeApiKey(k.id)
+                  message.success('已吊销')
+                  load()
+                } catch (e) {
+                  message.error(e instanceof ApiError ? e.message : String(e))
+                }
+              }}>
+                吊销
               </Button>
             ),
           },

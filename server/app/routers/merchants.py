@@ -538,7 +538,7 @@ async def my_dishes(
     result = await db.scalars(
         select(Dish)
         .where(Dish.merchant_id == shop.id)
-        .order_by(Dish.category, Dish.id)
+        .order_by(Dish.category, Dish.sort, Dish.id)
     )
     dishes = list(result)
     # 带上近 30 天销量:商家端销量榜/滞销提示的数据源
@@ -571,7 +571,10 @@ _DISH_SALES_SQL = text(
 @router.get("/{merchant_id}/dishes", response_model=list[DishOut])
 async def menu(merchant_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.scalars(
-        select(Dish).where(Dish.merchant_id == merchant_id, Dish.is_on_sale.is_(True))
+        select(Dish)
+        .where(Dish.merchant_id == merchant_id, Dish.is_on_sale.is_(True))
+        # 商家排的顺序,用户端照着看(sort 小的在前,同值按 id)
+        .order_by(Dish.category, Dish.sort, Dish.id)
     )
     dishes = list(result)
     sales_rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": merchant_id})
@@ -2252,13 +2255,196 @@ async def my_todos(
             Dish.flash_until > now,
             Dish.flash_until < now + timedelta(hours=24))) or 0
 
+    # 未读消息(评价/系统触达;公告不计):水位见消息中心
+    from ..models import PushLog
+    from ..redis_client import get_redis
+    raw = await get_redis().get(_MSG_READ_KEY.format(user_id=user.id))
+    msg_stmt = select(func.count(PushLog.id)).where(
+        PushLog.user_id == user.id)
+    if raw:
+        try:
+            watermark = datetime.fromisoformat(
+                raw.decode() if isinstance(raw, bytes) else raw)
+            msg_stmt = msg_stmt.where(PushLog.created_at > watermark)
+        except ValueError:
+            pass
+    messages_unread = await db.scalar(msg_stmt) or 0
+
     return {
         "pending_orders": pending_orders,
         "after_sales": after_sales,
         "bad_reviews_unreplied": bad_unreplied,
         "coupon_batches_low": coupon_low,
         "flash_expiring": flash_expiring,
+        "messages_unread": messages_unread,
     }
+
+
+# ---------- 开放接口凭证(POS/收银系统对接) ----------
+
+_MAX_API_KEYS = 5
+
+
+@router.get("/me/api-keys")
+async def list_api_keys(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """本店的 API Key 列表。**只回前缀,不回明文** ——
+    库里存的就是哈希,明文只在创建那一刻给过一次。"""
+    from ..models import MerchantApiKey
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    rows = await db.scalars(
+        select(MerchantApiKey)
+        .where(MerchantApiKey.merchant_id == shop.id)
+        .order_by(MerchantApiKey.id.desc()).limit(20))
+    return [{
+        "id": k.id, "name": k.name, "prefix": k.prefix,
+        "revoked": k.revoked_at is not None,
+        "created_at": k.created_at,
+    } for k in rows]
+
+
+@router.post("/me/api-keys")
+async def create_api_key(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """生成新 Key。返回体里的 token 是**唯一一次**能看到明文的机会。"""
+    from ..models import MerchantApiKey
+    from .open_api import new_key
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    if shop.status != MerchantStatus.approved:
+        raise HTTPException(403, "店铺通过审核后才能对接收银系统")
+    alive = await db.scalar(
+        select(func.count(MerchantApiKey.id)).where(
+            MerchantApiKey.merchant_id == shop.id,
+            MerchantApiKey.revoked_at.is_(None))) or 0
+    if alive >= _MAX_API_KEYS:
+        raise HTTPException(
+            409, f"最多同时保留 {_MAX_API_KEYS} 把有效 Key,请先吊销不用的")
+    raw, token_hash, prefix = new_key()
+    key = MerchantApiKey(
+        merchant_id=shop.id,
+        name=str(payload.get("name", ""))[:30],
+        token_hash=token_hash,
+        prefix=prefix,
+    )
+    db.add(key)
+    await db.commit()
+    await db.refresh(key)
+    return {"id": key.id, "name": key.name, "prefix": key.prefix,
+            "token": raw, "created_at": key.created_at}
+
+
+@router.delete("/me/api-keys/{key_id}")
+async def revoke_api_key(
+    key_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """吊销:立即失效,不可撤销。记录留着(谁在什么时候用过要查得到)。"""
+    from ..models import MerchantApiKey
+    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
+    key = await db.get(MerchantApiKey, key_id)
+    if shop is None or key is None or key.merchant_id != shop.id:
+        raise HTTPException(404, "Key 不存在")
+    if key.revoked_at is None:
+        key.revoked_at = datetime.now(timezone.utc)
+        await db.commit()
+    return {"ok": True}
+
+
+# ---------- 消息中心(公告 + 触达记录,订单类不进这里) ----------
+
+# 已读水位存 Redis:一人一条时间戳。丢了也只是未读数偏大,不值得建表
+_MSG_READ_KEY = "msg:read:merchant:{user_id}"
+
+
+def _classify_message(title: str) -> str:
+    """按标题归类:评价类要醒目,其余归系统。订单类消息不进消息中心 ——
+    订单页本身就是它们的家,这里再堆一份只会淹掉真正需要看的。"""
+    if "评价" in title or "回复" in title:
+        return "review"
+    return "system"
+
+
+@router.get("/me/messages")
+async def my_messages(
+    category: str | None = None,   # review / system;缺省全部
+    before: int | None = None,     # push_logs 游标(上一页最后一条 id)
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """消息中心:置顶当前生效的平台公告 + 本人触达记录(评价/系统)。"""
+    from ..models import Announcement, PushLog
+    from ..redis_client import get_redis
+    await _my_shop_or_404(db, user)
+
+    now = datetime.now(timezone.utc)
+    ann_rows = await db.scalars(
+        select(Announcement).where(
+            Announcement.is_active.is_(True),
+            Announcement.audience.in_(["merchant", "all"]),
+            or_(Announcement.starts_at.is_(None), Announcement.starts_at <= now),
+            or_(Announcement.ends_at.is_(None), Announcement.ends_at >= now),
+        ).order_by(Announcement.created_at.desc()).limit(10))
+    announcements = [{
+        "id": a.id, "title": a.title, "content": a.content,
+        "created_at": a.created_at,
+    } for a in ann_rows]
+
+    stmt = select(PushLog).where(PushLog.user_id == user.id)
+    if before is not None:
+        stmt = stmt.where(PushLog.id < before)
+    rows = (await db.scalars(
+        stmt.order_by(PushLog.id.desc()).limit(50))).all()
+    messages = []
+    for log in rows:
+        kind = _classify_message(log.title)
+        if category and kind != category:
+            continue
+        messages.append({
+            "id": log.id, "kind": kind, "title": log.title,
+            "content": log.content, "created_at": log.created_at,
+        })
+
+    # 未读 = 水位之后的触达条数(公告不计未读:横幅本来就常驻)
+    raw = await get_redis().get(_MSG_READ_KEY.format(user_id=user.id))
+    watermark = None
+    if raw:
+        try:
+            watermark = datetime.fromisoformat(
+                raw.decode() if isinstance(raw, bytes) else raw)
+        except ValueError:
+            pass
+    from ..models import PushLog as _PL
+    unread_stmt = select(func.count(_PL.id)).where(_PL.user_id == user.id)
+    if watermark is not None:
+        unread_stmt = unread_stmt.where(_PL.created_at > watermark)
+    unread = await db.scalar(unread_stmt) or 0
+
+    return {"announcements": announcements, "messages": messages,
+            "unread": unread}
+
+
+@router.post("/me/messages/read")
+async def mark_messages_read(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """记已读水位到当前时刻。"""
+    from ..redis_client import get_redis
+    await _my_shop_or_404(db, user)
+    await get_redis().set(
+        _MSG_READ_KEY.format(user_id=user.id),
+        datetime.now(timezone.utc).isoformat())
+    return {"ok": True}
 
 
 # ---------- 高峰备货(纯建议,不自动改库存) ----------
@@ -2284,6 +2470,36 @@ async def my_stocking(
         "suggestions": suggestions,
         "shortlist": shortlist(suggestions),
     }
+
+
+@router.post("/me/dishes/reorder")
+async def reorder_dishes(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量写菜单顺序:{items: [{dish_id, sort}]}。
+    只认本店的菜(混进别家的直接 404),一次最多 200 条。"""
+    shop = await _my_shop_or_404(db, user)
+    items = payload.get("items") or []
+    if not isinstance(items, list) or not 1 <= len(items) <= 200:
+        raise HTTPException(422, "items 需为 1-200 条 {dish_id, sort}")
+    ids: dict[int, int] = {}
+    for row in items:
+        try:
+            ids[int(row["dish_id"])] = int(row["sort"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(422, "每条需包含整数 dish_id 与 sort")
+    if any(not -9999 <= v <= 9999 for v in ids.values()):
+        raise HTTPException(422, "sort 需在 -9999 到 9999 之间")
+    dishes = (await db.scalars(select(Dish).where(
+        Dish.id.in_(ids.keys()), Dish.merchant_id == shop.id))).all()
+    if len(dishes) != len(ids):
+        raise HTTPException(404, "有菜品不属于本店")
+    for dish in dishes:
+        dish.sort = ids[dish.id]
+    await db.commit()
+    return {"updated": len(dishes)}
 
 
 @router.post("/me/dishes/batch-stock")

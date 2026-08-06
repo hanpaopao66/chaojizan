@@ -4,6 +4,7 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'appeal_page.dart';
 import 'dashboard_page.dart';
+import 'messages_page.dart';
 import 'reviews_page.dart';
 import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
@@ -1865,6 +1866,17 @@ class _ShopTabPageState extends State<ShopTabPage> {
               subtitle: SelectableText('网页版商家后台:chaojizan.cc/merchant\n'
                   '批量改菜、对账导出、大屏接单更顺手,与 App 同一账号'),
               isThreeLine: true,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.notifications_none),
+              title: const Text('消息中心'),
+              subtitle: const Text('平台公告、评价与系统通知'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => MerchantMessagesPage(api: widget.api))),
             ),
           ),
           const SizedBox(height: 12),

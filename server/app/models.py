@@ -280,6 +280,9 @@ class Dish(Base):
     # 估清前的库存(未启用每日回满的菜,恢复时回到这个值)
     stock_before_soldout: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_on_sale: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 菜单排序:小的在前(默认 0,同值按 id)。招牌放最前、饮品小食垫后
+    # 是商家最常做的"装修"动作,此前只能靠改分类名硬凑
+    sort: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # 酒类标记:商家上架自助勾选(法律义务在商家,平台提供工具与拦截)。
     # 含酒订单要求用户已实名且成年(#14),小票/骑手端提示查验收件人
     is_alcohol: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -1243,6 +1246,28 @@ class ContentReview(Base):
     )
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+
+
+class MerchantApiKey(Base):
+    """POS/收银系统对接的开放接口凭证(只读)。
+
+    稍大的餐厅都用收银系统,没有拉单接口他们就要两套系统抄单。
+    明文 key 只在创建那一刻返回一次,库里只存 sha256 —— 泄库不泄 key;
+    prefix 存明文前几位,列表页里让商家认得出是哪把。"""
+
+    __tablename__ = "merchant_api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    name: Mapped[str] = mapped_column(String(30), default="")  # 备注(如"收银台1")
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    prefix: Mapped[str] = mapped_column(String(12), default="")
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class PushLog(Base):

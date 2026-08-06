@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:superz_shared/superz_shared.dart';
 
-/// 菜品管理:按分类分组的列表,上下架开关,点击编辑,右下角新增。
+/// 菜品管理:按分类分组的列表,上下架开关,点击编辑,长按置顶,右下角新增。
 class DishManagePage extends StatefulWidget {
   const DishManagePage({super.key, required this.api});
 
@@ -128,6 +128,33 @@ class _DishManagePageState extends State<DishManagePage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('「${dish.name}」已补货至 $stock')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  /// 置顶:把这道菜排到本分类最前(招牌菜该在第一屏,不该靠改分类名硬凑)。
+  /// 只改这一道的 sort,不整体重排 —— 一次请求,失败也不会打乱既有顺序
+  Future<void> _pinToTop(Dish dish, List<Dish> sameCategory) async {
+    final minSort = sameCategory
+        .map((d) => d.sort)
+        .fold<int>(0, (a, b) => a < b ? a : b);
+    if (sameCategory.isNotEmpty && sameCategory.first.id == dish.id) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('「${dish.name}」已经在最前面了')));
+      return;
+    }
+    try {
+      await widget.api.reorderDishes([
+        {'dish_id': dish.id, 'sort': (minSort - 1).clamp(-9999, 9999)},
+      ]);
+      _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('「${dish.name}」已置顶到「${dish.category}」最前')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -290,6 +317,8 @@ class _DishManagePageState extends State<DishManagePage> {
               ),
               for (final dish in entry.value)
                 ListTile(
+                  // 长按置顶:排在本分类最前(招牌菜该在第一屏)
+                  onLongPress: () => _pinToTop(dish, entry.value),
                   leading: _thumb(dish),
                   title: Text(
                     dish.name,

@@ -365,6 +365,7 @@ class DishPatch(BaseModel):
     is_on_sale: bool | None = None
     is_alcohol: bool | None = None
     image_url: str | None = None
+    sort: int | None = Field(default=None, ge=-9999, le=9999)  # 菜单顺序,小的在前
     options: list[OptionGroup] | None = Field(default=None, max_length=5)
     # 限时折扣:两者同传开启,同传 null 关闭(折扣价必须低于现价,服务端校验)
     flash_price_cents: int | None = Field(default=None, gt=0)
@@ -385,6 +386,7 @@ class DishOut(BaseModel):
     is_on_sale: bool
     is_alcohol: bool = False  # 酒类:「酒」角标 + 未成年人禁止购买提示
     image_url: str
+    sort: int = 0  # 菜单顺序(小的在前),商家排的顺序用户端照着看
     options: list = []
     flash_price_cents: int | None = None
     flash_until: datetime | None = None

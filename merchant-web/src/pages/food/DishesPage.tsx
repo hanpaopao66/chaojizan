@@ -6,8 +6,8 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, Dish, DishOptionGroup, createDish, myDishes, sellOutDish,
-  updateDish, UPLOAD_ACCEPT, uploadImage, yuan,
+  ApiError, Dish, DishOptionGroup, createDish, myDishes, reorderDishes,
+  sellOutDish, updateDish, UPLOAD_ACCEPT, uploadImage, yuan,
 } from '../../api'
 
 /** 菜品管理:表格批量效率是网页价值(多选批量上下架/改分类,单击进抽屉编辑)。 */
@@ -122,10 +122,35 @@ export default function DishesPage() {
             ),
           },
           {
+            title: '顺序',
+            dataIndex: 'sort',
+            sorter: (a, b) => a.sort - b.sort,
+            render: (v: number) => v,
+          },
+          {
             title: '操作',
             render: (_, d) => (
               <Space>
                 <Button size="small" onClick={() => setEditing(d)}>编辑</Button>
+                <Button size="small" onClick={async () => {
+                  // 置顶:排到同分类最前(招牌菜该在第一屏)
+                  const sameCat = dishes.filter((x) => x.category === d.category)
+                  const min = Math.min(...sameCat.map((x) => x.sort), 0)
+                  if (sameCat[0]?.id === d.id) {
+                    message.info('已经在最前面了')
+                    return
+                  }
+                  try {
+                    await reorderDishes([{
+                      dish_id: d.id,
+                      sort: Math.max(min - 1, -9999),
+                    }])
+                    message.success(`已置顶到「${d.category || '未分类'}」最前`)
+                    load()
+                  } catch (e) {
+                    message.error(e instanceof ApiError ? e.message : String(e))
+                  }
+                }}>置顶</Button>
                 <Button size="small" onClick={async () => {
                   try {
                     await sellOutDish(d.id, d.sold_out_today)

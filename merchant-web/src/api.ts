@@ -515,10 +515,34 @@ export interface Todos {
   bad_reviews_unreplied: number
   coupon_batches_low: number
   flash_expiring: number
+  messages_unread: number
 }
 
 export function merchantTodos(): Promise<Todos> {
   return request('GET', '/merchants/me/todos')
+}
+
+// ---------- 开放接口凭证(POS 对接) ----------
+
+export interface ApiKey {
+  id: number
+  name: string
+  prefix: string
+  revoked: boolean
+  created_at: string
+}
+
+export function myApiKeys(): Promise<ApiKey[]> {
+  return request('GET', '/merchants/me/api-keys')
+}
+
+/** 返回体里的 token 是唯一一次能拿到明文的机会 */
+export function createApiKey(name: string): Promise<ApiKey & { token: string }> {
+  return request('POST', '/merchants/me/api-keys', { name })
+}
+
+export function revokeApiKey(id: number): Promise<unknown> {
+  return request('DELETE', `/merchants/me/api-keys/${id}`)
 }
 
 // ---------- 外卖:评价 ----------
@@ -580,8 +604,16 @@ export interface Dish {
   is_on_sale: boolean
   is_alcohol: boolean
   image_url: string
+  sort: number
   options: DishOptionGroup[]
   monthly_sales: number
+}
+
+/** 批量写菜单顺序(小的在前);置顶 = 给一个比同分类现有最小值更小的 sort */
+export function reorderDishes(
+  items: { dish_id: number; sort: number }[],
+): Promise<{ updated: number }> {
+  return request('POST', '/merchants/me/dishes/reorder', { items })
 }
 
 export function myDishes(): Promise<Dish[]> {
