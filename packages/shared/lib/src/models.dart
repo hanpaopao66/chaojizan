@@ -91,6 +91,9 @@ class Merchant {
             .cast<Map<String, dynamic>>(),
         viewerIsStaff = json['viewer_is_staff'] as bool? ?? false,
         viewerIsOwner = json['viewer_is_owner'] as bool? ?? true,
+        licenseStage = json['license_stage'] as String? ?? 'ok',
+        licenseExpiresAt = json['license_expires_at'] as String? ?? '',
+        licenseDaysLeft = json['license_days_left'] as int?,
         category = json['category'] as String? ?? 'fast_food',
         kitchenCam = json['kitchen_cam'] as bool? ?? false,
         kitchenCamLabel =
@@ -187,6 +190,13 @@ class Merchant {
   /// 能改设置),但也不是经营者本人 —— 资金动作服务端一律 403。
   /// 老服务端不下发这个字段时默认 true(单店商家的老行为)。
   final bool viewerIsOwner;
+
+  /// 证照档位:unknown 未登记 / ok / soon(≤30天) / urgent(≤7天)
+  /// / last(≤1天) / expired(已过期,宽限期内) / overdue(宽限期满,已停业)。
+  /// **老服务端不下发时默认 'ok'** —— 默认不出横幅,宁可少提醒也不误报。
+  final String licenseStage;
+  final String licenseExpiresAt;
+  final int? licenseDaysLeft;
 
   /// 今天生效的节假日计划(没有返回 null)
   Map<String, dynamic>? get todayHolidayPlan {

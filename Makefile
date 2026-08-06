@@ -70,6 +70,7 @@ test:
 	  && python -m tests.e2e_change_address && python -m tests.e2e_chat \
 	  && python -m tests.e2e_coupon_ops && python -m tests.e2e_favorite_coupon \
 	  && python -m tests.e2e_chain_stores \
+	  && python -m tests.e2e_license_expiry \
 	  && python -m tests.e2e_daily_stock \
 	  && python -m tests.e2e_delivery_issue && python -m tests.e2e_delivery_track \
 	  && python -m tests.e2e_deposit && python -m tests.e2e_eta_dynamic \

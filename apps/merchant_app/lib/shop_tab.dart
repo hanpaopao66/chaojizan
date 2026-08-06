@@ -7,6 +7,7 @@ import 'dashboard_page.dart';
 import 'messages_page.dart';
 import 'reviews_page.dart';
 import 'chain_page.dart';
+import 'license_page.dart';
 import 'rules_page.dart';
 import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
@@ -1908,6 +1909,22 @@ class _ShopTabPageState extends State<ShopTabPage> {
           ),
           const SizedBox(height: 12),
           if (!shop.viewerIsStaff) ...[
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: const Text('食品经营许可证'),
+                subtitle: Text(shop.licenseExpiresAt.isEmpty
+                    ? '还没登记有效期 —— 登记后到期前会提醒你'
+                    : '有效期至 ${shop.licenseExpiresAt}'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context)
+                    .push(MaterialPageRoute(
+                        builder: (_) =>
+                            LicenseRenewalPage(api: widget.api, shop: shop)))
+                    .then((_) => _load()),
+              ),
+            ),
+            const SizedBox(height: 12),
             // 店员不给连锁入口:开店、看跨店营业额都是老板的事,
             // 而且这些接口本来就按品牌所有者判权,给了也只会报错
             Card(

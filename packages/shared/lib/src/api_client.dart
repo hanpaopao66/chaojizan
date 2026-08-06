@@ -1187,6 +1187,34 @@ class ApiClient {
     return Order.fromJson(data as Map<String, dynamic>);
   }
 
+  // ---------- 证照有效期与续证 ----------
+
+  /// 我最近一次续证提交的进度(没提交过 renewal 为 null)。
+  Future<Map<String, dynamic>> myLicenseRenewal() async {
+    final data = await _request('GET', '/merchants/me/license-renewal');
+    return data as Map<String, dynamic>;
+  }
+
+  /// 提交续证材料。
+  ///
+  /// 过审后资质字段一律锁死(能随手把到期日改成 2099 的话,整个到期闸门
+  /// 就是摆设),换新证只能走这条复审通道 —— **核验期间照常营业**。
+  Future<void> submitLicenseRenewal({
+    required String licenseNo,
+    required String licenseImageUrl,
+    required String expiresAt,
+    String businessLicenseNo = '',
+    String licenseSubject = '',
+  }) async {
+    await _request('POST', '/merchants/me/license-renewal', body: {
+      'license_no': licenseNo,
+      'license_image_url': licenseImageUrl,
+      'license_expires_at': expiresAt,
+      'business_license_no': businessLicenseNo,
+      'license_subject': licenseSubject,
+    });
+  }
+
   // ---------- 连锁店群 ----------
   /// 我的品牌与门店列表。
   ///

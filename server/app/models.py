@@ -243,6 +243,11 @@ class Merchant(Base):
     # 商家在店铺页把开关拨回去就继续接单,"暂停营业待人工复核"形同虚设
     food_safety_hold: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false")
+    # **闸门是谁落的**:food_safety(食安投诉成立) / license_expired(证过期)。
+    # 不记原因的话就会出现"因食安被停业的店,交一张新证就解封了" ——
+    # 续证核验通过时我们要解的只是自己落的那道闸,不是别人的。
+    hold_reason: Mapped[str] = mapped_column(
+        String(20), default="", server_default="")
 
     # 忙碌模式:高峰压单的中间态 —— 不闭店,但把预期先说清楚。
     # busy_until 之前 ETA/出餐超时判定放宽 busy_extra_minutes,
@@ -266,6 +271,31 @@ class Merchant(Base):
     printer_auto: Mapped[bool] = mapped_column(Boolean, default=True)
     license_no: Mapped[str] = mapped_column(String(50), default="")  # 食品经营许可证号,入驻审核必填
     license_image_url: Mapped[str] = mapped_column(String(300), default="")  # 证照照片,监管要求留存影像
+
+    # 证照有效期与主体一致性(#连锁调研)。
+    #
+    # 美团《入网餐饮服务提供者审查登记规范》把三件事列为违规:
+    # 「营业执照和行业资质**主体名称不一致**」
+    # 「实际经营地址与资质证照中营业地址不一致」
+    # 「提交审核时过期或**合作期间未能保持持续有效**」
+    #
+    # 第三条是我们此前完全没管的:库里只有证号和照片,**没有到期日**。
+    # 食品经营许可证一般 5 年,到期是「静默失效」—— 商家绝不会自己记得,
+    # 而过期继续经营是违法的,平台放任有连带责任。
+    # 第一条也是我们审核时看不到的:审核员只看到一张图,
+    # 对不上"这张证是不是这家店的"。
+    license_expires_at: Mapped[date | None] = mapped_column(
+        Date, nullable=True)
+    # 营业执照统一社会信用代码 / 注册号
+    business_license_no: Mapped[str] = mapped_column(String(50), default="")
+    # 证照上的主体名称(公司/个体工商户全称)。与店铺名往往不同 ——
+    # 店招叫「赞小碗」,证上是「成都赞小碗餐饮管理有限公司」,
+    # 这很正常;要审的是**营业执照与行业资质两张证的主体一致**
+    license_subject: Mapped[str] = mapped_column(String(100), default="")
+    # 到期提醒的发送水位:记已经就哪一档(30/7/1/expired)提醒过,
+    # 避免清扫任务每小时跑一次就给商家轰 24 条消息
+    license_notified: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default="[]")
 
     # 明厨亮灶(#155)。**不塞 JSONB** —— 列表页要按 status 展示「有/无」标识,
     # 那是法规第十三条的硬要求,得能索引能筛
@@ -1864,4 +1894,42 @@ class StayAfterSale(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+class LicenseRenewal(Base):
+    """续证复审:过审后的资质变更走这条通道,不走 PATCH。
+
+    ## 为什么不让商家直接改
+
+    通过审核的店随手改证号不重审,等于让「亮照公示」页给假证号背书;
+    到期日更甚 —— 能随手改成 2099 的话,整个到期闸门就是摆设。
+    所以资质字段过审后一律锁死,续证提交到这张表,人工核验后才写回。
+
+    ## 为什么不复用"打回 pending 重审"
+
+    打回 pending 会让店在审核期间下架。**续证的店绝大多数是正常经营的**,
+    只是证到期了要换一张新的 —— 为了换证停业几天,惩罚的是守规矩的人。
+    所以单开一条通道:提交期间照常营业,核验通过才替换。
+    """
+
+    __tablename__ = "license_renewals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    submitted_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    license_no: Mapped[str] = mapped_column(String(50), default="")
+    license_image_url: Mapped[str] = mapped_column(String(300), default="")
+    license_expires_at: Mapped[date | None] = mapped_column(
+        Date, nullable=True)
+    business_license_no: Mapped[str] = mapped_column(String(50), default="")
+    license_subject: Mapped[str] = mapped_column(String(100), default="")
+    # pending / approved / rejected
+    status: Mapped[str] = mapped_column(
+        String(10), default="pending", server_default="pending", index=True)
+    reject_reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)

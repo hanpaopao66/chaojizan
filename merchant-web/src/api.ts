@@ -201,6 +201,9 @@ export interface Merchant {
   /** 是不是这家店登记的经营者本人。连锁的区域经理不是店员但也不是本人,
    *  资金动作(对账/提现)服务端一律 403 —— 据此隐藏入口 */
   viewer_is_owner: boolean
+  license_expires_at: string | null
+  license_stage: LicenseStage
+  license_days_left: number | null
   busy_active: boolean
   busy_until: string | null
   busy_extra_minutes: number
@@ -762,6 +765,39 @@ export interface Compliance {
 
 export function merchantCompliance(): Promise<Compliance> {
   return request('GET', '/merchants/me/compliance')
+}
+
+// ---------- 证照有效期与续证 ----------
+
+/** unknown 未登记 / ok / soon(≤30天) / urgent(≤7天) / last(≤1天)
+ *  / expired(已过期,宽限期内) / overdue(宽限期满,已停业) */
+export type LicenseStage =
+  | 'unknown' | 'ok' | 'soon' | 'urgent' | 'last' | 'expired' | 'overdue'
+
+export interface LicenseRenewal {
+  id: number
+  status: 'pending' | 'approved' | 'rejected'
+  license_no: string
+  license_expires_at: string | null
+  reject_reason: string
+  created_at: string
+  reviewed_at: string | null
+}
+
+export function myLicenseRenewal(): Promise<{ renewal: LicenseRenewal | null }> {
+  return request('GET', '/merchants/me/license-renewal')
+}
+
+/** 提交续证材料。过审后资质字段一律锁死(能随手把到期日改成 2099 的话,
+ *  整个到期闸门就是摆设),换新证只能走这条复审通道;核验期间照常营业。 */
+export function submitLicenseRenewal(fields: {
+  license_no: string
+  license_image_url: string
+  license_expires_at: string
+  business_license_no?: string
+  license_subject?: string
+}): Promise<{ ok: boolean; note: string }> {
+  return request('POST', '/merchants/me/license-renewal', fields)
 }
 
 /** 菜品标签白名单(与服务端 schemas.DISH_BADGES 一致) */

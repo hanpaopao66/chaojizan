@@ -8,6 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'dish_manage_page.dart';
 import 'finance_page.dart';
 import 'hotel/hotel_home_page.dart';
+import 'license_page.dart';
 import 'listen_service.dart';
 import 'messages_page.dart';
 import 'onboarding.dart';
@@ -1163,7 +1164,11 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           ]),
         ],
       ),
-      body: _tab == 1
+      // 证照横幅横跨所有 tab:它是唯一一件"到点就自动出事"的事
+      // (过期 → 7 天宽限 → 自动停业),不该只在某一个页面里出现
+      body: Column(children: [
+        LicenseBanner(api: widget.api, shop: widget.shop),
+        Expanded(child: _tab == 1
           ? DishManagePage(api: widget.api)
           : _tab == 2
               ? (widget.shop.viewerIsOwner
@@ -1369,7 +1374,8 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                           ),
                         ),
                       ],
-                    ),
+                    )),
+      ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),

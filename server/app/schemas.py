@@ -114,6 +114,12 @@ class MerchantIn(BaseModel):
     # biz_type=food 时为食品经营许可证;hotel 时为营业执照
     license_no: str = ""
     license_image_url: str = ""  # 证照照片(新申请必传,老库存量允许为空)
+    # 有效期与主体名称。**选填而不是必填**:存量商家没有这两项,
+    # 改成必填会把所有老商家的"驳回后回填重提"表单卡死。
+    # 填了就纳入到期提醒,不填只是不提醒 —— 不猜、不拦。
+    license_expires_at: date | None = None
+    business_license_no: str = Field(default="", max_length=50)
+    license_subject: str = Field(default="", max_length=100)
     # 外卖品类(白名单校验在路由,清单见 categories.py;酒店忽略此字段)
     category: str = "fast_food"
     # 业态:food 餐饮外卖(默认) / hotel 酒店住宿
@@ -191,6 +197,13 @@ class MerchantMeOut(MerchantOut):
 
     license_no: str = ""
     license_image_url: str = ""
+    license_expires_at: date | None = None
+    business_license_no: str = ""
+    license_subject: str = ""
+    # 证照状态:unknown 未登记 / ok / soon / urgent / last / expired / overdue
+    # (判定见 services/licenses.stage;客户端据此决定横幅的轻重)
+    license_stage: str = "unknown"
+    license_days_left: int | None = None
     special_license_no: str = ""
     special_license_image_url: str = ""
     hygiene_image_url: str = ""
@@ -295,6 +308,11 @@ class MerchantPatch(BaseModel):
     address: str | None = None
     license_no: str | None = None
     license_image_url: str | None = None
+    # 换新证时一起改:到期日变了,services/licenses.notify_key 里的水位
+    # 自然失效,新证到期时会重新走一遍完整的四档提醒
+    license_expires_at: date | None = None
+    business_license_no: str | None = Field(default=None, max_length=50)
+    license_subject: str | None = Field(default=None, max_length=100)
     announcement: str | None = None
     logo_url: str | None = None
     # "HH:MM" 或空串(清除设置)

@@ -1379,6 +1379,7 @@ async def confirm_food_safety(
         # **置闸门,不然商家自己就能开回来**:PATCH 的营业校验只拦
         # 非 approved 的店,而自动停业不改 status
         shop.food_safety_hold = True
+        shop.hold_reason = "food_safety"
         auto_suspended = True
         _fs_record(report, "auto_suspend",
                    f"30 天内第 {confirmed_30d} 起食安投诉成立,自动暂停营业待人工审核",
@@ -1482,6 +1483,7 @@ async def food_safety_suspend_merchant(
         raise HTTPException(404, "商家不存在")
     shop.is_open = False
     shop.food_safety_hold = True
+    shop.hold_reason = "food_safety"
     _fs_record(report, "suspend", payload.note.strip(), admin.id)
     await db.commit()
     await db.refresh(report)
@@ -1515,11 +1517,176 @@ async def release_food_safety_hold(
     if not shop.food_safety_hold:
         raise HTTPException(409, "该店没有食安停业闸门")
     shop.food_safety_hold = False
+    shop.hold_reason = ""
     await db.commit()
     await push_to_user(
         shop.owner_id, "食安整改复核通过",
         f"{payload.note.strip()};你现在可以在店铺页重新开始营业",
         {"type": "shop"}, record_skip=True)
+    return {"ok": True}
+
+
+@router.get("/merchants/license-alerts")
+async def license_alerts(
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """证照待处理队列:快到期、已过期、已因过期停业的店,一屏看全。
+
+    审核员从这里进,而不是靠推送找人 —— 推送是给商家的,
+    平台侧要的是"今天有几家该跟进",能排序、能一次看完。
+
+    排序按紧急程度倒序(overdue → expired → last → urgent → soon):
+    已经停业的那几家最该先处理,他们每多停一天就是真金白银的损失。
+    """
+    from datetime import date, timedelta
+
+    from ..services.licenses import GRACE_DAYS, days_left, stage
+
+    today = date.today()
+    rows = (await db.scalars(
+        select(Merchant).where(
+            Merchant.license_expires_at.is_not(None),
+            Merchant.license_expires_at <= today + timedelta(days=30),
+            Merchant.status == MerchantStatus.approved,
+        ))).all()
+    order = {"overdue": 0, "expired": 1, "last": 2, "urgent": 3, "soon": 4}
+    items = [{
+        "id": s.id, "name": s.name, "city": s.city, "address": s.address,
+        "owner_id": s.owner_id,
+        "license_no": s.license_no,
+        "license_subject": s.license_subject,
+        # 主体名称与店名不一致很正常(店招「赞小碗」/ 证上是公司全称),
+        # 但**营业执照与行业资质两张证的主体必须一致** —— 一并给出来让人核
+        "business_license_no": s.business_license_no,
+        "expires_at": s.license_expires_at,
+        "days_left": days_left(s.license_expires_at, today),
+        "stage": stage(s.license_expires_at, today),
+        "held": s.food_safety_hold,
+        "is_open": s.is_open,
+    } for s in rows]
+    items.sort(key=lambda x: (order.get(x["stage"], 9), x["days_left"] or 0))
+    return {
+        "grace_days": GRACE_DAYS,
+        "items": items,
+        "note": "过期后有 %d 天宽限期照常接单;期满自动停业,"
+                "核验新证后走食安闸门的解除接口恢复。" % GRACE_DAYS,
+    }
+
+
+@router.get("/license-renewals")
+async def list_license_renewals(
+    status: str = "pending",
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """续证核验队列。带上店里现在那张证,方便并排比对主体是否一致。"""
+    from ..models import LicenseRenewal
+
+    rows = (await db.execute(
+        select(LicenseRenewal, Merchant)
+        .join(Merchant, Merchant.id == LicenseRenewal.merchant_id)
+        .where(LicenseRenewal.status == status)
+        .order_by(LicenseRenewal.id))).all()
+    return [{
+        "id": r.id, "merchant_id": r.merchant_id, "shop_name": m.name,
+        "shop_address": m.address,
+        "held": m.food_safety_hold,
+        "new": {
+            "license_no": r.license_no,
+            "license_image_url": r.license_image_url,
+            "license_expires_at": r.license_expires_at,
+            "business_license_no": r.business_license_no,
+            "license_subject": r.license_subject,
+        },
+        # 现用的那张:主体名称/证号变没变,一眼能看出来
+        "current": {
+            "license_no": m.license_no,
+            "license_image_url": m.license_image_url,
+            "license_expires_at": m.license_expires_at,
+            "business_license_no": m.business_license_no,
+            "license_subject": m.license_subject,
+        },
+        "created_at": r.created_at,
+    } for r, m in rows]
+
+
+@router.post("/license-renewals/{renewal_id}/approve")
+async def approve_license_renewal(
+    renewal_id: int,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """核验通过:替换店里的资质,清提醒水位,并解除因过期置的停业闸门。
+
+    **清 license_notified 是必须的** —— 不清的话新证到期前 30 天那次
+    提醒会被旧水位去重掉,而那恰恰是最有用的一次(续证要跑审批流程,
+    提前一个月才来得及)。
+    """
+    from ..models import LicenseRenewal
+    from ..services.push import push_to_user
+
+    row = await db.get(LicenseRenewal, renewal_id)
+    if row is None or row.status != "pending":
+        raise HTTPException(404, "续证记录不存在或已处理")
+    shop = await db.get(Merchant, row.merchant_id)
+    if shop is None:
+        raise HTTPException(404, "商家不存在")
+
+    shop.license_no = row.license_no
+    shop.license_image_url = row.license_image_url
+    shop.license_expires_at = row.license_expires_at
+    if row.business_license_no:
+        shop.business_license_no = row.business_license_no
+    if row.license_subject:
+        shop.license_subject = row.license_subject
+    shop.license_notified = []
+    # 因证过期落的闸,证换了就该解 —— 这正是"人工核验后恢复"的那一步。
+    # **只解闸门不替商家开店**:什么时候恢复营业是商家的决定
+    # **只解自己落的那道闸**。因食安投诉成立被停业的店,交一张新证不该解封 ——
+    # 那两件事没有关系,混在一起就是"食安停业形同虚设"的又一种写法
+    unheld = False
+    if shop.food_safety_hold and shop.hold_reason == "license_expired":
+        shop.food_safety_hold = False
+        shop.hold_reason = ""
+        unheld = True
+    row.status = "approved"
+    row.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await push_to_user(
+        shop.owner_id, "新证已核验通过",
+        f"食品经营许可证已更新,有效期至 {row.license_expires_at}。"
+        + ("店铺停业闸门已解除,你可以在店铺页重新开始营业。" if unheld else ""),
+        {"type": "shop"}, record_skip=True)
+    return {"ok": True, "unheld": unheld}
+
+
+@router.post("/license-renewals/{renewal_id}/reject")
+async def reject_license_renewal(
+    renewal_id: int,
+    payload: FoodSafetyActionIn,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """核验不通过。原因原样推给商家 —— 不说清楚商家只能反复瞎传。"""
+    from ..models import LicenseRenewal
+    from ..services.push import push_to_user
+
+    if len(payload.note.strip()) < 2:
+        raise HTTPException(422, "请填写不通过的原因(会推送给商家)")
+    row = await db.get(LicenseRenewal, renewal_id)
+    if row is None or row.status != "pending":
+        raise HTTPException(404, "续证记录不存在或已处理")
+    row.status = "rejected"
+    row.reject_reason = payload.note.strip()[:200]
+    row.reviewed_at = datetime.now(timezone.utc)
+    shop = await db.get(Merchant, row.merchant_id)
+    await db.commit()
+    if shop is not None:
+        await push_to_user(
+            shop.owner_id, "续证材料未通过",
+            f"{row.reject_reason};请修正后重新提交",
+            {"type": "shop"}, record_skip=True)
     return {"ok": True}
 
 

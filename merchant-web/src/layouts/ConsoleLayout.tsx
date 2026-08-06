@@ -29,6 +29,7 @@ import FoodOrdersPage from '../pages/food/FoodOrdersPage'
 import FoodReviewsPage from '../pages/food/ReviewsPage'
 import MarketingPage from '../pages/food/MarketingPage'
 import ChainPage from '../pages/food/ChainPage'
+import LicenseBanner from '../pages/LicenseBanner'
 import AftersalesPage from '../pages/hotel/AftersalesPage'
 import CalendarPage from '../pages/hotel/CalendarPage'
 import FrontDeskPage from '../pages/hotel/FrontDeskPage'
@@ -279,6 +280,9 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
           </a>
         </Layout.Header>
         <Layout.Content style={{ padding: 16, overflow: 'auto' }}>
+          {/* 证照到期常驻横幅:它是唯一一件"到点就自动出事"的事
+              (过期 → 7 天宽限 → 自动停业),塞进消息中心会被划掉 */}
+          <LicenseBanner shop={shop} />
           <Routes>
             {isHotel ? (
               <>

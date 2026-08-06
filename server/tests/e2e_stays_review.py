@@ -84,7 +84,11 @@ assert r["_error"] in (409, 422)
 print("OK 离店可评/一单一评/匿名/标签白名单")
 
 # 3) <3 条不出分;满 3 条出滚动均分
-lst = call("GET", f"/stays/hotels?q={quote(shop['name'][:4])}&sort=rating")
+#
+# 搜索用**全名**而不是前缀:历次跑动共用同一个店名前缀,而列表封顶 50 条
+# 且按评分排序 —— 前缀搜到几十家老店时,新建的这家(还没评分,排最后)
+# 会被挤出结果,断言就变成"查无此店"而不是"这家不该出分"
+lst = call("GET", f"/stays/hotels?q={quote(shop['name'])}&sort=rating")
 mine = next((h for h in lst if h["id"] == sid), None)
 assert mine is not None and mine["rating_avg"] is None, "1 条评价不该出分"
 t2, t3 = guest(), guest()
@@ -92,7 +96,7 @@ call("POST", f"/stays/orders/{stay_through(t2)}/review", token=t2,
      body={"rating": 4})
 call("POST", f"/stays/orders/{stay_through(t3)}/review", token=t3,
      body={"rating": 3})
-lst = call("GET", f"/stays/hotels?q={quote(shop['name'][:4])}&sort=rating")
+lst = call("GET", f"/stays/hotels?q={quote(shop['name'])}&sort=rating")
 mine = next(h for h in lst if h["id"] == sid)
 assert mine["rating_avg"] == 4.0 and mine["rating_count"] == 3, mine
 d = call("GET", f"/stays/hotels/{sid}")

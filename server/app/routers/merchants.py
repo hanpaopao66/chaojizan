@@ -419,6 +419,10 @@ async def my_shop(
     out = MerchantMeOut.model_validate(shop)
     out.viewer_is_staff = not is_owner
     out.viewer_is_owner = shop.owner_id == user.id
+    # 证照档位:客户端据此决定横幅的轻重(unknown 不出横幅)
+    from ..services.licenses import days_left, stage
+    out.license_stage = stage(shop.license_expires_at)
+    out.license_days_left = days_left(shop.license_expires_at)
     # 证照只给店主(驳回后回填重提表单用);店员清空 —— 资质材料不是接单要用的
     if not is_owner:
         out.license_no = ""
@@ -469,6 +473,20 @@ async def update_my_shop(
         await guard_text(db, changes["name"], "店铺名称")
     if changes.get("announcement"):
         await guard_text(db, changes["announcement"], "店铺公告")
+    if changes.get("license_subject"):
+        await guard_text(db, changes["license_subject"], "证照主体名称")
+
+    # 换了新证 = 重新起算提醒。**必须清水位** —— 不清的话
+    # "2026-08-05:soon" 这条记录还在,新证到期前 30 天那次提醒会被去重掉,
+    # 商家再也收不到第一次提醒(而这恰恰是最有用的那一次)
+    if ("license_expires_at" in changes
+            and changes["license_expires_at"] != shop.license_expires_at):
+        changes["license_notified"] = []
+        # **不在这里自动解除 food_safety_hold**。证换了理由确实没了,
+        # 但"新证是真的吗"只有人看得出来 —— 自动解除等于让商家
+        # 随手填一个未来日期就把停业解开,那这道闸门就白设了。
+        # 换证后的店会出现在 admin 的 /admin/merchants/license-alerts 里,
+        # 核验通过后走既有的 food-safety-hold/release
 
     # 节假日计划:HolidayPlan 校验后归一化为 {from,to,closed,open,close} 存储
     if "holiday_plans" in changes:
@@ -499,9 +517,17 @@ async def update_my_shop(
     # 平时资质变更走客服人工核验 —— 通过审核的店随手改证号不重审,
     # 等于让「亮照公示」页给假证号背书;改 image_url 还能把无鉴权的
     # 公示出口指到私密桶里的任意文件
-    if (("license_no" in changes or "license_image_url" in changes)
+    # 有效期/主体名称/营业执照号同属资质,同一道闸:
+    # 到期日要是能随手改成 2099,整个到期闸门就白设了 ——
+    # 续证走 POST /me/license-renewal 的复审通道
+    _LICENSE_FIELDS = ("license_no", "license_image_url",
+                       "license_expires_at", "business_license_no",
+                       "license_subject")
+    if (any(k in changes for k in _LICENSE_FIELDS)
             and shop.status != MerchantStatus.rejected):
-        raise HTTPException(403, "资质变更需平台核验,请联系客服")
+        raise HTTPException(
+            403, "资质变更需平台核验:续证请在「证照」页提交新证,"
+                 "平台核验后自动生效")
 
     # 酒店第二证照(特种行业许可证/卫生许可证)只在**被驳回重提**时随表单更新;
     # 平时资质变更走客服人工核验(见 stays.update_hotel_profile 的口径)
@@ -2442,7 +2468,92 @@ async def my_todos(
         "coupon_batches_low": coupon_low,
         "flash_expiring": flash_expiring,
         "messages_unread": messages_unread,
+        # 证照到期:**不计入待办角标数**,单独一档。
+        # 它和"有几单待接"不是一回事 —— 混进同一个数字里,
+        # 商家清完订单就以为清完了,而这条是清不掉的(要去办证)
+        "license_stage": _license_stage_of(shop),
     }
+
+
+# ---------- 续证复审(过审后资质变更的唯一通道) ----------
+
+@router.get("/me/license-renewal")
+async def my_license_renewal(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我最近一次续证提交的进度(没提交过返回 null)。"""
+    from ..models import LicenseRenewal
+    shop = await _my_shop_or_404(db, user)
+    row = await db.scalar(
+        select(LicenseRenewal)
+        .where(LicenseRenewal.merchant_id == shop.id)
+        .order_by(LicenseRenewal.id.desc()).limit(1))
+    if row is None:
+        return {"renewal": None}
+    return {"renewal": {
+        "id": row.id, "status": row.status,
+        "license_no": row.license_no,
+        "license_expires_at": row.license_expires_at,
+        "reject_reason": row.reject_reason,
+        "created_at": row.created_at, "reviewed_at": row.reviewed_at,
+    }}
+
+
+@router.post("/me/license-renewal")
+async def submit_license_renewal(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交续证材料,人工核验后自动替换生效。
+
+    **提交期间照常营业** —— 续证的店绝大多数在正常经营,只是证到期要
+    换新的。为了换证停业几天,惩罚的是守规矩的那批人。
+    """
+    from ..models import LicenseRenewal
+    from ..services.moderation import guard_text
+
+    shop = await _money_shop_or_403(db, user)   # 资质是经营者本人的事
+    no = str(payload.get("license_no", "")).strip()[:50]
+    img = str(payload.get("license_image_url", "")).strip()[:300]
+    if not no or not img:
+        raise HTTPException(422, "请填写新证的编号并上传照片")
+    raw_exp = payload.get("license_expires_at")
+    if not raw_exp:
+        raise HTTPException(422, "请填写新证的有效期至(到期提醒靠它)")
+    try:
+        exp = date.fromisoformat(str(raw_exp))
+    except ValueError:
+        raise HTTPException(422, "有效期格式:YYYY-MM-DD")
+    if exp <= date.today():
+        # 交一张已经过期的证是没有意义的,当场拦掉比让人等三天核验强
+        raise HTTPException(422, "新证的有效期不能是今天或更早")
+    subject = str(payload.get("license_subject", "")).strip()[:100]
+    if subject:
+        await guard_text(db, subject, "证照主体名称")
+
+    pending = await db.scalar(select(LicenseRenewal).where(
+        LicenseRenewal.merchant_id == shop.id,
+        LicenseRenewal.status == "pending"))
+    if pending is not None:
+        raise HTTPException(409, "已有一份续证材料在核验中,请等结果或联系客服")
+
+    db.add(LicenseRenewal(
+        merchant_id=shop.id, submitted_by=user.id,
+        license_no=no, license_image_url=img, license_expires_at=exp,
+        business_license_no=str(
+            payload.get("business_license_no", "")).strip()[:50],
+        license_subject=subject))
+    await db.commit()
+    return {"ok": True,
+            "note": "已提交,核验通过后自动替换;核验期间照常营业。"}
+
+
+def _license_stage_of(shop) -> str:
+    """证照档位(unknown/ok/soon/urgent/last/expired/overdue)。"""
+    from ..services.licenses import stage
+    return stage(shop.license_expires_at)
 
 
 # ---------- 营销效果(花出去的钱换回了什么) ----------
@@ -2854,9 +2965,34 @@ async def my_compliance(
             Order.ready_late.is_(True),
             Order.created_at > since30)) or 0
 
+    # 证照有效期:合规档案的第一块 —— 它是唯一一条"到期就自动出事"的,
+    # 其余几块都是已经发生的事的记录
+    from ..services.licenses import GRACE_DAYS, days_left, stage
+    lic_stage = stage(shop.license_expires_at)
+    license_block = {
+        "expires_at": shop.license_expires_at,
+        "days_left": days_left(shop.license_expires_at),
+        "stage": lic_stage,
+        "grace_days": GRACE_DAYS,
+        "license_no": shop.license_no,
+        "license_subject": shop.license_subject,
+        "business_license_no": shop.business_license_no,
+        "hint": {
+            "unknown": "还没登记有效期。登记后我们会在到期前 30/7/1 天提醒你 ——"
+                       "证过期是静默失效,没人提醒就只能等监管上门。",
+            "ok": "在有效期内。",
+            "soon": "还有不到 30 天到期,续证要跑审批流程,建议现在就去办。",
+            "urgent": "7 天内到期,请尽快办理。",
+            "last": "明天到期。",
+            "expired": f"已过期,目前仍可接单,{GRACE_DAYS} 天宽限期后将暂停营业。",
+            "overdue": "已超过宽限期,店铺已暂停接单;上传新证后由平台人工核验恢复。",
+        }.get(lic_stage, ""),
+    }
+
     return {
         "shop_status": shop.status.value,
         "reject_reason": shop.reject_reason or "",
+        "license": license_block,
         "food_safety": food_safety,
         "rejected_images": rejected_images,
         "appeals": appeals,

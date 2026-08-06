@@ -1087,6 +1087,10 @@ async def auto_flow_loop() -> None:
             from .marketing import maybe_run_marketing
             await maybe_run_marketing(datetime.now(BEIJING))
             await maybe_recalc_commission_tiers()
+            # 证照到期提醒(09:00,按日防重):证过期是静默失效,
+            # 商家不会自己记得,而无证经营违法、平台有连带责任
+            from .licenses import sweep_license_expiry
+            await sweep_license_expiry(datetime.now(BEIJING))
             # 明厨亮灶探测(#156):标识必须能自动降级 ——
             # 挂着不管的「有明厨亮灶」就是在给虚假标识背书
             from .kitchen_cam import maybe_sweep as _cam_sweep
