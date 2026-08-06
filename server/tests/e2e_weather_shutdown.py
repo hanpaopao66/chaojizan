@@ -47,8 +47,10 @@ async def main():
     call("POST", "/admin/flags/weather_shutdown", admin, {"value": "on"})
     try:
         # 1) 停运中下单 409,文案说明已有订单履约
+        # retry_429:这里等的是 409(停运),不是限流。全量跑到这里时
+        # 演示账号常撞上下单频控,不重试就会红在一个和用例无关的错误上
         err = call("POST", "/orders", customer, order_body(),
-                   expect_error=True)
+                   expect_error=True, retry_429=True)
         assert err["_error"] == 409 and "极端天气" in err["detail"], err
         print("✓ 停运中下单 409")
 

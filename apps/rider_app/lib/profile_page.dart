@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'dispatch_spec_page.dart';
+import 'heatmap_page.dart';
 import 'messages_page.dart';
 import 'reviews_page.dart';
 import 'weekly_page.dart';
@@ -103,6 +104,10 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
             _group(sz, [
               _Item('我的订单', '进行中与历史订单', Icons.receipt_long_outlined,
                   widget.onOpenOrders),
+              // 只给历史,不预测、不推荐去哪跑 —— 后者是软性派单
+              _Item('哪儿有单', '过去几周各时段的实际单量(是历史不是预测)',
+                  Icons.map_outlined,
+                  () => _push(RiderHeatmapPage(api: widget.api))),
               _Item('我的周报', '每天跑了多少、钱是怎么来的(只统计不考核)',
                   Icons.insights_outlined,
                   () => _push(RiderWeeklyPage(api: widget.api))),

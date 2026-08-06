@@ -1870,6 +1870,35 @@ class ApiClient {
   Future<void> markRiderMessagesRead() =>
       _request('POST', '/riders/me/messages/read');
 
+  /// 骑手点「我到收货点了」。到这里到点送达之间的时长花在找门、
+  /// 等门禁、等电梯、爬楼上 —— 是"场景难度"唯一可测量的部分。
+  /// 幂等:重复点不刷新时间
+  Future<Order> markArrivedDrop(String orderNo,
+      {double? lat, double? lng}) async {
+    final body = <String, dynamic>{};
+    if (lat != null && lng != null) {
+      body['lat'] = lat;
+      body['lng'] = lng;
+    }
+    final data = await _request(
+        'POST', '/riders/orders/$orderNo/arrived-drop', body: body);
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 跑单热力图:过去 N 周这个时段各网格的**实际完成单量**。
+  /// 是历史不是预测 —— 样本不足的格子带 enough=false,必须显示成
+  /// "数据不够"而不是"冷区"
+  Future<Map<String, dynamic>> riderHeatmap(
+          {int? weekday, int? hour, int weeks = 4}) async {
+    final q = <String>[
+      if (weekday != null) 'weekday=$weekday',
+      if (hour != null) 'hour=$hour',
+      'weeks=$weeks',
+    ];
+    return await _request('GET', '/riders/heatmap?${q.join('&')}')
+        as Map<String, dynamic>;
+  }
+
   /// 骑手周报:逐日单量/时长/收入 + 收入构成。只统计不考核
   Future<Map<String, dynamic>> riderWeeklyReport({int weekOffset = 0}) async =>
       await _request('GET',

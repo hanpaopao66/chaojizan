@@ -490,6 +490,18 @@ class Order(Base):
     contact_name: Mapped[str] = mapped_column(String(50), default="")
     contact_phone: Mapped[str] = mapped_column(String(20), default="")
     remark: Mapped[str] = mapped_column(String(200), default="")
+    # 送达段:骑手点「我到了」的时刻,以及到送达之间的停留时长。
+    # 这几分钟花在找门、等门禁、等电梯、爬楼上 —— 是"场景难度"
+    # 唯一可测量的部分。到店等餐时长早就在记了,送达这段一直是空白。
+    # **只记录,不判罚**:一个点位慢是这个点位的事,
+    # 不是那天送这一单的骑手的事
+    arrived_drop_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    drop_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: 聚合键快照(网格+楼层段,见 services/drop_time)。**存下来不重算** ——
+    #: 网格算法一改,历史数据就全对不上了
+    drop_key: Mapped[str | None] = mapped_column(
+        String(40), nullable=True, index=True)
     # 追加单(加菜):关联原单,免配送费,骑手/配送随原单;原单取消则级联取消
     parent_order_no: Mapped[str] = mapped_column(String(32), default="", index=True)
     # 商家自配送(下单快照):不进抢单池、无骑手,商家操作配送三态;

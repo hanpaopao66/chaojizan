@@ -573,6 +573,12 @@ class Order {
         estWaitMinutes = (json['est_wait_minutes'] as num?)?.toDouble(),
         waitSource = json['wait_source'] as String? ?? 'declared',
         centsPerMinute = (json['cents_per_minute'] as num?)?.toDouble(),
+        arrivedDropAt = '${json['arrived_drop_at'] ?? ''}',
+        dropMinutes = (json['drop_minutes'] as num?)?.toDouble(),
+        // 这个收货点历史上要花多久。**样本不足时为 null** ——
+        // "这里确实快"和"我们还不知道"是两件事,客户端必须分得开
+        dropP75Minutes = (json['drop_p75_minutes'] as num?)?.toDouble(),
+        dropSample = (json['drop_sample'] as num?)?.toInt() ?? 0,
         // 配送费构成 + 中文名:**接单前就给**。8 块里有 3 块是因为
         // 要爬 6 楼 —— 知道这个才判断得了值不值
         feeParts = ((json['fee_parts'] as Map?) ?? const {})
@@ -653,6 +659,14 @@ class Order {
   /// 要标出来:「等 22 分钟」和「大概 15 分钟(样本还少)」,决策不一样
   final String waitSource;
   final double? centsPerMinute;   // 每分钟收入估算(横向比较用)
+
+  /// 骑手到达收货点的时刻(空 = 还没点「我到了」)
+  final String arrivedDropAt;
+  /// 这一单实际的送达段停留时长(分钟);null = 没点过「我到了」
+  final double? dropMinutes;
+  /// 这个收货点的历史停留时长分位数与样本数
+  final double? dropP75Minutes;
+  final int dropSample;
 
   /// 配送费构成(分)与中文名。接单前可见 ——
   /// 美团官方只承诺"接单前能看到价格",看不到明细;这一步我们做了

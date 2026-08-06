@@ -904,6 +904,16 @@ class OrderOut(BaseModel):
     eta_at: datetime | None = None
     # 骑手到店时刻:骑手端据此决定还要不要显示「我到店了」按钮
     arrived_shop_at: datetime | None = None
+    # 骑手到达收货点的时刻(同上,决定「我到了」按钮显不显示)
+    arrived_drop_at: datetime | None = None
+    # 这一单实际的送达段停留时长(分钟)。null = 骑手没点过「我到了」,
+    # **不猜** —— 凑出来的数会污染分位数,而分位数将来要给别人补时
+    drop_minutes: float | None = None
+    # 这个收货点的历史送达段耗时(分钟)与样本数。
+    # **样本不足时 p75 为 null 而不是给个凑合的数** ——
+    # 调用方必须能区分"这里确实快"和"我们还不知道"
+    drop_p75_minutes: float | None = None
+    drop_sample: int = 0
     # 配送费构成 {base, night, weather, door}(分)+ 中文名。
     # **四端都给**:顾客要知道这 8 块钱花在哪、骑手要在接单前就知道
     # 这单为什么值 8 块、商家被问起配送费贵时能解释

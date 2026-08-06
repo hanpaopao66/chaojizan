@@ -802,6 +802,19 @@ async def transition(
     # 且订单信息自交易完成之日起保存不少于三年)—— 不能只靠 order_events 推
     if payload.to_status == OrderStatus.DELIVERED:
         order.delivered_at = now
+        # 送达段停留时长:到收货点 → 点送达。这几分钟花在找门、等门禁、
+        # 等电梯、爬楼上,是"场景难度"唯一可测量的部分。
+        # 骑手没点过「我到了」就不算 —— **不猜**,猜出来的数会污染分位数,
+        # 而分位数将来要拿去给别人补时
+        if order.arrived_drop_at is not None:
+            from ..services.drop_time import drop_key
+            arrived = order.arrived_drop_at
+            if arrived.tzinfo is None:
+                arrived = arrived.replace(tzinfo=timezone.utc)
+            order.drop_minutes = round(
+                max(0.0, (now - arrived).total_seconds() / 60), 1)
+            # 聚合键存快照不重算:网格算法一改,历史数据就全对不上了
+            order.drop_key = drop_key(order.lat, order.lng, order.floor)
     if payload.to_status == OrderStatus.COMPLETED:
         order.completed_at = now
         if order.delivered_at is None:

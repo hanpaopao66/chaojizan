@@ -1,7 +1,7 @@
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import Float, cast, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -514,6 +514,97 @@ async def my_weekly_report(
     }
 
 
+@router.get("/heatmap")
+async def order_heatmap(
+    weekday: int | None = None,     # 0=周一 … 6=周日;缺省用今天
+    hour: int | None = None,        # 0-23;缺省用当前小时
+    weeks: int = 4,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """跑单热力图:**过去 N 周,这个时段、这个网格,实际完成了多少单。**
+
+    ## 只回答历史,不做预测
+
+    这一页不预测、不外推、不"推荐去哪跑"。
+
+    - **预测**在我们现在的单量上只会产生噪音,而噪音在这里的代价很实:
+      骑手照着一片"高热区"跑过去,发现没单;
+    - **推荐去哪跑**是软性派单 —— 会变成"平台让我去我才有单"的
+      另一种绑定,和不做强制派单的立场冲突。
+
+    ## 样本不足的格子不画热区
+
+    ⚠️ 这是这个功能唯一会真正伤人的失败方式:指着一片高热区跑过去
+    发现没单,比不给更糟。所以低于门槛的格子回 `enough=false`,
+    客户端**必须**显示成"数据不够"而不是"冷区" ——
+    "这里没单"和"我们不知道这里有没有单"是两件事。
+
+    只统计本城(骑手标了城市时),范围也只到骑手所在城市。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from ..services.drop_time import GRID
+
+    bj_now = datetime.now(timezone.utc) + timedelta(hours=8)
+    wd = bj_now.weekday() if weekday is None else max(0, min(6, weekday))
+    hr = bj_now.hour if hour is None else max(0, min(23, hour))
+    weeks = max(1, min(12, weeks))
+    since = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+
+    # 商家坐标而不是收货点:骑手要知道**去哪等单**,
+    # 而单是从店里出来的。按收货点画,他会守在住宅区,那里不出单
+    grid_lat = func.floor(cast(Merchant.lat, Float) / GRID)
+    grid_lng = func.floor(cast(Merchant.lng, Float) / GRID)
+    # 北京时区的星期与小时:服务器按 UTC 存,直接取 hour 会差 8 小时,
+    # 骑手看到的"午高峰"会落在凌晨
+    bj_ts = Order.created_at + text("interval '8 hours'")
+    stmt = (
+        select(grid_lat, grid_lng,
+               func.count(Order.id),
+               func.avg(cast(Merchant.lat, Float)),
+               func.avg(cast(Merchant.lng, Float)))
+        .join(Merchant, Merchant.id == Order.merchant_id)
+        .where(Order.created_at >= since,
+               Order.status.in_([OrderStatus.COMPLETED,
+                                 OrderStatus.DELIVERED]),
+               Order.pickup.is_(False),
+               func.extract("dow", bj_ts) == (wd + 1) % 7,
+               func.extract("hour", bj_ts) == hr)
+        .group_by(grid_lat, grid_lng))
+    if user.city:
+        # 和抢单池**同一条隔离规则**:商家没标注城市的不隔离(存量宽限)。
+        # 这里如果写成 `city == user.city`,热力图就会漏掉那些他其实
+        # 抢得到的单 —— 一张比现实更冷的图,比没有图更误导
+        stmt = stmt.where((Merchant.city == user.city)
+                          | (Merchant.city == "")
+                          | Merchant.city.is_(None))
+    rows = (await db.execute(stmt)).all()
+
+    # 门槛:每周至少 1 单才谈得上"这个时段这里有单"。
+    # 4 周 4 单换算成"平均每周 1 单" —— 低于这个数,
+    # 说它是热区就是在编
+    floor_n = weeks
+    cells = [{
+        "lat": round(float(alat), 5), "lng": round(float(alng), 5),
+        "orders": int(n),
+        "per_week": round(int(n) / weeks, 1),
+        "enough": int(n) >= floor_n,
+    } for _, _, n, alat, alng in rows if alat is not None]
+    cells.sort(key=lambda c: -c["orders"])
+    enough = [c for c in cells if c["enough"]]
+    return {
+        "weekday": wd, "hour": hr, "weeks": weeks,
+        "cells": cells[:200],
+        "note": (f"过去 {weeks} 周,周{'一二三四五六日'[wd]} {hr} 点这个时段的"
+                 f"**实际完成单量**。这是历史,不是预测 —— "
+                 f"我们不预测哪里会爆单,也不建议你去哪跑。"
+                 + ("" if enough else
+                    "当前这个时段的数据还不够,先按自己的经验跑。")),
+        "insufficient": len(cells) - len(enough),
+    }
+
+
 @router.post("/feedback")
 async def submit_feedback(
     payload: dict,
@@ -811,6 +902,12 @@ async def available_orders(
     now = datetime.now(timezone.utc)
     # 出餐时长分位数**批量取**:逐个查会把一次抢单变成几十次往返
     preps = await prep_time.stats_for(db, [o.merchant_id for o in orders])
+    # 送达段历史耗时:同样**批量取**(逐个查会把一次抢单变成几十次往返)。
+    # 样本不足的点位返回 None,客户端据此显示"这个点还没有历史数据" ——
+    # 拿 3 单算出来的数摆给骑手看,比不给更误导
+    from ..services import drop_time
+    drops = await drop_time.stats_for(
+        db, [drop_time.drop_key(o.lat, o.lng, o.floor) for o in orders])
     radius_m = (user.grab_radius_km * 1000
                 if user.grab_radius_km and rider_pos else None)
     scored: list[tuple[float, OrderOut]] = []
@@ -879,6 +976,11 @@ async def available_orders(
             out.fee_part_labels = {k: FEE_PART_LABELS[k]
                                    for k in out.fee_parts
                                    if k in FEE_PART_LABELS}
+
+            dk = drop_time.drop_key(order.lat, order.lng, order.floor)
+            stat = drops.get(dk) or {}
+            out.drop_p75_minutes = stat.get("p75_minutes")
+            out.drop_sample = stat.get("sample", 0)
 
             # 接单半径过滤(骑手自设);同店/顺路豁免 —— 手头单顺路的永远给看
             if (radius_m is not None and distance > radius_m
@@ -1091,6 +1193,63 @@ async def mark_arrived_shop(
     order.arrived_shop_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(order)
+    merchant = await db.get(Merchant, order.merchant_id)
+    return order_out(order, merchant, viewer=user)
+
+
+@router.post("/orders/{order_no}/arrived-drop", response_model=OrderOut)
+async def mark_arrived_drop(
+    order_no: str,
+    payload: dict | None = None,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手点「我到收货点了」。
+
+    ## 这个时间戳补的是一块空白
+
+    到店等餐时长早就在记(到店 → 取餐),**送达这一段一直没有**。
+    而"这个小区难进""这栋写字楼电梯要等十分钟"这类事全部发生在
+    这一段里 —— 到了楼下到点送达之间,花在找门牌、等门禁、等电梯、
+    爬楼、打电话让人下来上面。
+
+    没有它,"场景难度"就只能靠拍脑袋;有了它,才谈得上用真实分位数
+    给这个点位补时。
+
+    ## 只记录,不产生任何后果
+
+    这一步不进 ETA、不进钱、不进考核。**一个点位慢是这个点位的事,
+    不是那天送这一单的骑手的事** —— 这条边界要提前划死,
+    因为有了时长数据之后,"送得慢的骑手"是一个非常容易顺手做出来的
+    指标,而它和平台不做骑手评分的立场直接冲突。
+
+    ## 幂等,且以骑手主动点的那次为准
+
+    重复点不刷新时间(刷新的话多点一次就把时长清零了)。
+    围栏可以做自动提示,但判定用他点的那一下 —— 楼挨着楼,
+    自动触发会在隔壁单元就记上,把数据搞脏。
+    """
+    from datetime import datetime, timezone
+
+    from ..services.pricing import haversine_m
+
+    order = await db.scalar(select(Order).where(Order.order_no == order_no))
+    if order is None or order.rider_id != user.id:
+        raise HTTPException(404, "订单不存在")
+    if order.status != OrderStatus.PICKED_UP:
+        raise HTTPException(409, "只有配送中的单能标记到达收货点")
+    if order.arrived_drop_at is None:
+        if payload and payload.get("lat") is not None:
+            # 带了坐标就顺手校验(离收货点 500 米外点了会被拒,防随手乱点)。
+            # 不带坐标照样放行 —— 定位权限关着的骑手不该用不了这个功能
+            dist = haversine_m(float(payload["lat"]), float(payload["lng"]),
+                               order.lat, order.lng)
+            if dist > _ARRIVE_RADIUS_M * 5:
+                raise HTTPException(
+                    409, f"离收货点还有约 {int(dist)} 米,到了再点")
+        order.arrived_drop_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(order)
     merchant = await db.get(Merchant, order.merchant_id)
     return order_out(order, merchant, viewer=user)
 

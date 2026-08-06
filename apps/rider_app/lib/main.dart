@@ -697,6 +697,32 @@ class _RiderHomePageState extends State<RiderHomePage>
     }
   }
 
+  /// 「我到收货点了」。
+  ///
+  /// 到这一下到点送达之间的时长,花在找门牌、等门禁、等电梯、爬楼、
+  /// 打电话让人下来上面 —— 这是"场景难度"唯一可测量的部分,
+  /// 而在这之前平台对这几分钟一无所知。
+  ///
+  /// 提示文案要说清楚这个数**不用来考核他**:有了时长数据之后,
+  /// "送得慢的骑手"是一个非常容易顺手做出来的指标,而平台不做骑手评分。
+  /// 不说清楚,他会以为自己被掐表了,然后开始提前点。
+  Future<void> _markArrivedDrop(Order order) async {
+    try {
+      await widget.api.markArrivedDrop(order.orderNo,
+          lat: _riderPosition.value?.lat, lng: _riderPosition.value?.lng);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已记录到达时间。这段时间只用来了解这个点位难不难送,'
+              '不考核你'),
+          duration: Duration(seconds: 5)));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+    }
+  }
+
   /// 配送异常上报:途中(联系不上/地址错/餐损)+ 交接(到店未出餐/餐不齐)。
   /// 到店未出餐 = 催商家出餐,等满 10 分钟还可无责转单;
   /// 餐损/餐不齐必须拍照,走平台仲裁。
@@ -1251,6 +1277,15 @@ class _RiderHomePageState extends State<RiderHomePage>
                           fontWeight: FontWeight.w600,
                           color: Theme.of(context).sz.earn)),
               ]),
+            // 这个收货点历史上要花多久。**样本不足就直说不知道** ——
+            // 拿 3 单算出来的数摆给骑手看,比不给更误导
+            if (order.dropP75Minutes != null)
+              Text(
+                  '这个点位:送到手上平均还要 '
+                  '${order.dropP75Minutes!.toStringAsFixed(0)} 分钟'
+                  '(${order.dropSample} 单实测)',
+                  style: TextStyle(
+                      fontSize: 12, color: Theme.of(context).sz.inkMuted)),
             if (order.hasAlcohol)
               Text('🍺 含酒精饮品,送达请查验收件人年龄',
                   style: TextStyle(
@@ -1458,6 +1493,15 @@ class _RiderHomePageState extends State<RiderHomePage>
                                         api: widget.api, order: order))),
                             child: const Text('申诉')));
                       } else if (order.status == OrderStatus.pickedUp) {
+                        // 「我到了」:到这里到点送达之间的时长花在找门、
+                        // 等门禁、等电梯、爬楼上。点了才有数,不点不猜
+                        if (order.arrivedDropAt.isEmpty) {
+                          actions.add(OutlinedButton.icon(
+                              icon: const Icon(Icons.pin_drop_outlined,
+                                  size: 18),
+                              onPressed: () => _markArrivedDrop(order),
+                              label: const Text('我到了')));
+                        }
                         actions.add(TextButton(
                             onPressed: () => _reportAddress(order),
                             child: const Text('地址不准')));

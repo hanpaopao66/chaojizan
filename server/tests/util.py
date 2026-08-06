@@ -12,7 +12,17 @@ BASE = os.environ.get("SUPERZ_API", "http://127.0.0.1:8010")
 
 
 def call(method, path, token=None, body=None, expect_error=False,
-         _retried=False, headers=None):
+         _retried=False, headers=None, retry_429=False):
+    """[retry_429] 给「**期待某个错误、但那个错误不是 429**」的调用用。
+
+    全套 e2e 共用演示账号连着跑一百多个套件,很容易在末尾撞上自家的
+    下单/工单频控。不带这个开关时,expect_error 的调用会把 429 原样
+    返回给断言,表现成"我等的是 409,来的是 429" —— 排查它和排查真 bug
+    一样费时,而它只是环境。
+
+    **默认关**:e2e_urge / e2e_support_audit 这些正是在测限流本身,
+    对它们重试就等于把用例测的东西绕过去了。
+    """
     req = urllib.request.Request(BASE + path, method=method)
     req.add_header("Content-Type", "application/json")
     if token:
@@ -26,7 +36,7 @@ def call(method, path, token=None, body=None, expect_error=False,
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
         detail = json.loads(e.read()).get("detail")
-        if expect_error:
+        if expect_error and not (e.code == 429 and retry_429):
             return {"_error": e.code, "detail": detail}
         if e.code == 429 and not _retried:
             # 全套 e2e 共用演示账号,可能撞上自家限流(按分钟固定窗口):
@@ -35,7 +45,7 @@ def call(method, path, token=None, body=None, expect_error=False,
             print(f"  (限流 429,等 {wait}s 窗口翻转后重试)")
             time.sleep(wait)
             return call(method, path, token, body, expect_error,
-                        _retried=True, headers=headers)
+                        _retried=True, headers=headers, retry_429=retry_429)
         raise SystemExit(f"FAIL {method} {path}: {e.code} {detail}")
 
 
