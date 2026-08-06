@@ -187,3 +187,81 @@ async def sweep_license_expiry(now_beijing) -> dict[str, int]:
             notified += 1
         await db.commit()
     return {"notified": notified, "held": held}
+
+
+async def sweep_health_certs(now_beijing) -> dict[str, int]:
+    """每天 09:00 一并扫从业人员健康证。
+
+    ## 为什么和证照分开一个函数、却共用同一个时间窗
+
+    判定逻辑完全一样(stage/days_left),但**后果不同**:证照过期会落闸停业,
+    健康证过期只提醒 —— 证是按人的,一个员工的证过期停整家店不成比例。
+    把两件后果不同的事写进同一个循环,迟早有人顺手给健康证也加上落闸。
+
+    ## 一店一条,不是一人一条
+
+    三个员工的证同一周到期,发三条推送只会让人把通知关掉。
+    聚合成一条「N 位员工的健康证 30 天内到期」,点进台账看是谁。
+    """
+    from sqlalchemy import select
+
+    from ..db import SessionLocal
+    from ..models import Merchant, MerchantStatus, StaffHealthCert
+    from ..redis_client import get_redis
+    from .auto_flow import _in_window
+    from .push import push_to_user
+
+    if not _in_window("09:00", now_beijing, window_seconds=300):
+        return {}
+    redis = get_redis()
+    if not await redis.set(f"health_certs:{now_beijing.date()}", 1,
+                           ex=86400, nx=True):
+        return {}
+
+    today = now_beijing.date()
+    notified = 0
+    async with SessionLocal() as db:
+        # 只捞 30 天内到期或已过期的在岗证,不全表扫
+        rows = (await db.execute(
+            select(StaffHealthCert.merchant_id, StaffHealthCert.name,
+                   StaffHealthCert.expires_at)
+            .where(StaffHealthCert.archived.is_(False),
+                   StaffHealthCert.expires_at.is_not(None),
+                   StaffHealthCert.expires_at
+                   <= today + timedelta(days=30)))).all()
+        by_shop: dict[int, list[tuple[str, date]]] = {}
+        for mid, name, exp in rows:
+            by_shop.setdefault(mid, []).append((name, exp))
+        if not by_shop:
+            return {"notified": 0}
+
+        shops = {m.id: m for m in (await db.scalars(
+            select(Merchant).where(
+                Merchant.id.in_(list(by_shop)),
+                Merchant.status == MerchantStatus.approved)))}
+        for mid, people in by_shop.items():
+            shop = shops.get(mid)
+            if shop is None:
+                continue
+            expired = [n for n, e in people if stage(e, today)
+                       in ("expired", "overdue")]
+            soon = [n for n, e in people if stage(e, today)
+                    in ("soon", "urgent", "last")]
+            if expired:
+                title = f"{len(expired)} 位员工的健康证已过期"
+                body = (f"{'、'.join(expired[:3])}"
+                        f"{' 等' if len(expired) > 3 else ''}的健康证已过期。"
+                        f"接触直接入口食品的岗位需持证上岗,"
+                        f"请尽快安排体检并在台账里更新。")
+            elif soon:
+                title = f"{len(soon)} 位员工的健康证 30 天内到期"
+                body = (f"{'、'.join(soon[:3])}"
+                        f"{' 等' if len(soon) > 3 else ''}的健康证即将到期。"
+                        f"体检要排队,建议现在就约。")
+            else:
+                continue
+            await push_to_user(shop.owner_id, title, body,
+                               extras={"type": "health_cert"},
+                               record_skip=True)
+            notified += 1
+    return {"notified": notified}

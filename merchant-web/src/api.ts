@@ -1016,6 +1016,45 @@ export function updateHotelProfile(fields: Record<string, unknown>): Promise<unk
   return request('PATCH', '/stays/me/profile', fields)
 }
 
+// ---------- 从业人员健康证台账 ----------
+
+export interface HealthCert {
+  id: number
+  name: string
+  role: string
+  /** 列表里是打码的;只有刚提交返回的那一条回全号 */
+  cert_no: string
+  photo_url: string
+  issued_at: string | null
+  expires_at: string | null
+  days_left: number | null
+  stage: LicenseStage
+  archived: boolean
+}
+
+export function healthCerts(includeArchived = false):
+Promise<{ items: HealthCert[]; expiring: number; note: string }> {
+  return request('GET',
+    `/merchants/me/health-certs?include_archived=${includeArchived}`)
+}
+
+/** 录一张健康证。同名同岗视为换新证,更新原记录而不是堆两条。 */
+export function saveHealthCert(fields: {
+  name: string
+  role?: string
+  cert_no?: string
+  photo_url?: string
+  issued_at?: string
+  expires_at: string
+}): Promise<HealthCert> {
+  return request('POST', '/merchants/me/health-certs', fields)
+}
+
+/** 离职:**归档不删除** —— 监管查的是"当时在岗的人有没有证"。 */
+export function archiveHealthCert(id: number): Promise<unknown> {
+  return request('DELETE', `/merchants/me/health-certs/${id}`)
+}
+
 // ---------- 连锁店群 ----------
 
 export interface BrandShop {

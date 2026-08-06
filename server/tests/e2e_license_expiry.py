@@ -224,6 +224,99 @@ async def main():
         "没登记有效期的店不该进待处理队列 —— 不猜就是不猜"
     print("✓ 未登记有效期的店不进 admin 队列")
 
+
+
+    # ================= W:从业人员健康证台账 =================
+    #
+    # 与证照同一套档位判定,但**后果不同**:证照过期落闸停业,
+    # 健康证只提醒 —— 证是按人的,一个员工过期停整家店不成比例。
+    # 这条差别是本段用例的重点。
+    tok5, shop5 = new_shop(f"健康证店{random.randrange(10**4)}")
+
+    empty = call("GET", "/merchants/me/health-certs", tok5)
+    assert empty["items"] == [] and empty["expiring"] == 0, empty
+    print("✓ 健康证台账初始为空")
+
+    bad = call("POST", "/merchants/me/health-certs", tok5,
+               {"name": "张三"}, expect_error=True)
+    assert bad["_error"] == 422, f"没有有效期就没法提醒:{bad}"
+    bad = call("POST", "/merchants/me/health-certs", tok5,
+               {"name": "加微信转账便宜点",
+                "expires_at": (today + timedelta(days=300)).isoformat()},
+               expect_error=True)
+    assert bad["_error"] == 422, f"姓名要过敏感词:{bad}"
+    print("✓ 必填有效期、姓名过敏感词闸门")
+
+    c1 = call("POST", "/merchants/me/health-certs", tok5, {
+        "name": "张三", "role": "后厨", "cert_no": "510100199001011234",
+        "photo_url": "/uploads/hc1.jpg",
+        "expires_at": (today + timedelta(days=300)).isoformat()})
+    assert c1["cert_no"] == "510100199001011234", "编辑时回全号"
+    c2 = call("POST", "/merchants/me/health-certs", tok5, {
+        "name": "李四", "role": "配菜", "cert_no": "510100199202022345",
+        "expires_at": (today + timedelta(days=10)).isoformat()})
+    c3 = call("POST", "/merchants/me/health-certs", tok5, {
+        "name": "王五", "role": "传菜", "cert_no": "510100199303033456",
+        "expires_at": (today - timedelta(days=5)).isoformat()})
+
+    lst = call("GET", "/merchants/me/health-certs", tok5)
+    assert len(lst["items"]) == 3, lst
+    # 列表里打码:台账是给商家自查"谁的证快到期",不是员工身份信息查询库
+    for i in lst["items"]:
+        assert "*" in i["cert_no"], f"列表里证件号要打码:{i}"
+    print("✓ 列表证件号打码(编辑那一条才回全)")
+
+    # 快到期/已过期的排前面
+    assert lst["items"][0]["name"] == "王五", f"已过期的该排最前:{lst}"
+    assert lst["items"][0]["stage"] == "expired"
+    assert lst["items"][1]["name"] == "李四"
+    assert lst["items"][2]["stage"] == "ok"
+    assert lst["expiring"] == 2, lst
+    print("✓ 按紧急程度排序,expiring 只数快到期与已过期的")
+
+    # 同名同岗 = 换新证,更新那一条而不是堆两条
+    again = call("POST", "/merchants/me/health-certs", tok5, {
+        "name": "王五", "role": "传菜", "cert_no": "510100199303033456",
+        "expires_at": (today + timedelta(days=365)).isoformat()})
+    assert again["id"] == c3["id"], "同名同岗该更新而不是新增"
+    lst = call("GET", "/merchants/me/health-certs", tok5)
+    assert len(lst["items"]) == 3 and lst["expiring"] == 1, lst
+    print("✓ 同名同岗换新证:更新原记录,不堆重复条目")
+
+    # 待办与合规档案:单列一档,不混进角标数
+    todos = call("GET", "/merchants/me/todos", tok5)
+    assert todos["health_certs_expiring"] == 1, todos
+    comp = call("GET", "/merchants/me/compliance", tok5)
+    assert comp["health_certs"]["total"] == 3, comp["health_certs"]
+    assert comp["health_certs"]["expiring"] == 1
+    assert comp["health_certs"]["expired"] == 0
+    print("✓ 待办与合规档案都能看到健康证口径")
+
+    # **健康证过期不停业**:整段最该守的一条
+    assert call("GET", "/merchants/me", tok5)["is_open"] in (True, False)
+    call("PATCH", "/merchants/me", tok5, {"is_open": True})
+    me5 = call("GET", "/merchants/me", tok5)
+    assert me5["is_open"] is True, \
+        "健康证到期只提醒不停业 —— 一个员工的证过期停整家店不成比例"
+    print("✓ 健康证到期不影响营业(与证照过期的后果明确不同)")
+
+    # 离职归档:不再提醒、不计数,但记录留着备查
+    call("DELETE", f"/merchants/me/health-certs/{c2['id']}", tok5)
+    lst = call("GET", "/merchants/me/health-certs", tok5)
+    assert len(lst["items"]) == 2, f"归档后不在默认列表里:{lst}"
+    withArchived = call(
+        "GET", "/merchants/me/health-certs?include_archived=true", tok5)
+    assert len(withArchived["items"]) == 3, \
+        "归档是留证不是删除 —— 监管查的是当时在岗的人有没有证"
+    print("✓ 离职归档:默认列表隐藏,记录仍可查")
+
+    # 别人家的记录动不了
+    other_tok, _ = new_shop(f"路人店{random.randrange(10**4)}")
+    steal = call("DELETE", f"/merchants/me/health-certs/{c1['id']}",
+                 other_tok, expect_error=True)
+    assert steal["_error"] == 404, f"不能归档别人家的记录:{steal}"
+    print("✓ 跨店归档被拒")
+
     print("\ne2e_license_expiry 全部通过 ✅")
 
 

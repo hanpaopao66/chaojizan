@@ -1933,3 +1933,52 @@ class LicenseRenewal(Base):
         DateTime(timezone=True), server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+
+
+class StaffHealthCert(Base):
+    """从业人员健康证台账。
+
+    《食品安全法》第四十五条:从事接触直接入口食品工作的从业人员应当
+    每年进行健康检查、取得健康证明后方可上岗。**证一年一换、到期是静默
+    失效** —— 和食品经营许可证同一个毛病,只是人更多、更没人记得。
+
+    ## 为什么记在平台而不是让商家自己管
+
+    监管检查要看的是**记录**。商家把健康证塞在抽屉里,查的时候翻不出来
+    就是没有。做成台账之后,到期前平台替他记着,检查时一屏可查。
+
+    ## 这是别人的个人信息,不是商家的资料
+
+    姓名 + 证件号 + 照片,主体是**员工本人**,不是商家。所以:
+    - 照片走私密桶(storage.PURPOSES['health_cert'] = True);
+    - 列表里证件号打码,只有编辑时本人那条才回全;
+    - **绝不进「亮照公示」那个无鉴权的对外出口** —— 那个页面是给顾客看
+      店铺资质的,不是公示员工个人信息的。
+
+    ## 到期不停业
+
+    健康证是**按人**的,一个员工的证过期,停整家店不成比例。
+    所以只提醒 + 进合规档案 + admin 可见,不落闸 ——
+    与「不做违规积分」的立场一致。
+    """
+
+    __tablename__ = "staff_health_certs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    name: Mapped[str] = mapped_column(String(30))
+    # 岗位:后厨/配菜/传菜/前厅…… 自由填,不做枚举
+    # (各家叫法不同,枚举只会逼商家往"其他"里塞)
+    role: Mapped[str] = mapped_column(String(20), default="")
+    cert_no: Mapped[str] = mapped_column(String(40), default="")
+    photo_url: Mapped[str] = mapped_column(String(300), default="")
+    issued_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    expires_at: Mapped[date | None] = mapped_column(
+        Date, nullable=True, index=True)
+    # 离职的不删除、只归档:监管查的是"当时在岗的人有没有证",
+    # 删掉等于把当时的合规记录也一起删了
+    archived: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

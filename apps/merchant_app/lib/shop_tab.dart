@@ -7,6 +7,7 @@ import 'dashboard_page.dart';
 import 'messages_page.dart';
 import 'reviews_page.dart';
 import 'chain_page.dart';
+import 'health_certs_page.dart';
 import 'license_page.dart';
 import 'rules_page.dart';
 import 'kitchen_cam_page.dart';
@@ -1921,6 +1922,19 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     .push(MaterialPageRoute(
                         builder: (_) =>
                             LicenseRenewalPage(api: widget.api, shop: shop)))
+                    .then((_) => _load()),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.health_and_safety_outlined),
+                title: const Text('从业人员健康证'),
+                subtitle: const Text('一年一检,到期前 30 天提醒 —— 检查看的是记录'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context)
+                    .push(MaterialPageRoute(
+                        builder: (_) => HealthCertsPage(api: widget.api)))
                     .then((_) => _load()),
               ),
             ),

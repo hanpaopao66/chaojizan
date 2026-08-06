@@ -2409,9 +2409,19 @@ async def my_todos(
 ):
     """待办聚合:商家当下欠着的事,数字非零才值得展示。
     只聚合已有数据,不引入新状态 —— 每一项点进去都有现成的处理界面。"""
-    from ..models import AfterSale, AfterSaleStatus, Review
+    from ..models import AfterSale, AfterSaleStatus, Review, StaffHealthCert
+    from ..services.licenses import stage as _lic_stage
     shop = await _my_shop_or_404(db, user)
     now = datetime.now(timezone.utc)
+
+    # 健康证:30 天内到期或已过期的在岗人数(归档的不算)
+    cert_rows = (await db.scalars(
+        select(StaffHealthCert.expires_at).where(
+            StaffHealthCert.merchant_id == shop.id,
+            StaffHealthCert.archived.is_(False)))).all()
+    health_expiring = sum(
+        1 for e in cert_rows
+        if _lic_stage(e) in ("soon", "urgent", "last", "expired", "overdue"))
 
     pending_orders = await db.scalar(
         select(func.count(Order.id)).where(
@@ -2468,11 +2478,146 @@ async def my_todos(
         "coupon_batches_low": coupon_low,
         "flash_expiring": flash_expiring,
         "messages_unread": messages_unread,
-        # 证照到期:**不计入待办角标数**,单独一档。
-        # 它和"有几单待接"不是一回事 —— 混进同一个数字里,
-        # 商家清完订单就以为清完了,而这条是清不掉的(要去办证)
+        # 证照/健康证到期:**不计入待办角标数**,单独一档。
+        # 它们和"有几单待接"不是一回事 —— 混进同一个数字里,
+        # 商家清完订单就以为清完了,而这两条是清不掉的(要去办证)
         "license_stage": _license_stage_of(shop),
+        "health_certs_expiring": health_expiring,
     }
+
+
+# ---------- 从业人员健康证台账 ----------
+
+def _mask_cert_no(no: str) -> str:
+    """证件号打码。台账是给商家自查"谁的证快到期了"用的,
+    不是员工身份信息的查询库 —— 号码只在编辑那一条时回全。"""
+    if len(no) <= 6:
+        return "*" * len(no)
+    return f"{no[:3]}{'*' * (len(no) - 6)}{no[-3:]}"
+
+
+def _cert_out(c, *, full_no: bool = False) -> dict:
+    from ..services.licenses import days_left, stage
+    return {
+        "id": c.id, "name": c.name, "role": c.role,
+        "cert_no": c.cert_no if full_no else _mask_cert_no(c.cert_no),
+        "photo_url": c.photo_url,
+        "issued_at": c.issued_at, "expires_at": c.expires_at,
+        "days_left": days_left(c.expires_at),
+        # 与食品经营许可证同一套档位判定,商家不用学第二套说法
+        "stage": stage(c.expires_at),
+        "archived": c.archived,
+    }
+
+
+@router.get("/me/health-certs")
+async def my_health_certs(
+    include_archived: bool = False,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """本店从业人员健康证台账,快到期的排前面。
+
+    《食品安全法》四十五条要求接触直接入口食品的从业人员持证上岗、
+    一年一检。监管检查看的是**记录** —— 塞在抽屉里翻不出来就是没有。
+    """
+    from ..models import StaffHealthCert
+    from ..services.licenses import stage
+
+    shop = await _my_shop_or_404(db, user)
+    stmt = select(StaffHealthCert).where(
+        StaffHealthCert.merchant_id == shop.id)
+    if not include_archived:
+        stmt = stmt.where(StaffHealthCert.archived.is_(False))
+    rows = (await db.scalars(stmt.order_by(StaffHealthCert.id))).all()
+    items = [_cert_out(c) for c in rows]
+    order = {"overdue": 0, "expired": 1, "last": 2, "urgent": 3,
+             "soon": 4, "unknown": 5, "ok": 6}
+    items.sort(key=lambda x: (order.get(x["stage"], 9),
+                              x["days_left"] if x["days_left"] is not None
+                              else 9999))
+    expiring = sum(1 for i in items if i["stage"] in
+                   ("soon", "urgent", "last", "expired", "overdue")
+                   and not i["archived"])
+    return {
+        "items": items,
+        "expiring": expiring,
+        "note": "健康证一年一检。到期只提醒、不停业 —— 证是按人的,"
+                "一个人的证过期停整家店不成比例。",
+    }
+
+
+@router.post("/me/health-certs")
+async def add_health_cert(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """录一张健康证。同名同岗视为**换新证**,更新那一条而不是堆两条 ——
+    堆着的话台账里一个人两条记录,到期提醒会重复,查的时候也分不清哪张有效。"""
+    from ..models import StaffHealthCert
+    from ..services.moderation import guard_text
+
+    shop = await _my_shop_or_404(db, user)
+    name = str(payload.get("name", "")).strip()[:30]
+    if len(name) < 2:
+        raise HTTPException(422, "请填写姓名")
+    await guard_text(db, name, "姓名")
+    role = str(payload.get("role", "")).strip()[:20]
+    if role:
+        await guard_text(db, role, "岗位")
+    raw_exp = payload.get("expires_at")
+    if not raw_exp:
+        raise HTTPException(422, "请填写有效期至(到期提醒靠它)")
+    try:
+        exp = date.fromisoformat(str(raw_exp))
+    except ValueError:
+        raise HTTPException(422, "有效期格式:YYYY-MM-DD")
+    issued = None
+    if payload.get("issued_at"):
+        try:
+            issued = date.fromisoformat(str(payload["issued_at"]))
+        except ValueError:
+            raise HTTPException(422, "发证日期格式:YYYY-MM-DD")
+
+    existing = await db.scalar(select(StaffHealthCert).where(
+        StaffHealthCert.merchant_id == shop.id,
+        StaffHealthCert.name == name,
+        StaffHealthCert.role == role,
+        StaffHealthCert.archived.is_(False)))
+    cert = existing or StaffHealthCert(merchant_id=shop.id, name=name,
+                                       role=role)
+    cert.cert_no = str(payload.get("cert_no", "")).strip()[:40]
+    cert.photo_url = str(payload.get("photo_url", "")).strip()[:300]
+    cert.expires_at = exp
+    cert.issued_at = issued
+    if existing is None:
+        db.add(cert)
+    await db.commit()
+    await db.refresh(cert)
+    return _cert_out(cert, full_no=True)
+
+
+@router.delete("/me/health-certs/{cert_id}")
+async def archive_health_cert(
+    cert_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """员工离职:**归档不删除**。
+
+    监管查的是"当时在岗的人有没有证",记录删掉等于把当时的合规证据
+    也一起删了 —— 到时候说不清。归档后不再提醒、不计入在岗人数。
+    """
+    from ..models import StaffHealthCert
+
+    shop = await _my_shop_or_404(db, user)
+    cert = await db.get(StaffHealthCert, cert_id)
+    if cert is None or cert.merchant_id != shop.id:
+        raise HTTPException(404, "记录不存在")
+    cert.archived = True
+    await db.commit()
+    return {"ok": True, "note": "已归档;记录仍保留以备核查"}
 
 
 # ---------- 续证复审(过审后资质变更的唯一通道) ----------
@@ -2989,10 +3134,28 @@ async def my_compliance(
         }.get(lic_stage, ""),
     }
 
+    # 从业人员健康证:与证照同一套档位口径
+    from ..models import StaffHealthCert
+    cert_rows = (await db.scalars(
+        select(StaffHealthCert).where(
+            StaffHealthCert.merchant_id == shop.id,
+            StaffHealthCert.archived.is_(False)))).all()
+    health_block = {
+        "total": len(cert_rows),
+        "expiring": sum(1 for c in cert_rows if stage(c.expires_at) in
+                        ("soon", "urgent", "last")),
+        "expired": sum(1 for c in cert_rows if stage(c.expires_at) in
+                       ("expired", "overdue")),
+        "missing": sum(1 for c in cert_rows if c.expires_at is None),
+        "hint": "《食品安全法》四十五条:接触直接入口食品的从业人员"
+                "一年一检、持证上岗。到期只提醒不停业 —— 证是按人的。",
+    }
+
     return {
         "shop_status": shop.status.value,
         "reject_reason": shop.reject_reason or "",
         "license": license_block,
+        "health_certs": health_block,
         "food_safety": food_safety,
         "rejected_images": rejected_images,
         "appeals": appeals,

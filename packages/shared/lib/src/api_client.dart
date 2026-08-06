@@ -1215,6 +1215,45 @@ class ApiClient {
     });
   }
 
+  // ---------- 从业人员健康证台账 ----------
+
+  /// 本店健康证台账,快到期的排前面。
+  ///
+  /// 《食品安全法》四十五条:接触直接入口食品的从业人员一年一检、持证上岗。
+  /// **到期只提醒不停业** —— 证是按人的,一个员工过期停整家店不成比例
+  /// (这一点和食品经营许可证不同)。
+  Future<Map<String, dynamic>> healthCerts(
+      {bool includeArchived = false}) async {
+    final data = await _request('GET', '/merchants/me/health-certs',
+        query: {'include_archived': '\$includeArchived'});
+    return data as Map<String, dynamic>;
+  }
+
+  /// 录一张健康证。**同名同岗视为换新证**,更新原记录而不是堆两条。
+  Future<Map<String, dynamic>> saveHealthCert({
+    required String name,
+    required String expiresAt,
+    String role = '',
+    String certNo = '',
+    String photoUrl = '',
+    String? issuedAt,
+  }) async {
+    final data = await _request('POST', '/merchants/me/health-certs', body: {
+      'name': name,
+      'role': role,
+      'cert_no': certNo,
+      'photo_url': photoUrl,
+      'expires_at': expiresAt,
+      if (issuedAt != null) 'issued_at': issuedAt,
+    });
+    return data as Map<String, dynamic>;
+  }
+
+  /// 员工离职:**归档不删除** —— 监管查的是"当时在岗的人有没有证"。
+  Future<void> archiveHealthCert(int id) async {
+    await _request('DELETE', '/merchants/me/health-certs/\$id');
+  }
+
   // ---------- 连锁店群 ----------
   /// 我的品牌与门店列表。
   ///
