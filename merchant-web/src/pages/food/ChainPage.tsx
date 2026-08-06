@@ -8,7 +8,8 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   addBrandMember, ApiError, BrandMemberRow, BrandOverview, BrandShop,
   brandMembers, brandOverview, createBrand, Merchant, MyBrand, myBrand,
-  openBrandShop, removeBrandMember, switchShop, syncBrandMenu, UPLOAD_ACCEPT,
+  brandFinance, BrandFinance, downloadFile, openBrandShop, removeBrandMember,
+  switchShop, syncBrandCoupons, syncBrandMenu, syncBrandPromo, UPLOAD_ACCEPT,
   uploadImage, yuan,
 } from '../../api'
 
@@ -95,6 +96,8 @@ export default function ChainPage({ shop }: { shop: Merchant }) {
               ]}
             />
             {isOwner && <SyncMenuButton shops={brand.shops} />}
+            {isOwner && <SyncPromoButton shops={brand.shops} />}
+            {isOwner && <SyncCouponsButton shops={brand.shops} />}
             {isOwner && (
               <NewShopButton shops={brand.shops} onDone={load} />
             )}
@@ -157,6 +160,8 @@ export default function ChainPage({ shop }: { shop: Merchant }) {
           </>
         )}
       </Card>
+
+      {isOwner && <BrandFinanceCard days={days} />}
 
       {isOwner && (
         <Card
@@ -335,6 +340,219 @@ function NewShopButton(
             rules={[{ required: true, message: '上传这家店的许可证照片' }]}
           >
             <LicenseField />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
+  )
+}
+
+/**
+ * 跨店对账汇总。
+ *
+ * **只读,不做品牌级钱包** —— 钱一旦在总部合并,门店就说不清自己那份
+ * 对不对,而「每一笔分账可查可申诉」是平台写在规则中心里的承诺。
+ * 资金仍按门店结算、按门店提现;这里只是省去逐店点进去看。
+ */
+function BrandFinanceCard({ days }: { days: number }) {
+  const [data, setData] = useState<BrandFinance | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    brandFinance(days)
+      .then(setData)
+      .catch(() => { /* 概览已经展示了,对账拉不到不该整页报错 */ })
+      .finally(() => setLoading(false))
+  }, [days])
+
+  if (!loading && !data) return null
+  return (
+    <Card
+      title="跨店对账"
+      loading={loading}
+      extra={
+        <Button size="small" onClick={() => downloadFile(
+          `/brands/me/finance.csv?days=${days}`,
+          `brand-finance-${days}d.csv`)}>导出 CSV</Button>
+      }
+    >
+      {data && (
+        <>
+          <Table
+            rowKey="shop_id"
+            size="small"
+            dataSource={data.shops}
+            pagination={false}
+            summary={() => (
+              <Table.Summary.Row style={{ fontWeight: 600 }}>
+                <Table.Summary.Cell index={0}>合计</Table.Summary.Cell>
+                <Table.Summary.Cell index={1}>
+                  {data.total.orders}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={2}>
+                  {yuan(data.total.gross_cents)}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={3}>
+                  {yuan(data.total.commission_cents)}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4}>
+                  {yuan(data.total.net_cents)}
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} />
+              </Table.Summary.Row>
+            )}
+            columns={[
+              { title: '门店', dataIndex: 'name' },
+              { title: '订单', dataIndex: 'orders', width: 90 },
+              {
+                title: '流水', dataIndex: 'gross_cents', width: 120,
+                render: (v: number) => yuan(v),
+              },
+              {
+                title: '平台佣金', dataIndex: 'commission_cents', width: 120,
+                render: (v: number) => yuan(v),
+              },
+              {
+                title: '实得', dataIndex: 'net_cents', width: 120,
+                render: (v: number) => (
+                  <span style={{ fontWeight: 500 }}>{yuan(v)}</span>),
+              },
+              {
+                title: '实际费率', dataIndex: 'effective_rate', width: 100,
+                render: (v: number) => `${(v * 100).toFixed(2)}%`,
+              },
+            ]}
+          />
+          <div style={{ marginTop: 12, color: '#8c8c8c', fontSize: 12 }}>
+            {data.note}
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
+/** 满减下发。下发后门店仍可自己改 —— 满减的钱是门店出的。 */
+function SyncPromoButton({ shops }: { shops: BrandShop[] }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [form] = Form.useForm()
+  const inBrand = shops.filter((s) => s.in_brand)
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>满减下发</Button>
+      <Modal
+        open={open} title="把满减下发到其他门店" okText="下发"
+        confirmLoading={busy}
+        onCancel={() => setOpen(false)}
+        onOk={async () => {
+          const v = await form.validateFields()
+          setBusy(true)
+          try {
+            const r = await syncBrandPromo(v.from_shop, v.to_shops)
+            message.success(`已下发 ${r.rules} 个档位到 ${r.shops.length} 家店`)
+            setOpen(false)
+          } catch (e) {
+            message.error(e instanceof ApiError ? e.message : String(e))
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        <Alert
+          type="info" showIcon style={{ marginBottom: 16 }}
+          message="下发之后门店仍然可以自己改"
+          description="满减的钱是门店出的(结算时从门店实收里扣),最终决定权在他们手上。总部能做的是把模板推过去,省得每家重录一遍。"
+        />
+        <Form form={form} layout="vertical">
+          <Form.Item name="from_shop" label="以哪家店的满减为准"
+            rules={[{ required: true, message: '选源门店' }]}>
+            <Select options={inBrand.map((s) => (
+              { value: s.id, label: s.name }))} />
+          </Form.Item>
+          <Form.Item name="to_shops" label="下发到"
+            rules={[{ required: true, message: '至少选一家目标门店' }]}>
+            <Select mode="multiple" allowClear placeholder="可多选"
+              options={inBrand.map((s) => ({ value: s.id, label: s.name }))} />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
+  )
+}
+
+/** 券下发:各店各建一个批次,各出各的。 */
+function SyncCouponsButton({ shops }: { shops: BrandShop[] }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [form] = Form.useForm()
+  const inBrand = shops.filter((s) => s.in_brand)
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>券下发</Button>
+      <Modal
+        open={open} title="给多家门店发同一种券" okText="下发"
+        confirmLoading={busy}
+        onCancel={() => setOpen(false)}
+        onOk={async () => {
+          const v = await form.validateFields()
+          setBusy(true)
+          try {
+            const r = await syncBrandCoupons({
+              name: v.name,
+              to_shops: v.to_shops,
+              threshold_cents: Math.round(v.threshold * 100),
+              off_cents: Math.round(v.off * 100),
+              total: v.total,
+              valid_days: v.valid_days,
+            })
+            message.success(
+              `${r.shops.length} 家店各建了一个批次,各发 ${r.total_per_shop} 张`)
+            setOpen(false)
+            form.resetFields()
+          } catch (e) {
+            message.error(e instanceof ApiError ? e.message : String(e))
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        <Alert
+          type="warning" showIcon style={{ marginBottom: 16 }}
+          message="各店各建一个批次,各发各的、各自承担成本"
+          description="不是几家店分一个总额。券的钱由发券的那家门店全额承担 —— 共用预算就变成「我店的钱被别店花了」,门店对不上自己那份账。门店可以自己停掉自己那个批次。"
+        />
+        <Form form={form} layout="vertical"
+          initialValues={{ valid_days: 7, total: 100 }}>
+          <Form.Item name="name" label="券名称"
+            rules={[{ required: true, min: 2, message: '券名称至少 2 个字' }]}>
+            <Input maxLength={50} placeholder="如:新店开业券" />
+          </Form.Item>
+          <Space>
+            <Form.Item name="threshold" label="门槛(元)"
+              rules={[{ required: true, message: '填门槛' }]}>
+              <InputNumber min={0.01} style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item name="off" label="面额(元)"
+              rules={[{ required: true, message: '填面额' }]}
+              extra="必须小于门槛(不能倒贴)">
+              <InputNumber min={0.01} style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item name="total" label="每店发放量"
+              rules={[{ required: true, message: '填每店发放量' }]}
+              extra="每家各发这么多">
+              <InputNumber min={1} max={100000} style={{ width: 130 }} />
+            </Form.Item>
+            <Form.Item name="valid_days" label="有效期(天)"
+              rules={[{ required: true, message: '填有效期' }]}>
+              <InputNumber min={1} max={90} style={{ width: 110 }} />
+            </Form.Item>
+          </Space>
+          <Form.Item name="to_shops" label="下发到"
+            rules={[{ required: true, message: '至少选一家目标门店' }]}>
+            <Select mode="multiple" allowClear placeholder="可多选"
+              options={inBrand.map((s) => ({ value: s.id, label: s.name }))} />
           </Form.Item>
         </Form>
       </Modal>

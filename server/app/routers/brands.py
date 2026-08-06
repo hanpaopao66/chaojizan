@@ -337,6 +337,232 @@ async def open_brand_shop(
     }
 
 
+@router.post("/me/promo-sync")
+async def sync_promo(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """满减下发:把源门店的满减档位应用到目标门店。
+
+    **下发之后门店仍然可以自己改。** 这看着和"总部统一"的直觉相反,
+    但满减的成本是**门店承担的**(结算时从门店实收里扣) —— 谁出钱谁有
+    最终决定权。总部能做的是把模板推过去省得每家重录一遍,
+    不是替门店决定要亏多少。与菜单下发不覆盖库存是同一个道理。
+    """
+    from ..schemas import PromoRule
+
+    brand = await _my_brand(db, user)
+    if brand is None or brand.owner_id != user.id:
+        raise HTTPException(403, "只有品牌所有者能下发营销")
+    src = await db.get(Merchant, int(payload.get("from_shop") or 0))
+    if src is None or src.brand_id != brand.id:
+        raise HTTPException(422, "源门店必须是本品牌的店")
+    target_ids = [int(i) for i in (payload.get("to_shops") or [])]
+    if not 1 <= len(target_ids) <= 50:
+        raise HTTPException(422, "一次最多下发到 50 家门店")
+    targets = (await db.scalars(
+        select(Merchant).where(Merchant.id.in_(target_ids),
+                               Merchant.brand_id == brand.id))).all()
+    if len(targets) != len(set(target_ids)):
+        raise HTTPException(422, "目标门店必须都是本品牌的店")
+
+    # 源门店的档位照样过一遍校验:存量数据可能是更早的规则写进去的,
+    # 直接搬过去等于把一个校验不过的配置复制到 50 家店
+    rules = [PromoRule(**r).model_dump() for r in (src.promo_rules or [])]
+    done = []
+    for shop in targets:
+        if shop.id == src.id:
+            continue
+        shop.promo_rules = list(rules)
+        done.append({"shop_id": shop.id, "name": shop.name})
+    await db.commit()
+    return {
+        "from_shop": src.id, "rules": len(rules), "shops": done,
+        "note": "已下发。门店仍可自行调整 —— 满减的钱是门店出的,"
+                "最终决定权在他们手上。",
+    }
+
+
+@router.post("/me/coupon-sync")
+async def sync_coupons(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """券下发:按同一份模板,在每家目标门店**各建一个批次**。
+
+    ## 为什么不建一个"品牌级批次"让几家店共用预算
+
+    券的成本是 funder=merchant、**由发券的那家门店全额承担**。共用预算
+    就变成"我店的钱被别店花了" —— 门店对不上自己那份账,而
+    「每一笔分账可查可申诉」是平台写在规则中心里的承诺。
+    与"不做品牌级钱包"是同一条线。
+
+    所以各店各建、各出各的:total 是**每家店各自的**发放上限,
+    不是几家店分一个总额。返回体里明说这一点。
+    """
+    from ..models import CouponBatch
+    from ..services.moderation import guard_text
+
+    brand = await _my_brand(db, user)
+    if brand is None or brand.owner_id != user.id:
+        raise HTTPException(403, "只有品牌所有者能下发营销")
+    target_ids = [int(i) for i in (payload.get("to_shops") or [])]
+    if not 1 <= len(target_ids) <= 50:
+        raise HTTPException(422, "一次最多下发到 50 家门店")
+    targets = (await db.scalars(
+        select(Merchant).where(Merchant.id.in_(target_ids),
+                               Merchant.brand_id == brand.id))).all()
+    if len(targets) != len(set(target_ids)):
+        raise HTTPException(422, "目标门店必须都是本品牌的店")
+
+    name = str(payload.get("name", "")).strip()[:50]
+    if len(name) < 2:
+        raise HTTPException(422, "券名称至少 2 个字")
+    await guard_text(db, name, "券名称")
+    try:
+        off = int(payload["off_cents"])
+        threshold = int(payload["threshold_cents"])
+        total = int(payload["total"])
+        valid_days = int(payload.get("valid_days") or 7)
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(422, "请填写门槛、面额、每店发放量与有效期")
+    if off <= 0 or threshold <= 0 or off >= threshold:
+        raise HTTPException(422, "面额必须大于 0 且小于门槛(不能倒贴)")
+    if not 1 <= total <= 100_000:
+        raise HTTPException(422, "每店发放量 1–100000")
+    if not 1 <= valid_days <= 90:
+        raise HTTPException(422, "有效期 1–90 天")
+    trigger = str(payload.get("trigger") or "claim")
+    if trigger not in ("claim", "favorite"):
+        raise HTTPException(422, "发放方式只支持 claim(主动领)/favorite(收藏即送)")
+
+    created = []
+    for shop in targets:
+        db.add(CouponBatch(
+            name=name, trigger=trigger, merchant_id=shop.id,
+            amount_cents=off, min_spend_cents=threshold,
+            total=total, valid_days=valid_days,
+            per_user_limit=int(payload.get("per_user_limit") or 1),
+            active=True))
+        created.append({"shop_id": shop.id, "name": shop.name})
+    await db.commit()
+    return {
+        "shops": created, "total_per_shop": total,
+        "note": f"每家店各建了一个批次,各发 {total} 张、各自承担成本 —— "
+                "不是几家店分一个总额。门店可以自己停掉自己那个批次。",
+    }
+
+
+@router.get("/me/finance")
+async def brand_finance(
+    days: int = Query(default=30, ge=1, le=90),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """跨店对账汇总(只读)。
+
+    ## 刻意**不做品牌级钱包**
+
+    钱一旦在总部合并,门店就说不清自己那份对不对 —— 而
+    「每一笔分账可查可申诉」是平台写在规则中心里的承诺。
+    所以资金仍然按门店结算、按门店提现,这里只是把每家店的数并排列出来,
+    省去逐店点进去看。**能看的每一个数,门店自己也看得到同一个。**
+
+    只对品牌所有者开放:与 money_shop 同一条边界 ——
+    区域经理能改价改设置,但碰不到钱。
+    """
+    from ..models import MerchantEarning
+
+    brand = await _my_brand(db, user)
+    if brand is None or brand.owner_id != user.id:
+        raise HTTPException(403, "跨店对账只对品牌所有者开放")
+    shops = [s for s in await my_shops(db, user)
+             if s.brand_id == brand.id and s.owner_id == user.id]
+    if not shops:
+        raise HTTPException(404, "还没有品牌门店")
+    ids = [s.id for s in shops]
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    rows = (await db.execute(
+        select(MerchantEarning.merchant_id,
+               func.count(MerchantEarning.id),
+               func.coalesce(func.sum(MerchantEarning.food_cents), 0),
+               func.coalesce(func.sum(MerchantEarning.commission_cents), 0),
+               func.coalesce(func.sum(MerchantEarning.net_cents), 0))
+        .where(MerchantEarning.merchant_id.in_(ids),
+               MerchantEarning.created_at >= since)
+        .group_by(MerchantEarning.merchant_id))).all()
+    stat = {r[0]: r[1:] for r in rows}
+
+    items = []
+    for s in shops:
+        n, gross, commission, net = stat.get(s.id, (0, 0, 0, 0))
+        items.append({
+            "shop_id": s.id, "name": s.name,
+            "orders": n,
+            "gross_cents": int(gross),
+            "commission_cents": int(commission),
+            "net_cents": int(net),
+            # 实际费率(算出来的,不是配置里那个) —— 档位降费之后
+            # 配置值和真实抽成会不一样,给真实的
+            "effective_rate": (round(int(commission) / int(gross), 4)
+                               if gross else 0.0),
+        })
+    items.sort(key=lambda x: -x["net_cents"])
+    return {
+        "days": days,
+        "shops": items,
+        "total": {
+            "orders": sum(i["orders"] for i in items),
+            "gross_cents": sum(i["gross_cents"] for i in items),
+            "commission_cents": sum(i["commission_cents"] for i in items),
+            "net_cents": sum(i["net_cents"] for i in items),
+        },
+        "note": "只读汇总。**资金仍按门店结算、按门店提现** —— "
+                "钱在总部合并的话,门店就说不清自己那份对不对。"
+                "这里每一个数,门店自己也看得到同一个。",
+    }
+
+
+@router.get("/me/finance.csv")
+async def brand_finance_csv(
+    days: int = Query(default=30, ge=1, le=90),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """跨店对账汇总导出。逐店一行 + 合计一行,拿去做账直接能用。"""
+    import csv
+    import io
+
+    from fastapi.responses import StreamingResponse
+
+    data = await brand_finance(days=days, user=user, db=db)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["门店", "订单数", "流水(元)", "平台佣金(元)",
+                "实得(元)", "实际费率"])
+    for i in data["shops"]:
+        w.writerow([i["name"], i["orders"],
+                    f'{i["gross_cents"] / 100:.2f}',
+                    f'{i["commission_cents"] / 100:.2f}',
+                    f'{i["net_cents"] / 100:.2f}',
+                    f'{i["effective_rate"] * 100:.2f}%'])
+    t = data["total"]
+    w.writerow(["合计", t["orders"], f'{t["gross_cents"] / 100:.2f}',
+                f'{t["commission_cents"] / 100:.2f}',
+                f'{t["net_cents"] / 100:.2f}', ""])
+    w.writerow([])
+    w.writerow(["说明", data["note"]])
+    # \ufeff:Excel 不给 BOM 就把中文认成乱码,商家打开是一屏问号
+    return StreamingResponse(
+        io.BytesIO(("\ufeff" + buf.getvalue()).encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition":
+                 f'attachment; filename="brand-finance-{days}d.csv"'})
+
+
 @router.post("/me/menu-sync")
 async def sync_menu(
     payload: dict,

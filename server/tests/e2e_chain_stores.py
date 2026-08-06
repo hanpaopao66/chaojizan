@@ -207,6 +207,83 @@ def main():
     assert steal.get("_error") in (403, 422), steal
     print("✓ 外部商家不能往别人品牌下开店")
 
+    # ================= AA:总部统一下发营销 =================
+    #
+    # 红线:券的成本 funder=merchant、由**发券的那家门店**全额承担。
+    # 所以各店各建批次、各出各的 —— 建一个"品牌级批次"让几家店共用预算,
+    # 就变成"我店的钱被别店花了",门店对不上自己那份账。
+    call("PATCH", "/merchants/me", boss,
+         {"promo_rules": [{"threshold_cents": 3000, "off_cents": 500}]},
+         headers=h1)
+    r = call("POST", "/brands/me/promo-sync", boss,
+             {"from_shop": shop1["id"], "to_shops": [shop2["id"]]})
+    assert r["rules"] == 1 and len(r["shops"]) == 1, r
+    got = call("GET", "/merchants/me", boss, headers=h2)
+    assert got["promo_rules"] == [
+        {"threshold_cents": 3000, "off_cents": 500}], got["promo_rules"]
+    print("✓ 满减下发到目标门店")
+
+    # 下发之后门店仍可自己改 —— 满减的钱是门店出的,最终决定权在他们
+    call("PATCH", "/merchants/me", boss,
+         {"promo_rules": [{"threshold_cents": 5000, "off_cents": 300}]},
+         headers=h2)
+    still = call("GET", "/merchants/me", boss, headers=h1)
+    assert still["promo_rules"][0]["threshold_cents"] == 3000, \
+        f"门店改自己的不该反向影响源门店:{still['promo_rules']}"
+    print("✓ 下发后门店可自行调整,不回写源门店")
+
+    cross = call("POST", "/brands/me/promo-sync", boss,
+                 {"from_shop": shop1["id"], "to_shops": [other["id"]]},
+                 expect_error=True)
+    assert cross["_error"] == 422, f"不能下发到别人家的店:{cross}"
+    print("✓ 下发目标必须是本品牌的店")
+
+    bad = call("POST", "/brands/me/coupon-sync", boss, {
+        "name": "加微信转账便宜点", "to_shops": [shop1["id"]],
+        "threshold_cents": 3000, "off_cents": 500, "total": 100},
+        expect_error=True)
+    assert bad["_error"] == 422, f"券名要过敏感词:{bad}"
+    bad = call("POST", "/brands/me/coupon-sync", boss, {
+        "name": "开业券", "to_shops": [shop1["id"]],
+        "threshold_cents": 500, "off_cents": 500, "total": 100},
+        expect_error=True)
+    assert bad["_error"] == 422, f"面额不小于门槛该拦(倒贴):{bad}"
+
+    cs = call("POST", "/brands/me/coupon-sync", boss, {
+        "name": f"开业券{random.randrange(10**4)}",
+        "to_shops": [shop1["id"], shop2["id"]],
+        "threshold_cents": 3000, "off_cents": 500,
+        "total": 100, "valid_days": 14})
+    assert len(cs["shops"]) == 2 and cs["total_per_shop"] == 100, cs
+    assert "各自承担成本" in cs["note"], cs
+    b1 = call("GET", "/merchants/me/coupon-batches", boss, headers=h1)
+    b2 = call("GET", "/merchants/me/coupon-batches", boss, headers=h2)
+    n1 = [b for b in b1 if b["name"].startswith("开业券")][0]
+    n2 = [b for b in b2 if b["name"].startswith("开业券")][0]
+    assert n1["id"] != n2["id"], "必须是两个独立批次,不是共用一个"
+    assert n1["total"] == 100 and n2["total"] == 100, \
+        "每家各 100 张,不是两家分 100 张"
+    print("✓ 券下发:各店各建独立批次、各发 100 张各自承担成本")
+
+    # ================= AB:多门店合并对账 =================
+    fin = call("GET", "/brands/me/finance?days=30", boss)
+    assert len(fin["shops"]) == 2, fin
+    assert "资金仍按门店结算" in fin["note"], fin["note"]
+    assert set(fin["total"]) == {"orders", "gross_cents",
+                                "commission_cents", "net_cents"}, fin["total"]
+    print(f"✓ 跨店对账汇总:{len(fin['shops'])} 家门店并排(只读,不做品牌钱包)")
+
+    # 区域经理碰不到钱 —— 与 money_shop 同一条边界
+    call("POST", "/brands/me/members", boss,
+         {"phone": mgr_phone, "shop_ids": [shop2["id"]]})
+    denied = call("GET", "/brands/me/finance", mgr, expect_error=True)
+    assert denied["_error"] == 403, f"跨店对账只对品牌所有者:{denied}"
+    print("✓ 区域经理看不到跨店对账(与提现/钱包同一条边界)")
+
+    steal = call("GET", "/brands/me/finance", outsider, expect_error=True)
+    assert steal.get("_error") in (403, 404), steal
+    print("✓ 外部商家拿不到本品牌对账")
+
     print("\ne2e_chain_stores 全部通过 ✅")
 
 

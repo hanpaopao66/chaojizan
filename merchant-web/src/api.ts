@@ -1179,6 +1179,60 @@ export interface MenuSyncResult {
 
 /** 菜单下发:把源门店在售的菜应用到目标门店(按菜名匹配)。
  *  库存与上下架不覆盖 —— 那是各店当天的经营决策。 */
+/** 满减下发。**下发后门店仍可自己改** —— 满减的钱是门店出的。 */
+export function syncBrandPromo(
+  fromShop: number, toShops: number[],
+): Promise<{ rules: number; shops: { shop_id: number; name: string }[]
+  note: string }> {
+  return request('POST', '/brands/me/promo-sync',
+    { from_shop: fromShop, to_shops: toShops })
+}
+
+/** 券下发:在每家目标门店**各建一个批次**,各发 total 张、各自承担成本 ——
+ *  不是几家店分一个总额(共用预算 = 我店的钱被别店花了)。 */
+export function syncBrandCoupons(fields: {
+  name: string
+  to_shops: number[]
+  threshold_cents: number
+  off_cents: number
+  total: number
+  valid_days?: number
+  trigger?: 'claim' | 'favorite'
+  per_user_limit?: number
+}): Promise<{ shops: { shop_id: number; name: string }[]
+  total_per_shop: number; note: string }> {
+  return request('POST', '/brands/me/coupon-sync', fields)
+}
+
+export interface BrandFinanceRow {
+  shop_id: number
+  name: string
+  orders: number
+  gross_cents: number
+  commission_cents: number
+  net_cents: number
+  /** 实际费率(算出来的,不是配置值) —— 档位降费后两者会不一样 */
+  effective_rate: number
+}
+
+export interface BrandFinance {
+  days: number
+  shops: BrandFinanceRow[]
+  total: {
+    orders: number
+    gross_cents: number
+    commission_cents: number
+    net_cents: number
+  }
+  note: string
+}
+
+/** 跨店对账汇总(只读)。**不做品牌级钱包** —— 资金仍按门店结算、按门店提现;
+ *  钱在总部合并的话,门店就说不清自己那份对不对。仅品牌所有者可见。 */
+export function brandFinance(days: number): Promise<BrandFinance> {
+  return request('GET', `/brands/me/finance?days=${days}`)
+}
+
 export function syncBrandMenu(
   fromShop: number, toShops: number[],
 ): Promise<MenuSyncResult> {
