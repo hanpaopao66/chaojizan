@@ -109,11 +109,62 @@ class User(Base):
     )
 
 
+class Brand(Base):
+    """品牌(连锁总部)。
+
+    单店商家**没有**品牌 —— `Merchant.brand_id` 为空时所有既有逻辑
+    走原路径,零感知。品牌层只在"一个人要管多家店"时才出现。
+
+    刻意不做的:品牌级钱包。资金仍按门店结算,
+    与「每一笔分账可查可申诉」的承诺保持一致 ——
+    钱一旦在总部合并,门店就说不清自己那份对不对。
+    """
+
+    __tablename__ = "brands"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(50))
+    logo_url: Mapped[str] = mapped_column(String(300), default="")
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class BrandMember(Base):
+    """品牌成员与授权范围。
+
+    role:
+    - owner   品牌所有者:全部门店的全部权限
+    - manager 区域经理:只管 shop_ids 里的店(空 = 全部门店)
+
+    店员仍走 merchant_staff(按单店授权),不进品牌层 ——
+    店员是门店雇的,不是品牌雇的。
+    """
+
+    __tablename__ = "brand_members"
+    __table_args__ = (UniqueConstraint("brand_id", "user_id",
+                                       name="uq_brand_member"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    brand_id: Mapped[int] = mapped_column(ForeignKey("brands.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(12), default="manager")
+    # 授权门店范围(空列表 = 全部门店);manager 用,owner 忽略
+    shop_ids: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default="[]")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
 class Merchant(Base):
     __tablename__ = "merchants"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
+    # **不再 unique**:连锁品牌下一个老板名下有多家店。
+    # "一个账号一家店"改由应用层守(POST /merchants 仍拒第二家) ——
+    # 开分店走 /brands/me/shops,那条路径要求品牌所有者身份 + 独立证照
+    owner_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(100))
     # 店铺专属短码(6 位):海报二维码与短链 /s/{code} 用。
     # 懒生成(第一次要用时才建),不暴露内部 id 规律
@@ -181,6 +232,11 @@ class Merchant(Base):
     # 平台不上门查,所以用户端的文案也只能写"商家声明",不能写"平台认证"
     food_seal: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false")
+
+    # 所属品牌(连锁)。**为空 = 单店商家,一切照旧** ——
+    # 品牌层是加法不是改造,单店的路径一行都不用动
+    brand_id: Mapped[int | None] = mapped_column(
+        ForeignKey("brands.id"), nullable=True, index=True)
 
     # 食安停业闸门:30 天内多起食安投诉成立时置位,**商家自己开不回来**。
     # 此前自动停业只置 is_open=False,而 status 仍是 approved ——

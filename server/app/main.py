@@ -19,6 +19,7 @@ from .routers import (
     after_sales,
     appeals,
     auth,
+    brands,
     favorites,
     food_safety,
     geo,
@@ -138,6 +139,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(merchants.router)
+app.include_router(brands.router)
 app.include_router(orders.router)
 app.include_router(riders.router)
 app.include_router(addresses.router)

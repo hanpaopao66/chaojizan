@@ -1255,9 +1255,19 @@ DAILY_FINANCE_SQL = text(
 )
 
 
-async def _my_shop_or_404(db: AsyncSession, user: User) -> Merchant:
-    shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
-    if shop is None:
+async def _my_shop_or_404(db: AsyncSession, user: User,
+                          merchant_id: int | None = None) -> Merchant:
+    """当前请求要操作的店(店主级权限)。
+
+    **单店商家行为一字不变**:不传 merchant_id 时取"我唯一的那家店"。
+    连锁场景由客户端显式传 merchant_id,权限校验收敛在
+    services.staff.resolve_shop 里 —— 判定只写一遍,
+    才不会每加一个端点就多一次"A 店店长能改 B 店"的机会。
+    """
+    from ..services.staff import resolve_shop
+    shop, is_owner = await resolve_shop(db, user, merchant_id,
+                                        need_owner=True)
+    if shop is None or not is_owner:
         raise HTTPException(404, "还没开店")
     return shop
 
