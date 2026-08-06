@@ -1869,17 +1869,20 @@ class _ShopTabPageState extends State<ShopTabPage> {
             ),
           ),
           const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.notifications_none),
-              title: const Text('消息中心'),
-              subtitle: const Text('平台公告、评价与系统通知'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => MerchantMessagesPage(api: widget.api))),
+          // 消息中心是店主视角(接口按 owner 判权),店员看了只会报"还没开店"
+          if (!shop.viewerIsStaff) ...[
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.notifications_none),
+                title: const Text('消息中心'),
+                subtitle: const Text('平台公告、评价与系统通知'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantMessagesPage(api: widget.api))),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 12),
+          ],
           Card(
             child: ListTile(
               leading: const Icon(Icons.support_agent_outlined),

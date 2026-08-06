@@ -22,7 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Merchant, MerchantApiKey, Order
+from ..models import Merchant, MerchantApiKey, MerchantStatus, Order
+from ..ratelimit import check_rate_limit
 from ..state_machine import OrderStatus
 from .orders import order_out
 
@@ -58,7 +59,8 @@ async def open_merchant(
     if key is None:
         raise HTTPException(401, "API Key 无效或已吊销")
     shop = await db.get(Merchant, key.merchant_id)
-    if shop is None:
+    # 店铺被驳回/下架后,已发出的 Key 也不该继续拉单
+    if shop is None or shop.status != MerchantStatus.approved:
         raise HTTPException(401, "API Key 无效或已吊销")
     return shop
 
@@ -66,6 +68,8 @@ async def open_merchant(
 @router.get("/shop")
 async def open_shop(shop: Merchant = Depends(open_merchant)):
     """本店基础信息:对接方用来核对连的是哪家店。"""
+    # POS 是长期挂机的机器,轮询间隔配错(比如 100ms)就是一次自伤
+    await check_rate_limit("open_api", str(shop.id), 120)
     return {
         "id": shop.id,
         "name": shop.name,
@@ -86,13 +90,18 @@ async def open_orders(
     shop: Merchant = Depends(open_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """本店订单(只读,按创建时间倒序)。
+    """本店订单(只读)。
 
-    增量拉取用 `since` 传上次拉到的最新 created_at;
-    顾客手机号按商家视角脱敏,与商家 App 看到的完全一致。
+    增量拉取用 `since` 传上次拉到的最新 created_at ——
+    **此时按时间正序返回**:`created_at > since` 是向前取,配倒序会变成
+    "只给最新的 N 条",中间积压的单永远拉不到(POS 断网 40 分钟、
+    期间来了 120 单,带 limit=50 拉一次就永久漏掉 70 单,而且没有补拉的入口)。
+    不传 since 时按倒序给最新的一页,供首次接入/人工排查用。
+
+    顾客手机号与门牌按商家视角脱敏,与商家 App 看到的完全一致。
     """
-    query = (select(Order).where(Order.merchant_id == shop.id)
-             .order_by(Order.created_at.desc()).limit(limit))
+    await check_rate_limit("open_api", str(shop.id), 120)
+    query = select(Order).where(Order.merchant_id == shop.id).limit(limit)
     if since:
         try:
             cursor = datetime.fromisoformat(since)
@@ -100,21 +109,19 @@ async def open_orders(
             raise HTTPException(422, "since 需要是 ISO 时间格式")
         if cursor.tzinfo is None:
             cursor = cursor.replace(tzinfo=timezone.utc)
-        query = query.where(Order.created_at > cursor)
+        # 正序:从游标往后逐页推进,一单不漏
+        query = query.where(Order.created_at > cursor).order_by(
+            Order.created_at.asc())
+    else:
+        query = query.order_by(Order.created_at.desc())
     if status:
         try:
             query = query.where(Order.status == OrderStatus(status))
         except ValueError:
             raise HTTPException(422, "未知的订单状态")
     orders = list(await db.scalars(query))
-    # viewer=None 时 order_out 不做商家侧脱敏,这里显式按商家视角处理:
-    # 机器在读也不该比人多看到一位手机号
-    from ..services.privacy_phone import dialable_phone, mask_phone
-    items = []
-    for order in orders:
-        out = order_out(order, shop)
-        out.privacy_phone = dialable_phone(order)
-        out.contact_phone = mask_phone(order.contact_phone)
-        out.delivery_photo_url = ""
-        items.append(out)
+    # **必须显式声明商家视角**:API Key 认证没有 User 对象,
+    # 不传 as_role 就会退回"用户本人"的全量口径 —— 门牌、真名、
+    # 送达留证一起下发。机器在读也不比人多看到一个字段
+    items = [order_out(order, shop, as_role="merchant") for order in orders]
     return {"orders": items, "count": len(items)}

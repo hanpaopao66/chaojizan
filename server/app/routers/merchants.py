@@ -538,7 +538,9 @@ async def my_dishes(
     result = await db.scalars(
         select(Dish)
         .where(Dish.merchant_id == shop.id)
-        .order_by(Dish.category, Dish.sort, Dish.id)
+        # 与用户端菜单同口径:分类顺序按该分类首道菜的建立顺序,组内按 sort
+        .order_by(func.min(Dish.id).over(partition_by=Dish.category),
+                  Dish.sort, Dish.id)
     )
     dishes = list(result)
     # 带上近 30 天销量:商家端销量榜/滞销提示的数据源
@@ -573,8 +575,12 @@ async def menu(merchant_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.scalars(
         select(Dish)
         .where(Dish.merchant_id == merchant_id, Dish.is_on_sale.is_(True))
-        # 商家排的顺序,用户端照着看(sort 小的在前,同值按 id)
-        .order_by(Dish.category, Dish.sort, Dish.id)
+        # 分类之间的先后 = 该分类第一道菜的建立顺序(与加 sort 之前的
+        # 行为一致)。**不能直接按 category 字符串排** —— 未分类的菜
+        # category 是空串,一排就把"其他"顶到分类栏第一个并默认选中。
+        # 组内再按 sort(商家排的顺序,用户端照着看)
+        .order_by(func.min(Dish.id).over(partition_by=Dish.category),
+                  Dish.sort, Dish.id)
     )
     dishes = list(result)
     sales_rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": merchant_id})
@@ -2255,20 +2261,8 @@ async def my_todos(
             Dish.flash_until > now,
             Dish.flash_until < now + timedelta(hours=24))) or 0
 
-    # 未读消息(评价/系统触达;公告不计):水位见消息中心
-    from ..models import PushLog
-    from ..redis_client import get_redis
-    raw = await get_redis().get(_MSG_READ_KEY.format(user_id=user.id))
-    msg_stmt = select(func.count(PushLog.id)).where(
-        PushLog.user_id == user.id)
-    if raw:
-        try:
-            watermark = datetime.fromisoformat(
-                raw.decode() if isinstance(raw, bytes) else raw)
-            msg_stmt = msg_stmt.where(PushLog.created_at > watermark)
-        except ValueError:
-            pass
-    messages_unread = await db.scalar(msg_stmt) or 0
+    # 未读消息(评价/系统触达;订单类与公告不计):与消息中心同一口径
+    messages_unread = await _unread_count(db, user.id)
 
     return {
         "pending_orders": pending_orders,
@@ -2299,7 +2293,10 @@ async def list_api_keys(
     rows = await db.scalars(
         select(MerchantApiKey)
         .where(MerchantApiKey.merchant_id == shop.id)
-        .order_by(MerchantApiKey.id.desc()).limit(20))
+        # **有效的排前面**:吊销记录永久保留,按 id 倒序取 20 条时
+        # 会把仍然有效的老 Key 挤出列表 —— 商家从此看不到、也吊销不了它
+        .order_by(MerchantApiKey.revoked_at.is_not(None),
+                  MerchantApiKey.id.desc()).limit(20))
     return [{
         "id": k.id, "name": k.name, "prefix": k.prefix,
         "revoked": k.revoked_at is not None,
@@ -2321,6 +2318,8 @@ async def create_api_key(
         raise HTTPException(404, "还没开店")
     if shop.status != MerchantStatus.approved:
         raise HTTPException(403, "店铺通过审核后才能对接收银系统")
+    # 上限校验与插入之间上店铺行锁:并发两个 POST 都读到 4 就都能插进来
+    await db.refresh(shop, with_for_update=True)
     alive = await db.scalar(
         select(func.count(MerchantApiKey.id)).where(
             MerchantApiKey.merchant_id == shop.id,
@@ -2329,9 +2328,10 @@ async def create_api_key(
         raise HTTPException(
             409, f"最多同时保留 {_MAX_API_KEYS} 把有效 Key,请先吊销不用的")
     raw, token_hash, prefix = new_key()
+    name = payload.get("name")
     key = MerchantApiKey(
         merchant_id=shop.id,
-        name=str(payload.get("name", ""))[:30],
+        name=(str(name)[:30] if isinstance(name, str) else ""),
         token_hash=token_hash,
         prefix=prefix,
     )
@@ -2362,16 +2362,63 @@ async def revoke_api_key(
 
 # ---------- 消息中心(公告 + 触达记录,订单类不进这里) ----------
 
-# 已读水位存 Redis:一人一条时间戳。丢了也只是未读数偏大,不值得建表
+# 已读水位存 Redis:一人一条时间戳。Redis 无持久化卷,水位可能整体丢失 ——
+# 丢了不能退化成"未读=开店以来全部推送",见 _unread_since
 _MSG_READ_KEY = "msg:read:merchant:{user_id}"
+# 没有水位时(新商家/Redis 重建)只看最近这些天,免得徽标显示"新消息 8342"
+_MSG_FALLBACK_DAYS = 7
+
+# 订单类推送**不进消息中心**:订单页本身就是它们的家,
+# 一家日 300 单的店配好推送后,消息中心第一页会全是"新订单来了"。
+# 按标题关键词排除 —— push 的标题是我们自己写死的常量(services/push.py),
+# 不是用户输入,匹配稳定
+_ORDER_TITLE_KEYWORDS = ("订单", "新单", "催单", "骑手", "配送", "送达",
+                         "售后", "退款", "取餐")
+_REVIEW_TITLE_KEYWORDS = ("评价", "回复", "点评")
+
+
+def _message_filters():
+    """SQL 层过滤条件(排除订单类)。**必须在 SQL 里做**:
+    在 Python 里对取回的一页做 filter,会出现"这一页恰好全被过滤掉 →
+    客户端拿到空列表 → 没有游标可以继续翻"的死局。"""
+    from ..models import PushLog
+    conds = [PushLog.title.notlike(f"%{kw}%")
+             for kw in _ORDER_TITLE_KEYWORDS]
+    return conds
 
 
 def _classify_message(title: str) -> str:
-    """按标题归类:评价类要醒目,其余归系统。订单类消息不进消息中心 ——
-    订单页本身就是它们的家,这里再堆一份只会淹掉真正需要看的。"""
-    if "评价" in title or "回复" in title:
-        return "review"
-    return "system"
+    """按标题归类:评价类要醒目,其余归系统。"""
+    return ("review" if any(kw in title for kw in _REVIEW_TITLE_KEYWORDS)
+            else "system")
+
+
+async def _unread_since(user_id: int) -> datetime:
+    """未读统计的起点:有水位用水位,没有(新商家/Redis 重建)退回最近 N 天。
+    Redis 故障时同样退回 —— 未读数偏大可以忍,首屏 500 不行。"""
+    from ..redis_client import get_redis
+    fallback = datetime.now(timezone.utc) - timedelta(days=_MSG_FALLBACK_DAYS)
+    try:
+        raw = await get_redis().get(_MSG_READ_KEY.format(user_id=user_id))
+    except Exception:
+        return fallback
+    if not raw:
+        return fallback
+    try:
+        return datetime.fromisoformat(
+            raw.decode() if isinstance(raw, bytes) else raw)
+    except ValueError:
+        return fallback
+
+
+async def _unread_count(db: AsyncSession, user_id: int) -> int:
+    from ..models import PushLog
+    since = await _unread_since(user_id)
+    return await db.scalar(
+        select(func.count(PushLog.id)).where(
+            PushLog.user_id == user_id,
+            PushLog.created_at > since,
+            *_message_filters())) or 0
 
 
 @router.get("/me/messages")
@@ -2399,38 +2446,31 @@ async def my_messages(
         "created_at": a.created_at,
     } for a in ann_rows]
 
-    stmt = select(PushLog).where(PushLog.user_id == user.id)
+    # 分类过滤下推到 SQL:在 Python 里过滤取回的一页,会出现
+    # "这页恰好全被滤掉 → 返回空 → 客户端没有游标可翻"的死局
+    stmt = select(PushLog).where(PushLog.user_id == user.id,
+                                 *_message_filters())
+    if category == "review":
+        stmt = stmt.where(or_(*[PushLog.title.like(f"%{kw}%")
+                                for kw in _REVIEW_TITLE_KEYWORDS]))
+    elif category == "system":
+        stmt = stmt.where(*[PushLog.title.notlike(f"%{kw}%")
+                            for kw in _REVIEW_TITLE_KEYWORDS])
     if before is not None:
         stmt = stmt.where(PushLog.id < before)
     rows = (await db.scalars(
         stmt.order_by(PushLog.id.desc()).limit(50))).all()
-    messages = []
-    for log in rows:
-        kind = _classify_message(log.title)
-        if category and kind != category:
-            continue
-        messages.append({
-            "id": log.id, "kind": kind, "title": log.title,
-            "content": log.content, "created_at": log.created_at,
-        })
+    messages = [{
+        "id": log.id, "kind": _classify_message(log.title),
+        "title": log.title, "content": log.content,
+        "created_at": log.created_at,
+    } for log in rows]
 
     # 未读 = 水位之后的触达条数(公告不计未读:横幅本来就常驻)
-    raw = await get_redis().get(_MSG_READ_KEY.format(user_id=user.id))
-    watermark = None
-    if raw:
-        try:
-            watermark = datetime.fromisoformat(
-                raw.decode() if isinstance(raw, bytes) else raw)
-        except ValueError:
-            pass
-    from ..models import PushLog as _PL
-    unread_stmt = select(func.count(_PL.id)).where(_PL.user_id == user.id)
-    if watermark is not None:
-        unread_stmt = unread_stmt.where(_PL.created_at > watermark)
-    unread = await db.scalar(unread_stmt) or 0
+    unread = await _unread_count(db, user.id)
 
     return {"announcements": announcements, "messages": messages,
-            "unread": unread}
+            "unread": unread, "page_size": 50}
 
 
 @router.post("/me/messages/read")
@@ -2438,12 +2478,16 @@ async def mark_messages_read(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """记已读水位到当前时刻。"""
+    """记已读水位到当前时刻。Redis 挂了不报错 ——
+    看消息这个动作本身成功了,未读数下次再对齐就是。"""
     from ..redis_client import get_redis
     await _my_shop_or_404(db, user)
-    await get_redis().set(
-        _MSG_READ_KEY.format(user_id=user.id),
-        datetime.now(timezone.utc).isoformat())
+    try:
+        await get_redis().set(
+            _MSG_READ_KEY.format(user_id=user.id),
+            datetime.now(timezone.utc).isoformat())
+    except Exception:
+        return {"ok": False, "reason": "缓存暂时不可用,未读数稍后自动对齐"}
     return {"ok": True}
 
 

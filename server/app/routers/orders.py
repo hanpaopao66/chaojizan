@@ -73,11 +73,16 @@ def resolve_options(dish_name: str, base_cents: int, groups: list,
 
 
 def order_out(order: Order, merchant: Merchant | None,
-              viewer: User | None = None) -> OrderOut:
+              viewer: User | None = None, *,
+              as_role: str | None = None) -> OrderOut:
     """订单 + 商家取餐点信息。骑手端地图/导航需要知道店在哪。
 
     电话脱敏:商家/骑手视角 contact_phone 一律打码,可拨号码走 privacy_phone
     (X 号 > 过渡期真号 > 严格模式空)。用户本人与管理后台看真号。
+
+    [as_role] 给**没有 User 对象但视角明确**的调用方用(如 POS 开放接口:
+    认证走 API Key,没有登录用户)。不给它就等于走"用户本人"的全量口径 ——
+    脱敏是一整块,漏传一次就是门牌和真名一起下发出去。
     """
     out = OrderOut.model_validate(order)
     out.no_rider_alerted = order.no_rider_alerted_at is not None
@@ -86,7 +91,8 @@ def order_out(order: Order, merchant: Merchant | None,
         out.merchant_address = merchant.address
         out.merchant_lat = merchant.lat
         out.merchant_lng = merchant.lng
-    if viewer is not None and viewer.role.value in ("merchant", "rider"):
+    role = as_role or (viewer.role.value if viewer is not None else None)
+    if role in ("merchant", "rider"):
         out.privacy_phone = dialable_phone(order)
         out.contact_phone = mask_phone(order.contact_phone)
         # 地址保护:未放行前只给粗地址(POI/小区),门牌详情不下发;

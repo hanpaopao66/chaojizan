@@ -43,7 +43,10 @@ class _MerchantMessagesPageState extends State<MerchantMessagesPage> {
           _messages = (data['messages'] as List? ?? const [])
               .cast<Map<String, dynamic>>();
           _loaded = true;
-          _hasMore = _messages.length >= 40;
+          // 页大小以服务端为准:写死的阈值一旦和服务端不一致,
+          // 就会在"刚好不满一页"时误判成没有下一页
+          _hasMore =
+              _messages.length >= (data['page_size'] as int? ?? 50);
         });
       }
     } catch (e) {
