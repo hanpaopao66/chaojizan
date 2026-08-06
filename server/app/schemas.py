@@ -355,6 +355,13 @@ DISH_BADGES = [
 SERVE_WINDOW_RE = r"^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$|^$"
 
 
+def _validate_serve_window(window: str) -> None:
+    """起止相同的时段(如 10:00-10:00)在 in_hhmm_range 下恒为 False ——
+    这道菜会永远点不了,而商家以为自己设了"整点供应"。"""
+    if window and window.split("-")[0] == window.split("-")[1]:
+        raise ValueError("供应时段的开始和结束不能相同;全天供应请留空")
+
+
 class ComboItem(BaseModel):
     """套餐子项:哪道菜、几份。套餐价是套餐自身的 price_cents,
     子项只用来扣库存和给后厨看,不参与计价。"""
@@ -394,6 +401,7 @@ class DishIn(BaseModel):
     @model_validator(mode="after")
     def badges_in_whitelist(self):
         _validate_badges(self.badges)
+        _validate_serve_window(self.serve_window)
         return self
 
 
@@ -418,6 +426,7 @@ class DishPatch(BaseModel):
     @model_validator(mode="after")
     def badges_in_whitelist(self):
         _validate_badges(self.badges or [])
+        _validate_serve_window(self.serve_window or "")
         return self
     # 限时折扣:两者同传开启,同传 null 关闭(折扣价必须低于现价,服务端校验)
     flash_price_cents: int | None = Field(default=None, gt=0)
@@ -445,11 +454,25 @@ class DishOut(BaseModel):
     combo_dishes: list = []        # 子项明细 [{name, quantity}],菜单接口填充
     combo_original_cents: int = 0  # 子项单点合计,前端划线显示"省 X 元"
     serve_window: str = ""         # 供应时段(空=全天)
-    servable_now: bool = True      # 此刻是否在供应时段内,菜单接口填充
+    servable_now: bool = True      # 此刻是否在供应时段内(下方自动算)
     options: list = []
     flash_price_cents: int | None = None
     flash_until: datetime | None = None
     monthly_sales: int = 0  # 近 30 天售出份数,菜单接口填充
+
+    @model_validator(mode="after")
+    def _compute_servable(self):
+        """**在 schema 层算,不靠各个路由记得填**。
+        菜单和商家列表之外还有 frequent-dishes / 建菜 / 改菜 / 估清 等
+        六七个出口都返回 DishOut,漏一个,非供应时段的菜就在那里显示可点
+        (「我常买」里点早餐,一路点到结算才吃 409)。"""
+        if self.serve_window:
+            from zoneinfo import ZoneInfo
+
+            from .services.flags import in_hhmm_range
+            now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%H:%M")
+            self.servable_now = in_hhmm_range(self.serve_window, now)
+        return self
 
 
 # ---------- 平台:公告 / 埋点 ----------

@@ -287,7 +287,12 @@ async def create_order(
         # 任一子项不够就整单回滚 —— 套餐少一样东西送出去,顾客的体验
         # 比缺货退款更差
         if combo_items:
-            for sub in combo_items:
+            # **按 dish_id 排序后再逐个上锁**:两个套餐共用食材但
+            # combo_items 的顺序相反时(P=[X,Y]、Q=[Y,X]),并发下单
+            # 会两两互等成死锁 —— 实测 18 单挂 3 单,顾客直接吃 500。
+            # 顺序由商家配菜时的点选顺序决定,用户根本无从规避
+            for sub in sorted(combo_items,
+                              key=lambda s: s.get("dish_id") or 0):
                 sub_qty = int(sub.get("quantity", 1)) * item.quantity
                 sub_result = await db.execute(
                     update(Dish)
@@ -302,11 +307,21 @@ async def create_order(
                 )
                 sub_row = sub_result.first()
                 if sub_row is None:
+                    # 与主项同款的精确三分文案:说"不够了"但其实是下架,
+                    # 商家照着补货补半天也不管用
                     sub_dish = await db.get(Dish, sub.get("dish_id"))
+                    if sub_dish is None:
+                        why = "已不存在"
+                    elif sub_dish.sold_out_today:
+                        why = "今日已售罄"
+                    elif not sub_dish.is_on_sale:
+                        why = "已下架"
+                    else:
+                        why = f"库存不足(剩 {sub_dish.stock} 份)"
                     sub_name = sub_dish.name if sub_dish else "套餐内菜品"
                     await db.rollback()
                     raise HTTPException(
-                        409, f"「{name}」里的「{sub_name}」不够了,换一个吧")
+                        409, f"「{name}」里的「{sub_name}」{why},换一个吧")
         # 限时折扣生效则按折扣价成交(折扣价即成交价,佣金自动按折后实收计)
         if (flash_price is not None and flash_until is not None
                 and flash_until > datetime.now(timezone.utc)):
@@ -332,12 +347,19 @@ async def create_order(
             snapshot_entry["is_alcohol"] = True
         if combo_items:
             # 套餐仍是**一行**(账目口径零影响),但带上子项明细 ——
-            # 后厨看的是"要做哪几样",不是套餐名
-            names = {d.id: d.name for d in (await db.scalars(
-                select(Dish).where(Dish.id.in_(
-                    [s.get("dish_id") for s in combo_items]))))}
+            # 后厨看的是"要做哪几样",不是套餐名。
+            # **dish_id 必须存**:取消/退款回补库存只认快照,
+            # 没有 id 就只能补套餐自己,子项库存会凭空蒸发
+            names = {
+                r[0]: r[1] for r in (await db.execute(
+                    select(Dish.id, Dish.name).where(
+                        Dish.id.in_([s.get("dish_id") for s in combo_items]),
+                        # 纵深防御:子项写入时已钉死在本店,读时再钉一次
+                        Dish.merchant_id == merchant.id))).all()
+            }
             snapshot_entry["combo"] = [
-                {"name": names.get(s.get("dish_id"), ""),
+                {"dish_id": s.get("dish_id"),
+                 "name": names.get(s.get("dish_id"), ""),
                  "quantity": int(s.get("quantity", 1))}
                 for s in combo_items]
         items_snapshot.append(snapshot_entry)
@@ -1248,12 +1270,21 @@ async def refund_item(
     refund_amount = target["price_cents"] * payload.quantity
     note_piece = f"{target['name']}×{payload.quantity}"
 
-    # 库存回补
+    # 库存回补(套餐要连子项一起还 —— 真正扣的是子项)
     await db.execute(
         update(Dish)
         .where(Dish.id == payload.dish_id)
         .values(stock=Dish.stock + payload.quantity)
     )
+    for sub in (target.get("combo") or []):
+        if sub.get("dish_id") is None:
+            continue  # 老单没存子项 id
+        await db.execute(
+            update(Dish)
+            .where(Dish.id == sub["dish_id"])
+            .values(stock=Dish.stock
+                    + int(sub.get("quantity", 1)) * payload.quantity)
+        )
 
     target["quantity"] -= payload.quantity
     items = [i for i in items if i["quantity"] > 0]

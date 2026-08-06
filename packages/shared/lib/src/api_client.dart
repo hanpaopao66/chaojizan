@@ -115,6 +115,10 @@ class ApiClient {
   /// token 真失效(401)时的全局兜底:AuthGate 挂上后静默回到登录页
   static void Function()? onUnauthorized;
 
+  /// 会话被清空(退出登录/换账号)时的钩子。用回调而不是直接调 Analytics:
+  /// analytics.dart 已经 import 本文件,反向再 import 就成了环
+  static void Function()? onSessionCleared;
+
   Future<dynamic> _request(String method, String path,
       {Object? body, Map<String, String>? query}) async {
     try {
@@ -221,6 +225,7 @@ class ApiClient {
     userId = null;
     userName = null;
     userRole = null;
+    onSessionCleared?.call();  // 会话级状态(如埋点去重)跟着会话走
     try {
       final sp = await SharedPreferences.getInstance();
       await sp.remove('auth_token');

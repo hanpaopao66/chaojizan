@@ -350,13 +350,11 @@ class MerchantListView extends StatefulWidget {
 class _MerchantListViewState extends State<MerchantListView> {
   bool _realLocation = true;
 
-  /// 已上报过曝光的店(本次进程内去重):列表滚动来回划不该刷出几十条事件
-  static final Set<int> _impressed = {};
-
+  /// 曝光去重交给 Analytics 的会话级 once(退出登录会清)——
+  /// 用页面内的 static Set 的话,换账号后新账号的曝光永远不再上报
   void _trackImpression(int merchantId) {
-    if (_impressed.add(merchantId)) {
-      Analytics.track('impression_shop', {'merchant_id': merchantId});
-    }
+    Analytics.trackOnce('impression_shop:$merchantId', 'impression_shop',
+        {'merchant_id': merchantId});
   }
 
   /// 定位正常但该区域无商家:已降级展示演示城市数据(审核兜底)

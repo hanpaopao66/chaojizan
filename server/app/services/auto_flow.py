@@ -48,12 +48,28 @@ RESTOCK_FROM_STATUSES = {OrderStatus.PENDING_PAYMENT, OrderStatus.PAID}
 
 
 async def restore_stock(db: AsyncSession, order: Order) -> None:
+    """取消/关单时把库存还回去。
+
+    **套餐要还的是子项**:套餐在快照里是一行,dish_id 是套餐这道虚拟菜,
+    下单时真正扣的是每个子项。只按 dish_id 回补的话,每取消一单套餐
+    就白吃一份子项库存 —— 跑够次数后套餐库存还是满的、下单却报
+    「子项不够了」,商家在后台完全看不出为什么卖不动。
+    """
     for item in order.items:
         await db.execute(
             update(Dish)
             .where(Dish.id == item["dish_id"])
             .values(stock=Dish.stock + item["quantity"])
         )
+        for sub in (item.get("combo") or []):
+            if sub.get("dish_id") is None:
+                continue  # 本次改动之前下的套餐单没存 id,跳过而不是报错
+            await db.execute(
+                update(Dish)
+                .where(Dish.id == sub["dish_id"])
+                .values(stock=Dish.stock
+                        + int(sub.get("quantity", 1)) * item["quantity"])
+            )
 
 
 async def _transition_batch(

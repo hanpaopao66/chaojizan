@@ -26,7 +26,29 @@ class Analytics {
   bool _sending = false;
 
   /// App 启动时调用一次(PrivacyGate 同意之后)。
-  void init(ApiClient api) => _api = api;
+  void init(ApiClient api) {
+    _api = api;
+    // 退出登录/换账号时清掉会话级去重(见 resetSession)
+    ApiClient.onSessionCleared = resetSession;
+  }
+
+  /// 「每个会话只报一次」的去重键(如商家曝光:滚动列表来回划不该刷出几十条)
+  final Set<String> _once = {};
+
+  /// 同一个 [key] 在本次会话内只上报一次。
+  static void trackOnce(String key, String event,
+          [Map<String, dynamic> props = const {}]) =>
+      instance._trackOnce(key, event, props);
+
+  void _trackOnce(String key, String event, Map<String, dynamic> props) {
+    if (_once.add(key)) _track(event, props);
+  }
+
+  /// 退出登录/换账号时清空会话级去重 —— 不清的话新账号对这些对象的
+  /// 曝光永远不再上报,漏斗口径会一直偏
+  static void resetSession() {
+    instance._once.clear();
+  }
 
   void _track(String event, Map<String, dynamic> props) {
     final api = _api;

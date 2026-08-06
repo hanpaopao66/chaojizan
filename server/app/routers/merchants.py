@@ -482,6 +482,11 @@ async def update_my_shop(
                 Dish.id == rule["dish_id"], Dish.merchant_id == shop.id))
             if dish is None or not dish.is_on_sale:
                 raise HTTPException(422, "赠品必须是本店在售菜品")
+            # 赠品不能是套餐:赠品走的是独立的一条扣库存语句(orders.py),
+            # 没有子项循环 —— 赠出去只扣套餐自己,子项静默漏扣,
+            # 小票上也只有套餐名,后厨不知道要做什么
+            if dish.combo_items:
+                raise HTTPException(422, "赠品不能是套餐,请直接选一道单品")
             rule["name"] = dish.name
 
     # 主证照与酒店第二证照同一口径:只有**被驳回重提**时可改,
@@ -636,33 +641,48 @@ async def frequent_dishes(
 
 
 async def _combo_reference(db: AsyncSession, merchant_id: int,
-                           dishes: list) -> dict[int, tuple[str, int]]:
-    """套餐子项的名字与单价。子项可能已下架(菜单查询只取在售),
+                           dishes: list) -> dict[int, dict]:
+    """套餐子项的名字/单价/可售状态。子项可能已下架或估清(菜单查询只取在售),
     所以单独查一次,不从 dishes 里捞 —— 否则套餐里少一样东西却不说。"""
     ids = {it.get("dish_id") for d in dishes for it in (d.combo_items or [])}
     ids.discard(None)
     if not ids:
         return {}
     rows = (await db.execute(
-        select(Dish.id, Dish.name, Dish.price_cents).where(
+        select(Dish.id, Dish.name, Dish.price_cents, Dish.stock,
+               Dish.is_on_sale, Dish.sold_out_today).where(
             Dish.id.in_(ids), Dish.merchant_id == merchant_id))).all()
-    return {r[0]: (r[1], r[2]) for r in rows}
+    return {r[0]: {"name": r[1], "price": r[2], "stock": r[3],
+                   "on_sale": r[4], "sold_out": r[5]} for r in rows}
 
 
 def _fill_combo_and_window(out, dish, combo_ref: dict, now_hhmm: str) -> None:
-    """填套餐明细与供应时段的派生字段。"""
+    """填套餐明细与供应时段的派生字段。
+
+    **套餐的可售量由子项决定**:套餐自己的 stock 是虚的,真正扣的是子项。
+    子项估清/下架而套餐还显示"有货",用户会一路加购到结算才吃 409。
+    这里把 stock 收敛成"按子项最多还能配几份",让既有的售罄展示逻辑
+    自动生效(客户端不用改)。
+    """
     if dish.combo_items:
         detail, original = [], 0
+        available = out.stock
         for it in dish.combo_items:
             ref = combo_ref.get(it.get("dish_id"))
             if ref is None:
+                available = 0   # 子项被删了,这个套餐配不出来
                 continue
-            name, price = ref
-            qty = int(it.get("quantity", 1))
-            detail.append({"name": name, "quantity": qty})
-            original += price * qty
+            qty = max(int(it.get("quantity", 1)), 1)
+            detail.append({"name": ref["name"], "quantity": qty})
+            original += ref["price"] * qty
+            if not ref["on_sale"] or ref["sold_out"]:
+                available = 0
+                out.sold_out_today = out.sold_out_today or ref["sold_out"]
+            else:
+                available = min(available, ref["stock"] // qty)
         out.combo_dishes = detail
         out.combo_original_cents = original
+        out.stock = max(available, 0)
     if dish.serve_window:
         from ..services.flags import in_hhmm_range
         out.servable_now = in_hhmm_range(dish.serve_window, now_hhmm)
@@ -690,6 +710,17 @@ async def _validate_combo(db: AsyncSession, merchant_id: int, items: list,
     nested = [r[0] for r in rows if r[1]]
     if nested:
         raise HTTPException(422, "套餐里不能再放套餐")
+    # 反向也要拦:**先把 B 当子项放进套餐 C,再把 B 自己改成套餐**,
+    # 一样能造出两层嵌套。扣库存循环是非递归的,不会打挂,
+    # 但第二层子项会被静默漏扣,后厨也不知道要做它
+    if self_id is not None:
+        parent = await db.scalar(
+            select(Dish.name).where(
+                Dish.merchant_id == merchant_id,
+                Dish.combo_items.contains([{"dish_id": self_id}])))
+        if parent:
+            raise HTTPException(
+                422, f"这道菜是套餐「{parent}」的组成部分,不能再做成套餐")
 
 
 @router.post("/me/dishes", response_model=DishOut)
@@ -734,6 +765,21 @@ async def update_dish(
     flash_was_off = dish.flash_price_cents is None
     # exclude_unset:没传的字段不动,显式传 null 用于关闭限时折扣
     changes = payload.model_dump(exclude_unset=True)
+    # **显式传 null 的非空列要归一化成空值**。JSONB 列的 none_as_null
+    # 默认是 False —— 写进去的是 JSON `null` 而不是 SQL NULL,NOT NULL
+    # 约束拦不住;读回来 Python 是 None,DishOut 校验直接抛,
+    # 结果是**整店菜单 500**(顾客点不了单,商家也在列表里找不到这道菜自救)。
+    # 只有 daily_stock / flash_* 的 None 是有语义的(关闭该功能)
+    _EMPTY_FOR_NULL = {
+        "badges": [], "options": [], "combo_items": [],
+        "name": None, "category": "", "description": "",
+        "image_url": "", "serve_window": "",
+    }
+    for field, empty in _EMPTY_FOR_NULL.items():
+        if changes.get(field, "") is None:
+            if empty is None:      # 名字不能被清空
+                raise HTTPException(422, "菜品名称不能为空")
+            changes[field] = empty
     from ..services.moderation import guard_text, submit_images
     if changes.get("name"):
         await guard_text(db, changes["name"], "菜品名称")
@@ -2723,7 +2769,7 @@ async def my_compliance(
 
     # 菜品图被驳回的(先发后审):商家往往不知道自己的图被隐藏了
     dish_ids = [d for d in (await db.scalars(
-        select(Dish.id).where(Dish.merchant_id == shop.id)))]
+        select(Dish.id).where(Dish.merchant_id == shop.id).limit(500)))]
     rejected_images = []
     if dish_ids:
         rejected_images = [{
@@ -2804,14 +2850,31 @@ async def my_funnel(
     impression = await uniq("impression_shop")
     visit = await uniq("view_menu")
     checkout = await uniq("checkout_view")
+
+    # **四级必须是同一批人**。前三级来自客户端埋点(只有登录用户、
+    # 只有装了新版 App 的人),第四级如果直接数全部订单,分母分子不是
+    # 一个总体 —— 埋点刚上线那几天必然是"曝光 3 / 下单 843",
+    # 前端一算就是 28100%。所以这里只数**被埋点覆盖到的那批人**里下单的,
+    # 另外单给一个 ordered_all 让商家仍能看到真实下单人数
+    tracked = select(AppEvent.user_id).where(
+        AppEvent.created_at > since,
+        AppEvent.props["merchant_id"].astext == mid)
     ordered = await db.scalar(
+        select(func.count(func.distinct(Order.customer_id))).where(
+            Order.merchant_id == shop.id,
+            Order.created_at > since,
+            Order.status != OrderStatus.PENDING_PAYMENT,
+            Order.customer_id.in_(tracked))) or 0
+    ordered_all = await db.scalar(
         select(func.count(func.distinct(Order.customer_id))).where(
             Order.merchant_id == shop.id,
             Order.created_at > since,
             Order.status != OrderStatus.PENDING_PAYMENT)) or 0
 
     def rate(a: int, b: int) -> float:
-        return round(a / b, 3) if b else 0.0
+        # 上钳到 1:埋点覆盖不全时(如从搜索/收藏直接进店只发 view_menu)
+        # 下一级可能大于上一级,显示 120% 只会让人以为数据是错的
+        return round(min(a / b, 1.0), 3) if b else 0.0
 
     return {
         "days": days,
@@ -2819,12 +2882,14 @@ async def my_funnel(
         "visit": visit,
         "checkout": checkout,
         "ordered": ordered,
+        "ordered_all": ordered_all,   # 真实下单人数(不限于被埋点覆盖的)
         "visit_rate": rate(visit, impression),      # 看到 → 进店
         "checkout_rate": rate(checkout, visit),     # 进店 → 结算
         "order_rate": rate(ordered, checkout),      # 结算 → 下单
         "overall_rate": rate(ordered, impression),
-        "note": "按人去重,只统计登录用户的浏览(平台不采设备指纹)。"
-                "平台不卖曝光位——这些数字是给你自己看的,不影响排序。",
+        "note": "漏斗四级都只数「App 上报过浏览的那批登录用户」,"
+                "口径才可比;真实下单人数见 ordered_all(通常更高)。"
+                "平台不采设备指纹,也不卖曝光位——这些数字只给你自己看,不影响排序。",
     }
 
 
