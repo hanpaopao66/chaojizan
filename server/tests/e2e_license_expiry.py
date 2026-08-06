@@ -23,7 +23,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.db import SessionLocal  # noqa: E402
 
-from .util import ADMIN, call, login  # noqa: E402
+from .util import ADMIN, CUSTOMER, call, login  # noqa: E402
 
 admin = login(ADMIN)
 
@@ -429,6 +429,99 @@ async def main():
 
     call("DELETE", f"/merchants/me/purchases/{lite['id']}", tok6)
     print("✓ 录错的可以删")
+
+
+
+    # ================= Y/Z:菜品成本毛利 + 菜品级打包费 =================
+    #
+    # 两条红线:
+    # 1. **成本只商家自己可见** —— DishOut 同时是用户端菜单的出口,
+    #    成本挂上去等于把进价公开给同行和供应商;
+    # 2. **菜品打包费是在店铺每单打包费之外「另加」** —— 改成替代式
+    #    (按份数算)会让所有没设过的商家一夜涨价(3 份就收 3 倍)。
+    tok7, shop7 = new_shop(f"成本店{random.randrange(10**4)}")
+
+    d1 = call("POST", "/merchants/me/dishes", tok7, {
+        "name": "招牌牛腩饭", "price_cents": 2800, "stock": 50,
+        "category": "主食", "cost_cents": 1200})
+    assert d1["cost_cents"] == 1200, d1
+    d2 = call("POST", "/merchants/me/dishes", tok7, {
+        "name": "免费例汤", "price_cents": 100, "stock": 50,
+        "category": "汤"})
+    assert d2["cost_cents"] == 0, "没录成本就是 0(= 没录过)"
+    print("✓ 建菜可带成本,不带默认 0")
+
+    mine = call("GET", "/merchants/me/dishes", tok7)
+    assert all("cost_cents" in d for d in mine), "商家自己的列表要能看到成本"
+    # **用户端菜单绝不能有成本**
+    pub = call("GET", f"/merchants/{shop7['id']}/dishes")
+    assert pub, pub
+    for d in pub:
+        assert "cost_cents" not in d, f"成本泄露到用户端菜单了:{d}"
+    print("✓ 成本只在商家自己的接口里,用户端菜单没有这个字段")
+
+    # 改成本 / 清成本
+    upd = call("PATCH", f"/merchants/me/dishes/{d2['id']}", tok7,
+               {"cost_cents": 30})
+    assert upd["cost_cents"] == 30
+    upd = call("PATCH", f"/merchants/me/dishes/{d2['id']}", tok7,
+               {"cost_cents": None})
+    assert upd["cost_cents"] == 0, "显式传 null 归零而不是 500"
+    print("✓ 成本可改可清(显式 null 归零,不炸 NOT NULL)")
+
+    # ---- 毛利:只对录过成本的菜给 ----
+    ana = call("GET", "/merchants/me/analytics?days=7", tok7)
+    assert "margin_note" in ana and "不含平台佣金" in ana["margin_note"], ana
+    print("✓ 分析接口带毛利口径说明(明说不含佣金与配送)")
+
+    # ---- 菜品级打包费:另加,不是替代 ----
+    call("PATCH", "/merchants/me", tok7, {"packing_fee_cents": 100})
+    pack = call("PATCH", f"/merchants/me/dishes/{d1['id']}", tok7,
+                {"packing_fee_cents": 300})
+    assert pack["packing_fee_cents"] == 300
+    # 用户端能看到:它是实付价的一部分
+    pub = call("GET", f"/merchants/{shop7['id']}/dishes")
+    hit = [d for d in pub if d["id"] == d1["id"]][0]
+    assert hit["packing_fee_cents"] == 300, \
+        f"打包费要对用户端公开(它是实付价的一部分):{hit}"
+    print("✓ 菜品打包费对用户端公开(成本不公开,打包费公开 —— 两回事)")
+
+    # ---- 下单实收:这是钱的路径,必须真跑一单 ----
+    #
+    # 店铺每单打包费 ¥1;招牌牛腩饭额外 ¥3/份。
+    # 点 2 份 → 1 + 3×2 = ¥7。**不是 1×2 + 3×2** ——
+    # 店铺那笔是每单一次的,改成按份数会让所有没设过的商家一夜涨价。
+    customer = login(CUSTOMER)
+    call("PATCH", "/merchants/me", tok7, {"is_open": True})
+    o = call("POST", "/orders", customer, {
+        "merchant_id": shop7["id"],
+        "items": [{"dish_id": d1["id"], "quantity": 2}],
+        "address": "打包费测试地址", "lat": 30.6612, "lng": 104.0823})
+    assert o["packing_fee_cents"] == 100 + 300 * 2, \
+        f"应为 店铺每单 ¥1 + 菜品 ¥3×2 = ¥7,实际 {o['packing_fee_cents']}"
+    call("POST", f"/orders/{o['order_no']}/transition", customer,
+         {"to_status": "cancelled"})
+    print(f"✓ 下单实收打包费 ¥{o['packing_fee_cents'] / 100:g}"
+          f"(店铺每单 ¥1 + 菜品 ¥3×2)")
+
+    # 没设过菜品打包费的店:与加这个功能之前一字不差
+    o2 = call("POST", "/orders", customer, {
+        "merchant_id": shop7["id"],
+        "items": [{"dish_id": d2["id"], "quantity": 3}],
+        "address": "打包费测试地址", "lat": 30.6612, "lng": 104.0823},
+        expect_error=True)
+    if "_error" not in o2:
+        assert o2["packing_fee_cents"] == 100, \
+            f"没设菜品打包费的,还是店铺那一笔(不能按份数翻倍):{o2}"
+        call("POST", f"/orders/{o2['order_no']}/transition", customer,
+             {"to_status": "cancelled"})
+        print("✓ 没设菜品打包费的菜:仍是店铺每单一笔(不因份数翻倍)")
+
+    cleared = call("PATCH", f"/merchants/me/dishes/{d1['id']}", tok7,
+                   {"packing_fee_cents": None})
+    assert cleared["packing_fee_cents"] is None, \
+        f"要能清回「用店铺默认」:{cleared}"
+    print("✓ 菜品打包费可清回店铺默认(null 有语义,不被归一化掉)")
 
     print("\ne2e_license_expiry 全部通过 ✅")
 

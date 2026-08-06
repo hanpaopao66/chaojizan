@@ -417,6 +417,10 @@ class DishIn(BaseModel):
     name: str
     category: str = ""
     price_cents: int = Field(gt=0)
+    # 成本(分/份),0 = 没录过。只商家自己可见,不进任何对外接口
+    cost_cents: int = Field(default=0, ge=0, le=1_000_000)
+    # 额外打包费(分/份);None = 不单独设,只走店铺的每单打包费
+    packing_fee_cents: int | None = Field(default=None, ge=0, le=2000)
     stock: int = Field(default=100, ge=0)
     daily_stock: int | None = Field(default=None, ge=0, le=100_000)
     is_alcohol: bool = False  # 酒类:购买需实名且成年,商家上架自助勾选
@@ -438,6 +442,8 @@ class DishPatch(BaseModel):
     name: str | None = None
     category: str | None = None
     price_cents: int | None = Field(default=None, gt=0)
+    cost_cents: int | None = Field(default=None, ge=0, le=1_000_000)
+    packing_fee_cents: int | None = Field(default=None, ge=0, le=2000)
     stock: int | None = Field(default=None, ge=0)
     # 每日回满目标(传 null 关闭)。与其他字段不同,None 是有效值,
     # 用 model_fields_set 判断是否显式传了本字段
@@ -485,6 +491,9 @@ class DishOut(BaseModel):
     serve_window: str = ""         # 供应时段(空=全天)
     servable_now: bool = True      # 此刻是否在供应时段内(下方自动算)
     options: list = []
+    # 菜品额外打包费(分/份);None = 这道菜没单独设,只走店铺的每单打包费。
+    # **对用户端公开**:它是实付价的一部分,用户有权在点之前就看到
+    packing_fee_cents: int | None = None
     flash_price_cents: int | None = None
     flash_until: datetime | None = None
     monthly_sales: int = 0  # 近 30 天售出份数,菜单接口填充
@@ -505,6 +514,19 @@ class DishOut(BaseModel):
 
 
 # ---------- 平台:公告 / 埋点 ----------
+class MerchantDishOut(DishOut):
+    """商家自查视角的菜品(仅 /merchants/me/dishes 与建菜/改菜返回)。
+
+    **cost_cents 只能出现在这里**:DishOut 同时是用户端菜单、我常买、
+    店铺详情的出口,成本挂上去就等于把商家的进价公开给同行和供应商。
+    分一个子类而不是"记得在公开出口里 pop 掉" —— 后者漏一个就泄露,
+    而出口有六七个。
+    """
+
+    cost_cents: int = 0
+
+
+
 class AnnouncementIn(BaseModel):
     audience: str = Field(pattern="^(user|merchant|rider|all)$")
     title: str = Field(min_length=2, max_length=50)

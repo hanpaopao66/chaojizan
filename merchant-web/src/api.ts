@@ -683,6 +683,11 @@ export interface Dish {
   name: string
   category: string
   price_cents: number
+  /** 成本(分/份),0 = 没录过(不是成本为零)。**只商家自己的接口有这个字段** */
+  cost_cents?: number
+  /** 额外打包费(分/份);null = 用店铺的每单打包费。
+   *  **在店铺每单打包费之外另加**,不是替代 */
+  packing_fee_cents?: number | null
   stock: number
   daily_stock: number | null
   sold_out_today: boolean

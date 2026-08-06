@@ -311,6 +311,8 @@ class Dish {
         name = json['name'] as String,
         category = json['category'] as String? ?? '',
         priceCents = json['price_cents'] as int,
+        costCents = json['cost_cents'] as int? ?? 0,
+        packingFeeCents = json['packing_fee_cents'] as int?,
         stock = json['stock'] as int,
         dailyStock = json['daily_stock'] as int?,
         soldOutToday = json['sold_out_today'] as bool? ?? false,
@@ -341,6 +343,14 @@ class Dish {
   final String name;
   final String category;
   final int priceCents;
+
+  /// 成本(分/份),0 = **没录过**(不是成本为零)。
+  /// 只有商家自己的接口下发这个字段;用户端菜单里恒为 0。
+  final int costCents;
+
+  /// 额外打包费(分/份);null = 用店铺的每单打包费。
+  /// **在店铺那笔之外另加**,不是替代。
+  final int? packingFeeCents;
   final int stock;
 
   /// 菜单顺序(小的在前,同值按 id):商家排的顺序,用户端照着看

@@ -241,6 +241,8 @@ async def create_order(
     # 两个人同时买最后一份时,数据库保证只有一个 UPDATE 生效
     food_cents = 0
     items_snapshot = []
+    # 菜品级打包费的累计额(在店铺每单打包费之外另加)
+    extra_packing = 0
     for item in payload.items:
         result = await db.execute(
             update(Dish)
@@ -253,7 +255,8 @@ async def create_order(
             .values(stock=Dish.stock - item.quantity)
             .returning(Dish.name, Dish.price_cents, Dish.options,
                        Dish.flash_price_cents, Dish.flash_until,
-                       Dish.is_alcohol, Dish.serve_window, Dish.combo_items)
+                       Dish.is_alcohol, Dish.serve_window, Dish.combo_items,
+                       Dish.packing_fee_cents)
         )
         row = result.first()
         if row is None:
@@ -271,7 +274,16 @@ async def create_order(
             await db.rollback()
             raise HTTPException(409, detail)
         name, price_cents, option_groups, flash_price, flash_until, \
-            dish_is_alcohol, serve_window, combo_items = row
+            dish_is_alcohol, serve_window, combo_items, \
+            dish_packing = row
+        # 菜品级打包费:**在店铺「每单打包费」之外另加**,按份数累计。
+        #
+        # 为什么是"另加"而不是"替代":店铺那个是每单一次的费用,
+        # 改成按份数算会让**所有没设过菜品打包费的商家**在一夜之间
+        # 涨价(3 份菜就收 3 倍) —— 这种静默涨价谁都受不了。
+        # None = 没单独设过,不加钱;0 是合法取值,意思是"这道菜不额外收"。
+        if dish_packing:
+            extra_packing += dish_packing * item.quantity
         # 分时段供应:菜单里非供应时段是灰态可见的(不消失,免得用户以为没这道菜),
         # 真正的闸门在这里 —— 前端灰态挡不住直接调接口
         # in_hhmm_range 已在模块顶部导入 —— **不能在这里再 import 一次**:
@@ -392,7 +404,9 @@ async def create_order(
             raise HTTPException(
                 409, f"超出配送范围({settings.delivery_max_km:g}km),换家近点的店吧")
 
-    packing = merchant.packing_fee_cents
+    # 店铺「每单打包费」+ 各菜品自己的额外打包费(按份数)。
+    # 没有任何菜品设过额外打包费时,这里与加这个功能之前一字不差
+    packing = merchant.packing_fee_cents + extra_packing
     notes = []
 
     # 商家满减:取满足门槛的最大一档,成本商家承担(结算时从实收里扣)

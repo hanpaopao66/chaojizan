@@ -191,6 +191,14 @@ function DishDrawer({ existing, allDishes, onClose }: {
   const [price, setPrice] = useState<number | null>(
     existing ? existing.price_cents / 100 : null)
   const [stock, setStock] = useState<number | null>(existing?.stock ?? 100)
+  // 成本(元)。0/未录 → null,输入框留空 —— 0 是"没录过"不是"成本为零",
+  // 显示成 0.00 会让人以为已经录过了
+  const [cost, setCost] = useState<number | null>(
+    existing?.cost_cents ? existing.cost_cents / 100 : null)
+  // 额外打包费(元);null = 用店铺的每单打包费
+  const [packing, setPacking] = useState<number | null>(
+    existing?.packing_fee_cents != null
+      ? existing.packing_fee_cents / 100 : null)
   const [dailyStock, setDailyStock] = useState<number | null>(
     existing?.daily_stock ?? null)
   const [imageUrl, setImageUrl] = useState(existing?.image_url ?? '')
@@ -220,6 +228,9 @@ function DishDrawer({ existing, allDishes, onClose }: {
       name: name.trim(),
       category: category.trim(),
       price_cents: priceCents,
+      cost_cents: cost == null ? 0 : Math.round(cost * 100),
+      // null 有语义:清回"用店铺默认",所以显式传 null 而不是省略
+      packing_fee_cents: packing == null ? null : Math.round(packing * 100),
       stock,
       daily_stock: dailyStock,
       image_url: imageUrl,
@@ -264,6 +275,40 @@ function DishDrawer({ existing, allDishes, onClose }: {
           <Form.Item label="每日回满(空=不启用)">
             <InputNumber min={0} value={dailyStock} onChange={setDailyStock} />
           </Form.Item>
+        </Space>
+        <Space align="start">
+          <Form.Item
+            label="成本(元/份)"
+            extra="只你自己看得到,不会出现在用户端。填了才能算毛利。"
+          >
+            <InputNumber min={0} value={cost} onChange={setCost}
+              placeholder="未录" />
+          </Form.Item>
+          <Form.Item
+            label="额外打包费(元/份)"
+            extra={`空=只收店铺的每单打包费;填了在那笔之外按份数另加。`}
+          >
+            <InputNumber min={0} max={20} value={packing}
+              onChange={setPacking} placeholder="用店铺默认" />
+          </Form.Item>
+          {cost != null && price != null && price > 0 && (
+            <Form.Item label="毛利">
+              <div style={{ paddingTop: 4 }}>
+                <span style={{
+                  fontSize: 16, fontWeight: 600,
+                  color: price - cost > 0 ? '#389e0d' : '#cf1322',
+                }}>
+                  ¥{(price - cost).toFixed(2)}
+                </span>
+                <span style={{ marginLeft: 8, color: '#8c8c8c' }}>
+                  {Math.round((price - cost) / price * 100)}%
+                </span>
+                <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                  卖价 − 进价,不含平台佣金与配送
+                </div>
+              </div>
+            </Form.Item>
+          )}
         </Space>
         <Form.Item label="菜品描述"
           extra="写清用料和口味,有忌口的顾客不用猜">

@@ -607,8 +607,29 @@ class _DishEditPageState extends State<DishEditPage> {
       text: widget.dish == null
           ? ''
           : (widget.dish!.priceCents / 100).toStringAsFixed(2));
+  // 成本(元/份)。0 = 没录过 → 输入框留空,别显示成 0.00 让人以为录过了
+  late final _cost = TextEditingController(
+      text: (widget.dish?.costCents ?? 0) == 0
+          ? ''
+          : (widget.dish!.costCents / 100).toStringAsFixed(2));
+  // 额外打包费(元/份);空 = 用店铺的每单打包费
+  late final _packing = TextEditingController(
+      text: widget.dish?.packingFeeCents == null
+          ? ''
+          : (widget.dish!.packingFeeCents! / 100).toStringAsFixed(2));
   late final _stock =
       TextEditingController(text: '${widget.dish?.stock ?? 100}');
+
+  /// 卖价与成本都填了才给毛利。**明说不含平台佣金与配送** ——
+  /// 那是订单层面的,摊到单个菜上的数不能拿来定价。
+  String? get _grossHint {
+    final p = double.tryParse(_price.text);
+    final c = double.tryParse(_cost.text);
+    if (p == null || c == null || p <= 0) return null;
+    final pct = ((p - c) / p * 100).round();
+    return '毛利 ¥${(p - c).toStringAsFixed(2)}($pct%)'
+        ' —— 卖价 − 进价,不含平台佣金与配送';
+  }
   // 每日回满目标(空=不启用)
   late final _dailyStock = TextEditingController(
       text: widget.dish?.dailyStock == null ? '' : '${widget.dish!.dailyStock}');
@@ -691,6 +712,13 @@ class _DishEditPageState extends State<DishEditPage> {
 
   Future<void> _save() async {
     final priceCents = ((double.tryParse(_price.text) ?? 0) * 100).round();
+    final costCents = _cost.text.trim().isEmpty
+        ? 0
+        : ((double.tryParse(_cost.text) ?? 0) * 100).round();
+    // null 有语义:清回"用店铺默认"。所以空串 → null,而不是 0
+    final packingCents = _packing.text.trim().isEmpty
+        ? null
+        : ((double.tryParse(_packing.text) ?? 0) * 100).round();
     final stock = int.tryParse(_stock.text) ?? -1;
     if (_name.text.trim().isEmpty || priceCents <= 0 || stock < 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -748,6 +776,8 @@ class _DishEditPageState extends State<DishEditPage> {
           'name': _name.text.trim(),
           'category': _category.text.trim(),
           'price_cents': priceCents,
+          'cost_cents': costCents,
+          'packing_fee_cents': packingCents,
           'stock': stock,
           'daily_stock': dailyStock, // null = 关闭每日回满
           'is_alcohol': _isAlcohol,
@@ -868,6 +898,7 @@ class _DishEditPageState extends State<DishEditPage> {
             Expanded(
               child: TextField(
                   controller: _price,
+                  onChanged: (_) => setState(() {}),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
@@ -882,6 +913,41 @@ class _DishEditPageState extends State<DishEditPage> {
                       labelText: '库存 *', border: OutlineInputBorder())),
             ),
           ]),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                  controller: _cost,
+                  onChanged: (_) => setState(() {}),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                      labelText: '成本(元/份)',
+                      helperText: '只你自己看得到,填了才有毛利',
+                      helperMaxLines: 2,
+                      border: OutlineInputBorder())),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                  controller: _packing,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                      labelText: '额外打包费(元)',
+                      helperText: '空=只收店铺每单那笔;填了另加',
+                      helperMaxLines: 2,
+                      border: OutlineInputBorder())),
+            ),
+          ]),
+          if (_grossHint != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_grossHint!,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            ),
           const SizedBox(height: 12),
           TextField(
               controller: _dailyStock,

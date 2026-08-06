@@ -38,6 +38,7 @@ from ..schemas import (
     DayStatOut,
     DishIn,
     DishOut,
+    MerchantDishOut,
     DishPatch,
     FinanceOrderOut,
     MerchantIn,
@@ -563,7 +564,7 @@ async def update_my_shop(
     return shop
 
 
-@router.get("/me/dishes", response_model=list[DishOut])
+@router.get("/me/dishes", response_model=list[MerchantDishOut])
 async def my_dishes(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
@@ -755,7 +756,7 @@ async def _validate_combo(db: AsyncSession, merchant_id: int, items: list,
                 422, f"这道菜是套餐「{parent}」的组成部分,不能再做成套餐")
 
 
-@router.post("/me/dishes", response_model=DishOut)
+@router.post("/me/dishes", response_model=MerchantDishOut)
 async def add_dish(
     payload: DishIn,
     user: User = Depends(require_role("merchant")),
@@ -782,7 +783,7 @@ async def add_dish(
     return dish
 
 
-@router.patch("/me/dishes/{dish_id}", response_model=DishOut)
+@router.patch("/me/dishes/{dish_id}", response_model=MerchantDishOut)
 async def update_dish(
     dish_id: int,
     payload: DishPatch,
@@ -802,10 +803,14 @@ async def update_dish(
     # 约束拦不住;读回来 Python 是 None,DishOut 校验直接抛,
     # 结果是**整店菜单 500**(顾客点不了单,商家也在列表里找不到这道菜自救)。
     # 只有 daily_stock / flash_* 的 None 是有语义的(关闭该功能)
+    # packing_fee_cents 的 None 是**有语义的**(清掉菜品额外打包费,
+    # 退回店铺的每单打包费),所以不在这张表里 —— 它和 daily_stock /
+    # flash_* 一样是真 nullable 列。cost_cents 则是 NOT NULL,
+    # 显式传 null 会在 flush 时炸 IntegrityError,归一化成 0(= 没录过)
     _EMPTY_FOR_NULL = {
         "badges": [], "options": [], "combo_items": [],
         "name": None, "category": "", "description": "",
-        "image_url": "", "serve_window": "",
+        "image_url": "", "serve_window": "", "cost_cents": 0,
     }
     for field, empty in _EMPTY_FOR_NULL.items():
         if changes.get(field, "") is None:
@@ -2137,6 +2142,12 @@ async def my_analytics(
     sold_out = {d.name: d for d in (await db.scalars(
         select(Dish).where(Dish.merchant_id == shop.id,
                            Dish.sold_out_today.is_(True)))).all()}
+    # 成本按**菜名**匹配销量快照(快照里存的是下单当时的菜名)。
+    # 只取录过成本的:cost_cents = 0 是"没录过",不是"成本为零" ——
+    # 猜一个成本算出来的毛利,比不显示更糟(商家会照着它定价)
+    costs = {name: c for name, c in (await db.execute(
+        select(Dish.name, Dish.cost_cents).where(
+            Dish.merchant_id == shop.id, Dish.cost_cents > 0))).all()}
     today_bj = (datetime.now(timezone.utc)
                 + timedelta(hours=8)).strftime("%m-%d")
     top = sorted(dish_stat.items(), key=lambda kv: -kv[1]["qty"])[:10]
@@ -2148,6 +2159,16 @@ async def my_analytics(
         if name in sold_out:
             daily_avg = s["qty"] / days
             entry["missed_estimate"] = max(0, round(daily_avg))
+        # 毛利:只对录过成本的菜给。**不含平台佣金与配送** ——
+        # 那是订单层面的,摊到单个菜上只能靠分摊,分摊出来的数不能用来定价。
+        # 这里说的就是"卖价 - 进价",商家一眼能对上自己的账
+        cost = costs.get(name)
+        if cost:
+            entry["cost_cents"] = cost
+            gross = s["amount_cents"] - cost * s["qty"]
+            entry["gross_profit_cents"] = gross
+            entry["margin"] = (round(gross / s["amount_cents"], 3)
+                               if s["amount_cents"] else 0.0)
         top_dishes.append(entry)
 
     trend = [{"date": day, "orders": d["orders"],
@@ -2159,6 +2180,12 @@ async def my_analytics(
         "orders": len(rows),
         "hourly": hourly,
         "top_dishes": top_dishes,
+        # 有几道菜还没录成本 —— 录了才有毛利可看,不催但要让人知道
+        "dishes_without_cost": sum(
+            1 for d in top_dishes if "margin" not in d),
+        "margin_note": "毛利 = 卖价 − 进价,**不含平台佣金与配送费** ——"
+                       "那是订单层面的,摊到单个菜上的数不能拿来定价。"
+                       "没录成本的菜不算毛利(猜一个成本算出来的数更糟)。",
         "ticket_trend": trend,
         "repurchase_rate": (round(repeat / len(per_customer), 3)
                             if per_customer else 0.0),

@@ -391,6 +391,19 @@ class Dish(Base):
     # 酒类标记:商家上架自助勾选(法律义务在商家,平台提供工具与拦截)。
     # 含酒订单要求用户已实名且成年(#14),小票/骑手端提示查验收件人
     is_alcohol: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # 成本(分/份)。**只商家自己可见**:不进任何对外接口、不进开放 API、
+    # 不进公开的菜单接口 —— 成本泄露出去,商家在供应商和同行面前都被动。
+    # 0 = 没录过(不是"成本为零"),毛利一律不算不显示 ——
+    # 猜一个成本算出来的毛利,比不显示更糟。
+    cost_cents: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
+
+    # 菜品级打包费(分)。None = 用店铺的 packing_fee_cents。
+    # 店铺级一刀切在真实场景里两头不讨好:汤类打包盒三块、饮料根本不要盒,
+    # 收一样的钱要么商家亏,要么顾客觉得被宰。
+    packing_fee_cents: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
     image_url: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
