@@ -482,6 +482,9 @@ export interface FoodOrderItem {
 
 export interface FoodOrder {
   order_no: string
+  /** 下单顾客的 id。用来读/写本店对这位顾客的备注(AJ)与标记异常单(AK)。
+   *  服务端 OrderOut 一直有这个字段,这里只是把类型补上 */
+  customer_id: number
   status: string
   items: FoodOrderItem[]
   total_cents: number
@@ -1058,6 +1061,87 @@ export function saveHealthCert(fields: {
 /** 离职:**归档不删除** —— 监管查的是"当时在岗的人有没有证"。 */
 export function archiveHealthCert(id: number): Promise<unknown> {
   return request('DELETE', `/merchants/me/health-certs/${id}`)
+}
+
+// ---------- 顾客备注 / 异常订单标记 / 定时任务 / 菜单导入 ----------
+
+/** 顾客在**本店**的备注。不跨店 —— 这是顾客的个人信息,不是商家的资产。 */
+export function customerNote(userId: number):
+Promise<{ note: string; tags: string[]; updated_at: string | null }> {
+  return request('GET', `/merchants/me/customers/${userId}/note`)
+}
+
+export function saveCustomerNote(
+  userId: number, note: string, tags: string[],
+): Promise<unknown> {
+  return request('PUT', `/merchants/me/customers/${userId}/note`,
+    { note, tags })
+}
+
+/** 标记异常订单。**只上报给平台核查,不会自动处置顾客** ——
+ *  我们不给商家拉黑顾客的权力,那会变成报复工具。 */
+export function flagOrder(
+  orderNo: string, kind: 'claim' | 'review' | 'other', reason: string,
+): Promise<{ ok: boolean; note: string }> {
+  return request('POST', `/merchants/me/orders/${orderNo}/flag`,
+    { kind, reason })
+}
+
+export interface DishSchedule {
+  id: number
+  dish_id: number
+  dish_name: string
+  action: 'price' | 'on' | 'off'
+  price_cents: number | null
+  run_at: string
+  status: string
+  note: string
+}
+
+export function dishSchedules():
+Promise<{ items: DishSchedule[]; note: string }> {
+  return request('GET', '/merchants/me/dish-schedules')
+}
+
+export function addDishSchedule(fields: {
+  dish_id: number
+  action: 'price' | 'on' | 'off'
+  price_cents?: number
+  run_at: string
+  note?: string
+}): Promise<{ id: number }> {
+  return request('POST', '/merchants/me/dish-schedules', fields)
+}
+
+export function cancelDishSchedule(id: number): Promise<unknown> {
+  return request('DELETE', `/merchants/me/dish-schedules/${id}`)
+}
+
+export interface ImportRow {
+  row: number
+  name: string
+  action: 'create' | 'update' | 'problem'
+  problems: string[]
+  price_cents: number | null
+  cost_cents: number | null
+  packing_fee_cents: number | null
+  stock: number | null
+  category: string
+  description: string
+  badges: string[]
+  old_price_cents: number | null
+}
+
+/** 解析并**预览**,不落库 —— 一次错误的表格能把整店价格改掉。 */
+export function importPreview(rows: Record<string, string>[]):
+Promise<{ items: ImportRow[]; create: number; update: number
+  problem: number; note: string }> {
+  return request('POST', '/merchants/me/dishes/import-preview', { rows })
+}
+
+export function importCommit(items: ImportRow[]):
+Promise<{ created: number; updated: number; note: string }> {
+  return request('POST', '/merchants/me/dishes/import', { items })
 }
 
 // ---------- 商家系统回调(收银/ERP 主动收单) ----------

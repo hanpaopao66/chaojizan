@@ -265,3 +265,55 @@ async def sweep_health_certs(now_beijing) -> dict[str, int]:
                                record_skip=True)
             notified += 1
     return {"notified": notified}
+
+
+async def sweep_dish_schedules() -> dict[str, int]:
+    """执行到点的定时改价 / 上下架。
+
+    ## 过期太久的不补跑,标 skipped
+
+    服务重启或清扫停了一阵之后,把三天前该降的价降下来,商家会莫名其妙
+    亏一笔 —— 而他早就忘了自己设过这个。超过宽限期的直接跳过并留痕,
+    让他在列表里看到"这条没执行",而不是发现钱少了才回头查。
+
+    宽限期取 30 分钟:正常清扫每 30 秒一轮,半小时没跑到说明出过事,
+    这时候"按原计划执行"已经不是商家的本意了。
+    """
+    from sqlalchemy import select
+
+    from ..db import SessionLocal
+    from ..models import Dish, DishSchedule
+
+    now = datetime.now(timezone.utc)
+    grace = now - timedelta(minutes=30)
+    done = skipped = 0
+    async with SessionLocal() as db:
+        rows = list(await db.scalars(
+            select(DishSchedule)
+            .where(DishSchedule.status == "pending",
+                   DishSchedule.run_at <= now)
+            .order_by(DishSchedule.run_at).limit(200)))
+        if not rows:
+            return {}
+        for r in rows:
+            if r.run_at < grace:
+                r.status = "skipped"
+                r.note = (r.note + " ")[:60] + "(错过执行窗口,未补跑)"
+                skipped += 1
+                continue
+            dish = await db.get(Dish, r.dish_id)
+            if dish is None or dish.merchant_id != r.merchant_id:
+                r.status = "skipped"
+                r.note = "菜品已删除"
+                skipped += 1
+                continue
+            if r.action == "price" and r.price_cents:
+                dish.price_cents = r.price_cents
+            elif r.action == "on":
+                dish.is_on_sale = True
+            elif r.action == "off":
+                dish.is_on_sale = False
+            r.status = "done"
+            done += 1
+        await db.commit()
+    return {"done": done, "skipped": skipped}

@@ -1093,6 +1093,9 @@ async def auto_flow_loop() -> None:
             # 商家的服务器不该有能力拖慢我们的支付回调
             from .webhooks import sweep_webhooks
             await sweep_webhooks()
+            # 定时改价/上下架:到点执行,过期太久的不补跑
+            from .licenses import sweep_dish_schedules
+            await sweep_dish_schedules()
             from .licenses import sweep_health_certs, sweep_license_expiry
             await sweep_license_expiry(datetime.now(BEIJING))
             # 健康证与证照判定同一套,但**后果不同**:证照过期落闸停业,

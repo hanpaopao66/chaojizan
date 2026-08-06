@@ -1,14 +1,14 @@
 import { PrinterOutlined, SoundOutlined } from '@ant-design/icons'
 import {
-  Alert, Badge, Button, Card, Col, Input, InputNumber, Modal, Row, Space,
-  Tag, message,
+  Alert, Badge, Button, Card, Col, Input, InputNumber, Modal, Radio, Row,
+  Space, Tag, Tooltip, message,
 } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
-  ApiError, FOOD_STATUS_LABELS, FoodOrder, Merchant, foodPickupVerify,
-  foodRefundItem, foodReprint, foodTransition, foodUrgeReply, myFoodOrders,
-  yuan,
+  ApiError, FOOD_STATUS_LABELS, FoodOrder, Merchant, customerNote,
+  flagOrder, foodPickupVerify, foodRefundItem, foodReprint, foodTransition,
+  foodUrgeReply, myFoodOrders, saveCustomerNote, yuan,
 } from '../../api'
 import { useMerchantAlerts } from '../../hooks/useMerchantAlerts'
 
@@ -205,6 +205,45 @@ function OrderCard({ order, urged, onChanged }: {
     }
   }
 
+  function flagOrder_() {
+    let kind: 'claim' | 'review' | 'other' = 'claim'
+    let reason = ''
+    Modal.confirm({
+      title: '标记这一单异常',
+      width: 520,
+      content: (
+        <div>
+          <Alert
+            type="info" showIcon style={{ marginBottom: 12 }}
+            message="标记只上报平台核查,不会自动处置这位顾客"
+            description="我们不给商家拉黑顾客的权力 —— 那会变成报复工具。职业索赔是跨店行为,平台会把多家店的标记放在一起看;有结果会在消息中心通知你。"
+          />
+          <Radio.Group defaultValue="claim" style={{ marginBottom: 8 }}
+            onChange={(e) => { kind = e.target.value }}>
+            <Radio value="claim">疑似职业索赔</Radio>
+            <Radio value="review">疑似恶意差评</Radio>
+            <Radio value="other">其他</Radio>
+          </Radio.Group>
+          <Input.TextArea
+            rows={3} maxLength={300}
+            placeholder="写清楚为什么可疑(至少 5 个字) —— 平台要靠这段话去核查"
+            onChange={(e) => { reason = e.target.value }}
+          />
+        </div>
+      ),
+      okText: '上报平台',
+      onOk: async () => {
+        try {
+          const r = await flagOrder(order.order_no, kind, reason.trim())
+          message.info(r.note, 8)
+        } catch (e) {
+          message.error(e instanceof ApiError ? e.message : String(e))
+          return Promise.reject()
+        }
+      },
+    })
+  }
+
   function reject() {
     let reason = '菜品售罄,暂时无法接单'
     Modal.confirm({
@@ -266,6 +305,13 @@ function OrderCard({ order, urged, onChanged }: {
   }
 
   const actions: React.ReactNode[] = []
+  // 标记异常单:只在已完结的单上给入口 —— 进行中的单该先把它做完,
+  // 而"这单可疑"的判断也要等结果出来才成立
+  if (['completed', 'delivered', 'cancelled'].includes(order.status)) {
+    actions.push(
+      <Button key="flag" size="small" onClick={flagOrder_}>标记异常</Button>,
+    )
+  }
   if (order.status === 'paid') {
     actions.push(
       <Button key="refund" size="small" onClick={refundSheet}>缺货退款</Button>,
@@ -347,6 +393,9 @@ function OrderCard({ order, urged, onChanged }: {
         {yuan(order.total_cents)}{order.address ? ` · ${order.address}` : ''}
       </div>
       {order.remark && <div style={{ fontSize: 12, color: '#888' }}>备注:{order.remark}</div>}
+      {/* 本店对这位顾客的备注:"302 那位不要香菜" —— 老客维护靠这个,
+          在接单台上就能看到、就能改,回头再找就没人记了 */}
+      <CustomerNoteLine order={order} />
       {order.status === 'cancelled' && order.cancel_reason && (
         <div style={{ fontSize: 12, color: '#e5484d' }}>取消原因:{order.cancel_reason}</div>
       )}
@@ -361,5 +410,78 @@ function OrderCard({ order, urged, onChanged }: {
         </div>
       )}
     </Card>
+  )
+}
+
+
+/**
+ * 接单台上的顾客备注行。
+ *
+ * 「302 那位不要香菜」—— 老客维护靠这个。放在接单台而不是单独一个页面:
+ * 备注要在**看到这单的时候**就出现,回头再去翻就没人记了。
+ *
+ * 只对本店可见 —— 这是顾客的个人信息,商家能记是因为他在服务这个人,
+ * 不是因为他拥有这份数据。
+ */
+function CustomerNoteLine({ order }: { order: FoodOrder }) {
+  const [note, setNote] = useState<string | null>(null)
+  const [tags, setTags] = useState<string[]>([])
+
+  useEffect(() => {
+    let alive = true
+    customerNote(order.customer_id)
+      .then((r) => { if (alive) { setNote(r.note); setTags(r.tags) } })
+      .catch(() => { if (alive) setNote('') })
+    return () => { alive = false }
+  }, [order.customer_id])
+
+  if (note === null) return null
+
+  function edit() {
+    let draft = note ?? ''
+    let draftTags = tags.join(' ')
+    Modal.confirm({
+      title: '这位顾客的备注(只你自己看得到)',
+      content: (
+        <div>
+          <Input.TextArea
+            rows={2} maxLength={200} defaultValue={draft}
+            placeholder="如:不要香菜,喜欢多辣"
+            onChange={(e) => { draft = e.target.value }}
+          />
+          <Input
+            style={{ marginTop: 8 }} maxLength={80}
+            defaultValue={draftTags}
+            placeholder="口味标签,空格分隔:忌香菜 重辣"
+            onChange={(e) => { draftTags = e.target.value }}
+          />
+        </div>
+      ),
+      okText: '保存',
+      onOk: async () => {
+        const t = draftTags.split(/\s+/).filter(Boolean).slice(0, 8)
+        try {
+          await saveCustomerNote(order.customer_id, draft.trim(), t)
+          setNote(draft.trim())
+          setTags(t)
+        } catch (e) {
+          message.error(e instanceof ApiError ? e.message : String(e))
+          return Promise.reject()
+        }
+      },
+    })
+  }
+
+  return (
+    <div style={{ fontSize: 12, marginTop: 2 }}>
+      {tags.map((t) => (
+        <Tag key={t} color="blue" style={{ marginInlineEnd: 4 }}>{t}</Tag>
+      ))}
+      <Tooltip title="只你自己看得到,不跨店">
+        <a onClick={edit} style={{ color: note ? '#1677ff' : '#bbb' }}>
+          {note || '＋记一句'}
+        </a>
+      </Tooltip>
+    </div>
   )
 }

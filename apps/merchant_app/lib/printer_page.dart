@@ -21,11 +21,13 @@ class PrinterPage extends StatefulWidget {
 }
 
 class _PrinterPageState extends State<PrinterPage> {
-  // 云打印状态
+  // 云打印状态。**一家店可以挂多台**:前厅出顾客小票、后厨出备餐单,
+  // 是餐饮的标配 —— 共用一台的话出餐的人得跑到前台去拿
   bool _cloudLoaded = false;
   bool _cloudEnabled = false; // 平台是否配置了服务商
-  String _cloudSn = '';
-  bool _cloudAuto = true;
+  List<Map<String, dynamic>> _printers = const [];
+  List<Map<String, dynamic>> _purposes = const [];
+  String _printerNote = '';
   bool _busy = false;
 
   // 蓝牙状态
@@ -40,13 +42,16 @@ class _PrinterPageState extends State<PrinterPage> {
 
   Future<void> _load() async {
     try {
-      final s = await widget.api.printerStatus();
+      final s = await widget.api.printers();
       if (mounted) {
         setState(() {
           _cloudLoaded = true;
           _cloudEnabled = s['enabled'] as bool? ?? false;
-          _cloudSn = s['sn'] as String? ?? '';
-          _cloudAuto = s['auto'] as bool? ?? true;
+          _printers = ((s['items'] as List?) ?? const [])
+              .cast<Map<String, dynamic>>();
+          _purposes = ((s['purposes'] as List?) ?? const [])
+              .cast<Map<String, dynamic>>();
+          _printerNote = '${s['note'] ?? ''}';
         });
       }
     } catch (_) {
@@ -85,11 +90,15 @@ class _PrinterPageState extends State<PrinterPage> {
   Future<void> _bindCloud() async {
     final snCtrl = TextEditingController();
     final keyCtrl = TextEditingController();
+    final nameCtrl = TextEditingController();
+    var purpose = 'front';
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
         title: const Text('绑定云打印机'),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text('SN 和 KEY 在打印机机身贴纸上',
@@ -104,7 +113,43 @@ class _PrinterPageState extends State<PrinterPage> {
                 controller: keyCtrl,
                 decoration: const InputDecoration(
                     labelText: 'KEY(识别码)', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: purpose,
+              decoration: const InputDecoration(
+                  labelText: '这台放在哪、印什么',
+                  border: OutlineInputBorder()),
+              items: [
+                for (final p in (_purposes.isEmpty
+                    ? const [
+                        {'value': 'front', 'label': '前厅小票'},
+                        {'value': 'kitchen', 'label': '后厨备餐单'},
+                        {'value': 'label', 'label': '标签'},
+                      ]
+                    : _purposes))
+                  DropdownMenuItem(
+                      value: '${p['value']}', child: Text('${p['label']}')),
+              ],
+              onChanged: (v) => setLocal(() => purpose = v ?? 'front'),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              purpose == 'kitchen'
+                  ? '后厨备餐单**不印顾客手机号和地址** —— 后厨用不到,'
+                      '而单子会被随手丢在操作台上。'
+                  : purpose == 'label'
+                      ? '标签贴在打包袋外面,只印店名与单号后六位。'
+                      : '前厅小票含收件人与地址 —— 骑手来取要核对。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                    labelText: '备注名(选填,如「后厨那台」)',
+                    border: OutlineInputBorder())),
           ],
+        ),
         ),
         actions: [
           TextButton(
@@ -115,17 +160,16 @@ class _PrinterPageState extends State<PrinterPage> {
               child: const Text('绑定')),
         ],
       ),
+      ),
     );
     if (ok != true) return;
     final sn = snCtrl.text.trim();
     final key = keyCtrl.text.trim();
     if (sn.isEmpty || key.isEmpty) return _toast('SN 和 KEY 都要填');
     await _guard(() async {
-      final s = await widget.api.bindPrinter(sn, key, remark: widget.shopName);
-      setState(() {
-        _cloudSn = s['sn'] as String? ?? sn;
-        _cloudAuto = s['auto'] as bool? ?? true;
-      });
+      await widget.api.addPrinter(
+          sn: sn, key: key, purpose: purpose, name: nameCtrl.text.trim());
+      await _load();
       _toast('绑定成功,可以打一张测试页试试');
     });
   }
@@ -153,58 +197,103 @@ class _PrinterPageState extends State<PrinterPage> {
             else if (!_cloudEnabled)
               Text('平台还未开通云打印服务,先用下面的蓝牙打印;开通后这里会自动亮起。',
                   style: TextStyle(color: theme.colorScheme.error))
-            else if (_cloudSn.isEmpty)
+            else ...[
+              for (final p in _printers) _printerTile(p),
+              if (_printers.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Text('还没有绑定打印机'),
+                ),
+              if (_printerNote.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, bottom: 8),
+                  child: Text(_printerNote,
+                      style: theme.textTheme.bodySmall),
+                ),
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton.icon(
                   icon: const Icon(Icons.add_link),
-                  label: const Text('绑定打印机'),
+                  label: Text(_printers.isEmpty ? '绑定打印机' : '再绑一台'),
                   onPressed: _busy ? null : _bindCloud,
                 ),
-              )
-            else ...[
-              Row(children: [
-                Icon(Icons.check_circle, color: Theme.of(context).sz.earn, size: 18),
-                const SizedBox(width: 6),
-                Expanded(child: Text('已绑定:$_cloudSn')),
-              ]),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('新订单自动出票'),
-                value: _cloudAuto,
-                onChanged: _busy
-                    ? null
-                    : (v) => _guard(() async {
-                          await widget.api.setPrinterAuto(v);
-                          setState(() => _cloudAuto = v);
-                        }),
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => _guard(() async {
-                              await widget.api.unbindPrinter();
-                              setState(() => _cloudSn = '');
-                              _toast('已解绑');
-                            }),
-                    child: const Text('解绑'),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonal(
-                    onPressed: _busy
-                        ? null
-                        : () => _guard(() async {
-                              await widget.api.printerTest();
-                              _toast('测试页已发送,看打印机出纸');
-                            }),
-                    child: const Text('打印测试页'),
-                  ),
-                ],
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 一台打印机:用途 + 自动出票开关 + 解绑。
+  ///
+  /// 用途单独标出来,因为它决定这台印什么 —— 后厨那张不带顾客手机号和
+  /// 地址,商家得能一眼看出哪台是哪台。
+  Widget _printerTile(Map<String, dynamic> p) {
+    final theme = Theme.of(context);
+    final purpose = '${p['purpose']}';
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Icon(
+                purpose == 'kitchen'
+                    ? Icons.soup_kitchen_outlined
+                    : purpose == 'label'
+                        ? Icons.label_outline
+                        : Icons.receipt_long_outlined,
+                size: 18,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${p['name']}'.isEmpty
+                      ? '${p['purpose_label']}'
+                      : '${p['name']}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              Chip(
+                label: Text('${p['purpose_label']}',
+                    style: const TextStyle(fontSize: 11)),
+                visualDensity: VisualDensity.compact,
+              ),
+            ]),
+            Text('SN ${p['sn']}', style: theme.textTheme.bodySmall),
+            if (purpose == 'kitchen')
+              Text('这张不印顾客手机号和地址',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant)),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: const Text('新订单自动出票'),
+              value: p['auto'] == true,
+              onChanged: _busy
+                  ? null
+                  : (v) => _guard(() async {
+                        await widget.api
+                            .updatePrinter(p['id'] as int, {'auto': v});
+                        await _load();
+                      }),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => _guard(() async {
+                          await widget.api.removePrinter(p['id'] as int);
+                          await _load();
+                          _toast('已解绑');
+                        }),
+                child: const Text('解绑'),
+              ),
+            ),
           ],
         ),
       ),
@@ -341,7 +430,9 @@ class _PrinterPageState extends State<PrinterPage> {
 
   @override
   Widget build(BuildContext context) {
-    final both = _cloudSn.isNotEmpty && _cloudAuto && _btDevice != null && _btAuto;
+    // 云打印和蓝牙都开着会出两张一样的单 —— 提醒一句
+    final cloudAuto = _printers.any((p) => p['auto'] == true);
+    final both = cloudAuto && _btDevice != null && _btAuto;
     return Scaffold(
       appBar: AppBar(title: const Text('小票打印')),
       body: ListView(

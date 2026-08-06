@@ -592,7 +592,10 @@ async def my_dishes(
     combo_ref = await _combo_reference(db, shop.id, dishes)
     now_hhmm = datetime.now(CN_TZ).strftime("%H:%M")
     for dish in dishes:
-        out = DishOut.model_validate(dish)
+        # **必须构造 MerchantDishOut**:这里造 DishOut 的话,
+        # response_model 再套一层 MerchantDishOut 时 cost_cents 拿不到值,
+        # 只剩默认的 0 —— 库里是对的,是序列化这一步丢的
+        out = MerchantDishOut.model_validate(dish)
         out.monthly_sales = sales.get(dish.id, 0)
         _fill_combo_and_window(out, dish, combo_ref, now_hhmm)
         outs.append(out)
@@ -1775,6 +1778,434 @@ async def request_merchant_withdrawal(
 # ---------- 云打印小票(飞鹅):绑定/开关/测试/补打 ----------
 
 _FEIE_DISABLED = "云打印未启用:平台还未配置打印服务商账号,可先用商家端的蓝牙小票机直连"
+
+
+# ---------- 定时改价 / 定时上下架 ----------
+
+# 过期多久就不再补跑。把三天前该降的价降下来,商家会莫名其妙亏一笔 ——
+# 而他早就忘了自己设过这个
+_SCHEDULE_GRACE_MINUTES = 30
+
+
+@router.get("/me/dish-schedules")
+async def my_dish_schedules(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """待执行与最近执行过的定时动作。"""
+    from ..models import DishSchedule
+
+    shop = await _my_shop_or_404(db, user)
+    rows = (await db.execute(
+        select(DishSchedule, Dish.name)
+        .join(Dish, Dish.id == DishSchedule.dish_id)
+        .where(DishSchedule.merchant_id == shop.id)
+        .order_by(DishSchedule.status.desc(), DishSchedule.run_at)
+        .limit(200))).all()
+    return {
+        "items": [{
+            "id": r.id, "dish_id": r.dish_id, "dish_name": name,
+            "action": r.action, "price_cents": r.price_cents,
+            "run_at": r.run_at, "status": r.status, "note": r.note,
+        } for r, name in rows],
+        "note": "到点自动执行。**错过太久的不会补跑** —— "
+                "把三天前该降的价降下来,你会莫名其妙亏一笔。"
+                "与「供应时段」不是一回事:那个是每天重复、只灰不改价。",
+    }
+
+
+@router.post("/me/dish-schedules")
+async def add_dish_schedule(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """加一条定时动作。action: price 改价 / on 上架 / off 下架。"""
+    from ..models import DishSchedule
+
+    shop = await owned_shop(db, user)
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    dish = await db.get(Dish, int(payload.get("dish_id") or 0))
+    if dish is None or dish.merchant_id != shop.id:
+        raise HTTPException(404, "菜品不存在")
+    action = str(payload.get("action") or "")
+    if action not in ("price", "on", "off"):
+        raise HTTPException(422, "动作只支持:改价 / 上架 / 下架")
+    price = None
+    if action == "price":
+        try:
+            price = int(payload["price_cents"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(422, "改价要填新价格")
+        if not 1 <= price <= 1_000_000:
+            raise HTTPException(422, "价格超出范围")
+    try:
+        run_at = datetime.fromisoformat(str(payload["run_at"]))
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(422, "执行时间格式不对")
+    if run_at.tzinfo is None:
+        run_at = run_at.replace(tzinfo=timezone.utc)
+    if run_at <= datetime.now(timezone.utc):
+        # 定过去的时间等于"立刻执行",但商家想要的多半是明天同一时刻 ——
+        # 与其猜,不如让他重填
+        raise HTTPException(422, "执行时间必须晚于现在")
+
+    n = await db.scalar(select(func.count(DishSchedule.id)).where(
+        DishSchedule.merchant_id == shop.id,
+        DishSchedule.status == "pending"))
+    if n >= 100:
+        raise HTTPException(422, "待执行的定时任务最多 100 条")
+
+    row = DishSchedule(merchant_id=shop.id, dish_id=dish.id, action=action,
+                       price_cents=price, run_at=run_at,
+                       note=str(payload.get("note", "")).strip()[:100])
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return {"id": row.id, "run_at": row.run_at, "status": row.status}
+
+
+@router.delete("/me/dish-schedules/{schedule_id}")
+async def cancel_dish_schedule(
+    schedule_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    from ..models import DishSchedule
+
+    shop = await owned_shop(db, user)
+    row = await db.get(DishSchedule, schedule_id)
+    if shop is None or row is None or row.merchant_id != shop.id:
+        raise HTTPException(404, "定时任务不存在")
+    if row.status != "pending":
+        raise HTTPException(409, "这条已经执行过了")
+    row.status = "cancelled"
+    await db.commit()
+    return {"ok": True}
+
+
+# ---------- 顾客备注与口味标签 ----------
+
+@router.get("/me/customers/{user_id}/note")
+async def get_customer_note(
+    user_id: int,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """这位顾客在**本店**的备注。不跨店 —— 换一家店就是干净的。"""
+    from ..models import CustomerNote
+
+    shop = await _my_shop_or_404(db, user)
+    row = await db.scalar(select(CustomerNote).where(
+        CustomerNote.merchant_id == shop.id, CustomerNote.user_id == user_id))
+    return {
+        "note": row.note if row else "",
+        "tags": row.tags if row else [],
+        "updated_at": row.updated_at if row else None,
+    }
+
+
+@router.put("/me/customers/{user_id}/note")
+async def set_customer_note(
+    user_id: int,
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """记一条备注。**必须这位顾客真的在本店下过单** ——
+    否则这就成了一个可以给任意用户 id 写字的接口。"""
+    from ..models import CustomerNote
+    from ..services.moderation import guard_text
+
+    shop = await _my_shop_or_404(db, user)
+    ordered = await db.scalar(select(Order.id).where(
+        Order.merchant_id == shop.id, Order.customer_id == user_id).limit(1))
+    if ordered is None:
+        raise HTTPException(404, "这位顾客没在本店下过单")
+
+    note = str(payload.get("note", "")).strip()[:200]
+    if note:
+        await guard_text(db, note, "顾客备注")
+    tags = [str(t).strip()[:10] for t in (payload.get("tags") or [])][:8]
+    for t in tags:
+        await guard_text(db, t, "口味标签")
+
+    row = await db.scalar(select(CustomerNote).where(
+        CustomerNote.merchant_id == shop.id, CustomerNote.user_id == user_id))
+    if row is None:
+        row = CustomerNote(merchant_id=shop.id, user_id=user_id)
+        db.add(row)
+    row.note = note
+    row.tags = tags
+    await db.commit()
+    return {"ok": True, "note": note, "tags": tags}
+
+
+# ---------- 异常订单标记(只上报,不给拉黑权) ----------
+
+@router.post("/me/orders/{order_no}/flag")
+async def flag_order(
+    order_no: str,
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """标记疑似职业索赔 / 恶意差评。
+
+    ## 标记之后会发生什么(界面上必须原样说清楚)
+
+    **只上报给平台核查,不会自动对这位顾客做任何处置。** 我们不给商家
+    拉黑顾客的权力 —— 给了的话它会变成报复工具(差评了就拉黑)。
+    而真正的职业索赔是**跨店行为**:一个人在十家店用同样的话术要退款,
+    单店老板永远发现不了,只有平台看得到全局。
+
+    所以商家标记完不会立刻发生任何事。这一点必须诚实告诉他,
+    否则他会以为按下去就解决了。
+    """
+    from ..models import OrderFlag
+    from ..services.moderation import guard_text
+
+    shop = await _my_shop_or_404(db, user)
+    order = await db.scalar(select(Order).where(
+        Order.order_no == order_no, Order.merchant_id == shop.id))
+    if order is None:
+        raise HTTPException(404, "订单不存在")
+    kind = str(payload.get("kind") or "other")
+    if kind not in ("claim", "review", "other"):
+        raise HTTPException(422, "类型只支持:疑似职业索赔 / 疑似恶意差评 / 其他")
+    reason = str(payload.get("reason", "")).strip()[:300]
+    if len(reason) < 5:
+        raise HTTPException(422, "请写清楚为什么可疑(至少 5 个字),"
+                                 "平台要靠这段话去核查")
+    await guard_text(db, reason, "标记说明")
+
+    dup = await db.scalar(select(OrderFlag).where(
+        OrderFlag.merchant_id == shop.id, OrderFlag.order_no == order_no))
+    if dup is not None:
+        raise HTTPException(409, "这一单已经标记过了")
+
+    db.add(OrderFlag(merchant_id=shop.id, order_no=order_no,
+                     user_id=order.customer_id, kind=kind, reason=reason))
+    await db.commit()
+    return {
+        "ok": True,
+        "note": "已上报平台核查。**不会自动对这位顾客做任何处置** —— "
+                "我们不给商家拉黑顾客的权力,那会变成报复工具。"
+                "职业索赔是跨店行为,平台会把多家店的标记放在一起看;"
+                "核查有结果会在消息中心通知你。",
+    }
+
+
+@router.get("/me/order-flags")
+async def my_order_flags(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我标记过的单与核查进度。"""
+    from ..models import OrderFlag
+
+    shop = await _my_shop_or_404(db, user)
+    rows = (await db.scalars(
+        select(OrderFlag).where(OrderFlag.merchant_id == shop.id)
+        .order_by(OrderFlag.id.desc()).limit(100))).all()
+    return {
+        "items": [{
+            "id": r.id, "order_no": r.order_no, "kind": r.kind,
+            "reason": r.reason, "status": r.status,
+            "created_at": r.created_at,
+        } for r in rows],
+        "note": "标记只用于平台核查,不会自动处置顾客。"
+                "职业索赔是跨店行为 —— 单店看不出来的,放在一起才看得出。",
+    }
+
+
+# ---------- 菜单批量导入 ----------
+
+_IMPORT_COLUMNS = ("名称", "分类", "价格(元)", "成本(元)", "库存",
+                   "描述", "标签", "额外打包费(元)")
+
+
+@router.get("/me/dishes/import-template")
+async def dish_import_template(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """导入模板(CSV)。带两行示例 —— 空模板商家不知道每列该填成什么样。"""
+    import csv
+    import io
+
+    from fastapi.responses import StreamingResponse
+
+    await _my_shop_or_404(db, user)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(_IMPORT_COLUMNS)
+    w.writerow(["招牌牛腩饭", "主食", "28", "12", "50",
+                "十二小时慢炖,不加淀粉", "招牌|微辣", "1"])
+    w.writerow(["酸梅汤", "饮品", "6", "1.5", "100", "", "", ""])
+    # BOM:Excel 不给 BOM 会把中文认成乱码,商家打开是一屏问号
+    return StreamingResponse(
+        io.BytesIO(("\ufeff" + buf.getvalue()).encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition":
+                 'attachment; filename="menu-template.csv"'})
+
+
+@router.post("/me/dishes/import-preview")
+async def dish_import_preview(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """解析表格并**预览**,不落库。
+
+    ## 为什么一定要两步
+
+    直接落库的话,一次错误的表格能把 80 道菜的价格全改掉,而商家发现时
+    已经卖了半天 —— 一列串位就是一整店的价格错乱,退款和差评一起来。
+    所以先返回逐行的「新增 / 更新 / 有问题」,商家看过再确认。
+
+    有问题的行**不阻塞其余行**:80 行里错 2 行,不该逼商家把整张表重做。
+    """
+    from ..schemas import DISH_BADGES
+
+    shop = await _my_shop_or_404(db, user)
+    rows = payload.get("rows") or []
+    if not isinstance(rows, list) or not rows:
+        raise HTTPException(422, "没有解析到任何数据行")
+    if len(rows) > 500:
+        raise HTTPException(422, "一次最多导入 500 行")
+
+    existing = {d.name: d for d in (await db.scalars(
+        select(Dish).where(Dish.merchant_id == shop.id)))}
+    seen: set[str] = set()
+    out = []
+    for i, raw in enumerate(rows):
+        r = {k: str(v or "").strip() for k, v in (raw or {}).items()}
+        name = r.get("名称", "")[:60]
+        problems = []
+        if not name:
+            problems.append("缺名称")
+        elif name in seen:
+            problems.append("表格里重复出现")
+        seen.add(name)
+
+        def _money(key, required=False):
+            v = r.get(key, "")
+            if not v:
+                if required:
+                    problems.append(f"缺{key}")
+                return None
+            try:
+                cents = round(float(v) * 100)
+            except ValueError:
+                problems.append(f"{key}不是数字")
+                return None
+            if cents < 0:
+                problems.append(f"{key}不能是负数")
+                return None
+            return cents
+
+        price = _money("价格(元)", required=True)
+        cost = _money("成本(元)")
+        packing = _money("额外打包费(元)")
+        stock = None
+        if r.get("库存"):
+            try:
+                stock = max(0, int(float(r["库存"])))
+            except ValueError:
+                problems.append("库存不是数字")
+        badges = [b for b in r.get("标签", "").replace("、", "|").split("|")
+                  if b.strip()]
+        bad_badges = [b for b in badges if b not in DISH_BADGES]
+        if bad_badges:
+            problems.append(f"标签不在白名单:{'、'.join(bad_badges)}")
+
+        hit = existing.get(name)
+        out.append({
+            "row": i + 2,          # +2:第 1 行是表头,商家看到的行号要对得上
+            "name": name,
+            "action": "problem" if problems
+            else ("update" if hit else "create"),
+            "problems": problems,
+            "price_cents": price,
+            "cost_cents": cost,
+            "packing_fee_cents": packing,
+            "stock": stock,
+            "category": r.get("分类", "")[:20],
+            "description": r.get("描述", "")[:200],
+            "badges": badges,
+            "old_price_cents": hit.price_cents if hit else None,
+        })
+    return {
+        "items": out,
+        "create": sum(1 for i in out if i["action"] == "create"),
+        "update": sum(1 for i in out if i["action"] == "update"),
+        "problem": sum(1 for i in out if i["action"] == "problem"),
+        "note": "确认后才会写入。有问题的行会被跳过,其余照常导入 —— "
+                "80 行里错 2 行,不该逼你把整张表重做。",
+    }
+
+
+@router.post("/me/dishes/import")
+async def dish_import_commit(
+    payload: dict,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """确认导入。只写 action 为 create/update 的行。
+
+    **新建的菜默认下架(is_on_sale=False)**:一次导入几十道菜直接上架,
+    图片、描述、库存都还没核对过就出现在顾客面前。商家挨个看过再上,
+    比事后一个个下架强。更新已有的菜不动上下架状态(那是门店当下的决定)。
+    """
+    from ..services.moderation import guard_text
+
+    shop = await _my_shop_or_404(db, user)
+    items = payload.get("items") or []
+    if not items:
+        raise HTTPException(422, "没有可导入的行")
+    existing = {d.name: d for d in (await db.scalars(
+        select(Dish).where(Dish.merchant_id == shop.id)))}
+
+    created = updated = 0
+    for it in items:
+        if it.get("action") not in ("create", "update"):
+            continue
+        name = str(it.get("name", "")).strip()[:60]
+        if not name or not it.get("price_cents"):
+            continue
+        await guard_text(db, name, "菜品名称")
+        if it.get("description"):
+            await guard_text(db, str(it["description"]), "菜品描述")
+        d = existing.get(name)
+        if d is None:
+            d = Dish(merchant_id=shop.id, name=name, stock=0,
+                     is_on_sale=False)   # 导入的新菜默认下架,商家核对后再上
+            db.add(d)
+            created += 1
+        else:
+            updated += 1
+        d.price_cents = int(it["price_cents"])
+        if it.get("cost_cents") is not None:
+            d.cost_cents = int(it["cost_cents"])
+        if it.get("packing_fee_cents") is not None:
+            d.packing_fee_cents = int(it["packing_fee_cents"])
+        if it.get("stock") is not None:
+            d.stock = int(it["stock"])
+        if it.get("category"):
+            d.category = str(it["category"])[:20]
+        if it.get("description"):
+            d.description = str(it["description"])[:200]
+        if it.get("badges"):
+            d.badges = list(it["badges"])
+    await db.commit()
+    return {
+        "created": created, "updated": updated,
+        "note": "新导入的菜默认**下架**,核对图片和库存后再上架 —— "
+                "几十道菜没核对就出现在顾客面前,事后一个个下架更麻烦。",
+    }
 
 
 # ---------- 商家系统回调(收银/ERP 主动收单) ----------

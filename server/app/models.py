@@ -2149,3 +2149,92 @@ class WebhookDelivery(Base):
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class DishSchedule(Base):
+    """菜品定时动作(一次性)。
+
+    与 Dish.serve_window 的区别要分清:
+    - **serve_window 是每天重复的供应时段**,只把菜灰掉、不改价;
+    - 这张表是**一次性的定时动作**:夜宵档提价、午市套餐限时降价、
+      某天到点自动上架。
+
+    ## 过期未执行的不补跑
+
+    服务重启或清扫任务停了一阵之后,把三天前该降的价降下来,
+    商家会莫名其妙亏一笔 —— 而他早就忘了自己设过这个。
+    超过 grace 还没跑的直接标 skipped 并告知,不猜他现在还想不想要。
+    """
+
+    __tablename__ = "dish_schedules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    dish_id: Mapped[int] = mapped_column(ForeignKey("dishes.id"), index=True)
+    # price 改价 / on 上架 / off 下架
+    action: Mapped[str] = mapped_column(String(10))
+    price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    run_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True)
+    # pending / done / skipped(过期太久没跑) / cancelled
+    status: Mapped[str] = mapped_column(
+        String(10), default="pending", server_default="pending", index=True)
+    note: Mapped[str] = mapped_column(String(100), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class CustomerNote(Base):
+    """商家给顾客记的备注与口味标签。
+
+    "302 那位不要香菜" —— 老客维护靠这个,现在只能靠记性。
+
+    ## 只对本店可见
+
+    这是**顾客的个人信息**,商家能记是因为他在服务这个人,不是因为他
+    拥有这份数据。所以:不跨店、不进任何对外接口、不进开放 API、
+    顾客换一家店就是干净的。
+    """
+
+    __tablename__ = "customer_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    tags: Mapped[list] = mapped_column(JSONB, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now())
+
+
+class OrderFlag(Base):
+    """商家标记的异常订单(疑似职业索赔 / 恶意差评)。
+
+    ## 只上报,不给商家拉黑顾客的权力
+
+    这是拍板定下的口径。理由:给了拉黑权,它会变成报复工具
+    (差评了就拉黑);而真正的职业索赔是**跨店行为**,只有平台看得到
+    全局 —— 一个人在十家店用同样的话术要退款,单店老板永远发现不了。
+
+    代价是商家标记完**不会立刻发生任何事**,体感是"我说了没用"。
+    所以界面上必须诚实说明平台会怎么处理、多久有回音,否则不如不做。
+    """
+
+    __tablename__ = "order_flags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    order_no: Mapped[str] = mapped_column(String(32), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # claim 疑似职业索赔 / review 疑似恶意差评 / other
+    kind: Mapped[str] = mapped_column(String(10), default="other")
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    # pending 待核查 / reviewed 已核查 / dismissed 不成立
+    status: Mapped[str] = mapped_column(
+        String(10), default="pending", server_default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
