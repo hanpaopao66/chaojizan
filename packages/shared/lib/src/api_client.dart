@@ -1329,6 +1329,19 @@ class ApiClient {
     return (data as Map).cast<String, dynamic>();
   }
 
+  /// 平台规则(数字从服务端常量算出,后台改不了)
+  Future<Map<String, dynamic>> merchantRules() async {
+    final data = await _request('GET', '/merchants/me/rules');
+    return (data as Map).cast<String, dynamic>();
+  }
+
+  /// 顾客分层:新客/回头客/流失客各多少人、各贡献多少
+  Future<Map<String, dynamic>> merchantCustomers({int days = 30}) async {
+    final data = await _request('GET', '/merchants/me/customers',
+        query: {'days': '$days'});
+    return (data as Map).cast<String, dynamic>();
+  }
+
   /// 流量漏斗:曝光 → 进店 → 结算 → 下单(按人去重)
   Future<Map<String, dynamic>> merchantFunnel({int days = 7}) async {
     final data = await _request('GET', '/merchants/me/funnel',

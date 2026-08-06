@@ -2818,6 +2818,133 @@ async def my_compliance(
     }
 
 
+# ---------- 规则中心(数字从代码里的真实常量算出来) ----------
+
+@router.get("/me/rules")
+async def my_rules(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """平台规则:什么算违规、后果是什么、怎么申诉。
+
+    **每个数字都从代码里的真实常量算出来**,不是后台可编辑的文案 ——
+    公示 30 天 3 起自动停业、代码里写的却是 5 起,这种事只要可能发生
+    就迟早会发生。与 pledge.* 那套承诺文案同一个做法。
+    """
+    from ..routers.admin import FS_AUTO_SUSPEND_COUNT
+    from ..routers.appeals import APPEAL_WINDOW
+    shop = await _my_shop_or_404(db, user)
+    top_rate = max(float(r[1]) for r in settings.commission_tiers)
+    appeal_hours = int(APPEAL_WINDOW.total_seconds() // 3600)
+    return {
+        "sections": [
+            {
+                "title": "抽成",
+                "items": [
+                    f"总负担 {top_rate * 100:g}% 封顶,单量越大费率越低"
+                    f"(当前你是 {float(shop.commission_rate) * 100:g}%)",
+                    "配送费 100% 归骑手,平台一分不抽",
+                    "没有竞价排名,不存在花钱买曝光",
+                ],
+            },
+            {
+                "title": "食品安全(唯一会直接影响经营的红线)",
+                "items": [
+                    f"30 天内成立 {FS_AUTO_SUSPEND_COUNT} 起食安投诉,"
+                    "系统自动暂停营业并转人工复核",
+                    "投诉直达平台不经商家,处置动作全部留痕(你在合规档案里看得到)",
+                    "先行赔付由平台垫付,判定商家责任的才向你追偿",
+                ],
+            },
+            {
+                "title": "申诉",
+                "items": [
+                    f"售后判责、差评(≤3 星)可在 {appeal_hours} 小时内申诉,每项一次",
+                    "申诉成立:差评隐藏且评分同步扣回、被冲的净额补回来",
+                    "改判的钱平台认亏,不向用户追讨",
+                ],
+            },
+            {
+                "title": "配送责任",
+                "items": [
+                    "配送由平台负责,配送原因的差评不计入你的店铺评分",
+                    "超时安抚券由平台承担,不扣你也不扣骑手",
+                    "骑手到店等餐超时有补偿,同样平台出",
+                ],
+            },
+            {
+                "title": "不会发生的事",
+                "items": [
+                    "出餐时长、评分不折算成积分,不影响你在用户端的曝光",
+                    "平台没有「违规积分」这种东西",
+                    "评价不能删也不能花钱删,唯一例外是申诉成立后隐藏(评分同步扣回)",
+                ],
+            },
+        ],
+        "note": "这一页的数字直接来自代码里的常量,后台改不了 ——"
+                "公示的和实际执行的必须是同一个数。",
+    }
+
+
+# ---------- 顾客分层(我的客人是谁) ----------
+
+@router.get("/me/customers")
+async def my_customers(
+    days: int = Query(default=30, ge=7, le=90),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """新客 / 回头客 / 流失客各多少人、各贡献多少。
+
+    口径(写清楚,免得商家按错的定义做决定):
+    - 新客:窗口内第一次在本店下单(此前从没在本店买过)
+    - 回头客:窗口内下过 ≥2 单,或窗口前也买过
+    - 流失客:窗口前买过、窗口内一单没有(这是最该被召回的那批)
+    只数完成的单;金额按商家实收(扣掉让利与退款)。
+    """
+    shop = await _my_shop_or_404(db, user)
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(days=days)
+    done = [OrderStatus.DELIVERED, OrderStatus.COMPLETED]
+
+    # 窗口内:每人下了几单、净贡献多少
+    rows = (await db.execute(
+        select(Order.customer_id, Order.food_cents, Order.packing_fee_cents,
+               Order.discount_cents, Order.refund_cents)
+        .where(Order.merchant_id == shop.id, Order.created_at > since,
+               Order.status.in_(done)))).all()
+    per_user: dict[int, list[int]] = {}
+    for cid, food, packing, discount, refund in rows:
+        net = max(food + packing - discount - refund, 0)
+        cur = per_user.setdefault(cid, [0, 0])
+        cur[0] += 1
+        cur[1] += net
+
+    # 窗口之前买过的人(用来区分新客与回头客、找出流失客)
+    before_ids = set(await db.scalars(
+        select(func.distinct(Order.customer_id)).where(
+            Order.merchant_id == shop.id, Order.created_at <= since,
+            Order.status.in_(done))))
+
+    groups = {"new": [0, 0], "repeat": [0, 0]}
+    for cid, (cnt, net) in per_user.items():
+        key = "repeat" if (cnt >= 2 or cid in before_ids) else "new"
+        groups[key][0] += 1
+        groups[key][1] += net
+    churned = len(before_ids - set(per_user))
+
+    return {
+        "days": days,
+        "new": {"customers": groups["new"][0], "net_cents": groups["new"][1]},
+        "repeat": {"customers": groups["repeat"][0],
+                   "net_cents": groups["repeat"][1]},
+        "churned": {"customers": churned},
+        "total_customers": len(per_user),
+        "note": "流失客是窗口前买过、这段时间没再来的人 ——"
+                "店内营销里的「老客召回」正是发给他们的。",
+    }
+
+
 # ---------- 流量转化漏斗 ----------
 
 @router.get("/me/funnel")

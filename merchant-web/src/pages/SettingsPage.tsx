@@ -144,6 +144,7 @@ function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }
   const [packing, setPacking] = useState(shop.packing_fee_cents / 100)
   const [readyMinutes, setReadyMinutes] = useState(shop.promise_ready_minutes)
   const [selfDelivery, setSelfDelivery] = useState(shop.self_delivery)
+  const [foodSeal, setFoodSeal] = useState(shop.food_seal)
   const [busy, setBusy] = useState(false)
 
   async function save() {
@@ -154,6 +155,7 @@ function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }
         packing_fee_cents: Math.round(packing * 100),
         promise_ready_minutes: readyMinutes,
         self_delivery: selfDelivery,
+        food_seal: foodSeal,
       })
       message.success('已保存')
       onChanged()
@@ -179,6 +181,10 @@ function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }
         </Form.Item>
         <Form.Item label="商家自配送(订单不进抢单池)">
           <Switch checked={selfDelivery} onChange={setSelfDelivery} />
+        </Form.Item>
+        <Form.Item label="食安封签"
+          tooltip="打包贴一次性封签,拆封即留痕。用户端显示「商家声明使用食安封签」——是你的声明不是平台认证">
+          <Switch checked={foodSeal} onChange={setFoodSeal} />
         </Form.Item>
       </Space>
       <div>

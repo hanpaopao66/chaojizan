@@ -177,6 +177,11 @@ class Merchant(Base):
     auto_accept: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false")
 
+    # 食安封签:商家自述使用一次性封签(拆封即留痕)。**是自述不是认证** ——
+    # 平台不上门查,所以用户端的文案也只能写"商家声明",不能写"平台认证"
+    food_seal: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false")
+
     # 忙碌模式:高峰压单的中间态 —— 不闭店,但把预期先说清楚。
     # busy_until 之前 ETA/出餐超时判定放宽 busy_extra_minutes,
     # 用户端展示「出餐较慢」标;到点自动失效(读取时判断,无需清扫任务)

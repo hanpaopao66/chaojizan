@@ -6,6 +6,7 @@ import 'appeal_page.dart';
 import 'dashboard_page.dart';
 import 'messages_page.dart';
 import 'reviews_page.dart';
+import 'rules_page.dart';
 import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
 import 'promises_page.dart';
@@ -1549,6 +1550,30 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       '拒单、缺货退款仍可在订单页手动操作',
                       style: Theme.of(context).textTheme.bodySmall),
                   const Divider(height: 24),
+                  Row(
+                    children: [
+                      const Text('食安封签'),
+                      const Spacer(),
+                      Switch(
+                        value: shop.foodSeal,
+                        onChanged: (v) async {
+                          try {
+                            await widget.api.updateShop({'food_seal': v});
+                            _load();
+                          } catch (e) {
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text(e.toString())));
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  Text('打包时贴一次性封签,拆封即留痕。开启后用户端显示'
+                      '「商家声明使用食安封签」—— 是你的声明不是平台认证,'
+                      '请确保真的在用',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
                   // 小票打印:云打印机(服务端直推)+ 蓝牙小票机(App 直连)
                   Row(
                     children: [
@@ -1870,6 +1895,17 @@ class _ShopTabPageState extends State<ShopTabPage> {
           ),
           const SizedBox(height: 12),
           // 消息中心是店主视角(接口按 owner 判权),店员看了只会报"还没开店"
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.gavel_outlined),
+              title: const Text('平台规则'),
+              subtitle: const Text('什么算违规、后果是什么、怎么申诉'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => MerchantRulesPage(api: widget.api))),
+            ),
+          ),
+          const SizedBox(height: 12),
           if (!shop.viewerIsStaff) ...[
             Card(
               child: ListTile(

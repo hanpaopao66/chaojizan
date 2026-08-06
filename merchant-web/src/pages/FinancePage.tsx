@@ -7,11 +7,12 @@ import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, CommissionTier, Compliance, DayStat, FinanceOrder, Funnel,
-  InvoiceRecord, InvoiceSummary, Merchant, Wallet, Withdrawal, applyInvoice,
-  commissionTier, createWithdrawal, downloadFile, financeDaily, financeOrders,
-  invoiceSummary, merchantCompliance, merchantFunnel, merchantWallet,
-  merchantWithdrawals, myInvoices, yuan,
+  ApiError, CommissionTier, Compliance, CustomerMix, DayStat, FinanceOrder,
+  Funnel, InvoiceRecord, InvoiceSummary, Merchant, Rules, Wallet, Withdrawal,
+  applyInvoice, commissionTier, createWithdrawal, downloadFile, financeDaily,
+  financeOrders, invoiceSummary, merchantCompliance, merchantCustomers,
+  merchantFunnel, merchantRules, merchantWallet, merchantWithdrawals,
+  myInvoices, yuan,
 } from '../api'
 
 /** 对账中心:钱包 / 日流水(逐单可查) / 提现 / 发票 / 阶梯佣金。
@@ -89,6 +90,8 @@ export default function FinancePage({ shop }: { shop: Merchant }) {
             children: <TierTab shop={shop} />,
           },
           { key: 'funnel', label: '流量漏斗', children: <FunnelTab /> },
+          { key: 'customers', label: '顾客构成', children: <CustomersTab /> },
+          { key: 'rules', label: '平台规则', children: <RulesTab /> },
           { key: 'compliance', label: '合规档案', children: <ComplianceTab /> },
         ]}
       />
@@ -508,6 +511,64 @@ function ComplianceTab() {
             </Space>
           )}
       </Card>
+    </Space>
+  )
+}
+
+/** 顾客构成:新客带不来复购、老客不回头,是两个完全不同的问题。 */
+function CustomersTab() {
+  const [data, setData] = useState<CustomerMix | null>(null)
+
+  useEffect(() => {
+    merchantCustomers(30).then(setData).catch((e) => {
+      message.error(e instanceof ApiError ? e.message : String(e))
+    })
+  }, [])
+
+  if (!data) return <Card size="small" loading />
+
+  return (
+    <Card size="small" title={`近 ${data.days} 天的客人`}>
+      <Space size="large" wrap>
+        <Statistic title="新客" value={data.new.customers}
+          suffix={<span style={{ fontSize: 12, color: '#999' }}>
+            {yuan(data.new.net_cents)}
+          </span>} />
+        <Statistic title="回头客" value={data.repeat.customers}
+          valueStyle={{ color: '#389e0d' }}
+          suffix={<span style={{ fontSize: 12, color: '#999' }}>
+            {yuan(data.repeat.net_cents)}
+          </span>} />
+        <Statistic title="流失(待召回)" value={data.churned.customers}
+          valueStyle={{ color: '#d46b08' }} />
+      </Space>
+      <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>{data.note}</div>
+    </Card>
+  )
+}
+
+/** 平台规则:数字从服务端常量算出,后台改不了。 */
+function RulesTab() {
+  const [data, setData] = useState<Rules | null>(null)
+
+  useEffect(() => {
+    merchantRules().then(setData).catch((e) => {
+      message.error(e instanceof ApiError ? e.message : String(e))
+    })
+  }, [])
+
+  if (!data) return <Card size="small" loading />
+
+  return (
+    <Space direction="vertical" style={{ width: '100%' }}>
+      {data.sections.map((s) => (
+        <Card key={s.title} size="small" title={s.title}>
+          <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 2 }}>
+            {s.items.map((it) => <li key={it}>{it}</li>)}
+          </ul>
+        </Card>
+      ))}
+      <div style={{ fontSize: 12, color: '#999' }}>{data.note}</div>
     </Space>
   )
 }

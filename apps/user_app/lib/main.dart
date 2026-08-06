@@ -1152,6 +1152,9 @@ class _MerchantListViewState extends State<MerchantListView> {
                           // 下单前就让用户看到,而不是下了单再超时
                           if (m.busyActive)
                             SzChip('出餐较慢', color: sz.hold, dense: true),
+                          // 食安封签:**商家声明**不是平台认证,文案照此口径
+                          if (m.foodSeal)
+                            SzChip('封签', color: sz.earn, dense: true),
                           for (final label in m.promoLabels)
                             SzChip(label, color: sz.hold, dense: true),
                         ],
@@ -1763,6 +1766,20 @@ class _MenuPageState extends State<MenuPage>
               style: TextStyle(fontSize: 12, height: 1.55, color: sz.ink),
             ),
           ),
+          if (shop.foodSeal)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(children: [
+                Icon(Icons.verified_user_outlined, size: 16, color: sz.earn),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text('商家声明:打包使用一次性食安封签,拆封即留痕'
+                      '(商家自述,非平台核验)',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: sz.inkMuted)),
+                ),
+              ]),
+            ),
           // 忙碌模式:先说清楚再让用户下单,而不是下了单再超时
           if (shop.busyActive)
             Container(

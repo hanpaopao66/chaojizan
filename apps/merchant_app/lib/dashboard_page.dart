@@ -48,6 +48,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Map<String, dynamic>? _trend;
   Map<String, dynamic>? _today;
   Map<String, dynamic>? _funnel;
+  Map<String, dynamic>? _customers;
   Map<String, dynamic>? _prep;
   Map<String, dynamic>? _analytics;
   String? _error;
@@ -75,6 +76,13 @@ class _DashboardPageState extends State<DashboardPage> {
         err ??= '$e';
         return null;
       }),
+      widget.api
+          .merchantCustomers()
+          .then<Object?>((v) => v)
+          .catchError((Object e) {
+        err ??= '$e';
+        return null;
+      }),
       widget.api.merchantPrepTime().then<Object?>((v) => v).catchError((Object e) {
         err ??= '$e';
         return null;
@@ -92,8 +100,9 @@ class _DashboardPageState extends State<DashboardPage> {
       _trend = results[0] as Map<String, dynamic>?;
       _today = results[1] as Map<String, dynamic>?;
       _funnel = results[2] as Map<String, dynamic>?;
-      _prep = results[3] as Map<String, dynamic>?;
-      _analytics = results[4] as Map<String, dynamic>?;
+      _customers = results[3] as Map<String, dynamic>?;
+      _prep = results[4] as Map<String, dynamic>?;
+      _analytics = results[5] as Map<String, dynamic>?;
       _error = (_trend == null && _prep == null && _analytics == null) ? err : null;
     });
   }
@@ -123,6 +132,10 @@ class _DashboardPageState extends State<DashboardPage> {
                       ],
                       if (_funnel != null) ...[
                         _funnelCard(sz),
+                        const SizedBox(height: 14),
+                      ],
+                      if (_customers != null) ...[
+                        _customersCard(sz),
                         const SizedBox(height: 14),
                       ],
                       if (_analytics != null) ...[
@@ -240,6 +253,49 @@ class _DashboardPageState extends State<DashboardPage> {
             (f['order_rate'] as num?)?.toDouble()),
         const SizedBox(height: 6),
         Text('${f['note']}',
+            style: TextStyle(fontSize: 10.5, height: 1.5, color: sz.inkFaint)),
+      ]),
+    );
+  }
+
+  // ---------------- 0.6 顾客分层:我的客人是谁 ----------------
+
+  Widget _customersCard(SzColors sz) {
+    final c = _customers!;
+    final newC = c['new'] as Map<String, dynamic>? ?? const {};
+    final repeat = c['repeat'] as Map<String, dynamic>? ?? const {};
+    final churned = c['churned'] as Map<String, dynamic>? ?? const {};
+    Widget cell(String label, String value, String sub, Color color) =>
+        Expanded(
+          child: Column(children: [
+            Text(value,
+                style: szFigure(
+                    fontSize: 18, fontWeight: FontWeight.w700, color: color)),
+            const SizedBox(height: 2),
+            Text(label, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+            Text(sub, style: TextStyle(fontSize: 10, color: sz.inkFaint)),
+          ]),
+        );
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: Border.all(color: sz.line),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('近 ${c['days']} 天的客人',
+            style: TextStyle(fontWeight: FontWeight.w600, color: sz.ink)),
+        const SizedBox(height: 10),
+        Row(children: [
+          cell('新客', '${newC['customers'] ?? 0}',
+              yuan(newC['net_cents'] as int? ?? 0), sz.ink),
+          cell('回头客', '${repeat['customers'] ?? 0}',
+              yuan(repeat['net_cents'] as int? ?? 0), sz.earn),
+          cell('流失', '${churned['customers'] ?? 0}', '待召回', sz.hold),
+        ]),
+        const SizedBox(height: 6),
+        Text('${c['note']}',
             style: TextStyle(fontSize: 10.5, height: 1.5, color: sz.inkFaint)),
       ]),
     );

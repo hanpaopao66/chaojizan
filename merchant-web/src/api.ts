@@ -166,6 +166,8 @@ export interface Merchant {
   busy_active: boolean
   busy_until: string | null
   busy_extra_minutes: number
+  /** 食安封签(商家自述,非平台认证) */
+  food_seal: boolean
 }
 
 export function myShop(): Promise<Merchant> {
@@ -656,6 +658,30 @@ export interface Dish {
   servable_now: boolean
   options: DishOptionGroup[]
   monthly_sales: number
+}
+
+// ---------- 规则中心 / 顾客分层 ----------
+
+export interface Rules {
+  sections: { title: string; items: string[] }[]
+  note: string
+}
+
+export function merchantRules(): Promise<Rules> {
+  return request('GET', '/merchants/me/rules')
+}
+
+export interface CustomerMix {
+  days: number
+  new: { customers: number; net_cents: number }
+  repeat: { customers: number; net_cents: number }
+  churned: { customers: number }
+  total_customers: number
+  note: string
+}
+
+export function merchantCustomers(days = 30): Promise<CustomerMix> {
+  return request('GET', `/merchants/me/customers?days=${days}`)
 }
 
 // ---------- 流量漏斗 / 合规档案 ----------

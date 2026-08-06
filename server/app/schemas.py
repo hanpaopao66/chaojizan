@@ -174,6 +174,9 @@ class MerchantOut(BaseModel):
     busy_until: datetime | None = None
     busy_extra_minutes: int = 10
 
+    # 食安封签(商家自述,非平台认证):用户端展示"商家声明使用封签"
+    food_seal: bool = False
+
 
 class MerchantMeOut(MerchantOut):
     """店主自查视角(仅 GET /merchants/me):多了本店证照,驳回后回填表单用。
@@ -300,6 +303,7 @@ class MerchantPatch(BaseModel):
     promise_ready_minutes: int | None = Field(default=None, ge=5, le=60)
     self_delivery: bool | None = None  # 自配送开关(只影响之后的新订单)
     auto_accept: bool | None = None    # 自动接单(支付成功即进入制作)
+    food_seal: bool | None = None      # 食安封签(商家自述)
     # 酒店第二证照:仅**被驳回后重新提交**时可带(平时资质变更走客服人工核验)
     special_license_no: str | None = Field(default=None, max_length=50)
     special_license_image_url: str | None = Field(default=None, max_length=300)

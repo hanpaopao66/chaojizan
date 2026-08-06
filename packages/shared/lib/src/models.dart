@@ -96,6 +96,7 @@ class Merchant {
             json['kitchen_cam_label'] as String? ?? '无明厨亮灶',
         bizType = json['biz_type'] as String? ?? 'food',
         autoAccept = json['auto_accept'] as bool? ?? false,
+        foodSeal = json['food_seal'] as bool? ?? false,
         busyActive = json['busy_active'] as bool? ?? false,
         busyUntil = json['busy_until'] as String?,
         busyExtraMinutes = json['busy_extra_minutes'] as int? ?? 10,
@@ -145,6 +146,9 @@ class Merchant {
 
   /// 自动接单(仅 GET /merchants/me 下发;支付成功即进入制作)
   final bool autoAccept;
+
+  /// 食安封签:商家自述使用一次性封签(**不是平台认证**,文案要照此口径写)
+  final bool foodSeal;
 
   /// 忙碌模式(高峰压单):生效期 ETA/出餐超时判定放宽,用户端亮「出餐较慢」标
   final bool busyActive;
