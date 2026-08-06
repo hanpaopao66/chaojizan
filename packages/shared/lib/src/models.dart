@@ -97,6 +97,7 @@ class Merchant {
         bizType = json['biz_type'] as String? ?? 'food',
         autoAccept = json['auto_accept'] as bool? ?? false,
         foodSeal = json['food_seal'] as bool? ?? false,
+        foodSafetyHold = json['food_safety_hold'] as bool? ?? false,
         busyActive = json['busy_active'] as bool? ?? false,
         busyUntil = json['busy_until'] as String?,
         busyExtraMinutes = json['busy_extra_minutes'] as int? ?? 10,
@@ -149,6 +150,9 @@ class Merchant {
 
   /// 食安封签:商家自述使用一次性封签(**不是平台认证**,文案要照此口径写)
   final bool foodSeal;
+
+  /// 食安停业闸门:置位时商家自己开不回营业(整改复核后由平台解除)
+  final bool foodSafetyHold;
 
   /// 忙碌模式(高峰压单):生效期 ETA/出餐超时判定放宽,用户端亮「出餐较慢」标
   final bool busyActive;

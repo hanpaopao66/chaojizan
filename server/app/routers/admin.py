@@ -1376,6 +1376,9 @@ async def confirm_food_safety(
     auto_suspended = False
     if confirmed_30d >= FS_AUTO_SUSPEND_COUNT and shop and shop.is_open:
         shop.is_open = False
+        # **置闸门,不然商家自己就能开回来**:PATCH 的营业校验只拦
+        # 非 approved 的店,而自动停业不改 status
+        shop.food_safety_hold = True
         auto_suspended = True
         _fs_record(report, "auto_suspend",
                    f"30 天内第 {confirmed_30d} 起食安投诉成立,自动暂停营业待人工审核",
@@ -1468,7 +1471,7 @@ async def food_safety_suspend_merchant(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """暂停商家营业(is_open=false,approved 状态不变),附整改原因推送商家。"""
+    """暂停商家营业并置食安闸门(商家自己开不回来),附整改原因推送商家。"""
     from ..services.push import push_to_user
 
     if len(payload.note.strip()) < 2:
@@ -1478,6 +1481,7 @@ async def food_safety_suspend_merchant(
     if shop is None:
         raise HTTPException(404, "商家不存在")
     shop.is_open = False
+    shop.food_safety_hold = True
     _fs_record(report, "suspend", payload.note.strip(), admin.id)
     await db.commit()
     await db.refresh(report)
@@ -1487,6 +1491,36 @@ async def food_safety_suspend_merchant(
                        {"type": "order", "order_no": report.order_no},
                        record_skip=True)
     return await _fs_out(db, report)
+
+
+@router.post("/merchants/{merchant_id}/food-safety-hold/release")
+async def release_food_safety_hold(
+    merchant_id: int,
+    payload: FoodSafetyActionIn,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """食安整改复核通过:解除停业闸门(商家自己重新开店)。
+
+    **只解闸门不替商家开店** —— 什么时候恢复营业是商家的决定,
+    平台只负责确认整改到位。
+    """
+    from ..services.push import push_to_user
+
+    if len(payload.note.strip()) < 2:
+        raise HTTPException(422, "请填写复核结论(会推送给商家)")
+    shop = await db.get(Merchant, merchant_id)
+    if shop is None:
+        raise HTTPException(404, "商家不存在")
+    if not shop.food_safety_hold:
+        raise HTTPException(409, "该店没有食安停业闸门")
+    shop.food_safety_hold = False
+    await db.commit()
+    await push_to_user(
+        shop.owner_id, "食安整改复核通过",
+        f"{payload.note.strip()};你现在可以在店铺页重新开始营业",
+        {"type": "shop"}, record_skip=True)
+    return {"ok": True}
 
 
 # ---------- 内容审核(先发后审队列 + 敏感词库维护) ----------

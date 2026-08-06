@@ -447,6 +447,10 @@ async def update_my_shop(
         raise HTTPException(422, "未知品类")
     if changes.get("is_open") and shop.status != MerchantStatus.approved:
         raise HTTPException(403, "店铺还未通过审核,暂时不能营业")
+    # 食安停业期间商家自己开不回来 —— 否则"暂停营业待人工复核"只是一句话
+    if changes.get("is_open") and shop.food_safety_hold:
+        raise HTTPException(
+            403, "因食品安全问题暂停营业中,完成整改后联系平台客服复核恢复")
     # 开城清单:配置了 open_cities 时,清单外城市不可营业(可入驻待审,
     # 抢先注册留资;空 city 未标注不拦,避免误伤存量)
     if changes.get("is_open"):
@@ -2833,8 +2837,14 @@ async def my_rules(
     """
     from ..routers.admin import FS_AUTO_SUSPEND_COUNT
     from ..routers.appeals import APPEAL_WINDOW
-    shop = await _my_shop_or_404(db, user)
-    top_rate = max(float(r[1]) for r in settings.commission_tiers)
+    from ..services.staff import operable_shop
+    # 店员也该看得到"什么算违规"——这一页没有任何敏感数据
+    shop, _ = await operable_shop(db, user)
+    if shop is None:
+        raise HTTPException(404, "还没开店")
+    # 与 platform._pledge_copy 同款兜底:误配成空清单也不该让规则页 500
+    tiers = settings.commission_tiers or [[0, "0.050"]]
+    top_rate = max(float(r[1]) for r in tiers)
     appeal_hours = int(APPEAL_WINDOW.total_seconds() // 3600)
     return {
         "sections": [
@@ -2843,7 +2853,8 @@ async def my_rules(
                 "items": [
                     f"总负担 {top_rate * 100:g}% 封顶,单量越大费率越低"
                     f"(当前你是 {float(shop.commission_rate) * 100:g}%)",
-                    "配送费 100% 归骑手,平台一分不抽",
+                    "平台配送的配送费 100% 归骑手,平台一分不抽;"
+                    "自配送的单配送费归你",
                     "没有竞价排名,不存在花钱买曝光",
                 ],
             },
@@ -2867,17 +2878,32 @@ async def my_rules(
             {
                 "title": "配送责任",
                 "items": [
-                    "配送由平台负责,配送原因的差评不计入你的店铺评分",
+                    "配送由平台负责;评价里的配送标签(送得慢/餐洒了)"
+                    "只挂骑手评分,不进商家维度",
+                    "但**星级是用户给的**:配送不好导致的低星仍会计入店铺评分。"
+                    "遇到这种,72 小时内申诉,系统会自动附上这单的"
+                    "接单/出餐/送达时间线供审核 —— 出餐正常而配送晚了,证据替你说话",
                     "超时安抚券由平台承担,不扣你也不扣骑手",
                     "骑手到店等餐超时有补偿,同样平台出",
                 ],
             },
             {
+                "title": "排序怎么来的",
+                "items": [
+                    "用户端排序只用真实评分、销量、距离 —— 没有可以买的位置",
+                    "**评分会影响你的曝光**:「评分优先」按评分排,综合排序里"
+                    "评分是权重最大的一项,用户还能按最低评分筛选。"
+                    "这不是处罚机制,是用户在选店 —— 但它确实决定谁被看见",
+                    "出餐时长不参与任何排序与筛选:只给你自己看、"
+                    "让骑手知道大概等多久、给用户更准的送达时间",
+                ],
+            },
+            {
                 "title": "不会发生的事",
                 "items": [
-                    "出餐时长、评分不折算成积分,不影响你在用户端的曝光",
-                    "平台没有「违规积分」这种东西",
+                    "平台没有「违规积分」这种东西,任何指标都不折算成分数",
                     "评价不能删也不能花钱删,唯一例外是申诉成立后隐藏(评分同步扣回)",
+                    "自配送的单配送费归你;平台配送的配送费全归骑手,平台一分不抽",
                 ],
             },
         ],
@@ -2896,52 +2922,68 @@ async def my_customers(
 ):
     """新客 / 回头客 / 流失客各多少人、各贡献多少。
 
-    口径(写清楚,免得商家按错的定义做决定):
-    - 新客:窗口内第一次在本店下单(此前从没在本店买过)
-    - 回头客:窗口内下过 ≥2 单,或窗口前也买过
-    - 流失客:窗口前买过、窗口内一单没有(这是最该被召回的那批)
-    只数完成的单;金额按商家实收(扣掉让利与退款)。
+    口径(只有一套定义,不留歧义):
+    - **新客**:窗口内下过单,且此前从没在本店买过(拉新 ROI 看这个)
+    - **回头客**:窗口内下过单,且窗口之前也买过
+    - **流失客**:窗口前 90 天内买过、窗口内一单没有(可召回的那批;
+      两年前买过一次的人不是召回对象,所以要有下界)
+
+    只数完成的单,且**全额退款的单不算**(与营销效果同口径:
+    退光了的单没有做成生意,算进去会让回头客数虚高一倍)。
+    金额按商家实收(扣掉让利与退款);已确认的刷单不计。
     """
     shop = await _my_shop_or_404(db, user)
     now = datetime.now(timezone.utc)
     since = now - timedelta(days=days)
+    churn_floor = since - timedelta(days=90)
     done = [OrderStatus.DELIVERED, OrderStatus.COMPLETED]
+    # 与用户端月售、经营分析同口径:确认过的刷单不计
+    # **必须 coalesce**:risk_flags 里没有 status 键时 ->>'status' 是 NULL,
+    # 而 NULL != 'confirmed' 的结果是 NULL 不是 TRUE —— 整行会被静默滤掉,
+    # 实测把回头客与流失客直接算成 0。库里其它三处都是这么写的
+    not_fraud = text("coalesce(risk_flags->>'status', '') != 'confirmed'")
+    # 全额退款(退款 >= 商家实收)的单不算生意
+    gross = Order.food_cents + Order.packing_fee_cents - Order.discount_cents
+    real_deal = Order.refund_cents < func.greatest(gross, 0)
 
-    # 窗口内:每人下了几单、净贡献多少
+    # 窗口内:每人的净贡献(DB 侧聚合,不把订单行拉进 Python)
     rows = (await db.execute(
-        select(Order.customer_id, Order.food_cents, Order.packing_fee_cents,
-               Order.discount_cents, Order.refund_cents)
+        select(Order.customer_id,
+               func.sum(func.greatest(gross - Order.refund_cents, 0)))
         .where(Order.merchant_id == shop.id, Order.created_at > since,
-               Order.status.in_(done)))).all()
-    per_user: dict[int, list[int]] = {}
-    for cid, food, packing, discount, refund in rows:
-        net = max(food + packing - discount - refund, 0)
-        cur = per_user.setdefault(cid, [0, 0])
-        cur[0] += 1
-        cur[1] += net
+               Order.status.in_(done), real_deal, not_fraud)
+        .group_by(Order.customer_id))).all()
+    per_user = {cid: int(net or 0) for cid, net in rows}
 
-    # 窗口之前买过的人(用来区分新客与回头客、找出流失客)
+    # 窗口之前买过的人(区分新客/回头客)
     before_ids = set(await db.scalars(
         select(func.distinct(Order.customer_id)).where(
             Order.merchant_id == shop.id, Order.created_at <= since,
-            Order.status.in_(done))))
+            Order.status.in_(done), real_deal, not_fraud)))
+    # 可召回的流失客:只看窗口前 90 天,不是"生涯买过的所有人"
+    recent_before = set(await db.scalars(
+        select(func.distinct(Order.customer_id)).where(
+            Order.merchant_id == shop.id,
+            Order.created_at > churn_floor, Order.created_at <= since,
+            Order.status.in_(done), real_deal, not_fraud)))
 
     groups = {"new": [0, 0], "repeat": [0, 0]}
-    for cid, (cnt, net) in per_user.items():
-        key = "repeat" if (cnt >= 2 or cid in before_ids) else "new"
+    for cid, net in per_user.items():
+        key = "repeat" if cid in before_ids else "new"
         groups[key][0] += 1
         groups[key][1] += net
-    churned = len(before_ids - set(per_user))
+    churned = len(recent_before - set(per_user))
 
     return {
         "days": days,
         "new": {"customers": groups["new"][0], "net_cents": groups["new"][1]},
         "repeat": {"customers": groups["repeat"][0],
                    "net_cents": groups["repeat"][1]},
-        "churned": {"customers": churned},
+        "churned": {"customers": churned, "window_days": 90},
         "total_customers": len(per_user),
-        "note": "流失客是窗口前买过、这段时间没再来的人 ——"
-                "店内营销里的「老客召回」正是发给他们的。",
+        "note": "新客=此前从没在本店买过;流失客=前 90 天买过、这段时间没再来的人,"
+                "店内营销里的「老客召回」正是发给他们的。"
+                "全额退款的单不计入(那单没做成)。",
     }
 
 

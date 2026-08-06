@@ -20,6 +20,18 @@ dish = call("POST", "/merchants/me/dishes", merchant,
 IMG = ["https://example.com/evidence.jpg"]
 
 
+def clear_food_safety_hold():
+    """清掉可能残留的食安停业闸门。
+
+    这条闸门是「暂停营业待人工复核」的执行机制:置位后商家自己开不回来,
+    只能由平台复核解除。所以本套件里每次要复业之前都得先解一次 ——
+    上一轮跑挂了留下的闸门,也会让这次从第一步就 403。
+    """
+    shop_id = call("GET", "/merchants/me", merchant)["id"]
+    call("POST", f"/admin/merchants/{shop_id}/food-safety-hold/release",
+         admin, {"note": "测试复业"}, expect_error=True)
+
+
 def completed_order(customer):
     """跑一单到已送达(食安投诉的前置状态)。"""
     order = call("POST", "/orders", customer, {
@@ -53,6 +65,7 @@ def find_report(no):
 
 
 def main():
+    clear_food_safety_hold()   # 上一轮跑挂留下的闸门会让这次从头 403
     # 确保商家营业(前置)
     call("PATCH", "/merchants/me", merchant, {"is_open": True})
 
@@ -94,7 +107,15 @@ def main():
     assert {"confirmed", "dish_off", "suspend"} <= set(acts), acts
     print("✓ 下架涉事菜品、暂停营业,处置全留痕")
 
-    # 恢复营业与菜品,继续跑后面的单
+    # 恢复营业与菜品,继续跑后面的单。
+    # **必须先由平台解除食安闸门** —— 停业期间商家自己开不回来,
+    # 这正是"暂停营业待人工复核"的执行机制(见 merchants.update_my_shop)
+    err = call("PATCH", "/merchants/me", merchant, {"is_open": True},
+               expect_error=True)
+    assert err["_error"] == 403 and "食品安全" in err["detail"], err
+    print(f"✓ 停业期间商家自己开不回来:{err['detail']}")
+    call("POST", f"/admin/merchants/{shop['id']}/food-safety-hold/release",
+         admin, {"note": "整改材料已核验"})
     call("PATCH", "/merchants/me", merchant, {"is_open": True})
     call("PATCH", f"/merchants/me/dishes/{dish['id']}", merchant,
          {"is_on_sale": True})
@@ -112,6 +133,8 @@ def main():
     # 5) 30 天内第 3 起成立 → 自动停业(上面已成立 1 起;历史轮次的
     # 成立记录会让自动停业提前触发,循环里先复业保证能下单)
     for i in range(2):
+        # 前一轮可能已触发自动停业:闸门不解,商家自己开不回来
+        clear_food_safety_hold()
         call("PATCH", "/merchants/me", merchant, {"is_open": True})
         no = completed_order(customer)
         report(customer, no, kind="sick")
@@ -125,7 +148,8 @@ def main():
                for r in reports for a in r["actions"]), "应有自动停业留痕"
     print("✓ 30 天内第 3 起成立,自动暂停营业")
 
-    # 收尾:恢复营业,别影响别的测试套
+    # 收尾:解闸门 + 恢复营业,别影响别的测试套
+    clear_food_safety_hold()
     call("PATCH", "/merchants/me", merchant, {"is_open": True})
 
     print("\ne2e_food_safety 全部通过 ✅")

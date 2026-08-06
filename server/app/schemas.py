@@ -176,6 +176,8 @@ class MerchantOut(BaseModel):
 
     # 食安封签(商家自述,非平台认证):用户端展示"商家声明使用封签"
     food_seal: bool = False
+    # 食安停业闸门:置位时商家自己开不回营业(整改复核由平台解除)
+    food_safety_hold: bool = False
 
 
 class MerchantMeOut(MerchantOut):

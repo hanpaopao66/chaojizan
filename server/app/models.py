@@ -182,6 +182,12 @@ class Merchant(Base):
     food_seal: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false")
 
+    # 食安停业闸门:30 天内多起食安投诉成立时置位,**商家自己开不回来**。
+    # 此前自动停业只置 is_open=False,而 status 仍是 approved ——
+    # 商家在店铺页把开关拨回去就继续接单,"暂停营业待人工复核"形同虚设
+    food_safety_hold: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false")
+
     # 忙碌模式:高峰压单的中间态 —— 不闭店,但把预期先说清楚。
     # busy_until 之前 ETA/出餐超时判定放宽 busy_extra_minutes,
     # 用户端展示「出餐较慢」标;到点自动失效(读取时判断,无需清扫任务)

@@ -1031,10 +1031,16 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                   : Theme.of(context).sz.inkFaint,
             ),
             const SizedBox(width: 8),
-            Text(_isOpen ? '营业中' : '已打烊'),
+            Text(widget.shop.foodSafetyHold
+                ? '食安停业'
+                : (_isOpen ? '营业中' : '已打烊')),
             Switch(
+              // 食安停业闸门置位时商家自己开不回来(服务端也会 403),
+              // 直接禁用开关比让他点了报错好
               value: _isOpen,
-              onChanged: (v) async {
+              onChanged: widget.shop.foodSafetyHold
+                  ? null
+                  : (v) async {
                 setState(() => _isOpen = v);
                 try {
                   await widget.api.setShopOpen(v);
