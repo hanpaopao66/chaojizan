@@ -15,6 +15,22 @@ PUBLIC_BASE=${PUBLIC_BASE:?缺对外域名:在 deploy/.env.deploy 写 PUBLIC_BAS
 # 注意:不能写 DEST=~/super-z,本机 shell 会把 ~ 展开成本机家目录
 DEST='~/super-z'
 
+# 先探一下通不通,别让它烧满 SSH 超时再死在 rsync 中途。
+#
+# 部署机在局域网里,换个网络(咖啡厅、手机热点、公司网)就够不着。
+# 不预检的话表现是:等 75 秒 → 一句裸的 "unexpected end of file" →
+# 而这时候版本号已经写进 server/app_version.txt 了,工作区脏着,
+# 人还得先想明白"到底同步过去没有"。
+PORT=22
+HOSTONLY=${DEPLOY#*@}
+if ! nc -z -G 5 "$HOSTONLY" "$PORT" 2>/dev/null; then
+  echo "✗ 连不上部署机 $HOSTONLY:$PORT"
+  echo "  本机地址:$(ipconfig getifaddr en0 2>/dev/null || echo 未知)"
+  echo "  这个脚本只能在部署机所在局域网里跑(见文件头注释)。"
+  echo "  接回那个网段或连上 VPN 再来 —— 线上服务不受影响,还是原来那版。"
+  exit 1
+fi
+
 echo "== 记录版本号(透明中心/页脚展示,证明线上跑的就是仓里的代码) =="
 { git describe --tags --always 2>/dev/null || echo unknown; \
   date -u +%FT%TZ; } > server/app_version.txt
