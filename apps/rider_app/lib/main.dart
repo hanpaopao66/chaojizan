@@ -602,6 +602,41 @@ class _RiderHomePageState extends State<RiderHomePage>
   }
 
   /// 取餐核验:输小票单号尾号后 4 位防拿错单;连续输错 3 次可强制取餐(留痕)。
+  /// 帮送没拍物品照就点「已取件」时提醒一次,但**不拦**。
+  ///
+  /// 拦住的代价是骑手站在楼道里被一个弹窗卡住整单,
+  /// 而不拍的代价是万一起纠纷双方各执一词 —— 后者他自己承担,
+  /// 所以说清楚就够了,不该由平台替他决定。
+  Future<void> _pickUpErrandAware(Order order) async {
+    if (order.isErrand &&
+        !order.isErrandBuy &&
+        order.pickupPhotoUrl.isEmpty) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (dlg) => AlertDialog(
+          title: const Text('还没拍物品照'),
+          content: const Text('东西是顾客的,平台不做保价 —— '
+              '万一说少了件或者磕坏了,没有照片双方只能各执一词。\n\n'
+              '拍一张只要几秒,拍完再取件。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dlg, true),
+                child: const Text('不拍了,直接取件')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dlg, false),
+                child: const Text('去拍一张')),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (go != true) {
+        await _uploadPickupPhoto(order);
+        return;
+      }
+    }
+    await _pickUp(order);
+  }
+
   Future<void> _pickUp(Order order) async {
     final code = TextEditingController();
     var error = '';
@@ -748,7 +783,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                   } catch (e) {
                     if (!sheet.mounted) return;
                     ScaffoldMessenger.of(sheet).showSnackBar(
-                        SnackBar(content: Text('\$e')));
+                        SnackBar(content: Text('$e')));
                   }
                 },
                 label: Text(photo == null ? '拍小票' : '已拍 ✓'),
@@ -779,10 +814,84 @@ class _RiderHomePageState extends State<RiderHomePage>
       await _refresh();
     } catch (e) {
       if (!mounted) return;
-      // 超上限时服务端的提示已经写清楚"先问顾客",原样显示
+      // 超上限时服务端会 409。**光把它的话显示出来是不够的** ——
+      // 提示里写着"先问顾客",而骑手手上并没有"问"这个按钮:
+      // 小票交不了,加价也发不出,这一单就卡死在超市里了。
+      // 所以直接把 409 转成入口,他站在收银台前一下就能问出去
+      if (e is ApiException && e.statusCode == 409) {
+        await _requestRaise(order, cents, e.message);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e is ApiException ? e.message : '\$e'),
+          content: Text(e is ApiException ? e.message : '$e'),
           duration: const Duration(seconds: 8)));
+    }
+  }
+
+  /// 帮买:超出可自行垫付的上限,发起「要多花钱」确认。
+  ///
+  /// 上限是多少**不在这里算**。同一条规则在客户端再实现一遍,
+  /// 迟早会和服务端分叉,而分叉的那天没人会发现 ——
+  /// 所以由服务端拒绝、客户端只负责把拒绝变成一个可点的入口。
+  Future<void> _requestRaise(Order order, int cents, String why) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dlg) => AlertDialog(
+        title: const Text('要多花钱,先问顾客'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(why),
+          const SizedBox(height: 8),
+          Text('会告诉顾客这一单要 ${yuan(cents)}(他预估 '
+              '${yuan(order.goodsBudgetCents)})。'
+              '他同意了你再买 —— 别自己垫。'),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dlg, false),
+              child: const Text('先不问')),
+          FilledButton(
+              onPressed: () => Navigator.pop(dlg, true),
+              child: const Text('问顾客')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.api.requestRaise(order.orderNo, cents);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('已问顾客,等他回复;同意了再买')));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+    }
+  }
+
+  /// 帮送:取件拍照。东西是顾客的,平台既不知道原样也不做保价,
+  /// 出了丢件/损坏纠纷,这张照片是唯一能说明「拿到手时是什么样」的东西。
+  ///
+  /// 不卡取件 —— 人在楼道里手忙脚乱,卡住照片等于卡住整单。
+  /// 但没拍就点已取件时要把后果说清楚:到时候双方只能各执一词。
+  Future<void> _uploadPickupPhoto(Order order) async {
+    try {
+      final picked = await ImagePicker().pickImage(
+          source: ImageSource.camera, maxWidth: 1280, imageQuality: 80);
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      // 与送达留证同一条可见性口径(该单当事人 + 平台)
+      final url = await widget.api
+          .uploadImage(bytes, picked.name, purpose: 'delivery_proof');
+      await widget.api.uploadPickupPhoto(order.orderNo, url);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('物品照已存,丢件纠纷时以它为准')));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
     }
   }
 
@@ -825,7 +934,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e is ApiException ? e.message : '\$e')));
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
     }
   }
 
@@ -1426,6 +1535,25 @@ class _RiderHomePageState extends State<RiderHomePage>
                   style: TextStyle(
                       color: Theme.of(context).sz.earn,
                       fontWeight: FontWeight.bold)),
+            // 帮买加价的进展。不显示的话骑手站在收银台前完全不知道
+            // 该等还是该走 —— 而这三种状态下他要做的事完全不同
+            if (order.isErrandBuy && order.goodsRaiseStatus == 'pending')
+              Text('⏳ 已问顾客能不能花 ${yuan(order.goodsRaiseCents ?? 0)},'
+                  '等他回复;别先垫钱',
+                  style: TextStyle(
+                      color: Theme.of(context).sz.hold,
+                      fontWeight: FontWeight.bold)),
+            if (order.isErrandBuy && order.goodsRaiseStatus == 'approved')
+              Text('✅ 顾客同意花到 ${yuan(order.goodsRaiseCents ?? 0)},可以买了',
+                  style: TextStyle(
+                      color: Theme.of(context).sz.earn,
+                      fontWeight: FontWeight.bold)),
+            if (order.isErrandBuy && order.goodsRaiseStatus == 'rejected')
+              Text('❌ 顾客不同意多花钱 —— 按「买不到」处理,商品款全额退他,'
+                  '你的跑腿费照收到店那一段',
+                  style: TextStyle(
+                      color: Theme.of(context).sz.hold,
+                      fontWeight: FontWeight.bold)),
             if (order.hasAlcohol)
               Text('🍺 含酒精饮品,送达请查验收件人年龄',
                   style: TextStyle(
@@ -1632,8 +1760,22 @@ class _RiderHomePageState extends State<RiderHomePage>
                               onPressed: () => _markUnavailable(order),
                               child: const Text('买不到')));
                         }
+                        // 帮送:物品照。东西是顾客的,平台不做保价也不知道原样,
+                        // 出了丢件/损坏纠纷只有这张照片说得清
+                        if (order.isErrand && !order.isErrandBuy) {
+                          actions.add(OutlinedButton.icon(
+                              icon: Icon(
+                                  order.pickupPhotoUrl.isEmpty
+                                      ? Icons.photo_camera_outlined
+                                      : Icons.check_circle_outline,
+                                  size: 18),
+                              onPressed: () => _uploadPickupPhoto(order),
+                              label: Text(order.pickupPhotoUrl.isEmpty
+                                  ? '拍物品照'
+                                  : '已拍 ✓')));
+                        }
                         actions.add(FilledButton(
-                            onPressed: () => _pickUp(order),
+                            onPressed: () => _pickUpErrandAware(order),
                             child: Text(order.isErrand ? '已取件' : '已取餐')));
                       } else if (order.status == OrderStatus.delivered ||
                           order.status == OrderStatus.completed) {

@@ -186,6 +186,26 @@ async def main():
     assert earned == fin["delivery_fee_cents"] - fee + 5000, (earned, fee)
     print(f"✓ 结算:骑手拿 {earned} 分 = 跑腿费 98% + 小票实付商品款 5000 分")
 
+    # ---- 评价不能打到虚拟服务主体头上 ----
+    #
+    # 跑腿单的 merchant_id 指向每城一个的「跑腿服务」主体,
+    # 星级累加上去就是给一个不存在的经营者打分;更糟的是 ≤3 星会触发
+    # 「你收到一条差评」推送,而那个主体的 owner 挂的是平台管理员
+    async with SessionLocal() as db:
+        shop_id = await db.scalar(text(
+            "SELECT merchant_id FROM orders WHERE order_no = :n"), {"n": no4})
+        before = await db.scalar(text(
+            "SELECT rating_count FROM merchants WHERE id = :i"), {"i": shop_id})
+    call("POST", f"/orders/{no4}/review", customer, {
+        "merchant_rating": 1, "rider_rating": 5,
+        "comment": "测试:跑腿单评价不该计入商家评分"})
+    async with SessionLocal() as db:
+        after = await db.scalar(text(
+            "SELECT rating_count FROM merchants WHERE id = :i"), {"i": shop_id})
+    assert before == after, (
+        f"跑腿单的评价累加到虚拟服务主体上了({before} → {after})")
+    print("✓ 跑腿单评价不计入商家评分,也不触发差评推送(那头没有经营者)")
+
     # 只看**本次跑出来的单**。开发库里躺着修复前的历史脏单
     # (那时补收还没实现,骑手按小票拿钱、用户还按预估付钱),
     # 30 天窗口会一直扫到它们 —— 拿它们判红,这条用例就永远绿不了,

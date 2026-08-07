@@ -401,6 +401,10 @@ class _MerchantListViewState extends State<MerchantListView> {
             o.status != OrderStatus.delivered) {
           continue;
         }
+        // 跑腿单不进「再来一单」。它的 merchantId 指向「本城跑腿服务」
+        // 那个虚拟主体,点进去是一张空菜单 —— 而且"再来一单"对跑腿
+        // 本来就不成立:上次寄的东西和这次要寄的没有任何关系
+        if (o.isErrand) continue;
         if (seen.add(o.merchantId)) recent.add(o);
         if (recent.length >= 6) break;
       }
@@ -3533,6 +3537,111 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     }
   }
 
+  /// 骑手发起的加价确认。同意与否都由你决定 ——
+  /// 不回复的后果是骑手一直站在那里,所以文案直接把两条路都写清楚。
+  Widget _raiseAskCard(Order order) {
+    final want = order.goodsRaiseCents ?? 0;
+    final over = want - order.goodsBudgetCents;
+    return Card(
+      color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('骑手问你:要多花点钱吗',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text('你预估 ${yuan(order.goodsBudgetCents)},'
+              '实际要 ${yuan(want)}(多 ${yuan(over)})。'),
+          const SizedBox(height: 4),
+          Text('同意 → 骑手照买,差额之后跟你结;'
+              '不同意 → 按买不到处理,商品款全额退你,'
+              '跑腿费只收骑手到店那一段的距离费。',
+              style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => _decideRaise(order, false),
+                child: const Text('不同意'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: FilledButton(
+                onPressed: () => _decideRaise(order, true),
+                child: Text('同意,花到 ${yuan(want)}'),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  /// 小票。**商品款平台一分不抽**,按小票实付结给骑手 ——
+  /// 这句话只有在你能看到小票时才成立,所以它必须在这一页上。
+  Widget _receiptCard(Order order) {
+    final actual = order.goodsActualCents ?? 0;
+    final diff = actual - order.goodsBudgetCents;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('小票', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text('你预估 ${yuan(order.goodsBudgetCents)} · '
+              '小票实付 ${yuan(actual)}'),
+          if (diff < 0)
+            Text('少花了 ${yuan(-diff)},已原路退给你',
+                style: TextStyle(color: Theme.of(context).sz.earn)),
+          if (diff > 0)
+            Text('多花了 ${yuan(diff)}',
+                style: TextStyle(color: Theme.of(context).sz.hold)),
+          const SizedBox(height: 4),
+          Text('商品款平台一分不抽,按小票实付结给骑手',
+              style: Theme.of(context).textTheme.bodySmall),
+          if (order.goodsReceiptUrl.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            // 点开能放大 —— 小票上的字本来就小,缩在卡片里等于没给看
+            InkWell(
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (_) => Dialog(
+                  backgroundColor: Colors.transparent,
+                  child: InteractiveViewer(
+                      child: Image(
+                          image: szNetImage(widget.api
+                              .resolveUrl(order.goodsReceiptUrl)))),
+                ),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image(
+                    image: szNetImage(
+                        widget.api.resolveUrl(order.goodsReceiptUrl)),
+                    fit: BoxFit.cover),
+              ),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  Future<void> _decideRaise(Order order, bool agree) async {
+    try {
+      await widget.api.decideRaise(order.orderNo, agree);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(agree ? '已告诉骑手可以买' : '已告诉骑手不用买了')));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final order = _order;
@@ -3582,6 +3691,14 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                   ]),
                 ),
                 const SizedBox(height: 16),
+                // 帮买:骑手问「要多花钱吗」。**这个卡必须排在最前面** ——
+                // 骑手正站在货架前等回复,埋在页面下半段等于让他一直站着
+                if (order.isErrandBuy && order.goodsRaiseStatus == 'pending')
+                  _raiseAskCard(order),
+                // 帮买:小票。代买最容易起的纠纷是「你是不是多报了」,
+                // 把小票摊开这个纠纷根本不会发生
+                if (order.isErrandBuy && order.goodsActualCents != null)
+                  _receiptCard(order),
                 // 自取单:取餐码大卡(出餐后商家凭此核销)
                 if (order.pickup &&
                     order.pickupCode.isNotEmpty &&
@@ -3797,22 +3914,27 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                               kCustomerQuickReplies))),
                             ),
                           ),
-                        if (order.riderId != null) const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.storefront, size: 18),
-                            label: const Text('商家'),
-                            onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) => OrderChatPage(
-                                        api: widget.api,
-                                        orderNo: order.orderNo,
-                                        title: '和商家说句话',
-                                        peer: 'merchant',
-                                        quickReplies:
-                                            kCustomerQuickReplies))),
+                        if (order.riderId != null && !order.isErrand)
+                          const SizedBox(width: 8),
+                        // 跑腿单没有商家。这个按钮留着会把人引到
+                        // 「本城跑腿服务」那个虚拟主体的聊天窗 ——
+                        // 那头没有人,发出去的消息永远没有回音
+                        if (!order.isErrand)
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.storefront, size: 18),
+                              label: const Text('商家'),
+                              onPressed: () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                      builder: (_) => OrderChatPage(
+                                          api: widget.api,
+                                          orderNo: order.orderNo,
+                                          title: '和商家说句话',
+                                          peer: 'merchant',
+                                          quickReplies:
+                                              kCustomerQuickReplies))),
+                            ),
                           ),
-                        ),
                         if (order.riderPhone.isNotEmpty) ...[
                           const SizedBox(width: 8),
                           IconButton.outlined(
@@ -3930,6 +4052,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                       ? _ReviewDisplay(review: _review!)
                       : _ReviewForm(
                           hasRider: order.riderId != null,
+                          hasMerchant: !order.isErrand,
                           api: widget.api,
                           onSubmit: _submitReview,
                         ),
@@ -4164,9 +4287,16 @@ class _Stars extends StatelessWidget {
 
 class _ReviewForm extends StatefulWidget {
   const _ReviewForm(
-      {required this.hasRider, required this.api, required this.onSubmit});
+      {required this.hasRider,
+      required this.hasMerchant,
+      required this.api,
+      required this.onSubmit});
 
   final bool hasRider;
+
+  /// 跑腿单没有商家(merchant_id 指向虚拟服务主体)。
+  /// 让人给一个不存在的经营者打星,打完还进不了任何人的看板
+  final bool hasMerchant;
   final ApiClient api;
   final Future<void> Function(
       int merchantRating,
@@ -4226,32 +4356,34 @@ class _ReviewFormState extends State<_ReviewForm> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('评价这一单', style: Theme.of(context).textTheme.titleMedium),
-            Row(children: [
-              const Text('商家'),
-              _Stars(
-                  value: _merchantRating,
-                  onChanged: (v) => setState(() => _merchantRating = v)),
-            ]),
-            // 商家维度标签(正向 + 负向,归因到商家能改的事)
-            Wrap(
-              spacing: 6,
-              runSpacing: 2,
-              children: [
-                for (final tag in [...kReviewTags, ...kMerchantNegTags])
-                  FilterChip(
-                    label: Text(tag, style: const TextStyle(fontSize: 12)),
-                    selected: _tags.contains(tag),
-                    visualDensity: VisualDensity.compact,
-                    onSelected: (on) => setState(() {
-                      if (on && _tags.length < 4) {
-                        _tags.add(tag);
-                      } else {
-                        _tags.remove(tag);
-                      }
-                    }),
-                  ),
-              ],
-            ),
+            if (widget.hasMerchant) ...[
+              Row(children: [
+                const Text('商家'),
+                _Stars(
+                    value: _merchantRating,
+                    onChanged: (v) => setState(() => _merchantRating = v)),
+              ]),
+              // 商家维度标签(正向 + 负向,归因到商家能改的事)
+              Wrap(
+                spacing: 6,
+                runSpacing: 2,
+                children: [
+                  for (final tag in [...kReviewTags, ...kMerchantNegTags])
+                    FilterChip(
+                      label: Text(tag, style: const TextStyle(fontSize: 12)),
+                      selected: _tags.contains(tag),
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (on) => setState(() {
+                        if (on && _tags.length < 4) {
+                          _tags.add(tag);
+                        } else {
+                          _tags.remove(tag);
+                        }
+                      }),
+                    ),
+                ],
+              ),
+            ],
             if (widget.hasRider) ...[
               Row(children: [
                 const Text('骑手'),

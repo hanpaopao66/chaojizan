@@ -88,15 +88,22 @@ async def create_review(
         flag_reason=flag_reason or "",
     )
     db.add(review)
+    # 跑腿单没有商家:merchant_id 指向的是每城一个的虚拟服务主体。
+    # 把星级累加到它身上是给一个不存在的经营者打分,
+    # 下面的差评触达更会把「你收到一条差评」推给平台管理员。
+    # 骑手那部分照常记(跑腿单确实有骑手)
+    from ..services.errand import is_errand
+    errand = is_errand(order)
     # 商家评分聚合原子累加,并发评价不丢数
-    await db.execute(
-        update(Merchant)
-        .where(Merchant.id == order.merchant_id)
-        .values(
-            rating_sum=Merchant.rating_sum + payload.merchant_rating,
-            rating_count=Merchant.rating_count + 1,
+    if not errand:
+        await db.execute(
+            update(Merchant)
+            .where(Merchant.id == order.merchant_id)
+            .values(
+                rating_sum=Merchant.rating_sum + payload.merchant_rating,
+                rating_count=Merchant.rating_count + 1,
+            )
         )
-    )
     await db.flush()
     await submit_images(db, "review", review.id, payload.image_urls[:6])
     await db.commit()
@@ -104,7 +111,7 @@ async def create_review(
 
     # 差评(≤3 星)即时触达商家:WS(前台响横幅)+ 推送(App 在后台)双通道,
     # 与 new_order 同构。失败绝不拖垮评价主流程。
-    if payload.merchant_rating <= 3:
+    if payload.merchant_rating <= 3 and not errand:
         try:
             from ..services.push import notify_bad_review
             from ..ws import manager

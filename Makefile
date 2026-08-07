@@ -29,11 +29,22 @@ seed:
 # 请求会带着字面的 $orderNo 发出去。这个 analyze 不报(语法合法)、
 # e2e 也照不到(测的是服务端),只能靠扫。
 analyze:
+# 先 pub get 再 analyze。只写 --no-pub 的话,包解析一过期
+# (在别的 app 里跑过 flutter test 就会)analyze 会喷出几千条
+# "package:flutter/material.dart 不存在" —— 全是假的。
+# 一次这种噪音就够让人以后不再看 analyze 的输出了
 	@for d in packages/shared apps/user_app apps/merchant_app apps/rider_app; do \
-	  echo "== $$d =="; (cd $$d && flutter analyze --no-pub) || exit 1; \
+	  echo "== $$d =="; \
+	  (cd $$d && flutter pub get >/dev/null && flutter analyze --no-pub) \
+	    || exit 1; \
 	done
 	@echo "== 扫 Dart 字符串里的转义美元符 =="
-	@! grep -rn '\\$$' --include="*.dart" packages/ apps/ \
+# 模式必须是「字面反斜杠 + 字面美元」= BRE 的 \\\$。
+# 原来写的是 '\\$$'(传给 shell 是 \\$),BRE 里 $ 在模式末尾是**行尾锚点**,
+# 于是它只找得到"行尾的反斜杠",行中间的 '\$e' 一个都扫不出来 ——
+# 守卫写错的下场比没有守卫更糟:它一直返回绿灯,让人以为这类问题已经绝迹。
+# 后来 rider_app 跑腿那段又混进三个,就是这么进来的。
+	@! grep -rn '\\\$$' --include="*.dart" packages/ apps/ \
 	  || { echo "✗ 上面这些 '\\$$x' 是字面量,不是插值"; exit 1; }
 	@echo "  没有转义美元符 ✓"
 	@cd merchant-web && npx tsc --noEmit && echo "== merchant-web tsc ✓"
