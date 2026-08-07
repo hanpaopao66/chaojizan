@@ -697,6 +697,138 @@ class _RiderHomePageState extends State<RiderHomePage>
     }
   }
 
+  /// 帮买:填小票实付 + 传照片。
+  ///
+  /// 超出可自行垫付的上限时服务端会拒,并提示先点「要多花钱」问顾客 ——
+  /// **骑手不该被迫做"超了一点点先垫上"这个判断题**,
+  /// 那是把平台的规则缺失转嫁给收入最低的那个人。
+  Future<void> _submitReceipt(Order order) async {
+    final amount = TextEditingController(
+        text: (order.goodsBudgetCents / 100).toStringAsFixed(2));
+    String? photo;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheet) => Padding(
+          padding: EdgeInsets.only(
+              left: 16, right: 16, top: 16,
+              bottom: MediaQuery.of(sheet).viewInsets.bottom + 16),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('填小票 · ${order.orderNo.substring(order.orderNo.length - 6)}',
+                style: Theme.of(sheet).textTheme.titleMedium),
+            Text('顾客预估 ${yuan(order.goodsBudgetCents)};'
+                '小票顾客也看得到,照实填就行',
+                style: Theme.of(sheet).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            TextField(
+              controller: amount,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                  labelText: '小票实付(元)', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.photo_camera_outlined, size: 18),
+                onPressed: () async {
+                  try {
+                    final picked = await ImagePicker().pickImage(
+                        source: ImageSource.camera,
+                        maxWidth: 1280, imageQuality: 80);
+                    if (picked == null) return;
+                    final bytes = await picked.readAsBytes();
+                    // 小票是对账依据,顾客也看得到 —— 与送达留证同一条
+                    // 可见性口径(该单当事人 + 平台)
+                    final url = await widget.api.uploadImage(
+                        bytes, picked.name, purpose: 'delivery_proof');
+                    setSheet(() => photo = url);
+                  } catch (e) {
+                    if (!sheet.mounted) return;
+                    ScaffoldMessenger.of(sheet).showSnackBar(
+                        SnackBar(content: Text('\$e')));
+                  }
+                },
+                label: Text(photo == null ? '拍小票' : '已拍 ✓'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: photo == null
+                    ? null
+                    : () => Navigator.pop(sheet, true),
+                child: const Text('提交'),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (ok != true || photo == null || !mounted) return;
+    final cents = ((double.tryParse(amount.text) ?? 0) * 100).round();
+    try {
+      await widget.api.submitReceipt(order.orderNo,
+          actualCents: cents, receiptUrl: photo!);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('小票已提交,多退少补由平台处理')));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      // 超上限时服务端的提示已经写清楚"先问顾客",原样显示
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e is ApiException ? e.message : '\$e'),
+          duration: const Duration(seconds: 8)));
+    }
+  }
+
+  /// 帮买:到店发现没货。商品款全额退顾客,跑腿费只收到店那一段 ——
+  /// 你确实跑了这一趟,不白跑
+  Future<void> _markUnavailable(Order order) async {
+    final note = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dlg) => AlertDialog(
+        title: const Text('买不到?'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('商品款会全额退给顾客,跑腿费只收到店那一段的距离费 ——'
+              '你确实跑了这一趟,不白跑。'),
+          const SizedBox(height: 8),
+          TextField(
+            controller: note,
+            decoration: const InputDecoration(
+                hintText: '说一句什么情况(如:货架空了)',
+                border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dlg, false),
+              child: const Text('再找找')),
+          FilledButton(
+              onPressed: () => Navigator.pop(dlg, true),
+              child: const Text('确认买不到')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.api.markUnavailable(order.orderNo, note.text.trim());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已按买不到处理,商品款全额退顾客')));
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '\$e')));
+    }
+  }
+
   /// 「我到收货点了」。
   ///
   /// 到这一下到点送达之间的时长,花在找门牌、等门禁、等电梯、爬楼、
@@ -1286,11 +1418,20 @@ class _RiderHomePageState extends State<RiderHomePage>
                   '(${order.dropSample} 单实测)',
                   style: TextStyle(
                       fontSize: 12, color: Theme.of(context).sz.inkMuted)),
+            // 跑腿单:标出来并写清寄什么 —— 骑手取件时要照着核对,
+            // 而"取餐"这个词对跑腿是错的(那里没有餐也没有店)
+            if (order.isErrand)
+              Text(
+                  '🎒 跑腿单 · ${order.errandNote.isEmpty ? "物品" : order.errandNote}',
+                  style: TextStyle(
+                      color: Theme.of(context).sz.earn,
+                      fontWeight: FontWeight.bold)),
             if (order.hasAlcohol)
               Text('🍺 含酒精饮品,送达请查验收件人年龄',
                   style: TextStyle(
                       color: Theme.of(context).sz.hold, fontWeight: FontWeight.bold)),
-            Text('取餐:${order.merchantName} · ${order.merchantAddress}'),
+            Text('${order.isErrand ? "取件" : "取餐"}:'
+                '${order.merchantName} · ${order.merchantAddress}'),
             Text('送达:${order.address}'),
             if (order.contactPhone.isNotEmpty)
               Row(children: [
@@ -1468,7 +1609,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                         actions.add(OutlinedButton.icon(
                             icon: const Icon(Icons.storefront, size: 18),
                             onPressed: () => _markArrived(order),
-                            label: const Text('我到店了')));
+                            label: Text(order.isErrand ? '我到取件点了' : '我到店了')));
                       }
                       // 未取餐(接单中/待取餐)且非追加单可转单;追加单随原单一起转
                       if (order.status != OrderStatus.pickedUp &&
@@ -1479,9 +1620,21 @@ class _RiderHomePageState extends State<RiderHomePage>
                             label: const Text('转单')));
                       }
                       if (order.status == OrderStatus.ready) {
+                        // 帮买:先填小票再谈取件 —— 小票是这一单唯一的
+                        // 对账依据,顾客也看得到
+                        if (order.isErrandBuy &&
+                            order.goodsActualCents == null) {
+                          actions.add(OutlinedButton.icon(
+                              icon: const Icon(Icons.receipt_long, size: 18),
+                              onPressed: () => _submitReceipt(order),
+                              label: const Text('填小票')));
+                          actions.add(TextButton(
+                              onPressed: () => _markUnavailable(order),
+                              child: const Text('买不到')));
+                        }
                         actions.add(FilledButton(
                             onPressed: () => _pickUp(order),
-                            child: const Text('已取餐')));
+                            child: Text(order.isErrand ? '已取件' : '已取餐')));
                       } else if (order.status == OrderStatus.delivered ||
                           order.status == OrderStatus.completed) {
                         // 送完了才谈得上「这单超时不怪我」——

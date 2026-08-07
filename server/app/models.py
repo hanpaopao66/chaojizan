@@ -504,6 +504,21 @@ class Order(Base):
     pickup_contact_phone: Mapped[str] = mapped_column(String(20), default="")
     #: 物品描述(帮送)/ 要买什么(帮买)
     errand_note: Mapped[str] = mapped_column(String(300), default="")
+    #: 取件时拍的物品照。**丢件纠纷时唯一的事实来源** ——
+    #: 东西是用户的,平台既不知道原样也不承担保价
+    pickup_photo_url: Mapped[str] = mapped_column(String(300), default="")
+    # 帮买:垫资由**用户预付给平台**,骑手不垫自己的钱 ——
+    # 让收入最低的那个人先掏钱,是把平台的资金风险转嫁给他。
+    # 实付以小票为准,小票是唯一对账依据且用户看得到
+    # (代买最容易起的纠纷就是"你是不是多报了")
+    goods_budget_cents: Mapped[int] = mapped_column(Integer, default=0)
+    goods_actual_cents: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
+    goods_receipt_url: Mapped[str] = mapped_column(String(300), default="")
+    #: 超出浮动上限时骑手发起的加价确认(pending/approved/rejected)
+    goods_raise_status: Mapped[str] = mapped_column(String(12), default="")
+    goods_raise_cents: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
     # 送达段:骑手点「我到了」的时刻,以及到送达之间的停留时长。
     # 这几分钟花在找门、等门禁、等电梯、爬楼上 —— 是"场景难度"
     # 唯一可测量的部分。到店等餐时长早就在记了,送达这段一直是空白。

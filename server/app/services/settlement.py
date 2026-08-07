@@ -34,14 +34,32 @@ async def credit_rider_for_order(db: AsyncSession, order: Order) -> None:
             (order.picked_up_at - order.arrived_shop_at).total_seconds() / 60)
         wait_cents = wait_compensation_cents(wait_minutes)
 
+    # 帮买:商品款按**小票实付**结给骑手,平台一分不抽 ——
+    # 那是他替用户垫付的钱(虽然钱从平台走),对它抽成没有任何道理。
+    # 没填小票就按预付金额结,而不是按 0 —— 骑手确实买了东西,
+    # 让他自己承担平台的流程缺失是最坏的一种处理
+    from .errand import KIND_ERRAND_BUY
+    goods = 0
+    if order.order_kind == KIND_ERRAND_BUY:
+        goods = (order.goods_actual_cents
+                 if order.goods_actual_cents is not None
+                 else order.goods_budget_cents)
+
+    # 跑腿单:平台从跑腿费里收 2%,骑手拿 98%。
+    # **和外卖不是同一个口径**,外卖配送费一分不抽(平台收入来自商家佣金),
+    # 跑腿没有商家,这 2% 是这条业务上唯一的收入
+    from .errand import is_errand, service_fee_cents
+    fee_cut = (service_fee_cents(order.delivery_fee_cents)
+               if is_errand(order) else 0)
     db.add(
         RiderEarning(
             rider_id=order.rider_id,
             order_id=order.id,
             order_no=order.order_no,
-            # 配送费 + 小费,一分不少全归骑手;再加平台承担的等餐补偿
+            # 配送费 + 小费,一分不少全归骑手;再加平台承担的等餐补偿;
+            # 跑腿单扣掉平台服务费
             amount_cents=(order.delivery_fee_cents + order.tip_cents
-                          + wait_cents),
+                          + wait_cents - fee_cut + goods),
         )
     )
     if wait_cents:
@@ -53,6 +71,13 @@ async def credit_rider_for_order(db: AsyncSession, order: Order) -> None:
 
 
 async def credit_merchant_for_order(db: AsyncSession, order: Order) -> None:
+    # 跑腿单不产生商家入账:那个服务主体没有经营者、没有收款账户,
+    # 给它记一行 food=0/commission=2%/net=-2% 的账,只会让它的钱包变成负数,
+    # 然后每日核账的「商家余额不得为负」当场报红。
+    # 平台那 2% 记在 order.commission_cents 上,审计里单独有一条跑腿恒等式
+    from .errand import is_errand
+    if is_errand(order):
+        return
     existing = await db.scalar(
         select(MerchantEarning.id).where(
             MerchantEarning.order_id == order.id,

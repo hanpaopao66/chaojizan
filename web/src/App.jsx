@@ -206,6 +206,9 @@ function Home() {
             <p>低价引流到店,核销才收 2%。扫码核销、当日对账,未使用随时全额退。</p></div>
           <div className="bcard"><h3>酒店住宿 <span className="tag on">运营中</span></h3>
             <p>佣金 5%,离店才收;取消、未入住分文不取。无排他、无竞价排名、无年费。</p></div>
+          <div className="bcard"><h3>跑腿 <span className="tag on">运营中</span></h3>
+            <p>帮送与帮买,平台只收 2%,账单上单列不藏。帮买的商品款一分不抽,
+              按小票实付结给骑手,多退少补。</p></div>
           <div className="bcard"><h3>打车 · 家政 · 维修 <span className="tag">筹备中</span></h3>
             <p>凡是抽成不透明的行当,都值得重做一遍。低抽成,账目公开,一个一个来。</p></div>
         </div>
@@ -266,7 +269,7 @@ function Home() {
         <h2>关于我们 · 联系我们</h2>
         <p className="lead">
           超级赞(Super-Z)由陕西爱卡斯科技有限公司运营,是低抽成、账目透明的
-          本地生活服务平台:外卖佣金 5% 封顶、团购核销 2%、配送费 100% 归骑手,
+          本地生活服务平台:外卖佣金 5% 封顶、团购核销 2%、跑腿 2%、配送费 100% 归骑手,
           每一单的资金流向对用户、商家、骑手三方公开可查。
         </p>
         <p className="lead">

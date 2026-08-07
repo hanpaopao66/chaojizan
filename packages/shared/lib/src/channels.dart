@@ -76,6 +76,10 @@ const List<SzChannel> kChannels = [
     key: 'voucher', name: '超值团购', glyph: '券', sub: '到店核销',
     tone: 2,
   ),
+  SzChannel(
+    key: 'errand', name: '帮我送', glyph: '跑', sub: '取件送件 · 收 2%',
+    tone: 3,
+  ),
   // 下一个频道加在这里即可,例如:
   // SzChannel(key: 'ride', name: '打车', glyph: '车', sub: '一口价 · 不抽司机',
   //           tone: 3),

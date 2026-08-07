@@ -584,6 +584,16 @@ class Order {
         // 顾客选的送上门还是送楼下。选楼下时骑手没有上楼的义务,
         // 小票上要写出来,否则商家会以为骑手偷懒
         toDoor = json['to_door'] as bool? ?? true,
+        // 跑腿:food(外卖) / errand_send(帮送) / errand_buy(帮买)
+        orderKind = '${json['order_kind'] ?? 'food'}',
+        errandNote = '${json['errand_note'] ?? ''}',
+        pickupAddress = '${json['pickup_address'] ?? ''}',
+        pickupPhotoUrl = '${json['pickup_photo_url'] ?? ''}',
+        goodsBudgetCents = (json['goods_budget_cents'] as num?)?.toInt() ?? 0,
+        goodsActualCents = (json['goods_actual_cents'] as num?)?.toInt(),
+        goodsReceiptUrl = '${json['goods_receipt_url'] ?? ''}',
+        goodsRaiseStatus = '${json['goods_raise_status'] ?? ''}',
+        goodsRaiseCents = (json['goods_raise_cents'] as num?)?.toInt(),
         feeParts = ((json['fee_parts'] as Map?) ?? const {})
             .map((k, v) => MapEntry('$k', v as int)),
         feePartLabels = ((json['fee_part_labels'] as Map?) ?? const {})
@@ -673,6 +683,26 @@ class Order {
 
   /// 送上门(默认)还是送到楼下
   final bool toDoor;
+
+  /// 订单类型。跑腿单没有商家 —— 骑手端要据此把"取餐"改成"取件",
+  /// 商家端根本看不到这类单(它挂在独立的服务主体上)
+  final String orderKind;
+  bool get isErrand => orderKind.startsWith('errand');
+  /// 寄什么 / 买什么
+  final String errandNote;
+  /// 取件点地址(跑腿单的取件点在订单自己身上,不在商家上)
+  final String pickupAddress;
+  /// 取件时拍的物品照
+  final String pickupPhotoUrl;
+
+  /// 帮买:预付商品款 / 小票实付 / 小票照片 / 加价确认。
+  /// **小票用户看得到** —— 代买最容易起的纠纷就是"你是不是多报了"
+  final int goodsBudgetCents;
+  final int? goodsActualCents;
+  final String goodsReceiptUrl;
+  final String goodsRaiseStatus;
+  final int? goodsRaiseCents;
+  bool get isErrandBuy => orderKind == 'errand_buy';
 
   /// 配送费构成(分)与中文名。接单前可见 ——
   /// 美团官方只承诺"接单前能看到价格",看不到明细;这一步我们做了

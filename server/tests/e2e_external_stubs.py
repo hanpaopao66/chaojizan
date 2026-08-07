@@ -18,11 +18,11 @@ assert resp["sent"] is False and len(resp["dev_code"]) == 6
 code = resp["dev_code"]
 print(f"✓ 未配置短信服务 → 开发模式返回验证码 {code}")
 
-err = call("POST", "/auth/sms-code", body={"phone": phone}, expect_error=True)
+err = call("POST", "/auth/sms-code", body={"phone": phone}, expect_error=True, retry_429=False)
 assert err["_error"] == 429
 print(f"✓ 60 秒内重复发送被限流:{err['detail']}")
 
-err = call("POST", "/auth/sms-login", body={"phone": phone, "code": "000000"}, expect_error=True)
+err = call("POST", "/auth/sms-login", body={"phone": phone, "code": "000000"}, expect_error=True, retry_429=False)
 assert err["_error"] == 401
 print(f"✓ 错误验证码被拒:{err['detail']}")
 
@@ -31,7 +31,7 @@ assert data["role"] == "customer" and data["token"]
 uid = data["user_id"]
 print(f"✓ 验证码登录成功,新号自动注册为用户(id={uid})")
 
-err = call("POST", "/auth/sms-login", body={"phone": phone, "code": code}, expect_error=True)
+err = call("POST", "/auth/sms-login", body={"phone": phone, "code": code}, expect_error=True, retry_429=False)
 assert err["_error"] == 401
 print("✓ 验证码一次性,用过即废")
 
@@ -54,7 +54,7 @@ order = call("POST", "/orders", customer, {
 })
 no = order["order_no"]
 
-err = call("POST", f"/orders/{no}/pay/wechat", customer, expect_error=True)
+err = call("POST", f"/orders/{no}/pay/wechat", customer, expect_error=True, retry_429=False)
 assert err["_error"] == 503
 print(f"✓ 未配置商户号,微信支付明确拒绝(503):{err['detail'][:20]}…")
 
@@ -63,7 +63,7 @@ paid = call("POST", f"/orders/{no}/pay/mock", customer)
 assert paid["status"] == "paid" and paid["commission_cents"] > 0
 print("✓ 降级到模拟支付,统一入账逻辑正常(佣金已计)")
 
-err = call("POST", "/payments/wechat/notify", body={"fake": "callback"}, expect_error=True)
+err = call("POST", "/payments/wechat/notify", body={"fake": "callback"}, expect_error=True, retry_429=False)
 assert err["_error"] == 400
 print("✓ 伪造支付回调被验签拒绝(400)")
 

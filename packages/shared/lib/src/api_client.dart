@@ -1913,6 +1913,68 @@ class ApiClient {
         as Map<String, dynamic>;
   }
 
+  // ---------- 跑腿(帮送)----------
+
+  /// 跑腿报价。**服务费单独回**,不藏在总价里 ——
+  /// 外卖的配送费我们一分不抽,跑腿收 2%,两个口径同时存在,
+  /// 不在下单页写清楚就会变成"你不是说配送费不抽吗"
+  Future<Map<String, dynamic>> errandQuote(Map<String, dynamic> body) async =>
+      await _request('POST', '/errands/quote', body: body)
+          as Map<String, dynamic>;
+
+  Future<Order> createErrand(Map<String, dynamic> body) async {
+    final data = await _request('POST', '/errands', body: body);
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 帮买报价:商品款与跑腿费分开列 —— 用户付的是两笔钱,
+  /// 合成一个总数他就不知道自己在为什么付费
+  Future<Map<String, dynamic>> errandBuyQuote(
+          Map<String, dynamic> body) async =>
+      await _request('POST', '/errands/buy/quote', body: body)
+          as Map<String, dynamic>;
+
+  Future<Order> createErrandBuy(Map<String, dynamic> body) async {
+    final data = await _request('POST', '/errands/buy', body: body);
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 骑手买完:填实付 + 传小票。**小票是唯一对账依据**,用户也看得到
+  Future<Order> submitReceipt(String orderNo,
+      {required int actualCents, required String receiptUrl}) async {
+    final data = await _request('POST', '/errands/$orderNo/receipt',
+        body: {'actual_cents': actualCents, 'receipt_url': receiptUrl});
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 骑手发起「要多花钱」确认(超出可自行垫付的上限时必须走这一步)
+  Future<Order> requestRaise(String orderNo, int actualCents) async {
+    final data = await _request('POST', '/errands/$orderNo/raise',
+        body: {'actual_cents': actualCents});
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 用户回应加价
+  Future<Order> decideRaise(String orderNo, bool agree) async {
+    final data = await _request('POST', '/errands/$orderNo/raise/decide',
+        body: {'agree': agree});
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 骑手到店发现没货:商品款全额退,跑腿费只收到店那一段
+  Future<Order> markUnavailable(String orderNo, String note) async {
+    final data = await _request('POST', '/errands/$orderNo/unavailable',
+        body: {'note': note});
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 取件拍照(骑手)。丢件纠纷时唯一的事实来源
+  Future<Order> uploadPickupPhoto(String orderNo, String photoUrl) async {
+    final data = await _request('POST', '/errands/$orderNo/picked-photo',
+        body: {'photo_url': photoUrl});
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
   /// 骑手周报:逐日单量/时长/收入 + 收入构成。只统计不考核
   Future<Map<String, dynamic>> riderWeeklyReport({int weekOffset = 0}) async =>
       await _request('GET',

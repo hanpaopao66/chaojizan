@@ -29,6 +29,7 @@ import 'identity_page.dart';
 import 'coming_soon_page.dart';
 import 'feature_flags.dart';
 import 'delivery_map_page.dart';
+import 'errand_page.dart';
 import 'reviews_page.dart';
 import 'search_page.dart';
 import 'session.dart';
@@ -851,6 +852,8 @@ class _MerchantListViewState extends State<MerchantListView> {
                             api: widget.api, lat: _myLat, lng: _myLng)),
                     'voucher' => MaterialPageRoute<void>(
                         builder: (_) => DealsPage(api: widget.api)),
+                    'errand' => MaterialPageRoute<void>(
+                        builder: (_) => ErrandPage(api: widget.api)),
                     // 注册了但还没接页面的频道:不跳空白页,直接不响应
                     _ => null,
                   };

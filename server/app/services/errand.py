@@ -83,3 +83,123 @@ def service_fee_cents(errand_fee_cents: int) -> int:
     from ..config import settings
 
     return round(errand_fee_cents * settings.errand_service_fee_bps / 10000)
+
+
+#: 帮送禁运。**硬编码拦截,不能只写在用户协议里** ——
+#: 写在协议里等于没写:没人看,出了事平台也脱不了责任。
+#: 命中就拒单并说明是哪一类,让用户知道为什么而不是"提交失败"
+FORBIDDEN_ITEMS = (
+    ("危险化学品", ("汽油", "柴油", "酒精", "硫酸", "盐酸", "农药", "化学")),
+    ("易燃易爆", ("烟花", "爆竹", "打火机", "气罐", "煤气", "液化气", "炸")),
+    ("活体动物", ("活体", "宠物", "猫", "狗", "鸟", "鱼苗", "活鸡", "活鸭")),
+    ("现金与贵重金属", ("现金", "钞票", "金条", "黄金", "首饰", "珠宝")),
+    ("管制刀具", ("管制刀", "匕首", "弹簧刀", "枪")),
+    ("药品", ("处方药", "药品", "针剂", "疫苗")),
+)
+
+
+def forbidden_reason(text: str) -> str | None:
+    """物品描述命中禁运清单就返回中文原因,否则 None。
+
+    只做关键词粗筛 —— 它拦不住存心绕的人,但拦得住"随手写了汽油"
+    这类真实情况,而后者才是多数。真要严格得靠人工核验,
+    那是另一条成本曲线,现在这个量级不划算。
+    """
+    lowered = (text or "").lower()
+    for label, words in FORBIDDEN_ITEMS:
+        if any(w in lowered for w in words):
+            return label
+    return None
+
+
+async def service_merchant(db, city: str):
+    """本城的跑腿服务主体(没有就建一个)。
+
+    它是一个 `biz_type='errand'` 的 Merchant —— 存在的唯一理由是让
+    跑腿单能挂在 `Order.merchant_id` 这个非空外键上,而不必把上百处
+    依赖它的代码全部改成判空(见 docs/DESIGN-errand.md)。
+
+    **它不会出现在任何外卖界面里**:列表、搜索、首页推荐全都是
+    `biz_type == "food"` 的白名单写法。
+
+    owner 挂平台管理员:这个主体没有真实经营者,也不产生商家入账
+    (结算里对跑腿单不生成 MerchantEarning),所以 owner 只是个外键占位。
+    """
+    from sqlalchemy import select
+
+    from ..models import Merchant, MerchantStatus, User, UserRole
+
+    city = city or ""
+    shop = await db.scalar(
+        select(Merchant).where(Merchant.biz_type == "errand",
+                               Merchant.city == city)
+        .order_by(Merchant.id).limit(1))
+    if shop is not None:
+        return shop
+    owner = await db.scalar(
+        select(User).where(User.role == UserRole.admin)
+        .order_by(User.id).limit(1))
+    if owner is None:
+        raise RuntimeError("没有管理员账号,无法创建跑腿服务主体")
+    shop = Merchant(
+        owner_id=owner.id,
+        name=f"{city or '本城'}跑腿服务",
+        biz_type="errand",
+        city=city,
+        address="",
+        lat=0.0, lng=0.0,
+        status=MerchantStatus.approved,
+        is_open=True,
+    )
+    db.add(shop)
+    await db.flush()
+    return shop
+
+
+# ---------- 帮买:垫资与差额 ----------
+
+#: 实付超预估的浮动上限:20% 且不超过 20 元。
+#: 上限内平台先结给骑手、再向用户补收;超出必须骑手发起确认、用户同意。
+#:
+#: ⚠️ 这两个数不是随便定的。**骑手不该被迫做"超了一点点先垫上"这个判断题**
+#: —— 那看起来贴心,实际是把平台的规则缺失转嫁给收入最低的那个人。
+#: 有了明确上限,他在店里只需要看一眼:超了就点确认,不超就直接买。
+RAISE_RATIO = 0.20
+RAISE_MAX_CENTS = 2000
+
+
+def raise_limit_cents(budget_cents: int) -> int:
+    """这一单允许骑手自行超支多少(不用问用户)。"""
+    return min(int(budget_cents * RAISE_RATIO), RAISE_MAX_CENTS)
+
+
+def settle_goods(budget_cents: int, actual_cents: int) -> dict:
+    """帮买的商品款结算。
+
+    返回 {rider_goods, refund_cents, extra_charge_cents, note}:
+    - `rider_goods`:结给骑手的商品款(=实付,平台一分不抽 ——
+      那是他替用户垫付的钱,对它抽成没有任何道理);
+    - `refund_cents`:实付少于预估时退给用户的差额;
+    - `extra_charge_cents`:实付多于预估时向用户补收的金额。
+    """
+    diff = actual_cents - budget_cents
+    if diff <= 0:
+        return {"rider_goods": actual_cents, "refund_cents": -diff,
+                "extra_charge_cents": 0,
+                "note": (f"实付比预估少 {-diff / 100:.2f} 元,已原路退回"
+                         if diff else "实付与预估一致")}
+    return {"rider_goods": actual_cents, "refund_cents": 0,
+            "extra_charge_cents": diff,
+            "note": f"实付比预估多 {diff / 100:.2f} 元,需向你补收"}
+
+
+def unavailable_fee_cents(fee_parts: dict) -> int:
+    """买不到时收多少跑腿费。
+
+    **只收到店那段的距离费**(base),夜间/天气/上门难度都不收 ——
+    上门那一段根本没发生。
+
+    骑手确实跑了这一趟不该白跑,用户也确实没拿到东西;
+    折中方案的前提是**在下单页提前说清楚**,提前说了就不叫坑。
+    """
+    return int((fee_parts or {}).get("base", 0))

@@ -53,7 +53,7 @@ async def clear_cooldown(no):
 no1 = make_order("accepted")
 r1 = call("POST", f"/orders/{no1}/urge", customer)
 assert r1["target"] == "merchant" and r1["times_left"] == 2
-err = call("POST", f"/orders/{no1}/urge", customer, expect_error=True)
+err = call("POST", f"/orders/{no1}/urge", customer, expect_error=True, retry_429=False)
 assert err["_error"] == 429 and "3 分钟" in err["detail"]
 print("✓ 催商家成功;连催被 3 分钟间隔拦下")
 
@@ -64,7 +64,7 @@ asyncio.run(clear_cooldown(no1))
 r3 = call("POST", f"/orders/{no1}/urge", customer)
 assert r3["times_left"] == 0
 asyncio.run(clear_cooldown(no1))
-err = call("POST", f"/orders/{no1}/urge", customer, expect_error=True)
+err = call("POST", f"/orders/{no1}/urge", customer, expect_error=True, retry_429=False)
 assert err["_error"] == 429 and "3 次" in err["detail"]
 print("✓ 每单 3 次上限生效")
 
@@ -81,7 +81,7 @@ print("✓ 催单/回复写事件流水,订单状态不受影响")
 # 3) 没催过的订单不能回复
 no2 = make_order("accepted")
 err = call("POST", f"/orders/{no2}/urge-reply", merchant,
-           {"text": "马上好"}, expect_error=True)
+           {"text": "马上好"}, expect_error=True, retry_429=False)
 assert err["_error"] == 409
 print("✓ 无催单记录不能回复")
 
@@ -93,12 +93,12 @@ print("✓ 配送中催单对象自动切到骑手")
 
 # 5) 自取单出餐后不给催(自己去取);已取消订单 409
 no4 = make_order("ready", pickup=True)
-err = call("POST", f"/orders/{no4}/urge", customer, expect_error=True)
+err = call("POST", f"/orders/{no4}/urge", customer, expect_error=True, retry_429=False)
 assert err["_error"] == 409 and "取餐码" in err["detail"]
 no5 = make_order("paid")
 call("POST", f"/orders/{no5}/transition", customer,
      {"to_status": "cancelled", "reason": "不想要了"})
-err = call("POST", f"/orders/{no5}/urge", customer, expect_error=True)
+err = call("POST", f"/orders/{no5}/urge", customer, expect_error=True, retry_429=False)
 assert err["_error"] == 409
 print("✓ 自取已出餐/已取消订单不能催")
 

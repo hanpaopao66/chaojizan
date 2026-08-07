@@ -12,16 +12,18 @@ BASE = os.environ.get("SUPERZ_API", "http://127.0.0.1:8010")
 
 
 def call(method, path, token=None, body=None, expect_error=False,
-         _retried=False, headers=None, retry_429=False):
-    """[retry_429] 给「**期待某个错误、但那个错误不是 429**」的调用用。
+         _retried=False, headers=None, retry_429=True):
+    """[retry_429] 撞上自家限流时等窗口翻转重试一次。**默认开**。
 
-    全套 e2e 共用演示账号连着跑一百多个套件,很容易在末尾撞上自家的
-    下单/工单频控。不带这个开关时,expect_error 的调用会把 429 原样
-    返回给断言,表现成"我等的是 409,来的是 429" —— 排查它和排查真 bug
-    一样费时,而它只是环境。
+    全套 e2e 共用演示账号连着跑一百多个套件,很容易在末尾撞上下单/工单
+    频控。不重试的话,expect_error 的调用会把 429 原样返回给断言,
+    表现成"我等的是 409,来的是 429" —— 排查它和排查真 bug 一样费时,
+    而它只是环境。
 
-    **默认关**:e2e_urge / e2e_support_audit 这些正是在测限流本身,
-    对它们重试就等于把用例测的东西绕过去了。
+    默认开是因为**在这套用例里 429 几乎总是噪音**:真正在测限流的只有
+    e2e_urge / e2e_support_audit / e2e_external_stubs 这几处,
+    它们显式传 `retry_429=False` 关掉。默认关的话,每加一个新用例
+    就要再踩一次同样的坑(已经踩过两次了)。
     """
     req = urllib.request.Request(BASE + path, method=method)
     req.add_header("Content-Type", "application/json")

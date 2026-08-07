@@ -20,6 +20,7 @@ from .routers import (
     appeals,
     auth,
     brands,
+    errands,
     favorites,
     food_safety,
     geo,
@@ -162,6 +163,7 @@ app.include_router(auth.router)
 app.include_router(merchants.router)
 app.include_router(brands.router)
 app.include_router(orders.router)
+app.include_router(errands.router)
 app.include_router(riders.router)
 app.include_router(addresses.router)
 app.include_router(geo.router)

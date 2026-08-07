@@ -59,10 +59,18 @@ def _rider_due(order) -> int:
     """
     from .errand import is_errand, service_fee_cents
 
+    from .errand import KIND_ERRAND_BUY
+
     due = order.delivery_fee_cents + order.tip_cents
     due += (order.fee_parts or {}).get("wait", 0)
     if is_errand(order):
         due -= service_fee_cents(order.delivery_fee_cents)
+    # 帮买的商品款按小票实付结给骑手,平台一分不抽 ——
+    # 那是他替用户垫付的钱
+    if order.order_kind == KIND_ERRAND_BUY:
+        due += (order.goods_actual_cents
+                if order.goods_actual_cents is not None
+                else order.goods_budget_cents)
     return due
 
 
@@ -129,7 +137,27 @@ async def run_audit() -> list[dict]:
                 gross += o.delivery_fee_cents
             return gross
 
+        from .errand import is_errand, service_fee_cents
+
         for order in completed:
+            # 跑腿单没有商家入账(见 settlement),它有自己的恒等式:
+            # 用户实付 == 骑手入账 + 平台服务费
+            if is_errand(order):
+                re = r_earnings.get(order.id)
+                fee = service_fee_cents(order.delivery_fee_cents)
+                if re is not None and order.rider_id is not None:
+                    # 帮买按小票实付结算,和预估不一致时差额已原路退/补收,
+                    # 所以拿 refund_cents 校平
+                    lhs = re.amount_cents + fee + order.refund_cents
+                    if lhs != order.total_cents:
+                        problems.append({
+                            "check": "errand_identity_mismatch",
+                            "detail": f"跑腿单 {order.order_no} 不平:"
+                                      f"骑手入账 {re.amount_cents} + 服务费 {fee}"
+                                      f" + 已退 {order.refund_cents}"
+                                      f" ≠ 用户实付 {order.total_cents}",
+                        })
+                continue
             me = m_earnings.get(order.id)
             if me is None:
                 problems.append({
@@ -293,7 +321,10 @@ async def run_audit() -> list[dict]:
         #    配送侧:Σ配送费(有骑手的单) == Σ骑手入账 —— 配送费 100% 归骑手的账面铁证
         #           (售后单保留在此侧:配送已履约,骑手入账与配送费依然一一对应)
         active = [o for o in completed if o.refund_cents < o.total_cents]
-        active_food = [o for o in active if o.id not in m_reversals]
+        # 跑腿单剔除:它没有商家入账,留在菜品侧这条恒等式里必然不平。
+        # 它的钱在上面逐单那条跑腿恒等式里核过了
+        active_food = [o for o in active
+                       if o.id not in m_reversals and not is_errand(o)]
         food_lhs = sum(order_gross(o) for o in active_food)
         food_rhs = sum(
             m_earnings[o.id].net_cents + m_earnings[o.id].commission_cents

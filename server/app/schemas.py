@@ -847,6 +847,67 @@ class CartOut(BaseModel):
     items: list = []
 
 
+class ErrandCreateIn(BaseModel):
+    """帮送下单入参。取件点与送达点都是用户填的。"""
+    # 取件点(东西现在在哪)
+    pickup_address: str = Field(min_length=2, max_length=200)
+    pickup_lat: float
+    pickup_lng: float
+    pickup_contact_name: str = Field(default="", max_length=50)
+    pickup_contact_phone: str = Field(default="", max_length=20)
+    # 送达点
+    address: str = Field(min_length=2, max_length=200)
+    lat: float
+    lng: float
+    contact_name: str = Field(default="", max_length=50)
+    contact_phone: str = Field(default="", max_length=20)
+    floor: int | None = None
+    has_elevator: bool | None = None
+    to_door: bool = True
+    # 寄什么。**必填**:骑手取件时要核对,而且禁运筛查靠它
+    errand_note: str = Field(min_length=2, max_length=300)
+    remark: str = Field(default="", max_length=200)
+    #: 用户勾选「不含违禁品」。不勾不让下单 ——
+    #: 这不是免责话术,是让他在按下单之前真的想一遍
+    no_forbidden: bool = False
+
+
+class ErrandBuyCreateIn(ErrandCreateIn):
+    """帮买:去哪买(pickup_*)、买什么(errand_note)、预计花多少。
+
+    **只做包装商品与商超日用,不做即食餐饮** —— 代购即食食品需要食品经营
+    许可,让骑手去一个没证的摊子买一份小笼包就是给无证经营导流,
+    而我们外卖那边卡证卡得很严,两套标准会自己打架。
+    """
+    #: 用户预估这些东西要花多少钱。**先付给平台**,骑手不垫自己的钱
+    goods_budget_cents: int = Field(ge=100, le=200000)
+
+
+class ErrandBuyQuoteOut(BaseModel):
+    distance_m: int
+    fee_cents: int
+    parts: dict
+    labels: dict
+    service_fee_cents: int
+    #: 预付的商品款(原样回显,让用户在付款前看清自己付的是哪两笔)
+    goods_budget_cents: int
+    total_cents: int
+    #: 骑手可自行超支的上限;超出要他先发起确认、用户同意才买
+    raise_limit_cents: int
+    note: str
+
+
+class ErrandQuoteOut(BaseModel):
+    distance_m: int
+    fee_cents: int
+    parts: dict
+    labels: dict
+    #: 平台服务费**单独给**,不藏在总价里
+    service_fee_cents: int
+    total_cents: int
+    note: str
+
+
 class OrderCreateIn(BaseModel):
     merchant_id: int
     items: list[OrderItemIn] = Field(min_length=1)
@@ -906,6 +967,21 @@ class OrderOut(BaseModel):
     arrived_shop_at: datetime | None = None
     # 骑手到达收货点的时刻(同上,决定「我到了」按钮显不显示)
     arrived_drop_at: datetime | None = None
+    # 跑腿:订单类型与取件点。外卖单这几个是默认值/空串。
+    # 骑手端据此把「取餐」改成「取件」、把商家名改成取件点
+    order_kind: str = "food"
+    errand_note: str = ""
+    pickup_address: str = ""
+    pickup_contact_name: str = ""
+    pickup_photo_url: str = ""
+    # 帮买:预付商品款 / 小票实付 / 小票照片 / 加价确认状态。
+    # **小票对用户可见** —— 代买最容易起的纠纷就是"你是不是多报了",
+    # 把小票摊开这个纠纷根本不会发生
+    goods_budget_cents: int = 0
+    goods_actual_cents: int | None = None
+    goods_receipt_url: str = ""
+    goods_raise_status: str = ""
+    goods_raise_cents: int | None = None
     # 这一单实际的送达段停留时长(分钟)。null = 骑手没点过「我到了」,
     # **不猜** —— 凑出来的数会污染分位数,而分位数将来要给别人补时
     drop_minutes: float | None = None

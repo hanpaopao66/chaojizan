@@ -26,11 +26,11 @@ def close_open_tickets():
 close_open_tickets()
 
 # ---------- 工单基本流 ----------
-err = call("POST", "/tickets", customer, {"content": "太短"}, expect_error=True)
+err = call("POST", "/tickets", customer, {"content": "太短"}, expect_error=True, retry_429=False)
 assert err["_error"] == 422
 print("✓ 内容太短被拒(422)")
 
-err = call("GET", "/admin/tickets", customer, expect_error=True)
+err = call("GET", "/admin/tickets", customer, expect_error=True, retry_429=False)
 assert err["_error"] == 403
 print("✓ 非管理员不能看工单列表(403)")
 
@@ -70,7 +70,7 @@ print("✓ 平台回复,用户端可见")
 
 call("POST", f"/admin/tickets/{ticket['id']}/close", admin)
 err = call("POST", f"/admin/tickets/{ticket['id']}/reply", admin,
-           {"reply": "再补一句"}, expect_error=True)
+           {"reply": "再补一句"}, expect_error=True, retry_429=False)
 assert err["_error"] == 409
 print("✓ 关闭后不能再回复(409)")
 
@@ -79,13 +79,13 @@ close_open_tickets()
 for i in range(3):
     call("POST", "/tickets", customer, {"content": f"限流测试工单 {i},请忽略"})
 err = call("POST", "/tickets", customer,
-           {"content": "第 4 个应该被限流"}, expect_error=True)
+           {"content": "第 4 个应该被限流"}, expect_error=True, retry_429=False)
 assert err["_error"] == 429
 print("✓ 3 个开放工单后限流(429)")
 close_open_tickets()
 
 # ---------- 账务自检 ----------
-err = call("POST", "/admin/audit/run", customer, expect_error=True)
+err = call("POST", "/admin/audit/run", customer, expect_error=True, retry_429=False)
 assert err["_error"] == 403
 print("✓ 非管理员不能触发自检(403)")
 

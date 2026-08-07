@@ -45,6 +45,12 @@ async def mark_order_paid(
     # 商家让利的部分平台不抽成,平台补贴的部分照常计佣(商家全额收到)
     gross = order.food_cents + order.packing_fee_cents - order.discount_cents
     order.commission_cents = int(Decimal(max(gross, 0)) * merchant.commission_rate)
+    # 跑腿单没有菜品也没有商家,佣金按跑腿费的 2% 单独算(见 services/errand)。
+    # 外卖的配送费一分不抽,跑腿没有商家、2% 是平台在这条业务上唯一的收入
+    from .errand import is_errand, service_fee_cents
+    errand = is_errand(order)
+    if errand:
+        order.commission_cents = service_fee_cents(order.delivery_fee_cents)
     db.add(
         OrderEvent(
             order_id=order.id,
@@ -57,11 +63,31 @@ async def mark_order_paid(
     await db.commit()
     await db.refresh(order)
 
+    # 跑腿单**支付即进抢单池**:没有"商家接单/出餐"这两步。
+    # 直接落 READY 而不是 ACCEPTED —— ACCEPTED 会被出餐超时清扫盯上,
+    # 而那个店根本不出餐
+    if errand:
+        order.status = OrderStatus.READY
+        db.add(OrderEvent(
+            order_id=order.id,
+            from_status=OrderStatus.PAID.value,
+            to_status=OrderStatus.READY.value,
+            actor_role="system", actor_id=None,
+            note="跑腿单支付后直接进抢单池",
+        ))
+        await db.commit()
+        await db.refresh(order)
+
     summary = "、".join(f"{i['name']}×{i['quantity']}" for i in order.items)
     await manager.broadcast(
         f"order:{order.order_no}",
         {"type": "order_status", "order_no": order.order_no, "status": order.status.value},
     )
+    # 跑腿单没有商家:听单广播、推送、回调、云打印、自动接单全部跳过。
+    # 那个服务主体只是个外键占位,给它推"新订单来了"没有任何人会看
+    if errand:
+        return order
+
     # 商家听单:WebSocket(前台)+ 离线推送(退后台)双通道
     await manager.broadcast(
         f"merchant:{order.merchant_id}",
