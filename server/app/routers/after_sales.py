@@ -14,7 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import AfterSale, AfterSaleStatus, Merchant, Order, User
+from ..models import (AfterSale, AfterSaleStatus, Merchant, Order, User,
+                      UserRole)
+from ..services.errand import KIND_ERRAND_BUY, KIND_FOOD, is_errand
 from ..schemas import AfterSaleIn, AfterSaleOut, AfterSaleReplyIn, MerchantAfterSaleOut
 from ..security import require_role
 from ..services.push import push_to_user
@@ -29,6 +31,11 @@ APPLY_WINDOW_DAYS = 7
 
 
 def _summary(order: Order) -> str:
+    # 跑腿单没有菜品行,items 是空的 —— 照搬外卖那套会得到一个空字符串,
+    # 售后列表里只剩一个订单号,处理的人根本不知道这单是什么
+    if is_errand(order):
+        kind = "帮买" if order.order_kind == KIND_ERRAND_BUY else "帮送"
+        return f"跑腿·{kind}:{order.errand_note or '未填写物品'}"
     return "、".join(f"{i['name']}×{i['quantity']}" for i in order.items)
 
 
@@ -138,16 +145,57 @@ async def my_shop_after_sales(
     return [_merchant_out(a, order) for a, order in rows]
 
 
+@router.get("/admin/errand-after-sales",
+            response_model=list[MerchantAfterSaleOut])
+async def errand_after_sales(
+    status: AfterSaleStatus | None = None,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """平台待处理的跑腿售后。
+
+    跑腿没有商家,这些单子不会出现在任何一家店的售后列表里 ——
+    没有这个入口,用户提了售后也只是石沉大海。
+    """
+    query = (
+        select(AfterSale, Order)
+        .join(Order, Order.id == AfterSale.order_id)
+        .where(Order.order_kind != KIND_FOOD)
+        .order_by(AfterSale.created_at.desc())
+        .limit(100)
+    )
+    if status is not None:
+        query = query.where(AfterSale.status == status)
+    rows = await db.execute(query)
+    return [_merchant_out(a, order) for a, order in rows]
+
+
 async def _get_pending(
     db: AsyncSession, after_sale_id: int, user: User
 ) -> tuple[AfterSale, Order]:
-    shop = await owned_shop(db, user)
+    """取一条待处理的售后。商家只能碰自己店的;平台只能碰跑腿单。
+
+    跑腿单必须由平台处理:它的 merchant_id 指向每城一个的虚拟服务主体,
+    那个主体的 owner 是平台管理员,而处理售后的端点是 require_role("merchant")
+    —— 管理员根本进不来。不放开的话,用户对跑腿单提的售后会永远挂着:
+    推送发出去了,没有任何角色能受理。
+
+    平台这条路**只对跑腿单开**,不是给管理员一把处理所有商家售后的钥匙。
+    """
     after_sale = await db.get(AfterSale, after_sale_id, with_for_update=True)
-    if shop is None or after_sale is None or after_sale.merchant_id != shop.id:
+    if after_sale is None:
         raise HTTPException(404, "售后申请不存在")
+    order = await db.get(Order, after_sale.order_id)
+    if user.role == UserRole.admin:
+        if order is None or not is_errand(order):
+            raise HTTPException(
+                403, "平台只受理跑腿单的售后;外卖售后由商家处理")
+    else:
+        shop = await owned_shop(db, user)
+        if shop is None or after_sale.merchant_id != shop.id:
+            raise HTTPException(404, "售后申请不存在")
     if after_sale.status != AfterSaleStatus.pending:
         raise HTTPException(409, "该申请已处理过")
-    order = await db.get(Order, after_sale.order_id)
     return after_sale, order
 
 
@@ -155,7 +203,7 @@ async def _get_pending(
 async def accept_after_sale(
     after_sale_id: int,
     payload: AfterSaleReplyIn,
-    user: User = Depends(require_role("merchant")),
+    user: User = Depends(require_role("merchant", "admin")),
     db: AsyncSession = Depends(get_db),
 ):
     """同意售后 = 退还餐费部分(实付 - 配送费);已结算订单同步冲账。
@@ -175,7 +223,9 @@ async def accept_after_sale(
     if refund_amount <= 0:
         raise HTTPException(409, "该订单已无可退金额")
     after_sale.status = AfterSaleStatus.accepted
-    after_sale.fault = "merchant"  # 商家同意即认责,损失从商家结算款出
+    # 跑腿单没有商家,认责方是平台自己;外卖是商家同意即认责,
+    # 损失从商家结算款出
+    after_sale.fault = "platform" if is_errand(order) else "merchant"
     after_sale.reply = payload.reply.strip()
     after_sale.processed_at = datetime.now(timezone.utc)
     order.refund_cents += refund_amount
@@ -199,7 +249,7 @@ async def accept_after_sale(
 async def reject_after_sale(
     after_sale_id: int,
     payload: AfterSaleReplyIn,
-    user: User = Depends(require_role("merchant")),
+    user: User = Depends(require_role("merchant", "admin")),
     db: AsyncSession = Depends(get_db),
 ):
     after_sale, order = await _get_pending(db, after_sale_id, user)
@@ -210,7 +260,8 @@ async def reject_after_sale(
     await db.refresh(after_sale)
     await push_to_user(
         order.customer_id, "售后处理结果",
-        f"商家回复:{after_sale.reply[:40]}(如有异议可联系平台客服)",
+        f"{'平台' if is_errand(order) else '商家'}回复:"
+        f"{after_sale.reply[:40]}(如有异议可联系平台客服)",
         {"order_no": order.order_no},
     )
     return after_sale
