@@ -87,7 +87,17 @@ async def main():
     assert got["order_no"] == no
     print("✓ 取件拍照留证(丢件纠纷时唯一的事实来源)")
 
+    # 跑腿取件不走「取餐核验」:那个核验对的是小票上的单号尾号,
+    # 而跑腿没有商家、没有小票。骑手端要是照搬外卖那套弹窗,
+    # 他只能去点「核验不了?强制取餐」,于是每一单跑腿都在事件流里
+    # 留下一条「强制取餐(未通过尾号核验)」—— 那条记录是给
+    # 「拿错别人的餐」追溯用的,被跑腿单填满就废了
     call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
+    events = call("GET", f"/orders/{no}/events", customer)
+    forced = [e for e in events if "强制取餐" in str(e.get("note", ""))]
+    assert not forced, f"跑腿取件留下了强制取餐痕迹:{forced}"
+    print("✓ 取件不留「强制取餐」痕迹(跑腿没有小票可核验)")
+
     call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
     call("POST", f"/orders/{no}/transition", customer,
          {"to_status": "completed"})

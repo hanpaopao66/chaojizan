@@ -634,6 +634,24 @@ class _RiderHomePageState extends State<RiderHomePage>
         return;
       }
     }
+    // 跑腿单直接取件,不弹「取餐核验」。
+    //
+    // 那个核验对的是**小票上的单号尾号**,而跑腿没有商家、没有小票 ——
+    // 让骑手去核对一个不存在的东西,他只能去点「核验不了?强制取餐」,
+    // 于是每一单跑腿取件都在服务端留下一条「强制取餐(未通过尾号核验)」。
+    // 那条记录是给"拿错别人的餐"追溯用的,不该被跑腿单填满
+    if (order.isErrand) {
+      try {
+        await widget.api.transition(order.orderNo, OrderStatus.pickedUp);
+        if (!mounted) return;
+        await _refresh();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+      }
+      return;
+    }
     await _pickUp(order);
   }
 
