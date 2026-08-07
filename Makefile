@@ -99,6 +99,7 @@ test:
 	  && python -m tests.e2e_wait_comp_audit \
 	  && python -m tests.e2e_errand_send \
 	  && python -m tests.e2e_errand_buy \
+	  && python -m tests.e2e_errand_no_rider \
 	  && python -m tests.e2e_daily_stock \
 	  && python -m tests.e2e_delivery_issue && python -m tests.e2e_delivery_track \
 	  && python -m tests.e2e_deposit && python -m tests.e2e_eta_dynamic \

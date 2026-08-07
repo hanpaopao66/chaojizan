@@ -315,6 +315,28 @@ async def run_audit() -> list[dict]:
                     "detail": f"订单 {order.order_no} 售后已退餐费但商家入账未冲账",
                 })
 
+        # 6.5) 跑腿单一分商家入账都不该有。
+        #
+        # 这条是补盲区的:下面菜品侧恒等把跑腿单整个剔除了(它本来就没有商家入账),
+        # 于是**任何**给跑腿单记的商家入账行都落在检查视野之外 —— 无论金额多离谱。
+        # 真出过一次:无骑手兜底把跑腿单当成"商家已出餐"赔了餐损,
+        # merchant_id 指向的是虚拟服务主体,帮买单那笔还等于用户的商品款。
+        # 剔除一类订单的同时,必须补一条"它确实没有"的检查,否则剔除就等于失明。
+        # 求净额而不是逐行:已被冲账的行两两抵消,不该再报
+        from .errand import KIND_FOOD
+        errand_paid = (await db.execute(
+            select(Order.order_no, sa_func.sum(MerchantEarning.net_cents))
+            .join(MerchantEarning, MerchantEarning.order_id == Order.id)
+            .where(Order.order_kind != KIND_FOOD, Order.created_at >= since)
+            .group_by(Order.order_no)
+            .having(sa_func.sum(MerchantEarning.net_cents) != 0))).all()
+        for order_no, net in errand_paid:
+            problems.append({
+                "check": "errand_merchant_earning",
+                "detail": f"跑腿单 {order_no} 挂了商家入账 {net} 分 —— "
+                          "跑腿没有商家,这笔钱没有对应的经营者",
+            })
+
         # 7) 全局恒等(完成且未全退的订单,分两条核):
         #    菜品侧:Σ菜品金额 == Σ商家净额 + Σ平台佣金(售后冲账单两侧同时剔除:
         #           钱已退用户,商家/平台谁都不该再挂账)

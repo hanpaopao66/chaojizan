@@ -485,7 +485,13 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
     (菜品+打包-满减)全额赔付、佣金一分不收——运力不足是平台的问题,
     不能让做了餐的商家背锅。赔付走 merchant_earnings 正常入账行,
     公开账本里 net == food - 0 恒等式照样成立,社区可验证。
+
+    ⚠️ 跑腿单不赔:它支付后**直接进 READY**(语义是"可以取件了",
+    不是"商家出餐完成"),而它的 merchant_id 指向的是每城一个的虚拟服务主体——
+    没有经营者、没做任何东西。帮买单更严重:那笔 food_cents 装的是用户预付的
+    商品款,赔出去等于同一笔钱付两遍(用户已全额退款)。
     """
+    from .errand import is_errand
     from .wechat_pay import request_refund
 
     waiting = [
@@ -530,7 +536,7 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
         order.refund_note = (
             f"{order.refund_note};{note}" if order.refund_note else note)
         await request_refund(db, order, refund_amount, "无骑手接单自动取消")
-        if from_status == OrderStatus.READY:
+        if from_status == OrderStatus.READY and not is_errand(order):
             comp = (order.food_cents + order.packing_fee_cents
                     - order.discount_cents)
             if comp > 0:
@@ -576,11 +582,18 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
 
 
 async def _notify_no_rider(alert_orders, cancel_orders, compensated) -> None:
-    """无人接单的推送(commit 之后发,推送失败不影响账)。"""
+    """无人接单的推送(commit 之后发,推送失败不影响账)。
+
+    跑腿单只推给用户,不推商家侧:那个 merchant_id 是虚拟服务主体,
+    owner 挂的是平台管理员——推过去就是让管理员收到一堆"你有单没出餐"。
+    """
+    from .errand import is_errand
+
     if not alert_orders and not cancel_orders:
         return
     async with SessionLocal() as db:
-        merchant_ids = {o.merchant_id for o in [*alert_orders, *cancel_orders]}
+        merchant_ids = {o.merchant_id for o in [*alert_orders, *cancel_orders]
+                        if not is_errand(o)}
         owners = {
             m.id: m.owner_id
             for m in await db.scalars(
