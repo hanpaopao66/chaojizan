@@ -75,6 +75,12 @@ class ApiClient {
   int? userId;
   String? userName;
 
+  /// 当前账号手机号。**和 userName 一样要缓存**:
+  /// 「我的」页在 /auth/me 回来之前会先渲染一次,没有它就只能显示占位,
+  /// 等接口回来再闪成真手机号 —— 用户看到的是"先给我看了个别的,
+  /// 然后偷偷换掉了"。缓存之后首帧就是对的。
+  String? userPhone;
+
   /// 当前会话的账号角色(customer/merchant/rider)。账号按 (手机号, 角色) 分立,
   /// 持久化它用于冷启动校验"存的会话是不是本端的角色"——历史上曾出现
   /// 旧代码把用户端账号的 token 存进商家端,重启后恢复出来全程 403
@@ -186,6 +192,7 @@ class ApiClient {
           'auth_token_at', _tokenIssuedAt?.toIso8601String() ?? '');
       await sp.setInt('auth_user_id', userId ?? 0);
       await sp.setString('auth_user_name', userName ?? '');
+      await sp.setString('auth_user_phone', userPhone ?? '');
       await sp.setString('auth_role', userRole ?? '');
     } catch (_) {}
   }
@@ -207,6 +214,7 @@ class ApiClient {
               DateTime.now();
       userId = sp.getInt('auth_user_id');
       userName = sp.getString('auth_user_name');
+      userPhone = sp.getString('auth_user_phone');
       userRole = sp.getString('auth_role');
       shopId = sp.getInt('merchant_shop_id');
       // 本地先核一道角色(离线也能拦住错角色会话);
@@ -220,6 +228,7 @@ class ApiClient {
         final me = await _request('GET', '/auth/me') as Map<String, dynamic>;
         userId = me['id'] as int;
         userName = me['name'] as String;
+        userPhone = me['phone'] as String? ?? userPhone;
         userRole = me['role'] as String?;
         if (expectRole != null && userRole != expectRole) {
           await clearSession();
@@ -246,6 +255,7 @@ class ApiClient {
     _tokenIssuedAt = null;
     userId = null;
     userName = null;
+    userPhone = null;
     userRole = null;
     // 门店选择跟着会话一起清:不清的话换个商家账号登录,请求还带着
     // 上一个人的 X-Shop-Id,轻则全程 404,重则看着别人的店名发懵
@@ -291,6 +301,7 @@ class ApiClient {
     _tokenIssuedAt = DateTime.now();
     userId = data['user_id'] as int;
     userName = data['name'] as String;
+    userPhone = phone;   // 就在入参里,不用为它多打一次接口
     userRole = data['role'] as String?;
   }
 
@@ -302,6 +313,7 @@ class ApiClient {
     _tokenIssuedAt = DateTime.now();
     userId = data['user_id'] as int;
     userName = data['name'] as String;
+    userPhone = phone;
     userRole = data['role'] as String?;
   }
 
@@ -329,6 +341,7 @@ class ApiClient {
     _tokenIssuedAt = DateTime.now();
     userId = data['user_id'] as int;
     userName = data['name'] as String;
+    userPhone = phone;
     userRole = data['role'] as String?;
     await _persistSession();
   }

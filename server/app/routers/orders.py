@@ -102,11 +102,16 @@ def order_out(order: Order, merchant: Merchant | None,
                                for k in out.fee_parts
                                if k in FEE_PART_LABELS}
     out.no_rider_alerted = order.no_rider_alerted_at is not None
-    if merchant is not None:
-        out.merchant_name = merchant.name
-        out.merchant_address = merchant.address
-        out.merchant_lat = merchant.lat
-        out.merchant_lng = merchant.lng
+    # 取件点统一走访问器:外卖是那家店,跑腿是订单自带的地址。
+    # 各处自己读 merchant.lat/lng 的话,跑腿单会把骑手导到那个
+    # 虚拟服务主体的坐标去(见 services/errand)
+    from ..services.errand import pickup_point
+    point = pickup_point(order, merchant)
+    if point.lat is not None or point.name:
+        out.merchant_name = point.name
+        out.merchant_address = point.address
+        out.merchant_lat = point.lat
+        out.merchant_lng = point.lng
     role = as_role or (viewer.role.value if viewer is not None else None)
     if role in ("merchant", "rider"):
         out.privacy_phone = dialable_phone(order)

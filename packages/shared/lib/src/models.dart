@@ -581,6 +581,9 @@ class Order {
         dropSample = (json['drop_sample'] as num?)?.toInt() ?? 0,
         // 配送费构成 + 中文名:**接单前就给**。8 块里有 3 块是因为
         // 要爬 6 楼 —— 知道这个才判断得了值不值
+        // 顾客选的送上门还是送楼下。选楼下时骑手没有上楼的义务,
+        // 小票上要写出来,否则商家会以为骑手偷懒
+        toDoor = json['to_door'] as bool? ?? true,
         feeParts = ((json['fee_parts'] as Map?) ?? const {})
             .map((k, v) => MapEntry('$k', v as int)),
         feePartLabels = ((json['fee_part_labels'] as Map?) ?? const {})
@@ -667,6 +670,9 @@ class Order {
   /// 这个收货点的历史停留时长分位数与样本数
   final double? dropP75Minutes;
   final int dropSample;
+
+  /// 送上门(默认)还是送到楼下
+  final bool toDoor;
 
   /// 配送费构成(分)与中文名。接单前可见 ——
   /// 美团官方只承诺"接单前能看到价格",看不到明细;这一步我们做了

@@ -181,7 +181,10 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
   /// 今日数据。**不放任何分数、等级、段位** —— 见类文档的红线。
   Widget _todayCard(SzColors sz) {
     final level = _fatigue?['level'] as String?;
-    final onlineMin = (_fatigue?['online_minutes'] as num?)?.toDouble() ?? 0;
+    // 没加载完时给「—」而不是 0.0 ——
+    // 0 是一个**看起来像真值**的数,骑手会读它("我今天怎么才在线 0 小时"),
+    // 然后它又自己变了。占位符不会被误读
+    final onlineMin = (_fatigue?['online_minutes'] as num?)?.toDouble();
     return SzCard(
       child: Column(children: [
         Row(children: [
@@ -190,7 +193,8 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
           _stat(sz, '今日收入',
               (widget.todayCents / 100).toStringAsFixed(2), '元'),
           _divider(sz),
-          _stat(sz, '在线时长', _hours(onlineMin), '小时'),
+          _stat(sz, '在线时长',
+              onlineMin == null ? '—' : _hours(onlineMin), '小时'),
         ]),
         const SizedBox(height: 8),
         // 口径要写清楚:不写的话骑手会以为平台少算了
@@ -269,9 +273,11 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
         ]),
       );
 
+  /// 分钟 → 小时。**没数据时给「—」不给 0** ——
+  /// 0 会被当成真值读,而它随后还会自己变
   String _hours(dynamic minutes) {
-    final m = (minutes as num?)?.toDouble() ?? 0;
-    return (m / 60).toStringAsFixed(1);
+    final m = (minutes as num?)?.toDouble();
+    return m == null ? '—' : (m / 60).toStringAsFixed(1);
   }
 
   Future<void> _push(Widget page) => Navigator.of(context)

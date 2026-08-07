@@ -7,7 +7,7 @@ import time
 from types import SimpleNamespace
 from datetime import datetime, timezone
 
-from tests.util import demo_shop, call, login
+from tests.util import demo_shop, call, fake_order, login
 
 REAL = "13800000001"
 MASKED = "138****0001"
@@ -22,14 +22,8 @@ print("✓ mask_phone:标准打码,短号全遮,空号不炸")
 
 from app.services.cloud_print import build_ticket
 
-fake = SimpleNamespace(
-    created_at=datetime.now(timezone.utc), order_no="x" * 20, pickup=False,
-    parent_order_no="", scheduled_at=None, remark="", privacy_phone="",
-    items=[{"name": "面", "price_cents": 2000, "quantity": 1}],
-    food_cents=2000, packing_fee_cents=0, discount_cents=0,
-    delivery_fee_cents=300, total_cents=2300, pickup_code="",
-    contact_name="张三", contact_phone=REAL, address="某地址",
-)
+# 共用 util.fake_order:三个用例各写一份的话,订单加个字段就断一片
+fake = fake_order(order_no="x" * 20, contact_phone=REAL)
 ticket = build_ticket(fake, "测试店")
 assert REAL not in ticket and MASKED in ticket, "小票不得出现真号"
 fake.privacy_phone = "17000000000"  # 绑定了 X 号则印 X 号

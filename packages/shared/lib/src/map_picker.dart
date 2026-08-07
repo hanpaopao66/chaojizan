@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tencent_map/flutter_tencent_map.dart' as tx;
 
 import 'brand.dart';
+import 'city_picker.dart';
 import 'models.dart';
 import 'map_boot.dart';
 
@@ -41,6 +42,11 @@ class MapPickerPage extends StatefulWidget {
     super.key,
     required this.onReverse,
     this.onAround,
+    this.onSearch,
+    this.city = '',
+    this.onCities,
+    this.onCityChanged,
+    this.onLocate,
     this.initialLat,
     this.initialLng,
   });
@@ -54,6 +60,32 @@ class MapPickerPage extends StatefulWidget {
   ///
   /// 不注入时退化为原来的「一行反查地址 + 确认」,页面照常可用。
   final Future<List<NearbyPlace>> Function(double, double)? onAround;
+
+  /// 关键词 → POI 联想。**搜索必须做在这个组件里,不能各端各写一份**:
+  /// 之前搜索只做在用户端那一页上,商家入驻选店址就只剩"在地图上拖" ——
+  /// 老板得把地图拖到自己店门口,而不是打个店名跳过去。
+  ///
+  /// 城市由调用方绑好(POI 搜索限城市,搜"一号店"不限城市会返回全国同名地点,
+  /// 用户容易选中外地那个,下单后才发现超出配送范围)。
+  final Future<List<PoiTip>> Function(String keywords)? onSearch;
+
+  /// 城市切换。给了 [onCities] 才在搜索框旁边显示切换器 ——
+  /// POI 搜索按城市限定,城市选错就是"搜不到自己家"而且看不出原因
+  /// (西安的「紫薇臻品」在 city=成都 时返回 0 条)。
+  /// [city] 为空时切换器显示「选择城市」,**不猜一个填进去**。
+  final String city;
+  final Future<List<({String name, int merchants})>> Function()? onCities;
+  final void Function(String)? onCityChanged;
+
+  /// 「回到我的位置」。注入了才显示那个准星按钮。
+  ///
+  /// 没有它的话,打开选点页图钉落在上次的位置或者兜底点(成都春熙路),
+  /// 站在自己店里的老板还得把地图从市中心拖回来 —— 大厂的选点页
+  /// 都有这个按钮,少了它是**每次选点都要付一遍的成本**。
+  ///
+  /// 回调由调用方注入(shared 不依赖定位插件),返回 null =
+  /// 没权限或拿不到,按钮给一句提示而不是静默不动。
+  final Future<({double lat, double lng})?> Function()? onLocate;
 
   final double? initialLat;
   final double? initialLng;
@@ -74,6 +106,13 @@ class _MapPickerPageState extends State<MapPickerPage> {
   String _district = '';
   bool _loading = false;
 
+  final _search = TextEditingController();
+  Timer? _searchDebounce;
+  List<PoiTip> _tips = const [];
+  tx.TencentMapController? _ctrl;
+
+  bool _locating = false;
+
   List<NearbyPlace> _around = const [];
   /// 用户在列表里点中的那个;null = 用图钉当前位置
   NearbyPlace? _picked;
@@ -88,6 +127,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _searchDebounce?.cancel();
+    _search.dispose();
     super.dispose();
   }
 
@@ -240,6 +281,70 @@ class _MapPickerPageState extends State<MapPickerPage> {
         ),
       );
 
+  /// 输入联想。防抖 400ms —— 每敲一个字打一次接口既费配额也让列表乱跳
+  void _onSearchChanged(String text) {
+    _searchDebounce?.cancel();
+    if (widget.onSearch == null || text.trim().isEmpty) {
+      setState(() => _tips = const []);
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        final tips = await widget.onSearch!(text.trim());
+        if (mounted) setState(() => _tips = tips);
+      } catch (_) {
+        // 搜不动不打断选点:地图拖动那条路一直是通的
+      }
+    });
+  }
+
+  /// 回到我的位置。拿不到就明确说一句 ——
+  /// 按钮点了没反应,用户只会以为 App 卡了
+  Future<void> _locate() async {
+    if (widget.onLocate == null || _locating) return;
+    setState(() => _locating = true);
+    try {
+      final me = await widget.onLocate!();
+      if (!mounted) return;
+      if (me == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('拿不到当前位置,检查一下定位权限;也可以直接搜地名')));
+        return;
+      }
+      setState(() {
+        _center = tx.LatLng(me.lat, me.lng);
+        _picked = null;
+      });
+      await _ctrl?.moveCamera(
+          tx.CameraUpdate.newLatLngZoom(tx.LatLng(me.lat, me.lng), 17));
+      await _reverse();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('定位失败,可以直接搜地名或拖动地图')));
+      }
+    } finally {
+      if (mounted) setState(() => _locating = false);
+    }
+  }
+
+  /// 点中一条联想:把地图移过去,由 onCameraMoveEnd 走原有的反查流程。
+  /// **不直接把这条 POI 当结果返回** —— 搜出来的是地标,
+  /// 用户还要在地图上微调到自己那栋楼,这正是选点页存在的理由
+  Future<void> _gotoTip(PoiTip tip) async {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _tips = const [];
+      _search.text = tip.name;
+      _center = tx.LatLng(tip.lat, tip.lng);
+      _picked = null;
+    });
+    await _ctrl?.moveCamera(
+        tx.CameraUpdate.newLatLngZoom(tx.LatLng(tip.lat, tip.lng), 17));
+    await _reverse();   // _center 已经改过,直接走原有反查
+  }
+
+  @override
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
@@ -265,6 +370,8 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   tiltGesturesEnabled: false,
                   rotateGesturesEnabled: false,
                   onCameraMoveEnd: _onCameraEnd,
+                  // 搜到地点后要把镜头移过去,得拿着控制器
+                  onMapCreated: (c) => _ctrl = c,
                 )
               else
                 // 没同意隐私 / 没编 key:不渲染白板,给一句能看懂的话
@@ -293,6 +400,28 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   child: Icon(Icons.location_on, size: 40, color: sz.clay),
                 ),
               ),
+              if (ready && widget.onLocate != null)
+                Positioned(
+                  right: 12,
+                  bottom: 20,
+                  child: Material(
+                    elevation: 2,
+                    shape: const CircleBorder(),
+                    color: Theme.of(context).colorScheme.surface,
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _locate,
+                      child: Padding(
+                        padding: const EdgeInsets.all(9),
+                        child: _locating
+                            ? const SizedBox(
+                                width: 20, height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : Icon(Icons.my_location, size: 20, color: sz.clay),
+                      ),
+                    ),
+                  ),
+                ),
               if (ready)
                 Positioned(
                   right: 6,
@@ -302,9 +431,86 @@ class _MapPickerPageState extends State<MapPickerPage> {
                 ),
             ],
           );
+    // 搜索框 + 联想列表。注入了 onSearch 才有 ——
+    // 没注入时页面退化成原来的纯拖动选点,照常可用
+    final searchBar = widget.onSearch == null
+        ? const SizedBox.shrink()
+        : Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Row(children: [
+              if (widget.onCities != null) ...[
+                SzCityChip(
+                  city: widget.city,
+                  loadCities: widget.onCities!,
+                  onChanged: (c) {
+                    CityPref.save(c);
+                    widget.onCityChanged?.call(c);
+                    // 换了城市,旧联想是上一个城市的结果,留着会误导
+                    setState(() => _tips = const []);
+                    if (_search.text.trim().isNotEmpty) {
+                      _onSearchChanged(_search.text);
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: TextField(
+              controller: _search,
+              onChanged: _onSearchChanged,
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                isDense: true,
+                prefixIcon: const Icon(Icons.search, size: 20),
+                hintText: '搜地点名、路名、小区名',
+                border: const OutlineInputBorder(),
+                suffixIcon: _search.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () {
+                          _search.clear();
+                          setState(() => _tips = const []);
+                        },
+                      ),
+              ),
+            ),
+              ),
+            ]),
+          );
+
     return Scaffold(
       appBar: AppBar(title: const Text('在地图上选位置')),
       body: Column(children: [
+        searchBar,
+        // 联想结果压在地图上方:选中一条把镜头移过去,再由用户微调。
+        // **不直接拿这条 POI 当结果** —— 搜出来的是地标,
+        // 用户还要拖到自己那栋楼,这正是选点页存在的理由
+        if (_tips.isNotEmpty)
+          ConstrainedBox(
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.34),
+            child: Material(
+              color: Theme.of(context).colorScheme.surface,
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _tips.length,
+                separatorBuilder: (_, __) => Divider(height: 1, color: sz.line),
+                itemBuilder: (_, i) => ListTile(
+                  dense: true,
+                  leading: Icon(Icons.place_outlined, size: 18,
+                      color: sz.inkFaint),
+                  title: Text(_tips[i].name,
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: _tips[i].district.isEmpty
+                      ? null
+                      : Text(_tips[i].district,
+                          style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+                  onTap: () => _gotoTip(_tips[i]),
+                ),
+              ),
+            ),
+          ),
         // 有周边列表时地图给固定高度(约 38% 屏高),把下面让给列表 ——
         // 用户主要靠读地名确认"这是不是我家",地图是辅助。
         // 没有列表时地图占满剩余空间:那时它是唯一的信息源。

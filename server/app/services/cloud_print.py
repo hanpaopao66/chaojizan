@@ -126,6 +126,19 @@ def build_ticket(order: Order, shop_name: str, *, purpose: str = "front",
         lines.append("到店自取 免配送费")
     else:
         lines.append(f"配送费 {_yuan(order.delivery_fee_cents)}(全归骑手)")
+        # 配送费构成印在票上:顾客当面问"怎么这么贵"时,商家能直接指给他看。
+        # 这笔钱商家一分不拿却总要替我们解释,印出来比让他背话术实在。
+        # 与蓝牙小票、四端展示同一份拆分快照,不另算一遍
+        from ..routers.orders import FEE_PART_LABELS
+        parts = [(k, v) for k, v in (order.fee_parts or {}).items() if v]
+        if len(parts) > 1:
+            lines.append("  " + " ".join(
+                f"{FEE_PART_LABELS.get(k, k)}{v / 100:.1f}" for k, v in parts))
+        # 只在**明确选了楼下**时印。用 `not order.to_door` 的话,
+        # 字段为 None(未入库的对象/老数据)会被当成"选了楼下"印出来 ——
+        # 而那是在替顾客做一个他没做过的选择
+        if order.to_door is False:
+            lines.append("  顾客选了送到楼下,骑手不上楼")
     lines.append(f"<B>用户实付 {_yuan(order.total_cents)}</B>")
     lines.append("--------------------------------")
     # 电话脱敏:小票只印中间号(X 号)或打码号,真号永不落纸

@@ -238,3 +238,32 @@ DEMO_SHOP_ID = 1
 def demo_shop():
     """直接取演示店详情,不依赖任何会被截断的列表。"""
     return call("GET", f"/merchants/{DEMO_SHOP_ID}")
+
+
+def fake_order(**overrides):
+    """小票渲染用的假订单。**三个用例共用这一份**。
+
+    在这之前 e2e_printers / e2e_privacy_phone / e2e_alcohol 各手写了一份
+    SimpleNamespace,给订单加一个字段(比如配送费拆分 fee_parts)就断掉
+    没跟上的那几个 —— 而断的地方离真正的改动很远,排查起来全是噪音。
+
+    默认值取一单"有拆分、送上门、非自取"的常规外卖,
+    覆盖参数按需改。
+    """
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    base = dict(
+        order_no="SZ20260806000123",
+        created_at=datetime.now(timezone.utc),
+        pickup=False, pickup_code="", parent_order_no="", scheduled_at=None,
+        remark="", privacy_phone="",
+        items=[{"name": "牛腩饭", "quantity": 1, "price_cents": 2000,
+                "is_alcohol": False}],
+        food_cents=2000, packing_fee_cents=0, discount_cents=0,
+        delivery_fee_cents=300, total_cents=2300,
+        fee_parts={}, to_door=True,
+        contact_name="张三", contact_phone="13800001234", address="某地址",
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)

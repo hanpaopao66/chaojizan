@@ -490,6 +490,20 @@ class Order(Base):
     contact_name: Mapped[str] = mapped_column(String(50), default="")
     contact_phone: Mapped[str] = mapped_column(String(20), default="")
     remark: Mapped[str] = mapped_column(String(200), default="")
+    # 订单类型:food 外卖(默认)/ errand_send 帮送 / errand_buy 帮买。
+    # 跑腿单**没有商家**,但 merchant_id 是 NOT NULL 且有上百处代码依赖 ——
+    # 所以跑腿单挂到本城一个 biz_type='errand' 的服务主体上,
+    # 取件点放在订单自己身上(外卖的取件点是那家店、固定;
+    # 跑腿的是用户当场填的、每单不同)。读取件点统一走 services/errand
+    order_kind: Mapped[str] = mapped_column(
+        String(16), default="food", server_default="food", index=True)
+    pickup_address: Mapped[str] = mapped_column(String(200), default="")
+    pickup_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pickup_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pickup_contact_name: Mapped[str] = mapped_column(String(50), default="")
+    pickup_contact_phone: Mapped[str] = mapped_column(String(20), default="")
+    #: 物品描述(帮送)/ 要买什么(帮买)
+    errand_note: Mapped[str] = mapped_column(String(300), default="")
     # 送达段:骑手点「我到了」的时刻,以及到送达之间的停留时长。
     # 这几分钟花在找门、等门禁、等电梯、爬楼上 —— 是"场景难度"
     # 唯一可测量的部分。到店等餐时长早就在记了,送达这段一直是空白。

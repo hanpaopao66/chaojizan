@@ -9,7 +9,7 @@ library;
 import 'dart:io' show Platform;
 
 import 'package:fast_gbk/fast_gbk.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -132,6 +132,13 @@ class BtPrinter {
     if (device == null) return 'NO_DEVICE';
     return _write(device.$1, _testTicket(shopName));
   }
+
+  /// 小票的字节流。**给测试用**——没有真机也要能核版式:
+  /// 58mm 只有 32 列,一行排不下就会折行,而折行的地址在店里读起来
+  /// 是灾难。让版式能在 CI 里被断言,比印出来才发现串行强。
+  @visibleForTesting
+  static List<int> ticketBytes(Order order, String shopName) =>
+      _orderTicket(order, shopName);
 }
 
 // ---------- ESC/POS 排版 ----------
@@ -217,6 +224,30 @@ List<int> _orderTicket(Order order, String shopName) {
     e.line('到店自取 免配送费');
   } else {
     e.kv('配送费(全归骑手)', _yuanTxt(order.deliveryFeeCents));
+    // 配送费构成印在票上:顾客当面问"怎么这么贵"时,商家能直接指给他看。
+    // 这笔钱商家一分不拿,却总要替我们解释 —— 印出来比让他背话术实在。
+    // 58mm 只有 32 列,缩进两格单独一行,不跟金额挤在一起
+    final parts = order.feeParts.entries.where((x) => x.value > 0).toList();
+    if (parts.length > 1) {
+      // 按纸宽分行:三项拆分连起来是 37 列,58mm 只有 32,直接印会折行,
+      // 折出来的半截词在店里读着莫名其妙。宁可多占一行
+      final tokens = parts.map((x) =>
+          '${order.feePartLabels[x.key] ?? x.key}'
+          '${(x.value / 100).toStringAsFixed(1)}');
+      var cur = '';
+      for (final tk in tokens) {
+        final next = cur.isEmpty ? tk : '$cur $tk';
+        if (gbk.encode('  $next').length > _cols) {
+          e.line('  $cur');
+          cur = tk;
+        } else {
+          cur = next;
+        }
+      }
+      if (cur.isNotEmpty) e.line('  $cur');
+    }
+    // Dart 侧 toDoor 有默认值 true,不会有 null;这里与服务端口径一致
+    if (!order.toDoor) e.line('  顾客选了送到楼下,骑手不上楼');
   }
   e.kv('用户实付', _yuanTxt(order.totalCents), bold: true, big: true);
   e.divider();

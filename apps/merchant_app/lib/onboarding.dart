@@ -16,6 +16,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -261,10 +262,39 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   bool get _isHotel => _bizType == 'hotel';
   bool get _rejected => widget.existing?.isRejected == true;
 
+  /// POI 搜索限城市(不限的话搜「一号店」会返回全国同名地点)。
+  /// 优先级与用户端**共用同一份** CityPref.resolve:
+  /// 记住的选择 > 定位解析 > 留空让他自己选。
+  /// 留空时切换器显示「选择城市」—— 不猜一个填进去
+  String _city = '';
+
   @override
   void initState() {
     super.initState();
     if (widget.existing == null) _restoreDraft();
+    _initCity();
+  }
+
+  /// 当前位置。先要权限再取 —— 直接取会在没授权时静默失败,
+  /// 点了没反应用户只会以为卡了
+  Future<({double lat, double lng})?> _currentPosition() async {
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      return null;
+    }
+    final me = await Geolocator.getCurrentPosition();
+    return (lat: me.latitude, lng: me.longitude);
+  }
+
+  Future<void> _initCity() async {
+    // 商家端没装定位插件,只读记住的城市;没记过就留空让他自己选。
+    // 老板开店时人多半就在店里,但"多半"不足以拿来猜一个城市填上
+    final city = await CityPref.resolve();
+    if (city.isNotEmpty && mounted) setState(() => _city = city);
   }
 
   @override
@@ -382,6 +412,17 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
             final t = await widget.api.geoReverse(lat, lng);
             return (name: t.name, district: t.district);
           },
+          // 周边地点:老板认自己店旁边那个地标,比认坐标容易
+          onAround: widget.api.geoAround,
+          // 搜索:打个店名直接跳过去,不用把地图从市中心一路拖到自己店门口。
+          // 之前这一条只有用户端有 —— 搜索做在了用户端那一页上,
+          // 而不是做在共享的选点组件里,商家端就只剩"拖地图"
+          onSearch: (kw) => widget.api.geoTips(kw, city: _city),
+          city: _city,
+          onCities: widget.api.openCities,
+          onCityChanged: (c) => setState(() => _city = c),
+          // 老板填店址时多半就站在店里,一键定位比拖地图准得多
+          onLocate: _currentPosition,
         ),
       ),
     );

@@ -4751,9 +4751,14 @@ class _ProfileViewState extends State<ProfileView> {
                   ),
                 ]),
               ),
-              title: Text(profile?.name ?? widget.api.userName ?? '用户',
+              // 首帧用会话里缓存的昵称/手机号,**不要拿默认值或口号顶上** ——
+              // 「感谢你支持劳动者互助平台」占在手机号的位置上,接口一回来
+              // 闪成真号,用户看到的是"先给我看了个别的,然后偷偷换掉了"。
+              // 缓存里也没有(极少见:刚装且还没登录成功过)时留空,
+              // 空白至少是诚实的
+              title: Text(profile?.name ?? widget.api.userName ?? '',
                   style: theme.textTheme.titleLarge),
-              subtitle: Text(profile?.phone ?? '感谢你支持劳动者互助平台'),
+              subtitle: Text(profile?.phone ?? widget.api.userPhone ?? ''),
               trailing: const Icon(Icons.edit, size: 18),
               onTap: _editName,
             ),

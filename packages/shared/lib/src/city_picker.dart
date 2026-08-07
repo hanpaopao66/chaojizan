@@ -40,6 +40,35 @@ class CityPref {
     }
   }
 
+  /// 初始城市:**记住的选择 > 定位解析 > 留空让他自己选**。
+  ///
+  /// 留空时切换器显示「选择城市」——**不猜一个填进去**:
+  /// 猜错了用户会以为已经选对,然后搜不出东西也不知道为什么。
+  ///
+  /// 抽到这里是因为用户端和商家端要用同一套优先级 ——
+  /// 各写一遍的下场是两端行为不一致,而"为什么商家端搜不出来"
+  /// 这种问题极难从表象追到根因。
+  /// [lastKnown] 由调用方注入(shared 不依赖定位插件),
+  /// [reverse] 是坐标 → 含省市区的地址串。
+  static Future<String> resolve({
+    Future<({double lat, double lng})?> Function()? lastKnown,
+    Future<String> Function(double, double)? reverse,
+  }) async {
+    final saved = await load();
+    if (saved.isNotEmpty) return saved;
+    if (lastKnown == null || reverse == null) return '';
+    try {
+      final me = await lastKnown();
+      if (me == null) return '';
+      final district = await reverse(me.lat, me.lng);
+      // 逆地理的 district 形如「四川省成都市锦江区…」,取出「XX市」
+      final m = RegExp(r'([\u4e00-\u9fa5]{2,8}市)').firstMatch(district);
+      return m?.group(1) ?? '';
+    } catch (_) {
+      return '';   // 拿不到就留空,让他自己选 —— 比猜一个强
+    }
+  }
+
   static Future<void> save(String city) async {
     try {
       final sp = await SharedPreferences.getInstance();

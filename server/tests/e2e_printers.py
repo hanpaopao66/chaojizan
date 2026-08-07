@@ -48,7 +48,10 @@ def check_ticket_privacy():
         remark="不要香菜", items=[{"name": "牛腩饭", "quantity": 2,
                                 "price_cents": 2800, "is_alcohol": False}],
         food_cents=5600, packing_fee_cents=700, discount_cents=0,
-        delivery_fee_cents=300, total_cents=6600,
+        delivery_fee_cents=800, total_cents=7100,
+        # 配送费拆分与送上门选择:小票要把构成印出来 ——
+        # 顾客当面问"配送费怎么这么贵",商家能直接指给他看
+        fee_parts={"base": 300, "night": 200, "door": 300}, to_door=True,
         contact_name="张先生", contact_phone="13800001234",
         privacy_phone="", address="成都市高新区天府大道 1 号 3 栋 502")
 
@@ -57,6 +60,16 @@ def check_ticket_privacy():
         "前厅那张要印收件人与地址(骑手来取要核对)"
     assert "6600" not in front or "66.00" in front
     print("✓ 前厅小票:含收件人、地址、金额")
+
+    # 拆分要印出来,且**用的是订单上的快照**,不在小票里重算一遍
+    assert "上门难度" in front and "3.0" in front, front
+    assert "夜间" in front, front
+    print("✓ 前厅小票印出配送费构成(基础/夜间/上门难度)")
+
+    downstairs = SimpleNamespace(**{**order.__dict__, "to_door": False})
+    assert "送到楼下" in build_ticket(downstairs, "赞小碗"), \
+        "顾客选了送楼下要印出来,否则商家会以为骑手偷懒"
+    print("✓ 顾客选送到楼下时小票写明,骑手不上楼不是偷懒")
 
     kitchen = build_ticket(order, "赞小碗", purpose="kitchen")
     assert "天府大道" not in kitchen, \

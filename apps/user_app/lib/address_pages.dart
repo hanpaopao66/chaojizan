@@ -260,28 +260,36 @@ class _AddressEditPageState extends State<AddressEditPage> {
     _initCity();
   }
 
-  /// 城市优先级:**用户记住的选择 > 定位解析 > 留空让他自己选**。
-  ///
-  /// 留空时切换器显示「选择城市」——**不猜一个填进去**:
-  /// 猜错了用户会以为已经选对,然后搜不出东西也不知道为什么。
+  /// 城市优先级(记住的 > 定位解析 > 留空)统一在 CityPref.resolve 里,
+  /// 商家端用的是同一份 —— 各写一遍的话两端行为会不一致,
+  /// 而"为什么商家端搜不出来"这种问题极难从表象追到根因
+  /// 当前位置。**先要权限再取** —— 直接取会在没授权时静默失败,
+  /// 用户点了按钮没反应,只会以为 App 卡了
+  Future<({double lat, double lng})?> _currentPosition() async {
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      return null;
+    }
+    final me = await Geolocator.getCurrentPosition();
+    return (lat: me.latitude, lng: me.longitude);
+  }
+
   Future<void> _initCity() async {
-    final saved = await CityPref.load();
-    if (saved.isNotEmpty) {
-      if (mounted) setState(() => _city = saved);
-      return;
-    }
-    try {
+    final city = await CityPref.resolve(
       // 用**最后已知位置**:不弹权限、不等 GPS —— 解析城市这件事
-      // 不值得为它卡住表单;拿不到就留空让用户自己选
-      final me = await Geolocator.getLastKnownPosition();
-      if (me == null) return;
-      final t = await widget.api.geoReverse(me.latitude, me.longitude);
-      // 逆地理的 district 形如「四川省成都市锦江区…」,取出「XX市」
-      final m = RegExp(r'([\u4e00-\u9fa5]{2,8}市)').firstMatch(t.district);
-      if (m != null && mounted) setState(() => _city = m.group(1)!);
-    } catch (_) {
-      // 拿不到就留空,让用户自己选 —— 比猜一个强
-    }
+      // 不值得为它卡住表单
+      lastKnown: () async {
+        final me = await Geolocator.getLastKnownPosition();
+        return me == null ? null : (lat: me.latitude, lng: me.longitude);
+      },
+      reverse: (lat, lng) async =>
+          (await widget.api.geoReverse(lat, lng)).district,
+    );
+    if (city.isNotEmpty && mounted) setState(() => _city = city);
   }
 
   @override
@@ -321,6 +329,13 @@ class _AddressEditPageState extends State<AddressEditPage> {
           },
           // 周边地点列表:用户认地名比认坐标容易得多
           onAround: widget.api.geoAround,
+          // 地图页里也能搜。**和外面那个搜索框是两个入口不是两套逻辑** ——
+          // 大厂都是这样:列表页搜到大致位置,进地图再微调到自家单元门
+          onSearch: (kw) => widget.api.geoTips(kw, city: _city),
+          city: _city,
+          onCities: widget.api.openCities,
+          onCityChanged: (c) => setState(() => _city = c),
+          onLocate: _currentPosition,
         ),
       ),
     );

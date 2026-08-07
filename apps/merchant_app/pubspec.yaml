@@ -19,6 +19,7 @@ dependencies:
   flutter_foreground_task: ^10.0.0
   print_bluetooth_thermal: ^1.1.4  # 蓝牙 ESC/POS 小票机直连
   fast_gbk: ^1.0.0                 # 小票中文用 GBK 编码(热敏机不认 UTF-8)
+  geolocator: ^14.0.0              # 选店址时「回到我的位置」(老板多半就站在店里)
   permission_handler: ^12.0.1      # Android 12+ 附近设备(蓝牙)运行时权限
   shared_preferences: ^2.5.5       # 记住选择的打印机
   mobile_scanner:            # vendor 版,适配 AGP 9(见 packages/mobile_scanner)

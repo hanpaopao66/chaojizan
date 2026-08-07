@@ -2,7 +2,8 @@
 
 核对的恒等式(近 30 天):
   1. 每笔完成订单必须有商家入账,且 net == food - commission
-  2. 每笔有骑手的完成订单必须有骑手入账,且金额 == 配送费
+  2. 每笔有骑手的完成订单必须有骑手入账,且金额 == 骑手应得(见 _rider_due:
+     配送费 + 小费 + 平台承担的等餐补偿 − 跑腿服务费;外卖配送费平台一分不抽)
   3. 非取消订单:total == food + delivery
   4. 任何骑手的可提现余额不得为负
   5. 每笔订单的 refund_cents 必须等于 refunds 流水之和(失败流水不算 → 自动暴露)
@@ -39,6 +40,30 @@ from .settlement import settle_order
 logger = logging.getLogger("superz.audit")
 
 WINDOW_DAYS = 30
+
+
+def _rider_due(order) -> int:
+    """骑手这一单应得多少。
+
+    **不是**"顾客付的配送费" —— 两者在三种情况下不相等,
+    漏掉任何一种,逐单检查和全局恒等都会长期报红:
+
+    - **等餐补偿**:平台承担、不进 `delivery_fee_cents`
+      (顾客不该为商家出餐慢买单),但确实进了骑手入账;
+    - **跑腿服务费**:跑腿没有商家,平台从跑腿费里收 2%,骑手拿 98%;
+    - **外卖配送费**:平台一分不抽,不减。
+
+    逐单检查与全局恒等**必须共用这一个函数**。两处各写一遍的话,
+    加一笔新钱时只改了一处,另一处就成了长期红灯 ——
+    而长期红灯的下场是所有人习惯"红了也没关系"。
+    """
+    from .errand import is_errand, service_fee_cents
+
+    due = order.delivery_fee_cents + order.tip_cents
+    due += (order.fee_parts or {}).get("wait", 0)
+    if is_errand(order):
+        due -= service_fee_cents(order.delivery_fee_cents)
+    return due
 
 
 async def run_audit() -> list[dict]:
@@ -124,13 +149,15 @@ async def run_audit() -> list[dict]:
                         "check": "rider_earning_missing",
                         "detail": f"完成订单 {order.order_no} 缺骑手入账",
                     })
-                elif re.amount_cents != (order.delivery_fee_cents
-                                         + order.tip_cents):
+                elif re.amount_cents != _rider_due(order):
                     problems.append({
                         "check": "rider_earning_mismatch",
                         "detail": f"订单 {order.order_no} 骑手入账 {re.amount_cents} "
-                                  f"≠ 配送费 {order.delivery_fee_cents}"
-                                  f"+小费 {order.tip_cents}",
+                                  f"≠ 应得 {_rider_due(order)}"
+                                  f"(配送费 {order.delivery_fee_cents}"
+                                  f" + 小费 {order.tip_cents}"
+                                  f" + 等餐补偿 {(order.fee_parts or {}).get('wait', 0)}"
+                                  f" − 跑腿服务费)",
                     })
 
         # 3) 订单金额自洽:实付 = 菜品 + 打包 - 满减 + 配送 - 平台补贴
@@ -279,7 +306,7 @@ async def run_audit() -> list[dict]:
                           f"≠ Σ净额+佣金 {food_rhs}"
                           f"(差 {food_lhs - food_rhs} 分,近 {WINDOW_DAYS} 天)",
             })
-        fee_lhs = sum(o.delivery_fee_cents + o.tip_cents
+        fee_lhs = sum(_rider_due(o)
                       for o in active if o.rider_id is not None)
         fee_rhs = sum(
             r_earnings[o.id].amount_cents
