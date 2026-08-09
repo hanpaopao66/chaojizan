@@ -1,0 +1,12 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 商店渠道包的清单增量(#192):-PSUPERZ_CHANNEL=store 时并入 release 清单。
+         apk_installer 为自建分发带进来的「安装未知应用」权限在这里摘掉 ——
+         国内商店明令禁止绕过审核的应用内自更新,权限扫描必然命中;
+         商店包本来也不该有这个能力,它的更新由商店自己推。
+         配套:Dart 侧同时传 SUPERZ_CHANNEL=store 关掉 App 内的更新检查
+         (见 shared/update_checker.dart);完整发版命令见 scripts/release_apks.sh。 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"
+        tools:node="remove"/>
+</manifest>

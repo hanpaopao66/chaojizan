@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug 专用的网络安全配置(#193)。release 构建不含本文件,线上只走 HTTPS。
+     地址来源见 shared/api_client.dart 的 baseUrl 说明。
+     真机连电脑上的后端时,把电脑的局域网 IP 照下面的格式加一条 ——
+     不加会报 "Cleartext HTTP traffic to x.x.x.x not permitted"。 -->
+<network-security-config>
+    <!-- 兜底仍是"不许明文":只有下面点名的地址例外 -->
+    <base-config cleartextTrafficPermitted="false"/>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- Android 模拟器里指向宿主机的固定地址 -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

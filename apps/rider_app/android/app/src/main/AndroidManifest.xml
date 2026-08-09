@@ -15,9 +15,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- 明文流量一律关闭(#193):隐私政策里向用户承诺过「传输全程 HTTPS 加密」
+         (shared/legal.dart),这里再放开就是虚假公示。
+         写死 false 而不是省略:三方 SDK 的清单里若带 usesCleartextTraffic="true",
+         合并时同名属性冲突会直接报错,tools:replace 让本端的取值说了算。
+         本地开发连 http://127.0.0.1:8000 走 debug 专属的 network security config
+         (src/debug/res/xml/network_security_config.xml),release 一个明文地址都不放。 -->
     <application
         android:label="超级赞骑手"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
+        tools:replace="android:usesCleartextTraffic"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

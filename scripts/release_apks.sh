@@ -4,7 +4,15 @@
 #
 # 用法:TENCENT_MAP_KEY=xxx scripts/release_apks.sh 0.3.0 3 "更新说明一句话"
 #      (可省;省略时配送地图退化为品牌网格示意,方位与距离仍真实)
+#      SKIP_STORE=1 只出官网直链包(默认直链包 + 商店包都出,共 6 个)
 #   $1 版本名(versionName)  $2 build 号(必须递增!)  $3 更新说明
+#
+# 两种产物不能混(#192):
+#   官网直链包 build/release-apks/chaojizan-<端>-arm64.apk
+#       —— 带应用内自更新,上传部署机 appdist,versions.json 指向它;
+#   商店包     build/store-apks/chaojizan-<端>-store-v<版本>+<build>-arm64.apk
+#       —— 清单里摘掉 REQUEST_INSTALL_PACKAGES、App 内更新检查关闭,
+#          只留在本地等人工提交各应用商店,**绝不上传 appdist**。
 set -e
 cd "$(dirname "$0")/.."
 
@@ -15,10 +23,21 @@ NOTES=${3:?缺更新说明}
 API=${PUBLIC_BASE:?缺对外域名:在 deploy/.env.deploy 写 PUBLIC_BASE=https://域名(不入库)}
 DEPLOY=${DEPLOY:?缺部署机地址:在 deploy/.env.deploy 写 DEPLOY=user@host(不入库)}
 
-for app in user merchant rider; do
-  echo "== 打包 ${app}_app v$VERSION+$BUILD =="
+SELF_DIR=build/release-apks
+STORE_DIR=build/store-apks
+rm -rf "$SELF_DIR" "$STORE_DIR"
+mkdir -p "$SELF_DIR"
+
+# $1 = 端(user/merchant/rider),$2 = 渠道(self/store)
+build_apk() {
+  local app=$1 channel=$2 GRADLE_ARG=
+  # store 渠道要两边一起传:-P 给 Gradle(摘权限),--dart-define 给 Dart
+  # (关更新检查,见 shared/update_checker.dart)。少传一边就是个半成品
+  [ "$channel" = store ] && GRADLE_ARG=-PSUPERZ_CHANNEL=store
   # obfuscate+split-debug-info:Dart 代码混淆并剥离符号(瘦 ~2MB/端);
-  # 崩溃堆栈用 build/symbols/<app>-<version> 里的符号表还原(flutter symbolize)。
+  # 崩溃堆栈用 build/symbols/<渠道>-<version> 里的符号表还原(flutter symbolize)。
+  # 符号表按渠道分目录:两次构建的混淆映射不一样,共用一个目录会被后一次覆盖,
+  # 到时候拿商店包的符号表去还原直链包的堆栈,还原出来的是错的
   # 注意:用 --target-platform 出单 arm64 包,不用 --split-per-abi ——
   # split 会给 versionCode 加 ABI 偏移(arm64 = 2000+build),而应用内更新
   # 检查拿 versionCode 和 versions.json 的 build 平码比较,偏移会让
@@ -26,25 +45,66 @@ for app in user merchant rider; do
   (cd apps/${app}_app && flutter build apk --release \
       --target-platform android-arm64 \
       --build-name="$VERSION" --build-number="$BUILD" \
-      --obfuscate --split-debug-info=build/symbols/$VERSION+$BUILD \
+      --obfuscate --split-debug-info=build/symbols/$channel-$VERSION+$BUILD \
+      $GRADLE_ARG \
+      --dart-define=SUPERZ_CHANNEL=$channel \
       --dart-define=SUPERZ_API=$API \
       --dart-define=SUPERZ_ICP=陕ICP备2025064101号-5 \
       --dart-define=TENCENT_MAP_KEY=${TENCENT_MAP_KEY:-} | grep -E "apk|Built")
+}
+
+# 两个渠道的产物都叫 app-release.apk,后打的会盖掉先打的 —— 打完立刻拷走
+for app in user merchant rider; do
+  echo "== 打包 ${app}_app v$VERSION+$BUILD(官网直链包) =="
+  build_apk $app self
+  cp apps/${app}_app/build/app/outputs/flutter-apk/app-release.apk \
+      "$SELF_DIR/chaojizan-${app}-arm64.apk"
 done
 
-echo "== 校验 versionCode 平码(防更新检查失灵) =="
+if [ -z "${SKIP_STORE:-}" ]; then
+  mkdir -p "$STORE_DIR"
+  for app in user merchant rider; do
+    echo "== 打包 ${app}_app v$VERSION+$BUILD(应用商店包) =="
+    build_apk $app store
+    # 商店包是人工提交的,文件名带上版本便于存档;直链包的名字要和线上
+    # URL 一字不差(versions.json 里写死),所以那边反而不能带版本号
+    cp apps/${app}_app/build/app/outputs/flutter-apk/app-release.apk \
+        "$STORE_DIR/chaojizan-${app}-store-v$VERSION+$BUILD-arm64.apk"
+  done
+fi
+
 AAPT=$(ls "$HOME"/Library/Android/sdk/build-tools/*/aapt2 2>/dev/null | tail -1)
+
+echo "== 校验 versionCode 平码(防更新检查失灵) =="
 if [ -n "$AAPT" ]; then
   for app in user merchant rider; do
-    CODE=$("$AAPT" dump badging apps/${app}_app/build/app/outputs/flutter-apk/app-release.apk | head -1 | sed -n 's/.*versionCode=.\([0-9]*\).*/\1/p')
+    CODE=$("$AAPT" dump badging "$SELF_DIR/chaojizan-${app}-arm64.apk" | head -1 | sed -n 's/.*versionCode=.\([0-9]*\).*/\1/p')
     [ "$CODE" = "$BUILD" ] || { echo "✗ ${app} versionCode=$CODE ≠ build=$BUILD,中止"; exit 1; }
   done
   echo "  三端 versionCode == $BUILD ✓"
 fi
 
+echo "== 校验渠道权限(#192:商店包不许带安装权限) =="
+if [ -n "$AAPT" ]; then
+  has_install_perm() {
+    "$AAPT" dump permissions "$1" | grep -q "android.permission.REQUEST_INSTALL_PACKAGES"
+  }
+  for app in user merchant rider; do
+    has_install_perm "$SELF_DIR/chaojizan-${app}-arm64.apk" || {
+      echo "✗ ${app} 直链包没有 REQUEST_INSTALL_PACKAGES,应用内安装会失败,中止"; exit 1; }
+    if [ -z "${SKIP_STORE:-}" ]; then
+      ! has_install_perm "$STORE_DIR/chaojizan-${app}-store-v$VERSION+$BUILD-arm64.apk" || {
+        echo "✗ ${app} 商店包仍带 REQUEST_INSTALL_PACKAGES —— 上架必被驳回,中止"; exit 1; }
+    fi
+  done
+  echo "  直链包带安装权限、商店包已摘除 ✓"
+else
+  echo "  ⚠️ 找不到 aapt2,跳过权限核对 —— 提交商店前务必手工确认"
+fi
+
 echo "== 计算 SHA-256(应用内安装要用它校验,不校验等于给中间人开口子) =="
 # 不用关联数组:macOS 自带的是 bash 3.2,declare -A 直接报错
-apk_path() { echo "apps/${1}_app/build/app/outputs/flutter-apk/app-release.apk"; }
+apk_path() { echo "$SELF_DIR/chaojizan-${1}-arm64.apk"; }
 SHA_user=$(shasum -a 256 "$(apk_path user)" | awk '{print $1}')
 SHA_merchant=$(shasum -a 256 "$(apk_path merchant)" | awk '{print $1}')
 SHA_rider=$(shasum -a 256 "$(apk_path rider)" | awk '{print $1}')
@@ -52,10 +112,10 @@ for app in user merchant rider; do
   eval "echo \"  ${app}: \$SHA_${app}\""
 done
 
-echo "== 上传 APK 到部署机 =="
+echo "== 上传 APK 到部署机(只传直链包,商店包留在本地) =="
 ssh $DEPLOY 'mkdir -p ~/super-z/appdist'
 for app in user merchant rider; do
-  scp -q apps/${app}_app/build/app/outputs/flutter-apk/app-release.apk \
+  scp -q "$(apk_path $app)" \
       $DEPLOY:~/super-z/appdist/chaojizan-${app}-arm64.apk
   echo "  chaojizan-${app}-arm64.apk ✓"
 done
@@ -104,3 +164,9 @@ EOF"
 echo "== 验证 =="
 curl -s -m 10 --noproxy '*' "$API/app/latest?app=user" | head -c 200; echo
 echo "发版完成 🎉 旧版用户打开 App 即会收到更新提示"
+
+if [ -z "${SKIP_STORE:-}" ]; then
+  echo
+  echo "== 商店包(不含自更新,提交应用商店用;没上传、也不该上传) =="
+  ls -1 "$STORE_DIR"
+fi

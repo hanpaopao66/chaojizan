@@ -11,6 +11,18 @@ val keystoreProperties = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// 分发渠道(#192):store = 应用商店包,不传(self)= 官网直链包。
+// 传法:flutter build apk --release -PSUPERZ_CHANNEL=store
+//       (Dart 侧还要 --dart-define=SUPERZ_CHANNEL=store 把更新检查一起关掉,
+//        见 shared/update_checker.dart;两边都传才算一个完整的商店包)
+// 国内商店明令禁止绕过审核的应用内自更新,所以 store 包的清单里
+// 不能有 apk_installer 带进来的 REQUEST_INSTALL_PACKAGES(src/store/AndroidManifest.xml 摘掉它)
+val storeChannel = ((project.findProperty("SUPERZ_CHANNEL") as String?)
+    ?: System.getenv("SUPERZ_CHANNEL")) == "store"
+if (storeChannel) {
+    logger.lifecycle("== 渠道 store:release 清单将移除 REQUEST_INSTALL_PACKAGES ==")
+}
+
 android {
     namespace = "com.chaojizan.merchant"
     compileSdk = 36
@@ -19,6 +31,14 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        // 只挂在 release 上:商店包必然是 release 构建;debug 的清单另有正事
+        // (放行本地明文,见 src/debug/AndroidManifest.xml),不能被顶掉
+        if (storeChannel) {
+            getByName("release").manifest.srcFile("src/store/AndroidManifest.xml")
+        }
     }
 
     defaultConfig {

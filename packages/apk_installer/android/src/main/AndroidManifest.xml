@@ -2,12 +2,11 @@
 
     <!-- 自建分发渠道的应用内安装(#123)。
          这是一个敏感权限,三端 manifest 又是为上架整改特意精简过的
-         (一排 tools:node="remove")。上架应用商店时,store flavor 的
-         AndroidManifest 里用同样的写法把它摘掉:
-             <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"
-                              tools:node="remove"/>
-         否则审核一定会问"你为什么需要安装其他应用"——而商店渠道本来
-         就禁止绕过审核自更新,那个包也确实不该有这个能力。 -->
+         (一排 tools:node="remove")。审核一定会问"你为什么需要安装其他应用",
+         而商店渠道本来就禁止绕过审核自更新,那个包也确实不该有这个能力。
+         所以它只跟着官网直链包走:商店包(#192)在三端各自的
+         android/app/src/store/AndroidManifest.xml 里用 tools:node="remove"
+         把这条摘掉,构建时 -PSUPERZ_CHANNEL=store 才会并入 release 清单。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <application>
