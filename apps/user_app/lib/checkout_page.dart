@@ -35,9 +35,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
   final _remark = TextEditingController();
   bool _submitting = false;
   DateTime? _scheduledAt; // null = 尽快送达
-  // 平台券(超时安抚券等,平台承担):自动选可用的最大面额,可点掉
+  // 券包里适用本店的券(未使用未过期)。**未达门槛的也留着**——
+  // 置灰写明还差多少,比直接藏起来有用:用户要判断值不值得再加一道菜
   List<Map<String, dynamic>> _coupons = [];
-  int? _couponId;
+  // 用户手动点过的券。null = 没手动干预过,走自动比价;
+  // _couponOptOut = 用户主动点掉了,尊重他,别再自动选回来
+  int? _pickedCouponId;
+  bool _couponOptOut = false;
 
   @override
   void initState() {
@@ -50,8 +54,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
   Future<void> _loadCoupons() async {
     try {
       final list = await widget.api.myCoupons();
-      final usable = list
+      final mine = list
           .cast<Map<String, dynamic>>()
+          // 服务端的 usable 只判「未使用且未过期」(orders.py:674),**不含门槛**;
+          // 门槛按本单金额现算,见 _judge —— 这里再筛一次就把话说死了
           .where((c) => c['usable'] == true)
           // 店铺券(funder=merchant)只在发券商家可用,平台券不限店
           .where((c) =>
@@ -60,12 +66,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
           .toList()
         ..sort((a, b) =>
             (b['amount_cents'] as int).compareTo(a['amount_cents'] as int));
-      if (mounted) {
-        setState(() {
-          _coupons = usable;
-          _couponId = usable.firstOrNull?['id'] as int?;
-        });
-      }
+      if (mounted) setState(() => _coupons = mine);
     } catch (_) {}
   }
 
@@ -97,15 +98,150 @@ class _CheckoutPageState extends State<CheckoutPage> {
   int get _foodCents => widget.cart
       .fold(0, (sum, line) => sum + line.unitCents * line.quantity);
 
-  /// 满减(与后端同规则:取满足门槛的最大一档)。服务端是最终口径,这里仅预估展示
-  int get _discountCents {
+  /// 打包费 = 店铺「每单打包费」+ 菜品级打包费(按份数另加)。
+  /// 与 server/app/routers/orders.py:299-306、:429 同口径。
+  /// 券门槛判的就是这个数,客户端少算一分,能用的券就会被误判成不能用
+  int get _packingCents =>
+      widget.merchant.packingFeeCents +
+      widget.cart.fold(
+          0, (sum, l) => sum + (l.dish.packingFeeCents ?? 0) * l.quantity);
+
+  /// 券门槛与抵扣的计算基数:餐费 + 打包费(orders.py:480 的 food_cents + packing)
+  int get _couponBasis => _foodCents + _packingCents;
+
+  /// 满减(与后端同规则:门槛按餐费判、封顶按餐费+打包,取满足门槛的最大一档)。
+  /// 服务端是最终口径,这里仅预估展示
+  int get _manjianCents {
     var off = 0;
+    final basis = _couponBasis;
     final rules = [...widget.merchant.promoRules]
       ..sort((a, b) => a.thresholdCents.compareTo(b.thresholdCents));
     for (final r in rules) {
-      if (_foodCents >= r.thresholdCents) off = r.offCents;
+      if (_foodCents >= r.thresholdCents && r.thresholdCents > 0) {
+        off = r.offCents < basis ? r.offCents : basis; // orders.py:437 的封顶
+      }
     }
     return off;
+  }
+
+  /// 判一张券在本单能不能用、能减多少。
+  ///
+  /// **必须与 server/app/routers/orders.py:474-501 同口径**,差一点就是提交时 409:
+  /// 结算页写着"已省 10 元",付款那一刻被打回「未达券的使用门槛」——
+  /// 这种事发生一次,用户就不信第二次了。
+  _CouponVerdict _judge(Map<String, dynamic> c) {
+    final basis = _couponBasis;
+    final manjian = _manjianCents;
+    final amount = c['amount_cents'] as int;
+    final minSpend = c['min_spend_cents'] as int? ?? 0;
+    if (c['funder'] == 'merchant') {
+      // 店铺券:门槛按 餐费+打包 判(orders.py:480)
+      if (basis < minSpend) {
+        return _CouponVerdict.no('还差${_money(minSpend - basis)}');
+      }
+      final shopOff = amount < basis ? amount : basis;
+      // 店铺券与满减二选其一取最优,不叠加;不优于满减的服务端直接 409(orders.py:485)
+      if (shopOff <= manjian) return const _CouponVerdict.beaten();
+      return _CouponVerdict.ok(merchantOff: shopOff, platformOff: 0);
+    }
+    // 平台券:门槛按 餐费+打包-满减 判 —— orders.py:493 里的 discount
+    // 走到这一步就是满减档本身(店铺券分支没被走到)
+    final left = basis - manjian;
+    if (left < minSpend) {
+      return _CouponVerdict.no('还差${_money(minSpend - left)}');
+    }
+    final off = amount < left ? amount : left;
+    // 服务端还会再扣掉首单立减(orders.py:498 的 subsidy),那笔平台补贴客户端判不了。
+    // 所以这里给的是抵扣**上限**:真实抵扣只会更少,不会因此 409
+    if (off <= 0) return const _CouponVerdict.no('本单无可抵扣');
+    return _CouponVerdict.ok(merchantOff: manjian, platformOff: off);
+  }
+
+  /// 本单实际生效的券。**每次取用时现算** —— 金额一变(改数量、删菜、
+  /// 切自取/配送、改小费)结论跟着变,不会停在初始化那一刻
+  Map<String, dynamic>? get _activeCoupon {
+    if (_couponOptOut) return null;
+    final picked =
+        _coupons.where((c) => c['id'] == _pickedCouponId).firstOrNull;
+    // 手选的券若因金额变化不再可用,让位给最优的那张 ——
+    // 不能带着一张必然 409 的券去提交
+    if (picked != null && _judge(picked).usable) return picked;
+    return _bestCoupon();
+  }
+
+  /// 自动选券:和满减比价,选**用户实际省得最多**的那张。
+  ///
+  /// 不能再按面额倒序取第一张 —— 面额大 ≠ 省得多。一张 10 元店铺券碰上 12 元满减,
+  /// 服务端 orders.py:485 会直接 409「本单满减已优于该店铺券」。
+  /// 基准线取满减额、只在**严格更优**时才换券,判的就和服务端是同一件事;
+  /// 打平也不换,白烧一张券换不来一分钱。
+  Map<String, dynamic>? _bestCoupon() {
+    Map<String, dynamic>? best;
+    var bestOff = _manjianCents; // 基准线:不用券也有满减
+    for (final c in _coupons) {
+      final v = _judge(c);
+      if (v.usable && v.totalOff > bestOff) {
+        best = c;
+        bestOff = v.totalOff;
+      }
+    }
+    return best;
+  }
+
+  /// 生效的优惠拆分:没券可用时就是满减本身
+  _CouponVerdict _verdictOf(Map<String, dynamic>? coupon) => coupon == null
+      ? _CouponVerdict.ok(merchantOff: _manjianCents, platformOff: 0)
+      : _judge(coupon);
+
+  /// 展示顺序:能用的在前(面额大的优先),不能用的沉底 ——
+  /// 排序按**当前金额**算,加减菜之后顺序自己会变
+  List<Map<String, dynamic>> get _sortedCoupons {
+    final list = [..._coupons];
+    list.sort((a, b) {
+      final ua = _judge(a).usable, ub = _judge(b).usable;
+      if (ua != ub) return ua ? -1 : 1;
+      return (b['amount_cents'] as int).compareTo(a['amount_cents'] as int);
+    });
+    return list;
+  }
+
+  Widget _couponChip(
+      ThemeData theme, Map<String, dynamic> c, int? activeId) {
+    final v = _judge(c);
+    final minSpend = c['min_spend_cents'] as int? ?? 0;
+    // 「无门槛」以前是写死的文案,现在按券的真实门槛写。
+    // 一张满 50 减 10 的券被标成"无门槛",用户到付款时才知道用不了
+    final gate = minSpend > 0 ? '满${_money(minSpend)}可用' : '无门槛';
+    return ChoiceChip(
+      label: Text(
+        '${_money(c['amount_cents'] as int)} $gate'
+        '${v.usable ? '' : ' · ${v.reason}'}',
+        style: v.usable ? null : TextStyle(color: theme.sz.inkFaint),
+      ),
+      selected: activeId == c['id'],
+      // onSelected 传 null 就是 Flutter 的禁用态(置灰);不可用的券留在原位
+      // 但点不动 —— 藏起来用户就不知道自己差多少
+      onSelected: v.usable
+          ? (sel) => setState(() {
+                _pickedCouponId = sel ? c['id'] as int : null;
+                _couponOptOut = !sel;
+              })
+          : null,
+    );
+  }
+
+  String _couponHint(Map<String, dynamic>? active) {
+    if (active != null) {
+      // 自动选的和用户手选的要分开说 —— 把用户自己的选择说成"帮你选的"很讨嫌
+      return active['id'] == _pickedCouponId
+          ? '按你选的这张算,点一下可取消'
+          : '已按本单金额比过价,自动选了最省的一张,点一下可取消';
+    }
+    if (_couponOptOut) return '已取消用券,点上面的券可以重新选';
+    // 走到这儿说明一张都用不上:要么没够门槛,要么满减本来就更划算
+    return _coupons.any((c) => _judge(c).beatenByManjian)
+        ? '本单满减比手上的券更划算,券先留着'
+        : '本单暂无可用券 —— 灰掉的券上写着还差多少';
   }
 
   /// 满赠(与后端同规则:取满足门槛的最高一档)。库存不足时服务端会自动跳过
@@ -222,16 +358,6 @@ class _CheckoutPageState extends State<CheckoutPage> {
     );
   }
 
-  /// 已选券的抵扣额(不超过 菜品+打包-满减)
-  int get _selectedCouponOff {
-    final c =
-        _coupons.where((c) => c['id'] == _couponId).firstOrNull;
-    if (c == null) return 0;
-    final cap = _foodCents + widget.merchant.packingFeeCents - _discountCents;
-    final off = c['amount_cents'] as int;
-    return off > cap ? (cap > 0 ? cap : 0) : off;
-  }
-
   int? get _etaMin {
     final a = _address;
     if (_pickup || a == null) return null;
@@ -262,7 +388,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
         tipCents: _pickup ? 0 : _tipCents,
         // 顾客选的送上门/送楼下要跟着下单一起走 —— 只在预览里选了不算数
         toDoor: _toDoor,
-        couponId: _couponId,
+        // 提交的是**此刻**判定生效的那张券,不是初始化时挑的
+        couponId: _activeCoupon?['id'] as int?,
         groupCode: widget.groupCode,
       );
       if (!mounted) return;
@@ -336,22 +463,26 @@ class _CheckoutPageState extends State<CheckoutPage> {
     return '预约 $day ${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   }
 
-  /// 「已省」= 满减 + 券抵扣。都取已有字段,没有优惠时不显示这一行,不造数。
-  int get _savedCents => _discountCents + _selectedCouponOff;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final fee = _feeCents;
     final eta = _etaMin;
-    final packing = widget.merchant.packingFeeCents;
-    final discount = _discountCents;
+    final packing = _packingCents;
+    // 券与满减的取舍在这里定,下面所有金额都从这一份拆分里取,不各算各的
+    final coupon = _activeCoupon;
+    final verdict = _verdictOf(coupon);
+    // 商家承担:满减,或取代了满减的店铺券(服务端 orders.py:490 就是取代不叠加)
+    final merchantOff = verdict.merchantOff;
+    final platformOff = verdict.platformOff; // 平台承担:平台券
+    final shopCoupon = coupon != null && coupon['funder'] == 'merchant';
     // 首单立减由服务端判定,这里不预估(下单后订单明细会显示)
     final tip = _pickup ? 0 : _tipCents;
-    final total =
-        fee == null ? null : _foodCents + packing - discount + fee + tip;
+    final total = fee == null
+        ? null
+        : _foodCents + packing - merchantOff + fee + tip - platformOff;
     final commission =
-        ((_foodCents + packing - discount) * widget.merchant.commissionRate)
+        ((_foodCents + packing - merchantOff) * widget.merchant.commissionRate)
             .round();
 
     return Scaffold(
@@ -446,7 +577,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
           ),
           const SizedBox(height: 8),
 
-          // 平台券:有可用券时展示,默认选中最大面额,可点掉
+          // 优惠券:未达门槛的**不藏起来**,置灰写明还差多少 ——
+          // 用户得知道差在哪儿,才谈得上决定要不要再加一道菜
           if (_coupons.isNotEmpty)
             Card(
               child: Padding(
@@ -454,22 +586,20 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('优惠券',
-                        style: Theme.of(context).textTheme.titleSmall),
+                    Text('优惠券', style: theme.textTheme.titleSmall),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
+                      runSpacing: 4,
                       children: [
-                        for (final c in _coupons)
-                          ChoiceChip(
-                            label: Text(
-                                '¥${(c['amount_cents'] as int) ~/ 100} 无门槛'),
-                            selected: _couponId == c['id'],
-                            onSelected: (sel) => setState(
-                                () => _couponId = sel ? c['id'] as int : null),
-                          ),
+                        for (final c in _sortedCoupons)
+                          _couponChip(theme, c, coupon?['id'] as int?),
                       ],
                     ),
+                    const SizedBox(height: 6),
+                    Text(_couponHint(coupon),
+                        style: TextStyle(
+                            fontSize: 11.5, color: theme.sz.inkMuted)),
                   ],
                 ),
               ),
@@ -516,11 +646,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       amountCents: line.unitCents * line.quantity),
                 if (packing > 0)
                   SzFeeRow(label: '打包费', amountCents: packing),
-                if (discount > 0)
+                // 店铺券是**取代**满减而不是叠加,所以这一行要么是满减、
+                // 要么是店铺券,写两行就是把同一笔钱数了两遍
+                if (merchantOff > 0)
                   SzFeeRow(
-                      label: '满减优惠',
-                      note: '商家承担',
-                      amountCents: discount,
+                      label: shopCoupon ? '店铺券抵扣' : '满减优惠',
+                      note: shopCoupon ? '商家承担 · 已取代满减' : '商家承担',
+                      amountCents: merchantOff,
                       negative: true),
                 if (_giftRule != null)
                   SzFeeRow(
@@ -553,16 +685,16 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 ],
                 if (!_pickup && tip > 0)
                   SzFeeRow(label: '小费', note: '全额归骑手', amountCents: tip),
-                if (_selectedCouponOff > 0)
+                if (platformOff > 0)
                   SzFeeRow(
-                      label: '安抚券抵扣',
+                      label: '平台券抵扣',
                       note: '平台承担',
-                      amountCents: _selectedCouponOff,
+                      amountCents: platformOff,
                       negative: true),
                 Divider(color: theme.sz.line, height: 17),
                 SzFeeRow(
                     label: '实付',
-                    amountCents: total == null ? 0 : total - _selectedCouponOff,
+                    amountCents: total ?? 0,
                     emphasized: true),
               ],
             ),
@@ -630,10 +762,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
               child: SzMoneyFlow(items: [
                 SzFlowItem(
                   name: '商家实收',
-                  amountCents: _foodCents + packing - discount - commission,
+                  amountCents: _foodCents + packing - merchantOff - commission,
                   fraction:
-                      (_foodCents + packing - discount - commission) / total,
-                  note: '菜品 + 打包 − 满减,只扣 '
+                      (_foodCents + packing - merchantOff - commission) / total,
+                  note: '菜品 + 打包 − ${shopCoupon ? '店铺券' : '满减'},只扣 '
                       '${(widget.merchant.commissionRate * 100).toStringAsFixed(0)}% 服务费',
                 ),
                 if (!_pickup)
@@ -650,7 +782,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   amountCents: commission,
                   fraction: commission / total,
                   note: '服务器、客服与赔付池 · 按商家侧口径 '
-                      '${yuan(commission)} / ${yuan(_foodCents + packing - discount)}'
+                      '${yuan(commission)} / ${yuan(_foodCents + packing - merchantOff)}'
                       ' = ${(widget.merchant.commissionRate * 100).toStringAsFixed(0)}%',
                   isHold: true,
                 ),
@@ -683,14 +815,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     ),
                   ),
                   child: Column(
-                    key: ValueKey('$_belowMinOrder-$total-$_selectedCouponOff'),
+                    key: ValueKey('$_belowMinOrder-$total-${verdict.totalOff}'),
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        total == null
-                            ? '—'
-                            : yuan(total - _selectedCouponOff),
+                        total == null ? '—' : yuan(total),
                         style: szMoney(
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
@@ -702,8 +832,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
                             ? '差 ${yuan(widget.merchant.minOrderCents - _foodCents)} 起送'
                             : total == null
                                 ? '请先选择地址'
-                                : _savedCents > 0
-                                    ? '已省 ${yuan(_savedCents)}'
+                                // 「已省」= 满减/店铺券 + 平台券,取的就是提交时
+                                // 用的那份拆分 —— 显示得出来的,提交就付得掉
+                                : verdict.totalOff > 0
+                                    ? '已省 ${yuan(verdict.totalOff)}'
                                     : (_pickup ? '到店自取' : '含配送费'),
                         style: TextStyle(
                             fontSize: 10.5, color: theme.sz.inkMuted),
@@ -729,4 +861,49 @@ class _CheckoutPageState extends State<CheckoutPage> {
       ),
     );
   }
+}
+
+/// 券门槛/差额用紧凑写法:整元不带小数(「满¥50」比「满¥50.00」好读),
+/// 有零头才带 —— 券的门槛几乎都是整元,小数点纯属噪音
+String _money(int cents) =>
+    cents % 100 == 0 ? '¥${cents ~/ 100}' : yuan(cents);
+
+/// 一张券在本单的判定结果。
+///
+/// 拆成"商家承担 / 平台承担"两笔,是因为服务端就是这么记账的:
+/// 店铺券取代满减走 discount(orders.py:490,商家出),平台券走 subsidy
+/// (orders.py:500,平台出)。结算页的实付金额、佣金基数、分账预览三处
+/// 都依赖这个拆分,合成一个数就没法如实展示"这笔钱是谁掏的"。
+class _CouponVerdict {
+  const _CouponVerdict.ok({required this.merchantOff, required this.platformOff})
+      : reason = '',
+        beatenByManjian = false;
+
+  const _CouponVerdict.no(this.reason)
+      : merchantOff = 0,
+        platformOff = 0,
+        beatenByManjian = false;
+
+  /// 够得着门槛,但满减本来就更划算 —— 服务端会以 409 拒收这张券
+  const _CouponVerdict.beaten()
+      : reason = '满减更划算',
+        merchantOff = 0,
+        platformOff = 0,
+        beatenByManjian = true;
+
+  /// 商家承担:店铺券会**取代**满减(取最优不叠加);没用店铺券时就是满减本身
+  final int merchantOff;
+
+  /// 平台承担:平台券抵扣
+  final int platformOff;
+
+  /// 不能用的原因(人话,直接印在券上);空串 = 能用
+  final String reason;
+
+  final bool beatenByManjian;
+
+  bool get usable => reason.isEmpty;
+
+  /// 用户实际省下的总额 —— 自动选券比的就是这个数,不是券面额
+  int get totalOff => merchantOff + platformOff;
 }

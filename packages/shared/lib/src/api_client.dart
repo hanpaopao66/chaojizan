@@ -536,7 +536,8 @@ class ApiClient {
   Future<List<Merchant>> merchants(
       {double? lat, double? lng, String sort = 'distance',
       String? category, int? radiusM, double? minRating,
-      bool hasPromo = false, int? maxMinOrderCents}) async {
+      bool hasPromo = false, int? maxMinOrderCents,
+      int? limit, int offset = 0}) async {
     final data = await _request('GET', '/merchants', query: {
       if (lat != null) 'lat': '$lat',
       if (lng != null) 'lng': '$lng',
@@ -546,6 +547,8 @@ class ApiClient {
       if (minRating != null) 'min_rating': '$minRating',
       if (hasPromo) 'has_promo': 'true',
       if (maxMinOrderCents != null) 'max_min_order_cents': '$maxMinOrderCents',
+      if (limit != null) 'limit': '$limit',
+      if (offset > 0) 'offset': '$offset',
     });
     return (data as List)
         .map((e) => Merchant.fromJson(e as Map<String, dynamic>))
@@ -1168,6 +1171,44 @@ class ApiClient {
     return data as Map<String, dynamic>;
   }
 
+  // ---------- 透明中心(全部无需鉴权,数字难看也照实下发) ----------
+  Future<Map<String, dynamic>> _transparency(String path) async =>
+      await _request('GET', '/transparency/$path') as Map<String, dynamic>;
+
+  /// 每日核账:对不上的那天要能看出来,不是只报"一切正常"。
+  Future<Map<String, dynamic>> auditPublic() => _transparency('audit');
+
+  /// 佣金收进来多少、花到哪去了、平台留存多少。
+  Future<Map<String, dynamic>> fundsPublic() => _transparency('funds');
+
+  /// 平台自己赔出去的钱(超时券/餐损/退款)。
+  Future<Map<String, dynamic>> compensationPublic() =>
+      _transparency('compensation');
+
+  /// 月度财报(实时聚合,不是手工填的)。
+  Future<Map<String, dynamic>> reportsPublic() => _transparency('reports');
+
+  /// 近 30 天分账公平性证据。
+  Future<Map<String, dynamic>> fairnessPublic() => _transparency('fairness');
+
+  /// 线上运行版本 + 与本仓一致的更新日志。
+  Future<Map<String, dynamic>> changelogPublic() => _transparency('changelog');
+
+  /// 90 天可用率。探针缺档按不可用算,不给自己留面子。
+  Future<Map<String, dynamic>> uptimePublic() => _transparency('uptime');
+
+  /// 明厨亮灶发标/验标/撤标规则。
+  Future<Map<String, dynamic>> kitchenCamSpec() => _transparency('kitchen-cam');
+
+  /// 规则变更留痕、反作弊处置、客服质量。
+  Future<Map<String, dynamic>> governancePublic() =>
+      _transparency('governance');
+
+  /// 见证节点网络概览。ledger 路由没挂前缀,路径就是 /nodes/summary。
+  /// 返回 {online,total,verified_ok,divergent,latest_anchor,nodes[]}
+  Future<Map<String, dynamic>> nodesSummary() async =>
+      await _request('GET', '/nodes/summary') as Map<String, dynamic>;
+
   Future<Order> mockPay(String orderNo) async {
     final data = await _request('POST', '/orders/$orderNo/pay/mock');
     return Order.fromJson(data as Map<String, dynamic>);
@@ -1500,6 +1541,9 @@ class ApiClient {
     required String licenseImageUrl,
     String category = 'fast_food',
     String bizType = 'food',
+    // 堂食标识(总局令第 123 号第十二条):入驻时就问,免得开业后
+    // 列表上一直挂着「未填报」。unknown / yes / no,不填就是 unknown
+    String dineInStatus = 'unknown',
     Map<String, dynamic>? hotel, // 酒店专属资料(biz_type=hotel 必传)
   }) async {
     final data = await _request('POST', '/merchants', body: {
@@ -1512,6 +1556,7 @@ class ApiClient {
       'license_image_url': licenseImageUrl,
       'category': category,
       'biz_type': bizType,
+      'dine_in_status': dineInStatus,
       if (hotel != null) 'hotel': hotel,
     });
     return Merchant.fromJson(data as Map<String, dynamic>);
@@ -2185,6 +2230,19 @@ class ApiClient {
         'images': images,
         'medical_urls': medicalUrls,
       });
+
+  /// 本单的食安投诉状态,没投诉过返回 null。
+  /// 投诉能提交却查不到进度,比没有投诉入口更伤人。
+  Future<Map<String, dynamic>?> foodSafetyOfOrder(String orderNo) async {
+    final data = await _request('GET', '/food-safety/order/$orderNo');
+    return data as Map<String, dynamic>?;
+  }
+
+  /// 我提交过的食安投诉(近 50 条)。
+  Future<List<Map<String, dynamic>>> myFoodSafetyReports() async {
+    final data = await _request('GET', '/food-safety/mine');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
 
   // ---------- 收款账户(骑手/商家提现打款目标) ----------
   Future<PayoutAccount> payoutAccount() async {

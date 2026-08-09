@@ -369,7 +369,10 @@ class _SearchPageState extends State<SearchPage> {
                 const SizedBox(height: 8),
                 const Text('距离'),
                 Wrap(spacing: 8, children: [
-                  for (final d in [null, 1000, 3000, 5000])
+                  // 5km 这一档去掉:服务端已把浏览半径收敛到配送上限 4km
+                  // (merchants.py 的 _browse_radius_m),留着就是个骗人的选项 ——
+                  // 选了和「不限」结果一样。档位与首页筛选保持一致
+                  for (final d in [null, 1000, 2000, 3000])
                     ChoiceChip(
                       label: Text(d == null ? '不限' : '${d ~/ 1000}km 内'),
                       selected: _maxDistanceM == d,

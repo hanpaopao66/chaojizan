@@ -80,18 +80,23 @@ class _SettingsPageState extends State<SettingsPage> {
               style: TextStyle(fontSize: 11)),
           onTap: _clearCache,
         ),
-        const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.system_update_outlined),
-          title: const Text('检查更新'),
-          trailing: _checking
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2))
-              : const Icon(Icons.chevron_right),
-          onTap: _checking ? null : _checkUpdate,
-        ),
+        // 商店渠道包不显示这一项:商店禁止应用内自更新,`checkForUpdate`
+        // 在 store 渠道本来就直接短路,入口留着只会弹一句"已是最新版本"——
+        // 那是假话,版本新不新它根本没去查
+        if (kChannel != 'store') ...[
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.system_update_outlined),
+            title: const Text('检查更新'),
+            trailing: _checking
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.chevron_right),
+            onTap: _checking ? null : _checkUpdate,
+          ),
+        ],
         const Divider(height: 1),
         ListTile(
           leading: const Icon(Icons.description_outlined),

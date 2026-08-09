@@ -3,11 +3,16 @@ import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'five_percent.dart';
+import 'transparency_page.dart';
 
 /// 账目透明页:三原则实数 + 社区见证节点 + 近 30 天资金去向。
 ///
 /// 数据来自公开接口 /stats/overview,与公开账本同源——
 /// 页面上的每个数字,用户都可以自己跑一个见证节点去复核。
+///
+/// 这一页给的是「结论」(分了多少、有没有人在盯);
+/// 想逐项核对的从底部进「平台体检」([TransparencyPage]),
+/// 那里把 /transparency/* 十个端点原样摊开,包括难看的那些数字。
 class TrustPage extends StatefulWidget {
   const TrustPage({super.key, required this.api});
 
@@ -108,6 +113,10 @@ class _TrustPageState extends State<TrustPage> {
                       const SizedBox(height: 16),
                       _flowCard(theme, s),
                       const SizedBox(height: 16),
+                      // 这一页只给结论;要逐项复核的进体检页——十个公开端点
+                      // 原样摊开,核账差错、探针缺档、平台倒贴都照实显示
+                      _checkupEntry(theme),
+                      const SizedBox(height: 16),
                       Text(
                         '以上数字与平台公开账本同源。账本按日生成哈希锚点首尾相链,'
                         '改历史任何一分钱都会断链;任何人都可以运行见证节点独立复核。',
@@ -155,6 +164,39 @@ class _TrustPageState extends State<TrustPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 「平台体检」入口。写「敢难看」而不是「一切正常」——
+  /// 点进去看到的就是差错数、缺档天数和倒贴金额,入口文案不能先把预期抬高。
+  Widget _checkupEntry(ThemeData theme) {
+    final sz = theme.sz;
+    return SzCard(
+      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+          builder: (_) => TransparencyPage(api: widget.api))),
+      child: Row(
+        children: [
+          Icon(Icons.fact_check_outlined, size: 20, color: sz.clay),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('平台体检 · 十项公开数据',
+                    style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w600, color: sz.ink)),
+                const SizedBox(height: 2),
+                Text('每日核账、资金去向、平台赔付、可用率、派单算法……'
+                    '数字难看也照实显示',
+                    style: TextStyle(
+                        fontSize: 11.5, height: 1.55, color: sz.inkMuted)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Icon(Icons.chevron_right, size: 20, color: sz.inkFaint),
+        ],
       ),
     );
   }

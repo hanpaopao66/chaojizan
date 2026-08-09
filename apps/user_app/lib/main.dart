@@ -25,16 +25,19 @@ import 'money_flow_page.dart';
 import 'invite_page.dart';
 import 'share_card.dart';
 import 'five_percent.dart';
+import 'food_safety_records_page.dart';
 import 'identity_page.dart';
 import 'coming_soon_page.dart';
 import 'feature_flags.dart';
 import 'delivery_map_page.dart';
 import 'errand_page.dart';
+import 'payment_service.dart';
 import 'reviews_page.dart';
 import 'search_page.dart';
 import 'session.dart';
 import 'settings_page.dart';
 import 'stay_order_pages.dart';
+import 'transparency_page.dart';
 import 'trust_page.dart';
 import 'voucher_pages.dart';
 
@@ -79,10 +82,35 @@ Future<void> main() async {
   // 长辈版(大字)开关:启动时从本地读一次,全程用 ValueNotifier 广播
   final prefs = await SharedPreferences.getInstance();
   elderMode.value = prefs.getBool(_elderKey) ?? false;
-  // 可下发文案:只等本地缓存(毫秒级),网络刷新后台跑,不卡冷启动
+  // 可下发文案:只等本地缓存(毫秒级),不卡冷启动。
+  // 网络刷新挪到同意隐私政策之后(PrivacyGate.onAgreed)——
+  // 同意前发任何一个请求都算"未经同意收集",是工信部通报和商店驳回的头号事由
   await RemoteCopy.loadCached();
-  unawaited(RemoteCopy.refresh(rootApi));
   runApp(const UserApp());
+}
+
+/// 「待支付」订单的统一支付入口。
+///
+/// 跑腿单建出来就是 pending_payment,以前下完单页面一关就再也找不到付款的地方,
+/// 15 分钟后被 auto_flow 当成僵尸单清掉 —— 用户白填一遍地址,平台一分钱收不到。
+/// 支付中断(切后台、微信没装、网断)留下的单同样要能从列表回到这里。
+///
+/// 付成了返回新订单,没付成返回 null。注意 [payOrder] 支付不成时**不抛异常**,
+/// 而是原样返回状态仍为 pending_payment 的订单(它自己已经把原因提示给用户了),
+/// 所以这里要看状态,不能"拿到东西就当成功"。
+Future<Order?> payPendingOrder(
+    ApiClient api, Order order, BuildContext context) async {
+  try {
+    final result = await payOrder(api, order, context);
+    return result.status == OrderStatus.pendingPayment ? null : result;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e is ApiException ? e.message : '$e'),
+          duration: const Duration(seconds: 5)));
+    }
+    return null;
+  }
 }
 
 /// 长辈版大字模式(全局):开启后在系统字体缩放之上再放大,兼顾读屏用户已放大的场景
@@ -124,22 +152,25 @@ class UserApp extends StatelessWidget {
               data: mq.copyWith(textScaler: scaler),
               child: child ?? const SizedBox.shrink());
         },
-        home: SplashGate(
-            app: 'user',
-            tagline: '点外卖,每一单分账可查',
-            subLines: const [
-              '5% 佣金封顶,账本向所有人公开',
-              '配送费一分不截留,全部归骑手',
-              '让利于民 · 取之有道 · 账目为证',
-            ],
-            child: PrivacyGate(
-                onAgreed: () async {
-                  // 同意之后才初始化收集类 SDK。地图 SDK 尤其不能提前:
-                  // 腾讯的接口是"同意前调用则地图显示为空白",
-                  // 而且失败是静默的 —— 没异常没日志,只有一块白板
-                  await PushService.init();
-                  await agreeAndStart();
-                },
+        // 隐私门必须在最外层:开屏页会请求 /splash 并下载开屏图,
+        // 套在里面的话首次启动"同意"之前就已经联网了
+        home: PrivacyGate(
+            onAgreed: () async {
+              // 同意之后才初始化收集类 SDK。地图 SDK 尤其不能提前:
+              // 腾讯的接口是"同意前调用则地图显示为空白",
+              // 而且失败是静默的 —— 没异常没日志,只有一块白板
+              await PushService.init();
+              await agreeAndStart();
+              unawaited(RemoteCopy.refresh(rootApi));
+            },
+            child: SplashGate(
+                app: 'user',
+                tagline: '点外卖,每一单分账可查',
+                subLines: const [
+                  '5% 佣金封顶,账本向所有人公开',
+                  '配送费一分不截留,全部归骑手',
+                  '让利于民 · 取之有道 · 账目为证',
+                ],
                 child: AuthGate(
                     api: rootApi,
                     title: '用户端 · 点外卖',
@@ -164,6 +195,9 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _tab = 0;
+
+  /// 已经访问过的 tab。IndexedStack 保活的前提是别一上来就把三个都建起来
+  final Set<int> _visited = {0};
 
   /// 顶部地址栏选中的收货地址;null = 用当前定位
   Address? _deliveryAddress;
@@ -257,34 +291,36 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      // tab 切换:轻快的淡入 + 微上滑(120ms,不拖节奏)
       // 底部 tab 只放功能(首页/订单/我的),业务一律走金刚区——
-      // 业务会持续增加(团购/住宿/打车…),金刚区横向扩展,tab 保持稳定
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 160),
-        switchInCurve: Curves.easeOutCubic,
-        transitionBuilder: (child, animation) => FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position: Tween(
-                    begin: const Offset(0, 0.015), end: Offset.zero)
-                .animate(animation),
-            child: child,
-          ),
-        ),
-        child: switch (_tab) {
-          0 => MerchantListView(
-              key: const ValueKey('tab-food'),
-              api: widget.api,
-              deliveryAddress: _deliveryAddress),
-          1 => OrdersTab(key: const ValueKey('tab-order'), api: widget.api),
-          _ => ProfileView(key: const ValueKey('tab-me'), api: widget.api),
-        },
+      // 业务会持续增加(团购/住宿/打车…),金刚区横向扩展,tab 保持稳定。
+      //
+      // 用 IndexedStack 保活,不再用 AnimatedSwitcher:后者三个 tab 各带一个 key,
+      // 切走即销毁,从「订单」切回「首页」要重新定位 + 重拉商家列表,
+      // 用户等一遍、手机费一遍电。代价是没有了那 160ms 的淡入 —— 值。
+      // 但只建访问过的 tab:IndexedStack 会一次性 build 全部子树,
+      // 冷启动就把订单和「我的」的请求也打出去,那是另一种浪费
+      body: IndexedStack(
+        index: _tab,
+        children: [
+          _visited.contains(0)
+              ? MerchantListView(
+                  api: widget.api, deliveryAddress: _deliveryAddress)
+              : const SizedBox.shrink(),
+          _visited.contains(1)
+              ? OrdersTab(api: widget.api)
+              : const SizedBox.shrink(),
+          _visited.contains(2)
+              ? ProfileView(api: widget.api)
+              : const SizedBox.shrink(),
+        ],
       ),
       // 图标手感:未选描边、选中实心,切换自带 M3 缩放指示
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) => setState(() {
+          _tab = i;
+          _visited.add(i);
+        }),
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.storefront_outlined),
@@ -392,8 +428,12 @@ class _MerchantListViewState extends State<MerchantListView> {
   }
 
   Future<void> _loadRecent() async {
+    // 两块首页数据并发拉:互不依赖,串起来发就是白等一个来回。
+    // 各自兜底,一个挂了不影响另一个
+    final ordersF = widget.api.myOrders();
+    final frequentF = widget.api.myFrequentDishes();
     try {
-      final orders = await widget.api.myOrders();
+      final orders = await ordersF;
       final seen = <int>{};
       final recent = <Order>[];
       for (final o in orders) {
@@ -411,7 +451,7 @@ class _MerchantListViewState extends State<MerchantListView> {
       if (mounted) setState(() => _reorder = recent);
     } catch (_) {}
     try {
-      final frequent = await widget.api.myFrequentDishes();
+      final frequent = await frequentF;
       if (mounted) setState(() => _frequent = frequent);
     } catch (_) {}
   }
@@ -467,7 +507,40 @@ class _MerchantListViewState extends State<MerchantListView> {
     }
   }
 
+  /// 第二页起追加的商家。服务端一页 50 家,真实城市不止 50 家 ——
+  /// 老口径没有分页,第 51 家起用户永远看不到,而那条「排序只按你选的口径」
+  /// 的承诺在被截断的列表上是不成立的
+  final List<Merchant> _more = [];
+  bool _loadingMore = false;
+  bool _noMore = false;
+  static const _pageSize = 50; // 与服务端 merchants.py 的 _PAGE_MAX 一致
+
+  /// 触底加载下一页。失败就停,不反复重试打服务器;用户下拉刷新可以重来
+  Future<void> _loadMore(int loaded) async {
+    if (_loadingMore || _noMore) return;
+    _loadingMore = true;
+    try {
+      final next = await widget.api.merchants(
+          lat: _myLat, lng: _myLng, sort: _sort, category: widget.category,
+          radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
+          maxMinOrderCents: _maxMinOrderCents, offset: loaded);
+      if (!mounted) return;
+      setState(() {
+        _more.addAll(next);
+        _noMore = next.length < _pageSize;
+      });
+    } catch (_) {
+      _noMore = true;
+    } finally {
+      _loadingMore = false;
+    }
+  }
+
   Future<List<Merchant>> _load() async {
+    // 换排序/换筛选/下拉刷新都会走这里,分页状态跟着从头来
+    _more.clear();
+    _loadingMore = false;
+    _noMore = false;
     final address = widget.deliveryAddress;
     if (address != null) {
       _realLocation = true; // 用户手选地址,视为精确
@@ -841,11 +914,29 @@ class _MerchantListViewState extends State<MerchantListView> {
               spacing: gap,
               runSpacing: gap,
               children: [
-              // 金刚区定版(2026-07-27 拍板):住宿第 2 位,跑腿移除。
-              // 顺序即 kChannels 的顺序;路由按 key 分发 ——
+              // 金刚区顺序即 kChannels 的顺序;路由按 key 分发 ——
               // 加频道时这里只需补一个 case
+              // (跑腿 2026-07-27 曾下线,08-06 重新接回,注释一并订正)
               for (final ch in kChannels)
-                SizedBox(width: cell, child: liveEntry(ch, () {
+                SizedBox(width: cell, child: liveEntry(ch, () async {
+                  // 跑腿单一建出来就是「待支付」,必须把订单接回来直接进支付。
+                  // 之前这里和其他频道一样 push 完就不管返回值,
+                  // 结果用户填完地址、看完报价、点了下单,页面一关单子就没了
+                  if (ch.key == 'errand') {
+                    final created = await Navigator.of(context).push<Order>(
+                        MaterialPageRoute<Order>(
+                            builder: (_) => ErrandPage(api: widget.api)));
+                    if (created == null || !context.mounted) return;
+                    final paid =
+                        await payPendingOrder(widget.api, created, context);
+                    if (!context.mounted) return;
+                    // 付没付成都进详情:付成了能看进度,没付成那里有「去支付」
+                    await Navigator.of(context).push(MaterialPageRoute<void>(
+                        builder: (_) => OrderDetailPage(
+                            api: widget.api,
+                            orderNo: (paid ?? created).orderNo)));
+                    return;
+                  }
                   final route = switch (ch.key) {
                     'food' => MaterialPageRoute<void>(
                         builder: (_) => CategoryPage(
@@ -856,8 +947,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                             api: widget.api, lat: _myLat, lng: _myLng)),
                     'voucher' => MaterialPageRoute<void>(
                         builder: (_) => DealsPage(api: widget.api)),
-                    'errand' => MaterialPageRoute<void>(
-                        builder: (_) => ErrandPage(api: widget.api)),
+                    // 跑腿在上面单独处理(要接住订单去支付),不走这个 switch
                     // 注册了但还没接页面的频道:不跳空白页,直接不响应
                     _ => null,
                   };
@@ -1155,6 +1245,15 @@ class _MerchantListViewState extends State<MerchantListView> {
                               has: m.kitchenCam,
                               label: m.kitchenCamLabel,
                               compact: true),
+                          // 堂食标识(#187)。同样是法定要求:第 123 号令
+                          // 第十二条,列表页和商家主页都要展示,而且和明厨亮灶
+                          // 一样**要标两种**,所以无堂食、未填报也照样渲染。
+                          // 未填报如实写"未填报",不猜成有堂食
+                          SzChip(m.dineInLabel,
+                              color: m.dineInStatus == 'yes'
+                                  ? sz.earn
+                                  : sz.inkMuted,
+                              dense: true),
                           // 忙碌模式:商家自己声明"现在出餐慢",
                           // 下单前就让用户看到,而不是下了单再超时
                           if (m.busyActive)
@@ -1310,20 +1409,40 @@ class _MerchantListViewState extends State<MerchantListView> {
                             art: BrandArt.bowl,
                             text: '附近暂时没有营业的商家\n下拉刷新试试'),
                       ),
+                ]),
+              ),
+              // 商家卡片按需构建。原来是 SliverChildListDelegate 里 for 展开,
+              // 进首页就把全部卡片一次性建出来,商家一多首帧就卡
               if (merchants != null)
-                for (final (i, m) in merchants.indexed)
-                  FadeSlideIn(index: i, child: _bigMerchantCard(m)),
-              // 排序口径的兜底承诺:钱买不到靠前的位置
-              if (merchants != null && merchants.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(kPagePad, 18, kPagePad, 0),
-                  child: Text('没有竞价排名 · 排序只按你选的口径',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: 11.5,
-                          color: Theme.of(context).sz.inkFaint)),
+                SliverList.builder(
+                  itemCount: merchants.length + _more.length,
+                  itemBuilder: (context, i) {
+                    // 触底预加载:首页不满一页就说明后面没有了,不用白跑一趟
+                    if (i == merchants.length + _more.length - 1 &&
+                        merchants.length >= _pageSize) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) =>
+                          _loadMore(merchants.length + _more.length));
+                    }
+                    final m = i < merchants.length
+                        ? merchants[i]
+                        : _more[i - merchants.length];
+                    return FadeSlideIn(index: i, child: _bigMerchantCard(m));
+                  },
                 ),
-              const SizedBox(height: 24),
+              SliverToBoxAdapter(
+                child: Column(children: [
+                  // 排序口径的兜底承诺:钱买不到靠前的位置
+                  if (merchants != null && merchants.isNotEmpty)
+                    Padding(
+                      padding:
+                          const EdgeInsets.fromLTRB(kPagePad, 18, kPagePad, 0),
+                      child: Text('没有竞价排名 · 排序只按你选的口径',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              color: Theme.of(context).sz.inkFaint)),
+                    ),
+                  const SizedBox(height: 24),
                 ]),
               ),
             ],
@@ -1426,8 +1545,11 @@ class _MenuPageState extends State<MenuPage>
 
   Future<void> _load() async {
     try {
-      final detail = await widget.api.merchantDetail(widget.merchant.id);
-      final dishes = await widget.api.menu(widget.merchant.id);
+      // 并发:店铺详情和菜单互不依赖,串起来发等于让用户多等一个来回
+      final (detail, dishes) = await (
+        widget.api.merchantDetail(widget.merchant.id),
+        widget.api.menu(widget.merchant.id),
+      ).wait;
       bool fav = _isFavorite;
       if (widget.api.isLoggedIn) {
         try {
@@ -1754,6 +1876,22 @@ class _MenuPageState extends State<MenuPage>
               ),
             )),
           ),
+          // 堂食标识(#187):第 123 号令第十二条要求商家主页面也要展示,
+          // 位置紧挨明厨亮灶那一条。三态照实显示,未填报不猜
+          const SizedBox(height: 7),
+          Row(children: [
+            Icon(
+                shop.dineInStatus == 'yes'
+                    ? Icons.restaurant
+                    : Icons.storefront_outlined,
+                size: 14,
+                color: shop.dineInStatus == 'yes' ? sz.earn : sz.inkFaint),
+            const SizedBox(width: 5),
+            Text(shop.dineInLabel,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: shop.dineInStatus == 'yes' ? sz.earn : sz.inkMuted)),
+          ]),
           // 把平台主张落到这一家店:抽象的「5% 封顶」在这里变成
           // 「你这一单便宜在哪」——这是店铺页唯一该讲平台的地方
           const SizedBox(height: 11),
@@ -2471,7 +2609,16 @@ class _MenuPageState extends State<MenuPage>
     if (!_loaded) {
       body = const Center(child: CircularProgressIndicator());
     } else if (_error != null) {
-      body = Center(child: Text(_error!));
+      // 原来这里只有一行错误文字,没有重试:菜单没加载出来就等于进不了这家店
+      body = SzError(
+          error: _error,
+          onRetry: () {
+            setState(() {
+              _error = null;
+              _loaded = false;
+            });
+            _load();
+          });
     } else {
       body = Column(
         children: [
@@ -2721,7 +2868,31 @@ class OrderListView extends StatefulWidget {
 }
 
 class _OrderListViewState extends State<OrderListView> {
-  late Future<List<Order>> _future = widget.api.myOrders();
+  late Future<List<Order>> _future = _loadOrders();
+
+  /// 各单的聊天未读数。骑手/商家发来的消息以前在列表上毫无痕迹,
+  /// 用户不点进详情就永远不知道有人在等回话
+  final Map<String, int> _unread = {};
+
+  Future<List<Order>> _loadOrders() async {
+    final orders = await widget.api.myOrders();
+    // 只查进行中的单:已完成/已取消的单不会再有人说话,
+    // 给全部订单各发一个请求纯属浪费
+    final active = orders
+        .where((o) =>
+            o.status != OrderStatus.completed &&
+            o.status != OrderStatus.cancelled)
+        .take(6)
+        .toList();
+    final counts = await Future.wait(active
+        .map((o) => widget.api.orderUnread(o.orderNo).onError((_, __) => 0)));
+    if (!mounted) return orders;
+    _unread
+      ..clear()
+      ..addEntries(
+          [for (final (i, o) in active.indexed) MapEntry(o.orderNo, counts[i])]);
+    return orders;
+  }
 
   // 分页:老口径是服务端写死 limit(50) 不分页,用户超过 50 单后就永远看不到
   // 更早的订单——跟「每一单的账都可查」直接冲突。改成游标分页 + 触底加载。
@@ -2751,7 +2922,7 @@ class _OrderListViewState extends State<OrderListView> {
   void _reset() {
     _loaded.clear();
     _noMore = false;
-    _future = widget.api.myOrders();
+    _future = _loadOrders();
   }
 
   /// 状态语义色:进行中 = 品牌橙(需要关注),完成 = 账目绿(钱已结清),取消 = 灰
@@ -2825,6 +2996,18 @@ class _OrderListViewState extends State<OrderListView> {
                           style: const TextStyle(
                               fontWeight: FontWeight.w600, fontSize: 15)),
                     ),
+                    // 有人在等你回话:红点比什么文案都管用
+                    if ((_unread[order.orderNo] ?? 0) > 0) ...[
+                      Icon(Icons.mark_chat_unread,
+                          size: 15, color: theme.colorScheme.primary),
+                      const SizedBox(width: 4),
+                      Text('${_unread[order.orderNo]}',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: theme.colorScheme.primary)),
+                      const SizedBox(width: 8),
+                    ],
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),
@@ -2872,6 +3055,25 @@ class _OrderListViewState extends State<OrderListView> {
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: theme.colorScheme.outline)),
                     const Spacer(),
+                    // 待支付的单必须在列表里就能付。跑腿单建出来就是这个状态,
+                    // 支付中断(切后台、网断)留下的单也落在这儿
+                    if (order.status == OrderStatus.pendingPayment)
+                      SizedBox(
+                        height: 30,
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12),
+                              visualDensity: VisualDensity.compact),
+                          onPressed: () async {
+                            final paid = await payPendingOrder(
+                                widget.api, order, context);
+                            if (paid != null && mounted) setState(_reset);
+                          },
+                          child: const Text('去支付',
+                              style: TextStyle(fontSize: 12)),
+                        ),
+                      ),
                     if (order.status == OrderStatus.completed)
                       SizedBox(
                         height: 30,
@@ -2975,31 +3177,60 @@ class OrderDetailPage extends StatefulWidget {
   State<OrderDetailPage> createState() => _OrderDetailPageState();
 }
 
-class _OrderDetailPageState extends State<OrderDetailPage> {
+class _OrderDetailPageState extends State<OrderDetailPage>
+    with WidgetsBindingObserver {
   Order? _order;
   Review? _review;
   AfterSale? _afterSale;
   List<OrderEvent> _events = [];
   List<RefundRecord> _refunds = [];
+  Map<String, dynamic>? _foodSafety;
+  int _unread = 0;
   bool _reviewChecked = false;
+  String? _error;
   Timer? _timer;
   WebSocketChannel? _ws;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refresh();
     _connectWs();
-    // WebSocket 为主,慢轮询兜底(断线期间也不至于卡住)
-    _timer = Timer.periodic(const Duration(seconds: 15), (_) => _refresh());
+    _startPolling();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _ws?.sink.close();
     super.dispose();
   }
+
+  /// 退到后台就停表。原来不判生命周期,用户切走之后这一页还在每 15 秒
+  /// 发一轮请求,费流量费电,回前台时刷一次就够了
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refresh();
+      _startPolling();
+    } else {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  /// WebSocket 为主,慢轮询兜底(断线期间也不至于卡住)。
+  /// 订单到终态后不会再变,继续轮询是白跑
+  void _startPolling() {
+    _timer?.cancel();
+    if (_isFinal(_order?.status)) return;
+    _timer = Timer.periodic(const Duration(seconds: 15), (_) => _refresh());
+  }
+
+  static bool _isFinal(OrderStatus? s) =>
+      s == OrderStatus.completed || s == OrderStatus.cancelled;
 
   /// 订单状态实时推送:状态一变立刻刷新
   void _connectWs() {
@@ -3032,24 +3263,45 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
 
   Future<void> _refresh() async {
     try {
-      final order = await widget.api.getOrder(widget.orderNo);
-      final events = await widget.api.orderEvents(widget.orderNo);
-      Review? review = _review;
-      if (order.status == OrderStatus.completed && !_reviewChecked) {
-        review = await widget.api.orderReview(widget.orderNo);
-        _reviewChecked = true;
-      }
-      AfterSale? afterSale = _afterSale;
-      if (order.status == OrderStatus.delivered ||
-          order.status == OrderStatus.completed) {
-        afterSale = await widget.api.orderAfterSale(widget.orderNo);
-      }
-      var refunds = _refunds;
-      if (order.refundCents > 0) {
-        try {
-          refunds = await widget.api.orderRefunds(widget.orderNo);
-        } catch (_) {} // 拉不到就退回汇总文案
-      }
+      // 主数据并发拉。这两个互不依赖,串起来发等于让用户白等一个来回
+      final (order, events) = await (
+        widget.api.getOrder(widget.orderNo),
+        widget.api.orderEvents(widget.orderNo),
+      ).wait;
+
+      // 附属数据也并发,而且各自兜底 —— 评价拉不到不该把整页打回错误态
+      final needReview =
+          order.status == OrderStatus.completed && !_reviewChecked;
+      final needAfterSale = order.status == OrderStatus.delivered ||
+          order.status == OrderStatus.completed;
+      final (review, afterSale, refunds, foodSafety, unread) = await (
+        needReview
+            ? widget.api
+                .orderReview(widget.orderNo)
+                .onError((_, __) => _review)
+            : Future<Review?>.value(_review),
+        needAfterSale
+            ? widget.api
+                .orderAfterSale(widget.orderNo)
+                .onError((_, __) => _afterSale)
+            : Future<AfterSale?>.value(_afterSale),
+        order.refundCents > 0
+            // 拉不到就退回汇总文案
+            ? widget.api
+                .orderRefunds(widget.orderNo)
+                .onError((_, __) => _refunds)
+            : Future<List<RefundRecord>>.value(_refunds),
+        // 食安投诉状态:投诉能提交却查不到进度,比没有入口更伤人
+        widget.api
+            .foodSafetyOfOrder(widget.orderNo)
+            .onError((_, __) => _foodSafety),
+        // 聊天未读:骑手/商家发来的消息以前完全不提醒,用户看不到就回不了
+        _isFinal(order.status)
+            ? Future<int>.value(0)
+            : widget.api.orderUnread(widget.orderNo).onError((_, __) => _unread),
+      ).wait;
+      if (needReview) _reviewChecked = true;
+
       if (mounted) {
         setState(() {
           _order = order;
@@ -3057,9 +3309,19 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
           _review = review;
           _afterSale = afterSale;
           _refunds = refunds;
+          _foodSafety = foodSafety;
+          _unread = unread;
+          _error = null;
         });
       }
-    } catch (_) {}
+      if (_isFinal(order.status)) _startPolling(); // 到终态就停表
+    } catch (e) {
+      // 原来这里是 catch (_) {},首次加载失败就永远转圈:
+      // 没提示、没重试、用户只能杀进程
+      if (mounted && _order == null) {
+        setState(() => _error = e is ApiException ? e.message : '$e');
+      }
+    }
   }
 
   /// 售后分流:普通售后走商家先处理;食品安全是红线,不经商家直达平台
@@ -3097,7 +3359,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     }
   }
 
-  /// 食安投诉:强制拍照,可附医疗凭证;直达平台标红加急
+  /// 食安投诉:强制上传照片(走相册,不申请相机),可附医疗凭证;直达平台标红加急
   Future<void> _applyFoodSafety() async {
     var kind = 'foreign_object';
     final desc = TextEditingController();
@@ -3174,7 +3436,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                         border: OutlineInputBorder()),
                   ),
                   const SizedBox(height: 4),
-                  Text('问题食品拍照(必传):',
+                  Text('问题食品照片(必传):',
                       style: Theme.of(sheetContext).textTheme.bodySmall),
                   const SizedBox(height: 6),
                   Wrap(spacing: 6, runSpacing: 6, children: [
@@ -3187,7 +3449,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                     if (images.length < 6)
                       OutlinedButton.icon(
                         icon: const Icon(Icons.add_a_photo, size: 16),
-                        label: Text(uploading ? '上传中…' : '拍照'),
+                        label: Text(uploading ? '上传中…' : '选图片'),
                         onPressed: uploading ? null : () => pick(images),
                       ),
                   ]),
@@ -3235,7 +3497,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     }
     if (images.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('食安投诉必须拍照举证(问题食品照片)')));
+          const SnackBar(content: Text('食安投诉必须上传问题食品照片')));
       return;
     }
     try {
@@ -3275,7 +3537,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                 ),
               ),
               const SizedBox(height: 4),
-              Text('拍照举证(必传,最多 3 张):有图才能快速判责退款',
+              Text('上传照片(必传,最多 3 张):有图才能快速判责退款',
                   style: Theme.of(context).textTheme.bodySmall),
               const SizedBox(height: 6),
               Wrap(spacing: 6, runSpacing: 6, children: [
@@ -3539,6 +3801,46 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
 
   /// 骑手发起的加价确认。同意与否都由你决定 ——
   /// 不回复的后果是骑手一直站在那里,所以文案直接把两条路都写清楚。
+  /// 食安投诉状态。以前投诉能提交却查不到进度,用户交完照片就没下文了 ——
+  /// 对一个把食安当卖点的平台,投诉黑洞比没有投诉入口更伤
+  Widget _foodSafetyCard(Map<String, dynamic> report) {
+    final theme = Theme.of(context);
+    final status = report['status'] as String? ?? 'open';
+    final (label, color) = switch (status) {
+      'confirmed' => ('投诉成立,平台已处理', theme.sz.earn),
+      'dismissed' => ('调查后未认定', theme.colorScheme.outline),
+      _ => ('平台受理中', theme.colorScheme.primary),
+    };
+    final actions = (report['actions'] as List?) ?? const [];
+    final latest = actions.isEmpty ? null : actions.last as Map;
+    final note = (latest?['note'] as String?) ?? '';
+    return Card(
+      color: color.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(Icons.health_and_safety_outlined, size: 18, color: color),
+            const SizedBox(width: 6),
+            Expanded(
+                child: Text('食品安全投诉 · $label',
+                    style: theme.textTheme.titleSmall
+                        ?.copyWith(color: color, fontWeight: FontWeight.w700))),
+          ]),
+          if (note.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(note, style: theme.textTheme.bodySmall),
+          ],
+          if (status == 'open') ...[
+            const SizedBox(height: 6),
+            Text('食安投诉不经商家,由平台直接处理。处理完会推送通知你。',
+                style: theme.textTheme.bodySmall),
+          ],
+        ]),
+      ),
+    );
+  }
+
   Widget _raiseAskCard(Order order) {
     final want = order.goodsRaiseCents ?? 0;
     final over = want - order.goodsBudgetCents;
@@ -3648,7 +3950,15 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('订单详情')),
       body: order == null
-          ? const Center(child: CircularProgressIndicator())
+          ? (_error != null
+              // 加载失败要给得出去也回得来:原来这里只有一个转圈
+              ? SzError(
+                  error: _error,
+                  onRetry: () {
+                    setState(() => _error = null);
+                    _refresh();
+                  })
+              : const Center(child: CircularProgressIndicator()))
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -3691,6 +4001,24 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                   ]),
                 ),
                 const SizedBox(height: 16),
+                // 待支付:这一页最重要的动作就是付款,排在所有卡片之前。
+                // 没有这个入口的时候,跑腿单进来只能干看着,15 分钟后自动作废
+                if (order.status == OrderStatus.pendingPayment)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: FilledButton(
+                      onPressed: () async {
+                        final paid =
+                            await payPendingOrder(widget.api, order, context);
+                        if (paid != null && mounted) await _refresh();
+                      },
+                      child: Text('去支付 ${yuan(order.totalCents)}'),
+                    ),
+                  ),
+                if (_foodSafety != null) ...[
+                  _foodSafetyCard(_foodSafety!),
+                  const SizedBox(height: 8),
+                ],
                 // 帮买:骑手问「要多花钱吗」。**这个卡必须排在最前面** ——
                 // 骑手正站在货架前等回复,埋在页面下半段等于让他一直站着
                 if (order.isErrandBuy && order.goodsRaiseStatus == 'pending')
@@ -3895,7 +4223,26 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                     order.status != OrderStatus.cancelled)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
+                    child: Column(children: [
+                      // 未读提醒。以前骑手/商家发消息用户这边一点动静都没有,
+                      // 只能靠自己想起来点进去看
+                      if (_unread > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Row(children: [
+                            Icon(Icons.mark_chat_unread_outlined,
+                                size: 16,
+                                color: Theme.of(context).colorScheme.primary),
+                            const SizedBox(width: 6),
+                            Text('有 $_unread 条新消息',
+                                style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                    color:
+                                        Theme.of(context).colorScheme.primary)),
+                          ]),
+                        ),
+                      Row(
                       children: [
                         if (order.riderId != null)
                           Expanded(
@@ -3951,7 +4298,8 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                           ),
                         ],
                       ],
-                    ),
+                      ),
+                    ]),
                   ),
                 const Divider(height: 32),
                 for (final item in order.items)
@@ -4612,23 +4960,28 @@ class _ProfileViewState extends State<ProfileView> {
   }
 
   Future<void> _load() async {
-    if (widget.api.isLoggedIn) {
+    // 三块数据并发拉。原来是串行:进「我的」要连等三个来回才看得全
+    final loggedIn = widget.api.isLoggedIn;
+    final profileF = loggedIn ? widget.api.me() : null;
+    final configF = widget.api.platformConfig();
+    final ordersF = loggedIn ? widget.api.myOrders() : null;
+    if (profileF != null) {
       try {
-        final profile = await widget.api.me();
+        final profile = await profileF;
         if (mounted) setState(() => _profile = profile);
       } catch (_) {}
     } else if (mounted) {
       setState(() => _profile = null);
     }
     try {
-      final config = await widget.api.platformConfig();
+      final config = await configF;
       if (mounted) {
         setState(() => _marketingOn = config['marketing'] == true);
       }
     } catch (_) {}
-    if (widget.api.isLoggedIn) {
+    if (ordersF != null) {
       try {
-        final orders = await widget.api.myOrders();
+        final orders = await ordersF;
         var done = 0;
         var saved = 0;
         for (final o in orders) {
@@ -4926,6 +5279,11 @@ class _ProfileViewState extends State<ProfileView> {
             _accountRow(context, '平台账本与见证节点', '公开可复核',
                 () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => TrustPage(api: widget.api)))),
+            // 直达入口:这一页是我们和三大平台唯一的结构性差别,
+            // 不该只藏在信任页里点两层才看得到
+            _accountRow(context, '平台体检', '核账差错/可用率/赔付,难看也照实显示',
+                () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => TransparencyPage(api: widget.api)))),
           ]),
         ),
         const SizedBox(height: 18),
@@ -5063,6 +5421,21 @@ class _ProfileViewState extends State<ProfileView> {
                 if (!context.mounted) return;
                 await Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => FeedbackPage(api: widget.api)));
+              },
+            ),
+            const Divider(height: 1),
+            // 食安投诉查得到进度,投诉才不是黑洞
+            ListTile(
+              leading: const Icon(Icons.health_and_safety_outlined),
+              title: const Text('我的食安投诉'),
+              subtitle: const Text('处理进度与平台回复',
+                  style: TextStyle(fontSize: 11)),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => FoodSafetyRecordsPage(api: widget.api)));
               },
             ),
             const Divider(height: 1),

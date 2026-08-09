@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'payment_service.dart';
 import 'session.dart';
 
 /// 团购页(从金刚区进入):在售代金券列表。
@@ -139,16 +140,20 @@ class _VoucherListViewState extends State<VoucherListView> {
     if (confirmed != true || !mounted) return;
     try {
       final ticket = await widget.api.purchaseVoucher(deal.id);
-      // 模拟支付(微信支付联调后换成拉起收银台)
-      await widget.api.payVoucherMock(ticket.purchaseNo);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('抢购成功!券已放入「我的-我的券包」'),
-        action: SnackBarAction(
-            label: '去查看',
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => MyVouchersPage(api: widget.api)))),
-      ));
+      // 支付统一走 payment_service:付不成会如实提示并留下待支付的购买记录,
+      // 这里就不能再无条件报"抢购成功" —— 券没到手说到手,核销时才穿帮
+      final paid = await payVoucherTicket(widget.api, ticket, context);
+      if (!mounted) return;
+      if (paid != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('抢购成功!券已放入「我的-我的券包」'),
+          action: SnackBarAction(
+              label: '去查看',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => MyVouchersPage(api: widget.api)))),
+        ));
+      }
       _load();
     } catch (e) {
       if (!mounted) return;
