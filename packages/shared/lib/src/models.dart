@@ -98,6 +98,8 @@ class Merchant {
         kitchenCam = json['kitchen_cam'] as bool? ?? false,
         kitchenCamLabel =
             json['kitchen_cam_label'] as String? ?? '无明厨亮灶',
+        dineInStatus = json['dine_in_status'] as String? ?? 'unknown',
+        dineInLabel = json['dine_in_label'] as String? ?? '未填报',
         bizType = json['biz_type'] as String? ?? 'food',
         autoAccept = json['auto_accept'] as bool? ?? false,
         foodSeal = json['food_seal'] as bool? ?? false,
@@ -147,6 +149,15 @@ class Merchant {
   /// 看不到就是没有。
   final bool kitchenCam;
   final String kitchenCamLabel;
+
+  /// 堂食标识(#187,总局令第 123 号第十二条,2026-06-01 施行)。
+  /// 列表页和商家主页都要展示,和明厨亮灶一样是**法定公示项**。
+  ///
+  /// unknown 未填报 / yes 有堂食 / no 无堂食。**未填报就照实显示「未填报」**,
+  /// 不要在客户端兜底成「有堂食」—— 猜一个填上等于替商家撒谎。
+  /// dineInLabel 是服务端给的现成文案,三端不各写一套映射。
+  final String dineInStatus;
+  final String dineInLabel;
   final String bizType;  // 业态:food 餐饮外卖 / hotel 酒店住宿(工作台按此分叉)
 
   /// 自动接单(仅 GET /merchants/me 下发;支付成功即进入制作)

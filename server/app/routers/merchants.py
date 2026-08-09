@@ -85,8 +85,8 @@ _NEARBY_SQL_TMPL = """
             :radius_m
           )
     GROUP BY m.id
-    ORDER BY {order_by}
-    LIMIT 50
+    ORDER BY {order_by}, m.id
+    LIMIT :limit OFFSET :offset
 """
 
 _DIST_EXPR = (
@@ -94,7 +94,10 @@ _DIST_EXPR = (
     "<-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography"
 )
 
-# 排序白名单(拼 SQL 前必须查表,防注入)
+# 排序白名单(拼 SQL 前必须查表,防注入)。
+# 每个排序后面都再跟一个 m.id(见 SQL 模板):评分/月售有大量并列,
+# 并列组内的顺序不定 —— 翻页时同一家店会在第 1 页和第 2 页各出现一次,
+# 而另一家一次都不出现。分页要成立,排序必须是全序
 _SORTS = {
     "distance": _DIST_EXPR,
     "rating": (
@@ -104,6 +107,23 @@ _SORTS = {
     "sales": "count(o.id) DESC, " + _DIST_EXPR,
 }
 
+# 列表一页最多给这么多家:再多首帧就卡,也没人一屏看得完
+_PAGE_MAX = 50
+
+
+def _browse_radius_m(requested: int | None) -> int:
+    """浏览半径的唯一口径 = 配送上限(config.delivery_max_km)。
+
+    此前列表默认 5000 而配送上限是 4000:4–5km 的店进得了列表、进得了店、
+    加得了购物车,提交时被 orders.py 以「超出配送范围」409 打回。
+    用户看到的是"这店明明在列表里,凭什么不给我送" —— 这是信任伤害,
+    不是体验瑕疵,所以宁可少给几家也不给下不了单的。
+
+    传进来的值一律向下收敛到上限:老客户端(搜索页还挂着「5km 内」)
+    和第三方调用方不会因为多传一个数就把超范围的店放回列表里。
+    """
+    cap = int(settings.delivery_max_km * 1000)
+    return cap if requested is None else min(requested, cap)
 
 
 async def _fill_top_dishes(db: AsyncSession, outs: list[MerchantOut]) -> None:
@@ -133,19 +153,28 @@ async def _fill_top_dishes(db: AsyncSession, outs: list[MerchantOut]) -> None:
 async def list_merchants(
     lat: float | None = None,
     lng: float | None = None,
-    radius_m: int = 5000,
+    radius_m: int | None = Query(default=None, ge=100),
     sort: str = "distance",
     category: str | None = None,
     min_rating: float | None = Query(default=None, ge=0, le=5),
     has_promo: bool = False,          # 有满减或满赠
     max_min_order_cents: int | None = Query(default=None, ge=0, le=100_000),
+    limit: int = Query(default=_PAGE_MAX, ge=1, le=_PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
     """附近营业中的商家(带月售),sort=distance|rating|sales,category 按品类筛选。
 
     筛选与 /merchants/search 同口径:min_rating 评分下限、has_promo 有优惠、
     max_min_order_cents 起送价上限。首页和搜索页给的是同一套条件,
-    用户不用在两个地方学两遍。距离上限直接用已有的 radius_m。
+    用户不用在两个地方学两遍。
+
+    距离上限 radius_m 不传就取配送上限,传了也不会超过配送上限
+    (见 _browse_radius_m:列表里出现的每一家店都必须下得了配送单)。
+
+    分页 limit/offset:**返回体仍是纯 list,不包 {items,total}** ——
+    翻页是新加的能力,不该让所有老调用方跟着改解析。
+    没有下一页的信号就是"这一页不足 limit 家"。
     """
     if sort not in _SORTS:
         raise HTTPException(422, "sort 仅支持 distance / rating / sales")
@@ -173,7 +202,9 @@ async def list_merchants(
                 category_clause=(
                     "AND m.category = :category" if category else ""),
                 filter_clause="\n      ".join(filters))),
-            {"lat": lat, "lng": lng, "radius_m": radius_m,
+            {"lat": lat, "lng": lng,
+             "radius_m": _browse_radius_m(radius_m),
+             "limit": limit, "offset": offset,
              **({"category": category} if category else {}),
              **filter_params},
         )
@@ -209,7 +240,10 @@ async def list_merchants(
                                 Merchant.gift_rules != []))
     if max_min_order_cents is not None:
         query = query.where(Merchant.min_order_cents <= max_min_order_cents)
-    result = await db.scalars(query.limit(50))
+    # 排序在这条兜底路径上此前是缺的:没有 ORDER BY 时 Postgres 的返回顺序
+    # 不作保证,加了 offset 就会漏店和重店。按 id 是任意但**稳定**的全序
+    result = await db.scalars(query.order_by(Merchant.id)
+                              .limit(limit).offset(offset))
     outs = [MerchantOut.model_validate(m) for m in result]
     await _fill_top_dishes(db, outs)
     return outs
@@ -272,6 +306,9 @@ async def search_merchants(
     筛选:max_distance_m 距离上限、min_rating 评分下限、has_promo 有优惠、
     max_min_order_cents 起送价上限。综合/距离排序需要 lat/lng,缺则退化按评分。
     绝不做竞价排名——排序只用真实评分/销量/距离,商家花钱买不到靠前。
+
+    距离口径与首页列表同一个数(配送上限):此前搜索**不传就完全不限距离**,
+    搜出来的店比首页还远,一样是点进去下不了单。
     """
     has_pos = lat is not None and lng is not None
     if sort in ("comprehensive", "distance") and not has_pos:
@@ -287,11 +324,12 @@ async def search_merchants(
              " AND d.is_on_sale AND d.name ILIKE :pattern))"]
     if has_pos:
         params["lat"], params["lng"] = lat, lng
-        if max_distance_m is not None:
-            params["radius_m"] = max_distance_m
-            where.append(
-                "ST_DWithin(ST_SetSRID(ST_MakePoint(m.lng,m.lat),4326)::geography,"
-                " ST_SetSRID(ST_MakePoint(:lng,:lat),4326)::geography, :radius_m)")
+        # 不传 max_distance_m 也要卡住:默认无限远等于把"搜得到但送不到"
+        # 做成了常态。传了则收敛到配送上限,和首页列表同一个数
+        params["radius_m"] = _browse_radius_m(max_distance_m)
+        where.append(
+            "ST_DWithin(ST_SetSRID(ST_MakePoint(m.lng,m.lat),4326)::geography,"
+            " ST_SetSRID(ST_MakePoint(:lng,:lat),4326)::geography, :radius_m)")
     if min_rating is not None:
         params["min_rating"] = min_rating
         where.append(
@@ -3036,18 +3074,29 @@ async def merchant_licenses(
     db: AsyncSession = Depends(get_db),
 ):
     """店铺证照公示(公开):证号 + 公示图入口。仅审核通过的店。
-    老库存量商家可能没传图(入驻早于强制上传),只公示证号不报错。"""
+    老库存量商家可能没传图(入驻早于强制上传),只公示证号不报错。
+
+    餐饮店公示两张:营业执照 + 食品经营许可证。此前只有后者 ——
+    总局令第 123 号第十一条要求的是"营业执照和食品经营许可证"两样都在
+    主页面显著位置持续展示,而酒店那条路径反倒是全的。同一件事,
+    两个业态两个口径,漏的那个就是合规缺口。
+    """
     shop = await db.get(Merchant, merchant_id)
     if shop is None or shop.status != MerchantStatus.approved:
         raise HTTPException(404, "店铺不存在")
     items = []
+    # 酒店的 license_no 存的就是营业执照号(入驻表单如此收);
+    # 餐饮的 license_no 是食品经营许可证号,营业执照另存 business_license_no
     labels = ({"license": "营业执照", "special": "特种行业许可证(旅馆业)",
                "hygiene": "卫生许可证"} if shop.biz_type == "hotel"
-              else {"license": "食品经营许可证"})
+              else {"business_license": "营业执照",
+                    "license": "食品经营许可证"})
     for kind, label in labels.items():
         no = ""
         if kind == "license":
             no = shop.license_no or ""
+        elif kind == "business_license":
+            no = shop.business_license_no or ""
         elif kind == "special" and shop.biz_type == "hotel":
             from ..models import HotelProfile
             hp = await db.scalar(select(HotelProfile).where(
@@ -3060,6 +3109,9 @@ async def merchant_licenses(
             "kind": kind,
             "label": label,
             "no": no,
+            # 证照上的主体名称。光一串信用代码查不出是谁 ——
+            # 公示的意义在于用户能对上"这家店背后是哪个法律主体"
+            "subject": shop.license_subject or "",
             "image_url": (f"/merchants/{merchant_id}/licenses/{kind}"
                           if url else ""),
         })

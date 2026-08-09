@@ -88,6 +88,17 @@ class _ShopLicensesPageState extends State<ShopLicensesPage> {
                                       style: TextStyle(
                                           fontSize: 13, color: sz.inkMuted)),
                                 ],
+                                // 证照主体名称:光一串信用代码谁也查不出是谁。
+                                // 店招和执照主体经常不同名(「赞小碗」/
+                                // 「成都赞小碗餐饮管理有限公司」),这一行才是
+                                // 用户真正能拿去核对的东西
+                                if ((item['subject'] as String? ?? '')
+                                    .isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text('主体:${item['subject']}',
+                                      style: TextStyle(
+                                          fontSize: 13, color: sz.inkMuted)),
+                                ],
                                 if ((item['image_url'] as String? ?? '')
                                     .isNotEmpty) ...[
                                   const SizedBox(height: 8),

@@ -348,6 +348,23 @@ class Merchant(Base):
     def kitchen_cam_label(self) -> str:
         return "有明厨亮灶" if self.kitchen_cam else "无明厨亮灶"
 
+    # 堂食标识(总局令第 123 号第十二条,2026-06-01 施行):
+    # 列表页和商家主页都要展示。三态 unknown 未填报 / yes 有堂食 / no 无堂食。
+    #
+    # **默认 unknown,不默认「有堂食」**。这是法定公示项,平台替商家猜一个
+    # 填上去,就是拿平台的信用给一条没人核实过的信息背书 —— 填错比不填更糟,
+    # 而"未填报"至少是句真话,用户看得出这里还没数据。
+    # 不塞 JSONB 的理由同 kitchen_cam_status:列表页要按它展示,得能索引
+    dine_in_status: Mapped[str] = mapped_column(
+        String(10), default="unknown", server_default="unknown", index=True)
+
+    @property
+    def dine_in_label(self) -> str:
+        """列表页/详情页的堂食标识文案。挂模型上的理由同 kitchen_cam:
+        商家列表不止一个,逐个端点填一定会漏,漏掉的那个就是合规缺口。"""
+        return {"yes": "有堂食", "no": "无堂食"}.get(
+            self.dine_in_status, "未填报")
+
     status: Mapped[MerchantStatus] = mapped_column(
         _enum_column(MerchantStatus, "merchant_status"),
         default=MerchantStatus.pending,

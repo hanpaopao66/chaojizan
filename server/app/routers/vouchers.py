@@ -209,7 +209,13 @@ async def pay_mock(
     user: User = Depends(require_role("customer")),
     db: AsyncSession = Depends(get_db),
 ):
-    """模拟支付(与外卖同语义;微信支付联调时替换为统一下单+回调)。幂等。"""
+    """模拟支付(与外卖同语义;微信支付联调时替换为统一下单+回调)。幂等。
+
+    生产 MOCK_PAY_ENABLED=false 封死。和住宿那条一样,这道闸门以前只有
+    外卖有 —— 真实收款上线后不封等于白送券。
+    """
+    if not settings.mock_pay_enabled:
+        raise HTTPException(403, "模拟支付已关闭,请使用微信支付")
     p = await db.scalar(
         select(VoucherPurchase)
         .where(VoucherPurchase.purchase_no == purchase_no).with_for_update())

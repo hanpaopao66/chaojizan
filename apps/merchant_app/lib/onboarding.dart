@@ -240,6 +240,9 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   late final _licenseNo =
       TextEditingController(text: widget.existing?.licenseNo ?? '');
   late String _category = widget.existing?.category ?? 'fast_food';
+  // 堂食标识(#187):unknown 未填报 / yes 有堂食 / no 无堂食。
+  // 初值取服务端已填的,新申请是 unknown —— 不预设成「有堂食」
+  late String _dineInStatus = widget.existing?.dineInStatus ?? 'unknown';
   // 业态:第一步选择,决定后续收哪些证照(重新提交时沿用原业态)
   late String _bizType = widget.existing?.bizType ?? 'food';
   late String _licenseImageUrl = widget.existing?.licenseImageUrl ?? '';
@@ -320,6 +323,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
         _step = (d['step'] as int? ?? 0).clamp(0, 2);
         _bizType = d['biz_type'] as String? ?? 'food';
         _category = d['category'] as String? ?? 'fast_food';
+        _dineInStatus = d['dine_in_status'] as String? ?? 'unknown';
         _tier = d['tier'] as String? ?? 'economy';
         _name.text = d['name'] as String? ?? '';
         _description.text = d['description'] as String? ?? '';
@@ -344,6 +348,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
       'step': _step,
       'biz_type': _bizType,
       'category': _category,
+      'dine_in_status': _dineInStatus,
       'tier': _tier,
       'name': _name.text,
       'description': _description.text,
@@ -478,6 +483,8 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           licenseImageUrl: _licenseImageUrl,
           category: _category,
           bizType: _bizType,
+          // 堂食标识随入驻一起提交,不再补一发 PATCH
+          dineInStatus: _isHotel ? 'unknown' : _dineInStatus,
           hotel: _isHotel
               ? {
                   'tier': _tier,
@@ -497,7 +504,10 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           'address': _address.text.trim(),
           'license_no': _licenseNo.text.trim(),
           'license_image_url': _licenseImageUrl,
-          if (!_isHotel) 'category': _category,
+          if (!_isHotel) ...{
+            'category': _category,
+            'dine_in_status': _dineInStatus,
+          },
           // 酒店的第二证照也要随重提更新,否则商家改了等于白改
           if (_isHotel) ...{
             'special_license_no': _specialLicenseNo.text.trim(),
@@ -716,6 +726,32 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
                 labelText: '前台电话',
                 helperText: '展示给已下单的住客,方便到店联系',
                 border: OutlineInputBorder())),
+      ],
+      // 堂食标识(#187,总局令第 123 号第十二条):入驻时就问,
+      // 免得开业第一天列表上就挂着「未填报」。
+      // **预选的是「未填报」而不是「有堂食」**:大半人会顺手划过默认项,
+      // 预选一个业务值等于让平台替他公示了一条没人核实过的信息。
+      // 也因此不设成必填 —— 未填报是个如实的状态,不是待补的空
+      if (!_isHotel) ...[
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: _dineInStatus,
+          decoration: const InputDecoration(
+              labelText: '堂食标识',
+              helperText: '监管要求公示,会显示在用户端列表和店铺页;'
+                  '现在不填之后也能在「店铺」页改',
+              helperMaxLines: 3,
+              border: OutlineInputBorder()),
+          items: const [
+            DropdownMenuItem(value: 'unknown', child: Text('未填报')),
+            DropdownMenuItem(value: 'yes', child: Text('有堂食(店里有餐位)')),
+            DropdownMenuItem(value: 'no', child: Text('无堂食(只做外卖/自取)')),
+          ],
+          onChanged: (v) {
+            setState(() => _dineInStatus = v ?? 'unknown');
+            _saveDraft();
+          },
+        ),
       ],
     ];
   }

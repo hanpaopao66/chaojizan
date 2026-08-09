@@ -455,6 +455,9 @@ async def create_order(
 
     # 优惠券抵扣:平台券走 subsidy(平台承担),店铺券走 discount(商家承担)
     coupon = None
+    # 券是否真的抵到了钱。平台券在 coupon_off 被钳成 0 时(前面的立减/满减
+    # 已经把可抵金额吃光)一分没减,那种情况下不能把券烧掉
+    coupon_applied = False
     if payload.coupon_id:
         from ..models import Coupon
         coupon = await db.get(Coupon, payload.coupon_id, with_for_update=True)
@@ -488,6 +491,7 @@ async def create_order(
                     409, f"本单满减(¥{manjian_discount / 100:g})已优于该店铺券,"
                          "无需使用")
             discount = shop_off  # 取代满减(取最优,商家承担)
+            coupon_applied = True
             notes.append(f"店铺券-{shop_off / 100:g}元(商家)")
         else:
             if food_cents + packing - discount < coupon.min_spend_cents:
@@ -498,6 +502,7 @@ async def create_order(
                              food_cents + packing - discount - subsidy)
             if coupon_off > 0:
                 subsidy += coupon_off
+                coupon_applied = True
                 notes.append(f"平台券-{coupon_off / 100:g}元(平台)")
 
     # 满减备注:仅当最终折扣就是满减档(未被店铺券取代)时展示
@@ -648,7 +653,7 @@ async def create_order(
     )
     db.add(order)
     await db.flush()
-    if coupon is not None:
+    if coupon is not None and coupon_applied:
         coupon.used_order_no = order.order_no  # 锁定;全额退款/关单时释放
     await _record_event(db, order, "", OrderStatus.PENDING_PAYMENT.value, user)
     await db.commit()

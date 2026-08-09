@@ -315,6 +315,159 @@ class Test明厨亮灶标识是法定要求:
         assert "加权排序" in blob or "流量倾斜" in blob
 
 
+class Test堂食标识是法定公示项:
+    """总局令第 123 号第十二条(2026-06-01 施行):平台应当在列表页和
+    商家主页展示「有堂食」「无堂食」标识。
+
+    这一层守的是**不许给默认值**:布尔字段只能默认"有"或"无",
+    两个都是替商家做一次没人核实过的陈述。填错比不填更糟。
+    """
+
+    def test_返回体带标识且是三态(self):
+        from app.schemas import MerchantOut
+        for f in ("dine_in_status", "dine_in_label"):
+            assert f in MerchantOut.model_fields, f"列表返回体缺 {f}"
+        assert MerchantOut.model_fields["dine_in_status"].default == "unknown"
+        assert MerchantOut.model_fields["dine_in_label"].default == "未填报"
+
+    def test_默认未填报而不是有堂食(self):
+        """"这是法定公示项,平台猜一个填上去等于拿自己的信用背书。"""
+        from app.models import Merchant
+        col = Merchant.__table__.c.dine_in_status
+        assert col.default.arg == "unknown", "默认必须是未填报"
+        assert col.server_default.arg == "unknown", "存量商家也一律未填报"
+
+    def test_标识挂在模型属性上而不是逐端点填(self):
+        """理由同明厨亮灶:商家列表不止一个,逐个端点填一定会漏。"""
+        from app.models import Merchant
+        assert isinstance(Merchant.__dict__.get("dine_in_label"), property)
+
+    def test_三态文案(self):
+        from app.models import Merchant
+        shop = Merchant()
+        for value, label in (("yes", "有堂食"), ("no", "无堂食"),
+                             ("unknown", "未填报"), ("", "未填报")):
+            shop.dine_in_status = value
+            assert shop.dine_in_label == label, value
+
+    def test_只收白名单里的三个值(self):
+        """能随手写进任意字符串的话,dine_in_label 会静默退化成「未填报」,
+        商家以为填了、用户看到的是没填。"""
+        import pytest as _pytest
+        from pydantic import ValidationError
+
+        from app.schemas import MerchantIn, MerchantPatch
+        for value in ("yes", "no", "unknown"):
+            assert MerchantPatch(dine_in_status=value).dine_in_status == value
+        with _pytest.raises(ValidationError):
+            MerchantPatch(dine_in_status="有堂食")
+        assert MerchantIn(name="x", lat=0, lng=0).dine_in_status == "unknown"
+
+    def test_不走资质变更那道闸(self):
+        """堂食是对现状的陈述,店里加几张桌子就该能当天改过来 ——
+        混进 _LICENSE_FIELDS 会让商家改一次就被要求重审。"""
+        import inspect
+
+        from app.routers import merchants as m
+        src = inspect.getsource(m.update_my_shop)
+        head = src.split("_LICENSE_FIELDS = (")[1].split(")")[0]
+        assert "dine_in_status" not in head
+
+
+class Test餐饮也要公示营业执照:
+    """第十一条要求营业执照和食品经营许可证都在主页面显著位置持续展示。
+    此前餐饮只公示了后者,酒店那条路径反倒是全的 —— 同一件事两个口径,
+    漏的那个就是合规缺口。"""
+
+    def test_餐饮公示两张证(self):
+        import inspect
+
+        from app.routers import merchants as m
+        src = inspect.getsource(m.merchant_licenses)
+        assert '"business_license": "营业执照"' in src
+        assert "shop.business_license_no" in src, "营业执照号要真的取出来"
+
+    def test_营业执照没有公示图出口(self):
+        """库里只有执照号没有执照图。把它放进放行清单,
+        那个**无鉴权**的出图口就会去猜一个不存在的 key。"""
+        from app.routers.merchants import _PUBLIC_LICENSE_KINDS
+        assert "business_license" not in _PUBLIC_LICENSE_KINDS
+
+
+class Test列表半径与配送上限同一个数:
+    """4–5km 的店此前能进列表、能进店、能加购物车,提交时被
+    orders.py 以「超出配送范围」409 打回。用户视角是"这店明明在列表里,
+    凭什么不给我送" —— 信任伤害,不是体验瑕疵。"""
+
+    def test_不传就取配送上限(self):
+        from app.routers.merchants import _browse_radius_m
+        assert _browse_radius_m(None) == int(settings.delivery_max_km * 1000)
+
+    def test_传大了也收敛到上限(self):
+        """老客户端(搜索页还挂着「5km 内」)不能靠多传一个数
+        把下不了单的店放回列表。"""
+        from app.routers.merchants import _browse_radius_m
+        cap = int(settings.delivery_max_km * 1000)
+        assert _browse_radius_m(50_000) == cap
+        assert _browse_radius_m(cap + 1) == cap
+
+    def test_传小了照常生效(self):
+        from app.routers.merchants import _browse_radius_m
+        assert _browse_radius_m(1000) == 1000
+
+    def test_列表里的店都下得了配送单(self):
+        """半径口径与下单校验必须是同一个数,否则这条断言就是空的。"""
+        from app.routers.merchants import _browse_radius_m
+        assert in_delivery_range(_browse_radius_m(None))
+
+    def test_搜索用同一个口径(self):
+        """搜索此前不传 max_distance_m 就完全不限距离,
+        搜出来的店比首页还远,一样点进去下不了单。"""
+        import inspect
+
+        from app.routers import merchants as m
+        src = inspect.getsource(m.search_merchants)
+        assert "_browse_radius_m(max_distance_m)" in src
+
+
+class Test商家列表分页:
+    """真实城市第 51 家店起永远看不到(原先硬编码 LIMIT 50)。"""
+
+    def test_有offset且limit封顶(self):
+        import inspect
+
+        from app.routers import merchants as m
+        params = inspect.signature(m.list_merchants).parameters
+        assert "offset" in params and "limit" in params
+        assert m._PAGE_MAX == 50
+
+    def test_返回体仍是纯list(self):
+        """契约不变:包成 {items,total} 会把所有老调用方一起打断。"""
+        import typing
+
+        from app.routers import merchants as m
+        from app.schemas import MerchantOut
+        hints = typing.get_type_hints(m.list_merchants)
+        assert hints  # 签名可解析
+        route = next(r for r in m.router.routes
+                     if getattr(r, "endpoint", None) is m.list_merchants)
+        assert route.response_model == list[MerchantOut]
+
+    def test_排序是全序否则翻页会漏店(self):
+        """评分/月售有大量并列,并列组内顺序不定 —— 同一家店会在
+        第 1 页和第 2 页各出现一次,而另一家一次都不出现。"""
+        from app.routers.merchants import _NEARBY_SQL_TMPL
+        assert "ORDER BY {order_by}, m.id" in _NEARBY_SQL_TMPL
+        assert "LIMIT :limit OFFSET :offset" in _NEARBY_SQL_TMPL
+
+    def test_无定位兜底也要有稳定排序(self):
+        import inspect
+
+        from app.routers import merchants as m
+        src = inspect.getsource(m.list_merchants)
+        assert "order_by(Merchant.id)" in src, "没有 ORDER BY 时加 offset 会漏店"
+
+
 class Test健康证按城市:
     """国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员",
     四川已明确取消),但地方可能另有规章 —— 做成城市级清单。

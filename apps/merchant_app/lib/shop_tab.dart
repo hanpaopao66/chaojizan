@@ -342,6 +342,53 @@ class _ShopTabPageState extends State<ShopTabPage> {
     );
   }
 
+  /// 堂食标识填报(#187,总局令第 123 号第十二条)。
+  ///
+  /// 三选一而不是开关:**「未填报」必须是个能停留的状态**,
+  /// 开关只有开和关两态,做成开关就等于替没填的商家答了「无堂食」。
+  /// 填了之后照样能改回未填报 —— 商家自己拿不准时,如实说不知道
+  /// 比随便勾一个更好。
+  Future<void> _editDineIn() async {
+    final shop = _shop!;
+    const options = [
+      ('yes', '有堂食', '店里有餐位,顾客可以坐下来吃'),
+      ('no', '无堂食', '只做外卖/自取,店里不设餐位'),
+      ('unknown', '未填报', '暂不说明。用户端会照实显示「未填报」'),
+    ];
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text('这是市场监管总局令第 123 号要求公示的信息,'
+                '会展示在用户端的商家列表和店铺页。请照实填',
+                style: TextStyle(fontSize: 12.5, height: 1.4)),
+          ),
+          for (final (value, title, hint) in options)
+            ListTile(
+              title: Text(title),
+              subtitle: Text(hint),
+              trailing: shop.dineInStatus == value
+                  ? Icon(Icons.check, color: Theme.of(context).sz.hold)
+                  : null,
+              onTap: () => Navigator.pop(context, value),
+            ),
+        ]),
+      ),
+    );
+    if (picked == null || picked == shop.dineInStatus || !mounted) return;
+    try {
+      await widget.api.updateShop({'dine_in_status': picked});
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
   /// 承诺出餐时长(5-60 分钟)
   Future<void> _editPromiseMinutes() async {
     final shop = _shop!;
@@ -1673,6 +1720,27 @@ class _ShopTabPageState extends State<ShopTabPage> {
                   ),
                   Text('把后厨实时画面开放给顾客看。用你现有的摄像头就行,'
                       '平台不卖硬件也不挑品牌',
+                      style: Theme.of(context).textTheme.bodySmall),
+                  const Divider(height: 24),
+                  // 堂食标识(#187)。紧挨明厨亮灶:两个都是总局令第 123 号
+                  // 要求在列表页公示的标识,商家该在同一个地方管
+                  Row(
+                    children: [
+                      const Text('堂食标识'),
+                      const SizedBox(width: 10),
+                      Expanded(
+                          child: Text(shop.dineInLabel,
+                              style: TextStyle(
+                                  color: shop.dineInStatus == 'unknown'
+                                      ? Theme.of(context).colorScheme.error
+                                      : Theme.of(context).sz.hold))),
+                      TextButton(
+                          onPressed: _editDineIn,
+                          child: const Text('填报')),
+                    ],
+                  ),
+                  Text('监管要求公示「有堂食/无堂食」,会显示在用户端列表和店铺页。'
+                      '没填报就照实显示「未填报」—— 平台不替你猜一个填上去',
                       style: Theme.of(context).textTheme.bodySmall),
                   const Divider(height: 24),
                   // #154 经营看板:打烊后坐下来复盘的那一屏

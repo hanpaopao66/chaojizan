@@ -120,6 +120,10 @@ class MerchantIn(BaseModel):
     license_expires_at: date | None = None
     business_license_no: str = Field(default="", max_length=50)
     license_subject: str = Field(default="", max_length=100)
+    # 堂食标识(#187):入驻时就问一句,免得开业后列表上挂着「未填报」。
+    # 默认 unknown 而不是 yes —— 不填只是不填,不该被平台猜成有堂食
+    dine_in_status: str = Field(default="unknown",
+                                pattern="^(unknown|yes|no)$")
     # 外卖品类(白名单校验在路由,清单见 categories.py;酒店忽略此字段)
     category: str = "fast_food"
     # 业态:food 餐饮外卖(默认) / hotel 酒店住宿
@@ -178,6 +182,13 @@ class MerchantOut(BaseModel):
     # 看不到就是没有 —— 标识和实际能不能看必须是同一件事
     kitchen_cam: bool = False
     kitchen_cam_label: str = "无明厨亮灶"
+
+    # 堂食标识(#187,总局令第 123 号第十二条)。同样是**法定公示项**,
+    # 列表页和商家主页都要展示,所以每家店都带,不是给有堂食的加徽章。
+    # unknown 未填报 / yes 有堂食 / no 无堂食 —— 未填报如实标"未填报",
+    # 不默认成「有堂食」:替商家猜一个,就是用平台信用给未经核实的信息背书
+    dine_in_status: str = "unknown"
+    dine_in_label: str = "未填报"
 
     # 忙碌模式(高峰压单):生效期 ETA/出餐超时判定放宽 busy_extra_minutes,
     # 用户端亮「出餐较慢」标。busy_active 读 ORM 的 property,到点自动变 False
@@ -329,6 +340,11 @@ class MerchantPatch(BaseModel):
     self_delivery: bool | None = None  # 自配送开关(只影响之后的新订单)
     auto_accept: bool | None = None    # 自动接单(支付成功即进入制作)
     food_seal: bool | None = None      # 食安封签(商家自述)
+    # 堂食标识(#187):unknown 未填报 / yes 有堂食 / no 无堂食。
+    # **不是资质项**,不走驳回重提那道闸 —— 它是商家对现状的陈述,
+    # 店里加了几张桌子就该能当天改过来;真实性靠公示 + 用户举报兜
+    dine_in_status: str | None = Field(default=None,
+                                       pattern="^(unknown|yes|no)$")
     # 酒店第二证照:仅**被驳回后重新提交**时可带(平时资质变更走客服人工核验)
     special_license_no: str | None = Field(default=None, max_length=50)
     special_license_image_url: str | None = Field(default=None, max_length=300)
