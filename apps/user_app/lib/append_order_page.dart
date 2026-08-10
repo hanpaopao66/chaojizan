@@ -100,7 +100,7 @@ class _AppendOrderPageState extends State<AppendOrderPage> {
               Padding(
                 padding: EdgeInsets.fromLTRB(16, 10, 16, 0),
                 child: Text('免配送费、免起送价,商家会和原单一起打包;带规格的菜请重新下单选择',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkFaint)),
+                    style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkMuted)),
               ),
               Expanded(
                 child: dishes.isEmpty

@@ -264,7 +264,7 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
                       '四川已经取消了。只有个别城市另有规定时才会让你补'),
                 const SizedBox(height: 4),
                 Text('身份证号加密保存,任何接口都不会把它发出去。',
-                    style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                    style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
               ],
             ),
           ),

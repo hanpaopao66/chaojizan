@@ -133,7 +133,7 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
                         children: [
                           Row(children: [
                             SzChip(a.kindLabel,
-                                color: pending ? sz.clay : sz.inkFaint,
+                                color: pending ? sz.clay : sz.inkMuted,
                                 dense: true),
                             const SizedBox(width: 8),
                             Expanded(
@@ -146,7 +146,7 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
                                 style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
-                                    color: pending ? sz.clay : sz.inkFaint)),
+                                    color: pending ? sz.clay : sz.inkMuted)),
                           ]),
                           const SizedBox(height: 6),
                           Text.rich(

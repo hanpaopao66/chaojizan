@@ -1525,7 +1525,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                       '(含等餐 ${order.estWaitMinutes!.toStringAsFixed(0)}'
                       '${order.waitSource == "declared" ? "·商家自报" : ""})',
                       style: TextStyle(
-                          fontSize: 11, color: Theme.of(context).sz.inkFaint)),
+                          fontSize: 11, color: Theme.of(context).sz.inkMuted)),
                 ],
                 const Spacer(),
                 if (order.centsPerMinute != null && order.centsPerMinute! > 0)
@@ -1647,7 +1647,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                               child: Text(
                                   _feePartsLine(order),
                                   style: TextStyle(
-                                      fontSize: 11, color: sz.inkFaint)),
+                                      fontSize: 11, color: sz.inkMuted)),
                             ),
                         ],
                       ),
@@ -1865,7 +1865,7 @@ class _RiderHomePageState extends State<RiderHomePage>
             Icon(
               _gpsActive ? Icons.gps_fixed : Icons.gps_off,
               size: 18,
-              color: _gpsActive ? Theme.of(context).sz.earn : Theme.of(context).sz.inkFaint,
+              color: _gpsActive ? Theme.of(context).sz.earn : Theme.of(context).sz.inkMuted,
             ),
             const SizedBox(width: 4),
             Text(_online ? '接单中' : '已下线'),

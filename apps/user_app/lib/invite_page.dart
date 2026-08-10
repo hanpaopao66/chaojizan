@@ -67,7 +67,7 @@ class _InvitePageState extends State<InvitePage> {
                     Text('平台不出这笔钱——我们不靠补贴换增长',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                            fontSize: 11, color: Theme.of(context).sz.inkFaint)),
+                            fontSize: 11, color: Theme.of(context).sz.inkMuted)),
                     const SizedBox(height: 12),
                     Row(children: [
                       Expanded(

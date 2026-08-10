@@ -116,12 +116,12 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
                                       : Icons.star_border,
                                   size: 13,
                                   color:
-                                      s <= r.rating ? sz.hold : sz.inkFaint),
+                                      s <= r.rating ? sz.hold : sz.inkMuted),
                             const Spacer(),
                             Text(
                                 '…${r.orderNo.length > 6 ? r.orderNo.substring(r.orderNo.length - 6) : r.orderNo}',
                                 style: szFigure(
-                                    fontSize: 11, color: sz.inkFaint)),
+                                    fontSize: 11, color: sz.inkMuted)),
                           ]),
                           if (r.tags.isNotEmpty) ...[
                             const SizedBox(height: 5),
@@ -130,7 +130,7 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
                               runSpacing: 4,
                               children: [
                                 for (final t in r.tags)
-                                  SzChip(t, color: sz.inkFaint, dense: true),
+                                  SzChip(t, color: sz.inkMuted, dense: true),
                               ],
                             ),
                           ],

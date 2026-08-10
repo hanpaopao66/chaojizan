@@ -173,7 +173,7 @@ class _CitySheetState extends State<_CitySheet> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text('搜地址时只在选中的城市里找 —— 选错了会搜不到自己家',
-                style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
           ),
           const SizedBox(height: 10),
           if (_error != null)
@@ -207,7 +207,7 @@ class _CitySheetState extends State<_CitySheet> {
                             ? Icons.radio_button_checked
                             : Icons.radio_button_unchecked,
                         size: 18,
-                        color: c.name == widget.current ? sz.clay : sz.inkFaint,
+                        color: c.name == widget.current ? sz.clay : sz.inkMuted,
                       ),
                       title: Text(c.name,
                           style: TextStyle(

@@ -257,7 +257,7 @@ class _HomePageState extends State<HomePage> {
                     Text('▾',
                         style: TextStyle(
                             fontSize: 11,
-                            color: Theme.of(context).sz.inkFaint)),
+                            color: Theme.of(context).sz.inkMuted)),
                   ],
                 ),
               )
@@ -776,7 +776,7 @@ class _MerchantListViewState extends State<MerchantListView> {
               Icon(Icons.search, color: sz.inkFaint, size: 19),
               const SizedBox(width: 8),
               Text('搜店铺、搜菜名',
-                  style: TextStyle(color: sz.inkFaint, fontSize: 13.5)),
+                  style: TextStyle(color: sz.inkMuted, fontSize: 13.5)),
             ],
           ),
         ),
@@ -871,7 +871,7 @@ class _MerchantListViewState extends State<MerchantListView> {
               Text(ch.sub,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
+                  style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
             ],
           ),
       );
@@ -1192,7 +1192,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                             const TextSpan(text: ' 分'),
                             TextSpan(
                                 text: '  ·  ',
-                                style: TextStyle(color: sz.inkFaint)),
+                                style: TextStyle(color: sz.inkMuted)),
                           ],
                           const TextSpan(text: '月售 '),
                           TextSpan(
@@ -1200,7 +1200,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                               style: szFigure(fontSize: 11.5)),
                           TextSpan(
                               text: '  ·  ',
-                              style: TextStyle(color: sz.inkFaint)),
+                              style: TextStyle(color: sz.inkMuted)),
                           TextSpan(text: distanceLabel(dist)),
                         ]),
                         style: TextStyle(fontSize: 11.5, color: sz.inkMuted),
@@ -1216,7 +1216,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                           if (m.minOrderCents > 0) ...[
                             TextSpan(
                                 text: '  ·  ',
-                                style: TextStyle(color: sz.inkFaint)),
+                                style: TextStyle(color: sz.inkMuted)),
                             TextSpan(
                                 text: '¥${m.minOrderCents ~/ 100}',
                                 style: szFigure(fontSize: 11.5)),
@@ -1440,7 +1440,7 @@ class _MerchantListViewState extends State<MerchantListView> {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               fontSize: 11.5,
-                              color: Theme.of(context).sz.inkFaint)),
+                              color: Theme.of(context).sz.inkMuted)),
                     ),
                   const SizedBox(height: 24),
                 ]),
@@ -1885,7 +1885,7 @@ class _MenuPageState extends State<MenuPage>
                     ? Icons.restaurant
                     : Icons.storefront_outlined,
                 size: 14,
-                color: shop.dineInStatus == 'yes' ? sz.earn : sz.inkFaint),
+                color: shop.dineInStatus == 'yes' ? sz.earn : sz.inkMuted),
             const SizedBox(width: 5),
             Text(shop.dineInLabel,
                 style: TextStyle(
@@ -2338,7 +2338,7 @@ class _MenuPageState extends State<MenuPage>
                             style: soldOut
                                 ? TextStyle(
                                     fontSize: 13,
-                                    color: Theme.of(context).sz.inkFaint)
+                                    color: Theme.of(context).sz.inkMuted)
                                 : szMoney(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w600,
@@ -2751,7 +2751,7 @@ class _MenuPageState extends State<MenuPage>
                             fontSize: 20,
                             fontWeight: FontWeight.w600,
                             color: _cart.isEmpty
-                                ? Theme.of(context).sz.inkFaint
+                                ? Theme.of(context).sz.inkMuted
                                 : Theme.of(context).sz.ink)),
                     const SizedBox(height: 1),
                     Text(_cartNote(),
@@ -3152,7 +3152,7 @@ class _OrderListViewState extends State<OrderListView> {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                               fontSize: 11.5,
-                              color: Theme.of(context).sz.inkFaint)),
+                              color: Theme.of(context).sz.inkMuted)),
                     );
                   }
                   return const SizedBox(height: 8);
@@ -3732,7 +3732,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
             Padding(
               padding: EdgeInsets.only(bottom: 8, left: 14, right: 14),
               child: Text('小费 100% 归骑手,平台不抽成。加了会立刻通知附近骑手。',
-                  style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkFaint)),
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkMuted)),
             ),
             for (final c in options)
               ListTile(
@@ -4762,7 +4762,7 @@ class _ReviewFormState extends State<_ReviewForm> {
               ),
               Text('配送由平台负责,配送方面的反馈不计入商家评分',
                   style: TextStyle(
-                      fontSize: 11, color: Theme.of(context).sz.inkFaint)),
+                      fontSize: 11, color: Theme.of(context).sz.inkMuted)),
             ],
             TextField(
               controller: _comment,
@@ -5025,7 +5025,7 @@ class _ProfileViewState extends State<ProfileView> {
         child: Row(children: [
           Text(title, style: TextStyle(fontSize: 14, color: sz.ink)),
           const Spacer(),
-          Text(hint, style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+          Text(hint, style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
           const SizedBox(width: 4),
           Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
         ]),
@@ -5637,7 +5637,7 @@ class _OrderTimeline extends StatelessWidget {
         if (etaText != null) ...[
           Text(_mySteps[currentIdx.clamp(0, _mySteps.length - 1)].$2,
               style: TextStyle(
-                  fontSize: 11, letterSpacing: 1.2, color: sz.inkFaint)),
+                  fontSize: 11, letterSpacing: 1.2, color: sz.inkMuted)),
           const SizedBox(height: 5),
           Text.rich(
             TextSpan(children: [
@@ -5921,7 +5921,7 @@ class _ShopInfoTab extends StatelessWidget {
               const SizedBox(width: 10),
               const Expanded(child: Text('证照信息(平台人工审核)')),
               Icon(Icons.chevron_right,
-                  size: 18, color: Theme.of(context).sz.inkFaint),
+                  size: 18, color: Theme.of(context).sz.inkMuted),
             ]),
           ),
         ),

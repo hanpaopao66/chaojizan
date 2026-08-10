@@ -790,7 +790,7 @@ class _ApplymentPageState extends State<ApplymentPage> {
                 return Text(
                   '店员看不到这一页 —— 入口只对店主开。',
                   style: TextStyle(
-                      fontSize: 11.5, height: 1.6, color: sz.inkFaint),
+                      fontSize: 11.5, height: 1.6, color: sz.inkMuted),
                 );
               }),
             ],
@@ -913,7 +913,7 @@ class _ApplymentPageState extends State<ApplymentPage> {
           ),
           if (filled != null && total != null && total > 0)
             Text('已填 $filled/$total',
-                style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
         ]),
         const SizedBox(height: 4),
         Text('齐了才会提交给微信。缺哪些是平台按你选的主体类型算的 —— '
@@ -1188,7 +1188,7 @@ class _ApplymentPageState extends State<ApplymentPage> {
       Text(
         '填一半可以直接退出:改一处存一次草稿,存在这台手机上、不上传,'
         '下次进来接着填。提交成功后草稿自动清掉。',
-        style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkFaint),
+        style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkMuted),
       ),
     ];
   }

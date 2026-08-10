@@ -48,7 +48,18 @@ class SzColors extends ThemeExtension<SzColors> {
   /// 次要文字
   final Color inkMuted;
 
-  /// 弱化文字:分段标题、占位符
+  /// **只给装饰用**:图标、进度圈、淡底、分隔性元素。
+  ///
+  /// ⚠️ **不许拿它承载要读的信息。** 它在骨白底上对比度只有 2.54–2.83,
+  /// 连 WCAG 大字门槛 3.0 都不到,更不用说正文的 4.5 ——
+  /// 而这个 App 有长辈版大字模式,用户里老年人不少。
+  ///
+  /// 曾经有 146 处用它写正文:券包里"满50可用"的门槛、11.5px 的说明、
+  /// 底部导航的标签、输入框占位符。看着"淡雅",实际是看不清。
+  /// 现在这些一律改用 [inkMuted](骨白底上 5.32,过 AA)。
+  ///
+  /// 判断标准很简单:**这行字/这个元素,用户需要读懂它吗?**
+  /// 需要 → inkMuted;只是让界面不空、或者旁边已有文字说明 → inkFaint。
   final Color inkFaint;
 
   /// 发丝线:卡片描边、列表分隔
@@ -491,7 +502,7 @@ ThemeData brandTheme(Brightness brightness,
           fontSize: 14.5, fontWeight: FontWeight.w600, color: sz.ink),
       bodyMedium: TextStyle(fontSize: 15, height: 1.6, color: sz.ink),
       bodySmall: TextStyle(fontSize: 12.5, color: sz.inkMuted, height: 1.55),
-      labelSmall: TextStyle(fontSize: 11, color: sz.inkFaint),
+      labelSmall: TextStyle(fontSize: 11, color: sz.inkMuted),
     ),
 
     // ---- AppBar:与背景同色、无阴影、左对齐 ----
@@ -577,7 +588,7 @@ ThemeData brandTheme(Brightness brightness,
       filled: true,
       fillColor: sz.surfaceAlt,
       hintStyle: TextStyle(
-          color: sz.inkFaint, fontSize: 14.5 + density.fontBump),
+          color: sz.inkMuted, fontSize: 14.5 + density.fontBump),
       contentPadding: EdgeInsets.symmetric(
           horizontal: 16, vertical: 13 + density.inputPadBump),
       border: OutlineInputBorder(
@@ -595,13 +606,36 @@ ThemeData brandTheme(Brightness brightness,
     ),
 
     // ---- chip:描边胶囊、墨字;语义色在调用处给(见 SzChip) ----
+    //
+    // ⚠️ 文字颜色**必须按状态给**。这里踩过一个真实的坑:
+    // `selectedColor: sz.ink` 是选中时的底色,而 labelStyle 写死 `sz.ink`,
+    // 于是选中那一刻底色和字色变成同一个颜色 —— 字直接消失。
+    // 浅色态是近黑底配近黑字,深色态是近白底配近白字,**两套主题都看不见**。
+    //
+    // 表现出来就是"点了之后那个选项不见了",而它其实还在,只是隐身了。
+    // 三端一共 30 处 Material Chip 走这份主题,全都受影响
+    // (自绘的 SzChip 没事,它本来就是 selected ? paper : ink)。
+    //
+    // WidgetStateColor 能直接塞进 TextStyle.color,按状态解析,
+    // 口径与 SzChip 保持一致:选中 = 墨底纸字。
     chipTheme: ChipThemeData(
       shape: const StadiumBorder(),
       side: BorderSide(color: sz.line),
       backgroundColor: sz.surface,
       selectedColor: sz.ink,
+      // 勾选标记同理:FilterChip 选中会画一个勾,
+      // 墨底上再画墨色的勾一样是隐身
+      checkmarkColor: sz.paper,
       labelStyle: TextStyle(
-          fontSize: 12.5, fontWeight: FontWeight.w500, color: sz.ink),
+          fontSize: 12.5,
+          fontWeight: FontWeight.w500,
+          color: WidgetStateColor.resolveWith((states) =>
+              states.contains(WidgetState.selected) ? sz.paper : sz.ink)),
+      secondaryLabelStyle: TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w500,
+          color: WidgetStateColor.resolveWith((states) =>
+              states.contains(WidgetState.selected) ? sz.paper : sz.ink)),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
     ),
 
@@ -614,19 +648,19 @@ ThemeData brandTheme(Brightness brightness,
       indicatorColor: Colors.transparent,
       iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
           size: 23,
-          color: states.contains(WidgetState.selected) ? sz.clay : sz.inkFaint)),
+          color: states.contains(WidgetState.selected) ? sz.clay : sz.inkMuted)),
       labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
           fontSize: 10.5,
           fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w600
               : FontWeight.w500,
-          color: states.contains(WidgetState.selected) ? sz.clay : sz.inkFaint)),
+          color: states.contains(WidgetState.selected) ? sz.clay : sz.inkMuted)),
     ),
 
     // ---- TabBar 与分段控件 ----
     tabBarTheme: TabBarThemeData(
       labelColor: sz.ink,
-      unselectedLabelColor: sz.inkFaint,
+      unselectedLabelColor: sz.inkMuted,
       indicatorColor: sz.clay,
       indicatorSize: TabBarIndicatorSize.label,
       labelStyle: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),

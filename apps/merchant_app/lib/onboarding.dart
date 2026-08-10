@@ -111,7 +111,7 @@ class _OnboardingWelcomePageState extends State<OnboardingWelcomePage> {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(optional ? Icons.circle_outlined : Icons.check_circle_outline,
-            size: 16, color: optional ? sz.inkFaint : sz.clay),
+            size: 16, color: optional ? sz.inkMuted : sz.clay),
         const SizedBox(width: 8),
         Expanded(
             child: Text(text,
@@ -893,7 +893,7 @@ class PendingReviewPage extends StatelessWidget {
     final color = switch (state) {
       0 => sz.earn,
       1 => scheme.primary,
-      _ => sz.inkFaint,
+      _ => sz.inkMuted,
     };
     return IntrinsicHeight(
       child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

@@ -162,7 +162,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                         '任何人都可以自己请求一遍对照)。我们不做「一切正常」的汇总:'
                         '核账差一分钱、探针缺一档、平台倒贴,都按原样显示。',
                         style: TextStyle(
-                            fontSize: 11.5, height: 1.7, color: sz.inkFaint),
+                            fontSize: 11.5, height: 1.7, color: sz.inkMuted),
                       ),
                     ],
                   ),
@@ -514,7 +514,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
               Text(_yuan(_int(total['cents'])),
                   style: szMoney(fontSize: 15, color: sz.ink)),
               Text('${_int(total['count'])} 笔',
-                  style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                  style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
             ],
           ),
           const SizedBox(height: 2),
@@ -523,7 +523,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
               style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
           const SizedBox(height: 2),
           Text(note,
-              style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkFaint)),
+              style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkMuted)),
         ],
       ),
     );
@@ -601,7 +601,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
             if (tiers.isNotEmpty) ...[
               const SizedBox(height: 6),
               Text('在营商家的费率档位',
-                  style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                  style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
@@ -938,13 +938,13 @@ class _TransparencyPageState extends State<TransparencyPage> {
                       style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
                   if (w['cap'] != null)
                     Text('封顶 ${w['cap']}',
-                        style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                        style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
                 ],
               ),
               const SizedBox(height: 3),
               Text('${w['why']}',
                   style: TextStyle(
-                      fontSize: 11.5, height: 1.65, color: sz.inkFaint)),
+                      fontSize: 11.5, height: 1.65, color: sz.inkMuted)),
               const SizedBox(height: 10),
             ],
             if (labor.isNotEmpty) ...[
@@ -1146,7 +1146,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                                   fontSize: 12, color: sz.inkMuted)),
                           Text(_time(f['at']),
                               style:
-                                  TextStyle(fontSize: 11, color: sz.inkFaint)),
+                                  TextStyle(fontSize: 11, color: sz.inkMuted)),
                         ],
                       ),
                       if ('${f['reason'] ?? ''}'.isNotEmpty)
@@ -1154,7 +1154,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                             style: TextStyle(
                                 fontSize: 11.5,
                                 height: 1.6,
-                                color: sz.inkFaint)),
+                                color: sz.inkMuted)),
                     ],
                   ),
                 ),
@@ -1267,7 +1267,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                                   color: sz.ink)),
                           Text(_time(r['published_at']),
                               style:
-                                  TextStyle(fontSize: 11, color: sz.inkFaint)),
+                                  TextStyle(fontSize: 11, color: sz.inkMuted)),
                         ],
                       ),
                       Text('${r['name']}',
@@ -1290,7 +1290,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                       // 短 sha 定宽给一点空间就够,正文用 Expanded 自己折行,
                       // 长辈版下也不会挤出屏幕
                       Text('${c['sha']}',
-                          style: szFigure(fontSize: 11.5, color: sz.inkFaint)),
+                          style: szFigure(fontSize: 11.5, color: sz.inkMuted)),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text('${c['message']}',
@@ -1320,7 +1320,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
       style: TextStyle(fontSize: 12, height: 1.75, color: sz.inkMuted));
 
   Widget _stamp(SzColors sz, String text) => Text(text,
-      style: TextStyle(fontSize: 11, height: 1.6, color: sz.inkFaint));
+      style: TextStyle(fontSize: 11, height: 1.6, color: sz.inkMuted));
 
   Widget _good(SzColors sz, String text) => _banner(sz, text, sz.earn);
 
@@ -1377,7 +1377,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
               padding: const EdgeInsets.only(top: 2),
               child: Text(note,
                   style: TextStyle(
-                      fontSize: 11, height: 1.6, color: sz.inkFaint)),
+                      fontSize: 11, height: 1.6, color: sz.inkMuted)),
             ),
         ],
       ),
@@ -1397,7 +1397,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('—', style: TextStyle(color: sz.inkFaint)),
+                Text('—', style: TextStyle(color: sz.inkMuted)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(line,
@@ -1428,14 +1428,14 @@ class _TransparencyPageState extends State<TransparencyPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('${c['date']}',
-                    style: szFigure(fontSize: 12, color: sz.inkFaint)),
+                    style: szFigure(fontSize: 12, color: sz.inkMuted)),
                 Text('${c[bodyKey] ?? c['change'] ?? c['what'] ?? ''}',
                     style: TextStyle(
                         fontSize: 12, height: 1.7, color: sz.ink)),
                 if ('${c['why'] ?? ''}'.isNotEmpty)
                   Text('${c['why']}',
                       style: TextStyle(
-                          fontSize: 11.5, height: 1.65, color: sz.inkFaint)),
+                          fontSize: 11.5, height: 1.65, color: sz.inkMuted)),
               ],
             ),
           ),
@@ -1477,7 +1477,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                         borderRadius: BorderRadius.circular(1.5))),
                 const SizedBox(width: 4),
                 Text(label,
-                    style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                    style: TextStyle(fontSize: 11, color: sz.inkMuted)),
               ],
             ),
         ],
@@ -1604,8 +1604,8 @@ class _SectionState extends State<_Section> {
       _Verdict.ok => sz.earn,
       _Verdict.warn => sz.hold,
       _Verdict.bad => sz.danger,
-      _Verdict.dead => sz.inkFaint,
-      _Verdict.loading => sz.inkFaint,
+      _Verdict.dead => sz.inkMuted,
+      _Verdict.loading => sz.inkMuted,
     };
 
     return Padding(
@@ -1635,7 +1635,7 @@ class _SectionState extends State<_Section> {
                         ),
                         const SizedBox(width: 6),
                         Icon(_open ? Icons.expand_less : Icons.expand_more,
-                            size: 20, color: sz.inkFaint),
+                            size: 20, color: sz.inkMuted),
                       ],
                     ),
                     const SizedBox(height: 4),

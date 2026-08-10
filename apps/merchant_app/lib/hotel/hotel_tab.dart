@@ -45,7 +45,7 @@ class HotelTab extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(shop.description,
                     style: TextStyle(
-                        fontSize: 11.5, height: 1.55, color: sz.inkFaint)),
+                        fontSize: 11.5, height: 1.55, color: sz.inkMuted)),
               ],
             ],
           ),

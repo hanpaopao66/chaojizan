@@ -312,7 +312,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
                           style: theme.textTheme.bodySmall),
                     ] else
                       Text('该日期订不了',
-                          style: TextStyle(color: Theme.of(context).sz.inkFaint)),
+                          style: TextStyle(color: Theme.of(context).sz.inkMuted)),
                     const Spacer(),
                     FilledButton(
                       onPressed: bookable

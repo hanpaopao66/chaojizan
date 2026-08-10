@@ -128,7 +128,7 @@ class _RiderReviewsPageState extends State<RiderReviewsPage> {
             const SizedBox(height: 6),
             // 明确不给对比:给了就等于建了排名
             Text('只显示你自己的评价,不做排名、不与其他骑手比较',
-                style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11, color: sz.inkMuted)),
             const SizedBox(height: 16),
             const SzSectionTitle('每一条'),
             const SizedBox(height: 8),
@@ -146,10 +146,10 @@ class _RiderReviewsPageState extends State<RiderReviewsPage> {
                             size: 17,
                             color: i < (r['rating'] as int)
                                 ? sz.hold
-                                : sz.inkFaint),
+                                : sz.inkMuted),
                       const Spacer(),
                       Text('${r["created_at"]}'.substring(0, 10),
-                          style: szFigure(fontSize: 11, color: sz.inkFaint)),
+                          style: szFigure(fontSize: 11, color: sz.inkMuted)),
                     ]),
                     if ((r['comment'] as String).isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -164,7 +164,7 @@ class _RiderReviewsPageState extends State<RiderReviewsPage> {
                       Text('订单 ${r["order_no"]}'.length > 18
                           ? '订单 ${(r["order_no"] as String).substring((r["order_no"] as String).length - 6)}'
                           : '订单 ${r["order_no"]}',
-                          style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                          style: TextStyle(fontSize: 11, color: sz.inkMuted)),
                       const Spacer(),
                       if ((r['rating'] as int) <= 2)
                         Text('有异议可申诉',

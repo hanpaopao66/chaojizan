@@ -172,7 +172,7 @@ class _RiderExamPageState extends State<RiderExamPage> {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('· ', style: TextStyle(color: sz.inkFaint)),
+                        Text('· ', style: TextStyle(color: sz.inkMuted)),
                         Expanded(
                           child: Text(
                             // 服务端文案里的 ** 是给文档看的,界面不渲染 markdown
@@ -203,7 +203,7 @@ class _RiderExamPageState extends State<RiderExamPage> {
         const SizedBox(height: 8),
         Text('${t['note']}',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
       ],
     );
   }

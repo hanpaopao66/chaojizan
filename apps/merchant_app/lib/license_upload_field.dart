@@ -193,7 +193,7 @@ class _LicenseUploadFieldState extends State<LicenseUploadField> {
         Text(widget.label, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: 4),
         Text('拍照或从相册选择',
-            style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 11, color: sz.inkMuted)),
       ]);
     } else {
       inner = Stack(fit: StackFit.expand, children: [

@@ -74,7 +74,7 @@ class _MerchantRulesPageState extends State<MerchantRulesPage> {
                                         children: [
                                           Text('· ',
                                               style: TextStyle(
-                                                  color: sz.inkFaint)),
+                                                  color: sz.inkMuted)),
                                           Expanded(
                                             child: Text('$item',
                                                 style: TextStyle(
@@ -89,7 +89,7 @@ class _MerchantRulesPageState extends State<MerchantRulesPage> {
                       ),
                     Text('${rules['note']}',
                         style: TextStyle(
-                            fontSize: 11.5, height: 1.6, color: sz.inkFaint)),
+                            fontSize: 11.5, height: 1.6, color: sz.inkMuted)),
                   ],
                 ),
     );

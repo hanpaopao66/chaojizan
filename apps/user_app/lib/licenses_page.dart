@@ -114,7 +114,7 @@ class _ShopLicensesPageState extends State<ShopLicensesPage> {
                                         child: Text('证照图暂时加载不出来',
                                             style: TextStyle(
                                                 fontSize: 12,
-                                                color: sz.inkFaint)),
+                                                color: sz.inkMuted)),
                                       ),
                                     ),
                                   ),

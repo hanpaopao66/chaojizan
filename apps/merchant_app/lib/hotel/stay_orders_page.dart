@@ -248,7 +248,7 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
       'paid' => sz.clay,
       'confirmed' => sz.hold,
       'checked_in' || 'completed' => sz.earn,
-      _ => sz.inkFaint,
+      _ => sz.inkMuted,
     };
   }
 
@@ -349,7 +349,7 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
             Text('备注:${order.arrivalNote}',
                 style: TextStyle(fontSize: 12, color: sz.inkMuted)),
           Text(order.cancelPolicyText,
-              style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+              style: TextStyle(fontSize: 11, color: sz.inkMuted)),
           if (order.status == 'completed')
             Padding(
               padding: const EdgeInsets.only(top: 5),

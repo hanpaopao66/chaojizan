@@ -146,7 +146,7 @@ class _MerchantPromisesPageState extends State<MerchantPromisesPage> {
           Text(
             '这几条写进代码里,不是写在这一页上。'
             '哪天我们自己违背了,你在对账页和看板上会先看出来。',
-            style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkFaint),
+            style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkMuted),
           ),
         ],
       ),

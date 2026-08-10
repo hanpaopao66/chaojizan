@@ -143,7 +143,7 @@ class _AddressBookPageState extends State<AddressBookPage> {
                         child: Text(
                           '已按离你的远近排好序,最近的那个标了「距离最近」',
                           style:
-                              TextStyle(fontSize: 11.5, color: sz.inkFaint),
+                              TextStyle(fontSize: 11.5, color: sz.inkMuted),
                         ),
                       );
                     }
@@ -474,7 +474,7 @@ class _AddressEditPageState extends State<AddressEditPage> {
             Expanded(
               child: Text('搜索只在这个城市里找',
                   style: TextStyle(
-                      fontSize: 11.5, color: Theme.of(context).sz.inkFaint)),
+                      fontSize: 11.5, color: Theme.of(context).sz.inkMuted)),
             ),
           ]),
           const SizedBox(height: 6),

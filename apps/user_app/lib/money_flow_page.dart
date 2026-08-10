@@ -198,7 +198,7 @@ class MoneyFlowPage extends StatelessWidget {
                 for (final (i, line) in _promises.indexed) ...[
                   if (i > 0) const SizedBox(height: 9),
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('—', style: TextStyle(color: sz.inkFaint)),
+                    Text('—', style: TextStyle(color: sz.inkMuted)),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(line,
@@ -222,7 +222,7 @@ class MoneyFlowPage extends StatelessWidget {
               '第三方见证节点可独立复核。',
               textAlign: TextAlign.center,
               style:
-                  TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkFaint)),
+                  TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkMuted)),
         ],
       ),
     );

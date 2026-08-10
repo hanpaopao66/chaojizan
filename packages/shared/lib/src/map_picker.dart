@@ -206,7 +206,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 2),
             child: Text('周边地点',
-                style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
           ),
         for (final p in _around)
           _row(
@@ -222,7 +222,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
             padding: const EdgeInsets.symmetric(vertical: 18),
             child: Text('这附近没找到可选的地点,拖动地图试试',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12.5, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
           ),
         const SizedBox(height: 4),
       ],
@@ -247,7 +247,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   ? Icons.radio_button_checked
                   : Icons.radio_button_unchecked,
               size: 18,
-              color: selected ? sz.clay : sz.inkFaint,
+              color: selected ? sz.clay : sz.inkMuted,
             ),
             const SizedBox(width: 9),
             Expanded(
@@ -275,7 +275,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
               const SizedBox(width: 8),
               // 距离让用户一眼判断"是不是我家那栋" —— 比看地图快
               Text(distance < 1000 ? '${distance}m' : '${(distance / 1000).toStringAsFixed(1)}km',
-                  style: szFigure(fontSize: 11.5, color: sz.inkFaint)),
+                  style: szFigure(fontSize: 11.5, color: sz.inkMuted)),
             ],
           ]),
         ),
@@ -427,7 +427,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   right: 6,
                   bottom: 4,
                   child: Text('© 腾讯地图',
-                      style: TextStyle(fontSize: 9, color: sz.inkFaint)),
+                      style: TextStyle(fontSize: 9, color: sz.inkMuted)),
                 ),
             ],
           );
@@ -499,7 +499,7 @@ class _MapPickerPageState extends State<MapPickerPage> {
                 itemBuilder: (_, i) => ListTile(
                   dense: true,
                   leading: Icon(Icons.place_outlined, size: 18,
-                      color: sz.inkFaint),
+                      color: sz.inkMuted),
                   title: Text(_tips[i].name,
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: _tips[i].district.isEmpty

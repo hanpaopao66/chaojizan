@@ -263,7 +263,7 @@ class GalleryPage extends StatelessWidget {
           Text(name, style: const TextStyle(fontSize: 13)),
           const SizedBox(width: 8),
           Text('${(pct * 100).toStringAsFixed(1)}%',
-              style: szFigure(fontSize: 11, color: sz.inkFaint)),
+              style: szFigure(fontSize: 11, color: sz.inkMuted)),
           const Spacer(),
           Text(amount, style: szMoney(fontSize: 15, color: c)),
         ]),
@@ -317,7 +317,7 @@ class _ComponentSectionState extends State<_ComponentSection> {
           child: Row(children: [
             Text('可点的卡片', style: Theme.of(context).textTheme.bodyMedium),
             const Spacer(),
-            Text('→', style: TextStyle(color: sz.inkFaint)),
+            Text('→', style: TextStyle(color: sz.inkMuted)),
           ]),
         ),
 
@@ -331,7 +331,7 @@ class _ComponentSectionState extends State<_ComponentSection> {
             ])
               SzChip(t,
                   selected: _sort == v, onTap: () => setState(() => _sort = v)),
-            SzChip('已售罄', color: sz.inkFaint, dense: true),
+            SzChip('已售罄', color: sz.inkMuted, dense: true),
             SzChip('超时', color: sz.danger, dense: true),
             SzChip('已接单', color: sz.earn, dense: true),
           ]),
@@ -545,10 +545,10 @@ class _Swatches extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(name, style: TextStyle(fontSize: 10, color: sz.inkFaint)),
+                Text(name, style: TextStyle(fontSize: 10, color: sz.inkMuted)),
                 Text(
                   '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}',
-                  style: szFigure(fontSize: 9.5, color: sz.inkFaint),
+                  style: szFigure(fontSize: 9.5, color: sz.inkMuted),
                 ),
               ],
             ),

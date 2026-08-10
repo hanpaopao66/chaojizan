@@ -53,7 +53,7 @@ class SzKitchenCamChip extends StatelessWidget {
     // 把「无」做成大红标签是在羞辱没装的商家,而法规对商家是「倡导」不是强制
     if (compact && !has) {
       return Text(text,
-          style: TextStyle(fontSize: 10.5, color: sz.inkFaint));
+          style: TextStyle(fontSize: 10.5, color: sz.inkMuted));
     }
 
     return GestureDetector(
@@ -70,12 +70,12 @@ class SzKitchenCamChip extends StatelessWidget {
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(has ? Icons.videocam_outlined : Icons.videocam_off_outlined,
               size: compact ? 11 : 13,
-              color: has ? sz.earn : sz.inkFaint),
+              color: has ? sz.earn : sz.inkMuted),
           const SizedBox(width: 3),
           Text(text,
               style: TextStyle(
                   fontSize: compact ? 10.5 : 12,
-                  color: has ? sz.earn : sz.inkFaint)),
+                  color: has ? sz.earn : sz.inkMuted)),
           if (has && onTap != null && !compact) ...[
             const SizedBox(width: 2),
             Icon(Icons.chevron_right, size: 13, color: sz.earn),

@@ -165,7 +165,7 @@ class _KitchenCamSetupPageState extends State<KitchenCamSetupPage> {
                 style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
             Text('用你现在的摄像头就行,我们不卖硬件、也不挑品牌',
-                style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
             const SizedBox(height: 12),
 
             Text('① 摄像头品牌', style: TextStyle(fontSize: 12.5, color: sz.ink)),
@@ -286,7 +286,7 @@ class _KitchenCamSetupPageState extends State<KitchenCamSetupPage> {
             const SizedBox(height: 8),
             // 能验哪几项要照实说 —— 不能让商家以为我们全都验了
             Text('当前检测:${caps['note'] ?? ''}',
-                style: TextStyle(fontSize: 11.5, height: 1.5, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11.5, height: 1.5, color: sz.inkMuted)),
           ]),
         ),
       ],
@@ -311,7 +311,7 @@ class _KitchenCamSetupPageState extends State<KitchenCamSetupPage> {
                   fontSize: 16, fontWeight: FontWeight.w600, color: color)),
           const Spacer(),
           Text(_statusWord(status),
-              style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+              style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
         ]),
         if ('${d['note'] ?? ''}'.isNotEmpty) ...[
           const SizedBox(height: 7),
@@ -320,7 +320,7 @@ class _KitchenCamSetupPageState extends State<KitchenCamSetupPage> {
         ],
         const SizedBox(height: 6),
         Text('这是顾客在列表里看到你的店时显示的标识',
-            style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 11, color: sz.inkMuted)),
       ]),
     );
   }

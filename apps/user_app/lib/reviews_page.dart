@@ -155,7 +155,7 @@ class _ReviewsListState extends State<ReviewsList> {
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
-                                    ?.copyWith(color: Theme.of(context).sz.inkFaint)),
+                                    ?.copyWith(color: Theme.of(context).sz.inkMuted)),
                         ],
                       ),
                     ),

@@ -216,7 +216,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       label: Text(
         '${_money(c['amount_cents'] as int)} $gate'
         '${v.usable ? '' : ' · ${v.reason}'}',
-        style: v.usable ? null : TextStyle(color: theme.sz.inkFaint),
+        style: v.usable ? null : TextStyle(color: theme.sz.inkMuted),
       ),
       selected: activeId == c['id'],
       // onSelected 传 null 就是 Flutter 的禁用态(置灰);不可用的券留在原位
@@ -673,7 +673,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       const Spacer(),
                       Text('选地址后计算',
                           style:
-                              TextStyle(fontSize: 12, color: theme.sz.inkFaint)),
+                              TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
                     ]),
                   )
                 else ...[

@@ -158,7 +158,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         '看板只给你自己看,不做同行对比、不做区域排名。'
                         '一旦排名影响生意,动作就会从「把菜做好」变成「把数字做好看」。',
                         style: TextStyle(
-                            fontSize: 11.5, height: 1.6, color: sz.inkFaint),
+                            fontSize: 11.5, height: 1.6, color: sz.inkMuted),
                       ),
                     ],
                   ),
@@ -195,7 +195,7 @@ class _DashboardPageState extends State<DashboardPage> {
           if (yesterday != null)
             Text('昨日 ${yesterday['orders']} 单 · '
                 '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
-                style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11, color: sz.inkMuted)),
         ]),
         const SizedBox(height: 10),
         Row(children: [
@@ -206,7 +206,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ]),
         const SizedBox(height: 6),
         Text('按今日下单统计,是生意热度;对账页按结算入账,两边对不上是正常的',
-            style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
       ]),
     );
   }
@@ -253,7 +253,7 @@ class _DashboardPageState extends State<DashboardPage> {
             (f['order_rate'] as num?)?.toDouble()),
         const SizedBox(height: 6),
         Text('${f['note']}',
-            style: TextStyle(fontSize: 10.5, height: 1.5, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 10.5, height: 1.5, color: sz.inkMuted)),
       ]),
     );
   }
@@ -273,7 +273,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     fontSize: 18, fontWeight: FontWeight.w700, color: color)),
             const SizedBox(height: 2),
             Text(label, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
-            Text(sub, style: TextStyle(fontSize: 10, color: sz.inkFaint)),
+            Text(sub, style: TextStyle(fontSize: 10, color: sz.inkMuted)),
           ]),
         );
     return Container(
@@ -296,7 +296,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ]),
         const SizedBox(height: 6),
         Text('${c['note']}',
-            style: TextStyle(fontSize: 10.5, height: 1.5, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 10.5, height: 1.5, color: sz.inkMuted)),
       ]),
     );
   }
@@ -346,7 +346,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 Text(
                     '环比:${cmp['prev_week']} 那一周 → ${cmp['week']} 那一周'
                     '(都是完整周,本周还没过完不参与比较)',
-                    style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
+                    style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
                 const SizedBox(height: 8),
                 _compareRow(sz, cmp),
               ],
@@ -385,7 +385,7 @@ class _DashboardPageState extends State<DashboardPage> {
           style: szFigure(
             fontSize: 11.5,
             color: pct == null
-                ? sz.inkFaint
+                ? sz.inkMuted
                 : pct > 0
                     ? sz.earn
                     : pct < 0
@@ -511,7 +511,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   color: highlight ? sz.ink : sz.inkMuted)),
           const SizedBox(height: 2),
           Text(label, style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
-          Text(unit, style: TextStyle(fontSize: 10.5, color: sz.inkFaint)),
+          Text(unit, style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
         ]),
       );
 
@@ -616,7 +616,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               const SizedBox(width: 5),
                               Text('估算',
                                   style: TextStyle(
-                                      fontSize: 10, color: sz.inkFaint)),
+                                      fontSize: 10, color: sz.inkMuted)),
                             ],
                           ]),
                           const SizedBox(height: 2),
@@ -629,7 +629,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   ]),
                 ),
               Text('${_trend!['estimate_note']}',
-                  style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                  style: TextStyle(fontSize: 11, color: sz.inkMuted)),
             ]),
     );
   }
@@ -657,7 +657,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       fontSize: 15, fontWeight: FontWeight.w600)),
             ),
             Text(question,
-                style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 11, color: sz.inkMuted)),
           ]),
           const SizedBox(height: 6),
           // 先结论后图表:不让商家自己从折线里读结论
@@ -680,7 +680,7 @@ class _DashboardPageState extends State<DashboardPage> {
           Text('还没有足够数据',
               style: TextStyle(fontSize: 13.5, color: sz.inkMuted)),
           const SizedBox(height: 3),
-          Text(why, style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+          Text(why, style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
         ]),
       );
 
@@ -727,7 +727,7 @@ class _WeekBars extends StatelessWidget {
                             fontSize: 10.5,
                             color: i == weeks.length - 1
                                 ? sz.ink
-                                : sz.inkFaint)),
+                                : sz.inkMuted)),
                     const SizedBox(height: 3),
                     Container(
                       height: math.max(
@@ -754,11 +754,11 @@ class _WeekBars extends StatelessWidget {
                     Text(
                       // 只给月/日,给完整日期一行放不下 8 个
                       '${w['week']}'.substring(5).replaceAll('-', '/'),
-                      style: TextStyle(fontSize: 9, color: sz.inkFaint),
+                      style: TextStyle(fontSize: 9, color: sz.inkMuted),
                     ),
                     if (w['partial'] == true)
                       Text('进行中',
-                          style: TextStyle(fontSize: 8, color: sz.inkFaint)),
+                          style: TextStyle(fontSize: 8, color: sz.inkMuted)),
                   ],
                 ),
               ),
@@ -809,7 +809,7 @@ class _HourBars extends StatelessWidget {
           Expanded(
             child: Text(h % 4 == 0 ? '$h' : '',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 9, color: sz.inkFaint)),
+                style: TextStyle(fontSize: 9, color: sz.inkMuted)),
           ),
       ]),
     ]);

@@ -136,7 +136,7 @@ class _RoomManagePageState extends State<RoomManagePage> {
                   style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w600,
-                      color: rt.isOnSale ? sz.ink : sz.inkFaint)),
+                      color: rt.isOnSale ? sz.ink : sz.inkMuted)),
               const SizedBox(height: 2),
               Text(
                   [
@@ -268,10 +268,10 @@ class _RoomManagePageState extends State<RoomManagePage> {
     final sz = Theme.of(context).sz;
     Widget child;
     if (day == null) {
-      child = Text('未设价', style: TextStyle(fontSize: 11, color: sz.inkFaint));
+      child = Text('未设价', style: TextStyle(fontSize: 11, color: sz.inkMuted));
     } else if (day.closed) {
       // 关房是店家自己关的,不是错误——用弱化色不用 danger
-      child = Text('关房', style: TextStyle(fontSize: 11, color: sz.inkFaint));
+      child = Text('关房', style: TextStyle(fontSize: 11, color: sz.inkMuted));
     } else {
       child = Column(mainAxisSize: MainAxisSize.min, children: [
         Text('¥${(day.priceCents / 100).toStringAsFixed(0)}',
