@@ -35,6 +35,9 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
   bool _loadingMore = false;
   bool _hasMore = true;
 
+  /// 非空 = 首屏没拉到,和「这一栏没有评价」区分开
+  String _error = '';
+
   // 近 30 天负向标签聚合:"送得慢×8"比翻 50 条评价更快看清问题在哪一环
   Map<String, dynamic>? _tagStats;
 
@@ -169,7 +172,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
             SzChip('${e['tag']} ×${e['count']}', color: sz.danger, dense: true),
           for (final e in deliveryNeg)
             SzChip('${e['tag']} ×${e['count']}(配送,不计入你的评分)',
-                color: sz.inkFaint, dense: true),
+                color: sz.inkMuted, dense: true),
         ]),
       ]),
     );
@@ -193,13 +196,17 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
           _reviews = list;
           _loaded = true;
           _hasMore = list.length >= 100;
+          _error = '';
         });
       }
     } catch (e) {
+      // 「这一栏没有评价」和「评价没拉到」不能长得一样:
+      // 差评看不到,商家就错过了申诉窗口
       if (mounted && _filter == filterAtStart) {
-        setState(() => _loaded = true);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        setState(() {
+          _loaded = true;
+          _error = e is ApiException ? e.message : '$e';
+        });
       }
     }
   }
@@ -381,7 +388,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
               padding: const EdgeInsets.only(top: 4),
               child: Wrap(spacing: 6, runSpacing: 4, children: [
                 for (final tag in review.tags)
-                  SzChip(tag, color: sz.inkFaint, dense: true),
+                  SzChip(tag, color: sz.inkMuted, dense: true),
               ]),
             ),
           if (review.comment.isNotEmpty) ...[
@@ -455,6 +462,8 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
         Expanded(
           child: !_loaded
               ? const Center(child: CircularProgressIndicator())
+              : _error.isNotEmpty
+                  ? SzError(error: _error, onRetry: _reload)
               : RefreshIndicator(
                   onRefresh: _reload,
                   child: _reviews.isEmpty

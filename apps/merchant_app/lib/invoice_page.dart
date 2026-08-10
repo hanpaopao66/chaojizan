@@ -43,9 +43,16 @@ class _InvoicePageState extends State<InvoicePage> {
   }
 
   Future<void> _load() async {
+    // 两个请求互不依赖,先都发出去再逐个 await
+    final summaryF = widget.api.invoiceSummary(_period);
+    final mineF = widget.api.myInvoices();
+    final g = SzGather();
+    final summaryR = await g.take(summaryF);
+    final mineR = await g.take(mineF);
     try {
-      final summary = await widget.api.invoiceSummary(_period);
-      final mine = await widget.api.myInvoices();
+      if (g.failed) throw g.error!;
+      final summary = summaryR!;
+      final mine = mineR!;
       if (mounted) {
         setState(() {
           _summary = summary;

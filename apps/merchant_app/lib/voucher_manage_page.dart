@@ -18,6 +18,9 @@ class VoucherManagePage extends StatefulWidget {
 class _VoucherManagePageState extends State<VoucherManagePage> {
   List<VoucherDeal>? _deals;
 
+  /// 非空 = 上一次加载失败。「还没发布团购券」和「没拉到」不能长得一样
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -27,11 +30,12 @@ class _VoucherManagePageState extends State<VoucherManagePage> {
   Future<void> _load() async {
     try {
       final deals = await widget.api.myVoucherDeals();
-      if (mounted) setState(() => _deals = deals);
+      if (mounted) setState(() { _deals = deals; _error = ''; });
     } catch (e) {
       if (!mounted) return;
+      setState(() => _error = e is ApiException ? e.message : '$e');
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
+          .showSnackBar(SnackBar(content: Text(_error)));
     }
   }
 
@@ -128,7 +132,9 @@ class _VoucherManagePageState extends State<VoucherManagePage> {
         label: const Text('发布'),
       ),
       body: deals == null
-          ? const Center(child: CircularProgressIndicator())
+          ? (_error.isNotEmpty
+              ? SzError(error: _error, onRetry: _load)
+              : const Center(child: CircularProgressIndicator()))
           : deals.isEmpty
               ? const Center(
                   child: Text('还没发布团购券\n低价引流,核销才收 2% 服务费',

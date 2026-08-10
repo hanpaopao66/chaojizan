@@ -20,35 +20,47 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
   Map<String, Map<String, dynamic>> _appeals = {}; // "type:id" -> appeal
   bool _loaded = false;
 
+  /// 非空 = 上一次加载失败。空页面和加载失败在这一页含义完全相反
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// 三个请求先全部发出去再逐个 await —— 互不依赖,不必排队
   Future<void> _load() async {
-    try {
-      final afterSales = await widget.api.myAfterSales();
-      final reviews = await widget.api.myReviews();
-      final appeals = await widget.api.myAppeals();
-      if (mounted) {
-        setState(() {
-          // 只列可能需要申诉的:已同意退款且非骑手责的售后 / 3 星及以下差评
-          _afterSales = afterSales
-              .where((a) => a.status == 'accepted' && a.fault != 'rider')
-              .toList();
-          _badReviews =
-              reviews.where((r) => r.merchantRating <= 3).toList();
-          _appeals = {
-            for (final a in appeals)
-              '${a['target_type']}:${a['target_id']}': a,
-          };
-          _loaded = true;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _loaded = true);
+    final afterSalesF = widget.api.myAfterSales();
+    final reviewsF = widget.api.myReviews();
+    final appealsF = widget.api.myAppeals();
+    final g = SzGather();
+    final afterSales = await g.take(afterSalesF);
+    final reviews = await g.take(reviewsF);
+    final appeals = await g.take(appealsF);
+
+    if (!mounted) return;
+    // 拉失败时**不能**装作加载成功 —— 这一页空着的含义是「没有可申诉的」,
+    // 商家会当成判责已经翻篇,而实际上是没拉到
+    if (g.failed) {
+      setState(() {
+        _error = g.message;
+        _loaded = true;
+      });
+      return;
     }
+    setState(() {
+      _error = '';
+      // 只列可能需要申诉的:已同意退款且非骑手责的售后 / 3 星及以下差评
+      _afterSales = afterSales!
+          .where((a) => a.status == 'accepted' && a.fault != 'rider')
+          .toList();
+      _badReviews = reviews!.where((r) => r.merchantRating <= 3).toList();
+      _appeals = {
+        for (final a in appeals!) '${a['target_type']}:${a['target_id']}': a,
+      };
+      _loaded = true;
+    });
   }
 
   Future<void> _appeal(String targetType, int targetId, String title) async {
@@ -125,6 +137,8 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
       appBar: AppBar(title: const Text('判责申诉')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
+          : _error.isNotEmpty
+          ? SzError(error: _error, onRetry: _load)
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(

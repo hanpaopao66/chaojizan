@@ -16,6 +16,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   int _days = 7;
   Map<String, dynamic>? _data;
 
+  /// 非空 = 上一次加载失败。转个没头的圈,商家只能杀进程重开
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -25,11 +28,12 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Future<void> _load() async {
     try {
       final d = await widget.api.merchantAnalytics(days: _days);
-      if (mounted) setState(() => _data = d);
+      if (mounted) setState(() { _data = d; _error = ''; });
     } catch (e) {
       if (!mounted) return;
+      setState(() => _error = e is ApiException ? e.message : '$e');
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text(_error)));
     }
   }
 
@@ -76,7 +80,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                     if (h % 6 == 0)
                       Text('$h',
                           style: TextStyle(
-                              fontSize: 9, color: Theme.of(context).sz.inkFaint))
+                              fontSize: 9, color: Theme.of(context).sz.inkMuted))
                     else
                       const SizedBox(height: 12),
                   ],
@@ -108,7 +112,9 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
         const SizedBox(width: 12),
       ]),
       body: d == null
-          ? const Center(child: CircularProgressIndicator())
+          ? (_error.isNotEmpty
+              ? SzError(error: _error, onRetry: _load)
+              : const Center(child: CircularProgressIndicator()))
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
@@ -143,7 +149,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                                         fontWeight: FontWeight.w800,
                                         color: i < 3
                                             ? Theme.of(context).sz.earn
-                                            : Theme.of(context).sz.inkFaint))),
+                                            : Theme.of(context).sz.inkMuted))),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment:
@@ -191,7 +197,7 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   const SizedBox(height: 8),
                   Text('只读统计,仅自己可见;不做同行对比,好好做菜就行。',
                       style: theme.textTheme.bodySmall
-                          ?.copyWith(color: Theme.of(context).sz.inkFaint)),
+                          ?.copyWith(color: Theme.of(context).sz.inkMuted)),
                   const SizedBox(height: 24),
                 ],
               ),

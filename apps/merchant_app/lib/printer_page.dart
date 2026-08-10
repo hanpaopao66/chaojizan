@@ -24,6 +24,10 @@ class _PrinterPageState extends State<PrinterPage> {
   // 云打印状态。**一家店可以挂多台**:前厅出顾客小票、后厨出备餐单,
   // 是餐饮的标配 —— 共用一台的话出餐的人得跑到前台去拿
   bool _cloudLoaded = false;
+
+  /// 非空 = 云打印配置没拉到。**不能**因此显示成「平台还未开通」——
+  /// 那是一句关于平台的事实陈述,商家据此就不去绑打印机了
+  String _cloudError = '';
   bool _cloudEnabled = false; // 平台是否配置了服务商
   List<Map<String, dynamic>> _printers = const [];
   List<Map<String, dynamic>> _purposes = const [];
@@ -52,10 +56,16 @@ class _PrinterPageState extends State<PrinterPage> {
           _purposes = ((s['purposes'] as List?) ?? const [])
               .cast<Map<String, dynamic>>();
           _printerNote = '${s['note'] ?? ''}';
+          _cloudError = '';
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _cloudLoaded = true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _cloudLoaded = true;
+          _cloudError = e is ApiException ? e.message : '$e';
+        });
+      }
     }
     final device = await BtPrinter.savedDevice();
     final auto = await BtPrinter.autoPrintEnabled();
@@ -194,6 +204,10 @@ class _PrinterPageState extends State<PrinterPage> {
             const SizedBox(height: 12),
             if (!_cloudLoaded)
               const Center(child: CircularProgressIndicator())
+            else if (_cloudError.isNotEmpty)
+              SzRetryBanner(
+                  text: '云打印配置没拉到($_cloudError),开没开通现在说不准。点这里重试',
+                  onRetry: _load)
             else if (!_cloudEnabled)
               Text('平台还未开通云打印服务,先用下面的蓝牙打印;开通后这里会自动亮起。',
                   style: TextStyle(color: theme.colorScheme.error))

@@ -12,6 +12,9 @@ import 'health_certs_page.dart';
 import 'purchases_page.dart';
 import 'license_page.dart';
 import 'rules_page.dart';
+import 'holiday_plans_dialog.dart';
+import 'promo_rules_sheets.dart';
+import 'staff_sheet.dart';
 import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
 import 'promises_page.dart';
@@ -38,6 +41,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
   List<AfterSale> _afterSales = [];
   List<Map<String, dynamic>> _shopCoupons = [];
   final _announcement = TextEditingController();
+
+  /// 非空 = 店铺信息没拉到
+  String _error = '';
   bool _savingAnnouncement = false;
   bool _uploadingLogo = false;
   bool _uploadingPhoto = false;
@@ -54,41 +60,46 @@ class _ShopTabPageState extends State<ShopTabPage> {
     _load();
   }
 
+  /// 六个请求**先全部发出去**,再逐个 await —— 它们互不依赖,在网络上是并发的。
+  /// 原来排成一队,店里网不好时点开「店铺」要等六个来回。
+  ///
+  /// 后三个是附加信息,用 [SzGather.soft] 各自兜底:拉不到只是少显示一块,
+  /// 不该把整页打回错误态。
   Future<void> _load() async {
-    try {
-      final shop = await widget.api.myShop();
-      final reviews = await widget.api.myReviews();
-      final afterSales = await widget.api.myAfterSales(status: 'pending');
-      List<Map<String, dynamic>> coupons = _shopCoupons;
-      try {
-        coupons = await widget.api.myShopCouponBatches();
-      } catch (_) {}
-      Map<String, dynamic>? prep = _prepTime;
-      try {
-        prep = await widget.api.merchantPrepTime();
-      } catch (_) {}
-      Map<String, dynamic>? cam = _cam;
-      try {
-        cam = await widget.api.merchantKitchenCam();
-      } catch (_) {}
-      if (mounted) {
-        setState(() {
-          _shop = shop;
-          _reviews = reviews;
-          _afterSales = afterSales;
-          _shopCoupons = coupons;
-          _prepTime = prep;
-          _cam = cam;
-          if (_announcement.text.isEmpty) {
-            _announcement.text = shop?.announcement ?? '';
-          }
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
+    final shopF = widget.api.myShop();
+    final reviewsF = widget.api.myReviews();
+    final afterSalesF = widget.api.myAfterSales(status: 'pending');
+    final couponsF = widget.api.myShopCouponBatches();
+    final prepF = widget.api.merchantPrepTime();
+    final camF = widget.api.merchantKitchenCam();
+
+    final g = SzGather();
+    final shop = await g.take(shopF);
+    final reviews = await g.take(reviewsF);
+    final afterSales = await g.take(afterSalesF);
+    final coupons = await g.soft(couponsF, _shopCoupons);
+    final prep = await g.soft(prepF, _prepTime);
+    final cam = await g.soft(camF, _cam);
+
+    if (!mounted) return;
+    if (g.failed) {
+      setState(() => _error = g.message);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text(g.message)));
+      return;
     }
+    setState(() {
+      _error = '';
+      _shop = shop;
+      _reviews = reviews!;
+      _afterSales = afterSales!;
+      _shopCoupons = coupons;
+      _prepTime = prep;
+      _cam = cam;
+      if (_announcement.text.isEmpty) {
+        _announcement.text = shop?.announcement ?? '';
+      }
+    });
   }
 
   Future<void> _pickLogo() async {
@@ -272,7 +283,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
         child: Text(
             '近 ${p['window_days']} 天完成 ${p['samples']} 单,'
             '还不够算实测值(要 ${p['min_samples']} 单)',
-            style: TextStyle(fontSize: 11.5, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
       );
     }
 
@@ -320,13 +331,13 @@ class _ShopTabPageState extends State<ShopTabPage> {
                 'P95 ${(p['p95'] as num).toStringAsFixed(0)} 分钟',
             if (peer != null) '同品类中位 ${peer.toStringAsFixed(0)} 分钟(参照系,不是排名)',
           ].join(' · '),
-          style: TextStyle(fontSize: 11, color: sz.inkFaint),
+          style: TextStyle(fontSize: 11, color: sz.inkMuted),
         ),
         const SizedBox(height: 3),
         // 红线原样显示。不写清楚,商家会担心这个数影响生意,
         // 然后开始为它经营 —— 比如菜还没好就先点「出餐」,数据反而失真
         Text('${p['never_used_for']}',
-            style: TextStyle(fontSize: 11, height: 1.4, color: sz.inkFaint)),
+            style: TextStyle(fontSize: 11, height: 1.4, color: sz.inkMuted)),
       ]),
     );
   }
@@ -489,106 +500,6 @@ class _ShopTabPageState extends State<ShopTabPage> {
     }
   }
 
-  /// 满减规则编辑:最多 3 档,每档「满 X 减 Y」。
-  Future<void> _editPromoRules() async {
-    final shop = _shop!;
-    final rows = shop.promoRules
-        .map((r) => (
-              threshold: TextEditingController(
-                  text: '${r.thresholdCents ~/ 100}'),
-              off: TextEditingController(
-                  text: (r.offCents / 100).toStringAsFixed(
-                      r.offCents % 100 == 0 ? 0 : 2)),
-            ))
-        .toList();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
-          title: const Text('满减活动(最多 3 档)'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < rows.length; i++)
-                Row(
-                  children: [
-                    const Text('满'),
-                    SizedBox(
-                      width: 72,
-                      child: TextField(
-                          controller: rows[i].threshold,
-                          keyboardType: TextInputType.number,
-                          textAlign: TextAlign.center),
-                    ),
-                    const Text('元 减'),
-                    SizedBox(
-                      width: 72,
-                      child: TextField(
-                          controller: rows[i].off,
-                          keyboardType: const TextInputType
-                              .numberWithOptions(decimal: true),
-                          textAlign: TextAlign.center),
-                    ),
-                    const Text('元'),
-                    IconButton(
-                      tooltip: '减少',
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: () => setDialog(() => rows.removeAt(i)),
-                    ),
-                  ],
-                ),
-              if (rows.length < 3)
-                TextButton.icon(
-                  icon: const Icon(Icons.add),
-                  label: const Text('加一档'),
-                  onPressed: () => setDialog(() => rows.add((
-                        threshold: TextEditingController(),
-                        off: TextEditingController(),
-                      ))),
-                ),
-              const Text('成本商家承担;平台按满减后的实收计服务费',
-                  style: TextStyle(fontSize: 12)),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消')),
-            FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('保存')),
-          ],
-        ),
-      ),
-    );
-    if (saved != true || !mounted) return;
-    final rules = <Map<String, dynamic>>[];
-    for (final row in rows) {
-      final threshold = double.tryParse(row.threshold.text.trim());
-      final off = double.tryParse(row.off.text.trim());
-      if (threshold == null || off == null || threshold <= 0 || off <= 0) {
-        continue; // 空行/无效行直接忽略
-      }
-      if (off >= threshold) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('减的金额必须小于门槛(不能倒贴)')));
-        return;
-      }
-      rules.add({
-        'threshold_cents': (threshold * 100).round(),
-        'off_cents': (off * 100).round(),
-      });
-    }
-    try {
-      await widget.api.updateShop({'promo_rules': rules});
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
-
   String _hhmmLocal(DateTime utc) {
     final t = utc.toLocal();
     return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
@@ -615,525 +526,6 @@ class _ShopTabPageState extends State<ShopTabPage> {
   Future<void> _endRest() async {
     try {
       await widget.api.updateShop({'is_open': true});
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
-
-  static String _shortDate(String ymd) =>
-      ymd.length >= 10 ? '${int.parse(ymd.substring(5, 7))}/${int.parse(ymd.substring(8, 10))}' : ymd;
-
-  String _planLabel(Map<String, dynamic> p) {
-    final from = p['from'] as String? ?? '';
-    final to = (p['to'] as String?)?.isNotEmpty == true ? p['to'] as String : from;
-    final range = from == to
-        ? _shortDate(from)
-        : '${_shortDate(from)}~${_shortDate(to)}';
-    return (p['closed'] as bool? ?? true)
-        ? '$range 歇业'
-        : '$range ${p['open']}-${p['close']}';
-  }
-
-  static String _ymd(DateTime d) =>
-      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-  /// 节假日计划管理:歇业区间 / 单日特殊时段,最多 20 条,过期自动清理
-  Future<void> _editHolidayPlans() async {
-    final plans = [
-      for (final p in _shop!.holidayPlans) Map<String, dynamic>.from(p)
-    ];
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
-          title: const Text('节假日计划'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (plans.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('暂无计划。春节歇业、除夕只开半天,都在这里提前设置。',
-                        style: TextStyle(fontSize: 13)),
-                  ),
-                for (var i = 0; i < plans.length; i++)
-                  Row(children: [
-                    Expanded(child: Text(_planLabel(plans[i]))),
-                    IconButton(
-                      tooltip: '删除',
-                      icon: const Icon(Icons.delete_outline, size: 20),
-                      onPressed: () => setDialog(() => plans.removeAt(i)),
-                    ),
-                  ]),
-                const SizedBox(height: 4),
-                if (plans.length < 20)
-                  Row(children: [
-                    TextButton.icon(
-                      icon: const Icon(Icons.event_busy, size: 18),
-                      label: const Text('加歇业'),
-                      onPressed: () async {
-                        final now = DateTime.now();
-                        final range = await showDateRangePicker(
-                          context: context,
-                          firstDate: now,
-                          lastDate: now.add(const Duration(days: 365)),
-                        );
-                        if (range == null) return;
-                        setDialog(() => plans.add({
-                              'from': _ymd(range.start),
-                              'to': _ymd(range.end),
-                              'closed': true,
-                            }));
-                      },
-                    ),
-                    TextButton.icon(
-                      icon: const Icon(Icons.schedule, size: 18),
-                      label: const Text('加特殊时段'),
-                      onPressed: () async {
-                        final now = DateTime.now();
-                        final date = await showDatePicker(
-                          context: context,
-                          firstDate: now,
-                          lastDate: now.add(const Duration(days: 365)),
-                        );
-                        if (date == null || !context.mounted) return;
-                        final open = await showTimePicker(
-                            context: context,
-                            initialTime:
-                                const TimeOfDay(hour: 10, minute: 0),
-                            helpText: '当日开店时间');
-                        if (open == null || !context.mounted) return;
-                        final close = await showTimePicker(
-                            context: context,
-                            initialTime:
-                                const TimeOfDay(hour: 15, minute: 0),
-                            helpText: '当日打烊时间');
-                        if (close == null) return;
-                        String hhmm(TimeOfDay t) =>
-                            '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-                        setDialog(() => plans.add({
-                              'from': _ymd(date),
-                              'to': _ymd(date),
-                              'closed': false,
-                              'open': hhmm(open),
-                              'close': hhmm(close),
-                            }));
-                      },
-                    ),
-                  ]),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消')),
-            FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('保存')),
-          ],
-        ),
-      ),
-    );
-    if (saved != true || !mounted) return;
-    try {
-      await widget.api.updateShop({'holiday_plans': plans});
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
-
-  /// 子账号管理:列出店员 + 按手机号添加 + 移除(仅店主)
-  Future<void> _manageStaff() async {
-    List<Map<String, dynamic>> staff = [];
-    try {
-      staff = await widget.api.myStaff();
-    } catch (_) {}
-    if (!mounted) return;
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) => SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-                left: 16, right: 16, top: 16,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('子账号(店员)',
-                    style: Theme.of(context).textTheme.titleMedium),
-                Text('店员能接单/出餐/估清,不能提现/改价/改设置。',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkFaint)),
-                const SizedBox(height: 8),
-                if (staff.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text('还没有店员'),
-                  ),
-                for (final s in staff)
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(s['name'] as String? ?? ''),
-                    subtitle: Text(s['phone'] as String? ?? ''),
-                    trailing: IconButton(
-                      tooltip: '移除店员',
-                      icon: const Icon(Icons.person_remove_outlined),
-                      onPressed: () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          await widget.api.removeStaff(s['user_id'] as int);
-                          staff = await widget.api.myStaff();
-                          setSheet(() {});
-                        } catch (e) {
-                          messenger.showSnackBar(
-                              SnackBar(content: Text(e.toString())));
-                        }
-                      },
-                    ),
-                  ),
-                const Divider(),
-                FilledButton.icon(
-                  icon: const Icon(Icons.person_add_alt),
-                  label: const Text('添加店员'),
-                  onPressed: () async {
-                    final added = await _addStaffDialog();
-                    if (added == true) {
-                      staff = await widget.api.myStaff();
-                      setSheet(() {});
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<bool?> _addStaffDialog() async {
-    final phone = TextEditingController();
-    final name = TextEditingController();
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('添加店员'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-              controller: phone,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                  labelText: '手机号', helperText: '对方需先下载 App 登录一次')),
-          TextField(
-              controller: name,
-              decoration: const InputDecoration(labelText: '备注名(如:小王)')),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
-          FilledButton(
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              final nav = Navigator.of(context);
-              try {
-                await widget.api
-                    .addStaff(phone.text.trim(), name.text.trim());
-                nav.pop(true);
-              } catch (e) {
-                messenger.showSnackBar(
-                    SnackBar(content: Text(e.toString())));
-              }
-            },
-            child: const Text('添加'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 店铺券管理:列出已有批次(启停)+ 新建券
-  Future<void> _manageShopCoupons() async {
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheet) => SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-                left: 16, right: 16, top: 16,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('店铺券', style: Theme.of(context).textTheme.titleMedium),
-                Text('成本你自己出,用来引流拉复购。与满减二选其一取最优。',
-                    style: TextStyle(fontSize: 12, color: Theme.of(context).sz.inkFaint)),
-                const SizedBox(height: 8),
-                for (final b in _shopCoupons)
-                  ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                        '满${b['threshold_cents'] ~/ 100}减${b['off_cents'] ~/ 100}'
-                        ' · ${b['name']}'),
-                    subtitle: Text('已领 ${b['issued']}/${b['total']}'
-                        ' · 每人${b['per_user_limit']}张 · ${b['valid_days']}天'),
-                    trailing: Switch(
-                      value: b['active'] == true,
-                      onChanged: (_) async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          await widget.api.toggleShopCouponBatch(b['id'] as int);
-                          await _load();
-                          setSheet(() {});
-                        } catch (e) {
-                          messenger.showSnackBar(
-                              SnackBar(content: Text(e.toString())));
-                        }
-                      },
-                    ),
-                  ),
-                const Divider(),
-                FilledButton.icon(
-                  icon: const Icon(Icons.add),
-                  label: const Text('新建店铺券'),
-                  onPressed: () async {
-                    final ok = await _createShopCouponDialog();
-                    if (ok == true) {
-                      await _load();
-                      setSheet(() {});
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<bool?> _createShopCouponDialog() async {
-    final name = TextEditingController(text: '满减券');
-    final threshold = TextEditingController();
-    final off = TextEditingController();
-    final total = TextEditingController(text: '100');
-    final perUser = TextEditingController(text: '1');
-    final validDays = TextEditingController(text: '7');
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('新建店铺券'),
-        content: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(
-                controller: name,
-                decoration: const InputDecoration(labelText: '券名')),
-            Row(children: [
-              Expanded(
-                child: TextField(
-                    controller: threshold,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '满(元,0无门槛)')),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                    controller: off,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '减(元)')),
-              ),
-            ]),
-            Row(children: [
-              Expanded(
-                child: TextField(
-                    controller: total,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '发行总量')),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                    controller: perUser,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '每人限领')),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                    controller: validDays,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: '有效天数')),
-              ),
-            ]),
-          ]),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
-          FilledButton(
-            onPressed: () async {
-              final t = ((double.tryParse(threshold.text) ?? 0) * 100).round();
-              final o = ((double.tryParse(off.text) ?? 0) * 100).round();
-              final tot = int.tryParse(total.text) ?? 0;
-              if (o <= 0 || tot <= 0 || (t > 0 && o >= t)) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('减额需>0且小于门槛,总量>0')));
-                return;
-              }
-              try {
-                await widget.api.createShopCouponBatch({
-                  'name': name.text.trim(),
-                  'threshold_cents': t,
-                  'off_cents': o,
-                  'total': tot,
-                  'per_user_limit': int.tryParse(perUser.text) ?? 1,
-                  'valid_days': int.tryParse(validDays.text) ?? 7,
-                });
-                if (context.mounted) Navigator.pop(context, true);
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(content: Text(e.toString())));
-                }
-              }
-            },
-            child: const Text('发布'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 满赠规则编辑:最多 2 档,每档「满 X 元赠某菜 1 份」,赠品从本店在售菜里选。
-  Future<void> _editGiftRules() async {
-    final shop = _shop!;
-    final List<Dish> dishes;
-    try {
-      dishes = (await widget.api.myDishes())
-          .where((d) => d.isOnSale)
-          .toList();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-      return;
-    }
-    if (!mounted) return;
-    if (dishes.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('先上架菜品,才能选赠品')));
-      return;
-    }
-    final dishIds = dishes.map((d) => d.id).toSet();
-    final rows = shop.giftRules
-        .map((r) => (
-              threshold:
-                  TextEditingController(text: '${r.thresholdCents ~/ 100}'),
-              // 赠品菜已下架时置空,强制重选
-              dishId: ValueNotifier<int?>(
-                  dishIds.contains(r.dishId) ? r.dishId : null),
-            ))
-        .toList();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
-          title: const Text('满赠活动(最多 2 档)'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < rows.length; i++)
-                Row(
-                  children: [
-                    const Text('满'),
-                    SizedBox(
-                      width: 56,
-                      child: TextField(
-                          controller: rows[i].threshold,
-                          keyboardType: TextInputType.number,
-                          textAlign: TextAlign.center),
-                    ),
-                    const Text('元赠'),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: DropdownButton<int>(
-                        isExpanded: true,
-                        value: rows[i].dishId.value,
-                        hint: const Text('选菜品'),
-                        items: [
-                          for (final d in dishes)
-                            DropdownMenuItem(
-                                value: d.id,
-                                child: Text(d.name,
-                                    overflow: TextOverflow.ellipsis)),
-                        ],
-                        onChanged: (v) =>
-                            setDialog(() => rows[i].dishId.value = v),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: '减少',
-                      icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: () => setDialog(() => rows.removeAt(i)),
-                    ),
-                  ],
-                ),
-              if (rows.length < 2)
-                TextButton.icon(
-                  icon: const Icon(Icons.add),
-                  label: const Text('加一档'),
-                  onPressed: () => setDialog(() => rows.add((
-                        threshold: TextEditingController(),
-                        dishId: ValueNotifier<int?>(null),
-                      ))),
-                ),
-              const Text('赠品照常扣库存,库存不足该档自动失效;与满减可同时生效',
-                  style: TextStyle(fontSize: 12)),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('取消')),
-            FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('保存')),
-          ],
-        ),
-      ),
-    );
-    if (saved != true || !mounted) return;
-    final rules = <Map<String, dynamic>>[];
-    for (final row in rows) {
-      final threshold = double.tryParse(row.threshold.text.trim());
-      final dishId = row.dishId.value;
-      if (threshold == null || threshold <= 0 || dishId == null) {
-        continue; // 空行/无效行直接忽略
-      }
-      rules.add({
-        'threshold_cents': (threshold * 100).round(),
-        'dish_id': dishId,
-      });
-    }
-    try {
-      await widget.api.updateShop({'gift_rules': rules});
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -1187,7 +579,10 @@ class _ShopTabPageState extends State<ShopTabPage> {
   Widget build(BuildContext context) {
     final shop = _shop;
     if (shop == null) {
-      return const Center(child: CircularProgressIndicator());
+      // 店铺信息没拉到就转圈到天荒地老,商家只能杀进程重开
+      return _error.isNotEmpty
+          ? SzError(error: _error, onRetry: _load)
+          : const Center(child: CircularProgressIndicator());
     }
     return RefreshIndicator(
       onRefresh: _load,
@@ -1351,7 +746,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                           shop.holidayPlans.isEmpty
                               ? '未设置'
                               : shop.holidayPlans
-                                  .map(_planLabel)
+                                  .map(holidayPlanLabel)
                                   .join(' · '),
                           style: TextStyle(
                               color: shop.holidayPlans.isEmpty
@@ -1361,7 +756,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
                         ),
                       ),
                       TextButton(
-                          onPressed: _editHolidayPlans,
+                          onPressed: () => editHolidayPlans(
+                              context, widget.api, shop, _load),
                           child: const Text('管理')),
                     ],
                   ),
@@ -1411,7 +807,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
                         ),
                       ),
                       TextButton(
-                          onPressed: _editPromoRules,
+                          onPressed: () => editPromoRules(
+                              context, widget.api, shop, _load),
                           child: const Text('编辑')),
                     ],
                   ),
@@ -1437,7 +834,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
                         ),
                       ),
                       TextButton(
-                          onPressed: _editGiftRules,
+                          onPressed: () => editGiftRules(
+                              context, widget.api, shop, _load),
                           child: const Text('编辑')),
                     ],
                   ),
@@ -1465,7 +863,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
                         ),
                       ),
                       TextButton(
-                          onPressed: _manageShopCoupons,
+                          onPressed: () => showShopCouponSheet(
+                              context, widget.api, () => _shopCoupons, _load),
                           child: const Text('管理')),
                     ],
                   ),
@@ -1478,7 +877,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       const Text('子账号(店员)'),
                       const Spacer(),
                       TextButton(
-                          onPressed: _manageStaff, child: const Text('管理')),
+                          onPressed: () => showStaffSheet(context, widget.api),
+                          child: const Text('管理')),
                     ]),
                     Text('给店员开账号只能接单/出餐/估清,提现改价改设置仍只有你能操作',
                         style: Theme.of(context).textTheme.bodySmall),

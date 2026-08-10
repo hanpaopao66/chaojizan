@@ -11,6 +11,8 @@ server/certs/
 .dart_tool/
 .packages
 build/
+# Kotlin 编译器守护进程的会话文件,每次 gradle 构建都会新生成
+apps/*/android/.kotlin/
 .flutter-plugins
 .flutter-plugins-dependencies
 *.iml

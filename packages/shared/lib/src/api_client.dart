@@ -22,6 +22,70 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// 一页要拉好几份互不依赖的数据时用它。
+///
+/// 直接 `final a = await api.foo(); final b = await api.bar();` 是**串行**的:
+/// 店里网不好的时候,一页五个请求就是五个来回的白屏。改成先把 Future 全发出去、
+/// 再逐个 await 就并发了,但会踩两个坑:
+///
+/// - 第一个 await 抛异常后跳进 `catch`,**后面几个 Future 没人接**,
+///   变成未处理的异步错误(Flutter 会往控制台刷一片红,测试里直接算失败);
+/// - 改用记录 `.wait` 能保证都被 await,但它抛的是 `ParallelWaitError`,
+///   `toString()` 出来是一串英文,商家看到只会一脸懵。
+///
+/// 这个类两个坑都绕开:每个 Future 都被 await,失败的记下第一条**原始**错误,
+/// 拿到的仍是原来的类型。
+///
+/// ```dart
+/// final fooF = api.foo();          // ← 先全部发出去,这一步不能 await
+/// final barF = api.bar();
+/// final g = SzGather();
+/// final foo = await g.take(fooF);
+/// final bar = await g.take(barF);  // 挂了返回 null,不抛
+/// if (g.failed) { showError(g.message); return; }
+/// ```
+///
+/// 次要数据不想让它影响整页时,用 [soft] —— 它不计入 [failed]。
+class SzGather {
+  Object? _error;
+
+  /// 有没有 take 失败过。soft 的不算
+  bool get failed => _error != null;
+
+  /// 第一条失败的原始异常,没有则为 null
+  Object? get error => _error;
+
+  /// 给用户看的一句话。[ApiException] 已经是人话,别的兜底成通用说法
+  String get message {
+    final e = _error;
+    if (e == null) return '';
+    if (e is ApiException) return e.message;
+    return '加载失败,请重试';
+  }
+
+  /// 等一个 Future。失败返回 null 并记下第一条错误
+  Future<T?> take<T>(Future<T> future) async {
+    try {
+      return await future;
+    } catch (e) {
+      _error ??= e;
+      return null;
+    }
+  }
+
+  /// 等一个**次要**的 Future:失败返回 [fallback],且**不**让整页进错误态。
+  ///
+  /// 判断标准和 SzError 一样 —— 这次失败会不会让用户误以为某件事没发生?
+  /// 会 → 用 [take];不会(只是少显示一块) → 用这个。
+  Future<T> soft<T>(Future<T> future, T fallback) async {
+    try {
+      return await future;
+    } catch (_) {
+      return fallback;
+    }
+  }
+}
+
 /// 把底层网络异常翻成人话。
 ///
 /// 不翻的后果实测过:首页断网时界面上会出现

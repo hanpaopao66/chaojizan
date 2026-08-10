@@ -26,33 +26,54 @@ class _FinancePageState extends State<FinancePage> {
   Map<String, dynamic>? _tier;
   List<Withdrawal> _withdrawals = [];
 
+  /// 非空 = 上一次加载失败。空列表和加载失败不能长得一样
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
     _load();
   }
 
+  /// 五块数据一起拉。
+  ///
+  /// 原来是五个 `await` 排成一队 —— 互不依赖却要等五个来回,
+  /// 店里网不好的时候点开「财务」就是几秒白屏。
+  ///
+  /// **各自兜底**:钱包和流水是这一页的主角,拉不到要报错;
+  /// 品质分和费率档是附加信息,挂了不该把整页打回错误态 ——
+  /// 商家来这一页多半是要看钱、要提现,不是来看品质分的。
+  ///
   Future<void> _load() async {
-    try {
-      final daily = await widget.api.financeDaily();
-      final wallet = await widget.api.merchantWallet();
-      final withdrawals = await widget.api.merchantWithdrawals();
-      final quality = await widget.api.merchantQuality();
-      final tier = await widget.api.merchantCommissionTier();
-      if (mounted) {
-        setState(() {
-          _daily = daily;
-          _wallet = wallet;
-          _withdrawals = withdrawals;
-          _quality = quality;
-          _tier = tier;
-        });
-      }
-    } catch (e) {
-      if (!mounted) return;
+    // 先全部发出去,这一步不能 await,否则又串回去了
+    final dailyF = widget.api.financeDaily();
+    final walletF = widget.api.merchantWallet();
+    final withdrawalsF = widget.api.merchantWithdrawals();
+    final qualityF = widget.api.merchantQuality();
+    final tierF = widget.api.merchantCommissionTier();
+
+    final g = SzGather();
+    final daily = await g.take(dailyF);
+    final wallet = await g.take(walletF);
+    final withdrawals = await g.take(withdrawalsF);
+    final quality = await g.soft(qualityF, _quality);
+    final tier = await g.soft(tierF, _tier);
+
+    if (!mounted) return;
+    if (g.failed) {
+      setState(() => _error = g.message);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text(g.message)));
+      return;
     }
+    setState(() {
+      _error = '';
+      _daily = daily;
+      _wallet = wallet;
+      _withdrawals = withdrawals!;
+      _quality = quality;
+      _tier = tier;
+    });
   }
 
   /// 提现:输入金额 → 提交申请 → T+1 打款
@@ -140,7 +161,7 @@ class _FinancePageState extends State<FinancePage> {
                   fontSize: 34, fontWeight: FontWeight.w600, color: sz.earn)),
           const SizedBox(height: 2),
           Text('外卖净额 + 团购核销净额 − 保证金留存',
-              style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+              style: TextStyle(fontSize: 11, color: sz.inkMuted)),
           const SizedBox(height: 14),
           Row(
             children: [
@@ -172,7 +193,7 @@ class _FinancePageState extends State<FinancePage> {
               padding: const EdgeInsets.only(top: 6),
               child: Text('满 ¥10 可提现',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                  style: TextStyle(fontSize: 11, color: sz.inkMuted)),
             ),
           const SizedBox(height: 4),
           Row(
@@ -310,6 +331,10 @@ class _FinancePageState extends State<FinancePage> {
   Widget build(BuildContext context) {
     final daily = _daily;
     if (daily == null) {
+      // 拉失败就说清楚并给重试 —— 转个没头的圈,商家只能杀进程重开
+      if (_error.isNotEmpty) {
+        return SzError(error: _error, onRetry: _load);
+      }
       return const Center(child: CircularProgressIndicator());
     }
     final today = DateTime.now();
@@ -360,7 +385,7 @@ class _FinancePageState extends State<FinancePage> {
                   const SizedBox(height: 3),
                   Text('每月 1 日按上月单量自动重算,只降不升;5% 永远是上限',
                       style: TextStyle(
-                          fontSize: 11, color: Theme.of(context).sz.inkFaint)),
+                          fontSize: 11, color: Theme.of(context).sz.inkMuted)),
                 ],
               ),
             ),

@@ -76,7 +76,7 @@ class SzSectionTitle extends StatelessWidget {
       children: [
         Text(text,
             style: TextStyle(
-                fontSize: 11, letterSpacing: 1.2, color: sz.inkFaint)),
+                fontSize: 11, letterSpacing: 1.2, color: sz.inkMuted)),
         if (trailing != null) ...[const Spacer(), trailing!],
       ],
     );
@@ -279,7 +279,7 @@ class _SzMoneyFlowState extends State<SzMoneyFlow> {
                           color: sz.ink)),
                   const SizedBox(width: 8),
                   Text('${(item.fraction * 100).toStringAsFixed(1)}%',
-                      style: szFigure(fontSize: 11, color: sz.inkFaint)),
+                      style: szFigure(fontSize: 11, color: sz.inkMuted)),
                   const Spacer(),
                   Text(yuanOf(item.amountCents),
                       style: szMoney(
@@ -469,7 +469,7 @@ class SzTimeline extends StatelessWidget {
                                   ? FontWeight.w400
                                   : FontWeight.w500,
                               color: step.state == SzStepState.todo
-                                  ? sz.inkFaint
+                                  ? sz.inkMuted
                                   : sz.ink,
                             )),
                         if (step.subtitle != null) ...[
@@ -785,6 +785,49 @@ class SzError extends StatelessWidget {
               FilledButton(onPressed: onRetry, child: const Text('重试')),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 顶部警示条:页面**主体还能用**,但有一块数据没拉到。
+///
+/// 和 [SzError] 的分工:整页没数据用 SzError(占满屏、给重试);
+/// 只是某一块拉不到、剩下的照常能看,用这个 —— 整页打回错误态会
+/// 把本来能用的东西也一起拿走。
+///
+/// 关键是**把歧义说破**:界面上那块空白到底是「没有」还是「没拉到」,
+/// 用户自己分辨不出来,得由这行字来讲。
+class SzRetryBanner extends StatelessWidget {
+  const SzRetryBanner({super.key, required this.text, required this.onRetry});
+
+  /// 说清楚缺的是什么、空白不代表什么。别只写「加载失败」
+  final String text;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Material(
+      color: sz.danger.withValues(alpha: .12),
+      child: InkWell(
+        onTap: onRetry,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(children: [
+            Icon(Icons.wifi_off, size: 18, color: sz.danger),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(text,
+                  style:
+                      TextStyle(fontSize: 13, color: sz.danger, height: 1.4)),
+            ),
+            // 整条都能点,图标只是提示 —— 别让读屏把它再念一遍
+            ExcludeSemantics(
+              child: Icon(Icons.refresh, size: 18, color: sz.danger),
+            ),
+          ]),
         ),
       ),
     );

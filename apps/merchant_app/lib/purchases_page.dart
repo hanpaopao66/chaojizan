@@ -121,9 +121,17 @@ class _PurchasesPageState extends State<PurchasesPage> {
                     )
                   : RefreshIndicator(
                       onRefresh: _load,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
-                        children: [
+                      child: _ledgerList(scheme),
+                    ),
+        ),
+      ]),
+    );
+  }
+
+  /// 进货台账**只增不减**,开一年就是几百条 —— 按需构建。
+  /// 顶部说明卡和尾部备注数量固定,拿出来当固定头尾
+  Widget _ledgerList(ColorScheme scheme) {
+    final leading = <Widget>[
                           if (_q.isEmpty)
                             Card(
                               color: scheme.secondaryContainer,
@@ -162,20 +170,26 @@ class _PurchasesPageState extends State<PurchasesPage> {
                                       ? '还没有进货记录'
                                       : '没有找到「$_q」的进货记录')),
                             ),
-                          for (final r in _items) _recordTile(r),
-                          if (_note.isNotEmpty && _q.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Text(_note,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurfaceVariant)),
-                            ),
-                        ],
-                      ),
-                    ),
+    ];
+    final trailing = <Widget>[
+      if (_note.isNotEmpty && _q.isEmpty)
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(_note,
+              style:
+                  TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
         ),
-      ]),
+    ];
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
+      itemCount: leading.length + _items.length + trailing.length,
+      itemBuilder: (context, i) {
+        if (i < leading.length) return leading[i];
+        final j = i - leading.length;
+        if (j < _items.length) return _recordTile(_items[j]);
+        return trailing[j - _items.length];
+      },
     );
   }
 

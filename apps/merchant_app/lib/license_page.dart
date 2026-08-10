@@ -127,6 +127,9 @@ class LicenseRenewalPage extends StatefulWidget {
 class _LicenseRenewalPageState extends State<LicenseRenewalPage> {
   Map<String, dynamic>? _renewal;
   bool _loading = true;
+
+  /// 非空 = 换证申请状态没拉到。"没有待审申请"这句话在这一页有实际后果
+  String _error = '';
   bool _busy = false;
 
   final _no = TextEditingController();
@@ -158,8 +161,15 @@ class _LicenseRenewalPageState extends State<LicenseRenewalPage> {
           _loading = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      // 换证申请拉不到时**不能**装作没有 —— 这一页上"没有待审申请"
+      // 直接对应着「再交一份」那个按钮,商家会重复提交
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = e is ApiException ? e.message : '$e';
+        });
+      }
     }
   }
 
@@ -171,112 +181,125 @@ class _LicenseRenewalPageState extends State<LicenseRenewalPage> {
       appBar: AppBar(title: const Text('食品经营许可证')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (widget.shop.licenseExpiresAt.isNotEmpty)
-                  Card(
-                    child: ListTile(
-                      title: const Text('当前证照有效期至'),
-                      subtitle: Text(widget.shop.licenseExpiresAt),
-                      trailing: Text(
-                        widget.shop.licenseDaysLeft == null
-                            ? ''
-                            : (widget.shop.licenseDaysLeft! >= 0
-                                ? '还剩 ${widget.shop.licenseDaysLeft} 天'
-                                : '已过期 ${-widget.shop.licenseDaysLeft!} 天'),
-                        style: TextStyle(color: scheme.error),
+          : Column(children: [
+              // 证照本身的信息还在(来自 shop),只有换证申请状态缺了 ——
+              // 整页打回错误态会把能看的也一起拿走,所以只加一条横幅
+              if (_error.isNotEmpty)
+                SzRetryBanner(
+                    text: '换证申请状态没拉到,下面显示的「没有待审申请」不一定是真的。点这里重试',
+                    onRetry: () {
+                      setState(() => _loading = true);
+                      _load();
+                    }),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    if (widget.shop.licenseExpiresAt.isNotEmpty)
+                      Card(
+                        child: ListTile(
+                          title: const Text('当前证照有效期至'),
+                          subtitle: Text(widget.shop.licenseExpiresAt),
+                          trailing: Text(
+                            widget.shop.licenseDaysLeft == null
+                                ? ''
+                                : (widget.shop.licenseDaysLeft! >= 0
+                                    ? '还剩 ${widget.shop.licenseDaysLeft} 天'
+                                    : '已过期 ${-widget.shop.licenseDaysLeft!} 天'),
+                            style: TextStyle(color: scheme.error),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                if (_renewal != null && _renewal!['status'] == 'rejected')
-                  Card(
-                    color: scheme.errorContainer,
-                    child: ListTile(
-                      title: const Text('上次提交的新证未通过'),
-                      subtitle: Text('${_renewal!['reject_reason']}'),
-                    ),
-                  ),
-                if (pending) ...[
-                  Card(
-                    color: scheme.secondaryContainer,
-                    child: ListTile(
-                      leading: const Icon(Icons.hourglass_top),
-                      title: const Text('新证核验中'),
-                      subtitle: Text(
-                          '编号 ${_renewal!['license_no']};'
-                          '核验期间照常营业,通过后自动替换。'),
-                    ),
-                  ),
-                ] else ...[
-                  Card(
-                    color: scheme.secondaryContainer,
-                    child: const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: Text(
-                        '换证不用停业。提交后由平台人工核验,通过即自动替换店里的'
-                        '资质,并解除因证过期造成的停业。',
+                    if (_renewal != null && _renewal!['status'] == 'rejected')
+                      Card(
+                        color: scheme.errorContainer,
+                        child: ListTile(
+                          title: const Text('上次提交的新证未通过'),
+                          subtitle: Text('${_renewal!['reject_reason']}'),
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _no,
-                    maxLength: 50,
-                    decoration: const InputDecoration(
-                        labelText: '许可证编号', border: OutlineInputBorder()),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('有效期至'),
-                    subtitle: Text(_expires == null
-                        ? '到期提醒靠它 —— 填了才会在到期前 30 / 7 / 1 天提醒你'
-                        : _expires!.toIso8601String().substring(0, 10)),
-                    trailing: const Icon(Icons.calendar_today, size: 20),
-                    onTap: () async {
-                      final now = DateTime.now();
-                      final picked = await showDatePicker(
-                        context: context,
-                        // 交一张已经过期的证没有意义,选都别让选
-                        firstDate: now.add(const Duration(days: 1)),
-                        lastDate: DateTime(now.year + 20),
-                        initialDate: now.add(const Duration(days: 365)),
-                      );
-                      if (picked != null) setState(() => _expires = picked);
-                    },
-                  ),
-                  TextField(
-                    controller: _subject,
-                    maxLength: 100,
-                    decoration: const InputDecoration(
-                      labelText: '证照主体名称(选填)',
-                      hintText: '如:成都赞小碗餐饮管理有限公司',
-                      helperText: '证上的公司/个体户全称。与店招不同很正常。',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  TextField(
-                    controller: _bizNo,
-                    maxLength: 50,
-                    decoration: const InputDecoration(
-                        labelText: '营业执照统一社会信用代码(选填)',
-                        border: OutlineInputBorder()),
-                  ),
-                  const SizedBox(height: 8),
-                  LicenseUploadField(
-                    api: widget.api,
-                    label: '新证照片',
-                    url: _imageUrl,
-                    onUploaded: (u) => setState(() => _imageUrl = u),
-                  ),
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    onPressed: _busy ? null : _submit,
-                    child: const Text('提交核验'),
-                  ),
-                ],
-              ],
-            ),
+                    if (pending) ...[
+                      Card(
+                        color: scheme.secondaryContainer,
+                        child: ListTile(
+                          leading: const Icon(Icons.hourglass_top),
+                          title: const Text('新证核验中'),
+                          subtitle: Text(
+                              '编号 ${_renewal!['license_no']};'
+                              '核验期间照常营业,通过后自动替换。'),
+                        ),
+                      ),
+                    ] else ...[
+                      Card(
+                        color: scheme.secondaryContainer,
+                        child: const Padding(
+                          padding: EdgeInsets.all(12),
+                          child: Text(
+                            '换证不用停业。提交后由平台人工核验,通过即自动替换店里的'
+                            '资质,并解除因证过期造成的停业。',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _no,
+                        maxLength: 50,
+                        decoration: const InputDecoration(
+                            labelText: '许可证编号', border: OutlineInputBorder()),
+                      ),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('有效期至'),
+                        subtitle: Text(_expires == null
+                            ? '到期提醒靠它 —— 填了才会在到期前 30 / 7 / 1 天提醒你'
+                            : _expires!.toIso8601String().substring(0, 10)),
+                        trailing: const Icon(Icons.calendar_today, size: 20),
+                        onTap: () async {
+                          final now = DateTime.now();
+                          final picked = await showDatePicker(
+                            context: context,
+                            // 交一张已经过期的证没有意义,选都别让选
+                            firstDate: now.add(const Duration(days: 1)),
+                            lastDate: DateTime(now.year + 20),
+                            initialDate: now.add(const Duration(days: 365)),
+                          );
+                          if (picked != null) setState(() => _expires = picked);
+                        },
+                      ),
+                      TextField(
+                        controller: _subject,
+                        maxLength: 100,
+                        decoration: const InputDecoration(
+                          labelText: '证照主体名称(选填)',
+                          hintText: '如:成都赞小碗餐饮管理有限公司',
+                          helperText: '证上的公司/个体户全称。与店招不同很正常。',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      TextField(
+                        controller: _bizNo,
+                        maxLength: 50,
+                        decoration: const InputDecoration(
+                            labelText: '营业执照统一社会信用代码(选填)',
+                            border: OutlineInputBorder()),
+                      ),
+                      const SizedBox(height: 8),
+                      LicenseUploadField(
+                        api: widget.api,
+                        label: '新证照片',
+                        url: _imageUrl,
+                        onUploaded: (u) => setState(() => _imageUrl = u),
+                      ),
+                      const SizedBox(height: 20),
+                      FilledButton(
+                        onPressed: _busy ? null : _submit,
+                        child: const Text('提交核验'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ]),
     );
   }
 

@@ -16,6 +16,9 @@ class _DishManagePageState extends State<DishManagePage> {
   List<Dish>? _dishes;
   Map<String, dynamic>? _stocking; // 高峰备货建议(纯建议,不自动改)
 
+  /// 非空 = 菜单没拉到。「没有菜品」和「没拉到」在这一页含义天差地别
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -23,18 +26,28 @@ class _DishManagePageState extends State<DishManagePage> {
   }
 
   Future<void> _load() async {
-    try {
-      final dishes = await widget.api.myDishes();
-      if (mounted) setState(() => _dishes = dishes);
-    } catch (e) {
-      if (!mounted) return;
+    // 两个请求互不依赖,先都发出去再逐个 await
+    final dishesF = widget.api.myDishes();
+    final stockingF = widget.api.merchantStocking();
+    final g = SzGather();
+    final dishes = await g.take(dishesF);
+    // 备货建议只是锦上添花,拉不到不该拦着改菜单
+    final stocking = await g.soft(stockingF, _stocking);
+
+    if (!mounted) return;
+    if (g.failed) {
+      // 菜单没拉到时**不能**留在"还没有菜品"那一屏 —— 那句话会让商家
+      // 以为菜真的没了,跑去重新录一遍
+      setState(() => _error = g.message);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+          .showSnackBar(SnackBar(content: Text(g.message)));
+      return;
     }
-    try {
-      final st = await widget.api.merchantStocking();
-      if (mounted) setState(() => _stocking = st);
-    } catch (_) {}
+    setState(() {
+      _error = '';
+      _dishes = dishes;
+      _stocking = stocking;
+    });
   }
 
   /// 一键按建议补库存(可能不够卖的菜全部补到建议份数)
@@ -292,12 +305,108 @@ class _DishManagePageState extends State<DishManagePage> {
         size: 48,
       );
 
+  Widget _categoryHeader(String name) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text(name,
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(color: Theme.of(context).colorScheme.primary)),
+      );
+
+  /// 菜品行。[sameCategory] 是同分类的菜,置顶要靠它算最小 sort
+  Widget _dishTile(Dish dish, List<Dish> sameCategory) {
+    return ListTile(
+      selected: _selected.contains(dish.id),
+      selectedTileColor: Theme.of(context).sz.claySoft.withValues(alpha: 0.4),
+      // **长按始终是置顶**:这是上一版就教给商家的手势,
+      // 改成"第一次长按进多选、第二次才置顶"会让老用户
+      // 按肌肉记忆连按两下,结果置顶了错的那道菜(写库且无撤销)。
+      // 多选走上方显式的「批量」按钮进入
+      onLongPress: _batching
+          ? null
+          : () => _selecting
+              ? _toggleSelect(dish)
+              : _pinToTop(dish, sameCategory),
+      leading: _selecting
+          ? Icon(
+              _selected.contains(dish.id)
+                  ? Icons.check_circle
+                  : Icons.radio_button_unchecked,
+              color: _selected.contains(dish.id)
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).sz.inkFaint,
+            )
+          : _thumb(dish),
+      title: Text(
+        dish.name,
+        style: dish.isOnSale
+            ? null
+            : TextStyle(
+                color: Theme.of(context).colorScheme.outline,
+                decoration: TextDecoration.lineThrough),
+      ),
+      subtitle: Text(
+        '${yuan(dish.effectivePriceCents)}'
+        '${dish.flashActive ? "(限时中,原价 ${yuan(dish.priceCents)})" : ""} · '
+        '${dish.soldOutToday ? "今日售罄(明日自动恢复)" : dish.stock == 0 ? "已售罄" : "库存 ${dish.stock}"}'
+        '${dish.dailyStock != null ? " · 每日回满${dish.dailyStock}" : ""}'
+        ' · 月售 ${dish.monthlySales}',
+        style: dish.stock == 0
+            ? TextStyle(color: Theme.of(context).colorScheme.error)
+            : null,
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 缺图从一句混在灰字里的「· 建议配图」提成 chip:
+          // 占位图再好看也不如让商家把图补上,提示得看得见
+          if (dish.imageUrl.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: SzChip('缺图',
+                  color: Theme.of(context).sz.hold, dense: true),
+            ),
+          // 批量执行中锁掉行内控件:否则能对正在批量处理的
+          // 同一道菜发一个反向请求,最后谁赢看运气
+          if (dish.isOnSale)
+            dish.soldOutToday
+                ? TextButton(
+                    onPressed: _batching ? null : () => _cancelSellOut(dish),
+                    child: const Text('恢复'))
+                : dish.stock > 0
+                    ? TextButton(
+                        onPressed: _batching ? null : () => _sellOut(dish),
+                        child: const Text('估清'))
+                    : TextButton(
+                        onPressed:
+                            _batching ? null : () => _setStock(dish, 100),
+                        child: const Text('补货')),
+          // 读屏用户听到的只有"开关",不知道是哪道菜的。
+          // 上下架直接决定这道菜能不能被点,按错了整天卖不出去
+          Semantics(
+            label: '${dish.name} ${dish.isOnSale ? "在售" : "已下架"}',
+            child: Switch(
+              value: dish.isOnSale,
+              onChanged: _batching ? null : (v) => _toggleOnSale(dish, v),
+            ),
+          ),
+        ],
+      ),
+      onTap: _batching
+          ? null
+          : () => _selecting ? _toggleSelect(dish) : _edit(dish),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final dishes = _dishes;
     Widget body;
     if (dishes == null) {
-      body = const Center(child: CircularProgressIndicator());
+      body = _error.isNotEmpty
+          ? SzError(error: _error, onRetry: _load)
+          : const Center(child: CircularProgressIndicator());
     } else if (dishes.isEmpty) {
       body = Center(
         child: Column(
@@ -323,10 +432,20 @@ class _DishManagePageState extends State<DishManagePage> {
       final stale =
           dishes.where((d) => d.isOnSale && d.monthlySales == 0).length;
       final noPhoto = dishes.where((d) => d.imageUrl.isEmpty).length;
-      body = RefreshIndicator(
-        onRefresh: _load,
-        child: ListView(
-          children: [
+
+      // 把「分类标题 + 该分类下的菜」拍平成一维,交给 ListView.builder 按需构建。
+      // 原来是 ListView(children: [...]):菜单上百道时,首帧要把每一行的缩略图、
+      // 上下架开关、估清/补货按钮全建出来 —— 而卡住的那几百毫秒,商家正在接单
+      final rows = <_MenuRow>[];
+      for (final entry in grouped.entries) {
+        rows.add(_MenuRow.header(entry.key));
+        for (final dish in entry.value) {
+          rows.add(_MenuRow.dish(dish, entry.value));
+        }
+      }
+
+      // 顶部这几块是固定的,数量有限,直接建出来
+      final leading = <Widget>[
             // 多选的显式入口(长按留给置顶,不重载手势)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -417,104 +536,23 @@ class _DishManagePageState extends State<DishManagePage> {
                   ),
                 ),
               ),
-            for (final entry in grouped.entries) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text(entry.key,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleSmall
-                        ?.copyWith(color: Theme.of(context).colorScheme.primary)),
-              ),
-              for (final dish in entry.value)
-                ListTile(
-                  selected: _selected.contains(dish.id),
-                  selectedTileColor:
-                      Theme.of(context).sz.claySoft.withValues(alpha: 0.4),
-                  // **长按始终是置顶**:这是上一版就教给商家的手势,
-                  // 改成"第一次长按进多选、第二次才置顶"会让老用户
-                  // 按肌肉记忆连按两下,结果置顶了错的那道菜(写库且无撤销)。
-                  // 多选走上方显式的「批量」按钮进入
-                  onLongPress: _batching
-                      ? null
-                      : () => _selecting
-                          ? _toggleSelect(dish)
-                          : _pinToTop(dish, entry.value),
-                  leading: _selecting
-                      ? Icon(
-                          _selected.contains(dish.id)
-                              ? Icons.check_circle
-                              : Icons.radio_button_unchecked,
-                          color: _selected.contains(dish.id)
-                              ? Theme.of(context).colorScheme.primary
-                              : Theme.of(context).sz.inkFaint,
-                        )
-                      : _thumb(dish),
-                  title: Text(
-                    dish.name,
-                    style: dish.isOnSale
-                        ? null
-                        : TextStyle(
-                            color: Theme.of(context).colorScheme.outline,
-                            decoration: TextDecoration.lineThrough),
-                  ),
-                  subtitle: Text(
-                    '${yuan(dish.effectivePriceCents)}'
-                    '${dish.flashActive ? "(限时中,原价 ${yuan(dish.priceCents)})" : ""} · '
-                    '${dish.soldOutToday ? "今日售罄(明日自动恢复)" : dish.stock == 0 ? "已售罄" : "库存 ${dish.stock}"}'
-                    '${dish.dailyStock != null ? " · 每日回满${dish.dailyStock}" : ""}'
-                    ' · 月售 ${dish.monthlySales}',
-                    style: dish.stock == 0
-                        ? TextStyle(
-                            color: Theme.of(context).colorScheme.error)
-                        : null,
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // 缺图从一句混在灰字里的「· 建议配图」提成 chip:
-                      // 占位图再好看也不如让商家把图补上,提示得看得见
-                      if (dish.imageUrl.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 4),
-                          child: SzChip('缺图',
-                              color: Theme.of(context).sz.hold, dense: true),
-                        ),
-                      // 批量执行中锁掉行内控件:否则能对正在批量处理的
-                      // 同一道菜发一个反向请求,最后谁赢看运气
-                      if (dish.isOnSale)
-                        dish.soldOutToday
-                            ? TextButton(
-                                onPressed: _batching
-                                    ? null
-                                    : () => _cancelSellOut(dish),
-                                child: const Text('恢复'))
-                            : dish.stock > 0
-                                ? TextButton(
-                                    onPressed: _batching
-                                        ? null
-                                        : () => _sellOut(dish),
-                                    child: const Text('估清'))
-                                : TextButton(
-                                    onPressed: _batching
-                                        ? null
-                                        : () => _setStock(dish, 100),
-                                    child: const Text('补货')),
-                      Switch(
-                        value: dish.isOnSale,
-                        onChanged: _batching
-                            ? null
-                            : (v) => _toggleOnSale(dish, v),
-                      ),
-                    ],
-                  ),
-                  onTap: _batching
-                      ? null
-                      : () => _selecting ? _toggleSelect(dish) : _edit(dish),
-                ),
-            ],
-            const SizedBox(height: 80),
-          ],
+      ];
+
+      body = RefreshIndicator(
+        onRefresh: _load,
+        child: ListView.builder(
+          // +1 是尾部留白,给悬浮的「新增菜品」按钮让位
+          itemCount: leading.length + rows.length + 1,
+          itemBuilder: (context, i) {
+            if (i < leading.length) return leading[i];
+            final j = i - leading.length;
+            if (j >= rows.length) return const SizedBox(height: 80);
+            final row = rows[j];
+            final dish = row.dish;
+            return dish == null
+                ? _categoryHeader(row.category!)
+                : _dishTile(dish, row.siblings);
+          },
         ),
       );
     }
@@ -1178,4 +1216,21 @@ class _EditChoice {
 
   final TextEditingController name;
   final TextEditingController delta;
+}
+
+/// 拍平后的一行:要么是分类标题,要么是一道菜。
+///
+/// 为的是能用 `ListView.builder` —— 「分类嵌菜品」的两层结构没法直接按需构建
+class _MenuRow {
+  const _MenuRow.header(this.category)
+      : dish = null,
+        siblings = const [];
+
+  const _MenuRow.dish(this.dish, this.siblings) : category = null;
+
+  final String? category;
+  final Dish? dish;
+
+  /// 同分类的菜,置顶时要靠它算最小 sort
+  final List<Dish> siblings;
 }

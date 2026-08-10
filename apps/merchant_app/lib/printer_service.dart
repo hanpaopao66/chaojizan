@@ -48,7 +48,10 @@ class BtPrinter {
     await p.remove(_kName);
     try {
       await PrintBluetoothThermal.disconnect;
-    } catch (_) {}
+    } catch (_) {
+      // 本来就没连上/已经断了都会抛。用户的意图是"不用这台打印机了",
+      // 首选项已经清掉,断连成不成功都不影响这个意图
+    }
   }
 
   /// 来单自动打印开关(默认开;仅在已选择过打印机时生效)
@@ -108,9 +111,13 @@ class BtPrinter {
         if (sent) return null;
         await PrintBluetoothThermal.disconnect;
       } catch (_) {
+        // 这一轮的异常故意吞掉:还有第二次尝试,现在报错等于骗人。
+        // 两轮都没成的话,下面那句中文错误会照实告诉商家
         try {
           await PrintBluetoothThermal.disconnect;
-        } catch (_) {}
+        } catch (_) {
+          // 断连本身失败无所谓 —— 目的只是把连接状态清干净好重连
+        }
       }
     }
     return '打印失败,请重试(打印机可能被其他设备占用)';

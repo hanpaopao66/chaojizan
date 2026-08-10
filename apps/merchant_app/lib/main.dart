@@ -262,6 +262,10 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
   Timer? _wsPing;
   WebSocketChannel? _ws;
   bool _wsConnected = false;
+  /// 最后一次**成功**拉到订单列表的时间。null = 从来没成功过
+  DateTime? _lastOrdersOkAt;
+  /// 最近一次拉取失败的原因;空串 = 上一次是成功的
+  String _ordersError = '';
 
   // 今日 · 待办卡(工作台第一眼):30 秒一刷,失败保留上次的数
   Map<String, dynamic>? _today;
@@ -516,25 +520,74 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
     });
   }
 
+  /// 拉订单列表。
+  ///
+  /// ⚠️ **失败绝不能静默。** 这里原本是 `catch (_) {}` ——
+  /// 而 `_orders` 同时驱动订单列表**和持续催单语音**(见 initState 里的
+  /// `_alertTimer`)。拉不到的时候:列表是空的、语音不响,
+  /// 而顶部的连接指示灯还是绿的(WebSocket 连着 ≠ 列表拉到了)。
+  /// 商家看到的是「一切正常,今天没单」,实际上单在往里进。
+  ///
+  /// 午高峰漏一单,这个平台赔不起。
+  ///
+  /// 两条处置:
+  /// 1. 失败**不清空 `_orders`** —— 保留上一次的结果,比变成空列表安全;
+  /// 2. 记下最后一次成功的时间,顶部横条按"新鲜度"报警。
   Future<void> _refresh() async {
     try {
       final orders = await widget.api.myOrders();
-      if (mounted) setState(() => _orders = orders);
+      if (mounted) {
+        setState(() {
+          _orders = orders;
+          _lastOrdersOkAt = DateTime.now();
+          _ordersError = '';
+        });
+      }
       _autoPrintNew(orders);
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        setState(() => _ordersError = e is ApiException ? e.message : '$e');
+      }
+    }
+  }
+
+  /// 订单列表是不是"陈"了。超过 1 分钟没成功拉到就算 ——
+  /// 正常轮询是 15 秒一次,连着失败 4 次说明真出问题了
+  bool get _ordersStale {
+    if (_lastOrdersOkAt == null) {
+      return _ordersError.isNotEmpty; // 首次就失败
+    }
+    return DateTime.now().difference(_lastOrdersOkAt!).inSeconds > 60;
+  }
+
+  /// 顶部警示条:**首次加载失败不能和「今天没单」长得一样**
+  Widget? _staleBanner() {
+    if (!_ordersStale) return null;
+    final never = _lastOrdersOkAt == null;
+    final mins =
+        never ? 0 : DateTime.now().difference(_lastOrdersOkAt!).inMinutes;
+    return SzRetryBanner(
+      text: never
+          ? '订单列表没能加载出来 —— 下面的空白不代表没有单,点这里重试'
+          : '订单列表已经 $mins 分钟没更新成功,可能有新单没显示。点这里重试',
+      onRetry: _refresh,
+    );
   }
 
   Future<void> _refreshToday() async {
-    try {
-      final today = await widget.api.merchantToday();
-      final todos = await widget.api.merchantTodos();
-      if (mounted) {
-        setState(() {
-          _today = today;
-          _todos = todos;
-        });
-      }
-    } catch (_) {/* 看板拉不到不打扰接单主流程 */}
+    // 两个请求互不依赖,先都发出去再逐个 await。
+    // 看板拉不到不打扰接单主流程,所以两个都走 soft —— 保留上一次的值
+    final todayF = widget.api.merchantToday();
+    final todosF = widget.api.merchantTodos();
+    final g = SzGather();
+    final today = await g.soft(todayF, _today);
+    final todos = await g.soft(todosF, _todos);
+    if (mounted) {
+      setState(() {
+        _today = today;
+        _todos = todos;
+      });
+    }
   }
 
   /// 今日 · 待办卡:今天卖了多少 + 欠着什么没处理,数字非零才显示行
@@ -610,7 +663,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
               if (yesterday != null)
                 Text('昨日 ${yesterday['orders']} 单·'
                     '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
-                    style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+                    style: TextStyle(fontSize: 11, color: sz.inkMuted)),
             ]),
           ),
         if (todoRows.isNotEmpty) ...[
@@ -929,11 +982,25 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
     );
   }
 
+  /// 读屏用的订单指代:「尾号 3721 · 48 元」。
+  ///
+  /// 一屏十几单时,读屏用户听到的原本只有"聊天,按钮""打印,按钮" ——
+  /// 光标停在谁身上全靠数。接单/拒单按错的代价是真金白银,得把订单说清楚
+  String _orderSpeech(Order order) {
+    final no = order.orderNo;
+    final tail = no.length > 4 ? no.substring(no.length - 4) : no;
+    return '尾号 $tail,${(order.totalCents / 100).toStringAsFixed(2)} 元';
+  }
+
   List<Widget> _actionsFor(Order order) {
+    final who = _orderSpeech(order);
     final printButton = Row(mainAxisSize: MainAxisSize.min, children: [
       IconButton(
         tooltip: '和顾客说句话',
-        icon: const Icon(Icons.chat_bubble_outline, size: 20),
+        // tooltip 本身会被读出来,但只有"和顾客说句话"——是哪一单不知道
+        icon: Semantics(
+            label: '和顾客说句话,$who',
+            child: const Icon(Icons.chat_bubble_outline, size: 20)),
         onPressed: () => Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => OrderChatPage(
                 api: widget.api,
@@ -943,7 +1010,9 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
       ),
       IconButton(
         tooltip: '打印小票',
-        icon: const Icon(Icons.print_outlined, size: 20),
+        icon: Semantics(
+            label: '打印小票,$who',
+            child: const Icon(Icons.print_outlined, size: 20)),
         onPressed: () => _printTicket(order),
       ),
     ]);
@@ -953,14 +1022,25 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           printButton,
           TextButton(
               onPressed: () => _refundSheet(order), child: const Text('缺货退款')),
-          OutlinedButton(
-              onPressed: () => _reject(order), child: const Text('拒单')),
+          // 拒单和接单在屏幕上挨着,读屏时更要说清是哪一单
+          Semantics(
+            label: '拒单,$who',
+            excludeSemantics: true,
+            button: true,
+            child: OutlinedButton(
+                onPressed: () => _reject(order), child: const Text('拒单')),
+          ),
           const SizedBox(width: 8),
-          FilledButton(
-              onPressed: _acting.contains(order.orderNo)
-                  ? null
-                  : () => _act(order, OrderStatus.accepted),
-              child: Text(_acting.contains(order.orderNo) ? '处理中…' : '接单')),
+          Semantics(
+            label: '接单,$who',
+            excludeSemantics: true,
+            button: true,
+            child: FilledButton(
+                onPressed: _acting.contains(order.orderNo)
+                    ? null
+                    : () => _act(order, OrderStatus.accepted),
+                child: Text(_acting.contains(order.orderNo) ? '处理中…' : '接单')),
+          ),
         ];
       case OrderStatus.accepted:
         return [
@@ -968,11 +1048,17 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           TextButton(
               onPressed: () => _refundSheet(order), child: const Text('缺货退款')),
           const SizedBox(width: 8),
-          FilledButton(
-              onPressed: _acting.contains(order.orderNo)
-                  ? null
-                  : () => _act(order, OrderStatus.ready),
-              child: Text(_acting.contains(order.orderNo) ? '处理中…' : '出餐完成')),
+          Semantics(
+            label: '出餐完成,$who',
+            excludeSemantics: true,
+            button: true,
+            child: FilledButton(
+                onPressed: _acting.contains(order.orderNo)
+                    ? null
+                    : () => _act(order, OrderStatus.ready),
+                child:
+                    Text(_acting.contains(order.orderNo) ? '处理中…' : '出餐完成')),
+          ),
         ];
       case OrderStatus.ready:
         return [
@@ -992,10 +1078,15 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
           ],
           if (order.pickup) ...[
             const SizedBox(width: 8),
-            FilledButton.icon(
-                icon: const Icon(Icons.qr_code, size: 18),
-                onPressed: () => _verifyPickup(order),
-                label: const Text('核销取餐码')),
+            Semantics(
+              label: '核销取餐码,$who',
+              excludeSemantics: true,
+              button: true,
+              child: FilledButton.icon(
+                  icon: const Icon(Icons.qr_code, size: 18),
+                  onPressed: () => _verifyPickup(order),
+                  label: const Text('核销取餐码')),
+            ),
           ],
           if (order.selfDelivery) ...[
             const SizedBox(width: 8),
@@ -1008,10 +1099,15 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                         builder: (_) => SelfDeliveryMapPage(order: order))),
                 label: const Text('地图')),
             const SizedBox(width: 8),
-            FilledButton.icon(
-                icon: const Icon(Icons.delivery_dining, size: 18),
-                onPressed: () => _act(order, OrderStatus.pickedUp),
-                label: const Text('开始配送(自送)')),
+            Semantics(
+              label: '开始配送,自送,$who',
+              excludeSemantics: true,
+              button: true,
+              child: FilledButton.icon(
+                  icon: const Icon(Icons.delivery_dining, size: 18),
+                  onPressed: () => _act(order, OrderStatus.pickedUp),
+                  label: const Text('开始配送(自送)')),
+            ),
           ],
         ];
       case OrderStatus.pickedUp:
@@ -1132,14 +1228,25 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
               onPressed: _busySheet,
             ),
           Row(children: [
-            Icon(
-              _wsConnected
-                  ? Icons.notifications_active
-                  : Icons.notifications_off,
-              size: 18,
-              color: _wsConnected
-                  ? Theme.of(context).sz.earn
-                  : Theme.of(context).sz.inkFaint,
+            // 口径是**两者都好**才显示正常:WebSocket 连着不等于列表拉到了。
+            // 只看 WS 的话会出现"灯是绿的、列表是空的"这种最误导人的组合
+            // 这盏灯是纯图标,不读出来等于没有 —— 而它答的正是
+            // 「我现在还能不能收到单」
+            Semantics(
+              label: _ordersStale
+                  ? '订单列表已过期,可能收不到新单'
+                  : (_wsConnected ? '接单提醒正常' : '接单提醒未连接'),
+              child: Icon(
+                _wsConnected && !_ordersStale
+                    ? Icons.notifications_active
+                    : Icons.notifications_off,
+                size: 18,
+                color: _ordersStale
+                    ? Theme.of(context).sz.danger
+                    : (_wsConnected
+                        ? Theme.of(context).sz.earn
+                        : Theme.of(context).sz.inkMuted),
+              ),
             ),
             const SizedBox(width: 8),
             Text(widget.shop.foodSafetyHold
@@ -1200,6 +1307,9 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                                   setState(() => _segment = s.first),
                             ),
                           ),
+                        // 拉不到订单时的警示条。**必须在列表上方、必须显眼** ——
+                        // 空列表和"加载失败"长得一样,是商家端最危险的歧义
+                        if (_staleBanner() != null) _staleBanner()!,
                         Expanded(
                           child: RefreshIndicator(
                             onRefresh: _refresh,
@@ -1212,7 +1322,11 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                                                 ? (_searchActive
                                                     ? '没有匹配的订单'
                                                     : '输入订单号后几位、取餐码或手机尾号(至少 3 位)')
-                                                : '这一栏没有订单')))
+                                                // 拉取失败时不说"没有订单" ——
+                                                // 那是在替一个未知状态下结论
+                                                : (_ordersStale
+                                                    ? '订单列表没能加载出来'
+                                                    : '这一栏没有订单'))))
                                   ])
                                 : ListView.builder(
                                     itemCount: _filteredOrders.length,
@@ -1272,7 +1386,7 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                                                     SzChip(order.status.label,
                                                         color: isNew
                                                             ? sz.clay
-                                                            : sz.inkFaint,
+                                                            : sz.inkMuted,
                                                         dense: true),
                                                   ]),
                                               const SizedBox(height: 5),

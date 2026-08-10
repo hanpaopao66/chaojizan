@@ -24,6 +24,10 @@ class RiderTrackPage extends StatefulWidget {
 class _RiderTrackPageState extends State<RiderTrackPage> {
   RiderLocation? _loc;
   bool _loaded = false;
+
+  /// 非空 = 这一轮没拉到。「骑手还没上报位置」和「我们没拉到」
+  /// 在界面上长得一样,但商家该说给顾客听的话完全不同
+  String _error = '';
   Timer? _timer;
 
   @override
@@ -46,10 +50,16 @@ class _RiderTrackPageState extends State<RiderTrackPage> {
         setState(() {
           _loc = loc;
           _loaded = true;
+          _error = '';
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loaded = true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loaded = true;
+          _error = e is ApiException ? e.message : '$e';
+        });
+      }
     }
   }
 
@@ -103,7 +113,7 @@ class _RiderTrackPageState extends State<RiderTrackPage> {
                           ? Icons.delivery_dining
                           : Icons.location_off_outlined,
                       size: 18,
-                      color: hasRider ? sz.earn : sz.inkFaint,
+                      color: hasRider ? sz.earn : sz.inkMuted,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
@@ -112,8 +122,15 @@ class _RiderTrackPageState extends State<RiderTrackPage> {
                             ? (order.status == OrderStatus.pickedUp
                                 ? '骑手配送中,位置 5 秒自动刷新'
                                 : '骑手已接单,正在赶来取餐')
-                            : '骑手位置暂不可用(可能刚接单或设备离线),稍等自动刷新',
-                        style: TextStyle(fontSize: 13, color: sz.inkMuted),
+                            : (_error.isNotEmpty
+                                ? '拿不到骑手位置($_error) —— 这不代表骑手没在送,'
+                                    '5 秒后自动重试'
+                                : '骑手位置暂不可用(可能刚接单或设备离线),稍等自动刷新'),
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: _error.isNotEmpty && !hasRider
+                                ? sz.danger
+                                : sz.inkMuted),
                       ),
                     ),
                   ]),

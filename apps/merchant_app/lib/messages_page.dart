@@ -24,6 +24,10 @@ class _MerchantMessagesPageState extends State<MerchantMessagesPage> {
   bool _loadingMore = false;
   bool _hasMore = true;
 
+  /// 非空 = 首屏没拉到。「这一栏没有消息」和「没拉到」不能长得一样 ——
+  /// 差评通知看不到,商家就错过了申诉窗口
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -47,13 +51,15 @@ class _MerchantMessagesPageState extends State<MerchantMessagesPage> {
           // 就会在"刚好不满一页"时误判成没有下一页
           _hasMore =
               _messages.length >= (data['page_size'] as int? ?? 50);
+          _error = '';
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _loaded = true);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+      if (mounted && _category == categoryAtStart) {
+        setState(() {
+          _loaded = true;
+          _error = e is ApiException ? e.message : '$e';
+        });
       }
     }
   }
@@ -94,6 +100,8 @@ class _MerchantMessagesPageState extends State<MerchantMessagesPage> {
       appBar: AppBar(title: const Text('消息中心')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
+          : _error.isNotEmpty
+          ? SzError(error: _error, onRetry: _reload)
           : RefreshIndicator(
               onRefresh: _reload,
               child: NotificationListener<ScrollNotification>(
@@ -103,109 +111,110 @@ class _MerchantMessagesPageState extends State<MerchantMessagesPage> {
                   }
                   return false;
                 },
-                child: ListView(
-                  padding: const EdgeInsets.all(12),
-                  children: [
-                    if (_announcements.isNotEmpty) ...[
-                      Text('平台公告',
-                          style: Theme.of(context).textTheme.titleSmall),
-                      const SizedBox(height: 6),
-                      for (final a in _announcements)
-                        Card(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .tertiaryContainer
-                              .withValues(alpha: 0.4),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
-                                children: [
-                                  Row(children: [
-                                    Icon(Icons.campaign,
-                                        size: 16, color: sz.hold),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                        child: Text(
-                                            a['title'] as String? ?? '',
-                                            style: const TextStyle(
-                                                fontWeight:
-                                                    FontWeight.w600))),
-                                    Text(
-                                        _dateLabel(
-                                            a['created_at'] as String?),
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            color: sz.inkFaint)),
-                                  ]),
-                                  const SizedBox(height: 4),
-                                  Text(a['content'] as String? ?? ''),
-                                ]),
-                          ),
-                        ),
-                      const SizedBox(height: 12),
-                    ],
-                    Row(children: [
-                      Text('通知',
-                          style: Theme.of(context).textTheme.titleSmall),
-                      const Spacer(),
-                      SegmentedButton<String?>(
-                        segments: const [
-                          ButtonSegment(value: null, label: Text('全部')),
-                          ButtonSegment(value: 'review', label: Text('评价')),
-                          ButtonSegment(value: 'system', label: Text('系统')),
-                        ],
-                        selected: {_category},
-                        showSelectedIcon: false,
-                        onSelectionChanged: (s) {
-                          setState(() {
-                            _category = s.first;
-                            _messages = [];
-                            _loaded = false;
-                            _hasMore = true;
-                          });
-                          _reload();
-                        },
-                      ),
-                    ]),
-                    const SizedBox(height: 6),
-                    if (_messages.isEmpty)
-                      const Padding(
-                          padding: EdgeInsets.all(32),
-                          child: Center(child: Text('这一栏没有消息'))),
-                    for (final m in _messages)
-                      Card(
-                        margin: const EdgeInsets.symmetric(vertical: 3),
-                        child: ListTile(
-                          dense: true,
-                          leading: Icon(
-                            m['kind'] == 'review'
-                                ? Icons.rate_review_outlined
-                                : Icons.notifications_none,
-                            color: m['kind'] == 'review'
-                                ? sz.danger
-                                : sz.inkMuted,
-                          ),
-                          title: Text(m['title'] as String? ?? ''),
-                          subtitle: Text(m['content'] as String? ?? '',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis),
-                          trailing: Text(
-                              _dateLabel(m['created_at'] as String?),
-                              style: TextStyle(
-                                  fontSize: 11, color: sz.inkFaint)),
-                        ),
-                      ),
-                    if (_loadingMore)
-                      const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Center(
-                              child: CircularProgressIndicator())),
-                  ],
-                ),
+                child: _list(sz),
               ),
             ),
+    );
+  }
+
+  /// 通知是**翻页加载**的,越滚越长 —— 必须按需构建。
+  /// 顶部公告和分段选择器数量固定,先建出来当固定头部
+  Widget _list(SzColors sz) {
+    final leading = <Widget>[
+      if (_announcements.isNotEmpty) ...[
+        Text('平台公告', style: Theme.of(context).textTheme.titleSmall),
+        const SizedBox(height: 6),
+        for (final a in _announcements)
+          Card(
+            color: Theme.of(context)
+                .colorScheme
+                .tertiaryContainer
+                .withValues(alpha: 0.4),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Icon(Icons.campaign, size: 16, color: sz.hold),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: Text(a['title'] as String? ?? '',
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600))),
+                      Text(_dateLabel(a['created_at'] as String?),
+                          style:
+                              TextStyle(fontSize: 11, color: sz.inkMuted)),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(a['content'] as String? ?? ''),
+                  ]),
+            ),
+          ),
+        const SizedBox(height: 12),
+      ],
+      Row(children: [
+        Text('通知', style: Theme.of(context).textTheme.titleSmall),
+        const Spacer(),
+        SegmentedButton<String?>(
+          segments: const [
+            ButtonSegment(value: null, label: Text('全部')),
+            ButtonSegment(value: 'review', label: Text('评价')),
+            ButtonSegment(value: 'system', label: Text('系统')),
+          ],
+          selected: {_category},
+          showSelectedIcon: false,
+          onSelectionChanged: (s) {
+            setState(() {
+              _category = s.first;
+              _messages = [];
+              _loaded = false;
+              _hasMore = true;
+            });
+            _reload();
+          },
+        ),
+      ]),
+      const SizedBox(height: 6),
+      if (_messages.isEmpty)
+        const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: Text('这一栏没有消息'))),
+    ];
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      // 尾部那一格留给「加载中」,没在加载就是零高
+      itemCount: leading.length + _messages.length + 1,
+      itemBuilder: (context, i) {
+        if (i < leading.length) return leading[i];
+        final j = i - leading.length;
+        if (j >= _messages.length) {
+          return _loadingMore
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Center(child: CircularProgressIndicator()))
+              : const SizedBox.shrink();
+        }
+        final m = _messages[j];
+        return Card(
+          margin: const EdgeInsets.symmetric(vertical: 3),
+          child: ListTile(
+            dense: true,
+            leading: Icon(
+              m['kind'] == 'review'
+                  ? Icons.rate_review_outlined
+                  : Icons.notifications_none,
+              color: m['kind'] == 'review' ? sz.danger : sz.inkMuted,
+            ),
+            title: Text(m['title'] as String? ?? ''),
+            subtitle: Text(m['content'] as String? ?? '',
+                maxLines: 2, overflow: TextOverflow.ellipsis),
+            trailing: Text(_dateLabel(m['created_at'] as String?),
+                style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+          ),
+        );
+      },
     );
   }
 }
