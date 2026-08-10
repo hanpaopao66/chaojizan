@@ -11,6 +11,11 @@
   7. 全局恒等,分两侧:菜品侧 Σ应收 == Σ商家净额+Σ佣金(售后冲账单剔除);
      配送侧 Σ配送费 == Σ骑手入账(售后单保留 —— 配送费 100% 归骑手的账面铁证)
 
+另有一条不是恒等式、但同样是"账面与真实资金对不上"的检查:
+分账台账不许长期挂着。pending 超时未走通、以及已放弃的 failed,
+都意味着台账写着这笔钱该怎么分、实际一分没动(分账渠道尚未接入,
+桩不再伪造 success,挂起量就靠这条露出来)。
+
 不平 → 写 audit_alerts + logger.error,管理后台首页红条展示。
 backfill_missing_earnings() 可对缺账的历史订单补记账(自愈,幂等)。
 """
@@ -418,6 +423,29 @@ async def run_audit() -> list[dict]:
                               f"房费 {o.total_cents} 佣金 {o.fee_cents}"
                               f" 净额 {o.net_cents} 退款 {o.refund_cents}",
                 })
+
+        # 10) 分账挂起:台账说这笔货款该分给商家,而渠道一分钱都没动。
+        #     不设时间窗 —— 挂着的钱不会因为过了 30 天就不欠了,
+        #     而上面那些恒等式只看近 30 天是因为它们核的是"当期账对不对"。
+        #     一笔一条会刷屏(渠道未接入期间每单都挂),所以聚合成一条,
+        #     带上笔数、金额、最久多久,够管理端判断严重程度就行。
+        from .profit_sharing import STUCK_HOURS, stuck_summary
+        ps = await stuck_summary(db)
+        if ps["stuck"]:
+            problems.append({
+                "check": "profit_sharing_stuck",
+                "detail": f"分账挂起 {ps['stuck']} 笔共 {ps['stuck_cents']} 分"
+                          f"超过 {STUCK_HOURS} 小时未走通,最久的"
+                          f" {ps['oldest_order_no']} 已挂 {ps['oldest_hours']} 小时"
+                          f"——这些货款仍在平台侧,商家没收到",
+            })
+        if ps["failed"]:
+            problems.append({
+                "check": "profit_sharing_failed",
+                "detail": f"分账已放弃 {ps['failed']} 笔共 {ps['failed_cents']} 分"
+                          f"(超重试上限),需人工处理:清扫只捞 pending,"
+                          f"failed 不会自己恢复",
+            })
 
         for p in problems:
             db.add(AuditAlert(check_name=p["check"], detail=p["detail"][:500]))

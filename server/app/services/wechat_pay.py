@@ -116,20 +116,6 @@ def parse_notify(headers: dict, body: bytes) -> tuple[str, dict] | None:
     return result["event_type"], result.get("resource", {})
 
 
-async def request_profit_sharing(order: Order) -> None:
-    """订单完成后发起分账(平台佣金留存,其余给商家)。
-
-    前提:服务商模式 + 商家已作为分账接收方添加。资质未到位前跳过。
-    """
-    client = get_client()
-    if client is None:
-        logger.debug("微信分账未配置,跳过: %s", order.order_no)
-        return
-    # TODO(联调): 需先在商户平台开通分账、把商家特约商户号加为接收方,
-    # 然后按 client.profitsharing_order(...) 传 transaction_id 与 receivers。
-    logger.info("分账待实现(需服务商资质): %s 佣金 %s 分", order.order_no, order.commission_cents)
-
-
 async def request_refund(db, order: Order, refund_cents: int, reason: str) -> "object":
     """缺货部分退款/整单退款/售后退款,统一入口。
 

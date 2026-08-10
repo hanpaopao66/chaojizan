@@ -1,5 +1,5 @@
 """分账合规(桩模式)验证:分账口径快照、完成单落台账(幂等)、
-渠道未配置留 pending 且清扫重试到上限置 failed、售后全额退款分账回退、
+渠道未接入时留 pending 且不被清扫烧成终态、售后全额退款分账回退、
 钱包排除分账口径(防双发)、两种口径审计全绿、未配置全链路无感。
 
 在 server/ 目录下运行:python -m tests.e2e_profit_sharing
@@ -94,18 +94,20 @@ async def main():
         assert any(r["order_no"] == no1 for r in listed)
         print("✓ 分账单落台账(净额=应收-佣金),渠道未配置留 pending")
 
-        # 2) 幂等:清扫重跑不重复;attempts 递增,到 5 置 failed 人工介入
+        # 2) 幂等:清扫重跑不重复。**渠道未接入不计 attempts、不烧 failed** ——
+        #    failed 是终态而清扫只捞 pending,烧掉的话分账真接上那天
+        #    这批单一条都不会自动重试(见 profit_sharing.sweep_pending)
         from app.services.auto_flow import sweep_once
         for _ in range(5):
             await sweep_once()
         rec = await ps_record(no1)
-        assert rec.status == "failed" and rec.attempts >= 5, rec
+        assert rec.status == "pending" and rec.attempts == 0, rec
         async with SessionLocal() as db:
             n = (await db.execute(text(
                 "SELECT count(*) FROM profit_sharing_records "
                 "WHERE order_no = :no"), {"no": no1})).scalar()
         assert n == 1  # unique(order_id) 幂等
-        print("✓ 清扫重试幂等,超上限置 failed 供人工介入")
+        print("✓ 清扫重试幂等,渠道未接入的记录留在 pending 不烧成终态")
 
         # 3) 钱包口径:分账单净额不进平台侧可提现余额(防双发)
         wallet_before = call("GET", "/merchants/me/wallet", merchant)
