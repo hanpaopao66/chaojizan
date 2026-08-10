@@ -122,10 +122,45 @@ export interface OrderItem {
   quantity: number;
 }
 
-/** 配送费构成的一项。中文名由服务端给,客户端不另写映射 */
+/**
+ * 配送费构成的一项。中文名由服务端给,客户端不另写映射。
+ *
+ * ⚠️ **服务端下发的 `fee_parts` 是字典不是数组**(`{"base": 300, "night": 0}`,
+ * 见 `server/app/schemas.py` 的 `fee_parts: dict`)。这个 interface 是
+ * 界面渲染用的中间形态,由 [feePartList] 把字典摊平成数组 ——
+ * 别直接把 `order.fee_parts` 当数组 `ForEach`,那样一项都渲染不出来。
+ */
 export interface FeePart {
   key: string;
+  /** 中文名。取自服务端下发的 `fee_part_labels`,取不到才退回 key */
+  label: string;
   cents: number;
+}
+
+/**
+ * 把 `fee_parts` 字典 + `fee_part_labels` 字典摊成可渲染的数组。
+ *
+ * **只留大于 0 的项**:「夜间加价 0 元」这种行没有信息量,
+ * 只会让顾客觉得我们在凑条目。
+ */
+export function feePartList(parts?: Record<string, number>,
+                            labels?: Record<string, string>): FeePart[] {
+  const out: FeePart[] = [];
+  if (parts === undefined) {
+    return out;
+  }
+  const keys: string[] = Object.keys(parts);
+  for (let i: number = 0; i < keys.length; i++) {
+    const k: string = keys[i];
+    const cents: number = parts[k];
+    if (cents === undefined || cents <= 0) {
+      continue;
+    }
+    const label: string | undefined =
+        labels === undefined ? undefined : labels[k];
+    out.push({ key: k, label: label ?? k, cents: cents });
+  }
+  return out;
 }
 
 /** 订单 */
@@ -150,7 +185,10 @@ export interface Order {
   eta_at?: string;
   cancel_reason?: string;
   items?: OrderItem[];
-  fee_parts?: FeePart[];
+  /** 字典,不是数组。渲染前先过 [feePartList] */
+  fee_parts?: Record<string, number>;
+  /** 构成项的中文名,服务端下发 */
+  fee_part_labels?: Record<string, string>;
   summary?: string;
   pickup?: boolean;
   self_delivery?: boolean;
@@ -313,7 +351,8 @@ export interface SmsCodeResult {
 export interface DeliveryFeePreview {
   delivery_fee_cents: number;
   in_range: boolean;
-  parts?: FeePart[];
+  /** 字典,不是数组。渲染前先过 [feePartList] */
+  parts?: Record<string, number>;
   labels?: Record<string, string>;
   door_fee_cents?: number;
 }

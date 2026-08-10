@@ -3,7 +3,7 @@ import { promptAction } from '@kit.ArkUI';
 import { UserApi } from '../common/UserApi';
 import { ApiException } from '../common/Api';
 import { isPaid, payOrder } from '../common/Pay';
-import { AfterSale, FeePart, Order, OrderEvent, OrderItem, OrderStatus,
+import { AfterSale, FeePart, feePartList, Order, OrderEvent, OrderItem, OrderStatus,
   RefundRecord, Review, RiderLocation } from '../model/Models';
 import { distanceText, yuan } from '../common/Money';
 
@@ -588,10 +588,12 @@ export struct OrderDetailPage {
               this.row('配送费', yuan(this.order.delivery_fee_cents ?? 0),
                 $r('app.color.ink'));
               // 配送费构成:中文名由服务端下发,客户端不另写一份 ——
-              // 两份口径迟早分叉,那时骑手端和顾客端会对同一笔钱有两种说法
-              ForEach(this.order.fee_parts ?? [], (p: FeePart) => {
+              // 两份口径迟早分叉,那时骑手端和顾客端会对同一笔钱有两种说法。
+              // fee_parts 是**字典**,先摊平再渲染(直接 ForEach 一项都出不来)
+              ForEach(feePartList(this.order.fee_parts,
+                this.order.fee_part_labels), (p: FeePart) => {
                 Row() {
-                  Text(`· ${p.key}`).fontSize(11)
+                  Text(`· ${p.label}`).fontSize(11)
                     .fontColor($r('app.color.ink_muted')).layoutWeight(1);
                   Text(yuan(p.cents)).fontSize(11)
                     .fontColor($r('app.color.ink_muted'));
