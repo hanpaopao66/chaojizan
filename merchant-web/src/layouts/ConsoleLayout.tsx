@@ -1,5 +1,6 @@
 import {
   AccountBookOutlined,
+  BankOutlined,
   BellOutlined,
   CalendarOutlined,
   CommentOutlined,
@@ -27,6 +28,7 @@ import {
   ApiError, BrandShop, clearToken, Merchant, merchantTodos, setBusy,
   switchShop, Todos, updateShop,
 } from '../api'
+import ApplymentPage from '../pages/ApplymentPage'
 import FinancePage from '../pages/FinancePage'
 import SettingsPage from '../pages/SettingsPage'
 import DishesPage from '../pages/food/DishesPage'
@@ -160,6 +162,8 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
         // 对账是资金视图,只对经营者本人开放(连锁区域经理服务端 403)
         ...(shop.viewer_is_owner === false ? [] : [
           { key: '/finance', icon: <AccountBookOutlined />, label: '对账中心' },
+          // 进件资料里是法人身份证和银行账号,比提现还敏感 —— 同一条边界
+          { key: '/applyment', icon: <BankOutlined />, label: '收款资料' },
         ]),
         { key: '/settings', icon: <SettingOutlined />, label: '店铺设置' },
       ]
@@ -177,6 +181,7 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
         { key: '/food/reviews', icon: <CommentOutlined />, label: '顾客评价' },
         ...(shop.viewer_is_owner === false ? [] : [
           { key: '/finance', icon: <AccountBookOutlined />, label: '对账中心' },
+          { key: '/applyment', icon: <BankOutlined />, label: '收款资料' },
         ]),
         // 健康证台账是员工的个人信息,店员看不到别人的证
         ...(shop.viewer_is_staff ? [] : [
@@ -333,6 +338,12 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
               </>
             )}
             <Route path="/finance" element={<FinancePage shop={shop} />} />
+            {/* 收款资料两个业态都要(都得收钱)。直接敲 URL 也进不去:
+                非经营者本人这条路由不注册,落到下面的 Navigate 回首页,
+                服务端那边同样是 403 —— 两道都留着 */}
+            {shop.viewer_is_owner !== false && (
+              <Route path="/applyment" element={<ApplymentPage />} />
+            )}
             <Route path="/settings"
               element={<SettingsPage shop={shop} onShopChanged={onShopChanged} />} />
             <Route path="*" element={<Navigate to={home} replace />} />

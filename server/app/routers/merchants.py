@@ -37,6 +37,12 @@ from ..models import (
 CN_TZ = ZoneInfo("Asia/Shanghai")
 from ..state_machine import OrderStatus
 from ..schemas import (
+    APPLYMENT_LOCKED_STATUSES,
+    ApplymentIn,
+    ApplymentOut,
+    applyment_missing,
+    applyment_out,
+    next_applyment_status,
     DayStatOut,
     DishIn,
     DishOut,
@@ -1363,6 +1369,98 @@ async def _money_shop_or_403(db: AsyncSession, user: User,
         raise HTTPException(
             403, "只有店铺登记的经营者本人能操作资金(提现、收款账户)")
     return shop
+
+
+# ---------- 微信特约商户进件资料(#203/#206) ----------
+#
+# 为什么走 _money_shop_or_403 而不是 _my_shop_or_404:
+# 这里填的是「微信把货款结到哪张卡」。品牌 manager 在别处算店主级权限
+# (改价、改设置都放行),但改结算账户不是运营动作 ——
+# 运营授权不等于可以把这家店的货款改到自己卡上。口径与提现/收款账户一致。
+#
+# 另一半原因是**入口收敛**:身份证号和银行账号明文只经过这两个端点,
+# 能碰它们的人越少,泄露面越小。
+
+
+@router.get("/me/applyment", response_model=ApplymentOut)
+async def my_applyment(
+    merchant_id: int | None = None,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的进件资料 + 完整度 + 状态。敏感字段只回尾 4 位。
+
+    `missing` 是给前端画「还差什么」的**唯一口径** —— 别在客户端再抄一份
+    必填清单:抄了就会有一天服务端加了字段而某个端没跟上,
+    商家在那个端上看着 100% 却怎么也提交不成功。
+    """
+    shop = await _money_shop_or_403(db, user, merchant_id)
+    return applyment_out(shop)
+
+
+@router.put("/me/applyment", response_model=ApplymentOut)
+async def save_applyment(
+    payload: ApplymentIn,
+    merchant_id: int | None = None,
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交/更新进件资料。**这一版只落库,不调微信。**
+
+    调不了:进件走 `/v3/applyment4sub/` 还是 `/v3/ecommerce/applyments/`
+    取决于服务商类目,两套 API 完全不通用,类目答案没下来之前写哪套都可能白写。
+    但资料现在就得收 —— 没有商家配合,一家特约商户都开不出来,
+    这是整条链路里最耗时的一环。
+
+    只写这次传了的字段(None = 没动):商家分几次填是常态,
+    营业执照在抽屉里、银行账号要翻网银、身份证要拍两张,
+    强制一次填完的结果是填到一半退出去就全丢。
+    """
+    from ..services.crypto import encrypt
+
+    shop = await _money_shop_or_403(db, user, merchant_id)
+
+    # 微信侧已经在处理的单子不让改。
+    # 改了库里也报不上去(报送的是当时那一版),只会让商家以为"我已经改好了"
+    # 而实际卡在原来的驳回上。要改先让平台侧退回 rejected/not_submitted
+    if shop.applyment_status in APPLYMENT_LOCKED_STATUSES:
+        raise HTTPException(
+            409, f"当前状态({shop.applyment_status})不能修改资料;"
+                 "如需变更请联系平台客服")
+
+    # exclude_unset:没传的字段不动。**再滤掉显式的 null** ——
+    # 这些列都是 NOT NULL(默认 ""),把 None 写进去会在 commit 时炸成 500。
+    # 想清空某项就传空串 ""(语义也更明确:"我把它清了",而不是"我没提这事")
+    data = {k: v for k, v in payload.model_dump(exclude_unset=True).items()
+            if v is not None}
+    # 明文字段单独处理:落库前换成密文 + 尾号,明文不进库、不出任何接口
+    id_no = data.pop("legal_person_id_no", None)
+    account_no = data.pop("settle_account_no", None)
+    for field, value in data.items():
+        setattr(shop, field, value.strip() if isinstance(value, str) else value)
+    if id_no is not None:
+        id_no = id_no.strip().upper()
+        shop.legal_person_id_encrypted = encrypt(id_no) if id_no else ""
+        shop.legal_person_id_tail = id_no[-4:] if id_no else ""
+    if account_no is not None:
+        # 粘贴过来的卡号常带空格,入参校验时按去空格判的,落库也去
+        account_no = account_no.replace(" ", "")
+        shop.settle_account_no_encrypted = encrypt(account_no) if account_no else ""
+        shop.settle_account_tail = account_no[-4:] if account_no else ""
+
+    # 状态流转规则抽在 schemas.next_applyment_status 里(纯函数,单测覆盖),
+    # 不散在这个已经很长的处理函数里
+    nxt = next_applyment_status(shop.applyment_status,
+                                complete=not applyment_missing(shop))
+    if nxt is not None:
+        shop.applyment_status = nxt
+        if nxt == "submitted":
+            # 驳回原因一并清掉 —— 留着会让商家以为改完还是被驳回的
+            shop.applyment_reject_reason = ""
+        shop.applyment_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(shop)
+    return applyment_out(shop)
 
 
 @router.get("/me/trend")

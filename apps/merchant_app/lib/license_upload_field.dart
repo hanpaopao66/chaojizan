@@ -25,6 +25,8 @@ class LicenseUploadField extends StatefulWidget {
     required this.url,
     required this.onUploaded,
     this.onOcr,
+    this.purpose = 'license',
+    this.tip = '证照四角完整、文字清晰、无反光,审核一次就能过',
   });
 
   final ApiClient api;
@@ -37,6 +39,16 @@ class LicenseUploadField extends StatefulWidget {
   /// OCR 识别结果回调(仅在服务端启用且识别成功时调用),
   /// 入参形如 {license_no: '...', name: '...'}
   final void Function(Map<String, dynamic> fields)? onOcr;
+
+  /// 上传用途,决定落哪个桶。默认 `license`(经营证照)。
+  /// 进件要传身份证正反面,那是 `id_card` —— 两个 purpose 服务端都已是私密桶
+  /// (`services/storage.py` 的 `PURPOSES`),这里只是把选择权交给调用方,
+  /// **不要**为了传身份证再复制一份上传组件出来。
+  final String purpose;
+
+  /// 框底下那行拍摄提示。不同证件该提醒的点不一样
+  /// (执照要看清信用代码,身份证要看清号码和有效期)。
+  final String tip;
 
   @override
   State<LicenseUploadField> createState() => _LicenseUploadFieldState();
@@ -98,10 +110,10 @@ class _LicenseUploadFieldState extends State<LicenseUploadField> {
       _error = null;
     });
     try {
-      // 经营证照:私密桶,只有店主和管理员看得到(#124)。
+      // 经营证照/身份证:都是私密桶,只有店主和管理员看得到(#124)。
       // 证照图比菜品图大,弱网下 30 秒不够,放宽到 60 秒
       final url = await widget.api.uploadImage(bytes, _lastName,
-          purpose: 'license', timeout: const Duration(seconds: 60));
+          purpose: widget.purpose, timeout: const Duration(seconds: 60));
       if (!mounted) return;
       widget.onUploaded(url);
       unawaited(_tryOcr(url));
@@ -226,7 +238,7 @@ class _LicenseUploadFieldState extends State<LicenseUploadField> {
           Icon(Icons.tips_and_updates_outlined, size: 14, color: sz.inkFaint),
           const SizedBox(width: 4),
           Expanded(
-            child: Text('证照四角完整、文字清晰、无反光,审核一次就能过',
+            child: Text(widget.tip,
                 style: TextStyle(fontSize: 11, color: sz.inkMuted)),
           ),
         ]),

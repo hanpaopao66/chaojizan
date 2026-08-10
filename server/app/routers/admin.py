@@ -26,6 +26,11 @@ from ..schemas import (
     AdminMerchantOut,
     AdminRiderProfileOut,
     AdminWithdrawalOut,
+    APPLYMENT_STATUS_LABELS,
+    ApplymentOut,
+    ApplymentRevealIn,
+    ApplymentStatusIn,
+    applyment_out,
     BatchPaidIn,
     DeliveryIssueOut,
     DeliveryIssueResolveIn,
@@ -250,6 +255,163 @@ async def set_merchant_deposit(
     await db.refresh(shop)
     owner = await db.get(User, shop.owner_id)
     return _to_out(shop, owner)
+
+
+# ---------- 微信特约商户进件复核(#206) ----------
+#
+# 资质到位后这就是「提交微信」的工作队列:谁填齐了、谁缺什么、谁被驳回了。
+#
+# 敏感字段在这里**和商家侧一样只回尾 4 位**。管理员想看完整号码,
+# 得走下面那个 reveal 接口,每调一次留一条痕。
+# 这不是不信任同事,是因为「账目三方透明」写在首页 ——
+# 对用户隐私就不能反过来松。
+
+
+@router.get("/applyments", response_model=list[ApplymentOut])
+async def list_applyments(
+    status: str = "",
+    complete: bool | None = None,
+    city: str = "",
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """进件队列。可按状态 / 完整度 / 城市筛。
+
+    `complete` 在 Python 侧过滤而不是写进 SQL:完整度的判定要区分主体类型
+    (企业必须对公账户),用 SQL 表达会把这条规则复制成第二份 ——
+    而两份规则迟早对不上。队列本身是人工作业量级(limit 200),
+    多取几行再筛掉的代价可以忽略。
+    """
+    query = (
+        select(Merchant)
+        # 已提交的排前面(那是等着平台干活的);同状态按更新时间倒序
+        .order_by(Merchant.applyment_updated_at.desc().nullslast(),
+                  Merchant.created_at.desc())
+        .limit(200)
+    )
+    if status:
+        # 状态写错了要报错,不要静默返回空列表 ——
+        # 空列表在这个页面上长得像"这一档没有商家",而不是"你筛错了"
+        if status not in APPLYMENT_STATUS_LABELS:
+            raise HTTPException(
+                422, f"未知的进件状态 {status!r};"
+                     f"可选:{'/'.join(APPLYMENT_STATUS_LABELS)}")
+        query = query.where(Merchant.applyment_status == status)
+    if city:
+        query = query.where(Merchant.city == city)
+    shops = (await db.scalars(query)).all()
+    outs = [applyment_out(shop) for shop in shops]
+    if complete is not None:
+        outs = [o for o in outs if o.complete is complete]
+    return outs
+
+
+@router.get("/merchants/{merchant_id}/applyment", response_model=ApplymentOut)
+async def applyment_detail(
+    merchant_id: int,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """进件资料详情。同样只回尾 4 位 —— 详情页不是"看全号"的地方。"""
+    shop = await _get_shop(db, merchant_id)
+    return applyment_out(shop)
+
+
+@router.post("/merchants/{merchant_id}/applyment/reveal")
+async def reveal_applyment_field(
+    merchant_id: int,
+    payload: ApplymentRevealIn,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """解密查看法人身份证号 / 结算银行账号。**每次调用都留痕。**
+
+    ## 为什么是单独一个 POST,而不是详情接口带个 `?full=1`
+
+    - 单独接口 = 查看全号是一个**显式动作**,不是列表/详情顺手带出来的副产品。
+      骑手实名审核那边同样的道理:一个后台列表不该批量吐出几百个身份证号;
+    - POST 而不是 GET:它有副作用(写审计),而且证件号不该出现在 URL 里 ——
+      URL 会进 access log、进浏览器历史、进各种中间件的埋点。
+
+    留痕用的是现成的 `AppEvent`(自建埋点表:user_id + role + event + props),
+    没有新造一张表 —— 它的形状正好是「谁、什么时候、对哪家店、做了什么」。
+    同时打一条 warning 日志:AppEvent 行在用户注销时会被删掉
+    (auth.py 兑现隐私政策的「行为记录注销即删」),
+    而审计不该被被审计者删掉,所以日志那一份是兜底。
+    等有人加了专门的敏感操作审计表,这里换过去即可,接口契约不用动。
+    """
+    from ..models import AppEvent
+    from ..services.crypto import decrypt
+
+    shop = await _get_shop(db, merchant_id)
+    if payload.field == "legal_person_id_no":
+        cipher, tail, label = (shop.legal_person_id_encrypted,
+                               shop.legal_person_id_tail, "法人身份证号")
+    else:
+        cipher, tail, label = (shop.settle_account_no_encrypted,
+                               shop.settle_account_tail, "结算银行账号")
+    if not cipher:
+        raise HTTPException(404, f"该商家还没有填写{label}")
+
+    value = decrypt(cipher)
+    # 先落审计再返回:哪怕响应在路上丢了,"有人看过"这件事也已经记下了。
+    # 反过来(先返回后记)在异常路径上就会漏记 —— 而漏记的恰好是出问题那次
+    db.add(AppEvent(
+        user_id=admin.id, role="admin", event="applyment_reveal",
+        props={
+            "merchant_id": shop.id,
+            "merchant_name": shop.name,
+            "field": payload.field,
+            "reason": payload.reason.strip(),
+            # 只记尾号,审计记录本身不能变成第二个泄露点
+            "tail": tail,
+            "decrypt_ok": bool(value),
+        },
+    ))
+    await db.commit()
+    logger.warning(
+        "敏感字段查看 admin=%s(%s) merchant=%s(%s) field=%s reason=%s",
+        admin.id, admin.phone, shop.id, shop.name, payload.field,
+        payload.reason.strip())
+
+    if not value:
+        # 解不开 = 密钥换过或数据损坏(crypto.py 明确会返回空串)。
+        # 不要静默回空串让人以为"商家没填",说清楚是什么问题
+        raise HTTPException(
+            409, f"{label}解密失败(加密密钥可能已变更),请联系商家重新填写")
+    return {"field": payload.field, "label": label, "value": value,
+            "merchant_id": shop.id, "audited": True}
+
+
+@router.post("/merchants/{merchant_id}/applyment/status",
+             response_model=ApplymentOut)
+async def set_applyment_status(
+    merchant_id: int,
+    payload: ApplymentStatusIn,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """平台侧流转进件状态。
+
+    这一版微信还没接,状态靠报送人员手动推进 ——
+    没有这个口子,`need_sign` / `rejected` / `finished` 这几个状态永远到不了,
+    商家端的状态页也就没东西可显示。接上微信之后这里换成回调驱动,
+    `applyment_status` 的取值和商家端的展示逻辑都不用动。
+    """
+    shop = await _get_shop(db, merchant_id)
+    shop.applyment_status = payload.status
+    # 驳回原因只在 rejected 时保留:改成别的状态还留着旧原因,
+    # 商家会以为自己仍然被驳回
+    shop.applyment_reject_reason = (
+        payload.reject_reason.strip() if payload.status == "rejected" else "")
+    if payload.applyment_no:
+        shop.applyment_no = payload.applyment_no.strip()
+    shop.applyment_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(shop)
+    logger.info("进件状态流转 merchant=%s -> %s by admin=%s",
+                shop.id, payload.status, admin.id)
+    return applyment_out(shop)
 
 
 # ---------- 提现审核(骑手/商家共用同一套打款流程) ----------

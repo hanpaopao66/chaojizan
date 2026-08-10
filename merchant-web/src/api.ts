@@ -1393,3 +1393,168 @@ export function addBrandMember(phone: string, shopIds: number[]): Promise<unknow
 export function removeBrandMember(id: number): Promise<unknown> {
   return request('DELETE', `/brands/me/members/${id}`)
 }
+
+// ---------- 微信特约商户进件(收款资料,#203/#205/#206) ----------
+
+/**
+ * 进件状态。微信侧是**异步**的,中间「待账户验证」和「待签约」两步
+ * 要商家本人去做 —— 不把它显式画出来,商家提交完就以为没事了,
+ * 然后一直开不了通,还以为是平台在拖。
+ */
+export type ApplymentStatus =
+  | 'not_submitted'        // 资料还没交齐/没提交
+  | 'submitted'            // 已提交,等受理
+  | 'need_sign'            // 待签约:超级管理员本人微信扫码
+  | 'need_account_verify'  // 待账户验证:微信打了随机小额,要商家填回金额
+  | 'rejected'             // 被驳回,原因见 applyment_reject_reason
+  | 'finished'             // 已开通,货款直达商家结算账户
+
+/** individual 个体工商户 / enterprise 企业 */
+export type SubjectType = 'individual' | 'enterprise'
+/** corporate 对公 / personal 对私 */
+export type SettleAccountType = 'corporate' | 'personal'
+
+/**
+ * 缺项。**服务端算的,连中文名一起下发** —— 客户端不配这张表,
+ * 服务端加一个必填项,三个端同时就跟上了。
+ */
+export interface ApplymentMissing {
+  field: string
+  label: string
+}
+
+/**
+ * 我的进件资料。
+ *
+ * **敏感字段服务端只回尾 4 位**(`legal_person_id_tail` /
+ * `settle_account_tail`),完整的身份证号和银行账号任何角色都拿不到,
+ * 这个页面自然也拿不到 —— 所以那两项永远不回显,只显示尾号。
+ */
+export interface Applyment {
+  merchant_id: number
+  merchant_name: string
+  subject_type: SubjectType | ''
+  business_license_image_url: string
+  legal_person_name: string
+  legal_person_id_tail: string
+  legal_person_id_front_url: string
+  legal_person_id_back_url: string
+  admin_contact_name: string
+  admin_contact_phone: string
+  admin_contact_email: string
+  settle_account_type: SettleAccountType | ''
+  settle_account_name: string
+  settle_bank_name: string
+  settle_bank_branch: string
+  settle_account_tail: string
+  applyment_status: ApplymentStatus
+  /** 服务端下发的状态短名。认不出的新状态也有话可显示 */
+  applyment_status_label: string
+  applyment_no: string
+  applyment_reject_reason: string
+  applyment_updated_at: string | null
+  complete: boolean
+  /**
+   * 还缺哪些资料。
+   *
+   * **必填清单只认服务端这一份,前端不另写一套** —— 个体工商户和企业
+   * 要交的东西不完全一样,两边规则一旦对不上,商家就会卡在
+   * 「页面说填完了、提交却说没填完」的死循环里。
+   */
+  missing: ApplymentMissing[]
+  required_total: number
+  filled_count: number
+}
+
+/**
+ * 提交/更新进件资料。**这一版只落库,不调微信**(服务商类目未定)。
+ *
+ * 允许只填一部分就保存:老板照着营业执照抄,银行账号往往要另找一张卡。
+ * 齐没齐由服务端返回的 `missing` 说了算。
+ */
+export interface ApplymentIn {
+  subject_type?: SubjectType
+  business_license_image_url?: string
+  legal_person_name?: string
+  /**
+   * 明文身份证号。**只在商家这次真改了才传** ——
+   * 服务端只回尾号,把尾号原样回传会把库里的密文覆盖成 "1234"。
+   */
+  legal_person_id_no?: string
+  legal_person_id_front_url?: string
+  legal_person_id_back_url?: string
+  admin_contact_name?: string
+  admin_contact_phone?: string
+  admin_contact_email?: string
+  settle_account_type?: SettleAccountType
+  settle_account_name?: string
+  settle_bank_name?: string
+  settle_bank_branch?: string
+  /** 明文银行账号,同上:不改就不传 */
+  settle_account_no?: string
+}
+
+export function myApplyment(): Promise<Applyment> {
+  return request('GET', '/merchants/me/applyment')
+}
+
+/** 已在微信侧处理中的单子(need_sign/need_account_verify/finished)
+ *  服务端会 409 —— 页面要先把表单锁掉,别让人白填一遍。 */
+export function saveApplyment(fields: ApplymentIn): Promise<Applyment> {
+  return request('PUT', '/merchants/me/applyment', fields)
+}
+
+// ---- 身份证号校验(GB 11643-1999 加权模 11)----
+//
+// **和服务端 services/idcheck.py 的 validate_id_no 是同一套规则**,
+// 连报错文案都一样。为什么客户端也要算一遍校验位:只判"18 位数字"的话,
+// 手滑打错一位照样过,要等提交才被驳回 —— 而这个页面上错一位的代价,
+// 是商家以为填好了、然后进件卡住没人知道为什么。
+const _ID_WEIGHTS = [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+const _ID_CHECK_CHARS = '10X98765432'
+
+/** 返回错误信息;空串 = 通过。 */
+export function validateIdNo(raw: string): string {
+  const v = raw.trim().toUpperCase()
+  if (v.length !== 18 || !/^\d{17}[\dX]$/.test(v)) {
+    return '身份证号须为 18 位(末位可为 X)'
+  }
+  const y = Number(v.slice(6, 10))
+  const m = Number(v.slice(10, 12))
+  const d = Number(v.slice(12, 14))
+  const birth = new Date(Date.UTC(y, m - 1, d))
+  if (birth.getUTCFullYear() !== y || birth.getUTCMonth() !== m - 1
+      || birth.getUTCDate() !== d) {
+    return '身份证号中的出生日期不合法'
+  }
+  // 服务端按北京时间的"今天"判未来日期,这里跟着算,免得跨时区差一天
+  const todayBeijing = new Date(Date.now() + 8 * 3600 * 1000)
+    .toISOString().slice(0, 10)
+  if (v.slice(6, 14) > todayBeijing.replace(/-/g, '') || y < 1900) {
+    return '身份证号中的出生日期不合法'
+  }
+  const sum = _ID_WEIGHTS.reduce((acc, w, i) => acc + Number(v[i]) * w, 0)
+  if (_ID_CHECK_CHARS[sum % 11] !== v[17]) {
+    return '身份证号校验位不正确,请核对后重新输入'
+  }
+  return ''
+}
+
+/**
+ * 私密图片的可显示地址。
+ *
+ * 证照存私密桶,唯一出口是 `GET /files/{key}`,**每次访问都要过鉴权** ——
+ * 而浏览器的 `<img src>` 不会带 Authorization 头,直接塞进去必然破图。
+ * 这里先 fetch 成 blob 再转 object URL;调用方用完要 revokeObjectURL,
+ * 否则一页翻几次证照就攒一堆 blob 不释放。
+ */
+export async function fetchPrivateImage(path: string): Promise<string> {
+  const token = getToken()
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  const shopId = getShopId()
+  if (shopId) headers['X-Shop-Id'] = String(shopId)
+  const resp = await fetch(path, { headers })
+  if (!resp.ok) throw new ApiError(resp.status, `图片加载失败(${resp.status})`)
+  return URL.createObjectURL(await resp.blob())
+}

@@ -1204,6 +1204,29 @@ class ApiClient {
   Future<Map<String, dynamic>> governancePublic() =>
       _transparency('governance');
 
+  // ---------- 微信特约商户进件资料(商家端 / merchant-web 共用) ----------
+  /// 我的进件资料 + 完整度 + 状态。**敏感字段服务端只回尾 4 位**,
+  /// 客户端拿不到完整身份证号和银行账号 —— 想看完整的走管理端的留痕接口。
+  ///
+  /// 返回结构故意用 Map 不建模型:进件的字段还会随微信类目(普通服务商 /
+  /// 电商平台收付通)调整,过早建模型只会在改字段时三端一起返工。
+  /// [merchantId] 连锁必传:服务端不传就按 owner 解出"某一家",
+  /// 而这一页填的是**货款结到哪张卡** —— 解错店就是把钱结到别家的账户上,
+  /// 且商家不会察觉(两家店的页面长得一模一样)
+  Future<Map<String, dynamic>> myApplyment({int? merchantId}) async =>
+      await _request('GET', '/merchants/me/applyment',
+              query: {if (merchantId != null) 'merchant_id': '$merchantId'})
+          as Map<String, dynamic>;
+
+  /// 提交/更新进件资料。这一版**只落库,不调微信** —— 类目未定之前
+  /// 提交给谁都还不知道,但资料该先收起来,它是整条链路里最耗时的一环
+  Future<Map<String, dynamic>> saveApplyment(Map<String, dynamic> body,
+          {int? merchantId}) async =>
+      await _request('PUT', '/merchants/me/applyment',
+              body: body,
+              query: {if (merchantId != null) 'merchant_id': '$merchantId'})
+          as Map<String, dynamic>;
+
   /// 见证节点网络概览。ledger 路由没挂前缀,路径就是 /nodes/summary。
   /// 返回 {online,total,verified_ok,divergent,latest_anchor,nodes[]}
   Future<Map<String, dynamic>> nodesSummary() async =>

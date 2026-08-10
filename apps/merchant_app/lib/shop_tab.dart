@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'appeal_page.dart';
+import 'applyment_page.dart';
 import 'dashboard_page.dart';
 import 'messages_page.dart';
 import 'reviews_page.dart';
@@ -1979,6 +1980,26 @@ class _ShopTabPageState extends State<ShopTabPage> {
           ),
           const SizedBox(height: 12),
           if (!shop.viewerIsStaff) ...[
+            // 收款资料(#204):独立一页,**不进入驻流程** —— 进件资料是
+            // 「能收钱之前」要的,不是「能开店之前」要的,塞进入驻只会多劝退一批人。
+            //
+            // 只给店主本人:接口走 money_shop 判权(和提现同一口径),
+            // 品牌 manager 也进不去 —— 运营授权不等于可以改这家店的收款账户。
+            // 不加这层判断的话,区域经理点进去只会吃一个 403
+            if (shop.viewerIsOwner) ...[
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.account_balance_wallet_outlined),
+                  title: const Text('收款资料'),
+                  subtitle: const Text('开通后货款直接进你自己的账户,不再经平台的手'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) =>
+                          ApplymentPage(api: widget.api, shop: shop))),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             Card(
               child: ListTile(
                 leading: const Icon(Icons.badge_outlined),

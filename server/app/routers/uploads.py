@@ -133,10 +133,16 @@ async def _may_read_private(
             | (RiderProfile.health_cert_photo_url.contains(ref)))):
         return True
 
-    # 营业执照/特种行业许可证:店主。店员不给 —— 资质材料不是接单要用的东西
+    # 营业执照/特种行业许可证:店主。店员不给 —— 资质材料不是接单要用的东西。
+    # 进件资料(#203)的三张图一并算进来:上传者本人那条通路只在
+    # 「同一个账号传的」时候成立,连锁换人操作或换设备重登后就不成立了,
+    # 表现是收款资料页的证件照全部破图
     if await db.scalar(select(Merchant.id).where(
             Merchant.owner_id == user.id,
-            Merchant.license_image_url.contains(ref))):
+            Merchant.license_image_url.contains(ref)
+            | Merchant.business_license_image_url.contains(ref)
+            | Merchant.legal_person_id_front_url.contains(ref)
+            | Merchant.legal_person_id_back_url.contains(ref))):
         return True
 
     # 酒店的第二证照落在 HotelProfile 上,单独查(否则店主看不了自己的证)

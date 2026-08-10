@@ -1694,3 +1694,284 @@ class StayAfterSaleOut(BaseModel):
     order_no: str = ""       # 列表回填
     guest_name: str = ""
     total_cents: int = 0
+
+
+# ---------- 微信特约商户进件资料(#203/#206) ----------
+#
+# 这一节除了 Pydantic 模型,还放了**必填清单与完整度判定**。
+# 放在 schemas 而不是某个 router 里,是因为它是「契约」的一部分:
+# 商家端(Flutter)、merchant-web、管理端队列三处都要问"还差什么",
+# 三处各硬编码一份必填清单,加一个字段就得改四个地方 ——
+# 而漏改的那一处会让商家看着 100% 却永远提交不成功。
+#
+# 结算账户虽然也是"银行账号 + 户名",但**不复用 PayoutAccount**:
+# 那是「平台打款给谁」(按 user 一人一户),这里是「微信把钱结给谁」
+# (按门店,连锁每店可以不同)。同一个账号存两张表迟早分叉。
+
+#: 进件状态机(平台侧流转;接了微信之后由回调驱动)
+APPLYMENT_STATUS_LABELS: dict[str, str] = {
+    "not_submitted": "未提交",
+    "submitted": "已提交,待平台报送",
+    # 下面两个是微信侧**要商家本人动手**的环节。不把它们显式画出来,
+    # 商家会以为提交完就没事了,然后一直开不了通
+    "need_sign": "待超级管理员签约(微信会发通知,需本人扫码)",
+    "need_account_verify": "待账户验证(需在微信侧回填打款金额)",
+    "rejected": "已驳回,请按原因修改后重新提交",
+    "finished": "已开通",
+}
+
+#: 两种主体都要交的。顺序即前端进度条的展示顺序
+_APPLYMENT_REQUIRED_COMMON: tuple[tuple[str, str], ...] = (
+    ("subject_type", "主体类型"),
+    ("business_license_image_url", "营业执照照片"),
+    ("legal_person_name", "法人姓名"),
+    # 敏感字段判"填没填"看密文列,不看尾号 —— 尾号是展示用的派生值
+    ("legal_person_id_encrypted", "法人身份证号"),
+    ("legal_person_id_front_url", "身份证人像面"),
+    ("legal_person_id_back_url", "身份证国徽面"),
+    ("admin_contact_name", "超级管理员姓名"),
+    ("admin_contact_phone", "超级管理员手机号"),
+    # 邮箱不是可选项:微信的开户/签约通知邮件发到这里,
+    # 填错等于商家永远收不到"该你签约了"
+    ("admin_contact_email", "超级管理员邮箱"),
+    ("settle_account_type", "结算账户类型"),
+    ("settle_account_name", "结算账户开户名"),
+    ("settle_bank_name", "开户银行"),
+    # 开户支行:微信进件必填,而 PayoutAccount 里压根没有这一项 ——
+    # 这也是"两张表不能合并"的一个具体例子
+    ("settle_bank_branch", "开户支行"),
+    ("settle_account_no_encrypted", "结算银行账号"),
+)
+
+
+def applyment_missing(shop) -> list[dict]:
+    """还缺哪些资料。返回 [{field, label}],空列表 = 齐了。
+
+    个体工商户与企业交的东西**不完全一样**:企业主体的结算账户必须对公,
+    拿法人个人卡去开企业特约商户,微信侧一定驳回 —— 与其等驳回回来,
+    不如在我们这一侧就说清楚。个体工商户对公对私都行,不卡。
+
+    `subject_type` 没填时只报它一个吗?不 —— 那样进度条会从 1/1 直接
+    跳到 1/14,看着像出了 bug。所以按公共清单照常算,主体相关的额外规则
+    等主体类型填了再叠加。
+    """
+    missing = [{"field": f, "label": label}
+               for f, label in _APPLYMENT_REQUIRED_COMMON
+               if not (getattr(shop, f, "") or "")]
+    if (shop.subject_type == "enterprise"
+            and shop.settle_account_type
+            and shop.settle_account_type != "corporate"):
+        missing.append({"field": "settle_account_type",
+                        "label": "企业主体的结算账户必须是对公账户"})
+    return missing
+
+
+def applyment_required_total(shop) -> int:
+    """必填项总数(给前端画 x/y 进度)。企业的对公约束不额外计数 ——
+    它是同一个字段的取值约束,不是多一项要填的东西。"""
+    return len(_APPLYMENT_REQUIRED_COMMON)
+
+
+class ApplymentIn(BaseModel):
+    """进件资料提交/更新。**所有字段可选** —— 这是有意的。
+
+    商家不可能一次填完:营业执照在抽屉里、银行账号要翻网银、身份证要拍两张。
+    强制一次性提交的结果是每次都从头填一遍,填到一半退出去就全丢。
+    所以 PUT 是「把这次填的存下来」,只写传了的字段;
+    齐没齐由 `applyment_missing` 判,不由必填校验判。
+
+    身份证号与银行账号**明文只在这个入参里存在**:落库前就换成密文 + 尾号,
+    此后任何常规接口都只能拿到尾 4 位。
+    """
+
+    subject_type: Literal["individual", "enterprise"] | None = None
+    business_license_image_url: str | None = Field(default=None, max_length=300)
+    legal_person_name: str | None = Field(default=None, max_length=50)
+    #: 明文身份证号;校验位真算(见 validate_id_no),不是只判 18 位
+    legal_person_id_no: str | None = Field(default=None, max_length=18)
+    legal_person_id_front_url: str | None = Field(default=None, max_length=300)
+    legal_person_id_back_url: str | None = Field(default=None, max_length=300)
+    admin_contact_name: str | None = Field(default=None, max_length=50)
+    admin_contact_phone: str | None = Field(default=None, max_length=20)
+    admin_contact_email: str | None = Field(default=None, max_length=100)
+    settle_account_type: Literal["corporate", "personal"] | None = None
+    settle_account_name: str | None = Field(default=None, max_length=80)
+    settle_bank_name: str | None = Field(default=None, max_length=80)
+    settle_bank_branch: str | None = Field(default=None, max_length=120)
+    #: 明文银行账号
+    settle_account_no: str | None = Field(default=None, max_length=32)
+
+    @model_validator(mode="after")
+    def check_formats(self):
+        """格式校验集中在这里,三个前端共用同一套规则(#205 明确要求)。
+
+        每个字段都允许传空串 —— 那是「清空这一项」,不是「格式不对」。
+        """
+        import re
+
+        from .services.idcheck import validate_id_no
+
+        if self.legal_person_id_no:
+            # 身份证校验位真算:GB 11643-1999 加权模 11。
+            # 只判 18 位的话,随手打的 18 个数字也能过,
+            # 而错号要等微信驳回才发现,一来一回是好几天
+            _, err = validate_id_no(self.legal_person_id_no)
+            if err:
+                raise ValueError(err)
+        if self.admin_contact_phone and not re.fullmatch(
+                r"1\d{10}", self.admin_contact_phone.strip()):
+            raise ValueError("超级管理员手机号格式不正确")
+        if self.admin_contact_email and not re.fullmatch(
+                r"[^@\s]+@[^@\s.]+(\.[^@\s.]+)+", self.admin_contact_email.strip()):
+            raise ValueError("超级管理员邮箱格式不正确")
+        if self.settle_account_no:
+            # 银行卡号纯数字;国内对公/对私账号 8~32 位都有,不卡死具体长度。
+            # 常见的粘贴带空格,这里先去空格再判
+            no = self.settle_account_no.replace(" ", "")
+            if not re.fullmatch(r"\d{8,32}", no):
+                raise ValueError("银行账号须为 8~32 位数字")
+        # 证件照必须在**私密桶**里。storage.url_for 给私密文件的地址是
+        # /files/{purpose}/...,公开桶是 /img/...。
+        # 客户端要是拿 purpose=shop 传了身份证,这里就能拦住 ——
+        # 否则一张身份证会静静躺在公开桶里,而谁都不会发现
+        for field, purpose in (("legal_person_id_front_url", "id_card"),
+                               ("legal_person_id_back_url", "id_card"),
+                               ("business_license_image_url", "license")):
+            url = getattr(self, field)
+            if url and not url.startswith(f"/files/{purpose}/"):
+                raise ValueError(
+                    f"{field} 必须是 purpose={purpose} 的私密上传地址;"
+                    "证件照不能进公开桶")
+        return self
+
+
+class ApplymentOut(BaseModel):
+    """进件资料回显。**敏感字段只有尾 4 位** —— 商家、管理员一视同仁。
+
+    管理员要看完整号码得走 /admin/merchants/{id}/applyment/reveal,
+    那个接口每调一次写一条审计。把「查看」做成一个要留痕的显式动作,
+    而不是列表接口顺手带出来的副产品:
+    一个后台列表不该批量吐出几百个身份证号(骑手实名那边也是这么定的)。
+    """
+
+    merchant_id: int
+    merchant_name: str = ""
+    subject_type: str = ""
+    business_license_image_url: str = ""
+    legal_person_name: str = ""
+    legal_person_id_tail: str = ""      # 只有尾 4 位
+    legal_person_id_front_url: str = ""
+    legal_person_id_back_url: str = ""
+    admin_contact_name: str = ""
+    admin_contact_phone: str = ""
+    admin_contact_email: str = ""
+    settle_account_type: str = ""
+    settle_account_name: str = ""
+    settle_bank_name: str = ""
+    settle_bank_branch: str = ""
+    settle_account_tail: str = ""       # 只有尾 4 位
+    applyment_status: str = "not_submitted"
+    applyment_status_label: str = ""
+    applyment_no: str = ""
+    applyment_reject_reason: str = ""
+    applyment_updated_at: datetime | None = None
+    # 完整度:前端照着画进度条和「还差什么」,不要各自硬编码必填清单
+    complete: bool = False
+    missing: list[dict] = []
+    required_total: int = 0
+    filled_count: int = 0
+
+
+#: 微信侧已经在处理、商家不能再自行改资料的状态。
+#: 改了库里也报不上去(报送的是当时那一版),只会让商家以为"我已经改好了"
+APPLYMENT_LOCKED_STATUSES = ("need_sign", "need_account_verify", "finished")
+
+
+def next_applyment_status(current: str, complete: bool) -> str | None:
+    """商家保存资料后进件状态该变成什么。None = 不变。
+
+    规则只有两条,但两条都不能少:
+
+    1. **资料齐了就置 `submitted`** —— 商家的动作到此为止,球在平台这边;
+       只从 `not_submitted`/`rejected` 起跳,已经在微信侧流转的状态不回退;
+    2. **提交后又清空了某项就退回 `not_submitted`** —— 不退的话它会一直
+       挂在平台的待报送队列里,报上去必被驳回,而平台侧看不出是商家动过。
+    """
+    if current in APPLYMENT_LOCKED_STATUSES:
+        return None
+    if complete and current in ("not_submitted", "rejected"):
+        return "submitted"
+    if not complete and current == "submitted":
+        return "not_submitted"
+    return None
+
+
+def applyment_out(shop, merchant_name: str = "") -> "ApplymentOut":
+    """Merchant → ApplymentOut。商家侧和管理端**共用这一个映射**。
+
+    共用是要紧的:哪天有人在管理端顺手加一行 `out.legal_person_id_no = ...`,
+    也只会在这一个函数里发生,review 时看得见。
+    两处各拼一遍的话,"管理员也只看尾号"这条规矩迟早在某一处被悄悄破掉。
+    """
+    missing = applyment_missing(shop)
+    total = applyment_required_total(shop)
+    return ApplymentOut(
+        merchant_id=shop.id,
+        merchant_name=merchant_name or shop.name,
+        subject_type=shop.subject_type,
+        business_license_image_url=shop.business_license_image_url,
+        legal_person_name=shop.legal_person_name,
+        legal_person_id_tail=shop.legal_person_id_tail,
+        legal_person_id_front_url=shop.legal_person_id_front_url,
+        legal_person_id_back_url=shop.legal_person_id_back_url,
+        admin_contact_name=shop.admin_contact_name,
+        admin_contact_phone=shop.admin_contact_phone,
+        admin_contact_email=shop.admin_contact_email,
+        settle_account_type=shop.settle_account_type,
+        settle_account_name=shop.settle_account_name,
+        settle_bank_name=shop.settle_bank_name,
+        settle_bank_branch=shop.settle_bank_branch,
+        settle_account_tail=shop.settle_account_tail,
+        applyment_status=shop.applyment_status,
+        applyment_status_label=APPLYMENT_STATUS_LABELS.get(
+            shop.applyment_status, shop.applyment_status),
+        applyment_no=shop.applyment_no,
+        applyment_reject_reason=shop.applyment_reject_reason,
+        applyment_updated_at=shop.applyment_updated_at,
+        complete=not missing,
+        missing=missing,
+        required_total=total,
+        # 直接数填了几项,不用 total - len(missing) 去倒推:
+        # missing 里可能有「企业必须对公」这种**取值约束**,它不是多一项要填的,
+        # 倒推会把进度条算少一格
+        filled_count=sum(1 for f, _ in _APPLYMENT_REQUIRED_COMMON
+                         if getattr(shop, f, "")),
+    )
+
+
+class ApplymentStatusIn(BaseModel):
+    """平台侧流转进件状态。
+
+    这一版微信还没接(类目答案没下来,普通服务商与电商平台两套 API 不通用),
+    所以状态由平台报送人员手动推进;接上之后这里换成回调驱动,契约不变。
+    """
+
+    status: Literal["not_submitted", "submitted", "need_sign",
+                    "need_account_verify", "rejected", "finished"]
+    #: 驳回原因;status=rejected 时必填,商家端原样展示
+    reject_reason: str = Field(default="", max_length=500)
+    #: 微信侧申请单号,报送成功后回填
+    applyment_no: str = Field(default="", max_length=64)
+
+    @model_validator(mode="after")
+    def rejected_needs_reason(self):
+        if self.status == "rejected" and not self.reject_reason.strip():
+            raise ValueError("驳回必须写明原因 —— 商家要照着改")
+        return self
+
+
+class ApplymentRevealIn(BaseModel):
+    """解密查看敏感字段。**必须说明理由** —— 留痕留一个空理由等于没留。"""
+
+    field: Literal["legal_person_id_no", "settle_account_no"]
+    reason: str = Field(min_length=2, max_length=200)

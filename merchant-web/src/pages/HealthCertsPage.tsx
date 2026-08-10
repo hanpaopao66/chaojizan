@@ -7,8 +7,8 @@ import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, archiveHealthCert, HealthCert, healthCerts, LicenseStage,
-  saveHealthCert, UPLOAD_ACCEPT, uploadImage,
+  ApiError, archiveHealthCert, fetchPrivateImage, HealthCert, healthCerts,
+  LicenseStage, saveHealthCert, UPLOAD_ACCEPT, uploadImage,
 } from '../api'
 
 /**
@@ -242,16 +242,44 @@ function CertModal(
 
 /** purpose 必须是 'health_cert' —— 后端按 purpose 决定进公开桶还是私密桶。
  *  这是员工本人的个人信息,填错会把别人的健康证挂到公网上。 */
+/**
+ * 健康证照片。
+ *
+ * 健康证在私密桶里(`purpose=health_cert`),唯一出口 `GET /files/{key}`
+ * 每次都要过鉴权,而 `<img src>` 不带 token —— 之前直接把 URL 塞给
+ * Upload 的 fileList,缩略图一律 403 破图,商家传完就再也看不到自己传了什么。
+ * 先 fetch 成 blob 再显示,卸载时 revoke。与收款资料页的 SecretImage 同一套路。
+ */
 function CertImage(
   { value, onChange }: { value?: string; onChange?: (v: string) => void },
 ) {
+  const [preview, setPreview] = useState('')
+
+  useEffect(() => {
+    if (!value) { setPreview(''); return }
+    let dropped = false
+    let objectUrl = ''
+    fetchPrivateImage(value)
+      .then((u) => {
+        if (dropped) { URL.revokeObjectURL(u); return }
+        objectUrl = u
+        setPreview(u)
+      })
+      .catch(() => { /* 预览拉不到不影响文件本身已经传上去了 */ })
+    return () => {
+      dropped = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [value])
+
   return (
     <Upload
       listType="picture-card"
       maxCount={1}
       accept={UPLOAD_ACCEPT}
       fileList={value
-        ? [{ uid: '1', name: '健康证', status: 'done' as const, url: value }]
+        ? [{ uid: '1', name: '健康证', status: 'done' as const,
+             url: preview || undefined, thumbUrl: preview || undefined }]
         : []}
       showUploadList={{ showPreviewIcon: false }}
       customRequest={async ({ file, onSuccess, onError, onProgress }) => {
