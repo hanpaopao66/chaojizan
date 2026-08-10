@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "超级赞商家"
+    },
+    {
+      "name": "module_desc",
+      "value": "超级赞商家端"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "接单、出餐、对账,佣金只抽 5%"
+    },
+    {
+      "name": "reason_internet",
+      "value": "接收订单、同步菜品与对账数据"
+    },
+    {
+      "name": "reason_bluetooth",
+      "value": "用于连接蓝牙小票机打印订单小票"
+    },
+    {
+      "name": "reason_notification",
+      "value": "用于在应用退到后台时提醒你有新订单"
+    }
+  ]
+}

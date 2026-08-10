@@ -1,0 +1,12 @@
+{
+  "app": {
+    // 与安卓商家端同一命名空间。用户端是 cc.chaojizan.user,
+    // 三端在华为应用市场和后台按同一产品线归类
+    "bundleName": "cc.chaojizan.merchant",
+    "vendor": "chaojizan",
+    "versionCode": 1,
+    "versionName": "0.1.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

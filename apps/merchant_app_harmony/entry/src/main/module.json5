@@ -1,0 +1,81 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": ["phone", "tablet"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:startIcon",
+        "label": "$string:app_name",
+        "startWindowIcon": "$media:startIcon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          }
+        ]
+        // ⚠️ **这里没有 backgroundModes,是有意的。**
+        //
+        // 安卓端靠前台服务把进程钉住,做到"锁屏不丢单"。鸿蒙不给这条路:
+        // 长时任务只认 dataTransfer / audioPlayback / audioRecording /
+        // location / bluetoothInteraction / multiDeviceConnection / voip
+        // (taskKeeping 只给 2in1,wifiInteraction 只给系统应用),
+        // "听订单"一种都不沾。
+        //
+        // 声明 audioPlayback 再播静音音频保活是钻空子:系统会校验声明的
+        // 模式和实际行为是否一致,上架审核这一条也是明写的。更要命的是
+        // **它不可靠** —— 拿一个随时可能被收走的机制去兑现"锁屏不丢单",
+        // 等于在午高峰押注。
+        //
+        // 正解是推送兜底(见 common/PushChannel.ets 和 common/Listen.ets):
+        // 前台靠 WebSocket 实时,后台靠系统通知。
+      }
+    ],
+    // 权限最小化。商家端比用户端多蓝牙和通知,少定位 ——
+    // 商家不需要定位,店在哪是入驻时填的
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET",
+        "reason": "$string:reason_internet",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "always"
+        }
+      },
+      {
+        // 蓝牙:连小票机。**这是商家端唯一的敏感权限**,
+        // 而且只在商家主动去「打印设置」里连打印机时才要
+        "name": "ohos.permission.ACCESS_BLUETOOTH",
+        "reason": "$string:reason_bluetooth",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
+        // 通知:新订单提醒。**商家端最重要的一条** ——
+        // 应用退到后台之后,这是唯一还能叫醒商家的通道
+        "name": "ohos.permission.NOTIFICATION_CONTROLLER",
+        "reason": "$string:reason_notification",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "always"
+        }
+      }
+      // 不申请:定位(店址入驻时填)、相机(选图走相册选择器,
+      // photoAccessHelper 不需要权限)、存储、设备标识、装机列表。
+      // 多申请一个用不到的权限就是应用商店的一个检测项,
+      // 也是隐私政策里要多解释的一条
+    ]
+  }
+}

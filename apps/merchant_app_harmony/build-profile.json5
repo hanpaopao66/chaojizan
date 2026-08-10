@@ -1,0 +1,36 @@
+{
+  "app": {
+    "signingConfigs": [],
+    "products": [
+      {
+        "name": "default",
+        // API 20 = HarmonyOS 6。compatibleSdkVersion 下探到 12:
+        // 蓝牙 SPP(@kit.ConnectivityKit 的 socket)和极光推送的鸿蒙 SDK
+        // 都要 API 12+,再往下商家端两个核心能力都没有
+        //
+        // 不写 signingConfig:签名配置里有密钥库路径和口令,不入库。
+        // 在 DevEco 的 File > Project Structure > Signing Configs 里配一次,
+        // 它会把 signingConfigs 写进这个文件的本地副本 —— 提交时别带上
+        "compileSdkVersion": 20,
+        "compatibleSdkVersion": 12,
+        "runtimeOS": "HarmonyOS"
+      }
+    ],
+    "buildModeSet": [
+      { "name": "debug" },
+      { "name": "release" }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": ["default"]
+        }
+      ]
+    }
+  ]
+}
