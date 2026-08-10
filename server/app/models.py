@@ -304,6 +304,55 @@ class Merchant(Base):
     license_notified: Mapped[list] = mapped_column(
         JSONB, default=list, server_default="[]")
 
+    # ---- 微信特约商户进件资料(#203)----
+    #
+    # 进件的 API 形状取决于服务商类目(普通服务商 applyment4sub /
+    # 电商平台 ecommerce/applyments),但**要商家交的材料两套是一样的**,
+    # 所以数据模型先落地,不等类目答案。
+    #
+    # 为什么不复用 PayoutAccount:那是「平台打款给谁」(按 user 一人一户),
+    # 这里是「微信把钱结给谁」(按门店,连锁每店可以不同)。两件事,
+    # 而且分账上线后前者对商家就没用了。同一个银行账号存两张表迟早分叉。
+    subject_type: Mapped[str] = mapped_column(
+        String(12), default="")          # individual 个体工商户 / enterprise 企业
+    # 营业执照照片。此前库里只有证号没有图,而进件必须传图
+    business_license_image_url: Mapped[str] = mapped_column(
+        String(300), default="")
+    legal_person_name: Mapped[str] = mapped_column(String(50), default="")
+    # 身份证号与银行账号是敏感个人信息,**一律密文落库**(services/crypto.py),
+    # 接口只回尾 4 位。平台把「账目三方透明」写在首页,
+    # 对用户隐私就不能反过来松
+    legal_person_id_encrypted: Mapped[str] = mapped_column(
+        String(300), default="")
+    legal_person_id_tail: Mapped[str] = mapped_column(String(4), default="")
+    legal_person_id_front_url: Mapped[str] = mapped_column(
+        String(300), default="")         # 人像面,私密桶 purpose=id_card
+    legal_person_id_back_url: Mapped[str] = mapped_column(
+        String(300), default="")         # 国徽面
+    # 超级管理员:微信给他发进件通知,签约也是他扫码。
+    # 填错了商家永远收不到"该你签约了",而进件会一直卡在待签约
+    admin_contact_name: Mapped[str] = mapped_column(String(50), default="")
+    admin_contact_phone: Mapped[str] = mapped_column(String(20), default="")
+    admin_contact_email: Mapped[str] = mapped_column(String(100), default="")
+    settle_account_type: Mapped[str] = mapped_column(
+        String(12), default="")          # corporate 对公 / personal 对私
+    settle_account_name: Mapped[str] = mapped_column(String(80), default="")
+    settle_bank_name: Mapped[str] = mapped_column(String(80), default="")
+    # 开户支行:微信进件必填,而 PayoutAccount 里没有这一项
+    settle_bank_branch: Mapped[str] = mapped_column(String(120), default="")
+    settle_account_no_encrypted: Mapped[str] = mapped_column(
+        String(300), default="")
+    settle_account_tail: Mapped[str] = mapped_column(String(4), default="")
+    # 进件状态。微信侧是异步的,中间有「待账户验证」「待签约」两个
+    # **要商家本人操作**的环节 —— 不把状态显式画出来,
+    # 商家会以为提交完就没事了,然后一直开不了通
+    applyment_status: Mapped[str] = mapped_column(
+        String(24), default="not_submitted", index=True)
+    applyment_no: Mapped[str] = mapped_column(String(64), default="")
+    applyment_reject_reason: Mapped[str] = mapped_column(String(500), default="")
+    applyment_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
     # 明厨亮灶(#155)。**不塞 JSONB** —— 列表页要按 status 展示「有/无」标识,
     # 那是法规第十三条的硬要求,得能索引能筛
     #
@@ -556,6 +605,12 @@ class Order(Base):
     # 结算口径(支付时快照):platform=平台代收代付(过渡期);
     # profit_sharing=微信服务商分账,货款直达商家账户,平台不沉淀
     settle_mode: Mapped[str] = mapped_column(String(16), default="platform")
+    # 微信侧交易号(支付回调落库)。**分账接口的必传入参**,
+    # 此前只有 StayOrder 有这个字段,外卖单收到回调直接把它丢了。
+    #
+    # 注意存量:这个字段是分账的硬前提,而补不回来 ——
+    # 加字段之前已支付的订单永远分不了账。不是 bug,是迁移的既成事实
+    wx_transaction_id: Mapped[str] = mapped_column(String(64), default="")
     # 地址保护(下单快照):骑手/商家视角只见 addr_public(粗地址)与中性称呼;
     # 用户可临时放行(addr_revealed)完整门牌;深夜保护单送达强制拍照留证
     addr_protect: Mapped[bool] = mapped_column(Boolean, default=False)
