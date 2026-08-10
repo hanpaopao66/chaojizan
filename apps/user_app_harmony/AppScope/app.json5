@@ -1,0 +1,11 @@
+{
+  "app": {
+    // 包名与安卓端保持同一命名空间,便于在华为应用市场和后台按同一产品线归类
+    "bundleName": "cc.chaojizan.user",
+    "vendor": "chaojizan",
+    "versionCode": 1,
+    "versionName": "0.1.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

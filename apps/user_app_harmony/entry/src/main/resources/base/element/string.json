@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "超级赞"
+    },
+    {
+      "name": "module_desc",
+      "value": "超级赞用户端"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "点外卖,每一单分账可查"
+    },
+    {
+      "name": "reason_internet",
+      "value": "加载商家、菜品与订单数据"
+    },
+    {
+      "name": "reason_location",
+      "value": "用于展示附近的商家并计算配送费"
+    },
+    {
+      "name": "reason_location_precise",
+      "value": "用于把收货地址定位到门牌一级,让骑手少走冤枉路"
+    }
+  ]
+}

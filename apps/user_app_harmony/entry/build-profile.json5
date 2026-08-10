@@ -1,0 +1,17 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "arkOptions": {
+      // 后端地址编译期注入,和 Flutter 端的 --dart-define=SUPERZ_API 一个道理:
+      // 不写死在代码里,调试指本机、发版指线上
+      "buildProfileFields": {
+        "SUPERZ_API": "https://chaojizan.cc"
+      }
+    }
+  },
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}

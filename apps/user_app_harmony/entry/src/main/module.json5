@@ -1,0 +1,64 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": ["phone", "tablet"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:startIcon",
+        "label": "$string:app_name",
+        "startWindowIcon": "$media:startIcon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          }
+        ]
+      }
+    ],
+    // 权限最小化,与安卓端同一口径:只要 INTERNET 和定位。
+    // 不申请相机 —— 用户端所有图片选择都走相册;不申请存储、设备标识、
+    // 装机列表。多申请一个用不到的权限就是应用商店的一个检测项,
+    // 也是隐私政策里要多解释的一条
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET",
+        "reason": "$string:reason_internet",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "always"
+        }
+      },
+      {
+        // 模糊定位:找附近商家够用。**先申请这个**,精确定位只在
+        // 用户主动"定位到当前地址"时再要 —— 点外卖不该一进门就要精确位置
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:reason_location",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      },
+      {
+        // 精确定位。系统规则:申请 LOCATION 必须同时申请
+        // APPROXIMATELY_LOCATION,否则弹不出授权框
+        "name": "ohos.permission.LOCATION",
+        "reason": "$string:reason_location_precise",
+        "usedScene": {
+          "abilities": ["EntryAbility"],
+          "when": "inuse"
+        }
+      }
+    ]
+  }
+}
