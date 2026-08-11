@@ -421,10 +421,38 @@ class _MerchantListViewState extends State<MerchantListView> {
   /// 我的常点:近 90 天点得最多的单品(#119)
   List<FrequentDish> _frequent = [];
 
+  /// 5% 承诺条关掉了没有。
+  ///
+  /// **默认不关**,但关了就永久关 —— 它是一句宣言,老用户看过一次就够了,
+  /// 天天顶在首页上是打扰。想再看的话「我的 → 钱去哪了」一直在那儿,
+  /// 这条只是入口不是唯一入口。
+  bool _pledgeHidden = false;
+
+  static const _kPledgeHidden = 'home_pledge_hidden';
+
   @override
   void initState() {
     super.initState();
     _loadRecent();
+    _restorePledge();
+  }
+
+  Future<void> _restorePledge() async {
+    final sp = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _pledgeHidden = sp.getBool(_kPledgeHidden) ?? false);
+  }
+
+  Future<void> _hidePledge() async {
+    setState(() => _pledgeHidden = true);
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_kPledgeHidden, true);
+    if (!mounted) return;
+    // 说清楚去哪还能看到 —— 不说的话用户以为这个入口没了
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('已收起。想看分账明细,「我的 → 这钱怎么算的」一直在'),
+      duration: Duration(seconds: 4),
+    ));
   }
 
   Future<void> _loadRecent() async {
@@ -786,8 +814,15 @@ class _MerchantListViewState extends State<MerchantListView> {
 
   /// 5% 承诺条:全首页唯一一处 claySoft。左侧衬线大字是这套视觉的记忆点。
   /// 点进去看单笔分账(#107 的「钱去哪了」页;资质/入口在那条任务里收口)。
+  ///
+  /// **可以永久关掉。** 它是一句宣言,老用户看过一次就够了 ——
+  /// 天天顶在首页上就从"我们不黑你"变成了打扰。关掉不影响任何功能:
+  /// 「我的 → 这钱怎么算的」一直在。
   Widget _promiseStrip() {
     final sz = Theme.of(context).sz;
+    if (_pledgeHidden) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
       child: InkWell(
@@ -830,6 +865,22 @@ class _MerchantListViewState extends State<MerchantListView> {
                   ],
                 ),
               ),
+              // 关闭:热区做到 40×40(图标只有 16,光按图标点不中)。
+              // 放在整条 InkWell 里面,所以要自己吃掉点击,
+              // 否则点关闭会连带触发"进分账页"
+              Semantics(
+                label: '不再显示这条承诺',
+                button: true,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: _hidePledge,
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Icon(Icons.close, size: 16, color: sz.inkMuted),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -849,31 +900,91 @@ class _MerchantListViewState extends State<MerchantListView> {
     // 入口卡从频道注册表渲染(#132):新频道在 kChannels 加一行即可,
     // 这里一个字都不用改。频道字符用各自的频道色 —— 用户一眼看得出
     // "换了一个世界",而平台色 clay 留给跨频道的主 CTA
-    Widget liveEntry(SzChannel ch, VoidCallback onTap) {
+    // 频道字符做成方块底:单独一个字浮在卡片左上角,右边一大片空白,
+    // 看着就是"没排完"。加个底之后它是个图标而不是一个掉队的字
+    Widget glyphChip(SzChannel ch, double size) {
+      final c = channelColor(context, ch.key);
+      return Container(
+        width: size,
+        height: size,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: c.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(kRadiusSm),
+        ),
+        child: Text(ch.glyph,
+            style: szFigure(
+                fontSize: size * 0.48, color: c, height: 1.0)),
+      );
+    }
+
+    /// 宽卡(2 列时用):字块在左、标题副标题在右。
+    /// 横过来排才用得上宽度 —— 竖着堆的话副标题旁边永远空着一半。
+    Widget wideEntry(SzChannel ch, VoidCallback onTap) {
       return SzCard(
-          onTap: onTap,
-          padding: const EdgeInsets.fromLTRB(11, 13, 11, 13),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(ch.glyph,
-                  style: szFigure(
-                      fontSize: 19,
-                      color: channelColor(context, ch.key),
-                      height: 1.0)),
-              const SizedBox(height: 7),
-              Text(ch.name,
-                  style: TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: sz.ink)),
-              const SizedBox(height: 3),
-              Text(ch.sub,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
-            ],
+        onTap: onTap,
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+        child: Row(children: [
+          glyphChip(ch, 40),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(ch.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        height: 1.25,
+                        color: sz.ink)),
+                const SizedBox(height: 2),
+                // 长辈版 1.4× 下窄卡放不下,允许折两行而不是切成省略号 ——
+                // 「取件送件 · 收…」这种半截话不如换行
+                Text(ch.sub,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 11.5, height: 1.35, color: sz.inkMuted)),
+              ],
+            ),
           ),
+        ]),
+      );
+    }
+
+    /// 窄卡(3 列时用):竖排居中。宽度不够横排就别横排,
+    /// 硬横排会把副标题挤成一列一个字
+    Widget narrowEntry(SzChannel ch, VoidCallback onTap) {
+      return SzCard(
+        onTap: onTap,
+        padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            glyphChip(ch, 36),
+            const SizedBox(height: 8),
+            Text(ch.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.2,
+                    color: sz.ink)),
+            const SizedBox(height: 3),
+            Text(ch.sub,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 10.5, height: 1.3, color: sz.inkMuted)),
+          ],
+        ),
       );
     }
 
@@ -903,13 +1014,20 @@ class _MerchantListViewState extends State<MerchantListView> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
-          // 每行最多 3 格、自动换行:频道是开放集合,再用 Row+Expanded
-          // 挤在一行的话,第 4 个频道进来副标题就被截成「一口价 · 不…」,
-          // 第 5 个连标题都放不下(实测过)。宽度按 3 格算,
-          // 频道数增长时只会往下换行,不会把已有的挤瘦
+          // 自动换行,**列数按频道个数选** —— 关键是避开「末行只剩一个」。
+          //
+          // 之前写死 3 列,而上线频道正好是 4 个,排出来就是 3+1:
+          // 第二行一张卡孤零零靠左,右边整整空掉三分之二。
+          // 这就是"挤到一边"。4 个改成 2 列排成 2×2,一格不空。
+          //
+          // 规则在 shared 的 channelGridColumns 里,有测试锁着 ——
+          // 加频道时排版会不会退化成孤儿行,不该靠人肉数格子
           child: LayoutBuilder(builder: (context, box) {
             const gap = 9.0;
-            final cell = (box.maxWidth - gap * 2) / 3;
+            final cols = channelGridColumns(kChannels.length);
+            final cell = (box.maxWidth - gap * (cols - 1)) / cols;
+            // 宽度够就横排(字块在左、文案在右),不够就竖排居中
+            final entry = cols <= 2 ? wideEntry : narrowEntry;
             return Wrap(
               spacing: gap,
               runSpacing: gap,
@@ -918,7 +1036,7 @@ class _MerchantListViewState extends State<MerchantListView> {
               // 加频道时这里只需补一个 case
               // (跑腿 2026-07-27 曾下线,08-06 重新接回,注释一并订正)
               for (final ch in kChannels)
-                SizedBox(width: cell, child: liveEntry(ch, () async {
+                SizedBox(width: cell, child: entry(ch, () async {
                   // 跑腿单一建出来就是「待支付」,必须把订单接回来直接进支付。
                   // 之前这里和其他频道一样 push 完就不管返回值,
                   // 结果用户填完地址、看完报价、点了下单,页面一关单子就没了
