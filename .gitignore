@@ -22,7 +22,14 @@ apps/*/macos/
 apps/*/linux/
 apps/*/windows/
 apps/*/web/
-apps/*/test/
+# ⚠️ 这里**不要**再加 apps/*/test/。
+#
+# 曾经加过,本意大概是挡掉 flutter create 生成的 widget_test.dart 模板,
+# 结果连带把真写的测试也挡在仓库外 —— 商家端的小票版式测试在本机跑了
+# 很久、还被当成"版式已验证"的依据,而它从来没进过仓库:别人 clone
+# 下来没有,CI 也跑不了。
+#
+# 模板测试该做的是删掉,不是靠 gitignore 藏起来。
 
 # IDE
 .idea/

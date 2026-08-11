@@ -170,8 +170,25 @@ jobs:
             (cd "$d" && flutter pub get >/dev/null && flutter analyze) || fail=1
           done
           exit $fail
+      # 有测试的包都要跑。
+      #
+      # 以前这里只有 packages/shared,而 .gitignore 又把 apps/*/test/ 挡在
+      # 仓库外 —— 商家端的小票版式测试在本机跑了很久、还被当成"版式已验证"
+      # 的依据,实际上 CI 一次都没跑过。两个口子都堵上。
+      #
+      # 没有 test 目录的包跳过,不当失败。
       - name: dart 单测
-        run: cd packages/shared && flutter test
+        run: |
+          fail=0
+          for d in packages/shared apps/user_app apps/merchant_app apps/rider_app; do
+            if [ -n "$(find "$d/test" -name '*_test.dart' 2>/dev/null)" ]; then
+              echo "── $d"
+              (cd "$d" && flutter test) || fail=1
+            else
+              echo "── $d(没有测试,跳过)"
+            fi
+          done
+          exit $fail
 
   security:
     name: 私密信息扫描
