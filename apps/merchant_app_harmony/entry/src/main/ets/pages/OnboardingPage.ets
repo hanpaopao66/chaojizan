@@ -1,4 +1,5 @@
-import { common } from '@kit.AbilityKit';
+import { abilityAccessCtrl, common, Permissions } from '@kit.AbilityKit';
+import { geoLocationManager } from '@kit.LocationKit';
 import { promptAction } from '@kit.ArkUI';
 import { MerchantApi } from '../common/MerchantApi';
 import { ApiException } from '../common/Api';
@@ -22,6 +23,18 @@ import { pickAndUpload } from '../common/Upload';
  *
  * 总局令第 123 号第十二条要求公示。入驻时问一句,
  * 免得开业后列表上一直挂着「未填报」—— 那是给顾客看的减分项。
+ *
+ * ## 地址不让商家自己打字
+ *
+ * 老板填店址时多半就站在店里,所以**进这一页就自动定位**,逆地理反查出
+ * 主地址;店在商场里、定位飘了就搜店名跳过去。这两条都能定坐标,
+ * 而坐标才是真正起作用的东西 —— 它决定谁能搜到这家店、配送费怎么算。
+ * 让商家打字填地址,填出来的和实际坐标对不上是常事。
+ *
+ * **但输入框不能全删。** 腾讯逆地理给不出门牌号(`geo.py` 那段注释也承认
+ * 只能给到「XX 大厦」这种参照物),而「3 栋 502」「美食城 B12 号铺」
+ * 恰恰是骑手真正靠它找到店的信息。所以主地址只读、由定位或搜索决定,
+ * 输入框降级成「门牌 / 几号铺」这一项。
  */
 @Component
 export struct OnboardingPage {
@@ -29,7 +42,12 @@ export struct OnboardingPage {
 
   @State private name: string = '';
   @State private description: string = '';
+  /** 主地址:**只读**,由定位或搜索决定。商家改不了它,只能重新定位/重搜 */
   @State private address: string = '';
+  /** 门牌 / 几号铺 / 楼层。逆地理给不出这一段,只能商家自己补 */
+  @State private detail: string = '';
+  @State private locating: boolean = false;
+  @State private keyword: string = '';
   @State private licenseNo: string = '';
   @State private licenseImage: string = '';
   @State private category: string = 'fast_food';
@@ -42,29 +60,87 @@ export struct OnboardingPage {
 
   private api: MerchantApi = new MerchantApi();
 
+  aboutToAppear(): void {
+    // 进页面就定位 —— 老板多半就站在店里。**不等他点按钮**:
+    // 那个按钮他不一定会点,而不点的后果是坐标全靠打字反查,常常差几百米
+    this.locate();
+  }
+
   private get dirty(): boolean {
     return this.name.length > 0 || this.address.length > 0
         || this.licenseNo.length > 0 || this.licenseImage.length > 0;
   }
 
-  /** 地址联想。走服务端代理,不需要地图 SDK */
-  private async searchAddress(): Promise<void> {
-    if (this.address.trim().length < 2) {
+  /**
+   * 用当前位置定位,再逆地理反查出主地址。
+   *
+   * 拒权限不阻塞:退回搜索那条路。**但要说清楚** ——
+   * 不说的话商家会以为定位坏了,反复点。
+   */
+  private async locate(): Promise<void> {
+    if (this.locating) {
+      return;
+    }
+    this.locating = true;
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      const perms: Permissions[] = ['ohos.permission.APPROXIMATELY_LOCATION'];
+      const granted = await abilityAccessCtrl.createAtManager()
+          .requestPermissionsFromUser(context, perms);
+      if (granted.authResults.length === 0 || granted.authResults[0] !== 0) {
+        promptAction.showToast({ message: '没给定位权限,用下面的搜索找到你的店' });
+        return;
+      }
+      const req: geoLocationManager.CurrentLocationRequest = {
+        priority: geoLocationManager.LocationRequestPriority.ACCURACY,
+        scenario: geoLocationManager.LocationRequestScenario.UNSET,
+        timeoutMs: 8000,
+      };
+      const loc = await geoLocationManager.getCurrentLocation(req);
+      this.lat = loc.latitude;
+      this.lng = loc.longitude;
+      // 逆地理:把坐标变成一句人话。失败不影响 —— 坐标已经拿到了,
+      // 而坐标才是起作用的那个东西
+      try {
+        const poi: Record<string, Object> =
+            await this.api.geoReverse(this.lat, this.lng);
+        const name: string = `${poi['name'] ?? ''}`;
+        if (name.length > 0) {
+          this.address = name;
+        }
+      } catch (_) {
+        this.address = '已定位(地址名没取到,不影响)';
+      }
+    } catch (_) {
+      promptAction.showToast({ message: '定位失败,用下面的搜索找到你的店' });
+    } finally {
+      this.locating = false;
+    }
+  }
+
+  /** 搜店名。走服务端代理的腾讯位置服务,Key 不进客户端 */
+  private async search(): Promise<void> {
+    if (this.keyword.trim().length < 2) {
       return;
     }
     try {
-      this.tips = await this.api.geoTips(this.address.trim());
-    } catch (_) {
-      // 联想拉不到不拦着填 —— 商家可以手打完整地址,
-      // 只是坐标要靠下面「用当前位置」补
+      this.tips = await this.api.geoTips(this.keyword.trim(),
+        this.lat === 0 ? undefined : this.lat,
+        this.lng === 0 ? undefined : this.lng);
+      if (this.tips.length === 0) {
+        promptAction.showToast({ message: '没搜到,换个说法试试(比如带上街道名)' });
+      }
+    } catch (e) {
+      promptAction.showToast({ message: (e as ApiException).message });
     }
   }
 
   private pickTip(t: Record<string, Object>): void {
-    this.address = `${t['name'] ?? ''}${t['address'] ?? ''}`;
+    this.address = `${t['name'] ?? ''}`;
     this.lat = (t['lat'] ?? 0) as number;
     this.lng = (t['lng'] ?? 0) as number;
     this.tips = [];
+    this.keyword = '';
   }
 
   private async uploadLicense(): Promise<void> {
@@ -91,7 +167,7 @@ export struct OnboardingPage {
       out.push('地址');
     }
     if (this.lat === 0 || this.lng === 0) {
-      out.push('地址坐标(从联想里选一条)');
+      out.push('门店位置(点「重新定位」或搜店名)');
     }
     if (this.licenseNo.trim().length === 0) {
       out.push('营业执照号');
@@ -113,7 +189,11 @@ export struct OnboardingPage {
       await this.api.applyShop({
         name: this.name.trim(),
         description: this.description.trim(),
-        address: this.address.trim(),
+        // 主地址(定位/搜索来的)+ 门牌(商家补的)拼成一条。
+        // 服务端只有一个 address 字段
+        address: this.detail.trim().length > 0
+            ? `${this.address.trim()} ${this.detail.trim()}`
+            : this.address.trim(),
         lat: this.lat,
         lng: this.lng,
         license_no: this.licenseNo.trim(),
@@ -179,19 +259,57 @@ export struct OnboardingPage {
               this.description, '选填',
               (v: string) => { this.description = v; });
 
-            Column({ space: 4 }) {
-              Text('地址').fontSize(13).fontWeight(FontWeight.Medium)
+            Column({ space: 6 }) {
+              Text('门店位置').fontSize(13).fontWeight(FontWeight.Medium)
                 .fontColor($r('app.color.ink')).width('100%');
-              Text('决定配送范围和配送费。**要从联想里选一条**,' +
-                '手打的地址没有坐标,骑手找不到你')
+              Text('决定谁能搜到你、配送费怎么算。' +
+                '你要是就在店里,下面这个地址应该已经对了')
                 .fontSize(11).lineHeight(17)
                 .fontColor($r('app.color.ink_muted')).width('100%');
-              TextInput({ placeholder: '输入店铺地址', text: this.address })
-                .height(44)
-                .onChange((v: string) => { this.address = v; })
-                .onSubmit(() => { this.searchAddress(); });
+
+              // 主地址:**只读**。它由定位或搜索决定,不让打字 ——
+              // 打出来的地址和实际坐标对不上是常事,
+              // 而真正起作用的是坐标
+              Row({ space: 10 }) {
+                Column({ space: 2 }) {
+                  Text(this.address.length > 0
+                    ? this.address
+                    : (this.locating ? '正在定位…' : '还没定位'))
+                    .fontSize(15)
+                    .fontColor(this.address.length > 0
+                      ? $r('app.color.ink') : $r('app.color.ink_muted'));
+                  if (this.lat !== 0) {
+                    Text(`已定位 ${this.lat.toFixed(5)}, ${this.lng.toFixed(5)}`)
+                      .fontSize(11).fontColor($r('app.color.earn'));
+                  }
+                }
+                .alignItems(HorizontalAlign.Start).layoutWeight(1);
+                Button(this.locating ? '定位中' : '重新定位')
+                  .fontSize(12).height(32).padding({ left: 12, right: 12 })
+                  .backgroundColor($r('app.color.surface_alt'))
+                  .fontColor($r('app.color.ink'))
+                  .enabled(!this.locating)
+                  .onClick(() => { this.locate(); });
+              }
+              .width('100%').padding(12)
+              .backgroundColor($r('app.color.surface_alt')).borderRadius(10);
+
+              // 店在商场里、定位飘了就搜店名跳过去
+              Row({ space: 8 }) {
+                TextInput({ placeholder: '定位不准?搜店名或地标', text: this.keyword })
+                  .height(42).layoutWeight(1)
+                  .onChange((v: string) => { this.keyword = v; })
+                  .onSubmit(() => { this.search(); });
+                Button('搜')
+                  .fontSize(13).height(42).width(56)
+                  .backgroundColor($r('app.color.brand'))
+                  .enabled(this.keyword.trim().length >= 2)
+                  .onClick(() => { this.search(); });
+              }
+              .width('100%');
+
               if (this.tips.length > 0) {
-                ForEach(this.tips.slice(0, 5),
+                ForEach(this.tips.slice(0, 6),
                   (t: Record<string, Object>) => {
                     Row() {
                       Column({ space: 2 }) {
@@ -208,10 +326,13 @@ export struct OnboardingPage {
                   }, (t: Record<string, Object>, i: number) =>
                     `${i}-${t['name']}`);
               }
-              if (this.lat !== 0) {
-                Text('✓ 坐标已确定')
-                  .fontSize(11).fontColor($r('app.color.earn')).width('100%');
-              }
+
+              // 门牌这一段机器给不出来,只能商家自己补 ——
+              // 而这恰恰是骑手真正靠它找到店的信息
+              TextInput({ placeholder: '门牌 / 几号铺 / 楼层(选填,但骑手很需要)',
+                text: this.detail })
+                .height(44)
+                .onChange((v: string) => { this.detail = v; });
             }
             .width('100%');
 

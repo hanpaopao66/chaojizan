@@ -316,6 +316,11 @@ class MerchantPatch(BaseModel):
     # 品类不是资质项:随时可改即时生效,管理员可纠错
     category: str | None = None
     description: str | None = None
+    # 文字地址可改(补门牌、改错别字),**但 lat/lng 不在这里** ——
+    # 坐标决定谁能搜到这家店、配送费怎么算,自助改等于绕过审核把自己
+    # 挪到人流密集区。要迁址走客服重审(客户端 onboarding.dart 也是这个口径)。
+    #
+    # ⚠️ 别顺手往下面加 lat/lng —— 那一行加上去,距离推荐就可以被商家自己刷。
     address: str | None = None
     license_no: str | None = None
     license_image_url: str | None = None

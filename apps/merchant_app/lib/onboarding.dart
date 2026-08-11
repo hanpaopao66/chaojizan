@@ -235,6 +235,13 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   late final _name = TextEditingController(text: widget.existing?.name ?? '');
   late final _description =
       TextEditingController(text: widget.existing?.description ?? '');
+  /// 门牌 / 几号铺 / 楼层。
+  ///
+  /// **主地址由地图选点决定,这里只补机器给不出来的那一段。**
+  /// 腾讯逆地理只能给到「XX 大厦」这种参照物(见 server geo.py 的注释),
+  /// 而「3 栋 502」「美食城 B12 号铺」才是骑手真正靠它找到店的信息。
+  late final _detail =
+      TextEditingController(text: '')..addListener(_saveDraft);
   late final _address =
       TextEditingController(text: widget.existing?.address ?? '');
   late final _licenseNo =
@@ -303,7 +310,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
   @override
   void dispose() {
     for (final c in [
-      _name, _description, _address, _licenseNo, _frontDeskPhone,
+      _name, _description, _address, _detail, _licenseNo, _frontDeskPhone,
       _specialLicenseNo,
     ]) {
       c.dispose();
@@ -328,6 +335,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
         _name.text = d['name'] as String? ?? '';
         _description.text = d['description'] as String? ?? '';
         _address.text = d['address'] as String? ?? '';
+        _detail.text = d['detail'] as String? ?? '';
         _frontDeskPhone.text = d['front_desk_phone'] as String? ?? '';
         _licenseNo.text = d['license_no'] as String? ?? '';
         _licenseImageUrl = d['license_image_url'] as String? ?? '';
@@ -370,13 +378,23 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  /// 提交用的完整地址:主地址(地图选点来的)+ 门牌(商家补的)。
+  /// 服务端只有一个 address 字段,在这里拼。
+  String get _fullAddress {
+    final main = _address.text.trim();
+    final detail = _detail.text.trim();
+    return detail.isEmpty ? main : '$main $detail';
+  }
+
   // ---- 步骤校验与流转 ----
 
   String? _validateStep(int step) {
     if (step == 1) {
       if (_name.text.trim().isEmpty) return _isHotel ? '请填写酒店名称' : '请填写店铺名称';
-      if (_address.text.trim().isEmpty) return '请填写门店地址';
-      if (_lat == null) return '请在地图上标出店铺位置——用户按坐标搜附近的店,标错就没人看得到你';
+      // 地址由定位/地图选点决定,商家不用打字 —— 所以这两条都指向同一个动作
+      if (_lat == null || _address.text.trim().isEmpty) {
+        return '请先标出店铺位置——用户按坐标搜附近的店,标错就没人看得到你';
+      }
     }
     if (step == 2) {
       final licenseLabel = _isHotel ? '营业执照注册号' : '食品经营许可证号';
@@ -435,9 +453,13 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
     setState(() {
       _lat = picked.lat;
       _lng = picked.lng;
-      // 地址框空着就用反查结果填上,已经写了就不覆盖 ——
-      // 商家写的往往比反查更准(带门牌号)
-      if (_address.text.trim().isEmpty && picked.name.isNotEmpty) {
+      // 主地址**始终**用反查结果覆盖。
+      //
+      // 以前这里是「空着才填,写了不覆盖」,理由是"商家写的往往比反查准
+      // (带门牌号)"—— 那时候主地址是个自由输入框。现在门牌单独一个框,
+      // 主地址只由选点决定,再保留旧值就会出现「显示的是上次选的地方、
+      // 坐标是这次选的」这种最坏的组合。
+      if (picked.name.isNotEmpty) {
         _address.text = picked.name;
       }
     });
@@ -476,7 +498,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
         await widget.api.applyShop(
           name: _name.text.trim(),
           description: _description.text.trim(),
-          address: _address.text.trim(),
+          address: _fullAddress,
           lat: _lat!,
           lng: _lng!,
           licenseNo: _licenseNo.text.trim(),
@@ -501,7 +523,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
         await widget.api.updateShop({
           'name': _name.text.trim(),
           'description': _description.text.trim(),
-          'address': _address.text.trim(),
+          'address': _fullAddress,
           'license_no': _licenseNo.text.trim(),
           'license_image_url': _licenseImageUrl,
           if (!_isHotel) ...{
@@ -680,36 +702,75 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           controller: _description,
           decoration: const InputDecoration(
               labelText: '一句话介绍', border: OutlineInputBorder())),
-      const SizedBox(height: 12),
-      TextField(
-          controller: _address,
-          decoration: InputDecoration(
-              labelText: _isHotel ? '酒店地址 *' : '门店地址 *',
-              border: const OutlineInputBorder())),
+      const SizedBox(height: 14),
+      // ---- 门店位置 ----
+      //
+      // **地址不让商家打字。** 老板填店址时多半就站在店里,地图选点
+      // (带一键定位和搜店名)比打字准得多 —— 打出来的地址和实际坐标
+      // 对不上是常事,而真正起作用的是坐标:它决定谁能搜到这家店、
+      // 配送费怎么算。
+      //
+      // 主地址由选点决定、只读;输入框降级成「门牌 / 几号铺」——
+      // 腾讯逆地理给不出这一段(见 server geo.py 的注释),
+      // 而它恰恰是骑手真正靠它找到店的信息。
+      //
+      // 入驻后**不给自助改坐标**:自助改等于绕过审核把自己挪到人流密集区。
+      // 要挪店走客服重审。
+      Text(_isHotel ? '酒店位置 *' : '门店位置 *',
+          style: Theme.of(context).textTheme.titleSmall),
       const SizedBox(height: 6),
-      // 文字地址给人看,坐标给系统算 —— 两者都要。
-      // 入驻时必须自己标;入驻后**不给自助改**:坐标决定谁能搜到这家店,
-      // 自助改等于绕过审核把自己挪到人流密集区。要挪店走客服重审。
-      if (widget.existing == null)
-        Row(children: [
-          Expanded(
-            child: Text(
-              _lat == null
-                  ? '还没标位置:用户按坐标搜附近的店'
-                  : '已标位置 ${_lat!.toStringAsFixed(5)},'
-                      '${_lng!.toStringAsFixed(5)}',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: _lat == null ? sz.danger : sz.earn),
+      if (widget.existing == null) ...[
+        SzCard(
+          child: Row(children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _address.text.trim().isEmpty
+                        ? '还没标位置'
+                        : _address.text.trim(),
+                    style: TextStyle(
+                        fontSize: 15,
+                        color: _address.text.trim().isEmpty
+                            ? sz.inkMuted
+                            : sz.ink),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _lat == null
+                        ? '用户按坐标搜附近的店,标错就没人看得到你'
+                        : '已标位置 ${_lat!.toStringAsFixed(5)},'
+                            '${_lng!.toStringAsFixed(5)}',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: _lat == null ? sz.danger : sz.earn),
+                  ),
+                ],
+              ),
             ),
+            TextButton.icon(
+              icon: const Icon(Icons.map_outlined, size: 18),
+              label: Text(_lat == null ? '标位置' : '重新标'),
+              onPressed: _pickShopSpot,
+            ),
+          ]),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _detail,
+          decoration: const InputDecoration(
+            labelText: '门牌 / 几号铺 / 楼层',
+            helperText: '选填,但骑手很需要 —— 地图只能定到楼下',
+            border: OutlineInputBorder(),
           ),
-          TextButton.icon(
-            icon: const Icon(Icons.map_outlined, size: 18),
-            label: Text(_lat == null ? '在地图上标位置 *' : '重新标'),
-            onPressed: _pickShopSpot,
-          ),
-        ])
-      else
+        ),
+      ] else ...[
+        Text(
+          _address.text.trim().isEmpty ? '(未填写)' : _address.text.trim(),
+          style: TextStyle(fontSize: 15, color: sz.ink),
+        ),
+        const SizedBox(height: 4),
         Text(
           _lat == null
               ? '本店尚未标定位置,请联系客服补录'
@@ -717,6 +778,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
                   '${_lng!.toStringAsFixed(5)}(如需迁址请联系客服)',
           style: TextStyle(fontSize: 12, color: sz.inkMuted),
         ),
+      ],
       if (_isHotel) ...[
         const SizedBox(height: 12),
         TextField(

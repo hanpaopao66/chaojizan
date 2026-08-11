@@ -23,6 +23,10 @@
     {
       "name": "reason_notification",
       "value": "用于在应用退到后台时提醒你有新订单"
+    },
+    {
+      "name": "reason_location",
+      "value": "用于在开店时定位门店位置,决定配送范围与配送费"
     }
   ]
 }
