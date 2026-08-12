@@ -94,6 +94,30 @@ class User(Base):
     grab_min_fee_cents: Mapped[int] = mapped_column(Integer, default=0)
     grab_same_way_only: Mapped[bool] = mapped_column(Boolean, default=False)
     grab_avoid_alcohol: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 骑手自设的同时接单上限(空 = 用平台默认 rider_max_active_orders)。
+    #
+    # **只能往下调,不能往上**:平台常数留作硬上限。理由不是不信任他 ——
+    # 同时 8 单必然有人超时,而超时的赔付平台出、差评他背。
+    # 但 3 单对新手会超时、对老手嫌少,这个数只影响他自己,
+    # 没道理由平台替他定死一个。
+    rider_max_active: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 骑手有没有自己碰过接单半径。
+    #
+    # 用来区分「没设过」和「设成了不限」—— 两者的 grab_radius_km 都是
+    # null,但含义相反:前者是新手还没接触过这个设置,后者是他明确要
+    # 看全城。新手首次上线自动设 3 公里只对前者做,而且只做一次。
+    grab_radius_touched: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 收工方向(#264):开着的时候,顺路的参照点从「手上单的送达点」
+    # 换成这里,骑手就只看往这个方向的单。
+    #
+    # ⚠️ **只存到街道级**(小数点后 2 位,约 1km):对「往这个方向」
+    # 这个用途足够,而更精确就等于存了骑手住哪 —— 连着看几天能推出来的
+    # 东西,不该进我们的库。写入时由 round_coarse() 截断,不信任客户端。
+    #
+    # 开关和坐标分开:关掉之后坐标留着,下次收工不用重设。
+    go_home_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    go_home_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    go_home_on: Mapped[bool] = mapped_column(Boolean, default=False)
     # 骑手所在城市(上线时按定位逆地理解析一次,管理后台可改)。
     # 只看/只抢本城订单;空 = 未标注,不参与隔离(存量宽限)
     city: Mapped[str] = mapped_column(String(20), default="")

@@ -1953,8 +1953,27 @@ class ApiClient {
   }
 
   // ---------- 骑手端 ----------
-  Future<void> setOnline(bool isOnline) =>
-      _request('POST', '/riders/online', body: {'is_online': isOnline});
+  /// 上下线。
+  ///
+  /// ⚠️ **返回值必须显示给骑手。** 服务端一直在回两句话,而这个方法
+  /// 以前返回 void 直接丢掉了:
+  ///
+  /// - `warning`:食安培训宽限期提醒(法定要求,过期未完成会影响上线)。
+  ///   发了一年多没人看见 —— 骑手到期被拦时会觉得平台突然变卦;
+  /// - `autoPrefHint`:这次上线平台**替他改了什么设置**(新手默认收窄
+  ///   接单半径)。静默给人设一个筛选,他只会觉得"今天怎么单少了"。
+  ///
+  /// 两句都不阻塞上线,只是要说出来。
+  Future<({String warning, String autoPrefHint})> setOnline(
+      bool isOnline) async {
+    final data = await _request('POST', '/riders/online',
+        body: {'is_online': isOnline});
+    final m = (data as Map?)?.cast<String, dynamic>() ?? const {};
+    return (
+      warning: '${m['warning'] ?? ''}',
+      autoPrefHint: '${m['auto_pref_hint'] ?? ''}',
+    );
+  }
 
   Future<void> reportLocation(double lat, double lng) =>
       _request('POST', '/riders/location', body: {'lat': lat, 'lng': lng});
@@ -1971,7 +1990,18 @@ class ApiClient {
   /// 服务端对不带 `with_meta` 的老客户端仍返回裸数组,所以这里两个方法
   /// 并存而不是改掉上面那个 —— 装着旧版 App 的骑手不会因为服务端
   /// 升级就打不开抢单页。
-  Future<({List<Order> items, int filteredByPrefs})> availablePool() async {
+  /// `stalePrefs` 是**因为定位取不到而没生效的偏好键**。
+  ///
+  /// 接单半径和只看顺路都依赖骑手位置(服务端 riders.py ~919 行的
+  /// `if rider_pos` 分支),位置没上报或过期时它们静默失效 ——
+  /// 而界面上 chip 还选着「3km」。骑手不会想到是定位的问题,
+  /// 只会觉得"这破筛选没用"。拿到这个就照实提示。
+  Future<({
+    List<Order> items,
+    int filteredByPrefs,
+    bool hasLocation,
+    List<String> stalePrefs,
+  })> availablePool() async {
     final data = await _request('GET',
         '/riders/available-orders?with_meta=true') as Map<String, dynamic>;
     return (
@@ -1979,6 +2009,12 @@ class ApiClient {
           .map((e) => Order.fromJson(e as Map<String, dynamic>))
           .toList(),
       filteredByPrefs: (data['filtered_by_prefs'] as num?)?.toInt() ?? 0,
+      // 老服务端不返回这两个字段:按"有定位、没失效"处理,
+      // 保持和升级前一样的行为,不平白多一条吓人的提示
+      hasLocation: data['has_location'] as bool? ?? true,
+      stalePrefs: ((data['stale_prefs'] as List?) ?? const [])
+          .map((e) => '$e')
+          .toList(),
     );
   }
 

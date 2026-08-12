@@ -253,10 +253,33 @@ async def set_online(
     elif open_session is not None:
         open_session.offline_at = now
     user.is_online = payload.is_online
+
+    # ---- 新手默认收窄接单半径(#266)----
+    #
+    # `grab_radius_km` 默认为空(不限),新骑手第一次上线看到的是全城的单。
+    # 最容易发生的事:接一个十公里的,然后超时 —— 而超时的差评他自己背。
+    #
+    # **只在第一次生效**:设过一次之后(不管设成什么,包括手动改回不限)
+    # 永远不再自动改。平台插手一次是帮忙,反复插手就是替他做决定。
+    #
+    # ⚠️ **必须告诉他**。静默给人设一个筛选,正是我们刚修的那个
+    # 「定位丢了半径静默失效」的另一面 —— 他不知道自己被筛过,
+    # 只会觉得单少。所以走 warning 这条已有的通道说出来。
+    novice_hint = ""
+    if payload.is_online and user.grab_radius_km is None \
+            and not user.grab_radius_touched:
+        user.grab_radius_km = NOVICE_RADIUS_KM
+        user.grab_radius_touched = True
+        novice_hint = (f"先给你把接单半径设成了 {NOVICE_RADIUS_KM} 公里 —— "
+                       "新手接太远的单容易超时。熟悉之后在「接单偏好」里"
+                       "随时改,改成不限也行")
+
     await db.commit()
     # warning 非空 = 在宽限窗口内还没做培训。客户端要显示出来,
     # 但**不能挡住他上线** —— 挡了就是让他今天没饭吃
-    return {"is_online": payload.is_online, "warning": warning}
+    return {"is_online": payload.is_online, "warning": warning,
+            # 这次上线平台替他改了什么。空串 = 什么都没改
+            "auto_pref_hint": novice_hint}
 
 
 @router.patch("/me/preferences")
@@ -272,7 +295,10 @@ async def update_preferences(
       一个 3 块的单他看一眼就划走,却要一天划几百次;
     - `grab_same_way_only`:只看同店/顺路。兼职骑手要的不是"5 公里内",
       是"下班这条路上";
-    - `grab_avoid_alcohol`:不看酒类。要查收件人年龄,有人不想沾这麻烦。
+    - `grab_avoid_alcohol`:不看酒类。要查收件人年龄,有人不想沾这麻烦;
+    - `rider_max_active`:同时接单上限(null=用平台默认)。**只能往下调**,
+      平台常数是硬上限 —— 见 `effective_max_active`。这一项和上面四条
+      不一样:它真的会拦住接单,不只是改他看到什么。
 
     **过滤掉的单不会消失**,还在池子里等别人抢 —— 所以抢单池返回体里
     带 `filtered_by_prefs`,把"被你自己的设置挡掉了几单"摆出来。
@@ -284,6 +310,10 @@ async def update_preferences(
                                    or not 1 <= radius <= 20):
             raise HTTPException(422, "接单半径需为 1-20 的整数公里数,或 null 不限")
         user.grab_radius_km = radius
+        # 打标:他自己碰过了,以后不再自动帮他设(见 set_online 的 #266)。
+        # **改回 null 也算碰过** —— "我就是要看全城"是个明确的决定,
+        # 下次上线不该被平台悄悄改回 3 公里
+        user.grab_radius_touched = True
     if "grab_min_fee_cents" in payload:
         v = payload["grab_min_fee_cents"]
         # 上限 2000 分:再高就等于"我不接单了",那该用下线开关而不是
@@ -291,6 +321,37 @@ async def update_preferences(
         if not isinstance(v, int) or not 0 <= v <= 2000:
             raise HTTPException(422, "单价下限需为 0-2000 分(0=不限)")
         user.grab_min_fee_cents = v
+    if "rider_max_active" in payload:
+        v = payload["rider_max_active"]
+        hard = settings.rider_max_active_orders
+        if v is not None and (not isinstance(v, int) or not 1 <= v <= hard):
+            # 上限就是平台硬上限,**不许往上** —— 见 effective_max_active
+            raise HTTPException(
+                422, f"同时接单上限需为 1-{hard} 的整数,或 null 用平台默认")
+        user.rider_max_active = v
+    if "go_home" in payload:
+        # {"lat":.., "lng":..} 设方向;null 清掉
+        v = payload["go_home"]
+        if v is None:
+            user.go_home_lat = None
+            user.go_home_lng = None
+            user.go_home_on = False
+        else:
+            try:
+                lat, lng = float(v["lat"]), float(v["lng"])
+            except (KeyError, TypeError, ValueError):
+                raise HTTPException(422, "收工方向需要 {lat, lng}")
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                raise HTTPException(422, "坐标超出范围")
+            # **服务端截到街道级**,不信任客户端传的精度(见 round_coarse)
+            user.go_home_lat = round_coarse(lat)
+            user.go_home_lng = round_coarse(lng)
+    if "go_home_on" in payload:
+        if not isinstance(payload["go_home_on"], bool):
+            raise HTTPException(422, "go_home_on 需为 true/false")
+        if payload["go_home_on"] and user.go_home_lat is None:
+            raise HTTPException(422, "先设一个收工方向再打开")
+        user.go_home_on = payload["go_home_on"]
     for key in ("grab_same_way_only", "grab_avoid_alcohol"):
         if key in payload:
             if not isinstance(payload[key], bool):
@@ -302,6 +363,13 @@ async def update_preferences(
         "grab_min_fee_cents": user.grab_min_fee_cents,
         "grab_same_way_only": user.grab_same_way_only,
         "grab_avoid_alcohol": user.grab_avoid_alcohol,
+        "rider_max_active": user.rider_max_active,
+        # 平台硬上限一起给,客户端据此画滑块的范围 ——
+        # 写死在客户端的话,以后调这个常数要发版
+        "max_active_cap": settings.rider_max_active_orders,
+        "go_home_on": user.go_home_on,
+        "go_home_lat": user.go_home_lat,
+        "go_home_lng": user.go_home_lng,
     }
 
 
@@ -849,9 +917,15 @@ async def available_orders(
     (/transparency/dispatch 从同一处读权重,不另抄一份)。
     骑手位置取不到(未上报/过期)时退化为按等待时长排(老单在前)。
 
-    `with_meta=true` 时返回 `{items, filtered_by_prefs, prefs}` 而不是裸数组:
-    骑手自己设的偏好挡掉了几单要**摆出来**,否则"今天怎么没单"这个疑问
-    没有答案。不传时保持裸数组 —— 老版本客户端拿到对象会直接崩。
+    `with_meta=true` 时返回
+    `{items, filtered_by_prefs, has_location, stale_prefs, prefs}`
+    而不是裸数组:骑手自己设的偏好挡掉了几单要**摆出来**,否则
+    "今天怎么没单"这个疑问没有答案。不传时保持裸数组 ——
+    老版本客户端拿到对象会直接崩。
+
+    `stale_prefs` 是**因为定位取不到而没生效的偏好键**。半径和只看顺路
+    都依赖位置,位置一没有它们就静默失效,而界面上还选着 —— 这条是给
+    客户端照实提示用的。
     """
     from datetime import datetime, timezone
 
@@ -888,6 +962,17 @@ async def available_orders(
     mine = await _my_in_flight(db, user.id)
     my_shops = {o.merchant_id for o in mine}
     my_drops = [(o.lat, o.lng) for o in mine]
+    # 收工单(#264):开着的时候,顺路的参照点换成「我要回的方向」。
+    #
+    # 为什么需要它:`same_way` 按手上单的送达点算绕路增量,而
+    # **手上没单时它整个不生效**(见下面 grab_same_way_only 那段注释)——
+    # 收工那一刻恰恰是手上快空了的时候,顺路筛选正好在最需要它的时刻失灵,
+    # 结果是最后一单接到反方向,白骑十公里回家。
+    #
+    # 算法一行不用改:detour_m 的第四个参数本来就是"终点",
+    # 把手上单的送达点换成这个坐标即可。
+    if user.go_home_on and user.go_home_lat is not None:
+        my_drops = [(user.go_home_lat, user.go_home_lng)]
 
     # 骑手最近位置(Redis,5 分钟过期;取不到就不算距离)
     redis = get_redis()
@@ -1017,11 +1102,102 @@ async def available_orders(
     # 带上"被你自己的设置挡掉了几单"。悄悄过滤会变成"今天怎么没单",
     # 骑手不会想到是两个月前设的一个开关 —— 这个数就是那条线索。
     # 老版本客户端不传 with_meta,拿到的还是原来的数组,不会崩
+    # 定位取不到时**哪些偏好悄悄失效了**,照实回报。
+    #
+    # 接单半径和只看顺路都在 `if rider_pos` 分支里(见上面 ~919 行),
+    # 位置没上报或 Redis 过期(5 分钟)时整段跳过 —— 骑手界面上 chip
+    # 还选着「3km」,实际收到的是不限。他不会想到是定位的问题,
+    # 只会觉得"这破筛选没用"。
+    #
+    # 这和商家端「空列表和加载失败长得一样」是同一种病:
+    # **让用户误以为某件事在生效**。所以给出来,由客户端照实显示。
+    stale_prefs = stale_location_prefs(
+        rider_pos is not None,
+        grab_radius_km=user.grab_radius_km,
+        grab_same_way_only=user.grab_same_way_only,
+        go_home_on=user.go_home_on,
+    )
     return {"items": items, "filtered_by_prefs": filtered,
+            # 位置有没有:客户端据此决定要不要提示去开定位
+            "has_location": rider_pos is not None,
+            # 因为没定位而没生效的偏好键;空数组 = 一切正常
+            "stale_prefs": stale_prefs,
             "prefs": {"grab_radius_km": user.grab_radius_km,
                       "grab_min_fee_cents": user.grab_min_fee_cents,
                       "grab_same_way_only": user.grab_same_way_only,
-                      "grab_avoid_alcohol": user.grab_avoid_alcohol}}
+                      "grab_avoid_alcohol": user.grab_avoid_alcohol,
+                      "rider_max_active": user.rider_max_active,
+                      "max_active_cap": settings.rider_max_active_orders,
+                      "go_home_on": user.go_home_on,
+                      "go_home_lat": user.go_home_lat,
+                      "go_home_lng": user.go_home_lng}}
+
+
+#: 收工方向坐标的存储精度(小数点后位数)。
+#:
+#: 2 位 ≈ 1.1km。**这是隐私上限不是精度选择**:骑手的收工方向多半就是
+#: 他家附近,存得越准越接近"我们知道他住哪"。而「往这个方向」这个用途
+#: 只需要街道级 —— 判顺路比的是绕路增量的相对大小,差一公里不影响谁排前面。
+GO_HOME_PRECISION = 2
+
+
+def round_coarse(v: float) -> float:
+    """把坐标截到街道级。
+
+    **服务端截,不信任客户端** —— 客户端传什么精度我们管不着,
+    但落库的必须是粗的。
+    """
+    return round(v, GO_HOME_PRECISION)
+
+
+#: 新手首次上线时自动设的接单半径(km)。
+#:
+#: 美团给新手推荐 3 公里内,理由和我们一样:接太远容易超时。
+#: **只在第一次生效**,而且要明说 —— 见 set_online 里那段。
+NOVICE_RADIUS_KM = 3
+
+
+def effective_max_active(rider_max_active: int | None) -> int:
+    """这个骑手实际的同时接单上限。
+
+    `rider_max_active` 为空 = 没设过,用平台默认。设过就取**较小值** ——
+    平台常数是硬上限,骑手只能往下调。
+
+    往上调不给,不是不信任骑手:同时 8 单必然有人超时,而超时的
+    赔付平台出、差评他背。往下调随便,那纯粹是他自己的节奏。
+    """
+    hard = settings.rider_max_active_orders
+    if rider_max_active is None:
+        return hard
+    return min(rider_max_active, hard)
+
+
+def stale_location_prefs(has_location: bool, *,
+                         grab_radius_km: int | None,
+                         grab_same_way_only: bool,
+                         go_home_on: bool = False) -> list[str]:
+    """定位取不到时,哪些接单偏好**悄悄失效了**。
+
+    接单半径和只看顺路都要拿骑手位置来算(见 available_orders 里的
+    `if rider_pos` 分支),位置没上报或 Redis 过期(5 分钟)时整段跳过 ——
+    而骑手界面上 chip 还选着「3km」。
+
+    这是「让用户误以为某件事在生效」那一类:比"挡掉了你不知道"更坏,
+    因为骑手会按"我只看 3 公里内"去接单,接了才发现要骑十公里。
+
+    有定位时一律返回空 —— 偏好本身没设也返回空,没设就谈不上失效。
+    """
+    if has_location:
+        return []
+    out: list[str] = []
+    if grab_radius_km:
+        out.append("grab_radius_km")
+    if grab_same_way_only:
+        out.append("grab_same_way_only")
+    # 收工方向也吃 rider_pos:绕路增量是从"骑手当前位置"起算的
+    if go_home_on:
+        out.append("go_home_on")
+    return out
 
 
 # ---------- 骑手申诉(超时/差评非我责任) ----------
@@ -1353,12 +1529,22 @@ async def grab_order(
         raise HTTPException(
             409, f"今日转单已达 {used} 次,抢单暂停到明天(次日自动恢复,"
                  "不罚款不扣钱);手头的单照常配送,有困难随时联系平台")
-    # 并发上限:手头在途太多影响履约,先送完再接(追加单不占额度)
+    # 并发上限:手头在途太多影响履约,先送完再接(追加单不占额度)。
+    #
+    # 取骑手自设值和平台硬上限里**小的那个**:他可以往下调不能往上。
+    # 理由不是不信任他 —— 同时 8 单必然有人超时,而超时的赔付平台出、
+    # 差评他背。
     active = len(await _my_in_flight(db, user.id))
-    if active >= settings.rider_max_active_orders:
+    limit = effective_max_active(user.rider_max_active)
+    if active >= limit:
+        # 是他自己设的还是平台定的,要说清楚 —— 不然他会觉得平台在卡他,
+        # 而实际上那个数是他上周自己调的
+        why = ("你把同时接单上限设成了 %d 单,可以在接单偏好里改" % limit
+               if user.rider_max_active is not None
+               and user.rider_max_active < settings.rider_max_active_orders
+               else "最多同时 %d 单" % limit)
         raise HTTPException(
-            409, f"手头已有 {active} 单在途,先送完再接新单"
-                 f"(最多同时 {settings.rider_max_active_orders} 单)")
+            409, f"手头已有 {active} 单在途,先送完再接新单({why})")
     result = await db.execute(
         update(Order)
         .where(

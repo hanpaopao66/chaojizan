@@ -88,10 +88,27 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 被骑手自己的偏好挡掉的单数。摆出来是**这一批的重点**:
   /// 悄悄过滤会变成"今天怎么没单",他不会想到是两个月前设的一个开关
   int _filteredByPrefs = 0;
+
+  /// 因为定位取不到而**没生效**的接单偏好键(服务端算的)。
+  ///
+  /// 接单半径和只看顺路都要靠骑手位置算,位置没上报或过期(Redis 5 分钟)
+  /// 时它们静默失效 —— 而界面上 chip 还选着「3km」。
+  /// 骑手不会想到是定位的问题,只会觉得"这破筛选没用"。
+  List<String> _stalePrefs = const [];
   /// 其余接单偏好(单价下限 / 只看顺路 / 避开酒类)
   Map<String, dynamic> _prefs = const {};
   bool _gpsActive = false;
   List<Order> _available = [];
+
+  /// 抢单池排序。0 综合(服务端算的)/ 1 配送费 / 2 距离 / 3 等待时长。
+  ///
+  /// **不做服务端持久化**:这是个当下的选择,不是长期偏好 ——
+  /// 他午高峰想按配送费挑、收工前想按距离挑,不该被记成"这个人偏好配送费"。
+  ///
+  /// 给这个切换本身是有立场的:dispatch.py 写着「算法只负责把信息排得
+  /// 更有用」,那**排得对不对该由骑手说了算**。我们已经把算法公开给他看,
+  /// 却不让他换个排法,中间是断的。
+  int _sortMode = 0;
   List<Order> _mine = [];
 
   /// 今日已完成的单(「我的」页的今日数据用)。
@@ -208,9 +225,15 @@ class _RiderHomePageState extends State<RiderHomePage>
       // 挡掉的单还在池子里等别人抢 —— 不说出来,骑手只会以为"今天没单"
       final pool = _online
           ? await widget.api.availablePool()
-          : (items: <Order>[], filteredByPrefs: 0);
+          : (
+              items: <Order>[],
+              filteredByPrefs: 0,
+              hasLocation: true,
+              stalePrefs: const <String>[],
+            );
       final available = pool.items;
       _filteredByPrefs = pool.filteredByPrefs;
+      _stalePrefs = pool.stalePrefs;
       final mine = await widget.api.myOrders();
       // 疲劳提醒:只提醒不断单(见服务端 labor_guard)。
       // 取不到就不显示 —— 疲劳提示挂了不该影响接单
@@ -437,8 +460,9 @@ class _RiderHomePageState extends State<RiderHomePage>
 
   Future<void> _toggleOnline(bool value) async {
     if (value && !await _ensureVerified()) return;
+    final ({String warning, String autoPrefHint}) res;
     try {
-      await widget.api.setOnline(value);
+      res = await widget.api.setOnline(value);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -446,6 +470,26 @@ class _RiderHomePageState extends State<RiderHomePage>
       return;
     }
     setState(() => _online = value);
+
+    // 服务端这两句以前被 setOnline 的 void 返回值吞掉了。
+    //
+    // autoPrefHint = 平台这次替他改了什么(新手默认收窄半径)——
+    // 不说的话就是静默给人设了个筛选,他只会觉得"今天怎么单少了",
+    // 而这正是我们刚修过的那类问题。
+    if (mounted && res.autoPrefHint.isNotEmpty) {
+      setState(() => _grabRadiusKm = 3); // 和服务端 NOVICE_RADIUS_KM 一致
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(res.autoPrefHint),
+        duration: const Duration(seconds: 7),
+        action: SnackBarAction(label: '去改', onPressed: _openPrefs),
+      ));
+    } else if (mounted && res.warning.isNotEmpty) {
+      // 培训宽限提醒。不挡上线 —— 挡了就是让他今天没饭吃
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(res.warning),
+        duration: const Duration(seconds: 7),
+      ));
+    }
 
     if (value) {
       // 商店合规:首次调系统定位弹窗前先说明目的
@@ -1203,6 +1247,57 @@ class _RiderHomePageState extends State<RiderHomePage>
     );
   }
 
+  /// 按当前排序模式排好的抢单池。
+  ///
+  /// 综合(0)= **原样用服务端的顺序**,不在客户端重排 —— 那个顺序里
+  /// 含了顺路增量、等待时长加权这些客户端算不出来的东西。
+  ///
+  /// 其余三档是骑手自己要的单一维度。缺字段的排最后:
+  /// 服务端拿不到定位时 distance_m 是空的,把它们当成 0 会顶到最前面,
+  /// 而那是**最没把握**的几单。
+  List<Order> get _sortedAvailable {
+    if (_sortMode == 0) return _available;
+    final list = [..._available];
+    switch (_sortMode) {
+      case 1: // 配送费(含小费),高的在前
+        list.sort((a, b) => (b.deliveryFeeCents + b.tipCents)
+            .compareTo(a.deliveryFeeCents + a.tipCents));
+      case 2: // 到店距离,近的在前;没算出距离的沉底
+        list.sort((a, b) => (a.distanceM ?? 1 << 30)
+            .compareTo(b.distanceM ?? 1 << 30));
+      case 3: // 等待时长,等久的在前(下单时间早的)
+        list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    }
+    return list;
+  }
+
+  /// 排序切换。
+  ///
+  /// 放在「抢单怎么排的」入口旁边:换了排法之后**更**该能查
+  /// 综合分是怎么算的。
+  Widget _sortBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Row(children: [
+        Text('排序', style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Wrap(spacing: 6, children: [
+            for (final (mode, label) in const [
+              (0, '综合'), (1, '配送费'), (2, '距离'), (3, '等待久'),
+            ])
+              ChoiceChip(
+                label: Text(label, style: const TextStyle(fontSize: 12)),
+                visualDensity: VisualDensity.compact,
+                selected: _sortMode == mode,
+                onSelected: (_) => setState(() => _sortMode = mode),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
   /// 接单半径 chips:只看 N 公里内的单(顺路单豁免),服务端持久化。
   Widget _radiusBar() {
     Future<void> setRadius(int? km) async {
@@ -1247,6 +1342,34 @@ class _RiderHomePageState extends State<RiderHomePage>
           tooltip: '抢单怎么排的',
           onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => DispatchSpecPage(api: widget.api))),
+        ),
+      ]),
+    );
+  }
+
+  /// 「你设的筛选现在没生效」。
+  ///
+  /// 和下面 [_filteredHint] 是同一种病的两面:一个是**挡掉了你不知道**,
+  /// 一个是**没挡住你也不知道**。后者更坏 —— 骑手以为自己只看 3 公里内,
+  /// 实际收到的是全城,接了一单才发现要骑十公里。
+  Widget _stalePrefHint() {
+    if (_stalePrefs.isEmpty) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    const names = <String, String>{
+      'grab_radius_km': '接单半径',
+      'grab_same_way_only': '只看顺路',
+      'go_home_on': '只看往回走的单',
+    };
+    final which = _stalePrefs.map((k) => names[k] ?? k).join('、');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: Row(children: [
+        Icon(Icons.location_off_outlined, size: 15, color: sz.danger),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+              '定位没拿到,「$which」现在没生效 —— 下面是全部的单,不是筛过的',
+              style: TextStyle(fontSize: 12, height: 1.4, color: sz.danger)),
         ),
       ]),
     );
@@ -1309,6 +1432,12 @@ class _RiderHomePageState extends State<RiderHomePage>
         }
 
         final minFee = (_prefs['grab_min_fee_cents'] as num?)?.toInt() ?? 0;
+        // null = 没设过,用平台默认。和"设成 3"要能区分开 ——
+        // 这两件事在界面上说的话不一样
+        final myMaxActive = (_prefs['rider_max_active'] as num?)?.toInt();
+        // 平台硬上限。服务端给,拿不到时按 3 兜底(和 config 默认一致)
+        final maxActiveCap =
+            (_prefs['max_active_cap'] as num?)?.toInt() ?? 3;
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -1321,8 +1450,9 @@ class _RiderHomePageState extends State<RiderHomePage>
               const Padding(
                 padding: EdgeInsets.only(top: 4, bottom: 8),
                 child: Text(
-                    '这几项只改「你看到哪些单」。被挡掉的单还在池子里等别人抢,'
-                    '平台不会因为你设了偏好就少派单给你。',
+                    '下面除了「同时接单上限」,其余几项只改「你看到哪些单」。'
+                    '被挡掉的单还在池子里等别人抢,平台不会因为你设了偏好'
+                    '就少派单给你。',
                     style: TextStyle(fontSize: 12)),
               ),
               const Divider(height: 1),
@@ -1343,6 +1473,95 @@ class _RiderHomePageState extends State<RiderHomePage>
                 title: const Text('不看含酒的单'),
                 subtitle: const Text('送达要查收件人年龄,不想沾这个麻烦就关掉',
                     style: TextStyle(fontSize: 12)),
+              ),
+              // 收工方向(#264):顺路按手上单算,而手上没单时它不生效 ——
+              // 收工那一刻恰恰是手上快空了的时候。用当前位置当方向:
+              // 骑手要回家时,人多半已经在往那边走了
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _prefs['go_home_on'] == true,
+                onChanged: (v) async {
+                  if (!v) {
+                    await patch({'go_home_on': false});
+                    return;
+                  }
+                  // 没设过方向:用当前位置当方向。
+                  // 用已有的 _location.lastFix,不另起一套定位请求
+                  if (_prefs['go_home_lat'] == null) {
+                    final fix = _location.lastFix;
+                    if (fix == null) {
+                      if (!sheet.mounted) return;
+                      ScaffoldMessenger.of(sheet).showSnackBar(const SnackBar(
+                          content: Text('还没拿到定位,没法设收工方向 —— '
+                              '等一下或检查定位权限')));
+                      return;
+                    }
+                    await patch({
+                      'go_home': {'lat': fix.lat, 'lng': fix.lng},
+                      'go_home_on': true,
+                    });
+                    return;
+                  }
+                  await patch({'go_home_on': true});
+                },
+                title: const Text('只看往回走的单(收工用)'),
+                subtitle: const Text(
+                    '按你现在的位置当方向。开着的时候只显示不绕远的单,'
+                    '别忘了收工后关掉 —— 白天开着会一直只看一个方向',
+                    style: TextStyle(fontSize: 12)),
+              ),
+              if (_prefs['go_home_lat'] != null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero),
+                    onPressed: () {
+                      final fix = _location.lastFix;
+                      if (fix == null) {
+                        patch({'go_home': null});
+                        return;
+                      }
+                      patch({
+                        'go_home': {'lat': fix.lat, 'lng': fix.lng},
+                        'go_home_on': true,
+                      });
+                    },
+                    child: const Text('用现在的位置重设方向',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('同时最多接几单',
+                    style: Theme.of(sheet).textTheme.bodySmall),
+              ),
+              // 这一项和上面几条**不一样**:它真的会拦住接单,
+              // 不只是改你看到什么。所以副文案要单独说清楚。
+              //
+              // 档位上限跟服务端给的 max_active_cap 走,不写死 ——
+              // 平台调这个常数时不该要求骑手更新 App
+              Wrap(spacing: 6, children: [
+                for (final n in [
+                  null,
+                  for (var i = 1; i <= maxActiveCap; i++) i,
+                ])
+                  ChoiceChip(
+                    label: Text(n == null ? '默认($maxActiveCap)' : '$n 单',
+                        style: const TextStyle(fontSize: 12)),
+                    visualDensity: VisualDensity.compact,
+                    selected: myMaxActive == n,
+                    onSelected: (_) => patch({'rider_max_active': n}),
+                  ),
+              ]),
+              const Padding(
+                padding: EdgeInsets.only(top: 4, bottom: 4),
+                child: Text(
+                    '手头压太多单容易超时,而超时的差评算在你头上。'
+                    '刚上手的话先设 1 单,顺了再往上加。',
+                    style: TextStyle(fontSize: 11)),
               ),
               const SizedBox(height: 4),
               Align(
@@ -1693,25 +1912,28 @@ class _RiderHomePageState extends State<RiderHomePage>
                         child: Text('上线后开始接单(右上角开关)'))
                   ])
                 : ListView.builder(
-                        itemCount: _available.length + 1,
+                        itemCount: _sortedAvailable.length + 1,
                         itemBuilder: (context, i) {
                           if (i == 0) {
                             // 疲劳提示置顶:它比任何一单都重要
                             return Column(children: [
                               _fatigueBar(),
+                              _sortBar(),
                               _radiusBar(),
+                              _stalePrefHint(),
                               _filteredHint(),
                             ]);
                           }
                           return _orderCard(
-                          _available[i - 1],
+                          _sortedAvailable[i - 1],
                           actions: [
                             OutlinedButton(
-                                onPressed: () => _openMap(_available[i - 1]),
+                                onPressed: () =>
+                                    _openMap(_sortedAvailable[i - 1]),
                                 child: const Text('看路线')),
                             // 户外单手操作:主按钮高 52、宽一点,戴手套也点得中
                             Builder(builder: (context) {
-                              final o = _available[i - 1];
+                              final o = _sortedAvailable[i - 1];
                               final busy = _grabbing.contains(o.orderNo);
                               return FilledButton(
                                   style: FilledButton.styleFrom(
