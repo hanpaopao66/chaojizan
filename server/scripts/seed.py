@@ -101,6 +101,11 @@ async def main():
                 lng=SHOP_LNG,
                 is_open=True,
                 status=MerchantStatus.approved,
+                # 城市:真实链路里由首次上线/入驻时按坐标逆地理解析填。
+                # 种子不联网,所以按坐标写死 —— **不能留空**:
+                # 覆盖城市统计是 `count(DISTINCT city) WHERE city <> ''`,
+                # 留空就恒为 0,e2e_screen 的「至少覆盖 1 城」永远过不了
+                city="成都市",
                 license_no="JY15101000012345",
                 announcement="新店入驻超级赞,平台只抽 5%,让利全在菜价里",
             )
@@ -149,6 +154,7 @@ async def main():
                     lng=SHOP_LNG + 0.001,
                     is_open=False,
                     status=MerchantStatus.pending,
+                    city="成都市",
                     license_no="JY15101000067890",
                 )
             )
