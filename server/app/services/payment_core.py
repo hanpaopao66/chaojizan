@@ -36,8 +36,10 @@ async def mark_order_paid(
         # 进入无骑手状态的时刻:无人接单兜底从这里起算(骑手转单时会刷新)
         order.rider_pool_since = datetime.now(timezone.utc)
     # 预计送达时间(超时 15 分钟自动赔安抚券,平台承担;见 services/eta.py)
-    from .eta import compute_eta
-    order.eta_at = compute_eta(order, merchant)
+    # 用带路线级余量的版本(#268):市区多红灯的路线拿到更宽的时限。
+    # 路径服务不可用时它自动退回常量口径,不会拦住支付
+    from .eta import compute_eta_async
+    order.eta_at = await compute_eta_async(order, merchant)
     # 结算口径快照:商家分账就绪(特约商户号+接收方)才走 profit_sharing
     from .profit_sharing import settle_mode_for
     order.settle_mode = settle_mode_for(merchant)

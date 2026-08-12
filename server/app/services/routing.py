@@ -45,6 +45,32 @@ def _key(a: tuple[float, float], b: tuple[float, float]) -> str:
     return f"route:bike:{_cell(*a)}>{_cell(*b)}"
 
 
+def parse_route_cache(raw: str) -> tuple[float, float | None]:
+    """读缓存里的 "距离|时长"。
+
+    **抽成函数不是为了复用,是为了能被测试直接调。** 这段逻辑写在
+    `bicycling_route` 里的时候,单测只能复刻一份来测 —— 那测的是副本,
+    真代码改了测试照样绿。
+
+    格式两代并存:
+    - 新:`"1861.0|9.0"`(时长可能是空串,腾讯偶尔不给 duration);
+    - 旧:`"1861.0"`。TTL 一周,**升级后那一周缓存里全是旧值** ——
+      读不了就一路回退直线兜底,而直线比路网短,表现出来是
+      「ETA 莫名其妙紧了一周」。
+
+    解析不了就抛,由调用方的 try/except 兜住并走正常请求。
+    """
+    if "|" in raw:
+        d_raw, t_raw = raw.split("|", 1)
+        return float(d_raw), (float(t_raw) if t_raw else None)
+    return float(raw), None
+
+
+def dump_route_cache(distance_m: float, duration_min: float | None) -> str:
+    """写缓存的格式。和 [parse_route_cache] 成对,改一个必须改另一个。"""
+    return f"{distance_m}|{'' if duration_min is None else duration_min}"
+
+
 async def bicycling_m(
     from_lat: float, from_lng: float, to_lat: float, to_lng: float,
 ) -> tuple[float, str]:
@@ -52,10 +78,37 @@ async def bicycling_m(
 
     返回 `(distance_m, source)`,source ∈ {"route", "straight"}。
     **调用方必须把 source 透传给前端** —— 距离准不准,骑手有权知道。
+
+    要时长的话用 [bicycling_route],这个函数只是它的距离视图。
+    """
+    dist, _minutes, src = await bicycling_route(
+        from_lat, from_lng, to_lat, to_lng)
+    return dist, src
+
+
+async def bicycling_route(
+    from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+) -> tuple[float, float | None, str]:
+    """骑行距离(米)、路网时长(分钟)与来源。
+
+    返回 `(distance_m, duration_minutes, source)`。
+    腾讯骑行接口的 `routes[0].duration` **单位是分钟**(官方文档核实过)。
+    走直线兜底时 duration 为 None —— 我们估不出路口和红灯,
+    **不该编一个数出来**。
+
+    ## 这个时长拿来干什么
+
+    ETA 的骑行段现在是「距离 ÷ 15km/h」(labor_guard.RIDE_SPEED_KMH),
+    15 是故意压低的常量,把红灯、找楼栋、等电梯都包了进去。但它是
+    **一个平均值拍在所有路线上** —— 市区过 8 个红灯和郊区一条直路
+    拿的是同一份余量。
+
+    路网时长补的就是这个:**只在它更长时才用**,见 labor_guard 里
+    ride_minutes 的说明。
     """
     straight = haversine_m(from_lat, from_lng, to_lat, to_lng)
     if not settings.tencent_map_key:
-        return straight * _FALLBACK_FACTOR, "straight"
+        return straight * _FALLBACK_FACTOR, None, "straight"
 
     a, b = (from_lat, from_lng), (to_lat, to_lng)
     redis = get_redis()
@@ -64,7 +117,8 @@ async def bicycling_m(
         cached = await redis.get(ck)
         if cached is not None:
             raw = cached.decode() if isinstance(cached, bytes) else cached
-            return float(raw), "route"
+            dist_c, dur_c = parse_route_cache(raw)
+            return dist_c, dur_c, "route"
     except Exception:
         pass  # 缓存挂了不影响主流程
 
@@ -80,21 +134,26 @@ async def bicycling_m(
             # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
             logger.warning("骑行路径 status=%s %s,回退直线",
                            data.get("status"), data.get("message"))
-            return straight * _FALLBACK_FACTOR, "straight"
+            return straight * _FALLBACK_FACTOR, None, "straight"
         routes = (data.get("result") or {}).get("routes") or []
         if not routes:
-            return straight * _FALLBACK_FACTOR, "straight"
+            return straight * _FALLBACK_FACTOR, None, "straight"
         dist = float(routes[0].get("distance") or 0)
         if dist <= 0:
-            return straight * _FALLBACK_FACTOR, "straight"
+            return straight * _FALLBACK_FACTOR, None, "straight"
+        # duration 单位是分钟。缺了当没有 —— 不拿距离反推一个假时长
+        raw_dur = routes[0].get("duration")
+        dur = float(raw_dur) if raw_dur not in (None, "") else None
+        if dur is not None and dur <= 0:
+            dur = None
         try:
-            await redis.set(ck, str(dist), ex=_TTL_SECONDS)
+            await redis.set(ck, dump_route_cache(dist, dur), ex=_TTL_SECONDS)
         except Exception:
             pass
-        return dist, "route"
+        return dist, dur, "route"
     except Exception as e:
         logger.warning("骑行路径请求失败(%s),回退直线", type(e).__name__)
-        return straight * _FALLBACK_FACTOR, "straight"
+        return straight * _FALLBACK_FACTOR, None, "straight"
 
 
 async def detour_m(

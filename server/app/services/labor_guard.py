@@ -21,6 +21,8 @@ ETA 只能被放宽,不能被收紧。有测试钉着。
 """
 from __future__ import annotations
 
+import logging
+
 # ---------------------------------------------------------------------------
 # 骑行速度。**写死在这里,不由实际数据训练。**
 #
@@ -32,6 +34,8 @@ from __future__ import annotations
 # 找楼栋、爬楼、等电梯、找不到门牌打电话。按巡航速度算 ETA,
 # 等于默认骑手一路绿灯且送到楼下就完事。
 # ---------------------------------------------------------------------------
+logger = logging.getLogger("superz.labor_guard")
+
 RIDE_SPEED_KMH = 15.0
 
 #: 恶劣天气时的骑行速度(km/h)。下雨路滑、视线差,**慢是应该的**。
@@ -47,10 +51,70 @@ FATIGUE_REMIND_MINUTES = 4 * 60
 FATIGUE_THROTTLE_MINUTES = 8 * 60
 
 
-def ride_minutes(distance_m: float, *, severe_weather: bool = False) -> float:
-    """骑行时间(分钟)。速度是常量,不随骑手实际表现变化。"""
+#: 路网时长的上界,按常量估算的倍数。
+#:
+#: 路网时长是**外部数据**,而 clamp_eta_minutes 只挡收紧、不挡放宽 ——
+#: 一个离谱的值(坐标落到河对岸、路网数据错、接口抽风)会直接变成给顾客的
+#: 承诺:3 公里的单承诺 4 小时送到。顾客不会等,他会取消。
+#:
+#: 2.0 是宽松但有效的界:市区多灯的路线合理范围大概在常量的 1.0~1.5 倍,
+#: 超过 2 倍基本不是"路口多",是数据错了。超界时取上界并记日志。
+ROUTE_MINUTES_MAX_FACTOR = 2.0
+
+
+def ride_minutes(distance_m: float, *, severe_weather: bool = False,
+                 route_minutes: float | None = None) -> float:
+    """骑行时间(分钟)。速度是常量,不随骑手实际表现变化。
+
+    ## route_minutes:路线级余量(#268)
+
+    常量速度是**一个平均值拍在所有路线上** —— 市区过 8 个红灯和郊区
+    一条直路拿的是同一份余量。传进腾讯路网算出来的时长(骑行接口的
+    `routes[0].duration`,单位分钟)可以补上这个差。
+
+    **只取更大的那个,这个方向不能反:**
+
+    - 路网时长更短时**用常量的** —— 它算的是纯骑行,不含取餐、找楼栋、
+      爬楼、打电话找不到门牌。照它给 ETA 就是把这些时间从骑手身上抠掉;
+    - 路网时长更长时(市区多灯多路口)用它,这正是要补的那个缺口。
+
+    所以这条改动**只可能放宽 ETA,不可能收紧**。
+
+    ## 为什么这不违反「速度常量不许训练」那条红线
+
+    路网时长是**路况数据**,不是我们骑手跑出来的数。红线防的是
+    「骑手跑得快 → 速度上调 → 时限变紧 → 只能跑更快」这个自我收紧循环,
+    而腾讯的数跟我们哪个骑手跑多快没有关系。
+
+    ⚠️ 下一个人看到这里可能会想「那用骑手实际耗时不是更准」——
+    **不行**,那正是红线挡的东西。
+
+    ## 恶劣天气照样取 max
+
+    恶劣天气用更慢的常量速度(11km/h),多数情况下它已经比路网长了。
+    但**万一路网更长**(暴雨天的市区高峰),还是该用路网 ——
+    「只放宽」这条规则不该因为天气就开个例外。
+
+    ## 上界
+
+    路网时长是外部数据,而 clamp_eta_minutes 只挡收紧不挡放宽 ——
+    一个离谱的值会直接变成给顾客的承诺(3 公里承诺 4 小时)。
+    所以超过常量的 [ROUTE_MINUTES_MAX_FACTOR] 倍就截断并记日志:
+    那基本不是"路口多",是坐标或路网数据错了。
+    """
     speed = RIDE_SPEED_KMH_SEVERE if severe_weather else RIDE_SPEED_KMH
-    return distance_m / 1000 / speed * 60
+    constant = distance_m / 1000 / speed * 60
+    if route_minutes is None or route_minutes <= 0:
+        return constant
+    ceiling = constant * ROUTE_MINUTES_MAX_FACTOR
+    route = float(route_minutes)
+    if route > ceiling:
+        logger.warning(
+            "路网时长 %.1f 分钟超过常量估算 %.1f 的 %.1f 倍,按上界截断 —— "
+            "多半是坐标或路网数据有问题,不是路口多",
+            route, constant, ROUTE_MINUTES_MAX_FACTOR)
+        route = ceiling
+    return max(constant, route)
 
 
 # 爬楼:每层多算的分钟数。上楼提着餐、下楼还要走一趟,

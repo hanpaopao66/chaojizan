@@ -247,3 +247,104 @@ class Test骑手评价不得变成评分体系:
         for banned in ("rating", "score", "level", "rank", "tier"):
             assert not any(banned in f for f in fields), \
                 f"Candidate 里出现了含 {banned} 的字段"
+
+
+# ---------- 路线级余量(#268) ----------
+
+class Test路网时长只放宽不收紧:
+    """常量速度是一个平均值拍在所有路线上 —— 市区过 8 个红灯和郊区
+    一条直路拿的是同一份余量。腾讯路网时长补的就是这个差。
+
+    **方向不能反**:路网算的是纯骑行,不含取餐、找楼栋、爬楼、
+    打电话找不到门牌。照它给 ETA 就是把这些时间从骑手身上抠掉。
+    """
+
+    def test_不传路网时长_行为和以前完全一样(self):
+        """老调用方一个字不用改。"""
+        assert lg.ride_minutes(3000) == 3000 / 1000 / lg.RIDE_SPEED_KMH * 60
+
+    def test_路网更长时用路网_市区多红灯(self):
+        base = lg.ride_minutes(3000)
+        assert lg.ride_minutes(3000, route_minutes=base + 6) == base + 6
+
+    def test_路网更短时用常量_绝不收紧(self):
+        """这条是红线。路网说 5 分钟能到,不代表骑手 5 分钟能送到。"""
+        base = lg.ride_minutes(3000)
+        assert lg.ride_minutes(3000, route_minutes=1.0) == base
+
+    def test_恶劣天气也取_max_不开例外(self):
+        """恶劣天气用更慢的常量(11km/h),多数情况下它已经比路网长。
+
+        但**万一路网更长**(暴雨天的市区高峰),还是该用路网 ——
+        「只放宽」这条规则不该因为天气就开个例外。
+
+        第一版这里写的是「恶劣天气一律不吃路网」,理由是"路网算的是
+        平常路况,用它会收紧"。那个理由只成立于路网**更短**的时候,
+        我把它错误地推广到了更长的情况 —— 那样反而是拿天气当借口收紧。
+        """
+        severe = lg.ride_minutes(3000, severe_weather=True)
+        # 更短:用常量(这部分原来就对)
+        assert lg.ride_minutes(3000, severe_weather=True,
+                               route_minutes=1.0) == severe
+        # 更长:用路网。上界按恶劣天气的常量算,severe+5 在界内
+        assert lg.ride_minutes(3000, severe_weather=True,
+                               route_minutes=severe + 5) == severe + 5
+
+    def test_异常值当没有(self):
+        base = lg.ride_minutes(3000)
+        assert lg.ride_minutes(3000, route_minutes=None) == base
+        assert lg.ride_minutes(3000, route_minutes=0) == base
+        assert lg.ride_minutes(3000, route_minutes=-3) == base
+
+    def test_任何路网值都不会让结果变小(self):
+        """穷举一遍:这条改动不可能让任何一单的 ETA 变短。
+
+        含上界截断之后仍然成立 —— 截断是防离谱,不是收紧。
+        天气两档都过一遍:恶劣天气不该成为收紧的例外。
+        """
+        for severe in (False, True):
+            base = lg.ride_minutes(3000, severe_weather=severe)
+            for rm in [None, 0, -1, 0.5, 1, base - 0.01, base, base + 0.01,
+                       base * lg.ROUTE_MINUTES_MAX_FACTOR,
+                       base * lg.ROUTE_MINUTES_MAX_FACTOR + 1, 999, 1e9]:
+                got = lg.ride_minutes(3000, severe_weather=severe,
+                                      route_minutes=rm)
+                assert got >= base, f"severe={severe} route={rm} 收紧了"
+
+    def test_任何路网值都不会离谱地放宽(self):
+        """另一头也要有界:放宽是好事,放宽到 4 小时就是把单送不出去。"""
+        for severe in (False, True):
+            base = lg.ride_minutes(3000, severe_weather=severe)
+            ceiling = base * lg.ROUTE_MINUTES_MAX_FACTOR
+            for rm in [base * 3, 999, 1e9]:
+                assert lg.ride_minutes(3000, severe_weather=severe,
+                                       route_minutes=rm) == ceiling
+
+
+class Test路网时长的上界:
+    """路网时长是**外部数据**,而 clamp_eta_minutes 只挡收紧不挡放宽 ——
+    一个离谱的值会直接变成给顾客的承诺。3 公里承诺 4 小时,顾客不会等,
+    他会取消,而取消的锅落在商家和骑手头上。
+    """
+
+    def test_超过上界就截断(self):
+        base = lg.ride_minutes(3000)
+        absurd = base * 10
+        got = lg.ride_minutes(3000, route_minutes=absurd)
+        assert got == base * lg.ROUTE_MINUTES_MAX_FACTOR
+        assert got < absurd
+
+    def test_上界之内照常用(self):
+        base = lg.ride_minutes(3000)
+        ok = base * 1.4          # 市区多灯的合理范围
+        assert lg.ride_minutes(3000, route_minutes=ok) == ok
+
+    def test_正好等于上界不截(self):
+        base = lg.ride_minutes(3000)
+        edge = base * lg.ROUTE_MINUTES_MAX_FACTOR
+        assert lg.ride_minutes(3000, route_minutes=edge) == edge
+
+    def test_截断后仍然不小于常量(self):
+        """截断是防离谱,不是收紧。"""
+        base = lg.ride_minutes(3000)
+        assert lg.ride_minutes(3000, route_minutes=base * 99) >= base

@@ -41,6 +41,7 @@ def compute_eta(
     *,
     prep_minutes: float | None = None,
     severe_weather: bool = False,
+    route_minutes: float | None = None,
 ) -> datetime | None:
     """支付成功时调用;自取/追加单返回 None。
 
@@ -65,7 +66,10 @@ def compute_eta(
     from . import labor_guard
 
     distance_m = haversine_m(merchant.lat, merchant.lng, order.lat, order.lng)
-    ride = labor_guard.ride_minutes(distance_m, severe_weather=severe_weather)
+    # route_minutes 由 compute_eta_async 传进来(腾讯路网时长,含路口红灯);
+    # 不传就是纯常量速度。ride_minutes 里取 max,只放宽不收紧
+    ride = labor_guard.ride_minutes(distance_m, severe_weather=severe_weather,
+                                    route_minutes=route_minutes)
 
     # 备餐:有实测分位数就用,没有就用兜底。**取更大的那个** ——
     # 实测比兜底短时不缩短 ETA(见上面的红线)
@@ -87,6 +91,54 @@ def compute_eta(
     proposed = max(ETA_MIN_MINUTES, prep + ride + stairs)
     minutes = labor_guard.clamp_eta_minutes(proposed, baseline)
     return datetime.now(timezone.utc) + timedelta(minutes=math.ceil(minutes))
+
+
+async def compute_eta_async(
+    order: Order,
+    merchant: Merchant,
+    *,
+    prep_minutes: float | None = None,
+    severe_weather: bool = False,
+) -> datetime | None:
+    """带**路线级余量**的 ETA(#268)。支付成功时用这个。
+
+    和同步版 [compute_eta] 的唯一差别:多打一次腾讯骑行路径接口,
+    拿路网时长(含路口、红灯)喂给 `labor_guard.ride_minutes`。
+
+    ## 为什么要它
+
+    常量速度 15km/h 已经是故意压低的(把红灯、找楼栋、等电梯都包了),
+    但它是**一个平均值拍在所有路线上** —— 市区过 8 个红灯和郊区一条
+    直路拿的是同一份余量。市区骑手那几分钟的差额,就是他要抢的那几个灯。
+
+    ## 只放宽不收紧
+
+    `ride_minutes` 里取 `max(常量, 路网)`,方向不能反 —— 路网算的是
+    纯骑行,不含取餐爬楼。再加上 `clamp_eta_minutes` 那道闸,
+    这条改动**不可能让任何一单的 ETA 变短**。
+
+    ## 拿不到就退回常量
+
+    没配 key、接口挂了、配额用尽 —— 一律 `route_minutes=None`,
+    结果和改之前完全一样。**不编一个数出来**:估不出路口就说估不出。
+    """
+    if order.pickup or order.parent_order_no:
+        return None
+    if order.scheduled_at is not None:
+        return order.scheduled_at
+
+    route_minutes: float | None = None
+    try:
+        from .routing import bicycling_route
+        _dist, route_minutes, _src = await bicycling_route(
+            merchant.lat, merchant.lng, order.lat, order.lng)
+    except Exception:
+        # 路径服务挂了不该拦住下单 —— 退回常量口径,ETA 只是少了一点余量
+        logger.warning("ETA 取路网时长失败,退回常量速度", exc_info=True)
+
+    return compute_eta(order, merchant, prep_minutes=prep_minutes,
+                       severe_weather=severe_weather,
+                       route_minutes=route_minutes)
 
 
 ETA_REFRESH_THRESHOLD_MIN = 5  # 偏差 >5 分钟才刷新+推送(克制,不频繁打扰)
