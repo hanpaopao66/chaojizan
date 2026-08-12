@@ -31,7 +31,11 @@ def fresh_merchant(name):
     phone = f"139{random.randrange(10**8, 10**9) % 10**8:08d}"
     call("POST", "/auth/register", body={
         "phone": phone, "password": "123456", "role": "merchant", "name": name})
-    token = login(phone)
+    # 现注册的账号用**它自己的**密码登录。
+    # login() 不传密码时用的是 DEMO_PASSWORD —— 那是给 seed 演示账号
+    # (13800000001 等)准备的,CI 里会被随机化。拿它去登一个刚用
+    # "123456" 注册出来的账号,必然 401。
+    token = login(phone, "123456")
     shop = call("POST", "/merchants", token, {
         "name": name, "address": "洞察测试地址", "lat": 30.66, "lng": 104.08,
         "license_no": f"JY{ts}", "license_image_url": "https://x/lic.jpg"})
