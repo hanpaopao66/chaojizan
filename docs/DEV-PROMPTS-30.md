@@ -234,3 +234,23 @@ README 说「线上运行版本 = 本仓 tag」、APK 装前校验 SHA-256 —�
   腾讯云(AKID)、微信 AppSecret、RSA/EC 私钥块 —— 零命中;全历史从未提交过
   .env(只有 .env.example)、keystore、pem。**结论:历史无真密钥,无需换钥。**
   gitleaks 已加入 CI 的 security job(checkout 改 fetch-depth: 0)。
+
+- **2026-08-17 · 全批落地**(#269–#275 各自的提交见 git log,均带编号):
+  - #271 规格的三组测试向量里,B/C 两组是生产链上的真实锚点
+    (2026-06-29 起链),已在本地按规格逐字节复算通过后才写进文档;
+  - 执行中顺手修掉的旧账:CONTRIBUTING 三原则写着「6% 佣金」(实为 5%
+    封顶)、`server/.env.example` 里已从 config 删除的 AMAP_WEB_KEY、
+    `.gitignore` 没挡 `deploy/.env.prod`/`tunnel/frpc.toml`/证书目录、
+    docs/WXPAY-SETUP.md 一直是未跟踪文件;
+  - docs/INDEX.md 不收 ROADMAP.md —— 它在 .gitignore 里(内部路线图),
+    公开仓链它就是死链。
+
+  **还欠的(需要仓库所有者动手,代码侧已就绪)**:
+  1. #274 首次实跑:配 4 个 Actions secrets(ANDROID_KEYSTORE_BASE64 /
+     _PASSWORD / _ALIAS / _KEY_PASSWORD,可选 TENCENT_MAP_KEY),
+     打一个 `v<版本>-b<build>` 格式的 tag 验证全链路;
+  2. #275 的 good first issue:候选清单已备好(8 条,全部来自仓库里
+     已记录的真实欠账),过目后发布;
+  3. #273 的「干净机器演练」:手册命令对照代码和 CI 核过,但还没有
+     陌生人真的从零走通过 —— 第一个部署求助 issue 就是它的验收;
+  4. 商标决定(见「不在这批的」):拍板后往 README 许可一节落一行。
