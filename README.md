@@ -2,6 +2,10 @@
 
 # 超级赞(chaojizan)
 
+[![CI](https://github.com/hanpaopao66/chaojizan/actions/workflows/ci.yml/badge.svg)](https://github.com/hanpaopao66/chaojizan/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/hanpaopao66/chaojizan)](https://github.com/hanpaopao66/chaojizan/releases)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+
 一个群众帮助群众的平台,旨在提高国内群众挣到的钱,向外卖平台等第三方黑心平台宣战。
 
 > **超级赞是「群众帮群众」计划的第一战。** 目标不只是外卖:凡是高抽成、不透明的行业,
@@ -224,6 +228,12 @@ make test          # 130 套 e2e,跑在真实 HTTP 接口上(需要服务已启�
 
 `make test` 的三个前置条件写在 Makefile 注释里(服务端要用
 `AUTO_FLOW_ENABLED=false` 启动等),少一个都跑不完。
+
+CI 对每个 PR 跑同样的三件事(服务端 e2e 起真 PostGIS/Redis/MinIO,
+和生产同一条代码路径),外加工作区与全历史两层密钥扫描 ——
+配置在 [.github/workflows/ci.yml](.github/workflows/ci.yml),
+里面的注释解释了每个不显然的选择(为什么 CI 也用 MinIO、
+为什么演示口令每次随机),值得一读。
 
 ## 关键设计决策
 
