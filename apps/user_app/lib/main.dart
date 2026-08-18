@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,6 +22,7 @@ import 'help_page.dart';
 import 'hotel_pages.dart';
 import 'licenses_page.dart';
 import 'messages_page.dart';
+import 'mini_apps_panel.dart';
 import 'money_flow_page.dart';
 import 'invite_page.dart';
 import 'share_card.dart';
@@ -430,11 +432,76 @@ class _MerchantListViewState extends State<MerchantListView> {
 
   static const _kPledgeHidden = 'home_pledge_hidden';
 
+  /// 小程序清单(#278):空(含游客 401)时下拉手势整个不生效 ——
+  /// 没有内容的抽屉比没有抽屉更糟
+  List<MiniAppInfo> _miniApps = const [];
+
+  /// 列表到顶后继续下拉的累计拉距;>0 时顶部预览条露头
+  double _miniPull = 0;
+  bool _miniArmed = false;
+  bool _miniOpening = false;
+
   @override
   void initState() {
     super.initState();
     _loadRecent();
     _restorePledge();
+    _loadMiniApps();
+  }
+
+  Future<void> _loadMiniApps() async {
+    if (widget.category != null) return; // 面板只属于首页,品类页不呼出
+    try {
+      final apps = await widget.api.miniApps();
+      if (mounted) setState(() => _miniApps = apps);
+    } catch (_) {
+      // 游客/网络失败:按没有小程序处理,静默
+    }
+  }
+
+  /// 与 RefreshIndicator 的共存口径(#278 的验收重点):不抢、不禁用。
+  /// 浅拉松手 → 刷新,和从前一样;深拉过 kMiniAppsPullThreshold 松手 →
+  /// 面板展开(此时刷新也会触发,列表在面板底下顺手更新了,无害)。
+  /// Android 默认 clamping 没有 overscroll 位移,用 OverscrollNotification
+  /// 累计拉距;iOS bouncing 用负 pixels —— 两平台靠同一个阈值对齐手感
+  bool _onScrollForMiniApps(ScrollNotification n) {
+    if (widget.category != null || _miniApps.isEmpty) return false;
+    double? pull;
+    if (n is OverscrollNotification &&
+        n.dragDetails != null &&
+        n.overscroll < 0 &&
+        n.metrics.extentBefore <= 0) {
+      pull = _miniPull - n.overscroll;
+    } else if (n is ScrollUpdateNotification &&
+        n.dragDetails != null &&
+        n.metrics.pixels < 0) {
+      pull = -n.metrics.pixels;
+    }
+    if (pull != null) {
+      final p = pull;
+      final armed = p >= kMiniAppsPullThreshold;
+      if (armed && !_miniArmed) HapticFeedback.mediumImpact();
+      setState(() {
+        _miniPull = p;
+        _miniArmed = armed;
+      });
+      return false;
+    }
+    final released = n is ScrollEndNotification ||
+        (n is ScrollUpdateNotification && n.dragDetails == null);
+    if (released && _miniPull > 0) {
+      final open = _miniArmed && !_miniOpening;
+      setState(() {
+        _miniPull = 0;
+        _miniArmed = false;
+      });
+      if (open) {
+        _miniOpening = true;
+        showMiniAppsPanel(context, api: widget.api, apps: _miniApps)
+            .whenComplete(() => _miniOpening = false);
+      }
+    }
+    return false;
   }
 
   Future<void> _restorePledge() async {
@@ -1465,9 +1532,27 @@ class _MerchantListViewState extends State<MerchantListView> {
 
   @override
   Widget build(BuildContext context) {
+    return Stack(children: [
+      NotificationListener<ScrollNotification>(
+        onNotification: _onScrollForMiniApps,
+        child: _buildList(context),
+      ),
+      // 下拉预览条:跟手露头,盖在列表上方(#278)
+      if (_miniPull > 0)
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: MiniAppsPeek(pull: _miniPull, apps: _miniApps),
+        ),
+    ]);
+  }
+
+  Widget _buildList(BuildContext context) {
     return RefreshIndicator(
       onRefresh: () async {
         _loadRecent();
+        _loadMiniApps(); // 登录状态变过的话,清单跟着刷新
         setState(() => _future = _load());
       },
       child: FutureBuilder(

@@ -1617,3 +1617,38 @@ class NearbyPlace {
   final double lat;
   final double lng;
 }
+
+/// 小程序清单条目(#277,Telegram 模式:就是一个网页 + 桥权限)。
+/// allowedOrigins 是 JS 桥的安全边界:桥只对这些 origin 注入/应答。
+class MiniAppInfo {
+  const MiniAppInfo({
+    required this.id,
+    required this.name,
+    required this.icon,
+    required this.tagline,
+    required this.entryUrl,
+    required this.allowedOrigins,
+    required this.perms,
+  });
+
+  factory MiniAppInfo.fromJson(Map<String, dynamic> j) => MiniAppInfo(
+        id: j['id'] as int,
+        name: j['name'] as String? ?? '',
+        icon: j['icon'] as String? ?? '',
+        tagline: j['tagline'] as String? ?? '',
+        entryUrl: j['entry_url'] as String? ?? '',
+        allowedOrigins:
+            (j['allowed_origins'] as List? ?? const []).cast<String>(),
+        perms: (j['perms'] as List? ?? const []).cast<String>(),
+      );
+
+  final int id;
+  final String name;
+
+  /// emoji 字面量或 https 图片地址,按内容渲染
+  final String icon;
+  final String tagline;
+  final String entryUrl;
+  final List<String> allowedOrigins;
+  final List<String> perms;
+}

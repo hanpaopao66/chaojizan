@@ -86,3 +86,34 @@ Mini Apps**:小程序就是网页,跑在 WebView 里,能力靠一个 JS 桥给,
 #278 下拉面板 ← 纯交互,最后接上
 #280 验证
 ```
+
+---
+
+## 执行记录(2026-08-17,四条全部落地)
+
+- **#277**:迁移 0104;签名协议锁在 `tests/unit/test_mini_app_sign.py`
+  (6 个用例);e2e `tests/e2e_mini_apps.py` 本地跑通(退出码 0),
+  已入 `make test` 链。管理接口只做了 curl 可用的四个,admin.html
+  面板没挂 —— 清单是低频运营动作,等有第三方入驻需求再补;
+- **#279**:`mini_app_sheet.dart`。webview_flutter(官方版)只加在
+  user_app,shared 的轻入口(design.dart)不受污染。桥的注入和应答
+  都做了双重域名校验(注入前查一次、每条消息应答前再查一次);
+- **#278**:`mini_apps_panel.dart` + main.dart 的手势。**与下拉刷新的
+  共存口径**:不抢、不禁用 —— 浅拉松手照旧刷新;深拉过 120px 松手
+  开面板,此时刷新也会触发,列表在面板底下顺手更新,判定为无害,
+  换来的是不改 RefreshIndicator 的任何行为。Android(clamping,无
+  overscroll 位移)用 OverscrollNotification 累计,iOS(bouncing)用
+  负 pixels,同一阈值对齐手感;
+- **#280**:`make analyze` 全绿(shared + 三端 + tsc)、服务端单测
+  307 过、shared flutter test 71 过、新 e2e 退出码 0。
+
+**还欠的**:
+1. **真机手感验收**(#278 的验收标准是真机上两个手势都顺,模拟器
+   代替不了):下拉呼出 → 开透明中心 → 半屏拖全屏 → 关闭 → 下拉刷新;
+2. Android 清单 `usesCleartextTraffic=false`,http 的 entry_url 加载
+   不出来 —— 生产 seed 全是 https 没问题,**本地真机联调**要么给
+   开发机配 https,要么临时改清单(别提交);
+3. 首批两个入口(透明中心 /transparency、公开账本 /nodes)目前是
+   官网页面原样进容器,没做移动端适配审查,也还没接 initData ——
+   它们是公开页不需要身份,第一个真用 `getInitData()` 的自家小程序
+   出现时,桥的这条路径才算真正过过实战。

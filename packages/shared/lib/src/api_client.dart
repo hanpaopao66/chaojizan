@@ -2774,4 +2774,21 @@ class ApiClient {
         });
     return StayAfterSale.fromJson(data as Map<String, dynamic>);
   }
+
+  // ---------- 小程序(#277,Telegram 模式) ----------
+  /// 下拉面板的清单:只含上架条目,顺序服务端定。未登录会 401,
+  /// 调用方按"没有小程序"处理即可(游客不呼出面板)。
+  Future<List<MiniAppInfo>> miniApps() async {
+    final data = await _request('GET', '/mini-apps');
+    return (data as List)
+        .map((e) => MiniAppInfo.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 给某个小程序签一份 initData 身份包:{payload: {...}, sign: hex}。
+  /// 整包经桥透传给页面 —— 登录 token 永远不进 WebView。
+  Future<Map<String, dynamic>> miniAppInitData(int appId) async {
+    final data = await _request('POST', '/mini-apps/$appId/init-data');
+    return data as Map<String, dynamic>;
+  }
 }
