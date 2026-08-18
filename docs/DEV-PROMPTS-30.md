@@ -245,6 +245,28 @@ README 说「线上运行版本 = 本仓 tag」、APK 装前校验 SHA-256 —�
   - docs/INDEX.md 不收 ROADMAP.md —— 它在 .gitignore 里(内部路线图),
     公开仓链它就是死链。
 
+- **2026-08-18 · 推上去之后被 CI 抓出一个真问题,值得单独记**:
+  `security_scan.sh` 里几乎所有模式都写着 `\s`,而 **macOS 的
+  `git grep -E` 不认 `\s`,会把它当字面量 `s`** —— `key\s*=` 在开发机上
+  实际匹配的是 `key=` / `keyss=`,**带空格的 `key = "真密钥"` 静默漏过**,
+  而 TOML/YAML 恰恰都这么写。表现是开发机全绿、Linux CI 才报。
+
+  也就是说:CLAUDE.md 与 CONTRIBUTING 都要求「任何提交前跑
+  security_scan.sh」,而这道闸在 mac 上一直是半瞎的 —— 正是
+  DEV-PROMPTS-29 说的那句「让人误以为某件事在生效,比没有这个功能更坏」,
+  这次轮到我们自己身上。
+
+  修法:全部模式改用 POSIX `[[:space:]]`;加两条自检 ——
+  模式里再出现 `\s` 直接 exit 2、启动时用探针确认引擎真能匹配带空格的赋值。
+  验证不看「通过」,而是造了 5 个带空格的假密钥确认**能抓到**
+  (修复前这些全漏)。顺带把 `auth.token` 规则改成「等号后有实质内容才算」,
+  否则样例文件里的空值也被拦,逼着人不写样例。
+
+  同一次还改了 CI 的 gitleaks:`gitleaks-action` 在 push 事件下默认只扫
+  本次推送的提交范围,而 #276 承诺的是**全历史** —— 换成
+  `gitleaks git . --redact`(docker),行为与开发机完全一致,
+  `--redact` 保证命中时不把密钥原文广播进公开的 CI 日志。
+
   **还欠的(需要仓库所有者动手,代码侧已就绪)**:
   1. #274 首次实跑:配 4 个 Actions secrets(ANDROID_KEYSTORE_BASE64 /
      _PASSWORD / _ALIAS / _KEY_PASSWORD,可选 TENCENT_MAP_KEY),

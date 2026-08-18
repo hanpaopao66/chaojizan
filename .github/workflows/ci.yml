@@ -203,7 +203,13 @@ jobs:
       # 全历史密钥扫描(#276)。security_scan.sh 管的是当前工作区;
       # 历史里进过又删掉的东西它管不着,公开仓库的历史人人可翻 —— gitleaks 兜这个底。
       # 误报白名单在 .gitleaksignore(目前只有上游 jpush 插件文档的示例 Key)。
+      #
+      # 用 CLI 而不是 gitleaks-action:那个 action 在 push 事件下默认只扫
+      # 本次推送的提交范围,而这里要的是**全历史**(第一次跑和第一百次跑
+      # 结论必须一样)。`gitleaks git .` 的行为和开发机上跑的完全一致。
+      # --redact:命中时日志里不回显密钥原文 —— CI 日志是公开的,
+      # 报一个泄露不该顺手把它广播出去。
       - name: gitleaks(全历史)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks:latest git . --redact

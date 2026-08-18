@@ -15,11 +15,18 @@ cd "$TARGET"
 #  - 1380000000x / 139/137/136+时间戳:演示与测试专用号段
 #  - change-me-in-production:默认值本身就是提醒
 #  - example/示例/演示 上下文中的占位
+#
+# ⚠️ 空白一律写 POSIX 的 [[:space:]],**不许写 `\s`**(下面有自检拦着)。
+#    macOS 的 `git grep -E` 不认 `\s`,会把它当字面量 `s` —— 于是
+#    `key\s*=` 在开发机上实际匹配的是 `key=`/`keyss=`,**带空格的
+#    `key = "真密钥"` 静默漏过**,而 TOML/YAML 恰恰都这么写。
+#    表现:开发机全绿、Linux CI 才报,本地这道闸形同虚设 ——
+#    比没有这道闸更坏,因为大家以为它在守着(2026-08-18 由 CI 抓出)。
 PATTERNS=(
   # 密钥与凭证
   'BEGIN (RSA|EC|OPENSSH|DSA) PRIVATE KEY'
-  'api[_-]?key\s*[:=]\s*["'"'"'][A-Za-z0-9]{16,}'
-  'secret\s*[:=]\s*["'"'"'][A-Za-z0-9]{16,}'
+  'api[_-]?key[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9]{16,}'
+  'secret[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9]{16,}'
   'AKIA[0-9A-Z]{16}'                    # AWS
   'sk-[A-Za-z0-9]{20,}'                 # OpenAI 风格
   # 微信支付真实凭据(商户号只应存在于 .env,不入库)
@@ -29,7 +36,9 @@ PATTERNS=(
   # frp 本身是公开架构(deploy/ 随仓发布),要拦的是具体 IP 与隧道 token
   '192\.168\.[0-9]+\.[0-9]+'
   '8\.140\.31\.213'
-  'auth\.token\s*='
+  # 等号后必须有实质内容才算命中:样例文件里的空值(auth.token = "")
+  # 是给自部署者照着填的,拦它只会逼人不写样例
+  'auth\.token[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9]'
   'wanli'
   'aikas'    # 历史域名:保留访问但不明文出现
   # 地图 key。腾讯地图是 5 组 5 位、连字符分隔的固定形态,拦得住;
@@ -38,13 +47,40 @@ PATTERNS=(
   # 按变量名拦时**必须同时要求值长得像真 key**(16 位以上十六进制),
   # 否则 `--dart-define=AMAP_KEY=你的Key` 这种文档占位符全是误报,
   # 误报多了就没人看扫描结果,等于没有扫描
-  'TENCENT_MAP_KEY\s*[:=]\s*[A-Z0-9-]{20,}'
-  'TIANDITU_[A-Z_]*KEY\s*[:=]\s*[0-9a-fA-F]{16,}'
-  'AMAP_[A-Z_]*KEY\s*[:=]\s*[0-9a-fA-F]{16,}'
+  'TENCENT_MAP_KEY[[:space:]]*[:=][[:space:]]*[A-Z0-9-]{20,}'
+  'TIANDITU_[A-Z_]*KEY[[:space:]]*[:=][[:space:]]*[0-9a-fA-F]{16,}'
+  'AMAP_[A-Z_]*KEY[[:space:]]*[:=][[:space:]]*[0-9a-fA-F]{16,}'
   # 生产环境痕迹
-  'POSTGRES_PASSWORD\s*[:=]\s*[^$?{]'   # 写死的密码(引用变量的不算)
-  'JWT_SECRET\s*[:=]\s*[^$?{c]'         # 同上(change-me 默认值放行)
+  'POSTGRES_PASSWORD[[:space:]]*[:=][[:space:]]*[^$?{[:space:]]'  # 写死的密码(引用变量的不算)
+  'JWT_SECRET[[:space:]]*[:=][[:space:]]*[^$?{c[:space:]]'        # 同上(change-me 默认值放行)
 )
+
+# 自检一:模式里不许有 `\s`(理由见上面 PATTERNS 的注释)。
+# 静默半瞎的扫描器比没有扫描器更坏,所以这里宁可整个脚本失败
+for p in "${PATTERNS[@]}"; do
+  case "$p" in
+    *'\s'*)
+      echo "✗ 模式含 \\s:$p"
+      echo "  macOS 的 git grep -E 不认 \\s,会静默漏掉带空格的写法。"
+      echo "  改用 POSIX 字符类 [[:space:]]。"
+      exit 2
+      ;;
+  esac
+done
+
+# 自检二:确认当前引擎真的按预期匹配(引擎换了/环境变了立刻暴露,
+# 而不是等某天真密钥漏出去才发现)
+# (git grep --no-index 只认相对路径,所以要 cd 进临时目录跑)
+_probe_dir=$(mktemp -d)
+printf 'probe.token = "abc123"\n' > "$_probe_dir/probe.txt"
+_probe_hit=$(cd "$_probe_dir" && git grep --no-index -IhE \
+  'probe\.token[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9]' -- probe.txt 2>/dev/null)
+rm -rf "$_probe_dir"
+if [ -z "$_probe_hit" ]; then
+  echo "✗ 正则引擎自检失败:[[:space:]] 没能匹配到带空格的赋值"
+  echo "  这台机器上的扫描结果不可信,先修引擎再提交。"
+  exit 2
+fi
 
 # 已知的开发环境默认值(本地 docker 演示用,公开无害),从命中里过滤;
 # ${VAR:?} 形式的环境变量引用(compose 占位,真值在 .env.prod)不是密钥,放行
