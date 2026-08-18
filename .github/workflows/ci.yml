@@ -193,8 +193,17 @@ jobs:
   security:
     name: 私密信息扫描
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks 要扫全历史,不能浅克隆
       # 仓库要开源:密钥/内网 IP/隧道细节/其他项目名都不该进来
       - run: bash scripts/security_scan.sh
+      # 全历史密钥扫描(#276)。security_scan.sh 管的是当前工作区;
+      # 历史里进过又删掉的东西它管不着,公开仓库的历史人人可翻 —— gitleaks 兜这个底。
+      # 误报白名单在 .gitleaksignore(目前只有上游 jpush 插件文档的示例 Key)。
+      - name: gitleaks(全历史)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

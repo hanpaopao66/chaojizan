@@ -1,0 +1,10 @@
+# gitleaks 误报白名单(格式:commit:文件:规则:行号)
+#
+# 下面四条都是同一个字符串:上游 jpush_flutter 插件自带文档里的示例 AppKey,
+# 原文注释就写着「你自己应用的 AppKey」—— 是极光官方文档的演示值,不是本项目的 Key。
+# 本项目真实 JPush Key 走构建期/环境注入,默认为空,见
+# packages/shared/lib/src/push_service.dart 开头的注释。
+3778836a01e2dded6c0037eb780fb554529b40a3:packages/jpush_flutter/README_Harmony.md:generic-api-key:372
+3778836a01e2dded6c0037eb780fb554529b40a3:packages/jpush_flutter/README_Harmony.md:generic-api-key:410
+0f9e060e42fe7afed7bb7eaedec5ed829572c5f9:packages/jpush_flutter/README_Harmony.md:generic-api-key:372
+0f9e060e42fe7afed7bb7eaedec5ed829572c5f9:packages/jpush_flutter/README_Harmony.md:generic-api-key:410
