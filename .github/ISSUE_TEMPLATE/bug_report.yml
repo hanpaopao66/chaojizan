@@ -1,0 +1,49 @@
+name: Bug 报告
+description: 某个端的某个功能不对劲
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告。**安全漏洞不要走这里** —— 公开 issue 等于把漏洞挂出来,
+        请按 [SECURITY.md](../blob/main/SECURITY.md) 私下报告。
+  - type: dropdown
+    id: surface
+    attributes:
+      label: 哪个端
+      options:
+        - 用户端 App
+        - 商家端 App
+        - 骑手端 App
+        - 商家网页工作台(/merchant)
+        - 官网 / 透明中心 / 运营大屏
+        - 后端接口
+        - 见证节点
+        - 管理后台(/admin)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: App 在「设置 → 关于」里看;自部署的写 tag 或 commit
+      placeholder: v0.11.1 (build 2049)
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤
+      description: 从哪个页面开始、点了什么、期望看到什么、实际看到什么
+      placeholder: |
+        1. 骑手端上线,打开抢单列表
+        2. ……
+        期望:……
+        实际:……
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 截图 / 日志(可选)
+      description: 截图请自行打码手机号等个人信息

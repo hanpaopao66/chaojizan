@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞(私下报告)
+    url: https://github.com/hanpaopao66/chaojizan/blob/main/SECURITY.md
+    about: 不要发公开 issue,按 SECURITY.md 的方式私下报告

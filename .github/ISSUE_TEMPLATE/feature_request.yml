@@ -1,0 +1,33 @@
+name: 功能建议
+description: 希望平台做某件事,或不做某件事
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前请先翻一下 [docs/INDEX.md](../blob/main/docs/INDEX.md) ——
+        决策记录里有大量「明确不做」及其理由(强制派单、骑手评分、竞价排名、
+        会员储值、自动接单……)。很多建议我们不是没想到,是想到了并写了为什么不做。
+        如果你的建议正好撞上其中一条,请直接对着那条理由来辩,这样讨论才有效率。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 想解决什么问题
+      description: 先说问题,再说方案。谁(用户/商家/骑手/部署者)在什么场景下遇到了什么
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议怎么做(可选)
+  - type: dropdown
+    id: principle
+    attributes:
+      label: 和平台三原则的关系
+      description: 商家 5% 封顶 / 配送费 100% 归骑手 / 账目三方透明
+      options:
+        - 不冲突
+        - 可能冲突(请在上面说明)
+        - 不确定
+    validations:
+      required: true
