@@ -1,0 +1,174 @@
+name: Release
+
+# 发版走公开构建(#274 第一档)。
+#
+# 此前 APK 由开发机上的 scripts/release_apks.sh 打包,「线上版本 = 本仓 tag」
+# 和 SHA-256 都只是我们自己说的 —— 校验和只能证明「下载没坏」,证明不了
+# 「确实从这个 tag 编出来的」。这个 workflow 把信任根从「作者的开发机」
+# 换成「公开可查的 CI 日志」:tag 触发、公开 runner 打包、摘要写进 Release 页,
+# 任何人都能从 Release 追到那次构建的完整日志。
+#
+# 第二档(逐字节可复现)还没做:Flutter 产物要逐字节一致得钉死构建时间戳、
+# 签名外置等一堆事。先立目标不立军令状 —— 当前做到公开构建。
+#
+# 触发方式(build 号必须严格递增,否则已装用户收不到更新):
+#   - 推 tag,格式 v<版本>-b<build号>,如 v0.12.0-b2050;
+#   - 或手动 workflow_dispatch 填版本/build 号(会自动打同格式 tag)。
+#   老格式 tag(v0.11.1)不触发构建,避免误发。
+#
+# 需要的 secrets(Settings → Secrets and variables → Actions):
+#   ANDROID_KEYSTORE_BASE64   签名钥匙库 base64(base64 -i xxx.jks | pbcopy)
+#   ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD
+#   TENCENT_MAP_KEY           可选;缺省时配送地图退化为品牌网格示意
+# 缺签名 secrets 会在第一步明确失败 —— 绝不静默退回 debug 签名发出去
+# (debug 签名的包覆盖不了已装的正式签名版,用户升级会直接失败)。
+#
+# 产物口径与 scripts/release_apks.sh 的「官网直链包」一致(#192 的商店包
+# 不在这里出:商店包是人工提交的,继续走本地脚本 SKIP_STORE 流程)。
+# 上传部署机 appdist + 更新 versions.json 仍是运维动作,不在公开 CI 里做
+# (CI 不该拿得到生产服务器的钥匙)。
+#
+# fork 自部署的人:把 env 里的 PUBLIC_BASE 与 ICP 换成你自己的。
+
+on:
+  push:
+    tags: ["v*-b*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本名,如 0.12.0"
+        required: true
+      build:
+        description: "build 号(必须递增,上一版是多少去 versions.json 查)"
+        required: true
+      notes:
+        description: "更新说明一句话"
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 公开构建三端 APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # 创建 Release / dispatch 模式推 tag
+    env:
+      PUBLIC_BASE: https://chaojizan.cc
+      SUPERZ_ICP: 陕ICP备2025064101号-5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析版本与 build 号
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"; BUILD="${{ inputs.build }}"
+          else
+            TAG="${GITHUB_REF_NAME}"                    # v0.12.0-b2050
+            VERSION="${TAG#v}"; VERSION="${VERSION%-b*}"
+            BUILD="${TAG##*-b}"
+          fi
+          echo "$BUILD" | grep -qE '^[0-9]+$' || { echo "build 号不是数字:$BUILD"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "构建 v$VERSION build $BUILD"
+
+      - name: 还原签名钥匙(缺 secrets 明确失败,不静默降级)
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KS_KEYPASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ] || [ -z "$KS_ALIAS" ]; then
+            echo "::error::缺签名 secrets(ANDROID_KEYSTORE_*)。debug 签名的包用户装不上,拒绝继续。"
+            exit 1
+          fi
+          echo "$KS_B64" | base64 -d > /tmp/release.jks
+          # 三端 2026-07-28 起共用同一正式签名(docs/STORE-REVIEW.md)
+          for app in user_app merchant_app rider_app; do
+            cat > apps/$app/android/key.properties <<EOF
+          storeFile=/tmp/release.jks
+          storePassword=$KS_PASS
+          keyAlias=$KS_ALIAS
+          keyPassword=${KS_KEYPASS:-$KS_PASS}
+          EOF
+          done
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.44.6" # 与 ci.yml 保持一致
+          channel: stable
+          cache: true
+
+      - name: 打三端直链包(口径同 release_apks.sh)
+        env:
+          TENCENT_MAP_KEY: ${{ secrets.TENCENT_MAP_KEY }}
+        run: |
+          VERSION="${{ steps.ver.outputs.version }}"; BUILD="${{ steps.ver.outputs.build }}"
+          mkdir -p build/release-apks
+          for app in user merchant rider; do
+            echo "== ${app}_app v$VERSION+$BUILD =="
+            ( cd apps/${app}_app && flutter build apk --release \
+                --target-platform android-arm64 \
+                --build-name="$VERSION" --build-number="$BUILD" \
+                --obfuscate --split-debug-info=build/symbols/self-$VERSION+$BUILD \
+                --dart-define=SUPERZ_CHANNEL=self \
+                --dart-define=SUPERZ_API=$PUBLIC_BASE \
+                --dart-define=SUPERZ_ICP=$SUPERZ_ICP \
+                --dart-define=TENCENT_MAP_KEY=${TENCENT_MAP_KEY:-} )
+            cp apps/${app}_app/build/app/outputs/flutter-apk/app-release.apk \
+               build/release-apks/chaojizan-${app}-arm64.apk
+          done
+
+      - name: 校验 versionCode 平码与安装权限(同 release_apks.sh 两道闸)
+        run: |
+          BUILD="${{ steps.ver.outputs.build }}"
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)
+          for app in user merchant rider; do
+            APK=build/release-apks/chaojizan-${app}-arm64.apk
+            CODE=$("$AAPT" dump badging "$APK" | head -1 | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+            [ "$CODE" = "$BUILD" ] || { echo "::error::${app} versionCode=$CODE ≠ build=$BUILD"; exit 1; }
+            "$AAPT" dump permissions "$APK" | grep -q REQUEST_INSTALL_PACKAGES \
+              || { echo "::error::${app} 直链包缺 REQUEST_INSTALL_PACKAGES,应用内安装会失败"; exit 1; }
+          done
+          echo "versionCode 平码 ✓ 安装权限 ✓"
+
+      - name: 计算 SHA-256
+        id: sha
+        run: |
+          cd build/release-apks
+          sha256sum *.apk | tee SHA256SUMS.txt
+
+      - name: dispatch 模式补打 tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="v${{ steps.ver.outputs.version }}-b${{ steps.ver.outputs.build }}"
+          git tag "$TAG" && git push origin "$TAG" || echo "tag 已存在,跳过"
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}-b{1}', steps.ver.outputs.version, steps.ver.outputs.build) || github.ref_name }}
+          name: 超级赞 v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.build }})
+          body: |
+            ${{ github.event_name == 'workflow_dispatch' && inputs.notes || '' }}
+
+            本次 APK 由公开 CI 从本 tag 构建(第一档「公开构建」,
+            逐字节可复现还在路上)—— 构建日志:
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            安装前校验 SHA-256(见附件 SHA256SUMS.txt)。
+            官网下载页与应用内更新走 appdist 通道,由运维把本页同一批产物
+            同步过去 —— 两边哈希应当一致,不一致请立刻开 issue。
+          files: |
+            build/release-apks/*.apk
+            build/release-apks/SHA256SUMS.txt
