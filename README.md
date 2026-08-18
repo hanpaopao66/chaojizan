@@ -161,7 +161,8 @@ chaojizan/
 
 `docs/DEV-PROMPTS-*.md` 是这个项目的决策记录:每批功能动手前先写清楚
 调研结论、要守的边界、**明确不做什么以及为什么**。比 commit 信息更完整,
-适合想理解"为什么是这个设计"的人。
+适合想理解"为什么是这个设计"的人。30 多篇,从 [docs/INDEX.md](docs/INDEX.md)
+进 —— 按主题归了类,每篇标了最值得看的一个决定。
 
 **订单状态流**:待支付 → 待接单 → 制作中 → 待取餐 → 配送中 → 已送达 → 已完成
 (骑手在「制作中/待取餐」阶段抢单;每次流转写入 order_events 审计表)
@@ -237,23 +238,53 @@ CI 对每个 PR 跑同样的三件事(服务端 e2e 起真 PostGIS/Redis/MinIO,
 
 ## 关键设计决策
 
+每条都给了代码坐标 —— 不用信我们的描述,直接去读实现。
+(行号会随改动漂移,对不上时按函数名搜)
+
 - **金额一律用「分」存整数**,杜绝浮点误差
+  —— [models.py#L468](server/app/models.py#L468) `Dish.price_cents` 行尾就是这句口径注释,
+  订单侧 `Order.*_cents` 全套同理
 - **状态机集中管控**:非法流转直接 409,每次变更写审计表
+  —— 唯一入口 [state_machine.py#L58](server/app/state_machine.py#L58) `assert_transition()`,
+  409 落点 [orders.py#L757](server/app/routers/orders.py#L757),
+  审计表 `order_events` 在 [models.py#L1314](server/app/models.py#L1314)
 - **账本只追加不修改**:冲账=追加负数行;每日核账恒等式(e2e 篡改 1 分钱必被抓出)
+  —— 铁律写在 [models.py#L826](server/app/models.py#L826) `RiderEarning` 的 docstring,
+  冲账实现 [settlement.py#L125](server/app/services/settlement.py#L125)
+  `reverse_merchant_earning()`(三个金额字段整体取负新插一行),
+  七条恒等式在 [audit.py](server/app/services/audit.py) 文件头、主函数 `run_audit()`
 - **防超卖/防双花/抢单防冲突**:一律数据库条件 UPDATE,并发安全在存储层保证
+  —— 抢单 [riders.py#L1518](server/app/routers/riders.py#L1518) `grab_order()`
+  (手慢的收到 409),库存扣减 [orders.py#L260](server/app/routers/orders.py#L260)
+  (`stock >= quantity` 条件),提现行锁 [riders.py#L1879](server/app/routers/riders.py#L1879)
+  `request_withdrawal()`
 - **支付幂等**:模拟支付与微信回调走同一入账函数,联调只换通道不换逻辑
+  —— 共同入口 [payment_core.py#L22](server/app/services/payment_core.py#L22)
+  `mark_order_paid()`,两个调用方:[orders.py#L716](server/app/routers/orders.py#L716)(模拟)/
+  [payments.py#L170](server/app/routers/payments.py#L170)(微信回调)
 - **公开数据无个案**:大屏/透明中心全部平台级聚合,手机号打码、坐标只到城市级
+  —— [screen.py#L293](server/app/routers/screen.py#L293) `screen_latest_orders()`
+  (打码+坐标两位小数+订单号只露尾 6 位),
+  聚合口径 [transparency.py#L213](server/app/routers/transparency.py#L213) `fairness_public()`
 - **快照优于重算**:凡是要拿出去当证据或当钱的(配送费拆分、申诉证据),
   一律下单/送达当时存快照。事后按当前费率重算,和当时真正收的对不上
+  —— 设计理由就写在字段上:[models.py#L552](server/app/models.py#L552) `Order.fee_parts`,
+  写入处 [orders.py#L627](server/app/routers/orders.py#L627),
+  骑手端明确「读快照不重算」[riders.py#L489](server/app/routers/riders.py#L489)
 - **样本不足就说不足**:分位数、热力图这类统计,低于门槛不给数字只给样本数——
   "这里确实快"和"我们还不知道"是两件事,混在一起就是在编
+  —— [drop_time.py#L39](server/app/services/drop_time.py#L39) `MIN_SAMPLE = 20`,
+  热力图每格带 `enough` 标记 [riders.py#L586](server/app/routers/riders.py#L586) `order_heatmap()`
 - **e2e 全链路回归**:`make test` 130 套端到端测试,跑在真实 HTTP 接口上
 
 ## 参与
 
 - 提 issue / PR 前请读 [CONTRIBUTING.md](CONTRIBUTING.md);提交走 Conventional Commits
+- 安全漏洞不要走公开 issue,报告方式与威胁模型见 [SECURITY.md](SECURITY.md)
 - 任何提交前跑 `scripts/security_scan.sh .`(仓库公开,密钥与内网信息零容忍)
-- 跑一个[见证节点](https://chaojizan.cc/nodes)复算我们的账本,是最硬核的参与方式
+- 跑一个[见证节点](https://chaojizan.cc/nodes)复算我们的账本,是最硬核的参与方式;
+  再进一步:照 [docs/LEDGER-SPEC.md](docs/LEDGER-SPEC.md) 用你的语言写个独立验证器
+- 想把它部署到你的城市:[开城手册](docs/OPEN-A-CITY.md)
 
 ## 开发日志
 
