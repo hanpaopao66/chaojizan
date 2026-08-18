@@ -191,6 +191,23 @@ async def main():
                     bank_name=bank,
                 ))
 
+        # 小程序清单:第一批只有自家条目(第三方入驻未开放,#277)。
+        # entry 指向本实例的公开页 —— 顺手就是「用户端 H5 版」的起点
+        from app.config import settings as _settings
+        from app.models import MiniApp
+        base = _settings.public_base_url.rstrip("/")
+        for name, icon, tagline, path, sort in [
+            ("透明中心", "👁️", "每天核账,差一分都亮红灯", "/transparency", 0),
+            ("公开账本", "📒", "哈希链锚点,人人可复算", "/nodes", 1),
+        ]:
+            existing_ma = await db.scalar(select(MiniApp).where(MiniApp.name == name))
+            if existing_ma is None:
+                db.add(MiniApp(
+                    name=name, icon=icon, tagline=tagline,
+                    entry_url=f"{base}{path}", allowed_origins=[base],
+                    perms=["initData"], sort=sort,
+                ))
+
         # 骑手小李:待审核,演示后台审核流程
         rider2 = users["13800000005"]
         rp2 = await db.scalar(select(RiderProfile).where(RiderProfile.rider_id == rider2.id))

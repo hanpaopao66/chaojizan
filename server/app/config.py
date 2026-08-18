@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     # 敏感字段(收款账号等)对称加密密钥;不配置时从 jwt_secret 派生。
     # 生产务必单独配置,且一经使用不可更换(见 services/crypto.py)
     crypto_key: str = ""
+    # 小程序 initData 签名密钥;不配置时从 jwt_secret 带命名空间派生
+    # (见 services/mini_app.py)。有第三方小程序接入后再换要通知所有验签方
+    mini_app_secret: str = ""
     # 7 天 + 客户端自动续期(/auth/refresh):商家端长期挂机也不会掉线,
     # 但被泄露的旧 token 一周后自然作废
     jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线

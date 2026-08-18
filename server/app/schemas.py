@@ -1980,3 +1980,37 @@ class ApplymentRevealIn(BaseModel):
 
     field: Literal["legal_person_id_no", "settle_account_no"]
     reason: str = Field(min_length=2, max_length=200)
+
+
+class MiniAppOut(BaseModel):
+    """下拉面板的清单条目。status/created_at 是运营字段,不下发。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    icon: str
+    tagline: str
+    entry_url: str
+    allowed_origins: list
+    perms: list
+    sort: int
+
+
+class MiniAppIn(BaseModel):
+    name: str = Field(min_length=1, max_length=30)
+    icon: str = Field(default="", max_length=200)
+    tagline: str = Field(default="", max_length=60)
+    entry_url: str = Field(min_length=8, max_length=500)
+    allowed_origins: list[str] = []
+    perms: list[str] = []
+    sort: int = 0
+
+    @model_validator(mode="after")
+    def urls_sane(self):
+        if not self.entry_url.startswith(("http://", "https://")):
+            raise ValueError("entry_url 必须是 http(s) 地址")
+        for o in self.allowed_origins:
+            if not o.startswith(("http://", "https://")) or o.rstrip("/") != o:
+                raise ValueError("allowed_origins 写 origin(协议+域名,结尾不带斜杠)")
+        return self

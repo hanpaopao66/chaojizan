@@ -2501,3 +2501,45 @@ class RiderFeedback(Base):
         DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class MiniApp(Base):
+    """小程序清单:用户端下拉面板里的那排图标(#277)。
+
+    走 Telegram Mini Apps 模式:小程序就是网页,跑在 WebView 里,
+    能力靠 JS 桥给,身份靠 HMAC 签名的 initData 传(services/mini_app.py)。
+    不自研 DSL 渲染引擎,不引商业容器 —— 理由在 docs/DEV-PROMPTS-31.md。
+
+    ## allowed_origins 是安全边界,不是展示字段
+
+    JS 桥只对这里列出的 origin 注入/应答;容器每次导航都校验,
+    白名单外的链接甩给系统浏览器。改这个字段等于给页面发能力,
+    第三方入驻(以后的事)审核审的就是它。
+
+    ## sort 人工定,不做推荐算法
+
+    面板顺序就是运营拍的顺序。不做"猜你想用",将来有第三方了
+    也不做竞价位 —— 这条写在 DEV-PROMPTS-31 的"明确不做"里。
+    """
+
+    __tablename__ = "mini_apps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(30))
+    # 图标:emoji 字面量或 https 图片地址,客户端按内容渲染
+    icon: Mapped[str] = mapped_column(String(200), default="")
+    # 一句话副标题,面板宫格下方灰字
+    tagline: Mapped[str] = mapped_column(String(60), default="")
+    entry_url: Mapped[str] = mapped_column(String(500))
+    # JS 桥生效的 origin 白名单,如 ["https://chaojizan.cc"]
+    allowed_origins: Mapped[list] = mapped_column(JSONB, default=list)
+    # 允许调用的桥能力,如 ["initData"];支付/定位/扫码等以后按需加
+    perms: Mapped[list] = mapped_column(JSONB, default=list)
+    # on 上架 / off 下架(表结构为第三方入驻留位,这批清单只有自家条目)
+    status: Mapped[str] = mapped_column(
+        String(10), default="on", server_default="on", index=True)
+    sort: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

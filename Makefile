@@ -140,7 +140,8 @@ test:
 	  && python -m tests.e2e_tax_export && python -m tests.e2e_tier_commission \
 	  && python -m tests.e2e_tip && python -m tests.e2e_transfer_discipline \
 	  && python -m tests.e2e_urge && python -m tests.e2e_weather_shutdown \
-	  && python -m tests.e2e_withdrawal_failed
+	  && python -m tests.e2e_withdrawal_failed \
+	  && python -m tests.e2e_mini_apps
 
 # 需要特殊环境或已知不稳定的用例,**故意不放进 make test**:
 #   e2e_privacy_phone_strict —— 要对着 PRIVACY_PHONE_STRICT=true 启动的实例跑
