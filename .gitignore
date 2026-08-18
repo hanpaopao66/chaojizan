@@ -47,6 +47,15 @@ marketing/
 server/app_version.txt
 # 部署机地址等本机部署参数(不入库)
 deploy/.env.deploy
+# 生产密钥与证书:只应存在于部署机(样例是 .env.prod.example / frpc.toml.example)。
+# 这些路径此前不在 ignore 里 —— 照开城手册在本地准备文件的人一不小心
+# 就会把真密钥提交进公开仓库,宁可多挡一层
+deploy/.env.prod
+deploy/tunnel/frpc.toml
+deploy/certs/
+deploy/letsencrypt/
+deploy/certbot-www/
+deploy/wxpay-certs/
 # 内部路线图(公开仓不发布)
 docs/ROADMAP.md
 merchant-web/node_modules/

@@ -1,0 +1,29 @@
+# frpc 配置样例。复制到部署机为 deploy/tunnel/frpc.toml(不入库,rsync 排除)。
+#
+# 用途:业务跑在没有公网 IP 的内网机器(家用宽带)上,靠一台便宜的云服务器
+# 跑 frps 做入口 —— 这是官方实例省云主机钱的选择,不是必须的。
+# 你的服务器本身有公网 IP 的话,不需要 frp:compose 里去掉 frpc 服务,
+# 把 nginx 的 8880/8443 直接换成 80/443 发布即可(见 docs/OPEN-A-CITY.md 第 5 步)。
+#
+# 云服务器侧的 frps.toml(自装 frp,版本与 frpc 保持同大版本):
+#   bindPort = 7000
+#   auth.token = "<与下面相同的随机串>"
+#   # frps 监听 80/443 需要 root 或 setcap;systemd 常驻
+
+serverAddr = "你的云服务器公网IP"
+serverPort = 7000
+auth.token = ""            # openssl rand -hex 16,两端一致
+
+[[proxies]]
+name = "web-http"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8880           # 部署机 nginx 的 80(compose 发布为 8880)
+remotePort = 80
+
+[[proxies]]
+name = "web-https"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8443           # 部署机 nginx 的 443(compose 发布为 8443)
+remotePort = 443
