@@ -648,23 +648,43 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
         if (today != null)
           InkWell(
             onTap: () => setState(() => _tab = 2),
-            child: Row(children: [
-              Text('今日 ', style: TextStyle(fontSize: 13, color: sz.inkMuted)),
-              Text('${today['orders']}',
-                  style: szFigure(
-                      fontSize: 16, fontWeight: FontWeight.w700,
-                      color: sz.ink)),
-              Text(' 单 · ', style: TextStyle(fontSize: 13, color: sz.inkMuted)),
-              Text(yuan(today['gmv_cents'] as int? ?? 0),
-                  style: szMoney(
-                      fontSize: 16, fontWeight: FontWeight.w700,
-                      color: sz.ink)),
-              const Spacer(),
-              if (yesterday != null)
-                Text('昨日 ${yesterday['orders']} 单·'
-                    '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
-                    style: TextStyle(fontSize: 11, color: sz.inkMuted)),
-            ]),
+            // 用 Wrap 而不是 Row:原先是六个都不可伸缩的 Text 加一个 Spacer,
+            // 320 窄屏 + 长辈版 1.4× 下实测溢出 163px —— 商家一进来就看见
+            // 那条黄黑警示条。Wrap + spaceBetween 一行放得下时和原来一样
+            // (今日靠左、昨日靠右),放不下时「昨日」自己掉到第二行。
+            //
+            // 「今日 N 单 · ¥X」四段并成一个 Text.rich:它本来就是一句话,
+            // 拆成四个 Text 只是为了中间两段换字体,而拆开之后就没法整体折行了。
+            child: Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              alignment: WrapAlignment.spaceBetween,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                Text.rich(TextSpan(children: [
+                  TextSpan(
+                      text: '今日 ',
+                      style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+                  TextSpan(
+                      text: '${today['orders']}',
+                      style: szFigure(
+                          fontSize: 16, fontWeight: FontWeight.w700,
+                          color: sz.ink)),
+                  TextSpan(
+                      text: ' 单 · ',
+                      style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+                  TextSpan(
+                      text: yuan(today['gmv_cents'] as int? ?? 0),
+                      style: szMoney(
+                          fontSize: 16, fontWeight: FontWeight.w700,
+                          color: sz.ink)),
+                ])),
+                if (yesterday != null)
+                  Text('昨日 ${yesterday['orders']} 单·'
+                      '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
+                      style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+              ],
+            ),
           ),
         if (todoRows.isNotEmpty) ...[
           const SizedBox(height: 6),

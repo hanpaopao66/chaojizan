@@ -372,9 +372,12 @@ class _HotelListPageState extends State<HotelListPage> {
                     hotel.full
                         ? Text('该日期已满房',
                             style: TextStyle(color: Theme.of(context).sz.inkMuted))
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.baseline,
-                            textBaseline: TextBaseline.alphabetic,
+                        // 用 Wrap 而不是 Row:两个 Text 都不可伸缩,
+                        // 320 窄屏 + 长辈版 1.4× 下实测溢出 41px。
+                        // Wrap 放得下就并排(和原来一模一样),
+                        // 放不下「起/晚」自己掉到第二行 —— 价格一个字不切
+                        : Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
                               Text(
                                   '¥${((hotel.minNightPriceCents ?? 0) / 100).toStringAsFixed(0)}',

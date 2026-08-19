@@ -80,9 +80,58 @@ void main() {
     ),
   };
 
+  /// 三端页面里**手搓**的费用行 —— 不是共享组件,是各页面自己拼的 Row。
+  ///
+  /// 收在这里是因为它们全踩同一个形状:`Text(标签) + Spacer() + Text(金额)`,
+  /// 三个都不可伸缩。`Spacer` 只吃**剩下**的空间,标签和金额的自然宽度之和
+  /// 一超,整行就 RenderFlex 溢出 —— 320 窄屏 + 长辈版 1.4× 下实测:
+  /// 跑腿费用行超 74px、商家看板行超 163px、酒店价格行超 41px。
+  ///
+  /// 讽刺的是**正确写法就在 `sz_widgets.dart` 里** —— `SzFeeRow` 一直是
+  /// `Expanded(...) + 定宽金额`,它的注释还专门写了「别用 Flexible + Spacer,
+  /// 两者都是 flex:1,会把空隙对半分」。知识在同一个文件里,手搓的没照做。
+  ///
+  /// 这里存的是**修完之后的形状**,防止哪天又被写回去。
+  final fixedShapes = <String, Widget>{
+    '跑腿费用行': Row(children: [
+      const Expanded(
+          child: Text('商品款(预付)',
+              style: TextStyle(fontWeight: FontWeight.w600))),
+      const SizedBox(width: 10),
+      Text('¥1234.56', style: szMoney(fontSize: 16)),
+    ]),
+    '商家看板行': Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.spaceBetween,
+      spacing: 8,
+      runSpacing: 4,
+      children: [
+        Text.rich(TextSpan(children: [
+          const TextSpan(text: '今日 ', style: TextStyle(fontSize: kFontBody)),
+          TextSpan(text: '128', style: szFigure(fontSize: kFontTitle)),
+          const TextSpan(text: ' 单 · ', style: TextStyle(fontSize: kFontBody)),
+          TextSpan(text: '¥12880.00', style: szMoney(fontSize: kFontTitle)),
+        ])),
+        const Text('昨日 96 单·¥9120.00',
+            style: TextStyle(fontSize: kFontMicro)),
+      ],
+    ),
+    '酒店价格行': Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text('¥1288',
+            style: szMoney(fontSize: 18, fontWeight: FontWeight.bold)),
+        const Text(' 起/晚', style: TextStyle(fontSize: kFontNote)),
+      ],
+    ),
+  };
+
+  // 共享组件 + 各页面手搓的那几个形状,一起测
+  final allCases = <String, Widget>{...cases, ...fixedShapes};
+
   for (final width in [320.0, 360.0]) {
     group('${width.toInt()} 窄屏 · 长辈版 1.4×', () {
-      cases.forEach((name, widget) {
+      allCases.forEach((name, widget) {
         testWidgets('$name 不画出界', (tester) async {
           setPhoneViewport(tester, Size(width, 780));
           await tester.pumpWidget(host(widget));
@@ -99,7 +148,7 @@ void main() {
   group('截断清单(不是失败,是要有人知道)', () {
     testWidgets('320 窄屏 1.4× 下被切成省略号的字', (tester) async {
       final all = <String>[];
-      for (final entry in cases.entries) {
+      for (final entry in allCases.entries) {
         setPhoneViewport(tester, const Size(320, 780));
         await tester.pumpWidget(host(entry.value));
         for (final t in truncatedTexts(tester)) {

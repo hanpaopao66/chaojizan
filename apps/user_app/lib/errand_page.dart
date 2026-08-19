@@ -314,9 +314,9 @@ class _ErrandPageState extends State<ErrandPage> {
         children: [
           if (_buyMode) ...[
             Row(children: [
-              const Text('商品款(预付)',
-                  style: TextStyle(fontWeight: FontWeight.w600)),
-              const Spacer(),
+              Expanded(child: const Text('商品款(预付)',
+                  style: TextStyle(fontWeight: FontWeight.w600))),
+              const SizedBox(width: 10),
               Text('¥${((q['goods_budget_cents'] as num? ?? 0) / 100)
                   .toStringAsFixed(2)}',
                   style: szMoney(fontSize: 16, color: sz.ink)),
@@ -326,8 +326,8 @@ class _ErrandPageState extends State<ErrandPage> {
             const SizedBox(height: 8),
           ],
           Row(children: [
-            const Text('跑腿费', style: TextStyle(fontWeight: FontWeight.w600)),
-            const Spacer(),
+            Expanded(child: const Text('跑腿费', style: TextStyle(fontWeight: FontWeight.w600))),
+            const SizedBox(width: 10),
             Text('¥${((q['fee_cents'] as num) / 100).toStringAsFixed(2)}',
                 style: szMoney(fontSize: 16, color: sz.ink)),
           ]),
@@ -338,17 +338,17 @@ class _ErrandPageState extends State<ErrandPage> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 1),
               child: Row(children: [
-                Text(labels[e.key] ?? e.key,
-                    style: TextStyle(fontSize: 12, color: sz.inkMuted)),
-                const Spacer(),
+                Expanded(child: Text(labels[e.key] ?? e.key,
+                    style: TextStyle(fontSize: 12, color: sz.inkMuted))),
+                const SizedBox(width: 10),
                 Text('¥${(e.value / 100).toStringAsFixed(2)}',
                     style: TextStyle(fontSize: 12, color: sz.inkMuted)),
               ]),
             ),
           Divider(height: 14, color: sz.line),
           Row(children: [
-            Text('其中平台服务费', style: TextStyle(fontSize: 12, color: sz.inkMuted)),
-            const Spacer(),
+            Expanded(child: Text('其中平台服务费', style: TextStyle(fontSize: 12, color: sz.inkMuted))),
+            const SizedBox(width: 10),
             Text('¥${(fee / 100).toStringAsFixed(2)}',
                 style: TextStyle(fontSize: 12, color: sz.inkMuted)),
           ]),

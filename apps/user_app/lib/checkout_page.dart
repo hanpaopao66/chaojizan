@@ -306,9 +306,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
       rows.add(Padding(
         padding: const EdgeInsets.only(left: 12, bottom: 2),
         child: Row(children: [
-          Text('· ${labels[key] ?? key}',
-              style: TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
-          const Spacer(),
+          Expanded(child: Text('· ${labels[key] ?? key}',
+              style: TextStyle(fontSize: 12, color: theme.sz.inkMuted))),
+          const SizedBox(width: 10),
           Text('¥${(v / 100).toStringAsFixed(2)}',
               style: TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
         ]),
