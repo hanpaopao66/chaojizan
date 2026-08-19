@@ -2,7 +2,8 @@ import { Alert, Button, Image, Input, Modal, Select, Space, Table, Tag, message 
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, FoodSafetyReport, foodSafetyAction, listFoodSafety, takeDownDish,
+  ApiError, downloadFoodSafetyCsv, FoodSafetyReport, foodSafetyAction,
+  listFoodSafety, takeDownDish,
 } from '../api'
 
 /**
@@ -62,6 +63,13 @@ export default function FoodSafetyPage() {
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
       <Alert type="error" showIcon style={{ marginBottom: 12 }}
              message="食品安全投诉不可逆 —— 别的投诉压一天是体验问题,这个压一天可能是有人进医院。" />
+      <Space style={{ marginBottom: 12 }}>
+        {/* 监管报送要的就是这份 */}
+        <Button onClick={() => downloadFoodSafetyCsv().catch(
+          (e) => message.error(e instanceof ApiError ? e.message : String(e)))}>
+          导出 CSV(监管报送)
+        </Button>
+      </Space>
       <Table<FoodSafetyReport>
         rowKey="id" loading={loading} dataSource={rows} size="middle"
         scroll={{ x: 'max-content' }}

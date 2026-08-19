@@ -458,3 +458,221 @@ export const listAppeals = () => get<Appeal[]>('/admin/appeals?status=open')
 export const resolveAppeal = (
   id: number, result: 'overturned' | 'upheld', note: string,
 ) => post(`/admin/appeals/${id}/resolve`, { result, note })
+
+// ---------- 运力 ----------
+
+export interface DispatchOverview {
+  stats: Record<string, number>
+  pool: { order_no: string; merchant_name: string; wait_minutes: number;
+          tip_cents: number; status: string }[]
+  in_flight: { order_no: string; merchant_name: string; status: string;
+               wait_minutes: number }[]
+  riders: { rider_id: number; name?: string; phone?: string;
+            is_online?: boolean; active?: number }[]
+}
+
+export const getDispatch = () => get<DispatchOverview>('/admin/dispatch-overview')
+export const reassignOrder = (orderNo: string) =>
+  post(`/admin/orders/${orderNo}/reassign`)
+
+// ---------- 骑手关怀(事故 / 求助 / 装备) ----------
+
+export interface RiderAccident {
+  id: number
+  rider_phone: string
+  severity: string
+  description: string
+  photos: string[]
+  status: string
+  created_at: string
+}
+
+export interface RiderEmergency {
+  id: number
+  rider_phone: string
+  lat: number
+  lng: number
+  note: string
+  status: string
+  created_at: string
+}
+
+export interface RiderGear {
+  id: number
+  rider_phone: string
+  item_label: string
+  created_at: string
+}
+
+export const listAccidents = (status: string) =>
+  get<RiderAccident[]>(`/admin/rider-accidents?status=${status}`)
+export const updateAccident = (id: number, status: string, note: string) =>
+  post(`/admin/rider-accidents/${id}/update`, { status, note })
+export const listEmergencies = (status: string) =>
+  get<RiderEmergency[]>(`/admin/rider-emergencies?status=${status}`)
+export const updateEmergency = (id: number, status: string, note: string) =>
+  post(`/admin/rider-emergencies/${id}/update`, { status, note })
+export const listGear = () => get<RiderGear[]>('/admin/rider-gear?status=requested')
+export const issueGear = (id: number) => post(`/admin/rider-gear/${id}/issue`)
+
+// ---------- 营销 ----------
+
+export interface CouponBatch {
+  id: number
+  name: string
+  trigger: string
+  amount_cents: number
+  min_spend_cents: number
+  valid_days: number
+  total: number
+  issued: number
+  used: number
+  active: boolean
+}
+
+export const listCouponBatches = () => get<CouponBatch[]>('/admin/coupon-batches')
+export const toggleCouponBatch = (id: number) =>
+  post(`/admin/coupon-batches/${id}/toggle`)
+export const createCouponBatch = (b: {
+  name: string; trigger: string; amount_cents: number
+  min_spend_cents: number; valid_days: number; total: number
+}) => post('/admin/coupon-batches', b)
+
+// ---------- 开票 ----------
+
+export interface Invoice {
+  id: number
+  merchant_name: string
+  owner_phone: string
+  title: string
+  tax_no: string
+  email: string
+  period: string
+  amount_cents: number
+  created_at: string
+}
+
+export const listInvoices = () => get<Invoice[]>('/admin/invoices?status=pending')
+export const issueInvoice = (id: number, url: string) =>
+  post(`/admin/invoices/${id}/issue`, { url })
+export const rejectInvoice = (id: number, reason: string) =>
+  post(`/admin/invoices/${id}/reject`, { reason })
+
+// ---------- 住宿 ----------
+
+export interface StayOrder {
+  order_no: string
+  hotel: string
+  room_type: string
+  rooms_qty: number
+  nights: number
+  checkin_date: string
+  checkout_date: string
+  guest_name: string
+  status: string
+  total_cents: number
+  fee_cents: number
+  net_cents: number
+  refund_cents: number
+}
+
+export interface StayAfterSale {
+  id: number
+  order_no: string
+  hotel: string
+  kind: string
+  note: string
+  status: string
+  refund_cents: number
+  penalty_cents: number
+  created_at: string
+}
+
+export const listStayOrders = (status: string, day: string) => {
+  const qs = [status && `status=${status}`, day && `day=${day}`]
+    .filter(Boolean).join('&')
+  return get<StayOrder[]>(`/admin/stay-orders${qs ? `?${qs}` : ''}`)
+}
+export const listStayAftersales = () =>
+  get<StayAfterSale[]>('/admin/stay-aftersales')
+
+// ---------- 税务导出 ----------
+
+/** 带 token 下载 CSV。URL 里不能带凭证 —— 会进浏览器历史和服务器日志。 */
+export async function downloadTax(kind: string, period: string) {
+  const token = getToken()
+  const resp = await fetch(`/admin/tax/${kind}.csv?period=${period}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!resp.ok) throw new ApiError(resp.status, `导出失败(${resp.status})`)
+  const url = URL.createObjectURL(await resp.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${kind}-${period}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ---------- 补齐:旧后台有而这里缺的 ----------
+
+/** 已有商家的城市清单 + 当前开城清单。改「开城清单」开关时对着它填,
+ *  免得手敲城市名敲错一个字导致整城停摆。 */
+export interface CitiesOut {
+  cities: { city: string; merchants: number }[]
+  open_cities: string[]
+}
+export const getCities = () => get<CitiesOut>('/admin/cities')
+
+export const setMerchantCategory = (id: number, category: string) =>
+  post(`/admin/merchants/${id}/category`, { category })
+export const setMerchantCity = (id: number, city: string) =>
+  post(`/admin/merchants/${id}/city`, { city })
+/** 二清收口:回填微信特约商户号。ready=true 之后新订单货款走分账。 */
+export const setSubMchid = (id: number, subMchid: string, ready: boolean) =>
+  post(`/admin/merchants/${id}/sub-mchid`, { sub_mchid: subMchid, ready })
+
+/** 定向发券:给指定手机号发某个批次的券。 */
+export const issueCoupon = (phone: string, batchId: number) =>
+  post('/admin/coupons/issue', { phone, batch_id: batchId })
+
+/** T+1 批量打款:昨天及更早申请的 pending 一键打完。 */
+export const t1BatchPaid = () => post<{ done: number }>('/admin/withdrawals/t1-batch-paid')
+
+/** 打款退票(银行退回/收款信息有误):余额自动退回,自动开工单跟进。 */
+export const markWithdrawalFailed = (id: number, reason: string) =>
+  post(`/admin/withdrawals/${id}/failed`, { reason })
+
+/** 骑手工作明细(考核用) */
+export const getRiderWorklog = (riderId: number, days = 14) =>
+  get<unknown>(`/admin/riders/${riderId}/worklog?days=${days}`)
+
+/** 食安投诉导出 CSV(监管报送用) */
+export async function downloadFoodSafetyCsv() {
+  const token = getToken()
+  const resp = await fetch('/admin/food-safety.csv', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!resp.ok) throw new ApiError(resp.status, `导出失败(${resp.status})`)
+  const url = URL.createObjectURL(await resp.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'food-safety.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ---------- 开屏图(在 platform 路由下,不是 /admin) ----------
+
+export interface Splash {
+  id: number
+  title: string
+  subtitle: string
+  image_url: string
+  audience: string
+  countdown_seconds: number
+  starts_at: string
+  ends_at: string
+  is_active: boolean
+}
+export const listSplash = () => get<Splash[]>('/platform/splash')
+export const toggleSplash = (id: number) => post(`/admin/splash/${id}/toggle`)

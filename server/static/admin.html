@@ -70,6 +70,23 @@
     <button class="primary" id="loginBtn">登录</button>
   </div>
 
+  <!--
+    迁移横幅(#286)。这个单文件后台已经被 /admin-console 全量取代 ——
+    接口一个不少,而且多了操作留痕、窄屏、统一设计令牌。
+
+    **不直接删这个文件**,是因为运营的书签、内部文档、值班手册里都还写着 /admin。
+    留一段时间让人跟着链接走过去,确认没人再用了再删。
+  -->
+  <div id="legacyBanner" style="background:#fff4e6;border:1px solid #ffd8a8;
+       border-radius:10px;padding:12px 16px;margin-bottom:16px;font-size:14px;
+       line-height:1.8">
+    <b>这个后台已经被新版取代。</b>
+    新版在 <a href="/admin-console/" style="color:#c15f3c;font-weight:700">/admin-console</a> ——
+    功能一个不少,而且<b>每个操作都会留痕</b>(谁在什么时候批了什么,查得到)。
+    <div style="color:#6a737d;font-size:13px;margin-top:4px">
+      这个页面会保留一段时间,等大家把书签换过去。新的操作请到新版做。
+    </div>
+  </div>
   <div id="panel" hidden>
     <div class="tabs" style="margin-bottom:20px">
       <button data-module="dashboard" class="active module-btn">数据看板</button>

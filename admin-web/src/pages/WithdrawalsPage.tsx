@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import {
   AdminWithdrawal, ApiError, batchPaid, listWithdrawals, markPaid,
-  rejectWithdrawal, yuan,
+  markWithdrawalFailed, rejectWithdrawal, t1BatchPaid, yuan,
 } from '../api'
 
 /**
@@ -121,6 +121,20 @@ export default function WithdrawalsPage() {
         style={{ marginBottom: 12 }}
         message="「已打款」只是记账,不会真的转账 —— 先在银行侧打出去,再回来点。"
       />
+      {status === 'pending' && (
+        <Space style={{ marginBottom: 12 }}>
+          <Button onClick={() => Modal.confirm({
+            title: 'T+1 批量打款?',
+            content: '把昨天(北京时间)及更早申请的待打款一次全标成已打款。'
+              + '同样不会真的转账 —— 确认银行侧那一批已经打完了再点。',
+            okText: '确认', cancelText: '取消',
+            onOk: () => act(async () => {
+              const r = await t1BatchPaid()
+              message.success(`已标记 ${r.done} 笔`)
+            }, 'T+1 批量完成'),
+          })}>T+1 批量打款</Button>
+        </Space>
+      )}
       <Tabs
         activeKey={status}
         onChange={setStatus}
@@ -220,6 +234,31 @@ export default function WithdrawalsPage() {
                 <Button type="link" size="small" danger disabled={acting}
                         onClick={() => doReject(r)}>驳回</Button>
               </Space>
+            ) : r.status === 'paid' ? (
+              // 退票只能从「已打款」进:银行退回/收款信息有误。
+              // 余额自动退回,自动开工单跟进,申请人可重新发起
+              <Button type="link" size="small" danger disabled={acting}
+                      onClick={() => {
+                        let reason = '银行卡信息有误,款项被退回'
+                        Modal.confirm({
+                          title: '标记这笔退票?',
+                          content: (
+                            <>
+                              <p style={{ color: 'var(--sz-ink-muted)' }}>
+                                余额自动退回,会推送申请人并自动开工单跟进。
+                              </p>
+                              <Input.TextArea rows={2} maxLength={200}
+                                              defaultValue={reason}
+                                              onChange={(e) => { reason = e.target.value }} />
+                            </>
+                          ),
+                          okText: '确认退票', okButtonProps: { danger: true },
+                          cancelText: '取消',
+                          onOk: () => act(
+                            () => markWithdrawalFailed(r.id, reason.trim()),
+                            '已标记退票,余额已退回'),
+                        })
+                      }}>标记退票</Button>
             ) : null,
           },
         ]}

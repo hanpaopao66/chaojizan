@@ -4,7 +4,12 @@ import {
   CustomerServiceOutlined,
   EyeOutlined,
   MedicineBoxOutlined,
+  FileTextOutlined,
+  GiftOutlined,
+  HeartOutlined,
+  HomeOutlined,
   SolutionOutlined,
+  ThunderboltOutlined,
   WarningOutlined,
   DashboardOutlined,
   ExceptionOutlined,
@@ -29,7 +34,13 @@ import DashboardPage from '../pages/DashboardPage'
 import FoodSafetyPage from '../pages/FoodSafetyPage'
 import IssuesPage from '../pages/IssuesPage'
 import ModerationPage from '../pages/ModerationPage'
+import DispatchPage from '../pages/DispatchPage'
+import InvoicesPage from '../pages/InvoicesPage'
+import MarketingPage from '../pages/MarketingPage'
+import RiderCarePage from '../pages/RiderCarePage'
 import RiskPage from '../pages/RiskPage'
+import StaysPage from '../pages/StaysPage'
+import TaxPage from '../pages/TaxPage'
 import TicketsPage from '../pages/TicketsPage'
 import FlagsPage from '../pages/FlagsPage'
 import LogsPage from '../pages/LogsPage'
@@ -62,6 +73,12 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     { key: '/moderation', icon: <EyeOutlined />, label: '内容审核' },
     { key: '/risk', icon: <WarningOutlined />, label: '风控' },
     { key: '/appeals', icon: <SolutionOutlined />, label: '判责申诉' },
+    { key: '/rider-care', icon: <HeartOutlined />, label: '骑手关怀' },
+    { key: '/dispatch', icon: <ThunderboltOutlined />, label: '运力' },
+    { key: '/stays', icon: <HomeOutlined />, label: '住宿' },
+    { key: '/marketing', icon: <GiftOutlined />, label: '营销' },
+    { key: '/invoices', icon: <FileTextOutlined />, label: '开票' },
+    { key: '/tax', icon: <BankOutlined />, label: '税务导出' },
     { key: '/flags', icon: <ControlOutlined />, label: '平台开关' },
     { key: '/audit', icon: <FileSearchOutlined />, label: '对账自检' },
     { key: '/logs', icon: <AuditOutlined />, label: '操作留痕' },
@@ -132,6 +149,12 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/moderation" element={<ModerationPage />} />
             <Route path="/risk" element={<RiskPage />} />
             <Route path="/appeals" element={<AppealsPage />} />
+            <Route path="/rider-care" element={<RiderCarePage />} />
+            <Route path="/dispatch" element={<DispatchPage />} />
+            <Route path="/stays" element={<StaysPage />} />
+            <Route path="/marketing" element={<MarketingPage />} />
+            <Route path="/invoices" element={<InvoicesPage />} />
+            <Route path="/tax" element={<TaxPage />} />
             <Route path="/riders" element={<RidersPage />} />
             <Route path="/withdrawals" element={<WithdrawalsPage />} />
             <Route path="/flags" element={<FlagsPage />} />

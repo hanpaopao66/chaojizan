@@ -1,7 +1,7 @@
 import { Alert, Button, Card, Input, Modal, Space, Switch, Tag, message } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
-import { ApiError, Flags, getFlags, setFlag } from '../api'
+import { ApiError, CitiesOut, Flags, getCities, getFlags, setFlag } from '../api'
 
 /**
  * 平台开关。
@@ -84,13 +84,16 @@ export default function FlagsPage() {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [cities, setCities] = useState<CitiesOut | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setErr('')
     try {
-      const f = await getFlags()
+      const [f, c] = await Promise.all([getFlags(), getCities()])
       setFlags(f)
+      // 开城清单手敲一个字错了整城停摆,所以把「有商家的城市」列出来对照
+      setCities(c)
       setDrafts({})
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e))
@@ -153,6 +156,22 @@ export default function FlagsPage() {
                                 lineHeight: 1.6 }}>
                     {m.effect}
                   </div>
+                  {m.key === 'open_cities' && cities && (
+                    <div style={{ fontSize: 12, marginTop: 4 }}>
+                      <span style={{ color: 'var(--sz-ink-muted)' }}>有商家的城市:</span>
+                      {cities.cities.map((c) => (
+                        <Tag key={c.city} style={{ cursor: 'pointer', marginTop: 2 }}
+                             onClick={() => setDrafts((d) => {
+                               const cur = (d[m.key] ?? flags[m.key] ?? '')
+                                 .split(',').map((x) => x.trim()).filter(Boolean)
+                               if (cur.includes(c.city)) return d
+                               return { ...d, [m.key]: [...cur, c.city].join(',') }
+                             })}>
+                          {c.city} {c.merchants}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {m.kind === 'switch' ? (
                   <Switch

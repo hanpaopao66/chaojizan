@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 
 import {
   AdminMerchant, ApiError, approveMerchant, listMerchants, rejectMerchant,
+  setMerchantCategory, setMerchantCity, setSubMchid,
 } from '../api'
 
 /**
@@ -55,6 +56,22 @@ export default function MerchantsPage() {
     } finally {
       setActing(false)
     }
+  }
+
+  /** 一个通用的「改一个值」弹窗 —— 品类/城市/商户号三处形状一样 */
+  function edit(title: string, initial: string,
+                run: (v: string) => Promise<unknown>) {
+    let v = initial
+    Modal.confirm({
+      title,
+      content: <Input defaultValue={initial} maxLength={64}
+                      onChange={(e) => { v = e.target.value }} />,
+      okText: '保存', cancelText: '取消',
+      onOk: () => {
+        if (!v.trim()) { message.warning('不能为空'); throw new Error('空') }
+        return act(() => run(v.trim()), '已保存')
+      },
+    })
   }
 
   function doReject(m: AdminMerchant) {
@@ -115,7 +132,19 @@ export default function MerchantsPage() {
         title={detail?.name}
         onCancel={() => setDetail(null)}
         width={720}
-        footer={detail?.status === 'pending' ? [
+        footer={detail?.status === 'approved' ? [
+          // 已通过的店:改归类和回填特约商户号(二清收口)。
+          // 这几个动作旧后台有,是运营日常要用的
+          <Button key="cat" onClick={() => detail && edit(
+            '改外卖品类', detail.category,
+            (v) => setMerchantCategory(detail.id, v))}>改品类</Button>,
+          <Button key="city" onClick={() => detail && edit(
+            '改所在城市', detail.city,
+            (v) => setMerchantCity(detail.id, v))}>改城市</Button>,
+          <Button key="mch" type="primary" onClick={() => detail && edit(
+            '回填微信特约商户号(填完货款走分账)', '',
+            (v) => setSubMchid(detail.id, v, true))}>特约商户号</Button>,
+        ] : detail?.status === 'pending' ? [
           <Button key="reject" danger loading={acting}
                   onClick={() => detail && doReject(detail)}>
             驳回
