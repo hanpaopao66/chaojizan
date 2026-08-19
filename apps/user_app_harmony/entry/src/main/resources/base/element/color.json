@@ -2,43 +2,75 @@
   "color": [
     {
       "name": "start_window_background",
-      "value": "#FFFFFF"
+      "value": "#F0EEE6"
     },
     {
-      "name": "brand",
-      "value": "#C04026"
-    },
-    {
-      "name": "earn",
-      "value": "#2D7A59"
-    },
-    {
-      "name": "ink",
-      "value": "#1F1D1B"
-    },
-    {
-      "name": "ink_muted",
-      "value": "#726B65"
-    },
-    {
-      "name": "line",
-      "value": "#E8E2DC"
-    },
-    {
-      "name": "page",
-      "value": "#F5F1ED"
+      "name": "paper",
+      "value": "#F0EEE6"
     },
     {
       "name": "surface",
-      "value": "#FFFFFF"
+      "value": "#FBFAF6"
     },
     {
       "name": "surface_alt",
-      "value": "#F2EEEA"
+      "value": "#F5F3EC"
+    },
+    {
+      "name": "ink",
+      "value": "#141413"
+    },
+    {
+      "name": "ink_muted",
+      "value": "#6B6862"
+    },
+    {
+      "name": "ink_faint",
+      "value": "#9A968C"
+    },
+    {
+      "name": "line",
+      "value": "#E2DED2"
+    },
+    {
+      "name": "clay",
+      "value": "#C15F3C"
+    },
+    {
+      "name": "clay_soft",
+      "value": "#EFDDD3"
+    },
+    {
+      "name": "earn",
+      "value": "#4E6B4F"
+    },
+    {
+      "name": "hold",
+      "value": "#A6763E"
+    },
+    {
+      "name": "danger",
+      "value": "#D03030"
+    },
+    {
+      "name": "ledger",
+      "value": "#1F1E1B"
+    },
+    {
+      "name": "link",
+      "value": "#2C5F87"
+    },
+    {
+      "name": "brand",
+      "value": "#C15F3C"
     },
     {
       "name": "brand_soft",
-      "value": "#FDF1EC"
+      "value": "#EFDDD3"
+    },
+    {
+      "name": "page",
+      "value": "#F0EEE6"
     },
     {
       "name": "earn_soft",

@@ -1,18 +1,84 @@
 {
   "color": [
-    { "name": "start_window_background", "value": "#101010" },
-
-    { "name": "brand", "value": "#FF7A55" },
-    { "name": "earn", "value": "#5FBF95" },
-    { "name": "ink", "value": "#F2EFEC" },
-    { "name": "ink_muted", "value": "#9A938D" },
-    { "name": "line", "value": "#33302D" },
-
-    { "name": "page", "value": "#171614" },
-    { "name": "surface", "value": "#232120" },
-    { "name": "surface_alt", "value": "#2C2A28" },
-    { "name": "brand_soft", "value": "#3A2620" },
-    { "name": "earn_soft", "value": "#1E332A" },
-    { "name": "scrim", "value": "#99000000" }
+    {
+      "name": "start_window_background",
+      "value": "#1B1A17"
+    },
+    {
+      "name": "paper",
+      "value": "#1B1A17"
+    },
+    {
+      "name": "surface",
+      "value": "#24231F"
+    },
+    {
+      "name": "surface_alt",
+      "value": "#2C2A25"
+    },
+    {
+      "name": "ink",
+      "value": "#F2F0E8"
+    },
+    {
+      "name": "ink_muted",
+      "value": "#A8A49A"
+    },
+    {
+      "name": "ink_faint",
+      "value": "#7A766D"
+    },
+    {
+      "name": "line",
+      "value": "#37342D"
+    },
+    {
+      "name": "clay",
+      "value": "#E08A6B"
+    },
+    {
+      "name": "clay_soft",
+      "value": "#3A2C25"
+    },
+    {
+      "name": "earn",
+      "value": "#8FB08D"
+    },
+    {
+      "name": "hold",
+      "value": "#D2A86C"
+    },
+    {
+      "name": "danger",
+      "value": "#E06B6B"
+    },
+    {
+      "name": "ledger",
+      "value": "#100F0D"
+    },
+    {
+      "name": "link",
+      "value": "#7FB2D9"
+    },
+    {
+      "name": "brand",
+      "value": "#E08A6B"
+    },
+    {
+      "name": "brand_soft",
+      "value": "#3A2C25"
+    },
+    {
+      "name": "page",
+      "value": "#1B1A17"
+    },
+    {
+      "name": "earn_soft",
+      "value": "#3A2C25"
+    },
+    {
+      "name": "scrim",
+      "value": "#66000000"
+    }
   ]
 }

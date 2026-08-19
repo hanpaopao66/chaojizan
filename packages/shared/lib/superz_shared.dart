@@ -6,6 +6,7 @@ export 'src/announcement_banner.dart';
 export 'src/api_client.dart';
 export 'src/brand.dart';
 export 'src/brand_art.dart';
+export 'src/channel_grid.dart';
 export 'src/channels.dart';
 export 'src/chat_page.dart';
 export 'src/city_picker.dart';

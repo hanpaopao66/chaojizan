@@ -157,6 +157,22 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      # 设计令牌是从 brand.dart 生成的,这一步保证生成物没有跟源分叉。
+      #
+      # 放在装 Flutter 之前:纯 Python、几秒钟,分叉了就该立刻红,
+      # 没必要先等三分钟的 SDK 下载。
+      #
+      # 为什么需要它:品牌主色一度在仓库里有三个不同的值 —— Flutter 的
+      # #C15F3C、鸿蒙手抄成的 #C04026、后台写死的 #FF5A1F(而后者在
+      # docs/BRAND.md 里标着「已废弃」)。人手同步的东西一定会分叉,
+      # 只有让机器比对才不会。
+      - name: 设计令牌一致性
+        run: python3 scripts/gen_tokens.py --check
+      # 频道色是功能不是装饰:首页一排图标,用户要一眼找到"打车"。
+      # 「能不能一眼分开」是可以量的,而且**只能靠量** ——
+      # 旧色板在绿色盲下最差色差 4.0(等于一排一样的方块),肉眼永远看不出来。
+      - name: 频道色可分辨性
+        run: python3 scripts/check_channel_tones.py
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"

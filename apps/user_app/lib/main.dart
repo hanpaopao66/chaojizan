@@ -964,97 +964,6 @@ class _MerchantListViewState extends State<MerchantListView> {
   Widget _kingKong() {
     final sz = Theme.of(context).sz;
 
-    // 入口卡从频道注册表渲染(#132):新频道在 kChannels 加一行即可,
-    // 这里一个字都不用改。频道字符用各自的频道色 —— 用户一眼看得出
-    // "换了一个世界",而平台色 clay 留给跨频道的主 CTA
-    // 频道字符做成方块底:单独一个字浮在卡片左上角,右边一大片空白,
-    // 看着就是"没排完"。加个底之后它是个图标而不是一个掉队的字
-    Widget glyphChip(SzChannel ch, double size) {
-      final c = channelColor(context, ch.key);
-      return Container(
-        width: size,
-        height: size,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: c.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(kRadiusSm),
-        ),
-        child: Text(ch.glyph,
-            style: szFigure(
-                fontSize: size * 0.48, color: c, height: 1.0)),
-      );
-    }
-
-    /// 宽卡(2 列时用):字块在左、标题副标题在右。
-    /// 横过来排才用得上宽度 —— 竖着堆的话副标题旁边永远空着一半。
-    Widget wideEntry(SzChannel ch, VoidCallback onTap) {
-      return SzCard(
-        onTap: onTap,
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-        child: Row(children: [
-          glyphChip(ch, 40),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(ch.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w600,
-                        height: 1.25,
-                        color: sz.ink)),
-                const SizedBox(height: 2),
-                // 长辈版 1.4× 下窄卡放不下,允许折两行而不是切成省略号 ——
-                // 「取件送件 · 收…」这种半截话不如换行
-                Text(ch.sub,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 11.5, height: 1.35, color: sz.inkMuted)),
-              ],
-            ),
-          ),
-        ]),
-      );
-    }
-
-    /// 窄卡(3 列时用):竖排居中。宽度不够横排就别横排,
-    /// 硬横排会把副标题挤成一列一个字
-    Widget narrowEntry(SzChannel ch, VoidCallback onTap) {
-      return SzCard(
-        onTap: onTap,
-        padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            glyphChip(ch, 36),
-            const SizedBox(height: 8),
-            Text(ch.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    height: 1.2,
-                    color: sz.ink)),
-            const SizedBox(height: 3),
-            Text(ch.sub,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 10.5, height: 1.3, color: sz.inkMuted)),
-          ],
-        ),
-      );
-    }
-
     Widget comingEntry(IconData icon, String label, String coming, String blood) {
       return InkWell(
         borderRadius: BorderRadius.circular(kRadiusSm),
@@ -1089,57 +998,43 @@ class _MerchantListViewState extends State<MerchantListView> {
           //
           // 规则在 shared 的 channelGridColumns 里,有测试锁着 ——
           // 加频道时排版会不会退化成孤儿行,不该靠人肉数格子
-          child: LayoutBuilder(builder: (context, box) {
-            const gap = 9.0;
-            final cols = channelGridColumns(kChannels.length);
-            final cell = (box.maxWidth - gap * (cols - 1)) / cols;
-            // 宽度够就横排(字块在左、文案在右),不够就竖排居中
-            final entry = cols <= 2 ? wideEntry : narrowEntry;
-            return Wrap(
-              spacing: gap,
-              runSpacing: gap,
-              children: [
-              // 金刚区顺序即 kChannels 的顺序;路由按 key 分发 ——
-              // 加频道时这里只需补一个 case
-              // (跑腿 2026-07-27 曾下线,08-06 重新接回,注释一并订正)
-              for (final ch in kChannels)
-                SizedBox(width: cell, child: entry(ch, () async {
-                  // 跑腿单一建出来就是「待支付」,必须把订单接回来直接进支付。
-                  // 之前这里和其他频道一样 push 完就不管返回值,
-                  // 结果用户填完地址、看完报价、点了下单,页面一关单子就没了
-                  if (ch.key == 'errand') {
-                    final created = await Navigator.of(context).push<Order>(
-                        MaterialPageRoute<Order>(
-                            builder: (_) => ErrandPage(api: widget.api)));
-                    if (created == null || !context.mounted) return;
-                    final paid =
-                        await payPendingOrder(widget.api, created, context);
-                    if (!context.mounted) return;
-                    // 付没付成都进详情:付成了能看进度,没付成那里有「去支付」
-                    await Navigator.of(context).push(MaterialPageRoute<void>(
-                        builder: (_) => OrderDetailPage(
-                            api: widget.api,
-                            orderNo: (paid ?? created).orderNo)));
-                    return;
-                  }
-                  final route = switch (ch.key) {
-                    'food' => MaterialPageRoute<void>(
-                        builder: (_) => CategoryPage(
-                            api: widget.api,
-                            deliveryAddress: widget.deliveryAddress)),
-                    'stay' => MaterialPageRoute<void>(
-                        builder: (_) => HotelListPage(
-                            api: widget.api, lat: _myLat, lng: _myLng)),
-                    'voucher' => MaterialPageRoute<void>(
-                        builder: (_) => DealsPage(api: widget.api)),
-                    // 跑腿在上面单独处理(要接住订单去支付),不走这个 switch
-                    // 注册了但还没接页面的频道:不跳空白页,直接不响应
-                    _ => null,
-                  };
-                  if (route != null) Navigator.of(context).push(route);
-                })),
-              ],
-            );
+          // 排版全在 shared 的 SzChannelGrid 里(有测试锁着:末行不孤单、
+          // 频道多了自动换聚合式、长辈版 1.4× 下不撑爆)。
+          // 这里只管点了之后去哪 —— 那是各端自己的事
+          child: SzChannelGrid(onTap: (ch) async {
+            // 跑腿单一建出来就是「待支付」,必须把订单接回来直接进支付。
+            // 之前这里和其他频道一样 push 完就不管返回值,
+            // 结果用户填完地址、看完报价、点了下单,页面一关单子就没了
+            if (ch.key == 'errand') {
+              final created = await Navigator.of(context).push<Order>(
+                  MaterialPageRoute<Order>(
+                      builder: (_) => ErrandPage(api: widget.api)));
+              // 用 State 的 mounted 而不是 context.mounted:
+              // 这个 context 是 State 的,分析器要求两者对上
+              if (created == null || !mounted) return;
+              final paid = await payPendingOrder(widget.api, created, context);
+              if (!mounted) return;
+              // 付没付成都进详情:付成了能看进度,没付成那里有「去支付」
+              await Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => OrderDetailPage(
+                      api: widget.api, orderNo: (paid ?? created).orderNo)));
+              return;
+            }
+            final route = switch (ch.key) {
+              'food' => MaterialPageRoute<void>(
+                  builder: (_) => CategoryPage(
+                      api: widget.api,
+                      deliveryAddress: widget.deliveryAddress)),
+              'stay' => MaterialPageRoute<void>(
+                  builder: (_) => HotelListPage(
+                      api: widget.api, lat: _myLat, lng: _myLng)),
+              'voucher' => MaterialPageRoute<void>(
+                  builder: (_) => DealsPage(api: widget.api)),
+              // 跑腿在上面单独处理(要接住订单去支付),不走这个 switch
+              // 注册了但还没接页面的频道:不跳空白页,直接不响应
+              _ => null,
+            };
+            if (route != null) Navigator.of(context).push(route);
           }),
         ),
         // 未上线业务的愿景占位:审核包里整体隐藏(feature_flags.dart)
