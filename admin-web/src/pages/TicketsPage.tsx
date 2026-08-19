@@ -43,10 +43,14 @@ export default function TicketsPage() {
           { title: '联系方式', width: 140,
             render: (_, t) => t.contact || t.user_phone || '—' },
           { title: '内容', dataIndex: 'content', ellipsis: true },
-          { title: '状态', dataIndex: 'status', width: 90,
-            render: (v: string) => v === 'closed'
+          // status 实测只有 open / closed 两种,没有 replied ——
+          // 「回过但没关」表现为 status=open 且 reply 非空
+          { title: '状态', dataIndex: 'status', width: 100,
+            render: (_: string, t) => t.status === 'closed'
               ? <Tag>已关闭</Tag>
-              : t_open(v) },
+              : t.reply
+                ? <Tag color="processing">已回待关</Tag>
+                : <Tag color="warning">待处理</Tag> },
           { title: '操作', width: 100, fixed: 'right',
             render: (_, t) => (
               <Button type="link" onClick={() => { setCur(t); setReply(t.reply || '') }}>
@@ -96,8 +100,4 @@ export default function TicketsPage() {
       </Modal>
     </>
   )
-}
-
-function t_open(v: string) {
-  return v === 'replied' ? <Tag color="processing">已回复</Tag> : <Tag color="warning">待处理</Tag>
 }

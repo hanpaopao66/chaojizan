@@ -2,6 +2,10 @@ import {
   AuditOutlined,
   CarOutlined,
   CustomerServiceOutlined,
+  EyeOutlined,
+  MedicineBoxOutlined,
+  SolutionOutlined,
+  WarningOutlined,
   DashboardOutlined,
   ExceptionOutlined,
   BankOutlined,
@@ -19,9 +23,13 @@ import { useState } from 'react'
 import { clearToken } from '../api'
 import { useNarrow } from '../hooks/useNarrow'
 import AftersalesPage from '../pages/AftersalesPage'
+import AppealsPage from '../pages/AppealsPage'
 import AuditPage from '../pages/AuditPage'
 import DashboardPage from '../pages/DashboardPage'
+import FoodSafetyPage from '../pages/FoodSafetyPage'
 import IssuesPage from '../pages/IssuesPage'
+import ModerationPage from '../pages/ModerationPage'
+import RiskPage from '../pages/RiskPage'
 import TicketsPage from '../pages/TicketsPage'
 import FlagsPage from '../pages/FlagsPage'
 import LogsPage from '../pages/LogsPage'
@@ -50,6 +58,10 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     { key: '/tickets', icon: <CustomerServiceOutlined />, label: '客服工单' },
     { key: '/aftersales', icon: <ExceptionOutlined />, label: '售后仲裁' },
     { key: '/issues', icon: <CarOutlined />, label: '配送异常' },
+    { key: '/food-safety', icon: <MedicineBoxOutlined />, label: '食安投诉' },
+    { key: '/moderation', icon: <EyeOutlined />, label: '内容审核' },
+    { key: '/risk', icon: <WarningOutlined />, label: '风控' },
+    { key: '/appeals', icon: <SolutionOutlined />, label: '判责申诉' },
     { key: '/flags', icon: <ControlOutlined />, label: '平台开关' },
     { key: '/audit', icon: <FileSearchOutlined />, label: '对账自检' },
     { key: '/logs', icon: <AuditOutlined />, label: '操作留痕' },
@@ -116,6 +128,10 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/tickets" element={<TicketsPage />} />
             <Route path="/aftersales" element={<AftersalesPage />} />
             <Route path="/issues" element={<IssuesPage />} />
+            <Route path="/food-safety" element={<FoodSafetyPage />} />
+            <Route path="/moderation" element={<ModerationPage />} />
+            <Route path="/risk" element={<RiskPage />} />
+            <Route path="/appeals" element={<AppealsPage />} />
             <Route path="/riders" element={<RidersPage />} />
             <Route path="/withdrawals" element={<WithdrawalsPage />} />
             <Route path="/flags" element={<FlagsPage />} />

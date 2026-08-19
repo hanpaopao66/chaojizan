@@ -91,8 +91,13 @@ export default function AftersalesPage() {
             render: (v: number) => yuan(v) },
           { title: '已退', dataIndex: 'refund_cents', width: 100, align: 'right',
             render: (v: number) => v ? yuan(v) : '—' },
+          // fault 实测取值:platform / rider / merchant,空 = 还没判
           { title: '判责', dataIndex: 'fault', width: 100,
-            render: (v: string) => v ? <Tag>{v}</Tag> : <Tag color="warning">未判</Tag> },
+            render: (v: string) => ({
+              platform: <Tag color="default">平台承担</Tag>,
+              rider: <Tag color="error">骑手</Tag>,
+              merchant: <Tag color="warning">商家</Tag>,
+            }[v] ?? <Tag color="warning">未判</Tag>) },
           { title: '操作', width: 130, fixed: 'right',
             render: (_, a) => !a.fault ? (
               <Button type="link" danger size="small" disabled={acting}

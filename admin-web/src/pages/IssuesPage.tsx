@@ -21,10 +21,14 @@ const ACTIONS: { value: IssueAction; label: string; effect: string }[] = [
     effect: '退用户钱并结束订单。餐损毁、确实送不到时用' },
 ]
 
+/** 取值对着 `schemas.py` 的 Literal。同样别照感觉编 ——
+ *  第一版写的 `no_answer` / `damaged` 后端根本没有这两个值。 */
 const KINDS: Record<string, string> = {
-  no_answer: '联系不上收件人',
+  cannot_contact: '联系不上收件人',
   wrong_address: '地址有误',
-  damaged: '餐品损坏',
+  food_damaged: '餐品损坏',
+  not_ready: '到店未出餐',
+  items_missing: '餐不齐',
   other: '其他',
 }
 

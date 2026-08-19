@@ -363,3 +363,98 @@ export type IssueAction = 'continue_delivery' | 'mark_delivered' | 'refund'
 export const resolveDeliveryIssue = (
   id: number, action: IssueAction, note: string,
 ) => post(`/admin/delivery-issues/${id}/resolve`, { action, note })
+
+// ---------- 食安投诉 ----------
+
+export interface FoodSafetyReport {
+  id: number
+  order_no: string
+  kind: string
+  description: string
+  status: string
+  customer_phone: string
+  images: string[]
+  medical_urls: string[]
+  merchant_is_open: boolean
+  merchant_id?: number
+  order_items?: { dish_id: number; name: string; price_cents: number }[]
+  created_at?: string
+}
+
+export const listFoodSafety = () => get<FoodSafetyReport[]>('/admin/food-safety')
+export const foodSafetyAction = (
+  id: number, action: 'confirm' | 'dismiss' | 'suspend-merchant', note: string,
+) => post(`/admin/food-safety/${id}/${action}`, { note })
+export const takeDownDish = (id: number, dishId: number, note: string) =>
+  post(`/admin/food-safety/${id}/take-down-dish`, { dish_id: dishId, note })
+
+// ---------- 内容审核 ----------
+
+export interface ContentReview {
+  id: number
+  kind: string
+  url: string
+  created_at: string
+}
+
+export const listContentReviews = () =>
+  get<ContentReview[]>('/admin/content-reviews?status=pending')
+export const approveContent = (id: number) =>
+  post(`/admin/content-reviews/${id}/approve`)
+export const rejectContent = (id: number) =>
+  post(`/admin/content-reviews/${id}/reject`)
+
+export interface ModerationWord {
+  id: number
+  word: string
+  category: string
+  created_at?: string
+}
+
+export const listModerationWords = () =>
+  get<ModerationWord[]>('/admin/moderation-words')
+export const addModerationWord = (word: string, category: string) =>
+  post('/admin/moderation-words', { word, category })
+export const delModerationWord = (id: number) =>
+  request<void>('DELETE', `/admin/moderation-words/${id}`)
+
+// ---------- 风控 ----------
+
+export interface RiskOrder {
+  id: number
+  order_no: string
+  merchant_name: string
+  customer_phone: string
+  customer_id: number
+  customer_risk_level: string
+  hits: string[]
+  total_cents: number
+  order_status: string
+  risk_status: string
+  created_at: string
+}
+
+export const listRiskOrders = () => get<RiskOrder[]>('/admin/risk-orders?status=')
+export const riskVerdict = (id: number, verdict: 'confirmed' | 'cleared') =>
+  post(`/admin/risk-orders/${id}/verdict`, { verdict })
+export const setRiskLevel = (userId: number, level: string, reason: string) =>
+  post(`/admin/users/${userId}/risk-level`, { level, reason })
+
+// ---------- 判责申诉 ----------
+
+export interface Appeal {
+  id: number
+  role: string
+  name: string
+  phone: string
+  reason: string
+  target_type: string
+  target_summary: string
+  images: string[]
+  created_at: string
+}
+
+export const listAppeals = () => get<Appeal[]>('/admin/appeals?status=open')
+export const resolveAppeal = (
+  id: number, result: 'overturned' | 'upheld', note: string,
+) => post(`/admin/appeals/${id}/resolve`, { result, note })
