@@ -47,3 +47,13 @@ flutter:
         - asset: assets/fonts/SzSans-Regular.ttf
         - asset: assets/fonts/SzSans-Semibold.ttf
           weight: 600
+    # 中文衬线(思源宋体子集):**只给大字**——频道字块、页面大标题。
+    # 小字不用:宋体在 11px 上发虚,而这个 App 有长辈版 1.4×。
+    # 子集范围 = GB2312 一二级 + 源码固定文案,共 6764 字(简体常用全集),
+    # 这样商家名/菜名这类用户内容也盖得住,不会在标题里半宋半黑。
+    # 由 scripts/gen_font_subset.py 生成,CI 校验覆盖率。
+    - family: SzSerifCJK
+      fonts:
+        - asset: assets/fonts/SzSerifCJK-Regular.ttf
+        - asset: assets/fonts/SzSerifCJK-Semibold.ttf
+          weight: 600

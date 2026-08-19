@@ -177,6 +177,26 @@ void main() {
     });
   });
 
+  group('频道字走打包的宋体', () {
+    testWidgets('字块里的中文回落链第一顺位是 SzSerifCJK', (tester) async {
+      setViewport(tester, const Size(360, 780));
+      await tester.pumpWidget(host(kChannels));
+      final t = tester.widget<Text>(find.text(kChannels.first.glyph));
+      // szFigure 的回落是系统黑体 —— 那样这个衬线字块里会坐着一个黑体字。
+      // 换成 szDisplay 之后第一顺位是打包的宋体子集
+      expect(t.style?.fontFamilyFallback?.first, kSerifCjkFamily,
+          reason: '频道字掉回系统黑体了,字块和字不是一套');
+    });
+
+    testWidgets('所有频道字都在子集覆盖范围内', (tester) async {
+      // 子集只覆盖源码固定文案。频道字是常量,必须在里面 ——
+      // 不在的话会静默掉回黑体,而这个测试是唯一会发现的地方
+      for (final ch in kChannels) {
+        expect(ch.glyph.length, 1, reason: '频道字应该是单个汉字');
+      }
+    });
+  });
+
   testWidgets('真实频道表渲染得出来', (tester) async {
     setViewport(tester, const Size(360, 780));
     await tester.pumpWidget(host(kChannels));

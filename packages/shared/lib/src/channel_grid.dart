@@ -54,8 +54,16 @@ class SzChannelGrid extends StatelessWidget {
         color: c.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(kRadiusSm),
       ),
+      // 用 szDisplay 而不是 szFigure:szFigure 的中文回落是系统**黑**体 ——
+      // 这个字块本来是照衬线数字的样子设计的,里面却坐着一个黑体字。
+      // szDisplay 的中文走打包的宋体子集,字块和字终于是一套。
+      // 尺寸 size*0.48 → 40/44px 的块里是 19~21px,是宋体撑得住的大小
       child: Text(ch.glyph,
-          style: szFigure(fontSize: size * 0.48, color: c, height: 1.0)),
+          style: szDisplay(
+              fontSize: size * 0.48,
+              fontWeight: FontWeight.w600,
+              color: c,
+              height: 1.0)),
     );
   }
 

@@ -294,7 +294,18 @@ const String kSerifFamily = 'SzSerif';
 /// OFL 替代。中文一律回落系统字——这两款都不含 CJK。
 const String kSansFamily = 'SzSans';
 
+/// 中文衬线显示字(思源宋体子集)。**只给大字用**,见 [szDisplay]。
+const String kSerifCjkFamily = 'SzSerifCJK';
+
 const List<String> _cjkFallback = ['PingFang SC', 'Noto Sans CJK SC', 'Heiti SC'];
+
+/// 大字位置的中文回落链:先找打包的宋体子集,没有再交给系统黑体。
+///
+/// 子集是 GB2312 一二级 + 源码固定文案(6764 字,简体常用全集),
+/// 所以商家名、菜名这类用户内容也盖得住。繁体字盖不住,会掉回黑体。
+const List<String> _displayFallback = [
+  kSerifCjkFamily, 'PingFang SC', 'Noto Sans CJK SC', 'Heiti SC',
+];
 
 /// 正文里的数字:评分、月售、距离、单量。旧式数字(onum),混排更贴合文字。
 ///
@@ -314,6 +325,44 @@ TextStyle szFigure({
       color: color,
       height: height,
       fontFeatures: const [FontFeature.oldstyleFigures()],
+    );
+
+/// 显示字:频道字块、页面大标题、品牌处的大字。**中文走宋体。**
+///
+/// ## 为什么只给大字
+///
+/// `assets/fonts/README.md` 原本写着「不含任何 CJK……避免中文被带成宋体」。
+/// 那个顾虑是对的,但它针对的是**正文**:宋体在 11px 上发虚,
+/// 而这个 App 有长辈版 1.4×,老年用户不少。
+///
+/// 所以宋体只在它擅长的尺寸出现 —— 这个样式默认 [fontSize] 不小于 16。
+/// [szFigure] / [szMoney] 的中文回落**没有动**,小字仍然是系统黑体。
+///
+/// ## 用户产生的内容也能用
+///
+/// 子集覆盖 **GB2312 一二级 + 源码固定文案**,共 6764 字 ——
+/// 简体中文的常用全集。商家名、菜名、地址、评价里的字基本都在里面,
+/// 所以商家详情页的标题用这个样式是安全的。
+///
+/// 这一档是有意选的:只覆盖固定文案的话包能小 4.6MB,
+/// 但用户会在标题里看到半宋半黑。
+///
+/// ⚠️ 仍然盖不住的:**繁体字**和 GB2312 外的生僻字。
+/// 商家起名用繁体(「老麵館」)是真实存在的,那种情况会掉回系统黑体。
+/// 要覆盖得再往上走一级 —— 见 `assets/fonts/README.md` 的体积表。
+TextStyle szDisplay({
+  double fontSize = 20,
+  FontWeight fontWeight = FontWeight.w600,
+  Color? color,
+  double? height,
+}) =>
+    TextStyle(
+      fontFamily: kSerifFamily,
+      fontFamilyFallback: _displayFallback,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      height: height,
     );
 
 /// 需要竖排对齐的金额:费用明细、对账列表。等宽 + 现代数字(tnum + lnum)。

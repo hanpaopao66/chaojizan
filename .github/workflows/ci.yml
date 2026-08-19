@@ -173,6 +173,14 @@ jobs:
       # 旧色板在绿色盲下最差色差 4.0(等于一排一样的方块),肉眼永远看不出来。
       - name: 频道色可分辨性
         run: python3 scripts/check_channel_tones.py
+      # 中文衬线是**子集**,只覆盖源码里的固定文案。
+      # 新加一句 UI 文案带了子集外的字,那个字会**默默**掉回系统黑体 ——
+      # 同一个标题里一半宋体一半黑体,不报错、不崩、没人会注意到。
+      # --check 只读已提交的子集 cmap,不下载 24MB 源字体。
+      - name: 显示字覆盖率
+        run: |
+          pip install --quiet fonttools
+          python3 scripts/gen_font_subset.py --check
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"
