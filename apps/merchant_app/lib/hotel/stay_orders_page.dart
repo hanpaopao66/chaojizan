@@ -19,7 +19,8 @@ class StayOrdersPage extends StatefulWidget {
   State<StayOrdersPage> createState() => _StayOrdersPageState();
 }
 
-class _StayOrdersPageState extends State<StayOrdersPage> {
+class _StayOrdersPageState extends State<StayOrdersPage>
+    with WidgetsBindingObserver {
   static const _states = [
     ('pending', '待确认'),
     ('arriving', '今日预抵'),
@@ -39,26 +40,62 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
 
   final OrderAnnouncer _announcer = OrderAnnouncer();
 
+  /// App 是不是在前台。后台时轮询降频,见 [didChangeAppLifecycleState]。
+  bool _foreground = true;
+
+  /// WebSocket 通没通。**后台靠它决定要不要轮询** ——
+  /// 连着的时候轮询带不来新信息,是纯重复请求。
+  bool _wsConnected = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // 锁屏不丢单三件套(与外卖同一套):权限引导 → 前台服务
       await ListenKeepAlive.ensurePermissions(context);
       await ListenKeepAlive.start();
     });
     _refresh();
-    // 轮询保底(WS 断线期间也不漏单)
-    _timer = Timer.periodic(const Duration(seconds: 20), (_) => _refresh());
-    // 持续催办:有待确认单每 15 秒播报一次,直到处理
+    _restartTimers();
+    _connectWs();
+  }
+
+  /// 切前后台。和外卖那页同一个问题、同一套解法(#291) ——
+  /// 前台服务带唤醒锁让 CPU 熄屏不休眠,而定时器在后台还全速跑,
+  /// 叠起来就是「待机发热」。
+  ///
+  /// 听单能力一点不动(WS、前台服务、催办语音全保持),
+  /// 降的是 WS 连着时那份纯重复的轮询。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final fg = state == AppLifecycleState.resumed;
+    if (fg == _foreground) return;
+    _foreground = fg;
+    _restartTimers();
+    if (fg) _refresh();
+  }
+
+  void _restartTimers() {
+    _timer?.cancel();
+    _alertTimer?.cancel();
+    // 轮询保底(WS 断线期间也不漏单)。
+    // 后台拉到 60 秒,而且 WS 连着就整轮跳过 —— 那时它带不来新信息
+    _timer = Timer.periodic(
+        Duration(seconds: _foreground ? 20 : 60), (_) {
+      if (!_foreground && _wsConnected) return;
+      _refresh();
+    });
+    // 持续催办:有待确认单每 15 秒播报一次,直到处理。
+    // **前后台同一个节奏** —— 后台听不见等于白做
     _alertTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (_pendingCount > 0) _announcer.announce();
     });
-    _connectWs();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _alertTimer?.cancel();
     _wsPing?.cancel();
@@ -82,6 +119,7 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
         const Duration(seconds: 30), (_) => _ws?.sink.add('ping'));
     _ws!.stream.listen(
       (message) {
+        if (!_wsConnected) _wsConnected = true;
         final data = jsonDecode(message as String) as Map<String, dynamic>;
         if (data['type'] == 'new_stay_order') {
           _announcer.announce();
@@ -101,6 +139,7 @@ class _StayOrdersPageState extends State<StayOrdersPage> {
   }
 
   void _scheduleReconnect() {
+    _wsConnected = false;
     Timer(const Duration(seconds: 5), () {
       if (mounted) _connectWs();
     });

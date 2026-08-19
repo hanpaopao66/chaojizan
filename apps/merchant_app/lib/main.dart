@@ -252,7 +252,8 @@ class MerchantHomePage extends StatefulWidget {
   State<MerchantHomePage> createState() => _MerchantHomePageState();
 }
 
-class _MerchantHomePageState extends State<MerchantHomePage> {
+class _MerchantHomePageState extends State<MerchantHomePage>
+    with WidgetsBindingObserver {
   int _tab = 0;
   int _segment = 0; // 0 待接单 / 1 进行中 / 2 历史
   List<Order> _orders = [];
@@ -262,6 +263,10 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
   Timer? _wsPing;
   WebSocketChannel? _ws;
   bool _wsConnected = false;
+
+  /// App 是不是在前台。**后台时轮询要降频** —— 见 [didChangeAppLifecycleState]。
+  bool _foreground = true;
+
   /// 最后一次**成功**拉到订单列表的时间。null = 从来没成功过
   DateTime? _lastOrdersOkAt;
   /// 最近一次拉取失败的原因;空串 = 上一次是成功的
@@ -402,29 +407,110 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'merchant');
-      // 锁屏不丢单三件套:权限引导 → 前台服务 → 语音催单
+      // 锁屏不丢单三件套:权限引导 → 前台服务 → 语音催单。
+      // **只在营业中才起前台服务** —— 见 _syncKeepAlive
       await ListenKeepAlive.ensurePermissions(context);
-      await ListenKeepAlive.start();
+      await _syncKeepAlive();
     });
     _refresh();
     _refreshToday();
-    // 轮询保底(WebSocket 断线期间也不会漏单)
-    _timer = Timer.periodic(const Duration(seconds: 15), (_) => _refresh());
-    _todayTimer = Timer.periodic(
-        const Duration(seconds: 30), (_) => _refreshToday());
-    // 持续催单:只要有待接订单,每 10 秒语音播报一次,直到商家处理
+    _restartTimers();
+    _connectWs();
+  }
+
+  /// 切前后台。
+  ///
+  /// ## 为什么必须有这个(#291)
+  ///
+  /// 商家反馈「后台待机发热严重」。查下来是三件事叠在一起:
+  ///
+  /// 1. `ListenKeepAlive` 的前台服务带 `allowWakeLock: true` ——
+  ///    熄屏后 CPU 不休眠(这是**故意的**,不然听不到单);
+  /// 2. 三个定时器在后台照常全速跑:15 秒拉一次订单、30 秒拉一次今日统计、
+  ///    10 秒查一次要不要催单。**每分钟 6 次网络请求,一整夜不停**;
+  /// 3. 这个页面此前**一个生命周期监听都没有**(用户端有 3 处、骑手端 1 处,
+  ///    就商家端漏了)。
+  ///
+  /// CPU 不许休眠 + 每 10 秒一次网络 I/O = 手机一直温着。
+  ///
+  /// ## 改成什么
+  ///
+  /// **不动听单能力**:WebSocket 保持连着、前台服务保持、催单语音保持 ——
+  /// 那是这个 App 存在的理由。降的是**白烧的那部分**:
+  ///
+  /// - 订单轮询在后台只在 **WS 断线时**才跑。WS 连着的时候它一条新信息
+  ///   都带不来,纯属重复(见 `_restartTimers`);
+  /// - 今日统计后台直接停 —— 熄着屏没人看仪表盘数字;
+  /// - 回到前台立刻补一次全量刷新,不靠下一个 tick。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final fg = state == AppLifecycleState.resumed;
+    if (fg == _foreground) return;
+    _foreground = fg;
+    _restartTimers();
+    if (fg) {
+      // 回前台立刻补齐,别等下一个 tick —— 后台期间可能已经进了新单
+      _refresh();
+      _refreshToday();
+    }
+  }
+
+  /// 按前后台重排定时器。
+  ///
+  /// 三个定时器的取舍各不相同,所以没有"统一降频"这种做法:
+  ///
+  /// | | 前台 | 后台 | 为什么 |
+  /// |---|---|---|---|
+  /// | 订单轮询 | 15 秒 | **60 秒,且只在 WS 断线时** | WS 连着时它带不来新信息 |
+  /// | 今日统计 | 30 秒 | **停** | 熄着屏没人看仪表盘 |
+  /// | 催单语音 | 10 秒 | 10 秒(不动) | 这是商家要听见的东西 |
+  void _restartTimers() {
+    _timer?.cancel();
+    _todayTimer?.cancel();
+    _alertTimer?.cancel();
+
+    // 轮询保底:WebSocket 断线期间也不会漏单。
+    // 后台拉长到 60 秒,而且 WS 连着就整轮跳过 —— 那时候它是纯重复请求
+    _timer = Timer.periodic(
+        Duration(seconds: _foreground ? 15 : 60), (_) {
+      if (!_foreground && _wsConnected) return;
+      _refresh();
+    });
+
+    // 今日统计只在前台刷:后台熄着屏,这几个数字没人看
+    if (_foreground) {
+      _todayTimer = Timer.periodic(
+          const Duration(seconds: 30), (_) => _refreshToday());
+    }
+
+    // 持续催单:只要有待接订单,每 10 秒语音播报一次,直到商家处理。
+    // **前后台一个节奏,不降频** —— 后台听不见催单等于这个 App 白做
     _alertTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (_orders.any((o) => o.status == OrderStatus.paid)) {
         _announcer.announce();
       }
     });
-    _connectWs();
+  }
+
+  /// 前台服务(唤醒锁)跟着营业状态走。
+  ///
+  /// 之前是进这个页面就无条件 `start()`,只在 `dispose()` 才 `stop()` ——
+  /// 也就是说**打烊一整晚,唤醒锁照样握着、订单照样轮询**。
+  /// 关了店还在听单,听到了也不能接。
+  Future<void> _syncKeepAlive() async {
+    if (_isOpen) {
+      await ListenKeepAlive.start();
+    } else {
+      await ListenKeepAlive.stop();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _alertTimer?.cancel();
     _todayTimer?.cancel();
@@ -1282,6 +1368,9 @@ class _MerchantHomePageState extends State<MerchantHomePage> {
                 setState(() => _isOpen = v);
                 try {
                   await widget.api.setShopOpen(v);
+                  // 打烊就放掉唤醒锁 —— 关了店还握着,听到单也不能接,
+                  // 纯烧电。开门再拿回来
+                  await _syncKeepAlive();
                 } catch (e) {
                   setState(() => _isOpen = !v);
                 }
