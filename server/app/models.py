@@ -1051,6 +1051,61 @@ class FlagHistory(Base):
     )
 
 
+class AdminActionLog(Base):
+    """管理员写操作留痕。
+
+    ## 为什么必须有
+
+    这些接口碰的是**钱和资格**:批不批一家店营业、放不放一笔提现、
+    极端天气停不停运。原先每个 handler 都拿到了 `admin: User`,
+    却一个都没记 —— 谁批的、什么时候批的、为什么批,事后查不到。
+
+    只能 curl 的时候这个缺口还小(操作少、门槛高、有人盯着);
+    一旦做成后台点两下就能批,它就变成一个真问题。**界面和留痕要一起上。**
+
+    ## 为什么快照管理员手机号
+
+    `admin_id` 是外键,但人是会离职的、账号是会改手机号的。
+    留痕的意义在于**事后能还原当时发生了什么**,所以把当时的手机号
+    抄一份存下来 —— 外键给你"是谁",快照给你"当时他是谁"。
+
+    ## 为什么不做成通用中间件
+
+    试过在中间件里拦所有 POST /admin/*,但那样只能记到路径和 body,
+    记不到**业务含义**(「驳回,理由:执照过期」比
+    「POST /admin/merchants/12/reject {"reason":"执照过期"}」有用得多),
+    也记不到操作前的状态。所以是各 handler 显式调 `log_admin_action`。
+    显式的代价是可能漏记 —— `tests/e2e_admin_audit.py` 盯着这一点。
+    """
+
+    __tablename__ = "admin_action_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    admin_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+
+    #: 操作当时的管理员手机号快照。人会离职、号会变,外键答"是谁",
+    #: 快照答"当时他是谁"
+    admin_phone: Mapped[str] = mapped_column(String(20), default="")
+
+    #: 动作标识,如 merchant.approve / withdrawal.paid / flag.set。
+    #: 用点分而不是自由文本 —— 将来要按动作聚合(这个月批了多少家)
+    action: Mapped[str] = mapped_column(String(50), index=True)
+
+    #: 操作对象类型与主键,如 ("merchant", 12)。
+    #: 分开存是为了能按对象查历史("这家店被谁动过")
+    target_type: Mapped[str] = mapped_column(String(30), default="", index=True)
+    target_id: Mapped[str] = mapped_column(String(40), default="", index=True)
+
+    #: 业务细节:驳回理由、改动前后的值、批量操作的条数。
+    #: **不许往里塞身份证号、银行卡号这类东西** —— 留痕是给运营复盘的,
+    #: 不是第二份敏感数据副本
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class RiskActionLog(Base):
     """反作弊处置留痕:透明中心按月聚合公示(限制/冻结/解除各多少)。
     公开侧绝不下发 user_id——只有计数,没有个案。"""

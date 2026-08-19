@@ -92,7 +92,8 @@ test:
 	  && python -m tests.e2e_upload_privacy \
 	  && python -m tests.e2e_readiness \
 	  && python -m tests.e2e_address_privacy && python -m tests.e2e_admin_stays \
-	  && python -m tests.e2e_admin_worklog && python -m tests.e2e_alcohol \
+	  && python -m tests.e2e_admin_worklog && python -m tests.e2e_admin_audit \
+	  && python -m tests.e2e_alcohol \
 	  && python -m tests.e2e_appeal && python -m tests.e2e_append_order \
 	  && python -m tests.e2e_boost_tip && python -m tests.e2e_business_hours2 \
 	  && python -m tests.e2e_cancel_rules && python -m tests.e2e_cart_reorder \

@@ -40,6 +40,7 @@ from ..schemas import (
     RejectIn,
 )
 from ..security import require_role
+from ..services.admin_audit import log_admin_action
 
 router = APIRouter(prefix="/admin", tags=["管理后台"])
 logger = logging.getLogger("superz.admin")
@@ -214,6 +215,9 @@ async def approve(
         raise HTTPException(409, "该商家已经是通过状态")
     shop.status = MerchantStatus.approved
     shop.reject_reason = ""
+    await log_admin_action(db, admin, "merchant.approve",
+                           target_type="merchant", target_id=shop.id,
+                           detail={"name": shop.name})
     await db.commit()
     await db.refresh(shop)
     owner = await db.get(User, shop.owner_id)
@@ -231,6 +235,9 @@ async def reject(
     shop.status = MerchantStatus.rejected
     shop.reject_reason = payload.reason
     shop.is_open = False  # 驳回即下线,防止先过审营业后再被驳回还挂在列表里
+    await log_admin_action(db, admin, "merchant.reject",
+                           target_type="merchant", target_id=shop.id,
+                           detail={"name": shop.name, "reason": payload.reason})
     await db.commit()
     await db.refresh(shop)
     owner = await db.get(User, shop.owner_id)
@@ -476,6 +483,11 @@ async def mark_paid(
     w.status = WithdrawalStatus.paid
     w.paid_note = (payload.note if payload else "")[:200]
     w.processed_at = datetime.now(timezone.utc)
+    # 钱出去了必须留痕:谁点的、多少钱、凭证号
+    await log_admin_action(db, admin, "withdrawal.paid",
+                           target_type="withdrawal", target_id=w.id,
+                           detail={"amount_cents": w.amount_cents,
+                                   "user_id": w.user_id, "note": w.paid_note})
     await db.commit()
     await db.refresh(w)
     return _withdrawal_out(w, await db.get(User, w.user_id))
@@ -502,6 +514,16 @@ async def batch_mark_paid(
         w.processed_at = datetime.now(timezone.utc)
         paid_riders.append((w.user_id, w.amount_cents))
         done += 1
+    # 批量只记一条,但把明细带上 —— 一次打了哪些、总共多少钱。
+    # 记成 N 条的话列表会被这一批刷屏,反而看不见别的操作
+    if done:
+        await log_admin_action(db, admin, "withdrawal.batch_paid",
+                               target_type="withdrawal_batch",
+                               target_id=str(done),
+                               detail={"count": done,
+                                       "total_cents": sum(a for _, a in paid_riders),
+                                       "user_ids": [u for u, _ in paid_riders][:50],
+                                       "note": payload.note[:200]})
     await db.commit()
     from ..services.push import push_to_user
     for rider_id, amount in paid_riders:
@@ -582,6 +604,11 @@ async def mark_withdrawal_failed(
     w.status = WithdrawalStatus.failed
     w.reject_reason = payload.reason
     w.processed_at = datetime.now(timezone.utc)
+    await log_admin_action(db, admin, "withdrawal.failed",
+                           target_type="withdrawal", target_id=w.id,
+                           detail={"amount_cents": w.amount_cents,
+                                   "user_id": w.user_id,
+                                   "reason": payload.reason})
     applicant = await db.get(User, w.user_id)
     # 自动工单:退票必然需要人工跟进收款信息,别等用户自己来问
     db.add(Ticket(
@@ -614,6 +641,11 @@ async def reject_withdrawal(
     w.status = WithdrawalStatus.rejected
     w.reject_reason = payload.reason
     w.processed_at = datetime.now(timezone.utc)
+    await log_admin_action(db, admin, "withdrawal.reject",
+                           target_type="withdrawal", target_id=w.id,
+                           detail={"amount_cents": w.amount_cents,
+                                   "user_id": w.user_id,
+                                   "reason": payload.reason})
     await db.commit()
     await db.refresh(w)
     return _withdrawal_out(w, await db.get(User, w.user_id))
@@ -942,6 +974,8 @@ async def approve_rider(
         raise HTTPException(409, "该骑手已通过认证")
     p.status = VerifyStatus.approved
     p.reject_reason = ""
+    await log_admin_action(db, admin, "rider_profile.approve",
+                           target_type="rider", target_id=rider_id)
     await db.commit()
     await db.refresh(p)
     return _rider_profile_out(p, await db.get(User, rider_id))
@@ -961,6 +995,9 @@ async def reject_rider(
     rider = await db.get(User, rider_id)
     if rider:
         rider.is_online = False
+    await log_admin_action(db, admin, "rider_profile.reject",
+                           target_type="rider", target_id=rider_id,
+                           detail={"reason": payload.reason})
     await db.commit()
     await db.refresh(p)
     return _rider_profile_out(p, rider)
@@ -1300,6 +1337,48 @@ async def list_flags(
     return {k: current.get(k, defaults.get(k, "off")) for k in _KNOWN_FLAGS}
 
 
+@router.get("/action-logs")
+async def list_action_logs(
+    action: str | None = None,
+    target_type: str | None = None,
+    target_id: str | None = None,
+    limit: int = 100,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """管理员写操作留痕。
+
+    **只读,没有删除接口** —— 能删的留痕等于没有留痕。
+    保留期由运维决定(建表时没设 TTL),要清理走 DBA 而不是走 API。
+    """
+    from ..models import AdminActionLog
+
+    q = select(AdminActionLog).order_by(AdminActionLog.created_at.desc())
+    if action:
+        q = q.where(AdminActionLog.action == action)
+    if target_type:
+        q = q.where(AdminActionLog.target_type == target_type)
+    if target_id:
+        q = q.where(AdminActionLog.target_id == str(target_id))
+    rows = (await db.execute(q.limit(max(1, min(limit, 500))))).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "admin_id": r.admin_id,
+            # 手机号打码:留痕列表是运营日常看的,不需要完整号码;
+            # 要精确到人有 admin_id
+            "admin_phone": (r.admin_phone[:3] + "****" + r.admin_phone[-4:])
+            if len(r.admin_phone) >= 7 else r.admin_phone,
+            "action": r.action,
+            "target_type": r.target_type,
+            "target_id": r.target_id,
+            "detail": r.detail,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]
+
+
 @router.post("/flags/{key}")
 async def set_flag(
     key: str,
@@ -1343,6 +1422,14 @@ async def set_flag(
     db.add(FlagHistory(
         key=key, old_value=old_value, new_value=value,
         reason=str(payload.get("reason", "")).strip()[:200]))
+
+    # FlagHistory 是**对外公示**用的,里面没有"谁改的" —— 那是故意的,
+    # 公开侧不下发管理员身份。内部问责另记一条
+    await log_admin_action(db, admin, "flag.set",
+                           target_type="flag", target_id=key,
+                           detail={"from": old_value, "to": value,
+                                   "reason": str(
+                                       payload.get("reason", "")).strip()[:200]})
 
     # 停运开关联动:自动挂/撤三端横幅公告 + 提醒在线骑手注意安全
     if key == "weather_shutdown":
