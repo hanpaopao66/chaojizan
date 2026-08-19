@@ -57,3 +57,41 @@ scp server/certs/apiclient_key.pem server/certs/pub_key.pem <部署机>:~/super-
    compose 把它挂到 api 容器 `/srv/certs:ro`(容器 WORKDIR=/srv),
    所以 `.env.prod` 里写相对路径 `certs/apiclient_key.pem`、`certs/pub_key.pem`。
    密钥缺失时 `get_client()` 记日志返回 None、支付接口 503,不会 500。
+
+## 发版失败的两种"看着成功"
+
+两次都是**退出码骗人**,而不是部署真的成功。都已经修掉,记在这里防止再犯。
+
+### 一、管道吞掉失败(2026-08-19)
+
+```bash
+bash scripts/deploy_server.sh | tail -40    # ← 别这么跑
+```
+
+管道的退出码取的是**最后一个命令**(`tail`)的。那次 docker build 在
+`pip install` 就 exit 2 了(阿里云源读超时),终端显示的却是 `exit 0`。
+表现是"部署成功"四个字,线上还是上一版。
+
+现在 `deploy_server.sh` 开头是 `set -eo pipefail`,脚本自身在管道里
+不会再被吞掉。但**调用方也别随手接 `| tail`** —— 想看尾部就
+`> /tmp/deploy.log 2>&1` 完了再 `tail`,退出码才是真的。
+
+### 二、`timeout` 命令不存在(更早一次)
+
+```bash
+timeout 900 bash deploy_server.sh || bash deploy_server.sh    # ← 别这么跑
+```
+
+macOS 默认没有 `timeout`(那是 GNU coreutils 的)。`command not found`
+返回 127,`||` 接住之后又跑了一遍……也是 127。整条命令 exit 0,
+**部署压根没跑**,输出看着还挺正常。
+
+### 构建失败不会弄坏生产
+
+这是唯一的好消息:`docker compose up -d --build` 构建失败时不会替换
+正在跑的容器。上面那次失败之后线上仍是上一版、健康检查全绿 ——
+只是新版本没上去。所以发现"部署成功但功能没有"时,先查的是
+**版本号**(`/health` 里的 `version` 和 `deployed_at`),不是查代码。
+
+pip 那步现在带 `--retries 5 --timeout 60`(见 `server/Dockerfile`),
+一次网络抖动不至于报废一次发版。

@@ -5,7 +5,17 @@
 # /orders/{no}/refunds),服务端不更新用户会见到 404。
 #
 # 用法:scripts/deploy_server.sh          (需在部署机所在局域网)
-set -e
+# -e:任一步失败就停,别在坏状态上继续往下走。
+# -o pipefail:**管道里前面的命令失败也算失败**。
+#
+# 这一条是踩出来的:`bash scripts/deploy_server.sh | tail -40` 跑完显示
+# "exited with code 0",而实际上 docker build 在 pip 那步就 exit 2 了 ——
+# 管道的退出码取的是最后一个命令(tail)的。表现是"部署成功"四个字,
+# 线上还是上一版。加了 pipefail 之后脚本自身在管道里也不会被吞掉。
+#
+# (同一类坑还有一次:`timeout 900 bash deploy_server.sh || bash deploy_server.sh`
+#  在没有 timeout 命令的 mac 上直接 exit 0,部署压根没跑。)
+set -eo pipefail
 cd "$(dirname "$0")/.."
 
 # 部署机地址不入库:deploy/.env.deploy(gitignore)写 DEPLOY=user@host,或环境变量传入

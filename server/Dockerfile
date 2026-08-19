@@ -22,7 +22,18 @@ RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR
 # pip 也走阿里云:服务器上 PyPI 官方源直接不通
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 COPY requirements.txt .
-RUN pip install --no-cache-dir -i "${PIP_INDEX_URL}" -r requirements.txt
+# --timeout / --retries 不是可有可无的。
+#
+# 2026-08-19 那次发版就死在这儿:阿里云源读超时,整个构建 exit 2,
+# 部署脚本停在重建容器那一步 —— 生产没坏(旧容器还跑着),
+# 但新版本上不去,而失败原因和代码一点关系都没有。
+#
+# 默认超时 15 秒对国内镜像站偏紧,包大一点(torch 那类没有,但 grpcio、
+# pydantic-core 也不小)碰上网络抖动就断。retries 5 + timeout 60
+# 是"多等一会儿"而不是"忽略错误":真的连不上还是会失败,
+# 只是不会因为一次抖动就报废一次发版。
+RUN pip install --no-cache-dir --retries 5 --timeout 60 \
+      -i "${PIP_INDEX_URL}" -r requirements.txt
 
 COPY app ./app
 COPY scripts ./scripts
