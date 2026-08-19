@@ -181,6 +181,11 @@ jobs:
         run: |
           pip install --quiet fonttools
           python3 scripts/gen_font_subset.py --check
+      # 硬编码字号的棘轮:只许降不许涨。
+      # 三端 737 处、34 种取值,一次改完不现实,但也不能继续发散 ——
+      # 11 / 11.5 / 12 / 12.5 混着用,每个页面的层次都对不齐。
+      - name: 字号不再发散
+        run: bash scripts/check_fontsize_drift.sh
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"

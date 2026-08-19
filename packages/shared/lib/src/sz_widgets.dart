@@ -271,21 +271,68 @@ class _SzMoneyFlowState extends State<SzMoneyFlow> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(children: [
-                  Text(item.name,
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: sz.ink)),
-                  const SizedBox(width: 8),
-                  Text('${(item.fraction * 100).toStringAsFixed(1)}%',
-                      style: szFigure(fontSize: 11, color: sz.inkMuted)),
-                  const Spacer(),
-                  Text(yuanOf(item.amountCents),
-                      style: szMoney(
-                          fontSize: 15,
-                          color: item.isHold ? sz.hold : sz.earn)),
-                ]),
+                // 挤不下时**让位的是百分比,不是名称也不是金额**。
+                //
+                // 原先这一行是「名称 + 百分比 + Spacer + 金额」三个都不可伸缩,
+                // 320 窄屏 + 长辈版 1.4× 下实测溢出 25px —— 生产上就是那条
+                // 黄黑警示条,而这偏偏是「钱怎么分的」那张卡。
+                //
+                // 第一版改成让名称缩,结果「商家实收」只分到 37px(需要 74px),
+                // 渲染出来是「商…」—— 一张讲账目透明的卡片,说不清钱归谁,
+                // 比排版难看严重得多。
+                //
+                // 所以让位顺序是:百分比 → 名称 → 金额。百分比排第一个是因为
+                // **下面那根进度条已经把它画出来了**,文字只是精确读数;
+                // 金额永远原样,一个字都不许切。
+                LayoutBuilder(builder: (context, box) {
+                  final pct = '${(item.fraction * 100).toStringAsFixed(1)}%';
+                  final nameStyle = TextStyle(
+                      fontSize: kFontBody,
+                      fontWeight: FontWeight.w500,
+                      color: sz.ink);
+                  final pctStyle =
+                      szFigure(fontSize: kFontMicro, color: sz.inkMuted);
+                  final moneyStyle = szMoney(
+                      fontSize: 15, color: item.isHold ? sz.hold : sz.earn);
+
+                  double widthOf(String text, TextStyle style) {
+                    final tp = TextPainter(
+                      text: TextSpan(text: text, style: style),
+                      textDirection: TextDirection.ltr,
+                      textScaler: MediaQuery.textScalerOf(context),
+                    )..layout();
+                    return tp.width;
+                  }
+
+                  final wName = widthOf(item.name, nameStyle);
+                  final wPct = widthOf(pct, pctStyle);
+                  final wMoney = widthOf(yuanOf(item.amountCents), moneyStyle);
+                  // 8 是名称和百分比之间、12 是和金额之间
+                  final roomy = wName + 8 + wPct + 12 + wMoney <= box.maxWidth;
+
+                  // ⚠️ 左半边整个包进 Expanded,**不要用 Spacer**:
+                  // Spacer 是 flex:1 的 Expanded,和名称的 Flexible 平分剩余
+                  // 空间 —— 名称永远只拿得到一半,有地方也不给。
+                  // 包成一层之后名称拿满剩余宽度,金额照样贴右。
+                  return Row(children: [
+                    Expanded(
+                      child: Row(children: [
+                        Flexible(
+                          child: Text(item.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: nameStyle),
+                        ),
+                        if (roomy) ...[
+                          const SizedBox(width: 8),
+                          Text(pct, style: pctStyle),
+                        ],
+                      ]),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(yuanOf(item.amountCents), style: moneyStyle),
+                  ]);
+                }),
                 const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(2),

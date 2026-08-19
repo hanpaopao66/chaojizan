@@ -284,6 +284,41 @@ const double kRadiusLg = 18;
 const double kPagePad = 18;
 const double kCardPad = 14;
 
+/// 字号档位。
+///
+/// ## 为什么要有它
+///
+/// 三端现在有 737 处硬编码 `fontSize`,分成 **34 种不同的值** ——
+/// 11 / 11.5 / 12 / 12.5 / 13 / 13.5 / 14 / 14.5 都在用,而且抽样看下来
+/// 半磅之差的两处根本是同一种场合。没人分得出 11.5 和 12,
+/// 但它让每个页面的层次都对不齐。
+///
+/// 下面五档取的是**现有用量最大的那几个值**(12 用了 182 处、11 用了 99 处、
+/// 13 用了 60 处),所以照着换是 1:1 平移,不会有视觉变化。
+///
+/// ## ⚠️ 这不是"把 737 处都换掉"的号召
+///
+/// 纯搬运没有用户可见的收益,回归面积却不小。真正的毛病是
+/// **长辈版 1.4× 下会不会画出界**,那个由 `test/large_text_overflow_test.dart`
+/// 盯着。这几个常量的作用是**新写的代码有档位可依**,
+/// 加上 `scripts/check_fontsize_drift.sh` 卡住总数不再涨。
+///
+/// 也**不要为了归档把特意的字号抹平** —— 比如 5% 承诺条那个 22px 衬线大字,
+/// 它是记忆点,不属于任何一档。
+///
+/// | 档 | 值 | 场合 |
+/// |---|---|---|
+/// | [kFontMicro] | 11 | 角标、时间戳、图例;能不读也不影响理解的 |
+/// | [kFontNote] | 12 | 说明、副标题、卡片里的次要行 |
+/// | [kFontBody] | 13 | 正文、列表主行 |
+/// | [kFontBodyLg] | 14 | 需要强调的正文、表单标签 |
+/// | [kFontTitle] | 16 | 区块标题、页面小标题 |
+const double kFontMicro = 11;
+const double kFontNote = 12;
+const double kFontBody = 13;
+const double kFontBodyLg = 14;
+const double kFontTitle = 16;
+
 /// 衬线字族(Literata 子集):金额、评分、距离等数字。
 /// 选它是因为 Literata 与 claude.ai 大标题用的 Galaxie Copernicus 同属
 /// Plantin 一脉的过渡期衬线;Copernicus 本身是商用授权,打不进开源仓。

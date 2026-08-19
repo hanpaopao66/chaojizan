@@ -3,6 +3,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'text_fit.dart';
+
 /// 金刚区**渲染**测试(排版规则的测试在 channel_grid_test.dart)。
 ///
 /// ## 为什么非要有这个
@@ -27,19 +29,6 @@ void main() {
           ),
       ];
 
-  /// 把视口真的调成手机尺寸。
-  ///
-  /// ⚠️ **光给 MediaQuery 传 size 是没用的。** widget 测试的渲染视口默认是
-  /// 800×600,MediaQuery 里那个 size 只是元数据,不改布局约束 ——
-  /// 结果是拿一块 800px 宽的屏在测「360 窄屏」,格子宽 146px,
-  /// 怎么排都不会挤。这个测试一开始就是这么写的,五列的字明明画出界了还全绿。
-  void setViewport(WidgetTester tester, Size logical) {
-    tester.view
-      ..devicePixelRatio = 3.0
-      ..physicalSize = logical * 3.0;
-    addTearDown(tester.view.reset);
-  }
-
   Widget host(List<SzChannel> chs, {double textScale = 1.0}) {
     return MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
@@ -57,35 +46,12 @@ void main() {
 
   /// 没有任何一段文字会画到自己的格子外面。
   ///
-  /// ## 为什么不能只看 takeException()
-  ///
-  /// 试过了:把 `softWrap: false` + `overflow: visible` 灌回去,
-  /// **测试照样全绿**。Flutter 不会为这种情况抛 RenderFlex overflow ——
-  /// 它老老实实把盒子裁到 58px,然后把 81.8px 的字画到隔壁格子上,
-  /// 一声不吭。比报错还难发现。
-  ///
-  /// ## 为什么只查 overflow: visible
-  ///
-  /// `ellipsis` / `clip` / `fade` 都是**故意的截断**,画不出界 ——
-  /// 难看归难看,不会糊到邻居身上。只有 `visible` 会。
-  /// (第一版没分这个,把所有 `maxLines: 1 + ellipsis` 全报成了错。)
-  ///
-  /// 判据用 `getMinIntrinsicWidth`:它是"这段字最少需要多宽"。
-  /// 中文能逐字换行,正常情况下等于一个字的宽度;
-  /// 一旦 `softWrap: false`,整行不许断,它就变成整行宽度。
+  /// 判据在 `text_fit.dart` 里 —— 那里写清了为什么不能只看
+  /// `takeException()`(静默画出界不抛异常),以及第一版判据
+  /// 只用 `getMinIntrinsicWidth` 错在哪(只在 maxLines:1 时成立)。
   void expectNothingPaintsOutside(WidgetTester tester, String why) {
-    for (final e in find.byType(Text).evaluate()) {
-      final w = e.widget as Text;
-      // null 表示继承 DefaultTextStyle,而它的默认是 clip —— 安全
-      if (w.overflow != TextOverflow.visible) continue;
-      final p = e.renderObject as RenderParagraph?;
-      if (p == null || !p.hasSize) continue;
-      final need = p.getMinIntrinsicWidth(double.infinity);
-      expect(need, lessThanOrEqualTo(p.size.width + 0.5),
-          reason: '$why:「${w.data}」最少要 ${need.toStringAsFixed(1)}px,'
-              '格子只有 ${p.size.width.toStringAsFixed(1)}px,'
-              '而它是 overflow:visible —— 会画到隔壁格子上');
-    }
+    final bad = textsPaintingOutside(tester);
+    expect(bad, isEmpty, reason: '$why 有字画到格子外:\n${bad.join("\n")}');
   }
 
   /// 某段文字有没有被截断(末尾变成省略号)。
@@ -98,7 +64,7 @@ void main() {
     for (final n in [1, 2, 3, 4, 5, 6, 7, 8, 9, 12]) {
       for (final scale in [1.0, 1.4]) {
         testWidgets('$n 个频道 · 字号 ${scale}× 不溢出', (tester) async {
-          setViewport(tester, const Size(360, 780));
+          setPhoneViewport(tester, const Size(360, 780));
           await tester.pumpWidget(host(fake(n), textScale: scale));
           // RenderFlex 那类溢出会记在这里
           expect(tester.takeException(), isNull,
@@ -111,7 +77,7 @@ void main() {
     }
 
     testWidgets('窄屏 320 也不撑爆(iPhone SE 一代那个宽度)', (tester) async {
-      setViewport(tester, const Size(320, 640));
+      setPhoneViewport(tester, const Size(320, 640));
       await tester.pumpWidget(host(fake(8), textScale: 1.4));
       expect(tester.takeException(), isNull);
       expectNothingPaintsOutside(tester, '320 窄屏 · 1.4×');
@@ -120,20 +86,20 @@ void main() {
 
   group('两种排法长相不同', () {
     testWidgets('卡片式(4 个)有副标题', (tester) async {
-      setViewport(tester, const Size(360, 780));
+      setPhoneViewport(tester, const Size(360, 780));
       await tester.pumpWidget(host(fake(4)));
       expect(find.textContaining('一句话说明'), findsNWidgets(4));
     });
 
     testWidgets('聚合式(5 个)没有副标题 —— 那是它换排法的代价', (tester) async {
-      setViewport(tester, const Size(360, 780));
+      setPhoneViewport(tester, const Size(360, 780));
       await tester.pumpWidget(host(fake(5)));
       expect(find.textContaining('一句话说明'), findsNothing);
       expect(find.text('超值频道0'), findsOneWidget);
     });
 
     testWidgets('两种排法都保留频道字 —— 色觉缺陷下那是唯一的标识', (tester) async {
-      setViewport(tester, const Size(360, 780));
+      setPhoneViewport(tester, const Size(360, 780));
       for (final n in [4, 5, 8]) {
         await tester.pumpWidget(host(fake(n)));
         expect(find.text('频'), findsNWidgets(n),
@@ -158,7 +124,7 @@ void main() {
   group('真实频道名放得下', () {
     for (final scale in [1.0, 1.4]) {
       testWidgets('${scale}× 字号下没有一个频道名被切成省略号', (tester) async {
-        setViewport(tester, const Size(360, 780));
+        setPhoneViewport(tester, const Size(360, 780));
         await tester.pumpWidget(host(kChannels, textScale: scale));
         for (final ch in kChannels) {
           expect(truncated(ch.name), isFalse,
@@ -169,7 +135,7 @@ void main() {
     }
 
     testWidgets('320 窄屏 + 长辈版 1.4× 仍然放得下', (tester) async {
-      setViewport(tester, const Size(320, 640));
+      setPhoneViewport(tester, const Size(320, 640));
       await tester.pumpWidget(host(kChannels, textScale: 1.4));
       for (final ch in kChannels) {
         expect(truncated(ch.name), isFalse, reason: '「${ch.name}」在 320 窄屏被截断');
@@ -179,7 +145,7 @@ void main() {
 
   group('频道字走打包的宋体', () {
     testWidgets('字块里的中文回落链第一顺位是 SzSerifCJK', (tester) async {
-      setViewport(tester, const Size(360, 780));
+      setPhoneViewport(tester, const Size(360, 780));
       await tester.pumpWidget(host(kChannels));
       final t = tester.widget<Text>(find.text(kChannels.first.glyph));
       // szFigure 的回落是系统黑体 —— 那样这个衬线字块里会坐着一个黑体字。
@@ -198,7 +164,7 @@ void main() {
   });
 
   testWidgets('真实频道表渲染得出来', (tester) async {
-    setViewport(tester, const Size(360, 780));
+    setPhoneViewport(tester, const Size(360, 780));
     await tester.pumpWidget(host(kChannels));
     expect(tester.takeException(), isNull);
     for (final ch in kChannels) {
