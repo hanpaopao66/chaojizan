@@ -24,7 +24,7 @@ export default function LoginPage({ onAuthed }: { onAuthed: () => void }) {
       // 先告诉 App 已登录,再跳 —— 反过来的话 App 那一层还是旧的登录态,
       // 会把刚跳过去的路由又弹回登录页(见 App.tsx 的注释)
       onAuthed()
-      nav('/merchants', { replace: true })
+      nav('/dashboard', { replace: true })
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : String(e))
     } finally {

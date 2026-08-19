@@ -1,5 +1,9 @@
 import {
   AuditOutlined,
+  CarOutlined,
+  CustomerServiceOutlined,
+  DashboardOutlined,
+  ExceptionOutlined,
   BankOutlined,
   ControlOutlined,
   FileSearchOutlined,
@@ -14,7 +18,11 @@ import { useState } from 'react'
 
 import { clearToken } from '../api'
 import { useNarrow } from '../hooks/useNarrow'
+import AftersalesPage from '../pages/AftersalesPage'
 import AuditPage from '../pages/AuditPage'
+import DashboardPage from '../pages/DashboardPage'
+import IssuesPage from '../pages/IssuesPage'
+import TicketsPage from '../pages/TicketsPage'
 import FlagsPage from '../pages/FlagsPage'
 import LogsPage from '../pages/LogsPage'
 import MerchantsPage from '../pages/MerchantsPage'
@@ -35,9 +43,13 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const items = [
+    { key: '/dashboard', icon: <DashboardOutlined />, label: '数据看板' },
     { key: '/merchants', icon: <ShopOutlined />, label: '商家审核' },
     { key: '/riders', icon: <SafetyCertificateOutlined />, label: '骑手实名' },
     { key: '/withdrawals', icon: <BankOutlined />, label: '提现打款' },
+    { key: '/tickets', icon: <CustomerServiceOutlined />, label: '客服工单' },
+    { key: '/aftersales', icon: <ExceptionOutlined />, label: '售后仲裁' },
+    { key: '/issues', icon: <CarOutlined />, label: '配送异常' },
     { key: '/flags', icon: <ControlOutlined />, label: '平台开关' },
     { key: '/audit', icon: <FileSearchOutlined />, label: '对账自检' },
     { key: '/logs', icon: <AuditOutlined />, label: '操作留痕' },
@@ -99,13 +111,17 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
         </Layout.Header>
         <Layout.Content style={{ padding: 16, overflow: 'auto' }}>
           <Routes>
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/merchants" element={<MerchantsPage />} />
+            <Route path="/tickets" element={<TicketsPage />} />
+            <Route path="/aftersales" element={<AftersalesPage />} />
+            <Route path="/issues" element={<IssuesPage />} />
             <Route path="/riders" element={<RidersPage />} />
             <Route path="/withdrawals" element={<WithdrawalsPage />} />
             <Route path="/flags" element={<FlagsPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/logs" element={<LogsPage />} />
-            <Route path="*" element={<Navigate to="/merchants" replace />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </Layout.Content>
       </Layout>

@@ -270,3 +270,96 @@ export const listActionLogs = (q: {
     .join('&')
   return get<ActionLog[]>(`/admin/action-logs${qs ? `?${qs}` : ''}`)
 }
+
+// ---------- 数据看板 ----------
+
+export interface DashboardOut {
+  today: {
+    orders: number
+    gmv_cents: number
+    commission_cents: number
+    active_merchants: number
+    active_riders: number
+    new_users: number
+  }
+  trend_7d: { day: string; orders: number; gmv: number }[]
+  pending: {
+    merchants: number
+    riders: number
+    withdrawals: number
+    tickets: number
+    after_sales: number
+    stay_orders: number
+    stay_aftersales: number
+  }
+  totals: { users: number; merchants: number; riders: number; orders: number }
+  audit_alerts: { check: string; detail: string; created_at: string }[]
+}
+
+export const getDashboard = () => get<DashboardOut>('/admin/dashboard')
+
+// ---------- 客服工单 ----------
+
+export interface Ticket {
+  id: number
+  role: string
+  status: string
+  content: string
+  reply: string
+  contact: string
+  user_phone: string
+  created_at: string
+}
+
+export const listTickets = () => get<Ticket[]>('/admin/tickets')
+export const replyTicket = (id: number, reply: string) =>
+  post(`/admin/tickets/${id}/reply`, { reply })
+export const closeTicket = (id: number) => post(`/admin/tickets/${id}/close`)
+
+// ---------- 售后仲裁 ----------
+
+export interface AfterSale {
+  id: number
+  order_no: string
+  status: string
+  reason: string
+  fault: string
+  images: string[]
+  refund_cents: number
+  total_cents: number
+  created_at: string
+}
+
+export const listAfterSales = (days = 7) =>
+  get<AfterSale[]>(`/admin/after-sales?days=${days}`)
+/** 判骑手责任:全额退用户(含配送费),商家骑手收入不动,损失走骑手保障金 */
+export const riderFault = (id: number, reason: string) =>
+  post<{ refunded_cents: number }>(`/admin/after-sales/${id}/rider-fault`, { reason })
+
+// ---------- 配送异常 ----------
+
+export interface DeliveryIssue {
+  id: number
+  order_no: string
+  kind: string
+  note: string
+  photo_url: string
+  address: string
+  contact_phone: string
+  rider_name: string
+  rider_phone: string
+  order_status: string
+  created_at?: string
+}
+
+export const listDeliveryIssues = (status = 'open') =>
+  get<DeliveryIssue[]>(`/admin/delivery-issues?status=${status}`)
+/** 处置配送异常。**action 是必填的** —— 后端是 Literal,少传直接 422。
+ *  - continue_delivery 让骑手继续送
+ *  - mark_delivered 判定已送达
+ *  - refund 退款 */
+export type IssueAction = 'continue_delivery' | 'mark_delivered' | 'refund'
+
+export const resolveDeliveryIssue = (
+  id: number, action: IssueAction, note: string,
+) => post(`/admin/delivery-issues/${id}/resolve`, { action, note })
