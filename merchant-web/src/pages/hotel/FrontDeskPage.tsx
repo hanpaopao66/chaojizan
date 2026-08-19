@@ -82,7 +82,7 @@ export default function FrontDeskPage({ shop }: { shop: Merchant }) {
           action={<Button size="small" type="primary" onClick={enableSound}>开启声音</Button>}
         />
       )}
-      <Space style={{ marginBottom: 8, fontSize: 12, color: '#888' }}>
+      <Space style={{ marginBottom: 8, fontSize: 12, color: 'var(--sz-ink-muted)' }}>
         <Badge status={connected ? 'success' : 'error'} />
         {connected ? '实时听单中' : '连接中断,轮询保底'}
       </Space>
@@ -130,11 +130,11 @@ function BoardColumn({ title, orders, onChanged, highlight }: {
     <Col xs={24} md={12} xl={6}>
       <Card
         size="small"
-        title={<span style={{ color: highlight && orders.length > 0 ? '#FF5A1F' : undefined }}>{title}</span>}
+        title={<span style={{ color: highlight && orders.length > 0 ? 'var(--sz-clay)' : undefined }}>{title}</span>}
         style={{ minHeight: 200 }}
       >
         {orders.length === 0
-          ? <div style={{ color: '#bbb', textAlign: 'center', padding: 24 }}>无</div>
+          ? <div style={{ color: 'var(--sz-ink-muted)', textAlign: 'center', padding: 24 }}>无</div>
           : orders.map((o) => (
               <OrderCard key={o.order_no} order={o} onChanged={onChanged} compact />
             ))}
@@ -232,30 +232,30 @@ function OrderCard({ order, onChanged, compact }: {
         <b>{order.room_type_name} × {order.rooms_qty}</b>
         <Tag color={STATUS_COLORS[order.status]}>{order.status_label}</Tag>
       </div>
-      <div style={{ fontSize: 13, color: '#555' }}>
+      <div style={{ fontSize: 13, color: 'var(--sz-ink-muted)' }}>
         {order.checkin_date} → {order.checkout_date}({order.nights} 晚) · {yuan(order.total_cents)}
       </div>
       <div style={{ fontSize: 13 }}>
         {order.guest_name} · <a href={`tel:${order.guest_phone}`}>{order.guest_phone}</a>
       </div>
       {order.arrival_note && (
-        <div style={{ fontSize: 12, color: '#888' }}>备注:{order.arrival_note}</div>
+        <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>备注:{order.arrival_note}</div>
       )}
       {!compact && (
-        <div style={{ fontSize: 12, color: '#888' }}>{order.cancel_policy_text}</div>
+        <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>{order.cancel_policy_text}</div>
       )}
       {order.status === 'completed' && (
-        <div style={{ fontSize: 12, color: '#0E8A5F', fontWeight: 600 }}>
+        <div style={{ fontSize: 12, color: 'var(--sz-earn)', fontWeight: 600 }}>
           实收 {yuan(order.net_cents)}(佣金 {yuan(order.fee_cents)})
         </div>
       )}
       {order.refund_cents > 0 && (
-        <div style={{ fontSize: 12, color: '#e5484d' }}>
+        <div style={{ fontSize: 12, color: 'var(--sz-danger)' }}>
           已退款 {yuan(order.refund_cents)}({order.refund_note})
         </div>
       )}
       {order.status === 'noshow' && (
-        <div style={{ fontSize: 12, color: '#888' }}>
+        <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>
           系统已按政策处理:扣首晚 {yuan(order.net_cents)} 归你,其余退客人
         </div>
       )}

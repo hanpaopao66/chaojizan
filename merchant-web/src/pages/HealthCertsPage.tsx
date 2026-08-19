@@ -50,7 +50,7 @@ export default function HealthCertsPage() {
       title="从业人员健康证"
       extra={
         <>
-          <span style={{ marginRight: 8, fontSize: 13, color: '#8c8c8c' }}>
+          <span style={{ marginRight: 8, fontSize: 13, color: 'var(--sz-ink-muted)' }}>
             显示已离职
           </span>
           <Switch size="small" checked={showArchived}
@@ -129,7 +129,7 @@ export default function HealthCertsPage() {
           },
         ]}
       />
-      <div style={{ marginTop: 12, color: '#8c8c8c', fontSize: 12 }}>{note}</div>
+      <div style={{ marginTop: 12, color: 'var(--sz-ink-muted)', fontSize: 12 }}>{note}</div>
       <CertModal
         open={editing !== undefined}
         cert={editing ?? null}

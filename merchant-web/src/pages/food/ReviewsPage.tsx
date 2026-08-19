@@ -69,8 +69,8 @@ export default function ReviewsPage() {
   const stars = (n: number) => (
     <span>
       {[1, 2, 3, 4, 5].map((i) => i <= n
-        ? <StarFilled key={i} style={{ color: n <= 3 ? '#ff4d4f' : '#faad14', fontSize: 13 }} />
-        : <StarOutlined key={i} style={{ color: '#ddd', fontSize: 13 }} />)}
+        ? <StarFilled key={i} style={{ color: n <= 3 ? 'var(--sz-danger)' : 'var(--sz-hold)', fontSize: 13 }} />
+        : <StarOutlined key={i} style={{ color: 'var(--sz-ink-faint)', fontSize: 13 }} />)}
     </span>
   )
 
@@ -105,24 +105,24 @@ export default function ReviewsPage() {
             {stars(r.merchant_rating)}
             {r.tags.map((t) => <Tag key={t}>{t}</Tag>)}
             <span style={{ flex: 1 }} />
-            <span style={{ color: '#999', fontSize: 12 }}>
+            <span style={{ color: 'var(--sz-ink-muted)', fontSize: 12 }}>
               {r.created_at.slice(0, 10)}
             </span>
           </div>
           {r.comment && <div style={{ marginTop: 4 }}>{r.comment}</div>}
           {photos(r.image_urls)}
           {r.reply && (
-            <div style={{ fontSize: 13, color: '#FF5A1F', marginTop: 4 }}>
+            <div style={{ fontSize: 13, color: 'var(--sz-clay)', marginTop: 4 }}>
               我的回复:{r.reply}
             </div>
           )}
           {r.append_at && (
-            <div style={{ marginTop: 6, paddingLeft: 8, borderLeft: '2px solid #eee' }}>
-              <div style={{ fontSize: 12, color: '#888' }}>用户追评</div>
+            <div style={{ marginTop: 6, paddingLeft: 8, borderLeft: '2px solid var(--sz-line)' }}>
+              <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>用户追评</div>
               {r.append_content && <div>{r.append_content}</div>}
               {photos(r.append_images)}
               {r.append_reply && (
-                <div style={{ fontSize: 13, color: '#FF5A1F' }}>
+                <div style={{ fontSize: 13, color: 'var(--sz-clay)' }}>
                   追评回复:{r.append_reply}
                 </div>
               )}
@@ -175,10 +175,10 @@ function OverviewCard() {
                   ((all.dist[String(star)] ?? 0) / all.count) * 100) : 0}
                 size="small"
                 showInfo={false}
-                strokeColor={star <= 3 ? '#cf1322' : '#faad14'}
+                strokeColor={star <= 3 ? 'var(--sz-danger)' : 'var(--sz-hold)'}
                 style={{ flex: 1, margin: 0 }}
               />
-              <span style={{ width: 28, textAlign: 'right', color: '#888' }}>
+              <span style={{ width: 28, textAlign: 'right', color: 'var(--sz-ink-muted)' }}>
                 {all.dist[String(star)] ?? 0}
               </span>
             </div>
@@ -186,14 +186,14 @@ function OverviewCard() {
         </div>
         <div style={{ fontSize: 12, lineHeight: 2 }}>
           {trend != null && (
-            <div style={{ color: trend > 0 ? '#389e0d' : trend < 0 ? '#cf1322' : '#888' }}>
+            <div style={{ color: trend > 0 ? 'var(--sz-earn)' : trend < 0 ? 'var(--sz-danger)' : 'var(--sz-ink-muted)' }}>
               近 30 天 {trend > 0 ? `↑${trend}` : trend < 0 ? `↓${-trend}` : '持平'}
-              <span style={{ color: '#999' }}>（对比更早)</span>
+              <span style={{ color: 'var(--sz-ink-muted)' }}>（对比更早)</span>
             </div>
           )}
           <div>近 30 天 {d30.count} 条,均分 {d30.avg ?? '—'}</div>
           {d30.bad_unreplied > 0 && (
-            <div style={{ color: '#cf1322' }}>
+            <div style={{ color: 'var(--sz-danger)' }}>
               还有 {d30.bad_unreplied} 条差评没回
             </div>
           )}

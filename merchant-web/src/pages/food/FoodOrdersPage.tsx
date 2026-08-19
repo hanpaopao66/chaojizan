@@ -116,7 +116,7 @@ export default function FoodOrdersPage({ shop }: { shop: Merchant }) {
           action={<Button size="small" type="primary" onClick={enableSound}>开启声音</Button>}
         />
       )}
-      <Space style={{ marginBottom: 8, fontSize: 12, color: '#888' }}>
+      <Space style={{ marginBottom: 8, fontSize: 12, color: 'var(--sz-ink-muted)' }}>
         <Badge status={connected ? 'success' : 'error'} />
         {connected ? '实时听单中' : '连接中断,轮询保底'}
         <Input.Search
@@ -139,7 +139,7 @@ export default function FoodOrdersPage({ shop }: { shop: Merchant }) {
             setSearchQ(''); setSearchResults(null)
           }}>清除</Button>}>
           {searchResults.length === 0 && (
-            <span style={{ color: '#999' }}>没有匹配的订单</span>
+            <span style={{ color: 'var(--sz-ink-muted)' }}>没有匹配的订单</span>
           )}
           <Row gutter={12}>
             {searchResults.map((o) => (
@@ -180,7 +180,7 @@ function BoardColumn({ title, highlight, children }: {
     <Col xs={24} md={8}>
       <Card
         size="small"
-        title={<span style={{ color: highlight ? '#FF5A1F' : undefined }}>{title}</span>}
+        title={<span style={{ color: highlight ? 'var(--sz-clay)' : undefined }}>{title}</span>}
         style={{ minHeight: 300 }}
         styles={{ body: { maxHeight: 'calc(100vh - 300px)', overflowY: 'auto' } }}
       >
@@ -361,7 +361,7 @@ function OrderCard({ order, urged, onChanged }: {
       size="small"
       style={{
         marginBottom: 8,
-        border: order.ready_late ? '1.5px solid #e5484d' : undefined,
+        border: order.ready_late ? '1.5px solid var(--sz-danger)' : undefined,
       }}
     >
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -384,23 +384,23 @@ function OrderCard({ order, urged, onChanged }: {
       {order.status === 'accepted' && prepMinutes != null && (
         <div style={{
           fontSize: 12, fontWeight: 600,
-          color: order.ready_late ? '#e5484d' : '#0E8A5F',
+          color: order.ready_late ? 'var(--sz-danger)' : 'var(--sz-earn)',
         }}>
           {order.ready_late ? `⚠ 出餐超时 · 已备餐 ${prepMinutes} 分钟` : `备餐中 · 已 ${prepMinutes} 分钟`}
         </div>
       )}
-      <div style={{ fontSize: 13, color: '#555' }}>
+      <div style={{ fontSize: 13, color: 'var(--sz-ink-muted)' }}>
         {yuan(order.total_cents)}{order.address ? ` · ${order.address}` : ''}
       </div>
-      {order.remark && <div style={{ fontSize: 12, color: '#888' }}>备注:{order.remark}</div>}
+      {order.remark && <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>备注:{order.remark}</div>}
       {/* 本店对这位顾客的备注:"302 那位不要香菜" —— 老客维护靠这个,
           在接单台上就能看到、就能改,回头再找就没人记了 */}
       <CustomerNoteLine order={order} />
       {order.status === 'cancelled' && order.cancel_reason && (
-        <div style={{ fontSize: 12, color: '#e5484d' }}>取消原因:{order.cancel_reason}</div>
+        <div style={{ fontSize: 12, color: 'var(--sz-danger)' }}>取消原因:{order.cancel_reason}</div>
       )}
       {order.refund_cents > 0 && (
-        <div style={{ fontSize: 12, color: '#e5484d' }}>
+        <div style={{ fontSize: 12, color: 'var(--sz-danger)' }}>
           已退款 {yuan(order.refund_cents)}({order.refund_note})
         </div>
       )}
@@ -478,7 +478,7 @@ function CustomerNoteLine({ order }: { order: FoodOrder }) {
         <Tag key={t} color="blue" style={{ marginInlineEnd: 4 }}>{t}</Tag>
       ))}
       <Tooltip title="只你自己看得到,不跨店">
-        <a onClick={edit} style={{ color: note ? '#1677ff' : '#bbb' }}>
+        <a onClick={edit} style={{ color: note ? 'var(--sz-link)' : 'var(--sz-ink-muted)' }}>
           {note || '＋记一句'}
         </a>
       </Tooltip>

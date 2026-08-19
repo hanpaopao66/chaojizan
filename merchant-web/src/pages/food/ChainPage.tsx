@@ -65,7 +65,7 @@ export default function ChainPage({ shop }: { shop: Merchant }) {
                 <li>把菜价、描述一次同步到指定的几家店</li>
                 <li>请区域经理帮你管几家店,不用把账号密码给别人</li>
               </ul>
-              <p style={{ color: '#8c8c8c' }}>
+              <p style={{ color: 'var(--sz-ink-muted)' }}>
                 新门店仍要各自提交证照并照走审核 ——
                 食品经营许可证按门店核发,总部的不能给分店用。
               </p>
@@ -114,7 +114,7 @@ export default function ChainPage({ shop }: { shop: Merchant }) {
               <Statistic title="未回差评"
                 value={overview.total.bad_unreplied}
                 valueStyle={overview.total.bad_unreplied > 0
-                  ? { color: '#cf1322' } : undefined} />
+                  ? { color: 'var(--sz-danger)' } : undefined} />
             </Space>
             <Table
               rowKey="shop_id"
@@ -141,7 +141,7 @@ export default function ChainPage({ shop }: { shop: Merchant }) {
                 {
                   title: '出餐超时', dataIndex: 'ready_late', width: 100,
                   render: (v: number) => v > 0
-                    ? <span style={{ color: '#cf1322' }}>{v}</span> : v,
+                    ? <span style={{ color: 'var(--sz-danger)' }}>{v}</span> : v,
                 },
                 {
                   title: '评分', dataIndex: 'rating_avg', width: 90,
@@ -150,11 +150,11 @@ export default function ChainPage({ shop }: { shop: Merchant }) {
                 {
                   title: '未回差评', dataIndex: 'bad_unreplied', width: 100,
                   render: (v: number) => v > 0
-                    ? <span style={{ color: '#cf1322' }}>{v}</span> : v,
+                    ? <span style={{ color: 'var(--sz-danger)' }}>{v}</span> : v,
                 },
               ]}
             />
-            <div style={{ marginTop: 12, color: '#8c8c8c', fontSize: 12 }}>
+            <div style={{ marginTop: 12, color: 'var(--sz-ink-muted)', fontSize: 12 }}>
               {overview.note}
             </div>
           </>
@@ -424,7 +424,7 @@ function BrandFinanceCard({ days }: { days: number }) {
               },
             ]}
           />
-          <div style={{ marginTop: 12, color: '#8c8c8c', fontSize: 12 }}>
+          <div style={{ marginTop: 12, color: 'var(--sz-ink-muted)', fontSize: 12 }}>
             {data.note}
           </div>
         </>

@@ -310,11 +310,11 @@ function EffectCard() {
         <Statistic title="券让利" value={yuan(coupon.give_cents)} />
         <Statistic title="让利合计" value={yuan(stats.total_give_cents)} />
       </Space>
-      <div style={{ fontSize: 12, color: '#666', lineHeight: 1.8 }}>
+      <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)', lineHeight: 1.8 }}>
         客单价:用活动的单 {yuan(promo.avg_ticket_cents)} vs
         没用活动的单 {yuan(plain.avg_ticket_cents)}
         {promo.orders > 0 && plain.orders > 0 && (
-          <span style={{ color: diff >= 0 ? '#389e0d' : '#cf1322' }}>
+          <span style={{ color: diff >= 0 ? 'var(--sz-earn)' : 'var(--sz-danger)' }}>
             （{diff >= 0 ? '+' : ''}{yuan(diff)}）
           </span>
         )}
@@ -324,7 +324,7 @@ function EffectCard() {
             {stats.flash.map((f) => `${f.name}(月售 ${f.monthly_sales})`).join('、')}
             <br /></>
         )}
-        <span style={{ color: '#999' }}>{stats.note}</span>
+        <span style={{ color: 'var(--sz-ink-muted)' }}>{stats.note}</span>
       </div>
     </Card>
   )

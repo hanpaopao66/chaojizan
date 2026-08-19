@@ -287,7 +287,7 @@ export default function ApplymentPage() {
               保存资料
             </Button>
             <Button onClick={load} disabled={saving}>放弃修改,重新载入</Button>
-            <span style={{ color: '#8c8c8c', fontSize: 12 }}>
+            <span style={{ color: 'var(--sz-ink-muted)', fontSize: 12 }}>
               可以只填一部分先存着,不用一次填完。
             </span>
           </Space>
@@ -452,7 +452,7 @@ function StatusCard({ data }: { data: Applyment | null }) {
         </div>}
       />
       {(data?.applyment_no || data?.applyment_updated_at) && (
-        <div style={{ marginTop: 10, color: '#8c8c8c', fontSize: 12 }}>
+        <div style={{ marginTop: 10, color: 'var(--sz-ink-muted)', fontSize: 12 }}>
           {data.applyment_no && <>微信申请单号:{data.applyment_no}　</>}
           {data.applyment_updated_at && <>
             最后更新:{new Date(data.applyment_updated_at).toLocaleString('zh-CN')}
@@ -500,7 +500,7 @@ function MissingCard({ data }: { data: Applyment | null }) {
       }
       description={
         <div>
-          <div style={{ marginBottom: 6, fontSize: 12, color: '#595959' }}>
+          <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--sz-ink-muted)' }}>
             这份清单是服务端算的,以它为准 —— 个体工商户和企业要交的东西不一样,
             不用你自己对着规则猜。
           </div>
@@ -519,7 +519,7 @@ function SectionTitle({ text }: { text: string }) {
   return (
     <div style={{
       fontWeight: 600, fontSize: 14, margin: '4px 0 12px',
-      paddingLeft: 8, borderLeft: '3px solid #FF5A1F',
+      paddingLeft: 8, borderLeft: '3px solid var(--sz-clay)',
     }}>
       {text}
     </div>

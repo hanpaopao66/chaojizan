@@ -272,7 +272,7 @@ function HotelCard() {
         </Form.Item>
         <Form.Item label="资质(只读)">
           <Tag>特种行业许可证:{profile.special_license_no}</Tag>
-          <span style={{ color: '#888', fontSize: 12, marginLeft: 8 }}>
+          <span style={{ color: 'var(--sz-ink-muted)', fontSize: 12, marginLeft: 8 }}>
             变更资质请联系平台客服人工核验
           </span>
         </Form.Item>
@@ -314,7 +314,7 @@ function StaffCard() {
         <Input value={name} placeholder="备注名(选填)" maxLength={20}
           style={{ width: 140 }} onChange={(e) => setName(e.target.value)} />
         <Button type="primary" onClick={add}>添加</Button>
-        <span style={{ color: '#888', fontSize: 12 }}>
+        <span style={{ color: 'var(--sz-ink-muted)', fontSize: 12 }}>
           对方需先用商家端 App 或本网页登录过一次(同手机号的商家账号)
         </span>
       </Space>

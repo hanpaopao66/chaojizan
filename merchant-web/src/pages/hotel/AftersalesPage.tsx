@@ -114,10 +114,10 @@ export default function AftersalesPage() {
             </div>
             {a.note && <div style={{ fontSize: 13 }}>客人说明:{a.note}</div>}
             {a.merchant_note && (
-              <div style={{ fontSize: 12, color: '#888' }}>我的回应:{a.merchant_note}</div>
+              <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>我的回应:{a.merchant_note}</div>
             )}
             {(a.status === 'accepted' || a.status === 'auto_accepted') && (
-              <div style={{ fontSize: 12, color: '#0E8A5F' }}>
+              <div style={{ fontSize: 12, color: 'var(--sz-earn)' }}>
                 退款 {yuan(a.refund_cents)}
                 {a.penalty_cents > 0 && `(含违约金 ${yuan(a.penalty_cents)})`}
               </div>
@@ -125,7 +125,7 @@ export default function AftersalesPage() {
             {a.status === 'pending' && (
               <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
                 {a.kind === 'no_room' && (
-                  <span style={{ color: '#e5484d', fontSize: 12 }}>
+                  <span style={{ color: 'var(--sz-danger)', fontSize: 12 }}>
                     剩 {minutesLeft(a)} 分钟未响应将自动按成立处理
                   </span>
                 )}

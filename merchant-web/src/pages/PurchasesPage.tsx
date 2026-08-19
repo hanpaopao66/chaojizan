@@ -97,7 +97,7 @@ export default function PurchasesPage() {
               <div>
                 <div style={{ fontWeight: 500 }}>{v}</div>
                 {(r.spec || r.qty) && (
-                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                  <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>
                     {[r.spec, r.qty].filter(Boolean).join(' · ')}
                   </div>
                 )}
@@ -141,7 +141,7 @@ export default function PurchasesPage() {
             title: '最短留存到', dataIndex: 'keep_until', width: 120,
             render: (v: string) => (
               <Tooltip title="保质期满后六个月;没有明确保质期的两年。平台不会替你删。">
-                <span style={{ color: '#8c8c8c' }}>{v}</span>
+                <span style={{ color: 'var(--sz-ink-muted)' }}>{v}</span>
               </Tooltip>
             ),
           },
@@ -168,7 +168,7 @@ export default function PurchasesPage() {
           },
         ]}
       />
-      <div style={{ marginTop: 12, color: '#8c8c8c', fontSize: 12 }}>{note}</div>
+      <div style={{ marginTop: 12, color: 'var(--sz-ink-muted)', fontSize: 12 }}>{note}</div>
       <PurchaseModal
         open={open}
         suppliers={suppliers}

@@ -101,7 +101,7 @@ export default function DishesPage() {
             dataIndex: 'stock',
             sorter: (a, b) => a.stock - b.stock,
             render: (v: number, d) => (
-              <span style={{ color: v <= 0 ? '#e5484d' : undefined }}>
+              <span style={{ color: v <= 0 ? 'var(--sz-danger)' : undefined }}>
                 {v}{d.daily_stock != null ? ` / 每日回满 ${d.daily_stock}` : ''}
               </span>
             ),
@@ -296,14 +296,14 @@ function DishDrawer({ existing, allDishes, onClose }: {
               <div style={{ paddingTop: 4 }}>
                 <span style={{
                   fontSize: 16, fontWeight: 600,
-                  color: price - cost > 0 ? '#389e0d' : '#cf1322',
+                  color: price - cost > 0 ? 'var(--sz-earn)' : 'var(--sz-danger)',
                 }}>
                   ¥{(price - cost).toFixed(2)}
                 </span>
-                <span style={{ marginLeft: 8, color: '#8c8c8c' }}>
+                <span style={{ marginLeft: 8, color: 'var(--sz-ink-muted)' }}>
                   {Math.round((price - cost) / price * 100)}%
                 </span>
-                <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>
                   卖价 − 进价,不含平台佣金与配送
                 </div>
               </div>
@@ -386,7 +386,7 @@ function DishDrawer({ existing, allDishes, onClose }: {
         <Form.Item label="规格组(如 份量/辣度;每组内单选)">
           <Space direction="vertical" style={{ width: '100%' }}>
             {groups.map((g, gi) => (
-              <div key={gi} style={{ border: '1px solid #eee', borderRadius: 8, padding: 8 }}>
+              <div key={gi} style={{ border: '1px solid var(--sz-line)', borderRadius: 8, padding: 8 }}>
                 <Space style={{ marginBottom: 6 }}>
                   <Input
                     placeholder="组名(如 辣度)"

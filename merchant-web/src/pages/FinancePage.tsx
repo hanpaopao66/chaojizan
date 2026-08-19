@@ -41,12 +41,12 @@ export default function FinancePage({ shop }: { shop: Merchant }) {
                 value={wallet.balance_cents / 100}
                 precision={2}
                 prefix="¥"
-                valueStyle={wallet.balance_cents < 0 ? { color: '#e5484d' } : undefined}
+                valueStyle={wallet.balance_cents < 0 ? { color: 'var(--sz-danger)' } : undefined}
               />
             </Col>
             <Col xs={12} md={4}>
               <Statistic title="可提现" value={wallet.withdrawable_cents / 100}
-                precision={2} prefix="¥" valueStyle={{ color: '#0E8A5F' }} />
+                precision={2} prefix="¥" valueStyle={{ color: 'var(--sz-earn)' }} />
             </Col>
             <Col xs={12} md={4}>
               <Statistic title="提现中" value={wallet.pending_withdrawal_cents / 100}
@@ -178,7 +178,7 @@ function DailyTab() {
             { title: '实收', dataIndex: 'net_cents', render: (v: number) => yuan(v) },
           ]}
         />
-        <div style={{ color: '#888', fontSize: 12, marginTop: 8 }}>
+        <div style={{ color: 'var(--sz-ink-muted)', fontSize: 12, marginTop: 8 }}>
           住宿与团购流水见「下载对账单 CSV」,与钱包余额同源可核对
         </div>
       </Modal>
@@ -237,7 +237,7 @@ function WithdrawTab({ wallet, onChanged }: {
           style={{ width: 220 }}
         />
         <Button type="primary" loading={busy} onClick={submit}>申请提现</Button>
-        <span style={{ color: '#888', fontSize: 12 }}>T+1 打款 · 零手续费</span>
+        <span style={{ color: 'var(--sz-ink-muted)', fontSize: 12 }}>T+1 打款 · 零手续费</span>
       </Space>
       <Table<Withdrawal>
         rowKey="id"
@@ -255,7 +255,7 @@ function WithdrawTab({ wallet, onChanged }: {
           {
             title: '说明',
             render: (_, w) => w.status === 'rejected'
-              ? <span style={{ color: '#e5484d' }}>{w.reject_reason}</span>
+              ? <span style={{ color: 'var(--sz-danger)' }}>{w.reject_reason}</span>
               : (w.paid_note || '—'),
           },
         ]}
@@ -432,16 +432,16 @@ function FunnelTab() {
           <div key={label} style={{
             display: 'flex', alignItems: 'center', gap: 12, padding: '6px 0',
           }}>
-            <span style={{ width: 96, color: '#666' }}>{label}</span>
+            <span style={{ width: 96, color: 'var(--sz-ink-muted)' }}>{label}</span>
             <b style={{ width: 60, fontSize: 18 }}>{value}</b>
             {rate != null && (
-              <span style={{ color: rate >= 0.3 ? '#389e0d' : '#d46b08' }}>
+              <span style={{ color: rate >= 0.3 ? 'var(--sz-earn)' : 'var(--sz-hold)' }}>
                 转化 {(rate * 100).toFixed(1)}%
               </span>
             )}
           </div>
         ))}
-        <div style={{ marginTop: 8, fontSize: 12, color: '#999', lineHeight: 1.8 }}>
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--sz-ink-muted)', lineHeight: 1.8 }}>
           {data.note}
         </div>
       </Card>
@@ -473,7 +473,7 @@ function ComplianceTab() {
       </Card>
       <Card size="small" title={`食品安全投诉(${data.food_safety.length})`}>
         {data.food_safety.length === 0
-          ? <span style={{ color: '#999' }}>没有记录</span>
+          ? <span style={{ color: 'var(--sz-ink-muted)' }}>没有记录</span>
           : (
             <Table
               rowKey="id"
@@ -496,7 +496,7 @@ function ComplianceTab() {
       </Card>
       <Card size="small" title={`图片被驳回(${data.rejected_images.length})`}>
         {data.rejected_images.length === 0
-          ? <span style={{ color: '#999' }}>没有记录</span>
+          ? <span style={{ color: 'var(--sz-ink-muted)' }}>没有记录</span>
           : (
             <Space wrap>
               {data.rejected_images.map((r) => (
@@ -505,7 +505,7 @@ function ComplianceTab() {
                     width: 120, height: 90, objectFit: 'cover', borderRadius: 6,
                     filter: 'grayscale(1)',
                   }} />
-                  <div style={{ fontSize: 12, color: '#cf1322' }}>{r.note || '未说明'}</div>
+                  <div style={{ fontSize: 12, color: 'var(--sz-danger)' }}>{r.note || '未说明'}</div>
                 </div>
               ))}
             </Space>
@@ -531,18 +531,18 @@ function CustomersTab() {
     <Card size="small" title={`近 ${data.days} 天的客人`}>
       <Space size="large" wrap>
         <Statistic title="新客" value={data.new.customers}
-          suffix={<span style={{ fontSize: 12, color: '#999' }}>
+          suffix={<span style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>
             {yuan(data.new.net_cents)}
           </span>} />
         <Statistic title="回头客" value={data.repeat.customers}
-          valueStyle={{ color: '#389e0d' }}
-          suffix={<span style={{ fontSize: 12, color: '#999' }}>
+          valueStyle={{ color: 'var(--sz-earn)' }}
+          suffix={<span style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>
             {yuan(data.repeat.net_cents)}
           </span>} />
         <Statistic title="流失(待召回)" value={data.churned.customers}
-          valueStyle={{ color: '#d46b08' }} />
+          valueStyle={{ color: 'var(--sz-hold)' }} />
       </Space>
-      <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>{data.note}</div>
+      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--sz-ink-muted)' }}>{data.note}</div>
     </Card>
   )
 }
@@ -568,7 +568,7 @@ function RulesTab() {
           </ul>
         </Card>
       ))}
-      <div style={{ fontSize: 12, color: '#999' }}>{data.note}</div>
+      <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>{data.note}</div>
     </Space>
   )
 }

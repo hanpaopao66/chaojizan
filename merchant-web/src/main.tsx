@@ -13,7 +13,7 @@ import { szLight } from './theme'
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     {/* 主色从令牌来,不要再写死十六进制:
-        这里原本是 '#FF5A1F',而 docs/BRAND.md 里那个色标着「已废弃」——
+        这里原本是 'var(--sz-clay)',而 docs/BRAND.md 里那个色标着「已废弃」——
         于是商家后台和 App 长成了两个产品。 */}
     <ConfigProvider locale={zhCN} theme={szLight}>
       {/* basename 去尾斜杠:/merchant 与 /merchant/ 都能命中路由 */}

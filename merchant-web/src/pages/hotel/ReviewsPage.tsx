@@ -59,7 +59,7 @@ export default function ReviewsPage() {
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
-      <div style={{ color: '#888', fontSize: 12 }}>
+      <div style={{ color: 'var(--sz-ink-muted)', fontSize: 12 }}>
         评分口径:近 180 天滚动均分,少于 3 条不出分——防一条差评定生死,也防刷分
       </div>
       {list.map((r) => (
@@ -68,16 +68,16 @@ export default function ReviewsPage() {
             <b>{r.reviewer_name}</b>
             <span>
               {[1, 2, 3, 4, 5].map((i) => i <= r.rating
-                ? <StarFilled key={i} style={{ color: '#faad14', fontSize: 13 }} />
-                : <StarOutlined key={i} style={{ color: '#ddd', fontSize: 13 }} />)}
+                ? <StarFilled key={i} style={{ color: 'var(--sz-hold)', fontSize: 13 }} />
+                : <StarOutlined key={i} style={{ color: 'var(--sz-ink-faint)', fontSize: 13 }} />)}
             </span>
             {r.tags.map((t) => <Tag key={t}>{t}</Tag>)}
             <span style={{ flex: 1 }} />
-            <span style={{ color: '#999', fontSize: 12 }}>单号 …{r.order_no.slice(-6)}</span>
+            <span style={{ color: 'var(--sz-ink-muted)', fontSize: 12 }}>单号 …{r.order_no.slice(-6)}</span>
           </div>
           {r.comment && <div style={{ marginTop: 4 }}>{r.comment}</div>}
           {r.reply && (
-            <div style={{ fontSize: 13, color: '#FF5A1F', marginTop: 4 }}>
+            <div style={{ fontSize: 13, color: 'var(--sz-clay)', marginTop: 4 }}>
               我的回复:{r.reply}
             </div>
           )}
@@ -85,7 +85,7 @@ export default function ReviewsPage() {
             <div style={{ marginTop: 4 }}>追评:{r.append_content}</div>
           )}
           {r.append_reply && (
-            <div style={{ fontSize: 13, color: '#FF5A1F' }}>追评回复:{r.append_reply}</div>
+            <div style={{ fontSize: 13, color: 'var(--sz-clay)' }}>追评回复:{r.append_reply}</div>
           )}
           <div style={{ textAlign: 'right' }}>
             <Button size="small" onClick={() => reply(r)}>

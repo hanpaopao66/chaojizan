@@ -55,12 +55,12 @@ export default function LoginPage() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', background: '#f5f5f5',
+      justifyContent: 'center', background: 'var(--sz-paper)',
     }}>
       <Card style={{ width: 380 }}>
         <div style={{ textAlign: 'center', marginBottom: 16 }}>
           <div style={{ fontSize: 22, fontWeight: 700 }}>超级赞商家工作台</div>
-          <div style={{ color: '#888', fontSize: 13, marginTop: 4 }}>
+          <div style={{ color: 'var(--sz-ink-muted)', fontSize: 13, marginTop: 4 }}>
             入驻免费 · 外卖 5% 封顶 · 住宿 5% 离店才收
           </div>
         </div>
@@ -118,13 +118,13 @@ export default function LoginPage() {
             登录
           </Button>
         </Form>
-        <div style={{ color: '#999', fontSize: 12, marginTop: 12, textAlign: 'center' }}>
+        <div style={{ color: 'var(--sz-ink-muted)', fontSize: 12, marginTop: 12, textAlign: 'center' }}>
           登录即代表已阅读并同意
           <a href="/legal/terms" target="_blank" rel="noreferrer">《用户协议》</a>
           和
           <a href="/legal/privacy" target="_blank" rel="noreferrer">《隐私政策》</a>
         </div>
-        <div style={{ color: '#999', fontSize: 12, marginTop: 6, textAlign: 'center' }}>
+        <div style={{ color: 'var(--sz-ink-muted)', fontSize: 12, marginTop: 6, textAlign: 'center' }}>
           首次使用?请先在「超级赞商家」App 完成入驻,网页版与 App 同一账号
         </div>
       </Card>

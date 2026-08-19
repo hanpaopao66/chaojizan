@@ -137,6 +137,24 @@ def css(tokens: dict) -> str:
 
     size = "\n".join(f"  --sz-{_kebab(k)}: {int(v) if v == int(v) else v}px;"
                      for k, v in tokens["size"].items())
+
+    # 派生淡底:语义色按 12% 混进卡片底。
+    #
+    # **不是新令牌**,是同一个色的淡化用法 —— Flutter 那边写作
+    # `c.withValues(alpha: 0.12)`,CSS 这边没有运行时,所以在生成时算好。
+    # 后台的日历有「今天 / 关房 / 拖选」几种格子底,原先是三个手挑的浅色
+    # (#fff3ed / #fff1f0 / #ffd9c9),和主色没有任何关系 —— 换主色它们不跟。
+    def soft(scheme, key, pct=12):
+        fg = [int(scheme[key][i:i + 2], 16) for i in (1, 3, 5)]
+        bg = [int(scheme["surface"][i:i + 2], 16) for i in (1, 3, 5)]
+        return "#" + "".join(
+            "%02X" % round(f * pct / 100 + b * (1 - pct / 100))
+            for f, b in zip(fg, bg))
+
+    def softs(scheme, indent="  "):
+        return "\n".join(
+            f"{indent}--sz-{_kebab(k)}-soft: {soft(scheme, k)};"
+            for k in ("danger", "hold", "earn"))
     return f"""/* 由 scripts/gen_tokens.py 生成,**不要手改**。
  * 改 packages/shared/lib/src/brand.dart 再跑 `python3 scripts/gen_tokens.py`。
  *
@@ -146,6 +164,8 @@ def css(tokens: dict) -> str:
 :root {{
 {block(tokens['light'])}
 
+{softs(tokens['light'])}
+
 {size}
 }}
 
@@ -153,11 +173,15 @@ def css(tokens: dict) -> str:
 @media (prefers-color-scheme: dark) {{
   :root:not([data-theme="light"]) {{
 {block(tokens['dark'], '    ')}
+
+{softs(tokens['dark'], '    ')}
   }}
 }}
 
 :root[data-theme="dark"] {{
 {block(tokens['dark'])}
+
+{softs(tokens['dark'])}
 }}
 """
 

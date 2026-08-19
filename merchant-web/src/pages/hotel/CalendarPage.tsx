@@ -168,7 +168,7 @@ function CalendarGrid({ roomTypes, rows, start, loading, onStartChange, onChange
   }
 
   if (roomTypes.length === 0 && !loading) {
-    return <div style={{ padding: 40, color: '#888' }}>先到「房型管理」建房型,再回来设价开卖</div>
+    return <div style={{ padding: 40, color: 'var(--sz-ink-muted)' }}>先到「房型管理」建房型,再回来设价开卖</div>
   }
 
   return (
@@ -186,7 +186,7 @@ function CalendarGrid({ roomTypes, rows, start, loading, onStartChange, onChange
         <Button type="primary" onClick={() => setBatch({ rtIds: roomTypes.map(r => r.id), range: null })}>
           批量设置
         </Button>
-        <span style={{ color: '#999', fontSize: 12 }}>
+        <span style={{ color: 'var(--sz-ink-muted)', fontSize: 12 }}>
           点单格编辑 · 行内拖选批量 · 方向键移动 + 回车编辑
         </span>
       </Space>
@@ -199,17 +199,17 @@ function CalendarGrid({ roomTypes, rows, start, loading, onStartChange, onChange
         <table style={{ borderCollapse: 'collapse', minWidth: DAYS * 64 + 120 }}>
           <thead>
             <tr>
-              <th style={{ ...cellStyle, position: 'sticky', left: 0, background: '#fafafa', zIndex: 2, minWidth: 110 }}>房型</th>
+              <th style={{ ...cellStyle, position: 'sticky', left: 0, background: 'var(--sz-surface-alt)', zIndex: 2, minWidth: 110 }}>房型</th>
               {dates.map((d, i) => {
                 const weekend = d.day() === 0 || d.day() === 6
                 const isToday = d.isSame(today, 'day')
                 return (
                   <th key={i} style={{
                     ...cellStyle, minWidth: 62, fontWeight: isToday ? 700 : 500,
-                    background: isToday ? '#fff3ed' : weekend ? '#fffbe6' : '#fafafa',
+                    background: isToday ? 'var(--sz-clay-soft)' : weekend ? 'var(--sz-hold-soft)' : 'var(--sz-surface-alt)',
                   }}>
                     {d.format('M/D')}
-                    <div style={{ fontSize: 10, color: '#999' }}>
+                    <div style={{ fontSize: 10, color: 'var(--sz-ink-muted)' }}>
                       {'日一二三四五六'[d.day()]}
                     </div>
                   </th>
@@ -221,7 +221,7 @@ function CalendarGrid({ roomTypes, rows, start, loading, onStartChange, onChange
             {roomTypes.map((rt, rtIdx) => (
               <tr key={rt.id}>
                 <td style={{
-                  ...cellStyle, position: 'sticky', left: 0, background: '#fff',
+                  ...cellStyle, position: 'sticky', left: 0, background: 'var(--sz-surface)',
                   zIndex: 1, fontWeight: 600, minWidth: 110,
                   textDecoration: rt.is_on_sale ? undefined : 'line-through',
                 }}>
@@ -254,17 +254,17 @@ function CalendarGrid({ roomTypes, rows, start, loading, onStartChange, onChange
                         ...cellStyle,
                         cursor: past ? 'not-allowed' : 'pointer',
                         opacity: past ? 0.4 : 1,
-                        background: dragged ? '#ffd9c9'
-                          : focused ? '#fff3ed'
-                          : day?.closed ? '#fff1f0' : undefined,
-                        outline: focused ? '2px solid #FF5A1F' : undefined,
+                        background: dragged ? 'var(--sz-clay-soft)'
+                          : focused ? 'var(--sz-clay-soft)'
+                          : day?.closed ? 'var(--sz-danger-soft)' : undefined,
+                        outline: focused ? '2px solid var(--sz-clay)' : undefined,
                         outlineOffset: -2,
                       }}
                     >
                       {day == null ? (
-                        <span style={{ color: '#bbb', fontSize: 11 }}>未设价</span>
+                        <span style={{ color: 'var(--sz-ink-muted)', fontSize: 11 }}>未设价</span>
                       ) : day.closed ? (
-                        <span style={{ color: '#e5484d', fontSize: 12 }}>关房</span>
+                        <span style={{ color: 'var(--sz-danger)', fontSize: 12 }}>关房</span>
                       ) : (
                         <>
                           <div style={{ fontWeight: 600, fontSize: 12 }}>
@@ -272,7 +272,7 @@ function CalendarGrid({ roomTypes, rows, start, loading, onStartChange, onChange
                           </div>
                           <div style={{
                             fontSize: 11,
-                            color: day.total_qty - day.sold_qty <= 0 ? '#e5484d' : '#0E8A5F',
+                            color: day.total_qty - day.sold_qty <= 0 ? 'var(--sz-danger)' : 'var(--sz-earn)',
                           }}>
                             余{day.total_qty - day.sold_qty}
                           </div>
@@ -314,7 +314,7 @@ function CalendarGrid({ roomTypes, rows, start, loading, onStartChange, onChange
 }
 
 const cellStyle: React.CSSProperties = {
-  border: '1px solid #eee',
+  border: '1px solid var(--sz-line)',
   padding: '4px 6px',
   textAlign: 'center',
   fontSize: 12,

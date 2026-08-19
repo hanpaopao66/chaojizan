@@ -16,9 +16,11 @@ import {
   SettingOutlined,
   ShopOutlined,
   ClusterOutlined,
+  MenuOutlined,
 } from '@ant-design/icons'
 import {
-  Badge, Button, Layout, Menu, Modal, Radio, Select, Switch, Tag, Tooltip,
+  Badge, Button, Drawer, Layout, Menu, Modal, Radio, Select, Switch, Tag,
+  Tooltip,
   message,
 } from 'antd'
 import { useEffect, useState } from 'react'
@@ -28,6 +30,7 @@ import {
   ApiError, BrandShop, clearToken, Merchant, merchantTodos, setBusy,
   switchShop, Todos, updateShop,
 } from '../api'
+import { useNarrow } from '../hooks/useNarrow'
 import ApplymentPage from '../pages/ApplymentPage'
 import FinancePage from '../pages/FinancePage'
 import SettingsPage from '../pages/SettingsPage'
@@ -57,6 +60,10 @@ interface Props {
 /** 工作台外壳:左侧菜单按业态渲染,顶栏营业开关与 App 语义一致。 */
 export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
   const [collapsed, setCollapsed] = useState(false)
+  // 窄屏(<992)侧栏走抽屉:200px 的固定侧栏在 375 的屏上要吃掉一半宽度,
+  // 而 antd Sider 是常规流布局,展开会把内容推出去而不是浮在上面
+  const narrow = useNarrow()
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [isOpen, setIsOpen] = useState(shop.is_open)
   const [todos, setTodos] = useState<Todos | null>(null)
   const navigate = useNavigate()
@@ -213,33 +220,71 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
     }
   }
 
+  // 菜单本体只写一份,宽屏塞进 Sider、窄屏塞进 Drawer ——
+  // 两处各写一遍的话,加一个菜单项就会漏掉一边
+  const navMenu = (
+    <Menu
+      mode="inline"
+      selectedKeys={[location.pathname]}
+      items={menuItems}
+      // 窄屏点完就收抽屉,不然选完菜单还得再点一次遮罩
+      onClick={({ key }) => { navigate(key); setDrawerOpen(false) }}
+    />
+  )
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Layout.Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        theme="light"
+      {!narrow && (
+        <Layout.Sider
+          collapsible
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          theme="light"
+        >
+          <div style={{
+            padding: '16px 12px', fontWeight: 700, fontSize: collapsed ? 12 : 16,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            <ShopOutlined style={{ marginRight: 6, color: 'var(--sz-clay)' }} />
+            {!collapsed && '超级赞商家'}
+          </div>
+          {navMenu}
+        </Layout.Sider>
+      )}
+      <Drawer
+        placement="left"
+        open={narrow && drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        width={240}
+        title={<><ShopOutlined style={{ marginRight: 6, color: 'var(--sz-clay)' }} />超级赞商家</>}
+        styles={{ body: { padding: 0 } }}
       >
-        <div style={{
-          padding: '16px 12px', fontWeight: 700, fontSize: collapsed ? 12 : 16,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-        }}>
-          <ShopOutlined style={{ marginRight: 6, color: '#FF5A1F' }} />
-          {!collapsed && '超级赞商家'}
-        </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[location.pathname]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-        />
-      </Layout.Sider>
+        {navMenu}
+      </Drawer>
       <Layout>
         <Layout.Header style={{
-          background: '#fff', padding: '0 20px', display: 'flex',
-          alignItems: 'center', gap: 12, borderBottom: '1px solid #eee',
+          background: 'var(--sz-surface)', display: 'flex',
+          alignItems: 'center', borderBottom: '1px solid var(--sz-line)',
+          // ⚠️ 用 columnGap/rowGap 而不是 gap 简写:窄屏那套多给一个 rowGap,
+          // 而 gap 是简写 —— React 在两套之间切换时会警告「简写和非简写混用」,
+          // 实际表现是切回宽屏后 rowGap 残留。分开写就没这问题
+          columnGap: 12,
+          rowGap: narrow ? 8 : 0,
+          // 窄屏放开高度让它折成两行。**不砍功能** —— 营业开关、铃铛、
+          // 忙碌模式在手机上恰恰是最常用的那几个,藏进"更多"等于多点一次
+          ...(narrow
+            ? { padding: '10px 12px', height: 'auto', lineHeight: 1.6,
+                flexWrap: 'wrap' as const }
+            : { padding: '0 20px' }),
         }}>
+          {narrow && (
+            <Button
+              type="text"
+              icon={<MenuOutlined />}
+              onClick={() => setDrawerOpen(true)}
+              aria-label="打开菜单"
+            />
+          )}
           {/* 单店商家看到的还是一行店名(shops 只有一家时不渲染下拉),
               与加连锁之前完全一样 */}
           {shops.length > 1 ? (
@@ -277,12 +322,14 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
           <Tag color={isHotel ? 'blue' : 'orange'}>
             {isHotel ? '酒店住宿' : '餐饮外卖'}
           </Tag>
-          <span style={{ flex: 1 }} />
+          {/* 宽屏:把右边一组推到最右。
+              窄屏:占满整行强制换行 —— 上一行店名+业态,下一行才是操作 */}
+          <span style={narrow ? { flexBasis: '100%', height: 0 } : { flex: 1 }} />
           {todoCount > 0 && (
             <Tooltip title={todoTip}>
               <Badge count={todoCount} size="small">
                 <BellOutlined
-                  style={{ fontSize: 18, color: '#FF5A1F', cursor: 'pointer' }}
+                  style={{ fontSize: 18, color: 'var(--sz-clay)', cursor: 'pointer' }}
                   onClick={() => navigate(
                     todos && todos.bad_reviews_unreplied > 0 && !isHotel
                       ? '/food/reviews'
@@ -297,12 +344,12 @@ export default function ConsoleLayout({ shop, shops, onShopChanged }: Props) {
               {busyActive ? '🔥 忙碌中' : '忙碌模式'}
             </Button>
           )}
-          <span style={{ color: '#666', fontSize: 13 }}>
+          <span style={{ color: 'var(--sz-ink-muted)', fontSize: 13 }}>
             {isOpen ? '营业中' : isHotel ? '已停业' : '已打烊'}
           </span>
           <Switch checked={isOpen} onChange={toggleOpen} />
           <a
-            style={{ color: '#999', marginLeft: 12 }}
+            style={{ color: 'var(--sz-ink-muted)', marginLeft: 12 }}
             onClick={() => {
               clearToken()
               navigate('/login', { replace: true })
