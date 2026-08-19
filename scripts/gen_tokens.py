@@ -284,6 +284,10 @@ def render_all(tokens: dict) -> dict:
             json.dumps(tokens, ensure_ascii=False, indent=2) + "\n",
         "merchant-web/src/tokens.css": css(tokens),
         "merchant-web/src/theme.ts": antd_theme(tokens),
+        # 平台后台和商家后台共用同一份令牌。**不要复制粘贴过去** ——
+        # 这个仓库已经因为手抄色板出过一次三种主色了
+        "admin-web/src/tokens.css": css(tokens),
+        "admin-web/src/theme.ts": antd_theme(tokens),
     }
     for app in ("user_app_harmony", "merchant_app_harmony"):
         base = f"apps/{app}/entry/src/main/resources"

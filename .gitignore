@@ -59,3 +59,4 @@ deploy/wxpay-certs/
 # 内部路线图(公开仓不发布)
 docs/ROADMAP.md
 merchant-web/node_modules/
+admin-web/node_modules/

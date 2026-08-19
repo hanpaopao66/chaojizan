@@ -22,6 +22,17 @@
         "merchant-web"
       ],
       "port": 5174
+    },
+    {
+      "name": "admin-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "admin-web"
+      ],
+      "port": 5175
     }
   ]
 }

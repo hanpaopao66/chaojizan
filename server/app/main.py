@@ -409,6 +409,26 @@ async def merchant_console(path: str = ""):
     return FileResponse(MERCHANT_WEB_DIR / "index.html")
 
 
+# 平台管理后台(React SPA)。
+#
+# ⚠️ 路径**不能**叫 /admin —— 那是 79 个管理接口的前缀,
+# 而且 /admin 本身已经是老的单文件审核页(static/admin.html)。
+ADMIN_WEB_DIR = STATIC_DIR / "admin"
+
+
+@app.get("/admin-console", include_in_schema=False)
+@app.get("/admin-console/{path:path}", include_in_schema=False)
+async def admin_console(path: str = ""):
+    if not ADMIN_WEB_DIR.exists():
+        raise HTTPException(404, "平台后台尚未构建(admin-web/ 执行 npm run build)")
+    candidate = (ADMIN_WEB_DIR / path).resolve()
+    # 防路径穿越:只允许构建目录内的文件
+    if path and candidate.is_file() \
+            and candidate.is_relative_to(ADMIN_WEB_DIR.resolve()):
+        return FileResponse(candidate)
+    return FileResponse(ADMIN_WEB_DIR / "index.html")
+
+
 @app.get("/legal/terms", include_in_schema=False)
 async def legal_terms():
     """用户协议(网页版,应用商店审核和备案材料引用)。"""

@@ -1,0 +1,20 @@
+<!doctype html>
+<!--
+  data-theme="light" 是故意钉死的,和商家后台同一个理由:
+  tokens.css 带了整套深色值(和 App 共用一个源),而这些页面没按深色设计过,
+  antd 的 ConfigProvider 这边也只给了 szLight。不钉的话系统开深色时
+  页底变深、卡片还是浅色,而卡片里的文字会解析成深色态的值贴在浅底上。
+-->
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>超级赞平台后台</title>
+    <script type="module" crossorigin src="/admin-console/assets/index-CFnnf1CY.js"></script>
+    <link rel="stylesheet" crossorigin href="/admin-console/assets/index-DUBtwBMM.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
