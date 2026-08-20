@@ -16,12 +16,22 @@ apps/*/android/.kotlin/
 .flutter-plugins
 .flutter-plugins-dependencies
 *.iml
-# android/ 与 ios/ 已入库(含手工定制的清单/权限描述/签名/Bundle ID);
-# 其余平台目录仍由 flutter create 再生
-apps/*/macos/
-apps/*/linux/
-apps/*/windows/
-apps/*/web/
+# ⚠️ 平台目录**全部入库**,不要再加回 gitignore。
+#
+# 原本只留了 android/ 和 ios/,其余四个由 flutter create 再生 ——
+# 那在只发安卓 iOS 的时候没问题,一旦要发 web 和桌面就不行了:
+# 这些目录装着**必须定制、丢了就出事**的东西。
+#
+# - web/index.html 的 base href、web/manifest.json 的 PWA 名称与图标
+#   (不改的话标题就叫 "user_app",装到桌面也是这个名);
+# - macos/Runner/*.entitlements 的 com.apple.security.network.client ——
+#   **少这一条 macOS 版一个网络请求都发不出去**,而它是 flutter create
+#   的默认模板,再生一次就回去了;
+# - windows/runner 的应用名、图标、版本资源。
+#
+# 和 android/ ios/ 已入库是同一个道理:凡是需要手工定制的,就得入库。
+#
+# 构建产物仍然不入库(下面的 build/ 挡着)。
 # ⚠️ 这里**不要**再加 apps/*/test/。
 #
 # 曾经加过,本意大概是挡掉 flutter create 生成的 widget_test.dart 模板,

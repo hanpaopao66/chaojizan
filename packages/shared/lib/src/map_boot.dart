@@ -29,6 +29,29 @@ const String kTencentMapKey = String.fromEnvironment('TENCENT_MAP_KEY');
 ValueListenable<bool> get mapReady => _ready;
 final ValueNotifier<bool> _ready = ValueNotifier<bool>(false);
 
+/// 这个平台有没有腾讯地图原生 SDK。
+///
+/// **只有 Android 和 iOS 有。** web 和三个桌面平台上,
+/// `flutter_tencent_map` 没有对应实现 —— 调它的方法会抛
+/// MissingPluginException,而那个异常会顺着 build 冒上去把整页炸掉。
+///
+/// 所以这里不是"能不能显示地图"的问题,是**碰都不能碰**:
+/// [agreeAndStart] 在这些平台直接返回,`SzDeliveryMap` 走示意模式。
+///
+/// ## 为什么不上 web 版腾讯地图
+///
+/// 腾讯有 JavaScript API GL,web 上确实能做(HtmlElementView 嵌 div
+/// 驱动 JS SDK)。但那是**另一套 API、另一份 key、另一套坐标与事件模型**,
+/// 而桌面端腾讯根本没有原生 SDK —— 三个桌面平台还是要降级。
+///
+/// 现在的降级不是白板:方位和距离是真的,只是没有街道底图
+/// (见 delivery_map.dart 开头那段)。先让五端都能跑,
+/// web 版地图作为单独一件事再做。
+bool get mapSdkSupported =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+
 bool _started = false;
 
 /// 用户同意隐私后调用(挂在 `PrivacyGate.onAgreed` 里)。
@@ -38,6 +61,11 @@ bool _started = false;
 Future<void> agreeAndStart() async {
   if (_started) return;
   _started = true;
+  if (!mapSdkSupported) {
+    // web / 桌面:插件没有这些平台的实现,调它会抛 MissingPluginException
+    // 把整页炸掉。走示意模式(有方位有距离,只是没有街道底图)
+    return;
+  }
   if (kTencentMapKey.isEmpty) {
     // 没编 key 的包(开发/CI)不去动 SDK:调了也是白板,
     // 不如干脆走降级,让人一眼看出是"没配 key"而不是"地图坏了"

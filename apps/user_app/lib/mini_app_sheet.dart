@@ -13,6 +13,7 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,6 +21,29 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 /// 半屏弹起、可拖到近全屏 —— 骨架抄 five_percent.dart 的现成模板,
 /// 区别是 WebView 不是 Flutter 滚动体,拖拽只挂在顶栏上。
+/// 小程序容器在这个平台上能不能用。
+///
+/// `webview_flutter` 只有 Android / iOS 实现,web 和桌面上
+/// 构造 `WebViewController` 会抛 MissingPluginException 把页面炸掉。
+///
+/// ## web 上其实做得了,只是要换一套桥
+///
+/// Telegram Web 能打开小程序,是因为**它自己就是网页** —— 小程序也是网页,
+/// 所以 web 上它用 `<iframe>` 而不是原生 WebView,
+/// `window.Telegram.WebApp` 那个桥走的是 `postMessage`。
+///
+/// 我们照搬是可行的(`HtmlElementView` 嵌 iframe + postMessage),
+/// 而且**安全边界在 web 上反而更硬**:浏览器强制带上 `event.origin`,
+/// 比在 WebView 里自己比对 URL 可靠。`allowedOrigins` 现成的。
+///
+/// 但那是一整块活(整个信任边界要重新建立一遍),不是加个 if 能顺手带过的。
+/// 在它做完之前,web 和桌面上**不显示小程序入口** ——
+/// 显示了点不开比不显示更糟。
+bool get miniAppSupported =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+
 Future<void> showMiniAppSheet(BuildContext context,
     {required ApiClient api, required MiniAppInfo app}) {
   return showModalBottomSheet(

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  ⚠️ com.apple.security.network.client 是**必须的**,别删。
+  
+  flutter create 的默认模板里 Release.entitlements 只有 app-sandbox ——
+  沙箱开着、又没给出网权限,release 版 macOS App 一个网络请求都发不出去,
+  表现是"所有接口都超时"而不是报权限错。
+  
+  而 debug 版是好的(它带 network.server 供热重载),所以本地调试完全正常,
+  打了 release 包才炸 —— 这个坑必须写在这里。
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>

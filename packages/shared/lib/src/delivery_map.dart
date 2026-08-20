@@ -14,11 +14,14 @@
 /// **全程 GCJ-02,不转换。** 腾讯 SDK 与本系统全局口径一致。
 /// (唤起百度导航是唯一例外,见 nav_launcher.dart。)
 ///
-/// ## 三种降级,都不是白板
+/// ## 四种降级,都不是白板
 ///
 /// 1. 没编 key(开发/CI 包)→ 品牌网格 + 三点连线;
 /// 2. 用户没同意隐私 → 同上,并提示"同意后可看街道底图";
-/// 3. SDK 启动失败 → 同上。
+/// 3. SDK 启动失败 → 同上;
+/// 4. **平台没有原生 SDK**(web / macOS / Windows / Linux)→ 同上。
+///    这一条和前三条不一样:它是**永久**的,所以提示语也不同 ——
+///    写"待启用"会让人一直等一个不会来的东西。
 ///
 /// 方位与距离本来就是真的,「没有街道底图」不该等于「这个功能没了」。
 library;
@@ -224,9 +227,13 @@ class _DeliveryMapViewState extends State<DeliveryMapView> {
             border: Border.all(color: theme.colorScheme.outlineVariant),
           ),
           child: Text(
-              kTencentMapKey.isEmpty
-                  ? '示意模式 · 街道底图待启用'
-                  : '示意模式 · 同意隐私政策后可看街道底图',
+              // 三种降级各有各的说法:平台不支持是**永久**的,
+              // 写"待启用"会让人一直等一个不会来的东西
+              !mapSdkSupported
+                  ? '示意模式 · 本平台暂无街道底图'
+                  : kTencentMapKey.isEmpty
+                      ? '示意模式 · 街道底图待启用'
+                      : '示意模式 · 同意隐私政策后可看街道底图',
               style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
         ),
       ),

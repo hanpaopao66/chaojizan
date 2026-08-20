@@ -22,6 +22,7 @@ import 'help_page.dart';
 import 'hotel_pages.dart';
 import 'licenses_page.dart';
 import 'messages_page.dart';
+import 'mini_app_sheet.dart';
 import 'mini_apps_panel.dart';
 import 'money_flow_page.dart';
 import 'invite_page.dart';
@@ -451,6 +452,9 @@ class _MerchantListViewState extends State<MerchantListView> {
 
   Future<void> _loadMiniApps() async {
     if (widget.category != null) return; // 面板只属于首页,品类页不呼出
+    // web / 桌面上小程序容器还没做(见 mini_app_sheet.dart 的说明)。
+    // **连清单都不拉** —— 拉回来只会渲染出一排点不开的入口
+    if (!miniAppSupported) return;
     try {
       final apps = await widget.api.miniApps();
       if (mounted) setState(() => _miniApps = apps);

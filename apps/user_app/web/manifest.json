@@ -1,0 +1,36 @@
+{
+    "name": "超级赞 · 点外卖",
+    "short_name": "超级赞",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#F0EEE6",
+    "theme_color": "#F0EEE6",
+    "description": "低抽成的外卖平台:商家总负担 5% 封顶,配送费一分不留全给骑手,每一单账目可查。",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "lang": "zh-CN"
+}

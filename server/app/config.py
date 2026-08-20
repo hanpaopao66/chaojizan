@@ -271,8 +271,20 @@ class Settings(BaseSettings):
         return [
             self.public_base_url.rstrip("/"),
             "https://www.chaojizan.cc",
-            # 本地开发:官网 vite 与管理后台
+            # 本地开发:官网 vite(5173)、商家后台(5174)、平台后台(5175)
             "http://localhost:5173", "http://127.0.0.1:5173",
+            "http://localhost:5174", "http://127.0.0.1:5174",
+            "http://localhost:5175", "http://127.0.0.1:5175",
+            # 本地开发:Flutter web 三端(python -m http.server 或 flutter run -d chrome)
+            #
+            # ⚠️ 这几行是**必须的**,不是可选。原生 App 不发 Origin 头、
+            # 不受 CORS 约束,所以三端在手机上一直好好的;
+            # 一编成 web 就全变成跨域请求,不加白名单的表现是
+            # **每一个接口都失败**,而浏览器控制台里只说 CORS,
+            # 看不出来和后端配置有关。
+            "http://localhost:5180", "http://127.0.0.1:5180",
+            "http://localhost:5181", "http://127.0.0.1:5181",
+            "http://localhost:5182", "http://127.0.0.1:5182",
             "http://localhost:8010", "http://127.0.0.1:8010",
         ]
 
