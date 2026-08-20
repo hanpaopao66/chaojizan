@@ -452,8 +452,9 @@ class _MerchantListViewState extends State<MerchantListView> {
 
   Future<void> _loadMiniApps() async {
     if (widget.category != null) return; // 面板只属于首页,品类页不呼出
-    // web / 桌面上小程序容器还没做(见 mini_app_sheet.dart 的说明)。
-    // **连清单都不拉** —— 拉回来只会渲染出一排点不开的入口
+    // 桌面端没有小程序容器(WebView 插件不支持桌面,桌面也没有 iframe)。
+    // **连清单都不拉** —— 拉回来只会渲染出一排点不开的入口。
+    // web 现在能用了(iframe + postMessage,见 mini_app_host_web.dart)
     if (!miniAppSupported) return;
     try {
       final apps = await widget.api.miniApps();

@@ -429,6 +429,32 @@ async def admin_console(path: str = ""):
     return FileResponse(ADMIN_WEB_DIR / "index.html")
 
 
+@app.get("/mini-app-bridge.js", include_in_schema=False)
+async def mini_app_bridge():
+    """小程序桥脚本(#292)。**公开、无需鉴权** —— 它本身不含任何机密。
+
+    页面在 <head> 里引这一个文件就有了 window.superz。
+
+    为什么需要它:手机端小程序跑在原生 WebView 里,宿主可以注入 JS;
+    但 web 端跑在**跨域 iframe** 里,浏览器的同源策略明确禁止父页面注入 ——
+    这不是权限没开,是安全模型本身。Telegram 也是这么解决的
+    (它要求页面引 telegram-web-app.js)。
+
+    带 CORS 头是因为小程序部署在别人的域名下,而 <script src> 跨域取脚本
+    在带 crossorigin 属性时会走 CORS 检查。
+    """
+    return FileResponse(
+        STATIC_DIR / "mini-app-bridge.js",
+        media_type="application/javascript",
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            # 桥的协议是稳定的,让 CDN 和浏览器缓存住;
+            # 真要改协议就改文件名(bridge-v2.js),不靠让缓存失效
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
 @app.get("/legal/terms", include_in_schema=False)
 async def legal_terms():
     """用户协议(网页版,应用商店审核和备案材料引用)。"""

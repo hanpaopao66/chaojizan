@@ -21,7 +21,11 @@ dependencies:
   share_plus: ^12.0.2
   flutter_tencent_map: 1.0.1
   video_player: ^2.9.2       # 明厨亮灶直播(HLS,安卓走 ExoPlayer / iOS 走 AVPlayer)
-  webview_flutter: ^4.8.0    # 小程序容器(#279,Telegram 模式:网页 + JS 桥)
+  webview_flutter: ^4.8.0    # 小程序容器(#279,手机端:原生 WebView)
+  # web 端小程序容器(#292):跨域 iframe + postMessage。
+  # 浏览器不许父页面往跨域 iframe 注入 JS,所以页面要自己引
+  # /mini-app-bridge.js —— 和 Telegram 要求引 telegram-web-app.js 同理
+  web: ^1.1.0
 
 flutter:
   uses-material-design: true
