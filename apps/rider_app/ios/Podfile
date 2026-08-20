@@ -1,0 +1,56 @@
+# 明确写死最低版本。
+#
+# 注释掉的话 CocoaPods 会"自动分配 iOS 13.0"并每次警告 ——
+# 而自动分配的值会随 CocoaPods 版本变,某天升级就可能悄悄抬高门槛,
+# 把老设备的用户挡在外面。这种事不该由工具替我们决定。
+platform :ios, '13.0'
+
+# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get is executed first"
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  # ⚠️ 必须带 :linkage => :static。
+  #
+  # 腾讯地图 SDK(QMapKit.framework)是**静态库**,而裸的 use_frameworks!
+  # 要求全部动态链接 —— pod install 会报
+  # "transitive dependencies that include statically linked binaries" 然后失败,
+  # iOS 包根本建不出来。
+  #
+  # 地图 SDK 是拍板要的(见 delivery_map.dart 开头:栅格瓦片在高密度屏上必糊),
+  # 所以让链接方式迁就它,不是反过来。
+  use_frameworks! :linkage => :static
+
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+  end
+end

@@ -1,0 +1,48 @@
+PODS:
+  - Flutter (1.0.0)
+  - flutter_tencent_map (1.0.0):
+    - Flutter
+    - Tencent-MapSDK (>= 5.7.7)
+  - JCore (5.5.0)
+  - JPush (6.1.0):
+    - JCore (> 5.1.1)
+  - jpush_flutter (0.0.2):
+    - Flutter
+    - JCore (>= 5.2.0)
+    - JPush (= 6.1.0)
+  - Tencent-MapFoundation (5.2.3)
+  - Tencent-MapSDK (6.13.2):
+    - Tencent-MapFoundation (>= 5.2.1)
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - flutter_tencent_map (from `.symlinks/plugins/flutter_tencent_map/ios`)
+  - jpush_flutter (from `.symlinks/plugins/jpush_flutter/ios`)
+
+SPEC REPOS:
+  trunk:
+    - JCore
+    - JPush
+    - Tencent-MapFoundation
+    - Tencent-MapSDK
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  flutter_tencent_map:
+    :path: ".symlinks/plugins/flutter_tencent_map/ios"
+  jpush_flutter:
+    :path: ".symlinks/plugins/jpush_flutter/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_tencent_map: 1118de87cdc10cc8c2d37631c2feb4cf3c72c502
+  JCore: 38810b2235642507e9632ceb5bb66805042909bb
+  JPush: 891c497687be788b094bde368d51289355ee1112
+  jpush_flutter: 477929cab3546c78fbca65aabe61ff39eafc0d77
+  Tencent-MapFoundation: 36368d2dd52eb36bda8c4e93e6a6b7b9b99a5cbb
+  Tencent-MapSDK: 52a3cda55b7ab0a488190cf60420fef1c5150fcc
+
+PODFILE CHECKSUM: 4899e6c64252ddd9ab8a989dcd536291123e2959
+
+COCOAPODS: 1.17.0

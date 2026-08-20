@@ -41,6 +41,15 @@ apps/*/android/.kotlin/
 #
 # 模板测试该做的是删掉,不是靠 gitignore 藏起来。
 
+# CocoaPods 的依赖产物:`pod install` 再生,几百 MB,不入库。
+# **Podfile 和 Podfile.lock 要入库** —— 前者是配置(我们改过:
+# 写死 platform :ios 13.0、use_frameworks! 带 :linkage => :static,
+# 后者是腾讯地图静态库的硬要求),后者锁版本保证各机器装出同一套。
+apps/*/ios/Pods/
+apps/*/ios/.symlinks/
+apps/*/macos/Pods/
+apps/*/macos/.symlinks/
+
 # IDE
 .idea/
 .vscode/

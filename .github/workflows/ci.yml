@@ -186,6 +186,12 @@ jobs:
       # 11 / 11.5 / 12 / 12.5 混着用,每个页面的层次都对不齐。
       - name: 字号不再发散
         run: bash scripts/check_fontsize_drift.sh
+      # macOS 沙箱权限。flutter create 的模板里 Release 只有 app-sandbox,
+      # 没有 network.client —— 少了它 release 版一个网络请求都发不出去,
+      # 而 debug 版一切正常。平台目录被重新生成一次这条就又掉了。
+      # 表现是"所有接口超时"不是权限错,查起来会往后端方向找。
+      - name: macOS 权限声明
+        run: python3 scripts/check_macos_entitlements.py
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"
