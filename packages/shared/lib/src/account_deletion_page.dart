@@ -179,7 +179,7 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('注销账号')),
       body: ListView(
         padding: const EdgeInsets.all(20),

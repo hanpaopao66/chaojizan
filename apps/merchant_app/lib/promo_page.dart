@@ -72,7 +72,7 @@ class _MerchantPromoPageState extends State<MerchantPromoPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final promo = _promo;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('专属码与海报')),
       body: _error != null
           ? SzError(error: _error!, onRetry: _load)

@@ -138,7 +138,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
     final theme = Theme.of(context);
     final hotel = _hotel;
     if (hotel == null) {
-      return Scaffold(
+      return SzPageScaffold(
         appBar: AppBar(title: const Text('酒店详情')),
         body: Center(
           child: _error == null
@@ -154,7 +154,7 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
     final photos = hotel.photoUrls.isNotEmpty
         ? hotel.photoUrls
         : [if (hotel.logoUrl.isNotEmpty) hotel.logoUrl];
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(hotel.name)),
       body: ListView(children: [
         if (photos.isNotEmpty)

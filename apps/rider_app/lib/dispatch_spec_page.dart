@@ -42,7 +42,7 @@ class _DispatchSpecPageState extends State<DispatchSpecPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('抢单怎么排的')),
       body: _error != null
           ? Center(

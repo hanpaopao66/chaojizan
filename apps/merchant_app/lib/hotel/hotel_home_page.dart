@@ -40,7 +40,7 @@ class _HotelHomePageState extends State<HotelHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: Text(switch (_tab) {
           1 => '房型房价',

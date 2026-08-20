@@ -485,7 +485,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         ((_foodCents + packing - merchantOff) * widget.merchant.commissionRate)
             .round();
 
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('确认订单')),
       body: ListView(
         padding: const EdgeInsets.all(12),

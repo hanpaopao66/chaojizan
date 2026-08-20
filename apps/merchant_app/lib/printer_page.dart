@@ -448,7 +448,7 @@ class _PrinterPageState extends State<PrinterPage> {
     // 云打印和蓝牙都开着会出两张一样的单 —— 提醒一句
     final cloudAuto = _printers.any((p) => p['auto'] == true);
     final both = cloudAuto && _btDevice != null && _btAuto;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('小票打印')),
       body: ListView(
         padding: const EdgeInsets.all(12),

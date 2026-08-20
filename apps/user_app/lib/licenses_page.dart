@@ -46,7 +46,7 @@ class _ShopLicensesPageState extends State<ShopLicensesPage> {
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
     final items = _items;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('证照信息')),
       body: _error != null
           ? Center(

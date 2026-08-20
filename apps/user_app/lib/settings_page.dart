@@ -61,7 +61,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(children: [
         // 开关类:trailing 给 Switch,整行可点也切换。
@@ -148,7 +148,7 @@ class _AboutPageState extends State<AboutPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('关于我们')),
       body: ListView(padding: const EdgeInsets.all(24), children: [
         const Center(child: BrandLogo(size: 72)),

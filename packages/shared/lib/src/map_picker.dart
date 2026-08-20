@@ -18,6 +18,7 @@ import 'brand.dart';
 import 'city_picker.dart';
 import 'models.dart';
 import 'map_boot.dart';
+import 'responsive.dart';
 
 /// 选点结果。
 @immutable
@@ -479,7 +480,10 @@ class _MapPickerPageState extends State<MapPickerPage> {
             ]),
           );
 
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:地图选点挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('在地图上选位置')),
       body: Column(children: [
         searchBar,

@@ -177,7 +177,7 @@ class _LicenseRenewalPageState extends State<LicenseRenewalPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final pending = _renewal != null && _renewal!['status'] == 'pending';
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('食品经营许可证')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

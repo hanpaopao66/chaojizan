@@ -137,7 +137,7 @@ class _GroupCartPageState extends State<GroupCartPage>
     final cart = _cart;
     final locked = cart?['locked'] == true;
     final isOwner = cart?['is_owner'] == true;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text('拼单 · ${widget.merchant.name}')),
       body: cart == null
           ? const Center(child: CircularProgressIndicator())

@@ -55,7 +55,7 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('住客点评')),
       body: FutureBuilder<List<StayReview>>(
         future: _future,

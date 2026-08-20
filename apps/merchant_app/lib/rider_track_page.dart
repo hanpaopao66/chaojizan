@@ -70,7 +70,10 @@ class _RiderTrackPageState extends State<RiderTrackPage> {
     final hasShop = order.merchantLat != null && order.merchantLng != null;
     final hasRider = _loc?.lat != null && _loc?.lng != null;
 
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:地图挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('骑手在哪')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())

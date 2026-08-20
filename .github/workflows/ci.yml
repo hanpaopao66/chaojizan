@@ -192,11 +192,11 @@ jobs:
       # 表现是"所有接口超时"不是权限错,查起来会往后端方向找。
       - name: macOS 权限声明
         run: python3 scripts/check_macos_entitlements.py
-      # 弹层必须走 szShowSheet(按屏宽切底部弹层/居中对话框)。
-      # 直接 showModalBottomSheet 在桌面上会变成横贯屏底的一条长条,
+      # 宽屏布局:弹层走 szShowSheet、带 appBar 的页面走 SzPageScaffold。
+      # 写成裸的在桌面上是"标题栏横跨 1440、按钮一米宽",
       # 而这**不报错** —— 功能全对、测试全绿,只是难用。
-      - name: 弹层走自适应 helper
-        run: bash scripts/check_no_raw_sheet.sh
+      - name: 宽屏布局走自适应外壳
+        run: bash scripts/check_wide_layout.sh
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"

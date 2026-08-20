@@ -89,7 +89,7 @@ class _AppendOrderPageState extends State<AppendOrderPage> {
   @override
   Widget build(BuildContext context) {
     final dishes = _dishes;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
           title: Text('加菜 · 随#'
               '${widget.parent.orderNo.substring(widget.parent.orderNo.length - 6)}'

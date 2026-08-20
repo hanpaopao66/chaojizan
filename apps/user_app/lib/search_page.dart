@@ -205,7 +205,7 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final results = _results;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: TextField(
           controller: _controller,

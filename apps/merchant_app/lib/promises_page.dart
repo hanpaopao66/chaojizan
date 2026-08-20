@@ -56,7 +56,7 @@ class _MerchantPromisesPageState extends State<MerchantPromisesPage> {
     final sz = Theme.of(context).sz;
     final rate = (_tier?['commission_rate'] as num?)?.toDouble();
 
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('平台对你的承诺')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 32),

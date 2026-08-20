@@ -135,7 +135,7 @@ class _ErrandPageState extends State<ErrandPage> {
     final ready = _from != null && _to != null && _noForbidden &&
         _note.text.trim().length >= 2 && q != null;
 
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(_buyMode ? '帮我买' : '帮我送')),
       body: ListView(
         padding: const EdgeInsets.all(12),

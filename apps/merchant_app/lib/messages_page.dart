@@ -96,7 +96,7 @@ class _MerchantMessagesPageState extends State<MerchantMessagesPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('消息中心')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())

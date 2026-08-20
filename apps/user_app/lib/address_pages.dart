@@ -110,7 +110,7 @@ class _AddressBookPageState extends State<AddressBookPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(widget.selectMode ? '选择收货地址' : '我的收货地址')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())
@@ -444,7 +444,7 @@ class _AddressEditPageState extends State<AddressEditPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('新建收货地址')),
       body: ListView(
         padding: const EdgeInsets.all(16),

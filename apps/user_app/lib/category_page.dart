@@ -71,7 +71,7 @@ class _CategoryPageState extends State<CategoryPage> {
       );
     }
 
-    return Scaffold(
+    return SzPageScaffold(
       // 频道标识条(#132):细细一条,只回答"你在哪个世界",不抢内容的戏
       appBar: AppBar(
         title: const Text('点外卖'),

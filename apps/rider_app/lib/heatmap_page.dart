@@ -66,7 +66,10 @@ class _RiderHeatmapPageState extends State<RiderHeatmapPage> {
         1, (m, c) => (c['orders'] as num).toInt() > m
             ? (c['orders'] as num).toInt() : m);
 
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:热力图要看得见范围挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('哪儿有单')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

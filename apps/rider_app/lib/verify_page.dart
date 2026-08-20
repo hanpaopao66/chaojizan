@@ -71,7 +71,7 @@ class _RiderVerifyFlowPageState extends State<RiderVerifyFlowPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (_error != null) {
-      return Scaffold(
+      return SzPageScaffold(
         appBar: AppBar(title: const Text('实名认证')),
         body: SzError(error: _error, onRetry: _load),
       );
@@ -79,7 +79,7 @@ class _RiderVerifyFlowPageState extends State<RiderVerifyFlowPage> {
     final p = _profile!;
     if (p.isApproved) {
       final sz = Theme.of(context).sz;
-      return Scaffold(
+      return SzPageScaffold(
         appBar: AppBar(title: const Text('实名认证')),
         body: Center(
           child: Padding(
@@ -109,7 +109,7 @@ class _RiderVerifyFlowPageState extends State<RiderVerifyFlowPage> {
 
     // pending 只可能是历史数据(旧流程留下的);新流程核验通过即 approved
     if (p.status == 'pending') {
-      return Scaffold(
+      return SzPageScaffold(
         appBar: AppBar(title: const Text('实名认证')),
         body: Center(
           child: Padding(
@@ -186,7 +186,7 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('实名认证')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 28),

@@ -99,7 +99,7 @@ class _InvoicePageState extends State<InvoicePage> {
     final summary = _summary;
     final requested = summary?['requested'] == true;
     final total = summary?['total_cents'] as int? ?? 0;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('平台服务费发票')),
       body: ListView(
         padding: const EdgeInsets.all(16),

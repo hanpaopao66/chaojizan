@@ -81,7 +81,10 @@ class MoneyFlowPage extends StatelessWidget {
       return true;
     }());
 
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:资金流向图挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('钱去哪了')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 28),

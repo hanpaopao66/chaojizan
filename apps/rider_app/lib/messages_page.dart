@@ -70,7 +70,7 @@ class _RiderMessagesPageState extends State<RiderMessagesPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: const Text('消息'),
         bottom: PreferredSize(

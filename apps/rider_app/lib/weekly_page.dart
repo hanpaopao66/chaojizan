@@ -61,7 +61,10 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
         .map((k, v) => MapEntry('$k', '$v'));
     final partsTotal = parts.values.fold<int>(0, (a, b) => a + b);
 
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:周报的图表挤在 720 里看不清 ——
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(
         title: const Text('我的周报'),
         actions: [
@@ -283,7 +286,7 @@ class _RiderFeedbackPageState extends State<RiderFeedbackPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('给平台提意见')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())

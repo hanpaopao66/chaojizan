@@ -285,6 +285,10 @@ class Settings(BaseSettings):
             "http://localhost:5180", "http://127.0.0.1:5180",
             "http://localhost:5181", "http://127.0.0.1:5181",
             "http://localhost:5182", "http://127.0.0.1:5182",
+            # 5183 是 .claude/launch.json 里 u-web 用的口。
+            # 这两个文件要一起改 —— 少一行的表现是用户端 web 预览
+            # 一个接口都不通,而控制台只说 CORS
+            "http://localhost:5183", "http://127.0.0.1:5183",
             "http://localhost:8010", "http://127.0.0.1:8010",
         ]
 

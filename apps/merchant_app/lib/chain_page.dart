@@ -64,7 +64,10 @@ class _MerchantChainPageState extends State<MerchantChainPage> {
   Widget build(BuildContext context) {
     final brand = _brand?['brand'] as Map<String, dynamic>?;
     final isOwner = brand?['is_owner'] == true;
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:多门店对比表挤在 720 里看不清 ——
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(
         title: Text(brand == null ? '连锁店群' : '${brand['name']}'),
         actions: [
@@ -397,7 +400,7 @@ class _NewShopPageState extends State<_NewShopPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('开一家新门店')),
       body: ListView(
         padding: const EdgeInsets.all(16),

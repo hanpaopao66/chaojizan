@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import 'api_client.dart';
 import 'models.dart';
+import 'responsive.dart';
 
 class PayoutAccountPage extends StatefulWidget {
   const PayoutAccountPage({super.key, required this.api});
@@ -96,7 +97,7 @@ class _PayoutAccountPageState extends State<PayoutAccountPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final current = _current;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('收款账户')),
       body: !_loaded
           ? const Center(child: CircularProgressIndicator())

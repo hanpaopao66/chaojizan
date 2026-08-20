@@ -101,7 +101,7 @@ class _RiderExamPageState extends State<RiderExamPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('食品安全培训')),
       body: _error != null
           ? SzError(error: _error, onRetry: _load)
@@ -345,7 +345,7 @@ class _RiderGearPageState extends State<RiderGearPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('装备申领')),
       body: RefreshIndicator(
         onRefresh: _load,
@@ -449,7 +449,7 @@ class _RiderAccidentPageState extends State<RiderAccidentPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('事故上报')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Row(children: [
@@ -541,7 +541,7 @@ class _RiderInsurancePageState extends State<RiderInsurancePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('意外保障')),
       body: RefreshIndicator(
         onRefresh: _load,
@@ -650,7 +650,7 @@ class _RiderRulesPageState extends State<RiderRulesPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final d = _d;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('规则中心')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         if (d != null)
@@ -757,7 +757,7 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('紧急联系人')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Text('触发紧急求助(SOS)时,平台会第一时间联系他们。\n'

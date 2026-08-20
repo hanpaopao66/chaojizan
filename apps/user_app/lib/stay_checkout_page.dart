@@ -82,7 +82,7 @@ class _StayCheckoutPageState extends State<StayCheckoutPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final quote = widget.quote;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('确认订单')),
       body: ListView(padding: const EdgeInsets.all(12), children: [
         Card(
@@ -208,7 +208,7 @@ class _SubmittedPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(paid ? '支付成功' : '订单已提交')),
       body: Center(
         child: Padding(

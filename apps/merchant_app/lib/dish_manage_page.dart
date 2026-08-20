@@ -839,7 +839,7 @@ class _DishEditPageState extends State<DishEditPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(widget.dish == null ? '新增菜品' : '编辑菜品')),
       body: ListView(
         padding: const EdgeInsets.all(16),

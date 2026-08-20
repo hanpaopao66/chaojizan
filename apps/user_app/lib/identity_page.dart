@@ -61,7 +61,7 @@ class _IdentityPageState extends State<IdentityPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final s = _status;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('实名认证')),
       body: s == null
           ? const Center(child: CircularProgressIndicator())

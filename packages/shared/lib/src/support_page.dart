@@ -218,7 +218,7 @@ class _SupportPageState extends State<SupportPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: const Text('联系平台客服'),
         actions: [

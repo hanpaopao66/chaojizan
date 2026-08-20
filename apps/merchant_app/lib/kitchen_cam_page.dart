@@ -119,7 +119,10 @@ class _KitchenCamSetupPageState extends State<KitchenCamSetupPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:后厨视频挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('明厨亮灶')),
       body: _error != null
           ? SzError(error: _error, onRetry: _load)

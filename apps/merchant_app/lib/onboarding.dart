@@ -124,7 +124,7 @@ class _OnboardingWelcomePageState extends State<OnboardingWelcomePage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: const Text('开店入驻'),
         actions: [
@@ -890,7 +890,7 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) _saveDraft();
       },
-      child: Scaffold(
+      child: SzPageScaffold(
         appBar: AppBar(title: Text(_rejected ? '修改重新提交' : '申请入驻')),
         body: Column(children: [
           if (_rejected)
@@ -991,7 +991,7 @@ class PendingReviewPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('入驻审核中')),
       body: ListView(
         padding: const EdgeInsets.all(24),
@@ -1064,7 +1064,7 @@ class RejectedShopPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('入驻申请被驳回')),
       body: ListView(
         padding: const EdgeInsets.all(24),

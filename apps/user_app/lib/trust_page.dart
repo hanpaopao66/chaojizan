@@ -82,7 +82,7 @@ class _TrustPageState extends State<TrustPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final s = _stats;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('账目透明')),
       body: _error != null
           ? EmptyState(

@@ -287,7 +287,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
     final theme = Theme.of(context);
     final order = _order;
     if (order == null) {
-      return Scaffold(
+      return SzPageScaffold(
         appBar: AppBar(title: const Text('订单详情')),
         body: Center(
             child: _error == null
@@ -297,7 +297,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
     }
     final cancellable =
         order.status == 'paid' || order.status == 'confirmed';
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(order.statusLabel)),
       body: ListView(padding: const EdgeInsets.all(12), children: [
         _timeline(theme, order),

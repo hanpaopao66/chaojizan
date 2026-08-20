@@ -35,7 +35,7 @@ class _CouponsPageState extends State<CouponsPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final list = _coupons;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('优惠券')),
       body: list == null
           ? const Center(child: CircularProgressIndicator())

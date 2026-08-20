@@ -2763,7 +2763,7 @@ class _MenuPageState extends State<MenuPage>
       );
     }
 
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: Text(widget.merchant.name),
         actions: [
@@ -4058,7 +4058,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
   @override
   Widget build(BuildContext context) {
     final order = _order;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('订单详情')),
       body: order == null
           ? (_error != null
@@ -5623,7 +5623,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('我的收藏')),
       body: FutureBuilder(
         future: _future,

@@ -124,7 +124,7 @@ class _VoucherManagePageState extends State<VoucherManagePage> {
   @override
   Widget build(BuildContext context) {
     final deals = _deals;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('团购券管理')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _create,
@@ -248,7 +248,7 @@ class _VoucherRedeemPageState extends State<VoucherRedeemPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('团购核销')),
       body: Padding(
         padding: const EdgeInsets.all(24),
@@ -305,7 +305,7 @@ class _ScanPageState extends State<_ScanPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('对准顾客的券码二维码')),
       body: MobileScanner(
         onDetect: (capture) {

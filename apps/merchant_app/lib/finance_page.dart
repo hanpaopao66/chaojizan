@@ -551,7 +551,10 @@ class _DayOrdersPageState extends State<DayOrdersPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:对账表格挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: Text('${stat.day} 入账明细')),
       body: FutureBuilder(
         future: _future,

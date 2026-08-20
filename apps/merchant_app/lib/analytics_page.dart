@@ -96,7 +96,10 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final d = _data;
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:图表挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('经营分析'), actions: [
         SegmentedButton<int>(
           segments: const [

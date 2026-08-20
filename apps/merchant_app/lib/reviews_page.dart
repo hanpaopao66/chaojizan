@@ -434,7 +434,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('顾客评价')),
       body: Column(children: [
         _overviewBar(),

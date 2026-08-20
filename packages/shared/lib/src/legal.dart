@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'brand.dart';
+import 'responsive.dart';
 
 const String kLegalVersion = '2026-07-28';
 
@@ -210,7 +211,7 @@ class LegalPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(title)),
       body: Scrollbar(
         child: SingleChildScrollView(

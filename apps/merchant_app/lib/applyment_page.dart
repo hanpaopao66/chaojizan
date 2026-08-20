@@ -514,7 +514,7 @@ class _ApplymentPageState extends State<ApplymentPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('收款资料')),
       body: _error != null
           ? SzError(error: _error, onRetry: _load)

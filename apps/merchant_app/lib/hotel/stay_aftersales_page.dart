@@ -89,7 +89,7 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('售后处理')),
       body: FutureBuilder<List<StayAfterSale>>(
         future: _future,

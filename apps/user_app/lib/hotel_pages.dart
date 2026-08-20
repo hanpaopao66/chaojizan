@@ -190,7 +190,7 @@ class _HotelListPageState extends State<HotelListPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: const Text('住宿'),
         bottom: const PreferredSize(

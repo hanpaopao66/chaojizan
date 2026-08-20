@@ -39,7 +39,7 @@ class _InvitePageState extends State<InvitePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final d = _d;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('邀请有礼')),
       body: d == null
           ? const Center(child: CircularProgressIndicator())

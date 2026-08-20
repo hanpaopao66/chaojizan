@@ -74,7 +74,7 @@ class HelpCenterPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('帮助中心')),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -154,7 +154,7 @@ class _FeedbackPageState extends State<FeedbackPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('意见反馈')),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         Text('反馈类型', style: Theme.of(context).textTheme.titleSmall),

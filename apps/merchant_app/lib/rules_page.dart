@@ -40,7 +40,7 @@ class _MerchantRulesPageState extends State<MerchantRulesPage> {
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
     final rules = _rules;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('平台规则')),
       body: _error != null
           ? SzError(error: _error, onRetry: _load)

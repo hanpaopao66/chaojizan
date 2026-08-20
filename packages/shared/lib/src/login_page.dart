@@ -7,6 +7,7 @@ import 'api_client.dart';
 import 'brand.dart';
 import 'legal.dart';
 import 'push_service.dart';
+import 'responsive.dart';
 
 /// 三端统一:仅验证码登录(密码登录已下线,管理后台网页除外)。
 /// 配合 AuthGate:冷启动恢复会话免登录;401 静默回到登录页。
@@ -249,7 +250,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       // 从游客态推入时给返回箭头;作为门禁根页面时无处可返回,不显示
       appBar: Navigator.of(context).canPop()
           ? AppBar(backgroundColor: Colors.transparent)

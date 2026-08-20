@@ -225,20 +225,7 @@ class SzNavScaffold extends StatelessWidget {
         Expanded(
           child: Column(children: [
             if (appBar != null)
-              // 标题栏的**内容**跟着限宽,而底色铺满 ——
-              // 底色断在 1080 会在右边留一条色差,像渲染坏了
-              Material(
-                color: Theme.of(context).appBarTheme.backgroundColor ??
-                    sz.surface,
-                child: SafeArea(
-                  bottom: false,
-                  child: SzContentWidth(
-                    maxWidth: contentMaxWidth,
-                    child: SizedBox(
-                        height: appBar!.preferredSize.height, child: appBar),
-                  ),
-                ),
-              ),
+              _WideAppBar(appBar: appBar!, maxWidth: contentMaxWidth),
             Expanded(
                 child: SzContentWidth(maxWidth: contentMaxWidth, child: body)),
           ]),
@@ -381,6 +368,102 @@ class SzSheetScrollable extends StatelessWidget {
       minChildSize: minSize,
       maxChildSize: maxSize,
       builder: builder,
+    );
+  }
+}
+
+/// 宽屏上的标题栏:**内容**跟着限宽,而底色铺满。
+///
+/// 底色也断在 1080 的话,右边会留一条和页面底色不同的色差,
+/// 看着像渲染坏了。
+class _WideAppBar extends StatelessWidget {
+  const _WideAppBar({required this.appBar, required this.maxWidth});
+
+  final PreferredSizeWidget appBar;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).appBarTheme.backgroundColor ??
+          Theme.of(context).sz.surface,
+      child: SafeArea(
+        bottom: false,
+        child: SzContentWidth(
+          maxWidth: maxWidth,
+          child: SizedBox(height: appBar.preferredSize.height, child: appBar),
+        ),
+      ),
+    );
+  }
+}
+
+/// push 出来的子页用的 [Scaffold] —— 宽屏上标题栏和内容一起限宽。
+///
+/// ## 为什么不能直接用 Scaffold
+///
+/// [SzNavScaffold] 只管三个 tab 的外壳。子页(设置、意见反馈、券包、
+/// 订单详情……)是 push 出来的,不在外壳里,在 1440 的浏览器上是**整页铺满**的:
+/// 返回箭头钉在屏幕最左上角,提交按钮横跨 1440 —— 一个按钮一米宽。
+///
+/// 这是同一个毛病的另一半,改外壳的时候很容易漏掉,因为手机上完全看不出来。
+///
+/// ## 用法
+///
+/// 把 `Scaffold(` 换成 `SzPageScaffold(` 就行,参数同名。
+/// 默认限到 [kContentMaxWidth](720)—— 子页几乎都是单列表单和信息。
+/// 要放表格图表的传 [kWideMaxWidth]。
+class SzPageScaffold extends StatelessWidget {
+  const SzPageScaffold({
+    super.key,
+    required this.body,
+    this.appBar,
+    this.backgroundColor,
+    this.floatingActionButton,
+    this.bottomNavigationBar,
+    this.resizeToAvoidBottomInset,
+    this.contentMaxWidth = kContentMaxWidth,
+  });
+
+  final Widget body;
+  final PreferredSizeWidget? appBar;
+  final Color? backgroundColor;
+  final Widget? floatingActionButton;
+  final Widget? bottomNavigationBar;
+  final bool? resizeToAvoidBottomInset;
+
+  /// 内容(含 [appBar])的最大宽度。两者用**同一个值**才对得齐。
+  final double contentMaxWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!szWidthOf(context).hasSideNav) {
+      return Scaffold(
+        appBar: appBar,
+        body: body,
+        backgroundColor: backgroundColor,
+        floatingActionButton: floatingActionButton,
+        bottomNavigationBar: bottomNavigationBar,
+        resizeToAvoidBottomInset: resizeToAvoidBottomInset,
+      );
+    }
+    return Scaffold(
+      backgroundColor: backgroundColor,
+      floatingActionButton: floatingActionButton,
+      resizeToAvoidBottomInset: resizeToAvoidBottomInset,
+      // 底栏(提交按钮那种)也跟着限宽:让它横跨 1440 的话,
+      // 一个"确认下单"按钮一米宽,点哪儿都行反而不知道点哪儿
+      bottomNavigationBar: bottomNavigationBar == null
+          ? null
+          : SzContentWidth(
+              maxWidth: contentMaxWidth, child: bottomNavigationBar!),
+      body: Column(children: [
+        if (appBar != null)
+          _WideAppBar(appBar: appBar!, maxWidth: contentMaxWidth),
+        Expanded(
+          child: SzContentWidth(maxWidth: contentMaxWidth, child: body),
+        ),
+      ]),
     );
   }
 }

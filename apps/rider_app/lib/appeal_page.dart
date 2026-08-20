@@ -60,7 +60,7 @@ class _RiderAppealPageState extends State<RiderAppealPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('我的申诉')),
       floatingActionButton: widget.order == null
           ? null

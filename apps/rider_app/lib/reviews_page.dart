@@ -50,7 +50,7 @@ class _RiderReviewsPageState extends State<RiderReviewsPage> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('顾客评价')),
       body: _error != null
           ? Center(

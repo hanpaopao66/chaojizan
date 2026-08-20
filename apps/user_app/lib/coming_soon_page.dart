@@ -53,7 +53,7 @@ class _ComingSoonPageState extends State<ComingSoonPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(widget.name)),
       body: Center(
         child: SingleChildScrollView(

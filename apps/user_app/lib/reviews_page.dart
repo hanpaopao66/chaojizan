@@ -10,7 +10,7 @@ class ReviewsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text('${merchant.name} · 评价')),
       body: ReviewsList(api: api, merchantId: merchant.id),
     );

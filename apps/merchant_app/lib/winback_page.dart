@@ -151,7 +151,7 @@ class _MerchantWinbackPageState extends State<MerchantWinbackPage> {
     final theme = Theme.of(context);
     final sz = theme.sz;
     final data = _data;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('老客召回')),
       body: _error != null
           ? SzError(error: _error!, onRetry: _load)

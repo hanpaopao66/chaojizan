@@ -146,7 +146,7 @@ class _MessageCenterPageState extends State<MessageCenterPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('消息中心')),
       body: Column(children: [
         Padding(

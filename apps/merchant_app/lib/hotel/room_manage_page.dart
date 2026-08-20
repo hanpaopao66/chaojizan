@@ -558,7 +558,7 @@ class _RoomTypeEditPageState extends State<RoomTypeEditPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar:
           AppBar(title: Text(widget.existing == null ? '新增房型' : '编辑房型')),
       body: ListView(padding: const EdgeInsets.all(16), children: [

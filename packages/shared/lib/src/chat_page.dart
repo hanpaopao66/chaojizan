@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'api_client.dart';
 import 'brand.dart';
 import 'net_image.dart';
+import 'responsive.dart';
 
 /// 订单内聊天页(三端共用):气泡 + 快捷语 + 输入框,3 秒轮询兜底。
 /// 电话(隐私号)仍是兜底通道;终结 2 小时后只读。
@@ -85,7 +86,7 @@ class _OrderChatPageState extends State<OrderChatPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: Text(widget.title)),
       body: Column(children: [
         Expanded(

@@ -16,7 +16,7 @@ class DealsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: const Text('超值团购'),
         bottom: const PreferredSize(
@@ -404,7 +404,7 @@ class _MyVouchersPageState extends State<MyVouchersPage> {
   @override
   Widget build(BuildContext context) {
     final tickets = _tickets;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('我的券包')),
       body: tickets == null
           ? const Center(child: CircularProgressIndicator())

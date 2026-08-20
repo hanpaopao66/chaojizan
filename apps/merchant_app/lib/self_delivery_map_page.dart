@@ -22,7 +22,10 @@ class SelfDeliveryMapPage extends StatelessWidget {
             order.lat, order.lng)
         : null;
 
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:地图挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('自配送 · 送去哪')),
       body: Column(children: [
         Expanded(

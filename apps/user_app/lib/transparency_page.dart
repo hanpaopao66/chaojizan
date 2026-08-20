@@ -120,7 +120,10 @@ class _TransparencyPageState extends State<TransparencyPage> {
     final settled = _all.where((s) => !s.loading).length;
     final dead = _all.where((s) => s.error != null).length;
 
-    return Scaffold(
+    return SzPageScaffold(
+      // 限宽用宽档:账目图表挤在 720 里看不清 —— 
+      // 宽度上限按**内容形态**选,不是统一限死
+      contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('平台体检')),
       body: settled == 0
           // 一条都还没回来:骨架屏,不手写转圈

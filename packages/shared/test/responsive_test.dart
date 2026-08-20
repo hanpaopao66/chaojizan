@@ -365,4 +365,63 @@ void main() {
       expect(find.text('标题'), findsOneWidget);
     });
   });
+
+  group('push 出来的子页也要限宽', () {
+    // 这一条是**验收时才发现的**:改完外壳在 1440 上一切正常,
+    // 点进「意见反馈」——整页铺满,返回箭头钉在屏幕最左上角,
+    // 提交按钮横跨 1440,一个按钮一米宽。
+    //
+    // 子页是 push 出来的,不在 SzNavScaffold 里,所以外壳那次改动
+    // 一点也管不到它们。手机上完全看不出来。
+    Widget page({double maxWidth = kContentMaxWidth, Widget? bottom}) =>
+        SzPageScaffold(
+          contentMaxWidth: maxWidth,
+          appBar: AppBar(title: const Text('意见反馈')),
+          bottomNavigationBar: bottom,
+          body: Column(children: [
+            Container(key: const Key('内容'), height: 40, color: Colors.red),
+          ]),
+        );
+
+    testWidgets('窄屏上就是普通 Scaffold,不干预', (t) async {
+      await pumpAt(t, 375, page());
+      expect(t.getSize(find.byKey(const Key('内容'))).width, 375);
+      expect(find.byType(AppBar), findsOneWidget);
+    });
+
+    testWidgets('1440 上正文和标题栏一起收到 720', (t) async {
+      await pumpAt(t, 1440, page());
+      expect(t.getSize(find.byKey(const Key('内容'))).width, kContentMaxWidth);
+      final bar = t.getSize(find.byType(AppBar)).width;
+      expect(bar, lessThanOrEqualTo(kContentMaxWidth),
+          reason: '标题栏还横跨 1440(实际 ${bar.toStringAsFixed(0)})—— '
+              '返回箭头会钉在屏幕最左上角,离正文半个屏');
+    });
+
+    testWidgets('底栏按钮也跟着收,不做一米宽的按钮', (t) async {
+      await pumpAt(
+          t,
+          1440,
+          page(
+              bottom: Container(
+                  key: const Key('底栏'), height: 56, color: Colors.blue)));
+      final w = t.getSize(find.byKey(const Key('底栏'))).width;
+      expect(w, lessThanOrEqualTo(kContentMaxWidth),
+          reason: '"提交"按钮横跨了 1440(实际 ${w.toStringAsFixed(0)})—— '
+              '点哪儿都行反而不知道该点哪儿');
+    });
+
+    testWidgets('要放表格的页面可以传宽一档', (t) async {
+      await pumpAt(t, 1600, page(maxWidth: kWideMaxWidth));
+      expect(t.getSize(find.byKey(const Key('内容'))).width, kWideMaxWidth);
+    });
+
+    testWidgets('各档都不抛异常、不画出界', (t) async {
+      for (final w in [375.0, 600.0, 768.0, 1024.0, 1440.0, 1920.0]) {
+        await pumpAt(t, w, page());
+        expect(t.takeException(), isNull, reason: '${w.toInt()}px 下抛异常');
+        expect(textsPaintingOutside(t), isEmpty, reason: '${w.toInt()}px 下字出界');
+      }
+    });
+  });
 }

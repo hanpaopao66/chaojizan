@@ -61,7 +61,7 @@ class _HealthCertsPageState extends State<HealthCertsPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
         title: const Text('从业人员健康证'),
         actions: [
@@ -280,7 +280,7 @@ class _CertFormPageState extends State<_CertFormPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(
           title: Text(_renewing
               ? '为「${widget.existing!['name']}」录入新证'

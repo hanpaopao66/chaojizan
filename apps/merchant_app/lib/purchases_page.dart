@@ -70,7 +70,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('进货查验台账')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _add,
@@ -331,7 +331,7 @@ class _PurchaseFormPageState extends State<_PurchaseFormPage> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return SzPageScaffold(
       appBar: AppBar(title: const Text('录一笔进货')),
       body: ListView(
         padding: const EdgeInsets.all(16),
