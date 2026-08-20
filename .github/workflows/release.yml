@@ -13,6 +13,9 @@ name: Release
 #
 # 触发方式(build 号必须严格递增,否则已装用户收不到更新):
 #   - 推 tag,格式 v<版本>-b<build号>,如 v0.12.0-b2050;
+#     **用带注解的 tag**(git tag -a v0.12.1-b2052 -m "更新说明一句话")——
+#     注解正文会当成 Release 的更新说明。推轻量 tag 也能发,
+#     只是说明会退化成「上一版以来的提交列表」;
 #   - 或手动 workflow_dispatch 填版本/build 号(会自动打同格式 tag)。
 #   老格式 tag(v0.11.1)不触发构建,避免误发。
 #
@@ -61,6 +64,9 @@ jobs:
       SUPERZ_ICP: 陕ICP备2025064101号-5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 更新说明要读 tag 注解和上一版以来的提交,浅克隆两样都读不到
+          fetch-depth: 0
 
       - name: 解析版本与 build 号
         id: ver
@@ -76,6 +82,50 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD" >> "$GITHUB_OUTPUT"
           echo "构建 v$VERSION build $BUILD"
+
+      - name: 解析更新说明
+        id: notes
+        # ⚠️ inputs.notes 走 env 传,不要直接 ${{ }} 插进脚本里 ——
+        # 那是别人能填的自由文本,插进 shell 就是命令注入
+        env:
+          EVENT: ${{ github.event_name }}
+          DISPATCH_NOTES: ${{ inputs.notes }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            NOTES="$DISPATCH_NOTES"
+          elif [ "$(git cat-file -t "$GITHUB_REF_NAME" 2>/dev/null)" = "tag" ]; then
+            # 带注解的 tag:注解正文就是更新说明。
+            #
+            # ⚠️ 必须**先判对象类型**。轻量 tag 上 `%(contents)` 不会返回空,
+            # 它会退回那个提交的**提交信息** —— 也就是「chore: xxx」这类
+            # 开发日志,直接当成给用户看的更新说明发出去。
+            NOTES=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
+          else
+            # 轻量 tag:列出上一版以来的提交,总比空着强。
+            # 老格式 tag(v0.12.0)不匹配 v*-b*,所以要兜两层
+            PREV=$(git tag -l 'v*-b*' --sort=-version:refname \
+                   | grep -vx "$GITHUB_REF_NAME" | head -1)
+            [ -n "$PREV" ] || PREV=$(git tag -l 'v*' --sort=-version:refname \
+                                     | grep -vx "$GITHUB_REF_NAME" | head -1)
+            if [ -n "$PREV" ]; then
+              LOG=$(git log --no-merges --format='- %s' "$PREV..$GITHUB_REF_NAME")
+            else
+              LOG=$(git log --no-merges --format='- %s' -20 "$GITHUB_REF_NAME")
+            fi
+            NOTES=$(printf '本版改动(自 %s):\n%s' "${PREV:-仓库开始}" "$LOG")
+          fi
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "::error::取不到更新说明。Release 页空着等于没发说明 ——"
+            echo "::error::推 tag 请用带注解的(git tag -a v0.x.y-bNNNN -m '一句话'),"
+            echo "::error::或者用 workflow_dispatch 手动触发并填 notes。"
+            exit 1
+          fi
+          {
+            echo "text<<SZ_NOTES_EOF"
+            printf '%s\n' "$NOTES"
+            echo "SZ_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "本次更新说明:"; printf '%s\n' "$NOTES"
 
       - name: 还原签名钥匙(缺 secrets 明确失败,不静默降级)
         env:
@@ -160,7 +210,7 @@ jobs:
           tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}-b{1}', steps.ver.outputs.version, steps.ver.outputs.build) || github.ref_name }}
           name: 超级赞 v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.build }})
           body: |
-            ${{ github.event_name == 'workflow_dispatch' && inputs.notes || '' }}
+            ${{ steps.notes.outputs.text }}
 
             本次 APK 由公开 CI 从本 tag 构建(第一档「公开构建」,
             逐字节可复现还在路上)—— 构建日志:
