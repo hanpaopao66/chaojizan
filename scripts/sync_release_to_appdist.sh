@@ -31,7 +31,10 @@ NOTES=${2:?缺更新说明（会写进 versions.json，旧版 App 的更新弹�
 [ -f deploy/.env.deploy ] && . deploy/.env.deploy
 API=${PUBLIC_BASE:?缺 PUBLIC_BASE：写在 deploy/.env.deploy（不入库）}
 DEPLOY=${DEPLOY:?缺 DEPLOY=user@host：写在 deploy/.env.deploy（不入库）}
-REPO=$(git remote get-url origin | sed -E 's#.*[:/]([^/]+/[^/]+)(\.git)?$#\1#')
+# ⚠️ 先去 .git 后缀再截 owner/repo,不能靠 (\.git)? 可选组 ——
+# [^/]+ 是贪婪的,会把 .git 一起吞进捕获组,解析成 owner/repo.git,
+# 然后 gh release download 报 "release not found"(第一次跑就踩到了)
+REPO=$(git remote get-url origin | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1#')
 
 # tag 形如 v0.12.1-b2052 —— 版本号和 build 号都从它解析，
 # 不另外传参：两处各写一遍迟早会写岔，而写岔的后果是
@@ -94,20 +97,22 @@ for app in user merchant rider; do
 done
 
 echo "== 复核落地哈希（传输途中出错在这里拦）=="
-declare -A SHA
+# ⚠️ 不用关联数组（declare -A）—— macOS 自带的是 bash 3.2，没有这东西。
+# 踩过一次：它会在**包已经传上去、versions.json 还没改**的那一刻炸，
+# 是最坏的时机。release_apks.sh 用 SHA_<端> 这套写法也是这个原因
 for app in user merchant rider; do
   LOCAL=$(shasum -a 256 "$WORK/chaojizan-${app}-arm64.apk" | awk '{print $1}')
   REMOTE=$(ssh "$DEPLOY" "shasum -a 256 ~/super-z/appdist/chaojizan-${app}-arm64.apk | awk '{print \$1}'")
   [ "$REMOTE" = "$LOCAL" ] || { echo "✗ ${app} 上传后哈希不符，中止"; exit 1; }
-  SHA[$app]=$LOCAL
+  eval "SHA_${app}=\$LOCAL"
 done
 echo "  三端哈希一致 ✓（且与 Release 页同值）"
 
 echo "== 更新 versions.json =="
 ssh "$DEPLOY" "python3 - << 'PYEOF'
 import json, os
-shas = {'user': '${SHA[user]}', 'merchant': '${SHA[merchant]}',
-        'rider': '${SHA[rider]}'}
+shas = {'user': '$SHA_user', 'merchant': '$SHA_merchant',
+        'rider': '$SHA_rider'}
 data = {}
 for app in ['user', 'merchant', 'rider']:
     data[app] = {
