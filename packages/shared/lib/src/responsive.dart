@@ -281,8 +281,8 @@ class SzNavScaffold extends StatelessWidget {
 ///
 /// | builder 里写的 | 对话框形态下 |
 /// |---|---|
-/// | `SafeArea(...)` | 自动变成零内边距(下面 removePadding 掉了) |
-/// | `showDragHandle: true` | 忽略 —— 对话框不用拖 |
+/// | `SafeArea(...)` | 零内边距 —— [showDialog] 的 `useSafeArea` 先吃掉了 |
+/// | `showDragHandle` | 不画 —— 对话框没有拖拽条这回事 |
 /// | `MediaQuery.viewInsetsOf(ctx).bottom` | 恒为 0([Dialog] 自己 remove 掉了) |
 ///
 /// 这么做是因为调用点有 39 个,让每个都写 `if (isSheetBottom(ctx))`
@@ -293,7 +293,11 @@ Future<T?> szShowSheet<T>({
   required WidgetBuilder builder,
   bool isScrollControlled = true,
   bool isDismissible = true,
-  bool showDragHandle = false,
+
+  /// ⚠️ 保持**可空**。brandTheme 的 `bottomSheetTheme` 全局开了拖拽条,
+  /// 这里写死 `false` 会显式覆盖主题,把三端的拖拽条一起关掉。
+  /// null = 听主题的
+  bool? showDragHandle,
 
   /// 对话框形态下的最大宽度。默认 [kContentMaxWidth](720)——
   /// 弹层装的多半是表单和选项,和单列正文同一个口径。
@@ -312,6 +316,10 @@ Future<T?> szShowSheet<T>({
   return showDialog<T>(
     context: context,
     barrierDismissible: isDismissible,
+    // useSafeArea 已经把安全区吃掉了,builder 里的 SafeArea 因此
+    // 自动变成空操作 —— 对话框浮在屏幕中间,离刘海和小白条都远,
+    // 再补一截 34px 只会在底部留一条白边。**别关掉它**
+    useSafeArea: true,
     builder: (ctx) => Dialog(
       clipBehavior: Clip.antiAlias,
       child: ConstrainedBox(
@@ -321,17 +329,7 @@ Future<T?> szShowSheet<T>({
           // 0.85 是留出一圈能看见遮罩的余量
           maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
         ),
-        // 把安全区吃掉,好让 builder 里的 SafeArea 变成空操作。
-        // 对话框本来就浮在屏幕中间,离刘海和小白条都远得很,
-        // 再让 SafeArea 补一截 34px 只会在底部留一条白边
-        child: MediaQuery.removePadding(
-          context: ctx,
-          removeTop: true,
-          removeBottom: true,
-          removeLeft: true,
-          removeRight: true,
-          child: Builder(builder: builder),
-        ),
+        child: Builder(builder: builder),
       ),
     ),
   );

@@ -272,11 +272,14 @@ void main() {
           reason: '底部弹层反而不避让小白条了 —— 内容会被系统手势条压住');
     });
 
-    testWidgets('拖拽条只在底部弹层出现', (t) async {
-      Future<int> handles(double width) async {
+    testWidgets('拖拽条:底部弹层听主题的,对话框一律不画', (t) async {
+      // brandTheme 的 bottomSheetTheme 全局开了拖拽条。helper 的
+      // showDragHandle 必须**可空** —— 写死 false 会显式覆盖主题,
+      // 把三端的拖拽条一起关掉。这条断言就是防这个
+      Future<int> handles(double width, {bool? flag}) async {
         setPhoneViewport(t, Size(width, 900));
         await t.pumpWidget(MaterialApp(
-          key: ValueKey(width),
+          key: ValueKey('$width-$flag'),
           theme: brandTheme(Brightness.light),
           home: Builder(
             builder: (ctx) => Scaffold(
@@ -284,7 +287,7 @@ void main() {
                 child: TextButton(
                   onPressed: () => szShowSheet<void>(
                       context: ctx,
-                      showDragHandle: true,
+                      showDragHandle: flag,
                       builder: (_) =>
                           const SizedBox(height: 120, child: Text('内容'))),
                   child: const Text('打开'),
@@ -297,14 +300,18 @@ void main() {
         await t.tap(find.text('打开'));
         await t.pumpAndSettle();
         return find
-            .byWidgetPredicate((w) =>
-                w.runtimeType.toString().contains('DragHandle'))
+            .byWidgetPredicate(
+                (w) => w.runtimeType.toString().contains('DragHandle'))
             .evaluate()
             .length;
       }
 
-      expect(await handles(375), greaterThan(0));
-      expect(await handles(1440), 0,
+      expect(await handles(375), greaterThan(0),
+          reason: '手机上没拖拽条了 —— 多半是把 showDragHandle 写成了非空默认值,'
+              '显式 false 会盖掉 brandTheme 里的全局设置');
+      expect(await handles(375, flag: false), 0,
+          reason: 'showDragHandle 参数没接上,传 false 也照画');
+      expect(await handles(1440, flag: true), 0,
           reason: '对话框上顶着一根拖拽条 —— 它拖不动,纯是个装饰');
     });
 
