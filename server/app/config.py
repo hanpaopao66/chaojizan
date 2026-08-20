@@ -289,6 +289,7 @@ class Settings(BaseSettings):
             # 这两个文件要一起改 —— 少一行的表现是用户端 web 预览
             # 一个接口都不通,而控制台只说 CORS
             "http://localhost:5183", "http://127.0.0.1:5183",
+            "http://localhost:5184", "http://127.0.0.1:5184",
             "http://localhost:8010", "http://127.0.0.1:8010",
         ]
 

@@ -57,6 +57,18 @@
         "apps/user_app/build/web"
       ],
       "port": 5183
+    },
+    {
+      "name": "r-web",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5184",
+        "--directory",
+        "apps/rider_app/build/web"
+      ],
+      "port": 5184
     }
   ]
 }
