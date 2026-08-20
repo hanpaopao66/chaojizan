@@ -1,4 +1,4 @@
-package cc.chaojizan.apk_installer
+package com.chaojizan.apk_installer
 
 import android.app.Activity
 import android.content.Context

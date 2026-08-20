@@ -1,7 +1,12 @@
 {
   "app": {
-    // 包名与安卓端保持同一命名空间,便于在华为应用市场和后台按同一产品线归类
-    "bundleName": "cc.chaojizan.user",
+    // 与安卓/iOS 用户端**同一个包名**:com.chaojizan.user。
+    //
+    // 曾经是 cc.chaojizan.user,注释还写着"与安卓端保持同一命名空间" ——
+    // 而安卓那边一直是 com.,两边其实对不上。趁鸿蒙还没上架改掉:
+    // 上架之后包名就动不了了(应用市场按包名认应用,改了等于新应用、
+    // 老用户升不上来),而现在改是零成本。
+    "bundleName": "com.chaojizan.user",
     "vendor": "chaojizan",
     "versionCode": 1,
     "versionName": "0.1.0",

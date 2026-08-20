@@ -1,4 +1,4 @@
-group 'cc.chaojizan.apk_installer'
+group 'com.chaojizan.apk_installer'
 version '0.1.0'
 
 // 不自己引 Kotlin Gradle Plugin:Flutter 已内置(built-in Kotlin),
@@ -28,7 +28,7 @@ rootProject.allprojects {
 apply plugin: 'com.android.library'
 
 android {
-    namespace 'cc.chaojizan.apk_installer'
+    namespace 'com.chaojizan.apk_installer'
     compileSdk 35
 
     defaultConfig {
