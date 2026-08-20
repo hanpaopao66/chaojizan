@@ -4,6 +4,7 @@
 /// 蓝牙适合起步期复用手头的便宜打印机。两者都开会各出一张,页面有提示。
 library;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 import 'package:superz_shared/superz_shared.dart';
@@ -452,6 +453,28 @@ class _PrinterPageState extends State<PrinterPage> {
       body: ListView(
         padding: const EdgeInsets.all(12),
         children: [
+          // 网页版说清楚:云打印照常,蓝牙直连不行。
+          //
+          // 浏览器里没有经典蓝牙 SPP(Web Bluetooth 只有 BLE,
+          // 而热敏小票机基本都是 SPP)—— 这是浏览器的能力边界,
+          // 不是我们没做。云打印走服务端,和在手机上一模一样。
+          if (kIsWeb)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).sz.claySoft,
+                borderRadius: BorderRadius.circular(kRadiusSm),
+              ),
+              child: Text(
+                  '网页版可以用云打印,但连不了蓝牙小票机 —— '
+                  '浏览器没有经典蓝牙(Web Bluetooth 只有 BLE,'
+                  '而热敏小票机基本都是 SPP)。要用蓝牙机请在手机 App 里配。',
+                  style: TextStyle(
+                      color: Theme.of(context).sz.ink,
+                      fontSize: kFontBody,
+                      height: 1.6)),
+            ),
           _cloudCard(),
           const SizedBox(height: 12),
           _btCard(),

@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'dish_manage_page.dart';
+import 'web_limits_banner.dart';
 import 'finance_page.dart';
 import 'hotel/hotel_home_page.dart';
 import 'license_page.dart';
@@ -1339,9 +1341,20 @@ class _MerchantHomePageState extends State<MerchantHomePage>
             // 这盏灯是纯图标,不读出来等于没有 —— 而它答的正是
             // 「我现在还能不能收到单」
             Semantics(
+              // 网页版的口径不一样,不能照搬 App 的「正常」。
+              //
+              // 浏览器没有前台服务:标签页一关、或者被浏览器休眠,
+              // WebSocket 就断了 —— 而这时候灯还是绿的,商家以为在听单,
+              // 实际上单进来没人知道。这是**最误导的那种绿灯**。
+              //
+              // 所以 web 上明说"只在这个页面开着时有效"。
               label: _ordersStale
                   ? '订单列表已过期,可能收不到新单'
-                  : (_wsConnected ? '接单提醒正常' : '接单提醒未连接'),
+                  : !_wsConnected
+                      ? '接单提醒未连接'
+                      : kIsWeb
+                          ? '接单提醒正常,但只在这个页面开着时有效'
+                          : '接单提醒正常',
               child: Icon(
                 _wsConnected && !_ordersStale
                     ? Icons.notifications_active
@@ -1383,6 +1396,12 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       // 证照横幅横跨所有 tab:它是唯一一件"到点就自动出事"的事
       // (过期 → 7 天宽限 → 自动停业),不该只在某一个页面里出现
       body: Column(children: [
+        // 网页版一进来就说清楚它能干什么、不能干什么。
+        //
+        // 商家最容易误解的就是听单:网页版**不能替代手机 App** ——
+        // 浏览器没有前台服务,标签页一关或被休眠,WebSocket 就断了。
+        // 不说清楚的话,他会以为开着网页就等于在听单。
+        if (kIsWeb) const WebLimitsBanner(),
         LicenseBanner(api: widget.api, shop: widget.shop),
         Expanded(child: _tab == 1
           ? DishManagePage(api: widget.api)

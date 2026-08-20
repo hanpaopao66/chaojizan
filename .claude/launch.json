@@ -33,18 +33,6 @@
         "admin-web"
       ],
       "port": 5175
-    },
-    {
-      "name": "user-web",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "-m",
-        "http.server",
-        "5180",
-        "--directory",
-        "apps/user_app/build/web"
-      ],
-      "port": 5180
     }
   ]
 }
