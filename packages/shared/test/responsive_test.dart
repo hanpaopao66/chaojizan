@@ -232,6 +232,82 @@ void main() {
       }
     });
 
+    testWidgets('对话框里的 SafeArea 不补边距,底部弹层里照补', (t) async {
+      // builder 是照底部弹层写的(带 SafeArea),两种形态共用一份代码。
+      // 对话框浮在屏幕中间,离刘海和小白条都远,再补 34px 只是一条白边
+      Future<double> gap(double width) async {
+        setPhoneViewport(t, Size(width, 900));
+        t.view.padding =
+            const FakeViewPadding(bottom: 34 * 3, top: 47 * 3);
+        final inner = Container(height: 40, color: Colors.red);
+        await t.pumpWidget(MaterialApp(
+          // ⚠️ key 必须跟着宽度变:pumpWidget 会复用 element 树,
+          // Navigator 的路由栈也跟着留下来 —— 上一轮的弹层没关,
+          // 下一轮点"打开"点的是它盖住的地方
+          key: ValueKey(width),
+          theme: brandTheme(Brightness.light),
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => szShowSheet<void>(
+                      context: ctx,
+                      builder: (_) => SafeArea(child: inner)),
+                  child: const Text('打开'),
+                ),
+              ),
+            ),
+          ),
+        ));
+        await t.pumpAndSettle();
+        await t.tap(find.text('打开'));
+        await t.pumpAndSettle();
+        final safe = t.getSize(find.byType(SafeArea).last).height;
+        return safe - t.getSize(find.byWidget(inner)).height;
+      }
+
+      expect(await gap(1440), 0,
+          reason: '对话框底下多了一条 34px 的白边');
+      expect(await gap(375), greaterThan(0),
+          reason: '底部弹层反而不避让小白条了 —— 内容会被系统手势条压住');
+    });
+
+    testWidgets('拖拽条只在底部弹层出现', (t) async {
+      Future<int> handles(double width) async {
+        setPhoneViewport(t, Size(width, 900));
+        await t.pumpWidget(MaterialApp(
+          key: ValueKey(width),
+          theme: brandTheme(Brightness.light),
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => szShowSheet<void>(
+                      context: ctx,
+                      showDragHandle: true,
+                      builder: (_) =>
+                          const SizedBox(height: 120, child: Text('内容'))),
+                  child: const Text('打开'),
+                ),
+              ),
+            ),
+          ),
+        ));
+        await t.pumpAndSettle();
+        await t.tap(find.text('打开'));
+        await t.pumpAndSettle();
+        return find
+            .byWidgetPredicate((w) =>
+                w.runtimeType.toString().contains('DragHandle'))
+            .evaluate()
+            .length;
+      }
+
+      expect(await handles(375), greaterThan(0));
+      expect(await handles(1440), 0,
+          reason: '对话框上顶着一根拖拽条 —— 它拖不动,纯是个装饰');
+    });
+
     testWidgets('isSheetBottom 跟着档位走', (t) async {
       for (final (w, expected) in [(375.0, true), (768.0, false), (1440.0, false)]) {
         setPhoneViewport(t, Size(w, 900));

@@ -237,6 +237,13 @@ class _HomePageState extends State<HomePage> {
     // 而桌面浏览器的可视高度本来就比手机紧张(地址栏、标签栏都在吃)
     return SzNavScaffold(
       selectedIndex: _tab,
+      // 宽度上限交给外壳,标题栏和内容才会用**同一个**宽度对齐。
+      // 自己在 body 上套 SzContentWidth 的话,标题栏还是横跨全屏:
+      // 标题贴最左、图标钉最右,而下面的内容是居中的。
+      //
+      // 三个 tab 不同宽,因为**内容形态不同**:首页是卡片流(可以宽一点),
+      // 订单和「我的」是单列(要短行才好读)。统一限死会把卡片流也压成 720
+      contentMaxWidth: _tab == 0 ? kFeedMaxWidth : kContentMaxWidth,
       onSelected: (i) => setState(() {
         _tab = i;
         _visited.add(i);
@@ -325,26 +332,18 @@ class _HomePageState extends State<HomePage> {
       // 用户等一遍、手机费一遍电。代价是没有了那 160ms 的淡入 —— 值。
       // 但只建访问过的 tab:IndexedStack 会一次性 build 全部子树,
       // 冷启动就把订单和「我的」的请求也打出去,那是另一种浪费
-      // 内容限宽:窄屏上 ConstrainedBox 不生效(maxWidth 大于可用宽度),
-      // 所以三档共用一套代码,不用自己判断档位。
-      //
-      // 三个 tab 用不同的宽度上限,因为**内容形态不同**:
-      // 首页是卡片流(可以宽一点),订单和「我的」是单列(要短行才好读)。
-      // 统一限死会把卡片流也压成 720
       body: IndexedStack(
         index: _tab,
         children: [
           _visited.contains(0)
-              ? SzContentWidth(
-                  maxWidth: kFeedMaxWidth,
-                  child: MerchantListView(
-                      api: widget.api, deliveryAddress: _deliveryAddress))
+              ? MerchantListView(
+                  api: widget.api, deliveryAddress: _deliveryAddress)
               : const SizedBox.shrink(),
           _visited.contains(1)
-              ? SzContentWidth(child: OrdersTab(api: widget.api))
+              ? OrdersTab(api: widget.api)
               : const SizedBox.shrink(),
           _visited.contains(2)
-              ? SzContentWidth(child: ProfileView(api: widget.api))
+              ? ProfileView(api: widget.api)
               : const SizedBox.shrink(),
         ],
       ),

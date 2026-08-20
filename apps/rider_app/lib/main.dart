@@ -2073,6 +2073,9 @@ class _RiderHomePageState extends State<RiderHomePage>
     // 和调度台场景 —— 有的团队会把一台平板架在站点里看单
     return SzNavScaffold(
       selectedIndex: _tab,
+      // 骑手端是单列信息流(单卡、钱包流水),用窄一档。
+      // 宽度交给外壳,标题栏才会跟内容对齐
+      contentMaxWidth: kContentMaxWidth,
       onSelected: (i) => setState(() => _tab = i),
       items: const [
         SzNavItem(
@@ -2118,8 +2121,7 @@ class _RiderHomePageState extends State<RiderHomePage>
           ]),
         ],
       ),
-      // 内容限宽:骑手端是单列信息流(单卡、钱包流水),用窄一档
-      body: SzContentWidth(child: page),
+      body: page,
     );
   }
 }

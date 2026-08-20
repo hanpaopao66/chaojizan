@@ -54,12 +54,12 @@ class MerchantApp extends StatelessWidget {
           ],
           child: PrivacyGate(
             onAgreed: () async {
-                  // 同意之后才初始化收集类 SDK。地图 SDK 尤其不能提前:
-                  // 腾讯的接口是"同意前调用则地图显示为空白",
-                  // 而且失败是静默的 —— 没异常没日志,只有一块白板
-                  await PushService.init();
-                  await agreeAndStart();
-                },
+              // 同意之后才初始化收集类 SDK。地图 SDK 尤其不能提前:
+              // 腾讯的接口是"同意前调用则地图显示为空白",
+              // 而且失败是静默的 —— 没异常没日志,只有一块白板
+              await PushService.init();
+              await agreeAndStart();
+            },
             child: AuthGate(
               api: rootApi,
               title: '商家端 · 接单出餐',
@@ -112,8 +112,8 @@ class _ShopGateState extends State<ShopGate> {
       // /merchants/me 是 404(后端不猜是哪家),先调它会把连锁老板
       // 一路带进"还没开店"的入驻引导页。
       final brand = await widget.api.myBrand();
-      final shops = ((brand['shops'] as List?) ?? const [])
-          .cast<Map<String, dynamic>>();
+      final shops =
+          ((brand['shops'] as List?) ?? const []).cast<Map<String, dynamic>>();
       if (shops.isNotEmpty) {
         final current = widget.api.shopId;
         // 存的门店已不在可操作范围(被移出品牌/店被划走)就退回第一家,
@@ -233,7 +233,6 @@ class _ShopGateState extends State<ShopGate> {
   }
 }
 
-
 class MerchantHomePage extends StatefulWidget {
   const MerchantHomePage({
     super.key,
@@ -271,6 +270,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
 
   /// 最后一次**成功**拉到订单列表的时间。null = 从来没成功过
   DateTime? _lastOrdersOkAt;
+
   /// 最近一次拉取失败的原因;空串 = 上一次是成功的
   String _ordersError = '';
 
@@ -309,8 +309,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       try {
         final shop = await widget.api.setBusy(off: true);
         if (mounted) {
-          setState(() =>
-              _busyUntil = DateTime.tryParse(shop.busyUntil ?? ''));
+          setState(() => _busyUntil = DateTime.tryParse(shop.busyUntil ?? ''));
         }
       } catch (e) {
         _snack(e is ApiException ? e.message : '$e');
@@ -324,7 +323,8 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       builder: (dialog) => StatefulBuilder(
         builder: (dialog, setDialog) => AlertDialog(
           title: const Text('开启忙碌模式'),
-          content: Column(mainAxisSize: MainAxisSize.min,
+          content: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('高峰压单不用闭店:新单预计送达自动放宽,'
@@ -339,8 +339,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                     ButtonSegment(value: 120, label: Text('2小时')),
                   ],
                   selected: {minutes},
-                  onSelectionChanged: (s) =>
-                      setDialog(() => minutes = s.first),
+                  onSelectionChanged: (s) => setDialog(() => minutes = s.first),
                 ),
                 const SizedBox(height: 12),
                 const Text('出餐加时'),
@@ -476,16 +475,15 @@ class _MerchantHomePageState extends State<MerchantHomePage>
 
     // 轮询保底:WebSocket 断线期间也不会漏单。
     // 后台拉长到 60 秒,而且 WS 连着就整轮跳过 —— 那时候它是纯重复请求
-    _timer = Timer.periodic(
-        Duration(seconds: _foreground ? 15 : 60), (_) {
+    _timer = Timer.periodic(Duration(seconds: _foreground ? 15 : 60), (_) {
       if (!_foreground && _wsConnected) return;
       _refresh();
     });
 
     // 今日统计只在前台刷:后台熄着屏,这几个数字没人看
     if (_foreground) {
-      _todayTimer = Timer.periodic(
-          const Duration(seconds: 30), (_) => _refreshToday());
+      _todayTimer =
+          Timer.periodic(const Duration(seconds: 30), (_) => _refreshToday());
     }
 
     // 持续催单:只要有待接订单,每 10 秒语音播报一次,直到商家处理。
@@ -558,8 +556,8 @@ class _MerchantHomePageState extends State<MerchantHomePage>
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               backgroundColor: Theme.of(context).sz.danger,
               duration: const Duration(seconds: 8),
-              content: Text(
-                  '💬 收到 ${data['rating']} 星评价:${data['summary'] ?? ''}'),
+              content:
+                  Text('💬 收到 ${data['rating']} 星评价:${data['summary'] ?? ''}'),
               action: SnackBarAction(
                 label: '去回复',
                 textColor: Colors.white,
@@ -693,8 +691,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         if (n > 0) todoRows.add(('$label $n', onTap));
       }
 
-      addRow('after_sales', '售后待处理',
-          () => setState(() => _tab = 3));
+      addRow('after_sales', '售后待处理', () => setState(() => _tab = 3));
       // 差评只出一行:overdue 是 unreplied 的**子集**,分两行的话
       // 同一条差评会被数两遍,商家看到"2 件事"其实只有 1 条。
       // 超 24 小时的把紧迫性写进同一行文案(与 merchant-web 同口径)
@@ -707,15 +704,13 @@ class _MerchantHomePageState extends State<MerchantHomePage>
               : '差评待回复 $badUnreplied',
           () {
             Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => MerchantReviewsPage(
-                    api: widget.api, initialFilter: 1)));
+                builder: (_) =>
+                    MerchantReviewsPage(api: widget.api, initialFilter: 1)));
           }
         ));
       }
-      addRow('coupon_batches_low', '券快发完',
-          () => setState(() => _tab = 3));
-      addRow('flash_expiring', '折扣将到期',
-          () => setState(() => _tab = 1));
+      addRow('coupon_batches_low', '券快发完', () => setState(() => _tab = 3));
+      addRow('flash_expiring', '折扣将到期', () => setState(() => _tab = 1));
       addRow('messages_unread', '新消息', () {
         Navigator.of(context)
             .push(MaterialPageRoute(
@@ -756,7 +751,8 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                   TextSpan(
                       text: '${today['orders']}',
                       style: szFigure(
-                          fontSize: 16, fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
                           color: sz.ink)),
                   TextSpan(
                       text: ' 单 · ',
@@ -764,11 +760,13 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                   TextSpan(
                       text: yuan(today['gmv_cents'] as int? ?? 0),
                       style: szMoney(
-                          fontSize: 16, fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
                           color: sz.ink)),
                 ])),
                 if (yesterday != null)
-                  Text('昨日 ${yesterday['orders']} 单·'
+                  Text(
+                      '昨日 ${yesterday['orders']} 单·'
                       '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
                       style: TextStyle(fontSize: 11, color: sz.inkMuted)),
               ],
@@ -782,8 +780,8 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 onTap: onTap,
                 borderRadius: BorderRadius.circular(12),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: sz.danger.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
@@ -1164,8 +1162,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 onPressed: _acting.contains(order.orderNo)
                     ? null
                     : () => _act(order, OrderStatus.ready),
-                child:
-                    Text(_acting.contains(order.orderNo) ? '处理中…' : '出餐完成')),
+                child: Text(_acting.contains(order.orderNo) ? '处理中…' : '出餐完成')),
           ),
         ];
       case OrderStatus.ready:
@@ -1173,15 +1170,16 @@ class _MerchantHomePageState extends State<MerchantHomePage>
           printButton,
           // 平台配送且骑手已接:看骑手到哪了(顾客催单先打给店家,
           // 店家不该两眼一抹黑)
-          if (!order.pickup && !order.selfDelivery &&
+          if (!order.pickup &&
+              !order.selfDelivery &&
               order.riderId != null) ...[
             const SizedBox(width: 8),
             OutlinedButton.icon(
                 icon: const Icon(Icons.delivery_dining, size: 18),
                 onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                        builder: (_) => RiderTrackPage(
-                            api: widget.api, order: order))),
+                        builder: (_) =>
+                            RiderTrackPage(api: widget.api, order: order))),
                 label: const Text('骑手位置')),
           ],
           if (order.pickup) ...[
@@ -1227,8 +1225,8 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 icon: const Icon(Icons.delivery_dining, size: 18),
                 onPressed: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
-                        builder: (_) => RiderTrackPage(
-                            api: widget.api, order: order))),
+                        builder: (_) =>
+                            RiderTrackPage(api: widget.api, order: order))),
                 label: const Text('骑手位置')),
           ],
           // 自送的商家在路上,和骑手是同一种处境:需要导航,而不是一行文字地址。
@@ -1280,6 +1278,9 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     // 「坐在店里的电脑前接单」的场景,鼠标跑到 1440px 屏底部切页太远
     return SzNavScaffold(
       selectedIndex: _tab,
+      // 宽度上限交给外壳,标题栏和内容才用**同一个**宽度对齐。
+      // 对账页要放表格和图表,用宽一档;其余是单列信息流
+      contentMaxWidth: _tab == 2 ? kWideMaxWidth : kFeedMaxWidth,
       onSelected: (i) => setState(() => _tab = i),
       items: const [
         SzNavItem(
@@ -1313,8 +1314,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 controller: _searchCtrl,
                 autofocus: true,
                 decoration: const InputDecoration(
-                    hintText: '订单号后几位 / 取餐码 / 手机尾号',
-                    border: InputBorder.none),
+                    hintText: '订单号后几位 / 取餐码 / 手机尾号', border: InputBorder.none),
                 onChanged: _onSearchChanged,
               )
             : widget.shops.length > 1
@@ -1398,16 +1398,16 @@ class _MerchantHomePageState extends State<MerchantHomePage>
               onChanged: widget.shop.foodSafetyHold
                   ? null
                   : (v) async {
-                setState(() => _isOpen = v);
-                try {
-                  await widget.api.setShopOpen(v);
-                  // 打烊就放掉唤醒锁 —— 关了店还握着,听到单也不能接,
-                  // 纯烧电。开门再拿回来
-                  await _syncKeepAlive();
-                } catch (e) {
-                  setState(() => _isOpen = !v);
-                }
-              },
+                      setState(() => _isOpen = v);
+                      try {
+                        await widget.api.setShopOpen(v);
+                        // 打烊就放掉唤醒锁 —— 关了店还握着,听到单也不能接,
+                        // 纯烧电。开门再拿回来
+                        await _syncKeepAlive();
+                      } catch (e) {
+                        setState(() => _isOpen = !v);
+                      }
+                    },
             ),
             const SizedBox(width: 8),
           ]),
@@ -1415,11 +1415,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       ),
       // 证照横幅横跨所有 tab:它是唯一一件"到点就自动出事"的事
       // (过期 → 7 天宽限 → 自动停业),不该只在某一个页面里出现
-      // 内容限宽(#295):商家端的对账页要放表格和图表,用宽一档;
-      // 其余是单列信息流。横幅跟着内容一起限宽,不然它会横跨整个 1440
-      body: SzContentWidth(
-        maxWidth: _tab == 2 ? kWideMaxWidth : kFeedMaxWidth,
-        child: Column(children: [
+      body: Column(children: [
         // 网页版一进来就说清楚它能干什么、不能干什么。
         //
         // 商家最容易误解的就是听单:网页版**不能替代手机 App** ——
@@ -1427,221 +1423,256 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         // 不说清楚的话,他会以为开着网页就等于在听单。
         if (kIsWeb) const WebLimitsBanner(),
         LicenseBanner(api: widget.api, shop: widget.shop),
-        Expanded(child: _tab == 1
-          ? DishManagePage(api: widget.api)
-          : _tab == 2
-              ? (widget.shop.viewerIsOwner
-                  // 连锁的区域经理拿不到资金视图(服务端 403)。与其让人点进来
-                  // 看一个红色报错,不如直接说清楚这不是给他看的
-                  ? FinancePage(api: widget.api)
-                  : const _NoFinanceForManager())
-              : _tab == 3
-                  ? ShopTabPage(
-                      api: widget.api,
-                      onOpenFinance: () => setState(() => _tab = 2))
-                  : Column(
-                      children: [
-                        // 平台公告(费率调整、新功能上线等,发通知不用发版)
-                        AnnouncementBanner(
-                            api: widget.api, audience: 'merchant'),
-                        if (!_searchMode) _todayCard(),
-                        if (!_searchMode)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                            child: SegmentedButton<int>(
-                              segments: const [
-                                ButtonSegment(value: 0, label: Text('待接单')),
-                                ButtonSegment(value: 1, label: Text('进行中')),
-                                ButtonSegment(value: 2, label: Text('历史')),
-                              ],
-                              selected: {_segment},
-                              onSelectionChanged: (s) =>
-                                  setState(() => _segment = s.first),
-                            ),
-                          ),
-                        // 拉不到订单时的警示条。**必须在列表上方、必须显眼** ——
-                        // 空列表和"加载失败"长得一样,是商家端最危险的歧义
-                        if (_staleBanner() != null) _staleBanner()!,
-                        Expanded(
-                          child: RefreshIndicator(
-                            onRefresh: _refresh,
-                            child: _filteredOrders.isEmpty
-                                ? ListView(children: [
-                                    Padding(
-                                        padding: const EdgeInsets.all(24),
-                                        child: Center(
-                                            child: Text(_searchMode
-                                                ? (_searchActive
-                                                    ? '没有匹配的订单'
-                                                    : '输入订单号后几位、取餐码或手机尾号(至少 3 位)')
-                                                // 拉取失败时不说"没有订单" ——
-                                                // 那是在替一个未知状态下结论
-                                                : (_ordersStale
-                                                    ? '订单列表没能加载出来'
-                                                    : '这一栏没有订单'))))
-                                  ])
-                                : ListView.builder(
-                                    itemCount: _filteredOrders.length,
-                                    itemBuilder: (context, i) {
-                                      final order = _filteredOrders[i];
-                                      final sz = Theme.of(context).sz;
-                                      final isNew =
-                                          order.status == OrderStatus.paid;
-                                      return Container(
-                                        margin: const EdgeInsets.symmetric(
-                                            horizontal: 12, vertical: 5),
-                                        decoration: BoxDecoration(
-                                          color: sz.surface,
-                                          borderRadius:
-                                              BorderRadius.circular(kRadiusMd),
-                                          border: Border.all(
-                                              // 出餐超时:整卡 danger 描边,后厨一眼看到该催
-                                              color: order.readyLate
-                                                  ? sz.danger
-                                                  : sz.line,
-                                              width: order.readyLate ? 1.5 : 1),
-                                        ),
-                                        // 新单左侧一条 clay:待接单的在列表里要一眼挑出来
-                                        foregroundDecoration: isNew
-                                            ? BoxDecoration(
+        Expanded(
+            child: _tab == 1
+                ? DishManagePage(api: widget.api)
+                : _tab == 2
+                    ? (widget.shop.viewerIsOwner
+                        // 连锁的区域经理拿不到资金视图(服务端 403)。与其让人点进来
+                        // 看一个红色报错,不如直接说清楚这不是给他看的
+                        ? FinancePage(api: widget.api)
+                        : const _NoFinanceForManager())
+                    : _tab == 3
+                        ? ShopTabPage(
+                            api: widget.api,
+                            onOpenFinance: () => setState(() => _tab = 2))
+                        : Column(
+                            children: [
+                              // 平台公告(费率调整、新功能上线等,发通知不用发版)
+                              AnnouncementBanner(
+                                  api: widget.api, audience: 'merchant'),
+                              if (!_searchMode) _todayCard(),
+                              if (!_searchMode)
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                                  child: SegmentedButton<int>(
+                                    segments: const [
+                                      ButtonSegment(
+                                          value: 0, label: Text('待接单')),
+                                      ButtonSegment(
+                                          value: 1, label: Text('进行中')),
+                                      ButtonSegment(
+                                          value: 2, label: Text('历史')),
+                                    ],
+                                    selected: {_segment},
+                                    onSelectionChanged: (s) =>
+                                        setState(() => _segment = s.first),
+                                  ),
+                                ),
+                              // 拉不到订单时的警示条。**必须在列表上方、必须显眼** ——
+                              // 空列表和"加载失败"长得一样,是商家端最危险的歧义
+                              if (_staleBanner() != null) _staleBanner()!,
+                              Expanded(
+                                child: RefreshIndicator(
+                                  onRefresh: _refresh,
+                                  child: _filteredOrders.isEmpty
+                                      ? ListView(children: [
+                                          Padding(
+                                              padding: const EdgeInsets.all(24),
+                                              child: Center(
+                                                  child: Text(_searchMode
+                                                      ? (_searchActive
+                                                          ? '没有匹配的订单'
+                                                          : '输入订单号后几位、取餐码或手机尾号(至少 3 位)')
+                                                      // 拉取失败时不说"没有订单" ——
+                                                      // 那是在替一个未知状态下结论
+                                                      : (_ordersStale
+                                                          ? '订单列表没能加载出来'
+                                                          : '这一栏没有订单'))))
+                                        ])
+                                      : ListView.builder(
+                                          itemCount: _filteredOrders.length,
+                                          itemBuilder: (context, i) {
+                                            final order = _filteredOrders[i];
+                                            final sz = Theme.of(context).sz;
+                                            final isNew = order.status ==
+                                                OrderStatus.paid;
+                                            return Container(
+                                              margin:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 5),
+                                              decoration: BoxDecoration(
+                                                color: sz.surface,
                                                 borderRadius:
                                                     BorderRadius.circular(
                                                         kRadiusMd),
-                                                border: Border(
-                                                    left: BorderSide(
-                                                        color: sz.clay,
-                                                        width: 3)),
-                                              )
-                                            : null,
-                                        child: Padding(
-                                          padding: const EdgeInsets.fromLTRB(
-                                              12, 11, 12, 11),
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
+                                                border: Border.all(
+                                                    // 出餐超时:整卡 danger 描边,后厨一眼看到该催
+                                                    color: order.readyLate
+                                                        ? sz.danger
+                                                        : sz.line,
+                                                    width: order.readyLate
+                                                        ? 1.5
+                                                        : 1),
+                                              ),
+                                              // 新单左侧一条 clay:待接单的在列表里要一眼挑出来
+                                              foregroundDecoration: isNew
+                                                  ? BoxDecoration(
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                              kRadiusMd),
+                                                      border: Border(
+                                                          left: BorderSide(
+                                                              color: sz.clay,
+                                                              width: 3)),
+                                                    )
+                                                  : null,
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.fromLTRB(
+                                                        12, 11, 12, 11),
+                                                child: Column(
                                                   crossAxisAlignment:
                                                       CrossAxisAlignment.start,
                                                   children: [
-                                                    Expanded(
+                                                    Row(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Expanded(
+                                                              child: Text(
+                                                                  order.summary,
+                                                                  style: TextStyle(
+                                                                      fontSize:
+                                                                          14.5,
+                                                                      fontWeight:
+                                                                          FontWeight
+                                                                              .w600,
+                                                                      color: sz
+                                                                          .ink))),
+                                                          const SizedBox(
+                                                              width: 8),
+                                                          SzChip(
+                                                              order
+                                                                  .status.label,
+                                                              color: isNew
+                                                                  ? sz.clay
+                                                                  : sz.inkMuted,
+                                                              dense: true),
+                                                        ]),
+                                                    const SizedBox(height: 5),
+                                                    Wrap(
+                                                        spacing: 6,
+                                                        runSpacing: 4,
+                                                        children: [
+                                                          if (order
+                                                              .parentOrderNo
+                                                              .isNotEmpty)
+                                                            SzChip(
+                                                                '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}',
+                                                                color: sz.earn,
+                                                                dense: true),
+                                                          if (_urgedOrders
+                                                              .contains(order
+                                                                  .orderNo))
+                                                            SzChip('催',
+                                                                color:
+                                                                    sz.danger,
+                                                                dense: true),
+                                                          if (order.pickup)
+                                                            SzChip(
+                                                                order.pickupCode
+                                                                        .isEmpty
+                                                                    ? '自取'
+                                                                    : '自取 ${order.pickupCode}',
+                                                                color: sz.hold,
+                                                                dense: true),
+                                                        ]),
+                                                    if (order.scheduledLabel !=
+                                                        null)
+                                                      Padding(
+                                                        padding:
+                                                            const EdgeInsets
+                                                                .only(top: 4),
                                                         child: Text(
-                                                            order.summary,
+                                                            '⏰ ${order.scheduledLabel},请按时出餐',
                                                             style: TextStyle(
-                                                                fontSize: 14.5,
+                                                                fontSize: 12,
+                                                                color: sz.hold,
                                                                 fontWeight:
                                                                     FontWeight
-                                                                        .w600,
-                                                                color:
-                                                                    sz.ink))),
-                                                    const SizedBox(width: 8),
-                                                    SzChip(order.status.label,
-                                                        color: isNew
-                                                            ? sz.clay
-                                                            : sz.inkMuted,
-                                                        dense: true),
-                                                  ]),
-                                              const SizedBox(height: 5),
-                                              Wrap(
-                                                  spacing: 6,
-                                                  runSpacing: 4,
-                                                  children: [
-                                                    if (order.parentOrderNo
-                                                        .isNotEmpty)
-                                                      SzChip(
-                                                          '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}',
-                                                          color: sz.earn,
-                                                          dense: true),
-                                                    if (_urgedOrders.contains(
-                                                        order.orderNo))
-                                                      SzChip('催',
-                                                          color: sz.danger,
-                                                          dense: true),
-                                                    if (order.pickup)
-                                                      SzChip(
-                                                          order.pickupCode
-                                                                  .isEmpty
-                                                              ? '自取'
-                                                              : '自取 ${order.pickupCode}',
-                                                          color: sz.hold,
-                                                          dense: true),
-                                                  ]),
-                                              if (order.scheduledLabel != null)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 4),
-                                                  child: Text(
-                                                      '⏰ ${order.scheduledLabel},请按时出餐',
-                                                      style: TextStyle(
-                                                          fontSize: 12,
-                                                          color: sz.hold,
-                                                          fontWeight:
-                                                              FontWeight.w600)),
+                                                                        .w600)),
+                                                      ),
+                                                    if (isNew)
+                                                      _waitTimer(order),
+                                                    // 备餐计时:接单后按承诺出餐时长计时,超时高亮
+                                                    if (order.status ==
+                                                        OrderStatus.accepted)
+                                                      _prepTimer(order),
+                                                    const SizedBox(height: 5),
+                                                    Row(children: [
+                                                      Text(
+                                                          yuan(
+                                                              order.totalCents),
+                                                          style: szMoney(
+                                                              fontSize: 14,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              color: sz.ink)),
+                                                      const SizedBox(width: 8),
+                                                      Expanded(
+                                                        child: Text(
+                                                            order.address,
+                                                            maxLines: 1,
+                                                            overflow:
+                                                                TextOverflow
+                                                                    .ellipsis,
+                                                            style: TextStyle(
+                                                                fontSize: 12,
+                                                                color: sz
+                                                                    .inkMuted)),
+                                                      ),
+                                                    ]),
+                                                    if (order.remark.isNotEmpty)
+                                                      Text('备注:${order.remark}',
+                                                          style: TextStyle(
+                                                              fontSize: 12,
+                                                              color:
+                                                                  sz.inkMuted)),
+                                                    if (order.status ==
+                                                            OrderStatus
+                                                                .cancelled &&
+                                                        order.cancelReason
+                                                            .isNotEmpty)
+                                                      Text(
+                                                          '取消原因:${order.cancelReason}',
+                                                          style: TextStyle(
+                                                              fontSize: 12,
+                                                              color:
+                                                                  sz.danger)),
+                                                    if (order.refundCents > 0)
+                                                      Text(
+                                                          '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
+                                                          style: TextStyle(
+                                                              fontSize: 12,
+                                                              color:
+                                                                  sz.danger)),
+                                                    if (_actionsFor(order)
+                                                        .isNotEmpty) ...[
+                                                      const SizedBox(height: 6),
+                                                      Row(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .end,
+                                                        children:
+                                                            _actionsFor(order),
+                                                      ),
+                                                    ],
+                                                  ],
                                                 ),
-                                              if (isNew) _waitTimer(order),
-                                              // 备餐计时:接单后按承诺出餐时长计时,超时高亮
-                                              if (order.status ==
-                                                  OrderStatus.accepted)
-                                                _prepTimer(order),
-                                              const SizedBox(height: 5),
-                                              Row(children: [
-                                                Text(yuan(order.totalCents),
-                                                    style: szMoney(
-                                                        fontSize: 14,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        color: sz.ink)),
-                                                const SizedBox(width: 8),
-                                                Expanded(
-                                                  child: Text(order.address,
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                          fontSize: 12,
-                                                          color: sz.inkMuted)),
-                                                ),
-                                              ]),
-                                              if (order.remark.isNotEmpty)
-                                                Text('备注:${order.remark}',
-                                                    style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: sz.inkMuted)),
-                                              if (order.status ==
-                                                      OrderStatus.cancelled &&
-                                                  order.cancelReason.isNotEmpty)
-                                                Text(
-                                                    '取消原因:${order.cancelReason}',
-                                                    style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: sz.danger)),
-                                              if (order.refundCents > 0)
-                                                Text(
-                                                    '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
-                                                    style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: sz.danger)),
-                                              if (_actionsFor(order)
-                                                  .isNotEmpty) ...[
-                                                const SizedBox(height: 6),
-                                                Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.end,
-                                                  children: _actionsFor(order),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
+                                              ),
+                                            );
+                                          },
                                         ),
-                                      );
-                                    },
-                                  ),
-                          ),
-                        ),
-                      ],
-                    )),
-      ])),
+                                ),
+                              ),
+                            ],
+                          )),
+      ]),
     );
   }
 }
@@ -1734,7 +1765,6 @@ class _ShopSwitcher extends StatelessWidget {
     if (picked != null && picked != currentId) await onSwitch!(picked);
   }
 }
-
 
 /// 非经营者本人(连锁区域经理)看到的对账页占位。
 class _NoFinanceForManager extends StatelessWidget {

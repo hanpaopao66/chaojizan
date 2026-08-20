@@ -274,14 +274,26 @@ class SzNavScaffold extends StatelessWidget {
 /// );
 /// ```
 ///
-/// ⚠️ **builder 里的内容不要自己加 SafeArea 和拖拽条** —— 这两样只有
-/// 底部弹层需要,对话框里加了会多出一截空白和一个没用的横条。
-/// 需要的话看 [isSheetBottom] 判断当前是哪种形态。
+/// ## builder 照原样写,两种形态的差异 helper 自己吸收
+///
+/// 底部弹层要的三样东西 —— `SafeArea`、拖拽条、键盘避让 ——
+/// 在对话框里都是多余的。但**不用在 builder 里判断**:
+///
+/// | builder 里写的 | 对话框形态下 |
+/// |---|---|
+/// | `SafeArea(...)` | 自动变成零内边距(下面 removePadding 掉了) |
+/// | `showDragHandle: true` | 忽略 —— 对话框不用拖 |
+/// | `MediaQuery.viewInsetsOf(ctx).bottom` | 恒为 0([Dialog] 自己 remove 掉了) |
+///
+/// 这么做是因为调用点有 39 个,让每个都写 `if (isSheetBottom(ctx))`
+/// 迟早会漏。真需要按形态分叉的(比如整块内容都不一样),
+/// 用 [isSheetBottom] 判断。
 Future<T?> szShowSheet<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   bool isScrollControlled = true,
   bool isDismissible = true,
+  bool showDragHandle = false,
 
   /// 对话框形态下的最大宽度。默认 [kContentMaxWidth](720)——
   /// 弹层装的多半是表单和选项,和单列正文同一个口径。
@@ -292,6 +304,7 @@ Future<T?> szShowSheet<T>({
       context: context,
       isScrollControlled: isScrollControlled,
       isDismissible: isDismissible,
+      showDragHandle: showDragHandle,
       useSafeArea: true,
       builder: builder,
     );
@@ -308,7 +321,17 @@ Future<T?> szShowSheet<T>({
           // 0.85 是留出一圈能看见遮罩的余量
           maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
         ),
-        child: builder(ctx),
+        // 把安全区吃掉,好让 builder 里的 SafeArea 变成空操作。
+        // 对话框本来就浮在屏幕中间,离刘海和小白条都远得很,
+        // 再让 SafeArea 补一截 34px 只会在底部留一条白边
+        child: MediaQuery.removePadding(
+          context: ctx,
+          removeTop: true,
+          removeBottom: true,
+          removeLeft: true,
+          removeRight: true,
+          child: Builder(builder: builder),
+        ),
       ),
     ),
   );
