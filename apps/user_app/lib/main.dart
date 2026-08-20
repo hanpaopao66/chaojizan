@@ -231,7 +231,30 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    // 宽屏(≥600)自动换成左侧栏(#295)。底部导航是为**拇指**设计的 ——
+    // 桌面上鼠标的"家"在内容附近,把导航钉在 1440px 屏的最底部,
+    // 每次切页都要横跨半个屏幕跑一趟。侧栏还顺带省下 80px 竖向空间,
+    // 而桌面浏览器的可视高度本来就比手机紧张(地址栏、标签栏都在吃)
+    return SzNavScaffold(
+      selectedIndex: _tab,
+      onSelected: (i) => setState(() {
+        _tab = i;
+        _visited.add(i);
+      }),
+      items: const [
+        SzNavItem(
+            icon: Icons.storefront_outlined,
+            selectedIcon: Icons.storefront,
+            label: '首页'),
+        SzNavItem(
+            icon: Icons.receipt_long_outlined,
+            selectedIcon: Icons.receipt_long,
+            label: '订单'),
+        SzNavItem(
+            icon: Icons.person_outline,
+            selectedIcon: Icons.person,
+            label: '我的'),
+      ],
       appBar: AppBar(
         title: _tab == 0
             // 商业平台标配:顶部地址栏,让用户知道「附近」是哪儿附近。
@@ -302,41 +325,27 @@ class _HomePageState extends State<HomePage> {
       // 用户等一遍、手机费一遍电。代价是没有了那 160ms 的淡入 —— 值。
       // 但只建访问过的 tab:IndexedStack 会一次性 build 全部子树,
       // 冷启动就把订单和「我的」的请求也打出去,那是另一种浪费
+      // 内容限宽:窄屏上 ConstrainedBox 不生效(maxWidth 大于可用宽度),
+      // 所以三档共用一套代码,不用自己判断档位。
+      //
+      // 三个 tab 用不同的宽度上限,因为**内容形态不同**:
+      // 首页是卡片流(可以宽一点),订单和「我的」是单列(要短行才好读)。
+      // 统一限死会把卡片流也压成 720
       body: IndexedStack(
         index: _tab,
         children: [
           _visited.contains(0)
-              ? MerchantListView(
-                  api: widget.api, deliveryAddress: _deliveryAddress)
+              ? SzContentWidth(
+                  maxWidth: kFeedMaxWidth,
+                  child: MerchantListView(
+                      api: widget.api, deliveryAddress: _deliveryAddress))
               : const SizedBox.shrink(),
           _visited.contains(1)
-              ? OrdersTab(api: widget.api)
+              ? SzContentWidth(child: OrdersTab(api: widget.api))
               : const SizedBox.shrink(),
           _visited.contains(2)
-              ? ProfileView(api: widget.api)
+              ? SzContentWidth(child: ProfileView(api: widget.api))
               : const SizedBox.shrink(),
-        ],
-      ),
-      // 图标手感:未选描边、选中实心,切换自带 M3 缩放指示
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() {
-          _tab = i;
-          _visited.add(i);
-        }),
-        destinations: const [
-          NavigationDestination(
-              icon: Icon(Icons.storefront_outlined),
-              selectedIcon: Icon(Icons.storefront),
-              label: '首页'),
-          NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(Icons.receipt_long),
-              label: '订单'),
-          NavigationDestination(
-              icon: Icon(Icons.person_outline),
-              selectedIcon: Icon(Icons.person),
-              label: '我的'),
         ],
       ),
     );

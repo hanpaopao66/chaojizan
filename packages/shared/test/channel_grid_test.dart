@@ -83,6 +83,55 @@ void main() {
     });
   });
 
+  group('宽屏按格宽分列(#295)', () {
+    test('不传宽度时行为完全不变 —— 老调用点一个不受影响', () {
+      expect(channelGridColumns(4), 2);
+      expect(channelGridColumns(5), 5);
+      expect(channelGridColumns(6), 4);
+    });
+
+    test('手机宽度下和不传一样', () {
+      // 360 屏减掉页面留白约 324:324/260 = 1 列,走不到宽屏分支
+      expect(channelGridColumns(4, width: 324), 2);
+    });
+
+    test('每格约 260 宽,按这个算列数', () {
+      // 判据是**每格多宽**不是屏幕多宽 ——
+      // 1440px 上四个频道排两列时每格 550,而内容只占前 200。
+      //
+      // 700 / 260 = 2 列(不是"宽屏就一定要三列以上") ——
+      // 第一版这里断言 >2,是我把"屏幕宽"和"格子宽"混了
+      expect(channelGridColumns(4, width: 700), 2); // 700/260 = 2
+      // 800/260 = 3,但**4 个排 3 列末行只剩 1** —— 降到 2 列排成 2×2。
+      // "末行不孤单"优先于"格子别太宽",因为孤儿行看着像页面没加载完
+      expect(channelGridColumns(4, width: 800), 2);
+      expect(channelGridColumns(4, width: 1040), 4); // 1040/260 = 4,一行排完
+      // 列数不会超过频道数,不留空格子
+      expect(channelGridColumns(4, width: 2000), 4);
+      // 5 个频道:800 下 3 列排成 3+2,不孤单
+      expect(channelGridColumns(5, width: 800), 3);
+    });
+
+    test('列数不超过 6 —— 再多一行扫过去就找不着了', () {
+      expect(channelGridColumns(12, width: 3000), lessThanOrEqualTo(6));
+    });
+
+    test('列数不超过频道数,不留空格子', () {
+      expect(channelGridColumns(3, width: 1400), lessThanOrEqualTo(3));
+    });
+
+    test('宽屏上末行也不孤单', () {
+      for (final w in [700.0, 900.0, 1040.0, 1400.0, 2000.0]) {
+        for (var n = 3; n <= 12; n++) {
+          final c = channelGridColumns(n, width: w);
+          final last = n % c == 0 ? c : n % c;
+          expect(last == 1 && n > c, isFalse,
+              reason: '$n 个频道在 ${w.toInt()}px 下排 $c 列,末行只剩一个');
+        }
+      }
+    });
+  });
+
   test('当前真实频道数排出来不孤单', () {
     expect(lastRow(kChannels.length) > 1 ||
             kChannels.length <= channelGridColumns(kChannels.length),

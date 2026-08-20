@@ -45,6 +45,18 @@
         "apps/merchant_app/build/web"
       ],
       "port": 5182
+    },
+    {
+      "name": "u-web",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5183",
+        "--directory",
+        "apps/user_app/build/web"
+      ],
+      "port": 5183
     }
   ]
 }

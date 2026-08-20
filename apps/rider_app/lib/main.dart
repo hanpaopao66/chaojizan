@@ -2067,7 +2067,29 @@ class _RiderHomePageState extends State<RiderHomePage>
         ? tabBody
         : Column(children: [banner, Expanded(child: tabBody)]);
 
-    return Scaffold(
+    // 宽屏(≥600)换左侧栏(#295)。
+    //
+    // 骑手端跑在手机上的时候几乎都是 compact,这一条主要为**平板横屏**
+    // 和调度台场景 —— 有的团队会把一台平板架在站点里看单
+    return SzNavScaffold(
+      selectedIndex: _tab,
+      onSelected: (i) => setState(() => _tab = i),
+      items: const [
+        SzNavItem(
+            icon: Icons.flash_on_outlined,
+            selectedIcon: Icons.flash_on,
+            label: '抢单'),
+        SzNavItem(
+            icon: Icons.moped_outlined, selectedIcon: Icons.moped, label: '配送'),
+        SzNavItem(
+            icon: Icons.account_balance_wallet_outlined,
+            selectedIcon: Icons.account_balance_wallet,
+            label: '钱包'),
+        SzNavItem(
+            icon: Icons.person_outline,
+            selectedIcon: Icons.person,
+            label: '我的'),
+      ],
       appBar: AppBar(
         title: Text(switch (_tab) {
           0 => '抢单大厅',
@@ -2096,17 +2118,8 @@ class _RiderHomePageState extends State<RiderHomePage>
           ]),
         ],
       ),
-      body: page,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.flash_on), label: '抢单'),
-          NavigationDestination(icon: Icon(Icons.moped), label: '配送'),
-          NavigationDestination(icon: Icon(Icons.account_balance_wallet), label: '钱包'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: '我的'),
-        ],
-      ),
+      // 内容限宽:骑手端是单列信息流(单卡、钱包流水),用窄一档
+      body: SzContentWidth(child: page),
     );
   }
 }

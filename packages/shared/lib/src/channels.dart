@@ -211,8 +211,29 @@ SzChannelLayout channelGridLayout(int count) =>
 ///
 /// 放在 shared 而不是首页里,是为了**能被测试锁住** ——
 /// 加频道时排版会不会退化成孤儿行,不该靠人肉数。
-int channelGridColumns(int count) {
+int channelGridColumns(int count, {double? width}) {
   if (count <= 0) return 1;
+  // 宽屏(#295):格子太宽会让图标和字全挤在最左边,右边一大片空 ——
+  // 1440px 上四个频道排两列,每格 550px,而内容只占前 200px。
+  //
+  // 判据是**每格多宽**不是屏幕多宽:一格超过 ~260 就该多排一列。
+  // 上限 6 列 —— 再多一行扫过去就找不着了。
+  if (width != null && width > 0) {
+    var cols = (width / 260).floor();
+    if (cols > 2) {
+      // 先夹到频道数:列数比频道还多就会留空格子
+      if (cols > count) cols = count;
+      if (cols > 6) cols = 6;
+      // 末行不许只剩一个。**要一直往下找**,不是减一次就完 ——
+      // 7 个频道排 4 列剩 3(好),排 3 列剩 1(坏),减到 2 列又剩 1。
+      // 减一次的写法在这里会停在坏的那一档
+      while (cols > 2 && count > cols && count % cols == 1) {
+        cols--;
+      }
+      if (cols > 2) return cols;
+      // 落到 2 列以下就交给下面的窄屏规则,别硬凑
+    }
+  }
   if (count <= 2) return count;
   if (channelGridLayout(count) == SzChannelLayout.compact) {
     // 5 列剩 1 个就退 4 列。4 列也剩 1 的情况(count=13、17…)认了 ——

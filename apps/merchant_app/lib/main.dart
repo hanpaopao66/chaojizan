@@ -1276,7 +1276,27 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   @override
   Widget build(BuildContext context) {
     final pending = _orders.where((o) => o.status == OrderStatus.paid).length;
-    return Scaffold(
+    // 宽屏(≥600)换左侧栏(#295)。商家端尤其需要:网页版和桌面版是
+    // 「坐在店里的电脑前接单」的场景,鼠标跑到 1440px 屏底部切页太远
+    return SzNavScaffold(
+      selectedIndex: _tab,
+      onSelected: (i) => setState(() => _tab = i),
+      items: const [
+        SzNavItem(
+            icon: Icons.receipt_long_outlined,
+            selectedIcon: Icons.receipt_long,
+            label: '订单'),
+        SzNavItem(
+            icon: Icons.restaurant_menu_outlined,
+            selectedIcon: Icons.restaurant_menu,
+            label: '菜品'),
+        SzNavItem(
+            icon: Icons.bar_chart_outlined,
+            selectedIcon: Icons.bar_chart,
+            label: '对账'),
+        SzNavItem(
+            icon: Icons.store_outlined, selectedIcon: Icons.store, label: '店铺'),
+      ],
       appBar: AppBar(
         leading: _searchMode && _tab == 0
             ? IconButton(
@@ -1395,7 +1415,11 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       ),
       // 证照横幅横跨所有 tab:它是唯一一件"到点就自动出事"的事
       // (过期 → 7 天宽限 → 自动停业),不该只在某一个页面里出现
-      body: Column(children: [
+      // 内容限宽(#295):商家端的对账页要放表格和图表,用宽一档;
+      // 其余是单列信息流。横幅跟着内容一起限宽,不然它会横跨整个 1440
+      body: SzContentWidth(
+        maxWidth: _tab == 2 ? kWideMaxWidth : kFeedMaxWidth,
+        child: Column(children: [
         // 网页版一进来就说清楚它能干什么、不能干什么。
         //
         // 商家最容易误解的就是听单:网页版**不能替代手机 App** ——
@@ -1617,17 +1641,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                         ),
                       ],
                     )),
-      ]),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.receipt_long), label: '订单'),
-          NavigationDestination(icon: Icon(Icons.restaurant_menu), label: '菜品'),
-          NavigationDestination(icon: Icon(Icons.bar_chart), label: '对账'),
-          NavigationDestination(icon: Icon(Icons.store), label: '店铺'),
-        ],
-      ),
+      ])),
     );
   }
 }

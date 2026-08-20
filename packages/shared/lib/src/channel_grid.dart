@@ -184,7 +184,8 @@ class SzChannelGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, box) {
-      final cols = channelGridColumns(channels.length);
+      // 把可用宽度传进去:宽屏上一格 550px 是浪费,该多排几列(#295)
+      final cols = channelGridColumns(channels.length, width: box.maxWidth);
       final cell = (box.maxWidth - gap * (cols - 1)) / cols;
       // 排法由**频道数**决定,不是由列数决定。
       // 卡片式内部再按宽度选横排还是竖排
