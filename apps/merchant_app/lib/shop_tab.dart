@@ -196,6 +196,107 @@ class _ShopTabPageState extends State<ShopTabPage> {
     }
   }
 
+  /// 改店铺的布尔开关(自配送 / 自动接单 / 食安封签)。
+  ///
+  /// 这三处原本各写了一遍同样的 try-catch-toast-reload,一模一样 ——
+  /// 抽出来之后加第四个开关不用再抄一次。
+  Future<void> _toggleShopFlag(String field, bool value) async {
+    try {
+      await widget.api.updateShop({field: value});
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  /// 营业时间:一个弹窗里改开门、关门、清除。
+  ///
+  /// 原本是三个并排的大按钮直接摊在设置卡里 —— 每天要看的是"几点到几点",
+  /// 而不是三个按钮。改成入口之后那一行只显示时间,要改才点开。
+  Future<void> _editBusinessHours() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          const SzSectionTitle('营业时间'),
+          SzEntryTile(
+            icon: Icons.wb_sunny_outlined,
+            title: '每天开门',
+            value: _shop?.openTime.isEmpty ?? true ? '未设置' : _shop!.openTime,
+            onTap: () async {
+              Navigator.of(ctx).pop();
+              await _pickTime(true);
+            },
+          ),
+          const Divider(height: 1),
+          SzEntryTile(
+            icon: Icons.nightlight_outlined,
+            title: '每天打烊',
+            value: _shop?.closeTime.isEmpty ?? true ? '未设置' : _shop!.closeTime,
+            onTap: () async {
+              Navigator.of(ctx).pop();
+              await _pickTime(false);
+            },
+          ),
+          const Divider(height: 1),
+          SzEntryTile(
+            icon: Icons.clear,
+            title: '清除自动开关店',
+            valueTone: Theme.of(ctx).sz.danger,
+            value: '改回手动',
+            onTap: () async {
+              Navigator.of(ctx).pop();
+              await _clearTimes();
+            },
+          ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+  }
+
+  /// 临时歇业:选歇多久。
+  ///
+  /// 原本三个大按钮(1小时 / 2小时 / 到打烊)常驻在设置卡里 ——
+  /// 而临时歇业是**偶尔**才做的事,天天摆在那儿等于每天提醒一次。
+  Future<void> _pickRest() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SizedBox(height: 8),
+          const SzSectionTitle('临时歇业'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(kCardPad, 0, kCardPad, 8),
+            child: Text('到点自动恢复营业 —— 不用记着回来开店',
+                style: TextStyle(
+                    fontSize: kFontNote, color: Theme.of(ctx).sz.inkMuted)),
+          ),
+          for (final (label, h, untilClose) in const [
+            ('歇 1 小时', 1, false),
+            ('歇 2 小时', 2, false),
+            ('歇到今天打烊', 0, true),
+          ]) ...[
+            const Divider(height: 1),
+            SzEntryTile(
+              icon: Icons.pause_circle_outline,
+              title: label,
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await _rest(
+                    hours: untilClose ? null : h, untilClose: untilClose);
+              },
+            ),
+          ],
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+  }
+
   Future<void> _pickTime(bool isOpenTime) async {
     final shop = _shop!;
     final current = isOpenTime ? shop.openTime : shop.closeTime;
@@ -655,6 +756,10 @@ class _ShopTabPageState extends State<ShopTabPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
+                  // 店铺公告是这一整块里**唯一真需要内联输入**的东西:
+                  // 它是一段自由文本,不是"点开改个值"。其余 23 条都换成了
+                  // SzEntryTile —— 原本每条是「标题 + 一个 OutlinedButton +
+                  // 两行说明 + Divider(24)」,一条就要 200 多像素(#294)
                   TextField(
                     controller: _announcement,
                     maxLength: 200,
@@ -670,519 +775,266 @@ class _ShopTabPageState extends State<ShopTabPage> {
                       child: Text(_savingAnnouncement ? '保存中…' : '保存公告'),
                     ),
                   ),
-                  const Divider(height: 24),
-                  Row(
-                    children: [
-                      const Text('营业时间'),
-                      const SizedBox(width: 12),
-                      OutlinedButton(
-                        onPressed: () => _pickTime(true),
-                        child: Text(shop.openTime.isEmpty
-                            ? '开店时间'
-                            : shop.openTime),
-                      ),
-                      const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 6),
-                          child: Text('至')),
-                      OutlinedButton(
-                        onPressed: () => _pickTime(false),
-                        child: Text(shop.closeTime.isEmpty
-                            ? '打烊时间'
-                            : shop.closeTime),
-                      ),
-                      const Spacer(),
-                      if (shop.openTime.isNotEmpty || shop.closeTime.isNotEmpty)
-                        TextButton(
-                            onPressed: _clearTimes, child: const Text('清除')),
-                    ],
-                  ),
-                  Text(
-                    shop.openTime.isNotEmpty && shop.closeTime.isNotEmpty
-                        ? '已开启自动开关店:${shop.openTime} 自动营业,${shop.closeTime} 自动打烊(临时手动开关不受影响)'
-                        : '设置后到点自动开店/打烊;不设置则完全手动',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 8),
-                  // 临时歇业:到点自动恢复,区别于手动关店忘了开
-                  if (shop.closedUntil != null &&
-                      shop.closedUntil!.isAfter(DateTime.now().toUtc()))
-                    Row(children: [
-                      Expanded(
-                        child: Text(
-                          '歇业中,${_hhmmLocal(shop.closedUntil!)} 自动恢复营业',
-                          style: TextStyle(
-                              color: Theme.of(context).sz.hold,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      FilledButton.tonal(
-                          onPressed: () => _endRest(),
-                          child: const Text('立即恢复')),
-                    ])
-                  else
-                    Row(children: [
-                      const Text('临时歇业'),
-                      const SizedBox(width: 8),
-                      OutlinedButton(
-                          onPressed: () => _rest(hours: 1),
-                          child: const Text('1小时')),
-                      const SizedBox(width: 6),
-                      OutlinedButton(
-                          onPressed: () => _rest(hours: 2),
-                          child: const Text('2小时')),
-                      const SizedBox(width: 6),
-                      if (shop.closeTime.isNotEmpty)
-                        OutlinedButton(
-                            onPressed: () => _rest(untilClose: true),
-                            child: const Text('到打烊')),
-                    ]),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('节假日计划'),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          shop.holidayPlans.isEmpty
-                              ? '未设置'
-                              : shop.holidayPlans
-                                  .map(holidayPlanLabel)
-                                  .join(' · '),
-                          style: TextStyle(
-                              color: shop.holidayPlans.isEmpty
-                                  ? null
-                                  : Theme.of(context).sz.hold),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      TextButton(
-                          onPressed: () => editHolidayPlans(
-                              context, widget.api, shop, _load),
-                          child: const Text('管理')),
-                    ],
-                  ),
-                  Text('计划优先于每日营业时间:歇业日自动关店不再自动开;特殊时段日按计划时段开关',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // 运营三件套:起送价 / 打包费 / 满减(全部商家自主,平台不强制)
-                  Row(
-                    children: [
-                      const Text('起送价'),
-                      const SizedBox(width: 12),
-                      OutlinedButton(
-                        onPressed: () => _editAmount(
-                            '起送价(元,0 为不限)', shop.minOrderCents,
-                            'min_order_cents'),
-                        child: Text(shop.minOrderCents > 0
-                            ? '¥${shop.minOrderCents ~/ 100}'
-                            : '不限'),
-                      ),
-                      const SizedBox(width: 16),
-                      const Text('打包费'),
-                      const SizedBox(width: 12),
-                      OutlinedButton(
-                        onPressed: () => _editAmount(
-                            '每单打包费(元,0 为免收)', shop.packingFeeCents,
-                            'packing_fee_cents'),
-                        child: Text(shop.packingFeeCents > 0
-                            ? yuan(shop.packingFeeCents)
-                            : '免收'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('满减活动'),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          shop.promoLabels.isEmpty
-                              ? '未设置'
-                              : shop.promoLabels.join(' · '),
-                          style: TextStyle(
-                              color: shop.promoLabels.isEmpty
-                                  ? null
-                                  : Theme.of(context).sz.hold),
-                        ),
-                      ),
-                      TextButton(
-                          onPressed: () => editPromoRules(
-                              context, widget.api, shop, _load),
-                          child: const Text('编辑')),
-                    ],
-                  ),
-                  Text('满减成本由商家承担,平台按满减后的实收计 5% 服务费——你让利,平台跟着少收',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('满赠活动'),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          shop.giftRules.isEmpty
-                              ? '未设置'
-                              : shop.giftRules
-                                  .map((r) =>
-                                      '满${r.thresholdCents ~/ 100}赠${r.name}')
-                                  .join(' · '),
-                          style: TextStyle(
-                              color: shop.giftRules.isEmpty
-                                  ? null
-                                  : Theme.of(context).sz.hold),
-                        ),
-                      ),
-                      TextButton(
-                          onPressed: () => editGiftRules(
-                              context, widget.api, shop, _load),
-                          child: const Text('编辑')),
-                    ],
-                  ),
-                  Text('满赠动货不动钱:赠品 0 元入订单、照常扣库存,佣金不含赠品;赠品没库存时该档自动失效,不影响下单',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Text('店铺券'),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _shopCoupons.isEmpty
-                              ? '未发券'
-                              : _shopCoupons
-                                  .where((b) => b['active'] == true)
-                                  .map((b) =>
-                                      '满${b['threshold_cents'] ~/ 100}减${b['off_cents'] ~/ 100}')
-                                  .join(' · '),
-                          style: TextStyle(
-                              color: _shopCoupons.any((b) => b['active'] == true)
-                                  ? Theme.of(context).sz.hold
-                                  : null),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      TextButton(
-                          onPressed: () => showShopCouponSheet(
-                              context, widget.api, () => _shopCoupons, _load),
-                          child: const Text('管理')),
-                    ],
-                  ),
-                  Text('店铺券成本你自己出(和满减同口径,平台按券后实收计 5%),用来引流拉复购;与满减二选其一取最优,不叠加',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  // 子账号管理:仅店主可见(店员看不到,也无权管理)
-                  if (!shop.viewerIsStaff) ...[
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      const Text('子账号(店员)'),
-                      const Spacer(),
-                      TextButton(
-                          onPressed: () => showStaffSheet(context, widget.api),
-                          child: const Text('管理')),
-                    ]),
-                    Text('给店员开账号只能接单/出餐/估清,提现改价改设置仍只有你能操作',
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ] else
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text('你是本店店员:可接单出餐估清;提现/改价/改设置请联系店主',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: Theme.of(context).sz.hold)),
-                    ),
-                  const Divider(height: 24),
-                  // 团购(第二增长曲线:低价引流到店,核销才收 2%)
-                  Row(
-                    children: [
-                      const Text('团购券'),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.local_activity_outlined,
-                            size: 18),
-                        label: const Text('管理'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    VoucherManagePage(api: widget.api))),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton.tonalIcon(
-                        icon: const Icon(Icons.qr_code_scanner, size: 18),
-                        label: const Text('核销'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    VoucherRedeemPage(api: widget.api))),
-                      ),
-                    ],
-                  ),
-                  const Divider(height: 24),
-                  Row(
-                    children: [
-                      const Text('外卖品类'),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: Text(
-                              '${kMerchantCategoryEmoji[shop.category] ?? ''} '
-                              '${merchantCategoryLabel(shop.category)}',
-                              style: TextStyle(color: Theme.of(context).sz.hold))),
-                      TextButton(
-                          onPressed: _editCategory,
-                          child: const Text('修改')),
-                    ],
-                  ),
-                  Text('品类决定你出现在用户端哪个分类里,随时可改即时生效',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  Row(
-                    children: [
-                      const Text('承诺出餐时长'),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: Text('${shop.promiseReadyMinutes} 分钟',
-                              style: TextStyle(color: Theme.of(context).sz.hold))),
-                      TextButton(
-                          onPressed: _editPromiseMinutes,
-                          child: const Text('编辑')),
-                    ],
-                  ),
-                  // #150:承诺值旁边直接给实测值。
-                  // 在这之前商家是**闭着眼填**的 —— 平台替他的慢出餐掏钱赔付
-                  // (超时安抚券由平台承担),而他零反馈,不知道自己慢多少。
-                  // 平台掏钱、商家无感、问题不改,这个闭环不通治理就无从谈起
-                  _measuredPrep(),
-                  Text('接单后超过承诺时长未出餐,平台会催单并统计超时率(对账页可见)',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  Row(
-                    children: [
-                      const Text('商家自配送'),
-                      const Spacer(),
-                      Switch(
-                        value: shop.selfDelivery,
-                        onChanged: (v) async {
-                          try {
-                            await widget.api
-                                .updateShop({'self_delivery': v});
-                            _load();
-                          } catch (e) {
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(e.toString())));
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  Text('开启后新订单由你自己配送(不进骑手抢单池);配送费归你,'
-                      '平台照常只抽餐费佣金。只影响开启之后的新订单',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  Row(
-                    children: [
-                      const Text('自动接单'),
-                      const Spacer(),
-                      Switch(
-                        value: shop.autoAccept,
-                        onChanged: (v) async {
-                          try {
-                            await widget.api.updateShop({'auto_accept': v});
-                            _load();
-                          } catch (e) {
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(e.toString())));
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  Text('开启后来单免确认直接进入制作(仅营业中生效);'
-                      '拒单、缺货退款仍可在订单页手动操作',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  Row(
-                    children: [
-                      const Text('食安封签'),
-                      const Spacer(),
-                      Switch(
-                        value: shop.foodSeal,
-                        onChanged: (v) async {
-                          try {
-                            await widget.api.updateShop({'food_seal': v});
-                            _load();
-                          } catch (e) {
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(e.toString())));
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  Text('打包时贴一次性封签,拆封即留痕。开启后用户端显示'
-                      '「商家声明使用食安封签」—— 是你的声明不是平台认证,'
-                      '请确保真的在用',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // 小票打印:云打印机(服务端直推)+ 蓝牙小票机(App 直连)
-                  Row(
-                    children: [
-                      const Text('小票打印'),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.print_outlined, size: 18),
-                        label: const Text('设置'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => PrinterPage(
-                                    api: widget.api,
-                                    shopName: shop.name))),
-                      ),
-                    ],
-                  ),
-                  Text('云打印机来单自动出票(手机不在场也能打);也可蓝牙直连通用小票机',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // 拉客物料:平台没有补贴预算,商家自己带客是唯一能规模化的获客渠道
-                  Row(
-                    children: [
-                      const Text('专属码与海报'),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.qr_code_2_outlined, size: 18),
-                        label: const Text('生成'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    MerchantPromoPage(api: widget.api))),
-                      ),
-                    ],
-                  ),
-                  Text('一张能贴能发的海报,顾客扫码直达你的店。带来的客都是你自己的',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // 老客召回:平台只给人数不给名单,发不发商家自己定
-                  Row(
-                    children: [
-                      const Text('老客召回'),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.replay_outlined, size: 18),
-                        label: const Text('查看'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    MerchantWinbackPage(api: widget.api))),
-                      ),
-                    ],
-                  ),
-                  Text('看看有多少老客好久没来了。平台只给人数不给名单,'
-                      '要叫人回来就发一批券,预算你定',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // 判责申诉:售后判商家责/差评,72 小时内可申诉
-                  Row(
-                    children: [
-                      const Text('判责申诉'),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.gavel_outlined, size: 18),
-                        label: const Text('进入'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    MerchantAppealPage(api: widget.api))),
-                      ),
-                    ],
-                  ),
-                  Text('对售后判责或差评有异议?72 小时内申诉,平台人工复核',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // 明厨亮灶(#155)。放在「判责申诉」之后、「经营看板」之前 ——
-                  // 它属于"对外怎么呈现这家店"这一类,和看板那种自用工具不同
-                  Row(
-                    children: [
-                      const Text('明厨亮灶'),
-                      const SizedBox(width: 10),
-                      Expanded(child: _kitchenCamBadge()),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.videocam_outlined, size: 18),
-                        label: const Text('设置'),
-                        onPressed: () async {
-                          await Navigator.of(context).push(MaterialPageRoute(
-                              builder: (_) =>
-                                  KitchenCamSetupPage(api: widget.api)));
-                          _load();
-                        },
-                      ),
-                    ],
-                  ),
-                  Text('把后厨实时画面开放给顾客看。用你现有的摄像头就行,'
-                      '平台不卖硬件也不挑品牌',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // 堂食标识(#187)。紧挨明厨亮灶:两个都是总局令第 123 号
-                  // 要求在列表页公示的标识,商家该在同一个地方管
-                  Row(
-                    children: [
-                      const Text('堂食标识'),
-                      const SizedBox(width: 10),
-                      Expanded(
-                          child: Text(shop.dineInLabel,
-                              style: TextStyle(
-                                  color: shop.dineInStatus == 'unknown'
-                                      ? Theme.of(context).colorScheme.error
-                                      : Theme.of(context).sz.hold))),
-                      TextButton(
-                          onPressed: _editDineIn,
-                          child: const Text('填报')),
-                    ],
-                  ),
-                  Text('监管要求公示「有堂食/无堂食」,会显示在用户端列表和店铺页。'
-                      '没填报就照实显示「未填报」—— 平台不替你猜一个填上去',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // #154 经营看板:打烊后坐下来复盘的那一屏
-                  Row(
-                    children: [
-                      const Text('经营看板'),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.insights_outlined, size: 18),
-                        label: const Text('查看'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                    DashboardPage(api: widget.api))),
-                      ),
-                    ],
-                  ),
-                  Text('趋势、时段、出餐时长、菜品贡献、流失去向 —— 打烊后坐下来看',
-                      style: Theme.of(context).textTheme.bodySmall),
-                  const Divider(height: 24),
-                  // #153 平台承诺:和骑手端那份对称,每条都能自己验
-                  Row(
-                    children: [
-                      const Text('平台对你的承诺'),
-                      const Spacer(),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.verified_outlined, size: 18),
-                        label: const Text('查看'),
-                        onPressed: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                                builder: (_) => MerchantPromisesPage(
-                                    api: widget.api,
-                                    onOpenFinance: widget.onOpenFinance))),
-                      ),
-                    ],
-                  ),
-                  Text('佣金封顶只降不升、配送费不抽成、券未核销不收费…… 每条写了在哪儿验',
-                      style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 4),
+
+          // ── 营业 ────────────────────────────────────────────────
+          SzEntryGroup(
+            title: '营业',
+            children: [
+              SzEntryTile(
+                icon: Icons.schedule_outlined,
+                title: '营业时间',
+                // 值就是营业时间本身 —— 商家点进来最想知道的就是它
+                value: (shop.openTime.isEmpty || shop.closeTime.isEmpty)
+                    ? '未设置'
+                    : '${shop.openTime} – ${shop.closeTime}',
+                valueTone: (shop.openTime.isEmpty || shop.closeTime.isEmpty)
+                    ? Theme.of(context).sz.hold
+                    : null,
+                hint: '设置后到点自动开关店,临时手动开关不受影响',
+                onTap: _editBusinessHours,
+              ),
+              // 歇业中才出现:这是**当前状态**,不是常驻入口。
+              // 没歇业时显示一条「临时歇业」等于每天都在提醒一件不该常做的事
+              if (shop.closedUntil != null &&
+                  shop.closedUntil!.isAfter(DateTime.now().toUtc()))
+                SzEntryTile(
+                  icon: Icons.pause_circle_outline,
+                  title: '临时歇业中',
+                  value: '${_hhmmLocal(shop.closedUntil!)} 自动恢复',
+                  valueTone: Theme.of(context).sz.hold,
+                  trailing: TextButton(
+                      onPressed: _endRest, child: const Text('立即恢复')),
+                )
+              else
+                SzEntryTile(
+                  icon: Icons.pause_circle_outline,
+                  title: '临时歇业',
+                  onTap: _pickRest,
+                ),
+              SzEntryTile(
+                icon: Icons.event_outlined,
+                title: '节假日计划',
+                value: shop.holidayPlans.isEmpty
+                    ? null
+                    : '${shop.holidayPlans.length} 条',
+                hint: '计划优先于每日营业时间',
+                onTap: () => editHolidayPlans(context, widget.api, shop, _load),
+              ),
+              SzEntryTile(
+                icon: Icons.delivery_dining_outlined,
+                title: '商家自配送',
+                trailing: Switch(
+                  value: shop.selfDelivery,
+                  onChanged: (v) => _toggleShopFlag('self_delivery', v),
+                ),
+                hint: '自己送的单不进骑手池,配送费全归你',
+              ),
+              SzEntryTile(
+                icon: Icons.flash_on_outlined,
+                title: '自动接单',
+                trailing: Switch(
+                  value: shop.autoAccept,
+                  onChanged: (v) => _toggleShopFlag('auto_accept', v),
+                ),
+                hint: '来单免确认直接进制作,拒单和缺货退款仍可手动',
+              ),
+              SzEntryTile(
+                icon: Icons.timer_outlined,
+                title: '承诺出餐时长',
+                value: shop.promiseReadyMinutes > 0
+                    ? '${shop.promiseReadyMinutes} 分钟'
+                    : null,
+                hint: '不设就按平台默认估算',
+                onTap: _editPromiseMinutes,
+              ),
+            ],
+          ),
+          // 实测出餐时长(近 N 天的 p80 与同行对照)。
+          //
+          // **这不是解释,是数据** —— 商家改承诺时长时唯一该看的东西就是它。
+          // 它自己会判断样本够不够,不够就照实说"还不够算实测值",
+          // 所以不能塞进 hint(那一行只放得下一句话,而且配好值就不显示了)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(kCardPad, 2, kCardPad, 0),
+            child: _measuredPrep(),
+          ),
+          const SizedBox(height: 4),
+
+          // ── 价格与活动 ──────────────────────────────────────────
+          SzEntryGroup(
+            title: '价格与活动',
+            // 立场表达进脚注:原本这句挂在「满减活动」那一条下面,
+            // 但它讲的是平台怎么收费,是整组的前提
+            footnote: '满减、满赠的成本都由商家承担,'
+                '而平台按满减后的实收计 5% 服务费 —— 你让利,平台跟着少收。',
+            children: [
+              SzEntryTile(
+                icon: Icons.shopping_basket_outlined,
+                title: '起送价',
+                value: shop.minOrderCents > 0
+                    ? '¥${shop.minOrderCents ~/ 100}'
+                    : '不限',
+                onTap: () => _editAmount(
+                    '起送价(元,0 为不限)', shop.minOrderCents, 'min_order_cents'),
+              ),
+              SzEntryTile(
+                icon: Icons.inventory_outlined,
+                title: '打包费',
+                value: shop.packingFeeCents > 0
+                    ? yuan(shop.packingFeeCents)
+                    : '免收',
+                onTap: () => _editAmount('每单打包费(元,0 为免收)',
+                    shop.packingFeeCents, 'packing_fee_cents'),
+              ),
+              SzEntryTile(
+                icon: Icons.percent_outlined,
+                title: '满减活动',
+                value: shop.promoLabels.isEmpty
+                    ? '未设置'
+                    : shop.promoLabels.join(' · '),
+                onTap: () => editPromoRules(context, widget.api, shop, _load),
+              ),
+              SzEntryTile(
+                icon: Icons.card_giftcard_outlined,
+                title: '满赠活动',
+                value: shop.giftRules.isEmpty ? '未设置' : '${shop.giftRules.length} 档',
+                // 「动货不动钱」是这个功能最容易被误解的地方,留着
+                hint: '赠品 0 元入订单、照常扣库存,佣金不含赠品',
+                onTap: () => editGiftRules(context, widget.api, shop, _load),
+              ),
+              SzEntryTile(
+                icon: Icons.confirmation_number_outlined,
+                title: '店铺券',
+                onTap: () => showShopCouponSheet(
+                    context, widget.api, () => _shopCoupons, _load),
+              ),
+              SzEntryTile(
+                icon: Icons.local_activity_outlined,
+                title: '团购券',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => VoucherManagePage(api: widget.api))),
+              ),
+              SzEntryTile(
+                icon: Icons.qr_code_scanner_outlined,
+                title: '团购券核销',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => VoucherRedeemPage(api: widget.api))),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+
+          // ── 门店与合规 ──────────────────────────────────────────
+          SzEntryGroup(
+            title: '门店与合规',
+            children: [
+              SzEntryTile(
+                icon: Icons.category_outlined,
+                title: '外卖品类',
+                value: '${kMerchantCategoryEmoji[shop.category] ?? ''} '
+                    '${merchantCategoryLabel(shop.category)}',
+                onTap: _editCategory,
+              ),
+              SzEntryTile(
+                icon: Icons.videocam_outlined,
+                title: '明厨亮灶',
+                // 顾客看到的那个标识就是这里的值
+                // _kitchenCamBadge 画的就是顾客看到的那个标识,直接放 trailing
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  _kitchenCamBadge(),
+                  Icon(Icons.chevron_right,
+                      size: 18, color: Theme.of(context).sz.inkFaint),
+                ]),
+                hint: '用你现有的摄像头就行',
+                onTap: () async {
+                  await Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => KitchenCamSetupPage(api: widget.api)));
+                  _load();
+                },
+              ),
+              SzEntryTile(
+                icon: Icons.restaurant_outlined,
+                title: '堂食标识',
+                value: shop.dineInLabel,
+                // 未填报标红:监管要求公示,而平台不替商家猜一个填上去
+                valueTone: shop.dineInStatus == 'unknown'
+                    ? Theme.of(context).sz.danger
+                    : Theme.of(context).sz.hold,
+                onTap: _editDineIn,
+              ),
+              SzEntryTile(
+                icon: Icons.verified_user_outlined,
+                title: '食安封签',
+                trailing: Switch(
+                  value: shop.foodSeal,
+                  onChanged: (v) => _toggleShopFlag('food_seal', v),
+                ),
+                hint: '标注已贴封签,顾客收餐时能核对',
+              ),
+              if (!shop.viewerIsStaff)
+                SzEntryTile(
+                  icon: Icons.badge_outlined,
+                  title: '子账号(店员)',
+                  hint: '店员只能接单出餐估清,提现改价改设置仍只有你能操作',
+                  onTap: () => showStaffSheet(context, widget.api),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+
+          // ── 工具 ────────────────────────────────────────────────
+          SzEntryGroup(
+            title: '工具',
+            children: [
+              SzEntryTile(
+                icon: Icons.print_outlined,
+                title: '小票打印',
+                hint: '云打印机来单自动出票,也可蓝牙直连',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => PrinterPage(
+                        api: widget.api, shopName: shop.name))),
+              ),
+              SzEntryTile(
+                icon: Icons.qr_code_2_outlined,
+                title: '专属码与海报',
+                hint: '顾客扫码直达你的店,带来的客都是你自己的',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantPromoPage(api: widget.api))),
+              ),
+              SzEntryTile(
+                icon: Icons.group_outlined,
+                title: '老客召回',
+                hint: '平台只给人数不给名单,发不发券你定',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantWinbackPage(api: widget.api))),
+              ),
+              SzEntryTile(
+                icon: Icons.insights_outlined,
+                title: '经营看板',
+                hint: '趋势、时段、出餐时长、菜品贡献、流失去向',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => DashboardPage(api: widget.api))),
+              ),
+              SzEntryTile(
+                icon: Icons.gavel_outlined,
+                title: '判责申诉',
+                hint: '对售后判责或差评有异议?72 小时内申诉',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantAppealPage(api: widget.api))),
+              ),
+              SzEntryTile(
+                icon: Icons.verified_outlined,
+                title: '平台对你的承诺',
+                hint: '佣金封顶只降不升、配送费不抽成、券未核销不收费',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantPromisesPage(api: widget.api))),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
           // 门店相册:环境/后厨/证照实拍是最好的信任素材,展示在用户点单页「商家」标签
