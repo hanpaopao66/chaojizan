@@ -1338,145 +1338,131 @@ class _ShopTabPageState extends State<ShopTabPage> {
           ],
           // 评价升级为独立页(reviews_page.dart):筛选/图片/追评/申诉都在那边,
           // 这里只留入口。待回复数比总数更该被看到 —— 那是欠着顾客的话
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.rate_review_outlined),
-              title: Text('顾客评价(${_reviews.length})'),
-              subtitle: Text(() {
-                final unreplied =
-                    _reviews.where((r) => r.reply.isEmpty).length;
-                return unreplied > 0
-                    ? '$unreplied 条还没回复,尽量 24 小时内回应'
-                    : '筛差评、看图片、回追评都在这里';
-              }()),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context)
-                  .push(MaterialPageRoute(
-                      builder: (_) => MerchantReviewsPage(api: widget.api)))
-                  .then((_) => _load()),
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.desktop_windows_outlined),
-              title: Text('电脑上管店'),
-              subtitle: SelectableText('网页版商家后台:chaojizan.cc/merchant\n'
-                  '批量改菜、对账导出、大屏接单更顺手,与 App 同一账号'),
-              isThreeLine: true,
-            ),
-          ),
-          const SizedBox(height: 12),
-          // 消息中心是店主视角(接口按 owner 判权),店员看了只会报"还没开店"
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.gavel_outlined),
-              title: const Text('平台规则'),
-              subtitle: const Text('什么算违规、后果是什么、怎么申诉'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => MerchantRulesPage(api: widget.api))),
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (!shop.viewerIsStaff) ...[
-            // 收款资料(#204):独立一页,**不进入驻流程** —— 进件资料是
-            // 「能收钱之前」要的,不是「能开店之前」要的,塞进入驻只会多劝退一批人。
-            //
-            // 只给店主本人:接口走 money_shop 判权(和提现同一口径),
-            // 品牌 manager 也进不去 —— 运营授权不等于可以改这家店的收款账户。
-            // 不加这层判断的话,区域经理点进去只会吃一个 403
-            if (shop.viewerIsOwner) ...[
-              Card(
-                child: ListTile(
-                  leading: const Icon(Icons.account_balance_wallet_outlined),
-                  title: const Text('收款资料'),
-                  subtitle: const Text('开通后货款直接进你自己的账户,不再经平台的手'),
-                  trailing: const Icon(Icons.chevron_right),
+          // 九张独立卡片改成两个分组(#294)。
+          //
+          // 之前是每个入口一张 Card + 一个带 subtitle 的 ListTile ——
+          // 每条吃掉 Material 的 72dp 最小高度,外加卡片的外边距和描边,
+          // 一屏只放得下 6 条。而每条其实只是一个跳转。
+          //
+          // 现在:能给出**当前值**的就给值(有效期、几人在册、几条未读),
+          // 值和标题同一行、零额外高度;给不出值的才留一句解释。
+          // 解释没删,只是挪到它真正有用的时候 —— 见 SzEntryTile 的类文档。
+          SzEntryGroup(
+            title: '经营',
+            children: [
+              SzEntryTile(
+                icon: Icons.rate_review_outlined,
+                title: '顾客评价',
+                value: () {
+                  final unreplied =
+                      _reviews.where((r) => r.reply.isEmpty).length;
+                  return unreplied > 0
+                      ? '$unreplied 条待回复'
+                      : '${_reviews.length} 条';
+                }(),
+                valueTone: _reviews.any((r) => r.reply.isEmpty)
+                    ? Theme.of(context).sz.hold
+                    : null,
+                onTap: () => Navigator.of(context)
+                    .push(MaterialPageRoute(
+                        builder: (_) => MerchantReviewsPage(api: widget.api)))
+                    .then((_) => _load()),
+              ),
+              SzEntryTile(
+                icon: Icons.gavel_outlined,
+                title: '平台规则',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MerchantRulesPage(api: widget.api))),
+              ),
+              if (!shop.viewerIsStaff)
+                SzEntryTile(
+                  icon: Icons.notifications_none,
+                  title: '消息中心',
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) =>
-                          ApplymentPage(api: widget.api, shop: shop))),
+                      builder: (_) => MerchantMessagesPage(api: widget.api))),
                 ),
+              SzEntryTile(
+                icon: Icons.support_agent_outlined,
+                title: '联系平台客服',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => SupportPage(api: widget.api))),
               ),
-              const SizedBox(height: 12),
             ],
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.badge_outlined),
-                title: const Text('食品经营许可证'),
-                subtitle: Text(shop.licenseExpiresAt.isEmpty
-                    ? '还没登记有效期 —— 登记后到期前会提醒你'
-                    : '有效期至 ${shop.licenseExpiresAt}'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context)
-                    .push(MaterialPageRoute(
+          ),
+          if (!shop.viewerIsStaff) ...[
+            const SizedBox(height: 4),
+            SzEntryGroup(
+              title: '证照与台账',
+              // 立场表达进脚注,不是每行都说一遍
+              footnote: '这几样都是监管会查的。平台只做提醒和留档,不替你担责。',
+              children: [
+                // 收款资料(#204):独立一页,**不进入驻流程** —— 进件资料是
+                // 「能收钱之前」要的,不是「能开店之前」要的,
+                // 塞进入驻只会多劝退一批人。
+                //
+                // 只给店主本人:接口走 money_shop 判权(和提现同一口径),
+                // 品牌 manager 也进不去 —— 运营授权不等于可以改这家店的收款账户
+                if (shop.viewerIsOwner)
+                  SzEntryTile(
+                    icon: Icons.account_balance_wallet_outlined,
+                    title: '收款资料',
+                    // 开没开通这个状态**客户端模型里没有** ——
+                    // 别为了填个状态就编一个。给不出值就留解释,
+                    // 那正是 hint 存在的意义
+                    hint: '开通后货款直接进你自己的账户,不再经平台的手',
+                    onTap: () => Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) =>
-                            LicenseRenewalPage(api: widget.api, shop: shop)))
-                    .then((_) => _load()),
-              ),
+                            ApplymentPage(api: widget.api, shop: shop))),
+                  ),
+                SzEntryTile(
+                  icon: Icons.badge_outlined,
+                  title: '食品经营许可证',
+                  // 有有效期就显示它 —— 这才是商家点进来想知道的
+                  value: shop.licenseExpiresAt.isEmpty
+                      ? null
+                      : '${shop.licenseExpiresAt} 到期',
+                  hint: '还没登记有效期 —— 登记后到期前会提醒你',
+                  onTap: () => Navigator.of(context)
+                      .push(MaterialPageRoute(
+                          builder: (_) =>
+                              LicenseRenewalPage(api: widget.api, shop: shop)))
+                      .then((_) => _load()),
+                ),
+                SzEntryTile(
+                  icon: Icons.health_and_safety_outlined,
+                  title: '从业人员健康证',
+                  onTap: () => Navigator.of(context)
+                      .push(MaterialPageRoute(
+                          builder: (_) => HealthCertsPage(api: widget.api)))
+                      .then((_) => _load()),
+                ),
+                SzEntryTile(
+                  icon: Icons.inventory_2_outlined,
+                  title: '进货查验台账',
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => PurchasesPage(api: widget.api))),
+                ),
+                // 店员不给连锁入口:开店、看跨店营业额都是老板的事,
+                // 而且这些接口本来就按品牌所有者判权,给了也只会报错
+                SzEntryTile(
+                  icon: Icons.store_mall_directory_outlined,
+                  title: '连锁店群',
+                  onTap: () => Navigator.of(context)
+                      .push(MaterialPageRoute(
+                          builder: (_) =>
+                              MerchantChainPage(api: widget.api, shop: shop)))
+                      .then((_) => _load()),
+                ),
+              ],
             ),
-            const SizedBox(height: 12),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.health_and_safety_outlined),
-                title: const Text('从业人员健康证'),
-                subtitle: const Text('一年一检,到期前 30 天提醒 —— 检查看的是记录'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context)
-                    .push(MaterialPageRoute(
-                        builder: (_) => HealthCertsPage(api: widget.api)))
-                    .then((_) => _load()),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.inventory_2_outlined),
-                title: const Text('进货查验台账'),
-                subtitle: const Text('收货时拍张票据就录完 —— 出事时靠它反查供货商'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => PurchasesPage(api: widget.api))),
-              ),
-            ),
-            const SizedBox(height: 12),
-            // 店员不给连锁入口:开店、看跨店营业额都是老板的事,
-            // 而且这些接口本来就按品牌所有者判权,给了也只会报错
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.store_mall_directory_outlined),
-                title: const Text('连锁店群'),
-                subtitle: const Text('跨店看数、开新门店(新店证照要单独提交)'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context)
-                    .push(MaterialPageRoute(
-                        builder: (_) =>
-                            MerchantChainPage(api: widget.api, shop: shop)))
-                    .then((_) => _load()),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.notifications_none),
-                title: const Text('消息中心'),
-                subtitle: const Text('平台公告、评价与系统通知'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => MerchantMessagesPage(api: widget.api))),
-              ),
-            ),
-            const SizedBox(height: 12),
           ],
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.support_agent_outlined),
-              title: const Text('联系平台客服'),
-              subtitle: const Text('对账疑问、审核进度、任何问题都可以问'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => SupportPage(api: widget.api))),
-            ),
+          const SizedBox(height: 4),
+          // 「电脑上管店」不是入口(点不动),是一条说明 —— 用脚注而不是占一条
+          SzEntryGroup(
+            title: '其他',
+            footnote: '电脑上管店:网页版商家后台 chaojizan.cc/merchant,'
+                '批量改菜、对账导出、大屏接单更顺手,与 App 同一账号。',
+            children: const [],
           ),
           const SizedBox(height: 12),
           // 商店审核三件套:协议全文 / 退出登录 / 注销账号

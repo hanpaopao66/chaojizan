@@ -96,8 +96,17 @@ class SzEntryTile extends StatelessWidget {
                           color: sz.ink)),
                   if (showHint) ...[
                     const SizedBox(height: 2),
+                    // **一行**,多了切掉。
+                    //
+                    // 量出来才发现:hint 给两行的话,这套改造等于白做 ——
+                    // 九个入口从 641px 变成 664px,反而更长。因为九条里
+                    // 只有两条有状态值,其余照旧顶着两行说明。
+                    //
+                    // 需要两行才说得清的东西**不是提示,是文档** ——
+                    // 它该在点进去的那一页里,不该占着入口列表。
+                    // 入口列表回答「这是什么」,目的页回答「为什么重要」。
                     Text(hint!,
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             fontSize: kFontMicro,

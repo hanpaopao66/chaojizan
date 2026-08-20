@@ -102,6 +102,42 @@ void main() {
     });
   });
 
+  group('hint 的成本 —— 这一条是踩出来的', () {
+    testWidgets('只有 hint 的条目省得很少,别当成免费的', (t) async {
+      final withValue = await heightOf(
+          t, SzEntryTile(icon: Icons.circle, title: '入口', value: '值', onTap: () {}));
+      final withHint = await heightOf(
+          t, SzEntryTile(icon: Icons.circle, title: '入口', hint: '一句说明', onTap: () {}));
+      const oldListTile = 72.0;
+
+      // 有状态值:72 → 46,省 36%
+      expect(withValue / oldListTile, lessThan(0.7));
+      // 只有 hint:72 → 63,只省 12% —— **几乎等于没改**
+      expect(withHint / oldListTile, greaterThan(0.8),
+          reason: 'hint 看着便宜,其实只省一成 —— '
+              '这个断言是提醒:别以为加了 hint 还能省地方');
+    });
+
+    testWidgets('分组头 + 脚注的开销要算进去', (t) async {
+      final one = await heightOf(
+          t, SzEntryTile(title: 'x', value: 'y', onTap: () {}));
+      final grp = await heightOf(t,
+          SzEntryGroup(title: '分组',
+              children: [SzEntryTile(title: 'x', value: 'y', onTap: () {})]));
+      final grpFoot = await heightOf(t,
+          SzEntryGroup(title: '分组', footnote: '一句脚注',
+              children: [SzEntryTile(title: 'x', value: 'y', onTap: () {})]));
+
+      // 分组头约 41px、脚注约 23px。两个分组 + 一条脚注就是 105px ——
+      // 第一版改造正是栽在这儿:九个入口大多只有 hint,
+      // 省下的还不够付分组的开销,改完反而**长了 4%**。
+      //
+      // 判据:分组和脚注是有价格的,别为了"看起来有结构"随手加。
+      expect(grp - one, lessThan(50), reason: '分组头太贵了');
+      expect(grpFoot - grp, lessThan(30), reason: '脚注太贵了');
+    });
+  });
+
   group('长辈版下也不塌', () {
     testWidgets('1.4× 字号下状态值不换行把行顶高', (t) async {
       final h = await heightOf(
