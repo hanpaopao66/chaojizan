@@ -296,7 +296,7 @@ class _RoomManagePageState extends State<RoomManagePage> {
         text: day == null ? '' : (day.priceCents / 100).toStringAsFixed(0));
     final qty = TextEditingController(text: '${day?.totalQty ?? 1}');
     var closed = day?.closed ?? false;
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
@@ -360,7 +360,7 @@ class _RoomManagePageState extends State<RoomManagePage> {
     final price = TextEditingController();
     final qty = TextEditingController();
     bool? closed;
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(

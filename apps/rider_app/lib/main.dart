@@ -704,7 +704,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     var error = '';
     var failures = 0;
     var submitting = false;
-    final done = await showModalBottomSheet<bool>(
+    final done = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
@@ -803,7 +803,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     final amount = TextEditingController(
         text: (order.goodsBudgetCents / 100).toStringAsFixed(2));
     String? photo;
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheet) => StatefulBuilder(
@@ -1045,7 +1045,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     String photoUrl = '';
     bool uploading = false;
     bool needPhoto() => kind == 'food_damaged' || kind == 'items_missing';
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
@@ -1157,7 +1157,7 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 每天免责 2 次,超出仍可转但计入考核参考;已取餐不能转,走异常上报。
   Future<void> _transferOrder(Order order) async {
     var reason = 'vehicle_broken';
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, setSheet) => Padding(
@@ -1414,7 +1414,7 @@ class _RiderHomePageState extends State<RiderHomePage>
       // 读不到就用手上这份(可能为空):设置页打不开比显示旧值更糟
     }
     if (!mounted) return;
-    await showModalBottomSheet<void>(
+    await szShowSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (sheet) => StatefulBuilder(builder: (sheet, setSheet) {

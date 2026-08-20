@@ -743,7 +743,7 @@ class _MerchantListViewState extends State<MerchantListView> {
     var promo = _hasPromo;
     var minOrder = _maxMinOrderCents;
 
-    final applied = await showModalBottomSheet<bool>(
+    final applied = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
@@ -1768,7 +1768,7 @@ class _MenuPageState extends State<MenuPage>
       for (final g in dish.options)
         if (g.required_ && g.choices.isNotEmpty) g.choices.first.name,
     };
-    final confirmed = await showModalBottomSheet<bool>(
+    final confirmed = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
@@ -1858,7 +1858,7 @@ class _MenuPageState extends State<MenuPage>
   Future<void> _groupCart() async {
     if (!await ensureLoggedIn(context)) return;
     if (!mounted) return;
-    final action = await showModalBottomSheet<String>(
+    final action = await szShowSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -2529,7 +2529,7 @@ class _MenuPageState extends State<MenuPage>
 
   /// 菜品详情弹层:大图 + 价格 + 库存 + 数量加减 + 加入购物车
   void _showDishDetail(Dish dish) {
-    showModalBottomSheet(
+    szShowSheet(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
@@ -2653,7 +2653,7 @@ class _MenuPageState extends State<MenuPage>
   }
 
   void _openCartSheet() {
-    showModalBottomSheet(
+    szShowSheet(
       context: context,
       builder: (sheetContext) => StatefulBuilder(
         builder: (sheetContext, setSheetState) {
@@ -3437,7 +3437,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
 
   /// 售后分流:普通售后走商家先处理;食品安全是红线,不经商家直达平台
   Future<void> _chooseAfterSaleKind() async {
-    final choice = await showModalBottomSheet<String>(
+    final choice = await szShowSheet<String>(
       context: context,
       builder: (sheetContext) => SafeArea(
         child: Column(
@@ -3477,7 +3477,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     final images = <String>[];
     final medical = <String>[];
     var uploading = false;
-    final submitted = await showModalBottomSheet<bool>(
+    final submitted = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
@@ -3829,7 +3829,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
   /// 加急小费:无人接单时追加小费(纯用户出、100% 归骑手,平台不补贴)
   Future<void> _boostTip(Order order) async {
     const options = [200, 300, 500, 800]; // 元档:2/3/5/8
-    final add = await showModalBottomSheet<int>(
+    final add = await szShowSheet<int>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(
@@ -3874,7 +3874,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
   /// 用户取消:选原因 → 提交;窗口限制由服务端判定(超窗给出中文提示)
   Future<void> _cancelOrder(Order order) async {
     const reasons = ['点错了/重新下单', '不想要了', '地址/电话填错', '其他原因'];
-    final reason = await showModalBottomSheet<String>(
+    final reason = await szShowSheet<String>(
       context: context,
       builder: (context) => SafeArea(
         child: Column(

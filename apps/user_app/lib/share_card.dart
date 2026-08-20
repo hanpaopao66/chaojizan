@@ -11,7 +11,7 @@ import 'package:superz_shared/superz_shared.dart';
 Future<void> showShareCard(BuildContext context, Widget card,
     {required String event, required Map<String, Object?> props}) async {
   final key = GlobalKey();
-  await showModalBottomSheet<void>(
+  await szShowSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (context) => SafeArea(

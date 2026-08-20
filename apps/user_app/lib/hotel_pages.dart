@@ -138,7 +138,7 @@ class _HotelListPageState extends State<HotelListPage> {
         text: _minPriceCents == null ? '' : '${_minPriceCents! ~/ 100}');
     final max = TextEditingController(
         text: _maxPriceCents == null ? '' : '${_maxPriceCents! ~/ 100}');
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => Padding(

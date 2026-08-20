@@ -339,7 +339,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _openFilterSheet() async {
-    await showModalBottomSheet(
+    await szShowSheet(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setSheet) => SafeArea(

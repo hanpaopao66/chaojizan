@@ -216,7 +216,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
   /// 原本是三个并排的大按钮直接摊在设置卡里 —— 每天要看的是"几点到几点",
   /// 而不是三个按钮。改成入口之后那一行只显示时间,要改才点开。
   Future<void> _editBusinessHours() async {
-    await showModalBottomSheet<void>(
+    await szShowSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -263,7 +263,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
   /// 原本三个大按钮(1小时 / 2小时 / 到打烊)常驻在设置卡里 ——
   /// 而临时歇业是**偶尔**才做的事,天天摆在那儿等于每天提醒一次。
   Future<void> _pickRest() async {
-    await showModalBottomSheet<void>(
+    await szShowSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -337,7 +337,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
   /// 外卖品类:底部弹层选择,选了即改(不是资质项,即时生效)
   Future<void> _editCategory() async {
     final shop = _shop!;
-    final picked = await showModalBottomSheet<String>(
+    final picked = await szShowSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (context) => ListView(
@@ -468,7 +468,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
       ('no', '无堂食', '只做外卖/自取,店里不设餐位'),
       ('unknown', '未填报', '暂不说明。用户端会照实显示「未填报」'),
     ];
-    final picked = await showModalBottomSheet<String>(
+    final picked = await szShowSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(

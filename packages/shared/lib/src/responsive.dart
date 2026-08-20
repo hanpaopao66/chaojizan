@@ -340,3 +340,47 @@ Future<T?> szShowSheet<T>({
 /// 给 builder 里判断要不要画拖拽条、要不要 SafeArea 用 ——
 /// 那两样只有底部弹层需要。
 bool isSheetBottom(BuildContext context) => !szWidthOf(context).hasSideNav;
+
+/// 弹层里的滚动内容 —— 两种形态用两种方式定高度。
+///
+/// [DraggableScrollableSheet] 是**底部弹层专属**的:它靠"从屏底往上拖"
+/// 来决定高度,对话框浮在屏幕中间,没有屏底可拖。直接塞进对话框
+/// 不会报错,只是那根拖拽手势永远拖不动。
+///
+/// 所以这里按档位分叉:
+///
+/// | | 高度来自 | 传给 builder 的 controller |
+/// |---|---|---|
+/// | 底部弹层 | 拖到哪算哪([initialSize] 起步) | 拖拽用的那个 |
+/// | 对话框 | 内容自己撑,上限 0.85 屏高 | `null` |
+///
+/// ⚠️ **builder 里的 `ListView` 要写 `shrinkWrap: controller == null`。**
+/// 对话框那边给的是宽松约束,ListView 不 shrinkWrap 就会贪到 0.85 屏高 ——
+/// 三条 FAQ 撑出大半屏空白。
+class SzSheetScrollable extends StatelessWidget {
+  const SzSheetScrollable({
+    super.key,
+    required this.builder,
+    this.initialSize = 0.7,
+    this.minSize = 0.4,
+    this.maxSize = 0.95,
+  });
+
+  final Widget Function(BuildContext context, ScrollController? controller)
+      builder;
+  final double initialSize;
+  final double minSize;
+  final double maxSize;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isSheetBottom(context)) return builder(context, null);
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: initialSize,
+      minChildSize: minSize,
+      maxChildSize: maxSize,
+      builder: builder,
+    );
+  }
+}

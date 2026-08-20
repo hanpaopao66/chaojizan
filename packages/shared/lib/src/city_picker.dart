@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'brand.dart';
+import 'responsive.dart';
 
 /// 地址搜索的城市切换器(#172)。
 ///
@@ -65,7 +66,7 @@ class CityPref {
       final m = RegExp(r'([\u4e00-\u9fa5]{2,8}市)').firstMatch(district);
       return m?.group(1) ?? '';
     } catch (_) {
-      return '';   // 拿不到就留空,让他自己选 —— 比猜一个强
+      return ''; // 拿不到就留空,让他自己选 —— 比猜一个强
     }
   }
 
@@ -96,7 +97,7 @@ class SzCityChip extends StatelessWidget {
   final ValueChanged<String> onChanged;
 
   Future<void> _pick(BuildContext context) async {
-    final picked = await showModalBottomSheet<String>(
+    final picked = await szShowSheet<String>(
       context: context,
       builder: (ctx) => _CitySheet(loadCities: loadCities, current: city),
     );
@@ -212,9 +213,8 @@ class _CitySheetState extends State<_CitySheet> {
                       title: Text(c.name,
                           style: TextStyle(
                               fontSize: 14.5,
-                              color: c.name == widget.current
-                                  ? sz.clay
-                                  : sz.ink)),
+                              color:
+                                  c.name == widget.current ? sz.clay : sz.ink)),
                       // 商家数要露出来:**开城清单里可能有还没商家的城市**,
                       // 用户切过去会看到空列表 —— 先告诉他
                       trailing: Text(

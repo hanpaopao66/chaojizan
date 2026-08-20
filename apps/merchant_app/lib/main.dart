@@ -894,7 +894,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
 
   /// 缺货退款:弹层选菜品和份数,退对应的钱(不用整单拒)
   Future<void> _refundSheet(Order order) async {
-    final result = await showModalBottomSheet<(int, int)>(
+    final result = await szShowSheet<(int, int)>(
       context: context,
       builder: (sheetContext) {
         int? selectedDish;
@@ -1724,7 +1724,7 @@ class _ShopSwitcher extends StatelessWidget {
   }
 
   Future<void> _pick(BuildContext context) async {
-    final picked = await showModalBottomSheet<int>(
+    final picked = await szShowSheet<int>(
       context: context,
       showDragHandle: true,
       builder: (sheet) => SafeArea(

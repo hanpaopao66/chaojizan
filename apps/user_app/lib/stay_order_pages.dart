@@ -153,7 +153,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
     final selected = <String>{};
     final comment = TextEditingController();
     var anonymous = false;
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(

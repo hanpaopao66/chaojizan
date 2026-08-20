@@ -45,10 +45,8 @@ bool get miniAppSupported =>
 
 Future<void> showMiniAppSheet(BuildContext context,
     {required ApiClient api, required MiniAppInfo app}) {
-  return showModalBottomSheet(
+  return szShowSheet<void>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
     builder: (_) => MiniAppSheet(api: api, app: app),
   );
 }
@@ -82,59 +80,77 @@ class _MiniAppSheetState extends State<MiniAppSheet> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
+    final bottom = isSheetBottom(context);
+
+    Widget content(ScrollController? scrollController) => Column(children: [
+          // 顶栏是唯一的拖拽区:容器自己要滚页面,手势不能给它
+          SingleChildScrollView(
+            controller: scrollController,
+            physics: const ClampingScrollPhysics(),
+            child: Column(children: [
+              const SizedBox(height: 8),
+              // 拖拽条只有底部弹层用得上 —— 对话框浮在屏幕中间,拖不动
+              if (bottom)
+                Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: sz.line, borderRadius: BorderRadius.circular(2)),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(kPagePad, 8, 6, 8),
+                child: Row(children: [
+                  Text(
+                      widget.app.icon.startsWith('http')
+                          ? '🧩'
+                          : widget.app.icon,
+                      style: const TextStyle(fontSize: 18)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(widget.app.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close),
+                    tooltip: '关闭',
+                  ),
+                ]),
+              ),
+              Divider(height: 1, color: sz.line),
+            ]),
+          ),
+          Expanded(
+            child: MiniAppHost(
+              api: widget.api,
+              app: widget.app,
+              onClose: () {
+                if (mounted) Navigator.of(context).pop();
+              },
+              onExpand: _expand,
+            ),
+          ),
+        ]);
+
+    // 对话框那边必须给个**确定的高度**:上面 Column 里有 Expanded,
+    // 而对话框给的是宽松约束(高度上限 0.85 屏,下限 0)——
+    // Expanded 撞上无界高度会直接抛 RenderFlex 异常
+    if (!bottom) {
+      return SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.8,
+        child: content(null),
+      );
+    }
     return DraggableScrollableSheet(
       controller: _sheet,
       expand: false,
       initialChildSize: 0.72,
       minChildSize: 0.45,
       maxChildSize: 0.96,
-      builder: (context, scrollController) => Column(children: [
-        // 顶栏是唯一的拖拽区:容器自己要滚页面,手势不能给它
-        SingleChildScrollView(
-          controller: scrollController,
-          physics: const ClampingScrollPhysics(),
-          child: Column(children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                  color: sz.line, borderRadius: BorderRadius.circular(2)),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(kPagePad, 8, 6, 8),
-              child: Row(children: [
-                Text(widget.app.icon.startsWith('http') ? '🧩' : widget.app.icon,
-                    style: const TextStyle(fontSize: 18)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(widget.app.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w600)),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close),
-                  tooltip: '关闭',
-                ),
-              ]),
-            ),
-            Divider(height: 1, color: sz.line),
-          ]),
-        ),
-        Expanded(
-          child: MiniAppHost(
-            api: widget.api,
-            app: widget.app,
-            onClose: () {
-              if (mounted) Navigator.of(context).pop();
-            },
-            onExpand: _expand,
-          ),
-        ),
-      ]),
+      builder: (context, scrollController) => content(scrollController),
     );
   }
 }

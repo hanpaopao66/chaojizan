@@ -173,7 +173,7 @@ class _RiderAppealPageState extends State<RiderAppealPage> {
     final order = widget.order!;
     var kind = 'late';
     final reason = TextEditingController();
-    final ok = await showModalBottomSheet<bool>(
+    final ok = await szShowSheet<bool>(
       context: context,
       isScrollControlled: true,
       builder: (sheet) => StatefulBuilder(

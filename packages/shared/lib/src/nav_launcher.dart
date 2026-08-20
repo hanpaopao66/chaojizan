@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'brand.dart';
 import 'coord_utils.dart';
+import 'responsive.dart';
 
 /// 出行方式。骑手送餐是骑行,用户看店是驾车/步行。
 enum NavMode { ride, drive, walk }
@@ -61,20 +62,20 @@ final List<_MapApp> _apps = [
   _MapApp(
     name: '腾讯地图',
     scheme: 'qqmap://',
-    build: (lat, lng, n, m) => Uri.parse(
-        'qqmap://map/routeplan?type=${_qqType(m)}'
-        '&tocoord=$lat,$lng&to=${Uri.encodeComponent(n)}'
-        '&referer=superz'),
-    web: (lat, lng, n, m) => Uri.parse(
-        'https://apis.map.qq.com/uri/v1/routeplan?type=${_qqType(m)}'
-        '&to=${Uri.encodeComponent(n)}&tocoord=$lat,$lng&referer=superz'),
+    build: (lat, lng, n, m) =>
+        Uri.parse('qqmap://map/routeplan?type=${_qqType(m)}'
+            '&tocoord=$lat,$lng&to=${Uri.encodeComponent(n)}'
+            '&referer=superz'),
+    web: (lat, lng, n, m) =>
+        Uri.parse('https://apis.map.qq.com/uri/v1/routeplan?type=${_qqType(m)}'
+            '&to=${Uri.encodeComponent(n)}&tocoord=$lat,$lng&referer=superz'),
   ),
   _MapApp(
     name: '高德地图',
     // iOS 与 Android 的 scheme 不同,这里只用来探测,真正的地址在 build 里分平台
     scheme: 'iosamap://',
-    build: (lat, lng, n, m) => Uri.parse(
-        defaultTargetPlatform == TargetPlatform.iOS
+    build: (lat, lng, n, m) =>
+        Uri.parse(defaultTargetPlatform == TargetPlatform.iOS
             // dev=0 表示传入的已经是 GCJ-02,别让它再纠偏一次
             ? 'iosamap://path?sourceApplication=superz'
                 '&dlat=$lat&dlon=$lng&dname=${Uri.encodeComponent(n)}'
@@ -93,8 +94,7 @@ final List<_MapApp> _apps = [
     // 百度吃 BD-09。直接传 GCJ-02 会偏几百米 —— 骑手照着导航跑到隔壁街
     build: (lat, lng, n, m) {
       final bd = gcj02ToBd09(lat, lng);
-      return Uri.parse(
-          'baidumap://map/direction?destination=name:'
+      return Uri.parse('baidumap://map/direction?destination=name:'
           '${Uri.encodeComponent(n)}|latlng:${bd.lat},${bd.lng}'
           '&coord_type=bd09ll&mode=${_bdMode(m)}&src=superz');
     },
@@ -159,7 +159,7 @@ Future<void> navigateTo(
   }
 
   final sz = Theme.of(context).sz;
-  await showModalBottomSheet<void>(
+  await szShowSheet<void>(
     context: context,
     builder: (sheetCtx) => SafeArea(
       child: Column(
@@ -174,8 +174,7 @@ Future<void> navigateTo(
                       fontWeight: FontWeight.w600,
                       color: sz.ink)),
               const Spacer(),
-              Text(name,
-                  style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+              Text(name, style: TextStyle(fontSize: 12, color: sz.inkMuted)),
             ]),
           ),
           for (final a in _apps.where((a) => installed.contains(a.name)))

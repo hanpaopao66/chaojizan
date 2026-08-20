@@ -421,7 +421,7 @@ class _FinancePageState extends State<FinancePage> {
                   for (var i = 0; i < 6; i++)
                     DateTime(now.year, now.month - i)
                 ];
-                final month = await showModalBottomSheet<String>(
+                final month = await szShowSheet<String>(
                   context: context,
                   builder: (context) => SafeArea(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [

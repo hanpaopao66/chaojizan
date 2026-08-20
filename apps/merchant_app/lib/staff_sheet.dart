@@ -22,7 +22,7 @@ Future<void> showStaffSheet(BuildContext context, ApiClient api) async {
   }
   if (!context.mounted) return;
 
-  await showModalBottomSheet(
+  await szShowSheet(
     context: context,
     isScrollControlled: true,
     builder: (context) => StatefulBuilder(

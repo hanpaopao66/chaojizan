@@ -65,7 +65,7 @@ class _VoucherListViewState extends State<VoucherListView> {
   Future<void> _buy(VoucherDeal deal) async {
     if (!await ensureLoggedIn(context)) return;
     if (!mounted) return;
-    final confirmed = await showModalBottomSheet<bool>(
+    final confirmed = await szShowSheet<bool>(
       context: context,
       builder: (sheetContext) => SafeArea(
         child: Padding(

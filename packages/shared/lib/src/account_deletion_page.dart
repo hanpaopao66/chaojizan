@@ -14,6 +14,7 @@ import 'brand.dart';
 import 'api_client.dart';
 import 'legal.dart';
 import 'push_service.dart';
+import 'responsive.dart';
 
 /// 「账号与协议」区块(商家端/骑手端复用;用户端我的页自有布局,单独嵌入)。
 /// 包含:用户协议与隐私政策 / 退出登录 / 注销账号 —— 应用商店审核三件套。
@@ -59,8 +60,7 @@ class AccountLegalSection extends StatelessWidget {
         ListTile(
           leading:
               Icon(Icons.person_off_outlined, color: theme.colorScheme.error),
-          title:
-              Text('注销账号', style: TextStyle(color: theme.colorScheme.error)),
+          title: Text('注销账号', style: TextStyle(color: theme.colorScheme.error)),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
@@ -73,7 +73,7 @@ class AccountLegalSection extends StatelessWidget {
 
 /// 协议选择弹层:审核员两步内可达两份文件全文。
 void showLegalSheet(BuildContext context) {
-  showModalBottomSheet<void>(
+  szShowSheet<void>(
     context: context,
     builder: (sheetContext) => SafeArea(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -134,8 +134,7 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
           });
           return AlertDialog(
             title: const Text('确认注销账号?'),
-            content: const Text(
-                '注销后账号将被匿名化,无法恢复。\n此操作不可撤销,请再次确认。',
+            content: const Text('注销后账号将被匿名化,无法恢复。\n此操作不可撤销,请再次确认。',
                 style: TextStyle(height: 1.6)),
             actions: [
               FilledButton(
@@ -160,8 +159,8 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
       PushService.onLogout(); // 解绑推送别名,失败静默
       await widget.api.clearSession();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('账号已注销,感谢你曾经的支持')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('账号已注销,感谢你曾经的支持')));
       widget.onDeleted(context);
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -219,8 +218,7 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
           FilledButton(
             style: FilledButton.styleFrom(
                 backgroundColor: theme.colorScheme.error),
-            onPressed:
-                _acknowledged && !_busy ? _confirmAndDelete : null,
+            onPressed: _acknowledged && !_busy ? _confirmAndDelete : null,
             child: Text(_busy ? '注销中…' : '注销账号'),
           ),
           const SizedBox(height: 12),

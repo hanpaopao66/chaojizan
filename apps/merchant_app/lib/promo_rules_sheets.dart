@@ -293,7 +293,7 @@ Future<void> showShopCouponSheet(
   List<Map<String, dynamic>> Function() coupons,
   Future<void> Function() reload,
 ) async {
-  await showModalBottomSheet(
+  await szShowSheet(
     context: context,
     isScrollControlled: true,
     builder: (context) => StatefulBuilder(

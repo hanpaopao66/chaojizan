@@ -5,6 +5,7 @@ import 'api_client.dart';
 import 'models.dart';
 import 'push_service.dart';
 import 'ui_bits.dart';
+import 'responsive.dart';
 
 /// 联系平台客服:三端共用的工单页。
 ///
@@ -51,15 +52,15 @@ class _SupportPageState extends State<SupportPage> {
       faq = await widget.api.supportFaq();
     } catch (_) {}
     if (!mounted) return;
-    await showModalBottomSheet(
+    await szShowSheet<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (sheetCtx) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.7,
-        maxChildSize: 0.9,
+      builder: (sheetCtx) => SzSheetScrollable(
+        initialSize: 0.7,
+        maxSize: 0.9,
         builder: (sheetCtx, scroll) => ListView(
           controller: scroll,
+          // 对话框那边是宽松约束,不 shrinkWrap 会贪到 0.85 屏高
+          shrinkWrap: scroll == null,
           padding: const EdgeInsets.all(16),
           children: [
             Text('常见问题',
@@ -101,9 +102,8 @@ class _SupportPageState extends State<SupportPage> {
   Future<void> _openSubmitSheet() async {
     final contentCtrl = TextEditingController(text: widget.prefill);
     final contactCtrl = TextEditingController();
-    final submitted = await showModalBottomSheet<bool>(
+    final submitted = await szShowSheet<bool>(
       context: context,
-      isScrollControlled: true,
       builder: (sheetCtx) => Padding(
         padding: EdgeInsets.only(
           left: 16,

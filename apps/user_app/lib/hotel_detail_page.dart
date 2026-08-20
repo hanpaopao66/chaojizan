@@ -67,14 +67,13 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
       reviews = [];
     }
     if (!mounted) return;
-    showModalBottomSheet<void>(
+    szShowSheet<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
+      builder: (sheetContext) => SzSheetScrollable(
+        initialSize: 0.6,
         builder: (context, controller) => ListView(
           controller: controller,
+          shrinkWrap: controller == null,
           padding: const EdgeInsets.all(16),
           children: [
             Text('住客点评(${reviews.length})',

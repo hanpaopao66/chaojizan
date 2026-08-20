@@ -335,7 +335,7 @@ class _PrinterPageState extends State<PrinterPage> {
       return _toast('没有已配对的蓝牙设备:请先在手机系统蓝牙里配对小票机');
     }
     if (!mounted) return;
-    final picked = await showModalBottomSheet<BluetoothInfo>(
+    final picked = await szShowSheet<BluetoothInfo>(
       context: context,
       builder: (context) => SafeArea(
         child: ListView(

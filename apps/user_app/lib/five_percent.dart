@@ -6,9 +6,8 @@ import 'package:superz_shared/superz_shared.dart';
 /// 挂在「钱去哪了」透明卡的"平台留存"行与账目透明页的 5% 卡上——
 /// 让质疑者在产品里自己找到答案,而不是去评论区吵。
 Future<void> showFivePercentSheet(BuildContext context) {
-  return showModalBottomSheet(
+  return szShowSheet<void>(
     context: context,
-    isScrollControlled: true,
     builder: (context) {
       final theme = Theme.of(context);
       Widget item(IconData icon, String title, String desc) => Padding(
@@ -58,12 +57,12 @@ Future<void> showFivePercentSheet(BuildContext context) {
               ],
             ),
           );
-      return DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.78,
-        maxChildSize: 0.95,
+      return SzSheetScrollable(
+        initialSize: 0.78,
+        maxSize: 0.95,
         builder: (context, controller) => ListView(
           controller: controller,
+          shrinkWrap: controller == null,
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
           children: [
             Text('我们为什么收 5%,以及这 5% 去了哪',
