@@ -64,20 +64,22 @@ class _SettingsPageState extends State<SettingsPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(children: [
-        SwitchListTile(
-          secondary: const Icon(Icons.notifications_outlined),
-          title: const Text('订单状态通知'),
-          subtitle: const Text('接单/配送/送达提醒;系统权限在手机设置中管理',
-              style: TextStyle(fontSize: 11)),
-          value: _orderPush,
-          onChanged: _setOrderPush,
+        // 开关类:trailing 给 Switch,整行可点也切换。
+        // 「系统权限在手机设置中管理」留着 —— 关不掉时用户要知道去哪关
+        SzEntryTile(
+          icon: Icons.notifications_outlined,
+          title: '订单状态通知',
+          hint: '系统权限在手机设置中管理',
+          trailing: Switch(value: _orderPush, onChanged: _setOrderPush),
+          onTap: () => _setOrderPush(!_orderPush),
         ),
         const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.cleaning_services_outlined),
-          title: const Text('清除缓存'),
-          subtitle: const Text('清理图片缓存,不影响账号数据',
-              style: TextStyle(fontSize: 11)),
+        // 「不影响账号数据」是**打消顾虑**的话,留着 ——
+        // 不说清楚的话没人敢点"清除"
+        SzEntryTile(
+          icon: Icons.cleaning_services_outlined,
+          title: '清除缓存',
+          hint: '不影响账号数据',
           onTap: _clearCache,
         ),
         // 商店渠道包不显示这一项:商店禁止应用内自更新,`checkForUpdate`
@@ -85,30 +87,28 @@ class _SettingsPageState extends State<SettingsPage> {
         // 那是假话,版本新不新它根本没去查
         if (kChannel != 'store') ...[
           const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.system_update_outlined),
-            title: const Text('检查更新'),
+          SzEntryTile(
+            icon: Icons.system_update_outlined,
+            title: '检查更新',
             trailing: _checking
                 ? const SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.chevron_right),
+                : null,
             onTap: _checking ? null : _checkUpdate,
           ),
         ],
         const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.description_outlined),
-          title: const Text('用户协议与隐私政策'),
-          trailing: const Icon(Icons.chevron_right),
+        SzEntryTile(
+          icon: Icons.description_outlined,
+          title: '用户协议与隐私政策',
           onTap: () => showLegalSheet(context),
         ),
         const Divider(height: 1),
-        ListTile(
-          leading: const Icon(Icons.info_outline),
-          title: const Text('关于我们'),
-          trailing: const Icon(Icons.chevron_right),
+        SzEntryTile(
+          icon: Icons.info_outline,
+          title: '关于我们',
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const AboutPage())),
         ),
@@ -169,38 +169,42 @@ class _AboutPageState extends State<AboutPage> {
             style: theme.textTheme.bodySmall?.copyWith(height: 1.6)),
         const SizedBox(height: 24),
         Card(
+          // 这五条的副标题**全是值**(公司名、电话、邮箱、网址、备案号) ——
+          // 正是该和标题同一行的那一类。改完这一块从五条 72px 变成五条 46px。
+          //
+          // 商店审核会逐条核对这里,所以值本身一个字都不能改
           child: Column(children: [
-            const ListTile(
-              leading: Icon(Icons.business_outlined),
-              title: Text('运营主体'),
-              subtitle: Text('陕西爱卡斯科技有限公司'),
+            const SzEntryTile(
+              icon: Icons.business_outlined,
+              title: '运营主体',
+              value: '陕西爱卡斯科技有限公司',
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.phone_outlined),
-              title: const Text('客服电话'),
-              subtitle: const Text('15231109698'),
+            SzEntryTile(
+              icon: Icons.phone_outlined,
+              title: '客服电话',
+              value: '15231109698',
               onTap: () => _open(Uri.parse('tel:15231109698')),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.mail_outline),
-              title: const Text('客服邮箱'),
-              subtitle: const Text('support@chaojizan.cc'),
+            SzEntryTile(
+              icon: Icons.mail_outline,
+              title: '客服邮箱',
+              value: 'support@chaojizan.cc',
               onTap: () => _open(Uri.parse('mailto:support@chaojizan.cc')),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.language_outlined),
-              title: const Text('官方网站'),
-              subtitle: const Text('chaojizan.cc'),
+            SzEntryTile(
+              icon: Icons.language_outlined,
+              title: '官方网站',
+              value: 'chaojizan.cc',
               onTap: () => _open(Uri.parse('https://chaojizan.cc')),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.verified_outlined),
-              title: const Text('ICP 备案号'),
-              subtitle: const Text('陕ICP备2025064101号-5'),
+            SzEntryTile(
+              icon: Icons.verified_outlined,
+              title: 'ICP 备案号',
+              value: '陕ICP备2025064101号-5',
               onTap: () => _open(Uri.parse('https://beian.miit.gov.cn')),
             ),
           ]),

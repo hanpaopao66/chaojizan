@@ -102,7 +102,7 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
             const SzSectionTitle('跑单'),
             const SizedBox(height: 8),
             _group(sz, [
-              _Item('我的订单', '进行中与历史订单', Icons.receipt_long_outlined,
+              _Item('我的订单', '', Icons.receipt_long_outlined,
                   widget.onOpenOrders),
               // 只给历史,不预测、不推荐去哪跑 —— 后者是软性派单
               _Item('哪儿有单', '过去几周各时段的实际单量(是历史不是预测)',
@@ -111,25 +111,23 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
               _Item('我的周报', '每天跑了多少、钱是怎么来的(只统计不考核)',
                   Icons.insights_outlined,
                   () => _push(RiderWeeklyPage(api: widget.api))),
-              _Item(
-                  '工时统计',
-                  _worklog == null
-                      ? '在线时长逐日可查'
-                      : '本周在线 ${_hours(_worklog!["week_minutes"])} 小时',
-                  Icons.schedule_outlined,
-                  () => _snack('工时明细在钱包页「工时」区块')),
-              _Item('顾客评价', '看看顾客怎么说(不影响派单)',
-                  Icons.reviews_outlined, () => _push(RiderReviewsPage(api: widget.api))),
+              // 有值就给值(和标题同行,零额外高度);没加载出来才留解释
+              _Item('工时统计', '在线时长逐日可查', Icons.schedule_outlined,
+                  () => _snack('工时明细在钱包页「工时」区块'),
+                  value: _worklog == null
+                      ? null
+                      : '本周 ${_hours(_worklog!["week_minutes"])} 小时'),
+              // 「不影响派单」是平台的立场,不是解释 —— 它值得留
+              _Item('顾客评价', '不影响派单', Icons.reviews_outlined,
+                  () => _push(RiderReviewsPage(api: widget.api))),
               // 推送弹出来那一下没看到就永远找不回来了 ——
               // 而发给骑手的偏偏是申诉结果、提现到账、极端天气这几类
-              _Item(
-                  '消息',
-                  _unread > 0 ? '$_unread 条未读' : '申诉结果、到账、天气预警',
-                  Icons.notifications_none,
+              _Item('消息', '申诉结果、到账、天气预警', Icons.notifications_none,
                   () async {
                     await _push(RiderMessagesPage(api: widget.api));
                     _loadUnread();
-                  }),
+                  },
+                  value: _unread > 0 ? '$_unread 条未读' : null),
             ]),
             const SizedBox(height: 18),
             const SzSectionTitle('保障'),
@@ -137,10 +135,12 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
             _group(sz, [
               _Item('意外保障', '每日上线自动登记,出险有兜底',
                   Icons.health_and_safety_outlined, () => _toWallet()),
-              _Item('紧急联系人', 'SOS 时平台第一时间联系',
-                  Icons.contact_phone_outlined, () => _toWallet()),
+              _Item('紧急联系人', '', Icons.contact_phone_outlined,
+                  () => _toWallet()),
               _Item('事故上报', '人先安全;在途订单自动处理',
                   Icons.report_outlined, () => _toWallet()),
+              // 「头盔 / 保温餐箱 / 雨衣」是**内容**不是解释,留着 ——
+              // 它回答的是"能领什么",不是"这个入口是干嘛的"
               _Item('装备申领', '头盔 / 保温餐箱 / 雨衣',
                   Icons.backpack_outlined, () => _toWallet()),
             ]),
@@ -148,9 +148,9 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
             const SzSectionTitle('账目'),
             const SizedBox(height: 8),
             _group(sz, [
-              _Item('我的钱包', '收入明细、提现', Icons.account_balance_wallet_outlined,
+              _Item('我的钱包', '', Icons.account_balance_wallet_outlined,
                   widget.onOpenWallet),
-              _Item('收款账户', '提现打款到这里', Icons.credit_card_outlined,
+              _Item('收款账户', '', Icons.credit_card_outlined,
                   () => _toWallet()),
             ]),
             const SizedBox(height: 18),
@@ -226,20 +226,20 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
   Widget _divider(SzColors sz) =>
       Container(width: 1, height: 30, color: sz.line);
 
-  Widget _group(SzColors sz, List<_Item> items) => SzCard(
-        padding: EdgeInsets.zero,
-        child: Column(children: [
-          for (final (i, it) in items.indexed) ...[
-            if (i > 0) Divider(height: 1, color: sz.line),
-            ListTile(
-              leading: Icon(it.icon, size: 21, color: sz.inkFaint),
-              title: Text(it.title, style: const TextStyle(fontSize: 14.5)),
-              subtitle: Text(it.sub, style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
-              trailing: Icon(Icons.chevron_right, size: 18, color: sz.inkFaint),
+  /// 一组入口。用 shared 的 SzEntryGroup / SzEntryTile(#294) ——
+  /// 之前是 ListTile 带 subtitle,每条吃掉 Material 的 72dp 最小高度,
+  /// 一屏只放得下五六条,而每条其实只是一个跳转。
+  Widget _group(SzColors sz, List<_Item> items) => SzEntryGroup(
+        children: [
+          for (final it in items)
+            SzEntryTile(
+              icon: it.icon,
+              title: it.title,
+              value: it.value,
+              hint: it.sub,
               onTap: it.onTap,
             ),
-          ],
-        ]),
+        ],
       );
 
   /// 竞品这个位置放活动 banner。我们放**平台对骑手的承诺** ——
@@ -293,10 +293,18 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
 }
 
 class _Item {
-  const _Item(this.title, this.sub, this.icon, this.onTap);
+  const _Item(this.title, this.sub, this.icon, this.onTap, {this.value});
 
   final String title;
+
+  /// 一次性解释。**只在 [value] 为空时显示** —— 见 SzEntryTile 的类文档。
+  /// 标题已经说清是什么的(「我的订单」「收款账户」)就传空串,
+  /// 别为了"看起来完整"硬凑一句 —— 那一行只省 12%,还占着屏幕。
   final String sub;
+
+  /// 当前值。和标题同一行,零额外高度。
+  final String? value;
+
   final IconData icon;
   final VoidCallback? onTap;
 }

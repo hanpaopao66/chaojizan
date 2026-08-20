@@ -5448,45 +5448,42 @@ class _ProfileViewState extends State<ProfileView> {
         Card(
           child: Column(children: [
             if (_marketingOn && !guest) ...[
-              ListTile(
-                leading: const Icon(Icons.card_giftcard_outlined),
-                title: const Text('邀请有礼'),
-                subtitle: const Text('好友完成首单,你俩各得券',
-                    style: TextStyle(fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right),
+              // 「好友完成首单,你俩各得券」是**规则内容**不是解释,留着
+              SzEntryTile(
+                icon: Icons.card_giftcard_outlined,
+                title: '邀请有礼',
+                hint: '好友完成首单,你俩各得券',
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => InvitePage(api: widget.api))),
               ),
               const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.cake_outlined),
-                title: const Text('生日与营销推送'),
-                subtitle: const Text('生日当天送券;营销推送可一键关闭',
-                    style: TextStyle(fontSize: 11)),
-                trailing: const Icon(Icons.chevron_right),
+              SzEntryTile(
+                icon: Icons.cake_outlined,
+                title: '生日与营销推送',
+                hint: '营销推送可一键关闭',
                 onTap: _editBirthdayAndPush,
               ),
               const Divider(height: 1),
             ],
             // 长辈版:大字模式,方便老人和视障用户;尊重系统字体缩放
+            // 开关类入口:trailing 给 Switch,整行可点也切换。
+            // 「放大全局字号」这句留着 —— 老人要的正是这个确认
             ValueListenableBuilder<bool>(
               valueListenable: elderMode,
-              builder: (context, elder, _) => SwitchListTile(
-                secondary: const Icon(Icons.text_fields),
-                title: const Text('长辈版(大字模式)'),
-                subtitle: const Text('放大全局字号,看得更清楚',
-                    style: TextStyle(fontSize: 11)),
-                value: elder,
-                onChanged: (v) => setElderMode(v),
+              builder: (context, elder, _) => SzEntryTile(
+                icon: Icons.text_fields,
+                title: '长辈版(大字模式)',
+                hint: '放大全局字号,看得更清楚',
+                trailing: Switch(
+                    value: elder, onChanged: (v) => setElderMode(v)),
+                onTap: () => setElderMode(!elder),
               ),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.verified_user_outlined),
-              title: const Text('实名认证'),
-              subtitle: const Text('购买酒类等受限商品需先实名',
-                  style: TextStyle(fontSize: 11)),
-              trailing: const Icon(Icons.chevron_right),
+            SzEntryTile(
+              icon: Icons.verified_user_outlined,
+              title: '实名认证',
+              hint: '购买酒类等受限商品需先实名',
               onTap: () async {
                 if (!await ensureLoggedIn(context)) return;
                 if (!context.mounted) return;
@@ -5495,30 +5492,25 @@ class _ProfileViewState extends State<ProfileView> {
               },
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('设置'),
-              subtitle: const Text('通知/缓存/检查更新/关于我们',
-                  style: TextStyle(fontSize: 11)),
-              trailing: const Icon(Icons.chevron_right),
+            SzEntryTile(
+              icon: Icons.settings_outlined,
+              title: '设置',
+              hint: '通知 / 缓存 / 检查更新 / 关于我们',
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => SettingsPage(api: widget.api))),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.help_outline),
-              title: const Text('帮助中心'),
-              subtitle: const Text('配送范围/退款规则/常见问题',
-                  style: TextStyle(fontSize: 11)),
-              trailing: const Icon(Icons.chevron_right),
+            SzEntryTile(
+              icon: Icons.help_outline,
+              title: '帮助中心',
+              hint: '配送范围 / 退款规则 / 常见问题',
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => HelpCenterPage(api: widget.api))),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.rate_review_outlined),
-              title: const Text('意见反馈'),
-              trailing: const Icon(Icons.chevron_right),
+            SzEntryTile(
+              icon: Icons.rate_review_outlined,
+              title: '意见反馈',
               onTap: () async {
                 if (!await ensureLoggedIn(context)) return;
                 if (!context.mounted) return;
@@ -5528,12 +5520,11 @@ class _ProfileViewState extends State<ProfileView> {
             ),
             const Divider(height: 1),
             // 食安投诉查得到进度,投诉才不是黑洞
-            ListTile(
-              leading: const Icon(Icons.health_and_safety_outlined),
-              title: const Text('我的食安投诉'),
-              subtitle: const Text('处理进度与平台回复',
-                  style: TextStyle(fontSize: 11)),
-              trailing: const Icon(Icons.chevron_right),
+            // 食安投诉查得到进度,投诉才不是黑洞
+            SzEntryTile(
+              icon: Icons.health_and_safety_outlined,
+              title: '我的食安投诉',
+              hint: '处理进度与平台回复',
               onTap: () async {
                 if (!await ensureLoggedIn(context)) return;
                 if (!context.mounted) return;
@@ -5542,17 +5533,15 @@ class _ProfileViewState extends State<ProfileView> {
               },
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.receipt_outlined),
-              title: const Text('开发票'),
-              trailing: const Icon(Icons.chevron_right),
+            SzEntryTile(
+              icon: Icons.receipt_outlined,
+              title: '开发票',
               onTap: _showInvoiceInfo,
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.support_agent_outlined),
-              title: const Text('联系平台客服'),
-              trailing: const Icon(Icons.chevron_right),
+            SzEntryTile(
+              icon: Icons.support_agent_outlined,
+              title: '联系平台客服',
               onTap: () async {
                 if (!await ensureLoggedIn(context)) return;
                 if (!context.mounted) return;
@@ -5562,20 +5551,19 @@ class _ProfileViewState extends State<ProfileView> {
             ),
             const Divider(height: 1),
             // 商店审核要求:我的页可达协议全文与注销入口
-            ListTile(
-              leading: const Icon(Icons.description_outlined),
-              title: const Text('用户协议与隐私政策'),
-              trailing: const Icon(Icons.chevron_right),
+            SzEntryTile(
+              icon: Icons.description_outlined,
+              title: '用户协议与隐私政策',
               onTap: () => showLegalSheet(context),
             ),
             if (!guest) ...[
               const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.person_off_outlined,
-                    color: theme.colorScheme.error),
-                title: Text('注销账号',
-                    style: TextStyle(color: theme.colorScheme.error)),
-                trailing: const Icon(Icons.chevron_right),
+              // 注销保持红色 —— 不可逆操作不该和别的入口长得一样
+              SzEntryTile(
+                icon: Icons.person_off_outlined,
+                title: '注销账号',
+                valueTone: theme.sz.danger,
+                value: '不可逆',
                 onTap: () =>
                     Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) => AccountDeletionPage(

@@ -17,7 +17,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # 当前基数。降下来了就手动改小这个数(并在提交信息里说一声)。
-BASELINE=737
+# 737 → 724:三端「我的/店铺」页换用 SzEntryTile 之后,
+# 那些手写的 fontSize 11/11.5/14.5 跟着少了 13 处(#294)。
+BASELINE=724
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \
