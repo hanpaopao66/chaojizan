@@ -196,18 +196,18 @@ class _LicenseRenewalPageState extends State<LicenseRenewalPage> {
                   padding: const EdgeInsets.all(16),
                   children: [
                     if (widget.shop.licenseExpiresAt.isNotEmpty)
-                      Card(
-                        child: ListTile(
-                          title: const Text('当前证照有效期至'),
-                          subtitle: Text(widget.shop.licenseExpiresAt),
-                          trailing: Text(
-                            widget.shop.licenseDaysLeft == null
-                                ? ''
-                                : (widget.shop.licenseDaysLeft! >= 0
-                                    ? '还剩 ${widget.shop.licenseDaysLeft} 天'
-                                    : '已过期 ${-widget.shop.licenseDaysLeft!} 天'),
-                            style: TextStyle(color: scheme.error),
-                          ),
+                      // 日期和剩余天数都是**值**,和标题排一行(#294)。
+                      // 剩余天数保持红色 —— 那是这一屏唯一要人立刻反应的数字
+                      SzCard(
+                        padding: EdgeInsets.zero,
+                        child: SzEntryTile(
+                          icon: Icons.event_available_outlined,
+                          title: '当前证照有效期至',
+                          value: widget.shop.licenseDaysLeft == null
+                              ? widget.shop.licenseExpiresAt
+                              : '${widget.shop.licenseExpiresAt} · '
+                                  '${widget.shop.licenseDaysLeft! >= 0 ? "还剩 ${widget.shop.licenseDaysLeft} 天" : "已过期 ${-widget.shop.licenseDaysLeft!} 天"}',
+                          valueTone: scheme.error,
                         ),
                       ),
                     if (_renewal != null && _renewal!['status'] == 'rejected')
@@ -247,13 +247,12 @@ class _LicenseRenewalPageState extends State<LicenseRenewalPage> {
                         decoration: const InputDecoration(
                             labelText: '许可证编号', border: OutlineInputBorder()),
                       ),
-                      ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: const Text('有效期至'),
-                        subtitle: Text(_expires == null
-                            ? '到期提醒靠它 —— 填了才会在到期前 30 / 7 / 1 天提醒你'
-                            : _expires!.toIso8601String().substring(0, 10)),
-                        trailing: const Icon(Icons.calendar_today, size: 20),
+                      // 没选时给解释(它回答"为什么要填"),选完就让位给日期本身
+                      SzEntryTile(
+                        icon: Icons.calendar_today_outlined,
+                        title: '有效期至',
+                        value: _expires?.toIso8601String().substring(0, 10),
+                        hint: '填了才会在到期前 30 / 7 / 1 天提醒你',
                         onTap: () async {
                           final now = DateTime.now();
                           final picked = await showDatePicker(
