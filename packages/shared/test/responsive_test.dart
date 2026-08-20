@@ -145,4 +145,141 @@ void main() {
           reason: '单列内容超过 760 宽,一行汉字就超过 40 个了');
     });
   });
+
+  group('自适应弹层', () {
+    Future<void> open(WidgetTester t, double width) async {
+      setPhoneViewport(t, Size(width, 900));
+      await t.pumpWidget(MaterialApp(
+        theme: brandTheme(Brightness.light),
+        home: Builder(
+          builder: (ctx) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => szShowSheet<void>(
+                    context: ctx,
+                    builder: (_) => const SizedBox(
+                        height: 200, child: Center(child: Text('弹层内容')))),
+                child: const Text('打开'),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await t.pumpAndSettle();
+      await t.tap(find.text('打开'));
+      await t.pumpAndSettle();
+    }
+
+    testWidgets('375 手机:底部弹层', (t) async {
+      await open(t, 375);
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.byType(Dialog), findsNothing);
+    });
+
+    testWidgets('1440 桌面:居中对话框', (t) async {
+      await open(t, 1440);
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.byType(BottomSheet), findsNothing,
+          reason: '桌面上还是底部弹层 —— 那会变成横贯屏底的一条长条,'
+              '内容在左边一小块,而视线在屏幕中央');
+    });
+
+    testWidgets('对话框收得住宽度,不铺满', (t) async {
+      await open(t, 1440);
+      // ⚠️ 量的是白底那层 Material,不是 `find.byType(Dialog)` ——
+      // Dialog 的 RenderBox 是它外面那层 padding 盒,**永远等于屏宽**。
+      // 我第一次拿它做断言,量出 1440 以为没限住,差点去改一段本来对的代码。
+      final surface = find
+          .descendant(of: find.byType(Dialog), matching: find.byType(Material))
+          .first;
+      final w = t.getSize(surface).width;
+      expect(w, lessThanOrEqualTo(kContentMaxWidth),
+          reason: '对话框白底横跨了整个 1440(实际 ${w.toStringAsFixed(0)})');
+      expect(w, greaterThan(300), reason: '对话框窄成一条 —— 多半是被内容撑没了');
+    });
+
+    testWidgets('两种形态都能拿到返回值', (t) async {
+      for (final w in [375.0, 1440.0]) {
+        String? got;
+        setPhoneViewport(t, Size(w, 900));
+        await t.pumpWidget(MaterialApp(
+          theme: brandTheme(Brightness.light),
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () async {
+                    got = await szShowSheet<String>(
+                      context: ctx,
+                      builder: (sheetCtx) => TextButton(
+                        onPressed: () => Navigator.pop(sheetCtx, '选了'),
+                        child: const Text('选它'),
+                      ),
+                    );
+                  },
+                  child: const Text('打开'),
+                ),
+              ),
+            ),
+          ),
+        ));
+        await t.pumpAndSettle();
+        await t.tap(find.text('打开'));
+        await t.pumpAndSettle();
+        await t.tap(find.text('选它'));
+        await t.pumpAndSettle();
+        expect(got, '选了', reason: '${w.toInt()}px 下弹层没回传值');
+      }
+    });
+
+    testWidgets('isSheetBottom 跟着档位走', (t) async {
+      for (final (w, expected) in [(375.0, true), (768.0, false), (1440.0, false)]) {
+        setPhoneViewport(t, Size(w, 900));
+        late bool got;
+        await t.pumpWidget(MaterialApp(
+          home: Builder(builder: (ctx) {
+            got = isSheetBottom(ctx);
+            return const SizedBox();
+          }),
+        ));
+        await t.pumpAndSettle();
+        expect(got, expected, reason: '${w.toInt()}px 判错了');
+      }
+    });
+  });
+
+  group('appBar 跟着内容限宽', () {
+    Widget shellWithBar({double maxWidth = kFeedMaxWidth}) => SzNavScaffold(
+          items: items,
+          selectedIndex: 0,
+          onSelected: (_) {},
+          contentMaxWidth: maxWidth,
+          appBar: AppBar(title: const Text('标题')),
+          body: const Center(child: Text('内容')),
+        );
+
+    testWidgets('窄屏上 appBar 照常给 Scaffold', (t) async {
+      await pumpAt(t, 375, shellWithBar());
+      expect(find.byType(AppBar), findsOneWidget);
+      expect(find.text('标题'), findsOneWidget);
+    });
+
+    testWidgets('宽屏上 appBar 的内容不超过 contentMaxWidth', (t) async {
+      await pumpAt(t, 1440, shellWithBar(maxWidth: 1080));
+      final w = t.getSize(find.byType(AppBar)).width;
+      expect(w, lessThanOrEqualTo(1080),
+          reason: '标题栏横跨了整个 1440(实际 ${w.toStringAsFixed(0)})—— '
+              '标题贴最左、图标钉最右,而下面的内容是居中的,上下对不齐');
+    });
+
+    testWidgets('appBar 和 body 用同一个宽度,对得齐', (t) async {
+      await pumpAt(t, 1440, shellWithBar(maxWidth: 720));
+      expect(t.getSize(find.byType(AppBar)).width, lessThanOrEqualTo(720));
+    });
+
+    testWidgets('宽屏上标题还在,没被吃掉', (t) async {
+      await pumpAt(t, 1440, shellWithBar());
+      expect(find.text('标题'), findsOneWidget);
+    });
+  });
 }

@@ -124,9 +124,12 @@ class SzNavItem {
 ///
 /// ## 谁负责限宽
 ///
-/// **这个组件不限宽**,它只管导航。限宽是每个页面自己的事 ——
-/// 因为不同页面的内容形态不同(设置页 720、卡片流 1080、看板 1440),
-/// 在外壳这一层统一限死会把看板也压成 720。
+/// 宽屏上这个组件**同时**限住 [appBar] 的内容和 [body],用同一个
+/// [contentMaxWidth] —— 两边必须一致,不然标题从 1440 的最左开始、
+/// 内容从居中的 1080 开始,上下对不齐,看着像两个页面拼起来的。
+///
+/// 不同页面的内容形态不同(设置页 720、卡片流 1080、看板 1440),
+/// 所以宽度由调用方按当前页传进来,而不是在这里写死。
 class SzNavScaffold extends StatelessWidget {
   const SzNavScaffold({
     super.key,
@@ -137,6 +140,7 @@ class SzNavScaffold extends StatelessWidget {
     this.appBar,
     this.floatingActionButton,
     this.leading,
+    this.contentMaxWidth = kFeedMaxWidth,
   });
 
   final List<SzNavItem> items;
@@ -149,6 +153,15 @@ class SzNavScaffold extends StatelessWidget {
   /// 侧栏顶部的东西(logo 之类)。**只在宽屏出现** ——
   /// 窄屏的底部导航没地方放它。
   final Widget? leading;
+
+  /// 内容(含 [appBar] 的内容)的最大宽度。
+  ///
+  /// **appBar 和 body 用同一个值**,否则标题和下面的内容对不齐 ——
+  /// 一个从 1440 的最左开始、一个从居中的 1080 开始,看着像两个页面。
+  ///
+  /// 页面按 tab 切换不同宽度的(用户端首页是卡片流、「我的」是单列),
+  /// 在这里传当前 tab 的值就行,两边一起变。
+  final double contentMaxWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -175,8 +188,12 @@ class SzNavScaffold extends StatelessWidget {
       );
     }
 
+    // 宽屏上 **appBar 不给 Scaffold**,而是放进侧栏右边那一列。
+    //
+    // 给 Scaffold 的话它会横跨整个 1440:标题贴在最左上角、图标钉在最右上角,
+    // 中间隔着一米宽的空白,而下面的内容是居中限宽的 —— 上下对不齐,
+    // 看着像标题栏和内容不是一个页面的。
     return Scaffold(
-      appBar: appBar,
       floatingActionButton: floatingActionButton,
       body: Row(children: [
         NavigationRail(
@@ -205,7 +222,27 @@ class SzNavScaffold extends StatelessWidget {
           ],
         ),
         VerticalDivider(width: 1, thickness: 1, color: sz.line),
-        Expanded(child: body),
+        Expanded(
+          child: Column(children: [
+            if (appBar != null)
+              // 标题栏的**内容**跟着限宽,而底色铺满 ——
+              // 底色断在 1080 会在右边留一条色差,像渲染坏了
+              Material(
+                color: Theme.of(context).appBarTheme.backgroundColor ??
+                    sz.surface,
+                child: SafeArea(
+                  bottom: false,
+                  child: SzContentWidth(
+                    maxWidth: contentMaxWidth,
+                    child: SizedBox(
+                        height: appBar!.preferredSize.height, child: appBar),
+                  ),
+                ),
+              ),
+            Expanded(
+                child: SzContentWidth(maxWidth: contentMaxWidth, child: body)),
+          ]),
+        ),
       ]),
     );
   }
@@ -214,3 +251,71 @@ class SzNavScaffold extends StatelessWidget {
       ? Badge(label: Text('${it.badgeCount}'), child: child)
       : child;
 }
+
+/// 自适应弹层:窄屏底部弹出,宽屏居中对话框。
+///
+/// ## 为什么宽屏不能继续用底部弹层
+///
+/// 底部弹层是从屏幕下缘升起的 —— 手机上那是拇指够得着的地方,而且
+/// 弹层最宽也就一个手机宽。
+///
+/// 1440px 的桌面上它变成:一条横贯整个屏幕底部、高度可能只有 200px 的
+/// 长条。内容在左边一小块,右边一米空白;而用户的视线本来在屏幕中央,
+/// 得往下扫到底才看得到。
+///
+/// 居中对话框在宽屏上是对的:它出现在视线落点上,宽度也收得住。
+///
+/// ## 用法和 showModalBottomSheet 一样
+///
+/// ```dart
+/// final picked = await szShowSheet<String>(
+///   context: context,
+///   builder: (ctx) => ...,
+/// );
+/// ```
+///
+/// ⚠️ **builder 里的内容不要自己加 SafeArea 和拖拽条** —— 这两样只有
+/// 底部弹层需要,对话框里加了会多出一截空白和一个没用的横条。
+/// 需要的话看 [isSheetBottom] 判断当前是哪种形态。
+Future<T?> szShowSheet<T>({
+  required BuildContext context,
+  required WidgetBuilder builder,
+  bool isScrollControlled = true,
+  bool isDismissible = true,
+
+  /// 对话框形态下的最大宽度。默认 [kContentMaxWidth](720)——
+  /// 弹层装的多半是表单和选项,和单列正文同一个口径。
+  double dialogMaxWidth = kContentMaxWidth,
+}) {
+  if (!szWidthOf(context).hasSideNav) {
+    return showModalBottomSheet<T>(
+      context: context,
+      isScrollControlled: isScrollControlled,
+      isDismissible: isDismissible,
+      useSafeArea: true,
+      builder: builder,
+    );
+  }
+  return showDialog<T>(
+    context: context,
+    barrierDismissible: isDismissible,
+    builder: (ctx) => Dialog(
+      clipBehavior: Clip.antiAlias,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: dialogMaxWidth,
+          // 别顶到屏幕上下缘:对话框贴边看着像卡住了。
+          // 0.85 是留出一圈能看见遮罩的余量
+          maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
+        ),
+        child: builder(ctx),
+      ),
+    ),
+  );
+}
+
+/// 当前的弹层是不是底部形态。
+///
+/// 给 builder 里判断要不要画拖拽条、要不要 SafeArea 用 ——
+/// 那两样只有底部弹层需要。
+bool isSheetBottom(BuildContext context) => !szWidthOf(context).hasSideNav;
