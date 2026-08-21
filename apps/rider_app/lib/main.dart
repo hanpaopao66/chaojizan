@@ -127,20 +127,17 @@ class _RiderHomePageState extends State<RiderHomePage>
   int _sortMode = 0;
   List<Order> _mine = [];
 
-  /// 今日已完成的单(「我的」页的今日数据用)。
-  /// 从已有的订单列表里算,不为一个统计再开一个接口
-  List<Order> get _todayDone {
-    final now = DateTime.now();
-    return _mine.where((o) {
-      if (o.status != OrderStatus.completed &&
-          o.status != OrderStatus.delivered) {
-        return false;
-      }
-      final t = DateTime.tryParse(o.createdAt)?.toLocal();
-      return t != null &&
-          t.year == now.year && t.month == now.month && t.day == now.day;
-    }).toList();
-  }
+  // 这里原来有个 `_todayDone` getter,给「我的」页算今日单量和收入。
+  //
+  // **它恒为空。** `_mine` 只留 accepted/ready/pickedUp(见下面赋值处),
+  // 而 `_todayDone` 从 `_mine` 里筛 completed||delivered ——
+  // 两个集合不相交,所以「我的」页那两个数字对每个骑手每一天都是 0。
+  //
+  // 就算筛对了也还是错的:源头 `myOrders()` 默认 limit=20,
+  // 在一页列表上求和却安「今日收入」这个名字,和用户端刚删掉的
+  // 「累计优惠」是同一个错误。
+  //
+  // 「我的」页改成直接读服务端的全量聚合。统计该服务端算,不该客户端凑。
   Timer? _pollTimer;
   Timer? _keepaliveTimer;
   final _location = LocationService();
@@ -2202,10 +2199,6 @@ class _RiderHomePageState extends State<RiderHomePage>
       2 => WalletPage(api: widget.api),
       3 => RiderProfilePage(
           api: widget.api,
-          // 今日数据从主页已有的在途/历史单里算,不再多拉一次接口
-          todayOrders: _todayDone.length,
-          todayCents: _todayDone.fold<int>(
-              0, (sum, o) => sum + o.deliveryFeeCents + o.tipCents),
           onOpenWallet: () => setState(() => _tab = 2),
           onOpenOrders: () => setState(() => _tab = 1),
         ),
