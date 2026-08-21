@@ -75,7 +75,13 @@ def new_customer(suffix):
 
 
 async def ainvoke(method, path, token, body=None):
-    """在本进程内跑一次请求(假渠道才生效)。"""
+    """在本进程内跑一次请求(假渠道才生效)。
+
+    ⚠️ 进程内跑 ASGI app 意味着**本进程要能验开服务端签发的 token** ——
+    两边的 JWT_SECRET 必须同值。不一致的表现是 401「登录已过期」,
+    而 token 明明是几秒前刚拿的,极具误导性。CI 上就踩过:
+    起服务那步 export 了 JWT_SECRET,跑测试那步没有。
+    """
     from app.main import app
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport,
@@ -83,6 +89,12 @@ async def ainvoke(method, path, token, body=None):
         resp = await client.request(
             method, path, json=body,
             headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code == 401:
+            # 把最常见的那个原因直接说出来,别让人对着「登录已过期」发呆
+            raise AssertionError(
+                f"{path} 进程内调用 401。token 是刚拿的,所以多半不是真过期 —— "
+                f"检查跑测试的进程和起服务的进程 JWT_SECRET 是不是同一个值。"
+                f"响应:{resp.text}")
         assert resp.status_code < 400, (path, resp.status_code, resp.text)
         return resp.json() if resp.content else None
 

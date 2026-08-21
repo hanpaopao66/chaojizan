@@ -127,7 +127,16 @@ jobs:
           [ "$code" = "200" ] || { echo "API 起不来"; tail -40 /tmp/api.log; exit 1; }
 
       - name: e2e 回归
-        run: make test
+        # JWT_SECRET 要和上面起服务那步**同值**。
+        #
+        # 多数用例是走 HTTP 打真实服务的,进程里有没有这个变量都无所谓。
+        # 但有的用例(e2e_refund_order)要在**测试进程内**跑 ASGI app ——
+        # 只有进程内才拦得住真实的支付渠道调用。那时候测试进程自己要能
+        # 验开服务端签发的 token,两边 secret 不一致就是一句
+        # 「登录已过期,请重新登录」,而 token 明明是几秒前刚拿的。
+        run: |
+          export JWT_SECRET=ci-$GITHUB_RUN_ID
+          make test
 
       - name: 失败时贴上服务端日志
         if: failure()
