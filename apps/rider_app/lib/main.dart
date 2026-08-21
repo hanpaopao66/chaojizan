@@ -98,7 +98,23 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 其余接单偏好(单价下限 / 只看顺路 / 避开酒类)
   Map<String, dynamic> _prefs = const {};
   bool _gpsActive = false;
+
+  /// 定位出问题了的一句话;null = 正常。
+  ///
+  /// 定位死掉是骑手端最难自己发现的故障:界面上什么都不变,单就是不来了。
+  /// 他能想到的是"今天单少",想不到"我的定位半小时前就断了"。
+  String? _gpsProblem;
+
   List<Order> _available = [];
+
+  /// 最后一次**成功**刷新的时间。null = 从来没成功过。
+  ///
+  /// 和商家端 `_lastOrdersOkAt` 同一套口径:失败**不清空** `_available`/`_mine`,
+  /// 保留上一次的结果比变成空列表安全 —— 空列表会被读成"没单"。
+  DateTime? _lastRefreshOkAt;
+
+  /// 最近一次刷新失败的原因;空串 = 上一次是成功的
+  String _refreshError = '';
 
   /// 抢单池排序。0 综合(服务端算的)/ 1 配送费 / 2 距离 / 3 等待时长。
   ///
@@ -272,9 +288,83 @@ class _RiderHomePageState extends State<RiderHomePage>
                   o.status == OrderStatus.ready ||
                   o.status == OrderStatus.pickedUp)
               .toList());
+          _lastRefreshOkAt = DateTime.now();
+          _refreshError = '';
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      // **一个字都不说是不行的。**
+      //
+      // 原来这里是 `catch (_) {}`:骑手在电梯里、在地库里打开 App,
+      // 抢单页一片空白 —— 和"现在真的没单"长得一模一样;
+      // 切到「我的」,手上明明有单,页面写着"没有进行中的配送"。
+      //
+      // 失败**不清空已有的列表**(上一次的结果比空列表安全),
+      // 只记下错误和最后一次成功的时间,由 [_refreshStale] 决定怎么说。
+      if (mounted) {
+        setState(() =>
+            _refreshError = e is ApiException ? e.message : '$e');
+      }
+    }
+  }
+
+  /// 从来没成功拉到过数据。首次失败**不能**和"没有数据"共用一个界面
+  bool get _neverLoaded => _lastRefreshOkAt == null;
+
+  /// 数据是不是"陈"了。超过 1 分钟没成功刷新就算 ——
+  /// 前台 5 秒一轮,连着失败十几次说明是真出问题了(和商家端同一口径)
+  bool get _refreshStale {
+    if (_lastRefreshOkAt == null) return _refreshError.isNotEmpty;
+    return DateTime.now().difference(_lastRefreshOkAt!).inSeconds > 60;
+  }
+
+  /// 顶部警示条:**列表还有旧数据能看,但它可能已经不对了**
+  Widget _staleBanner(String what) {
+    if (!_refreshStale || _neverLoaded) return const SizedBox.shrink();
+    final mins = DateTime.now().difference(_lastRefreshOkAt!).inMinutes;
+    return SzRetryBanner(
+      text: '$what已经 $mins 分钟没刷新成功了,下面是旧的。点这里重试',
+      onRetry: _refresh,
+    );
+  }
+
+  /// 定位异常横幅。
+  ///
+  /// 说的是**后果**不是现象:骑手不关心"位置流终止了",
+  /// 他要知道的是"这会让你收不到单/顾客看不到你走到哪儿了"
+  Widget? _gpsBanner() {
+    final problem = _gpsProblem;
+    if (problem == null || !_online) return null;
+    final sz = Theme.of(context).sz;
+    return Material(
+      color: sz.danger.withValues(alpha: .12),
+      child: InkWell(
+        onTap: () => _toggleOnline(true), // 重新走一遍定位启动
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(children: [
+            Icon(Icons.location_off, size: 18, color: sz.danger),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                  '$problem\n定位不准的时候,按距离筛的单会漏掉,顾客也看不到你走到哪儿了。点这里重开定位',
+                  style: TextStyle(
+                      fontSize: 12.5, height: 1.4, color: sz.danger)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// 定位状态变了才 setState —— 保活定时器 15 秒一跳,不判重会一直重建
+  void _setGpsProblem(String? message) {
+    if (_gpsProblem == message) return;
+    if (!mounted) {
+      _gpsProblem = message;
+      return;
+    }
+    setState(() => _gpsProblem = message);
   }
 
   /// 我的配送建议顺序:先取后送——待取餐的单同店相邻(店按离我远近),
@@ -499,27 +589,51 @@ class _RiderHomePageState extends State<RiderHomePage>
               context, AppPermissionKind.locationRider)) {
         error = '未授予定位权限,无法记录配送轨迹';
       } else {
+        // 定位流中途断掉(关定位/进地库/权限被撤)也要被人知道 ——
+        // 在此之前它是静默终止的:订阅死了,界面上什么都不变
+        _location.onError = (message) {
+          _gpsActive = false;
+          _setGpsProblem(message);
+        };
         // 真实 GPS:移动 10 米上报一次
         error = await _location.start(_report);
       }
       _gpsActive = error == null;
+      _setGpsProblem(null);
       if (error != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('$error(先用演示坐标继续)')));
       }
-      // 静止时每 15 秒保活一次,防止后台位置过期;GPS 不可用则上报兜底坐标
+      _keepaliveTimer?.cancel();
+      // 静止时每 15 秒保活一次,防止后台位置过期;GPS 不可用则上报兜底坐标。
+      //
+      // ⚠️ **过期的坐标绝对不能报。** 定位死掉之后 `lastFix` 会一直停在
+      // 最后一个点上,原来这里照报不误 —— 服务端于是每 15 秒收到一次
+      // "他还在这儿",那套「位置过期就停用接单半径筛选」的保护
+      // **永远不会触发**。骑手被一个假心跳挡在筛选外面,还以为是没单。
+      //
+      // 宁可不报:不报会让服务端的位置自然过期,保护按设计生效。
       _keepaliveTimer = Timer.periodic(const Duration(seconds: 15), (_) {
         final fix = _location.lastFix;
-        if (fix != null) {
-          _report(fix.lat, fix.lng);
-        } else if (!_gpsActive) {
-          _report(fallbackLat, fallbackLng);
+        switch (keepAliveDecision(fix: fix, gpsActive: _gpsActive)) {
+          case PositionReport.fix:
+            _setGpsProblem(null);
+            _report(fix!.lat, fix.lng);
+          case PositionReport.fallback:
+            _report(fallbackLat, fallbackLng);
+          case PositionReport.waiting:
+            _setGpsProblem('定位还没拿到第一个点');
+          case PositionReport.stale:
+            final mins = DateTime.now().difference(fix!.at).inMinutes;
+            _setGpsProblem('定位已经 $mins 分钟没更新了,位置可能是旧的');
         }
       });
       if (!_gpsActive) _report(fallbackLat, fallbackLng);
     } else {
       _location.stop();
       _keepaliveTimer?.cancel();
+      _keepaliveTimer = null;
+      _setGpsProblem(null);
     }
     _refresh();
   }
@@ -1902,7 +2016,11 @@ class _RiderHomePageState extends State<RiderHomePage>
   @override
   Widget build(BuildContext context) {
     final banner = _verifyBanner();
-    final body = _tab == 0
+    final gpsBanner = _gpsBanner();
+    // 首次就没拉到:**整页错误态**,绝不能让它长得像"今天没单"。
+    // 有过一次成功就退回顶部横条 —— 旧列表还能看,别把能用的也拿走
+    final firstLoadFailed = _neverLoaded && _refreshError.isNotEmpty;
+    final tabList = _tab == 0
         ? RefreshIndicator(
             onRefresh: _refresh,
             child: !_online
@@ -1917,6 +2035,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                           if (i == 0) {
                             // 疲劳提示置顶:它比任何一单都重要
                             return Column(children: [
+                              _staleBanner('抢单池'),
                               _fatigueBar(),
                               _sortBar(),
                               _radiusBar(),
@@ -1949,14 +2068,19 @@ class _RiderHomePageState extends State<RiderHomePage>
         : RefreshIndicator(
             onRefresh: _refresh,
             child: _mine.isEmpty
-                ? ListView(children: const [
-                    Padding(
-                        padding: EdgeInsets.all(24), child: Text('没有进行中的配送'))
+                ? ListView(children: [
+                    _staleBanner('配送列表'),
+                    const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text('没有进行中的配送')),
                   ])
                 : ListView.builder(
                     itemCount: _mine.length + 1,
                     itemBuilder: (context, i) {
-                      if (i == 0) return _batchBar();
+                      if (i == 0) {
+                        return Column(
+                            children: [_staleBanner('配送列表'), _batchBar()]);
+                      }
                       final order = _mine[i - 1];
                       final actions = <Widget>[
                         OutlinedButton.icon(
@@ -2049,6 +2173,31 @@ class _RiderHomePageState extends State<RiderHomePage>
                   ),
           );
 
+    // 一次都没成功拉到过:**整页错误态**。
+    //
+    // 这是这一批在骑手端要修的核心 —— 抢单页一片空白和"现在真的没单"
+    // 长得一模一样;「我的」页写着"没有进行中的配送",而他手上明明有单。
+    // 电梯、地库、信号弱在这份工作里是常态,不是边角情况。
+    //
+    // 有过一次成功就不走这里,退回顶部的 [_staleBanner] —— 旧列表还能看,
+    // 别把本来能用的东西也一起拿走。
+    final body = firstLoadFailed
+        ? RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(children: [
+              SizedBox(
+                height: 360,
+                child: SzError(
+                    error: _tab == 0
+                        ? '抢单池没能加载出来:$_refreshError\n这不代表现在没有单'
+                        : '你的配送单没能加载出来:$_refreshError\n'
+                            '手上的单还在,只是这会儿显示不出来',
+                    onRetry: _refresh),
+              ),
+            ]),
+          )
+        : tabList;
+
     final tabBody = switch (_tab) {
       2 => WalletPage(api: widget.api),
       3 => RiderProfilePage(
@@ -2062,10 +2211,16 @@ class _RiderHomePageState extends State<RiderHomePage>
         ),
       _ => body,
     };
-    // 认证提示横幅置顶(通过后自动消失)
-    final page = banner == null
+    // 认证提示 + 定位异常横幅置顶(恢复后自动消失)。
+    // 定位挂了影响的是**每一个** tab —— 抢单靠它筛,配送靠它给顾客看进度,
+    // 所以放在页面级而不是塞进抢单列表里
+    final banners = <Widget>[
+      if (banner != null) banner,
+      if (gpsBanner != null) gpsBanner,
+    ];
+    final page = banners.isEmpty
         ? tabBody
-        : Column(children: [banner, Expanded(child: tabBody)]);
+        : Column(children: [...banners, Expanded(child: tabBody)]);
 
     // 宽屏(≥600)换左侧栏(#295)。
     //

@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
@@ -127,12 +129,23 @@ ApiException _asFriendly(Object error) {
 ///  - 真机调试:换成电脑的局域网 IP
 /// 可用 --dart-define=SUPERZ_API=http://x.x.x.x:8000 覆盖。
 class ApiClient {
-  ApiClient({String? baseUrl})
-      : baseUrl = baseUrl ??
+  ApiClient({
+    String? baseUrl,
+    http.Client? httpClient,
+    Duration timeout = const Duration(seconds: 15),
+  })  : baseUrl = baseUrl ??
             const String.fromEnvironment('SUPERZ_API',
-                defaultValue: 'http://127.0.0.1:8000');
+                defaultValue: 'http://127.0.0.1:8000'),
+        _http = httpClient ?? http.Client(),
+        _timeout = timeout;
 
   final String baseUrl;
+
+  /// 底层 HTTP 客户端。**注进来是为了能测超时** ——
+  /// `http.Request.send()` 自己 new 一个 Client,测试里没有缝可以塞假的,
+  /// 于是「body 卡住会不会永远不返回」这件事根本写不了断言。
+  /// 顺带一个好处:连接池在多次请求之间复用,不再每个请求建一次。
+  final http.Client _http;
   String? _token;
   DateTime? _tokenIssuedAt;
   bool _refreshing = false;
@@ -168,7 +181,33 @@ class ApiClient {
         'Content-Type': 'application/json',
         if (_token != null) 'Authorization': 'Bearer $_token',
         if (shopId != null) 'X-Shop-Id': '$shopId',
+        if (appBuild != null) 'X-App-Build': appBuild!,
       };
+
+  /// 当前客户端的构建号(pubspec 里 `version: x.y.z+build` 的 build)。
+  ///
+  /// 在此之前服务端**不知道跟它说话的是哪个版本** —— 出了问题只能问
+  /// 「你用的什么版本」,而线上到底还有多少旧版在跑,谁也答不上来。
+  ///
+  /// **这个头不做任何拦截**:不判版本、不强制升级、不改行为,只让日志能回答
+  /// 「这个报错集中在哪个 build」。要拦也该由服务端拿数据之后再决定。
+  ///
+  /// 静态一份:同一个 App 里所有 ApiClient 实例都是同一个包。
+  static String? appBuild;
+  static bool _appBuildTried = false;
+
+  /// 取一次构建号缓存起来。失败静默 —— 这个头缺了不影响任何功能,
+  /// 为了它让请求失败是本末倒置。只试一次,别每个请求都去敲平台通道。
+  static Future<void> loadAppBuild() async {
+    if (_appBuildTried) return;
+    _appBuildTried = true;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (info.buildNumber.isNotEmpty) appBuild = info.buildNumber;
+    } catch (_) {
+      // 测试环境 / 没有平台通道时拿不到,当作没有这个头
+    }
+  }
 
   /// 切换当前门店并落盘(冷启动后仍停在上次那家)。
   Future<void> setShopId(int? id) async {
@@ -221,14 +260,26 @@ class ApiClient {
     }
   }
 
+  /// 单次请求的时间预算。**发出到 header 回来**一份,**读完 body**一份。
+  ///
+  /// 原来只给了前半段。弱网下真实发生的是:header 回来了(超时计时就此结束),
+  /// body 卡在半路 —— 于是这个 Future **永远不 resolve**。
+  /// 上层 `try/finally` 里的 `_grabbing.remove(...)` / `_acting = false`
+  /// 就永远不执行:骑手的「抢单」按钮永久停在「抢单中…」且不可点,
+  /// 商家的「接单」同理。**不重启 App 这一单再也接不了。**
+  ///
+  /// 一个不返回的请求比一个失败的请求坏得多 —— 失败至少还能重试。
+  final Duration _timeout;
+
   Future<dynamic> _rawRequest(String method, String path,
       {Object? body, Map<String, String>? query}) async {
     if (path != '/auth/refresh') await _maybeRefreshToken();
+    await loadAppBuild();
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final request = http.Request(method, uri)..headers.addAll(_headers);
     if (body != null) request.body = jsonEncode(body);
-    final response = await http.Response.fromStream(
-        await request.send().timeout(const Duration(seconds: 15)));
+    final streamed = await _http.send(request).timeout(_timeout);
+    final response = await _readBody(streamed);
     final text = utf8.decode(response.bodyBytes);
     if (response.statusCode >= 400) {
       String message = '请求失败(${response.statusCode})';
@@ -245,6 +296,48 @@ class ApiClient {
       throw ApiException(response.statusCode, message);
     }
     return text.isEmpty ? null : jsonDecode(text);
+  }
+
+  /// 读完 body,超时就**把这条连接掐掉**。
+  ///
+  /// 只给 `Response.fromStream(...)` 套一个 `.timeout()` 也能让上层不再卡死,
+  /// 但那条 socket 还挂在客户端的连接池里等一个永远不来的字节 ——
+  /// 弱网下反复几次就把池子占满,接下来的请求连发都发不出去。
+  /// 所以这里自己拿着订阅,超时的时候 cancel。
+  Future<http.Response> _readBody(http.StreamedResponse streamed) {
+    final completer = Completer<http.Response>();
+    final bytes = BytesBuilder(copy: false);
+    late StreamSubscription<List<int>> sub;
+
+    final timer = Timer(_timeout, () {
+      if (completer.isCompleted) return;
+      sub.cancel();
+      completer.completeError(TimeoutException('读取响应内容超时', _timeout));
+    });
+
+    sub = streamed.stream.listen(
+      bytes.add,
+      cancelOnError: true,
+      onError: (Object e, StackTrace s) {
+        if (completer.isCompleted) return;
+        timer.cancel();
+        completer.completeError(e, s);
+      },
+      onDone: () {
+        if (completer.isCompleted) return;
+        timer.cancel();
+        completer.complete(http.Response.bytes(
+          bytes.takeBytes(),
+          streamed.statusCode,
+          request: streamed.request,
+          headers: streamed.headers,
+          isRedirect: streamed.isRedirect,
+          persistentConnection: streamed.persistentConnection,
+          reasonPhrase: streamed.reasonPhrase,
+        ));
+      },
+    );
+    return completer.future;
   }
 
   // ---------- 会话持久化(冷启动免登录,在线永不掉线) ----------

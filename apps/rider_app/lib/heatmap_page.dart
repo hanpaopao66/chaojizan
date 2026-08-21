@@ -33,6 +33,12 @@ class _RiderHeatmapPageState extends State<RiderHeatmapPage> {
   Map<String, dynamic>? _data;
   bool _loading = true;
 
+  /// 拉失败的原因;空串 = 上一次是成功的。
+  ///
+  /// 这一页整个立意就是"『这里没单』和『我们不知道这里有没有单』是两件事"——
+  /// 那么"拉不到数据"当然更不能画成一片没有热区的图。
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -50,9 +56,15 @@ class _RiderHeatmapPageState extends State<RiderHeatmapPage> {
         _weekday = (r['weekday'] as num?)?.toInt();
         _hour = (r['hour'] as num?)?.toInt();
         _loading = false;
+        _error = '';
       });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = e is ApiException ? e.message : '$e';
+        });
+      }
     }
   }
 
@@ -71,13 +83,19 @@ class _RiderHeatmapPageState extends State<RiderHeatmapPage> {
       // 宽度上限按**内容形态**选,不是统一限死
       contentMaxWidth: kWideMaxWidth,
       appBar: AppBar(title: const Text('哪儿有单')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+      body: !_loading && _data != null
+          ? RefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.all(12),
                 children: [
+                  // 有旧数据但这次没刷新成功:说一句,别让他以为是最新的
+                  if (_error.isNotEmpty) ...[
+                    SzRetryBanner(
+                        text: '这次没刷新成功($_error),下面是上一次的数据',
+                        onRetry: _load),
+                    const SizedBox(height: 8),
+                  ],
                   SzCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -196,7 +214,13 @@ class _RiderHeatmapPageState extends State<RiderHeatmapPage> {
                     ),
                 ],
               ),
-            ),
+            )
+          // 一次都没拉到:转圈和「没拉到」是两件事。
+          // 这一页整个立意就是"『这里没单』和『我们不知道有没有单』不一样",
+          // 那就更不能拿一张空图冒充"这一带没单"
+          : _loading
+              ? const Center(child: CircularProgressIndicator())
+              : SzError(error: '没能拿到跑单数据:$_error', onRetry: _load),
     );
   }
 }

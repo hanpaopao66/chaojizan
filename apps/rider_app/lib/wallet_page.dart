@@ -21,6 +21,14 @@ class _WalletPageState extends State<WalletPage> {
   List<Withdrawal> _withdrawals = [];
   int _segment = 0; // 0 收入明细 / 1 提现记录
 
+  /// 拉钱包失败的原因;空串 = 上一次是成功的。
+  ///
+  /// 之前只弹一条 SnackBar 就完了,而 `_wallet` 还是 null ——
+  /// 于是这一页**永久转圈**;更糟的是 `RefreshIndicator` 写在
+  /// `wallet != null` 分支里面,转圈的时候连下拉自救的路都没有,
+  /// 只能杀掉 App 重开。钱的那一页不该是这样。
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -42,12 +50,12 @@ class _WalletPageState extends State<WalletPage> {
           _earnings = earnings;
           _withdrawals = withdrawals;
           _worklog = worklog;
+          _error = '';
         });
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      setState(() => _error = e is ApiException ? e.message : e.toString());
     }
   }
 
@@ -151,7 +159,21 @@ class _WalletPageState extends State<WalletPage> {
   Widget build(BuildContext context) {
     final wallet = _wallet;
     if (wallet == null) {
-      return const Center(child: CircularProgressIndicator());
+      // 转圈 / 失败要分开。而且失败态也得能下拉重试 ——
+      // 一个只会转圈又拉不动的页面,骑手唯一的出路是杀 App
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(children: [
+          SizedBox(
+            height: 420,
+            child: _error.isEmpty
+                ? const Center(child: CircularProgressIndicator())
+                : SzError(
+                    error: '钱包没能加载出来:$_error\n余额和流水都还在,只是这会儿读不到',
+                    onRetry: _load),
+          ),
+        ]),
+      );
     }
     // 今日战报:后端时间戳是 UTC,必须转本地时区再按日归属
     final now = DateTime.now();
@@ -170,6 +192,14 @@ class _WalletPageState extends State<WalletPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 拉过一次之后又失败:下面的数字是**旧的**。金额尤其不能让人
+          // 以为是刚刚的 —— 他会拿这个数去判断今天还要不要再跑两单
+          if (_error.isNotEmpty) ...[
+            SzRetryBanner(
+                text: '余额和流水没刷新成功($_error),下面是上一次的数。点这里重试',
+                onRetry: _load),
+            const SizedBox(height: 8),
+          ],
           // 这一屏要能一眼回答:能提多少、今天跑了多少、什么时候能到账。
           // 户外单手,所以金额和按钮都比另外两端再大一档
           MoneyHeroCard(

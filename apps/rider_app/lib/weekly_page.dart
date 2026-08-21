@@ -30,6 +30,12 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
   Map<String, dynamic>? _data;
   bool _loading = true;
 
+  /// 拉失败的原因;空串 = 上一次是成功的。
+  ///
+  /// 静默失败在这一页表现为**这周 0 单 ¥0.00** —— 骑手跑了一周,
+  /// 打开周报看到一片零。这不是"少显示一块",这是在报错数
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -40,11 +46,41 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
     setState(() => _loading = true);
     try {
       final r = await widget.api.riderWeeklyReport(weekOffset: _offset);
-      if (mounted) setState(() { _data = r; _loading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) setState(() { _data = r; _loading = false; _error = ''; });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _data = null; // 切周失败:别把上一周的数字留在"本周"的标题下面
+          _loading = false;
+          _error = e is ApiException ? e.message : '$e';
+        });
+      }
     }
   }
+
+  /// 切周那一行。抽出来是为了**错误态也能用** ——
+  /// 一周拉不动就把翻页也一起没收,只能退出去重进
+  Widget _weekNav() => Row(children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left),
+          onPressed: () { setState(() => _offset++); _load(); },
+        ),
+        Expanded(
+          child: Center(
+            child: Text(
+                _offset == 0 ? '本周'
+                    : _offset == 1 ? '上周' : '$_offset 周前',
+                style: const TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w600)),
+          ),
+        ),
+        IconButton(
+          icon: const Icon(Icons.chevron_right),
+          onPressed: _offset == 0
+              ? null
+              : () { setState(() => _offset--); _load(); },
+        ),
+      ]);
 
   @override
   Widget build(BuildContext context) {
@@ -76,53 +112,32 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+      body: !_loading && d != null
+          ? RefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 padding: const EdgeInsets.all(12),
                 children: [
-                  Row(children: [
-                    IconButton(
-                      icon: const Icon(Icons.chevron_left),
-                      onPressed: () { setState(() => _offset++); _load(); },
-                    ),
-                    Expanded(
-                      child: Center(
-                        child: Text(
-                            _offset == 0 ? '本周'
-                                : _offset == 1 ? '上周' : '$_offset 周前',
-                            style: const TextStyle(
-                                fontSize: 15, fontWeight: FontWeight.w600)),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.chevron_right),
-                      onPressed: _offset == 0
-                          ? null
-                          : () { setState(() => _offset--); _load(); },
-                    ),
-                  ]),
+                  _weekNav(),
                   SzCard(
                     child: Column(children: [
                       Row(children: [
-                        _stat(sz, '完成', '${d?['orders'] ?? 0}', '单'),
+                        _stat(sz, '完成', '${d['orders'] ?? 0}', '单'),
                         _stat(sz, '收入',
-                            (((d?['earned_cents'] as num?) ?? 0) / 100)
+                            (((d['earned_cents'] as num?) ?? 0) / 100)
                                 .toStringAsFixed(2), '元'),
                         _stat(sz, '在线',
-                            (((d?['online_minutes'] as num?) ?? 0) / 60)
+                            (((d['online_minutes'] as num?) ?? 0) / 60)
                                 .toStringAsFixed(1), '小时'),
                       ]),
                       const SizedBox(height: 8),
                       // 时薪:总额高不等于划算,这是骑手最该拿到的一个数。
                       // 在线不足 1 小时不给 —— 分母太小算出来是个荒唐数字
                       Text(
-                          d?['cents_per_hour'] == null
+                          d['cents_per_hour'] == null
                               ? '在线时间太短,这周还算不出时薪'
                               : '平均时薪 ¥'
-                                  '${((d!['cents_per_hour'] as num) / 100).toStringAsFixed(1)}'
+                                  '${((d['cents_per_hour'] as num) / 100).toStringAsFixed(1)}'
                                   '/小时',
                           style: TextStyle(
                               fontSize: 12.5,
@@ -210,7 +225,19 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
                       style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
                 ],
               ),
-            ),
+            )
+          // 拉不到就说拉不到 —— 一屏「0 单 ¥0.00」是在报错数,
+          // 他跑了一整周。切周那一行留着:这一周拉不动还能翻到别的周去
+          : Column(children: [
+              _weekNav(),
+              Expanded(
+                child: _loading
+                    ? const Center(child: CircularProgressIndicator())
+                    : SzError(
+                        error: '这一周的周报没能加载出来:$_error',
+                        onRetry: _load),
+              ),
+            ]),
     );
   }
 

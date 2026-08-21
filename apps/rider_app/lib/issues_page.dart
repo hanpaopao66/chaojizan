@@ -30,6 +30,12 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
   Map<int, Map<String, dynamic>> _appeals = {}; // target_id -> appeal
   bool _loaded = false;
 
+  /// 拉失败的原因;空串 = 上一次是成功的。
+  ///
+  /// 这一页拉不到会写成「还没有配送异常上报记录」—— 而骑手正是因为
+  /// **有**一次判责才点进来的。看到"没有记录"他会以为申诉入口没了
+  String _error = '';
+
   @override
   void initState() {
     super.initState();
@@ -49,10 +55,16 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
                 a['target_id'] as int: a,
           };
           _loaded = true;
+          _error = '';
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loaded = true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loaded = true;
+          _error = e is ApiException ? e.message : '$e';
+        });
+      }
     }
   }
 
@@ -117,11 +129,13 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // 「还没有记录」和「没拉到」必须分开:骑手是因为**有**一次判责
+    // 才点进来的,看到"还没有配送异常上报记录"他会以为申诉入口没了
+    final loadFailed = _error.isNotEmpty && _issues.isEmpty;
     return SzPageScaffold(
       appBar: AppBar(title: const Text('配送异常与申诉')),
-      body: !_loaded
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
+      body: _loaded && !loadFailed
+          ? RefreshIndicator(
               onRefresh: _load,
               child: _issues.isEmpty
                   ? ListView(children: const [
@@ -131,8 +145,17 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
                     ])
                   : ListView.builder(
                       padding: const EdgeInsets.all(12),
-                      itemCount: _issues.length,
-                      itemBuilder: (context, i) {
+                      // 有旧列表但这次没刷成功:顶一条,别让人以为是最新的
+                      itemCount: _issues.length + (_error.isEmpty ? 0 : 1),
+                      itemBuilder: (context, index) {
+                        if (_error.isNotEmpty) {
+                          if (index == 0) {
+                            return SzRetryBanner(
+                                text: '这次没刷新成功($_error),下面是上一次的记录',
+                                onRetry: _load);
+                          }
+                        }
+                        final i = _error.isEmpty ? index : index - 1;
                         final issue = _issues[i];
                         final resolution = issue['resolution'] as String? ?? '';
                         final open = (issue['status'] as String?) == 'open';
@@ -182,7 +205,10 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
                         );
                       },
                     ),
-            ),
+            )
+          : loadFailed
+              ? SzError(error: '上报记录没能加载出来:$_error', onRetry: _load)
+              : const Center(child: CircularProgressIndicator()),
     );
   }
 }

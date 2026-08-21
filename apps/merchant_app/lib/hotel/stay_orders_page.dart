@@ -38,6 +38,11 @@ class _StayOrdersPageState extends State<StayOrdersPage>
   Timer? _wsPing;
   WebSocketChannel? _ws;
 
+  /// 一次断线只排一次重连 + 指数退避。和外卖工作台同一套(见 [ReconnectPolicy]):
+  /// 原来 onError / onDone 各排一个,重连数每轮翻倍
+  final _reconnect = ReconnectPolicy();
+  Timer? _reconnectTimer;
+
   final OrderAnnouncer _announcer = OrderAnnouncer();
 
   /// App 是不是在前台。后台时轮询降频,见 [didChangeAppLifecycleState]。
@@ -99,13 +104,29 @@ class _StayOrdersPageState extends State<StayOrdersPage>
     _timer?.cancel();
     _alertTimer?.cancel();
     _wsPing?.cancel();
-    _ws?.sink.close();
+    _reconnectTimer?.cancel();
+    _closeWs();
     _announcer.dispose();
     ListenKeepAlive.stop();
     super.dispose();
   }
 
+  /// close() 可能带着「本来就没连上」的错误回来,吞掉 —— 这里只是清理
+  void _closeWs() {
+    final old = _ws;
+    _ws = null;
+    old?.sink.close().catchError((_) {});
+  }
+
   void _connectWs() {
+    if (!mounted) return;
+    if (!_reconnect.beginConnect()) return; // 防重入
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    // 旧连接先关:留着它就是两条连接同时收推送,同一单播报两遍
+    _wsPing?.cancel();
+    _closeWs();
+
     final uri = Uri.parse(
         '${widget.api.wsBaseUrl}/ws/merchants/${widget.shop.id}?token=${widget.api.token}');
     try {
@@ -114,10 +135,15 @@ class _StayOrdersPageState extends State<StayOrdersPage>
       _scheduleReconnect();
       return;
     }
-    _wsPing?.cancel();
+    final ws = _ws!;
+    ws.ready.then((_) {
+      if (!mounted || !identical(_ws, ws)) return;
+      _reconnect.onConnected();
+      _wsConnected = true;
+    }, onError: (_) => _scheduleReconnect(ws));
     _wsPing = Timer.periodic(
         const Duration(seconds: 30), (_) => _ws?.sink.add('ping'));
-    _ws!.stream.listen(
+    ws.stream.listen(
       (message) {
         if (!_wsConnected) _wsConnected = true;
         final data = jsonDecode(message as String) as Map<String, dynamic>;
@@ -133,14 +159,23 @@ class _StayOrdersPageState extends State<StayOrdersPage>
           _refresh();
         }
       },
-      onError: (_) => _scheduleReconnect(),
-      onDone: _scheduleReconnect,
+      // 连不上时这两个**都会**触发,判重交给 ReconnectPolicy。
+      // 带上 ws:上一条连接的收尾事件不该把新连接顶掉
+      onError: (_) => _scheduleReconnect(ws),
+      onDone: () => _scheduleReconnect(ws),
     );
   }
 
-  void _scheduleReconnect() {
+  /// [from] 是发出这次断线通知的连接;不是当前那条就忽略
+  void _scheduleReconnect([WebSocketChannel? from]) {
+    if (!mounted) return;
+    if (from != null && !identical(_ws, from)) return;
+    _wsPing?.cancel();
     _wsConnected = false;
-    Timer(const Duration(seconds: 5), () {
+    final delay = _reconnect.schedule();
+    if (delay == null) return; // 这次断线已经排过了
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, () {
       if (mounted) _connectWs();
     });
   }

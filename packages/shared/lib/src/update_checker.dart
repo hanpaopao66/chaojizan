@@ -5,9 +5,10 @@ import 'package:apk_installer/apk_installer.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+import 'api_client.dart';
 
 /// 分发渠道:编译期由 --dart-define=SUPERZ_CHANNEL 指定。
 ///
@@ -41,8 +42,9 @@ Future<void> checkForUpdate(
         .timeout(const Duration(seconds: 8));
     if (resp.statusCode != 200) return;
     latest = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
-    final info = await PackageInfo.fromPlatform();
-    currentBuild = int.tryParse(info.buildNumber) ?? 0;
+    // 版本号只取一次,和请求头 X-App-Build 用同一份缓存
+    await ApiClient.loadAppBuild();
+    currentBuild = int.tryParse(ApiClient.appBuild ?? '') ?? 0;
   } catch (_) {
     return; // 检查失败不打扰使用
   }

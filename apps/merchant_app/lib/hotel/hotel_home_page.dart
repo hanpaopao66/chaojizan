@@ -58,12 +58,14 @@ class _HotelHomePageState extends State<HotelHomePage> {
                 try {
                   await widget.api.setShopOpen(v);
                 } catch (e) {
+                  // mounted 判在 setState **之前**:页面已经销毁时
+                  // setState 直接抛,后面那句提示就再也执行不到了
+                  if (!context.mounted) return;
                   setState(() => _isOpen = !v);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(
-                            e is ApiException ? e.message : e.toString())));
-                  }
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(e is ApiException
+                          ? e.message
+                          : e.toString())));
                 }
               },
             ),

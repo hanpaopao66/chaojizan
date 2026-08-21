@@ -14,6 +14,7 @@ export 'src/city_picker.dart';
 export 'src/coord_utils.dart';
 export 'src/delivery_map.dart';
 export 'src/merchant_categories.dart';
+export 'src/reconnect.dart';
 export 'src/remote_copy.dart';
 export 'src/responsive.dart';
 export 'src/models.dart';

@@ -265,6 +265,13 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   WebSocketChannel? _ws;
   bool _wsConnected = false;
 
+  /// 重连节奏。**一次断线只排一次重连** —— 为什么需要这个见 [ReconnectPolicy]
+  final _reconnect = ReconnectPolicy();
+
+  /// 排队中的那一个重连定时器。**只能有一个**:
+  /// 原来是每次 `Timer(...)` 裸着新建,谁也不认识谁,取消不掉也数不清
+  Timer? _reconnectTimer;
+
   /// App 是不是在前台。**后台时轮询要降频** —— 见 [didChangeAppLifecycleState]。
   bool _foreground = true;
 
@@ -508,6 +515,45 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     }
   }
 
+  /// 营业 / 打烊开关。
+  ///
+  /// ## 失败回弹必须说话
+  ///
+  /// 原来是 `catch (e) { setState(() => _isOpen = !v); }` —— 拿到了 `e` 却
+  /// 一个字都不说。早上开店点「营业」,网卡一下,开关自己弹回「已打烊」,
+  /// 商家看一眼觉得点错了、或者根本没看,收起手机去备餐 ——
+  /// **一整天零单**,到晚上才发现店压根没开过。
+  ///
+  /// 「开关弹回去了」在界面上和「我自己点的」长得一模一样,
+  /// 所以必须由文案讲清楚:没成功、现在是什么状态、怎么补救。
+  Future<void> _setOpen(bool v) async {
+    setState(() => _isOpen = v);
+    try {
+      await widget.api.setShopOpen(v);
+      // 打烊就放掉唤醒锁 —— 关了店还握着,听到单也不能接,
+      // 纯烧电。开门再拿回来
+      await _syncKeepAlive();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isOpen = !v);
+      final why = e is ApiException ? e.message : '$e';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+          backgroundColor: Theme.of(context).sz.danger,
+          duration: const Duration(seconds: 8),
+          content: Text(v
+              ? '没能开店:$why\n店铺还是「已打烊」,现在收不到单'
+              : '没能打烊:$why\n店铺还是「营业中」'),
+          action: SnackBarAction(
+            label: '重试',
+            textColor: Colors.white,
+            onPressed: () => _setOpen(v),
+          ),
+        ));
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -517,14 +563,45 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     _searchDebounce?.cancel();
     _searchCtrl.dispose();
     _wsPing?.cancel();
-    _ws?.sink.close();
+    _reconnectTimer?.cancel();
+    _closeWs();
     _announcer.dispose();
     ListenKeepAlive.stop();
     super.dispose();
   }
 
+  /// 关掉当前连接。`close()` 可能带着「这条连接本来就没连上」的错误回来,
+  /// 不接就是一条未处理的异步异常(控制台一片红);这里只是清理,吞掉即可
+  void _closeWs() {
+    final old = _ws;
+    _ws = null;
+    old?.sink.close().catchError((_) {});
+  }
+
   /// 实时听单通道:新单推送 → 响铃 + 振动 + 横幅
+  ///
+  /// ## 这里曾经会把手机连炸
+  ///
+  /// 原来 `onError` 和 `onDone` 各挂了一次 `_scheduleReconnect()`。看着像两条
+  /// 互斥的路径,实际不是:`web_socket_channel` 连不上的时候是先 `addError()`
+  /// 再 `close()`,**两个回调必然都触发**,于是一次断线排两个重连,
+  /// 每个重连再各排两个 —— 30 秒后 64 条连接,一分钟后四千条。
+  /// 而旧的 `_ws` 从来不 close,活下来的连接还都在收推送,同一单播报好几遍。
+  ///
+  /// 商家的听单机卡死 = 漏单 = 直接少一天营业额,所以这里四道都得有:
+  /// 判重(`ReconnectPolicy`)、关旧连接、单一定时器、指数退避。
   void _connectWs() {
+    if (!mounted) return;
+    // 防重入:定时器和生命周期回调可能同时想连一条
+    if (!_reconnect.beginConnect()) return;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+
+    // **旧连接先关掉。** 不关的话它还活着、还在收推送 ——
+    // 重连出来的新连接叠上去,同一单会被播报两遍
+    _wsPing?.cancel();
+    _closeWs();
+
     final uri = Uri.parse(
         '${widget.api.wsBaseUrl}/ws/merchants/${widget.shop.id}?token=${widget.api.token}');
     try {
@@ -533,10 +610,17 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       _scheduleReconnect();
       return;
     }
-    _wsPing?.cancel();
+    final ws = _ws!;
+    // 握手真成了才算连上:退避在这里归零,指示灯也在这里转绿。
+    // 等第一条消息才转绿是不准的 —— 服务端空闲时一条都不发
+    ws.ready.then((_) {
+      if (!mounted || !identical(_ws, ws)) return;
+      _reconnect.onConnected();
+      if (!_wsConnected) setState(() => _wsConnected = true);
+    }, onError: (_) => _scheduleReconnect(ws));
     _wsPing = Timer.periodic(
         const Duration(seconds: 30), (_) => _ws?.sink.add('ping'));
-    _ws!.stream.listen(
+    ws.stream.listen(
       (message) {
         if (!_wsConnected && mounted) setState(() => _wsConnected = true);
         final data = jsonDecode(message as String) as Map<String, dynamic>;
@@ -593,15 +677,25 @@ class _MerchantHomePageState extends State<MerchantHomePage>
           }
         }
       },
-      onError: (_) => _scheduleReconnect(),
-      onDone: _scheduleReconnect,
+      // 这两个回调**都会**在连不上时触发,判重交给 ReconnectPolicy。
+      // 带上 ws:上一条连接的收尾事件不该把新连接顶掉
+      onError: (_) => _scheduleReconnect(ws),
+      onDone: () => _scheduleReconnect(ws),
     );
   }
 
-  void _scheduleReconnect() {
+  /// [from] 是发出这次断线通知的连接。不是当前那条就忽略 ——
+  /// 旧连接关掉时的 onDone 会晚一步到,不认人就会把刚连上的新连接也重连掉
+  void _scheduleReconnect([WebSocketChannel? from]) {
     if (!mounted) return;
-    setState(() => _wsConnected = false);
-    Timer(const Duration(seconds: 5), () {
+    if (from != null && !identical(_ws, from)) return;
+    _wsPing?.cancel();
+    if (_wsConnected) setState(() => _wsConnected = false);
+    // null = 这次断线已经排过重连了(onError 和 onDone 会一前一后都进来)
+    final delay = _reconnect.schedule();
+    if (delay == null) return;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(delay, () {
       if (mounted) _connectWs();
     });
   }
@@ -1397,17 +1491,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
               value: _isOpen,
               onChanged: widget.shop.foodSafetyHold
                   ? null
-                  : (v) async {
-                      setState(() => _isOpen = v);
-                      try {
-                        await widget.api.setShopOpen(v);
-                        // 打烊就放掉唤醒锁 —— 关了店还握着,听到单也不能接,
-                        // 纯烧电。开门再拿回来
-                        await _syncKeepAlive();
-                      } catch (e) {
-                        setState(() => _isOpen = !v);
-                      }
-                    },
+                  : _setOpen,
             ),
             const SizedBox(width: 8),
           ]),
