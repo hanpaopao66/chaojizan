@@ -3,6 +3,13 @@
 #
 # 用法: scripts/sync_release_to_appdist.sh v0.12.1-b2052 "更新说明一句话"
 #
+# 版本门禁(环境变量,默认与从前一致):
+#   FORCE=1        这一版强制更新(versions.json 的 force=true)
+#   MIN_BUILD=<n>  低于这个 build 的客户端视为过旧
+#
+# 和 release_apks.sh 是同一套参数 —— 这两个脚本都会写 versions.json,
+# 只有一个支持门禁的话,用哪条路发版决定了门禁生不生效,那是最坏的一种不一致。
+#
 # ## 为什么要有这个脚本
 #
 # #274 把发版的信任根从开发机换成了公开 CI：APK 由 release.yml 在公开 runner
@@ -42,7 +49,19 @@ REPO=$(git remote get-url origin | sed -E 's#\.git$##; s#.*[:/]([^/]+/[^/]+)$#\1
 VERSION="${TAG#v}"; VERSION="${VERSION%-b*}"
 BUILD="${TAG##*-b}"
 echo "$BUILD" | grep -qE '^[0-9]+$' || { echo "✗ tag 里解析不出 build 号：$TAG"; exit 1; }
-echo "== 同步 $TAG（版本 $VERSION，build $BUILD）=="
+
+# 门禁参数。默认 false / 0 = 与改造前完全一致的行为
+FORCE_JSON=false
+[ "${FORCE:-0}" = "1" ] && FORCE_JSON=true
+MIN_BUILD=${MIN_BUILD:-0}
+echo "$MIN_BUILD" | grep -qE '^[0-9]+$' || {
+  echo "✗ MIN_BUILD 必须是数字，收到：$MIN_BUILD"; exit 1; }
+# min_build 大于本次 build 的话，新包自己都过不了门禁
+[ "$MIN_BUILD" -le "$BUILD" ] || {
+  echo "✗ MIN_BUILD($MIN_BUILD) 大于本次 build($BUILD)，这会把新版自己也挡在门外"
+  exit 1; }
+
+echo "== 同步 $TAG（版本 $VERSION，build $BUILD，force=$FORCE_JSON，min_build=$MIN_BUILD）=="
 
 # 先探部署机通不通。LAN-only，换个网段就发不了，
 # 别烧满 SSH 超时再死在 scp 中途（deploy_server.sh 同款预检）
@@ -120,7 +139,11 @@ for app in ['user', 'merchant', 'rider']:
         'build': $BUILD,
         'url': '$API/appdist/chaojizan-' + app + '-arm64.apk',
         'notes': '''$NOTES''',
-        'force': False,
+        # force:这一版是否强制更新(发版当时的一次性决定)
+        'force': $FORCE_JSON,
+        # min_build:低于它的客户端视为过旧(**持续有效**的下限,与 force 不同)。
+        # 服务端 /app/latest 原样透出,当前只用于观测,不拦截
+        'min_build': $MIN_BUILD,
         # 应用内安装前用它校验；缺这个字段客户端会退回浏览器下载（#123）
         'sha256': shas[app],
     }

@@ -21,6 +21,20 @@ services:
     logging: *default-logging
     image: postgis/postgis:16-3.4
     restart: unless-stopped
+    # max_connections 显式写出来,而不是靠镜像默认值。
+    #
+    # 这个数字和 server/app/config.py 里的 db_pool_size / db_max_overflow
+    # 是**一对必须同时看的数字**:api 曾经以 --workers 4 起,
+    # 4 × (10 + 20) = 120 > 默认的 100,高峰期后来的连接被库直接拒掉,
+    # 表现是随机 500 —— 而不是变慢,所以压测复现不出来。
+    #
+    # 现在的账:api 1 个进程 30 + sweeper 1 个进程 30 = 60,
+    # 加 3 个超级用户保留位、迁移容器和人工 psql/pg_dump 的临时连接,
+    # 100 有富余。**不要为了"保险"往上调**:每条连接在这台
+    # 4 核 / 可用内存 4.4G 的机器上都要几 MB,而机器上还压着
+    # redis/minio/nginx/frpc/witness,调大只会更早 OOM
+    command: >
+      postgres -c max_connections=100
     environment:
       POSTGRES_USER: superz
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
@@ -38,19 +52,46 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
 
-  api:
+  # 一次性迁移容器:跑完 alembic upgrade head 就退出,api/sweeper 等它成功再起。
+  #
+  # 为什么要单拎出来:迁移原先写在 api 的 lifespan 里,而 api 是 --workers 4,
+  # 于是**四个进程同时** upgrade,一起去读写 alembic_version。
+  # 平时怎么重启都风平浪静,只在"恰好这次部署带了迁移"时出事 ——
+  # 最难复现也最不该赌的那一类。现在只有这一个地方会跑,
+  # 加上 app/startup.py 里的 PostgreSQL 咨询锁双保险。
+  migrate:
     logging: *default-logging
     build: ../server
-    container_name: superz-api
-    restart: unless-stopped
-    # .env.prod 全量注入(短信/天地图/GitHub 等开关配置改了重启即生效);
-    # 下面 environment 里的三项优先级更高,负责拼接容器内地址
     env_file:
       - .env.prod
     environment:
       DATABASE_URL: postgresql+asyncpg://superz:${POSTGRES_PASSWORD}@db:5432/superz
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:?set in .env.prod}
+    command: python -m app.startup
+    restart: "no"     # 一次性任务,失败就该停在那里让人看见
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    logging: *default-logging
+    build: ../server
+    container_name: superz-api
+    restart: unless-stopped
+    # .env.prod 全量注入(短信/天地图/GitHub 等开关配置改了重启即生效);
+    # 下面 environment 里的几项优先级更高,负责拼接容器内地址和进程角色
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://superz:${POSTGRES_PASSWORD}@db:5432/superz
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?set in .env.prod}
+      # 迁移交给上面的 migrate 容器,清扫交给下面的 sweeper 容器。
+      # api 只负责收请求 —— 这两件事都只该有一份,而 web 进程是最不适合
+      # 承载"只跑一份"的地方(它天然想横向扩)
+      RUN_MIGRATIONS_ON_STARTUP: "false"
+      AUTO_FLOW_ENABLED: "false"
     # 127.0.0.1:8010 仅本机运维调试;公网流量走本栈 nginx 转发
     ports:
       - "127.0.0.1:8010:8000"
@@ -66,6 +107,48 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      # 迁移**跑完并成功**再起 api。之前是 api 自己边起边迁,
+      # 于是"结构还没改完就开始收请求"有一个真实存在的窗口
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  # 后台清扫:与 api 同一个镜像,不同 command(见 server/app/sweeper.py)。
+  #
+  # 原先 auto_flow_loop 挂在 api 的 lifespan 里,而 api 是 --workers 4,
+  # 于是**四份循环同时扫同一批订单**:超时退款、自动确认、发安抚券、
+  # 生成账本锚点。靠 Redis 防重键和行锁挡住了大部分重复,但那是"没出事",
+  # 不是"设计上不会出事" —— 账本锚点一天一条、按哈希链串起来,
+  # 重复执行的代价格外难收拾。
+  #
+  # 不监听端口,所以不需要 ports;崩了由 restart 拉起来。
+  sweeper:
+    logging: *default-logging
+    build: ../server
+    container_name: superz-sweeper
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://superz:${POSTGRES_PASSWORD}@db:5432/superz
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?set in .env.prod}
+      # 清扫进程**就是**那唯一一份 auto_flow;迁移仍然只归 migrate 容器
+      AUTO_FLOW_ENABLED: "true"
+      RUN_MIGRATIONS_ON_STARTUP: "false"
+    command: python -m app.sweeper
+    volumes:
+      # 清扫要碰上传目录(明厨亮灶抽帧、证照到期扫描)和商户密钥(自动退款)
+      - uploads:/srv/uploads
+      - ./wxpay-certs:/srv/certs:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_started
       minio:

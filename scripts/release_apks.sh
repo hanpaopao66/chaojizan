@@ -7,6 +7,14 @@
 #      SKIP_STORE=1 只出官网直链包(默认直链包 + 商店包都出,共 6 个)
 #   $1 版本名(versionName)  $2 build 号(必须递增!)  $3 更新说明
 #
+# 版本门禁(两个都是环境变量,默认与从前一致,不传就是老行为):
+#   FORCE=1        这一版强制更新(versions.json 的 force=true)
+#   MIN_BUILD=<n>  低于这个 build 的客户端视为过旧
+#
+# 这两个字段以前在脚本里**写死成 False / 根本不存在**,于是
+# "强制更新"这个能力名义上有、实际上永远关着,想用还得改脚本再发一次版。
+# 例:MIN_BUILD=8 FORCE=1 scripts/release_apks.sh 0.13.0 14 "修了支付回调"
+#
 # 两种产物不能混(#192):
 #   官网直链包 build/release-apks/chaojizan-<端>-arm64.apk
 #       —— 带应用内自更新,上传部署机 appdist,versions.json 指向它;
@@ -19,6 +27,18 @@ cd "$(dirname "$0")/.."
 VERSION=${1:?用法: release_apks.sh <版本名> <build号> <更新说明>}
 BUILD=${2:?缺 build 号}
 NOTES=${3:?缺更新说明}
+# 门禁参数。默认 false / 0 = 与改造前完全一致的行为
+FORCE_JSON=false
+[ "${FORCE:-0}" = "1" ] && FORCE_JSON=true
+MIN_BUILD=${MIN_BUILD:-0}
+# 早点炸:min_build 比本次 build 还大的话,新包自己都过不了门禁,
+# 而这个错误要等用户更新完打不开才会被发现
+case "$MIN_BUILD" in
+  ''|*[!0-9]*) echo "✗ MIN_BUILD 必须是数字,收到:$MIN_BUILD"; exit 1;;
+esac
+[ "$MIN_BUILD" -le "$BUILD" ] || {
+  echo "✗ MIN_BUILD($MIN_BUILD) 大于本次 build($BUILD),这会把新版自己也挡在门外"
+  exit 1; }
 [ -f deploy/.env.deploy ] && . deploy/.env.deploy
 API=${PUBLIC_BASE:?缺对外域名:在 deploy/.env.deploy 写 PUBLIC_BASE=https://域名(不入库)}
 DEPLOY=${DEPLOY:?缺部署机地址:在 deploy/.env.deploy 写 DEPLOY=user@host(不入库)}
@@ -151,7 +171,11 @@ for app in ['user', 'merchant', 'rider']:
         'build': $BUILD,
         'url': '$API/appdist/chaojizan-' + app + '-arm64.apk',
         'notes': '''$NOTES''',
-        'force': False,
+        # force:这一版是否强制更新(发版当时的一次性决定)
+        'force': $FORCE_JSON,
+        # min_build:低于它的客户端视为过旧(**持续有效**的下限,与 force 不同)。
+        # 服务端 /app/latest 原样透出,当前只用于观测,不拦截
+        'min_build': $MIN_BUILD,
         # 应用内安装前用它校验;缺这个字段客户端会退回浏览器下载(#123)
         'sha256': shas[app],
     }
