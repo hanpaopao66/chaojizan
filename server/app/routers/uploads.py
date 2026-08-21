@@ -107,6 +107,36 @@ async def upload_image(
     return {"url": stored.url, "private": private}
 
 
+# 「上传者本人可读」不适用的用途:**这一类另有归属规则,上传者不在其中**。
+#
+# delivery_proof 拍的是别人家门口,归属是「该订单的顾客」,骑手拍完就该看不到。
+# 用排除法而不是白名单:incident / after_sale / food_safety 这几类在库里
+# 没有任何一行引用它们(工单正文里存的是 URL 文本),白名单会把上传者
+# 自己的事故照、售后凭证一起锁死 —— 修一个洞不能顺手废掉三个功能。
+_NOT_SELF_PURPOSES = {"delivery_proof"}
+
+
+def _key_parts(ref: str) -> tuple[str, str]:
+    """把 `{purpose}/{name}` 拆开。老文件是平铺的裸文件名,拆出来 purpose 为空。
+
+    **只认两段**:`id_card/u5-abc.jpg` 这种。多一段就是拼出来的路径,
+    一律当成认不出(见 _may_read_private 末尾那条注释)。
+    """
+    parts = ref.strip("/").split("/")
+    return (parts[0], parts[1]) if len(parts) == 2 else ("", "")
+
+
+def _purpose_of(ref: str) -> str:
+    return _key_parts(ref)[0]
+
+
+def _uploader_of(ref: str) -> int | None:
+    """从 key 的首个 owner 段解析上传者 id;认不出返回 None。"""
+    import re
+    m = re.match(r"^u(\d+)-", _key_parts(ref)[1])
+    return int(m.group(1)) if m else None
+
+
 async def _may_read_private(
     ref: str, user: User, db: AsyncSession
 ) -> bool:
@@ -119,12 +149,6 @@ async def _may_read_private(
     """
     if user.role == UserRole.admin:
         return True                      # 审核要看
-
-    # 上传者本人:key 里编着 u{id}-(见 storage._new_key)。
-    # 入驻/认证表单在「上传成功」到「提交落库」之间,文件不被任何行引用,
-    # 只按归属判权会让上传者自己都看不了刚传的证照(缩略图破图、OCR 失效)
-    if f"/u{user.id}-" in f"/{ref}":
-        return True
 
     # 骑手证件:只有本人
     if await db.scalar(select(RiderProfile.rider_id).where(
@@ -162,7 +186,18 @@ async def _may_read_private(
             Order.delivery_photo_url.contains(ref))):
         return True
 
-    return False
+    # 上传者本人:key 里编着 u{id}-(见 storage._new_key)。
+    # 入驻/认证表单在「上传成功」到「提交落库」之间,文件不被任何行引用,
+    # 只按归属判权会让上传者自己都看不了刚传的证照(缩略图破图、OCR 失效)。
+    #
+    # **放在最后,而且只对表单类用途生效**,两条都是必需的:
+    #   - 原先它排在最前面,于是「送达留证只给该单顾客」那条整个失效 ——
+    #     照片是骑手传的,他永远先命中这一条,能长期回看别人家门口;
+    #   - 原先是裸子串 `f"/u{user.id}-" in f"/{ref}"`,路径里任意位置
+    #     出现 /u5- 就放行,下面按归属查库的分支一条都不执行。
+    #     现在只认 key 的**首个 owner 段**。
+    return (_uploader_of(ref) == user.id
+            and _purpose_of(ref) not in _NOT_SELF_PURPOSES)
 
 
 @router.get("/files/{key:path}")

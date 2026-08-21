@@ -242,6 +242,56 @@ def demo_shop():
     return call("GET", f"/merchants/{DEMO_SHOP_ID}")
 
 
+# ---------- 账务自检:按"本次运行新增了什么"断言 ----------
+#
+# **只按订单号过滤是漏的。** 聚合类检查(profit_sharing_stuck /
+# profit_sharing_failed / global_identity_mismatch / refund_stuck /
+# stay_paid_stuck …)的 detail 里根本没有订单号,一律被 `no in detail`
+# 滤掉 —— 真出问题时用例照样打印"全绿 ✅"。实测过:本地库 51 条在响,
+# 用例一条都没看见。
+#
+# 但也不能直接 `assert not run_audit()`:开发库是长期共享的,历史 e2e
+# 残留(挂起的分账、退不掉的老单)会让每个用例长期红着,
+# 而"长期红灯"的下场就是所有人习惯红了也没关系 —— 那比不查更糟。
+#
+# 所以口径是**增量**:跑场景前拍一次快照,跑完再拍一次,
+# 只对"这一趟新增出来的问题"负责。历史脏数据不背,新破的必抓。
+
+
+async def audit_snapshot():
+    """跑一次账务自检,返回 {check_name: 条数} 快照。"""
+    from collections import Counter
+
+    from app.services.audit import run_audit
+    return Counter(p["check"] for p in await run_audit())
+
+
+async def audit_new_problems(before, *order_nos):
+    """再跑一次自检,返回本次运行新增的问题。
+
+    两类都算数:
+      1. detail 里点名了本用例造的订单号 —— 逐单类检查;
+      2. 某个 check 的条数比 `before` 多了 —— 聚合类检查唯一的抓法。
+    """
+    from collections import Counter
+
+    from app.services.audit import run_audit
+    problems = await run_audit()
+    after = Counter(p["check"] for p in problems)
+    mine = [p for p in problems
+            if any(no and no in p.get("detail", "") for no in order_nos)]
+    seen = {(p["check"], p["detail"]) for p in mine}
+    for check in sorted(c for c, n in after.items() if n > before.get(c, 0)):
+        # 聚合类检查只多出一条也要炸,但别把同类的几百条全倒出来
+        sample = next(p["detail"] for p in problems if p["check"] == check)
+        entry = {"check": check,
+                 "detail": f"本次运行新增 {after[check] - before.get(check, 0)} 条"
+                           f"(本轮共 {after[check]} 条),例:{sample[:200]}"}
+        if (entry["check"], entry["detail"]) not in seen:
+            mine.append(entry)
+    return mine
+
+
 def fake_order(**overrides):
     """小票渲染用的假订单。**三个用例共用这一份**。
 

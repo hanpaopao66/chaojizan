@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db import get_db
 from ..models import PlatformFlag
-from ..ratelimit import check_rate_limit
+from ..ratelimit import check_rate_limit, client_ip
 from ..state_machine import STATUS_LABELS, OrderStatus
 
 router = APIRouter(prefix="/screen", tags=["公开大屏"])
@@ -45,8 +45,14 @@ def _cache_put(key: str, data: dict, ttl: float) -> None:
 
 
 async def _guard(request: Request) -> None:
-    ip = request.client.host if request.client else "unknown"
-    await check_rate_limit("screen", ip, 120)
+    """公开接口按来源 IP 限流(/screen 与 /transparency 共用这一只闸)。
+
+    **必须走 client_ip 而不是 request.client.host** ——
+    后者在 nginx 容器后面对所有请求都是同一个 172.x 地址,
+    于是全站共用一个 120/分钟的桶:几台店内电视一轮询就把额度刷光,
+    真实用户跟着一起吃 429。这条以前就是这么写的。
+    """
+    await check_rate_limit("screen", client_ip(request), 120)
 
 
 async def _show_gmv(db: AsyncSession) -> bool:

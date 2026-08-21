@@ -83,6 +83,27 @@ def resolve_options(dish_name: str, base_cents: int, groups: list,
     return total, display
 
 
+def coarse_address(order: Order) -> str:
+    """粗地址:登记了 POI/小区就用它,否则把结尾那段门牌替换掉。
+
+    坐标不动 —— 骑手要导航,能定位到楼下不等于知道住哪个门。
+    """
+    import re as _re
+    return (order.addr_public
+            or _re.sub(r"\d[\d\-室号门栋单元楼层a-zA-Z]*$",
+                       "***", order.address).strip() + " ***")
+
+
+def short_name(order: Order) -> str:
+    """中性称呼:下单时填的称谓 > 只留姓 > 「顾客」。"""
+    if order.salutation:
+        return order.salutation
+    if order.addr_protect:
+        return "顾客"
+    name = (order.contact_name or "").strip()
+    return f"{name[0]}**" if name else "顾客"
+
+
 def order_out(order: Order, merchant: Merchant | None,
               viewer: User | None = None, *,
               as_role: str | None = None) -> OrderOut:
@@ -114,17 +135,22 @@ def order_out(order: Order, merchant: Merchant | None,
         out.merchant_lng = point.lng
     role = as_role or (viewer.role.value if viewer is not None else None)
     if role in ("merchant", "rider"):
-        out.privacy_phone = dialable_phone(order)
+        # 骑手侧再分一层:**这一单的骑手**才拿得到联系方式和门牌。
+        #
+        # 抢单池里的单 rider_id 是空的 —— 谁都不是它的骑手。原先这里只看
+        # role 就下发 dialable_phone,于是骑手只要轮询 /available-orders、
+        # 一单都不接,就能拿到全城顾客的完整手机号 + 完整门牌 + 真名。
+        # 而没接单的人本来就不需要联系顾客:抢到之后再给全,业务上也是对的。
+        assigned = role != "rider" or (
+            viewer is not None and order.rider_id == viewer.id)
+        out.privacy_phone = dialable_phone(order) if assigned else ""
         out.contact_phone = mask_phone(order.contact_phone)
         # 地址保护:未放行前只给粗地址(POI/小区),门牌详情不下发;
         # 收货人一律中性称呼。坐标保留(导航要用,门牌才是敏感面)
-        if order.addr_protect and not order.addr_revealed:
-            import re as _re
-            out.address = (order.addr_public
-                           or _re.sub(r"\d[\d\-室号门栋单元楼层a-zA-Z]*$",
-                                      "***", order.address).strip() + " ***")
-        if order.addr_protect:
-            out.contact_name = order.salutation or "顾客"
+        if not assigned or (order.addr_protect and not order.addr_revealed):
+            out.address = coarse_address(order)
+        if not assigned or order.addr_protect:
+            out.contact_name = short_name(order)
         # 送达留证仅用户/平台可见
         out.delivery_photo_url = ""
     return out
@@ -140,6 +166,47 @@ async def orders_out(db: AsyncSession, orders: list[Order],
         for m in await db.scalars(select(Merchant).where(Merchant.id.in_(ids)))
     }
     return [order_out(o, merchants.get(o.merchant_id), viewer) for o in orders]
+
+
+async def may_view_order(db: AsyncSession, order: Order, user: User) -> bool:
+    """这个人是不是这一单的当事人。四种角色各有各的范围:
+
+    - 顾客:本人下的单;
+    - 商家:该单所属门店(含店员、含品牌里被授权到这家店的成员);
+    - 骑手:接了这一单的那个骑手;
+    - admin:全部(客服要查)。
+
+    口径与 self_refund_check / urge_order / rider_location 一致 ——
+    那几个从一开始就写对了,这里只是把同一条判断收敛成一个函数,
+    免得下一个只读端点又忘一次。
+    """
+    role = user.role.value
+    if role == "admin":
+        return True
+    if role == "customer":
+        return order.customer_id == user.id
+    if role == "rider":
+        return order.rider_id == user.id
+    if role == "merchant":
+        from ..services.staff import operable_shop
+        # 显式传本单的 merchant_id:不传的话走 X-Shop-Id / "我唯一的那家店",
+        # 连锁老板没选门店时会把自己家的单判成看不了
+        shop, _ = await operable_shop(db, user, order.merchant_id)
+        return shop is not None and shop.id == order.merchant_id
+    return False
+
+
+async def visible_order_or_404(db: AsyncSession, order_no: str,
+                               user: User) -> Order:
+    """按归属取单;不是当事人就当它不存在。
+
+    **404 而不是 403**:订单号是可枚举的(20 位 hex 不算,但历史短号在),
+    403 等于确认"这个单号存在",而这里没有任何理由把这件事告诉外人。
+    """
+    order = await db.scalar(select(Order).where(Order.order_no == order_no))
+    if order is None or not await may_view_order(db, order, user):
+        raise HTTPException(404, "订单不存在")
+    return order
 
 
 async def _record_event(db, order: Order, from_status: str, to_status: str,
@@ -270,6 +337,12 @@ async def create_order(
                 Dish.id == item.dish_id,
                 Dish.merchant_id == merchant.id,
                 Dish.is_on_sale.is_(True),
+                # 估清(今日售罄)是**下单闸门**,不是"库存刚好是 0"的同义词。
+                # 少了这个条件,任何一条回补库存的路径(缺货退款、取消回补)
+                # 都会让估清的菜在商家不知情的情况下复活 —— 下面那段
+                # 三分文案里专门有一支报「今日已售罄」,说明闸门本来就该看它。
+                # 解除估清只有商家点「撤销估清」和次日 04:00 自动恢复两条路
+                Dish.sold_out_today.is_(False),
                 Dish.stock >= item.quantity,
             )
             .values(stock=Dish.stock - item.quantity)
@@ -333,6 +406,7 @@ async def create_order(
                         Dish.id == sub.get("dish_id"),
                         Dish.merchant_id == merchant.id,
                         Dish.is_on_sale.is_(True),
+                        Dish.sold_out_today.is_(False),   # 同主项:估清即闸门
                         Dish.stock >= sub_qty,
                     )
                     .values(stock=Dish.stock - sub_qty)
@@ -857,8 +931,8 @@ async def transition(
     ):
         await restore_stock(db, order)
     # 已支付订单取消(用户取消/商家拒单)= 全额退款。
-    # 缺货部分退款已同步扣减 total_cents,此处余额即用户净付金额;
-    # 必须先发起退款再累计 refund_cents:微信通道按 total+已退 反推原始支付总额
+    # 缺货部分退款已同步扣减 total_cents,此处余额即用户净付金额。
+    # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
     if (
         payload.to_status == OrderStatus.CANCELLED
         and from_status != OrderStatus.PENDING_PAYMENT
@@ -867,7 +941,6 @@ async def transition(
         refund_amount = order.total_cents
         note = f"取消退款:{order.cancel_reason}"
         await request_refund(db, order, refund_amount, note)
-        order.refund_cents += refund_amount
         order.refund_note = (
             f"{order.refund_note};{note}" if order.refund_note else note
         )
@@ -1007,13 +1080,14 @@ async def change_address(
     refunded = 0
     if delta < 0:
         refunded = -delta
+        note = f"改地址退配送费差价 ¥{refunded / 100:.2f}"
+        # **先发起退款,再下调 total_cents**:微信通道按「当前 total + 已退」
+        # 反推原始支付总额,先扣了 total 反推出来的就少一截(见 wechat_pay)
+        await request_refund(db, order, refunded, "改地址,配送费差价退还")
         order.delivery_fee_cents += delta
         order.total_cents += delta
-        note = f"改地址退配送费差价 ¥{refunded / 100:.2f}"
-        order.refund_cents += refunded
         order.refund_note = (f"{order.refund_note};{note}"
                              if order.refund_note else note)
-        await request_refund(db, order, refunded, "改地址,配送费差价退还")
     await _record_event(db, order, order.status.value, "address_changed", user)
     await db.commit()
     await db.refresh(order)
@@ -1155,7 +1229,6 @@ async def self_refund(
     if order.total_cents > 0:
         note = f"自助退款:{reason}"
         await request_refund(db, order, order.total_cents, note)
-        order.refund_cents += order.total_cents
         order.refund_note = (f"{order.refund_note};{note}"
                              if order.refund_note else note)
     order.status = OrderStatus.CANCELLED
@@ -1351,7 +1424,7 @@ async def refund_item(
     if payload.quantity > target["quantity"]:
         raise HTTPException(422, f"最多可退 {target['quantity']} 份")
 
-    refund_amount = target["price_cents"] * payload.quantity
+    list_price = target["price_cents"] * payload.quantity
     note_piece = f"{target['name']}×{payload.quantity}"
 
     # 库存回补(套餐要连子项一起还 —— 真正扣的是子项)
@@ -1373,16 +1446,60 @@ async def refund_item(
     target["quantity"] -= payload.quantity
     items = [i for i in items if i["quantity"] > 0]
 
-    # 付费菜全退光 = 整单取消(只剩赠品行不算"还有菜"——赠品库存一并回补)
-    if not any(i.get("price_cents", 0) > 0 for i in items):
-        for gift in items:
+    # 付费菜全退光 = 整单取消(只剩赠品行不算"还有菜")
+    full_cancel = not any(i.get("price_cents", 0) > 0 for i in items)
+
+    if full_cancel:
+        # 全退光:退掉用户实付的剩余全部(打包/配送/扣除过的优惠都按实付口径)
+        refund_amount = max(order.total_cents, 0)
+        disc_share, sub_share = order.discount_cents, order.subsidy_cents
+    else:
+        # **退款按用户实付口径,不是菜单原价。**
+        #
+        # 满减/首单立减/平台券是**整单**优惠,用户从来没按原价付过这道菜。
+        # 按 price×qty 退,退出去的钱里就有一截是他没付过的:
+        # 餐费 5300 满减 2000 配送 300 → 实付 3600,退掉 4500 的那道菜
+        # 就退了 4500,total_cents 被扣成 -900,平台净流出 900 分
+        # (审计规则 5b 抓的就是这个负数),商家净额跟着变负、钱包被倒扣。
+        #
+        # 口径:按该菜在**当前**餐品总额中的占比分摊整单优惠。
+        # 这**不是**"整单回收满减" —— 用户留下的部分继续享受同样的折扣率,
+        # 不会因为退了一道菜就跌破门槛要补差价;分摊掉的那部分优惠
+        # 各自退回给出资方(满减→商家,补贴→平台),谁出的钱谁收回。
+        # 向下取整,不足一分的零头算用户的。
+        #
+        # 这样订单自洽式 total = 菜品+打包-满减+配送+小费-补贴 天然守恒
+        # (审计规则 3),而 Σ退款 ≤ 用户实付 是它的推论。
+        food_before = order.food_cents
+        if food_before > 0:
+            disc_share = min(order.discount_cents * list_price // food_before,
+                             order.discount_cents)
+            sub_share = min(order.subsidy_cents * list_price // food_before,
+                            order.subsidy_cents)
+        else:
+            disc_share = sub_share = 0
+        refund_amount = max(list_price - disc_share - sub_share, 0)
+        if refund_amount > order.total_cents:
+            # 上面的分摊保证了退款 ≤ 剩余应付,走到这儿说明哪条口径漏了。
+            # 宁可少退也不能退超(退超 = 平台净流出,而且用户倒欠钱)
+            logger.error(
+                "缺货退款封顶:订单 %s 算出 %s 分 > 剩余应付 %s 分",
+                order.order_no, refund_amount, order.total_cents)
+            refund_amount = max(order.total_cents, 0)
+
+    # **先发起退款,再改订单金额**:微信通道按「当前 total + 已退」反推
+    # 原始支付总额,先扣了 total 反推出来的就少一截(见 wechat_pay)。
+    # refund_cents 也由 request_refund 自己累计(渠道拒绝则不累计)
+    if refund_amount > 0:
+        await request_refund(db, order, refund_amount, f"缺货退款:{note_piece}")
+
+    if full_cancel:
+        for gift in items:      # 只剩的赠品行,库存一并回补
             await db.execute(
                 update(Dish)
                 .where(Dish.id == gift["dish_id"])
                 .values(stock=Dish.stock + gift["quantity"])
             )
-        # 全退光:整单取消,退掉用户实付的剩余全部(打包/配送/扣除过的优惠都按实付口径)
-        refund_amount = order.total_cents
         order.items = []
         order.food_cents = 0
         order.packing_fee_cents = 0
@@ -1390,7 +1507,6 @@ async def refund_item(
         order.subsidy_cents = 0
         order.total_cents = 0
         order.commission_cents = 0
-        order.refund_cents += refund_amount
         order.refund_note = (
             f"{order.refund_note};{note_piece}" if order.refund_note else note_piece
         )
@@ -1402,18 +1518,18 @@ async def refund_item(
         await _record_event(db, order, from_status.value, OrderStatus.CANCELLED.value, user)
     else:
         order.items = items
-        order.food_cents -= refund_amount
-        order.total_cents -= refund_amount
-        # 满减/首单立减不回收(对用户友好,成本各自认);佣金按新的实收口径重算
+        order.food_cents = max(order.food_cents - list_price, 0)
+        order.discount_cents -= disc_share      # 分摊掉的那部分优惠随菜退场
+        order.subsidy_cents -= sub_share
+        order.total_cents = max(order.total_cents - refund_amount, 0)
+        # 佣金按新的实收口径重算(商家仍只承担留下来的那部分满减)
         gross = max(order.food_cents + order.packing_fee_cents - order.discount_cents, 0)
         order.commission_cents = int(Decimal(gross) * shop.commission_rate)
-        order.refund_cents += refund_amount
         order.refund_note = (
             f"{order.refund_note};{note_piece}" if order.refund_note else note_piece
         )
         await _record_event(db, order, order.status.value, "partial_refund", user)
 
-    await request_refund(db, order, refund_amount, f"缺货退款:{note_piece}")
     await db.commit()
     await db.refresh(order)
     await _notify(order)
@@ -1576,9 +1692,7 @@ async def get_order(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    order = await db.scalar(select(Order).where(Order.order_no == order_no))
-    if order is None:
-        raise HTTPException(404, "订单不存在")
+    order = await visible_order_or_404(db, order_no, user)
     merchant = await db.get(Merchant, order.merchant_id)
     out = order_out(order, merchant, user)
     # 详情页专属:联系电话(用户联系骑手/商家,一键拨号)
@@ -1601,9 +1715,7 @@ async def order_events(
     db: AsyncSession = Depends(get_db),
 ):
     """订单状态时间轴(几点几分接单/取餐/送达),订单追踪页用。"""
-    order = await db.scalar(select(Order).where(Order.order_no == order_no))
-    if order is None:
-        raise HTTPException(404, "订单不存在")
+    order = await visible_order_or_404(db, order_no, user)
     result = await db.scalars(
         select(OrderEvent)
         .where(OrderEvent.order_id == order.id)
@@ -1625,10 +1737,9 @@ async def order_refunds(
     """
     from ..models import Refund
 
-    order = await db.scalar(select(Order).where(Order.order_no == order_no))
-    if order is None or (user.role.value == "customer"
-                         and order.customer_id != user.id):
-        raise HTTPException(404, "订单不存在")
+    # 原先只拦了顾客(customer_id != 我 → 404),商家/骑手角色拿到的是 200:
+    # 随便一个骑手号就能翻别人单子的退款流水。四种角色统一走归属校验
+    order = await visible_order_or_404(db, order_no, user)
     rows = await db.scalars(
         select(Refund).where(Refund.order_id == order.id)
         .order_by(Refund.created_at))

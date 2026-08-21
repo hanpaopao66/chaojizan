@@ -121,7 +121,10 @@ other = call("POST", "/auth/register", body={
     "password": "123456", "name": "对账测试商家", "role": "merchant",
 })["token"]
 err = call("GET", "/merchants/me/finance/daily", other, expect_error=True)
-assert err["_error"] == 404  # 还没开店
+# 403 不是 404:对账单已改走 _money_shop_or_403(routers/merchants.py),
+# 与 /me/wallet、/me/withdrawals 同一条资金边界 —— 品牌区域经理能改价改设置,
+# 但碰不到钱。拿不到别人的账这一点没变,变的只是拒绝的口径
+assert err["_error"] == 403, err
 print("✓ 其他商家账号看不到本店账目(数据按店隔离)")
 
 # 清场

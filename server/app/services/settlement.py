@@ -89,7 +89,13 @@ async def credit_merchant_for_order(db: AsyncSession, order: Order) -> None:
     # 商家应收口径 = 菜品 + 打包费 - 商家满减(food_cents 列存的就是这个口径);
     # 自配送单配送费归商家(商家出运力),并入本行 food 口径——
     # 行内 net == food - commission 恒等式不破,佣金仍只按餐费计
-    gross = order.food_cents + order.packing_fee_cents - order.discount_cents
+    #
+    # **钳 0**:应收是负数意味着"商家倒贴钱给平台",钱包会被这一行倒扣。
+    # 缺货退款按占比分摊满减之后(routers/orders.refund_item)这个数不该
+    # 再为负,这里是兜底 —— 真为负了,审计规则 1 会因为净额对不上
+    # 当场报红(order_gross 那边不钳),不会被这层兜底掩盖过去
+    gross = max(order.food_cents + order.packing_fee_cents
+                - order.discount_cents, 0)
     if order.self_delivery:
         gross += order.delivery_fee_cents
     db.add(

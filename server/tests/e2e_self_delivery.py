@@ -6,7 +6,8 @@
 import asyncio
 import time
 
-from tests.util import demo_shop, call, drain_order_pool, login, register_fresh_rider
+from tests.util import (audit_new_problems, audit_snapshot, call, demo_shop,
+                        drain_order_pool, login, register_fresh_rider)
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -21,6 +22,7 @@ dish = call("POST", "/merchants/me/dishes", merchant,
 
 async def main():
     await drain_order_pool()
+    audit_before = await audit_snapshot()  # 见 util.audit_new_problems
     rider = await register_fresh_rider("自送测试骑手")
 
     call("PATCH", "/merchants/me", merchant, {"self_delivery": True})
@@ -101,11 +103,12 @@ async def main():
         assert r2 == 0, "自送单不该有骑手入账"
         print("✓ 配送费入商家账(net==food-commission 恒等),佣金只抽餐费,无骑手行")
 
-        # 5) 审计恒等式全绿(本单无问题)
-        from app.services.audit import run_audit
-        problems = [p for p in await run_audit() if no in p.get("detail", "")]
+        # 5) 审计恒等式全绿(本单无问题)。
+        #    聚合类检查的 detail 不带订单号,只按 `no in detail` 过滤会把
+        #    global_identity_mismatch 这类整个滤掉 —— 按 check 名的增量一起判
+        problems = await audit_new_problems(audit_before, no)
         assert not problems, problems
-        print("✓ 审计恒等式全绿")
+        print("✓ 审计恒等式全绿(逐单 + 聚合类增量都为 0)")
     finally:
         call("PATCH", "/merchants/me", merchant, {"self_delivery": False})
 

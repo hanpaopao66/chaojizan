@@ -10,8 +10,9 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import (call, demo_shop, drain_order_pool, login,
-                        register_fresh_customer, register_fresh_rider)
+from tests.util import (audit_new_problems, audit_snapshot, call, demo_shop,
+                        drain_order_pool, login, register_fresh_customer,
+                        register_fresh_rider)
 
 customer = register_fresh_customer()  # 售后风控按用户30天累计,用新号
 merchant = login("13800000002")
@@ -59,6 +60,9 @@ async def ps_record(no):
 
 async def main():
     await drain_order_pool()
+    # 自检基线:开发库长期共享,历史残留不由本用例背;
+    # 但本用例新造出来的问题一条都不许漏(见 util.audit_new_problems)
+    audit_before = await audit_snapshot()
     rider = await register_fresh_rider("分账测试骑手")
     call("POST", "/riders/online", rider, {"is_online": True})
 
@@ -131,13 +135,16 @@ async def main():
         assert rec2.status == "returned", rec2
         print("✓ 售后成立触发分账回退(returned)")
 
-        # 5) 审计:两种口径同场全绿
-        from app.services.audit import run_audit
-        problems = [p for p in await run_audit()
-                    if no1 in p.get("detail", "") or no2 in p.get("detail", "")
-                    or no0 in p.get("detail", "")]
+        # 5) 审计:两种口径同场全绿。
+        #
+        # **不能只按订单号过滤。** profit_sharing_failed / _stuck、
+        # global_identity_mismatch 这些聚合类检查的 detail 里没有订单号,
+        # 只写 `no1 in detail` 的话它们全被滤掉 —— 本地库 51 条在响,
+        # 用例照印"全绿 ✅"。按 check 名的增量一起判,才是真的绿。
+        problems = await audit_new_problems(audit_before, no0, no1, no2)
         assert not problems, problems
-        print("✓ platform 与 profit_sharing 口径审计恒等式全绿")
+        print("✓ platform 与 profit_sharing 口径审计恒等式全绿"
+              "(逐单 + 聚合类增量都为 0)")
     finally:
         call("POST", f"/admin/merchants/{sid}/sub-mchid", admin,
              {"sub_mchid": "", "ready": False})

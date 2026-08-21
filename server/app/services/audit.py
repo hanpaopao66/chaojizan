@@ -1,20 +1,39 @@
 """每日账务自检——账本的守夜人。
 
 核对的恒等式(近 30 天):
-  1. 每笔完成订单必须有商家入账,且 net == food - commission
+  1. 每笔完成订单必须有商家入账,且 net == food - commission,**且收款方是本店**
   2. 每笔有骑手的完成订单必须有骑手入账,且金额 == 骑手应得(见 _rider_due:
-     配送费 + 小费 + 平台承担的等餐补偿 − 跑腿服务费;外卖配送费平台一分不抽)
+     配送费 + 小费 + 平台承担的等餐补偿 − 跑腿服务费;外卖配送费平台一分不抽),
+     **且收款人是接单的那个骑手**
   3. 非取消订单:total == food + delivery
-  4. 任何骑手的可提现余额不得为负
+  4. 任何骑手的可提现余额不得为负;商家余额同理(按店主整户核,口径直接复用钱包)
   5. 每笔订单的 refund_cents 必须等于 refunds 流水之和(失败流水不算 → 自动暴露)
+  5b. 退款不得超过用户实付 —— 判据是"剩余应付不许为负"(见该条的长注释:
+      total_cents 是剩余应付不是累计实付,直接比 refund_cents 会造出几百盏假红灯)
   6. 售后退款(完成单退餐费,配送费已履约不退)的已结算订单必须有商家冲账负数行
   7. 全局恒等,分两侧:菜品侧 Σ应收 == Σ商家净额+Σ佣金(售后冲账单剔除);
      配送侧 Σ配送费 == Σ骑手入账(售后单保留 —— 配送费 100% 归骑手的账面铁证)
 
-另有一条不是恒等式、但同样是"账面与真实资金对不上"的检查:
-分账台账不许长期挂着。pending 超时未走通、以及已放弃的 failed,
-都意味着台账写着这笔钱该怎么分、实际一分没动(分账渠道尚未接入,
-桩不再伪造 success,挂起量就靠这条露出来)。
+**收款方那两句是最便宜的一类覆盖。** 上面每条恒等式都按 order_id join,
+金额两边都对、钱记到另一家分店/另一个骑手头上时,它们全绿。
+连锁店主名下十家分店,记错一家谁都看不出来 —— 两行 `==` 就把这一整类堵死。
+
+另有几条不是恒等式、但同样是"账面与真实资金对不上"的检查:
+
+- **分账台账不许长期挂着**:pending 超时未走通、以及已放弃的 failed,
+  都意味着台账写着这笔钱该怎么分、实际一分没动(分账渠道尚未接入,
+  桩不再伪造 success,挂起量就靠这条露出来);
+- **退款不许卡在 requested**:发起了、渠道没回,钱既没退给用户也没留在账上;
+- **非完成订单不许挂来路不明的入账行**:上面 1/6/7 全部从 completed 出发遍历,
+  6.5 又只看非外卖单,于是"取消单上的商家入账"整个落在视野之外 ——
+  而无骑手兜底取消恰恰会往那儿写赔付行(auto_flow);
+- **住宿 PAID 不许长期挂着**:钱已收、商家没确认,而住宿清扫对 PAID
+  没有任何超时兜底,规则 9 又把这个状态整个排除。
+
+**时间窗取的列必须是"钱落定的那一刻"**,不是下单那一刻:券按 redeemed_at
+(有效期最长 365 天,按 created_at 取窗的话第 31 天以后核销的券一生都不会被看到)、
+住宿离店按 completed_at、住宿取消按 cancelled_at。口径与对外账本
+(services/ledger.py)逐列对齐 —— 公示的数和自检的数必须是同一批流水。
 
 不平 → 写 audit_alerts + logger.error,管理后台首页红条展示。
 backfill_missing_earnings() 可对缺账的历史订单补记账(自愈,幂等)。
@@ -22,6 +41,7 @@ backfill_missing_earnings() 可对缺账的历史订单补记账(自愈,幂等)�
 import logging
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import and_
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
 
@@ -45,6 +65,20 @@ from .settlement import settle_order
 logger = logging.getLogger("superz.audit")
 
 WINDOW_DAYS = 30
+
+#: 退款发起后多久还停在 requested 就算"挂住了"。与分账的 STUCK_HOURS 同量级:
+#: 模拟通道即时成功、微信正常也是秒级,超过这个数只能是渠道没回执。
+REFUND_STUCK_HOURS = 6
+
+#: 住宿已支付后多久商家还不确认/不拒单就算"钱压着"。比退款宽松得多 ——
+#: 商家半夜收到的单第二天早上处理是常态,不能因此天天报红。
+STAY_PAID_STUCK_HOURS = 24
+
+#: 无骑手兜底取消时给商家的餐损赔付行的 note 前缀。
+#: **三处共用同一个前缀**:auto_flow 写入、这里判定"是合规赔付不是野账"、
+#: routers/transparency.py 的 /funds 按它公示赔付支出。
+#: 各写各的字符串的话,改一处就会让另外两处静默失效(一个漏报、一个少算)。
+NO_RIDER_COMP_NOTE = "无骑手接单取消,平台赔付餐损"
 
 
 def _rider_due(order) -> int:
@@ -77,6 +111,66 @@ def _rider_due(order) -> int:
                 if order.goods_actual_cents is not None
                 else order.goods_budget_cents)
     return due
+
+
+async def _reversal_due_ids(db, order_ids) -> set[int]:
+    """该冲账的订单 id —— 规则 6 与历史补录**共用这一套口径**。
+
+    ## 判据不能是「累计退款 ≥ 剩余餐费」
+
+    原来这么写:`refund_cents >= total_cents - 配送费`。这两个数根本不是
+    一个口径,规则 5b 的长注释里已经把这个坑写过一遍,这里又踩了一次:
+    `refund_cents` 是**累计**已退(只增不减),`total_cents` 是**剩余**
+    应付(缺货退款、改地址退差价都会把它同步下调)。拿累计值去比剩余值,
+    相等只是巧合,不是证据。
+
+        下单 2 份×4500,满减 2000 → 实付 7000+配送
+        缺货退 1 份(摊掉满减退 3500)→ 剩余应付 3500+配送
+        送达完成 → 商家入账按**已扣减后**的 food 口径记 3500,佣金 140
+
+    累计退款 3500 == 剩余餐费 3500,旧判据成立 —— 可这单从头到尾没有售后。
+    退掉的那一份在结算时**根本没算进商家应收**
+    (settlement.credit_merchant_for_order 读的是退款后的 food/discount),
+    再冲一次账等于凭空从商家身上扣走 3360 分。而缺货退款只能发生在
+    待接单/制作中(routers/orders.refund_item 的状态闸),**永远早于结算**。
+
+    这不只是一盏假红灯:backfill_legacy_refund_records 拿同一个判据
+    真的去执行 reverse_merchant_earning,照旧口径跑一次就会把这种单的
+    商家净额抹平 —— 假红灯背后跟着的是真扣钱。
+
+    ## 正确的判据:钱是**什么时候**退的
+
+    结算发生在订单完成那一刻。完成**之前**退的钱已经体现在入账金额里,
+    没有可冲的;完成**之后**退的钱,商家已经收进账了,必须冲回。
+    两个信号取并集,不做单点依赖:
+
+    1. `after_sales` 里有已受理的售后 —— 完成后退款的正规入口。
+       after_sales.accept、admin 的配送异常仲裁/骑手责任/食安投诉,
+       每一条退款都会写这张表并落 fault,这才是规则 6 名字里那个"售后"。
+    2. 退款流水时间 ≥ 订单完成时刻 —— 任何绕开 after_sales 的退款路径
+       也照抓不误,规则不吊死在一张表上。完成时刻缺失的老单
+       (库里约两成)退回用入账行时间兜底。
+
+    fault 判 rider/platform 的先行赔付单除外:平台垫的钱,商家无责,
+    净额保留不冲账(admin.py 食安那段管这个叫「规则 6 豁免口径」)。
+    """
+    from ..models import AfterSale, AfterSaleStatus
+
+    rows = (await db.scalars(
+        select(AfterSale).where(AfterSale.order_id.in_(order_ids)))).all()
+    exempt = {a.order_id for a in rows if a.fault in ("rider", "platform")}
+    due = {a.order_id for a in rows if a.status == AfterSaleStatus.accepted}
+    settled_at = sa_func.coalesce(Order.completed_at, MerchantEarning.created_at)
+    due |= set(await db.scalars(
+        select(Refund.order_id)
+        .join(Order, Order.id == Refund.order_id)
+        .join(MerchantEarning,
+              and_(MerchantEarning.order_id == Refund.order_id,
+                   MerchantEarning.kind == EarningKind.earning))
+        .where(Refund.order_id.in_(order_ids),
+               Refund.status != RefundStatus.failed,
+               Refund.created_at >= settled_at)))
+    return due - exempt
 
 
 async def run_audit() -> list[dict]:
@@ -145,10 +239,23 @@ async def run_audit() -> list[dict]:
         from .errand import is_errand, service_fee_cents
 
         for order in completed:
+            # 收款人校验:金额对、人错也是错账。
+            #
+            # 下面所有恒等式都按 order_id join,两边金额一致就通过 ——
+            # 于是"钱记到另一个骑手头上"是一个金额永远平、审计永远绿的错误。
+            # 跑腿单也要查,所以放在 is_errand 分支之前。
+            re = r_earnings.get(order.id)
+            if (order.rider_id is not None and re is not None
+                    and re.rider_id != order.rider_id):
+                problems.append({
+                    "check": "rider_earning_payee_mismatch",
+                    "detail": f"订单 {order.order_no} 骑手入账记在骑手 "
+                              f"#{re.rider_id} 名下,实际接单的是 "
+                              f"#{order.rider_id} —— 钱发错人,金额恒等式看不出来",
+                })
             # 跑腿单没有商家入账(见 settlement),它有自己的恒等式:
             # 用户实付 == 骑手入账 + 平台服务费
             if is_errand(order):
-                re = r_earnings.get(order.id)
                 fee = service_fee_cents(order.delivery_fee_cents)
                 if re is not None and order.rider_id is not None:
                     # 帮买按小票实付结算,和预估不一致时差额已原路退/补收,
@@ -169,14 +276,23 @@ async def run_audit() -> list[dict]:
                     "check": "merchant_earning_missing",
                     "detail": f"完成订单 {order.order_no} 缺商家入账",
                 })
-            elif me.net_cents != order_gross(order) - order.commission_cents:
-                problems.append({
-                    "check": "merchant_earning_mismatch",
-                    "detail": f"订单 {order.order_no} 商家净额 {me.net_cents} "
-                              f"≠ 应收 {order_gross(order)}-佣金 {order.commission_cents}",
-                })
+            else:
+                if me.merchant_id != order.merchant_id:
+                    problems.append({
+                        "check": "merchant_earning_payee_mismatch",
+                        "detail": f"订单 {order.order_no} 商家入账记在门店 "
+                                  f"#{me.merchant_id} 名下,下单的是 "
+                                  f"#{order.merchant_id} —— 连锁记错分店,"
+                                  "金额恒等式看不出来",
+                    })
+                if me.net_cents != order_gross(order) - order.commission_cents:
+                    problems.append({
+                        "check": "merchant_earning_mismatch",
+                        "detail": f"订单 {order.order_no} 商家净额 {me.net_cents} "
+                                  f"≠ 应收 {order_gross(order)}"
+                                  f"-佣金 {order.commission_cents}",
+                    })
             if order.rider_id is not None:
-                re = r_earnings.get(order.id)
                 if re is None:
                     problems.append({
                         "check": "rider_earning_missing",
@@ -239,35 +355,40 @@ async def run_audit() -> list[dict]:
                     "detail": f"骑手 {rider.phone} 余额为负:{earned - out} 分",
                 })
 
-        # 4b) 商家余额不得为负(口径同商家钱包:外卖净额+团购核销净额-提现)
-        from ..models import Merchant, VoucherPurchase, VoucherPurchaseStatus
+        # 4b) 商家余额不得为负。
+        #
+        # **口径直接调钱包那个函数,不在这里抄第二份。** 上面 _rider_due 的
+        # 注释写着"逐单检查与全局恒等必须共用这一个函数",商家这边曾经没照做,
+        # 代价是两条永不消失的假红灯:
+        #   - 审计只算 外卖净额+团购净额,钱包还算了住宿净额 —— 纯住宿商家
+        #     一提现,审计当场算出负数,天天报红;
+        #   - 提现按 owner_id 减,而审计是**按店逐个循环**的:店主名下两家店
+        #     各挣 10 万、共提 15 万,审计对每家店都算「10万−15万」,两条红灯。
+        # 挣的钱按店算(merchant_id),提的钱按店主算(owner_id),
+        # 那么"余额为负"这件事本身就只能按店主整户判定。
+        from ..models import Merchant
+        from ..routers.merchants import _merchant_wallet
+
         merchants = (await db.scalars(select(Merchant))).all()
+        by_owner: dict[int, list] = {}
         for shop in merchants:
-            food_net = await db.scalar(
-                select(sa_func.coalesce(sa_func.sum(MerchantEarning.net_cents), 0))
-                .where(MerchantEarning.merchant_id == shop.id,
-                       # 分账口径不进平台侧余额(钱包同口径,见 merchants.py)
-                       MerchantEarning.settle_mode == "platform")
-            )
-            voucher_net = await db.scalar(
-                select(sa_func.coalesce(sa_func.sum(VoucherPurchase.net_cents), 0))
-                .where(VoucherPurchase.merchant_id == shop.id,
-                       VoucherPurchase.status == VoucherPurchaseStatus.redeemed)
-            )
-            out = await db.scalar(
-                select(sa_func.coalesce(sa_func.sum(Withdrawal.amount_cents), 0))
-                .where(
-                    Withdrawal.user_id == shop.owner_id,
-                    Withdrawal.role == "merchant",
-                    Withdrawal.status.notin_(
-                        [WithdrawalStatus.rejected, WithdrawalStatus.failed]),
-                )
-            )
-            if food_net + voucher_net - out < 0:
+            by_owner.setdefault(shop.owner_id, []).append(shop)
+        for owner_id, shops in by_owner.items():
+            earned = 0
+            out = 0
+            for shop in shops:
+                w = await _merchant_wallet(db, shop)
+                earned += w.total_earned_cents      # 按店:外卖+团购+住宿
+                # 提现按 owner_id 查,同一店主的每家店返回的都是同一个数,
+                # 取一次就够(累加就会把连锁的提现重复扣 N 遍)
+                out = w.pending_withdrawal_cents + w.withdrawn_cents
+            if earned - out < 0:
+                names = "、".join(s.name for s in shops)
                 problems.append({
                     "check": "merchant_balance_negative",
-                    "detail": f"商家 {shop.name} 余额为负:"
-                              f"{food_net + voucher_net - out} 分",
+                    "detail": f"店主 #{owner_id}(名下 {len(shops)} 家店:{names})"
+                              f"整户余额为负:{earned - out} 分"
+                              f"(累计入账 {earned},提现 {out})",
                 })
 
         # 5) 退款一致性:订单汇总 == 逐笔流水之和(failed 不计入 → 自动暴露渠道失败)
@@ -292,29 +413,56 @@ async def run_audit() -> list[dict]:
                               f"≠ 流水之和 {refunded}(可能有渠道退款失败,需人工介入)",
                 })
 
-        # 6) 售后退款的已结算订单必须已冲账(商家净额不能白拿)。
-        #    新规则下完成单售后只退餐费(配送费保留),判定口径:
-        #    退款 >= 餐费部分(total - 配送费)即视为售后单;兼容旧数据的全额退款。
-        #    例外:判骑手责任的单(平台先行赔付),商家无责保留净额,不冲账
-        from ..models import AfterSale
-        rider_fault_ids = {
-            a.order_id
-            for a in await db.scalars(
-                select(AfterSale).where(
-                    AfterSale.fault.in_(["rider", "platform"]),
-                    # 同上:子查询,不要绑一万个参数
-                    AfterSale.order_id.in_(completed_ids),
+        # 5b) 退款上界:退出去的钱不许超过用户付进来的钱。
+        #
+        # **判据是 total_cents < 0,不是 refund_cents > total_cents。**
+        # 这一条踩过坑,写清楚免得有人"顺手改回去":
+        #
+        # `total_cents` 不是"累计实付",是**剩余应付** —— 缺货退款
+        # (routers/orders.py partial_refund:总额与菜品同步扣减)、
+        # 改地址退配送费差价(同文件 change_address)都是退钱的同时
+        # 把 total_cents 一起下调,after_sales.py 的注释写得最直白:
+        # 「total_cents 在缺货部分退款时已同步扣减,此处即用户当前净付金额」。
+        # 而 `refund_cents` 是**累计**值,只增不减。于是"先缺货退一半、
+        # 再整单取消退剩下的"这种完全正常的单,refund_cents 天然大于
+        # total_cents —— 本地库里这样的单有 400 多笔,按那个判据写就是
+        # 400 多盏永不消失的假红灯,比不查还糟。
+        #
+        # 那怎么抓真的超退?所有退款路径的金额要么自己封顶
+        # (`max(0, total - keep)` / `refund_amount = order.total_cents`),
+        # 要么走"退多少就从 total 扣多少"的下调口径。**唯一能退超的方式,
+        # 就是从 total 里扣掉一个比它还大的数** —— 剩余应付被扣成负数。
+        # 用户不可能倒欠平台钱,total_cents < 0 就是平台净流出的铁证,
+        # 而且它不依赖任何"这笔算不算下调"的判断,不会误伤。
+        #
+        # **这条不加任何排除条件。** 下面规则 7 遇到退超了的单是把它从恒等式里
+        # 剔除(active 的过滤是 refund < total),于是超退不但不报警,
+        # 还顺手把自己从全局核对里摘了出去 —— 越离谱的单越安静。
+        over_refunded = (
+            await db.scalars(
+                select(Order).where(
+                    Order.total_cents < 0,
+                    Order.created_at >= since,
                 )
             )
-        }
+        ).all()
+        for order in over_refunded:
+            problems.append({
+                "check": "refund_exceeds_total",
+                "detail": f"订单 {order.order_no}({order.status.value})"
+                          f"退款超过用户实付:剩余应付被扣成 {order.total_cents} 分,"
+                          f"累计已退 {order.refund_cents} 分,平台净流出 "
+                          f"{-order.total_cents} 分 —— 用户不可能倒欠钱",
+            })
+
+        # 6) 售后退款的已结算订单必须已冲账(商家净额不能白拿)。
+        #    「该不该冲账」的判据见 _reversal_due_ids ——
+        #    是结算之后确实往外退过钱,不是金额上的巧合
+        reversal_due = await _reversal_due_ids(db, completed_ids)
         for order in completed:
-            food_part = order.total_cents - (
-                order.delivery_fee_cents + order.tip_cents
-                if order.rider_id is not None else 0)
-            if (order.refund_cents >= food_part > 0
+            if (order.id in reversal_due
                     and order.id in m_earnings
-                    and order.id not in m_reversals
-                    and order.id not in rider_fault_ids):
+                    and order.id not in m_reversals):
                 problems.append({
                     "check": "reversal_missing",
                     "detail": f"订单 {order.order_no} 售后已退餐费但商家入账未冲账",
@@ -378,13 +526,20 @@ async def run_audit() -> list[dict]:
             })
 
         # 8) 团购券:每张已核销券 净额+服务费 == 售价(逐张),全局 Σ 同样恒等
+        #
+        # **窗口按 redeemed_at,不是 created_at。** 券的钱是核销那一刻才落定的
+        # (net/commission 都在 routers/vouchers.py 核销时才写),而有效期默认
+        # 90 天、上限 365 天。按下单时间取窗的话,第 31 天以后核销的券
+        # **一生中没有任何一天会被审计看到** —— 它落定的时候,自检早就
+        # 不看它了。对外账本(ledger.py: replace("created_at","redeemed_at"))
+        # 取的就是这一列,自检必须和公示同一批流水。
         from ..models import VoucherPurchase, VoucherPurchaseStatus
 
         redeemed = (
             await db.scalars(
                 select(VoucherPurchase).where(
                     VoucherPurchase.status == VoucherPurchaseStatus.redeemed,
-                    VoucherPurchase.created_at >= since,
+                    VoucherPurchase.redeemed_at >= since,
                 )
             )
         ).all()
@@ -403,12 +558,23 @@ async def run_audit() -> list[dict]:
         from ..models import StayOrder
         from ..state_machine import StayOrderStatus
 
+        #
+        # **窗口按资金落定时刻取,不是下单时刻。** 住宿是提前订的:提前一个月
+        # 订房、住完离店,按 created_at 取 30 天窗的话这单 100% 漏检 ——
+        # 它产生佣金的那天已经在窗外了。离店看 completed_at,
+        # 取消/拒单/未入住看 cancelled_at,与 ledger.py 逐列对齐。
+        from sqlalchemy import and_ as sa_and
+        from sqlalchemy import or_ as sa_or
+
         settled_stays = (await db.scalars(
-            select(StayOrder).where(
-                StayOrder.status.in_([
-                    StayOrderStatus.COMPLETED, StayOrderStatus.CANCELLED,
-                    StayOrderStatus.NOSHOW, StayOrderStatus.REJECTED]),
-                StayOrder.created_at >= since))).all()
+            select(StayOrder).where(sa_or(
+                sa_and(StayOrder.status == StayOrderStatus.COMPLETED,
+                       StayOrder.completed_at >= since),
+                sa_and(StayOrder.status.in_([
+                           StayOrderStatus.CANCELLED, StayOrderStatus.NOSHOW,
+                           StayOrderStatus.REJECTED]),
+                       StayOrder.cancelled_at >= since),
+            )))).all()
         for o in settled_stays:
             if o.status == StayOrderStatus.COMPLETED:
                 bad = (o.fee_cents + o.net_cents != o.total_cents
@@ -445,6 +611,108 @@ async def run_audit() -> list[dict]:
                 "detail": f"分账已放弃 {ps['failed']} 笔共 {ps['failed_cents']} 分"
                           f"(超重试上限),需人工处理:清扫只捞 pending,"
                           f"failed 不会自己恢复",
+            })
+
+        # 11) 退款挂在 requested:向渠道发起了、渠道没回。
+        #     钱既没到用户手上,也不在平台账上算数 —— 规则 5 把 requested
+        #     算进"流水之和"(只排除 failed),所以恒等式那边一片安宁。
+        #     分账挂起有专门一条,退款挂起以前没有,这条把口子补上。
+        #     同样不设时间窗(挂着的钱不会因为过了 30 天就不欠了),
+        #     同样聚合成一条(渠道抽风时会是几百笔,一笔一条等于刷屏)。
+        now_utc = datetime.now(timezone.utc)
+        stuck_n, stuck_cents, stuck_oldest = (await db.execute(
+            select(sa_func.count(Refund.id),
+                   sa_func.coalesce(sa_func.sum(Refund.amount_cents), 0),
+                   sa_func.min(Refund.created_at))
+            .where(Refund.status == RefundStatus.requested,
+                   Refund.created_at
+                   < now_utc - timedelta(hours=REFUND_STUCK_HOURS)))).one()
+        if stuck_n:
+            if stuck_oldest.tzinfo is None:  # 与仓库其它处一致:naive 当 UTC
+                stuck_oldest = stuck_oldest.replace(tzinfo=timezone.utc)
+            oldest_h = int((now_utc - stuck_oldest).total_seconds() // 3600)
+            problems.append({
+                "check": "refund_stuck",
+                "detail": f"退款挂起 {stuck_n} 笔共 {stuck_cents} 分超过 "
+                          f"{REFUND_STUCK_HOURS} 小时仍是 requested,最久的已挂 "
+                          f"{oldest_h} 小时 —— 渠道没回执,用户没收到钱",
+            })
+
+        # 12) 非完成订单上挂着的商家入账行。
+        #
+        # 这是和 6.5 同一类的补盲区。规则 1/6/7 全部从 completed 那批单出发遍历,
+        # 6.5 又只看 order_kind != 外卖,于是**取消单上的外卖商家入账行**
+        # 谁都遍历不到。而无骑手兜底取消(services/auto_flow.py)恰恰会往那儿
+        # 写一条平台赔付餐损的入账行 —— 那是真金白银从平台流向商家,
+        # 却是审计视野里唯一一块没人看的地方。
+        #
+        # **只报"来路不明"的,不把合规赔付本身报成红灯。** 兜底赔付是设计内的
+        # 支出(透明中心 /funds 已按 note 公示),天天红一条只会让人习惯忽略红灯;
+        # 合规赔付的笔数金额随告警文案一起带出来,够对账就行。
+        from .errand import KIND_FOOD
+        noncompleted_rows = (await db.execute(
+            select(Order.order_no, Order.status, Order.order_kind,
+                   Order.food_cents, Order.packing_fee_cents,
+                   Order.discount_cents,
+                   sa_func.sum(MerchantEarning.net_cents),
+                   sa_func.sum(MerchantEarning.commission_cents),
+                   sa_func.min(MerchantEarning.note))
+            .join(MerchantEarning, MerchantEarning.order_id == Order.id)
+            .where(Order.status != OrderStatus.COMPLETED,
+                   Order.created_at >= since)
+            .group_by(Order.order_no, Order.status, Order.order_kind,
+                      Order.food_cents, Order.packing_fee_cents,
+                      Order.discount_cents)
+            .having(sa_func.sum(MerchantEarning.net_cents) != 0))).all()
+        comp_n, comp_cents, bad_rows = 0, 0, []
+        for (order_no, status, kind, food, packing, discount,
+             net, commission, note) in noncompleted_rows:
+            expected = food + packing - discount
+            sanctioned = (status == OrderStatus.CANCELLED
+                          and kind == KIND_FOOD
+                          and commission == 0
+                          and net == expected
+                          and note.startswith(NO_RIDER_COMP_NOTE))
+            if sanctioned:
+                comp_n += 1
+                comp_cents += net
+            else:
+                bad_rows.append((order_no, status, net, commission, note))
+        if comp_n:  # 合规赔付不报警,记一行日志够管理端复核
+            logger.info("平台兜底赔付(近 %s 天):%s 笔共 %s 分",
+                        WINDOW_DAYS, comp_n, comp_cents)
+        for order_no, status, net, commission, note in bad_rows:
+            problems.append({
+                "check": "noncompleted_order_earning",
+                "detail": f"未完成订单 {order_no}({status.value})挂着商家入账 "
+                          f"{net} 分、佣金 {commission} 分,note「{note[:40]}」——"
+                          f"不是兜底赔付的形态,这笔钱没有对应的已完成交易"
+                          f"(同期合规兜底赔付 {comp_n} 笔共 {comp_cents} 分)",
+            })
+
+        # 13) 住宿 PAID 挂起:钱已收、商家一直没确认。
+        #     规则 9 只核已结算的四个终态,PAID/CONFIRMED/CHECKED_IN 整个排除;
+        #     而住宿清扫(auto_flow._sweep_stays)对 CREATED 有支付超时、
+        #     对 CONFIRMED 有 noshow、对 CHECKED_IN 有自动离店,**唯独 PAID
+        #     没有任何超时兜底** —— 商家不点确认,这笔钱就无限期压在平台侧,
+        #     既不结算也不退款,而且没有任何一条检查看得见它。
+        stay_n, stay_cents, stay_oldest = (await db.execute(
+            select(sa_func.count(StayOrder.id),
+                   sa_func.coalesce(sa_func.sum(StayOrder.total_cents), 0),
+                   sa_func.min(StayOrder.paid_at))
+            .where(StayOrder.status == StayOrderStatus.PAID,
+                   StayOrder.paid_at
+                   < now_utc - timedelta(hours=STAY_PAID_STUCK_HOURS)))).one()
+        if stay_n:
+            if stay_oldest.tzinfo is None:
+                stay_oldest = stay_oldest.replace(tzinfo=timezone.utc)
+            oldest_h = int((now_utc - stay_oldest).total_seconds() // 3600)
+            problems.append({
+                "check": "stay_paid_stuck",
+                "detail": f"住宿已支付未确认 {stay_n} 笔共 {stay_cents} 分超过 "
+                          f"{STAY_PAID_STUCK_HOURS} 小时,最久的已挂 {oldest_h} 小时"
+                          f" —— 钱在平台侧,商家没确认也没拒单,清扫对 PAID "
+                          f"没有超时兜底,只能人工推",
             })
 
         for p in problems:
@@ -485,6 +753,14 @@ async def backfill_legacy_refund_records() -> int:
     fixed = 0
     since = datetime.now(timezone.utc) - timedelta(days=WINDOW_DAYS)
     async with SessionLocal() as db:
+        refunded_ids = select(Order.id).where(
+            Order.refund_cents > 0, Order.created_at >= since
+        )
+        # 冲账口径与规则 6 完全共用一个函数,不再各抄一份。
+        # 口径不一致的教训:补录了入账却按旧口径不补冲账,规则 6 永久红灯。
+        # 而按旧那个「累计退款 ≥ 剩余餐费」的巧合判据补冲账更糟 ——
+        # 会把缺货退款后正常完成的单的商家净额直接扣掉(见 _reversal_due_ids)
+        reversal_due = await _reversal_due_ids(db, refunded_ids)
         refunded = (
             await db.scalars(
                 select(Order).where(
@@ -511,19 +787,7 @@ async def backfill_legacy_refund_records() -> int:
                     status=RefundStatus.success,
                 ))
                 fixed += 1
-            # 冲账口径与规则 6 完全一致:退款覆盖餐费部分(配送费已履约不退)
-            # 即需冲账;判骑手责的先行赔付单除外(商家无责保留净额)。
-            # 口径不一致的教训:补录了入账却按旧口径不补冲账,规则 6 永久红灯
-            from ..models import AfterSale
-            food_part = order.total_cents - (
-                order.delivery_fee_cents + order.tip_cents
-                if order.rider_id is not None else 0)
-            rider_fault = await db.scalar(
-                select(AfterSale.id).where(
-                    AfterSale.order_id == order.id,
-                    AfterSale.fault.in_(["rider", "platform"])))
-            if (food_part > 0 and order.refund_cents >= food_part
-                    and rider_fault is None
+            if (order.id in reversal_due
                     and await reverse_merchant_earning(db, order, "历史售后冲账补录")):
                 fixed += 1
         await db.commit()

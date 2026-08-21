@@ -2779,8 +2779,13 @@ async def finance_daily(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    """按日对账单:订单数、菜品流水、平台佣金、净收入。"""
-    shop = await _my_shop_or_404(db, user)
+    """按日对账单:订单数、菜品流水、平台佣金、净收入。
+
+    走 _money_shop_or_403 而不是 _my_shop_or_404:这是**钱的明细**,
+    与 /me/wallet、/me/withdrawals、/me/finance/statement.csv 同一条边界 ——
+    品牌区域经理能改价改设置(那是运营授权),但碰不到钱。
+    """
+    shop = await _money_shop_or_403(db, user)
     rows = await db.execute(
         DAILY_FINANCE_SQL, {"merchant_id": shop.id, "days": min(days, 90)}
     )
@@ -2816,7 +2821,8 @@ async def finance_orders(
     而平台的招牌就是「每一单的账都可查」。实测演示店一天 545 条时就对不上了。
     """
     limit = max(1, min(limit, 500))
-    shop = await _my_shop_or_404(db, user)
+    # 与 /me/finance/daily 同一条边界:逐单入账明细属于经营者本人
+    shop = await _money_shop_or_403(db, user)
     query = (
         select(MerchantEarning)
         .where(

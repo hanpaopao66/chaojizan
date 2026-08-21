@@ -18,7 +18,7 @@ from ..models import (
     Withdrawal,
     WithdrawalStatus,
 )
-from ..ratelimit import check_rate_limit
+from ..ratelimit import check_rate_limit, client_ip
 from ..redis_client import get_redis
 from ..state_machine import OrderStatus
 from ..schemas import (
@@ -38,6 +38,10 @@ from ..services.sms import send_verification_code
 logger = logging.getLogger("superz.auth")
 
 router = APIRouter(prefix="/auth", tags=["认证"])
+
+#: 同一手机号验证码连错的次数(见 sms_login)。按手机号而不是按角色计,
+#: role 是请求方指定的,分桶等于白送攻击者几倍的额度
+SMS_FAIL_KEY = "sms:fail:{phone}"
 
 
 @router.post("/register", response_model=TokenOut)
@@ -95,12 +99,11 @@ async def refresh(user: User = Depends(get_current_user)):
 
 
 # ---------- 短信验证码登录(用户端主登录方式) ----------
-def _client_ip(request: Request) -> str:
-    """真实来源 IP:生产在 nginx/隧道后面,以 X-Forwarded-For 首值为准。"""
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd.strip():
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+# 取真实来源 IP 的逻辑提到了 ratelimit.client_ip:screen/transparency 那边
+# 原先自己读 request.client.host(拿到的是 nginx 容器地址),
+# 与其在那儿抄第二份,不如让两边共用同一个 —— 抄第二份的下场就是
+# 其中一份修好了另一份还错着,而且没人知道有两份
+_client_ip = client_ip
 
 
 @router.get("/slider")
@@ -157,6 +160,10 @@ async def send_sms_code(payload: SmsCodeIn, request: Request):
             await redis.expire(key, 86400)
     code = f"{secrets.randbelow(1000000):06d}"
     await redis.set(f"sms:code:{payload.phone}", code, ex=300)
+    # 新码 = 新的错码预算。不清的话,上一串码试错到锁定的人重新发码后
+    # 再手滑一次就又被锁死;而"多发一条码"本身有 60 秒冷却 + 每日 8 条
+    # + 第 3 条起滑块顶着,不构成绕过
+    await redis.delete(SMS_FAIL_KEY.format(phone=payload.phone))
 
     if await send_verification_code(payload.phone, code):
         return {"sent": True}
@@ -164,20 +171,57 @@ async def send_sms_code(payload: SmsCodeIn, request: Request):
     return {"sent": False, "dev_code": code}
 
 
+def review_code_ok(phone: str, code: str, role: str) -> bool:
+    """应用商店审核白名单的固定码是否成立(只豁免验证码,其余流程完全一致)。
+
+    **admin 一律不适用。** 这个分支只看手机号和固定码,而 role 是请求方
+    随便填的 —— 一个写死在配置里、永不过期的六位码配上一个已经存在的
+    管理员账号,就是一条直通管理后台的路。审核账号只需要三端能进,
+    把 admin 排除掉成本为零。
+    """
+    if role == "admin":
+        return False
+    expected = settings.sms_review_code(phone)
+    return expected is not None and secrets.compare_digest(code, expected)
+
+
 @router.post("/sms-login", response_model=TokenOut)
 async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
-    """验证码登录;新手机号自动注册为用户(customer)。"""
-    review_code = settings.sms_review_code(payload.phone)
-    if review_code is not None and secrets.compare_digest(
-            payload.code, review_code):
-        # 应用商店审核白名单:固定码即过(只豁免验证码,其余流程完全一致)
+    """验证码登录;新手机号自动注册为用户(customer)。
+
+    ## 频控:限速 + 作废,两条一起才挡得住爆破
+
+    密码登录(/login)和发码(/sms-code)都有 check_rate_limit,这里原先
+    一条都没有 —— 实测连打 25 次错误验证码,25 次全是 401。6 位码、
+    TTL 300 秒,一个人守着一个手机号慢慢试就能进,而 role 由请求方指定,
+    受害者是商家号还是已存在的 admin 都由攻击者挑。
+
+    所以两条一起上:同号每分钟 N 次(与密码登录同一口径),
+    **外加同一串码连错 M 次直接作废它** —— 只限速的话 300 秒的有效期里
+    还剩几十次机会,而正常人手滑不会超过两三次。
+    锁定按**手机号**算不按角色分桶:换个 role 接着打是同一个洞。
+    """
+    await check_rate_limit("sms_login", payload.phone,
+                           settings.rate_limit_sms_login_per_minute)
+    if review_code_ok(payload.phone, payload.code, payload.role):
         logger.info("审核白名单账号登录: %s role=%s", payload.phone, payload.role)
     else:
         redis = get_redis()
+        fail_key = SMS_FAIL_KEY.format(phone=payload.phone)
         stored = await redis.get(f"sms:code:{payload.phone}")
         if stored is None or stored != payload.code:
+            wrong = await redis.incr(fail_key)
+            if wrong == 1:
+                await redis.expire(fail_key, 300)  # 与验证码同寿命
+            if wrong >= settings.sms_login_max_wrong:
+                # 作废这一串码:光 429 的话等窗口翻转就能接着试同一个码
+                await redis.delete(f"sms:code:{payload.phone}")
+                logger.warning("验证码连错 %d 次,已作废该号当前验证码: %s",
+                               wrong, payload.phone)
+                raise HTTPException(429, "验证码错误次数过多,请重新获取验证码")
             raise HTTPException(401, "验证码错误或已过期")
         await redis.delete(f"sms:code:{payload.phone}")
+        await redis.delete(fail_key)
         await redis.delete(f"sms:day:p:{payload.phone}")  # 登录成功,清当日频控
 
     # 按 (手机号, 角色) 找账号:同一手机号在三端各有独立账号,首登该端自动注册

@@ -9,12 +9,14 @@ from sqlalchemy import (
     Enum as SAEnum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -529,6 +531,21 @@ class Dish(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    # 「某个人的单,按时间倒序取前 N 条」是三端最常跑的形状。
+    # 光有单列索引的话,库要把这个人的全部历史单捞出来再整个排序 ——
+    # 单越多越慢,而且慢得很平滑,不盯着看发现不了。
+    # **必须和 alembic/versions/0106_hot_path_indexes.py 里的一致**:
+    # 那边用 CONCURRENTLY 真正建库上的索引(不锁表),这边只是让
+    # autogenerate 知道它们该存在 —— 少了这几行,下次 autogenerate
+    # 会兴高采烈地生成 DROP INDEX
+    __table_args__ = (
+        Index("ix_orders_rider_created", "rider_id",
+              text("created_at DESC")),
+        Index("ix_orders_merchant_created", "merchant_id",
+              text("created_at DESC")),
+        Index("ix_orders_customer_created", "customer_id",
+              text("created_at DESC")),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_no: Mapped[str] = mapped_column(String(32), unique=True, index=True)
@@ -1367,9 +1384,18 @@ class FoodSafetyReport(Base):
 
 
 class OrderEvent(Base):
-    """状态流转审计日志:每次变更一条,纠纷仲裁全靠它。"""
+    """状态流转审计日志:每次变更一条,纠纷仲裁全靠它。
+
+    **这张表永远不清理。**《网络餐饮服务食品安全监督管理办法》第十五条
+    要求订单信息(含送餐人员、送达时间)自交易完成起保存不少于三年,
+    见 docs/DEV-PROMPTS-20.md。auto_flow 的日志清扫刻意绕开它。
+    """
 
     __tablename__ = "order_events"
+    # 运营侧「今天有多少单到了某状态」的统计走这条(见 0106 迁移)
+    __table_args__ = (
+        Index("ix_order_events_status_created", "to_status", "created_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)

@@ -354,6 +354,10 @@ async def submit_receipt(
 
     超出浮动上限的部分不能自己做主:骑手不该被迫做"超了一点点先垫上"
     这个判断题,那是把平台的规则缺失转嫁给收入最低的那个人。
+
+    **这一单只结一次账。** 本端点按差额真的发起退款,而 `settle_goods`
+    每次都拿没变过的 `goods_budget_cents` 重算 —— 少了行锁和幂等判断,
+    重复提交就是重复退款(下面的 `mark_unavailable` 是照着做对了的样板)。
     """
     from ..routers.orders import order_out
 
@@ -363,11 +367,20 @@ async def submit_receipt(
         raise HTTPException(422, "填一下小票上的实付金额")
     if not url:
         raise HTTPException(422, "小票必须拍 —— 它是这一单唯一的对账依据")
-    order = await db.scalar(select(Order).where(Order.order_no == order_no))
+    order = await db.scalar(
+        select(Order).where(Order.order_no == order_no).with_for_update())
     if order is None or order.rider_id != user.id:
         raise HTTPException(404, "订单不存在")
     if order.order_kind != KIND_ERRAND_BUY:
         raise HTTPException(409, "只有帮买单需要填小票")
+    if order.status in (OrderStatus.CANCELLED, OrderStatus.COMPLETED):
+        raise HTTPException(409, "这一单已经结束了")
+    if order.goods_actual_cents is not None:
+        # 已经结过账(传过小票,或标过买不到)。金额填错要改只能走客服 ——
+        # 让这里"再算一次差额"就等于让它再退一次款
+        raise HTTPException(
+            409, f"这一单已经按 {order.goods_actual_cents / 100:.2f} 元结过账了,"
+                 "填错了请联系平台客服更正,别重复提交")
 
     limit = raise_limit_cents(order.goods_budget_cents)
     over = actual - order.goods_budget_cents
@@ -385,8 +398,8 @@ async def submit_receipt(
     order.goods_receipt_url = url[:300]
     if diff["refund_cents"]:
         # 买少了:差额原路退,用户实付随之下降
+        # (refund_cents 由 request_refund 自己累计,渠道拒绝则不累计)
         await request_refund(db, order, diff["refund_cents"], diff["note"])
-        order.refund_cents += diff["refund_cents"]
         order.refund_note = (f"{order.refund_note};{diff['note']}"
                              if order.refund_note else diff["note"])
     elif diff["extra_charge_cents"]:
@@ -496,14 +509,21 @@ async def mark_unavailable(
         raise HTTPException(409, "只有帮买单能标记买不到")
     if order.status in (OrderStatus.CANCELLED, OrderStatus.COMPLETED):
         raise HTTPException(409, "这一单已经结束了")
+    if order.goods_actual_cents is not None:
+        # 与 submit_receipt 互斥。两条都是"结账",都会真的退钱,而它们的
+        # 金额口径互不相干(这边退 total-keep,那边退预估与小票的差额)——
+        # 先传小票再点买不到,两笔加起来能超过用户实付
+        raise HTTPException(
+            409, "这一单已经传过小票结过账了,东西买到了就不能再标买不到;"
+                 "小票填错请联系平台客服更正")
 
     # 商品款全额退,跑腿费只留到店那一段的距离费
     keep = unavailable_fee_cents(order.fee_parts)
     refund = max(0, order.total_cents - keep)
     note = f"帮买:商品买不到,退商品款与上门段费用,保留到店距离费 {keep} 分"
     if refund:
+        # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
         await request_refund(db, order, refund, note)
-        order.refund_cents += refund
         order.refund_note = (f"{order.refund_note};{note}"
                              if order.refund_note else note)
     from_status = order.status

@@ -113,12 +113,11 @@ async def _transition_batch(
             from .eta import release_coupon
             await release_coupon(db, order.order_no)
             # 已支付订单自动取消 = 全额退款(与人工取消/拒单同一口径)。
-            # 先发起退款再累计 refund_cents:微信通道按 total+已退 反推原始支付总额
+            # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
             if from_status != OrderStatus.PENDING_PAYMENT and order.total_cents > 0:
                 refund_amount = order.total_cents
                 note = f"取消退款:{reason}"
                 await request_refund(db, order, refund_amount, note)
-                order.refund_cents += refund_amount
                 order.refund_note = (
                     f"{order.refund_note};{note}" if order.refund_note else note
                 )
@@ -228,6 +227,13 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
         o.refund_cents = o.total_cents - first
         o.refund_note = "未入住:按政策扣首晚,其余已退回"
         o.cancelled_at = now
+        # **钱退了,房也要还。** 判定发生在入住日的**次日**,过去的只有
+        # 第一晚 —— 首晚留占用(商家确实为他留了房,那一晚的钱也归商家),
+        # 从次日到退房日的房态全部回补。订 5 晚没到店,后 4 晚商家既收不到
+        # 钱又卖不出去,而且自己救不了:改总房量会被「不能低于已售」拦住
+        # (routers/stays.set_calendar)
+        await release(db, o.room_type_id, o.checkin_date + timedelta(days=1),
+                      o.checkout_date, o.rooms_qty)
         noshow += 1
 
     inhouse = (await db.scalars(
@@ -377,10 +383,15 @@ async def _sweep_orphan_appends(db: AsyncSession, now: datetime) -> list[Order]:
             await restore_stock(db, order)
         if order.total_cents > 0:
             note = "原单取消,追加单退款"
+            # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
             await request_refund(db, order, order.total_cents, note)
-            order.refund_cents += order.total_cents
             order.refund_note = (f"{order.refund_note};{note}"
                                  if order.refund_note else note)
+        # 全额退款 = 抵扣过的券放回券包(与人工取消同一口径,models.Coupon 的
+        # 不变量)。追加单也可能是用券下的,少了这一句用户拿回的是打完折的
+        # 实付,券却跟着这条"平台侧原因"的取消一起没了
+        from .eta import release_coupon
+        await release_coupon(db, order.order_no)
         db.add(OrderEvent(order_id=order.id, from_status=from_status.value,
                           to_status=OrderStatus.CANCELLED.value,
                           actor_role="system", actor_id=None))
@@ -531,15 +542,24 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
         refund_amount = order.total_cents
         order.status = OrderStatus.CANCELLED
         order.cancel_reason = "长时间无骑手接单,平台自动取消并全额退款"
-        order.refund_cents += refund_amount
         note = "无骑手接单,全额退款"
         order.refund_note = (
             f"{order.refund_note};{note}" if order.refund_note else note)
+        # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
         await request_refund(db, order, refund_amount, "无骑手接单自动取消")
+        # 全额退款 = 抵扣过的券放回券包(与人工取消同一口径)。
+        # 少了这一句,用户拿回的只是打完折的实付,券却被这条**平台侧原因**的
+        # 取消吃掉了 —— 而超时赔付券本身就是平台赔给他的,转头被下一单的
+        # 无骑手取消没收,是这条漏洞里最说不过去的一种
+        from .eta import release_coupon
+        await release_coupon(db, order.order_no)
         if from_status == OrderStatus.READY and not is_errand(order):
             comp = (order.food_cents + order.packing_fee_cents
                     - order.discount_cents)
             if comp > 0:
+                # note 前缀走常量:账务自检靠它认出"这是合规兜底赔付、
+                # 不是挂在取消单上的野账",透明中心 /funds 靠它公示赔付支出
+                from .audit import NO_RIDER_COMP_NOTE
                 db.add(MerchantEarning(
                     merchant_id=order.merchant_id,
                     order_id=order.id,
@@ -548,7 +568,7 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
                     commission_cents=0,
                     net_cents=comp,
                     kind=EarningKind.earning,
-                    note="无骑手接单取消,平台赔付餐损(佣金不收)",
+                    note=f"{NO_RIDER_COMP_NOTE}(佣金不收)",
                 ))
                 compensated[order.id] = comp
         db.add(OrderEvent(
@@ -1045,7 +1065,15 @@ async def maybe_recalc_commission_tiers(now: datetime | None = None) -> bool:
 
 
 async def maybe_run_daily_audit(now: datetime | None = None) -> bool:
-    """每天北京时间 04:00 窗口执行一次账务自检(Redis 防重,重启安全)。"""
+    """每天北京时间 04:00 窗口执行一次账务自检(Redis 防重,重启安全)。
+
+    **自检抛异常时必须把防重键撤掉。** 这个循环外面是
+    `except Exception: logger.exception(...)`,run_audit 炸了会被静默吞掉;
+    而防重键已经写下了,当天就再也不会重跑,`audit_runs` 也不会有这一天的行。
+    结果是:**自检挂掉的那天,在透明中心公示里长得和"零差错"的干净天一模一样**
+    (连续无差错天数还会跨过去接着数,见 routers/transparency.py)。
+    没跑 ≠ 没问题 —— 键先占后跑,等于把"没结论"记成了"没问题"。
+    """
     from ..redis_client import get_redis
     from .audit import run_audit
 
@@ -1053,9 +1081,19 @@ async def maybe_run_daily_audit(now: datetime | None = None) -> bool:
     if not _in_window("04:00", now, window_seconds=300):
         return False
     redis = get_redis()
-    if not await redis.set(f"audit:ran:{now.date()}", 1, ex=86400, nx=True):
+    key = f"audit:ran:{now.date()}"
+    if not await redis.set(key, 1, ex=86400, nx=True):
         return False
-    await run_audit()
+    try:
+        await run_audit()
+    except Exception:
+        # 撤键,让 04:00 窗口内的下一轮清扫重试。撤不掉也要把原异常抛出去,
+        # 别拿"删键失败"盖住"自检失败"
+        try:
+            await redis.delete(key)
+        except Exception:
+            logger.exception("账务自检失败后清防重键也失败:%s", key)
+        raise
     return True
 
 
@@ -1093,6 +1131,85 @@ async def maybe_record_health_probe() -> bool:
         return False
 
 
+async def sweep_log_retention() -> dict[str, int]:
+    """运维日志过期清理。每天最多跑一次(Redis 防重),返回各表删除行数。
+
+    ## 为什么要有这个
+
+    `push_logs` / `app_events` / `audit_alerts` / `risk_action_log` 全都是
+    只写不删的。push_logs 增长最快:1000 单/天 × 50 骑手 ≈ 5 万行/天,
+    一年 1800 万行,而它只有 `ix_push_logs_user_id` 一个索引 ——
+    消息中心翻页会一年比一年慢,备份也一年比一年大。
+
+    ## 哪些表**不在**这里
+
+    `order_events` 一行都不清。《网络餐饮服务食品安全监督管理办法》
+    要求订单信息(含送餐人员、送达时间)自交易完成起保存不少于三年,
+    见 docs/DEV-PROMPTS-20.md。它是法定记录,不是运维日志。
+    `audit_runs`、`ledger_anchors` 同理 —— 账本锚点是哈希链,删一条断全链。
+
+    ## 保留期不是随便定的
+
+    - push_logs:它**同时是消息中心的数据源**(services/message_center.py
+      直接翻这张表),保留期 = 用户能往回翻多久的站内消息;
+    - risk_action_log:透明中心公示最近 12 个月的风控月度聚合
+      (routers/transparency.py),保留期短于 12 个月会让**已经公示过的
+      数字凭空变空**,所以默认 730 天,改之前先看那个接口;
+    - audit_alerts:payments.py 用「这条告警是不是已经存在」来防重复告警,
+      且**不带时间下限**。清掉很老的告警意味着同一笔陈年差异可能被
+      重新告警一次 —— 730 天之外的账务差异重新提醒一次是可以接受的。
+
+    删除按批 + 每张表独立 try:一张表清不动(锁冲突、超时)不能连累其他表。
+    """
+    from ..redis_client import get_redis
+
+    # 一天一次就够,而且清扫循环 30 秒一轮,不防重会一直在删空集合
+    try:
+        day = datetime.now(BEIJING).strftime("%Y-%m-%d")
+        if not await get_redis().set(f"logs:retention:{day}", 1, ex=90000, nx=True):
+            return {}
+    except Exception:
+        # Redis 不可用就跳过这一轮。清理是可以缓的事,
+        # 没必要为它冒"每 30 秒删一次全表"的风险
+        logger.warning("日志清理防重失败(Redis 不可用),本轮跳过")
+        return {}
+
+    plans = [
+        ("push_logs", settings.push_log_retention_days),
+        ("app_events", settings.app_event_retention_days),
+        ("audit_alerts", settings.audit_alert_retention_days),
+        ("risk_action_log", settings.risk_action_retention_days),
+    ]
+    removed: dict[str, int] = {}
+    for table, days in plans:
+        if days <= 0:  # 0 = 这张表不清
+            continue
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        try:
+            async with SessionLocal() as db:
+                # 分批删。一条 DELETE 干掉几百万行会把 WAL 撑爆、
+                # 锁也握太久;每批 5000 行、单轮最多 20 批(10 万行),
+                # 剩下的明天接着删 —— 反正是每天跑的
+                total = 0
+                for _ in range(20):
+                    result = await db.execute(text(
+                        f"DELETE FROM {table} WHERE ctid IN ("
+                        f"  SELECT ctid FROM {table}"
+                        f"  WHERE created_at < :cutoff LIMIT 5000)"
+                    ), {"cutoff": cutoff})
+                    await db.commit()
+                    total += result.rowcount or 0
+                    if (result.rowcount or 0) < 5000:
+                        break
+            if total:
+                removed[table] = total
+                logger.info("日志清理:%s 删除 %s 行(保留 %s 天)",
+                            table, total, days)
+        except Exception:
+            logger.exception("日志清理失败(不影响其他表): %s", table)
+    return removed
+
+
 async def auto_flow_loop() -> None:
     logger.info("auto_flow loop started, interval=%ss", settings.sweep_interval_seconds)
     while True:
@@ -1127,6 +1244,9 @@ async def auto_flow_loop() -> None:
             await _cam_sweep()
             await maybe_run_daily_audit()
             await maybe_record_health_probe()
+            # 运维日志按保留期清理(每天一次,内部防重)。
+            # **不含 order_events** —— 那是三年法定留存,见函数注释
+            await sweep_log_retention()
             # 公开账本锚点补到昨天(幂等,通常零工作量;见 services/ledger.py)
             from .ledger import build_missing_anchors
             async with SessionLocal() as db:

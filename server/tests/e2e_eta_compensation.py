@@ -10,7 +10,8 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal
-from tests.util import demo_shop, call, drain_order_pool, login, register_fresh_rider
+from tests.util import (audit_new_problems, audit_snapshot, call, demo_shop,
+                        drain_order_pool, login, register_fresh_rider)
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -57,6 +58,7 @@ def my_eta_coupons():
 
 async def main():
     await drain_order_pool()
+    audit_before = await audit_snapshot()  # 见 util.audit_new_problems
     rider = await register_fresh_rider("准时测试骑手")
     call("POST", "/riders/online", rider, {"is_online": True})
     base_coupons = len(my_eta_coupons())
@@ -142,8 +144,8 @@ async def main():
     call("POST", f"/orders/{no5}/pay/mock", customer)
     deliver(no5, rider)
     call("POST", f"/orders/{no5}/transition", customer, {"to_status": "completed"})
-    from app.services.audit import run_audit
-    problems = [p for p in await run_audit() if no5 in p.get("detail", "")]
+    # 聚合类检查不带订单号,必须按 check 名的增量一起判(见 util)
+    problems = await audit_new_problems(audit_before, no5)
     assert not problems, problems
     print("✓ 券抵扣走 subsidy 口径,下单锁定防复用,审计恒等式全绿")
 

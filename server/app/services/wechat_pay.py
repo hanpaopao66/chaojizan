@@ -117,13 +117,30 @@ def parse_notify(headers: dict, body: bytes) -> tuple[str, dict] | None:
 
 
 async def request_refund(db, order: Order, refund_cents: int, reason: str) -> "object":
-    """缺货部分退款/整单退款/售后退款,统一入口。
+    """缺货部分退款/整单退款/售后退款,**唯一入口**。
 
     每次退款写一条 refunds 流水(金额对账凭据,审计核对 Σ流水 == 订单 refund_cents)。
     - 未配置商户参数:mock 通道,立即置 success(开发/演示期)
     - 已配置:调微信退款 API(同步 SDK 丢线程池),渠道受理为 requested,
       REFUND.SUCCESS 回调置 success(见 routers/payments.py)
     返回 Refund 对象;调用方负责 commit。
+
+    ## 调用方两条纪律(写在这里是因为破坏它们没有任何症状)
+
+    **1)`order.refund_cents` 由本函数累计,调用方不要再自己加。**
+    以前是每个调用点手写一行 `order.refund_cents += x`,14 处里有 4 处
+    写在了 `request_refund` **之前** —— 而下面反推原始支付总额用的正是
+    `total_cents + refund_cents`,提前加过就把本次退款算了两遍,
+    反推出 2T 而实际只退 T,微信按"两个数对不上"直接拒掉。
+    mock 通道不校验这两个数,所以这个错在真机联调之前一点症状都没有。
+
+    **2)先调本函数,再去改 `order.total_cents`。** 同理:反推依赖的是
+    「改动之前」的剩余应付。先把 total 扣掉再来调,反推出来的就少了一截。
+
+    渠道拒绝(failed)时**不累计** refund_cents:钱一分没退出去,账面就
+    不能写"已退" —— 否则下一笔退款的反推还会再错一轮,而公开账本
+    (services/ledger)读的就是这个数。失败的流水留在 refunds 表里,
+    审计规则 5c 会把它捞出来要人工介入。
     """
     import asyncio
 
@@ -158,6 +175,8 @@ async def request_refund(db, order: Order, refund_cents: int, reason: str) -> "o
             refund.status = RefundStatus.failed
             refund.error = f"HTTP {code}: {str(message)[:250]}"
             logger.error("微信退款发起失败 %s: %s %s", order.order_no, code, message)
+    if refund.status != RefundStatus.failed:
+        order.refund_cents += refund_cents
     db.add(refund)
     return refund
 

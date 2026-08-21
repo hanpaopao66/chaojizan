@@ -36,6 +36,51 @@ router = APIRouter(prefix="/transparency", tags=["透明中心"])
 _EARN = "kind = 'earning'"
 
 
+def clean_streak_days(runs: list[dict]) -> int:
+    """从最近一天往回数,连续多少天核账零差错。runs 按 day 倒序。
+
+    **必须判日期连不连续。** 以前这里只遍历"已存在的行"、只在 problems > 0
+    时 break,缺失的天直接跨过去接着数 —— 而自检挂掉的那天恰恰**不写行**
+    (services/auto_flow.maybe_run_daily_audit:防重键先占后跑,炸了就没有
+    这一天的记录)。于是"那天没跑成"和"那天零差错"在公示上完全一样,
+    连续天数照涨。
+
+    这个平台把账目透明当立身之本,公示一个虚高的无差错天数,
+    性质和普通 bug 不一样:它是拿**没结论**冒充**没问题**。
+    """
+    from datetime import date as _date
+
+    streak, prev_day = 0, None
+    for r in runs:
+        day = _date.fromisoformat(r["day"])
+        if prev_day is not None and (prev_day - day).days != 1:
+            break  # 中间断档:那些天没有结论,连续性到此为止
+        if r["problems"] > 0:
+            break
+        streak += 1
+        prev_day = day
+    return streak
+
+
+def missing_run_days(runs: list[dict], today) -> list[str]:
+    """有记录的最早一天到昨天之间,自检没留下结论的日子。
+
+    今天不算:定时任务北京时间 04:00 才跑,今天的行本来就可能还没写 ——
+    把它算成缺失会天天误报,而误报久了就没人看这个数了。
+    """
+    from datetime import date as _date
+
+    if not runs:
+        return []
+    have = {r["day"] for r in runs}
+    missing, cursor = [], _date.fromisoformat(runs[-1]["day"])
+    while cursor < today:
+        if cursor.isoformat() not in have:
+            missing.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return missing
+
+
 @router.get("/audit")
 async def audit_public(request: Request, db: AsyncSession = Depends(get_db)):
     """每日核账公示:近 90 次运行 + 连续无差错天数。
@@ -51,16 +96,17 @@ async def audit_public(request: Request, db: AsyncSession = Depends(get_db)):
         SELECT day, checked_orders, problem_count
         FROM audit_runs ORDER BY day DESC LIMIT 90
     """))).all()]
-    streak = 0
-    for r in runs:  # 从最近一天往回数连续无差错
-        if r["problems"] > 0:
-            break
-        streak += 1
+    # 连续无差错天数 + 缺失天数都是纯函数,单元测试直接盯(tests/unit)
+    missing = missing_run_days(runs, datetime.now(SH).date())
     data = {
         "runs": runs,
-        "clean_streak_days": streak,
+        "clean_streak_days": clean_streak_days(runs),
         "window_days": 30,  # 每次核对近 30 天全部账目
         "latest": runs[0] if runs else None,
+        # 有记录的最早一天到昨天之间,自检没跑成/没留下结论的日子
+        "missing_days": len(missing),
+        "missing_recent": missing[-10:],
+        "last_run_day": runs[0]["day"] if runs else None,
     }
     _cache_put("tp:audit", data, 300)
     return data

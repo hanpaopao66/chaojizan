@@ -228,12 +228,13 @@ async def accept_after_sale(
     after_sale.fault = "platform" if is_errand(order) else "merchant"
     after_sale.reply = payload.reply.strip()
     after_sale.processed_at = datetime.now(timezone.utc)
-    order.refund_cents += refund_amount
     order.refund_note = (
         f"{order.refund_note};售后退餐费(配送费已履约不退)"
         if order.refund_note else "售后退餐费(配送费已履约不退)"
     )
     await reverse_merchant_earning(db, order, f"售后冲账:{after_sale.reason[:50]}")
+    # refund_cents 由 request_refund 自己累计:提前加会让通道按 total+已退
+    # 反推出多算一遍本次退款的原始支付总额,微信直接拒退(见 wechat_pay)
     await request_refund(db, order, refund_amount, f"售后退款:{after_sale.reason[:30]}")
     await db.commit()
     await db.refresh(after_sale)

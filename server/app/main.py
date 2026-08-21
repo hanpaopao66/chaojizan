@@ -51,38 +51,31 @@ from . import ws
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 SERVER_DIR = Path(__file__).resolve().parent.parent
 
-# Alembic 基线版本号:老库(有表但没有 alembic_version)启动时 stamp 到这里,
-# 之后的结构变更一律走 alembic revision --autogenerate,不再手写 ALTER
-_BASELINE_REV = "0001"
-
-
-def _run_alembic_upgrade(stamp_baseline: bool) -> None:
-    """在工作线程里跑(alembic env.py 内部 asyncio.run,不能嵌在事件循环里)。"""
-    from alembic import command
-    from alembic.config import Config
-
-    cfg = Config(str(SERVER_DIR / "alembic.ini"))
-    if stamp_baseline:
-        command.stamp(cfg, _BASELINE_REV)
-    command.upgrade(cfg, "head")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
-        # 老库识别:建过表(users 存在)但从没跑过 alembic → 先 stamp 基线
-        has_users = await conn.scalar(text("SELECT to_regclass('public.users')"))
-        has_alembic = await conn.scalar(
-            text("SELECT to_regclass('public.alembic_version')"))
-    await asyncio.to_thread(
-        _run_alembic_upgrade, has_users is not None and has_alembic is None)
+    """启动动作。**两件事都是可关的,因为它们都只该跑一份。**
+
+    生产上 api 容器两个开关都关:迁移交给一次性的 migrate 容器,
+    清扫交给常驻的 sweeper 容器(见 deploy/docker-compose.prod.yml)。
+    本地开发两个都开着,`uvicorn app.main:app` 一条命令即可,零配置。
+
+    历史包袱:这两件事原本无条件写在这里,而 api 是 `--workers 4` 起的,
+    于是迁移被四个进程同时执行、清扫循环同时跑四份。见 app/startup.py
+    和 app/sweeper.py 顶部的说明。
+    """
+    if settings.run_migrations_on_startup:
+        from .startup import prepare_database
+        await prepare_database()
     sweeper = (
         asyncio.create_task(auto_flow_loop()) if settings.auto_flow_enabled else None
     )
     yield
     if sweeper is not None:
         sweeper.cancel()
+    # 共享的推送 HTTP 客户端(连接池)随进程一起收掉
+    from .services.push import aclose_push_client
+    await aclose_push_client()
     await engine.dispose()
 
 
@@ -124,6 +117,36 @@ async def select_shop(request, call_next):
     finally:
         if token is not None:
             current_shop_id.reset(token)
+
+
+@app.middleware("http")
+async def observe_app_build(request, call_next):
+    """记录客户端上报的 X-App-Build。**只记录,不拦截。**
+
+    现在我们答不上来「线上还有多少旧版在跑」这个问题 ——
+    客户端不上报版本,服务端也就无从统计。而不知道分布就没法定阈值:
+    直接拍一个 min_build 上去,可能一刀切掉 30% 的活跃用户,
+    也可能定得太松等于没定。所以顺序是**先看见,再决定**。
+
+    这一步只做"看见":把 build 号打进日志,过一阵子拿日志一聚合,
+    就知道各版本占比和衰减速度,那时再谈拦不拦、阈值定多少。
+
+    客户端加请求头由另一包做,所以现在这个头**大概率是空的** ——
+    空的不记,免得刷屏。头不合法(不是数字)也不记、不报错:
+    版本上报绝不能变成一个能把请求打挂的东西。
+
+    `/health` 这类高频探活不记,不然日志里全是它。
+    """
+    build = request.headers.get("x-app-build", "")
+    if build and build.isdigit() and request.url.path not in ("/health",):
+        import logging as _logging
+
+        _logging.getLogger("superz.appbuild").info(
+            "app_build=%s platform=%s path=%s",
+            build[:12],
+            (request.headers.get("x-app-platform") or "?")[:16],
+            request.url.path)
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -254,7 +277,23 @@ async def app_latest(app_name: str = Query(alias="app", pattern="^(user|merchant
     """应用内更新检查:返回该端最新版本信息。
 
     versions.json 由发版脚本维护,不存在或无该端记录时 404(客户端静默忽略)。
-    格式:{"user": {"version": "0.3.0", "build": 3, "url": "...", "notes": "...", "force": false}, ...}
+    格式:{"user": {"version": "0.3.0", "build": 3, "url": "...",
+           "notes": "...", "force": false, "min_build": 0}, ...}
+
+    ## min_build:最低可用版本号
+
+    `force` 说的是"这个版本建议强制更新",`min_build` 说的是
+    "低于这个 build 的客户端不该继续用"。两者不是一回事:
+    force 是**发版当时**的一次性决定,min_build 是**持续有效**的下限 ——
+    今天发 build 12 说不强更,不代表半年后 build 3 还能用。
+
+    没有 min_build 之前,服务端**没有任何办法拒绝一个过旧的客户端**:
+    协议改了、算费口径改了、隐私口径改了,老版本照样在跑,
+    而我们连"还有多少人在跑老版本"都答不上来(客户端根本不上报版本)。
+
+    这一包只把字段透出去 + 开始记录上报,**服务端不拦截**。
+    拦截要等有了真实的版本分布数据再定阈值 —— 先拍一个数字然后
+    把一批人挡在门外,是比不拦更糟的选择。
     """
     versions_file = APPDIST_DIR / "versions.json"
     if not versions_file.exists():
@@ -262,6 +301,9 @@ async def app_latest(app_name: str = Query(alias="app", pattern="^(user|merchant
     info = json.loads(versions_file.read_text()).get(app_name)
     if not info:
         raise HTTPException(404, "暂无版本信息")
+    # 老的 versions.json 没有这个字段;补 0 = 不设下限,
+    # 客户端拿到 0 就知道"没有最低版本要求",不用区分缺字段和不限制
+    info.setdefault("min_build", 0)
     return info
 
 

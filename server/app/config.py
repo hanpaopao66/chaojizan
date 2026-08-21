@@ -6,6 +6,21 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://superz:superz@localhost:5432/superz"
     redis_url: str = "redis://localhost:6379/0"
+
+    # ---- 连接池 ----
+    # **这两个数字乘上进程数必须小于 PostgreSQL 的 max_connections。**
+    # 原先 api 以 --workers 4 起,4 × (10 + 20) = 120 > PG 默认的 100,
+    # 高峰期后来的连接直接被库拒掉,表现是随机 500 而不是变慢 ——
+    # 最难查的那种故障:日志里每条都不一样,压测又复现不出来。
+    # 现在 api 单进程、清扫独立一个进程,30 + 30 = 60,留足给
+    # psql/pg_dump/迁移容器。改这里记得同步 deploy 里 PG 的 max_connections
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+
+    # 启动时自动跑 alembic upgrade。本地开发/单机保持 True(起服务即最新);
+    # 生产由独立的一次性 migrate 容器跑,api 与 sweeper 都关掉 ——
+    # 多个进程同时 upgrade 会抢 alembic_version 的锁,轻则等待重则半途报错
+    run_migrations_on_startup: bool = True
     jwt_secret: str = "change-me-in-production"
     # 敏感字段(收款账号等)对称加密密钥;不配置时从 jwt_secret 派生。
     # 生产务必单独配置,且一经使用不可更换(见 services/crypto.py)
@@ -55,7 +70,12 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
     rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 60 秒重发限制)
+    rate_limit_sms_login_per_minute: int = 10  # 同一手机号验证码登录尝试
     rate_limit_order_per_minute: int = 20      # 同一用户下单
+    # 同一串验证码连错几次就作废它。**光限速挡不住爆破**:6 位码 300 秒有效,
+    # 按每分钟 10 次算,一个窗口期还能试 50 次,而正常人手滑不会超过两三次。
+    # 作废之后要重新发码,而发码那边有 60 秒冷却 + 每日 8 条 + 第 3 条起滑块
+    sms_login_max_wrong: int = 5
 
     # 配送费按距离计价:2km 内 ¥3,每超 1km 加 ¥1(向上取整),距离部分封顶 ¥10。
     # 配送费(含下面的加价)100% 归骑手,平台分文不取 —— 审计恒等式强制校验
@@ -136,6 +156,32 @@ class Settings(BaseSettings):
     auto_confirm_hours: int = 24       # 送达后超时未确认 → 自动完成
     sweep_interval_seconds: int = 30   # 清扫任务运行间隔
     auto_flow_enabled: bool = True     # 测试时可关掉后台任务,手动调 sweep_once
+
+    # ---- 运维日志保留期(天)。0 = 不清 ----
+    # 只清**纯运维日志**。order_events 一天都不清:
+    # 《网络餐饮服务食品安全监督管理办法》要求订单信息(含送餐人员、
+    # 送达时间)自交易完成起保存不少于三年,见 docs/DEV-PROMPTS-20.md。
+    #
+    # push_logs 增长最快(1000 单/天 × 50 骑手 ≈ 5 万行/天),但它同时是
+    # **消息中心的数据源**(services/message_center.py 直接翻这张表),
+    # 所以保留期就是"用户能往回翻多久的站内消息",180 天不是随手写的。
+    push_log_retention_days: int = 180
+    # 自建埋点。产品分析窗口最长 30 天(routers/platform.py 是 7 天),
+    # 留 180 天足够回看季度趋势;埋点数据留得越久隐私面越大,不宜再长
+    app_event_retention_days: int = 180
+    # 账务告警 / 风控处置留痕:量极小,清它不为省空间,只为不无限增长。
+    # **下限卡在 12 个月以上**:透明中心公示的是最近 12 个月的风控月度聚合
+    # (routers/transparency.py),保留期短于它会让已公示的数字凭空变空
+    audit_alert_retention_days: int = 730
+    risk_action_retention_days: int = 730
+
+    # ---- 推送扇出 ----
+    # 一批并发多少个。串行推 500 个骑手 ≈ 500 次串行 HTTPS,
+    # JPush 超时(5s)时能堵 2500 秒;并发分批把它压到 batch 数 × 超时
+    push_fanout_concurrency: int = 20
+    # 单次扇出的人数上限(安全阀,不是业务规则)。在线骑手不该有这么多,
+    # 真到了这个量级说明该改推送策略而不是继续无上限循环
+    push_fanout_max_targets: int = 2000
 
     # 公开大屏演示模式:真实数据上叠加确定性模拟增量,响应带 demo=true,
     # 页面明示"演示数据"角标(见 routers/screen.py)。生产保持关闭

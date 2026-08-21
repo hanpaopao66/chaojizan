@@ -573,11 +573,15 @@ async def t1_batch_paid(
         w.processed_at = datetime.now(timezone.utc)
         total += w.amount_cents
     await db.commit()
-    from ..services.push import push_to_user
-    for w in rows:
-        await push_to_user(w.user_id, "提现已打款",
-                           f"¥{w.amount_cents / 100:.2f} 已打款(T+1 批次),请查收",
-                           {"type": "withdrawal"})
+    # 分批并发。原先是逐个 await 串行推 —— 而上面那条查询是
+    # `with_for_update()`,批次里的行一直被锁着;推送慢一秒,
+    # 锁就多握一秒,骑手端的提现查询跟着一起等
+    from ..services.push import fanout
+    await fanout([
+        (w.user_id, "提现已打款",
+         f"¥{w.amount_cents / 100:.2f} 已打款(T+1 批次),请查收",
+         {"type": "withdrawal"})
+        for w in rows])
     return {"paid": len(rows), "total_cents": total, "note": note}
 
 
@@ -749,10 +753,11 @@ async def resolve_delivery_issue(
                 fault="rider", status=AfterSaleStatus.accepted,
                 reply=(payload.note or "配送责任,平台先行赔付")[:300],
                 processed_at=datetime.now(timezone.utc)))
-        order.refund_cents += refunded
         note = "配送异常,平台先行赔付"
         order.refund_note = (f"{order.refund_note};{note}"
                              if order.refund_note else note)
+        # refund_cents 由 request_refund 自己累计:提前加会让通道按
+        # total+已退 反推出 2 倍的原始支付总额,微信直接拒退(见 wechat_pay)
         await request_refund(db, order, refunded, "配送异常,平台先行赔付")
 
     issue.status = "resolved"
@@ -1146,13 +1151,31 @@ async def dashboard(
     pending["stay_aftersales"] = await _count(
         select(sa_func.count()).select_from(StayAfterSale)
         .where(StayAfterSale.status == StayAfterSaleStatus.pending))
-    # 近 3 天的账务告警——账不平是最高优先级,红条置顶
+    # 近 3 天的账务告警——账不平是最高优先级,红条置顶。
+    #
+    # **列表只是样本,严重程度看总数和分组。** 一次 run 写下的所有告警
+    # 共享同一个 created_at,`order_by(created_at desc)` 在同值之间顺序未定义,
+    # limit(20) 取到哪 20 条全看数据库心情;而后台以前拿 `len(audit_alerts)`
+    # 当"发现几处不平"显示 —— 200 处和 20 处长得一模一样,
+    # 上限一封顶,越严重反而越看不出来。所以:总数单独查,按 check_name 分组,
+    # 列表加 id 做次序兜底,只当样本用。
+    alert_since = datetime.now(timezone.utc) - timedelta(days=3)
+    alert_total = await _count(
+        select(sa_func.count()).select_from(AuditAlert)
+        .where(AuditAlert.created_at >= alert_since))
+    alert_groups = [
+        {"check": name, "count": n}
+        for name, n in (await db.execute(
+            select(AuditAlert.check_name, sa_func.count(AuditAlert.id))
+            .where(AuditAlert.created_at >= alert_since)
+            .group_by(AuditAlert.check_name)
+            .order_by(sa_func.count(AuditAlert.id).desc()))).all()
+    ]
     recent_alerts = (
         await db.scalars(
             select(AuditAlert)
-            .where(AuditAlert.created_at
-                   >= datetime.now(timezone.utc) - timedelta(days=3))
-            .order_by(AuditAlert.created_at.desc())
+            .where(AuditAlert.created_at >= alert_since)
+            .order_by(AuditAlert.created_at.desc(), AuditAlert.id.desc())
             .limit(20)
         )
     ).all()
@@ -1170,6 +1193,9 @@ async def dashboard(
         "experience": {**timing, "repurchase_rate_30d": repurchase_rate},
         "totals": totals,
         "pending": pending,
+        # 近 3 天告警总数(不受下面 limit(20) 截断影响)
+        "audit_alerts_total": alert_total,
+        "audit_alert_groups": alert_groups,
         "audit_alerts": [
             {
                 "check": a.check_name,
@@ -1269,11 +1295,11 @@ async def after_sale_rider_fault(
     a.fault = "rider"
     a.reply = (payload.reason or "配送责任,平台先行赔付")[:300]
     a.processed_at = datetime.now(timezone.utc)
-    order.refund_cents += refund_amount
     order.refund_note = (
         f"{order.refund_note};骑手责任,平台先行赔付(含配送费)"
         if order.refund_note else "骑手责任,平台先行赔付(含配送费)"
     )
+    # refund_cents 由 request_refund 自己累计(提前加会让通道反推出 2T)
     await request_refund(db, order, refund_amount, "骑手责任,平台先行赔付")
     await db.commit()
     await push_to_user(
@@ -1590,9 +1616,8 @@ async def confirm_food_safety(
 
     refunded = order.total_cents
     if refunded > 0:
-        # 先退款再累计 refund_cents:微信通道按 total+已退 反推原始支付总额
+        # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
         await request_refund(db, order, refunded, "食品安全投诉成立,平台先行全额退款")
-        order.refund_cents += refunded
         note = "食安投诉成立,全额退款(含配送费)"
         order.refund_note = (f"{order.refund_note};{note}"
                              if order.refund_note else note)
@@ -3107,12 +3132,16 @@ async def training_rollout(
 
         body = (f"请在 {grace} 前完成(三分钟)" if grace
                 else "现在需要先完成才能上线(三分钟)")
-        for rider_id, _name in rows:
-            await push_to_user(
-                rider_id, "需要完成一次食品安全培训",
-                f"这是监管对平台的要求,不是给你加的规矩 —— {body}。"
-                "「我的」→ 上岗培训,答错有讲解、可以重来",
-                {"type": "training"})
+        # 分批并发。首次执行的对象就是**全体没考过的骑手**,
+        # 串行推等于让这个接口挂在那儿几十分钟(然后网关先超时,
+        # 管理员以为没生效又点一次)
+        from ..services.push import fanout
+        await fanout([
+            (rider_id, "需要完成一次食品安全培训",
+             f"这是监管对平台的要求,不是给你加的规矩 —— {body}。"
+             "「我的」→ 上岗培训,答错有讲解、可以重来",
+             {"type": "training"})
+            for rider_id, _name in rows])
 
     return {
         "pending": len(rows),

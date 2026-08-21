@@ -33,14 +33,27 @@ from ..security import require_role
 router = APIRouter(prefix="/stays", tags=["住宿"])
 
 
-async def _my_hotel(db: AsyncSession, user: User) -> Merchant:
-    """当前商家(店主或店员)可操作的酒店。餐饮商家会被拦下。"""
+async def _my_hotel(db: AsyncSession, user: User, *,
+                    need_owner: bool = False) -> Merchant:
+    """当前商家可操作的酒店。餐饮商家会被拦下。
+
+    [need_owner] 改价/改房型/改酒店资料这类**敏感端点**传 True,店员一律拒。
+    services/staff.py 定的规矩是「运营端点用 operable_shop,敏感端点用
+    owned_shop」,餐饮侧照做了(merchants.py 的 _my_shop_or_404),
+    住宿侧原先把 is_owner 直接丢掉 —— 于是前台店员能改房价,
+    而房价是这门生意里唯一的价格。
+
+    品牌层仍算店主级(与餐饮侧一致:区域经理能改价改设置);
+    钱的边界另在 money_shop,不走这里。
+    """
     from ..services.staff import operable_shop
-    shop, _ = await operable_shop(db, user)
+    shop, is_owner = await operable_shop(db, user)
     if shop is None or shop.status != MerchantStatus.approved:
         raise HTTPException(404, "还没有已过审的店铺")
     if shop.biz_type != "hotel":
         raise HTTPException(403, "此功能仅酒店业态可用")
+    if need_owner and not is_owner:
+        raise HTTPException(403, "只有店主能改房价/房型/酒店资料,店员不行")
     return shop
 
 
@@ -71,7 +84,7 @@ async def create_room_type(
     user: User = Depends(require_role("merchant")),
     db: AsyncSession = Depends(get_db),
 ):
-    shop = await _my_hotel(db, user)
+    shop = await _my_hotel(db, user, need_owner=True)
     from ..services.moderation import guard_text
     await guard_text(db, payload.name, "房型名称")
     rt = RoomType(merchant_id=shop.id, **payload.model_dump())
@@ -91,7 +104,7 @@ async def update_room_type(
     """编辑房型。下架(is_on_sale=false)不删——历史订单还引用着它。
     取消政策改动只影响新订单,已有订单按下单时的快照执行。
     """
-    shop = await _my_hotel(db, user)
+    shop = await _my_hotel(db, user, need_owner=True)
     rt = await _own_room_type(db, shop, rt_id)
     changes = payload.model_dump(exclude_none=True)
     if changes.get("name"):
@@ -122,7 +135,7 @@ async def set_calendar(
     过去日期只读;新开日期(此前无记录)必须带价格;
     总量不能下调到低于该日已售。
     """
-    shop = await _my_hotel(db, user)
+    shop = await _my_hotel(db, user, need_owner=True)
     if payload.from_date < date.today():
         raise HTTPException(422, "过去的日期不能修改")
     for rt_id in payload.room_type_ids:
@@ -1242,7 +1255,7 @@ async def update_hotel_profile(
     (资质与展示口径需平台核验,变更走客服工单)。"""
     import re
 
-    shop = await _my_hotel(db, user)
+    shop = await _my_hotel(db, user, need_owner=True)
     hp = await db.scalar(
         select(HotelProfile).where(HotelProfile.merchant_id == shop.id))
     if hp is None:

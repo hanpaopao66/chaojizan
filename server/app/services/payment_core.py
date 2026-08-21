@@ -175,10 +175,17 @@ async def _auto_accept(db: AsyncSession, order: Order) -> None:
         if (locked.rider_id is None and not locked.pickup
                 and not locked.self_delivery and not locked.parent_order_no):
             from ..models import Merchant as _M
-            from .push import notify_riders_new_grab
+            from .push import notify_riders_new_grab_detached, spawn
             shop = await db.get(_M, locked.merchant_id)
-            await notify_riders_new_grab(
-                db, locked, shop.name if shop else "商家")
+            # **丢后台,不 await。** 这里是支付回调路径:微信支付回调超时
+            # 会重试最多 15 次,而骑手扇出要给一批在线骑手逐个发 HTTPS。
+            # 一旦 JPush 抽风,回调被拖超时 → 微信重试 → 每次重试又拖一遍,
+            # 一次抖动放大成十五次。接单本身在上面已经 commit 了,
+            # 推送成不成功都不改变订单状态,没有任何理由让回调等它。
+            spawn(notify_riders_new_grab_detached(
+                locked.order_no, locked.merchant_id,
+                locked.delivery_fee_cents, shop.name if shop else "商家"),
+                what="骑手新单扇出")
         from .push import notify_order_status
         await notify_order_status(
             locked.customer_id, locked.order_no, "制作中")
