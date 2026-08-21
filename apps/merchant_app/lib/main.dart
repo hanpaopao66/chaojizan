@@ -253,6 +253,23 @@ class MerchantHomePage extends StatefulWidget {
   State<MerchantHomePage> createState() => _MerchantHomePageState();
 }
 
+/// 宽屏下每个 tab 的内容限宽。**appBar 和 body 用同一个值**才对得齐。
+///
+/// `responsive.dart` 的三个常量各有各的内容形态,别按"看着差不多"随手选:
+///
+/// - 订单 / 菜品是**卡片流** → [kFeedMaxWidth](1080);
+/// - 对账要并排放表格和图表 → [kWideMaxWidth](1440);
+/// - 店铺是**单列设置页**(一列入口条和开关) → [kContentMaxWidth](720)。
+///
+/// 店铺页原来跟着订单走 1080:一条 `SzEntryTile` 拉到 1080px,
+/// 图标钉在最左、状态值钉在最右,中间隔着一米空白 ——
+/// 这就是 `responsive.dart` 类文档里举的那个反例。
+double merchantTabMaxWidth(int tab) => switch (tab) {
+      2 => kWideMaxWidth,
+      3 => kContentMaxWidth,
+      _ => kFeedMaxWidth,
+    };
+
 class _MerchantHomePageState extends State<MerchantHomePage>
     with WidgetsBindingObserver {
   int _tab = 0;
@@ -1374,7 +1391,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       selectedIndex: _tab,
       // 宽度上限交给外壳,标题栏和内容才用**同一个**宽度对齐。
       // 对账页要放表格和图表,用宽一档;其余是单列信息流
-      contentMaxWidth: _tab == 2 ? kWideMaxWidth : kFeedMaxWidth,
+      contentMaxWidth: merchantTabMaxWidth(_tab),
       onSelected: (i) => setState(() => _tab = i),
       items: const [
         SzNavItem(

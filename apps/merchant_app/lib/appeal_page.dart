@@ -144,6 +144,35 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
               child: ListView(
                 padding: const EdgeInsets.all(12),
                 children: [
+                  // 时限放**进门第一眼**。
+                  //
+                  // 它原来在这一页的最底下,而商家是从店铺页的入口进来的 ——
+                  // 那个入口的 hint 写着「72 小时内申诉」,等于时限在入口上
+                  // 先说了一遍。入口收进图标网格之后格子里放不下副标题,
+                  // 这句话就只剩这一处了:**错过窗口就再也申诉不了**,
+                  // 不能让它排在两个列表后面。
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(kCardPad),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(kRadiusMd),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.timer_outlined,
+                          size: 18, color: theme.colorScheme.onSecondaryContainer),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                            '申诉窗口为裁决后 72 小时;每个目标只能申诉一次,'
+                            '复核结果会推送给你。',
+                            style: TextStyle(
+                                fontSize: kFontNote,
+                                height: 1.5,
+                                color: theme.colorScheme.onSecondaryContainer)),
+                      ),
+                    ]),
+                  ),
                   Text('已退款的售后(判商家责任)', style: theme.textTheme.titleSmall),
                   if (_afterSales.isEmpty)
                     const Padding(
@@ -179,9 +208,6 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
                             : _appealTrailing('review', r.id, '差评'),
                       ),
                     ),
-                  const SizedBox(height: 12),
-                  Text('申诉窗口为裁决后 72 小时;每个目标只能申诉一次,复核结果会推送给你。',
-                      style: theme.textTheme.bodySmall),
                 ],
               ),
             ),

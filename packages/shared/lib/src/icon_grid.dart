@@ -55,51 +55,90 @@ class SzIconGridItem {
 ///
 /// 选第三个。判据锁在 `test/icon_grid_test.dart`。
 class SzIconGrid extends StatelessWidget {
-  const SzIconGrid({super.key, required this.items});
+  const SzIconGrid({super.key, required this.items, this.columns});
 
   final List<SzIconGridItem> items;
 
+  /// 每行几格。不给就是 `items.length`(一行放完)。
+  ///
+  /// ## 为什么需要它
+  ///
+  /// 这个组件是 `Row` + `Expanded`,列数**不会**自己跟着宽度变。
+  /// 五个格子在 390 屏上每格 71px,刚好;同样五个格子在 1080 的宽屏上
+  /// 每格 216px —— 一个 40px 的图标居中飘着,两侧各 88px 空白,
+  /// 看着像图标掉队了。
+  ///
+  /// 商家端「店铺」页因此按可用宽度分叉:窄屏 2 行 × 5 列,
+  /// 宽屏 1 行 × 10 列。**判据是可用宽度不是平台**(见 `responsive.dart`)。
+  ///
+  /// 格子数不够整行时补空位,**不把最后几格拉宽** —— 拉宽的话第二行
+  /// 和第一行对不齐,看着像布局坏了。
+  final int? columns;
+
   @override
   Widget build(BuildContext context) {
+    final n = columns ?? items.length;
+    if (n <= 0) return const SizedBox.shrink();
+    final rows = <List<SzIconGridItem?>>[];
+    for (var i = 0; i < items.length; i += n) {
+      final row = <SzIconGridItem?>[
+        for (var j = i; j < i + n; j++) j < items.length ? items[j] : null,
+      ];
+      rows.add(row);
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [for (final row in rows) _row(context, row)],
+    );
+  }
+
+  Widget _row(BuildContext context, List<SzIconGridItem?> row) {
     final sz = Theme.of(context).sz;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final it in items)
+          for (final it in row)
             Expanded(
-              child: InkWell(
-                onTap: it.onTap,
-                borderRadius: BorderRadius.circular(kRadiusSm),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Badge(
-                        isLabelVisible: it.badge > 0,
-                        // 20+ 是列表首页的上限(myOrders 一页 20 条)。
-                        // 显示 21 会是**猜**的 —— 第 21 条还没拉下来
-                        label: Text(it.badge > 20 ? '20+' : '${it.badge}'),
-                        child: SizedBox(
-                          width: 40,
-                          height: 40,
-                          child: Icon(it.icon, size: 22, color: sz.inkMuted),
+              // 空位:占着宽度但什么都不画,好让上下两行的格子对齐
+              child: it == null
+                  ? const SizedBox.shrink()
+                  : InkWell(
+                      onTap: it.onTap,
+                      borderRadius: BorderRadius.circular(kRadiusSm),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Badge(
+                              isLabelVisible: it.badge > 0,
+                              // 20+ 是列表首页的上限(myOrders 一页 20 条)。
+                              // 显示 21 会是**猜**的 —— 第 21 条还没拉下来
+                              label:
+                                  Text(it.badge > 20 ? '20+' : '${it.badge}'),
+                              child: SizedBox(
+                                width: 40,
+                                height: 40,
+                                child: Icon(it.icon,
+                                    size: 22, color: sz.inkMuted),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              it.label,
+                              maxLines: 2,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  fontSize: kFontNote,
+                                  height: 1.2,
+                                  color: sz.ink),
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        it.label,
-                        maxLines: 2,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontSize: kFontNote, height: 1.2, color: sz.ink),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+                    ),
             ),
         ],
       ),

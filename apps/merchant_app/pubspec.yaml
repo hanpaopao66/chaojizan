@@ -36,6 +36,11 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+  # 店铺页的密度与接线测试要真渲染整页:用 MockClient 顶掉网络,
+  # 而不是拿源码文本做 grep 断言(那种断言在"公告搬进弹层"这类改动上
+  # 照样绿,见 shop_tab_density_test.dart 的历史)
+  http: ^1.2.0
+  package_info_plus: ^8.0.0
 
 # App 图标(生成:dart run flutter_launcher_icons)
 flutter_launcher_icons:

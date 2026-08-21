@@ -117,4 +117,65 @@ void main() {
       expect(find.text('7'), findsOneWidget);
     });
   });
+
+  group('宽屏重排:列数不能等于 items 长度写死', () {
+    // 商家端「店铺」页有 10 个跳转型入口。窄屏排 2 行 × 5 列;
+    // 宽屏(≥600)如果还是 5 列一行,1080px 下每格 216px ——
+    // 一个 40px 的图标居中飘着,两侧各 88px 空白,看着像图标掉队了。
+    //
+    // ⚠️ 列数**不会**自己跟着宽度变:SzIconGrid 是 Row + Expanded,
+    // 不给 columns 就等于 items.length。判据是可用宽度不是平台(见 responsive.dart)
+    List<SzIconGridItem> tools() => const [
+          SzIconGridItem(icon: Icons.circle, label: '券核销'),
+          SzIconGridItem(icon: Icons.circle, label: '店铺券'),
+          SzIconGridItem(icon: Icons.circle, label: '团购券'),
+          SzIconGridItem(icon: Icons.circle, label: '小票打印'),
+          SzIconGridItem(icon: Icons.circle, label: '经营看板'),
+          SzIconGridItem(icon: Icons.circle, label: '老客召回'),
+          SzIconGridItem(icon: Icons.circle, label: '专属码'),
+          SzIconGridItem(icon: Icons.circle, label: '消息'),
+          SzIconGridItem(icon: Icons.circle, label: '客服'),
+          SzIconGridItem(icon: Icons.circle, label: '判责申诉'),
+        ];
+
+    testWidgets('10 格一行:medium 最窄处(内容宽 488)不切字、不出界',
+        (t) async {
+      // 600 的平板竖屏减去 NavigationRail(约 80)和页面内边距(32)
+      final h = await heightOf(t, SzIconGrid(items: tools(), columns: 10),
+          screen: 520);
+      expect(truncatedTexts(t), isEmpty,
+          reason: '标签被切了。给 maxLines:2 让它换行,别用 ellipsis 省事');
+      expect(textsPaintingOutside(t), isEmpty);
+      expect(h, lessThanOrEqualTo(120),
+          reason: '一行 10 格涨到 ${h.toStringAsFixed(0)}px 了');
+    });
+
+    testWidgets('10 格一行 + 长辈版 1.4×:仍不切字不出界', (t) async {
+      await heightOf(t, SzIconGrid(items: tools(), columns: 10),
+          screen: 520, scale: 1.4);
+      expect(t.takeException(), isNull);
+      expect(truncatedTexts(t), isEmpty);
+      expect(textsPaintingOutside(t), isEmpty);
+    });
+
+    testWidgets('columns 比 items 少时补空位,不把最后一格拉宽', (t) async {
+      // 7 个格子排 5 列 = 两行,第二行只有 2 个。如果不补空位,
+      // 那 2 个会各占半行宽 —— 和上一行对不齐,看着像布局坏了
+      await heightOf(
+          t,
+          SzIconGrid(items: tools().sublist(0, 7), columns: 5),
+          screen: 390);
+      final cells = t
+          .widgetList<Expanded>(find.descendant(
+              of: find.byType(SzIconGrid), matching: find.byType(Expanded)))
+          .length;
+      expect(cells, 10, reason: '7 个格子排 5 列该占满 2 行 10 个位置(3 个空位)');
+    });
+
+    testWidgets('不给 columns 时行为不变 —— 老调用点一个不用改', (t) async {
+      final a = await heightOf(t, orders());
+      final b = await heightOf(t, SzIconGrid(items: orders().items, columns: 4));
+      expect(a, b);
+    });
+  });
 }

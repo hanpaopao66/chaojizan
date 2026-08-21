@@ -3351,7 +3351,8 @@ async def my_todos(
 ):
     """待办聚合:商家当下欠着的事,数字非零才值得展示。
     只聚合已有数据,不引入新状态 —— 每一项点进去都有现成的处理界面。"""
-    from ..models import AfterSale, AfterSaleStatus, Review, StaffHealthCert
+    from ..models import (Appeal, AfterSale, AfterSaleStatus, Review,
+                          StaffHealthCert)
     from ..services.licenses import stage as _lic_stage
     shop = await _my_shop_or_404(db, user)
     now = datetime.now(timezone.utc)
@@ -3415,6 +3416,36 @@ async def my_todos(
             Review.created_at < now - timedelta(hours=24),
             Review.created_at > now - timedelta(days=7))) or 0
 
+    # 还来得及申诉的裁决数(售后判商家责 + 差评),已申诉过的不算。
+    #
+    # 口径是「**还来得及**」不是「历史上被判过几次」:后者点进去多半什么也
+    # 做不了,给它挂红数字只会制造焦虑 —— 下一次商家就不信这个角标了
+    # (同 SzIconGridItem.badge 的规矩:只给"你还有事要做"的)。
+    #
+    # 窗口判据从 appeals.py 借,不在这儿抄一遍 —— 抄一遍的话哪天只改了一处,
+    # 角标说有 2 单可申诉、点进去提交却被 422 挡回来
+    from .appeals import appeal_cutoff
+    cutoff = appeal_cutoff()
+    appealed = select(Appeal.target_id).where(
+        Appeal.target_type == "after_sale")
+    appealable_sales = await db.scalar(
+        select(func.count(AfterSale.id)).where(
+            AfterSale.merchant_id == shop.id,
+            AfterSale.status == AfterSaleStatus.accepted,
+            AfterSale.fault != "rider",
+            AfterSale.processed_at.is_not(None),
+            AfterSale.processed_at > cutoff,
+            AfterSale.id.not_in(appealed))) or 0
+    appealed_reviews = select(Appeal.target_id).where(
+        Appeal.target_type == "review")
+    appealable_reviews = await db.scalar(
+        select(func.count(Review.id)).where(
+            Review.merchant_id == shop.id,
+            Review.merchant_rating <= 3,
+            Review.hidden.is_(False),
+            Review.created_at > cutoff,
+            Review.id.not_in(appealed_reviews))) or 0
+
     return {
         "pending_orders": pending_orders,
         "after_sales": after_sales,
@@ -3423,6 +3454,7 @@ async def my_todos(
         "coupon_batches_low": coupon_low,
         "flash_expiring": flash_expiring,
         "messages_unread": messages_unread,
+        "appealable": appealable_sales + appealable_reviews,
         # 证照/健康证到期:**不计入待办角标数**,单独一档。
         # 它们和"有几单待接"不是一回事 —— 混进同一个数字里,
         # 商家清完订单就以为清完了,而这两条是清不掉的(要去办证)

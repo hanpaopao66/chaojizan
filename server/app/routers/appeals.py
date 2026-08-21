@@ -80,12 +80,35 @@ class AppealResolveIn(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
-def _within_window(decided_at: datetime | None) -> bool:
+def appeal_cutoff(now: datetime | None = None) -> datetime:
+    """窗口起点:比这个时刻更早的裁决已经申诉不了了。
+
+    给 SQL 的 WHERE 用 —— 数「还有几单来得及申诉」时不可能对每一行调
+    [within_window]。**它和 [within_window] 必须严格互为反面**,
+    不然商家端角标说有 2 单可申诉,点进去提交却被 422 挡回来。
+    """
+    return (now or datetime.now(timezone.utc)) - APPEAL_WINDOW
+
+
+def within_window(decided_at: datetime | None,
+                  now: datetime | None = None) -> bool:
+    """这条裁决还在申诉窗口里吗。
+
+    `decided_at` 为空 = 还没判过责,没有东西可申诉。
+
+    ⚠️ 数据库取出来的 datetime 可能是 naive 的,**一律当 UTC 解读** ——
+    当成本地时间的话东八区会凭空多出 8 小时窗口,
+    前端放行、后端 422。
+    """
     if decided_at is None:
         return False
     if decided_at.tzinfo is None:
         decided_at = decided_at.replace(tzinfo=timezone.utc)
-    return datetime.now(timezone.utc) - decided_at < APPEAL_WINDOW
+    return decided_at > appeal_cutoff(now)
+
+
+# 旧名保留:本文件内三处校验都在用
+_within_window = within_window
 
 
 async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):

@@ -1,0 +1,11 @@
+tags:
+  golden:
+    # 截图是**给人看的评审产物**,不做 CI 门禁。
+    #
+    # 字形栅格化跨平台不一致(本机 macOS / CI 是 Linux),
+    # 让 golden 当门禁的结果是 CI 天天红、大家学会无视它 ——
+    # 那比没有门禁更糟。
+    #
+    # 生成 / 更新:
+    #   flutter test test/shop_tab_golden_test.dart --update-goldens --run-skipped
+    skip: "截图产物,不做 CI 门禁;用 --run-skipped 显式跑"
