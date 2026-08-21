@@ -77,7 +77,7 @@ void main() {
       expect(thrown, isA<ApiException>());
       expect((thrown! as ApiException).isNetwork, isTrue,
           reason: '超时属于网络层问题,页面据此给重试按钮');
-      expect((thrown! as ApiException).message, contains('超时'));
+      expect((thrown as ApiException).message, contains('超时'));
     });
 
     test('超时之后底层连接被掐掉,不留在连接池里', () async {

@@ -2,6 +2,7 @@
 
 在 server/ 目录下运行:python -m tests.e2e_p4_witness
 """
+import asyncio
 import hashlib
 import json
 import subprocess
@@ -16,6 +17,14 @@ from tests.util import BASE, call
 GENESIS = "0" * 64
 
 
+async def _build_anchors() -> int:
+    """把锚点补到昨天(幂等)。auto_flow 每轮也调它,这里只是不依赖它跑过。"""
+    from app.db import SessionLocal
+    from app.services.ledger import build_missing_anchors
+    async with SessionLocal() as db:
+        return await build_missing_anchors(db)
+
+
 def canonical(obj) -> str:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False)
@@ -26,8 +35,20 @@ def sha256(s: str) -> str:
 
 
 # ---- 哈希链:独立复算每个锚点(与见证节点同一套算法) ----
+#
+# 锚点是 auto_flow 每轮清扫补出来的,而 CI 上 AUTO_FLOW_ENABLED=false
+# (后台任务一律关掉,要用的测试自己手动调)。所以这里先把锚点建出来,
+# 不能假设"跑测试之前已经有人建好了" —— 那正是这个测试从前
+# `if anchors:` 静默跳过、整段断言执行 0 次的原因。
+_build = asyncio.run(_build_anchors())
+if _build:
+    print(f"  (本次先补了 {_build} 个锚点 —— 后台清扫在测试环境是关的)")
+
 anchors = call("GET", "/ledger/anchors")
-assert anchors, "公开账本一个锚点都没有 —— 下面的断言会整段静默跳过"
+assert anchors, (
+    "补完之后公开账本仍然一个锚点都没有。"
+    "要么 build_missing_anchors 坏了,要么库里连昨天以前的活动都没有 —— "
+    "两种都不该让下面的哈希链断言静默跳过")
 prev = GENESIS
 sample_day, sample_payload = "", None
 for a in anchors:
