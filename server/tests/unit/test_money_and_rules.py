@@ -563,10 +563,24 @@ class Test核账要随单量增长仍能跑:
 
         from app.services import audit
         src = inspect.getsource(audit.run_audit)
-        # 商家入账 / 商家冲账 / 骑手入账 / 售后判责,四处都要走子查询 ——
+        # 商家入账 / 商家冲账 / 骑手入账,三处都要走子查询 ——
         # 漏一处,核账照样会在那个量级挂掉
-        assert src.count(".in_(completed_ids)") >= 4, \
-            "四处按订单 id 查的地方都要走子查询"
+        assert src.count(".in_(completed_ids)") >= 3, \
+            "三处按订单 id 查的地方都要走子查询"
+        # 第四处「售后判责」搬进了 _reversal_due_ids(规则 6 与历史补录共用
+        # 一套口径)。调用点把**同一个子查询**原样传进去,函数里再
+        # `.in_(order_ids)` —— 换了个参数名,子查询没变。
+        #
+        # 只数 run_audit 源码里的 `.in_(completed_ids)` 会漏掉它:
+        # 这条断言原来写死 >= 4,搬走那次就红了,而红的是断言不是代码。
+        # 源码扫描类的守卫必须跟着代码走,否则它保护的是"别重构"
+        assert "_reversal_due_ids(db, completed_ids)" in src, \
+            "售后判责要复用同一个子查询,不能在这儿把 id 拉成列表"
+        helper = inspect.getsource(audit._reversal_due_ids)
+        assert helper.count(".in_(order_ids)") >= 2, \
+            "_reversal_due_ids 里的 after_sales / refunds 两处也要走子查询"
+        assert "[o.id for o" not in helper and "[a.id for a" not in helper, \
+            "_reversal_due_ids 里不能把 id 逐个绑成参数"
 
 
 class Test城市切换器:

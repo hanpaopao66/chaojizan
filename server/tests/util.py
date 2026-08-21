@@ -4,6 +4,7 @@
 import json
 import os
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -319,3 +320,45 @@ def fake_order(**overrides):
     )
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+# ---------- 账务自检:怎么在长期共享的开发库上断言"没变坏" ----------
+#
+# 直接 `assert problems == 0` 在这个库上永远不成立,而且**清库也救不回来**:
+# 自检里有一类不设时间窗的挂账检查(见 services/audit.py 规则 10/11/13),
+# 核的不是"当期账对不对",是"有没有钱卡在半路没人管",注释写得很直白:
+# 「挂着的钱不会因为过了 30 天就不欠了」。它们只增不减,要靠人把那些单
+# 推完才降得下来 —— 开发库没有这个人,于是恒亮。
+#
+# 所以口径改成对基线取差:**本次运行不许把账弄坏**,存量原样带着。
+
+_AUDIT_ORDER_NO = re.compile(r"[0-9a-f]{20}")
+
+#: 纯粹靠时间推移就会从无到有的检查项:一笔退款挂满 6 小时、一单住宿挂满
+#: 24 小时,它就冒出来了,跟"这次运行干了什么"毫无关系。拿它们当"本次新增"
+#: 的判据,等于给主回归埋一颗按小时走的随机红灯(实测撞见过一次:
+#: 一批 03:04 发起的退款正好在两次自检之间挂满 6 小时)
+AUDIT_TIME_THRESHOLD = ("profit_sharing_stuck", "profit_sharing_failed",
+                        "refund_stuck", "stay_paid_stuck")
+
+
+def audit_fingerprint(detail_rows) -> set:
+    """一次自检结果的指纹:{(检查项, 被点名的订单号)}。
+
+    不能拿 detail 原文当指纹:聚合类检查的文案带笔数和「最久的已挂 N 小时」,
+    两次跑之间必然不同,比原文只会得到一堆假差异;而只比检查项名又看不出
+    "是不是换了一单在报"。取(检查项,订单号)是这两者的折中。
+    """
+    return {(p["check"],
+             m.group(0) if (m := _AUDIT_ORDER_NO.search(p["detail"])) else "")
+            for p in detail_rows}
+
+
+def audit_regressions(problems, baseline_checks) -> set:
+    """相对基线**新冒出来**的检查项,已剔除随时间自然出现的那几类。
+
+    本次运行真把账弄坏了,一定会以一个新的检查项出现(逐单类的还会带上
+    订单号,调用方通常再单独断言一次自己那一单)。
+    """
+    return ({p["check"] for p in problems} - set(baseline_checks)
+            - set(AUDIT_TIME_THRESHOLD))

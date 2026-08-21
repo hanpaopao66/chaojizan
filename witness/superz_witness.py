@@ -30,7 +30,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 
 def local_utc_offset() -> str:
@@ -41,7 +41,18 @@ def local_utc_offset() -> str:
     off = time.strftime("%z")  # 如 +0800;个别平台可能为空
     return f"UTC{off[:3]}:{off[3:]}" if len(off) == 5 else ""
 HEARTBEAT_SECONDS = 300
-MAX_DAYS_PER_CYCLE = 60      # 首次追赶历史时每轮最多校验的天数
+#: 常驻模式下每轮最多校验的天数 —— 纯粹是首次冷启动时的礼貌上限:
+#: 三年的链就是一千多次串行请求,不该在启动那一瞬间全打给服务器。
+#:
+#: **它只是断点,不是终点。** 校验过的每一天都落在本地 state 的 `seen` 里,
+#: 下一轮直接跳过已见的日子接着往下走,五分钟一轮,追上只是时间问题。
+#: 所以常驻模式永远追得上链尾,把这个数调大调小都只影响追赶速度。
+#:
+#: **但 `--once` 不能用它。** 一次性巡检只跑一轮,套上这个上限就成了
+#: "验了前 60 天、剩下的没看过、然后打印账本可信" —— 见证节点是拿来
+#: 证伪的,一句没验到链尾的"可信"比不验更糟。所以 `--once` 传 max_days=None,
+#: 语义是"验到追上链尾为止"(见 run_cycle 的 max_days 参数)。
+MAX_DAYS_PER_CYCLE = 60
 GENESIS = "0" * 64
 
 
@@ -133,8 +144,13 @@ class Witness:
     def _save_state(self):
         self.state_path.write_text(json.dumps(self.state, ensure_ascii=False))
 
-    def run_cycle(self) -> dict:
-        """一轮完整见证:比对历史 → 校验新增 → 心跳上报。返回上报内容。"""
+    def run_cycle(self, max_days: int | None = MAX_DAYS_PER_CYCLE) -> dict:
+        """一轮完整见证:比对历史 → 校验新增 → 心跳上报。
+
+        `max_days` 是本轮最多校验多少个**新**日子,None = 不限(验到链尾)。
+        没验完的日子不会丢:已验的都记在 `seen` 里,下一轮从断点接着走。
+        返回上报内容,外加一个 `caught_up`(是否已经验到链尾,不上报给服务端)。
+        """
         seen: dict = self.state["seen"]
         anchors, after = [], ""
         while True:  # 服务端每页 400 天,翻页取全量
@@ -173,9 +189,12 @@ class Witness:
             prev_hash = chain_hash
             verified_day, verified_hash = day, chain_hash
             fresh += 1
-            if len(problems) > 20 or fresh >= MAX_DAYS_PER_CYCLE:
+            if len(problems) > 20 or (max_days is not None and fresh >= max_days):
                 break
 
+        # 还差几天追上链尾。判据是"锚点里还有没进过 seen 的日子",
+        # 而不是"循环有没有 break" —— 正好在最后一天撞上限也算追上了
+        behind = sum(1 for a in anchors if a["day"] not in seen)
         ok = not tampered and not problems
         self._save_state()
 
@@ -195,9 +214,15 @@ class Witness:
             http_json("POST", f"{self.api}/nodes/heartbeat", report)
         except urllib.error.URLError as exc:
             print(f"[warn] 心跳上报失败(不影响本地见证): {exc}", file=sys.stderr)
-        status = "✓ 账本可信" if ok else f"✗ 发现问题: {message}"
+        # 没追上链尾就别说"账本可信" —— 那句话的范围只到 verified_day 为止
+        if not ok:
+            status = f"✗ 发现问题: {message}"
+        elif behind:
+            status = f"✓ 已验部分无异常,还差 {behind} 天追上链尾(下一轮接着验)"
+        else:
+            status = "✓ 账本可信(已验到链尾)"
         print(f"[{time.strftime('%H:%M:%S')}] 校验至 {verified_day or '(暂无锚点)'} {status}")
-        return report
+        return {**report, "caught_up": not behind}
 
 
 def main():
@@ -207,7 +232,9 @@ def main():
     parser.add_argument("--state", default=os.environ.get(
         "WITNESS_STATE", str(Path.home() / ".superz-witness.json")))
     parser.add_argument("--once", action="store_true",
-                        help="只跑一轮(测试/巡检用),默认常驻每 5 分钟一轮")
+                        help="一次性巡检:一口气验到链尾再退出(测试/CI/cron 用),"
+                             "默认常驻每 5 分钟一轮、每轮最多补 "
+                             f"{MAX_DAYS_PER_CYCLE} 天")
     args = parser.parse_args()
 
     witness = Witness(args.api, Path(args.state))
@@ -215,7 +242,9 @@ def main():
     print(f"节点 ID: {witness.state['node_id'][:12]}…(本机生成,只用于去重计数)")
     while True:
         try:
-            report = witness.run_cycle()
+            # --once 不设每轮上限:巡检退出码代表的是"整条链验过了",
+            # 卡在 60 天上限的话,链一超过 60 天,退出码就永远只反映前 60 天
+            report = witness.run_cycle(None if args.once else MAX_DAYS_PER_CYCLE)
             if args.once:
                 sys.exit(0 if report["ok"] else 1)
         except urllib.error.HTTPError as exc:

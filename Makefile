@@ -142,7 +142,13 @@ test:
 	  && python -m tests.e2e_tip && python -m tests.e2e_transfer_discipline \
 	  && python -m tests.e2e_urge && python -m tests.e2e_weather_shutdown \
 	  && python -m tests.e2e_withdrawal_failed \
-	  && python -m tests.e2e_mini_apps
+	  && python -m tests.e2e_mini_apps \
+	  && python -m tests.e2e_audit_coverage && python -m tests.e2e_authz_regression \
+	  && python -m tests.e2e_coupon_release \
+	  && python -m tests.e2e_errand_receipt_replay \
+	  && python -m tests.e2e_refund_bounds && python -m tests.e2e_refund_order \
+	  && python -m tests.e2e_soldout_gate \
+	  && python -m tests.e2e_stays_noshow_release
 
 # 需要特殊环境或已知不稳定的用例,**故意不放进 make test**:
 #   e2e_privacy_phone_strict —— 要对着 PRIVACY_PHONE_STRICT=true 启动的实例跑

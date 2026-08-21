@@ -17,7 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from .util import CUSTOMER, RIDER, call, login  # noqa: E402
+from .util import CUSTOMER, RIDER, audit_regressions, call, login  # noqa: E402
 
 customer = login(CUSTOMER)
 rider = login(RIDER)
@@ -35,7 +35,13 @@ def body(**kw):
 
 
 async def main():
+    from app.services.audit import run_audit
     from app.services.errand import service_fee_cents
+
+    # 下单之前先记一份自检基线:开发库里有历次 e2e 的存量问题
+    # (住宿 PAID 挂起、分账已放弃这些不设时间窗的挂账检查只增不减),
+    # 本用例只对**本次运行新增的**负责。用法见文件末尾那段断言
+    baseline_checks = {p["check"] for p in await run_audit()}
 
     # ---- 报价:服务费单列,不藏在总价里 ----
     q = call("POST", "/errands/quote", customer, body())
@@ -126,12 +132,20 @@ async def main():
     print("✓ 不产生商家入账(否则服务主体钱包变负,核账当场报红)")
 
     # ---- 账务自检必须仍然全绿 ----
-    from app.services.audit import run_audit
+    #
+    # 断言的是「**这一单**有没有把自检带红」,按本次运行的订单号匹配,
+    # 不按检查项名一刀切。原来还多一句 `"errand_identity" in check`,
+    # 那等于"库里任何一张历史跑腿单不平,这条用例就红" —— 而
+    # errand_identity_mismatch 的文案里本来就带订单号,`no in detail`
+    # 已经把本单盖住了,那一刀切只会把别人的历史账算到这一单头上。
+    #
+    # 聚合类检查(文案不带订单号)靠对基线取差来兜:本次运行让哪个检查项
+    # 从无到有,照样红。比原来只盯 global_identity 一个名字更严。
     problems = await run_audit()
-    bad = [p for p in problems if no in str(p.get("detail", ""))
-           or "global_identity" in str(p.get("check"))
-           or "errand_identity" in str(p.get("check"))]
+    bad = [p for p in problems if no in str(p.get("detail", ""))]
     assert not bad, f"跑腿单把账务自检带红了:{bad}"
+    fresh = audit_regressions(problems, baseline_checks)
+    assert not fresh, f"本次运行新增了自检问题:{fresh}"
     print("✓ 账务自检全绿:跑腿有自己的恒等式,外卖那两条也没被带红")
 
     # ---- 跑腿单不许渗进商家的任何口径 ----

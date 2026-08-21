@@ -27,7 +27,9 @@ def sha256(s: str) -> str:
 
 # ---- 哈希链:独立复算每个锚点(与见证节点同一套算法) ----
 anchors = call("GET", "/ledger/anchors")
+assert anchors, "公开账本一个锚点都没有 —— 下面的断言会整段静默跳过"
 prev = GENESIS
+sample_day, sample_payload = "", None
 for a in anchors:
     detail = call("GET", f"/ledger/days/{a['day']}")
     payload_hash = sha256(canonical(detail["payload"]))
@@ -35,6 +37,13 @@ for a in anchors:
     chain = sha256(prev + payload_hash)
     assert chain == a["chain_hash"], f"{a['day']} 链哈希不符"
     prev = chain
+    # 顺手留一份**有流水行**的账本给下面抽查用。
+    #
+    # 以前这里直接拿 anchors[-1](最新那天),而最新那天恰恰经常一行都没有
+    # ——于是"商家净额恒等式逐行成立"这个断言执行 0 次、隐私扫描也扫不进行里,
+    # 整块假绿。要抽查就抽查有东西可查的那天。
+    if detail["payload"].get("merchant_rows"):
+        sample_day, sample_payload = a["day"], detail["payload"]
 print(f"✓ 哈希链独立复算通过({len(anchors)} 个锚点,从创世块连续到昨天)")
 
 # ---- 隐私:公开账本不含任何个人信息字段 ----
@@ -49,15 +58,16 @@ def all_keys(obj, acc):
     return acc
 
 
-if anchors:
-    payload = call("GET", f"/ledger/days/{anchors[-1]['day']}")["payload"]
-    keys = all_keys(payload, set())
-    for banned in ("phone", "address", "name", "customer_id", "merchant_id",
-                   "rider_id", "lat", "lng", "order_no", "purchase_no"):
-        assert banned not in keys, f"公开账本泄露字段:{banned}"
-    for row in payload["merchant_rows"]:
-        assert row["net"] == row["food"] - row["commission"]
-    print("✓ 账本匿名化(无个人信息/身份字段),商家净额恒等式逐行成立")
+assert sample_payload is not None, \
+    "所有锚点都没有商家流水行 —— 隐私扫描和逐行恒等式都会空跑"
+keys = all_keys(sample_payload, set())
+for banned in ("phone", "address", "name", "customer_id", "merchant_id",
+               "rider_id", "lat", "lng", "order_no", "purchase_no"):
+    assert banned not in keys, f"公开账本泄露字段:{banned}"
+for row in sample_payload["merchant_rows"]:
+    assert row["net"] == row["food"] - row["commission"]
+print("✓ 账本匿名化(无个人信息/身份字段),商家净额恒等式逐行成立"
+      f"(抽查 {sample_day},{len(sample_payload['merchant_rows'])} 行)")
 
 # ---- 心跳注册与去重 ----
 node_id = uuid.uuid4().hex
@@ -81,21 +91,20 @@ assert err["_error"] == 422
 print("✓ 非法 node_id 被拒")
 
 # ---- 篡改示警:节点报告与平台记录不一致 → divergent 公开可见 ----
-if anchors:
-    latest = anchors[-1]
-    r = call("POST", "/nodes/heartbeat", body={
-        "node_id": node_id, "name": my_name, "region": "测试环境",
-        "verified_day": latest["day"], "chain_hash": "f" * 64, "ok": True})
-    assert r["divergent"], "链哈希不符必须标记 divergent"
-    s = call("GET", "/nodes/summary")
-    assert s["divergent"] >= 1
-    # 恢复:上报正确哈希后示警解除(不给后续测试和演示留红灯)
-    r = call("POST", "/nodes/heartbeat", body={
-        "node_id": node_id, "name": my_name, "region": "测试环境",
-        "verified_day": latest["day"], "chain_hash": latest["chain_hash"],
-        "ok": True})
-    assert not r["divergent"]
-    print("✓ 篡改示警:节点报告不一致 → 公开标记;复核一致后解除")
+latest = anchors[-1]
+r = call("POST", "/nodes/heartbeat", body={
+    "node_id": node_id, "name": my_name, "region": "测试环境",
+    "verified_day": latest["day"], "chain_hash": "f" * 64, "ok": True})
+assert r["divergent"], "链哈希不符必须标记 divergent"
+s = call("GET", "/nodes/summary")
+assert s["divergent"] >= 1
+# 恢复:上报正确哈希后示警解除(不给后续测试和演示留红灯)
+r = call("POST", "/nodes/heartbeat", body={
+    "node_id": node_id, "name": my_name, "region": "测试环境",
+    "verified_day": latest["day"], "chain_hash": latest["chain_hash"],
+    "ok": True})
+assert not r["divergent"]
+print("✓ 篡改示警:节点报告不一致 → 公开标记;复核一致后解除")
 
 # ---- 真跑一遍见证节点脚本(--once):校验全链 + 心跳上报 ----
 script = Path(__file__).resolve().parent.parent.parent / "witness" / "superz_witness.py"
@@ -121,11 +130,10 @@ print("✓ 见证脚本心跳已出现在 /nodes 节点列表")
 ov = call("GET", "/stats/overview")
 assert ov["today"]["orders"] >= 0 and ov["principles"]["commission_rate"] == 0.05
 assert len(ov["trend"]) == min(30, len(anchors))
-if anchors:
-    assert ov["chain"]["latest_hash"] == anchors[-1]["chain_hash"]
-    # 趋势数字与账本锚点 totals 同源(抽查最后一天)
-    day_payload = call("GET", f"/ledger/days/{ov['trend'][-1]['day']}")["payload"]
-    assert ov["trend"][-1]["rider_amount"] == day_payload["totals"]["rider_amount"]
+assert ov["chain"]["latest_hash"] == anchors[-1]["chain_hash"]
+# 趋势数字与账本锚点 totals 同源(抽查最后一天)
+day_payload = call("GET", f"/ledger/days/{ov['trend'][-1]['day']}")["payload"]
+assert ov["trend"][-1]["rider_amount"] == day_payload["totals"]["rider_amount"]
 print("✓ /stats/overview 与公开账本同源(大屏与官网的数据面)")
 
 print("\n全部通过:公开账本哈希链 + 社区见证节点 ✓")
