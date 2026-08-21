@@ -518,6 +518,42 @@ def _first_night_cents(order: StayOrder) -> int:
     return order.nightly_prices[0]["price_cents"] * order.rooms_qty
 
 
+def channel_refundable_cents(order: StayOrder) -> int:
+    """这单里**能从支付渠道原路退回去**的部分。**写入与自检共用这一个函数。**
+
+    住宿的 `refund_cents` 不总等于它:「到店无房」成立时
+    `refund_cents = 房费 + 商家违约金(首晚 30%)`,**超过了用户实付**。
+    微信退款 API 的硬约束是「退款额 ≤ 原支付额」,超出的那部分它直接拒;
+    真正的付法是房费原路退、违约金走「转账到零钱」—— 而转账通道还没接。
+
+    所以流水只记 `min(refund_cents, total_cents)`,超出部分是一笔
+    **待转账的负债**,不伪装成退款塞进流水表(塞进去的下场是:
+    真开微信支付那天这笔退款被渠道整笔拒掉,而账面写着已退)。
+    自检规则 15 按同一个口径核,并把超出部分单独认出来 ——
+    有「到店无房」那张已成立的售后单背书才算合规,否则报超退。
+    """
+    return min(order.refund_cents, order.total_cents)
+
+
+async def refund_to_channel(db: AsyncSession, order: StayOrder,
+                            note: str) -> None:
+    """住宿退款的**唯一出口**:把该退的钱推给渠道并落一条流水。
+
+    **金额不由调用方给** —— 它从 `order.refund_cents` 自己算(见
+    channel_refundable_cents)。五条退款路径(取消/拒单/noshow/到店无房/
+    协商退)各自算完金额往 `refund_cents` 上一放就调这里,谁都没有机会
+    把一个和订单对不上的数推给渠道。调用前把 `refund_cents` 设好。
+
+    退 0 就不写流水(不可退档取消/全额扣款):一条 0 分的空行对账上
+    没有任何意义,只会让"有没有退过钱"这个判断多一种形态。
+    """
+    amount = channel_refundable_cents(order)
+    if amount <= 0:
+        return
+    from ..services.wechat_pay import request_stay_refund
+    await request_stay_refund(db, order, amount, note)
+
+
 def cancel_refund_cents(order: StayOrder, now: datetime) -> tuple[int, str]:
     """按取消政策快照算退款(纯函数,试算与实退共用)。返回 (退款分, 说明)。"""
     policy = order.cancel_policy.value if hasattr(order.cancel_policy, "value") \
@@ -708,6 +744,7 @@ async def cancel_stay_order(
     # 扣款部分归商家,平台分文不取(fee=0);入商家流水在结算服务统一处理
     order.fee_cents = 0
     order.net_cents = order.total_cents - refund
+    await refund_to_channel(db, order, note)
     await release(db, order.room_type_id, order.checkin_date,
                   order.checkout_date, order.rooms_qty)
     await db.commit()
@@ -787,6 +824,7 @@ async def reject_stay_order(
     order.refund_cents = order.total_cents
     order.refund_note = f"商家拒单全额退款:{payload.reason}"
     order.cancelled_at = datetime.now(_tz.utc)
+    await refund_to_channel(db, order, order.refund_note)
     await release(db, order.room_type_id, order.checkin_date,
                   order.checkout_date, order.rooms_qty)
     await db.commit()
@@ -1049,6 +1087,9 @@ async def resolve_stay_aftersale(db: AsyncSession, a: StayAfterSale,
 
     到店无房成立:refund = 房费 + 首晚×30% 违约金,net = -违约金(商家余额扣),
     fee = 0——审计恒等式 net + refund == total 依然成立,平台分文不取。
+
+    **退款流水只记房费那一半**(见 channel_refundable_cents):违约金
+    超过用户实付,退款通道退不了,要等「转账到零钱」接入。
     """
     now = datetime.now(_tz.utc)
     a.merchant_note = merchant_note
@@ -1078,6 +1119,7 @@ async def resolve_stay_aftersale(db: AsyncSession, a: StayAfterSale,
         order.net_cents = order.total_cents - refund
         order.refund_cents = refund
         order.refund_note = "协商退款(商家同意)"
+    await refund_to_channel(db, order, order.refund_note)
     await release(db, order.room_type_id, order.checkin_date,
                   order.checkout_date, order.rooms_qty)
 

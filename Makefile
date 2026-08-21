@@ -147,6 +147,7 @@ test:
 	  && python -m tests.e2e_coupon_release \
 	  && python -m tests.e2e_errand_receipt_replay \
 	  && python -m tests.e2e_refund_bounds && python -m tests.e2e_refund_order \
+	  && python -m tests.e2e_refund_channels \
 	  && python -m tests.e2e_soldout_gate \
 	  && python -m tests.e2e_stays_noshow_release
 

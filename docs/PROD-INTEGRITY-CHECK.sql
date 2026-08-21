@@ -7,12 +7,52 @@
 -- 是唯一涉及真金白银流出的。#3 决定 #4 是否已经在发作。
 
 -- ============ 退款 ============
--- #1 退款汇总与流水明细不恒等
+-- refunds 表自 0107 起装三条业务线,用 biz_type + biz_id 区分;
+-- order_id / order_no 只有外卖行有(券和住宿是 NULL)。
+--
+-- ⚠️ 迁移到 0107 之后,券和住宿的历史退款**一条流水都没有**
+--    (接渠道之前它们只改了个状态字段)。先跑 #1b #1c 看存量,
+--    再执行一次 POST /admin/audit/backfill 把历史流水补录进去,
+--    否则每日自检会对每一笔历史退款报一条。
+
+-- #1 外卖:退款汇总与流水明细不恒等
 SELECT o.id, o.order_no, o.total_cents, o.refund_cents, COALESCE(r.s,0) AS refunds_sum
 FROM orders o
-LEFT JOIN (SELECT order_id, SUM(amount_cents) s FROM refunds GROUP BY 1) r ON r.order_id = o.id
+LEFT JOIN (SELECT biz_id, SUM(amount_cents) s FROM refunds
+           WHERE biz_type = 'food' AND status <> 'failed' GROUP BY 1) r
+       ON r.biz_id = o.id
 WHERE o.refund_cents <> COALESCE(r.s,0)
 ORDER BY abs(o.refund_cents - COALESCE(r.s,0)) DESC LIMIT 50;
+
+-- #1b 团购券:标着已退款,但流水之和 ≠ 售价(应退额只有"全额退"一种口径)
+SELECT p.id, p.purchase_no, p.sell_price_cents, COALESCE(r.s,0) AS refunds_sum
+FROM voucher_purchases p
+LEFT JOIN (SELECT biz_id, SUM(amount_cents) s FROM refunds
+           WHERE biz_type = 'voucher' AND status <> 'failed' GROUP BY 1) r
+       ON r.biz_id = p.id
+WHERE p.status = 'refunded' AND p.sell_price_cents <> COALESCE(r.s,0)
+ORDER BY p.id DESC LIMIT 50;
+
+-- #1c 住宿:流水之和 ≠ **能原路退回去**的部分 = least(refund_cents, total_cents)。
+--     不是 refund_cents —— 到店无房的退款额含商家违约金,本来就超过用户实付
+SELECT o.id, o.order_no, o.status, o.total_cents, o.refund_cents,
+       least(o.refund_cents, o.total_cents) AS channel_due,
+       COALESCE(r.s,0) AS refunds_sum
+FROM stay_orders o
+LEFT JOIN (SELECT biz_id, SUM(amount_cents) s FROM refunds
+           WHERE biz_type = 'stay' AND status <> 'failed' GROUP BY 1) r
+       ON r.biz_id = o.id
+WHERE o.status IN ('cancelled','noshow','rejected') AND o.refund_cents > 0
+  AND least(o.refund_cents, o.total_cents) <> COALESCE(r.s,0)
+ORDER BY o.id DESC LIMIT 50;
+
+-- #1d 到店无房的违约金:超过用户实付、退款通道退不了,等转账到零钱接入。
+--     这不是错账,是**挂着的负债**(商家余额已扣、用户没拿到)
+SELECT count(*) AS n, COALESCE(SUM(o.refund_cents - o.total_cents),0) AS owed_cents
+FROM stay_orders o
+JOIN stay_after_sales a ON a.stay_order_id = o.id
+WHERE o.refund_cents > o.total_cents
+  AND a.kind = 'no_room' AND a.status IN ('accepted','auto_accepted');
 
 -- #2 同一单既有 accepted 售后又有 confirmed 食安投诉 = 极可能双重退款
 SELECT o.id, o.order_no, o.total_cents, o.refund_cents
@@ -25,9 +65,9 @@ SELECT count(*) FILTER (WHERE wx_transaction_id <> '') AS with_txid,
        count(*) FILTER (WHERE wx_transaction_id = '')  AS without_txid
 FROM orders WHERE status NOT IN ('pending_payment','cancelled');
 
--- #4 退款发起失败，但订单已经把 refund_cents 加上去了
-SELECT r.id, r.order_no, r.amount_cents, r.status, r.error, o.refund_cents
-FROM refunds r JOIN orders o ON o.id = r.order_id WHERE r.status = 'failed';
+-- #4 退款发起失败（三条业务线一起看：钱没退出去，业务表却写着已退）
+SELECT r.id, r.biz_type, r.biz_id, r.order_no, r.amount_cents, r.status, r.error
+FROM refunds r WHERE r.status = 'failed' ORDER BY r.id DESC LIMIT 50;
 
 -- #5 退款额超过订单金额（超退粗筛）
 SELECT id, order_no, status, total_cents, refund_cents

@@ -211,6 +211,83 @@ class Test住宿清扫的顺序:
                 StayOrderStatus.CANCELLED) not in STAY_TRANSITIONS
 
 
+class Test三条业务线的退款都要落流水:
+    """券/住宿的「退款」曾经只是改一个状态字段,一条 refunds 流水都不写。
+
+    模拟支付期这歪打正着地自洽(没收钱也没退钱),真开微信支付那天
+    就变成「收了钱、标记已退款、钱没退」。而对账自检看的是流水,
+    只改状态字段它永远是绿的 —— 这一类错误没有任何症状。
+
+    下面几条是**源码扫描式的守卫**:它们防的不是今天的 bug(e2e_refund_channels
+    已经把行为钉死了),而是"以后有人在退款路径上加一条分支、忘了推渠道"。
+    """
+
+    def test_券和住宿的退款路径都调了渠道(self):
+        import inspect
+
+        from app.routers import stays, vouchers
+        from app.services import auto_flow
+
+        assert "request_voucher_refund" in inspect.getsource(
+            vouchers.refund_purchase), "券退款没有推给支付渠道"
+        # 住宿有五条落定退款的路:取消/拒单/到店无房/协商退/清扫 noshow。
+        # 前四条在 stays,最后一条在清扫里
+        for fn in (stays.cancel_stay_order, stays.reject_stay_order,
+                   stays.resolve_stay_aftersale):
+            assert "refund_to_channel" in inspect.getsource(fn), \
+                f"{fn.__name__} 改了 refund_cents 却没推渠道"
+        assert "refund_to_channel" in inspect.getsource(
+            auto_flow._sweep_stays), "清扫判 noshow 时退的钱没有推渠道"
+
+    def test_能原路退多少只有一个口径(self):
+        """写入端和自检端必须共用 channel_refundable_cents。
+
+        两处各写一遍 `min(refund_cents, total_cents)` 的下场,
+        这个仓库已经在 _rider_due 和商家钱包上各踩过一次:
+        加一笔新钱时只改了一处,另一处就成了长期红灯。
+        """
+        import inspect
+
+        from app.services import audit
+        for fn in (audit.run_audit, audit.backfill_legacy_refund_records):
+            assert "channel_refundable_cents" in inspect.getsource(fn), \
+                f"{fn.__name__} 要复用同一个口径函数,不能自己再算一遍"
+
+    def test_到店无房的违约金不塞进退款流水(self):
+        """`refund_cents = 房费 + 违约金`,**超过用户实付**。
+
+        整笔推给微信会被「退款额 ≤ 原支付额」直接拒掉,而账面写着已退。
+        """
+        from types import SimpleNamespace
+
+        from app.routers.stays import channel_refundable_cents
+
+        # 到店无房:房费 40000 + 首晚 30% 违约金 6000
+        no_room = SimpleNamespace(refund_cents=46000, total_cents=40000)
+        assert channel_refundable_cents(no_room) == 40000
+        # 其余四条路的退款额本来就不超过实付,原样退
+        for refund, total in ((20000, 20000), (10000, 20000), (0, 20000)):
+            o = SimpleNamespace(refund_cents=refund, total_cents=total)
+            assert channel_refundable_cents(o) == refund
+
+    def test_业务线字面量只定义一次(self):
+        """写入按 'voucher' 存、自检按 'voucher' 查,各写各的字符串的话,
+        改一处会让另一处**静默查不到数** —— 而查不到数的表现是自检全绿。"""
+        import inspect
+
+        from app import models
+        from app.services import audit, wechat_pay
+
+        assert models.REFUND_BIZ_FOOD == "food"
+        assert models.REFUND_BIZ_VOUCHER == "voucher"
+        assert models.REFUND_BIZ_STAY == "stay"
+        for mod in (wechat_pay, audit):
+            src = inspect.getsource(mod)
+            assert "REFUND_BIZ_" in src, f"{mod.__name__} 应当引用常量"
+            assert 'biz_type="voucher"' not in src, "别把业务线字面量再抄一遍"
+            assert 'biz_type == "stay"' not in src, "别把业务线字面量再抄一遍"
+
+
 class Test订单信息法定留存:
     """《网络餐饮服务经营者落实食品安全主体责任监督管理规定》
     (总局令第 123 号,2026-06-01 施行)第十五条:

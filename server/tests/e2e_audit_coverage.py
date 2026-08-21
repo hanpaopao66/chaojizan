@@ -133,6 +133,40 @@ async def main():
         "ORDER BY id LIMIT 1", n=cancel_no)
     assert voucher and stay and stay_closed and refund_row, "缺造坏账的素材"
 
+    # ---- 券/住宿的退款流水:上一轮审查里这两格是空的 ----
+    #
+    # 券和住宿的「退款」以前只是改一个状态字段,一条 refunds 流水都不写,
+    # 而规则 5(Σ流水 == refund_cents)查的是 orders —— 结构上装不下它们。
+    # 素材必须是**真的有流水**的券/住宿:挑不到就说明退款根本没接渠道,
+    # 那正是这条覆盖用例要抓的东西,红在这里比红在断言里更早也更清楚。
+    refunded_voucher = await db_one(
+        "SELECT p.id, p.purchase_no, p.sell_price_cents FROM voucher_purchases p "
+        "WHERE p.status = 'refunded' AND p.refunded_at >= now() - interval '20 days' "
+        "  AND EXISTS (SELECT 1 FROM refunds r WHERE r.biz_type = 'voucher' "
+        "              AND r.biz_id = p.id AND r.status <> 'failed') "
+        "ORDER BY p.id DESC LIMIT 1")
+    refunded_stay = await db_one(
+        "SELECT o.id, o.order_no, o.refund_cents, o.total_cents, o.net_cents "
+        "FROM stay_orders o "
+        "WHERE o.status IN ('cancelled', 'noshow', 'rejected') "
+        "  AND o.refund_cents > 0 AND o.refund_cents <= o.total_cents "
+        "  AND o.cancelled_at >= now() - interval '20 days' "
+        "  AND EXISTS (SELECT 1 FROM refunds r WHERE r.biz_type = 'stay' "
+        "              AND r.biz_id = o.id AND r.status <> 'failed') "
+        "ORDER BY o.id DESC LIMIT 1")
+    # 到店无房:退款额 = 房费 + 违约金,**本来就超过用户实付**。
+    # 它是「上界规则不许叫」的那一侧素材(叫了就是天天报红的假红灯)
+    no_room_stay = await db_one(
+        "SELECT o.id, o.order_no, o.refund_cents, o.total_cents FROM stay_orders o "
+        "JOIN stay_after_sales a ON a.stay_order_id = o.id "
+        "WHERE o.refund_cents > o.total_cents AND a.kind = 'no_room' "
+        "  AND a.status IN ('accepted', 'auto_accepted') "
+        "  AND o.cancelled_at >= now() - interval '20 days' "
+        "ORDER BY o.id DESC LIMIT 1")
+    assert refunded_voucher, "找不到「已退款且有退款流水」的券 —— 券退款没接渠道"
+    assert refunded_stay, "找不到「已退款且有退款流水」的住宿单 —— 住宿退款没接渠道"
+    assert no_room_stay, "缺「到店无房」素材(上界规则不许误伤的那一侧)"
+
     # ---- 商家钱包口径:两个曾经的假红灯场景 ----
     # (a) 纯住宿商家:钱全在 stay_orders.net_cents 里,审计漏算住宿净额的话
     #     一提现就是负数,天天报红
@@ -198,6 +232,15 @@ async def main():
                       o=shop_b.owner_id, i=shop_b.id)
         await db_exec("DELETE FROM withdrawals WHERE paid_note = :t",
                       t="e2e_audit_coverage")
+        await db_exec("UPDATE refunds SET status = 'success' "
+                      "WHERE biz_type = 'voucher' AND biz_id = :i",
+                      i=refunded_voucher.id)
+        await db_exec("UPDATE refunds SET status = 'success' "
+                      "WHERE biz_type = 'stay' AND biz_id = :i",
+                      i=refunded_stay.id)
+        await db_exec("UPDATE stay_orders SET refund_cents = :r, net_cents = :n "
+                      "WHERE id = :i", r=refunded_stay.refund_cents,
+                      n=refunded_stay.net_cents, i=refunded_stay.id)
 
     try:
         # 1) 收款方错人:金额两边都对,只是记到了别人头上
@@ -249,6 +292,19 @@ async def main():
                    reject_reason)
                 VALUES (:u, 'merchant', :a, 'pending', 'manual',
                         'e2e_audit_coverage', '')""", u=uid, a=amount)
+        # 8) 券/住宿的退款流水做坏:把流水置 failed(钱没退出去),
+        #    业务表上却依然写着"已退款"。这正是接渠道之前那两条线的形态 ——
+        #    状态字段绿着、一分钱没动。规则 5 查的是 orders,看不见它们
+        await db_exec("UPDATE refunds SET status = 'failed' "
+                      "WHERE biz_type = 'voucher' AND biz_id = :i",
+                      i=refunded_voucher.id)
+        await db_exec("UPDATE refunds SET status = 'failed' "
+                      "WHERE biz_type = 'stay' AND biz_id = :i",
+                      i=refunded_stay.id)
+        # 9) 住宿退超用户实付,且没有「到店无房」那张单子背书 ——
+        #    这是真的超退,不是违约金
+        await db_exec("UPDATE stay_orders SET refund_cents = total_cents + 1, "
+                      "net_cents = -1 WHERE id = :i", i=refunded_stay.id)
 
         problems = await run_audit()
 
@@ -289,11 +345,28 @@ async def main():
         assert shop_a.net + shop_b.net - chain_draw >= 0  # 整户其实是够的
         print("✓ 商家余额按店主整户核:住宿净额算进来了,"
               "连锁的提现只减一次(两条老假红灯都不再亮)")
+
+        got = checks_for(problems, refunded_voucher.purchase_no)
+        assert "voucher_refund_mismatch" in got, got
+        got = checks_for(problems, refunded_stay.order_no)
+        assert "stay_refund_mismatch" in got, got
+        print("✓ 券/住宿标着「已退款」而流水一分没退出去,两条都报出来了")
+
+        assert "stay_refund_exceeds_paid" in got, got
+        print("✓ 住宿退款超过用户实付被抓到")
+
+        # "不许叫"的一侧:到店无房本来就退得比实付多(房费+违约金),
+        # 报它等于给自检加一盏天天亮的假红灯
+        assert "stay_refund_exceeds_paid" not in \
+            checks_for(problems, no_room_stay.order_no), \
+            f"到店无房的违约金不该被当成超退:{no_room_stay.order_no}"
+        print("✓ 到店无房的违约金没被误报成超退")
     finally:
         await revert()
 
     clean = await run_audit()
-    for needle in (done_no, cancel_no, voucher.purchase_no, stay.order_no):
+    for needle in (done_no, cancel_no, voucher.purchase_no, stay.order_no,
+                   refunded_voucher.purchase_no, refunded_stay.order_no):
         assert not checks_for(clean, needle), (needle, checks_for(clean, needle))
     assert count_in(clean, "stay_paid_stuck") == count_in(base, "stay_paid_stuck")
     print("✓ 复原后自检回到基线(既没漏报,也没有赖着不走的告警)")

@@ -174,6 +174,14 @@ async def wechat_notify(request: Request, db: AsyncSession = Depends(get_db)):
             await db.commit()
 
     elif event_type.startswith("REFUND."):
+        # **三条业务线共用这一段。** 按 out_refund_no 反查,不关心这笔是
+        # 外卖、团购券还是住宿的退款 —— 这正是退款流水泛化成一张表
+        # (见迁移 0107)而不是分表的好处之一:分表的话这里要挨个表试。
+        #
+        # 回调只落流水的最终状态,不回头改业务表:券的 status / 住宿的
+        # refund_cents 是"按业务规则该退多少",渠道退失败时把它们改回去
+        # 反而会连带打破别的恒等式(住宿的 净额+退款 == 房费)。
+        # 失败留在流水上,自检规则 5/14/15 当场报不平,人工介入。
         refund = await db.scalar(
             select(Refund)
             .where(Refund.out_refund_no == resource.get("out_refund_no"))

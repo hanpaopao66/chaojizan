@@ -10,6 +10,12 @@
   5. 每笔订单的 refund_cents 必须等于 refunds 流水之和(失败流水不算 → 自动暴露)
   5b. 退款不得超过用户实付 —— 判据是"剩余应付不许为负"(见该条的长注释:
       total_cents 是剩余应付不是累计实付,直接比 refund_cents 会造出几百盏假红灯)
+  5-券/5-住宿(规则 14/15):同一条恒等式在另外两条业务线上的版本。
+      规则 5 按 `Refund.order_id` 取数,而券和住宿的流水那一列是 NULL
+      (它们不属于任何外卖订单),结构上落在规则 5 的视野之外 ——
+      这两格以前是空的:券和住宿的"退款"只改了个状态字段,一条流水都没写。
+      住宿那条核的是**能原路退回去**的部分,不是 refund_cents:
+      「到店无房」的退款额含商家违约金,本来就超过用户实付(详见规则 15)
   6. 售后退款(完成单退餐费,配送费已履约不退)的已结算订单必须有商家冲账负数行
   7. 全局恒等,分两侧:菜品侧 Σ应收 == Σ商家净额+Σ佣金(售后冲账单剔除);
      配送侧 Σ配送费 == Σ骑手入账(售后单保留 —— 配送费 100% 归骑手的账面铁证)
@@ -28,7 +34,10 @@
   6.5 又只看非外卖单,于是"取消单上的商家入账"整个落在视野之外 ——
   而无骑手兜底取消恰恰会往那儿写赔付行(auto_flow);
 - **住宿 PAID 不许长期挂着**:钱已收、商家没确认,而住宿清扫对 PAID
-  没有任何超时兜底,规则 9 又把这个状态整个排除。
+  没有任何超时兜底,规则 9 又把这个状态整个排除;
+- **到店无房的违约金不许无声挂着**:商家余额当场扣了,用户那一半却
+  超过他的实付额、退款通道退不了,得等「转账到零钱」接入 ——
+  这是一笔真实负债,聚合成一条报出来(规则 15 末尾)。
 
 **时间窗取的列必须是"钱落定的那一刻"**,不是下单那一刻:券按 redeemed_at
 (有效期最长 365 天,按 created_at 取窗的话第 31 天以后核销的券一生都不会被看到)、
@@ -171,6 +180,25 @@ async def _reversal_due_ids(db, order_ids) -> set[int]:
                Refund.status != RefundStatus.failed,
                Refund.created_at >= settled_at)))
     return due - exempt
+
+
+async def _refund_sums(db, biz_type: str, id_subquery) -> dict[int, int]:
+    """{业务 id: 真的退出去了多少分}。失败流水不算 —— 钱没动就不能算已退。
+
+    **一条 GROUP BY,不是每笔业务一次查询。** 规则 14/15 要核的是"近 30 天
+    每一笔退款",开发库里已经是上千笔,逐笔发一次 SQL 就是上千次往返;
+    而这套自检的全部意义是"差一分钱系统报警",它必须随单量增长还能跑完
+    (规则 1 上面那段长注释是同一件事的另一个版本:参数上限 32767)。
+
+    `id_subquery` 传子查询而不是 id 列表,同样是那条纪律。
+    """
+    rows = await db.execute(
+        select(Refund.biz_id, sa_func.sum(Refund.amount_cents))
+        .where(Refund.biz_type == biz_type,
+               Refund.biz_id.in_(id_subquery),
+               Refund.status != RefundStatus.failed)
+        .group_by(Refund.biz_id))
+    return {biz_id: total for biz_id, total in rows}
 
 
 async def run_audit() -> list[dict]:
@@ -715,6 +743,122 @@ async def run_audit() -> list[dict]:
                           f"没有超时兜底,只能人工推",
             })
 
+        # 14) 团购券退款:Σ退款流水 == 应退额。
+        #
+        # 形态照抄规则 5(订单那条),补的是**同一类恒等式在券这条线上的缺口**:
+        # 规则 5 查的是 `Refund.order_id == order.id`,而券的流水 order_id 是
+        # NULL(它不属于任何外卖订单),结构上就落在规则 5 的视野之外。
+        # 券只有"未使用全额退"一种口径,应退额恒等于售价。
+        #
+        # **窗口按 refunded_at,不是 created_at。** 券的有效期最长 365 天,
+        # 按下单时间取 30 天窗的话,第 31 天以后退的券一生都不会被看到 ——
+        # 和规则 8 用 redeemed_at 是同一个理由(钱落定的那一刻),
+        # 退掉的券没核销过,redeemed_at 永远是 NULL,所以单开一列。
+        #
+        # 显式再导一遍(规则 8/9 的块里也导过):这两条的取数完全依赖它们,
+        # 而"靠上面某个块顺手导进来的名字"会在有人调整规则顺序时静默崩掉
+        from ..models import (
+            REFUND_BIZ_STAY,
+            REFUND_BIZ_VOUCHER,
+            VoucherPurchase,
+            VoucherPurchaseStatus,
+        )
+
+        voucher_window = and_(
+            VoucherPurchase.status == VoucherPurchaseStatus.refunded,
+            VoucherPurchase.refunded_at >= since)
+        refunded_vouchers = (await db.scalars(
+            select(VoucherPurchase).where(voucher_window))).all()
+        voucher_paid = await _refund_sums(
+            db, REFUND_BIZ_VOUCHER, select(VoucherPurchase.id).where(voucher_window))
+        for p in refunded_vouchers:
+            paid_back = voucher_paid.get(p.id, 0)
+            if paid_back != p.sell_price_cents:
+                problems.append({
+                    "check": "voucher_refund_mismatch",
+                    "detail": f"团购券 {p.purchase_no} 标着已退款,退款流水却是 "
+                              f"{paid_back} 分 ≠ 售价 {p.sell_price_cents} 分"
+                              f"(渠道退款失败,或者这笔退款从来没推给渠道)",
+                })
+
+        # 15) 住宿退款:Σ退款流水 == **能原路退回去**的那部分,不是 refund_cents。
+        #
+        # 两者不总相等,差在「到店无房」:那条路上
+        # `refund_cents = 房费 + 商家违约金(首晚 30%)`,**超过用户实付**,
+        # 而微信退款 API 的硬约束是「退款额 ≤ 原支付额」——
+        # 照 refund_cents 整笔推过去会被渠道直接拒掉,而账面写着已退。
+        # 口径与写入端共用 routers/stays.channel_refundable_cents 那一个函数
+        # (两处各写一遍的话,改一处就是长期红灯)。
+        #
+        # 超出的违约金是一笔**真实负债**:商家余额已经扣了(net = -违约金),
+        # 用户还没拿到,得等「转账到零钱」接入。它照规则 12 的办法处理 ——
+        # 有已成立的「到店无房」售后单背书、且金额对得上,就不当红灯报
+        # (天天报一条谁都不看),只在下面聚合成一条待转账负债;
+        # 没有背书的超退是真超退,一笔一条报出来。
+        from ..models import (
+            StayAfterSale,
+            StayAfterSaleKind,
+            StayAfterSaleStatus,
+            StayOrder,
+        )
+        from ..routers.stays import channel_refundable_cents
+        from ..state_machine import StayOrderStatus
+
+        stay_window = and_(
+            StayOrder.status.in_([StayOrderStatus.CANCELLED,
+                                  StayOrderStatus.NOSHOW,
+                                  StayOrderStatus.REJECTED]),
+            StayOrder.refund_cents > 0,
+            StayOrder.cancelled_at >= since)
+        refunded_stays = (await db.scalars(
+            select(StayOrder).where(stay_window))).all()
+        # 子查询,不把 id 列表逐个绑成参数(理由见规则 1 上面那段长注释)
+        no_room_penalty = {
+            a.stay_order_id: a.penalty_cents
+            for a in await db.scalars(select(StayAfterSale).where(
+                StayAfterSale.stay_order_id.in_(
+                    select(StayOrder.id).where(stay_window)),
+                StayAfterSale.kind == StayAfterSaleKind.no_room,
+                StayAfterSale.status.in_([StayAfterSaleStatus.accepted,
+                                          StayAfterSaleStatus.auto_accepted])))
+        }
+        stay_paid = await _refund_sums(
+            db, REFUND_BIZ_STAY, select(StayOrder.id).where(stay_window))
+        owed_n, owed_cents = 0, 0
+        for o in refunded_stays:
+            due = channel_refundable_cents(o)
+            paid_back = stay_paid.get(o.id, 0)
+            if paid_back != due:
+                problems.append({
+                    "check": "stay_refund_mismatch",
+                    "detail": f"住宿单 {o.order_no}({o.status.value})"
+                              f"应原路退 {due} 分,退款流水却是 {paid_back} 分"
+                              f"(订单上写着已退 {o.refund_cents} 分)——"
+                              f"渠道退款失败,或者这笔退款从来没推给渠道",
+                })
+            excess = o.refund_cents - due
+            if excess <= 0:
+                continue
+            if no_room_penalty.get(o.id) == excess:
+                owed_n += 1
+                owed_cents += excess
+            else:
+                problems.append({
+                    "check": "stay_refund_exceeds_paid",
+                    "detail": f"住宿单 {o.order_no}({o.status.value})退款 "
+                              f"{o.refund_cents} 分超过用户实付 {o.total_cents} 分,"
+                              f"超出 {excess} 分却没有已成立的「到店无房」售后单"
+                              f"背书 —— 平台净流出,用户不可能倒欠钱",
+                })
+        if owed_n:
+            problems.append({
+                "check": "stay_penalty_unpaid",
+                "detail": f"到店无房违约金 {owed_n} 笔共 {owed_cents} 分还没给到用户"
+                          f"(近 {WINDOW_DAYS} 天):商家余额已经扣了,而违约金超过"
+                          f"用户实付,退款通道退不了,「转账到零钱」尚未接入 ——"
+                          f"这是一笔真实负债,不是账目错误",
+            })
+
         for p in problems:
             db.add(AuditAlert(check_name=p["check"], detail=p["detail"][:500]))
             logger.error("账务告警 [%s] %s", p["check"], p["detail"])
@@ -739,16 +883,43 @@ async def run_audit() -> list[dict]:
 
 
 async def backfill_legacy_refund_records() -> int:
-    """退款流水/冲账功能上线前的历史退款订单,补录流水和冲账行(幂等)。
+    """退款流水/冲账功能上线前的历史退款记录,补录流水和冲账行(幂等)。
 
     - refund_cents 与流水之和的差额 → 补一条 mock 流水(note 标注历史补录)
     - 全额退款且已结算但没冲账 → 补冲账负数行
-    上线切换时执行一次,此后审计的 5/6 号恒等式即可长期保持全绿。
+    - **券与住宿同理**:它们的退款接渠道之前一条流水都没写,
+      库里存量不补的话规则 14/15 会对每一笔历史退款报一条,
+      开发库里就是上千盏永不消失的红灯 —— 比不查更糟
+    上线切换时执行一次,此后审计的 5/6/14/15 号恒等式即可长期保持全绿。
     """
     import uuid as _uuid
 
-    from ..models import Refund, RefundStatus
+    from ..models import (
+        REFUND_BIZ_FOOD,
+        REFUND_BIZ_STAY,
+        REFUND_BIZ_VOUCHER,
+        Refund,
+        RefundStatus,
+        StayOrder,
+        VoucherPurchase,
+        VoucherPurchaseStatus,
+    )
+    from ..routers.stays import channel_refundable_cents
+    from ..state_machine import StayOrderStatus
     from .settlement import reverse_merchant_earning
+
+    def _legacy_refund(biz_type, biz_id, biz_no, amount, **extra) -> Refund:
+        """补录行长得和真流水一样,只是 reason 标了出处。
+
+        **mock + success**:补录的前提就是"这笔钱事实上已经退了/该退",
+        只是当时没有这张表(或者这条业务线还没接渠道)。
+        """
+        return Refund(
+            biz_type=biz_type, biz_id=biz_id,
+            out_refund_no=f"{biz_no}-legacy-{_uuid.uuid4().hex[:6]}",
+            amount_cents=amount,
+            reason="历史退款补录(refunds 流水表上线前)",
+            channel="mock", status=RefundStatus.success, **extra)
 
     fixed = 0
     since = datetime.now(timezone.utc) - timedelta(days=WINDOW_DAYS)
@@ -777,18 +948,44 @@ async def backfill_legacy_refund_records() -> int:
             )
             gap = order.refund_cents - flows
             if gap > 0:
-                db.add(Refund(
-                    order_id=order.id,
-                    order_no=order.order_no,
-                    out_refund_no=f"{order.order_no}-legacy-{_uuid.uuid4().hex[:6]}",
-                    amount_cents=gap,
-                    reason="历史退款补录(refunds 流水表上线前)",
-                    channel="mock",
-                    status=RefundStatus.success,
-                ))
+                db.add(_legacy_refund(REFUND_BIZ_FOOD, order.id,
+                                      order.order_no, gap,
+                                      order_id=order.id,
+                                      order_no=order.order_no))
                 fixed += 1
             if (order.id in reversal_due
                     and await reverse_merchant_earning(db, order, "历史售后冲账补录")):
+                fixed += 1
+
+        # ---- 团购券:应退额 = 售价 ----
+        voucher_window = and_(
+            VoucherPurchase.status == VoucherPurchaseStatus.refunded,
+            VoucherPurchase.refunded_at >= since)
+        voucher_flows = await _refund_sums(
+            db, REFUND_BIZ_VOUCHER,
+            select(VoucherPurchase.id).where(voucher_window))
+        for p in (await db.scalars(
+                select(VoucherPurchase).where(voucher_window))).all():
+            gap = p.sell_price_cents - voucher_flows.get(p.id, 0)
+            if gap > 0:
+                db.add(_legacy_refund(REFUND_BIZ_VOUCHER, p.id,
+                                      p.purchase_no, gap))
+                fixed += 1
+
+        # ---- 住宿:应退额 = **能原路退回去**的那部分(口径与规则 15 共用)----
+        stay_window = and_(
+            StayOrder.status.in_([StayOrderStatus.CANCELLED,
+                                  StayOrderStatus.NOSHOW,
+                                  StayOrderStatus.REJECTED]),
+            StayOrder.refund_cents > 0,
+            StayOrder.cancelled_at >= since)
+        stay_flows = await _refund_sums(
+            db, REFUND_BIZ_STAY, select(StayOrder.id).where(stay_window))
+        for o in (await db.scalars(
+                select(StayOrder).where(stay_window))).all():
+            gap = channel_refundable_cents(o) - stay_flows.get(o.id, 0)
+            if gap > 0:
+                db.add(_legacy_refund(REFUND_BIZ_STAY, o.id, o.order_no, gap))
                 fixed += 1
         await db.commit()
     if fixed:

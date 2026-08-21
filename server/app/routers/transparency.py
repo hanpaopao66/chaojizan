@@ -195,7 +195,9 @@ async def compensation_public(
             SELECT count(*), coalesce(sum(net_cents), 0) FROM merchant_earnings
             WHERE note LIKE '无骑手接单取消,平台赔付餐损%'
         """),
-        # 渠道确认成功的退款(缺货部分退/整单退/售后退)
+        # 渠道确认成功的退款(缺货部分退/整单退/售后退)。
+        # 不带 biz_type 过滤 —— 外卖/团购券/住宿三条线的退款都算数,
+        # 公示的是"平台一共退回去多少钱",按业务线切分是另一回事
         "refunds": await _pair("""
             SELECT count(*), coalesce(sum(amount_cents), 0) FROM refunds
             WHERE status = 'success'

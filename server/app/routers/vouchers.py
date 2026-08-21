@@ -35,6 +35,7 @@ from ..schemas import (
 )
 from ..security import require_role
 from ..services.staff import owned_shop
+from ..services.wechat_pay import request_voucher_refund
 
 router = APIRouter(prefix="/vouchers", tags=["团购券"])
 
@@ -259,6 +260,11 @@ async def refund_purchase(
 
     模拟通道即时退;微信联调后走真实原路退回(券款在核销前不属于商家,
     平台也没收服务费,退款没有任何冲账负担)。
+
+    **退款必须落一条 refunds 流水。** 这里以前只改 `status` 加一句
+    `refund_note` 就完事,一分钱都没往渠道推 —— 模拟支付期歪打正着地自洽
+    (没收钱也没退钱),真开微信支付那天就变成「收了钱、标记已退款、钱没退」,
+    而对账自检看的是流水,只改状态字段它永远是绿的。
     """
     p = await db.scalar(
         select(VoucherPurchase)
@@ -267,8 +273,12 @@ async def refund_purchase(
         raise HTTPException(404, "券不存在")
     if p.status != VoucherPurchaseStatus.paid:
         raise HTTPException(409, "只有已购未使用的券可以退款")
+    note = "用户申请退款(未使用,全额)"
+    await request_voucher_refund(db, p, p.sell_price_cents, note)
     p.status = VoucherPurchaseStatus.refunded
-    p.refund_note = "用户申请退款(未使用,全额)"
+    p.refund_note = note
+    # 自检的时间窗按"钱落定的那一刻"取(规则 14),退掉的券没有 redeemed_at
+    p.refunded_at = datetime.now(timezone.utc)
     # 库存回补,别人还能买
     await db.execute(update(Voucher).where(Voucher.id == p.voucher_id)
                      .values(total_count=Voucher.total_count + 1,

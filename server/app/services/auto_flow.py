@@ -174,6 +174,7 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
     from decimal import Decimal
 
     from ..models import StayOrder
+    from ..routers.stays import refund_to_channel
     from ..state_machine import StayOrderStatus
     from .stay_inventory import release
 
@@ -227,6 +228,9 @@ async def _sweep_stays(db: AsyncSession, now: datetime) -> tuple[int, int, int]:
         o.refund_cents = o.total_cents - first
         o.refund_note = "未入住:按政策扣首晚,其余已退回"
         o.cancelled_at = now
+        # 清扫路径的退款也要落流水 —— 用户从头到尾没点过任何按钮,
+        # 这条路上漏掉退款渠道,钱就是纯粹地留在平台账上没人发现
+        await refund_to_channel(db, o, o.refund_note)
         # **钱退了,房也要还。** 判定发生在入住日的**次日**,过去的只有
         # 第一晚 —— 首晚留占用(商家确实为他留了房,那一晚的钱也归商家),
         # 从次日到退房日的房态全部回补。订 5 晚没到店,后 4 晚商家既收不到

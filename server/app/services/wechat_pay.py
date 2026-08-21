@@ -116,13 +116,67 @@ def parse_notify(headers: dict, body: bytes) -> tuple[str, dict] | None:
     return result["event_type"], result.get("resource", {})
 
 
-async def request_refund(db, order: Order, refund_cents: int, reason: str) -> "object":
-    """缺货部分退款/整单退款/售后退款,**唯一入口**。
+async def _dispatch_refund(db, *, biz_type: str, biz_id: int, trade_no: str,
+                           paid_total_cents: int, refund_cents: int,
+                           reason: str):
+    """写一条退款流水并向渠道发起。**外卖/团购券/住宿三条线唯一的出口。**
 
-    每次退款写一条 refunds 流水(金额对账凭据,审计核对 Σ流水 == 订单 refund_cents)。
     - 未配置商户参数:mock 通道,立即置 success(开发/演示期)
     - 已配置:调微信退款 API(同步 SDK 丢线程池),渠道受理为 requested,
-      REFUND.SUCCESS 回调置 success(见 routers/payments.py)
+      REFUND.SUCCESS 回调置 success(见 routers/payments.py ——
+      那段按 out_refund_no 反查,三条线共用,不需要知道是哪条业务线)
+    返回 Refund 对象(未 commit,调用方负责)。
+
+    `paid_total_cents` 是**用户为这笔业务实际付进来的总额**,微信退款 API
+    要求同时给 `refund` 和 `total`,两者对不上直接拒。外卖那条线没单独存
+    这个数(部分退款会扣减 total_cents),只能反推;券和住宿的实付额
+    是稳定列,调用方直接给。
+
+    金额语义在这里收口:`refund_cents` 必须是**真的会从支付渠道原路退回去
+    的钱**。业务表上那个 refund_cents 不一定等于它 —— 住宿「到店无房」
+    的退款额是「房费 + 商家违约金」,违约金那部分退款通道退不了
+    (超过原支付额),得走还没接入的转账通道,详见 routers/stays 的调用点。
+    """
+    import asyncio
+
+    from ..models import Refund, RefundStatus
+
+    client = get_client()
+    refund = Refund(
+        biz_type=biz_type,
+        biz_id=biz_id,
+        out_refund_no=f"{trade_no}-{uuid.uuid4().hex[:8]}",
+        amount_cents=refund_cents,
+        reason=reason[:200],
+        channel="mock" if client is None else "wechat",
+    )
+    if client is None:
+        refund.status = RefundStatus.success
+        logger.info("模拟退款成功 %s 分: %s %s (%s)",
+                    refund_cents, biz_type, trade_no, reason)
+    else:
+        code, message = await asyncio.to_thread(
+            client.refund,
+            out_trade_no=trade_no,
+            out_refund_no=refund.out_refund_no,
+            amount={"refund": refund_cents, "total": paid_total_cents,
+                    "currency": "CNY"},
+            reason=reason[:80],
+        )
+        if code in (200, 201):
+            refund.status = RefundStatus.requested
+        else:
+            refund.status = RefundStatus.failed
+            refund.error = f"HTTP {code}: {str(message)[:250]}"
+            logger.error("微信退款发起失败 %s: %s %s", trade_no, code, message)
+    db.add(refund)
+    return refund
+
+
+async def request_refund(db, order: Order, refund_cents: int, reason: str) -> "object":
+    """缺货部分退款/整单退款/售后退款,**外卖/跑腿唯一入口**。
+
+    每次退款写一条 refunds 流水(金额对账凭据,审计核对 Σ流水 == 订单 refund_cents)。
     返回 Refund 对象;调用方负责 commit。
 
     ## 调用方两条纪律(写在这里是因为破坏它们没有任何症状)
@@ -142,43 +196,56 @@ async def request_refund(db, order: Order, refund_cents: int, reason: str) -> "o
     (services/ledger)读的就是这个数。失败的流水留在 refunds 表里,
     审计规则 5c 会把它捞出来要人工介入。
     """
-    import asyncio
+    from ..models import REFUND_BIZ_FOOD, RefundStatus
 
-    from ..models import Refund, RefundStatus
-
-    client = get_client()
-    refund = Refund(
-        order_id=order.id,
-        order_no=order.order_no,
-        out_refund_no=f"{order.order_no}-{uuid.uuid4().hex[:8]}",
-        amount_cents=refund_cents,
-        reason=reason[:200],
-        channel="mock" if client is None else "wechat",
-    )
-    if client is None:
-        refund.status = RefundStatus.success
-        logger.info("模拟退款成功 %s 分: %s (%s)", refund_cents, order.order_no, reason)
-    else:
+    refund = await _dispatch_refund(
+        db, biz_type=REFUND_BIZ_FOOD, biz_id=order.id,
+        trade_no=order.order_no,
         # 原始支付总额 = 当前订单金额 + 历史已退金额(部分退款会扣减 total_cents)
-        original_total = order.total_cents + order.refund_cents
-        code, message = await asyncio.to_thread(
-            client.refund,
-            out_trade_no=order.order_no,
-            out_refund_no=refund.out_refund_no,
-            amount={"refund": refund_cents, "total": original_total,
-                    "currency": "CNY"},
-            reason=reason[:80],
-        )
-        if code in (200, 201):
-            refund.status = RefundStatus.requested
-        else:
-            refund.status = RefundStatus.failed
-            refund.error = f"HTTP {code}: {str(message)[:250]}"
-            logger.error("微信退款发起失败 %s: %s %s", order.order_no, code, message)
+        paid_total_cents=order.total_cents + order.refund_cents,
+        refund_cents=refund_cents, reason=reason)
+    # 外卖行额外落这两列:规则 6 的冲账判据(_reversal_due_ids)要 join
+    # 回 orders,外键约束也只有真外键给得了。券/住宿行是 NULL
+    refund.order_id = order.id
+    refund.order_no = order.order_no
     if refund.status != RefundStatus.failed:
         order.refund_cents += refund_cents
-    db.add(refund)
     return refund
+
+
+async def request_voucher_refund(db, purchase, refund_cents: int, reason: str):
+    """团购券退款。券只有"全额退未使用的券"一种口径,实付额就是售价。
+
+    **不改 purchase 上的任何字段** —— 状态由调用方按业务判定,
+    本函数只负责把钱推出去并留下凭据。自检核对
+    「Σ流水 == 售价」(规则 14),渠道拒绝就会当场不平。
+    """
+    from ..models import REFUND_BIZ_VOUCHER
+
+    return await _dispatch_refund(
+        db, biz_type=REFUND_BIZ_VOUCHER, biz_id=purchase.id,
+        trade_no=purchase.purchase_no,
+        paid_total_cents=purchase.sell_price_cents,
+        refund_cents=refund_cents, reason=reason)
+
+
+async def request_stay_refund(db, stay, refund_cents: int, reason: str):
+    """住宿退款(用户取消 / 商家拒单 / noshow / 到店无房 / 协商退)。
+
+    住宿的 `total_cents` 是稳定的房费总额,从不随退款下调
+    (外卖那种"剩余应付"的语义在这里不存在),所以实付额直接给。
+
+    **也不改 stay 上的 refund_cents。** 住宿的退款额是**取消政策**
+    算出来的、一单只落定一次,不是逐笔累加出来的;渠道失败时把它清零
+    反而会连带打破规则 9(净额+退款 == 房费)。让它保持"按政策该退多少",
+    由规则 15 去核「Σ流水 == 该退多少」—— 渠道退失败就在那儿报出来。
+    """
+    from ..models import REFUND_BIZ_STAY
+
+    return await _dispatch_refund(
+        db, biz_type=REFUND_BIZ_STAY, biz_id=stay.id,
+        trade_no=stay.order_no, paid_total_cents=stay.total_cents,
+        refund_cents=refund_cents, reason=reason)
 
 
 # ---------- 服务商分账(五 API 桩,联调时按 SDK 填实) ----------
