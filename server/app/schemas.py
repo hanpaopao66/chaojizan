@@ -1029,6 +1029,11 @@ class OrderOut(BaseModel):
     cancel_reason: str = ""
     refund_cents: int = 0
     refund_note: str = ""
+    # 这一单评过没有。**列表侧就要给** —— 「我的」页要在不点进去的情况下
+    # 数出「待评价 N」,没有这个字段的话客户端只能对每一笔已完成订单
+    # 各打一发 GET /orders/{no}/review 看 404,批量形态根本不存在。
+    # 只有已完成的单才查(别的状态本来就不能评),其余恒为 false
+    has_review: bool = False
     # 商家自配送:不走骑手,商家自己送(用户端明示"商家自送")
     self_delivery: bool = False
     # 无人接单告警:置位后用户端出现「加急小费」入口(no_rider_alerted_at 非空)

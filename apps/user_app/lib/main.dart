@@ -25,6 +25,7 @@ import 'messages_page.dart';
 import 'mini_app_sheet.dart';
 import 'mini_apps_panel.dart';
 import 'money_flow_page.dart';
+import 'order_filter.dart';
 import 'invite_page.dart';
 import 'share_card.dart';
 import 'five_percent.dart';
@@ -208,6 +209,22 @@ class _HomePageState extends State<HomePage> {
   /// 消息中心红点(有新公告)
   bool _hasUnread = false;
 
+  /// 从「我的」页的订单四格跳过来时,订单 tab 要落在哪个筛选、哪个频道上。
+  ///
+  /// **切 tab 而不是 push 新页** —— push 的话会多出第二个订单列表,
+  /// 返回行为和底部 tab 不一致,用户点两次「订单」看到的是两个地方
+  OrderFilter _ordersFilter = OrderFilter.all;
+  int _ordersSegment = 0;
+
+  void _openOrders(OrderFilter filter, {int segment = 0}) {
+    setState(() {
+      _ordersFilter = filter;
+      _ordersSegment = segment;
+      _tab = 1;
+      _visited.add(1);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -310,18 +327,44 @@ class _HomePageState extends State<HomePage> {
                   builder: (_) => MessageCenterPage(api: widget.api)));
             },
           ),
-          // 搜索是主页第一交互,已做成显眼的大搜索框(点餐页顶部),
-          // 这里只保留地址簿入口,避免图标堆积
-          IconButton(
-            icon: const Icon(Icons.place_outlined),
-            tooltip: '收货地址',
-            onPressed: () async {
-              if (!await ensureLoggedIn(context)) return;
-              if (!context.mounted) return;
-              await Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => AddressBookPage(api: widget.api)));
-            },
-          ),
+          // 「我的」tab 上换成客服 + 设置。
+          //
+          // 这两样一个是「随时可能要」、一个是「一年点几次的目录页」,
+          // 都不该按位置在正文里排优先级 —— 提到右上角之后,正文列表
+          // 少两行(63 + 46 = 109px),它们反而更好找。
+          //
+          // 收货地址在「我的」页的卡券网格里有一份,这里让位不丢入口;
+          // 首页/订单 tab 保持原样(那两个 tab 的地址是下单上下文)
+          if (_tab == 2) ...[
+            IconButton(
+              icon: const Icon(Icons.support_agent_outlined),
+              tooltip: '联系平台客服',
+              onPressed: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => SupportPage(api: widget.api)));
+              },
+            ),
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: '设置',
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => SettingsPage(api: widget.api))),
+            ),
+          ] else
+            // 搜索是主页第一交互,已做成显眼的大搜索框(点餐页顶部),
+            // 这里只保留地址簿入口,避免图标堆积
+            IconButton(
+              icon: const Icon(Icons.place_outlined),
+              tooltip: '收货地址',
+              onPressed: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => AddressBookPage(api: widget.api)));
+              },
+            ),
         ],
       ),
       // 底部 tab 只放功能(首页/订单/我的),业务一律走金刚区——
@@ -340,10 +383,13 @@ class _HomePageState extends State<HomePage> {
                   api: widget.api, deliveryAddress: _deliveryAddress)
               : const SizedBox.shrink(),
           _visited.contains(1)
-              ? OrdersTab(api: widget.api)
+              ? OrdersTab(
+                  api: widget.api,
+                  filter: _ordersFilter,
+                  segment: _ordersSegment)
               : const SizedBox.shrink(),
           _visited.contains(2)
-              ? ProfileView(api: widget.api)
+              ? ProfileView(api: widget.api, onOpenOrders: _openOrders)
               : const SizedBox.shrink(),
         ],
       ),
@@ -2890,21 +2936,47 @@ class _MenuPageState extends State<MenuPage>
 /// 订单 tab:类型切换(点外卖/住宿);团购券在「我的-我的券包」保持原习惯,
 /// 这里给个快捷入口不搬家
 class OrdersTab extends StatefulWidget {
-  const OrdersTab({super.key, required this.api});
+  const OrdersTab({
+    super.key,
+    required this.api,
+    this.filter = OrderFilter.all,
+    this.segment = 0,
+  });
 
   final ApiClient api;
+
+  /// 从「我的」页四格跳过来时带的筛选;直接点底部 tab 时是 [OrderFilter.all]
+  final OrderFilter filter;
+
+  /// 0 = 点外卖,1 = 住宿
+  final int segment;
 
   @override
   State<OrdersTab> createState() => _OrdersTabState();
 }
 
 class _OrdersTabState extends State<OrdersTab> {
-  int _segment = 0;
+  late int _segment = widget.segment;
+  late OrderFilter _filter = widget.filter;
 
   @override
   void initState() {
     super.initState();
     authTick.addListener(_onAuthChanged); // 游客登录成功后刷新
+  }
+
+  /// 这个 tab 在 IndexedStack 里是保活的 —— 从「我的」页再跳一次过来,
+  /// State 不会重建,只有 widget 换新。不接这一下的话第二次点「待评价」
+  /// 会停在上一次的筛选上
+  @override
+  void didUpdateWidget(OrdersTab old) {
+    super.didUpdateWidget(old);
+    if (widget.filter != old.filter || widget.segment != old.segment) {
+      setState(() {
+        _filter = widget.filter;
+        _segment = widget.segment;
+      });
+    }
   }
 
   @override
@@ -2960,19 +3032,44 @@ class _OrdersTabState extends State<OrdersTab> {
           ),
         ]),
       ),
+      // 状态筛选:「我的」页四格点进来要有地方落。
+      // 横滑而不是折行 —— 五个筛选在 320 窄屏 + 长辈版下排不进一行
+      SizedBox(
+        height: 42,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          children: [
+            for (final f in OrderFilter.values)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: SzChip(f.label,
+                    selected: _filter == f,
+                    onTap: () => setState(() => _filter = f)),
+              ),
+          ],
+        ),
+      ),
       Expanded(
         child: _segment == 0
-            ? OrderListView(api: widget.api)
-            : StayOrderListView(api: widget.api),
+            ? OrderListView(api: widget.api, filter: _filter)
+            : StayOrderListView(api: widget.api, filter: _filter),
       ),
     ]);
   }
 }
 
 class OrderListView extends StatefulWidget {
-  const OrderListView({super.key, required this.api});
+  const OrderListView(
+      {super.key, required this.api, this.filter = OrderFilter.all});
 
   final ApiClient api;
+
+  /// 状态筛选。**在已拉到的页上过滤,不改分页请求** ——
+  /// 服务端的 `status` 参数只收单个状态(见 routers/orders.py),
+  /// 而「进行中」是四个状态、「待评价」还要看 has_review,
+  /// 一个参数表达不了。混着用会让游标分页和过滤互相打架
+  final OrderFilter filter;
 
   @override
   State<OrderListView> createState() => _OrderListViewState();
@@ -3224,12 +3321,23 @@ class _OrderListViewState extends State<OrderListView> {
           }
           // 第一页由 future 给,后续页累加进 _loaded
           if (_loaded.isEmpty) _loaded.addAll(snapshot.data!);
-          final orders = _loaded;
+          final orders =
+              _loaded.where(widget.filter.matchesFood).toList();
+          // 筛选后可能一屏都填不满 —— 那样用户滚不动,触底加载永远不触发,
+          // 更早的同类订单就永远看不到。这里替他把下一页要来
+          if (orders.length < 6 && !_noMore && !_loadingMore &&
+              _loaded.isNotEmpty) {
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _loadMore());
+          }
           if (orders.isEmpty) {
-            return ListView(children: const [
-              SizedBox(height: 120),
+            return ListView(children: [
+              const SizedBox(height: 120),
               SzEmpty(
-                  art: BrandArt.receipt, text: '还没有订单\n去点一单支持身边小店吧'),
+                  art: BrandArt.receipt,
+                  text: widget.filter == OrderFilter.all
+                      ? '还没有订单\n去点一单支持身边小店吧'
+                      : '没有${widget.filter.label}的订单'),
             ]);
           }
           return NotificationListener<ScrollNotification>(
@@ -5037,10 +5145,41 @@ class _ReviewDisplay extends StatelessWidget {
 }
 
 /// 「我的」:头像/昵称、平台理念、收藏、发票、地址、退出。
+/// 「我的」页。
+///
+/// ## 分块的依据(#296)
+///
+/// 改版前是一条从上到下的 ListView:12 个入口挤在一张卡里,高频的
+/// (订单、账目)和一年点一次的(注销、协议)靠**位置**区分优先级,
+/// 而位置这件事用户扫不出来 —— 真机 390×844 上首屏只看得到 8 个入口,
+/// 那张 12 条的大卡首屏只露 1 条。
+///
+/// 现在自上而下是:风控横幅 → 身份行 → **账目透明卡** → 订单四格 →
+/// 卡券网格 → 设置类列表。
+///
+/// ## 为什么黄金位给账目而不是权益
+///
+/// 商业平台在这个位置放会员等级。我们不做会员体系(没有补贴预算,
+/// 也不靠积分粘人),而**账目透明是这个平台唯一别人抄不走的东西**。
+///
+/// 这个位置不是新选的:首页那条 5% 承诺条可以被用户永久关掉,
+/// 而关掉它的前提写在 `_promiseStrip` 的注释里 ——
+/// 「关掉不影响任何功能:『我的 → 这钱怎么算的』一直在」。
+/// 那句话早就把「我的」页指定成账目透明的常驻入口了,这里只是兑现它。
+///
+/// 顺带:账目三个入口**游客也能用**(`openMoneyFlow` 拉不到订单时回落
+/// 说明弹层,信任页走公开接口),所以它也是未登录首屏唯一不发灰的块。
 class ProfileView extends StatefulWidget {
-  const ProfileView({super.key, required this.api});
+  const ProfileView({super.key, required this.api, this.onOpenOrders});
 
   final ApiClient api;
+
+  /// 点订单四格时切到订单 tab 并带上筛选。
+  ///
+  /// 为什么是回调不是 push:`_tab` 在外壳的 State 里,这一页够不着;
+  /// 而 push 一个新的订单列表页会造出第二个订单列表,
+  /// 返回行为和底部 tab 不一致。null = 没接外壳(测试里),按钮仍可点但不跳
+  final void Function(OrderFilter filter, {int segment})? onOpenOrders;
 
   @override
   State<ProfileView> createState() => _ProfileViewState();
@@ -5051,11 +5190,18 @@ class _ProfileViewState extends State<ProfileView> {
   // 营销总开关(服务端 /config):关着时邀请有礼等入口整体隐藏
   bool _marketingOn = false;
 
-  /// 三格数字。都从已有接口算出,拿不到就不显示那一格——
-  /// 「比别处省了多少」需要拿别家平台的费率做假设,那是造数,不做。
-  /// 这里的「累计优惠」是真金白银:历史订单的满减 + 平台补贴之和。
-  int? _doneOrders;
-  int? _savedCents;
+  /// 订单四格的角标数据源。**只用已拉到的这一页算。**
+  ///
+  /// 服务端按 created_at desc 排、一页 20 条,而待支付/进行中的单必然是
+  /// 最新的那批 —— 所以从第一页数出来的数字,对任何「同时未完结订单
+  /// 少于 20」的用户都是准的。超过 20 的极端情况在角标上显示「20+」,
+  /// 不假装知道确切数(见 SzIconGrid)。
+  ///
+  /// 这里**没有**旧版那个「累计优惠 / 已完成订单」三格数字卡:
+  /// 它拿同一个 limit=20 的列表算「累计」,第 21 单之后就是错的,
+  /// 而且错得悄无声息。要找回来的话得服务端算,不该在入口页上。
+  List<Order> _orders = const [];
+  List<StayOrder> _stays = const [];
 
   @override
   void initState() {
@@ -5071,11 +5217,16 @@ class _ProfileViewState extends State<ProfileView> {
   }
 
   Future<void> _load() async {
-    // 三块数据并发拉。原来是串行:进「我的」要连等三个来回才看得全
+    // 四块数据并发拉。**先把 Future 全发出去再逐个 await** ——
+    // 串行的话进「我的」要连等四个来回才看得全
     final loggedIn = widget.api.isLoggedIn;
     final profileF = loggedIn ? widget.api.me() : null;
     final configF = widget.api.platformConfig();
     final ordersF = loggedIn ? widget.api.myOrders() : null;
+    // 住宿单单独一个接口(和外卖是两套平行的竖井)。多这一个来回是为了
+    // 待支付角标能把住宿算进去 —— 住宿的待支付单 15 分钟不付就自动关闭,
+    // 角标漏数它是用户真金白银的损失
+    final staysF = loggedIn ? widget.api.myStayOrders() : null;
     if (profileF != null) {
       try {
         final profile = await profileF;
@@ -5093,56 +5244,35 @@ class _ProfileViewState extends State<ProfileView> {
     if (ordersF != null) {
       try {
         final orders = await ordersF;
-        var done = 0;
-        var saved = 0;
-        for (final o in orders) {
-          if (o.status == OrderStatus.completed ||
-              o.status == OrderStatus.delivered) {
-            done++;
-          }
-          saved += o.discountCents + o.subsidyCents;
-        }
-        if (mounted) {
-          setState(() {
-            _doneOrders = done;
-            _savedCents = saved;
-          });
-        }
+        if (mounted) setState(() => _orders = orders);
       } catch (_) {}
+    } else if (mounted) {
+      setState(() => _orders = const []);
+    }
+    if (staysF != null) {
+      try {
+        final stays = await staysF;
+        if (mounted) setState(() => _stays = stays);
+      } catch (_) {}
+    } else if (mounted) {
+      setState(() => _stays = const []);
     }
   }
 
-  /// 三格数字里的一格。数字走衬线,标签弱化。
-  Widget _statCell(BuildContext context, String value, String label) {
-    final sz = Theme.of(context).sz;
-    return Expanded(
-      child: Column(children: [
-        Text(value,
-            style: szMoney(
-                fontSize: 20, fontWeight: FontWeight.w600, color: sz.ink)),
-        const SizedBox(height: 3),
-        Text(label, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
-      ]),
-    );
-  }
+  /// 某个筛选下有多少单(外卖 + 住宿)。
+  int _count(OrderFilter f) =>
+      _orders.where(f.matchesFood).length +
+      _stays.where(f.matchesStay).length;
 
-  Widget _accountRow(
-      BuildContext context, String title, String hint, VoidCallback onTap) {
-    final sz = Theme.of(context).sz;
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 14),
-        child: Row(children: [
-          Text(title, style: TextStyle(fontSize: 14, color: sz.ink)),
-          const Spacer(),
-          Text(hint, style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
-          const SizedBox(width: 4),
-          Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
-        ]),
-      ),
-    );
-  }
+  /// 点这一格该落在哪个频道:哪边有就落哪边,两边都有落外卖。
+  int _segmentFor(OrderFilter f) =>
+      _orders.where(f.matchesFood).isEmpty &&
+              _stays.where(f.matchesStay).isNotEmpty
+          ? 1
+          : 0;
+
+  void _openOrders(OrderFilter f) =>
+      widget.onOpenOrders?.call(f, segment: _segmentFor(f));
 
   Future<void> _editBirthdayAndPush() async {
     final me = _profile ?? await widget.api.me();
@@ -5274,333 +5404,407 @@ class _ProfileViewState extends State<ProfileView> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final profile = _profile;
     final guest = !widget.api.isLoggedIn;
+    // 营销入口的闸门:总开关开着、已登录、**而且账号没被风控限制**。
+    // 少最后一条的话,「营销权益暂被限制」的账号照样能点进邀请有礼 ——
+    // 要么那个处置是假的,要么用户点进去才发现是死路。
+    //
+    // 要求 profile 非空是为了别闪:加载中先显示、拿到 risk_level 再收回去,
+    // 比一直不显示更糟
+    final marketing =
+        _marketingOn && !guest && profile != null && profile.riskLevel.isEmpty;
     return ListView(
       padding: const EdgeInsets.all(16),
+      // 块与块之间只留白,**不画分隔线** —— 卡片自己的 1px 描边已经在分区了,
+      // 再加横线就是同一件事说两遍
       children: [
-        // 游客态:登录/注册占位卡,不请求任何个人接口
-        if (guest)
-          Card(
-            child: ListTile(
-              leading: const CircleAvatar(
-                  radius: 26, child: Icon(Icons.person_outline)),
-              title: Text('登录 / 注册', style: theme.textTheme.titleLarge),
-              subtitle: const Text('登录后查看订单、收藏与优惠券'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => ensureLoggedIn(context),
-            ),
-          ),
-        // 反作弊处置提示(可见+可申诉):绝不静默处罚
-        if (profile != null && profile.riskLevel.isNotEmpty)
-          Card(
-            color: theme.colorScheme.errorContainer,
-            child: ListTile(
-              leading: Icon(Icons.info_outline,
-                  color: theme.colorScheme.onErrorContainer),
-              title: Text(
-                  profile.riskLevel == 'frozen'
-                      ? '账号使用受限(冻结,待人工复核)'
-                      : '账号营销权益暂被限制',
-                  style: TextStyle(
-                      color: theme.colorScheme.onErrorContainer,
-                      fontWeight: FontWeight.bold)),
-              subtitle: Text(
-                  '${profile.riskNote.isEmpty ? "系统检测到异常" : profile.riskNote}'
-                  '\n下单不受影响;如有疑问点此联系客服申诉',
-                  style: TextStyle(color: theme.colorScheme.onErrorContainer)),
-              isThreeLine: true,
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => SupportPage(
-                      api: widget.api,
-                      prefill: '对账号限制有疑问,申请复核:'
-                          '${profile.riskNote}'))),
-            ),
-          ),
-        if (!guest)
-          Card(
-            child: ListTile(
-              // 自己的头像:缺图时也用 SzImage(名字首字),但压一个相机角标
-              // 保住"点这里换头像"的提示——这里要的是促使补图,不只是好看
-              leading: InkWell(
-                onTap: _pickAvatar,
-                borderRadius: BorderRadius.circular(26),
-                child: Stack(clipBehavior: Clip.none, children: [
-                  SzImage(
-                      url: profile == null || profile.avatarUrl.isEmpty
-                          ? ''
-                          : widget.api.resolveUrl(profile.avatarUrl),
-                      name: profile?.name ?? widget.api.userName ?? '我',
-                      size: 52,
-                      circle: true),
-                  Positioned(
-                    right: -2,
-                    bottom: -2,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: theme.sz.surface,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: theme.sz.line),
-                      ),
-                      child: Icon(Icons.photo_camera_outlined,
-                          size: 11, color: theme.sz.inkMuted),
-                    ),
-                  ),
-                ]),
-              ),
-              // 首帧用会话里缓存的昵称/手机号,**不要拿默认值或口号顶上** ——
-              // 「感谢你支持劳动者互助平台」占在手机号的位置上,接口一回来
-              // 闪成真号,用户看到的是"先给我看了个别的,然后偷偷换掉了"。
-              // 缓存里也没有(极少见:刚装且还没登录成功过)时留空,
-              // 空白至少是诚实的
-              title: Text(profile?.name ?? widget.api.userName ?? '',
-                  style: theme.textTheme.titleLarge),
-              subtitle: Text(profile?.phone ?? widget.api.userPhone ?? ''),
-              trailing: const Icon(Icons.edit, size: 18),
-              onTap: _editName,
-            ),
-          ),
-        const SizedBox(height: 10),
-        // 三格数字:先给"我从这平台得到了什么",再给功能入口
-        if (!guest && (_savedCents != null || _doneOrders != null))
-          SzCard(
-            child: Row(children: [
-              if (_savedCents != null)
-                _statCell(context, yuan(_savedCents!), '累计优惠'),
-              if (_savedCents != null && _doneOrders != null)
-                Container(width: 1, height: 34, color: theme.sz.line),
-              if (_doneOrders != null)
-                _statCell(context, '${_doneOrders!}', '已完成订单'),
-            ]),
-          ),
-        if (!guest && (_savedCents != null || _doneOrders != null))
-          const SizedBox(height: 18),
+        if (profile != null && profile.riskLevel.isNotEmpty) ...[
+          _riskBanner(context, profile),
+          const SizedBox(height: 12),
+        ],
+        guest ? _loginCard(context) : _identityRow(context, profile),
+        const SizedBox(height: 12),
+        _ledgerCard(context),
+        const SizedBox(height: 12),
+        // 游客不渲染订单区:四个 0 角标的格子就是灰占位,
+        // 而订单 tab 自己已经有登录引导了
+        if (!guest) ...[
+          _ordersCard(context),
+          const SizedBox(height: 12),
+        ],
+        _quickGrid(context),
+        const SizedBox(height: 12),
+        _entryList(context, marketing: marketing),
+      ],
+    );
+  }
 
-        // 「账目」排在「我的」之前:这是用户留下来的理由,不是附属功能
-        const SzSectionTitle('账目'),
-        const SizedBox(height: 9),
-        SzCard(
-          padding: EdgeInsets.zero,
-          child: Column(children: [
-            _accountRow(context, '钱去哪了', '每单可查',
-                () => openMoneyFlow(context, widget.api)),
-            Divider(height: 1, color: theme.sz.line),
-            _accountRow(context, '平台账本与见证节点', '公开可复核',
+  /// 反作弊处置提示(可见 + 可申诉):绝不静默处罚。
+  ///
+  /// **一分不缩。** 这是「到点就自动出事」的提醒,不是装饰性横幅 ——
+  /// 密度改造不许拿它开刀
+  Widget _riskBanner(BuildContext context, UserProfile profile) {
+    final theme = Theme.of(context);
+    return Card(
+      color: theme.colorScheme.errorContainer,
+      child: ListTile(
+        leading: Icon(Icons.info_outline,
+            color: theme.colorScheme.onErrorContainer),
+        title: Text(
+            profile.riskLevel == 'frozen'
+                ? '账号使用受限(冻结,待人工复核)'
+                : '账号营销权益暂被限制',
+            style: TextStyle(
+                color: theme.colorScheme.onErrorContainer,
+                fontWeight: FontWeight.bold)),
+        subtitle: Text(
+            '${profile.riskNote.isEmpty ? "系统检测到异常" : profile.riskNote}'
+            '\n下单不受影响;如有疑问点此联系客服申诉',
+            style: TextStyle(color: theme.colorScheme.onErrorContainer)),
+        isThreeLine: true,
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => SupportPage(
+                api: widget.api,
+                prefill: '对账号限制有疑问,申请复核:${profile.riskNote}'))),
+      ),
+    );
+  }
+
+  /// 游客态:登录/注册占位卡,不请求任何个人接口。
+  Widget _loginCard(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: ListTile(
+        leading:
+            const CircleAvatar(radius: 26, child: Icon(Icons.person_outline)),
+        title: Text('登录 / 注册', style: theme.textTheme.titleLarge),
+        subtitle: const Text('登录后查看订单、收藏与优惠券'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => ensureLoggedIn(context),
+      ),
+    );
+  }
+
+  /// 身份行:头像(点=换头像)+ 昵称(点=改昵称)+ 手机号。
+  Widget _identityRow(BuildContext context, UserProfile? profile) {
+    final theme = Theme.of(context);
+    return Card(
+      child: ListTile(
+        // 自己的头像:缺图时也用 SzImage(名字首字),但压一个相机角标
+        // 保住"点这里换头像"的提示——这里要的是促使补图,不只是好看
+        leading: InkWell(
+          onTap: _pickAvatar,
+          borderRadius: BorderRadius.circular(26),
+          child: Stack(clipBehavior: Clip.none, children: [
+            SzImage(
+                url: profile == null || profile.avatarUrl.isEmpty
+                    ? ''
+                    : widget.api.resolveUrl(profile.avatarUrl),
+                name: profile?.name ?? widget.api.userName ?? '我',
+                size: 52,
+                circle: true),
+            Positioned(
+              right: -2,
+              bottom: -2,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: theme.sz.surface,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: theme.sz.line),
+                ),
+                child: Icon(Icons.photo_camera_outlined,
+                    size: 11, color: theme.sz.inkMuted),
+              ),
+            ),
+          ]),
+        ),
+        // 首帧用会话里缓存的昵称/手机号,**不要拿默认值或口号顶上** ——
+        // 「感谢你支持劳动者互助平台」占在手机号的位置上,接口一回来
+        // 闪成真号,用户看到的是"先给我看了个别的,然后偷偷换掉了"。
+        // 缓存里也没有(极少见:刚装且还没登录成功过)时留空,
+        // 空白至少是诚实的
+        title: Text(profile?.name ?? widget.api.userName ?? '',
+            style: theme.textTheme.titleLarge),
+        subtitle: Text(profile?.phone ?? widget.api.userPhone ?? ''),
+        trailing: const Icon(Icons.edit, size: 18),
+        onTap: _editName,
+      ),
+    );
+  }
+
+  /// 账目透明卡 —— 这一页的黄金位。
+  ///
+  /// 商业平台在这个位置放会员等级和成长值。我们放这个,因为**它才是
+  /// 这个平台要用户记住的东西**,而它此前埋在一串列表里的第五块。
+  ///
+  /// 卡里**只放入口,不放数字**。不是为了省事:旧版那张「累计优惠 /
+  /// 已完成订单」的三格数字卡拿 limit=20 的订单列表算「累计」,
+  /// 第 21 单之后就是错的。一个把账目透明当立身之本的平台,
+  /// 顶上挂两个静悄悄算错的数字,比不显示糟得多。
+  Widget _ledgerCard(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    Widget entry(String label, VoidCallback onTap, {bool last = false}) =>
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: last ? 0 : 8),
+            child: Material(
+              color: sz.surface,
+              borderRadius: BorderRadius.circular(kRadiusSm),
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(kRadiusSm),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  child: Text(label,
+                      maxLines: 2,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: kFontNote,
+                          height: 1.2,
+                          fontWeight: FontWeight.w500,
+                          color: sz.ink)),
+                ),
+              ),
+            ),
+          ),
+        );
+
+    return Container(
+      // 全页唯一一张有色卡:和首页那条 5% 承诺条同一套视觉语言,
+      // 「这两处说的是同一件事」不用写出来
+      decoration: BoxDecoration(
+        color: sz.claySoft,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+      ),
+      padding: const EdgeInsets.all(kCardPad),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic, children: [
+            Text('5%',
+                style: szFigure(
+                    fontSize: 20, fontWeight: FontWeight.w600, color: sz.clay)),
+            const SizedBox(width: 8),
+            Text('平台只抽这么多',
+                style: TextStyle(
+                    fontSize: 15, fontWeight: FontWeight.w600, color: sz.ink)),
+          ]),
+          const SizedBox(height: 4),
+          // 立场整卡说一次,不摊到每个入口上(同 SzEntryGroup.footnote 的规矩)
+          Text('每一单的钱去了哪里,平台的账本长什么样,都查得到',
+              style: TextStyle(
+                  fontSize: kFontNote, height: 1.4, color: sz.inkMuted)),
+          const SizedBox(height: 12),
+          Row(children: [
+            entry('钱去哪了', () => openMoneyFlow(context, widget.api)),
+            entry(
+                '平台账本',
                 () => Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => TrustPage(api: widget.api)))),
             // 直达入口:这一页是我们和三大平台唯一的结构性差别,
             // 不该只藏在信任页里点两层才看得到
-            _accountRow(context, '平台体检', '核账差错/可用率/赔付,难看也照实显示',
+            entry(
+                '平台体检',
                 () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => TransparencyPage(api: widget.api)))),
+                    builder: (_) => TransparencyPage(api: widget.api))),
+                last: true),
           ]),
-        ),
-        const SizedBox(height: 18),
-        const SzSectionTitle('我的'),
-        const SizedBox(height: 9),
-        // 高频三件套:快捷格(与首页金刚区同一视觉语言)
-        Card(
+        ],
+      ),
+    );
+  }
+
+  /// 订单四格:按状态直达。
+  ///
+  /// 底部的「订单」tab 是全部订单的入口,这里给的是**分流 + 数字**。
+  /// 角标是这一块存在的全部理由 —— 没有数字的四个格子只是四个
+  /// 通往同一个列表的重复入口。
+  Widget _ordersCard(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Card(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        InkWell(
+          onTap: () => _openOrders(OrderFilter.all),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                for (final (icon, label, page) in [
-                  (Icons.local_activity_outlined, '优惠券',
-                      () => CouponsPage(api: widget.api) as Widget),
-                  (Icons.confirmation_number_outlined, '团购券',
-                      () => MyVouchersPage(api: widget.api) as Widget),
-                  (Icons.favorite_outline, '我的收藏',
-                      () => FavoritesPage(api: widget.api) as Widget),
-                  (Icons.place_outlined, '收货地址',
-                      () => AddressBookPage(api: widget.api) as Widget),
-                ])
-                  Expanded(
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () async {
-                        if (!await ensureLoggedIn(context)) return;
-                        if (!context.mounted) return;
-                        await Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => page()));
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Column(
-                          children: [
-                            Container(
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                color: theme.sz.surfaceAlt,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(icon,
-                                  size: 20, color: theme.sz.inkMuted),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(label,
-                                style: TextStyle(
-                                    fontSize: 11.5, color: theme.sz.ink)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+            padding: const EdgeInsets.fromLTRB(kCardPad, 12, 8, 0),
+            child: Row(children: [
+              Text('我的订单',
+                  style: TextStyle(
+                      fontSize: kFontBodyLg,
+                      fontWeight: FontWeight.w600,
+                      color: sz.ink)),
+              const Spacer(),
+              Text('全部订单',
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+              Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
+            ]),
           ),
         ),
-        const SizedBox(height: 8),
-        Card(
-          child: Column(children: [
-            if (_marketingOn && !guest) ...[
-              // 「好友完成首单,你俩各得券」是**规则内容**不是解释,留着
-              SzEntryTile(
-                icon: Icons.card_giftcard_outlined,
-                title: '邀请有礼',
-                hint: '好友完成首单,你俩各得券',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => InvitePage(api: widget.api))),
-              ),
-              const Divider(height: 1),
-              SzEntryTile(
-                icon: Icons.cake_outlined,
-                title: '生日与营销推送',
-                hint: '营销推送可一键关闭',
-                onTap: _editBirthdayAndPush,
-              ),
-              const Divider(height: 1),
-            ],
-            // 长辈版:大字模式,方便老人和视障用户;尊重系统字体缩放
-            // 开关类入口:trailing 给 Switch,整行可点也切换。
-            // 「放大全局字号」这句留着 —— 老人要的正是这个确认
-            ValueListenableBuilder<bool>(
-              valueListenable: elderMode,
-              builder: (context, elder, _) => SzEntryTile(
-                icon: Icons.text_fields,
-                title: '长辈版(大字模式)',
-                hint: '放大全局字号,看得更清楚',
-                trailing: Switch(
-                    value: elder, onChanged: (v) => setElderMode(v)),
-                onTap: () => setElderMode(!elder),
-              ),
+        SzIconGrid(items: [
+          for (final (icon, filter) in [
+            (Icons.account_balance_wallet_outlined, OrderFilter.pendingPayment),
+            (Icons.local_shipping_outlined, OrderFilter.active),
+            (Icons.rate_review_outlined, OrderFilter.toReview),
+            (Icons.assignment_return_outlined, OrderFilter.refund),
+          ])
+            SzIconGridItem(
+              icon: icon,
+              label: filter.label,
+              badge: filter.badged ? _count(filter) : 0,
+              onTap: () => _openOrders(filter),
             ),
-            const Divider(height: 1),
-            SzEntryTile(
-              icon: Icons.verified_user_outlined,
-              title: '实名认证',
-              hint: '购买酒类等受限商品需先实名',
-              onTap: () async {
-                if (!await ensureLoggedIn(context)) return;
-                if (!context.mounted) return;
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => IdentityPage(api: widget.api)));
-              },
-            ),
-            const Divider(height: 1),
-            SzEntryTile(
-              icon: Icons.settings_outlined,
-              title: '设置',
-              hint: '通知 / 缓存 / 检查更新 / 关于我们',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => SettingsPage(api: widget.api))),
-            ),
-            const Divider(height: 1),
-            SzEntryTile(
-              icon: Icons.help_outline,
-              title: '帮助中心',
-              hint: '配送范围 / 退款规则 / 常见问题',
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => HelpCenterPage(api: widget.api))),
-            ),
-            const Divider(height: 1),
-            SzEntryTile(
-              icon: Icons.rate_review_outlined,
-              title: '意见反馈',
-              onTap: () async {
-                if (!await ensureLoggedIn(context)) return;
-                if (!context.mounted) return;
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => FeedbackPage(api: widget.api)));
-              },
-            ),
-            const Divider(height: 1),
-            // 食安投诉查得到进度,投诉才不是黑洞
-            // 食安投诉查得到进度,投诉才不是黑洞
-            SzEntryTile(
-              icon: Icons.health_and_safety_outlined,
-              title: '我的食安投诉',
-              hint: '处理进度与平台回复',
-              onTap: () async {
-                if (!await ensureLoggedIn(context)) return;
-                if (!context.mounted) return;
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => FoodSafetyRecordsPage(api: widget.api)));
-              },
-            ),
-            const Divider(height: 1),
-            SzEntryTile(
-              icon: Icons.receipt_outlined,
-              title: '开发票',
-              onTap: _showInvoiceInfo,
-            ),
-            const Divider(height: 1),
-            SzEntryTile(
-              icon: Icons.support_agent_outlined,
-              title: '联系平台客服',
-              onTap: () async {
-                if (!await ensureLoggedIn(context)) return;
-                if (!context.mounted) return;
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => SupportPage(api: widget.api)));
-              },
-            ),
-            const Divider(height: 1),
-            // 商店审核要求:我的页可达协议全文与注销入口
-            SzEntryTile(
-              icon: Icons.description_outlined,
-              title: '用户协议与隐私政策',
-              onTap: () => showLegalSheet(context),
-            ),
-            if (!guest) ...[
-              const Divider(height: 1),
-              // 注销保持红色 —— 不可逆操作不该和别的入口长得一样
-              SzEntryTile(
-                icon: Icons.person_off_outlined,
-                title: '注销账号',
-                valueTone: theme.sz.danger,
-                value: '不可逆',
-                onTap: () =>
-                    Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => AccountDeletionPage(
-                              api: widget.api,
-                              onDeleted: (ctx) {
-                                authTick.value++; // 切回游客态
-                                Navigator.of(ctx)
-                                    .popUntil((route) => route.isFirst);
-                              },
-                            ))),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.logout, color: theme.colorScheme.error),
-                title: Text('退出登录',
-                    style: TextStyle(color: theme.colorScheme.error)),
-                onTap: () async {
-                  PushService.onLogout(); // 解绑推送别名,失败静默
-                  await widget.api.clearSession();
-                  authTick.value++; // 各 tab 切回游客态
-                  if (!context.mounted) return;
-                  // 游客模式下退出登录 = 留在首页继续逛
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                },
-              ),
-            ],
-          ]),
+        ]),
+      ]),
+    );
+  }
+
+  /// 卡券与常用:四个平级入口,标题两三个字,给不出状态值 —— 网格档。
+  ///
+  /// 每格 23px,同样四条排成列表要 184px。收货地址在这里留一份,
+  /// 所以「我的」tab 的 AppBar 才腾得出位置给客服和设置
+  Widget _quickGrid(BuildContext context) {
+    return Card(
+      child: SzIconGrid(items: [
+        for (final (icon, label, page) in [
+          (Icons.local_activity_outlined, '优惠券',
+              () => CouponsPage(api: widget.api) as Widget),
+          (Icons.confirmation_number_outlined, '团购券',
+              () => MyVouchersPage(api: widget.api) as Widget),
+          (Icons.favorite_outline, '我的收藏',
+              () => FavoritesPage(api: widget.api) as Widget),
+          (Icons.place_outlined, '收货地址',
+              () => AddressBookPage(api: widget.api) as Widget),
+        ])
+          SzIconGridItem(
+            icon: icon,
+            label: label,
+            onTap: () async {
+              if (!await ensureLoggedIn(context)) return;
+              if (!context.mounted) return;
+              await Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => page()));
+            },
+          ),
+      ]),
+    );
+  }
+
+  /// 设置类列表:需要一句说明、或者有状态值可显示的入口。
+  ///
+  /// **一张卡,不加分组头。** 分组头 41px、脚注 23px —— 上面三张卡的
+  /// 卡片边界已经把结构表达完了,再加两个分组头就是白付 82px
+  /// (这一课记在 `entry_tile_test.dart` 里:第一版改造正是栽在这儿)。
+  ///
+  /// 长辈版排第一是刻意的:它是全页唯一一个**目标用户就是看不清这一页**
+  /// 的入口。埋在第三张卡中间,或者收进右上角那个没有文字标签的齿轮里,
+  /// 等于对这批人关门。它 72px 很贵,但那 72px 买的是 Switch 的 48px
+  /// 触控区 —— 给这批人缩触控区是本末倒置。
+  Widget _entryList(BuildContext context, {required bool marketing}) {
+    return Card(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // 长辈版:大字模式,方便老人和视障用户;尊重系统字体缩放。
+        // 开关类入口:trailing 给 Switch,整行可点也切换。
+        // 「放大全局字号」这句留着 —— 老人要的正是这个确认
+        ValueListenableBuilder<bool>(
+          valueListenable: elderMode,
+          builder: (context, elder, _) => SzEntryTile(
+            icon: Icons.text_fields,
+            title: '长辈版(大字模式)',
+            hint: '放大全局字号,看得更清楚',
+            trailing: Switch(value: elder, onChanged: (v) => setElderMode(v)),
+            onTap: () => setElderMode(!elder),
+          ),
         ),
-      ],
+        const Divider(height: 1),
+        SzEntryTile(
+          icon: Icons.verified_user_outlined,
+          title: '实名认证',
+          hint: '购买酒类等受限商品需先实名',
+          onTap: () async {
+            if (!await ensureLoggedIn(context)) return;
+            if (!context.mounted) return;
+            await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => IdentityPage(api: widget.api)));
+          },
+        ),
+        if (marketing) ...[
+          const Divider(height: 1),
+          // 「好友完成首单,你俩各得券」是**规则内容**不是解释,留着
+          SzEntryTile(
+            icon: Icons.card_giftcard_outlined,
+            title: '邀请有礼',
+            hint: '好友完成首单,你俩各得券',
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => InvitePage(api: widget.api))),
+          ),
+          const Divider(height: 1),
+          // 状态值走 value:,同一行右对齐,零额外高度。
+          // 旧版这里是 hint「营销推送可一键关闭」—— 那是句废话,
+          // 用户想知道的是**现在开着没有**,而这个值本来就在 _profile 里
+          SzEntryTile(
+            icon: Icons.cake_outlined,
+            title: '生日与营销推送',
+            value: (_profile?.marketingPush ?? true) ? '已开启' : '已关闭',
+            onTap: _editBirthdayAndPush,
+          ),
+        ],
+        const Divider(height: 1),
+        // 旧版的 hint 是「配送范围 / 退款规则 / 常见问题」—— 那是一份目录,
+        // 目的页自己会答。入口列表回答「这是什么」就够了
+        SzEntryTile(
+          icon: Icons.help_outline,
+          title: '帮助中心',
+          onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => HelpCenterPage(api: widget.api))),
+        ),
+        const Divider(height: 1),
+        SzEntryTile(
+          icon: Icons.rate_review_outlined,
+          title: '意见反馈',
+          onTap: () async {
+            if (!await ensureLoggedIn(context)) return;
+            if (!context.mounted) return;
+            await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => FeedbackPage(api: widget.api)));
+          },
+        ),
+        const Divider(height: 1),
+        // 食安投诉查得到进度,投诉才不是黑洞。
+        // 标题里的「我的」已经说明是查自己的,不用再补一句 hint
+        SzEntryTile(
+          icon: Icons.health_and_safety_outlined,
+          title: '我的食安投诉',
+          onTap: () async {
+            if (!await ensureLoggedIn(context)) return;
+            if (!context.mounted) return;
+            await Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => FoodSafetyRecordsPage(api: widget.api)));
+          },
+        ),
+        const Divider(height: 1),
+        // 点进去只会说「接入微信支付后开放」—— 那就把答案摆在行上,
+        // 用户不用点就知道。`value:` 槽位最正当的用法之一:
+        // 把一次注定落空的跳转换成同一行的一个词
+        SzEntryTile(
+          icon: Icons.receipt_outlined,
+          title: '开发票',
+          value: '暂未开放',
+          onTap: _showInvoiceInfo,
+        ),
+        const Divider(height: 1),
+        // 商店审核要求:我的页可达协议全文。
+        // 设置页里也有一份,但合规项上「2 跳可达算不算可达」是拿被打回
+        // 赌的,46px 不值这个风险 —— 留着
+        SzEntryTile(
+          icon: Icons.description_outlined,
+          title: '用户协议与隐私政策',
+          onTap: () => showLegalSheet(context),
+        ),
+      ]),
     );
   }
 }

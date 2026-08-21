@@ -9,6 +9,7 @@ export 'src/brand_art.dart';
 export 'src/channel_grid.dart';
 export 'src/channels.dart';
 export 'src/entry_tile.dart';
+export 'src/icon_grid.dart';
 export 'src/chat_page.dart';
 export 'src/city_picker.dart';
 export 'src/coord_utils.dart';

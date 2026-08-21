@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db import get_db
-from ..models import Dish, Merchant, MerchantStatus, Order, OrderEvent, User
+from ..models import (Dish, Merchant, MerchantStatus, Order, OrderEvent,
+                      Review, User)
 from ..ratelimit import check_rate_limit
 from ..redis_client import RIDER_LOC_KEY, get_redis
 from ..schemas import (
@@ -106,7 +107,8 @@ def short_name(order: Order) -> str:
 
 def order_out(order: Order, merchant: Merchant | None,
               viewer: User | None = None, *,
-              as_role: str | None = None) -> OrderOut:
+              as_role: str | None = None,
+              has_review: bool = False) -> OrderOut:
     """订单 + 商家取餐点信息。骑手端地图/导航需要知道店在哪。
 
     电话脱敏:商家/骑手视角 contact_phone 一律打码,可拨号码走 privacy_phone
@@ -117,6 +119,7 @@ def order_out(order: Order, merchant: Merchant | None,
     脱敏是一整块,漏传一次就是门牌和真名一起下发出去。
     """
     out = OrderOut.model_validate(order)
+    out.has_review = has_review
     # 拆分项的中文名跟着数一起给 —— 客户端不用各写一份映射
     if out.fee_parts:
         out.fee_part_labels = {k: FEE_PART_LABELS[k]
@@ -165,7 +168,28 @@ async def orders_out(db: AsyncSession, orders: list[Order],
         m.id: m
         for m in await db.scalars(select(Merchant).where(Merchant.id.in_(ids)))
     }
-    return [order_out(o, merchants.get(o.merchant_id), viewer) for o in orders]
+    # 一次查完再进循环。写成 `o.id in await _reviewed_ids(...)` 的话
+    # 每个订单各发一条 SQL —— 那正是这个字段要消灭的东西
+    reviewed = await _reviewed_ids(db, orders)
+    return [
+        order_out(o, merchants.get(o.merchant_id), viewer,
+                  has_review=o.id in reviewed)
+        for o in orders
+    ]
+
+
+async def _reviewed_ids(db: AsyncSession, orders: list[Order]) -> set[int]:
+    """这批单里哪些已经评过。**一次查完,不是一单一查。**
+
+    只查已完成的单:别的状态本来就不能评(见 reviews.py 的 409),
+    把它们也塞进 IN 里只是让索引白扫一遍。
+    一单都没完成时直接返回空集,连查询都不发。
+    """
+    done = [o.id for o in orders if o.status == OrderStatus.COMPLETED]
+    if not done:
+        return set()
+    return set(await db.scalars(
+        select(Review.order_id).where(Review.order_id.in_(done))))
 
 
 async def may_view_order(db: AsyncSession, order: Order, user: User) -> bool:
@@ -1694,7 +1718,10 @@ async def get_order(
 ):
     order = await visible_order_or_404(db, order_no, user)
     merchant = await db.get(Merchant, order.merchant_id)
-    out = order_out(order, merchant, user)
+    # 详情也填 has_review:同一个字段在列表里是真的、在详情里恒为 false,
+    # 那它就是个陷阱 —— 下一个人照着详情写逻辑,错得毫无征兆
+    out = order_out(order, merchant, user,
+                    has_review=order.id in await _reviewed_ids(db, [order]))
     # 详情页专属:联系电话(用户联系骑手/商家,一键拨号)。
     # dial_phone 而不是 phone:已注销账号的 phone 是 `del{id}_{hex}` 哨兵,
     # 原样下发的话客户端会拿一串字母去拨号

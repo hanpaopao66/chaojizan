@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'session.dart';
+
 /// 设置页:通知开关(本地记忆)/清除缓存/检查更新/关于我们。
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.api});
@@ -112,6 +114,50 @@ class _SettingsPageState extends State<SettingsPage> {
           onTap: () => Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const AboutPage())),
         ),
+        // 账号相关(#296):从「我的」页搬过来的。
+        //
+        // 这两件事一个一年点零次、一个点一次,原先和「帮助中心」并排
+        // 挂在同一串 12 条的列表里,靠位置区分优先级 —— 而位置这件事
+        // 用户扫不出来。放在设置页末尾是各家的通行位置,也仍然 2 跳可达。
+        //
+        // 注销入口的可达性是商店审核项:我的 → 设置 → 注销账号,
+        // 全程有文字标签,不藏在图标里
+        if (widget.api.isLoggedIn) ...[
+          const SizedBox(height: 18),
+          SzEntryGroup(
+            title: '账号',
+            children: [
+              SzEntryTile(
+                icon: Icons.logout,
+                title: '退出登录',
+                onTap: () async {
+                  PushService.onLogout(); // 解绑推送别名,失败静默
+                  await widget.api.clearSession();
+                  authTick.value++; // 各 tab 切回游客态
+                  if (!context.mounted) return;
+                  // 游客模式下退出登录 = 留在首页继续逛
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+              ),
+              // 注销保持红色 —— 不可逆操作不该和别的入口长得一样
+              SzEntryTile(
+                icon: Icons.person_off_outlined,
+                title: '注销账号',
+                value: '不可逆',
+                valueTone: Theme.of(context).sz.danger,
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => AccountDeletionPage(
+                          api: widget.api,
+                          onDeleted: (ctx) {
+                            authTick.value++; // 切回游客态
+                            Navigator.of(ctx)
+                                .popUntil((route) => route.isFirst);
+                          },
+                        ))),
+              ),
+            ],
+          ),
+        ],
       ]),
     );
   }

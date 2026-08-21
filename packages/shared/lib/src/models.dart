@@ -558,6 +558,7 @@ class Order {
         cancelReason = json['cancel_reason'] as String? ?? '',
         refundCents = json['refund_cents'] as int? ?? 0,
         refundNote = json['refund_note'] as String? ?? '',
+        hasReview = json['has_review'] as bool? ?? false,
         scheduledAt = json['scheduled_at'] as String?,
         etaAt = json['eta_at'] as String?,
         // 到店时刻:骑手端据此决定还要不要显示「我到店了」。
@@ -651,6 +652,11 @@ class Order {
   final String cancelReason;
   final int refundCents;
   final String refundNote;
+
+  /// 这一单评过没有。**列表侧就要能算「待评价 N」** —— 没有它的话
+  /// 只能对每笔已完成订单各打一发 `GET /orders/{no}/review` 看 404,
+  /// 那个形态在列表上不成立。非完成态恒为 false(本来也不能评)
+  final bool hasReview;
   final String? scheduledAt; // 预约送达时间(空 = 尽快送)
   final String? etaAt;       // 预计送达时间(超时 15 分钟平台自动赔安抚券)
   /// 骑手到店时刻(空 = 还没标记)。等餐时长 = 取餐 − 到店,申诉的证据

@@ -43,6 +43,21 @@ call("POST", f"/orders/{no_pending}/transition", customer, {"to_status": "cancel
 
 # 完整走完一单再评
 no = run_order()
+
+
+def listed(order_no):
+    """从「我的订单」列表里取这一单。角标要在列表侧就算得出来。"""
+    for o in call("GET", "/orders?limit=20", customer):
+        if o["order_no"] == order_no:
+            return o
+    raise AssertionError(f"{order_no} 不在订单列表里")
+
+
+# 「待评价」角标的数据源。没有这个字段的话,客户端只能对每一笔已完成订单
+# 各打一发 GET /orders/{no}/review 看 404 —— 列表侧根本算不出数字
+assert listed(no)["has_review"] is False, "完成但没评的单,has_review 应为 false"
+print("✓ 完成未评的单:has_review=false")
+
 err = call("POST", f"/orders/{no}/review", customer,
            {"merchant_rating": 6}, expect_error=True)
 assert err["_error"] == 422
@@ -62,6 +77,11 @@ print(f"✓ 重复评价被拒:{err['detail']}")
 mine = call("GET", f"/orders/{no}/review", customer)
 assert mine["comment"] == "面很好吃,送得快"
 print("✓ 能查到自己这单的评价")
+
+assert listed(no)["has_review"] is True, "评完之后 has_review 应翻成 true"
+assert call("GET", f"/orders/{no}", customer)["has_review"] is True, \
+    "详情接口的 has_review 也得是真的,不能只有列表对"
+print("✓ 评价后 has_review=true(列表与详情一致)")
 
 # 聚合分数
 # 用详情接口:这里验的是评分聚合,跟"在不在列表里"无关。

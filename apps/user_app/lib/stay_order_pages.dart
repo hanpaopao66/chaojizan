@@ -4,11 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'order_filter.dart';
+
 /// 住宿订单列表(嵌在订单 tab 的「住宿」分栏,无 Scaffold)。
 class StayOrderListView extends StatefulWidget {
-  const StayOrderListView({super.key, required this.api});
+  const StayOrderListView(
+      {super.key, required this.api, this.filter = OrderFilter.all});
 
   final ApiClient api;
+
+  /// 状态筛选。住宿走的是 StayOrderStatus,和外卖那套平行 ——
+  /// 判断落在 [OrderFilter.matchesStay] 里,别在这儿再抄一份状态名
+  final OrderFilter filter;
 
   @override
   State<StayOrderListView> createState() => _StayOrderListViewState();
@@ -38,15 +45,21 @@ class _StayOrderListViewState extends State<StayOrderListView> {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Center(child: CircularProgressIndicator());
         }
-        final orders = snapshot.data ?? const <StayOrder>[];
+        final orders = (snapshot.data ?? const <StayOrder>[])
+            .where(widget.filter.matchesStay)
+            .toList();
         if (orders.isEmpty) {
           return RefreshIndicator(
             onRefresh: _refresh,
-            child: ListView(children: const [
+            child: ListView(children: [
               Padding(
-                  padding: EdgeInsets.all(48),
-                  child: Center(child: Text('还没有住宿订单\n首页「住宿」逛逛?',
-                      textAlign: TextAlign.center))),
+                  padding: const EdgeInsets.all(48),
+                  child: Center(
+                      child: Text(
+                          widget.filter == OrderFilter.all
+                              ? '还没有住宿订单\n首页「住宿」逛逛?'
+                              : '没有${widget.filter.label}的住宿订单',
+                          textAlign: TextAlign.center))),
             ]),
           );
         }
