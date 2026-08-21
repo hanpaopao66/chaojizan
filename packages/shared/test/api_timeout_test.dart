@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -56,6 +57,9 @@ class _BrokenBodyClient extends http.BaseClient {
 }
 
 void main() {
+  // setMockMethodCallHandler 要 binding 先就绪
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('body 读取超时', () {
     test('body 卡住时 future 会完成(而不是永远挂着)', () async {
       final fake = _StalledBodyClient();
@@ -143,6 +147,48 @@ void main() {
       );
       await api.wallet();
       expect(echo.headers['X-App-Build'], '123');
+    });
+  });
+
+  group('版本号拿不到时不能拖住请求', () {
+    // 这一条防的是一个**真实发生过**的回归(2026-08-21 引进 X-App-Build 时):
+    //
+    // loadAppBuild() 在 `await PackageInfo.fromPlatform()` 之前就把
+    // `_appBuildTried` 置位了,所以**只有本进程的第一个请求**会走进去。
+    // 那个 await 当时没有超时,而 try/catch 接得住"抛异常"、
+    // 接不住"永远不返回" —— 平台通道冷启动未就绪、插件注册竞态都会这样。
+    //
+    // 表现是"冷启动后第一次操作没反应,重试一下又好了":后面的请求全部正常,
+    // 因为标志位早就置上了。极难复现,也极难归因到版本号这件小事上。
+    // 商家端最糟 —— 冷启动第一个请求就是拉订单。
+    // ⚠️ 用 test() 不用 testWidgets() —— testWidgets 跑在假时钟里,
+    // Duration 计时器要 pump 才推进,`.timeout(2s)` 永远不会触发,
+    // 于是**连"有 timeout"的那次也会挂住**。这里要的是真实计时器。
+    test('平台通道永不返回时,请求照样发得出去', () async {
+      // 让 PackageInfo 的平台通道挂死:handler 返回一个永不完成的 Future
+      // ⚠️ 必须先重置这个 static 标志位。同文件前面的用例已经把它置位了,
+      // 不重置的话 loadAppBuild() 直接短路返回,根本碰不到平台通道 ——
+      // 这个断言就成了永远绿的空断言(我第一版就是这么写的,注入验证才发现)
+      ApiClient.resetAppBuildForTest();
+      addTearDown(ApiClient.resetAppBuildForTest);
+
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('dev.fluttercommunity.plus/package_info'),
+        (call) => Completer<ByteData?>().future.then((_) => null),
+      );
+      addTearDown(() => messenger.setMockMethodCallHandler(
+          const MethodChannel('dev.fluttercommunity.plus/package_info'), null));
+
+      final client = _EchoClient();
+      final api = ApiClient(baseUrl: 'http://x', httpClient: client);
+
+      // 通道挂死,但 loadAppBuild 有 2 秒超时兜底,请求最终必须发出去。
+      // 给 5 秒余量:超不过就说明那个 timeout 没了
+      await api.platformConfig().timeout(const Duration(seconds: 5));
+      expect(client.headers, isNotEmpty, reason: '版本号拿不到就把整个请求拖住了 —— '
+          'PackageInfo.fromPlatform() 那里的 .timeout 是不是被删了?');
     });
   });
 }

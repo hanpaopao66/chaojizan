@@ -5,6 +5,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -196,16 +197,39 @@ class ApiClient {
   static String? appBuild;
   static bool _appBuildTried = false;
 
+  /// 只给测试用:把「已经取过版本号」这个标志位清掉。
+  ///
+  /// 它是 static 的,同一个测试文件里前面任何一个用例碰过之后,
+  /// 后面的用例就再也走不进 [loadAppBuild] 的取值分支 ——
+  /// 于是"版本号拿不到会不会拖住请求"这类断言变成永远绿的空断言。
+  @visibleForTesting
+  static void resetAppBuildForTest() {
+    appBuild = null;
+    _appBuildTried = false;
+  }
+
   /// 取一次构建号缓存起来。失败静默 —— 这个头缺了不影响任何功能,
   /// 为了它让请求失败是本末倒置。只试一次,别每个请求都去敲平台通道。
   static Future<void> loadAppBuild() async {
     if (_appBuildTried) return;
     _appBuildTried = true;
     try {
-      final info = await PackageInfo.fromPlatform();
+      // ⚠️ 必须有超时。
+      //
+      // `_appBuildTried` 在上面那个 await 之前就置位了,所以**只有本进程的
+      // 第一个请求**会走到这里 —— 它挂住的话,后面所有请求都正常,
+      // 表现是"冷启动后第一次操作没反应,重试一下又好了",极难复现也极难归因。
+      // 商家端最要命:冷启动第一个请求就是拉订单,挂住等于以为在听单其实没拉到。
+      //
+      // try/catch 接得住"抛异常",接不住"永远不返回"。平台通道在冷启动时
+      // 尚未就绪、插件注册有竞态,都会让它不返回。
+      // 版本号只是个观测用的请求头,**它没有资格让任何请求等**。
+      final info = await PackageInfo.fromPlatform()
+          .timeout(const Duration(seconds: 2));
       if (info.buildNumber.isNotEmpty) appBuild = info.buildNumber;
     } catch (_) {
-      // 测试环境 / 没有平台通道时拿不到,当作没有这个头
+      // 测试环境 / 没有平台通道 / 超时,都当作没有这个头。
+      // TimeoutException 也走这里
     }
   }
 
