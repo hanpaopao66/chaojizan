@@ -43,7 +43,12 @@ async def get_current_user(
     user = await db.get(User, int(payload["sub"]))
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户不存在")
-    if user.phone.startswith("del"):  # 已注销(匿名化标记),旧 token 立即失效
+    # 已注销:旧 token 立即失效。
+    #
+    # 判据是 `deleted_at`,不再是手机号长什么样。前缀那条留着兜两种情况:
+    # ① 存量行还没跑过数据修复脚本;② 迁移被回滚(0108 downgrade 会
+    # 删掉这一列)。少认一行墓碑的后果是旧 token 还能用,所以宁可两条都判。
+    if user.deleted_at is not None or user.phone.startswith("del"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号已注销")
     return user
 

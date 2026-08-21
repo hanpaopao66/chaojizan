@@ -5,6 +5,49 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+/// 地址簿排序的结果。[nearestId] 为 null 表示没定位/只有一个地址,
+/// 此时 [list] 保持服务端给的原顺序,也不打「距离最近」标签。
+typedef AddressOrder = ({List<Address> list, int? nearestId, double nearestM});
+
+/// 地址簿排序(#171)。**纯函数** —— 不碰网络、定位和 UI。
+///
+/// 排序规则是这个页面唯一真正的逻辑,单独拎出来是为了能直接测:
+/// 埋在 State 的异步 `_load()` 里,测试就只能去测自己抄的一份副本。
+///
+/// 两件事**故意分开**:
+///
+/// - **排序**:默认地址永远排最前 —— 用户特意设过「默认」,
+///   那是他的明确意愿,不该被算出来的距离盖过去;
+/// - **「距离最近」标签**:标在真的最近的那个上,而不是排序后的第一个。
+///
+/// 合成一件事的话,要么默认地址被挤走(违背用户意愿),
+/// 要么标签指着一个并不最近的地址(是在骗人)。
+AddressOrder sortAddressBook(List<Address> rows,
+    {double? myLat, double? myLng}) {
+  final lat = myLat, lng = myLng;
+  // 没定位或只有一个地址:退回原来的顺序,功能不受影响
+  if (lat == null || lng == null || rows.length <= 1) {
+    return (list: rows, nearestId: null, nearestM: 0);
+  }
+  final list = [...rows]..sort((a, b) {
+      if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
+      return distanceMeters(lat, lng, a.lat, a.lng)
+          .compareTo(distanceMeters(lat, lng, b.lat, b.lng));
+    });
+  // 「距离最近」标签给的是**真的最近的那个**,不是排序后的第一个 ——
+  // 默认地址排在最前,但它未必是最近的
+  var best = 0;
+  var bestD = double.infinity;
+  for (var i = 0; i < list.length; i++) {
+    final d = distanceMeters(lat, lng, list[i].lat, list[i].lng);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return (list: list, nearestId: list[best].id, nearestM: bestD);
+}
+
 /// 地址簿。selectMode = true 时点选地址直接返回(下单选址用)。
 class AddressBookPage extends StatefulWidget {
   const AddressBookPage({
@@ -64,31 +107,14 @@ class _AddressBookPageState extends State<AddressBookPage> {
         }
       }
       if (!mounted) return;
-      // 按离当前位置的远近排。**默认地址仍然排最前** ——
-      // 用户特意设过"默认",那是他的明确意愿,不该被算出来的距离盖过去
-      final lat = myLat, lng = myLng;
-      if (lat != null && lng != null && list.length > 1) {
-        list.sort((a, b) {
-          if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
-          return distanceMeters(lat, lng, a.lat, a.lng)
-              .compareTo(distanceMeters(lat, lng, b.lat, b.lng));
-        });
-        // 「距离最近」标签给的是**真的最近的那个**,不是排序后的第一个 ——
-        // 默认地址排在最前,但它未必是最近的
-        var best = 0;
-        var bestD = double.infinity;
-        for (var i = 0; i < list.length; i++) {
-          final d = distanceMeters(lat, lng, list[i].lat, list[i].lng);
-          if (d < bestD) {
-            bestD = d;
-            best = i;
-          }
-        }
-        _nearestId = list[best].id;
-        _nearestM = bestD;
+      // 按离当前位置的远近排(规则见 sortAddressBook)
+      final ordered = sortAddressBook(list, myLat: myLat, myLng: myLng);
+      if (ordered.nearestId != null) {
+        _nearestId = ordered.nearestId;
+        _nearestM = ordered.nearestM;
       }
       setState(() {
-        _list = list;
+        _list = ordered.list;
         _loaded = true;
       });
     } catch (e) {

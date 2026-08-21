@@ -50,12 +50,21 @@ print(f"✓ FAQ 自助分流返回 {len(faq)} 条,含直达 action")
 no = new_paid()
 chk = call("GET", f"/orders/{no}/self-refund/check", customer)
 assert chk["eligible"] is True and "未接单" in chk["reason"]
-tickets_before = len(call("GET", "/tickets/mine", customer))
+# ⚠️ **不能数条数**。/tickets/mine 只回最近 50 条,而演示号的工单
+# 早就四百多条了 —— 窗口顶满,新建一条只是把最老的挤出去,
+# `after == before` 恒等于 `50 == 50`。原来的写法因此是假绿:
+# 把「自助退款顺手建一条工单」注进去,这条断言照样通过。
+# 改成拿**最大工单 id 当游标**,只看退款之后有没有比它更新的。
+before_max = max((t["id"] for t in call("GET", "/tickets/mine", customer)),
+                 default=0)
 done = call("POST", f"/orders/{no}/self-refund", customer)
 assert done["status"] == "cancelled" and done["refund_cents"] == done["total_cents"]
-tickets_after = len(call("GET", "/tickets/mine", customer))
-assert tickets_after == tickets_before, "自助退款不应生成工单"
-print("✓ 未接单自助退款成功且全额退,不建工单")
+new_tickets = [t for t in call("GET", "/tickets/mine", customer)
+               if t["id"] > before_max]
+assert not new_tickets, (
+    f"自助退款不应生成工单,却新增了 "
+    f"{[(t['id'], t['content'][:30]) for t in new_tickets]}")
+print(f"✓ 未接单自助退款成功且全额退,不建工单(游标 id>{before_max} 无新增)")
 
 # ---- 已出餐/配送中 → 转人工带上下文 ----
 no2 = new_paid()

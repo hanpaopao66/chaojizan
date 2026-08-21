@@ -999,13 +999,19 @@ async def list_staff(
     shop = await owned_shop(db, user)
     if shop is None:
         return []
+    from ..services.privacy_phone import mask_phone
+    # 已注销的店员不该还挂在名单上。注销时会删 merchant_staff 行,
+    # 这里再加一道 where 兜住存量(修复脚本跑之前的那些行)
     rows = (await db.execute(
         select(MerchantStaff, User)
         .join(User, User.id == MerchantStaff.user_id)
-        .where(MerchantStaff.merchant_id == shop.id)
+        .where(MerchantStaff.merchant_id == shop.id,
+               User.deleted_at.is_(None))
         .order_by(MerchantStaff.created_at))).all()
+    # mask_phone 而不是手写切片:墓碑行的 phone 是 `del{id}_{hex}`,
+    # `phone[:3] + "****" + phone[-4:]` 会把它渲染成 `del****9af0`
     return [{"user_id": s.user_id, "name": s.name or u.name,
-             "phone": u.phone[:3] + "****" + u.phone[-4:]}
+             "phone": mask_phone(u.dial_phone)}
             for s, u in rows]
 
 

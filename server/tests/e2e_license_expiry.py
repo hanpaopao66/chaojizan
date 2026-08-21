@@ -504,18 +504,26 @@ async def main():
     print(f"✓ 下单实收打包费 ¥{o['packing_fee_cents'] / 100:g}"
           f"(店铺每单 ¥1 + 菜品 ¥3×2)")
 
-    # 没设过菜品打包费的店:与加这个功能之前一字不差
+    # 没设过菜品打包费的菜:与加这个功能之前一字不差。
+    #
+    # ⚠️ 份数必须让菜金额过得了**起送价硬地板**
+    # (max(商家自设, settings.min_order_floor_cents) = 1500)。
+    # 原来写的是 3 份 × ¥1 = ¥3,必然 409,整段断言包在
+    # `if "_error" not in o2:` 里于是**一次都没跑过** ——
+    # 把「未设置的菜品打包费回落成店铺费并按份数收」注进去,全套照样绿。
+    # 这条守的正是文件开头点名的资损:没设过的商家一夜涨价。
+    qty2 = -(-1500 // d2["price_cents"])          # 刚好够起送价的份数
     o2 = call("POST", "/orders", customer, {
         "merchant_id": shop7["id"],
-        "items": [{"dish_id": d2["id"], "quantity": 3}],
-        "address": "打包费测试地址", "lat": 30.6612, "lng": 104.0823},
-        expect_error=True)
-    if "_error" not in o2:
-        assert o2["packing_fee_cents"] == 100, \
-            f"没设菜品打包费的,还是店铺那一笔(不能按份数翻倍):{o2}"
-        call("POST", f"/orders/{o2['order_no']}/transition", customer,
-             {"to_status": "cancelled"})
-        print("✓ 没设菜品打包费的菜:仍是店铺每单一笔(不因份数翻倍)")
+        "items": [{"dish_id": d2["id"], "quantity": qty2}],
+        "address": "打包费测试地址", "lat": 30.6612, "lng": 104.0823})
+    assert "_error" not in o2, f"这一单必须真的下得成,否则断言又空转:{o2}"
+    assert o2["packing_fee_cents"] == 100, (
+        f"没设菜品打包费的,还是店铺那一笔(不能按份数翻倍):"
+        f"{qty2} 份收了 {o2['packing_fee_cents']} 分")
+    call("POST", f"/orders/{o2['order_no']}/transition", customer,
+         {"to_status": "cancelled"})
+    print(f"✓ 没设菜品打包费的菜:{qty2} 份仍只收店铺每单一笔 ¥1(不因份数翻倍)")
 
     cleared = call("PATCH", f"/merchants/me/dishes/{d1['id']}", tok7,
                    {"packing_fee_cents": None})

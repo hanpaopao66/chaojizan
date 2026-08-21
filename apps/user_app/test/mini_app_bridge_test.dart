@@ -3,6 +3,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:user_app/mini_app_bridge.dart';
 
+/// 只用来数「initData 接口被叫了几次」。
+///
+/// 数这个是为了把**权限闸门**和**取数**分开看:桥应该在闸门就把没权限的
+/// 挡掉,压根不该走到这里。用真接口(连不上的 127.0.0.1:1)也能凭报错类型
+/// 反推,但那要等一次真实的连接失败,测试会依赖网络行为 —— 直接数更稳。
+class _CountingApi extends ApiClient {
+  _CountingApi() : super(baseUrl: 'http://127.0.0.1:1');
+
+  int initDataCalls = 0;
+
+  @override
+  Future<Map<String, dynamic>> miniAppInitData(int appId) async {
+    initDataCalls++;
+    return {'app_id': appId};
+  }
+}
+
 /// 小程序桥的**业务层**(#292)。
 ///
 /// ## 为什么单独测这一层
@@ -25,8 +42,10 @@ void main() {
       );
 
   Future<BridgeReply?> call(WidgetTester tester, String method,
-      {List<String> perms = const [], VoidCallback? onClose,
-      VoidCallback? onExpand}) async {
+      {List<String> perms = const [],
+      VoidCallback? onClose,
+      VoidCallback? onExpand,
+      ApiClient? api}) async {
     BridgeReply? out;
     await tester.pumpWidget(MaterialApp(
       theme: brandTheme(Brightness.light),
@@ -35,7 +54,7 @@ void main() {
           onPressed: () async {
             out = await handleBridgeCall(
               context,
-              api: ApiClient(baseUrl: 'http://127.0.0.1:1'),
+              api: api ?? ApiClient(baseUrl: 'http://127.0.0.1:1'),
               app: app(perms: perms),
               method: method,
               onClose: onClose ?? () {},
@@ -109,15 +128,44 @@ void main() {
       expect(r!.data.toString(), contains('未申请 initData 权限'));
     });
 
-    testWidgets('权限是**每次调用都查**,不是打开时查一次', (t) async {
-      // 清单可以在服务端随时改(下架、撤权限),不该等下次打开才生效。
-      // 这里验的是"查在调用路径上":没权限时**根本不会去请求接口** ——
-      // 接口地址是 127.0.0.1:1(必然连不上),
-      // 如果它去请求了,报错会是网络错而不是权限错
-      final r = await call(t, 'getInitData');
+    testWidgets('没权限时根本不会去请求接口,在闸门就拒了', (t) async {
+      final api = _CountingApi();
+      final r = await call(t, 'getInitData', api: api);
       expect(r!.data.toString(), contains('权限'),
           reason: '应该在权限那一关就拒绝,而不是先去请求接口');
-      expect(r.data.toString(), isNot(contains('SocketException')));
+      expect(api.initDataCalls, 0, reason: '没权限却已经去取数了');
+    });
+
+    testWidgets('权限是**每次调用都查**,不是打开时查一次', (t) async {
+      // 清单可以在服务端随时改(下架、撤权限),不该等下次打开才生效。
+      //
+      // 只调一次是测不出这件事的 —— 桥就算把第一次的结论记下来永不复查,
+      // 单次调用的结果也一模一样。必须调两次、中间把权限撤掉。
+      final api = _CountingApi();
+
+      // 第一次:有权限,正常放行并取数
+      final first =
+          await call(t, 'getInitData', perms: const ['initData'], api: api);
+      expect(first?.ok, isTrue, reason: '有权限却被拒了');
+      expect(api.initDataCalls, 1);
+
+      // 第二次:权限被撤(服务端下了这个权限),必须当场拒绝 ——
+      // 不能拿第一次查到的结论接着用
+      final second = await call(t, 'getInitData', perms: const [], api: api);
+      expect(second?.ok, isFalse, reason: '权限撤了还放行 —— 说明权限被缓存住了,不是每次都查');
+      expect(second!.data.toString(), contains('未申请 initData 权限'));
+      expect(api.initDataCalls, 1, reason: '撤权之后又去取了一次数 —— 闸门没拦住');
+    });
+
+    testWidgets('反过来也要跟上:先被拒,补了权限就该立刻能用', (t) async {
+      // 缓存"拒绝"同样是 bug:小程序刚补申请下来的权限,
+      // 不该等用户关掉重开才生效
+      final api = _CountingApi();
+      expect((await call(t, 'getInitData', api: api))?.ok, isFalse);
+      final after =
+          await call(t, 'getInitData', perms: const ['initData'], api: api);
+      expect(after?.ok, isTrue, reason: '补了权限还被拒 —— 拒绝结论被缓存住了');
+      expect(api.initDataCalls, 1);
     });
   });
 

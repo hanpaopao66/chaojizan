@@ -154,9 +154,14 @@ void main() {
           reason: '频道字掉回系统黑体了,字块和字不是一套');
     });
 
-    testWidgets('所有频道字都在子集覆盖范围内', (tester) async {
-      // 子集只覆盖源码固定文案。频道字是常量,必须在里面 ——
-      // 不在的话会静默掉回黑体,而这个测试是唯一会发现的地方
+    testWidgets('频道字是单个汉字', (tester) async {
+      // ⚠️ 这条**不**校验子集覆盖 —— 那要读字体文件的 cmap,单测里做不到。
+      // 真正的守卫是 CI 的 `python3 scripts/gen_font_subset.py --check`
+      // (.github/workflows/ci.yml「显示字覆盖率」那步):子集只覆盖源码固定
+      // 文案,漏了的字会静默掉回黑体,不报错、不崩、同一行里字形打架。
+      //
+      // 这里钉的是另一件事:glyph 必须是**一个**字。两个字的话字块排版会挤,
+      // 而排版这件事恰恰是 CI 那步管不着的。
       for (final ch in kChannels) {
         expect(ch.glyph.length, 1, reason: '频道字应该是单个汉字');
       }

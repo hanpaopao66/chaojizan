@@ -1695,16 +1695,18 @@ async def get_order(
     order = await visible_order_or_404(db, order_no, user)
     merchant = await db.get(Merchant, order.merchant_id)
     out = order_out(order, merchant, user)
-    # 详情页专属:联系电话(用户联系骑手/商家,一键拨号)
+    # 详情页专属:联系电话(用户联系骑手/商家,一键拨号)。
+    # dial_phone 而不是 phone:已注销账号的 phone 是 `del{id}_{hex}` 哨兵,
+    # 原样下发的话客户端会拿一串字母去拨号
     if order.rider_id:
         rider = await db.get(User, order.rider_id)
         if rider:
             out.rider_name = rider.name
-            out.rider_phone = rider.phone
+            out.rider_phone = rider.dial_phone
     if merchant:
         owner = await db.get(User, merchant.owner_id)
         if owner:
-            out.merchant_phone = owner.phone
+            out.merchant_phone = owner.dial_phone
     return out
 
 

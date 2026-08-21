@@ -72,7 +72,14 @@ def main() -> None:
     assert "全额归你" in grab_logs[0]["content"], grab_logs[0]
     print(f"✓ 推送流水命中:{grab_logs[0]['content']}")
 
-    before = len(grab_logs)
+    # ⚠️ **不能数条数**。/admin/push-logs 只回最近 50 条,而演示骑手的窗口
+    # 早被同一个标题撑满(实测 50 条里 48 条是「有新单可抢」)——
+    # 再推一条只是把最老的一条挤出去,计数一模一样。
+    # 原来写的 `after == before` 因此恒成立:把「出餐也推一遍」注进去,
+    # 推送真的发了两条,这条断言照样绿。
+    # 改成拿**本次接单那条的 id 当游标**,只看它之后有没有新的 ——
+    # 与 e2e_p3_touch.py 里那条注释同一个道理(那边按本次运行的唯一内容匹配)。
+    cursor = max(g["id"] for g in grab_logs)
 
     # 出餐不该再推一遍(单子早在池里了,再推是骚扰)
     ready = call("POST", f"/orders/{order_no}/transition", token=m_token,
@@ -80,9 +87,12 @@ def main() -> None:
     assert ready["status"] == "ready", ready
     logs = call("GET", f"/admin/push-logs?user_id={rider_id}",
                 token=a_token)
-    after = len([g for g in logs if g["title"] == "有新单可抢"])
-    assert after == before, f"出餐又推了一遍新单({before} → {after})"
-    print("✓ 出餐流转正常,且没有重复推送")
+    dup = [g for g in logs
+           if g["title"] == "有新单可抢" and g["id"] > cursor]
+    assert not dup, (
+        f"出餐又推了一遍新单:接单那条 id={cursor},之后又多出 "
+        f"{[(g['id'], g['content'][:24]) for g in dup]}")
+    print(f"✓ 出餐流转正常,且没有重复推送(游标 id>{cursor} 无新增)")
 
     # 收尾:把单子抢掉送完,别留在池里顶住下次测试的在途额度
     call("POST", f"/riders/grab/{order_no}", token=r_token)

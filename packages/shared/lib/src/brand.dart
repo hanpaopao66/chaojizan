@@ -1044,10 +1044,14 @@ class _LogoPainter extends CustomPainter {
 /// 分档:1 分钟内「刚刚」、1 小时内「N 分钟前」、当天「N 小时前」、
 /// 昨天「昨天 HH:MM」、今年「M/D HH:MM」、跨年带上年份。
 /// [iso] 是服务端的 UTC 时间戳,内部转本地时区再比。
-String szTimeAgo(String iso) {
+///
+/// [now] 是「现在」,不传就取系统时钟。**只有测试会传** ——
+/// 分档全是拿"现在"当尺子量出来的,不把这把尺子钉死,断言就只能写成
+/// "如果此刻的钟点合适才检查",于是每天有几个小时整条用例一个断言都不跑。
+String szTimeAgo(String iso, {DateTime? now}) {
   final t = DateTime.tryParse(iso)?.toLocal();
   if (t == null) return '';
-  final now = DateTime.now();
+  now ??= DateTime.now();
   final diff = now.difference(t);
   String two(int n) => n.toString().padLeft(2, '0');
 

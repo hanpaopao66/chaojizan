@@ -61,7 +61,22 @@ async def issue_from_batch(db: AsyncSession, batch: CouponBatch,
 
 
 async def _device_has_other_account(db: AsyncSession, user: User) -> bool:
-    """新客券防薅:同设备已有其他账号(#44 multi_account_device 口径)。"""
+    """新客券防薅:同设备已有其他账号(#44 multi_account_device 口径)。
+
+    ## 已注销的账号**照样算数**,这是故意的
+
+    看起来像 bug:同一台手机上注销过一个号,以后在这台手机上注册的
+    新号一张新客券都拿不到。但把墓碑行排除掉的后果更糟 ——
+    `DELETE /auth/me` 是自助的、没有冷却时间的,排除之后
+    「领券 → 注销 → 再注册 → 再领券」就是一个零成本的死循环,
+    而券的钱是商家出的。
+
+    这条判定的口径本来就是"这台设备上已经有过别的账号",
+    注销掉的账号正是"已经有过、而且已经领过一张"的那种。
+    真正被误伤的是二手手机换主这种场景 —— 代价是一张券,
+    而且**任何一个还活着的第二账号**都会造成同样的结果,
+    并不是墓碑行特有的问题。
+    """
     if not user.device_id:
         return False
     other = await db.scalar(select(User.id).where(

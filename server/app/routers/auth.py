@@ -58,6 +58,8 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
         role=UserRole(payload.role),
     )
     db.add(user)
+    # 这个号上次注销时带着风控标记的话,贴回来(注销不是洗白按钮)
+    await apply_risk_carryover(db, user)
     await db.commit()
     if user.role == UserRole.customer:
         from ..services.coupons import issue_newcomer
@@ -242,6 +244,8 @@ async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
             password_hash=hash_password(secrets.token_hex(16)),
         )
         db.add(user)
+        # 与 /register 同一条口径:注销前的风控标记跟着手机号回来
+        await apply_risk_carryover(db, user)
         await db.commit()
         await db.refresh(user)
         from ..services.coupons import issue_newcomer
@@ -300,18 +304,110 @@ async def delete_account(
     # 隐私政策承诺"使用行为记录注销即删",这里兑现;实名数据一并删除
     from sqlalchemy import delete as sa_delete
 
-    from ..models import AppEvent, UserIdentity
+    from ..models import Address, AppEvent, MerchantStaff, RiderProfile, UserIdentity
 
     await db.execute(sa_delete(AppEvent).where(AppEvent.user_id == user.id))
     await db.execute(
         sa_delete(UserIdentity).where(UserIdentity.user_id == user.id))
+    # 骑手实名:注销页原话是"实名信息一并删除",而在此之前
+    # rider_profiles 的 real_name / id_no_encrypted / 紧急联系人
+    # **一个字都没删** —— 用户侧(UserIdentity)删了,骑手侧没删,
+    # 同一句承诺两套做法。整行删掉,与 UserIdentity 对齐:
+    # 这张表除了 users.id 没有别的外键指过来,删掉不牵连任何账务。
+    await db.execute(
+        sa_delete(RiderProfile).where(RiderProfile.rider_id == user.id))
+    # 地址簿:联系人姓名 + 电话 + 门牌 + 经纬度,是全库最贴身的一张表。
+    # 订单自带地址快照(orders.address / contact_phone),删地址簿不影响
+    # 任何历史订单的可读性与对账。
+    await db.execute(sa_delete(Address).where(Address.user_id == user.id))
+    # 店员名单:人都注销了还挂在名单上,店主看到的是 `del****9af0`。
+    # 店主本人有店时上面已经 409 拒了,能走到这里的必然是店员或普通账号。
+    await db.execute(
+        sa_delete(MerchantStaff).where(MerchantStaff.user_id == user.id))
+
+    # 风控标记跟着「手机号+角色」的假名走,不跟着这一行走。
+    # 手机号马上就要被释放,标记留在旧行上等于自助洗白,见 RiskCarryover。
+    await _park_risk_marks(db, user)
+
+    user.deleted_at = sa_func.now()      # ← 唯一的墓碑判据
     user.phone = f"del{user.id}_{secrets.token_hex(3)}"  # 释放手机号,可重新注册
     user.name = "已注销用户"
     user.avatar_url = ""
     user.password_hash = hash_password(secrets.token_hex(16))
+    # 下面这几列不清的话,墓碑行会继续参与业务:
+    user.ref_code = None          # 邀请码还能被解析出来,继续给已注销账号发券
+    user.is_online = False        # 8 处在线骑手查询会把它算进去(含派单广播)
+    user.birthday = ""            # 生日券任务按 birthday 扫全表,与推送开关无关
+    user.marketing_push = False
+    user.go_home_lat = None       # 收工方向 = 街道级的住处,属于"使用行为记录"
+    user.go_home_lng = None
+    user.go_home_on = False
+    # device_id **保留**:它不是账号资料,是这台设备的风控指纹。
+    # 清掉等于让"注销→再注册"绕过同设备多账号判定(见 services/coupons.py
+    # 的 _device_has_other_account 与 services/risk.py 的 multi_account_device)。
     await db.commit()
     logger.info("账号已注销并匿名化: user_id=%s", user.id)
     return {"deleted": True}
+
+
+async def _park_risk_marks(db: AsyncSession, user: User) -> None:
+    """把风控标记寄存到 risk_carryovers,按 HMAC(手机号+角色) 索引。
+
+    没有标记的账号一行都不写 —— 这张表里有一行本身就是个结论。
+    """
+    if not (user.after_sale_banned or user.risk_level):
+        return
+    from ..models import RiskCarryover
+    from ..services.crypto import pseudonym
+
+    key = pseudonym(user.phone, user.role.value)
+    row = await db.scalar(
+        select(RiskCarryover).where(RiskCarryover.phone_key == key))
+    if row is None:
+        row = RiskCarryover(phone_key=key)
+        db.add(row)
+    row.after_sale_banned = user.after_sale_banned
+    row.risk_level = user.risk_level
+    row.risk_note = user.risk_note
+    logger.info("风控标记已寄存(注销): user_id=%s banned=%s level=%s",
+                user.id, user.after_sale_banned, user.risk_level or "-")
+    # 寄存完就从墓碑行上抹掉,让不变式干净:
+    # **墓碑行不带任何活的风控状态**,状态只在 risk_carryovers 里。
+    #
+    # 这不是为了好看 —— 数据修复脚本靠"墓碑行还带着标记"来报
+    # 「这个人可能已经洗白过了,请人工核对」。新注销的行如果也留着标记,
+    # 那份名单每天都在长,几轮之后就没人看了,而它本来是要人看的。
+    # 处置的审计留痕在 risk_action_log,那张表一个字不动。
+    user.after_sale_banned = False
+    user.risk_level = ""
+    user.risk_note = ""
+
+
+async def apply_risk_carryover(db: AsyncSession, user: User) -> None:
+    """注册钩子:这个手机号+角色上次注销时带着风控标记,贴回来。
+
+    不 commit,随调用方的事务走。命中即消费掉那一行(标记已经落到
+    新账号上,再留着就会在下一次注销时被重复读)。
+    """
+    from ..models import RiskCarryover
+    from ..services.crypto import pseudonym
+
+    key = pseudonym(user.phone, user.role.value)
+    row = await db.scalar(
+        select(RiskCarryover).where(RiskCarryover.phone_key == key))
+    if row is None:
+        return
+    user.after_sale_banned = row.after_sale_banned
+    user.risk_level = row.risk_level
+    # note 跟着 level 走(与 admin 那边 `reason if level else ""` 同一条不变式)。
+    # 有 level 就必须有可见的原因:用户可见、可申诉是 risk_level 的既定口径,
+    # 不能让人看到一个凭空出现的"限制"
+    user.risk_note = (
+        f"{(row.risk_note or '')[:180]}(注销前的处置,可申诉)"[:200]
+        if row.risk_level else "")
+    await db.delete(row)
+    logger.info("风控标记已跟随到新账号: user_id=%s banned=%s level=%s",
+                user.id, user.after_sale_banned, user.risk_level or "-")
 
 
 # ---------- 用户实名认证(按需触发,不是注册门槛) ----------

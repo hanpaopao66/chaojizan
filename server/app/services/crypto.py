@@ -7,6 +7,7 @@
 """
 import base64
 import hashlib
+import hmac
 
 from cryptography.fernet import Fernet
 
@@ -29,3 +30,23 @@ def decrypt(token: str) -> str:
         return _fernet().decrypt(token.encode()).decode()
     except Exception:
         return ""
+
+
+def pseudonym(*parts: str) -> str:
+    """不可逆假名:HMAC-SHA256 取前 32 位 hex。
+
+    用来在**不留明文**的前提下,让注销后的账号还能被同一个人的
+    再注册命中(见 RiskCarryover)。
+
+    ⚠️ 必须是 **带密钥的** HMAC,不能用裸 sha256:中国手机号只有
+    1.9e9 个可能值,裸哈希用一台笔记本几分钟就能建全表反查 ——
+    那等于明文存手机号,而注销页答应过"账号将被匿名化删除"。
+
+    密钥与 Fernet 同源(crypto_key,未配则从 jwt_secret 派生):
+    换密钥的后果只是老的假名不再命中(风控标记不再跟随),
+    不会像密文那样"解不开就丢数据"。
+    """
+    secret = settings.crypto_key or f"superz-derive:{settings.jwt_secret}"
+    mac = hmac.new(secret.encode(), "\x1f".join(parts).encode(),
+                   hashlib.sha256)
+    return mac.hexdigest()[:32]

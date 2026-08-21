@@ -137,9 +137,87 @@ class User(Base):
     # / frozen=冻结(待人工复核)。任何非空级别都对用户可见并可申诉;误伤优先放行
     risk_level: Mapped[str] = mapped_column(String(10), default="")
     risk_note: Mapped[str] = mapped_column(String(200), default="")  # 处置原因(用户可见)
+    #: 注销时刻。**非空 = 这是一行墓碑**,不是活着的账号。
+    #:
+    #: 在此之前,"已注销"这件事是靠 `phone` 被改成 `del{id}_{hex}` 来表达的 ——
+    #: 一个标记塞在业务列里,全库只有 security.py 一处认得。于是:
+    #: 邀请码还能被解析出来、`is_online` 还是 true 被算进在线骑手、
+    #: 员工名单里渲染成 `del****9af0`、订单详情把它当电话号下发给对端拨号。
+    #: 每一处都是"没人想到还有这种行"而不是"决定这么做"。
+    #:
+    #: 有了这一列,判据就只有一个:`deleted_at IS NOT NULL`。
+    #: 手机号前缀那条在 security.py 里留着兜存量(修复脚本跑完即可摘)。
+    #:
+    #: 行本身不删:40 张表的外键指向 users.id 且**一条 ON DELETE 都没有**,
+    #: 硬删会直接违反外键;而订单/账务本来就要按法律留存。
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+    @property
+    def is_deleted(self) -> bool:
+        """已注销。手机号前缀是存量兜底,见 deleted_at 的注释。
+
+        ⚠️ 这是 Python 侧的判断,**不能用在 where 子句里** ——
+        查询要写 `User.deleted_at.is_(None)`。
+        """
+        return self.deleted_at is not None or self.phone.startswith("del")
+
+    @property
+    def dial_phone(self) -> str:
+        """可拨的号码。已注销返回空串。
+
+        墓碑行的 `phone` 是 `del{id}_{hex}` 哨兵,不是号码 ——
+        原样下发给对端"一键拨号"的话,拨出去的是一串字母。
+        """
+        return "" if self.is_deleted else self.phone
+
+
+class RiskCarryover(Base):
+    """注销后仍要跟随的风控标记(按 手机号+角色 的不可逆假名索引)。
+
+    ## 为什么需要它
+
+    注销把手机号释放掉了("释放手机号,可重新注册"),而
+    `after_sale_banned` / `risk_level` 留在旧行上。于是
+    **注销再注册 = 风控标记清零** —— 一个自助的、零成本的、
+    没有冷却时间的洗白按钮,就摆在"我的-设置"里。
+    `after_sale_banned` 是"恶意售后"黑名单,这个洞直接对着钱。
+
+    ## 为什么不是"有标记就不让注销"
+
+    注销是应用商店上架的硬性要求(苹果 5.1.1(v)),也是个人信息保护法
+    的删除权。现有的三条拒绝理由(在途订单 / 店铺资质 / 未提余额)
+    都是**用户自己的未了义务或资产**,站得住;
+    "平台给你打了个标记所以你不许注销"不是同一回事 ——
+    尤其 frozen 的语义是"待人工复核",可能是误伤
+    (风控那边的原话是"误伤优先放行"),
+    把一个可能误伤的标记变成永久不能注销,比这个洞更糟。
+
+    ## 为什么存假名不存手机号
+
+    存明文就等于"注销了但我们还留着你的手机号",和注销页答应的
+    "账号将被匿名化删除"直接冲突。存 HMAC 假名:命中判定照样做得了,
+    库里没有可读的号码。裸 sha256 不行 —— 手机号空间太小,见 crypto.pseudonym。
+
+    ## 只给带标记的账号写
+
+    干净账号注销后**一条痕迹都不留**。这张表里有一行,
+    本身就等于"这个号被处置过",所以它只该装真的被处置过的人。
+    """
+
+    __tablename__ = "risk_carryovers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: HMAC(手机号 + 角色),见 services/crypto.pseudonym。唯一:重复注销覆盖同一行
+    phone_key: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    after_sale_banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    risk_level: Mapped[str] = mapped_column(String(10), default="")
+    risk_note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
 
 
 class Brand(Base):
@@ -894,15 +972,39 @@ class RefundStatus(str, enum.Enum):
     failed = "failed"        # 渠道拒绝/失败,需人工介入
 
 
+#: 退款流水的业务线。**这三个字面量只在这里定义一次** ——
+#: 写入(services/wechat_pay)和核对(services/audit)各写各的字符串的话,
+#: 改一处就会让另一处静默查不到数,而"查不到数"的表现是**自检全绿**。
+REFUND_BIZ_FOOD = "food"        # 外卖 / 跑腿:order_id 指向 orders
+REFUND_BIZ_VOUCHER = "voucher"  # 团购券:biz_id 指向 voucher_purchases
+REFUND_BIZ_STAY = "stay"        # 住宿:biz_id 指向 stay_orders
+
+
 class Refund(Base):
     """退款流水:每次退款(缺货部分退/整单退/售后退)一条,金额对账的凭据。
-    订单上的 refund_cents 是汇总视图,本表是逐笔明细,审计核对两者恒等。"""
+    业务表上的 refund_cents 是汇总视图,本表是逐笔明细,审计核对两者恒等。
+
+    ## 三条业务线共用一张表
+
+    `biz_type` + `biz_id` 是**唯一的**业务归属判据,三条线都填。
+    `order_id` / `order_no` 只有外卖/跑腿行有(券和住宿是 NULL):
+    留着它们不是冗余,而是因为规则 6 的冲账判据(_reversal_due_ids)
+    要 join 回 orders,而外键约束也只有真外键给得了。
+    副作用刚好是所有现存的 `Refund.order_id == order.id` 查询原样正确。
+
+    分表(voucher_refunds / stay_refunds)的代价见迁移 0107 的抬头:
+    Σ 恒等式、requested 挂账的全表聚合、微信 REFUND.* 回调反查,
+    每加一条业务线都要再复制一遍。
+    """
 
     __tablename__ = "refunds"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
-    order_no: Mapped[str] = mapped_column(String(32))
+    biz_type: Mapped[str] = mapped_column(String(10))  # 见 REFUND_BIZ_*
+    biz_id: Mapped[int] = mapped_column(Integer)
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id"), index=True, nullable=True)
+    order_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
     out_refund_no: Mapped[str] = mapped_column(String(64), unique=True)
     amount_cents: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(200))
@@ -915,6 +1017,8 @@ class Refund(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+    __table_args__ = (Index("ix_refunds_biz", "biz_type", "biz_id"),)
 
 
 class Withdrawal(Base):
@@ -1349,6 +1453,12 @@ class VoucherPurchase(Base):
     paid_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     redeemed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # 退款时刻。**自检的时间窗要取"钱落定的那一刻"**(规则 8/9 刚为此
+    # 从 created_at 改成 redeemed_at / completed_at),而退掉的券根本没核销过,
+    # redeemed_at 永远是 NULL —— 没有这一列,券的有效期最长 365 天,
+    # 第 31 天以后退的券一生都不会被自检看到
+    refunded_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
 

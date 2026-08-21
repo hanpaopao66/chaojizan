@@ -107,6 +107,36 @@ final List<_MapApp> _apps = [
   ),
 ];
 
+/// 支持的地图,顺序即选择列表里的顺序(也是全都没装时网页兜底的优先级)。
+List<String> get kNavMaps => [for (final a in _apps) a.name];
+
+_MapApp _mapByName(String map) => _apps.firstWhere((a) => a.name == map,
+    orElse: () => throw ArgumentError('未知地图:$map'));
+
+/// 构造唤起某个地图 App 的链接。**纯函数,不发起跳转。**
+///
+/// 单独拎出来是为了让**坐标系**这件事可测:[lat]/[lng] 一律传 GCJ-02,
+/// 腾讯与高德必须原样带过去,只有百度要转成 BD-09。二次转换不报错,
+/// 只是导航终点静默偏出几百米 —— 没有测试钉住的话没人会发现。
+Uri navAppUri(
+  String map, {
+  required double lat,
+  required double lng,
+  required String name,
+  NavMode mode = NavMode.ride,
+}) =>
+    _mapByName(map).build(lat, lng, name, mode);
+
+/// 构造某个地图的**网页兜底**链接(没装 App 时用)。坐标系规则同 [navAppUri]。
+Uri navWebUri(
+  String map, {
+  required double lat,
+  required double lng,
+  required String name,
+  NavMode mode = NavMode.ride,
+}) =>
+    _mapByName(map).web(lat, lng, name, mode);
+
 /// 探测装了哪些地图。全都没装时返回空列表(调用方直接走网页兜底)。
 ///
 /// Android 11+ 要在 AndroidManifest 里声明 `<queries>` 才查得到别的 App,

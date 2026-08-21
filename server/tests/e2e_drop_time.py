@@ -85,15 +85,32 @@ def main():
         "幂等:重复点不该刷新时间,否则多点一次就把时长清零了"
     print("✓ 到达收货点时刻落库,且重复点不刷新(幂等)")
 
-    # 离收货点太远点了会被拒 —— 防随手乱点把数据搞脏
-    err = call("POST", f"/riders/orders/{no}/arrived-drop", rider,
-               {"lat": 31.5, "lng": 105.5}, expect_error=True)
-    assert err.get("_error") in (409, None), err
-
     call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
     done = call("GET", f"/orders/{no}", rider)
     assert done["drop_minutes"] is not None and done["drop_minutes"] >= 0, done
     print(f"✓ 送达时算出停留时长 {done['drop_minutes']} 分钟并存快照")
+
+    # ---- 离收货点太远点了会被拒 —— 防随手乱点把数据搞脏 ----
+    #
+    # ⚠️ 必须用**一张没标过到达的新单**。围栏那段在
+    # `if order.arrived_drop_at is None:` 里面 —— 拿上面那张已经标过的单
+    # 来点,请求走幂等分支直接 200 返回,压根到不了围栏。
+    # 这条断言原先写的是 `err.get("_error") in (409, None)`,
+    # 把幂等返回的 None 当成通过,于是把围栏整段删掉测试照样全绿。
+    far_no = take_to_picked(dish["id"], floor=6, has_elevator=False)
+    err = call("POST", f"/riders/orders/{far_no}/arrived-drop", rider,
+               {"lat": 31.5, "lng": 105.5}, expect_error=True)
+    assert err["_error"] == 409 and "离收货点还有" in err.get("detail", ""), \
+        f"围栏没生效:{err}"
+    # 而且被拒的那一下**不能落时间戳** —— 落了的话围栏等于只挡了个提示
+    assert call("GET", f"/orders/{far_no}", rider)["arrived_drop_at"] is None, \
+        "被围栏拒掉却还是把到达时刻记上了"
+    print(f"✓ 离收货点太远点不了:{err['detail']}")
+    # 走到店内坐标就能点(证明上面拒的是距离,不是这张单本身有问题)
+    ok = call("POST", f"/riders/orders/{far_no}/arrived-drop", rider, NEAR)
+    assert ok["arrived_drop_at"], ok
+    call("POST", f"/orders/{far_no}/transition", rider,
+         {"to_status": "delivered"})
 
     # ---- 配送中才能点;没送到的单点不了 ----
     fresh = call("POST", "/orders", customer, {

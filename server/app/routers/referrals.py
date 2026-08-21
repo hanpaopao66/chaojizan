@@ -79,7 +79,10 @@ async def claim_referral(
     if settings.referral_reward_cents <= 0 or not await marketing_on(db):
         raise HTTPException(409, "邀请活动暂未开启")
     code = str(payload.get("code", "")).strip()
-    inviter = await db.scalar(select(User).where(User.ref_code == code))
+    # deleted_at 过滤是必须的:注销时才刚开始清 ref_code,存量墓碑行
+    # 的邀请码还在库里,不加这条就会继续给一个注销掉的账号发券
+    inviter = await db.scalar(select(User).where(
+        User.ref_code == code, User.deleted_at.is_(None)))
     if inviter is None or len(code) != 6:
         raise HTTPException(404, "邀请码不存在")
     if inviter.id == user.id:

@@ -677,7 +677,7 @@ async def list_delivery_issues(
     out = []
     for issue, rider, order in rows:
         o = DeliveryIssueOut.model_validate(issue)
-        o.rider_name, o.rider_phone = rider.name, rider.phone
+        o.rider_name, o.rider_phone = rider.name, rider.dial_phone
         o.contact_phone = order.contact_phone
         o.address = order.address
         o.total_cents = order.total_cents
@@ -789,7 +789,7 @@ async def resolve_delivery_issue(
 
     out = DeliveryIssueOut.model_validate(issue)
     rider = await db.get(User, issue.rider_id)
-    out.rider_name, out.rider_phone = rider.name, rider.phone
+    out.rider_name, out.rider_phone = rider.name, rider.dial_phone
     out.order_status = order.status.value
     out.total_cents = order.total_cents
     return out
@@ -807,7 +807,7 @@ def _rider_profile_out(p: RiderProfile, rider: User) -> AdminRiderProfileOut:
         reject_reason=p.reject_reason,
         id_verified=p.id_verified_at is not None,
     )
-    out.rider_phone = rider.phone
+    out.rider_phone = rider.dial_phone
     out.created_at = p.created_at
     return out
 
@@ -1521,7 +1521,7 @@ async def _fs_out(db: AsyncSession, report) -> AdminFoodSafetyOut:
         out.merchant_is_open = shop.is_open
     customer = await db.get(User, report.customer_id)
     if customer:
-        out.customer_phone = customer.phone  # 管理后台看真号,方便回访
+        out.customer_phone = customer.dial_phone  # 管理后台看真号,方便回访
     order = await db.get(OrderModel, report.order_id)
     if order:
         out.order_total_cents = order.total_cents
@@ -1858,9 +1858,10 @@ async def list_rider_appeals(
     """骑手申诉队列。**证据是系统自己附的**,审核员看的是同一份数据 ——
     不用两边各说各话。"""
     from ..models import RiderAppeal
+    from ..services.privacy_phone import mask_phone
 
     rows = (await db.execute(
-        select(RiderAppeal, User.name, User.phone)
+        select(RiderAppeal, User)
         .join(User, User.id == RiderAppeal.rider_id)
         .where(RiderAppeal.status == status)
         .order_by(RiderAppeal.id))).all()
@@ -1868,12 +1869,13 @@ async def list_rider_appeals(
         "id": r.id, "order_no": r.order_no, "kind": r.kind,
         "reason": r.reason, "photo_url": r.photo_url,
         "evidence": r.evidence,
-        "rider_name": name,
-        # 手机号打码:队列是给审核用的,不是通讯录
-        "rider_phone": f"{phone[:3]}****{phone[-4:]}" if len(phone) >= 7
-        else "",
+        "rider_name": u.name,
+        # 手机号打码:队列是给审核用的,不是通讯录。
+        # 走 dial_phone 是因为已注销账号的 phone 是 `del{id}_{hex}` 哨兵 ——
+        # 直接 [:3]+****+[-4:] 会渲染出 `del****9af0`,看着像个真号码
+        "rider_phone": mask_phone(u.dial_phone),
         "created_at": r.created_at,
-    } for r, name, phone in rows]
+    } for r, u in rows]
 
 
 @router.post("/rider-appeals/{appeal_id}/resolve")
@@ -2249,7 +2251,8 @@ async def list_risk_orders(
         "id": o.id, "order_no": o.order_no,
         "merchant_name": shops.get(o.merchant_id, o.merchant_id),
         "customer_id": o.customer_id,
-        "customer_phone": getattr(users_map.get(o.customer_id), "phone", ""),
+        "customer_phone": getattr(
+            users_map.get(o.customer_id), "dial_phone", ""),
         "customer_risk_level": getattr(
             users_map.get(o.customer_id), "risk_level", ""),
         "total_cents": o.total_cents, "order_status": o.status.value,
@@ -2526,7 +2529,7 @@ async def list_rider_gear(
     rows = (await db.execute(query)).all()
     labels = {"helmet": "头盔", "box": "保温餐箱", "raincoat": "雨衣"}
     return [{
-        "id": g.id, "rider_id": g.rider_id, "rider_phone": u.phone,
+        "id": g.id, "rider_id": g.rider_id, "rider_phone": u.dial_phone,
         "item": g.item, "item_label": labels.get(g.item, g.item),
         "status": g.status, "note": g.note,
         "created_at": g.created_at.isoformat(),
@@ -2574,7 +2577,7 @@ async def list_rider_accidents(
         query = query.where(RiderAccident.status == status)
     rows = (await db.execute(query)).all()
     return [{
-        "id": a.id, "rider_id": a.rider_id, "rider_phone": u.phone,
+        "id": a.id, "rider_id": a.rider_id, "rider_phone": u.dial_phone,
         "severity": a.severity, "description": a.description,
         "photos": a.photos, "status": a.status, "actions": a.actions,
         "lat": a.lat, "lng": a.lng,
@@ -2789,7 +2792,7 @@ async def list_rider_emergencies(
         query = query.where(RiderEmergency.status == status)
     rows = (await db.execute(query)).all()
     return [{
-        "id": e.id, "rider_id": e.rider_id, "rider_phone": u.phone,
+        "id": e.id, "rider_id": e.rider_id, "rider_phone": u.dial_phone,
         "lat": e.lat, "lng": e.lng, "note": e.note, "status": e.status,
         "actions": e.actions, "created_at": e.created_at.isoformat(),
     } for e, u in rows]
