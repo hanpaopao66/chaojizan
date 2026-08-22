@@ -125,6 +125,83 @@ void main() {
       .where((s) => s.isNotEmpty)
       .toList();
 
+
+  /// #33 4.3 的三条判据。指标是那句原话:
+  /// 「今天到手多少 / 为什么是这个数 / 能不能提出来」这三件事在第几屏。
+  ///
+  /// 改之前:首屏 645px 里**没有一个「今天」的数字**(今日实收在 y=806)。
+  group('对账页首屏要答得出「今天到手多少」', () {
+    testWidgets('今日实收落在首屏 645 以内', (t) async {
+      await pumpFinance(t, financeFakeApi());
+      final row = find.textContaining('今日实收');
+      expect(row, findsOneWidget);
+      final y = t.getTopLeft(row).dy;
+      expect(y, lessThan(645),
+          reason: '可视区是 844 − 47(安全区) − 56(AppBar) − 96(底部导航) = 645。'
+              '今日实收在 y=$y —— 商家要滚一屏才知道今天挣了多少');
+    });
+
+    testWidgets('「钱去哪了」的等式三行一行不少', (t) async {
+      await pumpFinance(t, financeFakeApi());
+      // 流水 − 佣金 = 实收。这个等式闭合在 SzLedgerCard 上,
+      // 那是账目透明的表达 —— 为省地方砍掉其中任何一行,等式就断了
+      expect(find.text('菜品流水'), findsOneWidget);
+      expect(find.text('平台佣金'), findsOneWidget);
+      expect(find.textContaining('今日实收'), findsOneWidget);
+    });
+
+    testWidgets('同一个数不写两遍:hero 卡不许回来', (t) async {
+      await pumpFinance(t, financeFakeApi());
+      // 改之前台面**上方**还有一张 MoneyHeroCard,显示的是同一个「今日实收」。
+      // #33 4.3 砍掉它、给台面合计行加 hero 档(26px)补回视觉重量。
+      // 这条断言防的是有人觉得"首屏不够醒目"又把那张卡加回来。
+      //
+      // 注意不能拿「这个数出现几次」来判:按日账单里今天那一行本来就是
+      // 同一个数,那不是重复,那是列表里含今天
+      expect(find.byType(MoneyHeroCard), findsNothing,
+          reason: 'hero 卡和台面合计行是同一个数的两处显示 —— '
+              '留一处就够,而等式闭合在台面上');
+      final heroRow = t.widget<SzFeeRow>(find.byWidgetPredicate(
+          (w) => w is SzFeeRow && w.label.contains('今日实收')));
+      expect(heroRow.hero, isTrue,
+          reason: '砍了 hero 卡就得把合计行提到 hero 档,'
+              '否则今日实收在首屏上没有视觉重量 —— 这是方案里写明要拍板的代价');
+    });
+  });
+
+  group('按日账单默认近 7 天,更早的一按就出来', () {
+    List<Map<String, dynamic>> thirtyDays() {
+      final now = DateTime.now();
+      return [
+        for (var i = 0; i < 30; i++)
+          dayJson(
+              '${now.subtract(Duration(days: i)).year}-'
+              '${now.subtract(Duration(days: i)).month.toString().padLeft(2, '0')}-'
+              '${now.subtract(Duration(days: i)).day.toString().padLeft(2, '0')}',
+              10 + i,
+              10000 + i * 100,
+              0.045),
+      ];
+    }
+
+    testWidgets('默认只列 7 天,并说清还有多少天没列', (t) async {
+      await pumpFinance(t, financeFakeApi(daily: thirtyDays()));
+      expect(find.text('按日账单 · 近 7 天'), findsOneWidget);
+      expect(find.text('看更早的 23 天'), findsOneWidget,
+          reason: '不说还有多少天,商家不知道自己没看全 —— '
+              '这正是提现记录那条曾经犯过的错');
+    });
+
+    testWidgets('展开后 30 天一条不少', (t) async {
+      await pumpFinance(t, financeFakeApi(daily: thirtyDays()));
+      await t.tap(find.text('看更早的 23 天'));
+      await t.pump();
+      expect(find.text('按日账单 · 近 30 天'), findsOneWidget);
+      expect(find.text('看更早的 23 天'), findsNothing,
+          reason: '全列出来之后按钮该消失,不留一个点了没反应的按钮');
+    });
+  });
+
   group('费率不许被整除截断', () {
     testWidgets('4.5% 的店,分账台面要写 4.5% —— 不是 4%', (t) async {
       // config.py 的档位表就有 0.045(500–999 单/月那一档),

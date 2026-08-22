@@ -389,6 +389,7 @@ class SzFeeRow extends StatelessWidget {
     this.note,
     this.negative = false,
     this.emphasized = false,
+    this.hero = false,
     this.isHold = false,
   });
 
@@ -404,6 +405,17 @@ class SzFeeRow extends StatelessWidget {
 
   /// 合计行:加粗 + 金额放大。
   final bool emphasized;
+
+  /// 合计行再重一档(26px)。
+  ///
+  /// 给「这一屏最该被看见的那个数」用 —— 商家对账页的「今日实收」就是它。
+  /// 那里原本在这张台面上方另放一张 `MoneyHeroCard`(32px),而 hero 显示的
+  /// 数和这张台面最后一行**是同一个数**,写了两遍(#33 4.3)。
+  ///
+  /// 砍掉 hero 保留台面,是因为「流水 − 佣金 = 实收」这个等式闭合在台面上,
+  /// 那才是账目透明的表达;但 18px 的合计行扛不住首屏视觉重量,所以补这一档。
+  /// **需要 [emphasized] 一起为真** —— hero 是合计行的加强,不是另一种行。
+  final bool hero;
 
   /// 这一笔是**平台留存**(佣金、服务费),用 `hold` 琥珀。
   ///
@@ -444,7 +456,7 @@ class SzFeeRow extends StatelessWidget {
           const SizedBox(width: 10),
           Text('${negative ? '−' : ''}${yuanOf(amountCents)}',
               style: szMoney(
-                fontSize: emphasized ? 18 : 14,
+                fontSize: hero ? 26 : (emphasized ? 18 : 14),
                 fontWeight: emphasized ? FontWeight.w600 : FontWeight.w500,
                 color: isHold
                     ? sz.hold

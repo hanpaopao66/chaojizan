@@ -16,6 +16,14 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   int _days = 7;
   Map<String, dynamic>? _data;
 
+  /// 经营质量(近 30 天完成 / 出餐超时率 / 拒单)。
+  ///
+  /// 从对账页搬过来的(#33 4.3)—— 那三个数不是账,放在钱那一页里,
+  /// 商家对着「出餐超时率」只会以为自己在被扣分。搬过来时**必须**
+  /// 带上服务端 /me/quality docstring 里那句「只统计展示,不做处罚」:
+  /// 之前客户端一个字都没写。
+  Map<String, dynamic>? _quality;
+
   /// 非空 = 上一次加载失败。转个没头的圈,商家只能杀进程重开
   String _error = '';
 
@@ -27,8 +35,20 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
 
   Future<void> _load() async {
     try {
-      final d = await widget.api.merchantAnalytics(days: _days);
-      if (mounted) setState(() { _data = d; _error = ''; });
+      // 两个接口互不依赖,先都发出去。质量拉不到不该拦着看分析,
+      // 所以它单独 catch:一块挂了另一块照常
+      final analyticsF = widget.api.merchantAnalytics(days: _days);
+      final qualityF = widget.api.merchantQuality().catchError(
+          (_) => <String, dynamic>{});
+      final d = await analyticsF;
+      final q = await qualityF;
+      if (mounted) {
+        setState(() {
+          _data = d;
+          _quality = q.isEmpty ? _quality : q;
+          _error = '';
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e is ApiException ? e.message : '$e');
@@ -51,6 +71,27 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
           ),
         ),
       );
+
+  /// 经营质量的一个数。从对账页 `_metric` 原样搬来(#33 4.3)。
+  Widget _qualityMetric(String label, String value, String unit) {
+    final sz = Theme.of(context).sz;
+    return Expanded(
+      child: Column(children: [
+        Text.rich(
+          TextSpan(children: [
+            TextSpan(
+                text: value,
+                style: szFigure(fontSize: 17, fontWeight: FontWeight.w600)),
+            if (unit.isNotEmpty)
+              TextSpan(text: unit, style: const TextStyle(fontSize: 11.5)),
+          ]),
+          style: TextStyle(color: sz.ink),
+        ),
+        const SizedBox(height: 2),
+        Text(label, style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
+      ]),
+    );
+  }
 
   /// 24 小时下单柱状(简易 Container 柱,不引图表库)
   Widget _hourlyBars(List<dynamic> hourly) {
@@ -123,6 +164,38 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
               child: ListView(
                 padding: const EdgeInsets.all(12),
                 children: [
+                  if (_quality != null &&
+                      (_quality!['completed_30d'] as int? ?? 0) > 0)
+                    _section(
+                      '经营质量 · 近 30 天',
+                      Column(crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Row(children: [
+                          _qualityMetric('完成',
+                              '${_quality!['completed_30d']}', '单'),
+                          _qualityMetric(
+                              '出餐超时率',
+                              _quality!['ready_late_rate'] == null
+                                  ? '—'
+                                  : ((_quality!['ready_late_rate'] as num) *
+                                          100)
+                                      .toStringAsFixed(1),
+                              _quality!['ready_late_rate'] == null ? '' : '%'),
+                          _qualityMetric(
+                              '拒单', '${_quality!['rejects_30d']}', '次'),
+                        ]),
+                        const SizedBox(height: 8),
+                        // 这句话不许删:服务端 /me/quality 明写「只统计展示,
+                        // 不做处罚」,而客户端此前一个字都没写 —— 商家看到
+                        // 一个百分比,默认理解就是"我被扣分了"
+                        Text('只统计给你自己看,不评分、不排名、不做处罚;'
+                            '平台不会因为这三个数调整你的单量或费率',
+                            style: TextStyle(
+                                fontSize: 11,
+                                height: 1.5,
+                                color: Theme.of(context).sz.inkMuted)),
+                      ]),
+                    ),
                   _section(
                     '总览(完成单口径,与对账一致)',
                     Wrap(spacing: 18, runSpacing: 8, children: [
