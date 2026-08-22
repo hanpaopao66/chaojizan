@@ -53,6 +53,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
+from sqlalchemy.orm import aliased
 
 from ..db import SessionLocal
 from ..models import (
@@ -664,6 +665,41 @@ async def run_audit() -> list[dict]:
                 "detail": f"退款挂起 {stuck_n} 笔共 {stuck_cents} 分超过 "
                           f"{REFUND_STUCK_HOURS} 小时仍是 requested,最久的已挂 "
                           f"{oldest_h} 小时 —— 渠道没回执,用户没收到钱",
+            })
+
+        # 11b) 渠道**拒绝**的退款(failed):这一条以前不存在,而
+        #      services/wechat_pay.py 的 `request_refund` 注释里写着
+        #      「审计规则 5c 会把它捞出来要人工介入」—— 承诺了一条不存在的规则。
+        #
+        #      为什么它会隐形:渠道拒绝时**不累计** `order.refund_cents`
+        #      (钱一分没退出去,账面不能写"已退"),而恒等式那几条又都用
+        #      `status != failed` 把这些流水排除在 Σ 之外。两边一起躲开,
+        #      于是「用户该收到钱、但一分没收到」这件事,在一个号称
+        #      「差一分钱就报警」的自检里完全没有痕迹。
+        #
+        #      **失败后人工重发成功的不再报**:同一笔业务(biz_type+biz_id)
+        #      后来有过 success 的退款,就说明这事有人管了。不加这个条件的话
+        #      它会天天红一条,而天天红的告警等于没有告警。
+        retried = aliased(Refund)
+        failed_n, failed_cents = (await db.execute(
+            select(sa_func.count(Refund.id),
+                   sa_func.coalesce(sa_func.sum(Refund.amount_cents), 0))
+            .where(Refund.status == RefundStatus.failed,
+                   Refund.created_at
+                   < now_utc - timedelta(hours=REFUND_STUCK_HOURS),
+                   ~select(1)
+                   .where(retried.biz_type == Refund.biz_type,
+                          retried.biz_id == Refund.biz_id,
+                          retried.status == RefundStatus.success,
+                          retried.created_at > Refund.created_at)
+                   .exists()))).one()
+        if failed_n:
+            problems.append({
+                "check": "refund_failed",
+                "detail": f"退款被渠道拒绝 {failed_n} 笔共 {failed_cents} 分,"
+                          f"且之后没有成功的重发 —— 这笔钱既没退给用户,"
+                          f"也不在任何恒等式里(失败流水被 Σ 排除),"
+                          f"必须人工重发或退现",
             })
 
         # 12) 非完成订单上挂着的商家入账行。

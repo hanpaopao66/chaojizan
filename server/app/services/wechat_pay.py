@@ -194,7 +194,8 @@ async def request_refund(db, order: Order, refund_cents: int, reason: str) -> "o
     渠道拒绝(failed)时**不累计** refund_cents:钱一分没退出去,账面就
     不能写"已退" —— 否则下一笔退款的反推还会再错一轮,而公开账本
     (services/ledger)读的就是这个数。失败的流水留在 refunds 表里,
-    审计规则 5c 会把它捞出来要人工介入。
+    审计规则 11b(services/audit.py 的 `refund_failed`)会把它捞出来要
+    人工介入 —— 那条规则以前**不存在**,这句注释承诺了一条没写的检查(#33)。
     """
     from ..models import REFUND_BIZ_FOOD, RefundStatus
 

@@ -1037,6 +1037,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
                   PrinterPage(api: widget.api, shopName: shop.name)))),
+      // 「趋势」二字是和对账 tab 的「经营分析」分工:那边答「最近怎么样」,
+      // 这边答「在变好还是变坏」(#33 第 5 节遗留:商家不该猜是哪一个)
       SzIconGridItem(
           icon: Icons.insights_outlined,
           label: '经营看板',

@@ -116,6 +116,54 @@ async def main():
     assert not checks_for(base, cancel_no), checks_for(base, cancel_no)
     print("✓ 基线:本用例造的两笔单账目全平,自检不报")
 
+    # ---- 渠道拒绝的退款:以前是自检的盲区(#33 第 5 节遗留)----
+    #
+    # services/wechat_pay.py 的 request_refund 注释里写着「审计规则 5c
+    # 会把它捞出来要人工介入」,而那条规则一直不存在:渠道拒绝时
+    # order.refund_cents 不累计(钱没退出去,账面不能写"已退"),
+    # 而恒等式那几条又都用 status != failed 把它排除在 Σ 之外 ——
+    # 两边一起躲开,「用户该收到钱、一分没收到」在自检里没有任何痕迹。
+    # ⚠️ 用 db_exec 不用 db_one:db_all/db_one 那条路**不 commit**,
+    # INSERT 会随 session 关闭一起回滚 —— 造的坏账根本没落库,
+    # 而自检当然报不出来(踩过一次,表现是"规则写了却不生效")
+    await db_exec(
+        "INSERT INTO refunds (biz_type, biz_id, order_id, order_no, "
+        "  out_refund_no, amount_cents, reason, status, channel, error, "
+        "  created_at) "
+        "VALUES ('food', :bid, :bid, :no, :orn, 1234, '自检覆盖用例', "
+        "        'failed', 'mock', '渠道拒绝(造的)', "
+        "        now() - interval '12 hours')",
+        bid=order.id, no=done_no, orn=f"AUDITCOV-F-{order.id}")
+
+    def failed_refund_n(ps):
+        # 开发库里本来就躺着历史失败退款,所以看的是**笔数变化**,
+        # 不是"这条 check 在不在" —— 后者在干净库上才成立
+        for p in ps:
+            if p["check"] == "refund_failed":
+                return int(re.search(r"拒绝 (\d+) 笔", p["detail"]).group(1))
+        return 0
+
+    base_failed = failed_refund_n(base)
+    after = await run_audit()
+    assert failed_refund_n(after) == base_failed + 1, \
+        "渠道拒绝的退款没被自检捞出来 —— 这笔钱既没到用户手上,也不在任何恒等式里"
+    print("✓ 渠道拒绝的退款会被自检捞出来(补上了 wechat_pay 注释里承诺的那条)")
+
+    # 人工重发成功之后就不该再报 —— 天天红的告警等于没有告警
+    await db_exec(
+        "INSERT INTO refunds (biz_type, biz_id, order_id, order_no, "
+        "  out_refund_no, amount_cents, reason, status, channel, error, "
+        "  created_at) "
+        "VALUES ('food', :bid, :bid, :no, :orn, 1234, '自检覆盖用例', "
+        "        'success', 'mock', '', now() - interval '1 hour')",
+        bid=order.id, no=done_no, orn=f"AUDITCOV-S-{order.id}")
+    after2 = await run_audit()
+    assert failed_refund_n(after2) == base_failed, \
+        "失败后已经人工重发成功了还在报,这条告警迟早被无视"
+    print("✓ 失败后有成功重发的不再报")
+
+    await db_exec("DELETE FROM refunds WHERE out_refund_no LIKE 'AUDITCOV-%'")
+
     # ---- 挑一张已核销团购券 / 一笔已离店住宿,资金落定时刻都在窗内 ----
     voucher = await db_one(
         "SELECT id, purchase_no, net_cents, created_at FROM voucher_purchases "

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'dashboard_page.dart';
+
 /// 经营分析:近 7/30 天只读统计。不做建议不做排名对比(不制造焦虑),
 /// 口径与对账一致(完成单),赠品行不计销量金额。
 class AnalyticsPage extends StatefulWidget {
@@ -274,6 +276,25 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
                   Text('只读统计,仅自己可见;不做同行对比,好好做菜就行。',
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: Theme.of(context).sz.inkMuted)),
+                  const SizedBox(height: 14),
+                  // 这一页和「经营看板」是两个分析页,分在两个 tab ——
+                  // 商家找「我的数据」时不该猜是哪一个(#33 第 5 节遗留)。
+                  // 不合并(两者的场景真的不同:这里是随手查最近 7/30 天,
+                  // 看板是打烊后复盘趋势),但要把去向说清楚、点得到
+                  SzEntryGroup(
+                    footnote: '这一页答「最近怎么样」;看板答「在变好还是变坏」'
+                        ' —— 趋势、时段热力、出餐时长分布、流失去向都在那边',
+                    children: [
+                      SzEntryTile(
+                        title: '经营看板',
+                        value: '打烊后复盘',
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                                builder: (_) =>
+                                    DashboardPage(api: widget.api))),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 24),
                 ],
               ),
