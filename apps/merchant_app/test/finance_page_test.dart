@@ -202,6 +202,50 @@ void main() {
     });
   });
 
+  /// #33 4.3 宽屏:≥1100 两栏,按日账单变五列真表格。
+  /// `merchantTabMaxWidth` 的注释写着「对账要并排放表格和图表」,
+  /// 而这一页此前并没有表格。
+  group('宽屏两栏与按日表格', () {
+    List<Map<String, dynamic>> week() {
+      final now = DateTime.now();
+      return [
+        for (var i = 0; i < 7; i++)
+          dayJson(
+              '${now.subtract(Duration(days: i)).year}-'
+              '${now.subtract(Duration(days: i)).month.toString().padLeft(2, '0')}-'
+              '${now.subtract(Duration(days: i)).day.toString().padLeft(2, '0')}',
+              10 + i,
+              10000 + i * 100,
+              0.045),
+      ];
+    }
+
+    testWidgets('1200 宽:出现表头五列', (t) async {
+      setPhoneViewport(t, const Size(1200, 1000));
+      await t.pumpWidget(MaterialApp(
+        theme: brandTheme(Brightness.light, density: SzDensity.operate),
+        home: Scaffold(
+          body: SizedBox(
+              width: 1200,
+              height: 1000,
+              child: FinancePage(api: financeFakeApi(daily: week()))),
+        ),
+      ));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 400));
+
+      for (final h in ['日期', '单量', '菜品流水', '平台佣金', '实收']) {
+        expect(find.text(h), findsWidgets, reason: '表头缺「$h」这一列');
+      }
+    });
+
+    testWidgets('390 窄屏不出表头 —— 五列塞不进 390', (t) async {
+      await pumpFinance(t, financeFakeApi(daily: week()));
+      expect(find.text('单量'), findsNothing,
+          reason: '窄屏还是「日期+单量」摞「流水−佣金」那一行,不是表格');
+    });
+  });
+
   group('费率不许被整除截断', () {
     testWidgets('4.5% 的店,分账台面要写 4.5% —— 不是 4%', (t) async {
       // config.py 的档位表就有 0.045(500–999 单/月那一档),

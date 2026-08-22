@@ -358,6 +358,52 @@ void main() {
     });
   });
 
+  /// #33 4.1 宽屏:可用宽度 ≥700 时订单卡两栏,首屏 3 → 6 张。
+  /// 判据是**可用宽度**不是平台 —— 平板横屏、网页版拉宽窗口都算。
+  group('宽屏订单流两栏', () {
+    testWidgets('1100 宽:两张卡并排,不是一张通栏', (t) async {
+      final api = orderFakeApi(
+        pages: ordersJson(count: 4, prefix: 'SZPAID'),
+        todos: {'pending_orders': 4},
+      );
+      await pumpHome(t, api, width: 1100, height: 900);
+
+      final cards = find
+          .descendant(
+              of: find.byType(RefreshIndicator), matching: find.byType(Card))
+          .evaluate();
+      // 卡片本体是带描边的 Container,不是 Card;按前两张的横坐标判断
+      final boxes = find
+          .descendant(
+              of: find.byType(RefreshIndicator),
+              matching: find.byType(Container))
+          .evaluate()
+          .map((e) => e.renderObject as RenderBox?)
+          .where((b) => b != null && b.hasSize && b.size.height > 60)
+          .map((b) => b!.localToGlobal(Offset.zero))
+          .toList();
+      expect(cards.length + boxes.length, greaterThan(0));
+      expect(boxes.length, greaterThanOrEqualTo(2), reason: '至少要有两张卡');
+      // 前两张 y 相同、x 不同 = 并排
+      expect(boxes[0].dy, boxes[1].dy,
+          reason: '两张卡不在同一行 —— 宽屏还是单列,'
+              '1080 通栏的卡片上取餐码在最左、接单按钮在最右');
+      expect(boxes[0].dx, isNot(boxes[1].dx));
+      await teardown(t);
+    });
+
+    testWidgets('390 窄屏仍是单列(按需构建那条路)', (t) async {
+      final api = orderFakeApi(
+        pages: ordersJson(count: 4, prefix: 'SZPAID'),
+        todos: {'pending_orders': 4},
+      );
+      await pumpHome(t, api);
+      expect(find.byType(ListView), findsWidgets,
+          reason: '窄屏要保留 ListView.builder:手机上列表可能很长');
+      await teardown(t);
+    });
+  });
+
   group('订单卡的动作行:窄屏上一个按钮都不许被推出卡外', () {
     /// 一张待接单卡 + 一张自送待取餐卡。
     /// 后者是最宽的一种(打印 + 聊天 + 地图 + 开始配送(自送))。

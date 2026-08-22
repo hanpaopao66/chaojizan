@@ -304,6 +304,81 @@ class _FinancePageState extends State<FinancePage> {
   }
 
 
+  /// 宽屏的按日账单:真表格(#33 4.3 宽屏)。
+  ///
+  /// `merchantTabMaxWidth` 的注释写着「对账要并排放表格和图表」,
+  /// 而这一页此前并没有表格 —— 窄屏那一行是「日期+单量」摞「流水−佣金」,
+  /// 靠换行挤进 390。宽屏有的是横向空间,五列平铺一眼可比。
+  ///
+  /// 每一行仍可点进当日逐单明细,和窄屏同一个去向。
+  Widget _dayTable(List<DayStat> days) {
+    final sz = Theme.of(context).sz;
+    Widget cell(String text, {bool head = false, bool num = false, int flex = 1}) =>
+        Expanded(
+          flex: flex,
+          child: Text(text,
+              textAlign: num ? TextAlign.right : TextAlign.left,
+              style: num && !head
+                  ? szMoney(fontSize: 13, color: sz.ink)
+                  : TextStyle(
+                      fontSize: head ? kFontNote : 13,
+                      color: head ? sz.inkMuted : sz.ink,
+                      fontWeight: head ? FontWeight.w500 : null)),
+        );
+    return SzCard(
+      padding: EdgeInsets.zero,
+      child: Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(kCardPad, 10, kCardPad, 8),
+          child: Row(children: [
+            cell('日期', head: true, flex: 2),
+            cell('单量', head: true, num: true),
+            cell('菜品流水', head: true, num: true, flex: 2),
+            cell('平台佣金', head: true, num: true, flex: 2),
+            cell('实收', head: true, num: true, flex: 2),
+            const SizedBox(width: 20),
+          ]),
+        ),
+        for (final d in days) ...[
+          Divider(height: 1, color: sz.line),
+          InkWell(
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => DayOrdersPage(api: widget.api, stat: d))),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: kCardPad, vertical: 11),
+              child: Row(children: [
+                cell(d.day, flex: 2),
+                cell('${d.orderCount}', num: true),
+                cell(yuan(d.foodCents), num: true, flex: 2),
+                // 佣金是被抽走的,和台面上一个口径:hold 琥珀,不是绿
+                Expanded(
+                  flex: 2,
+                  child: Text('−${yuan(d.commissionCents)}',
+                      textAlign: TextAlign.right,
+                      style: szMoney(fontSize: 13, color: sz.hold)),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(yuan(d.netCents),
+                      textAlign: TextAlign.right,
+                      style: szMoney(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: sz.earn)),
+                ),
+                SizedBox(
+                    width: 20,
+                    child: Icon(Icons.chevron_right,
+                        size: 16, color: sz.inkFaint)),
+              ]),
+            ),
+          ),
+        ],
+      ]),
+    );
+  }
+
   /// 分账台面上「平台佣金」那一行的费率说明。
   ///
   /// ## 这里原本把平台自己的抽成说小了
@@ -349,198 +424,264 @@ class _FinancePageState extends State<FinancePage> {
     final shownDays =
         _showAllDays ? daily : daily.take(_kDefaultDays).toList();
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
+    // ① 可提现余额 + 提现按钮
+    final wallet = <Widget>[
+  if (_wallet != null) ...[
+    _walletCard(_wallet!),
+    const SizedBox(height: 12),
+  ],
+    ];
+    // ② 今天:分账台面(等式闭合在这里)
+    final todayBlock = <Widget>[
+  // 「今天」排在阶梯佣金和对账工具**之前**(#33 4.3)。
+  //
+  // 改之前首屏 645px 里没有一个「今天」的数字 —— 今日实收在 y=806,
+  // 商家打开对账页看不到今天挣了多少,得先滚过费率卡和工具列表。
+  // 对账页是三页里唯一还能挑首屏内容的(判据 2 成立):
+  // 余额 / 今日实收 / 费率三者里,「今天到手多少」才是每天要问的那个。
+  // 今日这一屏要能一眼回答:挣了多少、被抽了多少、共几单
+  const SzSectionTitle('今天'),
+  const SizedBox(height: 9),
+  // 分账明细走账目专属深色台面(#133):这是「钱去哪了」,
+  // 不是又一张卡片 —— 账目透明是唯一抄不走的差异点。
+  //
+  // 台面上方原本还有一张 MoneyHeroCard(109px),显示的是**同一个数**
+  // (今日实收)。#33 4.3 砍掉它、保留台面:「流水 − 佣金 = 实收」
+  // 这个等式闭合在台面上,那才是账目透明的表达。合计行改用 hero 档
+  // (26px)补回首屏视觉重量。
+  SzLedgerCard(
+    padding: const EdgeInsets.symmetric(
+        horizontal: kCardPad, vertical: 4),
+    child: Column(children: [
+      SzFeeRow(
+          label: '菜品流水', amountCents: todayStat?.foodCents ?? 0),
+      SzFeeRow(
+          label: '平台佣金',
+          note: _commissionNote(todayStat),
+          amountCents: todayStat?.commissionCents ?? 0,
+          negative: true,
+          isHold: true),
+      Divider(color: Theme.of(context).sz.line, height: 17),
+      SzFeeRow(
+          label: '今日实收 · ${todayStat?.orderCount ?? 0} 单',
+          amountCents: todayStat?.netCents ?? 0,
+          emphasized: true,
+          hero: true),
+    ]),
+  ),
+  const SizedBox(height: 18),
+    ];
+    // ③ 阶梯佣金
+    final tier = <Widget>[
+  if (_tier != null) ...[
+    // 阶梯佣金:单量越大费率越低,5% 永远是上限,只降不升
+    SzCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_wallet != null) ...[
-            _walletCard(_wallet!),
-            const SizedBox(height: 12),
-          ],
-          // 「今天」排在阶梯佣金和对账工具**之前**(#33 4.3)。
-          //
-          // 改之前首屏 645px 里没有一个「今天」的数字 —— 今日实收在 y=806,
-          // 商家打开对账页看不到今天挣了多少,得先滚过费率卡和工具列表。
-          // 对账页是三页里唯一还能挑首屏内容的(判据 2 成立):
-          // 余额 / 今日实收 / 费率三者里,「今天到手多少」才是每天要问的那个。
-          // 今日这一屏要能一眼回答:挣了多少、被抽了多少、共几单
-          const SzSectionTitle('今天'),
-          const SizedBox(height: 9),
-          // 分账明细走账目专属深色台面(#133):这是「钱去哪了」,
-          // 不是又一张卡片 —— 账目透明是唯一抄不走的差异点。
-          //
-          // 台面上方原本还有一张 MoneyHeroCard(109px),显示的是**同一个数**
-          // (今日实收)。#33 4.3 砍掉它、保留台面:「流水 − 佣金 = 实收」
-          // 这个等式闭合在台面上,那才是账目透明的表达。合计行改用 hero 档
-          // (26px)补回首屏视觉重量。
-          SzLedgerCard(
-            padding: const EdgeInsets.symmetric(
-                horizontal: kCardPad, vertical: 4),
-            child: Column(children: [
-              SzFeeRow(
-                  label: '菜品流水', amountCents: todayStat?.foodCents ?? 0),
-              SzFeeRow(
-                  label: '平台佣金',
-                  note: _commissionNote(todayStat),
-                  amountCents: todayStat?.commissionCents ?? 0,
-                  negative: true,
-                  isHold: true),
-              Divider(color: Theme.of(context).sz.line, height: 17),
-              SzFeeRow(
-                  label: '今日实收 · ${todayStat?.orderCount ?? 0} 单',
-                  amountCents: todayStat?.netCents ?? 0,
-                  emphasized: true,
-                  hero: true),
-            ]),
-          ),
-          const SizedBox(height: 18),
-          if (_tier != null) ...[
-            // 阶梯佣金:单量越大费率越低,5% 永远是上限,只降不升
-            SzCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Text('阶梯佣金',
-                        style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).sz.ink)),
-                    const Spacer(),
-                    // 费率是"被抽走的",用 hold 不用强调色
-                    Text(
-                        '${((_tier!['commission_rate'] as num) * 100).toStringAsFixed(1)}%',
-                        style: szFigure(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).sz.hold)),
-                  ]),
-                  const SizedBox(height: 6),
-                  Text(
-                    '上月完成 ${_tier!['last_month_completed']} 单 · '
-                    '本月已完成 ${_tier!['this_month_completed']} 单'
-                    '${_tier!['next_tier_from'] != null ? " · 本月再完成 ${_tier!['orders_to_next']} 单,下月降至 ${((_tier!['next_tier_rate'] as num) * 100).toStringAsFixed(1)}%" : " · 已是最低档"}',
-                    style: TextStyle(
-                        fontSize: 12,
-                        height: 1.55,
-                        color: Theme.of(context).sz.inkMuted),
-                  ),
-                  const SizedBox(height: 3),
-                  Text('每月 1 日按上月单量自动重算,只降不升;5% 永远是上限',
-                      style: TextStyle(
-                          fontSize: 11, color: Theme.of(context).sz.inkMuted)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
-          // 经营质量(近 30 天完成 / 出餐超时率 / 拒单)搬去了经营分析页
-          // (#33 4.3)—— 那三个数不是账。服务端 /me/quality 的 docstring
-          // 明写「只统计展示,不做处罚」,而这一页一个字都没写:商家看到
-          // 「出餐超时率 5.1%」只会以为自己在被扣分。搬过去时把那句话带上了
-          const SzSectionTitle('对账工具'),
-          const SizedBox(height: 9),
-          // 四个平级入口:竖排两条 _toolRow(202px)换成一格网格(#33 4.3)。
-          // 判据 3 在这里成立 —— 标题两三个字说得清、给不出状态值、彼此平级。
-          //
-          // 两条 desc 的去向按 2.3 分:「逐单明细 + 按日小计」是目录式
-          // (点进去自己会答)→ 砍;「口径与钱包同源」「仅自己可见」是立场
-          // → 合成下面这一条脚注。
-          SzIconGrid(items: [
-            SzIconGridItem(
-                icon: Icons.account_balance_outlined,
-                label: '收款账户',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => PayoutAccountPage(api: widget.api)))),
-            SzIconGridItem(
-                icon: Icons.receipt_long_outlined,
-                label: '服务费发票',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => InvoicePage(api: widget.api)))),
-            SzIconGridItem(
-                icon: Icons.ios_share,
-                label: '导出对账单',
-                onTap: _exportStatement),
-            SzIconGridItem(
-                icon: Icons.query_stats_outlined,
-                label: '经营分析',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => AnalyticsPage(api: widget.api)))),
-          ]),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(kCardPad, 6, kCardPad, 0),
-            child: Text('导出的口径与钱包同源,记账可用;经营分析仅自己可见',
+          Row(children: [
+            Text('阶梯佣金',
                 style: TextStyle(
-                    fontSize: kFontMicro,
-                    height: 1.5,
-                    color: Theme.of(context).sz.inkMuted)),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).sz.ink)),
+            const Spacer(),
+            // 费率是"被抽走的",用 hold 不用强调色
+            Text(
+                '${((_tier!['commission_rate'] as num) * 100).toStringAsFixed(1)}%',
+                style: szFigure(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).sz.hold)),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            '上月完成 ${_tier!['last_month_completed']} 单 · '
+            '本月已完成 ${_tier!['this_month_completed']} 单'
+            '${_tier!['next_tier_from'] != null ? " · 本月再完成 ${_tier!['orders_to_next']} 单,下月降至 ${((_tier!['next_tier_rate'] as num) * 100).toStringAsFixed(1)}%" : " · 已是最低档"}',
+            style: TextStyle(
+                fontSize: 12,
+                height: 1.55,
+                color: Theme.of(context).sz.inkMuted),
           ),
-          const SizedBox(height: 18),
-          const SizedBox(height: 18),
-          // 默认只出近 7 天:30 天在真机上约 1890px(2.9 屏),而商家来对账
-          // 十有八九是看这两天。更早的一按就出来,**一条都没少**(#33 4.3)
-          SzSectionTitle('按日账单 · 近 ${shownDays.length} 天'),
-          const SizedBox(height: 9),
-          if (daily.isEmpty)
-            const SzEmpty(
-                art: BrandArt.receipt,
-                text: '还没有入账记录\n订单完成后会出现在这里')
-          else ...[
-            SzCard(
-              padding: EdgeInsets.zero,
-              child: Column(children: [
-                for (final (i, d) in shownDays.indexed) ...[
-                  if (i > 0)
-                    Divider(height: 1, color: Theme.of(context).sz.line),
-                  _dayRow(d),
-                ],
-              ]),
-            ),
-            if (!_showAllDays && daily.length > _kDefaultDays)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: OutlinedButton(
-                  onPressed: () => setState(() => _showAllDays = true),
-                  child: Text('看更早的 ${daily.length - _kDefaultDays} 天'),
-                ),
-              ),
-          ],
-          if (_withdrawals.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            // 原来是 `take(20)` 却只写「提现记录」—— 服务端 `/me/withdrawals`
-            // 是 `.limit(100)`,客户端再切到 20,而标题既不说「近 N 条」
-            // 也没有翻页:提现频繁的店永远看不到更早的,**也不知道自己没看全**。
-            SzSectionTitle('提现记录 · 最近 ${_withdrawals.take(3).length} 条'),
-            const SizedBox(height: 9),
-            SzCard(
-              padding: EdgeInsets.zero,
-              child: Column(children: [
-                for (final (i, w) in _withdrawals.take(3).indexed) ...[
-                  if (i > 0)
-                    Divider(height: 1, color: Theme.of(context).sz.line),
-                  withdrawalRow(context, w),
-                ],
-                Divider(height: 1, color: Theme.of(context).sz.line),
-                SzEntryTile(
-                  title: '全部提现记录',
-                  value: '${_withdrawals.length}'
-                      '${_withdrawals.length >= 100 ? '+' : ''} 条',
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                      builder: (_) =>
-                          MerchantWithdrawalsPage(items: _withdrawals))),
-                ),
-              ]),
-            ),
-          ],
-          const SizedBox(height: 18),
-          // 承诺卡:品牌渐变唯一允许出现处(规则⑦,对账页尾)
-          const PledgeCard(
-            title: '超级赞承诺',
-            body: '佣金只抽 5%,单量越大费率越低 · 每日 4:00 自动核账,差一分钱系统报警 · 账目写进开源代码,欢迎监督',
-          ),
+          const SizedBox(height: 3),
+          Text('每月 1 日按上月单量自动重算,只降不升;5% 永远是上限',
+              style: TextStyle(
+                  fontSize: 11, color: Theme.of(context).sz.inkMuted)),
         ],
       ),
+    ),
+    const SizedBox(height: 10),
+  ],
+    ];
+    // ④ 对账工具网格
+    final tools = <Widget>[
+  // 经营质量(近 30 天完成 / 出餐超时率 / 拒单)搬去了经营分析页
+  // (#33 4.3)—— 那三个数不是账。服务端 /me/quality 的 docstring
+  // 明写「只统计展示,不做处罚」,而这一页一个字都没写:商家看到
+  // 「出餐超时率 5.1%」只会以为自己在被扣分。搬过去时把那句话带上了
+  const SzSectionTitle('对账工具'),
+  const SizedBox(height: 9),
+  // 四个平级入口:竖排两条 _toolRow(202px)换成一格网格(#33 4.3)。
+  // 判据 3 在这里成立 —— 标题两三个字说得清、给不出状态值、彼此平级。
+  //
+  // 两条 desc 的去向按 2.3 分:「逐单明细 + 按日小计」是目录式
+  // (点进去自己会答)→ 砍;「口径与钱包同源」「仅自己可见」是立场
+  // → 合成下面这一条脚注。
+  SzIconGrid(items: [
+    SzIconGridItem(
+        icon: Icons.account_balance_outlined,
+        label: '收款账户',
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => PayoutAccountPage(api: widget.api)))),
+    SzIconGridItem(
+        icon: Icons.receipt_long_outlined,
+        label: '服务费发票',
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => InvoicePage(api: widget.api)))),
+    SzIconGridItem(
+        icon: Icons.ios_share,
+        label: '导出对账单',
+        onTap: _exportStatement),
+    SzIconGridItem(
+        icon: Icons.query_stats_outlined,
+        label: '经营分析',
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => AnalyticsPage(api: widget.api)))),
+  ]),
+  Padding(
+    padding: const EdgeInsets.fromLTRB(kCardPad, 6, kCardPad, 0),
+    child: Text('导出的口径与钱包同源,记账可用;经营分析仅自己可见',
+        style: TextStyle(
+            fontSize: kFontMicro,
+            height: 1.5,
+            color: Theme.of(context).sz.inkMuted)),
+  ),
+  const SizedBox(height: 18),
+    ];
+    // ⑤ 按日账单
+    final days = <Widget>[
+  // 默认只出近 7 天:30 天在真机上约 1890px(2.9 屏),而商家来对账
+  // 十有八九是看这两天。更早的一按就出来,**一条都没少**(#33 4.3)
+  SzSectionTitle('按日账单 · 近 ${shownDays.length} 天'),
+  const SizedBox(height: 9),
+  if (daily.isEmpty)
+    const SzEmpty(
+        art: BrandArt.receipt,
+        text: '还没有入账记录\n订单完成后会出现在这里')
+  else ...[
+    LayoutBuilder(builder: (context, c) {
+      // 宽屏(≥1100 的可用宽度上,两栏右列约 640)换真表格
+      if (c.maxWidth >= 620) return _dayTable(shownDays);
+      return SzCard(
+        padding: EdgeInsets.zero,
+        child: Column(children: [
+          for (final (i, d) in shownDays.indexed) ...[
+            if (i > 0)
+              Divider(height: 1, color: Theme.of(context).sz.line),
+            _dayRow(d),
+          ],
+        ]),
+      );
+    }),
+    if (!_showAllDays && daily.length > _kDefaultDays)
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: OutlinedButton(
+          onPressed: () => setState(() => _showAllDays = true),
+          child: Text('看更早的 ${daily.length - _kDefaultDays} 天'),
+        ),
+      ),
+  ],
+    ];
+    // ⑥ 提现记录
+    final withdrawals = <Widget>[
+  if (_withdrawals.isNotEmpty) ...[
+    const SizedBox(height: 18),
+    // 原来是 `take(20)` 却只写「提现记录」—— 服务端 `/me/withdrawals`
+    // 是 `.limit(100)`,客户端再切到 20,而标题既不说「近 N 条」
+    // 也没有翻页:提现频繁的店永远看不到更早的,**也不知道自己没看全**。
+    SzSectionTitle('提现记录 · 最近 ${_withdrawals.take(3).length} 条'),
+    const SizedBox(height: 9),
+    SzCard(
+      padding: EdgeInsets.zero,
+      child: Column(children: [
+        for (final (i, w) in _withdrawals.take(3).indexed) ...[
+          if (i > 0)
+            Divider(height: 1, color: Theme.of(context).sz.line),
+          withdrawalRow(context, w),
+        ],
+        Divider(height: 1, color: Theme.of(context).sz.line),
+        SzEntryTile(
+          title: '全部提现记录',
+          value: '${_withdrawals.length}'
+              '${_withdrawals.length >= 100 ? '+' : ''} 条',
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) =>
+                  MerchantWithdrawalsPage(items: _withdrawals))),
+        ),
+      ]),
+    ),
+  ],
+    ];
+    // ⑦ 承诺卡(页尾,横跨两栏)
+    final pledge = <Widget>[
+  const SizedBox(height: 18),
+  // 承诺卡:品牌渐变唯一允许出现处(规则⑦,对账页尾)
+  const PledgeCard(
+    title: '超级赞承诺',
+    body: '佣金只抽 5%,单量越大费率越低 · 每日 4:00 自动核账,差一分钱系统报警 · 账目写进开源代码,欢迎监督',
+  ),
+    ];
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: LayoutBuilder(builder: (context, c) {
+        // 宽屏(可用宽度 ≥1100)两栏(#33 4.3 宽屏)。
+        //
+        // 左列放「钱」的静态事实:余额、费率档位、工具、提现记录;
+        // 右列放「今天」和按日账单 —— 每天要问的那两件事在同一列里,
+        // 而按日账单在这个宽度上是五列真表格(见 _dayTable)。
+        //
+        // 判据是可用宽度不是平台:网页版拉宽窗口、平板横屏都算。
+        if (c.maxWidth < 1100) {
+          return ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              ...wallet,
+              ...todayBlock,
+              ...tier,
+              ...tools,
+              ...days,
+              ...withdrawals,
+              ...pledge,
+            ],
+          );
+        }
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [...wallet, ...tier, ...tools, ...withdrawals],
+                ),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [...todayBlock, ...days],
+                ),
+              ),
+            ]),
+            ...pledge,
+          ],
+        );
+      }),
     );
   }
 }

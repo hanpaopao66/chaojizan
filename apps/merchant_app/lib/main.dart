@@ -1596,6 +1596,51 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   /// 历史正在翻页(空态文案要跟着变:「没有」和「还在翻」不是一回事)。
   bool get _historyPending => _segment == 2 && _historyLoading;
 
+  /// 订单流:窄屏单列,可用宽度 ≥700 时两栏(#33 4.1 宽屏)。
+  ///
+  /// **判据是可用宽度不是平台** —— 平板横屏、网页版窗口拉宽都算。
+  /// 每栏约 520:一张 1080 通栏的订单卡,取餐码在最左、接单按钮在最右,
+  /// 中间隔着一片空白,眼睛得来回扫。
+  ///
+  /// ## 为什么两栏用 Wrap 而不是 GridView
+  ///
+  /// 订单卡高度不定(待接单 180、自送待取餐带地图按钮更高、历史单最矮)。
+  /// `GridView` 要固定 `mainAxisExtent`:给小了高卡溢出(而这一页刚为
+  /// 溢出打过一仗),给大了矮卡下面全是空白。
+  ///
+  /// 代价是 `Wrap` 不做按需构建。**窄屏保留 `ListView.builder`** ——
+  /// 手机上列表可能很长;两栏只在宽屏走,那是店里的电脑,而历史栏本身
+  /// 已经封顶 [_kHistoryMax] 条。
+  Widget _orderFeed() {
+    return LayoutBuilder(builder: (context, c) {
+      final orders = _filteredOrders;
+      if (c.maxWidth < 700) {
+        return ListView.builder(
+          itemCount: orders.length + (_showHistoryMore ? 1 : 0),
+          itemBuilder: (context, i) => i >= orders.length
+              ? _historyMoreTile()
+              : _orderCard(orders[i]),
+        );
+      }
+      // 卡片自带 12 的横向 margin,所以每栏宽度直接对半分
+      final colWidth = c.maxWidth / 2;
+      return SingleChildScrollView(
+        // 两栏时也要能下拉刷新:列表不满一屏时 Wrap 撑不满,
+        // 没有 AlwaysScrollable 就拉不动
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(children: [
+          Wrap(
+            children: [
+              for (final o in orders)
+                SizedBox(width: colWidth, child: _orderCard(o)),
+            ],
+          ),
+          if (_showHistoryMore) _historyMoreTile(),
+        ]),
+      );
+    });
+  }
+
   /// 一张订单卡。
   ///
   /// 抽成方法是为了让窄屏的 `ListView.builder` 和宽屏两栏共用同一张卡
@@ -2077,15 +2122,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                                           if (_showHistoryMore)
                                             _historyMoreTile(),
                                         ])
-                                      : ListView.builder(
-                                          itemCount: _filteredOrders.length +
-                                              (_showHistoryMore ? 1 : 0),
-                                          itemBuilder: (context, i) =>
-                                              i >= _filteredOrders.length
-                                                  ? _historyMoreTile()
-                                                  : _orderCard(
-                                                      _filteredOrders[i]),
-                                        ),
+                                      : _orderFeed(),
                                 ),
                               ),
                             ],

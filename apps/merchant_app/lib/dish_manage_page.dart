@@ -163,6 +163,42 @@ class _DishManagePageState extends State<DishManagePage> {
     );
   }
 
+  /// 宽屏的左侧分类导航(#33 4.2 宽屏)。
+  ///
+  /// 和横向的 [_categoryStrip] 是同一份数据、同一个选中状态 ——
+  /// 两处各存一份迟早对不上。窄屏出横条、宽屏出这个,只换排法。
+  Widget _categoryRail(Map<String, List<Dish>> grouped, String? active) {
+    final sz = Theme.of(context).sz;
+    final total = grouped.values.fold<int>(0, (n, l) => n + l.length);
+    Widget row(String label, int count, bool on, VoidCallback onTap) => InkWell(
+          onTap: onTap,
+          child: Container(
+            color: on ? sz.claySoft : null,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+            child: Row(children: [
+              Expanded(
+                child: Text(label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: kFontBody,
+                        color: on ? sz.clay : sz.ink,
+                        fontWeight: on ? FontWeight.w600 : null)),
+              ),
+              Text('$count',
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+            ]),
+          ),
+        );
+    return ListView(children: [
+      row('全部', total, active == null,
+          () => setState(() => _activeCategory = null)),
+      for (final e in grouped.entries)
+        row(e.key, e.value.length, active == e.key,
+            () => setState(() => _activeCategory = e.key)),
+    ]);
+  }
+
   /// 提示组:备货 + 菜单体检。两条都是**条件性的**,没事时整组不出现。
   ///
   /// 原先是三张卡 428px(备货卡列明细、缺图卡三行解释、销量榜前三名)。
@@ -599,25 +635,43 @@ class _DishManagePageState extends State<DishManagePage> {
                   ),
               ]),
             ),
-            _categoryStrip(grouped, active),
+            // 宽屏走左侧分类导航,这条横向的就不出现了(见 _categoryRail)
+            if (MediaQuery.of(context).size.width < 900)
+              _categoryStrip(grouped, active),
             _hintsGroup(noPhoto: noPhoto, stale: stale),
       ];
+      Widget list() => ListView.builder(
+            // +1 是尾部留白,给悬浮的「新增菜品」按钮让位
+            itemCount: leading.length + rows.length + 1,
+            itemBuilder: (context, i) {
+              if (i < leading.length) return leading[i];
+              final j = i - leading.length;
+              if (j >= rows.length) return const SizedBox(height: 80);
+              final row = rows[j];
+              final dish = row.dish;
+              return dish == null
+                  ? _categoryHeader(row.category!)
+                  : _dishTile(dish, row.siblings);
+            },
+          );
       body = RefreshIndicator(
         onRefresh: _load,
-        child: ListView.builder(
-          // +1 是尾部留白,给悬浮的「新增菜品」按钮让位
-          itemCount: leading.length + rows.length + 1,
-          itemBuilder: (context, i) {
-            if (i < leading.length) return leading[i];
-            final j = i - leading.length;
-            if (j >= rows.length) return const SizedBox(height: 80);
-            final row = rows[j];
-            final dish = row.dish;
-            return dish == null
-                ? _categoryHeader(row.category!)
-                : _dishTile(dish, row.siblings);
-          },
-        ),
+        child: LayoutBuilder(builder: (context, c) {
+          // 宽屏(≥900)改主从(#33 4.2 宽屏):左边固定 220 的分类导航,
+          // 右边菜品列表。宽屏正是「批量改菜」的场景 —— 一整屏只看得见
+          // 十几行菜、分类还要横向滚,那是把手机布局拉大而已。
+          //
+          // 判据是**可用宽度**不是平台:平板横屏、网页版拉宽都算。
+          if (c.maxWidth < 900 || grouped.length < 2) return list();
+          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            SizedBox(
+              width: 220,
+              child: _categoryRail(grouped, active),
+            ),
+            VerticalDivider(width: 1, color: Theme.of(context).sz.line),
+            Expanded(child: list()),
+          ]);
+        }),
       );
     }
 
