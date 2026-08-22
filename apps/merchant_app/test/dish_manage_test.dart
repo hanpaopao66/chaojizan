@@ -92,7 +92,64 @@ void main() {
       .where((s) => s.isNotEmpty)
       .toList();
 
-  testWidgets('销量榜的标题说的是「近 30 天」,不是「本月」', (t) async {
+  /// #33 4.2 的指标:① 首屏能看到几道菜 ② 改一道菜的价格要几步。
+  ///
+  /// 分类条是这一页**唯一主动加的高度**(43px)。换回来的是:
+  /// 100 道菜的店找一道菜,从「滚 N 屏」变成「点一次 + 半屏」。
+  group('分类条:点一次只看这一类', () {
+    List<Map<String, dynamic>> mixed() => [
+          dishJson(1, name: '红烧牛肉面', category: '主食'),
+          dishJson(2, name: '酸辣粉', category: '主食'),
+          dishJson(3, name: '可乐', category: '饮品'),
+        ];
+
+    testWidgets('默认全部,分类各自带数量', (t) async {
+      await pumpDishes(t, mixed());
+      expect(find.text('全部 3'), findsOneWidget);
+      expect(find.text('主食 2'), findsOneWidget);
+      expect(find.text('饮品 1'), findsOneWidget);
+      expect(find.text('可乐'), findsOneWidget);
+    });
+
+    testWidgets('选中一类后,别的类不再出现', (t) async {
+      await pumpDishes(t, mixed());
+      await t.tap(find.text('主食 2'));
+      await t.pump();
+      expect(find.text('红烧牛肉面'), findsOneWidget);
+      expect(find.text('可乐'), findsNothing,
+          reason: '筛了主食还看得见饮品,那这个分类条就是白加的 43px');
+      // 只剩一类时不再重复分类名 —— 分类条上已经高亮着
+      expect(find.text('主食'), findsNothing,
+          reason: '分类头和高亮的 chip 说的是同一件事,重复一遍纯占地方');
+    });
+
+    testWidgets('只有一个分类时,分类条整个不出现', (t) async {
+      await pumpDishes(t, [
+        dishJson(1, name: '红烧牛肉面', category: '主食'),
+        dishJson(2, name: '酸辣粉', category: '主食'),
+      ]);
+      expect(find.text('全部 2'), findsNothing,
+          reason: '一个分类的店点它没有任何意义 —— 那时它是纯噪音');
+    });
+  });
+
+  /// #33 4.2 第 3 点:缺图提示挪到缩略图角标。
+  ///
+  /// 它原先在 `trailing` 里和估清按钮、上下架开关挤一列 ——
+  /// 挤窄标题列、逼副标题折行,每行 64→78。12 道全缺图就是 +168px。
+  testWidgets('缺图提示压在缩略图上,不占行高', (t) async {
+    await pumpDishes(t, [
+      {...dishJson(1, name: '红烧牛肉面'), 'image_url': ''},
+    ]);
+    expect(find.text('缺图'), findsOneWidget, reason: '缺图还是要提示,只是换了位置');
+    // 角标在 48×48 的缩略图范围内,不是在行尾那一列
+    final badge = t.getCenter(find.text('缺图'));
+    final tile = t.getTopLeft(find.text('红烧牛肉面'));
+    expect(badge.dx, lessThan(tile.dx),
+        reason: '角标跑到标题右边去了 —— 那就还是在挤标题列');
+  });
+
+  testWidgets('时间窗只说「近 30 天」,不说「本月」;销量榜已移除', (t) async {
     await pumpDishes(t, [
       dishJson(1, name: '红烧牛肉面', monthly: 200),
       dishJson(2, name: '酸辣粉', monthly: 180),
@@ -100,9 +157,14 @@ void main() {
     ]);
 
     expect(allTexts().where((s) => s.contains('本月')), isEmpty,
-        reason: '服务端算的是 interval 30 days(滚动窗),标题却写「本月」——'
+        reason: '服务端算的是 interval 30 days(滚动窗),写「本月」的话——'
             '每月 1 号这两个窗能差 29 天');
-    expect(find.text('近 30 天销量榜'), findsOneWidget);
+    // #33 4.2:销量榜整块砍掉了。它是**同一份东西的第三份** ——
+    // 每行副标题已经有「月售 N」,对账页 AnalyticsPage 也明说包含
+    // 「菜品排行」。这一页只留「N 道零销量」,因为那是待办,排行榜不是。
+    // 这条断言防的是有人看着空位又把榜加回来
+    expect(find.textContaining('销量榜'), findsNothing,
+        reason: '排行榜不该在干活页占地方 —— 首屏是留给菜的');
   });
 
   testWidgets('零销量提示也要说「近 30 天」', (t) async {

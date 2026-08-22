@@ -16,6 +16,10 @@ class _DishManagePageState extends State<DishManagePage> {
   List<Dish>? _dishes;
   Map<String, dynamic>? _stocking; // 高峰备货建议(纯建议,不自动改)
 
+  /// 分类条选中的分类。null = 全部。**只影响显示** ——
+  /// 批量/置顶/估清这些操作照旧作用在真实的菜上
+  String? _activeCategory;
+
   /// 非空 = 菜单没拉到。「没有菜品」和「没拉到」在这一页含义天差地别
   String _error = '';
 
@@ -70,48 +74,146 @@ class _DishManagePageState extends State<DishManagePage> {
     }
   }
 
-  Widget? _stockingCard() {
+  /// 备货明细:哪几道、现在多少、建议多少,以及这个数是怎么估的。
+  ///
+  /// 明细从常驻卡片挪进弹层(#33 4.2)。**没有被砍** —— 它是决策依据,
+  /// 不是解释:商家要先看见"哪几道菜快不够了"才敢点补货。
+  void _stockingSheet() {
     final st = _stocking;
     final short = (st?['shortlist'] as List?) ?? [];
-    if (st == null || short.isEmpty) return null;
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      color: Theme.of(context).sz.claySoft,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${st['meal_label']}备货提示(近 14 天同餐段销量估算)',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(color: Theme.of(context).sz.hold)),
-            const SizedBox(height: 6),
+    if (st == null || short.isEmpty) return;
+    final sz = Theme.of(context).sz;
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(kCardPad, 16, kCardPad, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Row(children: [
+              Expanded(
+                child: Text('${st['meal_label']}备货提示',
+                    style: TextStyle(
+                        fontSize: kFontBodyLg,
+                        fontWeight: FontWeight.w600,
+                        color: sz.ink)),
+              ),
+              Text('近 14 天同餐段销量估算',
+                  style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+            ]),
+            const SizedBox(height: 8),
             for (final s in short)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
+                padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(children: [
                   Expanded(child: Text('${s['name']}')),
                   Text('现 ${s['stock']} → 建议 ${s['suggested']} 份',
-                      style: Theme.of(context).textTheme.bodySmall),
+                      style:
+                          TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
                 ]),
               ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 10),
             Row(children: [
               Expanded(
                 child: Text('纯建议,不会自动改库存',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall
-                        ?.copyWith(color: Theme.of(context).sz.inkFaint)),
+                    style:
+                        TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
               ),
               FilledButton.tonal(
-                  onPressed: _adoptStocking,
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    _adoptStocking();
+                  },
                   child: const Text('一键按建议补货')),
             ]),
-          ],
+          ]),
         ),
+      ),
+    );
+  }
+
+  /// 分类条:横向可滚,点一下只看这一类。
+  ///
+  /// **这是菜品页唯一主动加的高度**(43px,#33 4.2)。换回来的是:
+  /// 100 道菜的店找一道菜,从「滚 N 屏」变成「点一次 + 半屏」。
+  /// 只有一个分类时不出现 —— 那时它是纯噪音。
+  Widget _categoryStrip(Map<String, List<Dish>> grouped, String? active) {
+    if (grouped.length < 2) return const SizedBox.shrink();
+    final total = grouped.values.fold<int>(0, (n, l) => n + l.length);
+    return SizedBox(
+      height: 43,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        children: [
+          SzChip('全部 $total',
+              selected: active == null,
+              dense: true,
+              onTap: () => setState(() => _activeCategory = null)),
+          for (final e in grouped.entries) ...[
+            const SizedBox(width: 6),
+            SzChip('${e.key} ${e.value.length}',
+                selected: active == e.key,
+                dense: true,
+                onTap: () => setState(() => _activeCategory = e.key)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 提示组:备货 + 菜单体检。两条都是**条件性的**,没事时整组不出现。
+  ///
+  /// 原先是三张卡 428px(备货卡列明细、缺图卡三行解释、销量榜前三名)。
+  /// #33 4.2 压到一组 ~127px:明细进弹层、解释进脚注、**销量榜整块砍掉**
+  /// —— 每行副标题已经有「月售 N」,对账页 AnalyticsPage 也明说包含
+  /// 「菜品排行」,那是同一份东西的第三份。零销量留下,因为它是待办。
+  Widget _hintsGroup({required int noPhoto, required int stale}) {
+    final st = _stocking;
+    final short = (st?['shortlist'] as List?) ?? [];
+    final hasStocking = st != null && short.isNotEmpty;
+    final hasCheck = noPhoto > 0 || stale > 0;
+    if (!hasStocking && !hasCheck) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    final notes = <String>[
+      if (hasStocking) '备货是纯建议,不会自动改库存;点这一条看是哪几道',
+      if (noPhoto > 0) '缺图的菜在列表里显示店名首字占位',
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      child: SzEntryGroup(
+        footnote: notes.isEmpty ? null : notes.join(' · '),
+        children: [
+          if (hasStocking)
+            SzEntryTile(
+              title: '${st['meal_label']}备货提示',
+              value: '${short.length} 道可能不够卖',
+              valueTone: sz.hold,
+              onTap: _stockingSheet,
+              trailing: InkWell(
+                onTap: _adoptStocking,
+                borderRadius: BorderRadius.circular(kRadiusSm),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: sz.claySoft,
+                    borderRadius: BorderRadius.circular(kRadiusSm),
+                  ),
+                  child: Text('一键补货',
+                      style: TextStyle(fontSize: 12, color: sz.clay)),
+                ),
+              ),
+            ),
+          if (hasCheck)
+            SzEntryTile(
+              title: '菜单体检',
+              value: [
+                if (noPhoto > 0) '$noPhoto 道缺图',
+                if (stale > 0) '$stale 道近 30 天零销量',
+              ].join(' · '),
+              valueTone: sz.hold,
+            ),
+        ],
       ),
     );
   }
@@ -299,11 +401,44 @@ class _DishManagePageState extends State<DishManagePage> {
     }
   }
 
-  Widget _thumb(Dish dish) => SzImage(
-        url: dish.imageUrl.isEmpty ? '' : widget.api.resolveUrl(dish.imageUrl),
-        name: dish.name,
-        size: 48,
-      );
+  /// 缩略图。缺图的压一个角标在右下角(#33 4.2)。
+  ///
+  /// 原先这个 chip 在 `trailing` 里,和估清按钮、上下架开关抢那一列 ——
+  /// 它挤窄标题列、逼副标题折行,每行 64→78。12 道全缺图就是 +168px,
+  /// 而角标是**压在已有的 48px 上**,零额外高度。
+  Widget _thumb(Dish dish) {
+    final img = SzImage(
+      url: dish.imageUrl.isEmpty ? '' : widget.api.resolveUrl(dish.imageUrl),
+      name: dish.name,
+      size: 48,
+    );
+    if (dish.imageUrl.isNotEmpty) return img;
+    final sz = Theme.of(context).sz;
+    return SizedBox(
+      width: 48,
+      height: 48,
+      child: Stack(children: [
+        img,
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 1),
+            decoration: BoxDecoration(
+              color: sz.hold.withValues(alpha: 0.85),
+              borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(kRadiusSm)),
+            ),
+            child: const Text('缺图',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 9, height: 1.3, color: Colors.white)),
+          ),
+        ),
+      ]),
+    );
+  }
 
   Widget _categoryHeader(String name) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -359,14 +494,8 @@ class _DishManagePageState extends State<DishManagePage> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 缺图从一句混在灰字里的「· 建议配图」提成 chip:
-          // 占位图再好看也不如让商家把图补上,提示得看得见
-          if (dish.imageUrl.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: SzChip('缺图',
-                  color: Theme.of(context).sz.hold, dense: true),
-            ),
+          // 缺图提示挪去了缩略图右下角(见 _thumb):它和估清按钮、
+          // 上下架开关挤同一列时,把标题列挤窄、副标题挤折行
           // 批量执行中锁掉行内控件:否则能对正在批量处理的
           // 同一道菜发一个反向请求,最后谁赢看运气
           if (dish.isOnSale)
@@ -425,20 +554,26 @@ class _DishManagePageState extends State<DishManagePage> {
         final key = dish.category.isEmpty ? '未分类' : dish.category;
         grouped.putIfAbsent(key, () => []).add(dish);
       }
-      // 经营诊断:本月销量榜 + 滞销数(卖得好的多备货,滞销的考虑换菜)
-      final ranked = [...dishes]
-        ..sort((a, b) => b.monthlySales.compareTo(a.monthlySales));
-      final top = ranked.where((d) => d.monthlySales > 0).take(3).toList();
+      // 菜单体检的两个数(#33 4.2:销量榜整块砍掉了 —— 每行副标题已经有
+      // 「月售 N」,对账页 AnalyticsPage 明说包含「菜品排行」,那是同一份
+      // 东西的第三份。**只留零销量**:它是待办,排行榜不是)
       final stale =
           dishes.where((d) => d.isOnSale && d.monthlySales == 0).length;
       final noPhoto = dishes.where((d) => d.imageUrl.isEmpty).length;
+
+      // 选中的分类不存在了(改分类/删菜之后)就自动回到全部,
+      // 否则商家会盯着一个空列表以为菜没了
+      final active =
+          grouped.containsKey(_activeCategory) ? _activeCategory : null;
 
       // 把「分类标题 + 该分类下的菜」拍平成一维,交给 ListView.builder 按需构建。
       // 原来是 ListView(children: [...]):菜单上百道时,首帧要把每一行的缩略图、
       // 上下架开关、估清/补货按钮全建出来 —— 而卡住的那几百毫秒,商家正在接单
       final rows = <_MenuRow>[];
       for (final entry in grouped.entries) {
-        rows.add(_MenuRow.header(entry.key));
+        if (active != null && entry.key != active) continue;
+        // 只筛出一个分类时不再重复它的名字 —— 分类条上已经高亮着
+        if (active == null) rows.add(_MenuRow.header(entry.key));
         for (final dish in entry.value) {
           rows.add(_MenuRow.dish(dish, entry.value));
         }
@@ -462,86 +597,9 @@ class _DishManagePageState extends State<DishManagePage> {
                   ),
               ]),
             ),
-            if (_stockingCard() != null) _stockingCard()!,
-            // 缺图汇总:占位图能让列表不难看,但真正解决问题的是把图补上。
-            // 只在确实有缺图时出现,补完自动消失,不长期占地方
-            if (noPhoto > 0)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: SzCard(
-                  child: Row(children: [
-                    Icon(Icons.photo_camera_outlined,
-                        size: 18, color: Theme.of(context).sz.hold),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text.rich(
-                        TextSpan(children: [
-                          TextSpan(
-                              text: '$noPhoto',
-                              style: szFigure(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Theme.of(context).sz.hold)),
-                          const TextSpan(text: ' 道菜还没配图。'),
-                          const TextSpan(text: '顾客看不到图会跳过——现在列表里'
-                              '显示的是店名首字占位,补一张实拍就换成你的图。'),
-                        ]),
-                        style: TextStyle(
-                            fontSize: 12,
-                            height: 1.55,
-                            color: Theme.of(context).sz.ink),
-                      ),
-                    ),
-                  ]),
-                ),
-              ),
-            if (top.isNotEmpty)
-              Card(
-                margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 「近 30 天」不是「本月」:服务端 `_DISH_SALES_SQL` 算的是
-                      // `interval '30 days'`(滚动窗),而同一个 App 的对账页
-                      // 「本月已完成 N 单」用的是自然月(`now_bj.replace(day=1)`)。
-                      // 每月 1 号这两个窗差 29 天 —— 商家拿这个榜决定下架哪道菜
-                      Text('近 30 天销量榜',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleSmall
-                              ?.copyWith(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
-                      for (final (i, d) in top.indexed)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(children: [
-                            Text('${i + 1}. ${d.name}'),
-                            const Spacer(),
-                            Text('月售 ${d.monthlySales}',
-                                style:
-                                    Theme.of(context).textTheme.bodySmall),
-                          ]),
-                        ),
-                      if (stale > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text('$stale 道在售菜品近 30 天零销量,考虑调整或下架',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outline)),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
+            _categoryStrip(grouped, active),
+            _hintsGroup(noPhoto: noPhoto, stale: stale),
       ];
-
       body = RefreshIndicator(
         onRefresh: _load,
         child: ListView.builder(
@@ -848,6 +906,41 @@ class _DishEditPageState extends State<DishEditPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // 价格 / 库存提到最顶(#33 4.2)。
+          //
+          // 改一道菜的价格是这一页最高频的动作,而原来价格框在第二屏、
+          // 保存在第三屏 —— 一次改价 2 触摸 + 2 滚动。现在两个框和常驻的
+          // 保存条都在首屏,0 滚动。
+          //
+          // **上下架没有搬过来**:它在列表页每一行上已经是 1 触摸的开关,
+          // 编辑页再放一个只会多出第二个状态源(#33 第 6 节的同类问题)。
+          Row(children: [
+            Expanded(
+              child: TextField(
+                  controller: _price,
+                  onChanged: (_) => setState(() {}),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                      labelText: '价格(元)*', border: OutlineInputBorder())),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: TextField(
+                  controller: _stock,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                      labelText: '库存 *', border: OutlineInputBorder())),
+            ),
+          ]),
+          const SizedBox(height: 12),
+          TextField(
+              controller: _name,
+              decoration: const InputDecoration(
+                  labelText: '菜名 *', border: OutlineInputBorder())),
+          const SizedBox(height: 12),
+          // 图片挪到菜名之后:它是这一页最占地方的一块(120px),
+          // 但换图的频次远低于改价改库存
           Center(
             child: InkWell(
               onTap: _uploading ? null : _pickImage,
@@ -882,11 +975,6 @@ class _DishEditPageState extends State<DishEditPage> {
             ),
           ),
           const SizedBox(height: 16),
-          TextField(
-              controller: _name,
-              decoration: const InputDecoration(
-                  labelText: '菜名 *', border: OutlineInputBorder())),
-          const SizedBox(height: 12),
           TextField(
               controller: _category,
               decoration: const InputDecoration(
@@ -935,26 +1023,6 @@ class _DishEditPageState extends State<DishEditPage> {
                   hintText: '06:00-10:30',
                   helperText: '留空=全天供应;非供应时段顾客看得到但点不了',
                   border: OutlineInputBorder())),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(
-              child: TextField(
-                  controller: _price,
-                  onChanged: (_) => setState(() {}),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(
-                      labelText: '价格(元)*', border: OutlineInputBorder())),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                  controller: _stock,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: '库存 *', border: OutlineInputBorder())),
-            ),
-          ]),
           const SizedBox(height: 12),
           Row(children: [
             Expanded(
@@ -1174,12 +1242,20 @@ class _DishEditPageState extends State<DishEditPage> {
                 ),
               ),
             ),
+          // 底部留白:给常驻保存条让位,否则最后一组规格会被压在条底下
           const SizedBox(height: 24),
-          FilledButton(
+        ],
+      ),
+      // 保存常驻底部(#33 4.2):原来它在页面最末,改完价格要一路滚到底才存得了,
+      // 而规格/加料多的菜这一路有两三屏
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: FilledButton(
             onPressed: _saving ? null : _save,
             child: Text(_saving ? '保存中…' : '保存'),
           ),
-        ],
+        ),
       ),
     );
   }
