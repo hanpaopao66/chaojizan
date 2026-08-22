@@ -18,9 +18,13 @@ import 'shop_fake_api.dart';
 /// 切片、不带状态过滤(orders.py)。而 `_orders` 这一个列表同时驱动:
 /// 顶栏「N 单待接」、三个分段的内容、**以及每 10 秒一次的催单语音**。
 ///
-/// 午高峰 20 单以上时,更早的未接单会掉出这个窗口 —— 顶栏数不到、
+/// 午高峰 20 单以上时,更早的未接单会掉出这个窗口 —— 数不到、
 /// 列表里看不见、**语音也不再响**。而这个文件自己的注释写着
 /// 「午高峰漏一单,这个平台赔不起」。
+///
+/// ⚠️ #33 把待接数从顶栏搬到了分段标签(顶栏三格被营业开关/听单灯/
+/// 忙碌模式占着,连锁店名已经在截断)。**测的还是同一件事** ——
+/// 这个数必须来自服务端聚合,不许从 20 条窗口里数。
 ///
 /// 服务端早就有权威数:`/merchants/me/todos` 的 `pending_orders`
 /// 是 `count(Order.id) where status == PAID`,全量、无窗口 ——
@@ -79,6 +83,27 @@ void main() {
     return null;
   }
 
+  /// 分段标签的整段文字(「待接单 25」这类)。
+  /// 限定在 `SegmentedButton` 里找,不然会撞上空态文案里的同名词。
+  String? segmentLabel(String prefix) {
+    for (final e in find
+        .descendant(
+            of: find.byType(SegmentedButton<int>), matching: find.byType(Text))
+        .evaluate()) {
+      final d = (e.widget as Text).data ?? '';
+      if (d.startsWith(prefix)) return d;
+    }
+    return null;
+  }
+
+  /// 点某个分段。标签带数字了,不能再用 `find.text('进行中')` 精确匹配。
+  Future<void> tapSegment(WidgetTester t, String prefix) async {
+    await t.tap(find.descendant(
+        of: find.byType(SegmentedButton<int>),
+        matching: find.textContaining(prefix)));
+    await t.pump();
+  }
+
   group('待接单这个数不许从一页列表里数出来', () {
     testWidgets('25 单待接,而 /orders 一页只回 20 单 —— 顶栏要说 25', (t) async {
       // 25 单全是待接。服务端一页最多回 20(orders.py limit 上限 50,
@@ -89,9 +114,12 @@ void main() {
       );
       await pumpHome(t, api);
 
-      expect(titleText(), '订单(25 单待接)',
-          reason: '顶栏的数字是从 20 条列表里数出来的 —— '
+      expect(segmentLabel('待接单'), '待接单 25',
+          reason: '这个数是从 20 条列表里数出来的 —— '
               '第 21 单之后的未接单不但看不见,连数都数不到');
+      expect(titleText(), '订单',
+          reason: '#33 把数字搬到了分段标签;顶栏只留店名/页名,'
+              '但数字必须在别处出现 —— 上一条断言管这个');
       await teardown(t);
     });
 
@@ -107,7 +135,7 @@ void main() {
       );
       await pumpHome(t, api);
 
-      expect(titleText(), '订单(5 单待接)',
+      expect(segmentLabel('待接单'), '待接单 5',
           reason: '列表里看不见 ≠ 没有。服务端 /todos.pending_orders 说还有 5 单');
       await teardown(t);
     });
@@ -282,7 +310,7 @@ void main() {
         expect(textsPaintingOutside(t), isEmpty);
 
         // 进行中栏:自送待取餐是最宽的一种(实测本征宽 410px)
-        await t.tap(find.text('进行中'));
+        await tapSegment(t, '进行中');
         await t.pump();
         await t.pump(const Duration(milliseconds: 200));
         expect(find.widgetWithText(FilledButton, '开始配送(自送)'), findsOneWidget);
@@ -307,7 +335,7 @@ void main() {
         todos: {'pending_orders': 0},
       );
       await pumpHome(t, api, width: 320, height: 1600);
-      await t.tap(find.text('进行中'));
+      await tapSegment(t, '进行中');
       await t.pump();
       await t.pump(const Duration(milliseconds: 200));
       expect(find.widgetWithText(FilledButton, '出餐完成'), findsOneWidget);

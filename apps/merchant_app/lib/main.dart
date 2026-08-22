@@ -929,123 +929,106 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     }
   }
 
-  /// 今日 · 待办卡:今天卖了多少 + 欠着什么没处理,数字非零才显示行
-  Widget _todayCard() {
-    final sz = Theme.of(context).sz;
-    final today = _today?['today'] as Map<String, dynamic>?;
-    final yesterday = _today?['yesterday'] as Map<String, dynamic>?;
+  /// 待办行的数据源:欠着没处理的事,每项一个 chip。
+  ///
+  /// **这仍是那一份待办**(判据 5:不另做待办区)。#33 只改排法 ——
+  /// 原先 `Wrap` 两行 62px,现在横向可滚一行 43px,文案去掉冗余词
+  /// (「售后待处理 2」→「售后 2」)。数字、去向、口径一个没动。
+  List<(String, VoidCallback)> _todoRows() {
     final todos = _todos;
-    if (today == null && todos == null) return const SizedBox.shrink();
-
-    final todoRows = <(String, VoidCallback)>[];
-    if (todos != null) {
-      void addRow(String key, String label, VoidCallback onTap) {
-        final n = todos[key] as int? ?? 0;
-        if (n > 0) todoRows.add(('$label $n', onTap));
-      }
-
-      addRow('after_sales', '售后待处理', () => setState(() => _tab = 3));
-      // 差评只出一行:overdue 是 unreplied 的**子集**,分两行的话
-      // 同一条差评会被数两遍,商家看到"2 件事"其实只有 1 条。
-      // 超 24 小时的把紧迫性写进同一行文案(与 merchant-web 同口径)
-      final badUnreplied = todos['bad_reviews_unreplied'] as int? ?? 0;
-      final badOverdue = todos['bad_reviews_overdue'] as int? ?? 0;
-      if (badUnreplied > 0) {
-        todoRows.add((
-          badOverdue > 0
-              ? '差评待回复 $badUnreplied(超24h $badOverdue)'
-              : '差评待回复 $badUnreplied',
-          () {
-            Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) =>
-                    MerchantReviewsPage(api: widget.api, initialFilter: 1)));
-          }
-        ));
-      }
-      addRow('coupon_batches_low', '券快发完', () => setState(() => _tab = 3));
-      addRow('flash_expiring', '折扣将到期', () => setState(() => _tab = 1));
-      addRow('messages_unread', '新消息', () {
-        Navigator.of(context)
-            .push(MaterialPageRoute(
-                builder: (_) => MerchantMessagesPage(api: widget.api)))
-            .then((_) => _refreshToday());
-      });
+    if (todos == null) return const [];
+    final rows = <(String, VoidCallback)>[];
+    void addRow(String key, String label, VoidCallback onTap) {
+      final n = todos[key] as int? ?? 0;
+      if (n > 0) rows.add(('$label $n', onTap));
     }
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: sz.surface,
-        borderRadius: BorderRadius.circular(kRadiusMd),
-        border: Border.all(color: sz.line),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        if (today != null)
-          InkWell(
-            onTap: () => setState(() => _tab = 2),
-            // 用 Wrap 而不是 Row:原先是六个都不可伸缩的 Text 加一个 Spacer,
-            // 320 窄屏 + 长辈版 1.4× 下实测溢出 163px —— 商家一进来就看见
-            // 那条黄黑警示条。Wrap + spaceBetween 一行放得下时和原来一样
-            // (今日靠左、昨日靠右),放不下时「昨日」自己掉到第二行。
-            //
-            // 「今日 N 单 · ¥X」四段并成一个 Text.rich:它本来就是一句话,
-            // 拆成四个 Text 只是为了中间两段换字体,而拆开之后就没法整体折行了。
-            child: Wrap(
-              crossAxisAlignment: WrapCrossAlignment.center,
-              alignment: WrapAlignment.spaceBetween,
-              spacing: 8,
-              runSpacing: 4,
-              children: [
-                Text.rich(TextSpan(children: [
-                  TextSpan(
-                      text: '今日 ',
-                      style: TextStyle(fontSize: 13, color: sz.inkMuted)),
-                  TextSpan(
-                      text: '${today['orders']}',
-                      style: szFigure(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: sz.ink)),
-                  TextSpan(
-                      text: ' 单 · ',
-                      style: TextStyle(fontSize: 13, color: sz.inkMuted)),
-                  TextSpan(
-                      text: yuan(today['gmv_cents'] as int? ?? 0),
-                      style: szMoney(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: sz.ink)),
-                ])),
-                if (yesterday != null)
-                  Text(
-                      '昨日 ${yesterday['orders']} 单·'
-                      '${yuan(yesterday['gmv_cents'] as int? ?? 0)}',
-                      style: TextStyle(fontSize: 11, color: sz.inkMuted)),
-              ],
-            ),
-          ),
-        if (todoRows.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Wrap(spacing: 6, runSpacing: 6, children: [
-            for (final (label, onTap) in todoRows)
-              InkWell(
-                onTap: onTap,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: sz.danger.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(label,
-                      style: TextStyle(fontSize: 12, color: sz.danger)),
-                ),
-              ),
-          ]),
-        ],
+    addRow('after_sales', '售后', () => setState(() => _tab = 3));
+    // 差评只出一行:overdue 是 unreplied 的**子集**,分两行的话
+    // 同一条差评会被数两遍,商家看到"2 件事"其实只有 1 条。
+    // 超 24 小时的把紧迫性写进同一行文案(与 merchant-web 同口径)
+    final badUnreplied = todos['bad_reviews_unreplied'] as int? ?? 0;
+    final badOverdue = todos['bad_reviews_overdue'] as int? ?? 0;
+    if (badUnreplied > 0) {
+      rows.add((
+        badOverdue > 0
+            ? '差评 $badUnreplied(超24h $badOverdue)'
+            : '差评 $badUnreplied',
+        () {
+          Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) =>
+                  MerchantReviewsPage(api: widget.api, initialFilter: 1)));
+        }
+      ));
+    }
+    addRow('coupon_batches_low', '券快发完', () => setState(() => _tab = 3));
+    addRow('flash_expiring', '折扣到期', () => setState(() => _tab = 1));
+    addRow('messages_unread', '消息', () {
+      Navigator.of(context)
+          .push(MaterialPageRoute(
+              builder: (_) => MerchantMessagesPage(api: widget.api)))
+          .then((_) => _refreshToday());
+    });
+    return rows;
+  }
+
+  /// 今日条:今天卖了多少。整条可点 → 对账 tab。
+  ///
+  /// 78px 的卡压到 46px 的 `SzEntryTile`(#33 4.1)。订单页是**干活页**,
+  /// 首屏内容不可替换(必须是订单)—— 所以顶上这几块的正确动作是
+  /// **把地方腾出来**,而不是往里塞更好看的东西。
+  ///
+  /// 昨日只留单量:昨日金额是对账页的数,这里要的只是「比昨天多还是少」。
+  Widget _todayTile() {
+    final today = _today?['today'] as Map<String, dynamic>?;
+    if (today == null) return const SizedBox.shrink();
+    final yesterday = _today?['yesterday'] as Map<String, dynamic>?;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: SzEntryGroup(children: [
+        SzEntryTile(
+          title: '今日 ${today['orders']} 单 · '
+              '${yuan(today['gmv_cents'] as int? ?? 0)}',
+          value: yesterday == null ? null : '昨日 ${yesterday['orders']} 单',
+          onTap: () => setState(() => _tab = 2),
+        ),
       ]),
+    );
+  }
+
+  /// 待办条:横向可滚一行,**非零才出现**。
+  ///
+  /// 固定 43px:8/9 的上下留白 + 26 的 chip。横向滚动而不是换行 ——
+  /// 待办最多五项,而干活页每多一行就少小半张订单卡。
+  Widget _todoStrip() {
+    final rows = _todoRows();
+    if (rows.isEmpty) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    return SizedBox(
+      height: 43,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(12, 9, 12, 8),
+        itemCount: rows.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (context, i) {
+          final (label, onTap) = rows[i];
+          return InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: sz.danger.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child:
+                  Text(label, style: TextStyle(fontSize: 12, color: sz.danger)),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -1500,13 +1483,25 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     }
   }
 
+  /// 「进行中」这一栏的状态集合。分段标签的数字和列表内容共用它 ——
+  /// 两处各写一套迟早对不上(#33 第 6 节:同一个数不要有第二个来源)。
+  static const _ongoingStatuses = {
+    OrderStatus.accepted,
+    OrderStatus.ready,
+    OrderStatus.pickedUp,
+  };
+
+  /// 进行中的单数。
+  ///
+  /// ⚠️ 这是**窗口里**数出来的(`_orders` 默认 20 条),和 `_pendingCount`
+  /// 不一样 —— 待接单有服务端聚合兜底,进行中没有对应字段。所以标签只写
+  /// 「进行中 N」:N 就是这一栏此刻能看到的条数,不冒充全量。
+  int get _ongoingCount =>
+      _orders.where((o) => _ongoingStatuses.contains(o.status)).length;
+
   List<Order> get _filteredOrders {
     if (_searchActive) return _searchResults;
-    const ongoing = {
-      OrderStatus.accepted,
-      OrderStatus.ready,
-      OrderStatus.pickedUp,
-    };
+    const ongoing = _ongoingStatuses;
     return switch (_segment) {
       // 待接单和历史都不再从 20 条窗口里过滤
       // —— 见 [_pendingInWindow]、[_historyList]
@@ -1537,6 +1532,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   Widget build(BuildContext context) {
     // **不是** `_orders.where(paid).length` —— 那是 20 条窗口里的数。见 [_pendingCount]
     final pending = _pendingCount;
+    final ongoing = _ongoingCount;
     // 宽屏(≥600)换左侧栏(#295)。商家端尤其需要:网页版和桌面版是
     // 「坐在店里的电脑前接单」的场景,鼠标跑到 1440px 屏底部切页太远
     return SzNavScaffold(
@@ -1589,7 +1585,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                       1 => '菜品管理',
                       2 => '对账',
                       3 => '店铺',
-                      _ => pending > 0 ? '$pending 单待接' : '订单',
+                      _ => '订单',
                     },
                     onSwitch: widget.onSwitchShop,
                   )
@@ -1597,7 +1593,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                     1 => '菜品管理',
                     2 => '对账',
                     3 => '店铺',
-                    _ => pending > 0 ? '订单($pending 单待接)' : '订单',
+                    _ => '订单',
                   }),
         actions: [
           if (_tab == 0 && !_searchMode)
@@ -1694,18 +1690,35 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                               // 平台公告(费率调整、新功能上线等,发通知不用发版)
                               AnnouncementBanner(
                                   api: widget.api, audience: 'merchant'),
-                              if (!_searchMode) _todayCard(),
+                              if (!_searchMode) _todayTile(),
+                              if (!_searchMode) _todoStrip(),
                               if (!_searchMode)
                                 Padding(
                                   padding:
                                       const EdgeInsets.fromLTRB(12, 8, 12, 4),
                                   child: SegmentedButton<int>(
-                                    segments: const [
+                                    // 数字跟着栏走:顶栏的「N 单待接」搬到这里
+                                    // (#33 判据 1 在商家端不成立 —— 右上角
+                                    // 三格被营业开关/听单灯/忙碌模式占着,
+                                    // 而连锁店名今天就已经被截断)。
+                                    //
+                                    // ⚠️ 两个数各自是**这一栏实际能看到的条数**:
+                                    // 待接走 `_pendingCount`(服务端聚合,不受
+                                    // 20 条窗口截断);进行中是窗口内数出来的,
+                                    // 所以它只敢叫「进行中」,不敢叫「全部进行中」。
+                                    segments: [
                                       ButtonSegment(
-                                          value: 0, label: Text('待接单')),
+                                          value: 0,
+                                          label: Text(pending > 0
+                                              ? '待接单 $pending'
+                                              : '待接单')),
                                       ButtonSegment(
-                                          value: 1, label: Text('进行中')),
-                                      ButtonSegment(
+                                          value: 1,
+                                          label: Text(ongoing > 0
+                                              ? '进行中 $ongoing'
+                                              : '进行中')),
+                                      // 历史不给数字:它是分页拉的,给了就是撒谎
+                                      const ButtonSegment(
                                           value: 2, label: Text('历史')),
                                     ],
                                     selected: {_segment},
