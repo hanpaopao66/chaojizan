@@ -5203,11 +5203,47 @@ class _ProfileViewState extends State<ProfileView> {
   List<Order> _orders = const [];
   List<StayOrder> _stays = const [];
 
+  /// 顶上那张账目卡关掉了没有。**默认不关,关了就永久关。**
+  ///
+  /// 和首页 `_promiseStrip` 同一个道理:「5% 平台只抽这么多」是一句宣言,
+  /// 老用户看过一次就够,天天顶在页首就从"我们不黑你"变成了打扰。
+  ///
+  /// ⚠️ 但**关法不一样**。首页那条敢整条消失,是因为它的注释里写着
+  /// 「『我的 → 这钱怎么算的』一直在」—— 它敢消失是因为这张卡兜着。
+  /// 这张卡是终点站:平台账本除了这里只有分账页里那一个入口,
+  /// 平台体检更是只有平台账本里那一个。承诺条关掉 + 这张卡也关掉 +
+  /// 一单没下过,这两页就从 App 里彻底没了。
+  ///
+  /// 所以这里**关掉的是卡,不是入口**:卡收起的同时,
+  /// 三条入口落到 [_entryList] 里(见那儿的 `if (_ledgerHidden)`)。
+  bool _ledgerHidden = false;
+
+  static const _kLedgerHidden = 'profile_ledger_hidden';
+
   @override
   void initState() {
     super.initState();
     authTick.addListener(_load); // 游客登录成功后刷新
     _load();
+    _restoreLedger();
+  }
+
+  Future<void> _restoreLedger() async {
+    final sp = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _ledgerHidden = sp.getBool(_kLedgerHidden) ?? false);
+  }
+
+  Future<void> _hideLedger() async {
+    setState(() => _ledgerHidden = true);
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_kLedgerHidden, true);
+    if (!mounted) return;
+    // 说清楚去哪还能看到 —— 不说的话用户以为这几个入口没了
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('已收起。钱去哪了 / 平台账本 / 平台体检 已移到本页下方的设置里'),
+      duration: Duration(seconds: 4),
+    ));
   }
 
   @override
@@ -5425,8 +5461,12 @@ class _ProfileViewState extends State<ProfileView> {
         ],
         guest ? _loginCard(context) : _identityRow(context, profile),
         const SizedBox(height: 12),
-        _ledgerCard(context),
-        const SizedBox(height: 12),
+        // 关掉之后连同它的间距一起消失 —— 留一个 12px 的空档
+        // 就是"关了但还占着位"
+        if (!_ledgerHidden) ...[
+          _ledgerCard(context),
+          const SizedBox(height: 12),
+        ],
         // 游客不渲染订单区:四个 0 角标的格子就是灰占位,
         // 而订单 tab 自己已经有登录引导了
         if (!guest) ...[
@@ -5583,15 +5623,48 @@ class _ProfileViewState extends State<ProfileView> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic, children: [
-            Text('5%',
-                style: szFigure(
-                    fontSize: 20, fontWeight: FontWeight.w600, color: sz.clay)),
-            const SizedBox(width: 8),
-            Text('平台只抽这么多',
-                style: TextStyle(
-                    fontSize: 15, fontWeight: FontWeight.w600, color: sz.ink)),
+          Row(children: [
+            // 标题两截仍按基线对齐(衬线的 5% 和黑体的中文各有各的字高),
+            // 所以关闭键**不能进这个 Row** —— 一个没有基线的盒子塞进
+            // baseline 行里,对齐会退化成按顶边排
+            Expanded(
+              child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text('5%',
+                        style: szFigure(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: sz.clay)),
+                    const SizedBox(width: 8),
+                    Text('平台只抽这么多',
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: sz.ink)),
+                  ]),
+            ),
+            // 关闭:热区做到 40×40(图标只有 16,光按图标点不中),
+            // 和首页承诺条同一套尺寸。
+            //
+            // **不用 OverflowBox 去省那 16px 高。** 试过:画出来是 40×40,
+            // 但父级 SizedBox 只有 24 高,命中测试在它那儿就被挡掉了 ——
+            // 量尺寸的断言照样绿,手指点上去只有 40×24 管用。
+            // 高度的账在卡的内边距上找补(见 padding)
+            Semantics(
+              label: '不再显示这张账目卡',
+              button: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: _hideLedger,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Icon(Icons.close, size: 16, color: sz.inkMuted),
+                ),
+              ),
+            ),
           ]),
           const SizedBox(height: 4),
           // 立场整卡说一次,不摊到每个入口上(同 SzEntryGroup.footnote 的规矩)
@@ -5795,6 +5868,36 @@ class _ProfileViewState extends State<ProfileView> {
           value: '暂未开放',
           onTap: _showInvoiceInfo,
         ),
+        // 账目卡收起时,它的三个入口落在这儿。**只在收起时出现** ——
+        // 卡开着还挂一份就是同一个入口在一页上出现两次。
+        //
+        // 这不是"顺手也放一份",是这张卡能被关掉的前提:平台账本除了那张卡
+        // 只有分账页里一个入口,平台体检更是只有平台账本里一个,
+        // 而分账页要么从首页那条(也能关)进、要么得先有一笔带佣金的订单。
+        // 少了这一段,关卡片 = 删功能
+        if (_ledgerHidden) ...[
+          const Divider(height: 1),
+          SzEntryTile(
+            icon: Icons.pie_chart_outline,
+            title: '钱去哪了',
+            hint: '一笔订单的钱怎么分的,拆到分',
+            onTap: () => openMoneyFlow(context, widget.api),
+          ),
+          const Divider(height: 1),
+          SzEntryTile(
+            icon: Icons.account_balance_outlined,
+            title: '平台账本',
+            onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => TrustPage(api: widget.api))),
+          ),
+          const Divider(height: 1),
+          SzEntryTile(
+            icon: Icons.monitor_heart_outlined,
+            title: '平台体检',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => TransparencyPage(api: widget.api))),
+          ),
+        ],
         const Divider(height: 1),
         // 商店审核要求:我的页可达协议全文。
         // 设置页里也有一份,但合规项上「2 跳可达算不算可达」是拿被打回

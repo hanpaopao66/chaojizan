@@ -180,6 +180,54 @@ void main() {
     });
   });
 
+  group('这张卡不给关', () {
+    // 用户端和商家端的黄金位卡都做成了「可以永久关掉」——**这一张刻意没做**,
+    // 而且不是漏了。理由三条,任何一条单独成立都够:
+    //
+    // ① **它不是宣言,是数据。** 「宣言看一次就够」这条判据的前提是内容不变;
+    //    今日完成/在线/收入每跑一单就变一次,关掉它等于关掉今天的账。
+    //
+    // ② **这一端的宣言本来就不在黄金位。** `_promises()` 是一张独立的
+    //    SzLedgerCard,注释写着「**刻意在折叠线以下**……不该占黄金位那 110px」。
+    //    也就是说骑手端早就用「放到折叠线以下」解决了同一个打扰问题,
+    //    黄金位这里根本没有可关的宣言。
+    //
+    // ③ **卡底那行「配送费 100% 归你 · 看周报 →」是入口本身。**
+    //    `RiderWeeklyPage` 全仓只有 `profile_page.dart` 这一个构造点,
+    //    那行字是唯一告诉骑手这张卡能点的东西(profile_routes_test.dart
+    //    已经拿一条用例锁着它)。把那一行做成可关 = 把周报变成暗手势。
+    //
+    // 外加一条:疲劳提醒也画在这张卡里。**可关闭的容器不该装安全提示。**
+    testWidgets('没有关闭按钮', (t) async {
+      await pump(t, fakeRiderApi());
+      expect(find.byIcon(Icons.close), findsNothing,
+          reason: '今日战报卡上出现了关闭键 —— 见本组注释:'
+              '它是每 20 分钟变一次的数据,不是看一次就够的宣言');
+    });
+
+    testWidgets('「看周报 →」那一行也不给单独关', (t) async {
+      await pump(t, fakeRiderApi());
+      expect(find.textContaining('看周报'), findsOneWidget);
+      // 那一行右边不许长出任何可点的小控件(关闭键/「不再显示」之类)。
+      // 它是 RiderWeeklyPage 唯一的可供性,遮掉就等于删掉入口
+      final row = find.ancestor(
+          of: find.textContaining('看周报'), matching: find.byType(Row));
+      expect(find.descendant(of: row.first, matching: find.byType(InkWell)),
+          findsNothing,
+          reason: '「看周报 →」那行里多了一个可点控件');
+    });
+
+    testWidgets('疲劳提醒在这张卡里 —— 可关闭的容器不该装安全提示', (t) async {
+      await pump(
+          t,
+          fakeRiderApi(
+              fatigueLevel: 'throttle', fatigueMessage: '已连续在线 12 小时,该歇了'));
+      expect(find.text('已连续在线 12 小时,该歇了'), findsOneWidget);
+      expect(find.byIcon(Icons.close), findsNothing,
+          reason: '疲劳提醒所在的卡片可以被关掉');
+    });
+  });
+
   group('不放分数、等级、段位', () {
     testWidgets('页面上没有服务分/派单分/段位这类字样', (t) async {
       // /transparency/dispatch 的 never_do 里公开承诺过

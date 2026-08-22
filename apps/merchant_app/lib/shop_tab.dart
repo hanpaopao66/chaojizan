@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'appeal_page.dart';
@@ -74,10 +75,44 @@ class _ShopTabPageState extends State<ShopTabPage> {
   /// (`completed_counts`,auto_flow.py:1005),不是客户端拿一页列表求和。
   Map<String, dynamic>? _tier;
 
+  /// 顶上那张费率卡关掉了没有。**默认不关,关了就永久关。**
+  ///
+  /// 「5% 封顶、只降不升」是一句宣言,商家看过一次就够,每天开店都顶在
+  /// 店铺页第一屏就成了打扰。
+  ///
+  /// ⚠️ 但**关掉的是卡,不是入口**。卡里那三个入口里有两个是终点站:
+  /// `MerchantPromisesPage` 和 `MerchantRulesPage` 全仓只在这一个文件里
+  /// 被构造过 —— 照着用户端首页承诺条那样一关了之,「平台对你的承诺」
+  /// 会直接从商家端消失。所以收起的同时它俩落到 [_accountList] 里。
+  ///
+  /// 「钱怎么分的」不搬:它去的是对账,而对账本来就是底部 tab。
+  bool _goldHidden = false;
+
+  static const _kGoldHidden = 'shop_gold_hidden';
+
   @override
   void initState() {
     super.initState();
     _load();
+    _restoreGold();
+  }
+
+  Future<void> _restoreGold() async {
+    final sp = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _goldHidden = sp.getBool(_kGoldHidden) ?? false);
+  }
+
+  Future<void> _hideGold() async {
+    setState(() => _goldHidden = true);
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_kGoldHidden, true);
+    if (!mounted) return;
+    // 说清楚去哪还能看到 —— 不说的话商家以为这几样没了
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('已收起。「平台对你的承诺」「平台规则」已移到本页底部;费率明细在对账页'),
+      duration: Duration(seconds: 4),
+    ));
   }
 
   /// 七个请求**先全部发出去**,再逐个 await —— 它们互不依赖,在网络上是并发的。
@@ -838,26 +873,48 @@ class _ShopTabPageState extends State<ShopTabPage> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(headline,
-                    style: szFigure(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                        color: sz.clay)),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(headlineNote,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: sz.ink)),
+          Row(children: [
+            // 费率大字和后面那句仍按基线对齐(衬线数字和黑体中文字高不同),
+            // 所以关闭键**不能进这个 Row** —— 一个没有基线的盒子塞进
+            // baseline 行里,对齐会退化成按顶边排
+            Expanded(
+              child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(headline,
+                        style: szFigure(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: sz.clay)),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(headlineNote,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: sz.ink)),
+                    ),
+                  ]),
+            ),
+            // 关闭:热区 40×40(图标只有 16,光按图标点不中),
+            // 与用户端两处同一套尺寸
+            Semantics(
+              label: '不再显示这张费率卡',
+              button: true,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: _hideGold,
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: Icon(Icons.close, size: 16, color: sz.inkMuted),
                 ),
-              ]),
+              ),
+            ),
+          ]),
           const SizedBox(height: 4),
           Text(sub,
               style:
@@ -1288,6 +1345,26 @@ class _ShopTabPageState extends State<ShopTabPage> {
             onTap: () => Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => ApplymentPage(api: widget.api, shop: shop))),
           ),
+        // 费率卡收起时,它那两份文件落在这儿。**只在收起时出现** ——
+        // 卡开着还挂一份就是同一个入口在一页上出现两次。
+        //
+        // 这不是"顺手也放一份",是那张卡能被关掉的前提:这两页在全仓
+        // 只有费率卡里那一个构造点,少了这一段,关卡片 = 删功能。
+        // 放在「用户协议与隐私政策」旁边是因为它们是同一类东西 ——
+        // 平台和商家之间那份关系写成的字
+        if (_goldHidden) ...[
+          SzEntryTile(
+            icon: Icons.handshake_outlined,
+            title: '平台对你的承诺',
+            onTap: _openPromises,
+          ),
+          SzEntryTile(
+            icon: Icons.gavel_outlined,
+            title: '平台规则',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MerchantRulesPage(api: widget.api))),
+          ),
+        ],
         SzEntryTile(
           icon: Icons.description_outlined,
           title: '用户协议与隐私政策',
@@ -1402,8 +1479,12 @@ class _ShopTabPageState extends State<ShopTabPage> {
         children: [
           // 有钱、有时限、且平台在等你表态的事,排在一切之前
           ..._afterSaleBlock(),
-          _goldCard(shop),
-          const SizedBox(height: 12),
+          // 关掉之后连同它的间距一起消失 —— 留一个 12px 的空档
+          // 就是"关了但还占着位"
+          if (!_goldHidden) ...[
+            _goldCard(shop),
+            const SizedBox(height: 12),
+          ],
           _identityCard(shop),
           const SizedBox(height: 12),
           _toolsGrid(shop),
