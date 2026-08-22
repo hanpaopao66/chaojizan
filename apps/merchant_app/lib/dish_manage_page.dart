@@ -503,7 +503,11 @@ class _DishManagePageState extends State<DishManagePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('本月销量榜',
+                      // 「近 30 天」不是「本月」:服务端 `_DISH_SALES_SQL` 算的是
+                      // `interval '30 days'`(滚动窗),而同一个 App 的对账页
+                      // 「本月已完成 N 单」用的是自然月(`now_bj.replace(day=1)`)。
+                      // 每月 1 号这两个窗差 29 天 —— 商家拿这个榜决定下架哪道菜
+                      Text('近 30 天销量榜',
                           style: Theme.of(context)
                               .textTheme
                               .titleSmall
@@ -523,7 +527,7 @@ class _DishManagePageState extends State<DishManagePage> {
                       if (stale > 0)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
-                          child: Text('$stale 道在售菜品本月零销量,考虑调整或下架',
+                          child: Text('$stale 道在售菜品近 30 天零销量,考虑调整或下架',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall

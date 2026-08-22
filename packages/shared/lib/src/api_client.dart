@@ -1444,12 +1444,18 @@ class ApiClient {
   /// 我的订单(游标分页)。[before] 传上一页最后一单的 createdAt。
   /// 不传就是第一页;服务端 limit 上限 50。
   /// [q] 商家搜单:订单号片段/取餐码/顾客手机尾号(≥3 字符)
+  ///
+  /// [status] 只回这一个状态的单(服务端 orders.py 早就支持,客户端一直没露出来)。
+  /// **商家端的「待接单」必须用它**:不带 status 时服务端按 `created_at desc`
+  /// 切最新一页,午高峰 20 单以上时更早的未接单会掉出窗口 ——
+  /// 而那一份列表同时驱动顶栏的「N 单待接」和每 10 秒一次的催单语音。
   Future<List<Order>> myOrders(
-      {String? before, int limit = 20, String? q}) async {
+      {String? before, int limit = 20, String? q, String? status}) async {
     final data = await _request('GET', '/orders', query: {
       'limit': '$limit',
       if (before != null && before.isNotEmpty) 'before': before,
       if (q != null && q.isNotEmpty) 'q': q,
+      if (status != null && status.isNotEmpty) 'status': status,
     });
     return (data as List)
         .map((e) => Order.fromJson(e as Map<String, dynamic>))

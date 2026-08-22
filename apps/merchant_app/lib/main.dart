@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -298,6 +299,23 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   /// 最近一次拉取失败的原因;空串 = 上一次是成功的
   String _ordersError = '';
 
+  /// 待接单**单独按状态拉**的那一份。null = 这一轮没拉(窗口没被截断)。
+  /// 为什么需要它见 [_pendingInWindow]。
+  List<Order>? _pendingFetched;
+
+  // ---------- 「历史」分段的自有分页 ----------
+  //
+  // 「历史」原本是从 `_orders`(最近 20 单)里过滤出来的,没有翻页。
+  // 一家一天 40 单的店,过了午市点「历史」可能一条都没有 ——
+  // 而屏幕会说「这一栏没有订单」。名字是「历史」,内容是「最近 20 单的残余」。
+  //
+  // 这里给它自己的游标。**用游标不用 offset**:翻页期间还在进新单,
+  // offset 会漏单或重复(api_client.myOrders 的注释里是同一条理由)。
+  final List<Order> _historyMore = [];
+  String? _historyCursor;
+  bool _historyLoading = false;
+  bool _historyEnd = false;
+
   // 今日 · 待办卡(工作台第一眼):30 秒一刷,失败保留上次的数
   Map<String, dynamic>? _today;
   Map<String, dynamic>? _todos;
@@ -512,10 +530,13 @@ class _MerchantHomePageState extends State<MerchantHomePage>
 
     // 持续催单:只要有待接订单,每 10 秒语音播报一次,直到商家处理。
     // **前后台一个节奏,不降频** —— 后台听不见催单等于这个 App 白做
+    //
+    // ⚠️ 判据走 [_pendingCount],**不是** `_orders.any(paid)`。
+    // `_orders` 是 20 条的窗口:午高峰压过 20 单时,更早的未接单掉出窗口,
+    // 这里就再也不响了 —— 而那恰恰是商家最需要被叫醒的时候。
+    // 催单语音是漏单的最后一道防线,它的判据必须是全量的那个数。
     _alertTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      if (_orders.any((o) => o.status == OrderStatus.paid)) {
-        _announcer.announce();
-      }
+      if (_pendingCount > 0) _announcer.announce();
     });
   }
 
@@ -717,6 +738,119 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     });
   }
 
+  /// 服务端聚合的待接单数(`/merchants/me/todos` 的 `pending_orders`,
+  /// 服务端是 `count(Order.id) where status == PAID`,全量、无窗口)。
+  /// null = 还没拉到(冷启动的头几百毫秒)。
+  int? get _serverPending => _todos?['pending_orders'] as int?;
+
+  /// **窗口里**看得见的待接单。
+  ///
+  /// ⚠️ 这不是总数。`myOrders()` 默认 `limit=20`,服务端按 `created_at desc`
+  /// 切片、**不带状态过滤**(orders.py)。午高峰 20 单以上时,更早的未接单
+  /// 会掉出这个窗口 —— 而 `_orders` 这一个列表同时驱动顶栏的「N 单待接」、
+  /// 三个分段的内容、以及每 10 秒一次的催单语音。三条链一起断:
+  /// 看不见、数不到、**也不再催**。
+  ///
+  /// 而这一页早就把权威数拉下来了(`_todos`),只是一次都没用。
+  List<Order> get _pendingInWindow =>
+      _orders.where((o) => o.status == OrderStatus.paid).toList();
+
+  /// 待接单列表:窗口截断了就用单独拉的那一份,没截断就用窗口里那些。
+  List<Order> get _pendingList => _pendingFetched ?? _pendingInWindow;
+
+  /// 待接单总数。
+  ///
+  /// 单独拉过就用那一份的长度(它是同一轮刷新里按状态拿的,精确);
+  /// 没拉过就取「服务端说的」和「窗口里数的」两者的大者 ——
+  /// `/todos` 30 秒一刷,而 WebSocket 推进来的新单立刻就在列表里,
+  /// 那几十秒窗口比服务端新;反过来,超过 20 单的那部分只有服务端知道。
+  int get _pendingCount =>
+      _pendingFetched?.length ??
+      math.max(_serverPending ?? 0, _pendingInWindow.length);
+
+  /// 待接单掉出窗口时,按状态单独再拉一次。
+  ///
+  /// **平时这一次请求不会发出去**:服务端说的待接数和窗口里数出来的一致,
+  /// 就说明没被截断。只有午高峰真压了 20 单以上才多花一个来回 ——
+  /// 而那正是这个 App 存在的时刻。
+  Future<void> _syncPending(List<Order> window) async {
+    final server = _serverPending;
+    final visible = window.where((o) => o.status == OrderStatus.paid).length;
+    if (server == null || server <= visible) {
+      if (_pendingFetched != null && mounted) {
+        setState(() => _pendingFetched = null);
+      }
+      return;
+    }
+    try {
+      // 走枚举不写字面量:服务端 `OrderStatus(status)` 认的就是这个值
+      final all =
+          await widget.api.myOrders(status: OrderStatus.paid.value, limit: 50);
+      if (mounted) setState(() => _pendingFetched = all);
+    } catch (_) {
+      // 拉不到就退回窗口里那些:少显示几单,但**绝不清空** ——
+      // 和 _refresh 失败时保留上一次结果是同一条理由
+    }
+  }
+
+  /// 「历史」分段该显示的单。窗口里那些 + 翻页拿到的更早的,按单号去重。
+  ///
+  /// 去重是必要的:翻页之后又进了新单,`_orders` 会整体往前挪,
+  /// 原来窗口最末那几单就和 `_historyMore` 的头几单重了。
+  List<Order> get _historyList {
+    const done = {
+      OrderStatus.delivered,
+      OrderStatus.completed,
+      OrderStatus.cancelled,
+    };
+    final seen = <String>{};
+    final out = <Order>[];
+    for (final o in [..._orders, ..._historyMore]) {
+      if (!done.contains(o.status)) continue;
+      if (seen.add(o.orderNo)) out.add(o);
+    }
+    return out;
+  }
+
+  /// 下一页的游标 = 目前已知**最早**一单的下单时间。
+  String? get _historyCursorNext {
+    if (_historyCursor != null) return _historyCursor;
+    return _orders.isEmpty ? null : _orders.last.createdAt;
+  }
+
+  /// 历史栏还有没有「更早的」可翻。
+  bool get _historyHasMore => !_historyEnd && _historyCursorNext != null;
+
+  Future<void> _loadMoreHistory() async {
+    if (_historyLoading || _historyEnd) return;
+    final cursor = _historyCursorNext;
+    if (cursor == null) return;
+    setState(() => _historyLoading = true);
+    try {
+      final page = await widget.api.myOrders(before: cursor, limit: 20);
+      if (!mounted) return;
+      setState(() {
+        _historyMore.addAll(page);
+        _historyCursor = page.isEmpty ? cursor : page.last.createdAt;
+        // 回不满一页 = 到底了
+        _historyEnd = page.length < 20;
+      });
+    } catch (e) {
+      if (mounted) _snack(e is ApiException ? e.message : '$e');
+    } finally {
+      if (mounted) setState(() => _historyLoading = false);
+    }
+  }
+
+  /// 切到「历史」时,窗口里一条历史单都没有就先自动翻一页。
+  ///
+  /// 不自动翻的话,商家看到的是「这一栏没有订单」—— 而更早的单明明还在。
+  /// 「没有」和「这一页没有」在屏幕上长得一样,是这一栏最危险的歧义。
+  void _maybeAutoLoadHistory() {
+    if (_segment != 2 || _historyLoading || !_historyHasMore) return;
+    if (_historyList.isEmpty) _loadMoreHistory();
+  }
+
   /// 拉订单列表。
   ///
   /// ⚠️ **失败绝不能静默。** 这里原本是 `catch (_) {}` ——
@@ -741,6 +875,8 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         });
       }
       _autoPrintNew(orders);
+      await _syncPending(orders);
+      _maybeAutoLoadHistory();
     } catch (e) {
       if (mounted) {
         setState(() => _ordersError = e is ApiException ? e.message : '$e');
@@ -784,6 +920,12 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         _today = today;
         _todos = todos;
       });
+      // 刚拿到权威的待接数,立刻和窗口对一次。
+      // **不能只在 `_refresh()` 里对**:冷启动时这两个请求是并发的,
+      // `_refresh()` 跑完时 `_todos` 还是 null,那一轮 `_syncPending` 只能空跑 ——
+      // 于是「掉出窗口的未接单」要等下一个 15 秒的 tick 才浮出来
+      await _syncPending(_orders);
+      _maybeAutoLoadHistory();
     }
   }
 
@@ -962,6 +1104,9 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     try {
       await widget.api.transition(order.orderNo, to);
       _refresh();
+      // 待办数也要跟着走:不刷的话 `/todos` 最长 30 秒才更新,
+      // 而这期间 [_pendingCount] 还按旧值催 —— 接完最后一单还在响
+      _refreshToday();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
@@ -996,6 +1141,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       await widget.api
           .transition(order.orderNo, OrderStatus.cancelled, reason: reason);
       _refresh();
+      _refreshToday(); // 同 _act:拒完单 [_pendingCount] 要立刻降下来
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -1247,7 +1393,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
             child: OutlinedButton(
                 onPressed: () => _reject(order), child: const Text('拒单')),
           ),
-          const SizedBox(width: 8),
           Semantics(
             label: '接单,$who',
             excludeSemantics: true,
@@ -1264,7 +1409,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
           printButton,
           TextButton(
               onPressed: () => _refundSheet(order), child: const Text('缺货退款')),
-          const SizedBox(width: 8),
           Semantics(
             label: '出餐完成,$who',
             excludeSemantics: true,
@@ -1284,7 +1428,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
           if (!order.pickup &&
               !order.selfDelivery &&
               order.riderId != null) ...[
-            const SizedBox(width: 8),
             OutlinedButton.icon(
                 icon: const Icon(Icons.delivery_dining, size: 18),
                 onPressed: () => Navigator.of(context).push(
@@ -1294,7 +1437,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 label: const Text('骑手位置')),
           ],
           if (order.pickup) ...[
-            const SizedBox(width: 8),
             Semantics(
               label: '核销取餐码,$who',
               excludeSemantics: true,
@@ -1306,7 +1448,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
             ),
           ],
           if (order.selfDelivery) ...[
-            const SizedBox(width: 8),
             // 出发前先看清送去哪、多远。远近全靠猜的话,
             // 猜错就是自己骑半小时送一单 3 块钱配送费的活
             OutlinedButton.icon(
@@ -1315,7 +1456,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                     MaterialPageRoute<void>(
                         builder: (_) => SelfDeliveryMapPage(order: order))),
                 label: const Text('地图')),
-            const SizedBox(width: 8),
             Semantics(
               label: '开始配送,自送,$who',
               excludeSemantics: true,
@@ -1331,7 +1471,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         return [
           printButton,
           if (!order.selfDelivery && order.riderId != null) ...[
-            const SizedBox(width: 8),
             OutlinedButton.icon(
                 icon: const Icon(Icons.delivery_dining, size: 18),
                 onPressed: () => Navigator.of(context).push(
@@ -1343,7 +1482,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
           // 自送的商家在路上,和骑手是同一种处境:需要导航,而不是一行文字地址。
           // 此前商家端全程没有地图,自送只能对着地址自己找
           if (order.selfDelivery) ...[
-            const SizedBox(width: 8),
             OutlinedButton.icon(
                 icon: const Icon(Icons.navigation_outlined, size: 18),
                 onPressed: () => navigateTo(context,
@@ -1352,7 +1490,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                     name: order.address,
                     mode: NavMode.ride),
                 label: const Text('导航')),
-            const SizedBox(width: 8),
             FilledButton(
                 onPressed: () => _act(order, OrderStatus.delivered),
                 child: const Text('已送达')),
@@ -1371,20 +1508,35 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       OrderStatus.pickedUp,
     };
     return switch (_segment) {
-      0 => _orders.where((o) => o.status == OrderStatus.paid).toList(),
+      // 待接单和历史都不再从 20 条窗口里过滤
+      // —— 见 [_pendingInWindow]、[_historyList]
+      0 => _pendingList,
       1 => _orders.where((o) => ongoing.contains(o.status)).toList(),
-      _ => _orders
-          .where((o) =>
-              o.status == OrderStatus.delivered ||
-              o.status == OrderStatus.completed ||
-              o.status == OrderStatus.cancelled)
-          .toList(),
+      _ => _historyList,
     };
   }
 
+  /// 历史栏底下那一条「看更早的订单」。
+  ///
+  /// 只在**历史**栏出现,而且只在服务端还可能有更早的单时出现 ——
+  /// 翻到底之后它自己消失,不留一个点了没反应的按钮。
+  bool get _showHistoryMore => !_searchMode && _segment == 2 && _historyHasMore;
+
+  /// 历史正在翻页(空态文案要跟着变:「没有」和「还在翻」不是一回事)。
+  bool get _historyPending => _segment == 2 && _historyLoading;
+
+  Widget _historyMoreTile() => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+        child: OutlinedButton(
+          onPressed: _historyLoading ? null : _loadMoreHistory,
+          child: Text(_historyLoading ? '正在翻…' : '看更早的订单'),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
-    final pending = _orders.where((o) => o.status == OrderStatus.paid).length;
+    // **不是** `_orders.where(paid).length` —— 那是 20 条窗口里的数。见 [_pendingCount]
+    final pending = _pendingCount;
     // 宽屏(≥600)换左侧栏(#295)。商家端尤其需要:网页版和桌面版是
     // 「坐在店里的电脑前接单」的场景,鼠标跑到 1440px 屏底部切页太远
     return SzNavScaffold(
@@ -1557,8 +1709,10 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                                           value: 2, label: Text('历史')),
                                     ],
                                     selected: {_segment},
-                                    onSelectionChanged: (s) =>
-                                        setState(() => _segment = s.first),
+                                    onSelectionChanged: (s) {
+                                      setState(() => _segment = s.first);
+                                      _maybeAutoLoadHistory();
+                                    },
                                   ),
                                 ),
                               // 拉不到订单时的警示条。**必须在列表上方、必须显眼** ——
@@ -1580,11 +1734,21 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                                                       // 那是在替一个未知状态下结论
                                                       : (_ordersStale
                                                           ? '订单列表没能加载出来'
-                                                          : '这一栏没有订单'))))
+                                                          : _historyPending
+                                                              ? '正在翻更早的订单…'
+                                                              : '这一栏没有订单'))),
+                                          ),
+                                          // 空着也要给出口:这一栏空不代表更早的也空
+                                          if (_showHistoryMore)
+                                            _historyMoreTile(),
                                         ])
                                       : ListView.builder(
-                                          itemCount: _filteredOrders.length,
+                                          itemCount: _filteredOrders.length +
+                                              (_showHistoryMore ? 1 : 0),
                                           itemBuilder: (context, i) {
+                                            if (i >= _filteredOrders.length) {
+                                              return _historyMoreTile();
+                                            }
                                             final order = _filteredOrders[i];
                                             final sz = Theme.of(context).sz;
                                             final isNew = order.status ==
@@ -1755,10 +1919,34 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                                                     if (_actionsFor(order)
                                                         .isNotEmpty) ...[
                                                       const SizedBox(height: 6),
-                                                      Row(
-                                                        mainAxisAlignment:
-                                                            MainAxisAlignment
-                                                                .end,
+                                                      // ⚠️ **Wrap 不是 Row。**
+                                                      //
+                                                      // 待接单那一行实测本征宽
+                                                      // 354px,而卡片内容区在 390 屏
+                                                      // 上只有 340(360 屏 310、
+                                                      // 320 屏 270);自送待取餐那一行
+                                                      // 要 410px。`RenderFlex` 溢出时
+                                                      // `remainingSpace =
+                                                      // max(0, delta)`,`end` 对齐
+                                                      // 于是退化成 start ——
+                                                      // **被挤出去的是最后一个孩子**,
+                                                      // 也就是「接单」和
+                                                      // 「开始配送(自送)」。而 Row
+                                                      // 默认 Clip.none,它照样被画出来:
+                                                      // 390 上压在描边上,360 上有一截
+                                                      // 跑到屏幕外。
+                                                      //
+                                                      // 换 Wrap 之后放不下就折行,
+                                                      // 一个按钮都不丢。代价是 ≤390 屏
+                                                      // 上这张卡实测 180 → 238;
+                                                      // ≥430 仍是一行 180。这一页的
+                                                      // `_todayCard()` 为一模一样的
+                                                      // 溢出换过 Wrap,同一条理由。
+                                                      Wrap(
+                                                        alignment:
+                                                            WrapAlignment.end,
+                                                        spacing: 8,
+                                                        runSpacing: 4,
                                                         children:
                                                             _actionsFor(order),
                                                       ),

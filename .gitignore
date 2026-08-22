@@ -79,3 +79,7 @@ deploy/wxpay-certs/
 docs/ROADMAP.md
 merchant-web/node_modules/
 admin-web/node_modules/
+
+# 评审用截图产物:每跑一次就变,进仓库只是噪音。
+# golden 基线是另一回事(带 @Tags(['golden']),在 test/goldens/ 下)
+apps/*/test/_shots/

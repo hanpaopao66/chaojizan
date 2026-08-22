@@ -9,6 +9,39 @@ import 'package:share_plus/share_plus.dart';
 import 'analytics_page.dart';
 import 'invoice_page.dart';
 
+/// 提现记录一行:状态用 chip,红色只留给驳回/失败。
+///
+/// 对账页(只列最近几条)和「全部提现记录」页共用 —— 两处各写一遍的话,
+/// 哪天改了颜色规则只改一处,同一笔提现在两页会是两种颜色。
+Widget withdrawalRow(BuildContext context, Withdrawal w) {
+  final sz = Theme.of(context).sz;
+  final color = switch (w.status) {
+    'paid' => sz.earn,
+    'rejected' || 'failed' => sz.danger,
+    _ => sz.hold,
+  };
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 11),
+    child: Row(children: [
+      Expanded(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(yuan(w.amountCents),
+                style: szMoney(fontSize: 13.5, color: sz.ink)),
+            const SizedBox(height: 2),
+            Text(
+                szTimeAgo(w.createdAt) +
+                    (w.rejectReason.isEmpty ? '' : ' · ${w.rejectReason}'),
+                style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+          ],
+        ),
+      ),
+      SzChip(w.statusLabel, color: color, dense: true),
+    ]),
+  );
+}
+
 /// 商家对账:今日概览 + 按日账单,点某天看逐单明细。
 class FinancePage extends StatefulWidget {
   const FinancePage({super.key, required this.api});
@@ -126,10 +159,6 @@ class _FinancePageState extends State<FinancePage> {
           .showSnackBar(SnackBar(content: Text(e.toString())));
     }
   }
-
-  /// 近的说「多久前」,超过昨天自动退回「M/D HH:MM」——
-  /// 精度不丢,但「2 小时前提的」比「07-29 05:12」好读得多。
-  String _localTime(String iso) => szTimeAgo(iso);
 
   Widget _walletMetric(String label, int cents) {
     final sz = Theme.of(context).sz;
@@ -277,35 +306,6 @@ class _FinancePageState extends State<FinancePage> {
     );
   }
 
-  /// 提现记录一行:状态用 chip,红色只留给驳回/失败。
-  Widget _withdrawalRow(Withdrawal w) {
-    final sz = Theme.of(context).sz;
-    final color = switch (w.status) {
-      'paid' => sz.earn,
-      'rejected' || 'failed' => sz.danger,
-      _ => sz.hold,
-    };
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 11),
-      child: Row(children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(yuan(w.amountCents),
-                  style: szMoney(fontSize: 13.5, color: sz.ink)),
-              const SizedBox(height: 2),
-              Text(
-                  _localTime(w.createdAt) +
-                      (w.rejectReason.isEmpty ? '' : ' · ${w.rejectReason}'),
-                  style: TextStyle(fontSize: 11, color: sz.inkMuted)),
-            ],
-          ),
-        ),
-        SzChip(w.statusLabel, color: color, dense: true),
-      ]),
-    );
-  }
 
   Widget _metric(String label, String value, String unit) {
     final sz = Theme.of(context).sz;
@@ -325,6 +325,32 @@ class _FinancePageState extends State<FinancePage> {
         Text(label, style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
       ]),
     );
+  }
+
+  /// 分账台面上「平台佣金」那一行的费率说明。
+  ///
+  /// ## 这里原本把平台自己的抽成说小了
+  ///
+  /// 旧写法是 `((_tier?['commission_rate'] as num?) ?? 0.05) * 100 ~/ 1`。
+  /// `~/` 是**整数除法**:`0.045 * 100 ~/ 1 == 4`,于是 4.5% 的店在这一页
+  /// 看到「按 4% 计」,而同一屏往上 600px 的阶梯佣金卡写着「4.5%」。
+  /// 4.5% 不是极端输入 —— `config.py` 的档位表里 500–999 单/月就是这一档。
+  ///
+  /// ## 为什么按当天的数算,而不是照搬当前费率
+  ///
+  /// 右边那个金额是服务端**逐单累加**出来的(`merchant_earnings`),
+  /// 而 `commission_rate` 是店铺此刻的档位。每月 1 日重算当天、
+  /// 或者当天混了不同口径的单(团购券核销走 `VoucherPurchase.net_cents`),
+  /// 两者就对不上 —— 那时候照搬档位就是在给一个和右边数字不符的解释。
+  /// 有流水就按 `佣金 ÷ 流水` 算,这一行说的才是它自己。
+  ///
+  /// 今天还没有流水时(除数为 0)退回当前档位:那时它答的是
+  /// 「你这一档是多少」,仍然照实格式化,不截断。
+  String _commissionNote(DayStat? today) {
+    final rate = (today != null && today.foodCents > 0)
+        ? today.commissionCents / today.foodCents
+        : ((_tier?['commission_rate'] as num?) ?? 0.05).toDouble();
+    return '按 ${(rate * 100).toStringAsFixed(1)}% 计';
   }
 
   @override
@@ -476,7 +502,7 @@ class _FinancePageState extends State<FinancePage> {
                   label: '菜品流水', amountCents: todayStat?.foodCents ?? 0),
               SzFeeRow(
                   label: '平台佣金',
-                  note: '按 ${((_tier?['commission_rate'] as num?) ?? 0.05) * 100 ~/ 1}% 计',
+                  note: _commissionNote(todayStat),
                   amountCents: todayStat?.commissionCents ?? 0,
                   negative: true,
                   isHold: true),
@@ -507,16 +533,28 @@ class _FinancePageState extends State<FinancePage> {
             ),
           if (_withdrawals.isNotEmpty) ...[
             const SizedBox(height: 18),
-            const SzSectionTitle('提现记录'),
+            // 原来是 `take(20)` 却只写「提现记录」—— 服务端 `/me/withdrawals`
+            // 是 `.limit(100)`,客户端再切到 20,而标题既不说「近 N 条」
+            // 也没有翻页:提现频繁的店永远看不到更早的,**也不知道自己没看全**。
+            SzSectionTitle('提现记录 · 最近 ${_withdrawals.take(3).length} 条'),
             const SizedBox(height: 9),
             SzCard(
               padding: EdgeInsets.zero,
               child: Column(children: [
-                for (final (i, w) in _withdrawals.take(20).indexed) ...[
+                for (final (i, w) in _withdrawals.take(3).indexed) ...[
                   if (i > 0)
                     Divider(height: 1, color: Theme.of(context).sz.line),
-                  _withdrawalRow(w),
+                  withdrawalRow(context, w),
                 ],
+                Divider(height: 1, color: Theme.of(context).sz.line),
+                SzEntryTile(
+                  title: '全部提现记录',
+                  value: '${_withdrawals.length}'
+                      '${_withdrawals.length >= 100 ? '+' : ''} 条',
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) =>
+                          MerchantWithdrawalsPage(items: _withdrawals))),
+                ),
               ]),
             ),
           ],
@@ -637,6 +675,52 @@ class _DayOrdersPageState extends State<DayOrdersPage> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// 全部提现记录。
+///
+/// 服务端 `/merchants/me/withdrawals` 是 `.limit(100)`,所以这里也只可能有
+/// 100 条 —— **标题就照实说 100**,不写一个说不出上限的「全部」。
+/// 更早的走对账页的「导出对账单(CSV)」。
+class MerchantWithdrawalsPage extends StatelessWidget {
+  const MerchantWithdrawalsPage({super.key, required this.items});
+
+  final List<Withdrawal> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final capped = items.length >= 100;
+    return SzPageScaffold(
+      appBar:
+          AppBar(title: Text('提现记录 · ${items.length}${capped ? '+' : ''} 条')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 24),
+        children: [
+          SzCard(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              for (final (i, w) in items.indexed) ...[
+                if (i > 0)
+                  Divider(height: 1, color: Theme.of(context).sz.line),
+                withdrawalRow(context, w),
+              ],
+            ]),
+          ),
+          if (capped)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(kCardPad, 10, kCardPad, 0),
+              child: Text(
+                  '只回最近 100 条。更早的提现在「对账工具 - 导出对账单(CSV)」里,'
+                  '口径与钱包同源。',
+                  style: TextStyle(
+                      fontSize: kFontMicro,
+                      height: 1.5,
+                      color: Theme.of(context).sz.inkMuted)),
+            ),
+        ],
       ),
     );
   }
