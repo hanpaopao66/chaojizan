@@ -312,6 +312,16 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   // 这里给它自己的游标。**用游标不用 offset**:翻页期间还在进新单,
   // offset 会漏单或重复(api_client.myOrders 的注释里是同一条理由)。
   final List<Order> _historyMore = [];
+
+  /// 历史最多留 200 条(10 页)。
+  ///
+  /// `_historyMore` 原本只增不减:商家一直开着 App 反复翻,连锁总部长期
+  /// 挂机可能攒到几千条,全在内存里、全参与每帧的 diff(#33 第 5 节遗留)。
+  ///
+  /// 选上限而不是「切走分段就清空」:清空的话商家翻了五页、切去看一眼
+  /// 待接单再回来,五页全没了 —— 那是拿体验换内存。到上限后**明说**
+  /// 去哪找更早的,和提现记录那 100 条一个口径(不静默停住)。
+  static const _kHistoryMax = 200;
   String? _historyCursor;
   bool _historyLoading = false;
   bool _historyEnd = false;
@@ -819,7 +829,15 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   }
 
   /// 历史栏还有没有「更早的」可翻。
-  bool get _historyHasMore => !_historyEnd && _historyCursorNext != null;
+  bool get _historyHasMore =>
+      !_historyEnd &&
+      _historyCursorNext != null &&
+      _historyMore.length < _kHistoryMax;
+
+  /// 到上限了(不是翻到底了)。两者的文案必须不一样 ——
+  /// 「没有更早的」和「这里不再往下翻」是两件事
+  bool get _historyCapped =>
+      !_historyEnd && _historyMore.length >= _kHistoryMax;
 
   Future<void> _loadMoreHistory() async {
     if (_historyLoading || _historyEnd) return;
@@ -1338,36 +1356,98 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     return '尾号 $tail,${(order.totalCents / 100).toStringAsFixed(2)} 元';
   }
 
+  /// 卡片右上角的「⋯」:聊天 / 打印小票 / 缺货退款(#33 4.1 第 4 点)。
+  ///
+  /// 这三个从动作行收进菜单,动作行只留主操作(拒单/接单/出餐完成…)。
+  /// 换来的是窄屏上动作行不再折行:卡从 238 回到 180 以下,首屏多放一张。
+  ///
+  /// ⚠️ **这一条改了手势习惯**:打印小票从 1 触摸变 2 触摸。之所以是它们
+  /// 三个而不是别的 —— 主操作每单必点,这三个是**偶尔**才点:
+  /// 聊天要顾客先问、打印小票绝大多数店已经开了自动出票(蓝牙/云打印
+  /// 在支付成功时就打了)、缺货退款是异常路径。
+  ///
+  /// 历史单(default 分支)本来就没有动作行,也就没有这个菜单 —— 保持原样。
+  Widget? _moreMenuFor(Order order) {
+    final who = _orderSpeech(order);
+    final canRefund = order.status == OrderStatus.paid ||
+        order.status == OrderStatus.accepted;
+    const live = {
+      OrderStatus.paid,
+      OrderStatus.accepted,
+      OrderStatus.ready,
+      OrderStatus.pickedUp,
+    };
+    if (!live.contains(order.status)) return null;
+    return Semantics(
+      label: '更多操作,$who',
+      button: true,
+      excludeSemantics: true,
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: PopupMenuButton<String>(
+          tooltip: '更多',
+          padding: EdgeInsets.zero,
+          icon: const Icon(Icons.more_horiz, size: 20),
+          onSelected: (v) {
+            switch (v) {
+              case 'chat':
+                Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => OrderChatPage(
+                        api: widget.api,
+                        orderNo: order.orderNo,
+                        title: '和顾客说句话',
+                        quickReplies: kMerchantQuickReplies)));
+              case 'print':
+                _printTicket(order);
+              case 'refund':
+                _refundSheet(order);
+            }
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(
+              value: 'chat',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.chat_bubble_outline, size: 20),
+                title: Text('和顾客说句话'),
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'print',
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.print_outlined, size: 20),
+                title: Text('打印小票'),
+              ),
+            ),
+            if (canRefund)
+              const PopupMenuItem(
+                value: 'refund',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.remove_shopping_cart_outlined, size: 20),
+                  title: Text('缺货退款'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 动作行:**只留主操作**。
+  ///
+  /// 聊天 / 打印小票 / 缺货退款收进了卡片右上角的「⋯」(见 [_moreMenuFor])
+  /// —— 它们挤在这一行时,窄屏上要折成两行,一张卡 180 → 238。
   List<Widget> _actionsFor(Order order) {
     final who = _orderSpeech(order);
-    final printButton = Row(mainAxisSize: MainAxisSize.min, children: [
-      IconButton(
-        tooltip: '和顾客说句话',
-        // tooltip 本身会被读出来,但只有"和顾客说句话"——是哪一单不知道
-        icon: Semantics(
-            label: '和顾客说句话,$who',
-            child: const Icon(Icons.chat_bubble_outline, size: 20)),
-        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => OrderChatPage(
-                api: widget.api,
-                orderNo: order.orderNo,
-                title: '和顾客说句话',
-                quickReplies: kMerchantQuickReplies))),
-      ),
-      IconButton(
-        tooltip: '打印小票',
-        icon: Semantics(
-            label: '打印小票,$who',
-            child: const Icon(Icons.print_outlined, size: 20)),
-        onPressed: () => _printTicket(order),
-      ),
-    ]);
     switch (order.status) {
       case OrderStatus.paid:
         return [
-          printButton,
-          TextButton(
-              onPressed: () => _refundSheet(order), child: const Text('缺货退款')),
           // 拒单和接单在屏幕上挨着,读屏时更要说清是哪一单
           Semantics(
             label: '拒单,$who',
@@ -1389,9 +1469,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         ];
       case OrderStatus.accepted:
         return [
-          printButton,
-          TextButton(
-              onPressed: () => _refundSheet(order), child: const Text('缺货退款')),
           Semantics(
             label: '出餐完成,$who',
             excludeSemantics: true,
@@ -1405,7 +1482,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         ];
       case OrderStatus.ready:
         return [
-          printButton,
           // 平台配送且骑手已接:看骑手到哪了(顾客催单先打给店家,
           // 店家不该两眼一抹黑)
           if (!order.pickup &&
@@ -1452,7 +1528,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
         ];
       case OrderStatus.pickedUp:
         return [
-          printButton,
           if (!order.selfDelivery && order.riderId != null) ...[
             OutlinedButton.icon(
                 icon: const Icon(Icons.delivery_dining, size: 18),
@@ -1515,17 +1590,264 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   ///
   /// 只在**历史**栏出现,而且只在服务端还可能有更早的单时出现 ——
   /// 翻到底之后它自己消失,不留一个点了没反应的按钮。
-  bool get _showHistoryMore => !_searchMode && _segment == 2 && _historyHasMore;
+  bool get _showHistoryMore =>
+      !_searchMode && _segment == 2 && (_historyHasMore || _historyCapped);
 
   /// 历史正在翻页(空态文案要跟着变:「没有」和「还在翻」不是一回事)。
   bool get _historyPending => _segment == 2 && _historyLoading;
 
+  /// 一张订单卡。
+  ///
+  /// 抽成方法是为了让窄屏的 `ListView.builder` 和宽屏两栏共用同一张卡
+  /// (#33 4.1 宽屏)—— 两处各画一张的话,改一处忘一处。
+  Widget _orderCard(Order order) {
+    final sz = Theme.of(context).sz;
+    final isNew = order.status ==
+        OrderStatus.paid;
+    return Container(
+      margin:
+          const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 5),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius:
+            BorderRadius.circular(
+                kRadiusMd),
+        border: Border.all(
+            // 出餐超时:整卡 danger 描边,后厨一眼看到该催
+            color: order.readyLate
+                ? sz.danger
+                : sz.line,
+            width: order.readyLate
+                ? 1.5
+                : 1),
+      ),
+      // 新单左侧一条 clay:待接单的在列表里要一眼挑出来
+      foregroundDecoration: isNew
+          ? BoxDecoration(
+              borderRadius:
+                  BorderRadius.circular(
+                      kRadiusMd),
+              border: Border(
+                  left: BorderSide(
+                      color: sz.clay,
+                      width: 3)),
+            )
+          : null,
+      // 「⋯」用 Stack 浮在右上角而不是
+      // 排进标题行:40×40 的触控区排进去
+      // 会把那一行从 20 撑到 40,而这一点
+      // 改造的全部意义就是省高度(实测
+      // 排进去 196、浮起来 176)
+      child: Stack(children: [
+      Padding(
+        padding:
+            const EdgeInsets.fromLTRB(
+                12, 11, 12, 11),
+        child: Column(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
+          children: [
+            Row(
+                crossAxisAlignment:
+                    CrossAxisAlignment
+                        .start,
+                children: [
+                  Expanded(
+                      child: Text(
+                          order.summary,
+                          style: TextStyle(
+                              fontSize:
+                                  14.5,
+                              fontWeight:
+                                  FontWeight
+                                      .w600,
+                              color: sz
+                                  .ink))),
+                  const SizedBox(
+                      width: 8),
+                  SzChip(
+                      order
+                          .status.label,
+                      color: isNew
+                          ? sz.clay
+                          : sz.inkMuted,
+                      dense: true),
+                  // 「⋯」浮在卡片右上角
+                  // (下面的 Stack),
+                  // 这里只给它让出位置
+                  if (_moreMenuFor(
+                          order) !=
+                      null)
+                    const SizedBox(
+                        width: 34),
+                ]),
+            const SizedBox(height: 5),
+            Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  if (order
+                      .parentOrderNo
+                      .isNotEmpty)
+                    SzChip(
+                        '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}',
+                        color: sz.earn,
+                        dense: true),
+                  if (_urgedOrders
+                      .contains(order
+                          .orderNo))
+                    SzChip('催',
+                        color:
+                            sz.danger,
+                        dense: true),
+                  if (order.pickup)
+                    SzChip(
+                        order.pickupCode
+                                .isEmpty
+                            ? '自取'
+                            : '自取 ${order.pickupCode}',
+                        color: sz.hold,
+                        dense: true),
+                ]),
+            if (order.scheduledLabel !=
+                null)
+              Padding(
+                padding:
+                    const EdgeInsets
+                        .only(top: 4),
+                child: Text(
+                    '⏰ ${order.scheduledLabel},请按时出餐',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: sz.hold,
+                        fontWeight:
+                            FontWeight
+                                .w600)),
+              ),
+            if (isNew)
+              _waitTimer(order),
+            // 备餐计时:接单后按承诺出餐时长计时,超时高亮
+            if (order.status ==
+                OrderStatus.accepted)
+              _prepTimer(order),
+            const SizedBox(height: 5),
+            Row(children: [
+              Text(
+                  yuan(
+                      order.totalCents),
+                  style: szMoney(
+                      fontSize: 14,
+                      fontWeight:
+                          FontWeight
+                              .w600,
+                      color: sz.ink)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    order.address,
+                    maxLines: 1,
+                    overflow:
+                        TextOverflow
+                            .ellipsis,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: sz
+                            .inkMuted)),
+              ),
+            ]),
+            if (order.remark.isNotEmpty)
+              Text('备注:${order.remark}',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color:
+                          sz.inkMuted)),
+            if (order.status ==
+                    OrderStatus
+                        .cancelled &&
+                order.cancelReason
+                    .isNotEmpty)
+              Text(
+                  '取消原因:${order.cancelReason}',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color:
+                          sz.danger)),
+            if (order.refundCents > 0)
+              Text(
+                  '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color:
+                          sz.danger)),
+            if (_actionsFor(order)
+                .isNotEmpty) ...[
+              const SizedBox(height: 6),
+              // ⚠️ **Wrap 不是 Row。**
+              //
+              // 待接单那一行实测本征宽
+              // 354px,而卡片内容区在 390 屏
+              // 上只有 340(360 屏 310、
+              // 320 屏 270);自送待取餐那一行
+              // 要 410px。`RenderFlex` 溢出时
+              // `remainingSpace =
+              // max(0, delta)`,`end` 对齐
+              // 于是退化成 start ——
+              // **被挤出去的是最后一个孩子**,
+              // 也就是「接单」和
+              // 「开始配送(自送)」。而 Row
+              // 默认 Clip.none,它照样被画出来:
+              // 390 上压在描边上,360 上有一截
+              // 跑到屏幕外。
+              //
+              // 换 Wrap 之后放不下就折行,
+              // 一个按钮都不丢。代价是 ≤390 屏
+              // 上这张卡实测 180 → 238;
+              // ≥430 仍是一行 180。这一页的
+              // `_todayCard()` 为一模一样的
+              // 溢出换过 Wrap,同一条理由。
+              Wrap(
+                alignment:
+                    WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 4,
+                children:
+                    _actionsFor(order),
+              ),
+            ],
+          ],
+        ),
+      ),
+      if (_moreMenuFor(order) != null)
+        Positioned(
+            // 和卡片自己的 12 内边距对齐,
+            // 否则按钮会压在描边上
+            top: 3,
+            right: 12,
+            child:
+                _moreMenuFor(order)!),
+      ]),
+    );
+  }
+
   Widget _historyMoreTile() => Padding(
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
-        child: OutlinedButton(
-          onPressed: _historyLoading ? null : _loadMoreHistory,
-          child: Text(_historyLoading ? '正在翻…' : '看更早的订单'),
-        ),
+        child: _historyCapped
+            // 停在这里要说清楚为什么,以及更早的去哪找。
+            // 按钮悄悄消失的话,商家会以为「就这些了」
+            ? Text(
+                '这里最多显示最近 $_kHistoryMax 单。更早的在'
+                '「对账 → 导出对账单(CSV)」里,逐单明细都在',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: Theme.of(context).sz.inkMuted))
+            : OutlinedButton(
+                onPressed: _historyLoading ? null : _loadMoreHistory,
+                child: Text(_historyLoading ? '正在翻…' : '看更早的订单'),
+              ),
       );
 
   @override
@@ -1758,217 +2080,11 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                                       : ListView.builder(
                                           itemCount: _filteredOrders.length +
                                               (_showHistoryMore ? 1 : 0),
-                                          itemBuilder: (context, i) {
-                                            if (i >= _filteredOrders.length) {
-                                              return _historyMoreTile();
-                                            }
-                                            final order = _filteredOrders[i];
-                                            final sz = Theme.of(context).sz;
-                                            final isNew = order.status ==
-                                                OrderStatus.paid;
-                                            return Container(
-                                              margin:
-                                                  const EdgeInsets.symmetric(
-                                                      horizontal: 12,
-                                                      vertical: 5),
-                                              decoration: BoxDecoration(
-                                                color: sz.surface,
-                                                borderRadius:
-                                                    BorderRadius.circular(
-                                                        kRadiusMd),
-                                                border: Border.all(
-                                                    // 出餐超时:整卡 danger 描边,后厨一眼看到该催
-                                                    color: order.readyLate
-                                                        ? sz.danger
-                                                        : sz.line,
-                                                    width: order.readyLate
-                                                        ? 1.5
-                                                        : 1),
-                                              ),
-                                              // 新单左侧一条 clay:待接单的在列表里要一眼挑出来
-                                              foregroundDecoration: isNew
-                                                  ? BoxDecoration(
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                              kRadiusMd),
-                                                      border: Border(
-                                                          left: BorderSide(
-                                                              color: sz.clay,
-                                                              width: 3)),
-                                                    )
-                                                  : null,
-                                              child: Padding(
-                                                padding:
-                                                    const EdgeInsets.fromLTRB(
-                                                        12, 11, 12, 11),
-                                                child: Column(
-                                                  crossAxisAlignment:
-                                                      CrossAxisAlignment.start,
-                                                  children: [
-                                                    Row(
-                                                        crossAxisAlignment:
-                                                            CrossAxisAlignment
-                                                                .start,
-                                                        children: [
-                                                          Expanded(
-                                                              child: Text(
-                                                                  order.summary,
-                                                                  style: TextStyle(
-                                                                      fontSize:
-                                                                          14.5,
-                                                                      fontWeight:
-                                                                          FontWeight
-                                                                              .w600,
-                                                                      color: sz
-                                                                          .ink))),
-                                                          const SizedBox(
-                                                              width: 8),
-                                                          SzChip(
-                                                              order
-                                                                  .status.label,
-                                                              color: isNew
-                                                                  ? sz.clay
-                                                                  : sz.inkMuted,
-                                                              dense: true),
-                                                        ]),
-                                                    const SizedBox(height: 5),
-                                                    Wrap(
-                                                        spacing: 6,
-                                                        runSpacing: 4,
-                                                        children: [
-                                                          if (order
-                                                              .parentOrderNo
-                                                              .isNotEmpty)
-                                                            SzChip(
-                                                                '加·随${order.parentOrderNo.substring(order.parentOrderNo.length - 6)}',
-                                                                color: sz.earn,
-                                                                dense: true),
-                                                          if (_urgedOrders
-                                                              .contains(order
-                                                                  .orderNo))
-                                                            SzChip('催',
-                                                                color:
-                                                                    sz.danger,
-                                                                dense: true),
-                                                          if (order.pickup)
-                                                            SzChip(
-                                                                order.pickupCode
-                                                                        .isEmpty
-                                                                    ? '自取'
-                                                                    : '自取 ${order.pickupCode}',
-                                                                color: sz.hold,
-                                                                dense: true),
-                                                        ]),
-                                                    if (order.scheduledLabel !=
-                                                        null)
-                                                      Padding(
-                                                        padding:
-                                                            const EdgeInsets
-                                                                .only(top: 4),
-                                                        child: Text(
-                                                            '⏰ ${order.scheduledLabel},请按时出餐',
-                                                            style: TextStyle(
-                                                                fontSize: 12,
-                                                                color: sz.hold,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w600)),
-                                                      ),
-                                                    if (isNew)
-                                                      _waitTimer(order),
-                                                    // 备餐计时:接单后按承诺出餐时长计时,超时高亮
-                                                    if (order.status ==
-                                                        OrderStatus.accepted)
-                                                      _prepTimer(order),
-                                                    const SizedBox(height: 5),
-                                                    Row(children: [
-                                                      Text(
-                                                          yuan(
-                                                              order.totalCents),
-                                                          style: szMoney(
-                                                              fontSize: 14,
-                                                              fontWeight:
-                                                                  FontWeight
-                                                                      .w600,
-                                                              color: sz.ink)),
-                                                      const SizedBox(width: 8),
-                                                      Expanded(
-                                                        child: Text(
-                                                            order.address,
-                                                            maxLines: 1,
-                                                            overflow:
-                                                                TextOverflow
-                                                                    .ellipsis,
-                                                            style: TextStyle(
-                                                                fontSize: 12,
-                                                                color: sz
-                                                                    .inkMuted)),
-                                                      ),
-                                                    ]),
-                                                    if (order.remark.isNotEmpty)
-                                                      Text('备注:${order.remark}',
-                                                          style: TextStyle(
-                                                              fontSize: 12,
-                                                              color:
-                                                                  sz.inkMuted)),
-                                                    if (order.status ==
-                                                            OrderStatus
-                                                                .cancelled &&
-                                                        order.cancelReason
-                                                            .isNotEmpty)
-                                                      Text(
-                                                          '取消原因:${order.cancelReason}',
-                                                          style: TextStyle(
-                                                              fontSize: 12,
-                                                              color:
-                                                                  sz.danger)),
-                                                    if (order.refundCents > 0)
-                                                      Text(
-                                                          '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
-                                                          style: TextStyle(
-                                                              fontSize: 12,
-                                                              color:
-                                                                  sz.danger)),
-                                                    if (_actionsFor(order)
-                                                        .isNotEmpty) ...[
-                                                      const SizedBox(height: 6),
-                                                      // ⚠️ **Wrap 不是 Row。**
-                                                      //
-                                                      // 待接单那一行实测本征宽
-                                                      // 354px,而卡片内容区在 390 屏
-                                                      // 上只有 340(360 屏 310、
-                                                      // 320 屏 270);自送待取餐那一行
-                                                      // 要 410px。`RenderFlex` 溢出时
-                                                      // `remainingSpace =
-                                                      // max(0, delta)`,`end` 对齐
-                                                      // 于是退化成 start ——
-                                                      // **被挤出去的是最后一个孩子**,
-                                                      // 也就是「接单」和
-                                                      // 「开始配送(自送)」。而 Row
-                                                      // 默认 Clip.none,它照样被画出来:
-                                                      // 390 上压在描边上,360 上有一截
-                                                      // 跑到屏幕外。
-                                                      //
-                                                      // 换 Wrap 之后放不下就折行,
-                                                      // 一个按钮都不丢。代价是 ≤390 屏
-                                                      // 上这张卡实测 180 → 238;
-                                                      // ≥430 仍是一行 180。这一页的
-                                                      // `_todayCard()` 为一模一样的
-                                                      // 溢出换过 Wrap,同一条理由。
-                                                      Wrap(
-                                                        alignment:
-                                                            WrapAlignment.end,
-                                                        spacing: 8,
-                                                        runSpacing: 4,
-                                                        children:
-                                                            _actionsFor(order),
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
-                                              ),
-                                            );
-                                          },
+                                          itemBuilder: (context, i) =>
+                                              i >= _filteredOrders.length
+                                                  ? _historyMoreTile()
+                                                  : _orderCard(
+                                                      _filteredOrders[i]),
                                         ),
                                 ),
                               ),

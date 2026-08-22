@@ -272,6 +272,92 @@ void main() {
     });
   });
 
+  /// #33 4.1 第 4 点:聊天 / 打印小票 / 缺货退款收进卡片右上角的「⋯」。
+  ///
+  /// 这一条**改了手势习惯**(打印小票 1 触摸 → 2 触摸),所以两件事都要锁:
+  /// 一是三个操作一个都没丢(只是换了地方),二是换来的高度确实省下来了。
+  group('次要操作收进「⋯」,一个都没丢', () {
+    testWidgets('待接单:三个次要操作都在菜单里,主操作留在动作行', (t) async {
+      final api = orderFakeApi(
+        pages: [orderJson(no: 'SZ0001')],
+        todos: {'pending_orders': 1},
+      );
+      await pumpHome(t, api);
+
+      // 动作行只剩主操作
+      expect(find.text('接单'), findsOneWidget);
+      expect(find.text('拒单'), findsOneWidget);
+      expect(find.text('缺货退款'), findsNothing,
+          reason: '次要操作还留在动作行的话,窄屏上照旧要折行 —— 这一点就白改了');
+
+      await t.tap(find.byIcon(Icons.more_horiz));
+      await t.pumpAndSettle();
+      expect(find.text('和顾客说句话'), findsOneWidget);
+      expect(find.text('打印小票'), findsOneWidget);
+      expect(find.text('缺货退款'), findsOneWidget,
+          reason: '收进菜单 ≠ 删掉。三个操作一个都不能少');
+      await teardown(t);
+    });
+
+    testWidgets('已出餐:没有缺货退款这一项(那时退款走售后)', (t) async {
+      final api = orderFakeApi(
+        pages: [orderJson(no: 'SZ0002', status: 'ready')],
+        todos: {'pending_orders': 0},
+      );
+      await pumpHome(t, api);
+      // 已出餐在「进行中」栏,默认停在待接单
+      await tapSegment(t, '进行中');
+      await t.pump(const Duration(milliseconds: 300));
+      await t.tap(find.byIcon(Icons.more_horiz));
+      await t.pumpAndSettle();
+      expect(find.text('打印小票'), findsOneWidget);
+      expect(find.text('缺货退款'), findsNothing,
+          reason: '菜品都出锅了还给「缺货退款」,点了只会 409');
+      await teardown(t);
+    });
+
+    testWidgets('历史单没有「⋯」—— 它本来就没有动作行', (t) async {
+      final api = orderFakeApi(
+        pages: ordersJson(count: 3, prefix: 'SZDONE', status: 'completed'),
+        todos: {'pending_orders': 0},
+      );
+      await pumpHome(t, api);
+      await t.tap(find.textContaining('历史'));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.byIcon(Icons.more_horiz), findsNothing);
+      await teardown(t);
+    });
+
+    testWidgets('390 窄屏上待接单卡从 238 回到 180', (t) async {
+      final api = orderFakeApi(
+        pages: [orderJson(no: 'SZ0001')],
+        todos: {'pending_orders': 1},
+      );
+      await pumpHome(t, api);
+      // 卡片是订单列表里那个带描边的 Container。取第一张的高度 ——
+      // 0294c4a 把动作行换成 Wrap 之后,窄屏上它是 238;方案要求回到 180 以下
+      final card = find
+          .descendant(
+              of: find.byType(RefreshIndicator),
+              matching: find.byType(Container))
+          .evaluate()
+          .map((e) => e.renderObject as RenderBox?)
+          .where((b) => b != null && b.hasSize && b.size.height > 60)
+          .map((b) => b!.size.height)
+          .toList();
+      expect(card, isNotEmpty, reason: '没找到订单卡');
+      // 实测 180,方案估的是 160。差的这 20px 在动作行两个按钮的触控高度上,
+      // 要拿到就得缩触控区 —— 干活页不干这事(同 shop_tab「带开关的入口条
+      // 不超过 72px,不许缩触控区」那条)。238 → 180 已经拿到了这一点的
+      // 收益:首屏多放一张待接单卡
+      expect(card.first, lessThanOrEqualTo(180),
+          reason: '待接单卡 ${card.first}px —— 动作行又在折行了,'
+              '这一点的收益(首屏多放一张)就没拿到');
+      await teardown(t);
+    });
+  });
+
   group('订单卡的动作行:窄屏上一个按钮都不许被推出卡外', () {
     /// 一张待接单卡 + 一张自送待取餐卡。
     /// 后者是最宽的一种(打印 + 聊天 + 地图 + 开始配送(自送))。
