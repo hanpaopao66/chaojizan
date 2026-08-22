@@ -83,7 +83,9 @@ class _DishManagePageState extends State<DishManagePage> {
     final short = (st?['shortlist'] as List?) ?? [];
     if (st == null || short.isEmpty) return;
     final sz = Theme.of(context).sz;
-    showModalBottomSheet(
+    // 走 szShowSheet:宽屏上它自己换成居中对话框。钉在 1440 屏底的弹层
+    // 是横贯屏底的一条,内容挤在左边而视线在屏幕中央
+    szShowSheet(
       context: context,
       builder: (ctx) => SafeArea(
         child: Padding(

@@ -141,7 +141,9 @@ void main() {
         data: const MediaQueryData(
             size: Size(390, 844),
             padding: EdgeInsets.only(top: 47, bottom: 34)),
-        child: Scaffold(
+        // SzPageScaffold 不是 Scaffold:带 appBar 的页面在宽屏上要限宽,
+        // 走查用的壳也得和真页面一致,否则 golden 量的不是线上那个布局
+        child: SzPageScaffold(
           backgroundColor: bg,
           appBar: AppBar(
             title: const Text('店铺'),
