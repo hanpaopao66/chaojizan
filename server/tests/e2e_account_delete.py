@@ -6,6 +6,7 @@
   4. **实名信息真的删了**:注销页写着"实名信息一并删除",这条钉住它
   5. 墓碑行不再参与业务:ref_code / is_online 清零
   6. 风控标记跟着手机号走:注销再注册不等于洗白
+  7. **未核销的团购券自动全额退款**(那是用户的钱,不是作废)
 在 server/ 目录下运行:python -m tests.e2e_account_delete
 """
 import asyncio
@@ -196,5 +197,51 @@ other_role = call("POST", "/auth/register", body={
 assert call("GET", "/auth/me", other_role["token"])["risk_level"] == "", \
     "假名带了 role,别的角色不该被同一手机号的标记殃及"
 print("✓ 标记按 (手机号, 角色) 生效,不误伤同号的其他角色账号")
+
+# ---- 未核销团购券:注销时自动全额退款,不是作废(#33 已拍板)----
+#
+# 注销页原来写着「团购券将全部作废」,而代码一张没动 —— 两头都不对:
+# 已付款未核销的券**是用户的钱**(核销前不属于商家,平台也没收服务费)。
+# 现在走和用户自己点退款完全相同的那条路,连 refunds 流水一起落。
+vphone = "134" + tag[-8:]
+vtoken = call("POST", "/auth/register", body={
+    "phone": vphone, "password": "123456", "name": "带券注销",
+    "role": "customer"})["token"]
+vshop = demo_shop()
+vdeals = call("GET", f"/vouchers?merchant_id={vshop['id']}")
+if vdeals:
+    vp = call("POST", f"/vouchers/{vdeals[0]['id']}/purchase", vtoken)
+    vp = call("POST", f"/vouchers/purchases/{vp['purchase_no']}/pay/mock", vtoken)
+    assert vp["status"] == "paid", vp
+    mine = call("GET", "/vouchers/purchases/mine", vtoken)
+    assert any(x["purchase_no"] == vp["purchase_no"] and x["status"] == "paid"
+               for x in mine)
+
+    out = call("DELETE", "/auth/me", vtoken)
+    assert out.get("refunded_vouchers", 0) >= 1, \
+        f"注销没退未核销的券:{out} —— 那是用户的钱,不能作废"
+    print(f"✓ 注销自动退未核销团购券 {out['refunded_vouchers']} 张")
+
+    # 退款必须落 refunds 流水,不能只改状态:
+    # 只改状态在模拟支付期歪打正着地自洽,真开微信那天就是
+    # 「收了钱、标记已退款、钱没退」,而自检看的正是流水
+    async def _check_refund_row():
+        from sqlalchemy import text as _text
+
+        from app.db import SessionLocal
+        async with SessionLocal() as db:
+            row = (await db.execute(_text(
+                "SELECT r.status, r.amount_cents FROM refunds r "
+                "JOIN voucher_purchases p ON p.id = r.biz_id "
+                "WHERE r.biz_type = 'voucher' AND p.purchase_no = :no"),
+                {"no": vp["purchase_no"]})).all()
+            return row
+
+    rows = asyncio.run(_check_refund_row())
+    assert rows, "退了券却没有 refunds 流水 —— 自检看的就是流水"
+    assert rows[0][1] == vp["price_cents"] if "price_cents" in vp else True
+    print(f"✓ 退券落了 refunds 流水({rows[0][0]},{rows[0][1]} 分)")
+else:
+    print("⚠️ 库里没有在售团购券,跳过注销退券验证")
 
 print("\n账号注销全流程验证通过 🎉")

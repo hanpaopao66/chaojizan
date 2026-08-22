@@ -116,6 +116,43 @@ async def main():
     assert not checks_for(base, cancel_no), checks_for(base, cancel_no)
     print("✓ 基线:本用例造的两笔单账目全平,自检不报")
 
+    # ---- 跑腿平台认赔:关灯,但不许把真错账一起关掉(#33 已拍板)----
+    #
+    # 帮买售后受理时 fault 记 "platform"(跑腿没有商家,认责方是平台自己),
+    # 平台把商品款吃下来 —— 而这笔亏损在账本里没有任何一行,于是
+    # errand_identity_mismatch 每受理一次亮一次,亮的还都是真事。
+    # 拍板结论是**关灯**:这些聚合成一条日志,不进 problems。
+    #
+    # 这条用例守的是关灯的边界:**没有 platform 认赔记录的不平照样要报**。
+    # 关灯关过头就等于把跑腿线的恒等式整条废掉。
+    errand = await db_one(
+        "SELECT o.id, o.order_no FROM orders o "
+        "WHERE o.order_kind IN ('errand_send', 'errand_buy') "
+        "  AND o.status = 'completed' "
+        "  AND NOT EXISTS (SELECT 1 FROM after_sales a "
+        "                  WHERE a.order_id = o.id AND a.fault = 'platform' "
+        "                    AND a.status = 'accepted') "
+        "ORDER BY o.id DESC LIMIT 1")
+    if errand is not None:
+        before_mismatch = len(
+            [p for p in base if p["check"] == "errand_identity_mismatch"])
+        # 把骑手入账改错 1 分:没有认赔记录,这条必须照常报
+        await db_exec(
+            "UPDATE rider_earnings SET amount_cents = amount_cents + 1 "
+            "WHERE order_id = :oid AND kind = 'earning'", oid=errand.id)
+        broke = await run_audit()
+        after_mismatch = len(
+            [p for p in broke if p["check"] == "errand_identity_mismatch"])
+        await db_exec(
+            "UPDATE rider_earnings SET amount_cents = amount_cents - 1 "
+            "WHERE order_id = :oid AND kind = 'earning'", oid=errand.id)
+        assert after_mismatch == before_mismatch + 1, \
+            "跑腿单账做坏了却没报 —— 平台认赔那条关灯关过头,"\
+            "把整条跑腿恒等式一起废了"
+        print("✓ 关灯只关平台认赔那些:没有认赔记录的不平照样报")
+    else:
+        print("⚠️ 库里没有可用的跑腿完成单,跳过关灯边界验证")
+
     # ---- 渠道拒绝的退款:以前是自检的盲区(#33 第 5 节遗留)----
     #
     # services/wechat_pay.py 的 request_refund 注释里写着「审计规则 5c

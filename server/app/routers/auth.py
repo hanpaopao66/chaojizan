@@ -3,7 +3,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func as sa_func
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -301,6 +301,39 @@ async def delete_account(
         if earned - out > 0:
             raise HTTPException(409, f"钱包还有 ¥{(earned - out) / 100:.2f} 未提现,提现到账后才能注销")
 
+    # 未核销的团购券:**自动全额退款**,不是作废(#33 第 5 节,已拍板)。
+    #
+    # 注销页此前写着「团购券将全部作废」,而代码一张没动 —— 两头都不对:
+    # 已付款未核销的券**是用户的钱**(券款在核销前不属于商家,平台也没收
+    # 服务费),作废等于注销一次没收一次;而文案说了作废、代码又没作废,
+    # 用户看到的和发生的也不是一回事。
+    #
+    # 走和用户自己点退款完全相同的那条路(request_voucher_refund + 落
+    # refunds 流水 + 回补库存):**只改状态不推钱**的写法在模拟支付期
+    # 歪打正着地自洽,真开微信那天就变成「收了钱、标记已退款、钱没退」。
+    refunded_vouchers = 0
+    if user.role == UserRole.customer:
+        from ..models import Voucher, VoucherPurchase, VoucherPurchaseStatus
+        from ..services.wechat_pay import request_voucher_refund
+
+        unused = (await db.scalars(
+            select(VoucherPurchase)
+            .where(VoucherPurchase.customer_id == user.id,
+                   VoucherPurchase.status == VoucherPurchaseStatus.paid)
+            .with_for_update())).all()
+        for pur in unused:
+            note = "账号注销,未核销券全额退款"
+            await request_voucher_refund(db, pur, pur.sell_price_cents, note)
+            pur.status = VoucherPurchaseStatus.refunded
+            pur.refund_note = note
+            # 自检规则 14 的时间窗按"钱落定那一刻"取,退掉的券没有 redeemed_at
+            pur.refunded_at = sa_func.now()
+            await db.execute(
+                update(Voucher).where(Voucher.id == pur.voucher_id)
+                .values(total_count=Voucher.total_count + 1,
+                        sold_count=Voucher.sold_count - 1))
+            refunded_vouchers += 1
+
     # 隐私政策承诺"使用行为记录注销即删",这里兑现;实名数据一并删除
     from sqlalchemy import delete as sa_delete
 
@@ -346,8 +379,9 @@ async def delete_account(
     # 清掉等于让"注销→再注册"绕过同设备多账号判定(见 services/coupons.py
     # 的 _device_has_other_account 与 services/risk.py 的 multi_account_device)。
     await db.commit()
-    logger.info("账号已注销并匿名化: user_id=%s", user.id)
-    return {"deleted": True}
+    logger.info("账号已注销并匿名化: user_id=%s 退券=%s",
+                user.id, refunded_vouchers)
+    return {"deleted": True, "refunded_vouchers": refunded_vouchers}
 
 
 async def _park_risk_marks(db: AsyncSession, user: User) -> None:

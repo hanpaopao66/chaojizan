@@ -267,6 +267,21 @@ async def run_audit() -> list[dict]:
 
         from .errand import is_errand, service_fee_cents
 
+        # 平台认赔过的单(帮买售后受理时 fault="platform")。
+        # AfterSale/AfterSaleStatus 在这个函数里是局部 import 的(见上面
+        # 冲账那段),那个 import 在别的作用域,这里要自己拿一次
+        from ..models import AfterSale as _AfterSale
+        from ..models import AfterSaleStatus as _AfterSaleStatus
+        # 这些单的恒等式必然不平 —— 平台吃下的商品款没有对应账目行。
+        absorbed_rows = (await db.scalars(
+            select(_AfterSale.order_id)
+            .where(_AfterSale.order_id.in_([o.id for o in completed] or [0]),
+                   _AfterSale.status == _AfterSaleStatus.accepted,
+                   _AfterSale.fault == "platform"))).all()
+        platform_absorbed = set(absorbed_rows)
+        absorbed_n = 0
+        absorbed_cents = 0
+
         for order in completed:
             # 收款人校验:金额对、人错也是错账。
             #
@@ -291,13 +306,34 @@ async def run_audit() -> list[dict]:
                     # 所以拿 refund_cents 校平
                     lhs = re.amount_cents + fee + order.refund_cents
                     if lhs != order.total_cents:
-                        problems.append({
-                            "check": "errand_identity_mismatch",
-                            "detail": f"跑腿单 {order.order_no} 不平:"
-                                      f"骑手入账 {re.amount_cents} + 服务费 {fee}"
-                                      f" + 已退 {order.refund_cents}"
-                                      f" ≠ 用户实付 {order.total_cents}",
-                        })
+                        # 平台认赔的那些**不报警,聚合成日志**(#33 已拍板:
+                        # 关灯,不是记账)。
+                        #
+                        # 帮买售后受理时 fault 记的是 "platform"(跑腿没有
+                        # 商家,认责方就是平台自己),平台把商品款吃下来 ——
+                        # 而这笔亏损在账本里**没有任何一行**,于是这条恒等式
+                        # 每受理一次就亮一次,亮的还都是真事。
+                        #
+                        # ⚠️ **关灯不等于账平了。** 这笔钱确实流出去了,
+                        # 只是没人记它。哪天要把它记上(平台侧的赔付支出行),
+                        # 从这里改回来:去掉 absorbed 分支,让它照常报,
+                        # 直到 settlement 那边真的写出那一行。
+                        if order.id in platform_absorbed:
+                            absorbed_n += 1
+                            # lhs − total,不是 total − lhs:认赔的形态是
+                            # 「用户退了钱(已退↑)、骑手照常拿钱」,所以
+                            # 左边比实付大,差额就是**平台多掏的那部分**。
+                            # 写反了这个数会变成负的,而它是这笔亏损在系统里
+                            # 唯一的痕迹 —— 符号错了就会被读成"平台还赚了"
+                            absorbed_cents += lhs - order.total_cents
+                        else:
+                            problems.append({
+                                "check": "errand_identity_mismatch",
+                                "detail": f"跑腿单 {order.order_no} 不平:"
+                                          f"骑手入账 {re.amount_cents} + 服务费 {fee}"
+                                          f" + 已退 {order.refund_cents}"
+                                          f" ≠ 用户实付 {order.total_cents}",
+                            })
                 continue
             me = m_earnings.get(order.id)
             if me is None:
@@ -337,6 +373,20 @@ async def run_audit() -> list[dict]:
                                   f" + 等餐补偿 {(order.fee_parts or {}).get('wait', 0)}"
                                   f" − 跑腿服务费)",
                     })
+
+        # 平台认赔聚合成一条日志(#33 已拍板「关灯」)。
+        #
+        # 走 logger 不进 problems:进 problems 就还是红灯,而这些不平**每一笔
+        # 都是已知的、主动的**——平台受理帮买售后时把商品款吃下来了。
+        #
+        # ⚠️ 这条日志要留着,而且要带金额:**关灯之后,它是这笔亏损在系统里
+        # 唯一的痕迹**。账本里仍然没有对应的行(services/settlement 没写),
+        # 所以这个数不会出现在任何对外的账目上 —— 要改成记账,见上面那段注释。
+        if absorbed_n:
+            logger.info(
+                "跑腿平台认赔 %s 笔共 %s 分:恒等式按已拍板的口径不报警。"
+                "注意这笔亏损在账本里没有对应行,只有这条日志",
+                absorbed_n, absorbed_cents)
 
         # 3) 订单金额自洽:实付 = 菜品 + 打包 - 满减 + 配送 - 平台补贴
         bad_totals = (
