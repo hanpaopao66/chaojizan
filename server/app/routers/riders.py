@@ -930,7 +930,7 @@ async def available_orders(
     from datetime import datetime, timezone
 
     from ..services import dispatch, prep_time
-    from ..services.routing import bicycling_m, detour_m
+    from ..services.routing import bicycling_m, bicycling_matrix, detour_m
 
     # 取 200 条进来算分、只返回前 50:若只取最老的 50 条再排序,
     # 离骑手近的新单会被挤在池外,「新单不垫底」就落空了
@@ -993,6 +993,25 @@ async def available_orders(
     from ..services import drop_time
     drops = await drop_time.stats_for(
         db, [drop_time.drop_key(o.lat, o.lng, o.floor) for o in orders])
+    # 路网距离**批量预热**(#289):和上面两处「批量取」同一个理由 ——
+    # 原来这一段在下面的 for 里逐单打两次腾讯路径接口(骑手→商家、
+    # 商家→用户),一屏 20 单就是 40 次串行 HTTP、每次超时 3 秒。
+    # Redis 缓存挡得住重复,但**缓存冷的时候正是午高峰第一批单**。
+    #
+    # 矩阵写的缓存和单点调用是同一套键,所以下面的 bicycling_m 直接命中,
+    # 一行调用都不用改口径。
+    if rider_pos:
+        shop_pts = list({(o.merchant_lat, o.merchant_lng) for o in outs
+                         if o.merchant_lat is not None
+                         and o.merchant_lng is not None})
+        if shop_pts:
+            try:
+                await bicycling_matrix(rider_pos, shop_pts)
+            except Exception:
+                # 预热失败不影响正确性:下面照旧逐单算,只是慢一点
+                import logging
+                logging.getLogger("superz.riders").warning(
+                    "抢单列表路网预热失败,退回逐单", exc_info=True)
     radius_m = (user.grab_radius_km * 1000
                 if user.grab_radius_km and rider_pos else None)
     scored: list[tuple[float, OrderOut]] = []

@@ -156,6 +156,110 @@ async def bicycling_route(
         return straight * _FALLBACK_FACTOR, None, "straight"
 
 
+#: 距离矩阵单次请求的上限(腾讯:20 起点 × 25 终点)。
+#: 我们的形态是「1 个骑手 → N 家店」,所以只用得上终点那一维
+_MATRIX_MAX_DESTS = 25
+
+_MATRIX_API = "https://apis.map.qq.com/ws/distance/v1/matrix"
+
+
+async def bicycling_matrix(
+    origin: tuple[float, float],
+    dests: list[tuple[float, float]],
+) -> dict[tuple[float, float], tuple[float, float | None, str]]:
+    """一个起点到多个终点的骑行距离(#289)。
+
+    返回 `{(lat, lng): (distance_m, duration_min, source)}`,
+    source ∈ {"route", "straight"},和 [bicycling_route] 完全一致 ——
+    调用方不需要知道这个数是矩阵来的还是单点来的。
+
+    ## 为什么需要它
+
+    抢单列表原来在 **for 循环里**逐单调 [bicycling_m](骑手→商家、
+    商家→用户各一次)。一屏 20 单就是 40 次串行 HTTP,每次超时 3 秒。
+    Redis 缓存挡掉了重复,但**缓存冷的时候正是午高峰第一批单** ——
+    而那正是这个 App 存在的时刻。
+
+    ## 缓存和单点调用是同一套
+
+    键、格式、TTL 全用 [_key] / [dump_route_cache] / [_TTL_SECONDS]。
+    **这一条不能省**:两套缓存各热各的,等于白做 —— 矩阵回来的结果
+    单点调用读不到,单点热好的缓存矩阵也用不上。
+
+    ## 拿不到就退回直线,和单点一个口径
+
+    没配 key、接口挂了、配额用尽、某个点没返回 —— 一律
+    `straight × _FALLBACK_FACTOR` 并标 `"straight"`,**不编数**。
+    """
+    out: dict[tuple[float, float], tuple[float, float | None, str]] = {}
+    if not dests:
+        return out
+
+    redis = get_redis()
+    todo: list[tuple[float, float]] = []
+    for d in dests:
+        straight = haversine_m(origin[0], origin[1], d[0], d[1])
+        try:
+            cached = await redis.get(_key(origin, d))
+            if cached is not None:
+                raw = cached.decode() if isinstance(cached, bytes) else cached
+                dist_c, dur_c = parse_route_cache(raw)
+                out[d] = (dist_c, dur_c, "route")
+                continue
+        except Exception:
+            pass  # 缓存挂了不影响主流程
+        if not settings.tencent_map_key:
+            out[d] = (straight * _FALLBACK_FACTOR, None, "straight")
+        else:
+            todo.append(d)
+
+    # 分批打:超过单次上限就切片,别指望接口帮我们截断
+    for i in range(0, len(todo), _MATRIX_MAX_DESTS):
+        batch = todo[i:i + _MATRIX_MAX_DESTS]
+        rows: list[dict] | None = None
+        try:
+            async with httpx.AsyncClient(timeout=4) as client:
+                resp = await client.get(_MATRIX_API, params={
+                    "mode": "bicycling",
+                    "from": f"{origin[0]},{origin[1]}",
+                    "to": ";".join(f"{d[0]},{d[1]}" for d in batch),
+                    "key": settings.tencent_map_key,
+                })
+                data = resp.json()
+            if data.get("status") != 0:
+                # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
+                logger.warning("距离矩阵 status=%s %s,这一批回退直线",
+                               data.get("status"), data.get("message"))
+            else:
+                rows = ((data.get("result") or {}).get("rows") or [{}])[0] \
+                    .get("elements")
+        except Exception as e:
+            logger.warning("距离矩阵请求失败(%s),这一批回退直线",
+                           type(e).__name__)
+
+        for j, d in enumerate(batch):
+            straight = haversine_m(origin[0], origin[1], d[0], d[1])
+            el = rows[j] if rows is not None and j < len(rows) else None
+            dist = float((el or {}).get("distance") or 0)
+            if dist <= 0:
+                out[d] = (straight * _FALLBACK_FACTOR, None, "straight")
+                continue
+            # 矩阵接口的 duration 单位是**秒**(和骑行路径的分钟不一样,
+            # 官方文档两处口径确实不同)—— 换算成分钟再往下传,
+            # 否则 ETA 会拿到一个 60 倍的数
+            raw_dur = (el or {}).get("duration")
+            dur = float(raw_dur) / 60 if raw_dur not in (None, "") else None
+            if dur is not None and dur <= 0:
+                dur = None
+            out[d] = (dist, dur, "route")
+            try:
+                await redis.set(_key(origin, d), dump_route_cache(dist, dur),
+                                ex=_TTL_SECONDS)
+            except Exception:
+                pass
+    return out
+
+
 async def detour_m(
     rider: tuple[float, float],
     pickup: tuple[float, float],
