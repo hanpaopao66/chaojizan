@@ -6361,12 +6361,17 @@ class _OrderTimeline extends StatelessWidget {
         etaAt != null &&
         order.status.index < OrderStatus.delivered.index) {
       final left = etaAt.difference(DateTime.now()).inMinutes;
-      // 超时了就直说超时。「马上就到」喊了二十分钟比晚到本身更伤人
+      final hhmm = '${etaAt.hour.toString().padLeft(2, '0')}:'
+          '${etaAt.minute.toString().padLeft(2, '0')}';
+      // 还有多久 + 几点到**都给**,和订单列表卡片同一个口径:
+      // 「还有 20 分钟」答的是"我等不等得起",「18:40」答的是
+      // "我 7 点出门来不来得及"。超时了就直说超时 ——
+      // 「马上就到」喊了二十分钟,比晚到本身更伤人
       etaText = left > 0
-          ? '预计还有 $left 分钟送到'
+          ? '预计还有 $left 分钟送到(约 $hhmm)'
           : (left > -5
               ? '马上就到'
-              : '比预计晚了 ${-left} 分钟,骑手还在路上');
+              : '比预计($hhmm)晚了 ${-left} 分钟,骑手还在路上');
     }
 
     final sz = theme.sz;

@@ -325,6 +325,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
     }
   }
 
+  /// 从现在起 [minutes] 分钟后是几点几分,形如 `18:40`。
+  String _clockAfter(int minutes) {
+    final t = DateTime.now().add(Duration(minutes: minutes));
+    return '${t.hour.toString().padLeft(2, '0')}:'
+        '${t.minute.toString().padLeft(2, '0')}';
+  }
+
   /// 自取卡上那句「走过去大概多远」。
   String? get _walkLine {
     final w = _walk;
@@ -610,7 +617,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
               child: Text(
-                '🕐 预计 $eta 分钟送达',
+                // 分钟数 + 几点几分**都给**。
+                //
+                // 「30 分钟」要用户自己加一遍才知道是几点,而他这会儿
+                // 想的是"我 7 点要出门,来不来得及";「18:40」又看不出
+                // 是快还是慢。两个一起给,两种问法都答得上(#296)
+                '🕐 预计 $eta 分钟送达(约 ${_clockAfter(eta)})',
                 style: TextStyle(
                     color: theme.colorScheme.primary,
                     fontWeight: FontWeight.w600),
