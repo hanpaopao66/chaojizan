@@ -210,6 +210,47 @@ async def bicycling_route(
     return await route(from_lat, from_lng, to_lat, to_lng, "bike")
 
 
+async def billing_distance_m(
+    from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+) -> tuple[float, str]:
+    """**算配送费用的**距离(米)与来源。返回 `(distance_m, source)`。
+
+    ## 为什么单独一个函数
+
+    配送费一分不少全归骑手,所以这个数直接就是骑手的收入。
+    它必须比别处更谨慎,单独拎出来,好写红线、好写测试、好被人看见。
+
+    ## 只放宽不收紧
+
+    取 `max(直线, 路网)`。方向不能反 ——
+
+    - 直线永远 ≤ 实际要骑的路,这是几何决定的,不是估算误差;
+    - 万一腾讯回来一个比直线还短的数(路网数据异常、坐标落到了
+      高架另一侧),那是**接口的问题,不该由骑手承担**。
+
+    和 `labor_guard.clamp_eta_minutes` 是同一条原则的两处落点:
+    **任何第三方数据只能让骑手的处境变好,不能变坏。**
+
+    ## 为什么这件事值一次网络调用
+
+    实测成都样本:直线 1467m,骑行 1745m,差 19%。而计价是按整公里
+    分档的(起步 2km,每超 1km +¥1)—— 19% 的低估在 2–4km 区间里
+    经常正好差一整档,也就是**每单少 1 块钱**。一天 30 单就是 30 块。
+
+    这不是精度问题,是系统性地少付,而且是单边的:
+    直线永远偏低,不存在偶尔多给。
+    """
+    straight = haversine_m(from_lat, from_lng, to_lat, to_lng)
+    try:
+        routed, _dur, source = await route(
+            from_lat, from_lng, to_lat, to_lng, "bike")
+    except Exception:
+        logger.warning("配送费取路网距离失败,退回直线兜底", exc_info=True)
+        return straight * _MODE_FALLBACK["bike"], "straight"
+    # ⚠️ max 不能省(见上面「只放宽不收紧」)
+    return max(straight, routed), source
+
+
 async def walking_route(
     from_lat: float, from_lng: float, to_lat: float, to_lng: float,
 ) -> tuple[float, float | None, str]:

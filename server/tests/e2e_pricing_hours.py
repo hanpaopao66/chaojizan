@@ -25,11 +25,23 @@ assert near["fee_cents"] == sum(near["parts"].values()), near
 assert near["in_range"] is True
 print(f"✓ 2km 内基础配送费 ¥3(距离 {near['distance_m']}m,组成 {near['parts']})")
 
-# ≈3.5km:基础 3 + ceil(1.5)×1 = 5 元,仍在 4km 半径内
+# 直线 ≈3.7km、**骑行路网 ≈5.0km**:基础 3 + ceil(3.0)×1 = 7 元。
+#
+# 断言从写死 500 改成"按返回的距离自己算一遍"(#300):
+# 计价距离已经不是直线了,写死一个数就等于把当年那条直线钉在测试里 ——
+# 而路网距离会随腾讯的数据更新而变,钉死只会让这条用例长期假红。
+# 要验的本来就是「阶梯算对了没有」,不是「那天恰好是 5 块」。
 mid = call("GET", f"/orders/delivery-fee?merchant_id={sid}&lat=30.6927&lng=104.0823", customer)
-assert mid["parts"]["base"] == 500, mid
+import math
+expect_base = min(300 + math.ceil(max(0.0, mid["distance_m"] / 1000 - 2)) * 100,
+                  1000)
+assert mid["parts"]["base"] == expect_base, mid
+assert mid["distance_source"] == "route", \
+    f"计价没走路网(source={mid['distance_source']}),骑手每单少拿钱"
+# 半径按**直线**判:路网比直线长,若这里也用路网,用户在附近商家列表
+# (PostGIS 球面直线)看得见的店会点不了 —— 看得见点不了比看不见更伤人
 assert mid["in_range"] is True
-print(f"✓ 远距离阶梯加价:{mid['distance_m']}m → 基础 ¥{mid['parts']['base']/100:.0f}")
+print(f"✓ 远距离阶梯加价:路网 {mid['distance_m']}m → 基础 ¥{mid['parts']['base']/100:.0f}")
 
 # ≈5.6km:超出 4km 配送半径,预览标记 + 下单被拒
 far = call("GET", f"/orders/delivery-fee?merchant_id={sid}&lat=30.7098&lng=104.0810", customer)

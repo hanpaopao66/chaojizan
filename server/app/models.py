@@ -654,6 +654,18 @@ class Order(Base):
     # 此前它只在预览接口里露过一次,下单之后就没人看得到了。
     fee_parts: Mapped[dict] = mapped_column(
         JSONB, default=dict, server_default="{}")
+    #: 算这笔配送费时**用的**距离(米)与来源(#300)。
+    #:
+    #: 配送费一分不少全归骑手,所以这个数直接是他的收入。
+    #: 算过一次就锁在订单里 —— 不能因为缓存过期、接口换了答案就变,
+    #: 骑手事后要查得到「这 8 块钱按 3.4 公里算的」。
+    #:
+    #: source: route=腾讯骑行路网 / straight=接口不可用时的直线兜底。
+    #: 两者差 19%(实测成都样本),不标出来事后无从分辨。
+    bill_distance_m: Mapped[int | None] = mapped_column(
+        Integer, nullable=True)
+    bill_distance_source: Mapped[str] = mapped_column(
+        String(10), default="", server_default="")
     # 送上门 / 送到楼下。**顾客自己选**:选了楼下就不收上门难度费,
     # 骑手也没有义务上楼(这一点写进骑手端与规则页,否则那笔钱是白收的)
     to_door: Mapped[bool] = mapped_column(
@@ -2007,6 +2019,53 @@ class AddressFeedback(Base):
     order_no: Mapped[str] = mapped_column(String(32), unique=True)
     rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
     note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class RiderHardship(Base):
+    """骑手对**这一单实际有多难送**的现场反馈(#301)。
+
+    ## 为什么需要它
+
+    配送费里的上门难度费取决于 `floor` / `has_elevator`,而这两个字段是
+    **用户在地址簿里自己填的**:大多数人不填(那就是 0,骑手爬六层白爬),
+    填了也没人核实。「要走进小区 300 米」「车进不去只能推行」
+    「门禁要等保安」这些情况**根本没有字段**。
+
+    平台不可能知道每栋楼的情况。**跑过的人知道。**
+
+    ## 一条反馈做两件事
+
+    1. **这一单当场补钱**,平台承担 —— 不向用户追收(会让顾客觉得被坑,
+       更要命的是会让骑手不敢反馈),也不向商家追收(与商家无关);
+    2. **按地址沉淀**,攒够一致反馈后转正,后来的单在下单时就按真实
+       难度计价 —— 用户下单前看得到并可以改选送到楼下,
+       骑手接单前也看得到,不用骑到楼下才发现是六楼没电梯。
+
+    ## 这张表里没有的东西
+
+    **不存对骑手的评价、不存信用分。** 沉淀的是地址的属性,不是人的行为。
+    防刷靠 `(rider_id, addr_key)` 唯一约束和补贴金额上限,不靠给人打分 ——
+    一旦反馈有代价,骑手就不说了,机制立刻死掉。
+    """
+
+    __tablename__ = "rider_hardships"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    order_no: Mapped[str] = mapped_column(String(32), unique=True)
+    rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    #: 地址规整键:收货点 111m 网格 + 楼层。
+    #: 同一栋楼的地址写法千奇百怪,按原文攒永远攒不够
+    addr_key: Mapped[str] = mapped_column(String(64), index=True)
+    #: no_elevator / walk_in / no_vehicle / gate_hard / other
+    kinds: Mapped[list] = mapped_column(JSONB, default=list)
+    floors: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    walk_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    #: 这一单实际补给骑手多少(分)
+    comp_cents: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
 

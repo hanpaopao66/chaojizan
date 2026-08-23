@@ -31,7 +31,8 @@ from ..services.payment_core import mark_order_paid
 from zoneinfo import ZoneInfo
 
 from ..services.flags import in_hhmm_range, night_curfew_window, weather_surcharge_on
-from ..services.pricing import delivery_fee_parts, haversine_m, in_delivery_range
+from ..services.pricing import (delivery_fee_parts, haversine_m,
+                                in_delivery_range)
 
 # 配送费拆分项的中文名。**放服务端,四端共用一份** ——
 # 三个客户端各写一遍,迟早写得不一样,而这是要给顾客看的账
@@ -44,6 +45,7 @@ FEE_PART_LABELS = {
 }
 from ..services.privacy_phone import dialable_phone, mask_phone
 from ..services.push import notify_order_status, push_to_user
+from ..services.routing import billing_distance_m
 from ..services.settlement import settle_order
 from ..services.wechat_pay import request_refund
 from ..state_machine import STATUS_LABELS
@@ -525,6 +527,7 @@ async def create_order(
             409, f"未达起送价 ¥{min_order / 100:.0f},请再加点菜")
 
     # 自取单不校验配送半径(人自己来,多远都行);配送单必须有收货地址
+    distance_source = ""
     if parent is not None:
         distance_m = 0.0  # 地址随原单,半径在原单已校验
     elif payload.pickup:
@@ -533,12 +536,39 @@ async def create_order(
         if not payload.address or payload.lat is None or payload.lng is None:
             await db.rollback()
             raise HTTPException(422, "请先选择收货地址")
-        # 配送半径:超出不接单(与其靠封顶价让远单没人接,不如明确不做远单)
-        distance_m = haversine_m(merchant.lat, merchant.lng, payload.lat, payload.lng)
-        if not in_delivery_range(distance_m):
+        # 计价距离走**腾讯骑行路网**,不是直线(#300)。
+        #
+        # 配送费一分不少全归骑手,所以这个数直接就是他的收入。
+        # 直线永远 ≤ 实际要骑的路(几何决定的,不是估算误差),实测成都
+        # 样本差 19% —— 而计价按整公里分档,19% 在 2–4km 区间经常正好
+        # 差一整档,每单少 1 块钱,一天 30 单就是 30 块。单边的少付。
+        #
+        # ⚠️ **配送半径仍按直线判**,只有计价用路网。
+        #
+        # 一度改成两边都用路网,理由是"直线 3.9km 在范围内、实际骑行
+        # 4.6km 已经超了,骑手垫了中间那段"。这个理由**是错的**:
+        # 配送费封顶 ¥10,要骑到 9 公里才碰得到 —— 计价换成路网之后,
+        # 4.6km 的单本来就按 4.6km 付钱,骑手没有垫任何东西。
+        #
+        # 而路网判范围有个真实代价:附近商家列表的半径是 PostGIS
+        # **球面直线**(merchants.py 的 _radius_cap),算不了路网。
+        # 两边尺子不一样,用户就会看见一家店、点进去、下单被拒 ——
+        # 「看得见点不了」比「看不见」更伤人,而且他不知道为什么。
+        #
+        # 所以:钱按实际骑的路算(骑手的收入不能少),
+        # 范围按看得见的那把尺子算(用户看到的和能点的一致)。
+        straight_m = haversine_m(merchant.lat, merchant.lng,
+                                 payload.lat, payload.lng)
+        if not in_delivery_range(straight_m):
             await db.rollback()
             raise HTTPException(
                 409, f"超出配送范围({settings.delivery_max_km:g}km),换家近点的店吧")
+        # 计价距离走**腾讯骑行路网**(#300)。配送费一分不少全归骑手,
+        # 所以这个数直接就是他的收入。直线永远 ≤ 实际要骑的路
+        # (几何决定的,不是估算误差),实测成都样本差 19–42% ——
+        # 而计价按整公里分档,经常正好差一整档,每单少 1 块钱。
+        distance_m, distance_source = await billing_distance_m(
+            merchant.lat, merchant.lng, payload.lat, payload.lng)
 
     # 店铺「每单打包费」+ 各菜品自己的额外打包费(按份数)。
     # 没有任何菜品设过额外打包费时,这里与加这个功能之前一字不差
@@ -748,6 +778,11 @@ async def create_order(
         # 配送费构成快照:此前这份拆分只在预览里露一次,下单后就没人看得到
         # 追加单/自取单没有配送费,拆分自然是空的
         fee_parts=fee_parts,
+        # 算这笔钱**用的**距离和来源,锁进订单(#300)。
+        # 配送费全归骑手,他事后要查得到「8 块钱按 3.4 公里算的,
+        # 数据来自路网」—— 说不清来历的钱,给多少都不叫透明
+        bill_distance_m=round(distance_m) if distance_m else None,
+        bill_distance_source=distance_source,
         to_door=payload.to_door,
         has_elevator=(parent.has_elevator if parent is not None
                       else (None if payload.pickup
@@ -1104,14 +1139,24 @@ async def change_address(
         raise HTTPException(409, "每单只能改一次地址;再有变动请联系商家或客服")
 
     merchant = await db.get(Merchant, order.merchant_id)
-    new_distance = haversine_m(merchant.lat, merchant.lng,
-                               payload.lat, payload.lng)
-    if not in_delivery_range(new_distance):
+    # 范围按直线判(和下单一致,理由见 create_order),计价用路网
+    if not in_delivery_range(haversine_m(merchant.lat, merchant.lng,
+                                         payload.lat, payload.lng)):
         raise HTTPException(
             409, f"新地址超出配送范围({settings.delivery_max_km:g}km)")
+    new_distance, _new_src = await billing_distance_m(
+        merchant.lat, merchant.lng, payload.lat, payload.lng)
 
-    # 距离差重算基础费,保留原单的夜间/天气加价部分
-    old_distance = haversine_m(merchant.lat, merchant.lng, order.lat, order.lng)
+    # 距离差重算基础费,保留原单的夜间/天气加价部分。
+    #
+    # 旧距离**优先用下单时锁在订单里的那个**(#300):现算一遍的话,
+    # 万一这期间缓存过期、路网换了答案,差值就凭空冒出来了 ——
+    # 而顾客只是改了个地址,他没做错任何事。老订单没有这个字段
+    # (0109 之前的)才退回现算。
+    old_distance = float(order.bill_distance_m) \
+        if order.bill_distance_m else \
+        (await billing_distance_m(merchant.lat, merchant.lng,
+                                  order.lat, order.lng))[0]
     old_base = delivery_fee_parts(old_distance)["base"]
     new_base = delivery_fee_parts(new_distance)["base"]
     delta = new_base - old_base
@@ -1612,7 +1657,11 @@ async def preview_delivery_fee(
     merchant = await db.get(Merchant, merchant_id)
     if merchant is None:
         raise HTTPException(404, "商家不存在")
-    distance = haversine_m(merchant.lat, merchant.lng, lat, lng)
+    # 和下单时**同一个函数**(#300)。预览用直线、下单用路网的话,
+    # 结算页显示 ¥5 付款变 ¥6 —— 和 #295 的 ETA 是同一种病:
+    # 同一件事在同一分钟内给出两个答案
+    distance, distance_source = await billing_distance_m(
+        merchant.lat, merchant.lng, lat, lng)
     # 按**商家坐标**判天气:骑手是在那一带跑的。
     # 用收货点也行,但一单里两点最远 4km,同一片天气,取商家侧即可
     parts = delivery_fee_parts(
@@ -1661,7 +1710,14 @@ async def preview_delivery_fee(
         "parts": parts,
         "labels": FEE_PART_LABELS,
         "door_fee_cents": door_saving,
-        "in_range": in_delivery_range(distance),
+        # in_range 按**直线**判,和下单时同一把尺子(见 create_order 里的
+        # 长注释)。这里若用路网,预览说"超范围"下单却过得去,
+        # 或者反过来 —— 又是同一件事两个答案
+        "in_range": in_delivery_range(
+            haversine_m(merchant.lat, merchant.lng, lat, lng)),
+        # 这个距离是怎么来的:route=腾讯骑行路网 / straight=接口不可用
+        # 时的直线兜底。两者差 19%,顾客和骑手都该知道看的是哪个
+        "distance_source": distance_source,
         "eta_minutes": eta_minutes,
     }
 

@@ -50,20 +50,32 @@ def change(no, addr, expect_error=False):
 
 
 # 1) 远→近:退差价,金额三处联动。
-# 夜间时段(21:00-06:00)配送费含 +2 元夜间加价,改址保留加价只退基础费差价,
-# 断言按「相对差」写,任何时段跑都成立
+#
+# 夜间时段(21:00-06:00)配送费含 +2 元夜间加价,改址保留加价只退基础费差价。
+# 断言全部按「相对差」写,不写死金额:
+#   - 夜间加价让绝对值随跑测时间变;
+#   - 计价距离已改成腾讯骑行路网(#300),而路网数据会更新 ——
+#     写死当年那条直线算出来的 500/300,只会让这条用例长期假红。
+# 要验的是「改近了要退钱,而且三处对得上」,不是「那天恰好退 2 块」。
+FAR_FEE = call("GET", f"/orders/delivery-fee?merchant_id={shop['id']}"
+                      f"&lat={FAR['lat']}&lng={FAR['lng']}", customer)
+NEAR_FEE = call("GET", f"/orders/delivery-fee?merchant_id={shop['id']}"
+                       f"&lat={NEAR['lat']}&lng={NEAR['lng']}", customer)
+diff = FAR_FEE["parts"]["base"] - NEAR_FEE["parts"]["base"]
+assert diff > 0, f"远端基础费没比近端高,样本点选得不对:{FAR_FEE} {NEAR_FEE}"
+
 o = make_order(FAR)
-night = o["delivery_fee_cents"] - 500  # 0 或 200(夜间加价部分)
-assert o["delivery_fee_cents"] == 500 + night, o["delivery_fee_cents"]
+before_fee = o["delivery_fee_cents"]
 after = change(o["order_no"], NEAR)
 assert after["address"] == "近端小区 2 栋"
-assert after["delivery_fee_cents"] == 300 + night
-assert after["total_cents"] == o["total_cents"] - 200
-assert after["refund_cents"] == 200
+assert after["delivery_fee_cents"] == before_fee - diff, \
+    (before_fee, after["delivery_fee_cents"], diff)
+assert after["total_cents"] == o["total_cents"] - diff
+assert after["refund_cents"] == diff
 flows = call("GET", f"/orders/{o['order_no']}/refunds", customer)
-assert sum(f["amount_cents"] for f in flows) == 200
+assert sum(f["amount_cents"] for f in flows) == diff
 assert after["contact_name"] == "改址人"
-print("✓ 改近退差价 ¥2.00:配送费/实付/退款流水三处联动")
+print(f"✓ 改近退差价 ¥{diff/100:.2f}:配送费/实付/退款流水三处联动")
 
 # 2) 每单一次
 err = change(o["order_no"], FAR, expect_error=True)
