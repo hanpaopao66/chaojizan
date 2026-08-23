@@ -558,6 +558,43 @@ enum SzDensity {
       : VisualDensity.standard;
 }
 
+/// 把当前页面的密度档带进 widget 树。
+///
+/// ## 为什么需要它(#33 第 5 节遗留)
+///
+/// `SzDensity` 的那几个数值原本只能在 `brandTheme()` 里用 —— 主题构造完
+/// 就"丢"了,widget 拿不到。于是 `SzEntryTile` / `SzIconGrid` 这类**自己
+/// 画字号**的组件只能写死常量,商家端「后厨油烟下看得更清」的分化
+/// 在它们身上是空的:同一屏里按钮文字 +1 了,入口条的字没有。
+///
+/// 不用 `Theme.of(context).visualDensity.vertical > 0` 反推:那是 Material
+/// 的字段,语义是"控件垂直紧凑度",拿它当"我们的密度档"用,哪天有人
+/// 给浏览态也设一个 visualDensity,这里就静默判错。
+@immutable
+class SzMetrics extends ThemeExtension<SzMetrics> {
+  const SzMetrics({required this.density});
+
+  final SzDensity density;
+
+  /// 正文字号增量。组件里写 `kFontBody + metrics.fontBump`。
+  double get fontBump => density.fontBump;
+
+  @override
+  SzMetrics copyWith({SzDensity? density}) =>
+      SzMetrics(density: density ?? this.density);
+
+  /// 密度是离散档位,没有"半档"可言 —— 主题切换时直接跳,不插值。
+  @override
+  SzMetrics lerp(covariant SzMetrics? other, double t) =>
+      t < 0.5 ? this : (other ?? this);
+}
+
+/// 取当前密度。没挂扩展时按浏览态,和 `brandTheme` 的默认值一致。
+extension SzMetricsX on ThemeData {
+  SzMetrics get szMetrics =>
+      extension<SzMetrics>() ?? const SzMetrics(density: SzDensity.browse);
+}
+
 /// 三端统一的品牌主题 v3(第八辑视觉重构)。
 ///
 /// 数值来源:docs/DEV-PROMPTS-8.md「设计基线」。七条规则:
@@ -609,7 +646,7 @@ ThemeData brandTheme(Brightness brightness,
     canvasColor: sz.paper,
     // 涟漪比 InkSparkle 安静,和这套克制的观感匹配
     splashFactory: InkRipple.splashFactory,
-    extensions: <ThemeExtension<dynamic>>[sz],
+    extensions: <ThemeExtension<dynamic>>[sz, SzMetrics(density: density)],
 
     // ---- 字阶:26 页面大标题、21 卡标题、15 正文、13 辅助、11 分段标题 ----
     // 中文不做字距,字重比旧版整体轻一档(w900 在中文里糊成一团)

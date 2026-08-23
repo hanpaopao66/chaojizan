@@ -176,4 +176,78 @@ void main() {
       expect(textsPaintingOutside(t), isEmpty);
     });
   });
+
+  /// 字号跟密度走(#33 第 5 节遗留,已拍板做掉)。
+  ///
+  /// `SzDensity.fontBump` 的注释写着「商家端在油烟和光线不好的后厨看,
+  /// 骑手在阳光下看」,而这两个组件此前写死常量 —— 商家端最常盯的
+  /// 「店铺」页恰恰全是它们(46 处),分化在最需要的地方是空的:
+  /// 同一屏里按钮文字 +1 了,入口条的字没有。
+  ///
+  /// 锁字号不锁高度:flutter_test 的回退字体把字符画成 fontSize 见方,
+  /// 高度在这里量不出真机的差别(实测两档都是 159)。
+  group('字号跟密度走', () {
+    // ⚠️ 两次 pump 之间必须先清场。
+    //
+    // `home: const Scaffold(...)` 在两次 pumpWidget 里是**同一个 const 实例**
+    // (Dart 会把相同的 const 规范化成一个对象),Flutter 认为 widget 没变
+    // 就不重建 —— 换了 theme 也照样量到上一次的字号,于是这条测试会
+    // "证明"分化没生效,而实际上是测试自己没刷新。
+    Future<void> clear(WidgetTester t) async {
+      await t.pumpWidget(const SizedBox());
+      await t.pump();
+    }
+
+    Future<double?> titleSize(WidgetTester t, SzDensity d) async {
+      await clear(t);
+      await t.pumpWidget(MaterialApp(
+        theme: brandTheme(Brightness.light, density: d),
+        home: const Scaffold(
+            body: SzEntryGroup(children: [SzEntryTile(title: '收款账户')])),
+      ));
+      return t.widget<Text>(find.text('收款账户')).style?.fontSize;
+    }
+
+    Future<double?> gridLabelSize(WidgetTester t, SzDensity d) async {
+      await clear(t);
+      await t.pumpWidget(MaterialApp(
+        theme: brandTheme(Brightness.light, density: d),
+        home: const Scaffold(
+            body: SzIconGrid(items: [
+          SzIconGridItem(icon: Icons.star, label: '优惠券'),
+        ])),
+      ));
+      return t.widget<Text>(find.text('优惠券')).style?.fontSize;
+    }
+
+    testWidgets('入口条:操作态比浏览态大一档', (t) async {
+      final browse = await titleSize(t, SzDensity.browse);
+      final operate = await titleSize(t, SzDensity.operate);
+      expect(browse, kFontBodyLg);
+      expect(operate, kFontBodyLg + SzDensity.operate.fontBump,
+          reason: '商家端/骑手端的入口条没跟着密度加大 —— '
+              '同一屏里按钮文字已经 +1 了,两套字号');
+    });
+
+    testWidgets('图标网格:同一条口径', (t) async {
+      expect(await gridLabelSize(t, SzDensity.browse), kFontNote);
+      expect(await gridLabelSize(t, SzDensity.operate),
+          kFontNote + SzDensity.operate.fontBump);
+    });
+
+    testWidgets('用户端(浏览态)一个像素都不动', (t) async {
+      // 这条是这次改动的安全边界:user_app 走 browse,
+      // 它的入口页不该因为"给商家端加大"而跟着变样
+      expect(await titleSize(t, SzDensity.browse), kFontBodyLg);
+      expect(await gridLabelSize(t, SzDensity.browse), kFontNote);
+    });
+
+    testWidgets('没挂主题扩展时按浏览态,不炸', (t) async {
+      await t.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: SzEntryGroup(children: [SzEntryTile(title: '裸主题')])),
+      ));
+      expect(t.widget<Text>(find.text('裸主题')).style?.fontSize, kFontBodyLg);
+    });
+  });
 }

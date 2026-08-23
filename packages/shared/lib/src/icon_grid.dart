@@ -94,6 +94,8 @@ class SzIconGrid extends StatelessWidget {
 
   Widget _row(BuildContext context, List<SzIconGridItem?> row) {
     final sz = Theme.of(context).sz;
+    // 和 SzEntryTile 同一条:字号跟密度走(#33 第 5 节遗留)
+    final bump = Theme.of(context).szMetrics.fontBump;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -131,7 +133,7 @@ class SzIconGrid extends StatelessWidget {
                               maxLines: 2,
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                  fontSize: kFontNote,
+                                  fontSize: kFontNote + bump,
                                   height: 1.2,
                                   color: sz.ink),
                             ),

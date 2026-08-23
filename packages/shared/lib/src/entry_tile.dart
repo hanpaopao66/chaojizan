@@ -65,6 +65,10 @@ class SzEntryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
+    // 字号跟密度走(#33 第 5 节遗留):商家端/骑手端 +1,用户端不动。
+    // 这两端在后厨油烟和阳光下看屏幕,而按钮文字早就 +1 了 ——
+    // 入口条不跟上的话,同一屏里两套字号
+    final bump = Theme.of(context).szMetrics.fontBump;
     // hint 只在没有状态值时出现。两者同时给的话,状态优先 ——
     // 用户已经配过了,他要看的是"现在是什么"
     final showHint = (value == null || value!.isEmpty) &&
@@ -92,7 +96,7 @@ class SzEntryTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: dense ? kFontBody : kFontBodyLg,
+                          fontSize: (dense ? kFontBody : kFontBodyLg) + bump,
                           color: sz.ink)),
                   if (showHint) ...[
                     const SizedBox(height: 2),
@@ -180,7 +184,9 @@ class SzEntryGroup extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(kCardPad, 14, kCardPad, 6),
             child: Text(title!,
-                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                style: TextStyle(
+                    fontSize: kFontNote,
+                    color: sz.inkMuted)),
           ),
         Container(
           decoration: BoxDecoration(
@@ -200,7 +206,9 @@ class SzEntryGroup extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(kCardPad, 6, kCardPad, 0),
             child: Text(footnote!,
                 style: TextStyle(
-                    fontSize: kFontMicro, height: 1.5, color: sz.inkMuted)),
+                    fontSize: kFontMicro,
+                    height: 1.5,
+                    color: sz.inkMuted)),
           ),
       ],
     );
