@@ -16,6 +16,7 @@
 用的是哪种(`source`)。不标的话,骑手看到的距离时准时不准却不知道为什么,
 那比一直用直线更糟。
 """
+import asyncio
 import logging
 
 import httpx
@@ -27,6 +28,35 @@ from .pricing import haversine_m
 logger = logging.getLogger("superz.routing")
 
 _API = "https://apis.map.qq.com/ws/direction/v1/bicycling/"
+
+#: 出行方式 → 腾讯路径规划接口。
+#:
+#: 加步行和驾车不是为了"多用几个接口",是因为**同样 800 米,
+#: 骑过去和走过去是两种体感**:自取的人是走过去的,给他骑行距离
+#: 等于让他按错误的前提做决定(#298)。
+_MODE_API = {
+    "bike": _API,
+    "walk": "https://apis.map.qq.com/ws/direction/v1/walking/",
+    "drive": "https://apis.map.qq.com/ws/direction/v1/driving/",
+}
+
+#: 直线 → 各方式实际路径的经验放大系数(只在路径规划不可用时兜底)。
+#:
+#: 步行比骑行小:人能穿小区、走天桥、逆行人行道;
+#: 驾车比骑行大:单行道、禁左、高架要绕上绕下。
+_MODE_FALLBACK = {"bike": 1.2, "walk": 1.15, "drive": 1.35}
+
+#: 距离矩阵接口的 mode 取值(和路径规划接口不同名,别混用)
+_MODE_MATRIX = {"bike": "bicycling", "walk": "walking", "drive": "driving"}
+
+#: 各方式的合理速度区间(km/h),用来体检接口回来的 duration。
+#:
+#: ⚠️ 这道体检是有来历的:腾讯**各接口的 duration 单位不统一** ——
+#: 路径规划是分钟,距离矩阵是秒(#289 踩过一次)。单位错了不会报错,
+#: 只会把「走 12 分钟」显示成「走 720 分钟」或者「走 0.2 分钟」。
+#: 算出来的速度离谱就当没拿到,**不把一个自己都不信的数显示给用户**。
+_MODE_SPEED_RANGE = {"bike": (5.0, 35.0), "walk": (1.5, 10.0),
+                     "drive": (5.0, 130.0)}
 
 # 缓存网格:0.001° ≈ 111m。再细就没有复用率,再粗会把街对面算成同一点
 _GRID = 0.001
@@ -41,8 +71,11 @@ def _cell(lat: float, lng: float) -> str:
     return f"{int(lat / _GRID)}:{int(lng / _GRID)}"
 
 
-def _key(a: tuple[float, float], b: tuple[float, float]) -> str:
-    return f"route:bike:{_cell(*a)}>{_cell(*b)}"
+def _key(a: tuple[float, float], b: tuple[float, float],
+         mode: str = "bike") -> str:
+    """缓存键。**默认 bike 不能改** —— 距离矩阵(#289)写进去的是这个键,
+    单点调用要读得到它写的,前缀一变两套缓存就各热各的,等于白做。"""
+    return f"route:{mode}:{_cell(*a)}>{_cell(*b)}"
 
 
 def parse_route_cache(raw: str) -> tuple[float, float | None]:
@@ -86,10 +119,14 @@ async def bicycling_m(
     return dist, src
 
 
-async def bicycling_route(
+async def route(
     from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+    mode: str = "bike",
 ) -> tuple[float, float | None, str]:
-    """骑行距离(米)、路网时长(分钟)与来源。
+    """路径距离(米)、路网时长(分钟)与来源。`mode`:bike / walk / drive。
+
+    **同样 800 米,骑过去和走过去是两种体感** —— 自取的人是走过去的,
+    住宿的人多半开车。给错方式的距离,等于让人按错误的前提做决定(#298)。
 
     返回 `(distance_m, duration_minutes, source)`。
     腾讯骑行接口的 `routes[0].duration` **单位是分钟**(官方文档核实过)。
@@ -108,11 +145,11 @@ async def bicycling_route(
     """
     straight = haversine_m(from_lat, from_lng, to_lat, to_lng)
     if not settings.tencent_map_key:
-        return straight * _FALLBACK_FACTOR, None, "straight"
+        return straight * _MODE_FALLBACK[mode], None, "straight"
 
     a, b = (from_lat, from_lng), (to_lat, to_lng)
     redis = get_redis()
-    ck = _key(a, b)
+    ck = _key(a, b, mode)
     try:
         cached = await redis.get(ck)
         if cached is not None:
@@ -124,7 +161,7 @@ async def bicycling_route(
 
     try:
         async with httpx.AsyncClient(timeout=3) as client:
-            resp = await client.get(_API, params={
+            resp = await client.get(_MODE_API[mode], params={
                 "from": f"{from_lat},{from_lng}",
                 "to": f"{to_lat},{to_lng}",
                 "key": settings.tencent_map_key,
@@ -132,28 +169,68 @@ async def bicycling_route(
             data = resp.json()
         if data.get("status") != 0:
             # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
-            logger.warning("骑行路径 status=%s %s,回退直线",
+            logger.warning("%s 路径 status=%s %s,回退直线", mode,
                            data.get("status"), data.get("message"))
-            return straight * _FALLBACK_FACTOR, None, "straight"
+            return straight * _MODE_FALLBACK[mode], None, "straight"
         routes = (data.get("result") or {}).get("routes") or []
         if not routes:
-            return straight * _FALLBACK_FACTOR, None, "straight"
+            return straight * _MODE_FALLBACK[mode], None, "straight"
         dist = float(routes[0].get("distance") or 0)
         if dist <= 0:
-            return straight * _FALLBACK_FACTOR, None, "straight"
+            return straight * _MODE_FALLBACK[mode], None, "straight"
         # duration 单位是分钟。缺了当没有 —— 不拿距离反推一个假时长
         raw_dur = routes[0].get("duration")
         dur = float(raw_dur) if raw_dur not in (None, "") else None
         if dur is not None and dur <= 0:
             dur = None
+        # 单位体检:算出来的速度不合常理就当没拿到(见 _MODE_SPEED_RANGE)
+        if dur is not None:
+            kmh = (dist / 1000) / (dur / 60)
+            lo, hi = _MODE_SPEED_RANGE[mode]
+            if not (lo <= kmh <= hi):
+                logger.warning(
+                    "%s 路径时长不合常理:%.0fm / %.1f 分钟 = %.1f km/h,当没拿到",
+                    mode, dist, dur, kmh)
+                dur = None
         try:
             await redis.set(ck, dump_route_cache(dist, dur), ex=_TTL_SECONDS)
         except Exception:
             pass
         return dist, dur, "route"
     except Exception as e:
-        logger.warning("骑行路径请求失败(%s),回退直线", type(e).__name__)
-        return straight * _FALLBACK_FACTOR, None, "straight"
+        logger.warning("%s 路径请求失败(%s),回退直线",
+                       mode, type(e).__name__)
+        return straight * _MODE_FALLBACK[mode], None, "straight"
+
+
+async def bicycling_route(
+    from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+) -> tuple[float, float | None, str]:
+    """骑行路径。ETA、抢单距离都走这个 —— 主场景是骑手。"""
+    return await route(from_lat, from_lng, to_lat, to_lng, "bike")
+
+
+async def walking_route(
+    from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+) -> tuple[float, float | None, str]:
+    """步行路径。到店自取、团购到店核销用。
+
+    自取的人是**走过去**的:骑行路线会让他上机动车道、绕开步行街,
+    而人可以穿小区、走天桥。给骑行距离等于让他按错误的前提决定
+    "要不要自己去拿"。
+    """
+    return await route(from_lat, from_lng, to_lat, to_lng, "walk")
+
+
+async def driving_route(
+    from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+) -> tuple[float, float | None, str]:
+    """驾车路径。住宿列表用 —— 订酒店的人多半开车过去。
+
+    「离你 3 公里」和「开车 12 分钟」是两个概念:前者是地图上的长度,
+    后者才是他要做的决定(今晚住不住这家)。
+    """
+    return await route(from_lat, from_lng, to_lat, to_lng, "drive")
 
 
 #: 距离矩阵单次请求的上限(腾讯:20 起点 × 25 终点)。
@@ -162,12 +239,18 @@ _MATRIX_MAX_DESTS = 25
 
 _MATRIX_API = "https://apis.map.qq.com/ws/distance/v1/matrix"
 
+#: 腾讯的「每秒请求量已达到上限」。**不是每日配额用尽** —— 等一下就好,
+#: 所以要和真正的配额耗尽区分开:前者该重试,后者重试只是多烧一次
+_RATE_LIMIT_STATUS = {120}
+_RATE_LIMIT_PAUSE = 0.35
 
-async def bicycling_matrix(
+
+async def route_matrix(
     origin: tuple[float, float],
     dests: list[tuple[float, float]],
+    mode: str = "bike",
 ) -> dict[tuple[float, float], tuple[float, float | None, str]]:
-    """一个起点到多个终点的骑行距离(#289)。
+    """一个起点到多个终点的路径距离(#289;#298 加 mode)。
 
     返回 `{(lat, lng): (distance_m, duration_min, source)}`,
     source ∈ {"route", "straight"},和 [bicycling_route] 完全一致 ——
@@ -196,11 +279,22 @@ async def bicycling_matrix(
         return out
 
     redis = get_redis()
+    # 按**缓存格**去重后再问接口。
+    #
+    # 缓存键是 111m 见方的格子,同一格里的点本来就共用一个答案 ——
+    # 而现实里同格的点非常多:一栋楼里的几家酒店、同一家店的好几单。
+    # 不去重就会把同一个点重复问几十遍,50 个终点切成两批发出去,
+    # 第二批直接撞上「此key每秒请求量已达到上限」,一半的卡片没有时长,
+    # 看着像"这些算不出来",其实只是我们自己把自己限流了。
+    #
+    # 去重之后 50 家酒店常常只剩三四个真正要问的点,一批就够。
     todo: list[tuple[float, float]] = []
+    seen_cells: dict[str, tuple[float, float]] = {}
+    same_cell: dict[tuple[float, float], tuple[float, float]] = {}
     for d in dests:
         straight = haversine_m(origin[0], origin[1], d[0], d[1])
         try:
-            cached = await redis.get(_key(origin, d))
+            cached = await redis.get(_key(origin, d, mode))
             if cached is not None:
                 raw = cached.decode() if isinstance(cached, bytes) else cached
                 dist_c, dur_c = parse_route_cache(raw)
@@ -209,40 +303,63 @@ async def bicycling_matrix(
         except Exception:
             pass  # 缓存挂了不影响主流程
         if not settings.tencent_map_key:
-            out[d] = (straight * _FALLBACK_FACTOR, None, "straight")
-        else:
+            out[d] = (straight * _MODE_FALLBACK[mode], None, "straight")
+            continue
+        cell = _key(origin, d, mode)
+        rep = seen_cells.get(cell)
+        if rep is None:
+            seen_cells[cell] = d
             todo.append(d)
+        elif rep != d:
+            same_cell[d] = rep  # 跟着代表点走,不单独问
 
     # 分批打:超过单次上限就切片,别指望接口帮我们截断
     for i in range(0, len(todo), _MATRIX_MAX_DESTS):
         batch = todo[i:i + _MATRIX_MAX_DESTS]
         rows: list[dict] | None = None
-        try:
-            async with httpx.AsyncClient(timeout=4) as client:
-                resp = await client.get(_MATRIX_API, params={
-                    "mode": "bicycling",
-                    "from": f"{origin[0]},{origin[1]}",
-                    "to": ";".join(f"{d[0]},{d[1]}" for d in batch),
-                    "key": settings.tencent_map_key,
-                })
-                data = resp.json()
-            if data.get("status") != 0:
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=4) as client:
+                    resp = await client.get(_MATRIX_API, params={
+                        "mode": _MODE_MATRIX[mode],
+                        "from": f"{origin[0]},{origin[1]}",
+                        "to": ";".join(f"{d[0]},{d[1]}" for d in batch),
+                        "key": settings.tencent_map_key,
+                    })
+                    data = resp.json()
+                status = data.get("status")
+                if status == 0:
+                    rows = ((data.get("result") or {}).get("rows") or [{}])[0] \
+                        .get("elements")
+                    break
+                if status in _RATE_LIMIT_STATUS and attempt == 0:
+                    # **每秒**请求量上限,不是每日配额 —— 等一下再打就过了。
+                    # 50 家酒店切成两批、40 单抢单池切成两批,两批背靠背
+                    # 发出去就会撞上;第二批静默回退直线,一半的卡片没有
+                    # 时长,看着像"这些店算不出来",其实只是发太快了
+                    await asyncio.sleep(_RATE_LIMIT_PAUSE)
+                    continue
                 # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
                 logger.warning("距离矩阵 status=%s %s,这一批回退直线",
-                               data.get("status"), data.get("message"))
-            else:
-                rows = ((data.get("result") or {}).get("rows") or [{}])[0] \
-                    .get("elements")
-        except Exception as e:
-            logger.warning("距离矩阵请求失败(%s),这一批回退直线",
-                           type(e).__name__)
+                               status, data.get("message"))
+                break
+            except Exception as e:
+                logger.warning("距离矩阵请求失败(%s),这一批回退直线",
+                               type(e).__name__)
+                break
+        else:
+            logger.warning("距离矩阵限流重试后仍失败,这一批回退直线")
+
+        # 批与批之间歇一下,别自己把自己限流(上面的重试是兜底,不是常态)
+        if i + _MATRIX_MAX_DESTS < len(todo):
+            await asyncio.sleep(_RATE_LIMIT_PAUSE)
 
         for j, d in enumerate(batch):
             straight = haversine_m(origin[0], origin[1], d[0], d[1])
             el = rows[j] if rows is not None and j < len(rows) else None
             dist = float((el or {}).get("distance") or 0)
             if dist <= 0:
-                out[d] = (straight * _FALLBACK_FACTOR, None, "straight")
+                out[d] = (straight * _MODE_FALLBACK[mode], None, "straight")
                 continue
             # 矩阵接口的 duration 单位是**秒**(和骑行路径的分钟不一样,
             # 官方文档两处口径确实不同)—— 换算成分钟再往下传,
@@ -253,11 +370,30 @@ async def bicycling_matrix(
                 dur = None
             out[d] = (dist, dur, "route")
             try:
-                await redis.set(_key(origin, d), dump_route_cache(dist, dur),
+                await redis.set(_key(origin, d, mode),
+                                dump_route_cache(dist, dur),
                                 ex=_TTL_SECONDS)
             except Exception:
                 pass
+
+    # 同格的点抄代表点的答案。代表点自己也没算出来的,退回直线 ——
+    # 口径和单点调用一致,不编数
+    for d, rep in same_cell.items():
+        if rep in out:
+            out[d] = out[rep]
+    for d in dests:
+        if d not in out:
+            straight = haversine_m(origin[0], origin[1], d[0], d[1])
+            out[d] = (straight * _MODE_FALLBACK[mode], None, "straight")
     return out
+
+
+async def bicycling_matrix(
+    origin: tuple[float, float],
+    dests: list[tuple[float, float]],
+) -> dict[tuple[float, float], tuple[float, float | None, str]]:
+    """骑行矩阵。抢单列表用 —— 一屏 20 单不该打 40 次 HTTP。"""
+    return await route_matrix(origin, dests, "bike")
 
 
 async def detour_m(

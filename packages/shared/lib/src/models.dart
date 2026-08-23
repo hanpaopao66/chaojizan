@@ -1,3 +1,6 @@
+// 类里已经有个同名的 distanceLabel getter,顶层那个要加前缀才叫得到
+import 'coord_utils.dart' as geo;
+
 /// 与后端 state_machine.py 一一对应的订单状态。
 enum OrderStatus {
   pendingPayment('pending_payment', '待支付'),
@@ -1332,6 +1335,7 @@ class HotelCard {
         ratingAvg = (json['rating_avg'] as num?)?.toDouble(),
         ratingCount = json['rating_count'] as int? ?? 0,
         distanceM = json['distance_m'] as int?,
+        driveMinutes = json['drive_minutes'] as int?,
         minNightPriceCents = json['min_night_price_cents'] as int?,
         full = json['full'] as bool? ?? false;
 
@@ -1346,14 +1350,26 @@ class HotelCard {
   final double? ratingAvg;
   final int ratingCount;
   final int? distanceM;
+
+  /// 开车过去大概多少分钟(#298)。null = 没定位 / 算不出来。
+  final int? driveMinutes;
   final int? minNightPriceCents; // null = 区间内满房
   final bool full;
 
   String get tierLabel => kHotelTiers[tier] ?? tier;
+
+  /// 「离你多远」。
+  ///
+  /// 有驾车时长就一起说 —— 住宿的人多半开车过去,「3.2 公里」是地图上的
+  /// 长度,「开车 12 分钟」才是他要做的那个决定(今晚住不住这家)。
+  /// 算不出时长就只说距离,不编一个(#298)。
+  ///
+  /// 单位用中文:「km」是给开发看的,不是给订酒店的人看的(#296)。
   String get distanceLabel {
     final d = distanceM;
     if (d == null) return '';
-    return d < 1000 ? '${d}m' : '${(d / 1000).toStringAsFixed(1)}km';
+    final far = geo.distanceLabel(d.toDouble());
+    return driveMinutes == null ? far : '$far · 开车约 $driveMinutes 分钟';
   }
 }
 

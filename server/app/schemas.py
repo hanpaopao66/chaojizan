@@ -1565,6 +1565,15 @@ class HotelCardOut(BaseModel):
     rating_avg: float | None = None
     rating_count: int = 0
     distance_m: int | None = None
+    #: 开车过去大概多少分钟(#298)。None = 没定位 / 算不出来。
+    #:
+    #: 「离你 3 公里」是地图上的长度,「开车 12 分钟」才是他要做的
+    #: 那个决定(今晚住不住这家)。住宿场景的人多半开车,给骑行或者
+    #: 直线距离,是让他按错误的前提选酒店。
+    #:
+    #: **排序仍按 distance_m**:那是 PostGIS 球面距离,不依赖外部接口。
+    #: 让列表顺序取决于第三方接口通不通,是把稳定性押在别人身上。
+    drive_minutes: int | None = None
     # 区间内可订房型的最低"每晚均价"(分);None = 区间内满房/未开放
     min_night_price_cents: int | None = None
     full: bool = False  # 区间内所有房型都订不了

@@ -283,3 +283,45 @@ async def open_city_list(db: AsyncSession = Depends(get_db)):
             "source": "open_cities",
         }
     return {"items": have, "source": "merchants"}
+
+
+@router.get("/route")
+async def route_estimate(
+    from_lat: float = Query(ge=-90, le=90),
+    from_lng: float = Query(ge=-180, le=180),
+    to_lat: float = Query(ge=-90, le=90),
+    to_lng: float = Query(ge=-180, le=180),
+    mode: str = Query(default="walk", pattern="^(walk|drive|bike)$"),
+    user: User = Depends(get_current_user),
+):
+    """两点之间按出行方式算的实际路径距离与时长(#298)。
+
+    ## 为什么不能都用一个数
+
+    **同样 800 米,骑过去和走过去是两种体感。**
+
+    - 到店自取、团购到店核销的人是**走过去**的。给他骑行距离,
+      等于让他按错误的前提决定"要不要自己去拿" ——
+      骑行路线会上机动车道、绕开步行街,而人能穿小区、走天桥;
+    - 订酒店的人多半**开车**过去。「离你 3 公里」是地图上的长度,
+      「开车 12 分钟」才是他要做的那个决定。
+
+    ## 时长可能是 null
+
+    没配 Key、接口挂了、或者回来的时长不合常理(腾讯各接口 duration
+    单位不统一,#289 踩过),一律给 null。客户端**只显示距离,不显示时间**
+    —— 编一个时间出来,用户按它出门,迟到的是他。
+
+    距离永远有值:最差也是直线 × 经验系数,并在 `source` 里标成
+    `straight`,客户端据此说"约"。
+    """
+    from ..services.routing import route as _route
+
+    dist, minutes, source = await _route(from_lat, from_lng,
+                                         to_lat, to_lng, mode)
+    return {
+        "distance_m": round(dist),
+        "minutes": None if minutes is None else max(1, round(minutes)),
+        "mode": mode,
+        "source": source,
+    }

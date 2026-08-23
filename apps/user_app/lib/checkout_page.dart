@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'address_pages.dart';
@@ -28,6 +29,13 @@ class CheckoutPage extends StatefulWidget {
 
 class _CheckoutPageState extends State<CheckoutPage> {
   bool _pickup = false; // 到店自取:免配送费,凭取餐码取餐
+
+  /// 自取要走多远(#298)。null = 还没拉到 / 拉不到。
+  ///
+  /// 「到店自取(免配送费)」省的那几块钱,和"我得走二十分钟过去"
+  /// 是同一个决定的两半。只说省钱不说路程,是把好处摊开、把代价藏起来。
+  ({int distanceM, int? minutes, String source})? _walk;
+  bool _walkLoading = false;
   int _tipCents = 0; // 小费:100% 归骑手,平台不抽不计佣
   Address? _address;
   bool _loadingAddress = true;
@@ -292,6 +300,43 @@ class _CheckoutPageState extends State<CheckoutPage> {
     }
   }
 
+  /// 拉一次「走过去要多远」。只在**切到自取那一刻**拉:
+  /// 每次进结算页都拉是白费配额 —— 大多数人选的是配送。
+  Future<void> _refreshWalk() async {
+    if (_walk != null || _walkLoading) return; // 同一家店只拉一次
+    setState(() => _walkLoading = true);
+    try {
+      final me = await Geolocator.getLastKnownPosition() ??
+          await Geolocator.getCurrentPosition();
+      final gcj = wgs84ToGcj02(me.latitude, me.longitude);
+      final r = await widget.api.geoRoute(
+        fromLat: gcj.lat,
+        fromLng: gcj.lng,
+        toLat: widget.merchant.lat,
+        toLng: widget.merchant.lng,
+        mode: 'walk',
+      );
+      if (mounted) setState(() => _walk = r);
+    } catch (_) {
+      // 没给定位权限、定位超时、接口挂了 —— 都只是"这行不显示",
+      // 不弹窗、不拦下单。他本来就知道自己要去哪家店
+    } finally {
+      if (mounted) setState(() => _walkLoading = false);
+    }
+  }
+
+  /// 自取卡上那句「走过去大概多远」。
+  String? get _walkLine {
+    final w = _walk;
+    if (w == null) return null;
+    final about = w.source == 'straight' ? '约' : '';
+    // 时长拿不到就只说距离 —— 编一个时间出来,用户照着它出门,迟到的是他
+    return w.minutes == null
+        ? '离你$about ${distanceLabel(w.distanceM.toDouble())},走过去'
+        : '走过去$about ${w.minutes} 分钟'
+            '(${distanceLabel(w.distanceM.toDouble())})';
+  }
+
   /// 配送费拆分的逐行展示。基础项不重复列(上面那行就是总额),
   /// 只把**加价的原因**摊开 —— 顾客要知道多出来的钱是为什么。
   List<Widget> _feeBreakdownRows(ThemeData theme) {
@@ -518,6 +563,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 onSelectionChanged: (v) {
                   setState(() => _pickup = v.first);
                   _refreshFee();
+                  if (v.first) _refreshWalk();
                 },
               ),
             ),
@@ -530,8 +576,13 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 leading: Icon(Icons.storefront,
                     color: theme.colorScheme.primary),
                 title: Text(widget.merchant.name),
-                subtitle: Text('${widget.merchant.address}\n'
-                    '出餐后凭订单页的取餐码到店取餐'),
+                subtitle: Text([
+                  widget.merchant.address,
+                  // 走多远放在取餐码说明**之前**:他先要决定去不去,
+                  // 才轮到怎么取。(SDK ^3.4 没有 `?expr`,用 if 判空)
+                  if (_walkLine != null) _walkLine!,
+                  '出餐后凭订单页的取餐码到店取餐',
+                ].join('\n')),
                 isThreeLine: true,
               ),
             )

@@ -1314,6 +1314,35 @@ class ApiClient {
         query: {'lat': '$lat', 'lng': '$lng'});
     return PoiTip.fromJson(data as Map<String, dynamic>);
   }
+  /// 两点之间按出行方式算的实际路径(#298)。`mode`:walk / drive / bike。
+  ///
+  /// 同样 800 米,骑过去和走过去是两种体感。自取的人是走过去的,
+  /// 订酒店的人多半开车 —— 给错方式的距离,是让人按错误的前提做决定。
+  ///
+  /// `minutes` 可能是 null(没配 Key、接口挂了、或时长不合常理)。
+  /// 那时**只显示距离,不显示时间** —— 编一个时间出来,
+  /// 用户照着它出门,迟到的是他。
+  Future<({int distanceM, int? minutes, String source})> geoRoute({
+    required double fromLat,
+    required double fromLng,
+    required double toLat,
+    required double toLng,
+    String mode = 'walk',
+  }) async {
+    final data = await _request('GET', '/geo/route', query: {
+      'from_lat': '$fromLat',
+      'from_lng': '$fromLng',
+      'to_lat': '$toLat',
+      'to_lng': '$toLng',
+      'mode': mode,
+    }) as Map<String, dynamic>;
+    return (
+      distanceM: data['distance_m'] as int,
+      minutes: data['minutes'] as int?,
+      source: (data['source'] as String?) ?? 'straight',
+    );
+  }
+
   /// 图钉周边的可选地点(地图选点页下方的列表)。
   ///
   /// 光给一个图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——

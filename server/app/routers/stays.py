@@ -385,7 +385,24 @@ async def list_hotels(
         score = (c.rating_avg or 3) * 20 - (c.distance_m or 0) / 1000 * 2
         return -score
     cards.sort(key=_key)
-    return cards[:50]
+    top = cards[:50]
+
+    # 开车多久:只给**真要返回的这一页**算,而且只在有定位时算(#298)。
+    # 走矩阵接口(一次问一批)而不是逐个打 —— 50 家店逐个调就是 50 次
+    # 串行 HTTP,和 #289 抢单列表踩的是同一个坑。
+    # 算不出来就留 None,客户端只显示距离,不显示时间。
+    if lat is not None and lng is not None and top:
+        try:
+            from ..services.routing import route_matrix
+            got = await route_matrix(
+                (lat, lng), [(c.lat, c.lng) for c in top], "drive")
+            for c in top:
+                _d, mins, _src = got.get((c.lat, c.lng), (0, None, "straight"))
+                if mins is not None:
+                    c.drive_minutes = max(1, round(mins))
+        except Exception:
+            logger.warning("酒店列表算驾车时长失败,只显示距离", exc_info=True)
+    return top
 
 
 @router.get("/hotels/{hotel_id}", response_model=HotelDetailOut)
