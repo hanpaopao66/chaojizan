@@ -86,7 +86,7 @@ class _KitchenCamSetupPageState extends State<KitchenCamSetupPage> {
   Future<void> _remove() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (c) => AlertDialog(
+      builder: (c) => SzDialog(
         title: const Text('撤下明厨亮灶?'),
         content: const Text('撤下后顾客看到的是「无明厨亮灶」。'
             '这是你的选择 —— 法规对商家是倡导,不是强制。'),

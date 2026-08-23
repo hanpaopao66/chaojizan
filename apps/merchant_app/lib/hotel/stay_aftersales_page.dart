@@ -34,7 +34,7 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
     final isNego = a.kind == 'nego_refund';
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text(accept
             ? (isNego ? '同意协商退' : '确认无房,认罚')
             : '拒绝该申请'),

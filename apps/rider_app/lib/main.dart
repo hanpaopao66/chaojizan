@@ -402,7 +402,7 @@ class _RiderHomePageState extends State<RiderHomePage>
   Future<void> _triggerSos() async {
     final go = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('🆘 紧急求助'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Row(children: [
@@ -489,7 +489,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     }
     final go = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('跑单需要先完成实名认证'),
         content: Text(p != null && p.status == 'rejected'
             ? '上次认证被驳回:${p.rejectReason}\n修改后重新提交即可'
@@ -668,7 +668,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     if (order.addrProtect) {
       final take = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
+        builder: (context) => SzDialog(
           title: const Text('拍照留证'),
           content: const Text('这是地址保护订单:放门口请拍一张照片留证'
               '(深夜时段必须拍;照片只有顾客和平台能看到)。'),
@@ -725,7 +725,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     final note = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('反馈地址不准'),
         content: TextField(
             controller: note,
@@ -768,7 +768,7 @@ class _RiderHomePageState extends State<RiderHomePage>
         order.pickupPhotoUrl.isEmpty) {
       final go = await showDialog<bool>(
         context: context,
-        builder: (dlg) => AlertDialog(
+        builder: (dlg) => SzDialog(
           title: const Text('还没拍物品照'),
           content: const Text('东西是顾客的,平台不做保价 —— '
               '万一说少了件或者磕坏了,没有照片双方只能各执一词。\n\n'
@@ -1009,7 +1009,7 @@ class _RiderHomePageState extends State<RiderHomePage>
   Future<void> _requestRaise(Order order, int cents, String why) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dlg) => AlertDialog(
+      builder: (dlg) => SzDialog(
         title: const Text('要多花钱,先问顾客'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(why),
@@ -1074,7 +1074,7 @@ class _RiderHomePageState extends State<RiderHomePage>
     final note = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dlg) => AlertDialog(
+      builder: (dlg) => SzDialog(
         title: const Text('买不到?'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           const Text('商品款会全额退给顾客,跑腿费只收到店那一段的距离费 ——'

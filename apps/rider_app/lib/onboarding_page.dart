@@ -421,7 +421,7 @@ class _RiderAccidentPageState extends State<RiderAccidentPage> {
       if (!mounted) return;
       showDialog(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (_) => SzDialog(
           title: const Text('已上报,平台马上联系你'),
           content: Text(
               '在途订单已自动处理(${r['released_orders']} 单回池、'

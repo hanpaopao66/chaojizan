@@ -101,7 +101,7 @@ Future<bool?> _addStaffDialog(BuildContext context, ApiClient api) async {
   try {
     return await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('添加店员'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(

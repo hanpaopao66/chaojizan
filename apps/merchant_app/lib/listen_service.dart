@@ -97,7 +97,7 @@ class ListenKeepAlive {
     if (!context.mounted) return;
     final agree = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('别让系统杀掉听单'),
         content: const Text('部分手机会自动清理后台应用,导致锁屏后收不到新订单。\n\n'
             '请在接下来的系统弹窗里允许「忽略电池优化」,'

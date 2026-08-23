@@ -211,7 +211,7 @@ class _HealthCertsPageState extends State<HealthCertsPage> {
   Future<void> _archive(Map<String, dynamic> c) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (d) => AlertDialog(
+      builder: (d) => SzDialog(
         title: Text('「${c['name']}」已离职?'),
         content: const Text('归档后不再提醒,记录仍保留以备核查 —— '
             '监管查的是「当时在岗的人有没有证」,删掉就说不清了。'),

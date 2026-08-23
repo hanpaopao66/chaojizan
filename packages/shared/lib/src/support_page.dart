@@ -6,6 +6,7 @@ import 'models.dart';
 import 'push_service.dart';
 import 'ui_bits.dart';
 import 'responsive.dart';
+import 'sz_widgets.dart';
 
 /// 联系平台客服:三端共用的工单页。
 ///
@@ -172,7 +173,7 @@ class _SupportPageState extends State<SupportPage> {
   Future<void> _deleteAccount() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('注销账号'),
         content: const Text('注销后手机号解绑、资料匿名化,无法恢复;'
             '交易记录按法律要求保留。\n\n'
@@ -202,7 +203,7 @@ class _SupportPageState extends State<SupportPage> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('已注销'),
         content: const Text('感谢使用超级赞,应用即将关闭。'),
         actions: [

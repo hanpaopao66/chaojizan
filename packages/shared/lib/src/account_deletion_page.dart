@@ -15,6 +15,7 @@ import 'api_client.dart';
 import 'legal.dart';
 import 'push_service.dart';
 import 'responsive.dart';
+import 'sz_widgets.dart';
 
 /// 「账号与协议」区块(商家端/骑手端复用;用户端我的页自有布局,单独嵌入)。
 /// 包含:用户协议与隐私政策 / 退出登录 / 注销账号 —— 应用商店审核三件套。
@@ -132,7 +133,7 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
               setDialog(() => countdown--);
             }
           });
-          return AlertDialog(
+          return SzDialog(
             title: const Text('确认注销账号?'),
             content: const Text('注销后账号将被匿名化,无法恢复。\n此操作不可撤销,请再次确认。',
                 style: TextStyle(height: 1.6)),

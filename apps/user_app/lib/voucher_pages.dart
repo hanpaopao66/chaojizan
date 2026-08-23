@@ -315,7 +315,7 @@ class _MyVouchersPageState extends State<MyVouchersPage> {
   Future<void> _showTicket(VoucherTicket t) async {
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => SzDialog(
         title: Text(t.title),
         content: Column(
           mainAxisSize: MainAxisSize.min,

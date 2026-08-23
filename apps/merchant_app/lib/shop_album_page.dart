@@ -73,7 +73,7 @@ class _ShopAlbumPageState extends State<ShopAlbumPage> {
   Future<void> _remove(String url) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('删除这张照片?'),
         actions: [
           TextButton(

@@ -67,7 +67,7 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
     final controller = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text('申诉:$title'),
         content: Column(
           mainAxisSize: MainAxisSize.min,

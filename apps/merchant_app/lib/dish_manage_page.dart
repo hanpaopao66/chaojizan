@@ -410,7 +410,7 @@ class _DishManagePageState extends State<DishManagePage> {
     try {
       final category = await showDialog<String>(
         context: context,
-        builder: (dialog) => AlertDialog(
+        builder: (dialog) => SzDialog(
           title: Text('把 ${_selected.length} 道菜改到新分类'),
           content: TextField(
             controller: controller,

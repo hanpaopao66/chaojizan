@@ -253,7 +253,7 @@ class _PurchasesPageState extends State<PurchasesPage> {
   Future<void> _delete(Map<String, dynamic> r) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (d) => AlertDialog(
+      builder: (d) => SzDialog(
         title: Text('删掉「${r['name']}」这条?'),
         content: const Text('只用来删录错的 —— 到了最短留存期平台也不会自动删,'
             '记录留着是给你自己用的。'),

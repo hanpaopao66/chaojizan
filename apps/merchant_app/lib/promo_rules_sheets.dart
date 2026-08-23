@@ -47,7 +47,7 @@ Future<void> _runPromoDialog(
   final saved = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
-      builder: (context, setDialog) => AlertDialog(
+      builder: (context, setDialog) => SzDialog(
         title: const Text('满减活动(最多 3 档)'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -194,7 +194,7 @@ Future<void> _runGiftDialog(
   final saved = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
-      builder: (context, setDialog) => AlertDialog(
+      builder: (context, setDialog) => SzDialog(
         title: const Text('满赠活动(最多 2 档)'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -365,7 +365,7 @@ Future<bool?> _createShopCouponDialog(
   try {
     return await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (context) => SzDialog(
       title: const Text('新建店铺券'),
       content: SingleChildScrollView(
         child: Column(mainAxisSize: MainAxisSize.min, children: [

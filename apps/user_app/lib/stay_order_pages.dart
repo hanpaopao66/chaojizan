@@ -260,7 +260,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
     if (!mounted) return;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('确认取消?'),
         content: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -505,7 +505,7 @@ class _StayOrderDetailPageState extends State<StayOrderDetailPage> {
     final isNoRoom = kind == 'no_room';
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text(isNoRoom ? '到店无房' : '申请协商退款'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           Text(isNoRoom

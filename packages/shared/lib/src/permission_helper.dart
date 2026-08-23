@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'sz_widgets.dart';
 
 enum AppPermissionKind { location, locationRider, camera, photos, bluetooth, notification }
 
@@ -61,7 +62,7 @@ class PermissionRationale {
     final (title, defaultReason) = _copy(kind);
     final agreed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text(title),
         content: Text(reason ?? defaultReason, style: const TextStyle(height: 1.6)),
         actions: [
@@ -88,7 +89,7 @@ class PermissionRationale {
       required Future<void> Function() openSettings}) async {
     final go = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('权限未开启'),
         content: Text(message, style: const TextStyle(height: 1.6)),
         actions: [

@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api_client.dart';
+import 'sz_widgets.dart';
 
 /// 分发渠道:编译期由 --dart-define=SUPERZ_CHANNEL 指定。
 ///
@@ -119,7 +120,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       if (!mounted) return;
       final go = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
+        builder: (ctx) => SzDialog(
           title: const Text('需要允许安装应用'),
           content: const Text(
               '用于安装超级赞的新版本安装包。\n'
@@ -217,7 +218,7 @@ class _UpdateDialogState extends State<_UpdateDialog> {
   @override
   Widget build(BuildContext context) {
     final downloading = _progress != null;
-    return AlertDialog(
+    return SzDialog(
       title: Text('发现新版本 v${widget.version}'),
       content: Column(
         mainAxisSize: MainAxisSize.min,

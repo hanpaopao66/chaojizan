@@ -470,6 +470,58 @@ class SzFeeRow extends StatelessWidget {
   }
 }
 
+/// 紧凑对话框:三端所有弹窗的统一外壳。
+///
+/// ## 为什么不直接用 AlertDialog
+///
+/// Material 的默认内边距是给桌面和大屏留的:标题上 24、标题到正文 20、
+/// 正文到按钮 24,再加按钮区自己的 8 —— 一个"暂无计划"两行字的弹窗,
+/// 光空白就吃掉七十多像素,正文反而挤在中间一小条。真机截图上很显眼:
+/// 弹窗占了大半屏,而有效内容只有两行。
+///
+/// 而这三个内边距**都不在 `DialogThemeData` 里**(它只有 `insetPadding`
+/// 和 `actionsPadding`),改不动 —— 所以要一个自己的外壳来传它们。
+///
+/// ## 收的是空白,不是触控区
+///
+/// 按钮的最小高度仍然由密度决定(商家端 56、用户端 48)——
+/// 戴手套按不准那条没变。这里只压标题与正文之间、正文与按钮之间的空隙。
+class SzDialog extends StatelessWidget {
+  const SzDialog({
+    super.key,
+    this.title,
+    this.content,
+    this.actions,
+    this.scrollable = false,
+    this.icon,
+  });
+
+  /// 标题上方的图标(危险操作的警示图标之类)。
+  final Widget? icon;
+
+  final Widget? title;
+  final Widget? content;
+  final List<Widget>? actions;
+
+  /// 内容超长时让整个对话框可滚(长协议、长清单用)。
+  final bool scrollable;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        icon: icon,
+        title: title,
+        content: content,
+        actions: actions,
+        scrollable: scrollable,
+        // 24/24/24/0 → 20/18/20/0
+        titlePadding: EdgeInsets.fromLTRB(20, icon == null ? 18 : 0, 20, 0),
+        // 24/20/24/24 → 20/10/20/14。标题到正文那 20 是最没道理的一段:
+        // 标题本身已经有字重和字号做区隔,不需要再拿空白隔一次
+        contentPadding: EdgeInsets.fromLTRB(20, title == null ? 18 : 10, 20, 14),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      );
+}
+
 /// 时间线节点状态。
 enum SzStepState { done, now, todo }
 

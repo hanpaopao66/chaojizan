@@ -1929,7 +1929,7 @@ class _MenuPageState extends State<MenuPage>
         final controller = TextEditingController();
         final ok = await showDialog<bool>(
           context: context,
-          builder: (context) => AlertDialog(
+          builder: (context) => SzDialog(
             title: const Text('输入 6 位拼单码'),
             content: TextField(
                 controller: controller,
@@ -3740,7 +3740,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     final submitted = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
+        builder: (context, setDialog) => SzDialog(
           title: const Text('申请售后'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -4315,7 +4315,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                           final go = await showDialog<bool>(
                             context: context,
                             builder: (context) => StatefulBuilder(
-                              builder: (context, setState) => AlertDialog(
+                              builder: (context, setState) => SzDialog(
                                 title: const Text('晒单设置'),
                                 content: SwitchListTile(
                                   title: const Text('金额打码'),
@@ -4386,7 +4386,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                         final content = TextEditingController();
                         final ok = await showDialog<bool>(
                           context: context,
-                          builder: (context) => AlertDialog(
+                          builder: (context) => SzDialog(
                             title: const Text('追评'),
                             content: TextField(
                                 controller: content,
@@ -4790,7 +4790,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     if (chk['eligible'] == true) {
       final ok = await showDialog<bool>(
         context: context,
-        builder: (context) => AlertDialog(
+        builder: (context) => SzDialog(
           title: const Text('自助退款'),
           content: Text('${chk['reason']},将全额退回原路。确认退款?'),
           actions: [
@@ -5069,7 +5069,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                             _riderTags.isNotEmpty) {
                           final go = await showDialog<bool>(
                             context: context,
-                            builder: (dialog) => AlertDialog(
+                            builder: (dialog) => SzDialog(
                               content: const Text(
                                   '你选的都是配送方面的反馈 —— 配送由平台负责,'
                                   '建议低分打给骑手评分,不影响商家。\n'
@@ -5318,7 +5318,7 @@ class _ProfileViewState extends State<ProfileView> {
     await showDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
+        builder: (context, setState) => SzDialog(
           title: const Text('生日与营销推送'),
           content: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(
@@ -5383,7 +5383,7 @@ class _ProfileViewState extends State<ProfileView> {
     final controller = TextEditingController(text: _profile?.name ?? '');
     final name = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('修改昵称'),
         content: TextField(
             controller: controller,
@@ -5412,7 +5412,7 @@ class _ProfileViewState extends State<ProfileView> {
   void _showInvoiceInfo() {
     showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('开发票'),
         content: const Text(
             '电子发票功能将在接入微信支付后开放。\n\n'

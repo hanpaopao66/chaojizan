@@ -66,7 +66,7 @@ class _OnboardingWelcomePageState extends State<OnboardingWelcomePage> {
   Future<void> _logout() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialog) => AlertDialog(
+      builder: (dialog) => SzDialog(
         title: const Text('退出登录?'),
         content: const Text('已填写的开店草稿会保留在本机。'),
         actions: [

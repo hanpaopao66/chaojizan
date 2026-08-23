@@ -106,7 +106,7 @@ class _PrinterPageState extends State<PrinterPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setLocal) => AlertDialog(
+        builder: (context, setLocal) => SzDialog(
         title: const Text('绑定云打印机'),
         content: SingleChildScrollView(
           child: Column(

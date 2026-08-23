@@ -46,7 +46,7 @@ class _VoucherManagePageState extends State<VoucherManagePage> {
     final count = TextEditingController(text: '100');
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('发布代金券'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -206,7 +206,7 @@ class _VoucherRedeemPageState extends State<VoucherRedeemPage> {
       _code.clear();
       await showDialog<void>(
         context: context,
-        builder: (context) => AlertDialog(
+        builder: (context) => SzDialog(
           icon: PopIn(
               child:
                   Icon(Icons.check_circle, color: Theme.of(context).sz.earn, size: 52)),

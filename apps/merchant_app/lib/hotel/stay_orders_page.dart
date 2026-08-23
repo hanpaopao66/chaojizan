@@ -210,7 +210,7 @@ class _StayOrdersPageState extends State<StayOrdersPage>
       Future<StayOrder> Function() action, {String? doneMessage}) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text(title),
         content: Text(body),
         actions: [
@@ -242,7 +242,7 @@ class _StayOrdersPageState extends State<StayOrdersPage>
     final controller = TextEditingController(text: '满房,暂时无法接待');
     final reason = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('拒单原因'),
         content: TextField(
           controller: controller,

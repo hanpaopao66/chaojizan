@@ -24,7 +24,7 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
         text: review.reply.isEmpty ? '' : review.reply);
     final text = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text(review.reply.isEmpty ? '回复点评' : '回复追评 / 修改回复'),
         content: TextField(
           controller: controller,

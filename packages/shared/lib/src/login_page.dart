@@ -8,6 +8,7 @@ import 'brand.dart';
 import 'legal.dart';
 import 'push_service.dart';
 import 'responsive.dart';
+import 'sz_widgets.dart';
 
 /// 三端统一:仅验证码登录(密码登录已下线,管理后台网页除外)。
 /// 配合 AuthGate:冷启动恢复会话免登录;401 静默回到登录页。
@@ -164,7 +165,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
+        builder: (context, setDialog) => SzDialog(
           title: const Text('安全验证'),
           content: Column(
             mainAxisSize: MainAxisSize.min,

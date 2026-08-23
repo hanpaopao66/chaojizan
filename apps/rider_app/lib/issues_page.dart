@@ -72,7 +72,7 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
     final controller = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('申诉这次判责'),
         content: Column(
           mainAxisSize: MainAxisSize.min,

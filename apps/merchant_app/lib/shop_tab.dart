@@ -606,7 +606,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
         TextEditingController(text: '${shop.promiseReadyMinutes}');
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('承诺出餐时长(分钟)'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(
@@ -662,7 +662,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
             currentCents % 100 == 0 ? 0 : 2) : '');
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text(label),
         content: TextField(
           controller: controller,
@@ -738,7 +738,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
         text: accept ? '非常抱歉给您带来不好的体验,已退您餐费' : '');
     final reply = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: Text(accept ? '同意售后(退餐费,配送费已履约不退)' : '拒绝售后'),
         content: TextField(
           controller: controller,

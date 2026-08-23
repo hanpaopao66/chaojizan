@@ -39,7 +39,7 @@ Future<void> editHolidayPlans(
   final saved = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
-      builder: (context, setDialog) => AlertDialog(
+      builder: (context, setDialog) => SzDialog(
         title: const Text('节假日计划'),
         content: SizedBox(
           width: double.maxFinite,

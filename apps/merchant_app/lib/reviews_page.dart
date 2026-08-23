@@ -236,7 +236,7 @@ class _MerchantReviewsPageState extends State<MerchantReviewsPage> {
     final group = review.merchantRating <= 3 ? 'bad' : 'good';
     final text = await showDialog<String>(
       context: context,
-      builder: (dialog) => AlertDialog(
+      builder: (dialog) => SzDialog(
         // 内容区必须可滚动:模板 chip 折两三行 + autofocus 弹键盘后,
         // 小屏可用高度只剩百来点,固定 Column 会直接溢出
         scrollable: true,

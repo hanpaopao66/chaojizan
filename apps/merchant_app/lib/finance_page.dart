@@ -117,7 +117,7 @@ class _FinancePageState extends State<FinancePage> {
         text: (wallet.withdrawableCents / 100).toStringAsFixed(2));
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('申请提现'),
         content: Column(
           mainAxisSize: MainAxisSize.min,

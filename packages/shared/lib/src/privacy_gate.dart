@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'brand.dart';
 import 'legal.dart';
+import 'sz_widgets.dart';
 
 const String _kAgreedKey = 'privacy_agreed_version';
 
@@ -59,7 +60,7 @@ class _PrivacyGateState extends State<PrivacyGate> {
       barrierDismissible: false,
       builder: (context) => PopScope(
         canPop: false,
-        child: AlertDialog(
+        child: SzDialog(
           title: const Text('用户协议与隐私政策'),
           content: SingleChildScrollView(
             child: Column(

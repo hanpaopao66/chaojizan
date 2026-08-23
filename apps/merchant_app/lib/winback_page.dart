@@ -46,7 +46,7 @@ class _MerchantWinbackPageState extends State<MerchantWinbackPage> {
 
     final ok = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
+      builder: (dialogContext) => SzDialog(
         title: const Text('发一批召回券'),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [

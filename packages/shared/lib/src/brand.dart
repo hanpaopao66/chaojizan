@@ -850,6 +850,12 @@ ThemeData brandTheme(Brightness brightness,
           fontSize: 16.5, fontWeight: FontWeight.w600, color: sz.ink),
       contentTextStyle:
           TextStyle(fontSize: 14, height: 1.6, color: sz.inkMuted),
+      // 默认水平 40 太窄:窄屏上一句十来个字的提示会被逼成三行,
+      // 高度全长在换行上。收到 24 之后同样的字少一行
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      // 按钮区自带的 8 圈内边距 + 按钮自己的最小高度,底部很容易堆到 70+。
+      // 这里只收空白,按钮高度仍由密度定(戴手套按不准那条不动)
+      actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: sz.surface,

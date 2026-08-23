@@ -5,7 +5,10 @@
 #      底部弹层是给拇指设计的。钉在 1440 桌面屏底会变成横贯屏底的一条长条,
 #      内容挤在左边一小块,而视线在屏幕中央。
 #
-#   2. 带 appBar 的页面走 SzPageScaffold,不直接 Scaffold
+#   2. 弹窗走 SzDialog,不直接 AlertDialog
+#      Material 的默认内边距是给桌面留的,手机上空白比正文还多。
+#
+#   3. 带 appBar 的页面走 SzPageScaffold,不直接 Scaffold
 #      push 出来的子页不在 SzNavScaffold 里。裸 Scaffold 在 1440 上整页铺满:
 #      返回箭头钉在屏幕最左上角,提交按钮横跨 1440 —— 一个按钮一米宽。
 #      这一条是**验收时才发现的**:改完外壳看着都对,点进子页才露馅。
@@ -15,6 +18,18 @@ set -eo pipefail
 cd "$(dirname "$0")/.."
 
 fail=0
+
+dialogs=$(grep -rn --include="*.dart" "AlertDialog(" apps packages \
+  | grep -v "packages/shared/lib/src/sz_widgets.dart" \
+  | grep -v "packages/shared/test/dialog_density_test.dart" || true)
+if [ -n "$dialogs" ]; then
+  echo "✗ 直接用了 AlertDialog,改成 SzDialog:"
+  echo "$dialogs" | sed 's/^/    /'
+  echo "  参数同名(title/content/actions),直接换名字就行。"
+  echo "  Material 的默认内边距是给桌面留的:标题上 24、标题到正文 20、"
+  echo "  正文到按钮 24 —— 手机上一个两行字的弹窗,空白比正文还多。"
+  fail=1
+fi
 
 sheets=$(grep -rn --include="*.dart" "showModalBottomSheet" apps packages \
   | grep -v "packages/shared/lib/src/responsive.dart" || true)

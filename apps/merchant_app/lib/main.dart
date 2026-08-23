@@ -343,7 +343,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
           _busyUntil!.difference(DateTime.now().toUtc()).inMinutes + 1;
       final end = await showDialog<bool>(
         context: context,
-        builder: (dialog) => AlertDialog(
+        builder: (dialog) => SzDialog(
           title: const Text('忙碌模式生效中'),
           content: Text('还剩约 $minutesLeft 分钟自动恢复。\n'
               '期间新单的预计送达时间已放宽,用户端显示「出餐较慢」。'),
@@ -373,7 +373,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     final ok = await showDialog<bool>(
       context: context,
       builder: (dialog) => StatefulBuilder(
-        builder: (dialog, setDialog) => AlertDialog(
+        builder: (dialog, setDialog) => SzDialog(
           title: const Text('开启忙碌模式'),
           content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1120,7 +1120,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     final controller = TextEditingController(text: '菜品售罄,暂时无法接单');
     final reason = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('拒单原因'),
         content: TextField(
           controller: controller,
@@ -1260,7 +1260,7 @@ class _MerchantHomePageState extends State<MerchantHomePage>
     final controller = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => SzDialog(
         title: const Text('核销取餐码'),
         content: TextField(
           controller: controller,
