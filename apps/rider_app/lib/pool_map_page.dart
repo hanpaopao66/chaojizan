@@ -136,7 +136,7 @@ class RiderPoolMapPage extends StatelessWidget {
                         '还没定到位,所以没画你的位置'
                       : '图上是现在能抢的 ${orders.length} 单的取餐点,'
                         '橙色那个是你。接不接、先接哪个由你定',
-                  style: TextStyle(fontSize: 12, color: sz.inkMuted),
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted),
                 ),
               ),
             ),

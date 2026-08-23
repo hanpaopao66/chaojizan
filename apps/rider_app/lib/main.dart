@@ -2053,7 +2053,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                               padding: const EdgeInsets.only(bottom: 2),
                               child: Text('⚠ ${order.hardshipNote}',
                                   style: TextStyle(
-                                      fontSize: 12,
+                                      fontSize: kFontNote,
                                       fontWeight: FontWeight.w600,
                                       color: sz.hold)),
                             ),
@@ -2062,7 +2062,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                               padding: const EdgeInsets.only(bottom: 2),
                               child: Text(parts.join(' · '),
                                   style: TextStyle(
-                                      fontSize: 12, color: sz.inkMuted)),
+                                      fontSize: kFontNote, color: sz.inkMuted)),
                             ),
                         ],
                       ),

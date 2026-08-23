@@ -378,14 +378,14 @@ class _CheckoutPageState extends State<CheckoutPage> {
           rows.add(Padding(
             padding: const EdgeInsets.only(left: 24, bottom: 2),
             child: Text('· $line',
-                style: TextStyle(fontSize: 11, color: theme.sz.inkMuted)),
+                style: TextStyle(fontSize: kFontMicro, color: theme.sz.inkMuted)),
           ));
         }
         if (samples > 0) {
           rows.add(Padding(
             padding: const EdgeInsets.only(left: 24, bottom: 2),
             child: Text('（$samples 位骑手实地反馈，这笔钱全归骑手）',
-                style: TextStyle(fontSize: 11, color: theme.sz.inkMuted)),
+                style: TextStyle(fontSize: kFontMicro, color: theme.sz.inkMuted)),
           ));
         }
       }

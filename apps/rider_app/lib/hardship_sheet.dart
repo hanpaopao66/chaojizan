@@ -32,10 +32,10 @@ class HardshipSheet extends StatefulWidget {
   /// 送达成功后调用。**返回值没人用** —— 填不填都不影响主流程。
   static Future<void> show(
       BuildContext context, ApiClient api, String orderNo) async {
-    await showModalBottomSheet<void>(
+    // 统一走 szShowSheet:SafeArea、拖拽条、键盘避让、宽屏限宽,
+    // 这个 helper 自己吸收(check_wide_layout.sh 盯着这一条)
+    await szShowSheet<void>(
       context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
       builder: (_) => HardshipSheet(api: api, orderNo: orderNo),
     );
   }
@@ -133,7 +133,7 @@ class _HardshipSheetState extends State<HardshipSheet> {
               '平台不知道哪栋楼没电梯、哪个小区车进不去 —— 你知道。\n'
               '说了这一单当场补钱(平台出,不从顾客和商家身上要);'
               '同一个地方两个人说过之后,后来的单一开始就按真实情况算。',
-              style: TextStyle(fontSize: 12, color: sz.inkMuted),
+              style: TextStyle(fontSize: kFontNote, color: sz.inkMuted),
             ),
             const SizedBox(height: 12),
             for (final item in _items)
@@ -149,13 +149,13 @@ class _HardshipSheetState extends State<HardshipSheet> {
                 // 金额和规则直接写在选项下面 ——
                 // 不给出金额的补贴等于施舍,而施舍没人会认真填
                 subtitle: Text('${item['desc']} · ${item['rule']}',
-                    style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+                    style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
               ),
             if (_items.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text('规则没拉到,先勾也行 —— 补贴照算',
-                    style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+                    style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
               ),
             if (needFloors)
               TextField(
@@ -184,7 +184,7 @@ class _HardshipSheetState extends State<HardshipSheet> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(_error,
-                    style: TextStyle(fontSize: 12, color: theme.colorScheme.error)),
+                    style: TextStyle(fontSize: kFontNote, color: theme.colorScheme.error)),
               ),
             Row(children: [
               // 「不用了」放在左边、样式最轻:这是个可以直接关掉的东西,
@@ -200,7 +200,7 @@ class _HardshipSheetState extends State<HardshipSheet> {
             ]),
             const SizedBox(height: 4),
             Text('这条反馈不影响你的评分、派单和接单资格',
-                style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+                style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
           ],
         ),
       ),
