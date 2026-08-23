@@ -157,6 +157,47 @@ class _RiderHeatmapPageState extends State<RiderHeatmapPage> {
                                 fontSize: 12, color: sz.inkMuted)),
                       ]),
                     ),
+                  // 地图先于列表(#286)。原来这一页只把 lat/lng 当文字列出来
+                  // (「34.3400, 108.9400」),骑手看不出那是哪儿 ——
+                  // 而这一页存在的理由就是「告诉他哪片单多」。
+                  // 给经纬度不算给信息,那是给数据。
+                  //
+                  // ⚠️ **红线**:只画「哪片单多」,不画「建议你去哪」。
+                  // 不加推荐路线、不标「建议前往」、不排名 ——
+                  // 一旦变成指令就是变相调度(DEV-PROMPTS-17)。
+                  // 图上只有热度深浅,读图的人自己决定去不去。
+                  if (enough.isNotEmpty) ...[
+                    SizedBox(
+                      height: 260,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(kRadiusMd),
+                        child: DeliveryMapView(
+                          points: [
+                            for (final c in enough)
+                              MapPoint(
+                                lat: (c['lat'] as num).toDouble(),
+                                lng: (c['lng'] as num).toDouble(),
+                                // 标签只说这格多少单,不说该不该去
+                                label: '${(c['orders'] as num).toInt()} 单',
+                                icon: Icons.circle,
+                                // 热度用颜色深浅:满格 earn,少的淡下去。
+                                // 不用红→绿那套,红色在这个 App 里只给报错
+                                color: sz.earn.withValues(
+                                    alpha: 0.35 +
+                                        0.65 *
+                                            ((c['orders'] as num) / maxOrders)
+                                                .clamp(0.0, 1.0)),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text('圈越深这个时段单越多。去哪儿你自己定 —— '
+                        '我们不做「建议前往」,那是派单不是信息。',
+                        style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+                    const SizedBox(height: 12),
+                  ],
                   for (final c in enough)
                     Card(
                       margin: const EdgeInsets.only(bottom: 8),

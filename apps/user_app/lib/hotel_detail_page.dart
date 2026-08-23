@@ -189,6 +189,22 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
               const Icon(Icons.location_on_outlined, size: 16),
               const SizedBox(width: 4),
               Expanded(child: Text(hotel.address)),
+              // 导航(#287)。这一页的文件头写着「图集/设施/**位置**」,
+              // 而位置此前只有这一行地址文字 —— 同为到店业务的团购券有
+              // 「到店导航」、外卖商家有「导航去店里」,住宿反而没有,
+              // 用户订了房找不到门。
+              // navigateTo 已经处理了高德/百度/腾讯的 scheme 和 BD-09 转换
+              if (hotel.lat != 0 || hotel.lng != 0)
+                IconButton(
+                  icon: const Icon(Icons.navigation_outlined, size: 18),
+                  tooltip: '导航过去',
+                  onPressed: () => navigateTo(context,
+                      lat: hotel.lat,
+                      lng: hotel.lng,
+                      name: hotel.name,
+                      // 住宿是「去住」不是「去送」:多数人开车或打车过去
+                      mode: NavMode.drive),
+                ),
               if (hotel.frontDeskPhone.isNotEmpty)
                 IconButton(
                   icon: const Icon(Icons.phone_outlined, size: 18),
@@ -197,6 +213,26 @@ class _HotelDetailPageState extends State<HotelDetailPage> {
                       launchUrl(Uri.parse('tel:${hotel.frontDeskPhone}')),
                 ),
             ]),
+            // 一张小地图(#287):看得见在哪个位置,比只有一行地址有用 ——
+            // 「离地铁远不远」「是不是在巷子里」这种事,文字说不清
+            if (hotel.lat != 0 || hotel.lng != 0) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 160,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(kRadiusMd),
+                  child: DeliveryMapView(points: [
+                    MapPoint(
+                      lat: hotel.lat,
+                      lng: hotel.lng,
+                      label: hotel.name,
+                      icon: Icons.hotel,
+                      color: Theme.of(context).sz.clay,
+                    ),
+                  ]),
+                ),
+              ),
+            ],
             Text('${hotel.checkinFrom} 后入住 · ${hotel.checkoutUntil} 前退房',
                 style: theme.textTheme.bodySmall),
             // 证照公示(亮照经营):营业执照 + 特种行业许可证
