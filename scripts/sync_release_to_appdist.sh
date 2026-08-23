@@ -53,6 +53,12 @@ echo "$BUILD" | grep -qE '^[0-9]+$' || { echo "✗ tag 里解析不出 build 号
 # 门禁参数。默认 false / 0 = 与改造前完全一致的行为
 FORCE_JSON=false
 [ "${FORCE:-0}" = "1" ] && FORCE_JSON=true
+# ⚠️ Python 的布尔字面量首字母大写。直接把 shell 的 `false` 插进下面那段
+# python3 里会是个**未定义的名字**,而它炸的位置正是本脚本注释里点过名的
+# 那个最坏时机:**包已经传上去、versions.json 还没改**
+# (2026-08-23 发 v0.13.0 时踩到)。显示仍用小写,写进代码的用这个
+FORCE_PY=False
+[ "$FORCE_JSON" = true ] && FORCE_PY=True
 MIN_BUILD=${MIN_BUILD:-0}
 echo "$MIN_BUILD" | grep -qE '^[0-9]+$' || {
   echo "✗ MIN_BUILD 必须是数字，收到：$MIN_BUILD"; exit 1; }
@@ -140,7 +146,7 @@ for app in ['user', 'merchant', 'rider']:
         'url': '$API/appdist/chaojizan-' + app + '-arm64.apk',
         'notes': '''$NOTES''',
         # force:这一版是否强制更新(发版当时的一次性决定)
-        'force': $FORCE_JSON,
+        'force': $FORCE_PY,
         # min_build:低于它的客户端视为过旧(**持续有效**的下限,与 force 不同)。
         # 服务端 /app/latest 原样透出,当前只用于观测,不拦截
         'min_build': $MIN_BUILD,
