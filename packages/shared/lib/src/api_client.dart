@@ -1506,16 +1506,20 @@ class ApiClient {
 
   /// [verifyCode]/[force] 仅骑手取餐(READY→PICKED_UP)用:
   /// 输小票单号尾号后 4 位核验防拿错单,连续输错可强制取餐(服务端留痕)
+  /// 状态流转。[handoff] 只在送达时有意义:
+  /// `hand`=当面交给顾客 / `leave`=放在门口(服务端会要求拍照,#303)。
   Future<Order> transition(String orderNo, OrderStatus to,
       {String reason = '',
       String verifyCode = '',
       bool force = false,
-      String photoUrl = ''}) async {
+      String photoUrl = '',
+      String handoff = 'hand'}) async {
     final data = await _request('POST', '/orders/$orderNo/transition', body: {
       'to_status': to.value,
       'reason': reason,
       'verify_code': verifyCode,
       'force': force,
+      'handoff': handoff,
       if (photoUrl.isNotEmpty) 'photo_url': photoUrl,
     });
     return Order.fromJson(data as Map<String, dynamic>);

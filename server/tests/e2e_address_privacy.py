@@ -38,11 +38,6 @@ def make_protected_order():
     return no
 
 
-def is_night():
-    bj = datetime.now(timezone.utc) + timedelta(hours=8)
-    return bj.hour >= 21 or bj.hour < 6
-
-
 async def main():
     await drain_order_pool()
     rider = await register_fresh_rider("保护测试骑手")
@@ -65,17 +60,22 @@ async def main():
     assert rv["address"] == FULL_ADDR and rv["addr_revealed"] is True
     print("✓ 用户临时放行后骑手可见完整门牌")
 
-    # 3) 送达照片:存档且仅用户/平台可见;深夜无照片 422(按时段分支)
+    # 3) 送达照片:存档且仅用户/平台可见。
+    #
+    # 强制拍照的判据从「深夜 + 地址保护单」改成了**交付方式**(#303):
+    # 放门口没有人证,照片是骑手唯一的自保;当面交给顾客有人接了就是证据,
+    # 拍照多余还尴尬。所以这里不再按时段分支,直接按 handoff 断言 ——
+    # 白天放门口一样说不清,时段从来就不是对的判据。
     call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
     call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
     no2 = make_protected_order()  # 备一单测无照片分支
-    if is_night():
-        err = call("POST", f"/orders/{no}/transition", rider,
-                   {"to_status": "delivered"}, expect_error=True)
-        assert err["_error"] == 422 and "拍照" in err["detail"], err
-        print("✓ 深夜保护单无照片送达 422")
+    err = call("POST", f"/orders/{no}/transition", rider,
+               {"to_status": "delivered", "handoff": "leave"},
+               expect_error=True)
+    assert err["_error"] == 422 and "照片" in err["detail"], err
+    print("✓ 放门口无照片送达 422(不分时段)")
     call("POST", f"/orders/{no}/transition", rider,
-         {"to_status": "delivered",
+         {"to_status": "delivered", "handoff": "leave",
           "photo_url": "https://x/door_photo.jpg"})
     mine = call("GET", f"/orders/{no}", customer)
     assert mine["delivery_photo_url"] == "https://x/door_photo.jpg"

@@ -664,53 +664,73 @@ class _RiderHomePageState extends State<RiderHomePage>
   }
 
   /// 送达:保护单引导拍照留证(深夜强制,白天可选,放门口拍一张)
+  /// 送达。先问**交付方式**,放门口才要照片(#303)。
+  ///
+  /// 原来的判据是"这单是不是地址保护单",维度用错了:
+  ///
+  /// - **当面交给顾客**:有人接了就是证据,拍照多余,而且尴尬 ——
+  ///   举着手机拍一个正在接餐的人,谁都不舒服;
+  /// - **放门口**:没有人证,照片是你唯一的自保。顾客三天后说没收到,
+  ///   没照片就是各执一词。
+  ///
+  /// 所以当面交付一律不拦(赶时间的时候多一道手续,收益只有一张
+  /// 没人会看的照片),放门口一律要拍 —— 白天放门口也一样说不清。
   Future<void> _deliver(Order order) async {
     var photoUrl = '';
-    if (order.addrProtect) {
-      final take = await showDialog<bool>(
-        context: context,
-        builder: (context) => SzDialog(
-          title: const Text('拍照留证'),
-          content: const Text('这是地址保护订单:放门口请拍一张照片留证'
-              '(深夜时段必须拍;照片只有顾客和平台能看到)。'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('当面交付,不拍')),
-            FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('去拍照')),
-          ],
-        ),
-      );
-      if (take == null || !mounted) return;
-      if (take) {
-        if (!await PermissionRationale.ensure(context, AppPermissionKind.camera,
-            reason: '用于拍摄送达凭证照片。\n拒绝不影响其他功能。')) {
-          return;
-        }
-        try {
-          final picked = await ImagePicker().pickImage(
-              source: ImageSource.camera, maxWidth: 1280, imageQuality: 80);
-          if (picked == null) return;
-          final bytes = await picked.readAsBytes();
-          // 送达留证:拍的是别人家门口,只有该单顾客和平台看得到(#124)
-          photoUrl = await widget.api
-              .uploadImage(bytes, picked.name, purpose: 'delivery_proof');
-        } catch (e) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(e.toString())));
-          return;
-        }
+    final handoff = await showDialog<String>(
+      context: context,
+      builder: (context) => SzDialog(
+        title: const Text('怎么交付的?'),
+        content: const Text('放门口请拍一张照片 —— '
+            '万一顾客说没收到,这张照片替你说话。\n\n'
+            '照片只有这一单的顾客和平台看得到。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, 'hand'),
+              child: const Text('当面交给顾客')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, 'leave'),
+              child: const Text('放门口,去拍照')),
+        ],
+      ),
+    );
+    if (handoff == null || !mounted) return;
+    if (handoff == 'leave') {
+      if (!await PermissionRationale.ensure(context, AppPermissionKind.camera,
+          reason: '用于拍摄送达凭证照片。\n拒绝不影响其他功能。')) {
+        return;
       }
+      try {
+        final picked = await ImagePicker().pickImage(
+            source: ImageSource.camera, maxWidth: 1280, imageQuality: 80);
+        if (picked == null) return;
+        final bytes = await picked.readAsBytes();
+        // 送达留证:拍的是别人家门口,只有该单顾客和平台看得到(#124)
+        photoUrl = await widget.api
+            .uploadImage(bytes, picked.name, purpose: 'delivery_proof');
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.toString())));
+        return;
+      }
+    }
+    // 放门口却没拍成(相机权限没给、取消了):**不提交**。
+    // 服务端会拒(422),但在这儿就说清楚比让他吃一个报错好
+    if (handoff == 'leave' && photoUrl.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('放门口的单要有照片才能点送达;'
+                '当面交给顾客的话选「当面交给顾客」')));
+      }
+      return;
     }
     // 送达同样按单号防重:拍照上传后有一段等待,这期间很容易再点一下
     if (_grabbing.contains(order.orderNo)) return;
     if (mounted) setState(() => _grabbing.add(order.orderNo));
     try {
       await widget.api.transition(order.orderNo, OrderStatus.delivered,
-          photoUrl: photoUrl);
+          photoUrl: photoUrl, handoff: handoff);
       _refresh();
     } catch (e) {
       if (!mounted) return;

@@ -407,3 +407,88 @@ async def notify_favorites(db, merchant_id: int, shop_name: str,
     except Exception:
         logger.exception("收藏触达失败(不影响主流程): merchant=%s", merchant_id)
         return 0
+
+
+#: 每个状态变更该通知谁,以及对各方说什么(#302)。
+#:
+#: ## 为什么要这张表
+#:
+#: 在此之前状态变更**只推给顾客**。三个关键点击的按钮都早就有了
+#: (商家「出餐完成」、骑手「已取餐」「已送达」),但信号只走到一端:
+#:
+#: - 商家点了「出餐完成」→ 骑手收不到,只能靠 15 秒轮询,
+#:   他就站在店门口等着,而餐已经好了;
+#: - 骑手点了「已取餐」「已送达」→ 商家收不到,看板要自己刷。
+#:
+#: WebSocket 只有 `order:{order_no}`(要开着那一单的详情页)和
+#: `merchant:{id}`(只在新单和支付时广播),都接不住这几下。
+#:
+#: ## 措辞要说下一步动作,不是复述状态
+#:
+#: 「订单状态更新:待取餐」对骑手没有意义 —— 他要的是「餐好了,可以取了」。
+#: 通知的价值在于**接下来该干什么**,不在于告诉你系统里那个字段变成了啥。
+#:
+#: ## 不推给动作的发起人
+#:
+#: 谁点的谁知道,再推一遍是骚扰。调用处按 actor 过滤。
+_STATUS_FANOUT: dict[str, dict[str, tuple[str, str]]] = {
+    # 状态: {角色: (标题, 正文)}
+    "accepted": {
+        "customer": ("商家已接单", "商家开始做了,做好会有骑手来取"),
+    },
+    "ready": {
+        # 这一条是这次改动的重点:骑手在楼下等,餐好了他得马上知道
+        "rider": ("餐好了,可以取了", "商家已出餐,去取餐吧"),
+        "customer": ("商家已出餐", "等骑手取走就出发了"),
+    },
+    "picked_up": {
+        "customer": ("骑手已取餐", "正在送来的路上"),
+        "merchant": ("骑手已取餐", "这一单已经出门了"),
+    },
+    "delivered": {
+        "customer": ("餐到了", "请查收;有问题可以在订单里申请售后"),
+        "merchant": ("已送达", "这一单送到了"),
+    },
+    "completed": {
+        # 完成 = 结算点,骑手的配送费这一刻才真的进账。
+        # 在此之前他跑完一单没有任何回音,要自己去钱包页看 ——
+        # **钱到账是最该主动说一声的事**
+        "rider": ("这一单结清了", "配送费已入账,可以在钱包里查"),
+        "merchant": ("订单已完成", "货款已结算入账"),
+    },
+    "cancelled": {
+        "customer": ("订单已取消", "退款会原路返回"),
+        "merchant": ("订单已取消", "不用做了"),
+        "rider": ("订单已取消", "这一单不用送了"),
+    },
+}
+
+
+async def fanout_order_status(
+    status_value: str,
+    *,
+    customer_id: int,
+    merchant_owner_id: int | None,
+    rider_id: int | None,
+    order_no: str,
+    actor_id: int | None,
+) -> None:
+    """把状态变更推给这一单的**每一个**相关方(#302)。
+
+    `actor_id` 是点这一下的人,不推给他自己。
+    推送失败不影响主流程 —— 这是通知,不是业务。
+    """
+    plan = _STATUS_FANOUT.get(status_value)
+    if not plan:
+        return
+    targets = {
+        "customer": customer_id,
+        "merchant": merchant_owner_id,
+        "rider": rider_id,
+    }
+    for role, (title, body) in plan.items():
+        uid = targets.get(role)
+        if uid is None or uid == actor_id:
+            continue
+        await push_to_user(uid, title, body,
+                           {"order_no": order_no, "type": "order_status"})

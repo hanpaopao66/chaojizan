@@ -44,7 +44,8 @@ FEE_PART_LABELS = {
     "wait": "等餐补偿",
 }
 from ..services.privacy_phone import dialable_phone, mask_phone
-from ..services.push import notify_order_status, push_to_user
+from ..services.push import (fanout_order_status,
+                             notify_order_status, push_to_user)
 from ..services.routing import billing_distance_m
 from ..services.settlement import settle_order
 from ..services.wechat_pay import request_refund
@@ -1043,16 +1044,29 @@ async def transition(
             .values(status="resolved", resolution="continue_delivery",
                     resolve_note="商家已出餐,自动销单", resolved_at=now)
         )
-    # 送达拍照留证(放门口场景,仅用户/平台可见):
-    # 深夜(北京 21-06)的地址保护单强制,其余可选
+    # 送达拍照留证:判据是**交付方式**,不是地址是否保护(#303)。
+    #
+    # 原来只有「地址保护单 + 深夜」才强制,这个判据用错了维度:
+    #
+    # - **当面交给顾客**:有人接了就是证据,拍照多余,而且尴尬 ——
+    #   举着手机拍一个正在接餐的人,谁都不舒服;
+    # - **放门口/前台/柜子**:没有人证,**照片是骑手唯一的自保**。
+    #   顾客三天后说"我没收到",没有照片就是各执一词,
+    #   而这种事的结果通常由平台判,判给谁都有人吃亏。
+    #
+    # 所以强制的对象从"保护单"改成"没当面交给人的单",
+    # 深夜与否不再是判据 —— 白天放门口一样说不清。
+    #
+    # **这是为骑手做的,不是为平台的留证率做的。**
+    # 所以当面交付一律不拦:那是在他赶时间的时候多加一道手续,
+    # 收益只有一张没人会看的照片。
     if payload.to_status == OrderStatus.DELIVERED and not order.pickup:
         if payload.photo_url.strip():
             order.delivery_photo_url = payload.photo_url.strip()[:300]
-        elif order.addr_protect:
-            hour = datetime.now(ZoneInfo("Asia/Shanghai")).hour
-            if hour >= 21 or hour < 6:
-                raise HTTPException(
-                    422, "深夜时段的保护订单送达需拍照留证(放门口拍一张即可)")
+        elif payload.handoff == "leave":
+            raise HTTPException(
+                422, "放在门口的单需要拍一张照片 —— "
+                     "万一顾客说没收到,这张照片替你说话")
     # 订单完成 = 结算点:骑手配送费、商家净收入分别入账
     if payload.to_status == OrderStatus.COMPLETED:
         await settle_order(db, order)
@@ -1098,12 +1112,24 @@ async def transition(
         merchant_for_push = await db.get(Merchant, order.merchant_id)
         await notify_riders_new_grab(
             db, order, merchant_for_push.name if merchant_for_push else "商家")
-    # 离线推送给用户(自己操作的除外);分账在完成时触发
-    if user.id != order.customer_id:
-        await notify_order_status(
-            order.customer_id, order.order_no, STATUS_LABELS[order.status]
-        )
-    return order_out(order, await db.get(Merchant, order.merchant_id), user)
+    # 状态变更推给这一单的**每一个**相关方,不只是顾客(#302)。
+    #
+    # 原来这里写死 `notify_order_status(order.customer_id, ...)`:
+    # 商家点了「出餐完成」,在楼下等餐的骑手收不到,只能靠 15 秒轮询;
+    # 骑手点了「已取餐」「已送达」,商家看板要自己刷。
+    # 三个按钮早就有了,信号却只走到一端。
+    #
+    # 谁点的不推给谁 —— 他知道自己刚点了什么,再推一遍是骚扰。
+    shop_for_push = await db.get(Merchant, order.merchant_id)
+    await fanout_order_status(
+        order.status.value,
+        customer_id=order.customer_id,
+        merchant_owner_id=shop_for_push.owner_id if shop_for_push else None,
+        rider_id=order.rider_id,
+        order_no=order.order_no,
+        actor_id=user.id,
+    )
+    return order_out(order, shop_for_push, user)
 
 
 @router.post("/{order_no}/change-address", response_model=OrderOut)
@@ -1480,6 +1506,16 @@ async def pickup_verify(
     await db.commit()
     await db.refresh(order)
     await _notify(order)
+    # 完成也走 fanout(#302):骑手跑完一单、钱这一刻进账,
+    # 在此之前他没有任何回音,要自己翻钱包页去看
+    await fanout_order_status(
+        order.status.value,
+        customer_id=order.customer_id,
+        merchant_owner_id=merchant.owner_id if merchant else None,
+        rider_id=order.rider_id,
+        order_no=order.order_no,
+        actor_id=user.id,
+    )
     await notify_order_status(
         order.customer_id, order.order_no, STATUS_LABELS[order.status])
     return order_out(order, merchant, user)

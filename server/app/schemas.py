@@ -1111,8 +1111,15 @@ class TransitionIn(BaseModel):
     # 连续输错可强制取餐(force=true,写事件留痕)。不传 = 老客户端,不核验
     verify_code: str = Field(default="", max_length=8)
     force: bool = False
-    # 送达拍照留证(放门口场景):深夜(21-06)的地址保护单强制,其余可选
+    # 送达拍照留证。判据是**交付方式**,不是地址是否保护(#303):
+    # 放门口没有人证,照片是骑手唯一的自保;当面交付有人接了就是证据
     photo_url: str = Field(default="", max_length=300)
+    #: 交付方式:hand=当面交给顾客 / leave=放在门口(或前台、柜子)。
+    #:
+    #: 默认 hand 是**故意的**:老客户端不传这个字段,不能因为升级
+    #: 就把它们全拦在门外 —— 骑手站在楼道里被一个 422 卡住整单,
+    #: 而他甚至不知道是因为自己没更新 App。
+    handoff: str = Field(default="hand", pattern="^(hand|leave)$")
 
 
 class RefundItemIn(BaseModel):
