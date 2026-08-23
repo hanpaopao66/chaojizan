@@ -65,6 +65,18 @@ void main() {
           isTrue);
     });
 
+    test('刚主动选完远处的地址,不该扭头就问 —— 那是他明确的意图', () {
+      // 在西安选北京的地址给朋友点单,是这个功能存在的理由本身。
+      // 页面用 _suppressFarUntilMove 走同一个 dismissed 入参压住,
+      // 等人真的从「选地址那一刻的位置」挪开够远才放开
+      expect(
+          shouldSuggestLocationSwitch(
+              hasDeliveryAddress: true,
+              dismissedThisSession: true, // ← 选地址那一刻置上的压制
+              distanceMeters: 900000),
+          isFalse);
+    });
+
     test('跨城(西安→北京 约 900km)提示', () {
       expect(
           shouldSuggestLocationSwitch(

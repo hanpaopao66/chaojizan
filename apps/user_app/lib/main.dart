@@ -518,6 +518,13 @@ class _MerchantListViewState extends State<MerchantListView>
   /// 重启 App 重新判断,他下次打开时人可能真的在新城市待下来了
   bool _farDismissed = false;
 
+  /// 刚选过地址,在人移动之前不提示(见 didUpdateWidget 的注释)
+  bool _suppressFarUntilMove = false;
+
+  /// 选地址那一刻人在哪。人从这里挪开够远了,才认为「他自己跑远了」,
+  /// 提示条才有意义
+  ({double lat, double lng})? _hereAtPick;
+
   /// 上次为「是不是换城市了」取定位的时刻。resumed 会因为切通知栏、
   /// 接电话反复触发,不压一下会变成每分钟几次定位
   DateTime? _lastHereCheck;
@@ -625,6 +632,12 @@ class _MerchantListViewState extends State<MerchantListView>
               accuracy: LocationAccuracy.low, timeLimit: Duration(seconds: 6)));
       final gcj = wgs84ToGcj02(p.latitude, p.longitude);
       if (!mounted) return;
+      // 人从「选地址那一刻所在的位置」挪开够远了 —— 现在提示才说得通
+      if (_suppressFarUntilMove && _hereAtPick != null) {
+        final moved = Geolocator.distanceBetween(
+            _hereAtPick!.lat, _hereAtPick!.lng, gcj.lat, gcj.lng);
+        if (moved > _kFarMeters) _suppressFarUntilMove = false;
+      }
       _hereLat = gcj.lat;
       _hereLng = gcj.lng;
       // 没选收货地址时,人动了就直接跟着动 —— 这本来就是「按当前位置找店」,
@@ -648,7 +661,7 @@ class _MerchantListViewState extends State<MerchantListView>
   /// 口径很乱(「北京市」vs「北京」vs「东城区」),拿它当判据会误报。
   bool get _farFromHere => shouldSuggestLocationSwitch(
         hasDeliveryAddress: widget.deliveryAddress != null,
-        dismissedThisSession: _farDismissed,
+        dismissedThisSession: _farDismissed || _suppressFarUntilMove,
         distanceMeters: _hereLat == null
             ? null
             : Geolocator.distanceBetween(
@@ -832,6 +845,17 @@ class _MerchantListViewState extends State<MerchantListView>
   void didUpdateWidget(MerchantListView old) {
     super.didUpdateWidget(old);
     if (old.deliveryAddress?.id != widget.deliveryAddress?.id) {
+      // 他刚**主动**选了一个地址 —— 那是明确的意图表达,别扭头就问
+      // 「你人不在那儿,要切回来吗」。在西安选北京的地址给朋友点单,
+      // 是完全正常的用法(选存的地址把配送点挪过去、点那边的店,
+      // 本来就是这个功能存在的理由)。
+      //
+      // 提示条要管的是**另一件事**:他没重新选地址,而人自己跑远了。
+      // 所以这里先压住,等 _recheckHere() 发现人真的移动了再放开
+      _suppressFarUntilMove = true;
+      _hereAtPick = (_hereLat == null || _hereLng == null)
+          ? null
+          : (lat: _hereLat!, lng: _hereLng!);
       setState(() => _future = _load());
     }
   }
