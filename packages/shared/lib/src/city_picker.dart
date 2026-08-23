@@ -41,7 +41,18 @@ class CityPref {
     }
   }
 
-  /// 初始城市:**记住的选择 > 定位解析 > 留空让他自己选**。
+  /// 初始城市:**定位解析 > 记住的选择 > 留空让他自己选**。
+  ///
+  /// ⚠️ 这个顺序 2026-08-23 反过来过一次。原来是「记住的优先」,理由是
+  /// 「他多半在给固定的某个地方点单,每次重选是折磨」—— 但推演下来
+  /// 那个顺序在两种真实场景里都是错的:
+  ///
+  /// - 他在西安,偶尔给北京朋友点一次 → 记住北京 → **此后一直是北京**,
+  ///   而他人在西安,搜自己家又搜不到了(正是这个组件要解决的那个 bug);
+  /// - 他从西安搬到北京 → 记住西安 → 定位早就变了,城市却不跟。
+  ///
+  /// 所以默认跟定位,记住的那个降级成**定位拿不到时的兜底**。
+  /// 手动选依然管用 —— 只是它管的是「这一次」,不是「从此以后」。
   ///
   /// 留空时切换器显示「选择城市」——**不猜一个填进去**:
   /// 猜错了用户会以为已经选对,然后搜不出东西也不知道为什么。
@@ -56,18 +67,29 @@ class CityPref {
     Future<String> Function(double, double)? reverse,
   }) async {
     final saved = await load();
-    if (saved.isNotEmpty) return saved;
-    if (lastKnown == null || reverse == null) return '';
-    try {
-      final me = await lastKnown();
-      if (me == null) return '';
-      final district = await reverse(me.lat, me.lng);
-      // 逆地理的 district 形如「四川省成都市锦江区…」,取出「XX市」
-      final m = RegExp(r'([\u4e00-\u9fa5]{2,8}市)').firstMatch(district);
-      return m?.group(1) ?? '';
-    } catch (_) {
-      return ''; // 拿不到就留空,让他自己选 —— 比猜一个强
+    if (lastKnown != null && reverse != null) {
+      try {
+        final me = await lastKnown();
+        if (me != null) {
+          final district = await reverse(me.lat, me.lng);
+          // 逆地理的 district 形如「陕西省西安市雁塔区…」,取出「西安市」。
+          //
+          // ⚠️ **必须先剥掉省/自治区**:直接匹配 `[\u4e00-\u9fa5]{2,8}市`
+          // 是贪婪的,从头开始能一路吃到「陕西省西安市」—— 拿这个当
+          // 腾讯 POI 的 city 参数,搜出来是 0 条,而界面上看不出为什么
+          // (正是这个组件当初要解决的那个 bug 的另一种犯法)。
+          // 这段以前藏在「记住的优先」后面很少执行,改成定位优先才露出来
+          final cleaned = district.replaceFirst(
+              RegExp(r'^[\u4e00-\u9fa5]{2,8}?(省|自治区|特别行政区)'), '');
+          final m = RegExp(r'([\u4e00-\u9fa5]{2,8}市)').firstMatch(cleaned);
+          final located = m?.group(1) ?? '';
+          if (located.isNotEmpty) return located;
+        }
+      } catch (_) {
+        // 定位/逆地理失败:落到下面的 saved 兜底
+      }
     }
+    return saved; // 空串也照样返回 —— 留空时切换器显示「选择城市」
   }
 
   static Future<void> save(String city) async {

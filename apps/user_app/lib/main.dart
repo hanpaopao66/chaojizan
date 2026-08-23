@@ -664,7 +664,12 @@ class _MerchantListViewState extends State<MerchantListView>
     try {
       final poi = await widget.api.geoReverse(lat, lng);
       if (!mounted) return;
-      final name = poi.district.isNotEmpty ? poi.district : poi.name;
+      // **要 name 不要 district**:name 是腾讯的「推荐地址」
+      // (「紫薇臻品」「XX 大厦」),district 是完整行政区划串
+      // (「陕西省西安市雁塔区XX路」)。服务端 geo.py 那里特意开了 get_poi=1,
+      // 注释写着「纯行政区划当收货地址没用,得给出骑手找得到的参照物」——
+      // 顶部要显示的是同一种东西:用户一眼认得出「这是我家楼下」
+      final name = poi.name.isNotEmpty ? poi.name : poi.district;
       _farCity = name;
       widget.onLocated?.call(name, false);
       if (_farFromHere) setState(() {});
@@ -934,7 +939,7 @@ class _MerchantListViewState extends State<MerchantListView>
           child: Text(
             _farCity.isEmpty
                 ? '你现在好像不在「$short」附近,正在按这个地址找店'
-                : '你现在好像在$_farCity,正在按「$short」找店',
+                : '你现在好像在$_farCity附近,正在按「$short」找店',
             style: TextStyle(fontSize: 12.5, height: 1.4, color: sz.ink),
           ),
         ),
