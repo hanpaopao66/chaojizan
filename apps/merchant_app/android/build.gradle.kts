@@ -6,8 +6,18 @@ allprojects {
     // 改不了也不该改 —— 只能在这里把镜像喂给它们
     buildscript {
         repositories {
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        // 国内镜像只在**国内网络**上是加速,在海外 runner 上是瓶颈:
+        // 2026-08-23 发 v0.13.0 时 aliyun 的 google 镜像 502,三端全挂。
+        // 而 Gradle 对 5xx 是 fail fast —— 只有 404 才往下找下一个仓库,
+        // 所以「阿里云在前、google() 在后」这条 fallback 链根本没兜住。
+        //
+        // CI 里设 SUPERZ_SKIP_CN_MIRROR=1 跳过镜像直连官方源(runner 在海外,
+        // dl.google.com 是通的);开发机不设,照旧走镜像 ——
+        // 那边的问题正相反,是 dl.google.com 被挡。
+        if (System.getenv("SUPERZ_SKIP_CN_MIRROR") != "1") {
+            maven { url = uri("https://maven.aliyun.com/repository/google") }
+            maven { url = uri("https://maven.aliyun.com/repository/public") }
+        }
         google()
         mavenCentral()
         }
@@ -21,8 +31,18 @@ allprojects {
         // 只写 google() 的话换个网络就打不出包 —— 而"打不出包"这件事
         // 只会在发版当天才发现。阿里云的 google 镜像是完整代理,
         // 拉不到的再回落官方源
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
+        // 国内镜像只在**国内网络**上是加速,在海外 runner 上是瓶颈:
+        // 2026-08-23 发 v0.13.0 时 aliyun 的 google 镜像 502,三端全挂。
+        // 而 Gradle 对 5xx 是 fail fast —— 只有 404 才往下找下一个仓库,
+        // 所以「阿里云在前、google() 在后」这条 fallback 链根本没兜住。
+        //
+        // CI 里设 SUPERZ_SKIP_CN_MIRROR=1 跳过镜像直连官方源(runner 在海外,
+        // dl.google.com 是通的);开发机不设,照旧走镜像 ——
+        // 那边的问题正相反,是 dl.google.com 被挡。
+        if (System.getenv("SUPERZ_SKIP_CN_MIRROR") != "1") {
+            maven { url = uri("https://maven.aliyun.com/repository/google") }
+            maven { url = uri("https://maven.aliyun.com/repository/public") }
+        }
         google()
         mavenCentral()
     }

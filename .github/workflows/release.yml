@@ -62,6 +62,10 @@ jobs:
     env:
       PUBLIC_BASE: https://chaojizan.cc
       SUPERZ_ICP: 陕ICP备2025064101号-5
+      # runner 在海外:直连 google()/mavenCentral 是通的,而国内镜像
+      # 对海外访问不稳(2026-08-23 aliyun 的 google 镜像 502,三端全挂)。
+      # 开发机不设这个变量,继续走镜像 —— 那边被挡的恰恰是 dl.google.com
+      SUPERZ_SKIP_CN_MIRROR: "1"
     steps:
       - uses: actions/checkout@v4
         with:
