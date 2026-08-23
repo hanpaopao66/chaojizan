@@ -104,6 +104,7 @@
 | [DEV-PROMPTS-4.md](DEV-PROMPTS-4.md) | #56–65 对标大厂。专章「大厂有但故意不做」:不竞价排名、不做假客服机器人 |
 | [DEV-PROMPTS-13.md](DEV-PROMPTS-13.md) | #132–134 设计系统。73 份大厂设计规格一个都不采用:立身之本是「我不是他们」,穿最像的外衣就会被归类成「又一个」 |
 | [COMMERCIAL-REVIEW.md](COMMERCIAL-REVIEW.md) | 商业化完善度评审十维打表。「会员/储值:不做(资金池红线)」的源头结论在这 |
+| [COMMERCIAL-REVIEW-2.md](COMMERCIAL-REVIEW-2.md) | 第二次评审(2026-08-23),换查法:不看代码有没有,看生产上有没有真在跑。结论是功能不再是瓶颈 —— 现在真实用户下单之后付不了款 |
 | [BRAND.md](BRAND.md) | 品牌与视觉资产 |
 
 ### 协议与规格
