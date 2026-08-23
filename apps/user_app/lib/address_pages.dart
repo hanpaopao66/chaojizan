@@ -312,8 +312,10 @@ class _AddressEditPageState extends State<AddressEditPage> {
         final me = await Geolocator.getLastKnownPosition();
         return me == null ? null : (lat: me.latitude, lng: me.longitude);
       },
+      // 服务端直接给结构化城市名,客户端不解析(以前抠 district 那串
+      // 行政区划,正则一贪婪就成了「陕西省西安市」)
       reverse: (lat, lng) async =>
-          (await widget.api.geoReverse(lat, lng)).district,
+          (await widget.api.geoReverse(lat, lng)).city,
     );
     if (city.isNotEmpty && mounted) setState(() => _city = city);
   }

@@ -21,7 +21,7 @@ void main() {
     await CityPref.save('北京市');
     final city = await CityPref.resolve(
       lastKnown: () async => (lat: 34.34, lng: 108.94), // 西安
-      reverse: (lat, lng) async => '陕西省西安市雁塔区科技路',
+      reverse: (lat, lng) async => '西安市', // 服务端给的结构化城市名
     );
     expect(city, '西安市',
         reason: '记住的城市盖过了定位 —— 他人在西安却在按北京搜,'
@@ -55,28 +55,24 @@ void main() {
         reason: '猜错了用户会以为已经选对,然后搜不出东西也不知道为什么');
   });
 
-  test('省名不能被吃进城市里 —— 「陕西省西安市」不是城市名', () async {
-    for (final (raw, want) in [
-      ('陕西省西安市雁塔区科技路', '西安市'),
-      ('北京市朝阳区建国路', '北京市'), // 直辖市没有省前缀
-      ('广西壮族自治区南宁市青秀区', '南宁市'),
-      ('四川省成都市锦江区春熙路', '成都市'),
-    ]) {
+  test('城市名原样用,客户端不做任何解析', () async {
+    // 解析在服务端(/geo/reverse 取腾讯的 address_component.city,
+    // 直辖市那里 city 为空所以退回 province)。客户端再抠一次的下场是
+    // 贪婪正则把「陕西省西安市雁塔区」抠成「陕西省西安市」
+    for (final want in ['西安市', '北京市', '南宁市', '成都市']) {
       SharedPreferences.setMockInitialValues({});
       final city = await CityPref.resolve(
         lastKnown: () async => (lat: 1.0, lng: 1.0),
-        reverse: (lat, lng) async => raw,
+        reverse: (lat, lng) async => want,
       );
-      expect(city, want,
-          reason: '「$raw」解析成了「$city」—— 拿它当腾讯 POI 的 city 参数'
-              '会搜出 0 条,而界面上看不出为什么');
+      expect(city, want);
     }
   });
 
-  test('逆地理串里没有「市」时不硬凑', () async {
+  test('服务端给不出城市时留空,不硬凑', () async {
     final city = await CityPref.resolve(
       lastKnown: () async => (lat: 1.0, lng: 1.0),
-      reverse: (lat, lng) async => '某个海外地址',
+      reverse: (lat, lng) async => '',
     );
     expect(city, '');
   });

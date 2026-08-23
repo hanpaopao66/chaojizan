@@ -99,7 +99,7 @@ async def reverse_geocode(
     if not settings.tencent_map_key:
         return PoiTipOut(
             name="演示地点(服务端未配置 TENCENT_MAP_KEY)",
-            district="演示数据", lat=lat, lng=lng)
+            district="演示数据", lat=lat, lng=lng, city="")
 
     async with httpx.AsyncClient(timeout=5) as client:
         try:
@@ -125,8 +125,13 @@ async def reverse_geocode(
             or formatted.get("rough")
             or result.get("address")
             or "")
+    # 结构化城市名,和 services/geo_city.py 同一个口径:
+    # address_component.city,直辖市那里 city 为空所以退回 province。
+    # **不让客户端从地址串里抠** —— 正则一贪婪就变成「陕西省西安市」
+    comp = result.get("address_component") or {}
     return PoiTipOut(
         name=name,
+        city=str(comp.get("city") or comp.get("province") or "")[:20],
         district=result.get("address", "") or "",
         # 回传的是**用户点的那个坐标**,不是腾讯匹配到的 POI 坐标 ——
         # 用户拖到自家单元门口,不该被吸附到几十米外的小区大门

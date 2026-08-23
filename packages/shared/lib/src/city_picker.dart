@@ -61,7 +61,8 @@ class CityPref {
   /// 各写一遍的下场是两端行为不一致,而"为什么商家端搜不出来"
   /// 这种问题极难从表象追到根因。
   /// [lastKnown] 由调用方注入(shared 不依赖定位插件),
-  /// [reverse] 是坐标 → 含省市区的地址串。
+  /// [reverse] 是坐标 → **城市名**(不是地址串)—— 调用方传
+  /// `(await api.geoReverse(lat, lng)).city`,解析在服务端做。
   static Future<String> resolve({
     Future<({double lat, double lng})?> Function()? lastKnown,
     Future<String> Function(double, double)? reverse,
@@ -71,18 +72,18 @@ class CityPref {
       try {
         final me = await lastKnown();
         if (me != null) {
-          final district = await reverse(me.lat, me.lng);
-          // 逆地理的 district 形如「陕西省西安市雁塔区…」,取出「西安市」。
+          // [reverse] 直接给城市名,**这里不做任何解析**。
           //
-          // ⚠️ **必须先剥掉省/自治区**:直接匹配 `[\u4e00-\u9fa5]{2,8}市`
-          // 是贪婪的,从头开始能一路吃到「陕西省西安市」—— 拿这个当
-          // 腾讯 POI 的 city 参数,搜出来是 0 条,而界面上看不出为什么
-          // (正是这个组件当初要解决的那个 bug 的另一种犯法)。
-          // 这段以前藏在「记住的优先」后面很少执行,改成定位优先才露出来
-          final cleaned = district.replaceFirst(
-              RegExp(r'^[\u4e00-\u9fa5]{2,8}?(省|自治区|特别行政区)'), '');
-          final m = RegExp(r'([\u4e00-\u9fa5]{2,8}市)').firstMatch(cleaned);
-          final located = m?.group(1) ?? '';
+          // 以前是服务端回一串「陕西省西安市雁塔区…」、客户端用正则抠 ——
+          // 而 `[\u4e00-\u9fa5]{2,8}市` 是贪婪的,从头能一路吃到
+          // 「陕西省西安市」,拿它当腾讯 POI 的 city 参数搜出来是 0 条,
+          // 界面上还看不出为什么(正是这个组件当初要解决的那个 bug)。
+          //
+          // 根治办法不是把正则写对,是**不在客户端猜**:腾讯的逆地理返回里
+          // 本来就有结构化的 address_component.city,服务端 /geo/reverse
+          // 现在把它透出来了,而且和商家入驻解析城市(services/geo_city.py)
+          // 同一个口径 —— 两边不一致的话,用户搜的城市和商家标的城市对不上
+          final located = await reverse(me.lat, me.lng);
           if (located.isNotEmpty) return located;
         }
       } catch (_) {

@@ -1289,6 +1289,12 @@ class PoiTipOut(BaseModel):
     district: str
     lat: float
     lng: float
+    # 结构化城市名(「西安市」)。客户端拿它当腾讯 POI 搜索的 city 参数 ——
+    # 以前是客户端从 district 那串行政区划里用正则抠,贪婪匹配会抠出
+    # 「陕西省西安市」,搜出来 0 条而界面上看不出为什么。
+    # 这里和 services/geo_city.py(商家入驻解析城市)**同一个口径**:
+    # 两边不一致的话,用户搜的城市和商家标的城市对不上
+    city: str = ""
 
 
 # ---------- 骑手实名认证 ----------

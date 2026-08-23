@@ -1087,16 +1087,23 @@ class PoiTip {
     required this.district,
     required this.lat,
     required this.lng,
+    this.city = '',
   });
 
   PoiTip.fromJson(Map<String, dynamic> json)
       : name = json['name'] as String,
         district = json['district'] as String? ?? '',
+        city = json['city'] as String? ?? '',
         lat = (json['lat'] as num).toDouble(),
         lng = (json['lng'] as num).toDouble();
 
   final String name;
   final String district;
+
+  /// 结构化城市名(「西安市」),服务端从腾讯的 address_component 取,
+  /// 和商家入驻解析出来的 city 同一个口径。
+  /// **别再从 [district] 那串行政区划里抠** —— 见 CityPref 的注释
+  final String city;
   final double lat;
   final double lng;
 }
