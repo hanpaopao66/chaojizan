@@ -358,11 +358,20 @@ class _CheckoutPageState extends State<CheckoutPage> {
     );
   }
 
+  /// 预计送达分钟数,**由服务端给**(#295)。
+  ///
+  /// 这里原本是自己算的:直线距离 × 一个常量速度。而下单成功后订单详情
+  /// 显示的是服务端算的数(腾讯骑行路网 + 商家出餐分位数 + 忙碌模式)——
+  /// 于是结算页说 30 分钟、付完款变成 42 分钟。
+  ///
+  /// 新用户不会想到这是两套算法,他只会记住这个 App 说话不算数。
+  /// 同一件事在同一分钟内给出两个答案,是最伤信任的一种不一致。
+  ///
+  /// 拿不到就返回 null、**整行不显示** —— 而不是退回直线自己编一个。
+  /// 「大概 30 分钟」和「不知道」的区别新手分不出来,但他会记住你说错了。
   int? get _etaMin {
-    final a = _address;
-    if (_pickup || a == null) return null;
-    return etaMinutes(distanceMeters(
-        widget.merchant.lat, widget.merchant.lng, a.lat, a.lng));
+    if (_pickup) return null;
+    return _feePreview?['eta_minutes'] as int?;
   }
 
   Future<void> _submit() async {

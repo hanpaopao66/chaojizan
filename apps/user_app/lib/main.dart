@@ -4185,9 +4185,11 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     if (expect == null) {
       final created = DateTime.tryParse(order.createdAt)?.toLocal();
       if (created == null || order.merchantLat == null) return null;
-      final rideMin = etaMinutes(distanceMeters(order.merchantLat!,
-          order.merchantLng!, order.lat, order.lng));
-      expect = created.add(Duration(minutes: 10 + rideMin));
+      // etaMinutes 里**已经含 20 分钟出餐**,不能再外加一个 10 ——
+      // 原来那样是把备餐算了两遍(#295)
+      expect = created.add(Duration(
+          minutes: etaMinutes(distanceMeters(
+              order.merchantLat!, order.merchantLng!, order.lat, order.lng))));
     }
     final left = expect.difference(DateTime.now()).inMinutes;
     final hhmm = '${expect.hour.toString().padLeft(2, '0')}:'
@@ -6343,14 +6345,28 @@ class _OrderTimeline extends StatelessWidget {
     // 当前进行到第几步(用订单当前状态定位)
     final currentIdx =
         _mySteps.indexWhere((s) => s.$1 == order.status.value);
-    // ETA:配送中时估算送达时间
+    // 还要多久:**用服务端算好的 eta_at**(#295)。
+    //
+    // 这里原本自己算「直线距离 ÷ 常量速度」,而订单列表卡片用的是
+    // order.etaAt(服务端按腾讯骑行路网 + 这家店的实测出餐时间算的)——
+    // 同一个订单,列表说「还有 20 分钟」,点进去说「12 分钟内送达」。
+    //
+    // 打开订单页第一眼只想知道"还要多久",这一眼就得和别处对得上;
+    // 拿不到 eta_at 就整行不显示,不自己编一个。
     String? etaText;
+    final etaAt = order.etaAt == null
+        ? null
+        : DateTime.tryParse(order.etaAt!)?.toLocal();
     if (!order.pickup &&
-        order.merchantLat != null &&
+        etaAt != null &&
         order.status.index < OrderStatus.delivered.index) {
-      final min = etaMinutes(distanceMeters(order.merchantLat!,
-          order.merchantLng!, order.lat, order.lng));
-      etaText = '预计 $min 分钟内送达';
+      final left = etaAt.difference(DateTime.now()).inMinutes;
+      // 超时了就直说超时。「马上就到」喊了二十分钟比晚到本身更伤人
+      etaText = left > 0
+          ? '预计还有 $left 分钟送到'
+          : (left > -5
+              ? '马上就到'
+              : '比预计晚了 ${-left} 分钟,骑手还在路上');
     }
 
     final sz = theme.sz;

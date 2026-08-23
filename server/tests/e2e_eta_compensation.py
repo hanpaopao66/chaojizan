@@ -61,7 +61,13 @@ async def main():
     audit_before = await audit_snapshot()  # 见 util.audit_new_problems
     rider = await register_fresh_rider("准时测试骑手")
     call("POST", "/riders/online", rider, {"is_online": True})
-    base_coupons = len(my_eta_coupons())
+    # ⚠️ 一律**按单号**判有没有券,不数总数。
+    #
+    # 开发库是共享的,里面随时躺着别人留下的超时单;一次 sweep_once
+    # 会把它们一起补发,于是「总数 == 基线 + 1」这种断言必然假红。
+    # 这个文件里原本四处都是数总数写的,长期红着 —— 假红的测试等于没有测试。
+    def _has_coupon(order_no):
+        return any(order_no[-6:] in c["note"] for c in my_eta_coupons())
 
     # 1) 支付生成 ETA(距离朴素公式,最少 30 分钟)
     no1, paid = make_paid_order()
@@ -70,7 +76,7 @@ async def main():
 
     # 2) 未超时送达:不发券
     deliver(no1, rider)
-    assert len(my_eta_coupons()) == base_coupons
+    assert not _has_coupon(no1), "没超时却赔了"
     print("✓ 未超时不发券")
 
     # 3) 超时 20 分钟送达:自动发 3 元安抚券,且只发一次(清扫重跑不重复)
@@ -89,7 +95,12 @@ async def main():
     assert coupon["amount_cents"] == 300 and coupon["usable"], coupon
     from app.services.auto_flow import sweep_once
     await sweep_once()  # 兜底补发重跑:source 唯一,不重复
-    assert len(my_eta_coupons()) == base_coupons + 1
+    # 同样按单号数,不数总数 —— 这一行原本写的是
+    # `len(my_eta_coupons()) == base_coupons + 1`,和上面那段注释自相矛盾:
+    # sweep_once 会把开发库里**别人留下的**超时单一起补发,总数必然对不上,
+    # 于是这个用例长期假红。要验的本来就是「这一单没被发第二张」
+    again = [c for c in my_eta_coupons() if no2[-6:] in c["note"]]
+    assert len(again) == 1, f"重跑清扫又给这一单发了一张:{again}"
     comps = call("GET", "/admin/eta-compensations", admin)
     assert any(c["order_no"] == no2 and "归因" in c["note"] for c in comps)
     print("✓ 超时 20 分钟自动发 3 元券,只发一次,后台归因可见")
@@ -104,7 +115,7 @@ async def main():
     call("POST", f"/orders/{no3}/transition", rider, {"to_status": "picked_up"})
     await backdate_eta(no3, 30)
     call("POST", f"/orders/{no3}/transition", rider, {"to_status": "delivered"})
-    assert len(my_eta_coupons()) == base_coupons + 1
+    assert not _has_coupon(no3), "用户自己改了地址,这单不该赔"
     print("✓ 用户改过地址的单不赔")
 
     # 5) 极端天气豁免:开关切换过(1 小时内)的送达超时不赔
@@ -117,7 +128,7 @@ async def main():
     call("POST", "/admin/flags/weather_shutdown", admin, {"value": "off"})
     await backdate_eta(no4, 30)
     call("POST", f"/orders/{no4}/transition", rider, {"to_status": "delivered"})
-    assert len(my_eta_coupons()) == base_coupons + 1
+    assert not _has_coupon(no4), "极端天气豁免窗内的超时不该赔"
     async with SessionLocal() as db:  # 清掉豁免窗,不影响后续测试
         pass
     from app.redis_client import get_redis

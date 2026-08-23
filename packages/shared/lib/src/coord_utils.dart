@@ -69,9 +69,16 @@ String distanceLabelShort(double meters) => meters >= 1000
     ? '${(meters / 1000).toStringAsFixed(1)}km'
     : '${meters.round()}m';
 
-/// 预计送达(分钟)= 出餐 15 分钟 + 骑行(15km/h ≈ 250m/min)。
-/// 首页卡片、点单页、订单追踪共用这一个公式,口径一致。
-int etaMinutes(double distanceM) => 15 + (distanceM / 250).ceil();
+/// 预计送达(分钟)= 出餐 20 分钟 + 骑行(15km/h ≈ 250m/min)。
+///
+/// **只用于商家列表卡片的粗估**。真要下单的那个数一律问服务端
+/// (`/orders/delivery-fee` 的 `eta_minutes`,和下单后订单上的
+/// `eta_at` 同源)—— 客户端算不了路网、算不了这家店今天出餐多快。
+///
+/// 出餐常量从 15 改成 20,对齐服务端的 `ETA_PREP_MINUTES`(#295)。
+/// 原来差这 5 分钟,列表页系统性地比结算页乐观 —— 用户在列表看到
+/// 「25 分钟」点进去变「30 分钟」,每一单都这样。宁可列表说得保守些。
+int etaMinutes(double distanceM) => 20 + (distanceM / 250).ceil();
 
 /// 纯骑行时间(分钟),不含出餐(#293)。
 ///

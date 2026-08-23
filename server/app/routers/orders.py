@@ -53,6 +53,24 @@ from ..services.staff import owned_shop
 
 logger = logging.getLogger("superz.orders")
 
+
+def _coupon_label(source: str) -> str:
+    """给用户看的券名。按发放来源认,不是按资金方认。
+
+    资金方(platform/merchant)是记账用的分类,对用户没有意义 ——
+    他记得的是"平台赔我的那张"、"收藏店铺送的那张"。
+    认不出来的券名会让减免看着像凭空冒出来的,反而不放心。
+    """
+    for prefix, label in (
+        ("eta:", "超时安抚券"),
+        ("favorite:", "收藏有礼券"),
+        ("batch:", "平台活动券"),
+        ("shop:", "店铺券"),
+    ):
+        if source.startswith(prefix):
+            return label
+    return "平台券"
+
 router = APIRouter(prefix="/orders", tags=["订单"])
 
 
@@ -601,7 +619,14 @@ async def create_order(
             if coupon_off > 0:
                 subsidy += coupon_off
                 coupon_applied = True
-                notes.append(f"平台券-{coupon_off / 100:g}元(平台)")
+                # 券名要说清是**哪一张**(#296)。
+                #
+                # 原来一律写「平台券-3元」:用户被超时赔付时收到的通知
+                # 说的是「安抚券」,订单上却写「平台券」—— 他认不出这
+                # 就是平台答应赔他的那张,只会觉得凭空多了个没头没尾的减免。
+                # 名字对不上号的补偿,等于没补偿。
+                notes.append(
+                    f"{_coupon_label(coupon.source)}-{coupon_off / 100:g}元(平台)")
 
     # 满减备注:仅当最终折扣就是满减档(未被店铺券取代)时展示
     if discount and discount == manjian_discount:
@@ -1598,6 +1623,38 @@ async def preview_delivery_fee(
     door_saving = delivery_fee_parts(
         distance, weather_on=False, floor=floor,
         has_elevator=has_elevator, to_door=True)["door"]
+    # 预计送达:走**和下单后完全同一条路径**(compute_eta_async),
+    # 而不是让客户端拿直线距离自己换算。
+    #
+    # 结算页原来自己算 `etaMinutes(直线距离)`,付完款订单详情显示的却是
+    # 服务端算的数 —— 同一件事在同一分钟内给出两个答案。新用户不会想到
+    # 这是两套算法,他只会记住这个 App 说话不算数。(#295)
+    #
+    # ⚠️ 这里**故意不传 prep_minutes**:payment_core 下单时也没传。
+    # 传了商家实测分位数看着"更准",却会和真实下单结果差开 ——
+    # 这个接口要的是**一致**,不是更准。
+    #
+    # 搭在配送费预览里而不是新开一个接口:结算页选完地址本来就调这个,
+    # 多开一个就是多一次往返、多一处可能只成功一半的地方。
+    eta_minutes: int | None = None
+    try:
+        from types import SimpleNamespace
+
+        from ..services.eta import compute_eta_async
+
+        # compute_eta 只读这几个字段;为了预估去造一条真订单是本末倒置
+        probe = SimpleNamespace(
+            pickup=False, parent_order_no="", scheduled_at=None,
+            lat=lat, lng=lng, floor=floor, has_elevator=has_elevator)
+        eta_at = await compute_eta_async(probe, merchant)
+        if eta_at is not None:
+            eta_minutes = max(1, round(
+                (eta_at - datetime.now(timezone.utc)).total_seconds() / 60))
+    except Exception:
+        # 估不出就回 None,客户端**不显示** —— 而不是退回直线自己编一个。
+        # 「大概 30 分钟」和「不知道」的区别新手分不出来,但他会记住你说错了
+        logger.warning("结算页预估送达失败,不显示", exc_info=True)
+
     return {
         "distance_m": round(distance),
         "fee_cents": sum(parts.values()),
@@ -1605,6 +1662,7 @@ async def preview_delivery_fee(
         "labels": FEE_PART_LABELS,
         "door_fee_cents": door_saving,
         "in_range": in_delivery_range(distance),
+        "eta_minutes": eta_minutes,
     }
 
 
