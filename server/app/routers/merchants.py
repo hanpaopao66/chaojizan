@@ -1530,7 +1530,16 @@ async def my_trend(
     series: list[dict] = []
     if rows:
         wk = rows[0][0].date()
-        last = rows[-1][0].date()
+        # 末端补到**本周**,不是补到"最后一个有单的周"。
+        #
+        # 原来是 `last = rows[-1][0].date()`:本周一单都还没有的时候,
+        # 本周就整个不出现在图上 —— 商家看到的折线停在上周,
+        # 而这和上面那段"空周被连成直线"是同一个毛病,只是发生在最后一格。
+        #
+        # 最容易撞上的时刻:周一刚过零点。CI 在 UTC 16:17 跑
+        # (北京时间周一 00:17),本周确实还没有单,于是图上没有 partial 那格,
+        # 环比也就失去了"本周不参与比较"的那个标记。
+        last = max(rows[-1][0].date(), this_week)
         while wk <= last:
             r = by_week.get(wk)
             orders = r[1] if r else 0
