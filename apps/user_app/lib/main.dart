@@ -1578,7 +1578,10 @@ class _MerchantListViewState extends State<MerchantListView>
   /// 属于功能不属于装饰,不能顺手删掉。
   Widget _bigMerchantCard(Merchant m) {
     final sz = Theme.of(context).sz;
-    final dist = distanceMeters(_myLat, _myLng, m.lat, m.lng);
+    // 距离优先用**服务端算的**(#294):它是 PostGIS 球面距离,
+    // 比客户端 haversine 准,而且和排序用的是同一个数 ——
+    // 各算各的会出现「排在前面的反而显示更远」
+    final dist = m.distanceM ?? distanceMeters(_myLat, _myLng, m.lat, m.lng);
     final eta = etaMinutes(dist);
     // 曝光埋点:商家漏斗最上面那一级(此前只有"进店"往下)。
     // 每店每次冷启动只报一次 —— 滚动列表来回划不该刷出几十条,

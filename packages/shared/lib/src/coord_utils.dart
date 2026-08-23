@@ -58,8 +58,16 @@ double distanceMeters(double lat1, double lng1, double lat2, double lng2) {
 double _rad(double deg) => deg * pi / 180.0;
 
 /// 距离展示:850m / 2.3km
-String distanceLabel(double meters) =>
-    meters >= 1000 ? '${(meters / 1000).toStringAsFixed(1)}km' : '${meters.round()}m';
+String distanceLabel(double meters) => meters >= 1000
+    ? '${(meters / 1000).toStringAsFixed(1)} 公里'
+    : '${meters.round()} 米';
+
+/// 紧凑版:`1.7km` / `860m`。**只给空间极窄的地方用**
+/// (小票、角标)—— 正文一律用 [distanceLabel] 的中文单位:
+/// 「km」是给开发看的,不是给点外卖的人和骑手看的
+String distanceLabelShort(double meters) => meters >= 1000
+    ? '${(meters / 1000).toStringAsFixed(1)}km'
+    : '${meters.round()}m';
 
 /// 预计送达(分钟)= 出餐 15 分钟 + 骑行(15km/h ≈ 250m/min)。
 /// 首页卡片、点单页、订单追踪共用这一个公式,口径一致。

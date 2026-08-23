@@ -140,6 +140,11 @@ class MerchantOut(BaseModel):
     address: str
     lat: float
     lng: float
+
+    # 到用户的直线距离(米)。**服务端算的**(PostGIS geography,球面),
+    # 客户端别再自己拿两点算一遍 —— 各算各的迟早对不上,而且客户端那份
+    # 用的是更糙的 haversine。null = 这次查询没带定位
+    distance_m: int | None = None
     city: str = ""  # 所在城市(入驻时逆地理解析;开城清单外不可营业)
     biz_type: str = "food"  # 业态:food 餐饮 / hotel 酒店(三端按此分叉界面)
     category: str = "fast_food"  # 外卖品类(清单见 categories.py)

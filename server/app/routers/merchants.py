@@ -73,7 +73,7 @@ logger = logging.getLogger(__name__)
 
 # 附近商家 + 近 30 天完成单数(月售),按指定方式排序
 _NEARBY_SQL_TMPL = """
-    SELECT m.id, count(o.id) AS sales
+    SELECT m.id, count(o.id) AS sales, min({dist_expr}) AS distance_m
     FROM merchants m
     LEFT JOIN orders o
            ON o.merchant_id = m.id
@@ -205,6 +205,9 @@ async def list_merchants(
         rows = await db.execute(
             text(_NEARBY_SQL_TMPL.format(
                 order_by=_SORTS[sort],
+                # 距离本来就为排序算了一次(_DIST_EXPR),顺手取出来返回 ——
+                # 不返回的话客户端只能拿两点直线再算一遍,而那份更糙
+                dist_expr=_DIST_EXPR,
                 category_clause=(
                     "AND m.category = :category" if category else ""),
                 filter_clause="\n      ".join(filters))),
@@ -214,19 +217,24 @@ async def list_merchants(
              **({"category": category} if category else {}),
              **filter_params},
         )
-        id_sales = [(r[0], r[1]) for r in rows]
+        id_sales = [(r[0], r[1], r[2]) for r in rows]
         if not id_sales:
             return []
         result = await db.scalars(
-            select(Merchant).where(Merchant.id.in_([i for i, _ in id_sales]))
+            select(Merchant).where(
+                Merchant.id.in_([i for i, _, _ in id_sales]))
         )
         by_id = {m.id: m for m in result}
         outs = []
-        for mid, sales in id_sales:
+        for mid, sales, dist in id_sales:
             if mid not in by_id:
                 continue
             out = MerchantOut.model_validate(by_id[mid])
             out.monthly_sales = sales
+            # PostGIS geography 的 <-> 是**球面**距离(米),比客户端的
+            # haversine 准;但它仍是直线不是骑行路径 —— 字段名和文案
+            # 都不许说成「骑行 X 公里」
+            out.distance_m = int(dist) if dist is not None else None
             outs.append(out)
         await _fill_top_dishes(db, outs)
         return outs
@@ -352,7 +360,8 @@ async def search_merchants(
         dist=_SEARCH_DIST if has_pos else "0",
         dist_km=_SEARCH_DIST_KM if has_pos else "0")
     sql = text(f"""
-        SELECT m.id, count(o.id) AS sales
+        SELECT m.id, count(o.id) AS sales,
+               {'min(' + _SEARCH_DIST + ')' if has_pos else 'NULL'} AS distance_m
         FROM merchants m
         LEFT JOIN orders o
                ON o.merchant_id = m.id AND o.status = 'completed'
@@ -363,16 +372,18 @@ async def search_merchants(
         LIMIT 30
     """)
     rows = await db.execute(sql, params)
-    id_sales = [(r[0], r[1]) for r in rows]
+    id_sales = [(r[0], r[1], r[2]) for r in rows]
     if not id_sales:
         return []
     by_id = {m.id: m for m in await db.scalars(
-        select(Merchant).where(Merchant.id.in_([i for i, _ in id_sales])))}
+        select(Merchant).where(Merchant.id.in_([i for i, _, _ in id_sales])))}
     outs = []
-    for mid, sales in id_sales:  # 保持 SQL 已排好的顺序
+    for mid, sales, dist in id_sales:  # 保持 SQL 已排好的顺序
         if mid in by_id:
             out = MerchantOut.model_validate(by_id[mid])
             out.monthly_sales = sales
+            # 搜索没带定位时 distance_m 是 NULL —— 那时客户端也不该显示距离
+            out.distance_m = int(dist) if dist is not None else None
             outs.append(out)
     await _fill_top_dishes(db, outs)
     return outs

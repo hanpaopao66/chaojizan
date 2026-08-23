@@ -55,6 +55,7 @@ class Merchant {
         name = json['name'] as String,
         description = json['description'] as String? ?? '',
         address = json['address'] as String? ?? '',
+        distanceM = (json['distance_m'] as num?)?.toDouble(),
         lat = (json['lat'] as num).toDouble(),
         lng = (json['lng'] as num).toDouble(),
         isOpen = json['is_open'] as bool,
@@ -120,6 +121,13 @@ class Merchant {
   final int promiseReadyMinutes; // 承诺出餐时长(分钟)
   final bool selfDelivery;       // 商家自配送(订单不进抢单池,自己送)
   final String address;
+  /// 到我的直线距离(米),**服务端算的**(PostGIS 球面距离)。
+  /// null = 这次查询没带定位。
+  ///
+  /// ⚠️ 它是直线不是骑行路程,文案里别写成「骑行 X 公里」——
+  /// 实测直线比骑行短约 19%
+  final double? distanceM;
+
   final double lat;
   final double lng;
   final bool isOpen;
