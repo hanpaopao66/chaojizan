@@ -261,7 +261,13 @@ function nodePos(n) {
   const m = n.tz.match(/^UTC([+-])(\d{1,2}):?(\d{2})?$/);
   if (m) {
     const h = (+m[2]) + (+(m[3] || 0)) / 60;
-    return [22, Math.max(-178, Math.min(178, (m[1] === '-' ? -1 : 1) * h * 15))];
+    const lng = Math.max(-178, Math.min(178, (m[1] === '-' ? -1 : 1) * h * 15));
+    // 纬度不再硬编码 22 —— 那条纬线大半是海,UTC+0 的节点会落在几内亚湾。
+    // 沿这条经度找一个在陆地上的纬度,找不到才退回 22
+    for (const lat of [30, 40, 22, 50, 10, -10, -25, 60]) {
+      if (isLand(lat, lng)) return [lat, lng];
+    }
+    return [22, lng];
   }
   return null;
 }

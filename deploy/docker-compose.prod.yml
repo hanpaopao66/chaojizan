@@ -234,6 +234,11 @@ services:
       SUPERZ_API: ${WITNESS_API:-https://chaojizan.cc}
       WITNESS_NAME: ${WITNESS_NAME:-官方部署机}
       WITNESS_REGION: ${WITNESS_REGION:-}
+      # 容器默认 UTC,而节点上报的 tz 就是从系统时区取的 ——
+      # 不设这个,官方节点在 /nodes 的地图上会被画到几内亚湾
+      # (nodes.html 对 UTC±HH:MM 的落点是纬度 22、经度 = 时区 × 15)。
+      # 节点只上报时区不上报坐标,这是隐私设计;但时区本身得是真的
+      TZ: ${WITNESS_TZ:-Asia/Shanghai}
     volumes:
       - witness-data:/data
 
