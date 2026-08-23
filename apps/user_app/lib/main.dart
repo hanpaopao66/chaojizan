@@ -49,6 +49,26 @@ import 'voucher_pages.dart';
 
 /// 一次性获取当前位置(GCJ-02),失败静默退回演示坐标。
 /// 传 [context] 时,首次申请权限前先弹目的说明(商店合规:先告知后申请)。
+/// 跨城提示的判据(#282)。抽成纯函数是为了能被测试锁住 ——
+/// 它决定「要不要打断用户」,而打断错了比不打断更烦人。
+///
+/// 三个条件缺一不可:
+/// - **选过收货地址**:没选的时候本来就按当前位置找店,人动了直接跟着动,
+///   不需要问;
+/// - **这次会话没点过「不用」**:他已经说了不换,别每次回前台再问一遍;
+/// - **距离超过 30km**:同城跨区(公司→家)是最常见的正常用法,
+///   在那种距离上弹提示纯属打扰。
+bool shouldSuggestLocationSwitch({
+  required bool hasDeliveryAddress,
+  required bool dismissedThisSession,
+  required double? distanceMeters,
+  double thresholdMeters = 30000.0,
+}) {
+  if (!hasDeliveryAddress || dismissedThisSession) return false;
+  if (distanceMeters == null) return false;
+  return distanceMeters > thresholdMeters;
+}
+
 Future<({double lat, double lng, bool real})> resolveMyLocation(
     [BuildContext? context]) async {
   try {
@@ -206,6 +226,16 @@ class _HomePageState extends State<HomePage> {
   /// 顶部地址栏选中的收货地址;null = 用当前定位
   Address? _deliveryAddress;
 
+  /// 当前定位落在哪个区(#284)。`_deliveryAddress` 为空时顶部显示它。
+  ///
+  /// 原来那里固定写「当前位置」四个字 —— 用户没法判断 App 到底定到哪了,
+  /// 而这正是「换了城市要不要提示他」那条(#282)的前提:
+  /// 连 App 认为自己在哪都不知道,就不会去点那个切换。
+  String _hereName = '';
+
+  /// 定位失败(权限关了/取不到)。顶部要说出来,不能继续假装「当前位置」
+  bool _hereFailed = false;
+
   /// 消息中心红点(有新公告)
   bool _hasUnread = false;
 
@@ -294,7 +324,10 @@ class _HomePageState extends State<HomePage> {
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 178),
                       child: Text(
-                        _deliveryAddress?.address ?? '当前位置',
+                        _deliveryAddress?.address ??
+                            (_hereFailed
+                                ? '定位失败,点这里选地址'
+                                : (_hereName.isEmpty ? '当前位置' : _hereName)),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -380,7 +413,21 @@ class _HomePageState extends State<HomePage> {
         children: [
           _visited.contains(0)
               ? MerchantListView(
-                  api: widget.api, deliveryAddress: _deliveryAddress)
+                  api: widget.api,
+                  deliveryAddress: _deliveryAddress,
+                  onLocated: (name, failed) {
+                    if (!mounted) return;
+                    if (name == _hereName && failed == _hereFailed) return;
+                    setState(() {
+                      _hereName = name;
+                      _hereFailed = failed;
+                    });
+                  },
+                  onUseCurrentLocation: () {
+                    // 清掉收货地址 = 回到「按当前位置找店」。
+                    // 地址本身一条没删,他随时能再选回来
+                    setState(() => _deliveryAddress = null);
+                  })
               : const SizedBox.shrink(),
           _visited.contains(1)
               ? OrdersTab(
@@ -426,12 +473,25 @@ class _PinnedChipsDelegate extends SliverPersistentHeaderDelegate {
 
 class MerchantListView extends StatefulWidget {
   const MerchantListView(
-      {super.key, required this.api, this.deliveryAddress, this.category});
+      {super.key,
+      required this.api,
+      this.deliveryAddress,
+      this.category,
+      this.onLocated,
+      this.onUseCurrentLocation});
 
   final ApiClient api;
 
   /// 顶部地址栏选中的地址;null = 用手机定位
   final Address? deliveryAddress;
+
+  /// 定位有结果时回报给首页:区名(拿不到就空串)+ 是否失败(#284)。
+  /// 顶部地址栏靠它把「当前位置」换成真实地名
+  final void Function(String hereName, bool failed)? onLocated;
+
+  /// 用户在跨城提示条上点了「切到当前位置」(#282)——
+  /// 清掉收货地址这件事只有首页做得了,列表页只负责报告
+  final VoidCallback? onUseCurrentLocation;
 
   /// 品类模式(外卖二级页):null = 首页模式(搜索栏+金刚区+再来一单);
   /// '' = 推荐(不过滤,不带首页头部);slug = 按品类过滤
@@ -441,8 +501,35 @@ class MerchantListView extends StatefulWidget {
   State<MerchantListView> createState() => _MerchantListViewState();
 }
 
-class _MerchantListViewState extends State<MerchantListView> {
+class _MerchantListViewState extends State<MerchantListView>
+    with WidgetsBindingObserver {
   bool _realLocation = true;
+
+  /// 上一次真实定位到的坐标(#282 判断「是不是换城市了」用的基准)。
+  /// 注意它和 `_myLat/_myLng` 不是一回事:后者是**正在用来找店的**位置,
+  /// 选了收货地址时那是地址的坐标,而这个始终是人所在的位置
+  double? _hereLat;
+  double? _hereLng;
+
+  /// 跨城提示条要显示的当前城市名;空 = 还没拿到(不影响提示,见 #282)
+  String _farCity = '';
+
+  /// 用户在这次会话里点过「不用」。**存内存不落盘** ——
+  /// 重启 App 重新判断,他下次打开时人可能真的在新城市待下来了
+  bool _farDismissed = false;
+
+  /// 上次为「是不是换城市了」取定位的时刻。resumed 会因为切通知栏、
+  /// 接电话反复触发,不压一下会变成每分钟几次定位
+  DateTime? _lastHereCheck;
+
+  /// 用户在「定位没拿到」时手选的城市(#283)。空 = 没选过
+  String _pickedCity = '';
+
+  /// 跨城判据:30km。同城跨区(公司→家)不该提示 —— 那是最常见的正常用法
+  static const _kFarMeters = 30000.0;
+
+  /// 两次位置复核的最小间隔
+  static const _kHereCheckGap = Duration(minutes: 5);
 
   /// 曝光去重交给 Analytics 的会话级 once(退出登录会清)——
   /// 用页面内的 static Set 的话,换账号后新账号的曝光永远不再上报
@@ -499,10 +586,93 @@ class _MerchantListViewState extends State<MerchantListView> {
   @override
   void initState() {
     super.initState();
+    // 首页要跟随位置(#281):App 从后台回来时人可能已经换了城市。
+    // 全 App 此前只有订单详情/地图/拼单页监听生命周期,首页反而没有
+    if (widget.category == null) WidgetsBinding.instance.addObserver(this);
     _loadRecent();
     _restorePledge();
     _loadMiniApps();
   }
+
+  @override
+  void dispose() {
+    if (widget.category == null) WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _recheckHere();
+  }
+
+  /// 回到前台时复核「人还在原来那片吗」(#281/#282)。
+  ///
+  /// **只取定位,不重拉列表** —— 拉不拉由跨城判断说了算。
+  /// 用 `getLastKnownPosition` 优先:我们只要判断是不是换了城市,
+  /// 不需要为此唤醒 GPS;拿不到才退回一次低精度定位。
+  Future<void> _recheckHere() async {
+    if (!mounted || widget.category != null) return;
+    final now = DateTime.now();
+    if (_lastHereCheck != null &&
+        now.difference(_lastHereCheck!) < _kHereCheckGap) {
+      return; // 切个通知栏、接个电话都会触发 resumed,不压会变成每分钟几次定位
+    }
+    _lastHereCheck = now;
+    try {
+      var p = await Geolocator.getLastKnownPosition();
+      p ??= await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.low, timeLimit: Duration(seconds: 6)));
+      final gcj = wgs84ToGcj02(p.latitude, p.longitude);
+      if (!mounted) return;
+      _hereLat = gcj.lat;
+      _hereLng = gcj.lng;
+      // 没选收货地址时,人动了就直接跟着动 —— 这本来就是「按当前位置找店」,
+      // 不需要问他(要问的是"你选了别处的地址"那种,见下面 _farFromHere)
+      if (widget.deliveryAddress == null &&
+          Geolocator.distanceBetween(_myLat, _myLng, gcj.lat, gcj.lng) >
+              _kFarMeters) {
+        setState(() => _future = _load());
+        return;
+      }
+      if (_farFromHere) setState(() {}); // 让提示条出现
+      _resolveHereName();
+    } catch (_) {
+      // 复核失败不打扰:上一次的位置继续用,提示条也不出
+    }
+  }
+
+  /// 正在用来找店的位置,和人所在的位置差得够远吗(#282)。
+  ///
+  /// 用直线距离不用城市名:城市名要多一次逆地理,而且直辖市/省直管县的
+  /// 口径很乱(「北京市」vs「北京」vs「东城区」),拿它当判据会误报。
+  bool get _farFromHere => shouldSuggestLocationSwitch(
+        hasDeliveryAddress: widget.deliveryAddress != null,
+        dismissedThisSession: _farDismissed,
+        distanceMeters: _hereLat == null
+            ? null
+            : Geolocator.distanceBetween(
+                _myLat, _myLng, _hereLat!, _hereLng!),
+        thresholdMeters: _kFarMeters,
+      );
+
+  /// 拿当前定位的区名,给顶部地址栏(#284)和跨城提示条用。
+  /// **拿不到不影响任何判断** —— 提示条会退化成不带地名的说法
+  Future<void> _resolveHereName() async {
+    final lat = _hereLat, lng = _hereLng;
+    if (lat == null || lng == null) return;
+    try {
+      final poi = await widget.api.geoReverse(lat, lng);
+      if (!mounted) return;
+      final name = poi.district.isNotEmpty ? poi.district : poi.name;
+      _farCity = name;
+      widget.onLocated?.call(name, false);
+      if (_farFromHere) setState(() {});
+    } catch (_) {
+      // 逆地理失败:顶部保持「当前位置」,提示条用不带地名的文案
+    }
+  }
+
 
   Future<void> _loadMiniApps() async {
     if (widget.category != null) return; // 面板只属于首页,品类页不呼出
@@ -705,6 +875,16 @@ class _MerchantListViewState extends State<MerchantListView> {
       _realLocation = location.real; // FutureBuilder 完成时会重建,无需 setState
       _myLat = location.lat;
       _myLng = location.lng;
+      if (location.real) {
+        // 人所在的位置,和「用来找店的位置」分开记(#282):
+        // 选了收货地址时后者是地址的坐标,而这个始终是人在哪
+        _hereLat = location.lat;
+        _hereLng = location.lng;
+        _lastHereCheck = DateTime.now();
+        _resolveHereName();
+      } else {
+        widget.onLocated?.call('', true); // 顶部要说「定位失败」,不装作有位置
+      }
     }
     _fellBack = false;
     var list = await widget.api.merchants(
@@ -726,6 +906,96 @@ class _MerchantListViewState extends State<MerchantListView> {
       }
     }
     return list;
+  }
+
+  /// 跨城提示条(#282):**非阻断,不是弹窗**。
+  ///
+  /// 判据在 `_farFromHere`。这里只负责说清楚三件事:你在哪、现在按哪找店、
+  /// 要不要换 —— 然后**等他点**。
+  ///
+  /// ⚠️ 绝不自动切:人在北京出差、给西安家里老人点单是最常见的场景之一。
+  /// App 因为「你人在北京」把地址偷偷改掉,他不看第二眼就会把饭点到
+  /// 自己出差的酒店。静默改比不改更糟。
+  Widget _farBanner() {
+    final sz = Theme.of(context).sz;
+    final to = widget.deliveryAddress?.address ?? '';
+    final short = to.length > 12 ? '${to.substring(0, 12)}…' : to;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: sz.claySoft,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+      ),
+      child: Row(children: [
+        Icon(Icons.my_location, size: 18, color: sz.clay),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            _farCity.isEmpty
+                ? '你现在好像不在「$short」附近,正在按这个地址找店'
+                : '你现在好像在$_farCity,正在按「$short」找店',
+            style: TextStyle(fontSize: 12.5, height: 1.4, color: sz.ink),
+          ),
+        ),
+        TextButton(
+          onPressed: () {
+            widget.onUseCurrentLocation?.call();
+          },
+          child: const Text('切到当前位置'),
+        ),
+        // 「不用」只记在内存里:重启 App 重新判断 —— 他下次打开时
+        // 人可能真的在新城市待下来了
+        IconButton(
+          tooltip: '不用',
+          icon: const Icon(Icons.close, size: 18),
+          onPressed: () => setState(() => _farDismissed = true),
+        ),
+      ]),
+    );
+  }
+
+  /// 按指定坐标找店。手选城市(#283)走它 —— 不再碰定位,
+  /// 也不走 `_load()` 里那条「空了就降级演示城市」的兜底:
+  /// 他明确选了城市,那个城市没店就该照实说没店
+  Future<List<Merchant>> _loadAt(double lat, double lng) async {
+    _more.clear();
+    _loadingMore = false;
+    _noMore = false;
+    return widget.api.merchants(
+        lat: lat, lng: lng, sort: _sort, category: widget.category,
+        radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
+        maxMinOrderCents: _maxMinOrderCents);
+  }
+
+  /// 手选城市之后按该城市找店(#283)。
+  ///
+  /// city → 坐标走服务端的 POI 搜索(`geoTips` 用城市名限定区域),
+  /// 取第一条的坐标当城市中心 —— 不在客户端塞一张城市坐标表:
+  /// 那张表迟早和服务端的开城清单对不上,而且新开一个城市就要发一次版。
+  Future<void> _useCity(String city) async {
+    if (city.isEmpty) return;
+    await CityPref.save(city);
+    if (!mounted) return;
+    setState(() => _pickedCity = city);
+    try {
+      final tips = await widget.api.geoTips(city, city: city);
+      if (tips.isEmpty || !mounted) return;
+      setState(() {
+        _realLocation = true; // 他自己选的,不再是「没定位」那种状态
+        _fellBack = false;
+        _myLat = tips.first.lat;
+        _myLng = tips.first.lng;
+        _future = _loadAt(tips.first.lat, tips.first.lng);
+      });
+    } catch (_) {
+      if (mounted) _snackCityFailed();
+    }
+  }
+
+  void _snackCityFailed() {
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('这个城市暂时查不到位置,换一个试试')));
   }
 
   /// 空品类招商位:该品类还没有商家,把空状态变成入驻引导
@@ -1522,6 +1792,8 @@ class _MerchantListViewState extends State<MerchantListView> {
                     _searchBar(),
                     // 平台公告(运营配置,发通知不用发版);无公告时零高度
                     AnnouncementBanner(api: widget.api, audience: 'user'),
+                    // 人不在收货地址那一片了(#282)。非阻断,他点了才换
+                    if (_farFromHere) _farBanner(),
                     _kingKong(),
                     _promiseStrip(),
                     if (_frequent.isNotEmpty) _frequentRow(),
@@ -1537,14 +1809,28 @@ class _MerchantListViewState extends State<MerchantListView> {
               if ((!_realLocation || _fellBack) && merchants != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
-                  child: Text(
-                      _fellBack
-                          ? '您所在区域暂未开通,正在展示演示城市商家'
-                          : '未获取到定位,正在展示演示区域的商家(下拉重试)',
-                      style: TextStyle(
-                          fontSize: 12,
-                          height: 1.5,
-                          color: Theme.of(context).sz.inkMuted)),
+                  // 定位没拿到时,原来只有一句「正在展示演示区域的商家」——
+                  // 西安的用户会对着成都的店干看着(#283)。现在给他一条出路:
+                  // 直接选城市。演示城市那条降级**没有删**,它是应用商店
+                  // 审核员在外地/海外时的兜底,只是不再是唯一选择
+                  child: Row(children: [
+                    Expanded(
+                      child: Text(
+                          _fellBack
+                              ? '您所在区域暂未开通,正在展示演示城市商家'
+                              : '未获取到定位,正在展示演示区域的商家(下拉重试)',
+                          style: TextStyle(
+                              fontSize: 12,
+                              height: 1.5,
+                              color: Theme.of(context).sz.inkMuted)),
+                    ),
+                    const SizedBox(width: 8),
+                    SzCityChip(
+                      city: _pickedCity,
+                      loadCities: widget.api.openCities,
+                      onChanged: _useCity,
+                    ),
+                  ]),
                 ),
               if (snapshot.hasError)
                 SzError(
