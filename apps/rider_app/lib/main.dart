@@ -1937,12 +1937,32 @@ class _RiderHomePageState extends State<RiderHomePage>
                   ),
               ]),
             Builder(builder: (context) {
-              // 本地定位优先(更新更快),没有就用服务端算的距离
-              final toShop = _distanceToShop(order) ?? order.distanceM?.toDouble();
-              final trip = _tripDistance(order);
+              // 两段路都优先用**服务端算的骑行路径距离**(#293)。
+              //
+              // 原来是 `_distanceToShop(order) ?? order.distanceM` ——
+              // 客户端直线优先、服务端路径兜底,**正好反了**:
+              // 直线系统性低估(实测成都两点直线 1467m、骑行 1745m,差 19%),
+              // 骑手按直线判断「顺路、近」接了单,实际要多骑三成。
+              //
+              // 本地定位的价值是「更新快」,但它只能算直线;服务端那个数
+              // 走的是腾讯骑行路网,含单行道和过街。所以:
+              // **有路网数就用路网数,没有才退回本地直线并标出来**。
+              final routed = order.distanceM?.toDouble();
+              final toShop = routed ?? _distanceToShop(order);
+              final trip = order.tripM?.toDouble() ?? _tripDistance(order);
+              // 直线兜底时说一句,别让骑手以为这是骑行距离
+              final approx = routed == null && toShop != null;
+              // 说人话(#293):「距你 1.7km」看不出要骑多久,也看不出
+              // 这一单总共要跑多远。骑手真正要判断的是两件事:
+              // 「我去取要多久」「取到之后还要跑多远」——
+              // 所以两段分开写清楚,并且各带一个骑行分钟数
               final parts = [
-                if (toShop != null) '距你 ${distanceLabel(toShop)}',
-                if (trip != null) '送程 ${distanceLabel(trip)}',
+                if (toShop != null)
+                  '去取餐 ${distanceLabel(toShop)}'
+                      '(约 ${rideMinutes(toShop)} 分钟)${approx ? ' 直线估算' : ''}',
+                if (trip != null) '再送 ${distanceLabel(trip)}',
+                if (toShop != null && trip != null)
+                  '全程 ${distanceLabel(toShop + trip)}',
               ];
               final sz = Theme.of(context).sz;
               final mine = order.deliveryFeeCents + order.tipCents;

@@ -65,6 +65,16 @@ String distanceLabel(double meters) =>
 /// 首页卡片、点单页、订单追踪共用这一个公式,口径一致。
 int etaMinutes(double distanceM) => 15 + (distanceM / 250).ceil();
 
+/// 纯骑行时间(分钟),不含出餐(#293)。
+///
+/// 骑手端抢单卡用它:「去取餐 1.7km」看不出要骑多久,而他要在几秒内
+/// 判断这单接不接。速度用的是和服务端 `labor_guard.RIDE_SPEED_KMH`
+/// **同一个** 15km/h —— 那是个含等灯、找楼栋的保守值,两边不一致的话
+/// 骑手看到的分钟数和平台承诺给顾客的对不上。
+///
+/// ⚠️ 只是给骑手看的参考,**不参与任何时限考核**。
+int rideMinutes(double distanceM) => (distanceM / 250).ceil().clamp(1, 999);
+
 const _a = 6378245.0;
 const _ee = 0.00669342162296594323;
 
