@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'appeal_page.dart';
 import 'location_service.dart';
 import 'map_page.dart';
+import 'pool_map_page.dart';
 import 'verify_page.dart';
 import 'wallet_page.dart';
 import 'dispatch_spec_page.dart';
@@ -1440,6 +1441,15 @@ class _RiderHomePageState extends State<RiderHomePage>
                 onSelected: (_) => setRadius(km),
               ),
           ]),
+        ),
+        // 总览图放这儿而不是每张卡上:卡上的「看路线」回答「这一单在哪」,
+        // 这个回答「这些单挨得近吗」—— 后者是看整个池子时才有的问题(#297)
+        IconButton(
+          icon: const Icon(Icons.map_outlined, size: 20),
+          tooltip: '取餐点总览',
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => RiderPoolMapPage(
+                  orders: _sortedAvailable, riderPosition: _riderPosition))),
         ),
         IconButton(
           icon: const Icon(Icons.tune, size: 20),
