@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'license_upload_field.dart';
@@ -373,8 +374,13 @@ class _NewShopPageState extends State<_NewShopPage> {
   int? _copyFrom;
   final _name = TextEditingController();
   final _address = TextEditingController();
-  final _lat = TextEditingController();
-  final _lng = TextEditingController();
+
+  /// 门店坐标(#285):由地图选点产生,**不再手输**
+  double? _lat;
+  double? _lng;
+
+  /// 选点页的城市(限定 POI 搜索范围)。空 = 让选点页自己解析
+  String _city = '';
   final _licenseNo = TextEditingController();
   String _licenseUrl = '';
   bool _busy = false;
@@ -391,8 +397,6 @@ class _NewShopPageState extends State<_NewShopPage> {
   void dispose() {
     _name.dispose();
     _address.dispose();
-    _lat.dispose();
-    _lng.dispose();
     _licenseNo.dispose();
     super.dispose();
   }
@@ -460,27 +464,36 @@ class _NewShopPageState extends State<_NewShopPage> {
                 border: OutlineInputBorder()),
           ),
           const SizedBox(height: 12),
-          Row(children: [
-            Expanded(
-              child: TextField(
-                controller: _lat,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: '纬度', border: OutlineInputBorder()),
+          SzCard(
+            child: Row(children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('门店位置',
+                        style: TextStyle(
+                            fontSize: 13.5, color: Theme.of(context).sz.ink)),
+                    const SizedBox(height: 2),
+                    Text(
+                      _lat == null
+                          ? '还没标 —— 用户能不能搜到这家店、骑手导航去哪,都看它'
+                          : '已标(${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)})',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: _lat == null
+                              ? Theme.of(context).sz.danger
+                              : Theme.of(context).sz.earn),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _lng,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(
-                    labelText: '经度', border: OutlineInputBorder()),
+              TextButton.icon(
+                icon: const Icon(Icons.map_outlined, size: 18),
+                label: Text(_lat == null ? '标位置' : '重新标'),
+                onPressed: _pickSpot,
               ),
-            ),
-          ]),
+            ]),
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: _licenseNo,
@@ -507,14 +520,69 @@ class _NewShopPageState extends State<_NewShopPage> {
     );
   }
 
+  /// 在地图上标这家分店的位置(#285)。
+  ///
+  /// 以前这里是两个「纬度」「经度」输入框,让店主手打坐标 —— 而**同一个 App
+  /// 的首次入驻**(onboarding.dart 的 `_pickShopSpot`)早就用地图选点了,
+  /// 那边的注释还写着「老板认自己店旁边那个地标,比认坐标容易」。
+  ///
+  /// 这不是体验问题,是**数据正确性**:小数点后第 2 位差 1 就是 1 公里,
+  /// 而这个坐标决定用户能不能搜到这家店、骑手导航去哪、配送费按多远算。
+  /// 填错了没有任何一层会拦。
+  ///
+  /// 走的是和入驻**同一套** `MapPickerPage` —— 另写一套的话两处行为迟早分叉。
+  Future<void> _pickSpot() async {
+    final picked = await Navigator.of(context).push<PickedPlace>(
+      MaterialPageRoute(
+        builder: (_) => MapPickerPage(
+          initialLat: _lat,
+          initialLng: _lng,
+          onReverse: (lat, lng) async {
+            final t = await widget.api.geoReverse(lat, lng);
+            return (name: t.name, district: t.district);
+          },
+          // 周边地点:老板认自己店旁边那个地标,比认坐标容易
+          onAround: widget.api.geoAround,
+          onSearch: (kw) => widget.api.geoTips(kw, city: _city),
+          city: _city,
+          onCities: widget.api.openCities,
+          onCityChanged: (c) => setState(() => _city = c),
+          // 开分店时人多半就站在新店里,一键定位比拖地图准
+          onLocate: _currentPosition,
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _lat = picked.lat;
+      _lng = picked.lng;
+      // 地址跟着选点走,和入驻页一个口径:显示的地址必须是这个坐标反查出来的,
+      // 否则会出现「地址写着 A、坐标指着 B」而没人看得出来
+      if (picked.name.isNotEmpty) _address.text = picked.name;
+    });
+  }
+
+  Future<({double lat, double lng})?> _currentPosition() async {
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      return null;
+    }
+    final me = await Geolocator.getCurrentPosition();
+    return (lat: me.latitude, lng: me.longitude);
+  }
+
   Future<void> _submit() async {
-    final lat = double.tryParse(_lat.text.trim());
-    final lng = double.tryParse(_lng.text.trim());
+    final lat = _lat;
+    final lng = _lng;
     final missing = <String>[
       if (_copyFrom == null) '参照门店',
       if (_name.text.trim().isEmpty) '门店名称',
       if (_address.text.trim().isEmpty) '门店地址',
-      if (lat == null || lng == null) '经纬度',
+      if (lat == null || lng == null) '门店位置(在地图上标一下)',
       if (_licenseNo.text.trim().isEmpty) '许可证编号',
       if (_licenseUrl.isEmpty) '许可证照片',
     ];

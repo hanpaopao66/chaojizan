@@ -34,6 +34,7 @@ import 'package:flutter_tencent_map/flutter_tencent_map.dart' as tx;
 import 'brand.dart';
 import 'map_boot.dart';
 import 'map_pin_bitmap.dart';
+import 'nav_launcher.dart';
 
 /// 地图上的一个点(GCJ-02)
 class MapPoint {
@@ -203,196 +204,48 @@ class _DeliveryMapViewState extends State<DeliveryMapView> {
     );
   }
 
-  /// 降级:方位与距离依然真实,只是没有街道底图
+  /// 没有地图时显示什么(#290)。
+  ///
+  /// 以前这里画一张网格 + 图钉的「示意图」,方位和距离是真的、只是没有街道
+  /// 底图。**去掉了** —— 一张自绘的网格看起来像地图但不是地图,用户没法拿它
+  /// 找路;而真正有用的动作(用系统地图打开)反而被那张图挡住了。
+  ///
+  /// 三种触发原因里,只有第三种是永久的,所以文案分开写:
+  /// 写「待启用」会让桌面端用户一直等一个不会来的东西。
   Widget _fallback(ThemeData theme, List<int> path) {
-    return Stack(children: [
-      const Positioned.fill(child: _GridBackdrop()),
-      Positioned.fill(
-        child: CustomPaint(
-          painter: _SchematicPainter(
-            points: widget.points,
-            path: path,
-            line: kBrandOrange.withValues(alpha: .75),
-          ),
-        ),
-      ),
-      Positioned(
-        left: 12,
-        top: 12,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface.withValues(alpha: .9),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-          ),
-          child: Text(
-              // 三种降级各有各的说法:平台不支持是**永久**的,
-              // 写"待启用"会让人一直等一个不会来的东西
-              !mapSdkSupported
-                  ? '示意模式 · 本平台暂无街道底图'
-                  : kTencentMapKey.isEmpty
-                      ? '示意模式 · 街道底图待启用'
-                      : '示意模式 · 同意隐私政策后可看街道底图',
-              style: theme.textTheme.bodySmall?.copyWith(fontSize: 11)),
-        ),
-      ),
-      // 降级态仍然把标点画出来:相对方位和距离是真的,别只给一张网格
-      Positioned.fill(child: _SchematicPins(points: widget.points, path: path)),
-    ]);
-  }
-}
-
-/// 降级态:把点按经纬度线性映射到画布上,画连线
-class _SchematicPainter extends CustomPainter {
-  _SchematicPainter(
-      {required this.points, required this.path, required this.line});
-
-  final List<MapPoint> points;
-  final List<int> path;
-  final Color line;
-
-  static List<Offset> layout(List<MapPoint> points, Size size) {
-    if (points.isEmpty) return const [];
-    final lats = points.map((p) => p.lat).toList();
-    final lngs = points.map((p) => p.lng).toList();
-    final minLat = lats.reduce((a, b) => a < b ? a : b);
-    final maxLat = lats.reduce((a, b) => a > b ? a : b);
-    final minLng = lngs.reduce((a, b) => a < b ? a : b);
-    final maxLng = lngs.reduce((a, b) => a > b ? a : b);
-    const pad = 56.0;
-    double map(double v, double lo, double hi, double a, double b) =>
-        hi - lo < 1e-9 ? (a + b) / 2 : a + (v - lo) / (hi - lo) * (b - a);
-    return [
-      for (final p in points)
-        Offset(
-          map(p.lng, minLng, maxLng, pad, size.width - pad),
-          // 纬度越大越靠北 = 越靠上,所以 y 轴反过来
-          map(p.lat, maxLat, minLat, pad, size.height - pad),
-        ),
-    ];
-  }
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (path.length < 2) return;
-    final pts = layout(points, size);
-    final paint = Paint()
-      ..color = line
-      ..strokeWidth = 2.5
-      ..style = PaintingStyle.stroke;
-    final p = Path()..moveTo(pts[path.first].dx, pts[path.first].dy);
-    for (final i in path.skip(1)) {
-      p.lineTo(pts[i].dx, pts[i].dy);
-    }
-    canvas.drawPath(p, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _SchematicPainter old) => true;
-}
-
-/// 降级态的标点(复用品牌样式的 Widget 版)
-class _SchematicPins extends StatelessWidget {
-  const _SchematicPins({required this.points, required this.path});
-
-  final List<MapPoint> points;
-  final List<int> path;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (context, box) {
-      final pts = _SchematicPainter.layout(
-          points, Size(box.maxWidth, box.maxHeight));
-      return Stack(children: [
-        for (var i = 0; i < points.length; i++)
-          Positioned(
-            left: pts[i].dx - 46,
-            top: pts[i].dy - 30,
-            width: 92,
-            child: _Pin(point: points[i]),
-          ),
-      ]);
-    });
-  }
-}
-
-/// 品牌化标点:色环图标 + 名签
-class _Pin extends StatelessWidget {
-  const _Pin({required this.point});
-
-  final MapPoint point;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: point.color,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: const [
-              BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2)),
-            ],
-          ),
-          child: Icon(point.icon, size: 15, color: Colors.white),
-        ),
-        const SizedBox(height: 3),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface.withValues(alpha: .92),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Text(point.label,
-              maxLines: 1,
+    final sz = theme.sz;
+    final first = widget.points.isEmpty ? null : widget.points.first;
+    final target = widget.points.length > 1 ? widget.points.last : first;
+    final why = !mapSdkSupported
+        ? '这个平台没有地图组件'
+        : kTencentMapKey.isEmpty
+            ? '地图待启用'
+            : '同意隐私政策后可看地图';
+    return Container(
+      color: sz.surfaceAlt,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(kPagePad),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.map_outlined, size: 30, color: sz.inkFaint),
+        const SizedBox(height: 8),
+        Text(why, style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+        if (target != null) ...[
+          const SizedBox(height: 4),
+          Text(target.label,
+              maxLines: 2,
+              textAlign: TextAlign.center,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w600,
-                  color: theme.colorScheme.onSurface)),
-        ),
-      ],
+              style: TextStyle(fontSize: 12.5, color: sz.ink)),
+          const SizedBox(height: 12),
+          // 没有内嵌地图时,能做的事一件都没少 —— 系统地图照样导得了
+          FilledButton.tonalIcon(
+            icon: const Icon(Icons.navigation_outlined, size: 18),
+            label: const Text('用手机地图打开'),
+            onPressed: () => navigateTo(context,
+                lat: target.lat, lng: target.lng, name: target.label),
+          ),
+        ],
+      ]),
     );
   }
-}
-
-/// 无底图时的品牌网格(暗色友好)
-class _GridBackdrop extends StatelessWidget {
-  const _GridBackdrop();
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(size: Size.infinite, painter: _GridPainter(
-        Theme.of(context).brightness == Brightness.dark
-            ? Colors.white10
-            : Colors.black.withValues(alpha: .06)));
-  }
-}
-
-class _GridPainter extends CustomPainter {
-  _GridPainter(this.color);
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1;
-    const gap = 44.0;
-    for (var x = 0.0; x < size.width; x += gap) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (var y = 0.0; y < size.height; y += gap) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _GridPainter old) => old.color != color;
 }
