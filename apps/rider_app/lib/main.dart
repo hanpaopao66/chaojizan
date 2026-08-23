@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'appeal_page.dart';
 import 'location_service.dart';
 import 'map_page.dart';
+import 'hardship_sheet.dart';
 import 'pool_map_page.dart';
 import 'verify_page.dart';
 import 'wallet_page.dart';
@@ -732,6 +733,12 @@ class _RiderHomePageState extends State<RiderHomePage>
       await widget.api.transition(order.orderNo, OrderStatus.delivered,
           photoUrl: photoUrl, handoff: handoff);
       _refresh();
+      // 送到之后再问"这单好不好送"(#301)。**先把餐送到,再说钱的事** ——
+      // 送达前弹这个是在他赶时间的时候加手续。
+      // 可以直接关掉,不填不影响任何东西
+      if (mounted) {
+        await HardshipSheet.show(context, widget.api, order.orderNo);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -2032,13 +2039,33 @@ class _RiderHomePageState extends State<RiderHomePage>
                         ],
                       ),
                       const Spacer(),
-                      if (parts.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Text(parts.join(' · '),
-                              style: TextStyle(
-                                  fontSize: 12, color: sz.inkMuted)),
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // 这个地方难在哪 —— **接单前**就说(#301)。
+                          //
+                          // 光给一个"难度费 ¥3"没用,他还是要骑到楼下
+                          // 才知道是六楼没电梯。而这条信息不是平台猜的,
+                          // 是跑过这里的骑手告诉我们的
+                          if (order.hardshipNote.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text('⚠ ${order.hardshipNote}',
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: sz.hold)),
+                            ),
+                          if (parts.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(parts.join(' · '),
+                                  style: TextStyle(
+                                      fontSize: 12, color: sz.inkMuted)),
+                            ),
+                        ],
+                      ),
                     ]),
               );
             }),

@@ -1343,6 +1343,31 @@ class ApiClient {
     );
   }
 
+  /// 难度补贴的完整口径(#301):每一项是什么、加多少钱、几条转正。
+  ///
+  /// 骑手端在弹反馈之前先拉这个 —— **不给出金额的补贴等于施舍**,
+  /// 他得知道勾一项能拿多少,才谈得上判断值不值得花那十秒钟。
+  Future<Map<String, dynamic>> hardshipRules() async =>
+      await _request('GET', '/orders/hardship-rules')
+          as Map<String, dynamic>;
+
+  /// 反馈这一单实际有多难送(#301)。送达后才能提。
+  ///
+  /// 返回 `comp_cents` 补了多少、`lines` 明细、`duplicate` 是否同址重复。
+  Future<Map<String, dynamic>> reportHardship(
+    String orderNo, {
+    required List<String> kinds,
+    int? floors,
+    int? walkM,
+    String note = '',
+  }) async =>
+      await _request('POST', '/orders/$orderNo/hardship', body: {
+        'kinds': kinds,
+        if (floors != null) 'floors': floors,
+        if (walkM != null) 'walk_m': walkM,
+        'note': note,
+      }) as Map<String, dynamic>;
+
   /// 图钉周边的可选地点(地图选点页下方的列表)。
   ///
   /// 光给一个图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——

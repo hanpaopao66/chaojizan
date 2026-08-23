@@ -17,6 +17,7 @@ from ..redis_client import RIDER_LOC_KEY, get_redis
 from ..schemas import (
     BoostTipIn,
     ChangeAddressIn,
+    HardshipIn,
     OrderCreateIn,
     OrderEventOut,
     OrderOut,
@@ -41,6 +42,9 @@ FEE_PART_LABELS = {
     "night": "夜间配送",
     "weather": "恶劣天气",
     "door": "上门难度(无电梯高楼层)",
+    # 骑手实地反馈过的难度(#301)。名字里带"骑手反馈"是刻意的:
+    # 顾客要知道这不是平台拍脑袋加的,是跑过这个地址的人说的
+    "hardship": "骑手反馈的实地难度",
     "wait": "等餐补偿",
 }
 from ..services.privacy_phone import dialable_phone, mask_phone
@@ -529,6 +533,7 @@ async def create_order(
 
     # 自取单不校验配送半径(人自己来,多远都行);配送单必须有收货地址
     distance_source = ""
+    hardship_note = ""
     if parent is not None:
         distance_m = 0.0  # 地址随原单,半径在原单已校验
     elif payload.pickup:
@@ -713,12 +718,28 @@ async def create_order(
     else:
         # 天气按**商家坐标**判(骑手在那一带跑),不再是全局开关 ——
         # 成都下暴雨北京也加价、北京下雪没人开开关骑手白挨冻,都是全局开关的锅
+        # 这个地址骑手反馈过什么(#301)。攒够共识才算数,
+        # 而且**只加不减**:没有任何一条路径让这笔钱变负
+        from ..services import hardship as _hs
+        _cons = await _hs.address_consensus(
+            db, payload.lat, payload.lng, payload.floor)
         fee_parts = delivery_fee_parts(
             distance_m,
             weather_on=await weather_surcharge_on(
                 db, merchant.lat, merchant.lng),
             floor=payload.floor, has_elevator=payload.has_elevator,
-            to_door=payload.to_door)
+            to_door=payload.to_door,
+            hardship_cents=_hs.comp_cents(
+                _cons["kinds"], _cons["floors"], _cons["walk_m"]))
+        # 骑手接单前要看到的是**什么难**,不只是多了几块钱。
+        # 只说金额,他还是要骑到楼下才知道是六楼没电梯
+        hardship_note = "；".join(
+            _hs.HARDSHIP_LABELS[k][0]
+            + (f"{_cons['floors']}楼"
+               if k == "no_elevator" and _cons["floors"] else "")
+            + (f"约{_cons['walk_m']}米"
+               if k == "walk_in" and _cons["walk_m"] else "")
+            for k in _cons["kinds"])[:200]
         fee_cents = sum(fee_parts.values())
         if fee_parts["night"]:
             notes.append(f"夜间配送+{fee_parts['night'] / 100:g}元(归骑手)")
@@ -728,6 +749,10 @@ async def create_order(
             notes.append(
                 f"{payload.floor}楼无电梯送上门+"
                 f"{fee_parts['door'] / 100:g}元(归骑手)")
+        if fee_parts["hardship"]:
+            # 说清是**谁**说的:不是平台拍脑袋加的,是跑过这里的骑手
+            notes.append(
+                f"骑手反馈这里不好送+{fee_parts['hardship'] / 100:g}元(归骑手)")
 
     if group_members > 1:
         notes.append(f"拼单×{group_members}人")
@@ -784,6 +809,7 @@ async def create_order(
         # 数据来自路网」—— 说不清来历的钱,给多少都不叫透明
         bill_distance_m=round(distance_m) if distance_m else None,
         bill_distance_source=distance_source,
+        hardship_note=hardship_note,
         to_door=payload.to_door,
         has_elevator=(parent.has_elevator if parent is not None
                       else (None if payload.pickup
@@ -1700,10 +1726,17 @@ async def preview_delivery_fee(
         merchant.lat, merchant.lng, lat, lng)
     # 按**商家坐标**判天气:骑手是在那一带跑的。
     # 用收货点也行,但一单里两点最远 4km,同一片天气,取商家侧即可
+    # 骑手反馈过的实地难度(#301):预览就要带上,否则预览 ¥5 付款变 ¥7。
+    # 顺带 —— 顾客在这里就能看到"这地方骑手说不好送",
+    # 他可以改选送到楼下省掉一部分,这个选择权本来就该给他
+    from ..services import hardship as _hs
+    _cons = await _hs.address_consensus(db, lat, lng, floor)
+    _hard = _hs.comp_cents(_cons["kinds"], _cons["floors"], _cons["walk_m"])
     parts = delivery_fee_parts(
         distance,
         weather_on=await weather_surcharge_on(db, merchant.lat, merchant.lng),
-        floor=floor, has_elevator=has_elevator, to_door=to_door)
+        floor=floor, has_elevator=has_elevator, to_door=to_door,
+        hardship_cents=_hard)
     # 送到楼下时能省多少:让顾客在选之前就看到差价,而不是选完才发现
     door_saving = delivery_fee_parts(
         distance, weather_on=False, floor=floor,
@@ -1754,6 +1787,11 @@ async def preview_delivery_fee(
         # 这个距离是怎么来的:route=腾讯骑行路网 / straight=接口不可用
         # 时的直线兜底。两者差 19%,顾客和骑手都该知道看的是哪个
         "distance_source": distance_source,
+        # 骑手实地反馈的原文说明,一项一行 —— 顾客要看得懂
+        # 自己为什么多付这两块钱。说不清来历的钱,收多少都不叫透明
+        "hardship_lines": _hs.explain(
+            _cons["kinds"], _cons["floors"], _cons["walk_m"]),
+        "hardship_samples": _cons["samples"],
         "eta_minutes": eta_minutes,
     }
 
@@ -1858,6 +1896,56 @@ async def my_frequent_dishes(
          "last_at": r[8].isoformat() if r[8] else None}
         for r in rows
     ]}
+
+
+# ⚠️ 这条必须排在 `/{order_no}` **之前**:FastAPI 按注册顺序匹配,
+# 放在后面的话 "hardship-rules" 会被当成一个订单号,回「订单不存在」
+@router.get("/hardship-rules")
+async def hardship_rules(user: User = Depends(get_current_user)):
+    """难度补贴的**完整口径**:每一项是什么、加多少钱、几条转正。
+
+    公开这个接口是这套机制成立的前提。**不给出金额的补贴等于施舍** ——
+    骑手不知道勾一项能拿多少,就无从判断值不值得花那十秒钟填;
+    顾客不知道那两块钱怎么来的,只会觉得平台在乱收费。
+
+    写死在代码里,不做后台可调 —— 可调就意味着某天可以悄悄调低。
+    """
+    from ..services import hardship as hs
+
+    return {
+        "items": [
+            {"kind": k, "name": n, "desc": d,
+             "cents": {
+                 "no_elevator": None,   # 按层算,见 rule
+                 "walk_in": None,       # 按米算
+                 "no_vehicle": hs.NO_VEHICLE_CENTS,
+                 "gate_hard": hs.GATE_HARD_CENTS,
+                 "other": hs.OTHER_CENTS,
+             }[k],
+             "rule": {
+                 "no_elevator": f"超出 {hs.NO_ELEVATOR_FREE_FLOOR} 楼的部分,"
+                                f"每层 ¥{hs.NO_ELEVATOR_PER_FLOOR_CENTS / 100:g},"
+                                f"封顶 ¥{hs.NO_ELEVATOR_MAX_CENTS / 100:g}",
+                 "walk_in": f"超出 {hs.WALK_IN_FREE_M} 米的部分,"
+                            f"每 100 米 ¥{hs.WALK_IN_PER_100M_CENTS / 100:g},"
+                            f"封顶 ¥{hs.WALK_IN_MAX_CENTS / 100:g}",
+                 "no_vehicle": f"固定 ¥{hs.NO_VEHICLE_CENTS / 100:g}",
+                 "gate_hard": f"固定 ¥{hs.GATE_HARD_CENTS / 100:g}",
+                 "other": "不自动给钱,平台人工看",
+             }[k]}
+            for k, (n, d) in hs.HARDSHIP_LABELS.items()
+        ],
+        "max_cents": hs.MAX_COMP_CENTS,
+        "consensus_min": hs.CONSENSUS_MIN,
+        "funder": "platform",
+        "notes": [
+            "这笔钱由平台出,不向顾客或商家追收",
+            "反馈不影响你的评分、派单和接单资格",
+            f"同一个地址攒够 {hs.CONSENSUS_MIN} 条一致反馈后,"
+            "后来的单在下单时就按真实难度算,顾客也看得到",
+            "同一个地址你只需要反馈一次",
+        ],
+    }
 
 
 @router.get("/{order_no}", response_model=OrderOut)
@@ -2167,3 +2255,81 @@ async def address_feedback(
         note=str(payload.get("note", "")).strip()[:200]))
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/{order_no}/hardship")
+async def report_hardship(
+    order_no: str,
+    payload: HardshipIn,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手反馈这一单实际有多难送 —— 当场补钱 + 按地址沉淀(#301)。
+
+    ## 为什么在送达之后才能提
+
+    送达前弹这个是在他赶时间的时候加手续。**先把餐送到,再说钱的事。**
+
+    ## 这笔钱由平台出
+
+    不向顾客追收(顾客会觉得被坑,更要命的是会让骑手不敢反馈 ——
+    他知道这钱是从顾客身上要的),也不向商家追收(与商家无关)。
+    走 `adjustment` 入账,和申诉改判同一条通道:平台认亏。
+
+    ## 沉淀怎么用
+
+    同一地址攒够 `CONSENSUS_MIN` 条一致反馈后,后续订单在**下单时**
+    就按真实难度计价 —— 用户下单前看得到(可以改选送到楼下省这笔钱),
+    骑手接单前也看得到,不用骑到楼下才发现是六楼没电梯。
+    """
+    from ..models import RiderHardship
+    from ..services import hardship as hs
+
+    order = await db.scalar(select(Order).where(Order.order_no == order_no))
+    if order is None or order.rider_id != user.id:
+        raise HTTPException(403, "这不是你接的订单")
+    if order.status not in (OrderStatus.DELIVERED, OrderStatus.COMPLETED):
+        raise HTTPException(409, "送到之后再来说这一单难不难 —— 先别耽误送餐")
+
+    kinds = [k for k in payload.kinds if k in hs.HARDSHIP_LABELS]
+    if not kinds:
+        raise HTTPException(422, "至少勾一项")
+
+    if await db.scalar(select(RiderHardship.id).where(
+            RiderHardship.order_no == order_no)):
+        raise HTTPException(409, "这单已经反馈过了")
+
+    key = hs.addr_key(order.lat, order.lng, order.floor)
+    # 同一骑手同一地址只计一次 —— 防刷靠这个,不靠给人打分。
+    # **不是拒绝他反馈**,是这一次不再重复补钱:同一个地方的同一件事,
+    # 说一次就够了,再说三次也不会变得更难
+    dup = await db.scalar(select(RiderHardship.id).where(
+        RiderHardship.rider_id == user.id, RiderHardship.addr_key == key))
+    comp = 0 if dup else hs.comp_cents(kinds, payload.floors, payload.walk_m)
+
+    row = RiderHardship(
+        order_id=order.id, order_no=order_no, rider_id=user.id,
+        addr_key=key, kinds=kinds, floors=payload.floors,
+        walk_m=payload.walk_m, note=payload.note.strip()[:200],
+        comp_cents=comp,
+    )
+    db.add(row)
+    if comp:
+        from ..models import EarningKind, RiderEarning
+        db.add(RiderEarning(
+            rider_id=user.id, order_id=order.id, order_no=order_no,
+            kind=EarningKind.adjustment, amount_cents=comp,
+        ))
+    await db.commit()
+
+    lines = hs.explain(kinds, payload.floors, payload.walk_m)
+    return {
+        "comp_cents": comp,
+        "lines": lines,
+        "duplicate": bool(dup),
+        "message": (
+            f"谢谢,已补 ¥{comp / 100:.2f} 到你的收入"
+            if comp else
+            ("这个地址你反馈过了,已经记下 —— 不重复补钱,但会算进共识"
+             if dup else "已记下;这几项不自动补钱,平台会人工看")),
+    }

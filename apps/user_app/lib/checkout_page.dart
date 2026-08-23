@@ -365,6 +365,30 @@ class _CheckoutPageState extends State<CheckoutPage> {
               style: TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
         ]),
       ));
+      // 骑手反馈的难度费:把**具体是什么**也摊开(#301)。
+      //
+      // 只写「骑手反馈的实地难度 ¥3」,用户会觉得是平台在乱收费;
+      // 写清「无电梯爬到 6 楼:超出 2 层 +¥2 / 门禁难进 +¥1」,
+      // 他才知道这钱去了哪、以及可以改选「送到楼下」省掉一部分。
+      if (key == 'hardship') {
+        final lines = (p['hardship_lines'] as List?)?.cast<String>() ??
+            const <String>[];
+        final samples = p['hardship_samples'] as int? ?? 0;
+        for (final line in lines) {
+          rows.add(Padding(
+            padding: const EdgeInsets.only(left: 24, bottom: 2),
+            child: Text('· $line',
+                style: TextStyle(fontSize: 11, color: theme.sz.inkMuted)),
+          ));
+        }
+        if (samples > 0) {
+          rows.add(Padding(
+            padding: const EdgeInsets.only(left: 24, bottom: 2),
+            child: Text('（$samples 位骑手实地反馈，这笔钱全归骑手）',
+                style: TextStyle(fontSize: 11, color: theme.sz.inkMuted)),
+          ));
+        }
+      }
     }
     return rows;
   }

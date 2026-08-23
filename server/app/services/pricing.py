@@ -72,8 +72,9 @@ def delivery_fee_parts(
     floor: int | None = None,
     has_elevator: bool | None = None,
     to_door: bool = True,
+    hardship_cents: int = 0,
 ) -> dict[str, int]:
-    """配送费组成(分)。键固定:base/night/weather/door,前端与测试按键取用。
+    """配送费组成(分)。键固定:base/night/weather/door/hardship。
 
     **这份拆分要一路带到订单里**(Order.fee_parts),不是只在预览时露一次。
     顾客要知道 8 块钱花在哪、骑手要在**接单前**就知道这单为什么值 8 块。
@@ -86,6 +87,16 @@ def delivery_fee_parts(
         "weather": settings.delivery_weather_surcharge_cents if weather_on else 0,
         # 上门难度:无电梯高楼层。有电梯不收(等电梯已在 ETA 里补过)
         "door": door_fee_cents(floor, has_elevator, to_door),
+        # 现场难度:**骑手告诉我们的**(#301)。
+        #
+        # 上面的 door 取决于用户自己填的楼层/电梯 —— 大多数人不填,
+        # 填了也没人核实,而「要步行进小区 300 米」「车进不去」
+        # 「门禁要等保安」这些情况根本没有字段。
+        #
+        # 平台不可能知道每栋楼的情况,跑过的人知道。同一地址攒够
+        # 一致反馈后转正,从此这个地址的单在下单时就带上这笔 ——
+        # 顾客下单前看得到(可以改选送到楼下),骑手接单前也看得到。
+        "hardship": max(0, hardship_cents),
     }
 
 

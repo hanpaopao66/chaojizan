@@ -46,6 +46,14 @@ def upgrade() -> None:
     op.add_column("orders", sa.Column(
         "bill_distance_source", sa.String(10),
         nullable=False, server_default=""))
+    # 下单时这个地址的已知难度,一句话存下来(#301)。
+    #
+    # 为什么存而不是查:骑手抢单列表一屏几十单,每单去查一次地址共识
+    # 就是几十次往返 —— 和 #289 抢单列表那个坑一模一样。
+    # 而且这也是快照:下单那一刻我们知道什么,就该按什么算钱、
+    # 按什么告诉骑手,事后共识变了不该追溯改这一单。
+    op.add_column("orders", sa.Column(
+        "hardship_note", sa.String(200), nullable=False, server_default=""))
 
     op.create_table(
         "rider_hardships",
@@ -73,17 +81,25 @@ def upgrade() -> None:
     # 每单只能反馈一次
     op.create_index("uq_rider_hardships_order", "rider_hardships",
                     ["order_no"], unique=True)
-    # 同一骑手同一地址只计一次 —— 防刷靠这个,不靠给人打分
-    op.create_index("uq_rider_hardships_rider_addr", "rider_hardships",
-                    ["rider_id", "addr_key"], unique=True)
+    # (骑手, 地址):**普通索引,不是唯一约束**。
+    #
+    # 一度设成唯一的,想用它实现"同一骑手同一地址只计一次"。方向错了:
+    # 那样第二次反馈会直接插不进去,而每一单的现场情况本来就该留档
+    # (今天车能进、明天施工进不去,是两条不同的事实)。
+    #
+    # "只计一次"是**共识计数**的事:consensus() 按不同骑手去重。
+    # 数据库该记的是发生过什么,判定谁算数是业务逻辑。
+    op.create_index("ix_rider_hardships_rider_addr", "rider_hardships",
+                    ["rider_id", "addr_key"])
     # 按地址取共识时的主查询路径
     op.create_index("ix_rider_hardships_addr", "rider_hardships", ["addr_key"])
 
 
 def downgrade() -> None:
     op.drop_index("ix_rider_hardships_addr", table_name="rider_hardships")
-    op.drop_index("uq_rider_hardships_rider_addr", table_name="rider_hardships")
+    op.drop_index("ix_rider_hardships_rider_addr", table_name="rider_hardships")
     op.drop_index("uq_rider_hardships_order", table_name="rider_hardships")
     op.drop_table("rider_hardships")
+    op.drop_column("orders", "hardship_note")
     op.drop_column("orders", "bill_distance_source")
     op.drop_column("orders", "bill_distance_m")

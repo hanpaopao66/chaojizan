@@ -585,6 +585,7 @@ class Order {
         pickup = json['pickup'] as bool? ?? false,
         pickupCode = json['pickup_code'] as String? ?? '',
         parentOrderNo = json['parent_order_no'] as String? ?? '',
+        hardshipNote = json['hardship_note'] as String? ?? '',
         distanceM = json['distance_m'] as int?,
         tripM = json['trip_m'] as int?,
         distanceSource = json['distance_source'] as String? ?? 'straight',
@@ -683,6 +684,9 @@ class Order {
   final String pickupCode;   // 取餐码,商家核对后完成订单
   final String parentOrderNo; // 非空 = 追加单,随原单一起配送
   // 抢单池视角(仅骑手 available-orders 返回):到商家距离与顺路标记
+  /// 这个地址已知的难度(#301),如「无电梯6楼；门禁难进」。
+  /// 空串 = 没人反馈过,或还没攒够共识
+  final String hardshipNote;
   final int? distanceM;   // 骑手 → 取餐点(骑行路径距离),无定位为空
   final int? tripM;       // 取餐点 → 送达点。整单划不划算要看它
   /// route=腾讯骑行路径规划,straight=回退直线×1.2。

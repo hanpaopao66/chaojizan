@@ -666,6 +666,13 @@ class Order(Base):
         Integer, nullable=True)
     bill_distance_source: Mapped[str] = mapped_column(
         String(10), default="", server_default="")
+    #: 下单时这个地址**已知的**难度,一句话(#301)。
+    #:
+    #: 骑手抢单列表要在**接单前**看到「无电梯 6 楼」——
+    #: 不能骑到楼下才发现。存快照而不是现查:一屏几十单,
+    #: 每单查一次共识就是几十次往返(#289 踩过同一个坑)。
+    hardship_note: Mapped[str] = mapped_column(
+        String(200), default="", server_default="")
     # 送上门 / 送到楼下。**顾客自己选**:选了楼下就不收上门难度费,
     # 骑手也没有义务上楼(这一点写进骑手端与规则页,否则那笔钱是白收的)
     to_door: Mapped[bool] = mapped_column(

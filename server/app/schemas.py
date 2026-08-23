@@ -1063,6 +1063,12 @@ class OrderOut(BaseModel):
     merchant_lng: float | None = None
     # 骑手抢单池视角(仅 available-orders 填充):
     # 到商家的直线距离(骑手最近上报位置,无定位为空)与顺路标记
+    #: 这个地址已知的难度,一句话(#301)。骑手**接单前**就该看到
+    #: 「无电梯6楼」,而不是骑到楼下才发现
+    hardship_note: str = ""
+    #: 这个地址已知的难度,一句话(#301)。骑手**接单前**就该看到
+    #: 「无电梯6楼」,而不是骑到楼下才发现
+    hardship_note: str = ""
     distance_m: int | None = None          # 骑手 → 取餐点
     trip_m: int | None = None              # 取餐点 → 送达点(整单划不划算要看它)
     # 距离来源:route=腾讯骑行路径规划,straight=回退直线×1.2。
@@ -2046,3 +2052,14 @@ class MiniAppIn(BaseModel):
             if not o.startswith(("http://", "https://")) or o.rstrip("/") != o:
                 raise ValueError("allowed_origins 写 origin(协议+域名,结尾不带斜杠)")
         return self
+
+
+class HardshipIn(BaseModel):
+    """骑手对这一单实际难度的反馈(#301)。"""
+
+    kinds: list[str] = Field(default_factory=list, max_length=5)
+    #: 无电梯时爬到几楼
+    floors: int | None = Field(default=None, ge=1, le=99)
+    #: 要步行进小区时大约多少米
+    walk_m: int | None = Field(default=None, ge=0, le=3000)
+    note: str = Field(default="", max_length=200)
