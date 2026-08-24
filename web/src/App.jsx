@@ -1,28 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react'
 
 import { BrandIcon, BrandWordmark } from './BrandSvg.jsx'
+import CoinFlow from './CoinFlow.jsx'
 
 // 大屏/透明中心单独成 chunk:echarts + 地图数据不拖累官网首页
 const ScreenPage = React.lazy(() => import('./screen/ScreenPage.jsx'))
 const TransparencyPage = React.lazy(
   () => import('./transparency/TransparencyPage.jsx'))
 
-/* 3D 装饰件和子页面也全部拆出去 —— 它们一起把 three.js 拖进了首屏主包。
+/* 子页面(入驻/骑手/品牌)拆成独立 chunk。
  *
- * 改之前:首页主包 gzip **282 KB**,其中绝大部分是 three.js。
- * 一个人在微信里点开这个链接,要等这 282 KB 下完,才看得到
- * 「这不是生意,是一场把钱分公平的运动」这行字 —— 而那 282 KB
- * 买到的只是背景火星、一个 3D 地球和一段滚动动画。
+ * 原本是直接 import 的,虽然只有对应路由才渲染,但代码照样打进首屏主包。
  *
- * 这是个靠转发传播的落地页:白屏三秒,人就退回聊天窗口了。
- * **文字先出来,装饰后到。**
+ * 首页的三个 3D 装饰件(背景火星 Embers、3D 地球 ChinaNodes、
+ * 滚动驱动的金币动画 CoinFlow)已经**整个删掉** —— 它们一起把 three.js
+ * 拖进首屏,gzip 282 KB,而人在微信里点开这个链接,要等这 282 KB
+ * 下完才看得到第一行字。买到的只是背景上的火星和一个转动的地球。
  *
- * 子页面(入驻/骑手/品牌)原本是直接 import 的,虽然只有对应路由才渲染,
- * 但代码照样打进首屏主包,而且它们各自也 import 了 Embers。
+ * 「一单钱怎么分」的内容一个数字没丢,换成了一条纯 CSS 的比例横条
+ * (CoinFlow.jsx),反而比动画好懂:动画要滚三屏才看得到结论。
  */
-const ChinaNodes = React.lazy(() => import('./ChinaNodes.jsx'))
-const CoinFlow = React.lazy(() => import('./CoinFlow.jsx'))
-const Embers = React.lazy(() => import('./Embers.jsx'))
 const BrandPage = React.lazy(() => import('./BrandPage.jsx'))
 const JoinMerchant = React.lazy(
   () => import('./JoinPages.jsx').then(m => ({ default: m.JoinMerchant })))
@@ -137,7 +134,6 @@ function Home() {
         <a className="dl" href="#download">下载 App</a>
       </nav>
       <header className="hero">
-        <React.Suspense fallback={null}><Embers /></React.Suspense>
         <div className="hero-inner">
           <div className="hlogo"><BrandWordmark width={360} /></div>
           <h1>这不是生意,<br />是一场把钱分公平的运动。</h1>
@@ -177,12 +173,7 @@ function Home() {
         </div>
       </Reveal>
 
-      {/* 占位和真身同一个 class,高度一致 —— 不占位的话它一到就把页面
-          顶长,正在往下滑的人会被硬生生推走 */}
-      <React.Suspense
-        fallback={<section className="coinflow" id="coinflow" aria-hidden="true" />}>
-        <CoinFlow />
-      </React.Suspense>
+      <CoinFlow />
 
       <Reveal className="cycle">
         <h2>平台赚的钱,去哪儿了</h2>
@@ -205,7 +196,6 @@ function Home() {
 
       <Reveal className="trust" id="trust">
         <h2>不要相信我们,验证我们</h2>
-        <React.Suspense fallback={null}><ChinaNodes /></React.Suspense>
         <p className="section-lede">
           说要散银子的人多了,兑现的少。所以别信表态——平台每天把全部账务流水
           (匿名化,无个人信息)生成哈希锚点,首尾相链;全世界志愿者的机器持续复算、

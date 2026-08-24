@@ -1,7 +1,5 @@
 import React, { useEffect } from 'react'
 
-import Embers from './Embers.jsx'
-
 /* 品牌物料页:标志/用色/海报传单/社媒背景,全部开放下载。
    立场:欢迎任何人拿去转发传播——唯一要求是别改数字承诺。 */
 
@@ -29,8 +27,7 @@ export default function BrandPage() {
   return (
     <>
       <header className="join-hero">
-        <Embers />
-        <div className="hero-inner">
+          <div className="hero-inner">
           <img className="brand-logo-lg" src={`${B}/logo_horizontal_dark.png`}
             alt="超级赞 Super-Z · 群众帮群众" />
           <h1>品牌物料,随便拿。</h1>

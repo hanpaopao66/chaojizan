@@ -16,7 +16,6 @@ a { color: inherit; text-decoration: none; }
 /* ---- Hero ---- */
 .hero { position: relative; height: 100svh; min-height: 560px; display: flex;
         align-items: center; justify-content: center; text-align: center; }
-.embers { position: absolute !important; inset: 0; }
 .hero-inner { position: relative; z-index: 1; padding: 0 24px; max-width: 720px; }
 .brand { color: var(--orange); font-weight: 800; letter-spacing: .08em;
          font-size: 1rem; margin-bottom: 18px; opacity: 0;
@@ -139,36 +138,37 @@ section .cta { justify-content: flex-start; margin-top: 26px; }
 .topnav a { color: var(--muted); transition: color .25s ease; }
 .topnav a:hover { color: var(--orange); }
 
-/* ---- 钱流分账段(滚动驱动) ---- */
-.coinflow { max-width: none; padding: 0; height: 260svh; position: relative; }
-.cf-sticky { position: sticky; top: 0; height: 100svh; overflow: hidden; }
-.cf-sticky canvas { position: absolute !important; inset: 0; }
-.cf-head { position: absolute; top: 9svh; left: 0; right: 0; z-index: 1;
-           text-align: center; padding: 0 24px; }
-.cf-head .section-lede { margin-left: auto; margin-right: auto; }
-.cf-label { position: absolute; z-index: 1; text-align: center;
-            opacity: 0; transform: translateY(14px);
-            transition: opacity .8s ease, transform .8s ease; }
-.cf-label.show { opacity: 1; transform: none; }
-.cf-label .amt { font-size: clamp(1.4rem, 3.4vw, 2rem); font-weight: 800;
-                 font-variant-numeric: tabular-nums; }
-.cf-label .amt.green { color: var(--green); }
-.cf-label .amt.blue { color: #4DA3FF; }
-.cf-label .amt.orange { color: var(--orange); }
-.cf-label .who { font-size: .95rem; margin-top: 2px; }
-.cf-label .how { color: var(--muted); font-size: .78rem; }
-.cf-label.merchant { left: 13%; bottom: 34svh; }
-.cf-label.rider { right: 13%; bottom: 34svh; }
-.cf-label.platform { left: 0; right: 0; bottom: 18svh; }
-.cf-note { position: absolute; left: 0; right: 0; bottom: 6svh; z-index: 1;
-           text-align: center; color: var(--muted); font-size: .8rem;
-           padding: 0 24px; opacity: 0; transition: opacity 1s ease .3s; }
-.cf-note.show { opacity: 1; }
+/* ---- 一单钱的去向 ---- */
+/*
+ * 这里原来是一段 260svh 的滚动驱动 3D 动画(three.js 画布 + 金币分堆)。
+ * 换成一条按比例分段的横条:同样的数字,一眼看完,零 KB,
+ * 而且比动画好懂 —— 动画要滚三屏才看得到结论。
+ */
+.cf-bar { display: flex; height: 26px; border-radius: 999px;
+          overflow: hidden; margin: 26px 0 18px;
+          border: 1px solid var(--line); }
+/* 段宽 = flex-grow = 真实金额。比例失真的图比没有图更糟 */
+.cf-seg { min-width: 3px; }
+.cf-seg.merchant, .cf-dot.merchant { background: var(--green); }
+.cf-seg.rider, .cf-dot.rider { background: #4DA3FF; }
+.cf-seg.platform, .cf-dot.platform { background: var(--orange); }
 
-/* ---- 链与哨兵 ---- */
-.chain3d { height: 300px; margin-top: 26px; border: 1px solid var(--line);
-           border-radius: 18px; overflow: hidden; background: var(--card); }
-.chain3d canvas { display: block; }
+.cf-legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.cf-item { display: flex; gap: 10px; align-items: flex-start; }
+.cf-dot { width: 12px; height: 12px; border-radius: 4px;
+          margin-top: 7px; flex: none; }
+.cf-item .amt { font-size: clamp(1.3rem, 3.2vw, 1.9rem); font-weight: 800;
+                font-variant-numeric: tabular-nums; }
+.cf-item .amt.merchant { color: var(--green); }
+.cf-item .amt.rider { color: #4DA3FF; }
+.cf-item .amt.platform { color: var(--orange); }
+.cf-item .who { font-size: .95rem; margin-top: 2px; }
+.cf-item .how { color: var(--muted); font-size: .78rem; margin-top: 2px; }
+.cf-note { color: var(--muted); font-size: .8rem; margin-top: 20px; }
+/* 窄屏一列:三列挤在 375px 里,金额会换行成两截 */
+@media (max-width: 620px) {
+  .cf-legend { grid-template-columns: 1fr; gap: 12px; }
+}
 
 /* ---- 入驻/加入子页 ---- */
 .join-hero { position: relative; height: 88svh; min-height: 520px;
@@ -176,8 +176,6 @@ section .cta { justify-content: flex-start; margin-top: 26px; }
              text-align: center; }
 .join-hero .hero-inner { position: relative; z-index: 1; padding: 0 24px;
                          max-width: 720px; }
-.grid-bg { position: absolute; inset: 0; }
-.grid-bg canvas { position: absolute !important; inset: 0; }
 .join-main section { padding-top: 70px; }
 .cmp-table { margin-top: 30px; border: 1px solid var(--line);
              border-radius: 16px; overflow: hidden; font-size: .92rem; }

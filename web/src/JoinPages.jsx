@@ -1,9 +1,11 @@
 import React, { useEffect } from 'react'
 
-import CityGrid from './CityGrid.jsx'
-import Embers from './Embers.jsx'
-
-/* 入驻/加入子页:转化导向,3D 只做点缀,重点是把账算给对方看。 */
+/* 入驻/加入子页:转化导向,重点是把账算给对方看。
+ *
+ * 原来两页各挂一个 three.js 画布做点缀(商家页背景火星、
+ * 骑手页夜色城市网格)。删掉了 —— 它们把 three.js 拖进包里,
+ * 而这两页真正管用的是「同一碗面,多挣四块五」这行字和下面那笔账。
+ * 装饰再好看,也不该让人多等几秒才看到它。 */
 
 function JoinShell({ hero, children }) {
   return (
@@ -34,7 +36,6 @@ export function JoinMerchant() {
   return (
     <JoinShell hero={
       <>
-        <Embers />
         <div className="hero-inner">
           <div className="brand">超级赞 · 商家入驻</div>
           <h1>同一碗面,<br />多挣四块五。</h1>
@@ -98,7 +99,6 @@ export function JoinRider() {
   return (
     <JoinShell hero={
       <>
-        <div className="grid-bg"><CityGrid /></div>
         <div className="hero-inner">
           <div className="brand">超级赞 · 骑手加入</div>
           <h1>你跑的每一米,<br />都算你的。</h1>
