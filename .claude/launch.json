@@ -69,6 +69,51 @@
         "apps/rider_app/build/web"
       ],
       "port": 5184
+    },
+    {
+      "name": "web-review",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "web",
+        "--",
+        "--port",
+        "5273",
+        "--strictPort"
+      ],
+      "port": 5273
+    },
+    {
+      "name": "merchant-web-review",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "merchant-web",
+        "--",
+        "--port",
+        "5274",
+        "--strictPort"
+      ],
+      "port": 5274
+    },
+    {
+      "name": "admin-web-review",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "admin-web",
+        "--",
+        "--port",
+        "5275",
+        "--strictPort"
+      ],
+      "port": 5275
     }
   ]
 }

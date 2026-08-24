@@ -1,16 +1,33 @@
 import React, { useEffect, useRef, useState } from 'react'
 
-import BrandPage from './BrandPage.jsx'
 import { BrandIcon, BrandWordmark } from './BrandSvg.jsx'
-import ChinaNodes from './ChinaNodes.jsx'
-import CoinFlow from './CoinFlow.jsx'
-import Embers from './Embers.jsx'
-import { JoinMerchant, JoinRider } from './JoinPages.jsx'
 
 // 大屏/透明中心单独成 chunk:echarts + 地图数据不拖累官网首页
 const ScreenPage = React.lazy(() => import('./screen/ScreenPage.jsx'))
 const TransparencyPage = React.lazy(
   () => import('./transparency/TransparencyPage.jsx'))
+
+/* 3D 装饰件和子页面也全部拆出去 —— 它们一起把 three.js 拖进了首屏主包。
+ *
+ * 改之前:首页主包 gzip **282 KB**,其中绝大部分是 three.js。
+ * 一个人在微信里点开这个链接,要等这 282 KB 下完,才看得到
+ * 「这不是生意,是一场把钱分公平的运动」这行字 —— 而那 282 KB
+ * 买到的只是背景火星、一个 3D 地球和一段滚动动画。
+ *
+ * 这是个靠转发传播的落地页:白屏三秒,人就退回聊天窗口了。
+ * **文字先出来,装饰后到。**
+ *
+ * 子页面(入驻/骑手/品牌)原本是直接 import 的,虽然只有对应路由才渲染,
+ * 但代码照样打进首屏主包,而且它们各自也 import 了 Embers。
+ */
+const ChinaNodes = React.lazy(() => import('./ChinaNodes.jsx'))
+const CoinFlow = React.lazy(() => import('./CoinFlow.jsx'))
+const Embers = React.lazy(() => import('./Embers.jsx'))
+const BrandPage = React.lazy(() => import('./BrandPage.jsx'))
+const JoinMerchant = React.lazy(
+  () => import('./JoinPages.jsx').then(m => ({ default: m.JoinMerchant })))
+const JoinRider = React.lazy(
+  () => import('./JoinPages.jsx').then(m => ({ default: m.JoinRider })))
 
 /* 滚动渐现:进入视口加 .visible,CSS 负责平缓的位移+淡入 */
 function Reveal({ children, className = '', as: Tag = 'section', id }) {
@@ -46,9 +63,11 @@ export default function App() {
   // vite dev 下路径带 /site 前缀(base 配置),先剥掉,与生产行为一致
   const raw = typeof location !== 'undefined' ? location.pathname : '/'
   const path = raw.replace(/^\/site/, '') || '/'
-  if (path.startsWith('/join/merchant')) return <JoinMerchant />
-  if (path.startsWith('/join/rider')) return <JoinRider />
-  if (path.startsWith('/brand')) return <BrandPage />
+  const lazyPage = node => (
+    <React.Suspense fallback={null}>{node}</React.Suspense>)
+  if (path.startsWith('/join/merchant')) return lazyPage(<JoinMerchant />)
+  if (path.startsWith('/join/rider')) return lazyPage(<JoinRider />)
+  if (path.startsWith('/brand')) return lazyPage(<BrandPage />)
   if (path.startsWith('/screen')) {
     return <React.Suspense fallback={null}><ScreenPage /></React.Suspense>
   }
@@ -58,26 +77,67 @@ export default function App() {
   return <Home />
 }
 
+function useAudit() {
+  const [audit, setAudit] = useState(null)
+  useEffect(() => {
+    let alive = true
+    fetch('/transparency/audit')
+      .then(r => r.json()).then(d => alive && setAudit(d)).catch(() => {})
+    return () => { alive = false }
+  }, [])
+  return audit
+}
+
+/** 一格实时数字。
+ *
+ * ## 「0」和「坏了」在用户眼里长得一样
+ *
+ * 拿不到数据显示「–」,真的是 0 就显示 0 —— 这两件事本来就分开了。
+ * 但**观感**上还差一层:一个大大的橙色 `0` 长得像警报,
+ * 而事实常常只是"今天才刚开始"。
+ *
+ * 所以 0 的时候不高亮,并在下面补一句话说清这是真的 0。
+ * 不改数字本身:难看的真话也是真话,只是别让它被读成别的意思。
+ */
+function LiveItem({ value, label, tone, zeroHint, render }) {
+  const loading = value === undefined || value === null
+  const zero = !loading && Number(value) === 0
+  return (
+    <div className="live-item">
+      <div className={loading || zero ? 'n' : `n ${tone || ''}`}>
+        {loading ? '–' : (render ? render(value) : value)}
+      </div>
+      <div className="l">{label}</div>
+      {zero && zeroHint && <div className="l zero-hint">{zeroHint}</div>}
+    </div>
+  )
+}
+
 function Home() {
   const stats = useStats()
+  const audit = useAudit()
   return (
     <>
       <nav className="topnav">
         <a className="brand-link" href="/"><BrandIcon size={34} /> 超级赞</a>
+        {/* 锚点链接标 `jump`:窄屏隐掉。
+            它们只是页内跳转,手机上往下滑一样到得了;而把它们留着,
+            会把「商家入驻」「骑手加入」这些**真页面**挤出屏幕 ——
+            那才是手机用户唯一到不了的东西。 */}
         <div className="links">
-          <a href="#principles">三原则</a>
-          <a href="#coinflow">钱去哪了</a>
-          <a href="#trust">验证我们</a>
+          <a className="jump" href="#principles">三原则</a>
+          <a className="jump" href="#coinflow">钱去哪了</a>
+          <a className="jump" href="#trust">验证我们</a>
           <a href="/transparency">透明中心</a>
           <a href="/join/merchant">商家入驻</a>
           <a href="/join/rider">骑手加入</a>
           <a href="/brand">品牌物料</a>
-          <a href="#faq">常见问题</a>
+          <a className="jump" href="#faq">常见问题</a>
         </div>
         <a className="dl" href="#download">下载 App</a>
       </nav>
       <header className="hero">
-        <Embers />
+        <React.Suspense fallback={null}><Embers /></React.Suspense>
         <div className="hero-inner">
           <div className="hlogo"><BrandWordmark width={360} /></div>
           <h1>这不是生意,<br />是一场把钱分公平的运动。</h1>
@@ -117,7 +177,12 @@ function Home() {
         </div>
       </Reveal>
 
-      <CoinFlow />
+      {/* 占位和真身同一个 class,高度一致 —— 不占位的话它一到就把页面
+          顶长,正在往下滑的人会被硬生生推走 */}
+      <React.Suspense
+        fallback={<section className="coinflow" id="coinflow" aria-hidden="true" />}>
+        <CoinFlow />
+      </React.Suspense>
 
       <Reveal className="cycle">
         <h2>平台赚的钱,去哪儿了</h2>
@@ -140,7 +205,7 @@ function Home() {
 
       <Reveal className="trust" id="trust">
         <h2>不要相信我们,验证我们</h2>
-        <ChinaNodes />
+        <React.Suspense fallback={null}><ChinaNodes /></React.Suspense>
         <p className="section-lede">
           说要散银子的人多了,兑现的少。所以别信表态——平台每天把全部账务流水
           (匿名化,无个人信息)生成哈希锚点,首尾相链;全世界志愿者的机器持续复算、
@@ -151,23 +216,49 @@ function Home() {
           骑手入账等不等于配送费,差一分钱,管理后台直接红条报警。
           我们在自动化测试里故意篡改过 1 分钱,系统当场抓了出来。
         </p>
+        {/* 这一节问的是「账目可不可验证」,所以先摆能回答这个问题的数:
+            节点、锚点、连续零差错、累计核对笔数。
+            今日业务数照常留着 —— 难看的真话也是真话,一个都不删。 */}
         <div className="live">
-          <div className="live-item"><div className="n green">{stats ? stats.nodes.online : '–'}</div>
-            <div className="l">社区见证节点在线</div></div>
-          <div className="live-item"><div className="n">{stats ? stats.chain.anchors : '–'}</div>
-            <div className="l">每日账本锚点相链</div></div>
-          <div className="live-item"><div className="n orange">{stats ? stats.today.orders : '–'}</div>
-            <div className="l">今日订单</div></div>
-          <div className="live-item"><div className="n green">¥{stats ? yuan(stats.today.rider_cents) : '–'}</div>
-            <div className="l">骑手今日所得</div></div>
+          <LiveItem value={stats?.nodes.online} tone="green"
+            label="社区见证节点在线"
+            zeroHint="暂时没有节点在线,锚点仍在逐日生成" />
+          <LiveItem value={stats?.chain.anchors} label="每日账本锚点相链" />
+          <LiveItem value={audit?.clean_streak_days} tone="green"
+            label="连续核账零差错(天)"
+            zeroHint="最近一次核账发现了差错,细节在透明中心" />
+          <LiveItem
+            value={audit?.runs ? audit.runs.reduce((a, r) => a + r.checked_orders, 0) : null}
+            label="已逐笔核对(笔)"
+            render={v => v.toLocaleString()} />
+          <LiveItem value={stats?.today.orders} tone="orange"
+            label="今日订单" zeroHint="今天还没有订单" />
+          <LiveItem value={stats?.today.rider_cents} tone="green"
+            label="骑手今日所得" render={v => `¥${yuan(v)}`}
+            zeroHint="今天还没有配送单" />
         </div>
+        {/* 一串 64 位十六进制,不解释就只是一坨乱码。
+            解释一句它是什么、改了会怎样,它才从"技术装饰"变成证据。 */}
         {stats?.chain?.latest_hash && (
-          <div className="hash">最新锚点 {stats.chain.latest_day} · {stats.chain.latest_hash}</div>
+          <>
+            <div className="hash-note">
+              下面这串是 {stats.chain.latest_day} 那天全部账目的「指纹」。
+              账目里改动任何一分钱,这串字符都会完全变样,而它已经被
+              各地的见证节点抄走了 —— 这就是我们赖不掉账的原因。
+            </div>
+            <div className="hash">{stats.chain.latest_hash}</div>
+          </>
         )}
         <div className="cta">
           <a className="btn ghost" href="/transparency">进透明中心看细账</a>
           <a className="btn ghost" href="/nodes">运行你自己的见证节点</a>
-          <a className="btn ghost" href="/ledger/anchors">查看账本原文</a>
+          {/* 这个链接直接甩出一屏 JSON。**留着**,因为要自己复算的人
+              需要的正是原始数据;但要提前说清楚点开是什么,
+              别让不懂的人点进去被一屏乱码吓走、以为网站坏了。 */}
+          <a className="btn ghost" href="/ledger/anchors"
+             title="点开是给程序读的原始数据(JSON)">
+            账本原始数据(给会看的人)
+          </a>
         </div>
       </Reveal>
 
@@ -218,7 +309,11 @@ function Home() {
         <h2>问得最多的几件事</h2>
         <p className="section-lede">评论区问什么,我们就答什么。原话放在这里,不装、不画饼。</p>
         <div className="faq-list">
-          <details>
+          {/* 第一条默认展开。
+              五个折叠标题一字排开、一个答案都不露,看着像"问题列在这儿
+              但懒得答" —— 而这一节恰恰是想证明"我们真的正面回答"。
+              露出第一条,读者才知道点开有东西。 */}
+          <details open>
             <summary>5% 也是抽成,你们不还是在赚钱?</summary>
             <p>5% 基本是这个平台的"电费":支付通道手续费、服务器带宽、短信、地图接口、
               证照审核与客服,都从这里出。我们不卖用户数据、不做竞价排名、不收商家推广费、

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 
 import Embers from './Embers.jsx'
 
@@ -24,6 +24,8 @@ function Asset({ src, label, links, light = false }) {
 }
 
 export default function BrandPage() {
+  // 同 JoinPages:每页设自己的 title,转发/收藏/搜索结果才认得出
+  useEffect(() => { document.title = '超级赞 · 品牌物料(开放下载)' }, [])
   return (
     <>
       <header className="join-hero">

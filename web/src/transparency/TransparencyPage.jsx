@@ -110,9 +110,14 @@ export default function TransparencyPage() {
         <header className="tp-hero" id="audit">
           <div className="eyebrow">透 明 中 心</div>
           <div className="big">
+            {/* 差错数**有值时必须是红的**。
+                这里原来两个数都吃 `.big b { color: green }` ——
+                于是有差错的那天,页面用一个让人安心的绿色写着
+                「差错 10 笔」。这是整页唯一一个不能看起来令人安心的数字。 */}
             {latest
               ? <>昨日核账 <b>{latest.checked_orders.toLocaleString()}</b> 笔,
-                  差错 <b>{latest.problems}</b> 笔</>
+                  差错 <b className={latest.problems > 0 ? 'bad' : ''}>
+                    {latest.problems}</b> 笔</>
               : '核账数据加载中…'}
           </div>
           {audit?.clean_streak_days > 0 &&

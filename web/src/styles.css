@@ -74,7 +74,9 @@ section .cta { justify-content: flex-start; margin-top: 26px; }
 .tag.on { color: var(--green); border-color: rgba(47, 191, 143, .4); }
 
 /* ---- 实时数据 ---- */
-.live { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+/* 六格,桌面三列两行。原来是四列 —— 六格塞进四列会剩两个孤零零地
+   靠左排在第二行,看着像没写完 */
+.live { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
         margin-top: 36px; }
 .live-item { background: var(--card); border: 1px solid var(--line);
              border-radius: 18px; padding: 20px; text-align: center; }
@@ -83,7 +85,13 @@ section .cta { justify-content: flex-start; margin-top: 26px; }
 .live-item .n.green { color: var(--green); }
 .live-item .n.orange { color: var(--orange); }
 .live-item .l { color: var(--muted); font-size: .78rem; margin-top: 4px; }
-.hash { margin-top: 18px; color: var(--muted); font-size: .74rem;
+/* 「今天还没有订单」这类补白:比标签再轻一档,别喧宾夺主 */
+.live-item .zero-hint { font-size: .72rem; opacity: .72; margin-top: 2px; }
+/* 哈希前面那句人话。没有它,那串十六进制对绝大多数人就只是乱码 */
+.hash-note { margin-top: 18px; color: var(--muted); font-size: .82rem;
+             max-width: 640px; margin-left: auto; margin-right: auto;
+             line-height: 1.7; }
+.hash { margin-top: 10px; color: var(--muted); font-size: .74rem;
         font-family: ui-monospace, Menlo, monospace; word-break: break-all;
         background: var(--card); border: 1px solid var(--line);
         border-radius: 12px; padding: 10px 14px; }
@@ -100,7 +108,32 @@ section .cta { justify-content: flex-start; margin-top: 26px; }
 .topnav .links a:hover { color: var(--orange); }
 .topnav .dl { background: var(--orange); color: #fff; font-weight: 800;
   padding: 8px 20px; border-radius: 999px; font-size: .9rem; }
-@media (max-width: 860px) { .topnav .links { display: none; } }
+/* 窄屏:导航换成两行,链接那行横向可滚 —— **不是隐藏**。
+ *
+ * 原来这里是 `.links { display: none }`,而且没有任何替代入口:
+ * 手机上「商家入驻」「骑手加入」「透明中心」「品牌物料」四个页面
+ * **一个可见入口都没有**(页脚当时也没有)。做好的入驻页,
+ * 想开店的老板在手机上根本进不去 —— 而绝大多数人是在手机上
+ * 点开这种链接的。
+ *
+ * 没做汉堡菜单:那要一个展开状态,而"点了没反应"是这类菜单最常见的
+ * 故障,在一个主要靠手机传播的落地页上不值得冒这个险。
+ * 横向滚动一行是纯 CSS 的,不会坏。 */
+@media (max-width: 860px) {
+  .topnav { flex-wrap: wrap; row-gap: 6px; gap: 12px; padding: 10px 14px; }
+  .topnav .dl { margin-left: auto; }
+  .topnav .links {
+    order: 3; width: 100%; margin-left: 0; gap: 18px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; padding-bottom: 2px;
+  }
+  .topnav .links::-webkit-scrollbar { display: none; }
+  /* 不许换行:换了行就把首屏又吃掉一截 */
+  .topnav .links a { white-space: nowrap; }
+  /* 页内锚点在手机上收起来:往下滑一样到得了,
+     留着只会把「商家入驻」这类真页面挤出屏幕 */
+  .topnav .links a.jump { display: none; }
+}
 .topnav-legacy { position: absolute; top: 0; right: 0; z-index: 2;
           display: flex; gap: 20px; padding: 20px 26px; font-size: .88rem; }
 .topnav a { color: var(--muted); transition: color .25s ease; }

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 
 import CityGrid from './CityGrid.jsx'
 import Embers from './Embers.jsx'
@@ -23,7 +23,14 @@ function JoinShell({ hero, children }) {
   )
 }
 
+/** 每一页设自己的 title。
+ *
+ * 原来这几页沿用首页的标题「超级赞 Super-Z · 5% 佣金外卖平台|…」——
+ * 转发到微信群、加书签、出现在搜索结果里,都分不出这是入驻页。
+ * 一个店主收到「商家入驻」的链接,点开前看到的却是首页的通用标题。
+ */
 export function JoinMerchant() {
+  useEffect(() => { document.title = '超级赞 · 商家入驻:同一碗面,多挣四块五' }, [])
   return (
     <JoinShell hero={
       <>
@@ -87,6 +94,7 @@ export function JoinMerchant() {
 }
 
 export function JoinRider() {
+  useEffect(() => { document.title = '超级赞 · 骑手加入:配送费 100% 归你' }, [])
   return (
     <JoinShell hero={
       <>

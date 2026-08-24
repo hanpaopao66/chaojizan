@@ -11,6 +11,9 @@
 .tp-hero .eyebrow { color: var(--muted, #7A8499); letter-spacing: .3em; }
 .tp-hero .big { font-size: 2.4rem; font-weight: 800; margin: 10px 0; }
 .tp-hero .big b { color: var(--green); }
+/* 差错不为 0 时转红。绿色的「差错 10 笔」比没有这个数字更糟 ——
+   它在告诉人"一切正常",而事实相反 */
+.tp-hero .big b.bad { color: #E5484D; }
 .tp-hero .streak { color: var(--amber); font-size: 1.05rem; }
 .tp-hero .sub { color: var(--muted, #7A8499); font-size: .9rem; max-width: 640px;
   margin: 10px auto 0; }

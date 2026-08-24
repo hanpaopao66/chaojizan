@@ -124,8 +124,17 @@ export default function LoginPage() {
           和
           <a href="/legal/privacy" target="_blank" rel="noreferrer">《隐私政策》</a>
         </div>
+        {/* 「先去 App 入驻」必须**给得到 App**。
+            原来这句是纯文本:一个店主在手机上打开网页版,被告知去下载
+            商家端,却没有任何可点的地方 —— 他得自己去搜。
+            这是新用户唯一的入口,不能是条死路。 */}
         <div style={{ color: 'var(--sz-ink-muted)', fontSize: 12, marginTop: 6, textAlign: 'center' }}>
-          首次使用?请先在「超级赞商家」App 完成入驻,网页版与 App 同一账号
+          首次使用?请先用「超级赞商家」App 完成入驻,网页版与 App 同一账号
+          <div style={{ marginTop: 6 }}>
+            <a href="/appdist/chaojizan-merchant-arm64.apk">下载商家端 App（安卓）</a>
+            <span style={{ margin: '0 8px', opacity: .5 }}>·</span>
+            <a href="/join/merchant" target="_blank" rel="noreferrer">先看看入驻能省多少</a>
+          </div>
         </div>
       </Card>
     </div>
