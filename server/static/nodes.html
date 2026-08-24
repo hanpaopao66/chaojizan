@@ -63,18 +63,56 @@
   .dlbtn:hover { border-color:var(--orange); color:var(--orange); }
   .honest { color:var(--muted); font-size:.85rem; border-top:1px solid var(--line);
             margin-top:32px; padding-top:16px; }
-  .mapcard { position:relative; background:var(--card); border:1px solid var(--line);
-             border-radius:16px; padding:12px 12px 8px; margin-bottom:6px; }
-  .mapcard canvas { width:100%; display:block; }
-  .maplegend { display:flex; gap:16px; flex-wrap:wrap; color:var(--muted);
-               font-size:.78rem; padding:8px 4px 4px; }
+  /* ---- 见证网络地图:控制台配色 ----
+   *
+   * 这块和页面其余部分**故意长得不一样**:它是一台机器的读数,
+   * 不是一张宣传图。深底 + 等宽字 + 荧光绿,是看惯监控面板的人
+   * 一眼就认得的语言,而这一页的读者正是要自己跑节点的那批人。
+   *
+   * 陆地填充 #1C2A20、描边 #1A2E1A、在线点 #30FF67、已知点 #0A6A34 —— 
+   * 深浅差要够大:在线和离线在这张图上是**最要紧的一个区别**,
+   * 靠明暗分,不靠颜色分(色弱的人也看得出来)。
+   */
+  .mapcard { --map-bg:#000A00; --map-land:#1C2A20; --map-edge:#1A2E1A;
+             --node-on:#30FF67; --node-known:#0A6A34; --node-bad:#FF4D4D;
+             position:relative; background:var(--map-bg);
+             border:1px solid var(--map-edge);
+             border-radius:16px; padding:12px 12px 8px; margin-bottom:6px;
+             font-family:ui-monospace,SFMono-Regular,Menlo,"JetBrains Mono",monospace; }
+  .mapcard canvas { width:100%; display:block; cursor:grab;
+                    touch-action:none; }
+  .mapcard canvas.dragging { cursor:grabbing; }
+  .maphead { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;
+             padding:2px 4px 10px; }
+  .maphead .t { color:var(--node-on); font-size:.74rem; letter-spacing:.2em; }
+  .maphead .c { color:#6E8A76; font-size:.74rem; }
+  .maphead .c b { color:var(--node-on); font-weight:600; }
+  .maphead .hint { margin-left:auto; color:#456B50; font-size:.7rem; }
+  .maplegend { display:flex; gap:16px; flex-wrap:wrap; color:#6E8A76;
+               font-size:.74rem; padding:8px 4px 4px; }
   .maplegend i { display:inline-block; width:8px; height:8px; border-radius:50%;
                  margin-right:5px; vertical-align:baseline; }
   #mapTip { position:absolute; display:none; pointer-events:none; z-index:9;
-            background:var(--card); border:1px solid var(--line); border-radius:10px;
-            padding:7px 11px; font-size:.8rem; box-shadow:0 4px 16px rgba(0,0,0,.18);
-            max-width:240px; line-height:1.5; }
+            background:#04140A; border:1px solid #1F4A2C; border-radius:8px;
+            color:#CFEAD8; padding:7px 11px; font-size:.76rem;
+            box-shadow:0 4px 16px rgba(0,0,0,.5);
+            max-width:240px; line-height:1.5;
+            font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .mapnote { color:var(--muted); font-size:.8rem; margin:6px 0 0; }
+  /* 节点列表和地图是同一台机器的两种读数,配色也就该是同一套。
+     两块长得不一样的话,读的人得在脑子里再对一次"这个绿等于那个绿吗" */
+  .nodetable { background:#000A00; border:1px solid #1A2E1A; border-radius:16px;
+               overflow:hidden;
+               font-family:ui-monospace,SFMono-Regular,Menlo,"JetBrains Mono",monospace; }
+  .nodetable table { background:transparent; border:none; border-radius:0;
+                     font-size:.8rem; }
+  .nodetable th { color:#456B50; letter-spacing:.12em; font-size:.7rem;
+                  border-bottom:1px solid #1A2E1A; text-transform:uppercase; }
+  .nodetable td { color:#CFEAD8; border-bottom:1px solid #12220F; }
+  .nodetable tr:last-child td { border-bottom:none; }
+  .nodetable .dot.on { background:#30FF67; box-shadow:0 0 6px #30FF67; }
+  .nodetable .dot.off { background:#0A6A34; box-shadow:none; }
+  .nodetable .muted { color:#456B50; }
 </style>
 </head>
 <body>
@@ -93,12 +131,18 @@
 
   <h2>见证网络 · 世界分布</h2>
   <div class="mapcard">
+    <div class="maphead">
+      <span class="t">NODE DISTRIBUTION</span>
+      <span class="c"><b id="mapOnline">–</b> 在线</span>
+      <span class="c"><b id="mapKnown">–</b> 已注册</span>
+      <span class="hint">滚轮缩放 · 拖拽平移 · 双击复位</span>
+    </div>
     <canvas id="worldMap"></canvas>
     <div id="mapTip"></div>
     <div class="maplegend">
-      <span><i style="background:var(--green)"></i>在线 · 校验通过</span>
-      <span><i style="background:#C62828"></i>报告不一致</span>
-      <span><i style="background:#9a9aa0"></i>离线</span>
+      <span><i style="background:#30FF67"></i>在线 · 校验通过</span>
+      <span><i style="background:#FF4D4D"></i>报告不一致</span>
+      <span><i style="background:#0A6A34"></i>已注册 · 当前离线</span>
       <span id="mapUnknown" style="display:none"></span>
     </div>
   </div>
@@ -151,10 +195,12 @@ python3 witness.py               # 只需要 Python 3.10+,每 5 分钟自动校�
   <p style="font-size:.88rem;color:var(--muted)">脚本不到 300 行、零第三方依赖,建议读一遍再运行——见证的意义在于你不需要信任任何人,包括我们。网页版的校验代码同样公开:在本页右键"查看源代码"即可审阅。开源仓库(含 Docker 方式)将随公开版一起发布。</p>
 
   <h2>节点列表</h2>
+  <div class="nodetable">
   <table>
     <thead><tr><th>节点</th><th>地区</th><th>校验至</th><th>结论</th><th>心跳数</th></tr></thead>
-    <tbody id="nodeRows"><tr><td colspan="5" style="color:var(--muted)">加载中…</td></tr></tbody>
+    <tbody id="nodeRows"><tr><td colspan="5" class="muted">加载中…</td></tr></tbody>
   </table>
+  </div>
 
   <p class="honest">诚实声明:节点数量是社会证明,不是共识机制;见证节点核验账目、留存锚点、
   公开示警,但不参与订单与支付的运行——那些发生在依法备案、可被追责的平台服务器上。
@@ -272,7 +318,47 @@ function nodePos(n) {
   return null;
 }
 
-const mapState = { canvas:null, base:null, nodes:[], W:0, H:0, dpr:1, anim:null };
+/* view:缩放平移。scale=1 时整幅世界地图正好铺满卡片宽度 */
+const mapState = { canvas:null, nodes:[], W:0, H:0, dpr:1, anim:null,
+                   view:{ k:1, x:0, y:0 } };
+const MAP_COLORS = { land:'#1C2A20', edge:'#1A2E1A',
+                     on:'#30FF67', known:'#0A6A34', bad:'#FF4D4D' };
+
+/* 陆地改成**填充多边形**,不再是点阵。
+ *
+ * 点阵在浅色页面上像一张示意图,而这一块现在是控制台读数:
+ * 实心陆块 + 发亮的节点,对比一拉开,"哪儿有节点"才是第一眼看到的东西。
+ * 而且填充是矢量的 —— 缩放之后仍然是干净的边,点阵放大就是一堆麻点。
+ */
+/* ⚠️ beginPath 只调用**一次**,在循环外面。
+   放进循环里的话每一圈都把前面的子路径清掉,最后 fill 的只有一个多边形
+   —— 表现是整张图只剩一块陆地,或者干脆什么都没有。 */
+function tracePolys(ctx, polys, W, H) {
+  ctx.beginPath();
+  for (const poly of polys) {
+    poly.forEach(([lat, lng], i) => {
+      const [x, y] = project(lat, lng, W, H);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+  }
+}
+
+function drawLand(ctx, W, H, k) {
+  ctx.fillStyle = MAP_COLORS.land;
+  tracePolys(ctx, LAND, W, H);
+  ctx.fill();   // nonzero:各大洲是独立子路径,evenodd 会让相交处变成洞
+  // 内海按背景色挖回去(WATER 是湖和内海,不是陆地)
+  ctx.fillStyle = getComputedStyle(mapState.canvas.parentElement)
+    .getPropertyValue('--map-bg').trim() || '#000A00';
+  tracePolys(ctx, WATER, W, H);
+  ctx.fill();
+  // 描边:0.5px 是参照里的值,放大时按 k 收窄,免得缩放后边框变粗
+  ctx.strokeStyle = MAP_COLORS.edge;
+  ctx.lineWidth = 0.5 / k;
+  tracePolys(ctx, LAND, W, H);
+  ctx.stroke();
+}
 
 function buildBase() {
   const c = mapState.canvas, wrap = c.parentElement;
@@ -281,20 +367,6 @@ function buildBase() {
   Object.assign(mapState, { W, H, dpr });
   c.width = W * dpr; c.height = H * dpr;
   c.style.height = H + 'px';
-  const base = document.createElement('canvas');
-  base.width = W * dpr; base.height = H * dpr;
-  const ctx = base.getContext('2d');
-  ctx.scale(dpr, dpr);
-  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  ctx.fillStyle = dark ? 'rgba(255,255,255,.16)' : 'rgba(0,0,0,.13)';
-  const r = Math.max(1.1, W / 640 * 1.5);
-  for (let lat = MAP.minLat; lat <= MAP.maxLat; lat += MAP.dotLat)
-    for (let lng = -180; lng <= 180; lng += MAP.dotLng)
-      if (isLand(lat, lng)) {
-        const [x, y] = project(lat, lng, W, H);
-        ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-      }
-  mapState.base = base;
 }
 
 function placeNodes(nodes) {
@@ -316,34 +388,93 @@ function placeNodes(nodes) {
 }
 
 function drawMap(t) {
-  const { canvas, base, nodes, W, H, dpr } = mapState;
-  if (!base) return;
+  const { canvas, nodes, W, H, dpr, view } = mapState;
+  if (!canvas || !W) return;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(base, 0, 0);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const green = cssVar('--green') || '#0E8A5F';
+  ctx.save();
+  ctx.translate(view.x, view.y);
+  ctx.scale(view.k, view.k);
+  drawLand(ctx, W, H, view.k);
+
+  /* 节点两档,靠**明暗**分,不靠色相 —— 在线和离线是这张图上最要紧的
+     一个区别,色弱的人也得看得出来。
+     在线:实心亮点 + 一圈 15% 的光晕(参照里就是 r3 实心 + r5 淡圈);
+     离线:一个暗绿小点,说明"注册过,现在没在跑";
+     报告不一致:红点 —— 参照页没有这一档,但我们有,而且它恰恰是
+     这一页最该被看见的状态。 */
   let hasOnline = false;
   for (const p of nodes) {
     const on = p.n.online, bad = !p.n.ok;
-    const color = bad ? '#C62828' : on ? green : '#9a9aa0';
-    if (on) {                                   // 呼吸圈,2.4s 一轮
+    const color = bad ? MAP_COLORS.bad : on ? MAP_COLORS.on : MAP_COLORS.known;
+    // 点的视觉大小不随缩放变 —— 放大是为了看清位置,不是把点也吹大
+    const s = 1 / view.k;
+    if (on || bad) {
       hasOnline = true;
-      const ph = (t % 2400) / 2400;
-      ctx.beginPath(); ctx.arc(p.x, p.y, 4 + ph * 13, 0, 7);
-      ctx.strokeStyle = color; ctx.globalAlpha = .5 * (1 - ph);
-      ctx.lineWidth = 1.4; ctx.stroke(); ctx.globalAlpha = 1;
+      const ph = (t % 2400) / 2400;               // 呼吸圈,2.4s 一轮
+      ctx.beginPath(); ctx.arc(p.x, p.y, (4 + ph * 12) * s, 0, 7);
+      ctx.strokeStyle = color; ctx.globalAlpha = .45 * (1 - ph);
+      ctx.lineWidth = 1.2 * s; ctx.stroke(); ctx.globalAlpha = 1;
     }
-    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 9);
-    g.addColorStop(0, color); g.addColorStop(1, 'transparent');
-    ctx.globalAlpha = .35; ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, 7); ctx.fill(); ctx.globalAlpha = 1;
+    if (on || bad) {
+      ctx.fillStyle = color; ctx.globalAlpha = .15;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5 * s, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(p.x, p.y, on ? 3.4 : 2.6, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x, p.y, (on || bad ? 3 : 2.5) * s, 0, 7); ctx.fill();
   }
+  ctx.restore();
   cancelAnimationFrame(mapState.anim);
   if (hasOnline) mapState.anim = requestAnimationFrame(drawMap);
+}
+
+/* ---- 缩放与平移 ---- */
+function clampView() {
+  const v = mapState.view, { W, H } = mapState;
+  v.k = Math.max(1, Math.min(8, v.k));
+  // 不许把地图拖出画布:缩放到 1 时锁死在原位
+  v.x = Math.min(0, Math.max(W - W * v.k, v.x));
+  v.y = Math.min(0, Math.max(H - H * v.k, v.y));
+}
+function zoomAt(cx, cy, factor) {
+  const v = mapState.view, k0 = v.k;
+  v.k = Math.max(1, Math.min(8, v.k * factor));
+  // 以光标为锚点缩放:手指/鼠标底下的那块地不动
+  const r = v.k / k0;
+  v.x = cx - (cx - v.x) * r;
+  v.y = cy - (cy - v.y) * r;
+  clampView();
+  drawMap(performance.now());
+}
+function bindMapGestures(c) {
+  c.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = c.getBoundingClientRect();
+    zoomAt(e.clientX - r.left, e.clientY - r.top,
+           e.deltaY < 0 ? 1.12 : 1 / 1.12);
+  }, { passive:false });
+  let drag = null;
+  c.addEventListener('pointerdown', e => {
+    drag = { x:e.clientX, y:e.clientY, vx:mapState.view.x, vy:mapState.view.y };
+    c.setPointerCapture(e.pointerId); c.classList.add('dragging');
+  });
+  c.addEventListener('pointermove', e => {
+    if (!drag) return;
+    mapState.view.x = drag.vx + (e.clientX - drag.x);
+    mapState.view.y = drag.vy + (e.clientY - drag.y);
+    clampView(); drawMap(performance.now());
+  });
+  const end = () => { drag = null; c.classList.remove('dragging'); };
+  c.addEventListener('pointerup', end);
+  c.addEventListener('pointercancel', end);
+  // 双击复位:缩放拖拽之后总得有条退路,不然只能刷新页面
+  c.addEventListener('dblclick', () => {
+    Object.assign(mapState.view, { k:1, x:0, y:0 });
+    drawMap(performance.now());
+  });
 }
 
 function renderMap(nodes) {
@@ -359,19 +490,27 @@ function renderMap(nodes) {
     mapState.canvas.addEventListener('mousemove', mapHover);
     mapState.canvas.addEventListener('mouseleave', () =>
       document.getElementById('mapTip').style.display = 'none');
-    matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',
-      () => { buildBase(); drawMap(0); });
+    // 这块固定深色控制台配色,不跟随系统浅色 —— 少一个重建分支
+    bindMapGestures(mapState.canvas);
     buildBase();
   }
   mapState.lastNodes = nodes;
   placeNodes(nodes);
+  const onCount = nodes.filter(n => n.online).length;
+  document.getElementById('mapOnline').textContent = onCount;
+  document.getElementById('mapKnown').textContent = nodes.length;
   drawMap(0);
 }
 
 function mapHover(e) {
   const rect = mapState.canvas.getBoundingClientRect();
-  const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-  let best = null, bd = 14 * 14;
+  const v = mapState.view;
+  // 屏幕坐标 → 地图坐标。缩放之后不换算的话,放大越多命中偏得越离谱
+  const mx = (e.clientX - rect.left - v.x) / v.k;
+  const my = (e.clientY - rect.top - v.y) / v.k;
+  // 命中半径也除以 k:放大后点在屏幕上没变大,判定范围也不该变大
+  const R = 14 / v.k;
+  let best = null, bd = R * R;
   for (const p of mapState.nodes) {
     const d = (p.x - mx) ** 2 + (p.y - my) ** 2;
     if (d < bd) { bd = d; best = p; }
@@ -381,9 +520,9 @@ function mapHover(e) {
   const n = best.n;
   tip.innerHTML = '<b>' + esc(n.name) + '</b><br>' +
       esc(n.region || n.tz || '') + ' · ' +
-      (n.online ? (n.ok ? '<span style="color:var(--green)">✓ 在线可信</span>'
-                        : '<span style="color:#C62828">✗ 报告不一致</span>')
-                : '离线') +
+      (n.online ? (n.ok ? '<span style="color:#30FF67">✓ 在线可信</span>'
+                        : '<span style="color:#FF4D4D">✗ 报告不一致</span>')
+                : '<span style="color:#6E8A76">离线</span>') +
       (n.verified_day ? '<br>校验至 ' + esc(n.verified_day) : '');
   tip.style.display = 'block';
   tip.style.left = Math.min(best.x + 14, mapState.W - 200) + 'px';
@@ -412,15 +551,18 @@ async function load() {
   document.getElementById('anchor').textContent = s.latest_anchor
     ? s.latest_anchor.day + ' · ' + s.latest_anchor.chain_hash
     : '账本刚启用,首个锚点将于明日生成';
+  // 颜色和地图上的点一一对应:亮绿=在线可信、红=存疑、暗绿=离线。
+  // 缺值统一写成暗色的「–」,别让空白看起来像"加载没完"
+  const dash = '<span class="muted">–</span>';
   const rows = (s.nodes || []).map(n =>
     '<tr><td><span class="dot ' + (n.online ? 'on' : 'off') + '"></span>' + esc(n.name) + '</td>' +
-    '<td>' + esc(n.region || '–') + '</td>' +
-    '<td>' + esc(n.verified_day || '–') + '</td>' +
-    '<td>' + (n.ok ? '<span style="color:var(--green)">✓ 可信</span>'
-                   : '<span style="color:#C62828">✗ 存疑</span>') + '</td>' +
+    '<td>' + (n.region ? esc(n.region) : dash) + '</td>' +
+    '<td>' + (n.verified_day ? esc(n.verified_day) : dash) + '</td>' +
+    '<td>' + (n.ok ? '<span style="color:#30FF67">✓ 可信</span>'
+                   : '<span style="color:#FF4D4D">✗ 存疑</span>') + '</td>' +
     '<td>' + n.heartbeats + '</td></tr>').join('');
   document.getElementById('nodeRows').innerHTML =
-    rows || '<tr><td colspan="5" style="color:var(--muted)">还没有节点,等你来跑第一个</td></tr>';
+    rows || '<tr><td colspan="5" class="muted">还没有节点,等你来跑第一个</td></tr>';
   renderMap(s.nodes || []);
 }
 
