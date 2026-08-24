@@ -39,6 +39,44 @@ async def ledger_anchors(
              "chain_hash": r.chain_hash} for r in rows]
 
 
+@router.get("/ledger/epochs")
+async def ledger_epochs(db: AsyncSession = Depends(get_db)):
+    """账本纪元:每一次「链被重新起头」的永久公开记录(#2)。
+
+    ## 见证节点拿它干什么
+
+    第一道防线是「我见过的锚点必须一字不差,消失也算篡改」。这条防线
+    分不出「平台偷偷改账」和「平台公开重置了链」——
+    `LEDGER-SPEC` §4 把这件事交给「人来判断」,而机器没有依据。
+
+    有了这个接口,节点看到某天的锚点消失时可以问一句:
+    **这一天是不是落在某个已公告纪元的覆盖范围里?**
+    是,就按「公告过的重置」处理(照常显示、不判为篡改);
+    不是,那就是真的在毁账,警报照旧。
+
+    ## 它不给平台开后门
+
+    纪元记录本身也在节点的留存范围里:**记录被改或消失,同样是篡改**。
+    重置这件事没有变得更容易,只是变得必须署名、必须留档。
+
+    `prev_tip_hash` 是上一纪元的链尾 —— 旧链每日锚点可以没了,
+    但它最后长什么样必须留下来。第 1 纪元这一栏是空的,
+    因为 2026-07-28 那次**确实没留**;空着就是记录的一部分。
+    """
+    from ..models import LedgerEpoch
+
+    rows = await db.scalars(select(LedgerEpoch).order_by(LedgerEpoch.epoch))
+    return [{
+        "epoch": r.epoch,
+        "started_day": r.started_day,
+        "reason": r.reason,
+        "prev_tip_hash": r.prev_tip_hash,
+        "prev_first_day": r.prev_first_day,
+        "prev_last_day": r.prev_last_day,
+        "announced_at": r.created_at,
+    } for r in rows]
+
+
 @router.get("/ledger/days/{day}")
 async def ledger_day(day: str, db: AsyncSession = Depends(get_db)):
     """某天流水全文(匿名化)。见证节点据此复算 payload_hash 与 chain_hash。"""

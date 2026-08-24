@@ -175,3 +175,17 @@
   color: #4E6B4F;      /* 承诺不做 = 好事,用「到手的钱」那个绿 */
   font-weight: 700;
 }
+
+/* 账本纪元公告。**刻意不是红色** —— 它不是异常,是一条已经说明过的事实。
+   红色留给「有节点说账被改了,而我们没解释过」 */
+.tp-epoch { margin: 0 0 18px; }
+.tp-epoch-card { border: 1px solid var(--line, #23262E);
+                 border-left: 4px solid var(--amber, #FFB84D);
+                 border-radius: 12px; padding: 14px 16px;
+                 background: var(--card, #14161C); line-height: 1.75; }
+.tp-epoch-card h3 { margin: 0 0 6px; font-size: .95rem;
+                    color: var(--amber, #FFB84D); }
+.tp-epoch-card p { margin: 0; font-size: .88rem; }
+.tp-epoch-card .meta { margin-top: 8px; font-size: .78rem;
+                       color: var(--muted, #7A8499); word-break: break-all;
+                       font-family: ui-monospace, Menlo, monospace; }

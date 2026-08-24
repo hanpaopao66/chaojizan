@@ -5,8 +5,23 @@
 演示账号号段:138000000xx(现行 seed)与 938000000xx(历史 seed),
 真实用户不可能撞上。
 
-账本:演示订单被清后,历史每日锚点必然与数据重算对不上,所以一并清空
-ledger_anchors 与内审告警,账本链从清理后的数据重新起链(开发库同款先例)。
+账本:**不动。**
+
+这里曾经连 ledger_anchors 一起清、让链重新起链,理由是"演示订单被清后
+历史锚点必然与数据重算对不上"。2026-07-28 在生产上跑过一次,后果是
+官方见证节点从那天报警到今天 9000 多次——它本地留着 2026-06-13 起的
+71 天,而平台侧只剩 2026-06-29,中间 16 天在平台侧整个消失。
+对外部观察者来说,那就是「平台删了 16 天的账」。
+
+现在不需要了:自 payload schema 2 起,演示号段的流水**根本不进账本**
+(services/ledger.py 的 DEMO_PHONE_PREFIXES)。链上没记过演示订单的账,
+删演示单据自然不会让历史锚点对不上。
+
+老锚点(schema 1,确实含演示流水)照常留着——锚点存的是当时那一天的
+payload 全文,不是实时查询,单据删了仍然自洽。
+
+真有非重置不可的理由,走 services/ledger.py 的 open_new_epoch():
+它会先把旧链的链尾哈希冻结成一条永久公开记录再动手。
 
 用法(在部署机上,先预览再执行):
     docker exec superz-api python -m scripts.scrub_demo
@@ -158,11 +173,33 @@ async def scrub(apply: bool) -> None:
             print("\n预览模式,未做任何修改。确认无误后加 --yes 执行。")
             return
 
-        # 账本重新起链:历史锚点/内审结果引用已删单据,保留只会天天报警
-        for model in (m.LedgerAnchor, m.AuditAlert, m.AuditRun):
-            if model.__tablename__ in existing_tables:
-                await db.execute(delete(model))
-        print("  ✓ 账本锚点与内审记录已清空,从当前数据重新起链")
+        # ⚠️ **不再清空账本锚点。**
+        #
+        # 原来这里连 ledger_anchors 一起删,让链从清理后的数据重新起链,
+        # 理由是"历史锚点引用已删单据,保留只会天天报警"。
+        #
+        # 代价极大:2026-07-28 跑过一次,官方见证节点本地留着 2026-06-13
+        # 起的 71 天,平台侧只剩 2026-06-29 —— 中间 16 天在平台侧整个消失。
+        # 节点每 5 分钟报一次「锚点消失」,报了 9000 多次,/nodes 页对外
+        # 挂着一个永久红色警报。**对外部观察者来说,那就是「平台删了账」。**
+        # 更糟的是警报从此卡死:真出事时没人会再看它。
+        #
+        # 根子已经在 schema 2 修掉了 —— 演示流水根本不进账本
+        # (services/ledger.py 的 DEMO_PHONE_PREFIXES)。既然链上没记过
+        # 演示订单的账,删演示单据也就不会让历史锚点对不上,不需要动链。
+        #
+        # 老锚点(schema 1,里面确实含演示流水)照常留着:它们存的是
+        # **当时那一天的 payload 全文**,不是实时查询,单据删了也仍然自洽,
+        # 见证节点复算得出同样的哈希。
+        #
+        # 万一将来真有非重置不可的理由,走 ledger.open_new_epoch() ——
+        # 它会先把旧链的链尾哈希冻结成一条永久公开记录再动手。
+        if m.AuditAlert.__tablename__ in existing_tables:
+            # 未决告警会引用已删单据,留着就是每天一条查不下去的红条;
+            # AuditRun(历史核账记录)**不删** —— 删了"连续 N 天零差错"
+            # 会归零,那是自己给自己抹掉的信用
+            await db.execute(delete(m.AuditAlert))
+            print("  ✓ 未决内审告警已清空(账本锚点与历史核账记录保留)")
 
         if admin_ids and new_password:
             from app.security import hash_password

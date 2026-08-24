@@ -20,7 +20,50 @@ from ..models import LedgerAnchor
 logger = logging.getLogger("superz.ledger")
 
 GENESIS = "0" * 64
-SCHEMA = 1
+#: payload 版本。2 起**演示账号的流水不再进账本**(见 _DEMO_EXCLUDE)。
+#:
+#: 改这个数字意味着"同一天重算会得到不同结果",所以它必须写进 payload ——
+#: 见证节点看到 schema 变了,就知道口径变了,而不是账被改了。
+#: 历史锚点各自冻结着自己那天的 schema,永不重算。
+SCHEMA = 2
+
+#: seed/demo_seed 的演示号段(和 scripts/scrub_demo.py 同一份判据)。
+#:
+#: ## 为什么账本必须把它们排除在外
+#:
+#: 2026-07-28 跑过一次 scrub_demo 清演示数据,它按当时的设计**清空了
+#: ledger_anchors 让链重新起链** —— 因为演示订单的账就记在链上,单据一删,
+#: 历史锚点必然与数据对不上。
+#:
+#: 代价是:官方见证节点本地留着 2026-06-13 起的 71 天,而平台侧最早只剩
+#: 2026-06-29,中间 16 天在平台侧整个消失。节点每 5 分钟报一次「锚点消失」,
+#: 报了 9000 多次,而 /nodes 页对外挂着一个永久的红色警报。
+#:
+#: **对外部观察者来说,那看起来就是「平台删了 16 天的账」。**
+#:
+#: 根子在这里:演示数据和真实账混在同一条链上。只要还混着,
+#: 每清一次演示数据就得重置一次链、就得再报一次警。
+#: 所以从 schema 2 起,链上只记真实交易 —— 清演示数据不再需要动账本。
+DEMO_PHONE_PREFIXES = ("138000000", "938000000")
+
+#: 排除演示流水的 SQL 片段。`{col}` 填该表指向 users.id 的列。
+#:
+#: 用 NOT EXISTS 而不是先查一遍 id 列表再 NOT IN:号段是前缀匹配,
+#: 账号会随时间增减,把它固化成一个列表就等于给自己埋一个"某天多了个
+#: 演示号但账本没排除"的坑。判据只写一处,交给数据库当场判。
+_DEMO_USER = " OR ".join(f"u.phone LIKE '{p}%%'" for p in DEMO_PHONE_PREFIXES)
+
+
+def _not_demo_user(col: str) -> str:
+    """该行的所属用户不是演示号。"""
+    return (f"NOT EXISTS (SELECT 1 FROM users u WHERE u.id = {col} "
+            f"AND ({_DEMO_USER}))")
+
+
+def _not_demo_merchant(col: str) -> str:
+    """该行所属商家的店主不是演示号。"""
+    return (f"NOT EXISTS (SELECT 1 FROM merchants m JOIN users u ON u.id = m.owner_id "
+            f"WHERE m.id = {col} AND ({_DEMO_USER}))")
 # 首次上线时不回补无穷多的空日子:最多回补到最早一条流水那天(再早没有意义)
 MAX_BACKFILL_DAYS = 400
 
@@ -52,13 +95,17 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
          "net": r[3], "kind": r[4]}
         for r in await db.execute(text(
             f"SELECT order_no, food_cents, commission_cents, net_cents, kind "
-            f"FROM merchant_earnings WHERE {where} ORDER BY id"), span)
+            f"FROM merchant_earnings WHERE {where} "
+            f"AND {_not_demo_merchant('merchant_earnings.merchant_id')} "
+            f"ORDER BY id"), span)
     ]
     rider_rows = [
         {"o": hash_no(r[0]), "amount": r[1], "kind": r[2]}
         for r in await db.execute(text(
             f"SELECT order_no, amount_cents, kind "
-            f"FROM rider_earnings WHERE {where} ORDER BY id"), span)
+            f"FROM rider_earnings WHERE {where} "
+            f"AND {_not_demo_user('rider_earnings.rider_id')} "
+            f"ORDER BY id"), span)
     ]
     voucher_where = where.replace("created_at", "redeemed_at")
     voucher_rows = [
@@ -66,6 +113,7 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
         for r in await db.execute(text(
             f"SELECT purchase_no, sell_price_cents, commission_cents, net_cents "
             f"FROM voucher_purchases WHERE status = 'redeemed' AND {voucher_where} "
+            f"AND {_not_demo_merchant('voucher_purchases.merchant_id')} "
             f"ORDER BY id"), span)
     ]
     # 住宿:离店结算行(settle,产生 5% 佣金) + 取消扣款/未入住行(佣金必须为 0)。
@@ -79,6 +127,7 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"SELECT order_no, total_cents, fee_cents, net_cents, "
             f"       'settle' AS kind "
             f"FROM stay_orders WHERE status = 'completed' AND {stay_completed} "
+            f"AND {_not_demo_merchant('stay_orders.merchant_id')} "
             f"UNION ALL "
             f"SELECT order_no, total_cents, fee_cents, net_cents, "
             f"       CASE WHEN net_cents < 0 THEN 'penalty' "
@@ -86,6 +135,7 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"            ELSE 'cancel' END "  # penalty=到店无房违约金(商家负行)
             f"FROM stay_orders WHERE status IN ('cancelled', 'noshow') "
             f"  AND net_cents != 0 AND {stay_cancelled} "
+            f"  AND {_not_demo_merchant('stay_orders.merchant_id')} "
             f"ORDER BY 1"), span)
     ]
     # 骑手保障金计提:每笔配送入账计提固定额,从平台佣金中拨出,
@@ -164,3 +214,69 @@ async def build_missing_anchors(db: AsyncSession) -> int:
     if built:
         logger.info("公开账本锚点 +%s(至 %s)", built, yesterday)
     return built
+
+
+async def open_new_epoch(db: AsyncSession, reason: str) -> int:
+    """重置账本链之前**必须**先走这里。返回新纪元号。
+
+    做三件事,顺序不能反:
+
+    1. 把旧链的**链尾哈希和日期范围冻结**进 `ledger_epochs` ——
+       旧链的每日锚点可以没了,但它最后长什么样必须留下来,
+       任何保存过旧锚点的人都能对上。2026-07-28 那次就是漏了这一步,
+       于是"消失的 16 天到底是什么"永远说不清了;
+    2. 删掉旧锚点;
+    3. 让 `build_missing_anchors` 从当前数据重新起链。
+
+    `reason` 会**原样公开**在 /nodes 与透明中心。写清楚为什么,
+    因为这条记录一旦写下就不再改动,而且见证节点也会盯着它 ——
+    记录本身被改或消失,防线照常触发。
+
+    ⚠️ **这不是赦免。** 它只是把「重置」从一个无法解释的异常,
+    变成一条必须署名、永久留档的记录。平台仍然改不了历史。
+    """
+    from sqlalchemy import delete, func as sa_func
+
+    from ..models import LedgerEpoch
+
+    if not reason.strip():
+        raise ValueError("重置账本必须写明原因 —— 这条记录会公开且永不修改")
+
+    last_epoch = await db.scalar(
+        select(LedgerEpoch).order_by(LedgerEpoch.epoch.desc()).limit(1))
+    epoch = (last_epoch.epoch + 1) if last_epoch else 2
+
+    first_day = await db.scalar(select(sa_func.min(LedgerAnchor.day)))
+    tip = await db.scalar(
+        select(LedgerAnchor).order_by(LedgerAnchor.day.desc()).limit(1))
+
+    db.add(LedgerEpoch(
+        epoch=epoch,
+        started_day="",                      # 新链第一天,由重新起链时回填
+        reason=reason.strip()[:300],
+        prev_tip_hash=tip.chain_hash if tip else "",
+        prev_first_day=first_day or "",
+        prev_last_day=tip.day if tip else "",
+    ))
+    await db.execute(delete(LedgerAnchor))
+    await db.commit()
+    logger.warning("账本链重置为第 %s 纪元:%s(旧链 %s→%s,链尾 %s)",
+                   epoch, reason, first_day, tip.day if tip else "-",
+                   (tip.chain_hash[:16] + "…") if tip else "-")
+    return epoch
+
+
+async def backfill_epoch_start(db: AsyncSession) -> None:
+    """把纪元记录里空着的 started_day 补上(重新起链之后调用,幂等)。"""
+    from ..models import LedgerEpoch
+
+    row = await db.scalar(select(LedgerEpoch)
+                          .where(LedgerEpoch.started_day == "")
+                          .order_by(LedgerEpoch.epoch.desc()).limit(1))
+    if row is None:
+        return
+    first = await db.scalar(
+        select(LedgerAnchor).order_by(LedgerAnchor.day.asc()).limit(1))
+    if first is not None:
+        row.started_day = first.day
+        await db.commit()

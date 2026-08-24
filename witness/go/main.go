@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	version          = "go-0.2.1"
+	version          = "go-0.2.2"
 	defaultAPI       = "https://chaojizan.cc"
 	heartbeatSeconds = 300
 	genesis          = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -186,11 +186,20 @@ func verifyRows(p map[string]any) []string {
 			problems = append(problems, fmt.Sprintf("商家行 %v: 佣金超过 %.0f%%", r["o"], rate*100))
 		}
 	}
+	// 「只进不冲」的实质是**骑手的钱只增不减**,不是"只能有 earning 一种"。
+	// 骑手反馈现场难度后的补贴(#301)是平台认亏的正数 adjustment,
+	// 没破坏任何原则,却会被 kind 字面判成违规。
+	// 判据按实质写:负数即违规;kind 走白名单,多出一种会扣钱的立刻拦住。
 	rows, _ = p["rider_rows"].([]any)
 	for _, ri := range rows {
 		r := ri.(map[string]any)
-		if r["kind"] != "earning" || num(r["amount"]) < 0 {
-			problems = append(problems, fmt.Sprintf("骑手行 %v: 配送费被冲减", r["o"]))
+		kind, _ := r["kind"].(string)
+		if num(r["amount"]) < 0 {
+			problems = append(problems, fmt.Sprintf(
+				"骑手行 %v: 配送费被冲回(%s)", r["o"], kind))
+		} else if kind != "earning" && kind != "adjustment" {
+			problems = append(problems, fmt.Sprintf(
+				"骑手行 %v: 未知入账类型 %s", r["o"], kind))
 		}
 	}
 	rows, _ = p["voucher_rows"].([]any)

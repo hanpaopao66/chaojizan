@@ -99,6 +99,17 @@
             max-width:240px; line-height:1.5;
             font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
   .mapnote { color:var(--muted); font-size:.8rem; margin:6px 0 0; }
+  /* 账本纪元公告。**刻意不做成红色警报** —— 它不是异常,是一条
+     已经说明过的事实记录。红色留给"有节点说账被改了,而我们没解释过"。
+     用琥珀色 + 左侧粗边:看得见、读得完、不制造恐慌 */
+  .epoch { border-left:4px solid var(--amber); background:var(--card);
+           border:1px solid var(--line); border-left-width:4px;
+           border-radius:12px; padding:14px 16px; margin:16px 0;
+           font-size:.88rem; line-height:1.75; }
+  .epoch h3 { margin:0 0 6px; font-size:.95rem; color:var(--amber); }
+  .epoch .meta { color:var(--muted); font-size:.8rem; margin-top:8px;
+                 font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                 word-break:break-all; }
   /* 节点列表和地图是同一台机器的两种读数,配色也就该是同一套。
      两块长得不一样的话,读的人得在脑子里再对一次"这个绿等于那个绿吗" */
   .nodetable { background:#000A00; border:1px solid #1A2E1A; border-radius:16px;
@@ -128,6 +139,10 @@
       <div class="l" id="divergentLabel" style="display:none">节点报告不一致</div></div>
   </div>
   <div id="statusLine" class="status-line status-ok">正在加载…</div>
+  <!-- 账本纪元公告:由 /ledger/epochs 渲染,不是写死的文案。
+       写死的话,下一次重置又得有人记得回来改这段 HTML ——
+       而"忘了公告"正是上一次留下 9000 次警报的原因 -->
+  <div id="epochs"></div>
 
   <h2>见证网络 · 世界分布</h2>
   <div class="mapcard">
@@ -529,7 +544,43 @@ function mapHover(e) {
   tip.style.top = (best.y + 14) + 'px';
 }
 
+/* 账本纪元公告:每一次「链被重新起头」都在这里说清楚。
+ *
+ * 从 /ledger/epochs 渲染,不是写死的文案 —— 写死的话下一次重置又得有人
+ * 记得回来改这段 HTML,而"忘了公告"正是上一次留下 9000 次警报的原因。
+ *
+ * 这段话是给**怀疑我们的人**看的,所以要把不利的部分也写出来:
+ * 消失了哪几天、链尾哈希有没有留存。留了就贴出来给人对,
+ * 没留就直说没留 —— 含糊过去只会让人更确信我们在藏东西。
+ */
+async function loadEpochs() {
+  let list = [];
+  try {
+    list = await (await fetch('/ledger/epochs')).json();
+  } catch (e) { return; }                       // 拿不到就什么都不显示
+  if (!Array.isArray(list) || !list.length) return;
+  // 只公告"抹掉过历史"的纪元。第 1 纪元若没有前链范围,说明这条链
+  // 从头到尾没断过,没什么可公告的
+  const resets = list.filter(e => e.prev_first_day);
+  if (!resets.length) return;
+  document.getElementById('epochs').innerHTML = resets.map(e => {
+    const lo = e.prev_first_day;
+    const hi = e.prev_last_day || '(新链起点前一天)';
+    const tip = e.prev_tip_hash
+      ? '上一条链的链尾哈希:' + esc(e.prev_tip_hash)
+      : '⚠ 上一条链的链尾哈希<b>没有保留</b>——这是当时的疏漏,'
+        + '保存过旧锚点的人无法与我们对账。此后的重置一律先冻结链尾再动手。';
+    return '<div class="epoch">'
+      + '<h3>账本曾于此处重新起链(第 ' + e.epoch + ' 纪元)</h3>'
+      + '<div>' + esc(e.reason) + '</div>'
+      + '<div class="meta">消失的锚点:' + esc(lo) + ' ~ ' + esc(hi)
+      + '<br>新链起点:' + esc(e.started_day || '—')
+      + '<br>' + tip + '</div></div>';
+  }).join('');
+}
+
 async function load() {
+  loadEpochs();
   const s = await (await fetch('/nodes/summary')).json();
   document.getElementById('online').textContent = s.online;
   document.getElementById('total').textContent = s.total;
@@ -590,7 +641,11 @@ function verifyRows(p) {
       problems.push(`商家行 ${r.o}: 佣金超过 ${rate * 100}%`);
   }
   for (const r of p.rider_rows || [])
-    if (r.kind !== 'earning' || r.amount < 0) problems.push(`骑手行 ${r.o}: 配送费被冲减`);
+    // 只进不冲的实质是**只增不减**:负数即违规,不管挂什么 kind;
+    // kind 走白名单(earning / adjustment),将来多出一种会扣钱的立刻拦住
+    if (r.amount < 0) problems.push(`骑手行 ${r.o}: 配送费被冲回(${r.kind})`);
+    else if (r.kind !== 'earning' && r.kind !== 'adjustment')
+      problems.push(`骑手行 ${r.o}: 未知入账类型 ${r.kind}`);
   for (const r of p.voucher_rows || [])
     if (r.fee !== Math.trunc(r.gross * vrate) || r.net !== r.gross - r.fee)
       problems.push(`团购行 ${r.p}: 服务费不是 ${vrate * 100}%`);

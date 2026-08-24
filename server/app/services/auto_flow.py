@@ -1252,9 +1252,13 @@ async def auto_flow_loop() -> None:
             # **不含 order_events** —— 那是三年法定留存,见函数注释
             await sweep_log_retention()
             # 公开账本锚点补到昨天(幂等,通常零工作量;见 services/ledger.py)
-            from .ledger import build_missing_anchors
+            from .ledger import backfill_epoch_start, build_missing_anchors
             async with SessionLocal() as db:
                 await build_missing_anchors(db)
+                # 重置之后新链的第一天要回填进纪元记录
+                #(幂等,平时零工作量)。必须在 with 里面 —— 出了这个块
+                # session 已经关了
+                await backfill_epoch_start(db)
         except Exception:  # 清扫失败不能拖垮主服务,下一轮重试
             logger.exception("auto_flow sweep failed")
         await asyncio.sleep(settings.sweep_interval_seconds)

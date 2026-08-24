@@ -1813,6 +1813,53 @@ class PushLog(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
+class LedgerEpoch(Base):
+    """账本纪元:每一次「链被重新起头」的**永久公开记录**(#2)。
+
+    ## 为什么需要它
+
+    见证节点的第一道防线是「我见过的锚点必须一字不差,消失也算篡改」。
+    这条防线是对的,但它分不出两件事:
+
+    - 平台偷偷改了账;
+    - 平台公开地重置了链(比如清演示数据),并说明了原因。
+
+    `LEDGER-SPEC` §4 原话是「由人来判断是公告过的重置还是真的在毁账」——
+    **机器没有任何判断依据**。2026-07-28 那次重置就卡在这儿:
+    节点从那天报警报到今天 9000 多次,而这一个月里没有人做过那个判断。
+    结果是最坏的一种告警疲劳:唯一那个该响的警报,正因为别的原因一直响着。
+
+    ## 它不是赦免
+
+    有了这张表,平台**仍然改不了历史** —— 只是把「重置」从一个无法解释的
+    异常,变成一条**必须署名、永久留档、节点也会盯着**的记录:
+
+    - 每条纪元记录一旦写下就不再改动,节点各自留存;
+      记录本身被改或消失,那才是真的篡改,防线照常触发;
+    - `prev_tip_hash` 冻结上一纪元的链尾哈希 —— 旧链的每日锚点可以没了,
+      但它最后长什么样必须留下来,任何保存过旧锚点的人都能对。
+      **2026-07-28 那次没留**,所以第 1 纪元这一栏是空的;
+      这条记录存在的意义,一半就是让这种事不再发生第二次。
+    """
+
+    __tablename__ = "ledger_epochs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: 第几纪元,从 1 开始
+    epoch: Mapped[int] = mapped_column(Integer, unique=True)
+    #: 本纪元第一个锚点的日子(北京时间 yyyy-MM-dd)
+    started_day: Mapped[str] = mapped_column(String(10))
+    #: 为什么重置。给人看的一句话,会原样展示在 /nodes 与透明中心
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    #: 上一纪元的链尾 chain_hash;第 1 纪元或未留存时为空串
+    prev_tip_hash: Mapped[str] = mapped_column(String(64), default="")
+    #: 上一纪元覆盖的日期范围(留档用,便于对照"消失的是哪几天")
+    prev_first_day: Mapped[str] = mapped_column(String(10), default="")
+    prev_last_day: Mapped[str] = mapped_column(String(10), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
 class LedgerAnchor(Base):
     """公开账本锚点:一天一条,哈希链防篡改(见证节点体系的地基)。
 

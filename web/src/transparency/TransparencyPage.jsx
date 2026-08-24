@@ -65,6 +65,40 @@ function UptimeDays({ days }) {
   return <div className="tp-days">{cells}</div>
 }
 
+/** 账本纪元公告:每一次「链被重新起头」都在这里说清楚。
+ *
+ * 从 /ledger/epochs 渲染,不是写死的文案 —— 写死的话下一次重置又得有人
+ * 记得回来改这个文件,而「忘了公告」正是上一次留下 9000 次节点警报的原因。
+ *
+ * 这段话是给**怀疑我们的人**看的,所以不利的部分也要写出来:
+ * 消失了哪几天、链尾哈希有没有留存。没留就直说没留 ——
+ * 含糊过去只会让人更确信我们在藏东西。
+ */
+function EpochNotice() {
+  const list = useFetch('/ledger/epochs')
+  // 只公告"抹掉过历史"的纪元;链从头没断过的话没什么可说的
+  const resets = (Array.isArray(list) ? list : []).filter(e => e.prev_first_day)
+  if (!resets.length) return null
+  return (
+    <section className="tp-epoch">
+      {resets.map(e => (
+        <div key={e.epoch} className="tp-epoch-card">
+          <h3>账本曾于此处重新起链(第 {e.epoch} 纪元)</h3>
+          <p>{e.reason}</p>
+          <div className="meta">
+            消失的锚点:{e.prev_first_day} ~ {e.prev_last_day || '(新链起点前一天)'}
+            <br />新链起点:{e.started_day || '—'}
+            <br />{e.prev_tip_hash
+              ? `上一条链的链尾哈希:${e.prev_tip_hash}`
+              : '⚠ 上一条链的链尾哈希没有保留——这是当时的疏漏,保存过旧锚点的人'
+                + '无法与我们对账。此后的重置一律先冻结链尾再动手。'}
+          </div>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 export default function TransparencyPage() {
   useEffect(() => { document.title = '超级赞 · 透明中心' }, [])
   const audit = useFetch('/transparency/audit')
@@ -107,6 +141,7 @@ export default function TransparencyPage() {
       </nav>
 
       <div className="tp-page">
+        <EpochNotice />
         <header className="tp-hero" id="audit">
           <div className="eyebrow">透 明 中 心</div>
           <div className="big">

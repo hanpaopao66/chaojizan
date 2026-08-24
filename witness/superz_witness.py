@@ -20,6 +20,7 @@
 见证的意义在于你不需要信任任何人,包括这个脚本的作者。
 """
 import argparse
+import datetime
 import hashlib
 import json
 import os
@@ -30,7 +31,12 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-VERSION = "0.1.2"
+VERSION = "0.1.3"
+
+#: 骑手侧允许的入账类型。**白名单,不是黑名单** ——
+#: 将来谁加了一种会扣骑手钱的类型,这里会立刻拦住,而不是默默放行。
+#: earning=配送费+小费+等餐补偿;adjustment=正向补偿(申诉改判、现场难度补贴)
+RIDER_KINDS = {"earning", "adjustment"}
 
 
 def local_utc_offset() -> str:
@@ -88,9 +94,23 @@ def verify_rows(payload: dict) -> list[str]:
         if abs(fee) > abs(food) * rate_max + 1:
             problems.append(f"商家行 {r['o']}: 佣金 {fee} 超过应收 {food} 的 {rate_max:.0%}")
 
+    # 骑手侧「只进不冲」的实质是**骑手的钱只增不减**,不是"只能有 earning 这一种"。
+    # 原来写成 `kind != "earning"` 是当时骑手侧确实只有这一种入账的简写。
+    # 现在多了一种:骑手反馈现场难度后的补贴(#301),平台认亏、正数、走 adjustment。
+    # 它没有破坏任何原则,却会被字面判成违规。
+    # 
+    # 所以判据改成按实质写:
+    #   - **金额为负 = 违规**(这才是"冲")——不管挂的是什么 kind;
+    #   - kind 必须在白名单里,出现没见过的种类同样报出来 ——
+    #     白名单比黑名单安全:将来谁加了一种会扣钱的类型,这里会立刻拦住。
+    # `reversal` 不在白名单里:商家侧有售后冲账,骑手侧**永远不该有**。
     for r in payload.get("rider_rows", []):
-        if r["kind"] != "earning" or r["amount"] < 0:
-            problems.append(f"骑手行 {r['o']}: 配送费只进不冲的原则被打破 ({r['kind']}, {r['amount']})")
+        if r["amount"] < 0:
+            problems.append(f"骑手行 {r['o']}: 配送费被冲回 "
+                            f"({r['kind']}, {r['amount']}) —— 只进不冲的原则被打破")
+        elif r["kind"] not in RIDER_KINDS:
+            problems.append(f"骑手行 {r['o']}: 未知入账类型 {r['kind']} —— "
+                            f"骑手侧只应有入账与正向补偿")
 
     for r in payload.get("voucher_rows", []):
         expect_fee = int(r["gross"] * voucher_rate)
@@ -124,6 +144,29 @@ def verify_rows(payload: dict) -> list[str]:
             r["fee"] for r in payload.get("stay_rows", [])):
         problems.append("住宿服务费合计与逐行加总不一致")
     return problems
+
+
+def _epoch_fingerprint(e: dict) -> str:
+    """纪元记录的指纹。
+
+    只取**不该变**的字段:纪元号、新链起点、原因、上一纪元的链尾与范围。
+    `announced_at` 之类的时间戳不进指纹 —— 服务端序列化格式改一下
+    (比如时区写法)就会让所有节点集体误报篡改。
+    """
+    return sha256(canonical([
+        e.get("epoch"), e.get("started_day", ""), e.get("reason", ""),
+        e.get("prev_tip_hash", ""), e.get("prev_first_day", ""),
+        e.get("prev_last_day", ""),
+    ]))
+
+
+def _prev_day(day: str) -> str:
+    """yyyy-MM-dd 的前一天;格式不对就返回空串(宁可不匹配,不可乱匹配)。"""
+    try:
+        y, m, d = (int(x) for x in day.split("-"))
+        return (datetime.date(y, m, d) - datetime.timedelta(days=1)).isoformat()
+    except Exception:
+        return ""
 
 
 class Witness:
@@ -160,12 +203,66 @@ class Witness:
                 break
             after = page[-1]["day"]
 
+        # 纪元记录:平台每一次「链被重新起头」的永久公开档案。
+        #
+        # 没有它的时候,这个脚本分不出两件事 —— 平台偷偷改账,
+        # 和平台公开重置了链并说明原因。协议里原本写的是「由人来判断」,
+        # 而机器没有依据,于是 2026-07-28 那次重置让节点报了 9000 多次警,
+        # 一个月没人判断过。警报卡死之后,真出事时也没人会再看它。
+        #
+        # 服务端没有这个接口(老版本)就当没有纪元 —— 行为退回改动之前,
+        # 一切照旧判为篡改。**宁可误报,不可漏报。**
+        epochs = []
+        try:
+            epochs = http_json("GET", f"{self.api}/ledger/epochs") or []
+        except Exception:
+            pass
+
+        # 纪元记录**本身**也在留存范围里:被改或消失,那才是真的篡改。
+        # 少了这一条,平台就可以事后编一条纪元来解释任何一次删账
+        seen_epochs: dict = self.state.setdefault("epochs", {})
+        cur_ep = {str(e["epoch"]): _epoch_fingerprint(e) for e in epochs}
+        tampered = [f"纪元记录被改: 第 {k} 纪元" for k, v in seen_epochs.items()
+                    if k in cur_ep and cur_ep[k] != v]
+        tampered += [f"纪元记录消失: 第 {k} 纪元" for k in seen_epochs
+                     if k not in cur_ep]
+        seen_epochs.update(cur_ep)
+
+        # 已公告的重置覆盖了哪几天:那几天的锚点在平台侧消失是**说明过的**,
+        # 不判为篡改 —— 但照样写进 message,让人看得见发生过什么
+        announced = [(e.get("prev_first_day") or "", e.get("prev_last_day") or "",
+                      e.get("started_day") or "", e.get("reason") or "")
+                     for e in epochs]
+
+        def _covered(day: str) -> str:
+            """这一天是否落在某次已公告重置抹掉的范围里;是则返回原因。"""
+            for first, last, started, reason in announced:
+                # 上一纪元的范围;`last` 缺失时用新链起点兜底
+                hi = last or (started and _prev_day(started)) or ""
+                if first and hi and first <= day <= hi:
+                    return reason or "(未写明原因)"
+            return ""
+
         # 第一道防线:我以前见过的锚点,现在必须一字不差 —— 变了就是改历史;
-        # 老锚点整个消失同样是篡改
+        # 老锚点整个消失同样是篡改,**除非**它落在一次已公告的重置范围里
         current = {a["day"]: a["chain_hash"] for a in anchors}
-        tampered = [f"锚点被改: {d}" for d, h in seen.items()
-                    if d in current and current[d] != h]
-        tampered += [f"锚点消失: {d}" for d in seen if d not in current]
+        tampered += [f"锚点被改: {d}" for d, h in seen.items()
+                     if d in current and current[d] != h]
+        vanished = [d for d in seen if d not in current]
+        reset_days = [d for d in vanished if _covered(d)]
+        tampered += [f"锚点消失: {d}" for d in vanished if d not in reset_days]
+
+        # 已公告的那部分:归档掉,不再每轮重复比对。
+        # 不删的话它会一直挂在 seen 里,而那些天永远不会再出现
+        notes = []
+        if reset_days:
+            reset_days.sort()
+            why = _covered(reset_days[0])
+            notes.append(f"已公告的账本重置: {reset_days[0]}~{reset_days[-1]} "
+                         f"共 {len(reset_days)} 天({why})")
+            archived = self.state.setdefault("archived", {})
+            for d in reset_days:
+                archived[d] = seen.pop(d)
 
         # 第二道防线:新增的日子逐日复算哈希链 + 三原则
         problems: list[str] = []
@@ -198,7 +295,9 @@ class Witness:
         ok = not tampered and not problems
         self._save_state()
 
-        message = "; ".join([*map(str, tampered), *problems])[:200]
+        # notes 放最后:它不是问题,是"发生过什么"的说明。
+        # 但也**必须写进去** —— 一次重置被静默吞掉,和当初没有记录一样坏
+        message = "; ".join([*map(str, tampered), *problems, *notes])[:200]
         report = {
             "node_id": self.state["node_id"],
             "name": os.environ.get("WITNESS_NAME", "")[:30],
