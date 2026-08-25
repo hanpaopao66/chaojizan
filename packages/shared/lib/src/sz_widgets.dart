@@ -977,7 +977,10 @@ class SzUnsavedGuard extends StatelessWidget {
         }
         final leave = await showDialog<bool>(
           context: context,
-          builder: (context) => AlertDialog(
+          // 用 SzDialog 而不是裸 AlertDialog —— 组件库自己也得守自己的规矩。
+          // Material 的默认内边距(24/20/24/24)是给桌面留的,手机上
+          // 一个两行字的弹窗光空白就吃掉七十多像素
+          builder: (context) => SzDialog(
             title: const Text('要放弃已填的内容吗'),
             content: Text(message),
             actions: [

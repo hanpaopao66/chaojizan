@@ -19,9 +19,14 @@ cd "$(dirname "$0")/.."
 
 fail=0
 
+# ⚠️ 只放行 SzDialog 内部那一处,**不是整个文件**。
+# 原来这里排除的是整个 sz_widgets.dart,于是同一个文件里另一处裸的
+# AlertDialog(「要放弃已填的内容吗」)一直没被抓到 —— 组件库自己
+# 没守自己的规矩,而守卫正好在那儿睁一只眼。
 dialogs=$(grep -rn --include="*.dart" "AlertDialog(" apps packages \
-  | grep -v "packages/shared/lib/src/sz_widgets.dart" \
-  | grep -v "packages/shared/test/dialog_density_test.dart" || true)
+  | grep -v "packages/shared/lib/src/sz_widgets.dart:.*=> AlertDialog(" \
+  | grep -v "packages/shared/test/dialog_density_test.dart" \
+  | grep -v "packages/shared/test/dialog_layout_test.dart" || true)
 if [ -n "$dialogs" ]; then
   echo "✗ 直接用了 AlertDialog,改成 SzDialog:"
   echo "$dialogs" | sed 's/^/    /'
