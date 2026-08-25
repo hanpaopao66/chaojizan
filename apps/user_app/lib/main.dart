@@ -6181,6 +6181,13 @@ class _ProfileViewState extends State<ProfileView> {
   /// 的入口。埋在第三张卡中间,或者收进右上角那个没有文字标签的齿轮里,
   /// 等于对这批人关门。它 72px 很贵,但那 72px 买的是 Switch 的 48px
   /// 触控区 —— 给这批人缩触控区是本末倒置。
+  Future<void> _openIdentity() async {
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => IdentityPage(api: widget.api)));
+  }
+
   Widget _entryList(BuildContext context, {required bool marketing}) {
     return Card(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -6198,38 +6205,60 @@ class _ProfileViewState extends State<ProfileView> {
           ),
         ),
         const Divider(height: 1),
-        SzEntryTile(
-          icon: Icons.verified_user_outlined,
-          title: '实名认证',
-          hint: '购买酒类等受限商品需先实名',
-          onTap: () async {
-            if (!await ensureLoggedIn(context)) return;
-            if (!context.mounted) return;
-            await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => IdentityPage(api: widget.api)));
-          },
-        ),
+        // 账号相关三个入口:横过来 + 一句合并的脚注。
+        //
+        // ## 有说明、有状态值的怎么也能进网格
+        //
+        // 前一版把「有 hint 或有 value」一律判成不能进网格,判死了。
+        // 两样都能安置:
+        //
+        // - **说明合进脚注**。三条各挂一句 hint 是 3×17px,而这几句说的
+        //   其实是同一件事(账号能干什么)—— 合成一段 footnote,
+        //   一次说完,还更连贯;
+        // - **状态值收进弹窗**。「生日与推送」点开本来就是个弹窗
+        //   (`_editBirthdayAndPush`,里面有生日输入框和推送开关),
+        //   行上那个「已开启」只是省下一次点击。而这是**设置一次就不管**
+        //   的偏好,不是每次进页面都要确认的东西 —— 用一整行换那一眼,
+        //   不划算。
+        //
+        // 三条 63+63+46=172px → 网格 82px + 脚注两行 28px。
         if (marketing) ...[
-          const Divider(height: 1),
-          // 「好友完成首单,你俩各得券」是**规则内容**不是解释,留着
-          SzEntryTile(
-            icon: Icons.card_giftcard_outlined,
-            title: '邀请有礼',
-            hint: '好友完成首单,你俩各得券',
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => InvitePage(api: widget.api))),
+          SzIconGrid(items: [
+            SzIconGridItem(
+              icon: Icons.verified_user_outlined,
+              label: '实名认证',
+              onTap: _openIdentity,
+            ),
+            SzIconGridItem(
+              icon: Icons.card_giftcard_outlined,
+              label: '邀请有礼',
+              onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => InvitePage(api: widget.api))),
+            ),
+            SzIconGridItem(
+              icon: Icons.cake_outlined,
+              label: '生日与推送',
+              onTap: _editBirthdayAndPush,
+            ),
+          ]),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            child: Text(
+              '实名后才能买酒类等受限商品;邀请好友完成首单,你俩各得券;'
+              '生日当天送券,营销推送可随时关掉(订单通知不受影响)。',
+              style: TextStyle(
+                  fontSize: kFontMicro, color: Theme.of(context).sz.inkMuted),
+            ),
           ),
-          const Divider(height: 1),
-          // 状态值走 value:,同一行右对齐,零额外高度。
-          // 旧版这里是 hint「营销推送可一键关闭」—— 那是句废话,
-          // 用户想知道的是**现在开着没有**,而这个值本来就在 _profile 里
+        ] else
+          // 关掉营销时只剩实名一条 —— 一格网格是三分之一宽的孤格,
+          // 不如老老实实一条列表条,说明也留在原位
           SzEntryTile(
-            icon: Icons.cake_outlined,
-            title: '生日与营销推送',
-            value: (_profile?.marketingPush ?? true) ? '已开启' : '已关闭',
-            onTap: _editBirthdayAndPush,
+            icon: Icons.verified_user_outlined,
+            title: '实名认证',
+            hint: '购买酒类等受限商品需先实名',
+            onTap: _openIdentity,
           ),
-        ],
         const Divider(height: 1),
         // 旧版的 hint 是「配送范围 / 退款规则 / 常见问题」—— 那是一份目录,
         // 目的页自己会答。入口列表回答「这是什么」就够了
