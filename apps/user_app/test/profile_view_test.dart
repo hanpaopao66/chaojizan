@@ -211,7 +211,10 @@ void main() {
       final api = await loggedIn(orders: [order()]);
       await pumpProfile(t, api);
       final n = visibleEntries(t);
-      expect(n, greaterThanOrEqualTo(14),
+      // 18:帮助/反馈/食安投诉三条从列表条换成图标网格之后的实测值。
+      // 门槛跟着实测往上抬 —— 只抬不降,不然下次有人把网格改回列表条
+      // 这里照样绿
+      expect(n, greaterThanOrEqualTo(18),
           reason: '首屏只看得到 $n 个入口。改版前是 8 个,'
               '这一页的全部意义就是把这个数字提上来');
     });
@@ -221,7 +224,7 @@ void main() {
       final api = fakeApi();
       await pumpProfile(t, api);
       final n = visibleEntries(t);
-      expect(n, greaterThanOrEqualTo(10),
+      expect(n, greaterThanOrEqualTo(15),
           reason: '游客首屏只有 $n 个能点的东西 —— '
               '登录前这一页也得是有用的');
     });

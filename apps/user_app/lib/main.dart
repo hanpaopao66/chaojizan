@@ -5794,6 +5794,7 @@ class _ProfileViewState extends State<ProfileView> {
           const SizedBox(height: 12),
         ],
         _quickGrid(context),
+        _serviceGrid(context),
         const SizedBox(height: 12),
         _entryList(context, marketing: marketing),
       ],
@@ -6086,6 +6087,90 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
+  /// 找平台的四类事 + 查账的三个入口:全部横过来。
+  ///
+  /// ## 为什么这几条该是网格而不是列表条
+  ///
+  /// 判据没变,还是 `SzIconGrid` 文档里那条:**标题两三个字就说清、
+  /// 彼此完全平级、给不出状态值**。这六条正好全中 ——
+  /// 「帮助中心」「意见反馈」「平台账本」都是一看就懂的名词,
+  /// 没有"当前是什么值"可言,也不需要一句解释。
+  ///
+  /// 排成竖列的代价是每条 46px 只放三四个字。横过来之后
+  /// **六条 ≈ 100px,原来要 276px**。
+  ///
+  /// ## 分成两行,不是拼成一行
+  ///
+  /// 前三条是「找人」(问、说、查自己的投诉),后三条是「查账」。
+  /// 挤成一行六格的话,每格在 375px 屏上只剩 57px —— 四个字要折两行,
+  /// 而且两类事混在一起,扫一眼分不出哪三个是一伙的。
+  ///
+  /// 一行三个是刻意的:格子宽 114px,四个字一行放得下,
+  /// 两组之间天然断开,不用加分组头(那要 41px)。
+  Widget _serviceGrid(BuildContext context) {
+    Future<void> guarded(Widget Function() page) async {
+      if (!await ensureLoggedIn(context)) return;
+      if (!context.mounted) return;
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => page()));
+    }
+
+    return Card(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        SzIconGrid(items: [
+          SzIconGridItem(
+            icon: Icons.help_outline,
+            label: '帮助中心',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => HelpCenterPage(api: widget.api))),
+          ),
+          SzIconGridItem(
+            icon: Icons.rate_review_outlined,
+            label: '意见反馈',
+            onTap: () => guarded(() => FeedbackPage(api: widget.api)),
+          ),
+          // 食安投诉查得到进度,投诉才不是黑洞。
+          // 标签里的「我的」说明是查自己的,别省 —— 省了就像个投诉入口,
+          // 而这里是**看自己投诉办到哪一步**
+          SzIconGridItem(
+            icon: Icons.health_and_safety_outlined,
+            label: '我的食安投诉',
+            onTap: () => guarded(() => FoodSafetyRecordsPage(api: widget.api)),
+          ),
+        ]),
+        // 账目卡收起时,它的三个入口落在这儿。**只在收起时出现** ——
+        // 卡开着还挂一份就是同一个入口在一页上出现两次。
+        //
+        // 这不是"顺手也放一份",是这张卡能被关掉的前提:平台账本除了那张卡
+        // 只有分账页里一个入口,平台体检更是只有平台账本里一个,
+        // 而分账页要么从首页那条(也能关)进、要么得先有一笔带佣金的订单。
+        // 少了这一段,关卡片 = 删功能
+        if (_ledgerHidden) ...[
+          const Divider(height: 1),
+          SzIconGrid(items: [
+            SzIconGridItem(
+              icon: Icons.pie_chart_outline,
+              label: '钱去哪了',
+              onTap: () => openMoneyFlow(context, widget.api),
+            ),
+            SzIconGridItem(
+              icon: Icons.account_balance_outlined,
+              label: '平台账本',
+              onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => TrustPage(api: widget.api))),
+            ),
+            SzIconGridItem(
+              icon: Icons.monitor_heart_outlined,
+              label: '平台体检',
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => TransparencyPage(api: widget.api))),
+            ),
+          ]),
+        ],
+      ]),
+    );
+  }
+
   /// 设置类列表:需要一句说明、或者有状态值可显示的入口。
   ///
   /// **一张卡,不加分组头。** 分组头 41px、脚注 23px —— 上面三张卡的
@@ -6148,37 +6233,6 @@ class _ProfileViewState extends State<ProfileView> {
         const Divider(height: 1),
         // 旧版的 hint 是「配送范围 / 退款规则 / 常见问题」—— 那是一份目录,
         // 目的页自己会答。入口列表回答「这是什么」就够了
-        SzEntryTile(
-          icon: Icons.help_outline,
-          title: '帮助中心',
-          onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => HelpCenterPage(api: widget.api))),
-        ),
-        const Divider(height: 1),
-        SzEntryTile(
-          icon: Icons.rate_review_outlined,
-          title: '意见反馈',
-          onTap: () async {
-            if (!await ensureLoggedIn(context)) return;
-            if (!context.mounted) return;
-            await Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => FeedbackPage(api: widget.api)));
-          },
-        ),
-        const Divider(height: 1),
-        // 食安投诉查得到进度,投诉才不是黑洞。
-        // 标题里的「我的」已经说明是查自己的,不用再补一句 hint
-        SzEntryTile(
-          icon: Icons.health_and_safety_outlined,
-          title: '我的食安投诉',
-          onTap: () async {
-            if (!await ensureLoggedIn(context)) return;
-            if (!context.mounted) return;
-            await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => FoodSafetyRecordsPage(api: widget.api)));
-          },
-        ),
-        const Divider(height: 1),
         // 点进去只会说「接入微信支付后开放」—— 那就把答案摆在行上,
         // 用户不用点就知道。`value:` 槽位最正当的用法之一:
         // 把一次注定落空的跳转换成同一行的一个词
@@ -6188,36 +6242,6 @@ class _ProfileViewState extends State<ProfileView> {
           value: '暂未开放',
           onTap: _showInvoiceInfo,
         ),
-        // 账目卡收起时,它的三个入口落在这儿。**只在收起时出现** ——
-        // 卡开着还挂一份就是同一个入口在一页上出现两次。
-        //
-        // 这不是"顺手也放一份",是这张卡能被关掉的前提:平台账本除了那张卡
-        // 只有分账页里一个入口,平台体检更是只有平台账本里一个,
-        // 而分账页要么从首页那条(也能关)进、要么得先有一笔带佣金的订单。
-        // 少了这一段,关卡片 = 删功能
-        if (_ledgerHidden) ...[
-          const Divider(height: 1),
-          SzEntryTile(
-            icon: Icons.pie_chart_outline,
-            title: '钱去哪了',
-            hint: '一笔订单的钱怎么分的,拆到分',
-            onTap: () => openMoneyFlow(context, widget.api),
-          ),
-          const Divider(height: 1),
-          SzEntryTile(
-            icon: Icons.account_balance_outlined,
-            title: '平台账本',
-            onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => TrustPage(api: widget.api))),
-          ),
-          const Divider(height: 1),
-          SzEntryTile(
-            icon: Icons.monitor_heart_outlined,
-            title: '平台体检',
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => TransparencyPage(api: widget.api))),
-          ),
-        ],
         const Divider(height: 1),
         // 商店审核要求:我的页可达协议全文。
         // 设置页里也有一份,但合规项上「2 跳可达算不算可达」是拿被打回
