@@ -3484,38 +3484,95 @@ async def my_todos(
         1 for e in cert_rows
         if _lic_stage(e) in ("soon", "urgent", "last", "expired", "overdue"))
 
-    pending_orders = await db.scalar(
-        select(func.count(Order.id)).where(
-            Order.merchant_id == shop.id,
-            Order.status == OrderStatus.PAID)) or 0
-    after_sales = await db.scalar(
-        select(func.count(AfterSale.id)).where(
-            AfterSale.merchant_id == shop.id,
-            AfterSale.status == AfterSaleStatus.pending)) or 0
-    # 差评待回复:近 7 天 ≤3 星还没回应的 —— 回应越快挽回余地越大
-    bad_unreplied = await db.scalar(
-        select(func.count(Review.id)).where(
-            Review.merchant_id == shop.id,
-            Review.merchant_rating <= 3,
-            Review.reply == "",
-            Review.hidden.is_(False),
-            Review.created_at > now - timedelta(days=7))) or 0
-    # 临期营销:店铺券快发完(余量 <10% 或已发完但还挂着)
-    batches = (await db.scalars(
-        select(CouponBatch).where(
-            CouponBatch.merchant_id == shop.id,
-            CouponBatch.active.is_(True)))).all()
-    coupon_low = sum(
-        1 for b in batches
-        if b.total > 0 and (b.total - b.issued) <= max(b.total // 10, 0))
-    # 限时折扣 24h 内到期(到期自动失效,提醒续期或收手)
-    flash_expiring = await db.scalar(
-        select(func.count(Dish.id)).where(
-            Dish.merchant_id == shop.id,
-            Dish.flash_price_cents.is_not(None),
-            Dish.flash_until.is_not(None),
-            Dish.flash_until > now,
-            Dish.flash_until < now + timedelta(hours=24))) or 0
+    # ## 八个计数一趟取回,不是一条一趟
+    #
+    # 这些计数彼此无关,谁也不等谁,可原来是八次 `await db.scalar(...)`
+    # 排着队跑 —— 八个往返,每个 0.5~1ms,而整个接口只回 343 字节。
+    # 商家端前台每 30 秒打一次,一家店一天就是两千多次。
+    #
+    # 现在拼成一条 `SELECT (子查询), (子查询), ...`:WHERE 条件一个字
+    # 没改,只是让库一次算完。**别改成 join**——八个条件各管各的表和
+    # 时间窗,join 起来要处理笛卡尔积,写对了也没人看得懂。
+    #
+    # 「店铺券快发完」原来是把本店所有在架批次整行捞回来在 Python 里数,
+    # 顺手也并进去:开发库里有商家攒了 462 个批次,那是一次全表捞。
+    # `total / 10` 在 Postgres 里整数相除就是截断,与 Python 的 `//`
+    # 对非负数完全一致(total > 0 已经保证了非负)。
+    from .appeals import appeal_cutoff
+    cutoff = appeal_cutoff()
+    appealed_sales_q = select(Appeal.target_id).where(
+        Appeal.target_type == "after_sale")
+    appealed_reviews_q = select(Appeal.target_id).where(
+        Appeal.target_type == "review")
+
+    def _count(model, *conds):
+        return select(func.count(model.id)).where(*conds).scalar_subquery()
+
+    counts = (await db.execute(select(
+        _count(Order,
+               Order.merchant_id == shop.id,
+               Order.status == OrderStatus.PAID).label("pending_orders"),
+        _count(AfterSale,
+               AfterSale.merchant_id == shop.id,
+               AfterSale.status == AfterSaleStatus.pending).label(
+                   "after_sales"),
+        # 差评待回复:近 7 天 ≤3 星还没回应的 —— 回应越快挽回余地越大
+        _count(Review,
+               Review.merchant_id == shop.id,
+               Review.merchant_rating <= 3,
+               Review.reply == "",
+               Review.hidden.is_(False),
+               Review.created_at > now - timedelta(days=7)).label(
+                   "bad_unreplied"),
+        # 超过 24 小时还没回的差评:行业里"差评 24 小时内必回"是常识,
+        # 拖过一天再回,顾客早就走了。单列出来而不是混在待回复里
+        _count(Review,
+               Review.merchant_id == shop.id,
+               Review.merchant_rating <= 3,
+               Review.reply == "",
+               Review.hidden.is_(False),
+               Review.created_at < now - timedelta(hours=24),
+               Review.created_at > now - timedelta(days=7)).label(
+                   "bad_overdue"),
+        # 临期营销:店铺券快发完(余量 ≤10%,含已发完但还挂着的)
+        _count(CouponBatch,
+               CouponBatch.merchant_id == shop.id,
+               CouponBatch.active.is_(True),
+               CouponBatch.total > 0,
+               (CouponBatch.total - CouponBatch.issued)
+               <= CouponBatch.total / 10).label("coupon_low"),
+        # 限时折扣 24h 内到期(到期自动失效,提醒续期或收手)
+        _count(Dish,
+               Dish.merchant_id == shop.id,
+               Dish.flash_price_cents.is_not(None),
+               Dish.flash_until.is_not(None),
+               Dish.flash_until > now,
+               Dish.flash_until < now + timedelta(hours=24)).label(
+                   "flash_expiring"),
+        # 还来得及申诉的裁决数(售后判商家责 + 差评),已申诉过的不算。
+        #
+        # 口径是「**还来得及**」不是「历史上被判过几次」:后者点进去多半
+        # 什么也做不了,给它挂红数字只会制造焦虑 —— 下一次商家就不信
+        # 这个角标了(同 SzIconGridItem.badge 的规矩:只给"你还有事要做"的)。
+        #
+        # 窗口判据从 appeals.py 借,不在这儿抄一遍 —— 抄一遍的话哪天只改了
+        # 一处,角标说有 2 单可申诉、点进去提交却被 422 挡回来
+        _count(AfterSale,
+               AfterSale.merchant_id == shop.id,
+               AfterSale.status == AfterSaleStatus.accepted,
+               AfterSale.fault != "rider",
+               AfterSale.processed_at.is_not(None),
+               AfterSale.processed_at > cutoff,
+               AfterSale.id.not_in(appealed_sales_q)).label(
+                   "appealable_sales"),
+        _count(Review,
+               Review.merchant_id == shop.id,
+               Review.merchant_rating <= 3,
+               Review.hidden.is_(False),
+               Review.created_at > cutoff,
+               Review.id.not_in(appealed_reviews_q)).label(
+                   "appealable_reviews"),
+    ))).one()
 
     # 未读消息(评价/系统触达;订单类与公告不计):与消息中心同一口径 ——
     # 走同一个函数,而不是"照着写一遍",两处数字对不上比不显示更糟
@@ -3523,56 +3580,15 @@ async def my_todos(
     messages_unread = await message_center.unread_count(db, "merchant",
                                                         user.id)
 
-    # 超过 24 小时还没回的差评:行业里"差评 24 小时内必回"是常识,
-    # 拖过一天再回,顾客早就走了。单列出来而不是混在 bad_reviews_unreplied 里
-    bad_overdue = await db.scalar(
-        select(func.count(Review.id)).where(
-            Review.merchant_id == shop.id,
-            Review.merchant_rating <= 3,
-            Review.reply == "",
-            Review.hidden.is_(False),
-            Review.created_at < now - timedelta(hours=24),
-            Review.created_at > now - timedelta(days=7))) or 0
-
-    # 还来得及申诉的裁决数(售后判商家责 + 差评),已申诉过的不算。
-    #
-    # 口径是「**还来得及**」不是「历史上被判过几次」:后者点进去多半什么也
-    # 做不了,给它挂红数字只会制造焦虑 —— 下一次商家就不信这个角标了
-    # (同 SzIconGridItem.badge 的规矩:只给"你还有事要做"的)。
-    #
-    # 窗口判据从 appeals.py 借,不在这儿抄一遍 —— 抄一遍的话哪天只改了一处,
-    # 角标说有 2 单可申诉、点进去提交却被 422 挡回来
-    from .appeals import appeal_cutoff
-    cutoff = appeal_cutoff()
-    appealed = select(Appeal.target_id).where(
-        Appeal.target_type == "after_sale")
-    appealable_sales = await db.scalar(
-        select(func.count(AfterSale.id)).where(
-            AfterSale.merchant_id == shop.id,
-            AfterSale.status == AfterSaleStatus.accepted,
-            AfterSale.fault != "rider",
-            AfterSale.processed_at.is_not(None),
-            AfterSale.processed_at > cutoff,
-            AfterSale.id.not_in(appealed))) or 0
-    appealed_reviews = select(Appeal.target_id).where(
-        Appeal.target_type == "review")
-    appealable_reviews = await db.scalar(
-        select(func.count(Review.id)).where(
-            Review.merchant_id == shop.id,
-            Review.merchant_rating <= 3,
-            Review.hidden.is_(False),
-            Review.created_at > cutoff,
-            Review.id.not_in(appealed_reviews))) or 0
-
     return {
-        "pending_orders": pending_orders,
-        "after_sales": after_sales,
-        "bad_reviews_unreplied": bad_unreplied,
-        "bad_reviews_overdue": bad_overdue,  # 其中超 24 小时的
-        "coupon_batches_low": coupon_low,
-        "flash_expiring": flash_expiring,
+        "pending_orders": counts.pending_orders,
+        "after_sales": counts.after_sales,
+        "bad_reviews_unreplied": counts.bad_unreplied,
+        "bad_reviews_overdue": counts.bad_overdue,  # 其中超 24 小时的
+        "coupon_batches_low": counts.coupon_low,
+        "flash_expiring": counts.flash_expiring,
         "messages_unread": messages_unread,
-        "appealable": appealable_sales + appealable_reviews,
+        "appealable": counts.appealable_sales + counts.appealable_reviews,
         # 证照/健康证到期:**不计入待办角标数**,单独一档。
         # 它们和"有几单待接"不是一回事 —— 混进同一个数字里,
         # 商家清完订单就以为清完了,而这两条是清不掉的(要去办证)
