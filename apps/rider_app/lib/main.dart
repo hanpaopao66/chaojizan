@@ -1868,17 +1868,18 @@ class _RiderHomePageState extends State<RiderHomePage>
                           '比只送手头单多跑约 ${order.detourM ?? 0} 米',
                   style: TextStyle(
                       color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
-            // 整单跑程 + 耗时 + 时薪。
+            // ⚠️ 这里曾经还有一行「跑程:到店 X 米 + 送 Y 米」,**删了**。
             //
-            // 旧版只显示「到店多远」和总价 —— 而一个 3 公里 8 块的单和一个
-            // 1 公里 4 块的单哪个划算,**不看总价看时薪**。实测:前者时薪
-            // ¥14.2/小时、后者 ¥21.8/小时,总价高的反而不划算。
-            if (order.tripM != null)
-              Text(
-                  '跑程:到店 ${order.distanceM ?? 0} 米 + 送 ${order.tripM} 米'
-                  '${order.distanceSource == "straight" ? "(直线估算)" : ""}',
-                  style: TextStyle(
-                      fontSize: 12, color: Theme.of(context).sz.inkMuted)),
+            // 它和卡片下方那行「去取餐 1.7 公里(约 7 分钟)· 再送 2.3 公里
+            // · 全程 4.0 公里」是**同两个数**,一个用米一个用公里,
+            // 一个在上一个在下 —— #293 加下面那行时忘了删这行。
+            //
+            // 重复不会报错。代价是骑手在雨里要读两遍才找得到他真正要的
+            // 那个数,而下面那行还多给了骑行分钟数和「全程」,严格更好。
+            //
+            // 时薪那行留着:一个 3 公里 8 块的单和一个 1 公里 4 块的单
+            // 哪个划算,**不看总价看时薪**(实测 ¥14.2/小时 vs ¥21.8/小时,
+            // 总价高的反而不划算)。
             if (order.estMinutes != null)
               Row(children: [
                 Text('约 ${order.estMinutes!.toStringAsFixed(0)} 分钟',
@@ -2007,10 +2008,21 @@ class _RiderHomePageState extends State<RiderHomePage>
               // 所以金额比别处再大一档,并明说没人从里面抽走
               return Padding(
                 padding: const EdgeInsets.only(top: 6),
+                // ⚠️ 两边都要能收缩。
+                //
+                // 原来左右两个 Column 都按内容自然宽度撑开,中间一个
+                // Spacer —— 390 屏上实测**横向溢出 424px**:
+                // 左边的费用拆分「基础配送费 3.00 · 夜间配送 2.00 · 爬楼费…」
+                // 和右边的「⚠ 无电梯爬楼6楼;门禁难进」都可能很长,
+                // 谁都不肯让,于是一起画出界。
+                //
+                // 溢出在真机上是黄黑条 + 文字被裁,而**测试里之前没有
+                // 任何用例渲染过这张卡**,所以一直没人发现。
                 child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Column(
+                      Flexible(
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(yuan(mine),
@@ -2038,8 +2050,10 @@ class _RiderHomePageState extends State<RiderHomePage>
                             ),
                         ],
                       ),
-                      const Spacer(),
-                      Column(
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -2065,6 +2079,7 @@ class _RiderHomePageState extends State<RiderHomePage>
                                       fontSize: kFontNote, color: sz.inkMuted)),
                             ),
                         ],
+                      ),
                       ),
                     ]),
               );

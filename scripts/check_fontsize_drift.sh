@@ -21,7 +21,8 @@ cd "$(dirname "$0")/.."
 # 那些手写的 fontSize 11/11.5/14.5 跟着少了 13 处(#294)。
 # 724 → 720:首页商家卡重排,四行 meta 收进一个 dim() helper,
 # 原来每处各写一遍 fontSize 11.5 的地方少了 4 处。
-BASELINE=720
+# 720 → 719:抢单卡删掉重复的「跑程」行,连带少一处。
+BASELINE=719
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \
