@@ -55,6 +55,29 @@ class Test等锁有上限:
         assert 0 < routing._MATRIX_WAIT_BUDGET < 1.0
 
     def test_锁被占住时抛MatrixBusy而不是干等(self, monkeypatch):
+        """**必须把 key 和缓存都打桩**,否则这条用例在 CI 上是假绿。
+
+        `route_matrix` 里有两条在碰锁**之前**就返回的路:没配
+        `tencent_map_key` 时整批退直线,以及全部命中缓存时直接回
+        (那句"别去碰那把锁"正是这次要守的优化)。两条都会让
+        `todo` 空掉,于是锁根本没人等,MatrixBusy 自然不抛。
+
+        本地开发机配了 key、缓存又恰好没命中,所以一直是绿的;
+        CI 不配 key(那是花钱的外部接口,也不该配),第一次跑就红。
+        这条用例要守的是**锁的行为**,不该依赖环境里有没有 key。
+        """
+        class _NoCache:
+            async def get(self, *a, **k): return None
+            async def set(self, *a, **k): return None
+
+        class _Boom:
+            def __init__(self, *a, **k):
+                raise AssertionError("抛 MatrixBusy 之前不该发请求")
+
+        monkeypatch.setattr(routing, "get_redis", lambda: _NoCache())
+        monkeypatch.setattr(routing.settings, "tencent_map_key", "x" * 20)
+        monkeypatch.setattr(routing.httpx, "AsyncClient", _Boom)
+
         async def go():
             _fresh_gate(monkeypatch)
             await routing._matrix_gate.acquire()
