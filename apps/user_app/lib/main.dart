@@ -317,12 +317,20 @@ class _HomePageState extends State<HomePage> {
                 onTap: _pickDeliveryAddress,
                 borderRadius: BorderRadius.circular(kRadiusSm),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                  // 不能是 min:那样 Flexible 拿不到可用宽度,
+                  // 地址还是会在老位置被截断
                   crossAxisAlignment: CrossAxisAlignment.baseline,
                   textBaseline: TextBaseline.alphabetic,
                   children: [
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 178),
+                    // 地址要尽量看全。原来是 17px + 写死 maxWidth 178 ——
+                    // 「雁塔区T11 BLOCK(西安国际...)」这类真实地名在 390 屏上
+                    // 只露得出前八九个字,剩下全是省略号,而**后半截才是**
+                    // 用来分辨"是不是我家"的那部分(楼名、单元)。
+                    //
+                    // 字号降到 14.5,宽度改成吃掉剩余空间(Flexible)而不是
+                    // 写死一个数 —— 写死的那个 178 是按 17px 定的,
+                    // 字缩了它也不会跟着放宽,等于白缩。
+                    Flexible(
                       child: Text(
                         _deliveryAddress?.address ??
                             (_hereFailed
@@ -331,7 +339,7 @@ class _HomePageState extends State<HomePage> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                            fontSize: 17,
+                            fontSize: 14.5,
                             fontWeight: FontWeight.w600,
                             letterSpacing: -0.2),
                       ),
@@ -1596,162 +1604,140 @@ class _MerchantListViewState extends State<MerchantListView>
           categoryIcon: merchantCategoryIcon(m.category),
         );
 
+    // 一行小字:标签之间用「·」隔开,排不下就截断
+    Widget dim(String t, {Color? color}) => Text(t,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 11.5, color: color ?? sz.inkMuted));
+
     return InkWell(
       onTap: () => Navigator.of(context).push(MaterialPageRoute(
           builder: (_) => MenuPage(api: widget.api, merchant: m))),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 14),
+        padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 12),
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: sz.line)),
         ),
-        child: Column(
+        // 图定高 100,右侧四行 spaceBetween 撑满 —— 图下不留空白。
+        //
+        // 上一版是 62px 缩略图配右侧 109px 的内容,图**下方空着 47px**,
+        // 那正是列表看着松散的来源。现在反过来:让图当高度基准,
+        // 文字排布跟着它走,两边齐平。
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                thumb(m.logoUrl, m.name, 62),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(m.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w600,
-                              color: sz.ink)),
-                      const SizedBox(height: 4),
-                      Text.rich(
-                        TextSpan(children: [
-                          if (m.ratingAvg != null) ...[
-                            TextSpan(
-                                text: '${m.ratingAvg}',
-                                style: szFigure(fontSize: 11.5)),
-                            const TextSpan(text: ' 分'),
-                            TextSpan(
-                                text: '  ·  ',
-                                style: TextStyle(color: sz.inkMuted)),
-                          ],
-                          const TextSpan(text: '月售 '),
-                          TextSpan(
-                              text: '${m.monthlySales}',
-                              style: szFigure(fontSize: 11.5)),
-                          TextSpan(
-                              text: '  ·  ',
-                              style: TextStyle(color: sz.inkMuted)),
-                          TextSpan(text: distanceLabel(dist)),
-                        ]),
-                        style: TextStyle(fontSize: 11.5, color: sz.inkMuted),
-                      ),
+            thumb(m.logoUrl, m.name, 100),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SizedBox(
+                height: 100,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(m.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: sz.ink)),
 
-                      const SizedBox(height: 2),
-                      Text.rich(
-                        TextSpan(children: [
-                          const TextSpan(text: '约 '),
-                          TextSpan(
-                              text: '$eta', style: szFigure(fontSize: 11.5)),
-                          const TextSpan(text: ' 分钟送达'),
-                          if (m.minOrderCents > 0) ...[
-                            TextSpan(
-                                text: '  ·  ',
-                                style: TextStyle(color: sz.inkMuted)),
-                            TextSpan(
-                                text: '¥${m.minOrderCents ~/ 100}',
-                                style: szFigure(fontSize: 11.5)),
-                            const TextSpan(text: ' 起送'),
-                          ],
-                        ]),
-                        style: TextStyle(fontSize: 11.5, color: sz.inkMuted),
+                    // 第二行:评分 · 月售 · 人均。
+                    // 三个都是"这家店怎么样"的判断依据,放一起。
+                    // 没有的如实写「暂无评价」「新店」—— 不知道就说不知道,
+                    // 和首页那几个 0 是同一条(#296)
+                    Row(children: [
+                      if (m.ratingAvg != null) ...[
+                        Text('${m.ratingAvg}',
+                            style: szFigure(fontSize: 12, color: sz.hold)),
+                        Text(' 分',
+                            style: TextStyle(
+                                fontSize: 11.5, color: sz.inkMuted)),
+                        const SizedBox(width: 8),
+                      ] else ...[
+                        dim('暂无评价', color: sz.inkFaint),
+                        const SizedBox(width: 8),
+                      ],
+                      if (m.monthlySales > 0) ...[
+                        dim('月售 ${m.monthlySales}'),
+                        const SizedBox(width: 8),
+                      ],
+                      // Flexible:窄屏或长辈版下这一行会排不开,
+                      // 让最后一项先截断,而不是整行溢出画出界
+                      Flexible(
+                        child: m.avgSpendCents != null
+                            ? dim('人均 ${yuanShort(m.avgSpendCents!)}')
+                            : dim('新店', color: sz.inkFaint),
                       ),
-                      const SizedBox(height: 7),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          SzChip(
-                              RemoteCopy.text(
-                                  'pledge.commission_short', '5% 封顶'),
-                              color: sz.earn, dense: true),
-                          // 明厨亮灶(#155)。**这一项是法定要求**:总局令第 123 号
-                          // 第十三条要求平台在商家列表页展示「有明厨亮灶」
-                          // 「无明厨亮灶」标识 —— 要标的是**两种**,
-                          // 所以没装的店也渲染,只是渲染成一行浅灰小字
-                          // (compact 版),不做成大红标签去羞辱他 ——
-                          // 法规对商家是「倡导」不是强制
-                          SzKitchenCamChip(
-                              has: m.kitchenCam,
-                              label: m.kitchenCamLabel,
-                              compact: true),
-                          // 堂食标识(#187)。同样是法定要求:第 123 号令
-                          // 第十二条,列表页和商家主页都要展示,而且和明厨亮灶
-                          // 一样**要标两种**,所以无堂食、未填报也照样渲染。
-                          // 未填报如实写"未填报",不猜成有堂食
-                          SzChip(m.dineInLabel,
-                              color: m.dineInStatus == 'yes'
-                                  ? sz.earn
-                                  : sz.inkMuted,
-                              dense: true),
-                          // 忙碌模式:商家自己声明"现在出餐慢",
-                          // 下单前就让用户看到,而不是下了单再超时
-                          if (m.busyActive)
-                            SzChip('出餐较慢', color: sz.hold, dense: true),
-                          // 食安封签:**商家声明**不是平台认证,文案照此口径
-                          if (m.foodSeal)
-                            SzChip('封签', color: sz.earn, dense: true),
-                          for (final label in m.promoLabels)
-                            SzChip(label, color: sz.hold, dense: true),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            // 招牌菜:列表页直接看到"这家卖什么、多少钱"(美团式决策信息)
-            if (m.topDishes.isNotEmpty) ...[
-              const SizedBox(height: 11),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final d in m.topDishes.take(3))
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Row(
-                          children: [
-                            thumb(d.imageUrl, d.name, 34),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(d.name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          fontSize: 10.5, color: sz.inkMuted)),
-                                  Text(yuan(d.priceCents),
-                                      style: szMoney(
-                                          fontSize: 11, color: sz.ink)),
-                                ],
-                              ),
-                            ),
-                          ],
+                    ]),
+
+                    // 第三行:左边是钱,右边是路。
+                    //
+                    // 左右分栏是这一版的关键 —— 上一版全挤在左边,一行
+                    // 只装得下一组信息,于是要么换行要么装不下。
+                    //
+                    // ⚠️ **不显示配送费。** 它取决于距离 + 夜间 + 天气,
+                    // 只有服务端算得准;客户端凑一个数出来,就会出现
+                    // 「列表说 ¥3,结算页说 ¥5」—— 同一件事两个答案,
+                    // 那正是 #295 花力气修掉的毛病,不能在这儿再造一个。
+                    // 真要显示,得让列表接口把它一起算出来。
+                    Row(children: [
+                      dim('起送 ${yuanShort(m.minOrderCents)}'),
+                      const Spacer(),
+                      // 距离时长不许被挤掉:它是右栏的锚,
+                      // 排不下时该让左边先让
+                      Flexible(child: dim('${distanceLabel(dist)} · $eta 分钟')),
+                    ]),
+
+                    // 第四行:券 → 封签 → 法定标识,按"帮不帮得上决策"排序。
+                    //
+                    // 券用实底(全卡最扎眼的一处,它直接影响下不下单),
+                    // 封签用描边,法定标识退成灰字排最后 ——
+                    // 明厨亮灶与堂食是总局令 123 号要求列表页展示的,
+                    // **两种状态都要标**,所以没装的店也照写,只是不抢眼
+                    Row(children: [
+                      // 券最多两个:三个就把这一行挤满,法定标识没地方站
+                      for (final label in m.promoLabels.take(2)) ...[
+                        Flexible(child: _solidChip(label, sz)),
+                        const SizedBox(width: 6),
+                      ],
+                      if (m.busyActive) ...[
+                        SzChip('出餐较慢', color: sz.hold, dense: true),
+                        const SizedBox(width: 6),
+                      ],
+                      if (m.foodSeal) ...[
+                        SzChip('封签', color: sz.earn, dense: true),
+                        const SizedBox(width: 6),
+                      ],
+                      Flexible(
+                        child: dim(
+                          '${m.dineInLabel} · '
+                          '${m.kitchenCam ? '有明厨亮灶' : '无明厨亮灶'}',
+                          color: sz.inkFaint,
                         ),
                       ),
-                    ),
-                ],
+                    ]),
+                  ],
+                ),
               ),
-            ],
+            ),
           ],
         ),
       ),
     );
   }
+
+  /// 券:实底小标签。全卡唯一一处实底 —— 它是最直接影响下单的信息。
+  Widget _solidChip(String text, SzColors sz) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: sz.hold.withValues(alpha: .12),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Text(text,
+            style: TextStyle(fontSize: 11, color: sz.hold)),
+      );
 
   Widget _bigCardSkeleton() {
     final sz = Theme.of(context).sz;

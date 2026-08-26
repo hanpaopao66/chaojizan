@@ -46,8 +46,16 @@ class Analytics {
 
   /// 退出登录/换账号时清空会话级去重 —— 不清的话新账号对这些对象的
   /// 曝光永远不再上报,漏斗口径会一直偏
+  /// 换账号 / 退出时调用:清掉"这一段已经报过什么",并**停掉待发的批量上报**。
+  ///
+  /// 原来只清 `_once`,那个 30 秒的批量定时器留着 —— 生产上表现为
+  /// 上一个账号的队列在下一个账号的会话里被发出去;
+  /// 测试里表现为"widget 树都销毁了还有 Timer 挂着"。两个都是同一件事没做完。
   static void resetSession() {
     instance._once.clear();
+    instance._timer?.cancel();
+    instance._timer = null;
+    instance._queue.clear();
   }
 
   void _track(String event, Map<String, dynamic> props) {

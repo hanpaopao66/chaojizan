@@ -52,6 +52,18 @@ const List<String> kRiderReviewTags = [
 /// 分 → 元的展示格式。金额在前后端之间永远以「分」传输。
 String yuan(int cents) => '¥${(cents / 100).toStringAsFixed(2)}';
 
+/// 列表用的短金额:整元不带小数(¥20),有零头才带(¥20.5)。
+///
+/// [yuan] 永远两位小数,那是**账目**的口径 —— 对账、退款、分账里
+/// 一分钱都不能省。但列表卡是扫读的:「人均 ¥20.00 · 起送 ¥15.00」
+/// 里那四个 .00 不带信息,只占宽度,而这一行本来就快排不下了。
+String yuanShort(int cents) {
+  final y = cents / 100;
+  return y == y.truncateToDouble()
+      ? '¥${y.toInt()}'
+      : '¥${y.toStringAsFixed(y * 10 == (y * 10).truncateToDouble() ? 1 : 2)}';
+}
+
 class Merchant {
   Merchant.fromJson(Map<String, dynamic> json)
       : id = json['id'] as int,
@@ -73,6 +85,7 @@ class Merchant {
         openTime = json['open_time'] as String? ?? '',
         closeTime = json['close_time'] as String? ?? '',
         monthlySales = json['monthly_sales'] as int? ?? 0,
+        avgSpendCents = json['avg_spend_cents'] as int?,
         promiseReadyMinutes = json['promise_ready_minutes'] as int? ?? 15,
         selfDelivery = json['self_delivery'] as bool? ?? false,
         topDishes = (json['top_dishes'] as List? ?? const [])
@@ -146,6 +159,13 @@ class Merchant {
   final String openTime;
   final String closeTime;
   final int monthlySales;
+
+  /// 人均(分):近 30 天已完成单的**餐费**均价,不含配送费与打包费。
+  ///
+  /// null = 样本不足(服务端 AVG_SPEND_MIN_ORDERS,当前 10 单)。
+  /// 那时卡片显示「新店」而不是编一个数 —— 三五单算出来的均价没有意义,
+  /// 而用户会按它形成价位预期,点进去发现对不上。
+  final int? avgSpendCents;
   final List<TopDish> topDishes;
   final int minOrderCents;
   final int packingFeeCents;

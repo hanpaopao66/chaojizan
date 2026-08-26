@@ -168,6 +168,11 @@ class MerchantOut(BaseModel):
     promise_ready_minutes: int = 15  # 承诺出餐时长(分钟)
     self_delivery: bool = False  # 商家自配送(开启后订单不进抢单池)
     monthly_sales: int = 0  # 近 30 天完成单数,仅店铺详情接口计算
+    #: 人均(分):近 30 天已完成单的**餐费**均价,不含配送费与打包费。
+    #: 用户比的是"这家菜多少钱",配送费在卡片上单列。
+    #: None = 样本不足(见 merchants.AVG_SPEND_MIN_ORDERS),客户端显示「新店」——
+    #: 不够就说不知道,编一个数会让人按错误的价位预期点进去
+    avg_spend_cents: int | None = None
     # 招牌菜(名/价/图,最多 3 个):列表页给足"这家卖什么"的决策信息
     top_dishes: list = []
     # 当前查看者是否为店员(仅 GET /merchants/me 填充,客户端据此隐藏提现/改价入口)

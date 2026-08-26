@@ -19,7 +19,9 @@ cd "$(dirname "$0")/.."
 # 当前基数。降下来了就手动改小这个数(并在提交信息里说一声)。
 # 737 → 724:三端「我的/店铺」页换用 SzEntryTile 之后,
 # 那些手写的 fontSize 11/11.5/14.5 跟着少了 13 处(#294)。
-BASELINE=724
+# 724 → 720:首页商家卡重排,四行 meta 收进一个 dim() helper,
+# 原来每处各写一遍 fontSize 11.5 的地方少了 4 处。
+BASELINE=720
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \

@@ -73,7 +73,16 @@ logger = logging.getLogger(__name__)
 
 # 附近商家 + 近 30 天完成单数(月售),按指定方式排序
 _NEARBY_SQL_TMPL = """
-    SELECT m.id, count(o.id) AS sales, min({dist_expr}) AS distance_m
+    SELECT m.id, count(o.id) AS sales, min({dist_expr}) AS distance_m,
+           -- 人均:近 30 天已完成单的**餐费**均价,不含配送费和打包费。
+           -- 用户比的是"这家菜多少钱",配送费在卡片上本来就单列了。
+           --
+           -- 样本不足时给 NULL,由调用方决定不显示 —— 三五单算出来的均价
+           -- 没有意义(一单 50 和一单 10 差得离谱),而一个瞎编的"人均"
+           -- 会让人按错误的价位预期点进去。和评分「暂无评价」一个道理:
+           -- 不知道就说不知道。
+           CASE WHEN count(o.id) >= :avg_min_orders
+                THEN round(avg(o.food_cents))::int END AS avg_spend_cents
     FROM merchants m
     LEFT JOIN orders o
            ON o.merchant_id = m.id
@@ -94,6 +103,14 @@ _NEARBY_SQL_TMPL = """
     ORDER BY {order_by}, m.id
     LIMIT :limit OFFSET :offset
 """
+
+#: 算「人均」至少要几单。
+#:
+#: 三五单算出来的均价没有意义 —— 一单 50 和一单 10 差得离谱,而用户会
+#: 按这个数形成价位预期,点进去发现对不上。10 单是个折中:够抹平个别
+#: 大单小单,又不至于让新店永远显示不出来。不够就给 NULL,
+#: 客户端显示「新店」,和评分的「暂无评价」一个道理。
+AVG_SPEND_MIN_ORDERS = 10
 
 _DIST_EXPR = (
     "ST_SetSRID(ST_MakePoint(m.lng, m.lat), 4326)::geography "
@@ -213,20 +230,21 @@ async def list_merchants(
                 filter_clause="\n      ".join(filters))),
             {"lat": lat, "lng": lng,
              "radius_m": _browse_radius_m(radius_m),
+             "avg_min_orders": AVG_SPEND_MIN_ORDERS,
              "limit": limit, "offset": offset,
              **({"category": category} if category else {}),
              **filter_params},
         )
-        id_sales = [(r[0], r[1], r[2]) for r in rows]
+        id_sales = [(r[0], r[1], r[2], r[3]) for r in rows]
         if not id_sales:
             return []
         result = await db.scalars(
             select(Merchant).where(
-                Merchant.id.in_([i for i, _, _ in id_sales]))
+                Merchant.id.in_([i for i, _, _, _ in id_sales]))
         )
         by_id = {m.id: m for m in result}
         outs = []
-        for mid, sales, dist in id_sales:
+        for mid, sales, dist, avg_spend in id_sales:
             if mid not in by_id:
                 continue
             out = MerchantOut.model_validate(by_id[mid])
@@ -235,6 +253,9 @@ async def list_merchants(
             # haversine 准;但它仍是直线不是骑行路径 —— 字段名和文案
             # 都不许说成「骑行 X 公里」
             out.distance_m = int(dist) if dist is not None else None
+            # 样本不足时 SQL 已经给了 NULL —— 原样透传,不补默认值。
+            # 补一个数就等于编造价位预期
+            out.avg_spend_cents = avg_spend
             outs.append(out)
         await _fill_top_dishes(db, outs)
         return outs
