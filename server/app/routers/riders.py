@@ -1004,14 +1004,37 @@ async def available_orders(
         shop_pts = list({(o.merchant_lat, o.merchant_lng) for o in outs
                          if o.merchant_lat is not None
                          and o.merchant_lng is not None})
-        if shop_pts:
-            try:
+        try:
+            if shop_pts:
                 await bicycling_matrix(rider_pos, shop_pts)
-            except Exception:
-                # 预热失败不影响正确性:下面照旧逐单算,只是慢一点
-                import logging
-                logging.getLogger("superz.riders").warning(
-                    "抢单列表路网预热失败,退回逐单", exc_info=True)
+            # **商家 → 送达点那一段也要热。**
+            #
+            # 原来只热了骑手→商家,而下面的循环对每一单还要算一次
+            # 商家→送达点 —— 那一段照旧是逐单串行 HTTP。实测 20 单的池子
+            # 冷缓存要 6.4 秒,一半就花在这儿。
+            #
+            # 矩阵是「一个起点 → 多个终点」,而这一段每单的起点都不同,
+            # 所以按商家分组:同一家店的多单共用一次矩阵调用
+            # (外卖的现实是一家店同时有好几单,分组之后调用次数
+            #  从"单数"降到"店数")。
+            # ⚠️ 局部变量别叫 drops —— 外面 `drops` 是送达段历史耗时的
+            # 字典(drop_time.stats_for 的结果),在这儿覆盖掉的话,
+            # 下面 `drops.get(dk)` 会拿到一个 list,整个接口 500。
+            # 踩过一次,改名 drop_pts
+            by_shop: dict[tuple[float, float], list[tuple[float, float]]] = {}
+            for order, out in zip(orders, outs):
+                if out.merchant_lat is None or out.merchant_lng is None:
+                    continue
+                by_shop.setdefault(
+                    (out.merchant_lat, out.merchant_lng), []).append(
+                        (order.lat, order.lng))
+            for shop_pt, drop_pts in by_shop.items():
+                await bicycling_matrix(shop_pt, list(set(drop_pts)))
+        except Exception:
+            # 预热失败不影响正确性:下面照旧逐单算,只是慢一点
+            import logging
+            logging.getLogger("superz.riders").warning(
+                "抢单列表路网预热失败,退回逐单", exc_info=True)
     radius_m = (user.grab_radius_km * 1000
                 if user.grab_radius_km and rider_pos else None)
     scored: list[tuple[float, OrderOut]] = []

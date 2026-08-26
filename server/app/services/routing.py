@@ -62,6 +62,21 @@ _MODE_SPEED_RANGE = {"bike": (5.0, 35.0), "walk": (1.5, 10.0),
 _GRID = 0.001
 _TTL_SECONDS = 7 * 24 * 3600      # 路网不常变,一周足够
 
+#: 规划不出路线时的**负缓存** TTL(秒)。
+#:
+#: 腾讯对某些点对会返回 status=384「提供的起终点无法规划出骑行线路」——
+#: 城中村里的坐标、刚建好还没进路网的楼、以及演示数据里挨得极近的两点。
+#: 这类点对**不会因为再问一次就变得能规划**。
+#:
+#: 而原来只有成功那条写缓存,五条兜底路径一条都不写:抢单池里一个这样的
+#: 点对,骑手每 5 秒刷一次就重打一次腾讯接口。实测 20 单的池子里
+#: 一次刷新要 6.1 秒 —— **上一次还没回来,下一次已经发出去了**,
+#: 而且每一次都在烧配额。
+#:
+#: 比正缓存(7 天)短得多:路网确实会更新,新修的路该有机会被重新发现。
+#: 半小时是个折中:够挡住高频刷新,又不会让一条新路等一周。
+_NEG_TTL_SECONDS = 1800
+
 # 直线 → 骑行的经验放大系数。**只在路径规划不可用时兜底**,
 # 实测成都样本约 1.19;取 1.2 略偏保守(宁可高估一点,别让骑手吃亏)
 _FALLBACK_FACTOR = 1.2
@@ -119,6 +134,21 @@ async def bicycling_m(
     return dist, src
 
 
+async def _give_up(redis, key: str, fallback):
+    """记下「这个点对规划不出来」,然后返回直线兜底。
+
+    不记的话,抢单池里一个这样的点对会被每 5 秒重问一次 —— 实测 20 单的
+    池子一次刷新要 6.1 秒,而客户端的轮询间隔就是 5 秒。
+    """
+    try:
+        # 距离写 0 当负缓存标记:parse_route_cache 读得回来,
+        # 而 0 米在业务上不可能是真实距离
+        await redis.set(key, dump_route_cache(0.0, None), ex=_NEG_TTL_SECONDS)
+    except Exception:
+        pass  # 缓存挂了不影响正确性,只是下次还得再问一遍
+    return fallback
+
+
 async def route(
     from_lat: float, from_lng: float, to_lat: float, to_lng: float,
     mode: str = "bike",
@@ -144,8 +174,11 @@ async def route(
     ride_minutes 的说明。
     """
     straight = haversine_m(from_lat, from_lng, to_lat, to_lng)
+    fallback = (straight * _MODE_FALLBACK[mode], None, "straight")
     if not settings.tencent_map_key:
-        return straight * _MODE_FALLBACK[mode], None, "straight"
+        # 没配 key 时不写负缓存:那不是"这条路规划不出来",
+        # 是"我们没去问"。配上 key 之后应当立刻生效,不该被缓存挡半小时
+        return fallback
 
     a, b = (from_lat, from_lng), (to_lat, to_lng)
     redis = get_redis()
@@ -155,6 +188,10 @@ async def route(
         if cached is not None:
             raw = cached.decode() if isinstance(cached, bytes) else cached
             dist_c, dur_c = parse_route_cache(raw)
+            # 负缓存标记:距离写 0 表示"这个点对规划不出路线",
+            # 别再去问了(见 _NEG_TTL_SECONDS)
+            if dist_c <= 0:
+                return fallback
             return dist_c, dur_c, "route"
     except Exception:
         pass  # 缓存挂了不影响主流程
@@ -171,13 +208,13 @@ async def route(
             # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
             logger.warning("%s 路径 status=%s %s,回退直线", mode,
                            data.get("status"), data.get("message"))
-            return straight * _MODE_FALLBACK[mode], None, "straight"
+            return await _give_up(redis, ck, fallback)
         routes = (data.get("result") or {}).get("routes") or []
         if not routes:
-            return straight * _MODE_FALLBACK[mode], None, "straight"
+            return await _give_up(redis, ck, fallback)
         dist = float(routes[0].get("distance") or 0)
         if dist <= 0:
-            return straight * _MODE_FALLBACK[mode], None, "straight"
+            return await _give_up(redis, ck, fallback)
         # duration 单位是分钟。缺了当没有 —— 不拿距离反推一个假时长
         raw_dur = routes[0].get("duration")
         dur = float(raw_dur) if raw_dur not in (None, "") else None
@@ -200,7 +237,7 @@ async def route(
     except Exception as e:
         logger.warning("%s 路径请求失败(%s),回退直线",
                        mode, type(e).__name__)
-        return straight * _MODE_FALLBACK[mode], None, "straight"
+        return await _give_up(redis, ck, fallback)
 
 
 async def bicycling_route(
@@ -283,7 +320,23 @@ _MATRIX_API = "https://apis.map.qq.com/ws/distance/v1/matrix"
 #: 腾讯的「每秒请求量已达到上限」。**不是每日配额用尽** —— 等一下就好,
 #: 所以要和真正的配额耗尽区分开:前者该重试,后者重试只是多烧一次
 _RATE_LIMIT_STATUS = {120}
-_RATE_LIMIT_PAUSE = 0.35
+#: 实测这个 key 的每秒配额比想象中严:0.35 秒的间隔仍会撞上
+#: status=120,而**撞一次的代价是整批回退直线**,然后逐单补打 40 次
+#: 单点请求 —— 冷缓存一次刷新 7.5 秒。宁可等 1.1 秒。
+_RATE_LIMIT_PAUSE = 1.1
+
+#: 矩阵调用之间的**进程级**最小间隔。
+#:
+#: 原来节流只管同一次调用内部的分批,管不住"两次独立调用背靠背发出去"——
+#: 抢单池预热正好是这种形态(先热骑手→商家,再按店热商家→送达点),
+#: 实测第二次直接撞上 status=120「此key每秒请求量已达到上限」,
+#: 整批回退直线、白跑一趟,还得等重试。
+#:
+#: 用一把锁串行化并保证间隔:矩阵本来就是"一次问一批",
+#: 它不需要并发,而它一旦被限流,代价是整批失效。
+_matrix_gate = asyncio.Lock()
+_matrix_last = 0.0
+
 
 
 async def route_matrix(
@@ -354,68 +407,80 @@ async def route_matrix(
         elif rep != d:
             same_cell[d] = rep  # 跟着代表点走,不单独问
 
-    # 分批打:超过单次上限就切片,别指望接口帮我们截断
-    for i in range(0, len(todo), _MATRIX_MAX_DESTS):
-        batch = todo[i:i + _MATRIX_MAX_DESTS]
-        rows: list[dict] | None = None
-        for attempt in range(2):
-            try:
-                async with httpx.AsyncClient(timeout=4) as client:
-                    resp = await client.get(_MATRIX_API, params={
-                        "mode": _MODE_MATRIX[mode],
-                        "from": f"{origin[0]},{origin[1]}",
-                        "to": ";".join(f"{d[0]},{d[1]}" for d in batch),
-                        "key": settings.tencent_map_key,
-                    })
-                    data = resp.json()
-                status = data.get("status")
-                if status == 0:
-                    rows = ((data.get("result") or {}).get("rows") or [{}])[0] \
-                        .get("elements")
+    # 串行 + 保证间隔:跨调用也不许把自己限流(见 _matrix_gate)。
+    #
+    # ⚠️ 锁要罩住**整个分批循环**,不能只罩住开头的等待 ——
+    # 只罩开头的话两个并发调用会同时拿到锁又同时放开,然后各自
+    # 开始打接口,间隔等于没有。踩过一次。
+    global _matrix_last
+    async with _matrix_gate:
+        gap = _RATE_LIMIT_PAUSE - (asyncio.get_event_loop().time() - _matrix_last)
+        if gap > 0:
+            await asyncio.sleep(gap)
+
+        # 分批打:超过单次上限就切片,别指望接口帮我们截断
+        for i in range(0, len(todo), _MATRIX_MAX_DESTS):
+            batch = todo[i:i + _MATRIX_MAX_DESTS]
+            rows: list[dict] | None = None
+            for attempt in range(2):
+                try:
+                    async with httpx.AsyncClient(timeout=4) as client:
+                        resp = await client.get(_MATRIX_API, params={
+                            "mode": _MODE_MATRIX[mode],
+                            "from": f"{origin[0]},{origin[1]}",
+                            "to": ";".join(f"{d[0]},{d[1]}" for d in batch),
+                            "key": settings.tencent_map_key,
+                        })
+                        data = resp.json()
+                    status = data.get("status")
+                    if status == 0:
+                        rows = ((data.get("result") or {}).get("rows") or [{}])[0] \
+                            .get("elements")
+                        break
+                    if status in _RATE_LIMIT_STATUS and attempt == 0:
+                        # **每秒**请求量上限,不是每日配额 —— 等一下再打就过了。
+                        # 50 家酒店切成两批、40 单抢单池切成两批,两批背靠背
+                        # 发出去就会撞上;第二批静默回退直线,一半的卡片没有
+                        # 时长,看着像"这些店算不出来",其实只是发太快了
+                        await asyncio.sleep(_RATE_LIMIT_PAUSE)
+                        continue
+                    # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
+                    logger.warning("距离矩阵 status=%s %s,这一批回退直线",
+                                   status, data.get("message"))
                     break
-                if status in _RATE_LIMIT_STATUS and attempt == 0:
-                    # **每秒**请求量上限,不是每日配额 —— 等一下再打就过了。
-                    # 50 家酒店切成两批、40 单抢单池切成两批,两批背靠背
-                    # 发出去就会撞上;第二批静默回退直线,一半的卡片没有
-                    # 时长,看着像"这些店算不出来",其实只是发太快了
-                    await asyncio.sleep(_RATE_LIMIT_PAUSE)
+                except Exception as e:
+                    logger.warning("距离矩阵请求失败(%s),这一批回退直线",
+                                   type(e).__name__)
+                    break
+            else:
+                logger.warning("距离矩阵限流重试后仍失败,这一批回退直线")
+
+            _matrix_last = asyncio.get_event_loop().time()
+            # 批与批之间歇一下,别自己把自己限流(上面的重试是兜底,不是常态)
+            if i + _MATRIX_MAX_DESTS < len(todo):
+                await asyncio.sleep(_RATE_LIMIT_PAUSE)
+
+            for j, d in enumerate(batch):
+                straight = haversine_m(origin[0], origin[1], d[0], d[1])
+                el = rows[j] if rows is not None and j < len(rows) else None
+                dist = float((el or {}).get("distance") or 0)
+                if dist <= 0:
+                    out[d] = (straight * _MODE_FALLBACK[mode], None, "straight")
                     continue
-                # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
-                logger.warning("距离矩阵 status=%s %s,这一批回退直线",
-                               status, data.get("message"))
-                break
-            except Exception as e:
-                logger.warning("距离矩阵请求失败(%s),这一批回退直线",
-                               type(e).__name__)
-                break
-        else:
-            logger.warning("距离矩阵限流重试后仍失败,这一批回退直线")
-
-        # 批与批之间歇一下,别自己把自己限流(上面的重试是兜底,不是常态)
-        if i + _MATRIX_MAX_DESTS < len(todo):
-            await asyncio.sleep(_RATE_LIMIT_PAUSE)
-
-        for j, d in enumerate(batch):
-            straight = haversine_m(origin[0], origin[1], d[0], d[1])
-            el = rows[j] if rows is not None and j < len(rows) else None
-            dist = float((el or {}).get("distance") or 0)
-            if dist <= 0:
-                out[d] = (straight * _MODE_FALLBACK[mode], None, "straight")
-                continue
-            # 矩阵接口的 duration 单位是**秒**(和骑行路径的分钟不一样,
-            # 官方文档两处口径确实不同)—— 换算成分钟再往下传,
-            # 否则 ETA 会拿到一个 60 倍的数
-            raw_dur = (el or {}).get("duration")
-            dur = float(raw_dur) / 60 if raw_dur not in (None, "") else None
-            if dur is not None and dur <= 0:
-                dur = None
-            out[d] = (dist, dur, "route")
-            try:
-                await redis.set(_key(origin, d, mode),
-                                dump_route_cache(dist, dur),
-                                ex=_TTL_SECONDS)
-            except Exception:
-                pass
+                # 矩阵接口的 duration 单位是**秒**(和骑行路径的分钟不一样,
+                # 官方文档两处口径确实不同)—— 换算成分钟再往下传,
+                # 否则 ETA 会拿到一个 60 倍的数
+                raw_dur = (el or {}).get("duration")
+                dur = float(raw_dur) / 60 if raw_dur not in (None, "") else None
+                if dur is not None and dur <= 0:
+                    dur = None
+                out[d] = (dist, dur, "route")
+                try:
+                    await redis.set(_key(origin, d, mode),
+                                    dump_route_cache(dist, dur),
+                                    ex=_TTL_SECONDS)
+                except Exception:
+                    pass
 
     # 同格的点抄代表点的答案。代表点自己也没算出来的,退回直线 ——
     # 口径和单点调用一致,不编数

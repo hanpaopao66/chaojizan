@@ -96,3 +96,47 @@ class Test同格去重的前提:
         me = (30.6598, 104.0810)
         a, b = (30.6927, 104.0823), (30.6940, 104.0840)
         assert routing._key(me, a, "walk") != routing._key(me, b, "walk")
+
+
+class Test规划不出来也要记下来:
+    """负缓存 —— 抢单池高频刷新的命脉。
+
+    腾讯对某些点对返回 status=384「无法规划出骑行线路」:城中村里的坐标、
+    刚建好还没进路网的楼。这类点对**不会因为再问一次就变得能规划**。
+
+    而原来只有成功那条写缓存,五条兜底路径一条都不写。抢单池里有一个
+    这样的点对,骑手每 5 秒刷一次就重打一次腾讯接口 ——
+    **实测 20 单的池子一次刷新 6.2 秒,而轮询间隔就是 5 秒**:
+    上一次还没回来,下一次已经发出去了,而且每次都在烧配额。
+    """
+
+    def test_负缓存标记读得回来(self):
+        # 距离写 0 当标记:0 米在业务上不可能是真实距离
+        raw = routing.dump_route_cache(0.0, None)
+        dist, dur = routing.parse_route_cache(raw)
+        assert dist == 0.0 and dur is None
+
+    def test_负缓存比正缓存短得多(self):
+        """路网确实会更新,新修的路该有机会被重新发现 ——
+        但也不能短到挡不住高频刷新。"""
+        assert routing._NEG_TTL_SECONDS < routing._TTL_SECONDS
+        assert routing._NEG_TTL_SECONDS >= 600, '短于十分钟挡不住 5 秒轮询'
+
+    def test_没配key时不写负缓存(self):
+        """那不是"这条路规划不出来",是"我们没去问" ——
+        配上 key 之后应当立刻生效,不该被缓存挡住。"""
+        import inspect
+        src = inspect.getsource(routing.route)
+        i = src.index('if not settings.tencent_map_key')
+        j = src.index('a, b = ', i)
+        assert '_give_up' not in src[i:j], '没配 key 的分支写了负缓存'
+
+
+class Test矩阵不许把自己限流:
+    def test_有进程级间隔(self):
+        """节流原来只管同一次调用内部的分批,管不住"两次独立调用背靠背"——
+        而抢单池预热正好是那种形态(先热骑手→商家,再按店热商家→送达点)。
+        撞一次的代价是**整批回退直线**,然后逐单补打几十次单点请求。"""
+        assert hasattr(routing, '_matrix_gate')
+        assert routing._RATE_LIMIT_PAUSE >= 1.0, \
+            '实测 0.35 秒仍会撞上 status=120'
