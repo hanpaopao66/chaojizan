@@ -1988,11 +1988,18 @@ async def request_withdrawal(
         )
     # 收款账户是打款前提:先登记再申请(打给谁都不知道就别冻结钱)
     from ..models import PayoutAccount
-    from .payout import account_recently_changed
+    from .payout import account_recently_changed, ensure_holder_matches_identity
     account = await db.scalar(
         select(PayoutAccount).where(PayoutAccount.user_id == user.id))
     if account is None:
         raise HTTPException(422, "请先在钱包页登记收款账户,再申请提现")
+    # 户名与实名一致 —— **这里必须再查一次,不能只卡登记那一步**。
+    #
+    # 两种情况只有这里拦得住:账户是这条规则上线之前登记的;
+    # 以及先登记账户、后完成实名(登记时还没实名可比)。
+    #
+    # 拦在冻结余额之前:钱先冻上再报错,骑手会以为钱被扣了。
+    await ensure_holder_matches_identity(db, user, account.holder_name)
     # 行锁:同一骑手的提现申请排队进入,余额校验期间不会有并发写
     await db.execute(select(User).where(User.id == user.id).with_for_update())
     current = await _wallet(db, user.id)

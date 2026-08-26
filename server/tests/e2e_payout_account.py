@@ -86,4 +86,59 @@ asyncio.run(backdate_account())
 for w in (wd, wd2, wd3):
     call("POST", f"/admin/withdrawals/{w['id']}/reject", admin, {"reason": "e2e清场"})
 
+# ---------- 户名必须与实名一致(防顶替跑单) ----------
+#
+# 二要素核验只证明"这个姓名+证号真实且匹配",不证明拿手机的人就是他。
+# 众包没有站长天天见人,而「实名张三、提现打给李四」是账号出租最硬的
+# 信号 —— 它在资金侧,租号的人图的就是把钱收走。
+
+# 1) 登记时就卡:演示骑手实名是「王小王」,填别人的名字要被挡回来
+err = call("PUT", "/payout-account", rider,
+           {"kind": "alipay", "holder_name": "李四",
+            "account_no": "13800000003"}, expect_error=True)
+assert err["_error"] == 422, err
+assert "王小王" in str(err["detail"]), "提示里要带本人实名,否则他不知道该填什么"
+print(f"✓ 户名与实名不符,登记就被挡:{err['detail'][:28]}…")
+
+# 2) 只是写法不同的要放行 —— 空格、间隔号码位不统一是常态,
+#    尤其是少数民族姓名,不能把这批人卡在提现门外
+ok = call("PUT", "/payout-account", rider,
+          {"kind": "alipay", "holder_name": " 王 小　王 ",
+           "account_no": "13800000003"})
+assert ok["configured"] is True
+# 存的是证件上那一份,不是他输入的那一份 —— 带空格的户名银行不认,
+# 而这个字符串会一路进提现快照和管理端打款界面
+assert ok["holder_name"] == "王小王", ok["holder_name"]
+print("✓ 「 王 小　王 」照常通过,且落库归一成证件写法「王小王」")
+
+# 3) 没实名的骑手不卡登记 —— 他也没余额可提,真正的闸门在提现那一步
+ok2 = call("PUT", "/payout-account", fresh,
+           {"kind": "alipay", "holder_name": "随便谁", "account_no": "13900000000"})
+assert ok2["configured"] is True
+print("✓ 未实名的骑手允许先登记账户(他没有余额,闸门在提现)")
+
+
+# 4) **提现那道闸要独立生效**:历史账户是在这条规则之前登记的,
+#    只卡登记拦不住。绕过接口直接改库造出这种账户,再去提现
+async def tamper_holder():
+    async with SessionLocal() as db:
+        await db.execute(text(
+            "UPDATE payout_accounts SET holder_name = '李四' "
+            "WHERE user_id = (SELECT id FROM users WHERE phone = '13800000003')"))
+        await db.commit()
+    await engine.dispose()
+
+
+asyncio.run(tamper_holder())
+err = call("POST", "/riders/withdrawals", rider,
+           {"amount_cents": 1000}, expect_error=True)
+assert err["_error"] == 422, err
+assert "王小王" in str(err["detail"]), err
+print("✓ 历史账户(绕过登记闸口)在提现那一步被拦下")
+
+# 恢复现场
+call("PUT", "/payout-account", rider,
+     {"kind": "alipay", "holder_name": "王小王", "account_no": "13800000003"})
+asyncio.run(backdate_account())
+
 print("\n收款账户与打款风控验证通过 🎉")
