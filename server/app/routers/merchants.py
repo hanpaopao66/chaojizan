@@ -73,7 +73,37 @@ logger = logging.getLogger(__name__)
 
 # 附近商家 + 近 30 天完成单数(月售),按指定方式排序
 _NEARBY_SQL_TMPL = """
-    SELECT m.id, count(o.id) AS sales, min({dist_expr}) AS distance_m,
+    -- 先挑出这一页的店,**再**给这一页算月售。
+    --
+    -- 原来是反过来的:LEFT JOIN orders → GROUP BY → ORDER BY → LIMIT 20。
+    -- 也就是为了返回 20 家,给半径内**所有**店都算了 30 天月售和人均。
+    -- 实测 863 家店 join 出 7610 行再分组排序,一次 14.5ms,占整个首页
+    -- 接口 81%;而店越多这个数涨得越快 —— 恰恰是生意做起来之后。
+    --
+    -- distance / rating 的排序键只跟 merchants 自己有关,所以能把 LIMIT
+    -- 推到聚合前面。sales 不行(排序键就是聚合结果本身),走另一个模板。
+    WITH page AS (
+        -- rn 是给外层复用排序用的:CTE 里的顺序不保证传到外层,而
+        -- rating 排序的键(评分)并不在 CTE 的输出列里。用 row_number
+        -- 一次覆盖所有排序方式,不用给每种排序各自把列拖出来。
+        -- 窗口函数在 LIMIT 之前算,所以 rn 就是"按这个排序的第几名"。
+        SELECT m.id, {dist_expr} AS distance_m,
+               row_number() OVER (ORDER BY {order_by}, m.id) AS rn
+        FROM merchants m
+        WHERE m.is_open = true
+          AND m.status = 'approved'
+          AND m.biz_type = 'food'
+          {category_clause}
+          {filter_clause}
+          AND ST_DWithin(
+                ST_SetSRID(ST_MakePoint(m.lng, m.lat), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+                :radius_m
+              )
+        ORDER BY {order_by}, m.id
+        LIMIT :limit OFFSET :offset
+    )
+    SELECT p.id, count(o.id) AS sales, p.distance_m,
            -- 人均:近 30 天已完成单的**餐费**均价,不含配送费和打包费。
            -- 用户比的是"这家菜多少钱",配送费在卡片上本来就单列了。
            --
@@ -81,6 +111,23 @@ _NEARBY_SQL_TMPL = """
            -- 没有意义(一单 50 和一单 10 差得离谱),而一个瞎编的"人均"
            -- 会让人按错误的价位预期点进去。和评分「暂无评价」一个道理:
            -- 不知道就说不知道。
+           CASE WHEN count(o.id) >= :avg_min_orders
+                THEN round(avg(o.food_cents))::int END AS avg_spend_cents
+    FROM page p
+    LEFT JOIN orders o
+           ON o.merchant_id = p.id
+          AND o.status = 'completed'
+          AND o.created_at >= now() - interval '30 days'
+          AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
+    GROUP BY p.id, p.distance_m, p.rn
+    ORDER BY p.rn
+"""
+
+#: 按销量排序**只能**用这个:排序键就是聚合结果,没法把 LIMIT 推到
+#: 聚合前面。所以这条路径照旧要给半径内所有店算月售 —— 首页默认的
+#: distance 不走这里,影响面小
+_NEARBY_SQL_BY_SALES = """
+    SELECT m.id, count(o.id) AS sales, min({dist_expr}) AS distance_m,
            CASE WHEN count(o.id) >= :avg_min_orders
                 THEN round(avg(o.food_cents))::int END AS avg_spend_cents
     FROM merchants m
@@ -219,8 +266,10 @@ async def list_merchants(
         filter_params["max_min_order"] = max_min_order_cents
 
     if lat is not None and lng is not None:
+        # 按销量排必须先聚合才知道谁在前 —— 只有那一种走全量模板
+        tmpl = _NEARBY_SQL_BY_SALES if sort == "sales" else _NEARBY_SQL_TMPL
         rows = await db.execute(
-            text(_NEARBY_SQL_TMPL.format(
+            text(tmpl.format(
                 order_by=_SORTS[sort],
                 # 距离本来就为排序算了一次(_DIST_EXPR),顺手取出来返回 ——
                 # 不返回的话客户端只能拿两点直线再算一遍,而那份更糙
