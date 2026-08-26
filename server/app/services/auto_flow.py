@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db import SessionLocal
 from ..models import (
+    NOT_APPEND_ORDER,
     Dish,
     EarningKind,
     Merchant,
@@ -514,7 +515,7 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
         Order.rider_id.is_(None),
         Order.pickup.is_(False),        # 自取单不需要骑手,不在兜底范围
         Order.self_delivery.is_(False),  # 商家自送,不在兜底范围
-        Order.parent_order_no == "",    # 追加单随原单,原单被兜底时一并级联
+        NOT_APPEND_ORDER,              # 追加单随原单,原单被兜底时一并级联
     ]
     immediate = Order.scheduled_at.is_(None)
     scheduled = Order.scheduled_at.is_not(None)

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db import get_db
 from ..models import (
+    NOT_APPEND_ORDER,
     DeliveryIssue,
     Merchant,
     Order,
@@ -898,7 +899,7 @@ async def _my_in_flight(db: AsyncSession, rider_id: int) -> list[Order]:
         select(Order).where(
             Order.rider_id == rider_id,
             Order.status.in_(_IN_FLIGHT_STATUSES),
-            Order.parent_order_no == "",
+            NOT_APPEND_ORDER,
         )
     ))
 
@@ -946,7 +947,7 @@ async def available_orders(
         .where(Order.rider_id.is_(None), Order.status.in_(GRABBABLE_STATUSES),
                Order.pickup.is_(False),        # 自取单不进抢单池
                Order.self_delivery.is_(False),  # 商家自送,不需要骑手
-               Order.parent_order_no == "")    # 追加单随原单,不单独抢
+               NOT_APPEND_ORDER)               # 追加单随原单,不单独抢
         .order_by(Order.created_at)            # 无定位时的兜底顺序:等待久的在前
         .limit(200)
     )
@@ -1652,7 +1653,7 @@ async def grab_order(
             Order.status.in_(GRABBABLE_STATUSES),
             Order.pickup.is_(False),        # 自取单没有配送环节
             Order.self_delivery.is_(False),  # 商家自送,不进抢单池
-            Order.parent_order_no == "",    # 追加单不能单独被抢
+            NOT_APPEND_ORDER,               # 追加单不能单独被抢
         )
         .values(rider_id=user.id)
         .returning(Order.id)
@@ -2238,7 +2239,7 @@ async def report_accident(
             Order.rider_id == user.id,
             Order.status.in_([OrderStatus.ACCEPTED, OrderStatus.READY,
                               OrderStatus.PICKED_UP]),
-            Order.parent_order_no == ""))).all()
+            NOT_APPEND_ORDER))).all()
     released, issues = 0, 0
     for order in in_flight:
         if order.status == OrderStatus.PICKED_UP:

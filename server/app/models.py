@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    literal,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -1510,6 +1511,28 @@ class FoodSafetyReport(Base):
     )
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
+
+
+#: 「不是追加单」= `parent_order_no = ''`。
+#:
+#: **`''` 必须渲染成字面量,不能走绑定参数。** 这不是风格问题,是性能悬崖:
+#:
+#: `parent_order_no` 上有普通索引,而全库 99.8% 的单这一列都是 `''`
+#: (追加单才有值)。写成绑定参数时,PostgreSQL 的预备语句在**第 6 次执行**
+#: 起会切「通用计划」—— 通用计划按 n_distinct 估选择度,于是认定
+#: `parent_order_no = $n` 很挑,一头扎进 `ix_orders_parent_order_no`,
+#: 然后把整张表当过滤条件扫一遍。
+#:
+#: 开发库 134728 单上实测:同一条抢单池查询,前 5 次 0.32~0.61ms,
+#: **第 6 次起 22~27ms**(Rows Removed by Filter: 134427)。而骑手端
+#: 每 5 秒打一次这个接口 —— 连接上的预备语句一旦切过去就一直是慢的,
+#: 且随订单表增长线性变差。
+#:
+#: 写成字面量后 Postgres 拿得到 `''` 的真实 MCV 统计,知道它命中几乎全表,
+#: 转而走 `ix_orders_status`:稳定 0.31~0.65ms,不再有第 6 次的悬崖。
+#: (试过加部分索引 —— 谓词里带绑定参数时 Postgres 证不出蕴含,建了也用不上;
+#: 改成字面量之后规划器又更愿意走 status 索引,那个索引是多余的。)
+NOT_APPEND_ORDER = Order.parent_order_no == literal("", literal_execute=True)
 
 
 class OrderEvent(Base):

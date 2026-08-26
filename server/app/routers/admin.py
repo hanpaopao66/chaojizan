@@ -2342,7 +2342,7 @@ async def dispatch_overview(
     只看不派——处置动作走 reassign 接口。位置数据仅管理员可见。"""
     import json as json_mod
 
-    from ..models import Order, UserRole
+    from ..models import NOT_APPEND_ORDER, Order, UserRole
     from ..redis_client import RIDER_LOC_KEY, get_redis
     from ..state_machine import GRABBABLE_STATUSES
     from ..state_machine import OrderStatus as OS
@@ -2372,7 +2372,7 @@ async def dispatch_overview(
     pool_orders = (await db.scalars(
         select(Order).where(
             Order.rider_id.is_(None), Order.status.in_(GRABBABLE_STATUSES),
-            Order.pickup.is_(False), Order.parent_order_no == "")
+            Order.pickup.is_(False), NOT_APPEND_ORDER)
         .order_by(Order.created_at).limit(100))).all()
     # 在途单按**最新优先**取,不是最早优先。
     #
@@ -2384,7 +2384,7 @@ async def dispatch_overview(
         select(Order).where(
             Order.rider_id.is_not(None),
             Order.status.in_([OS.ACCEPTED, OS.READY, OS.PICKED_UP]),
-            Order.parent_order_no == "")
+            NOT_APPEND_ORDER)
         .order_by(Order.created_at.desc()).limit(100))).all()))
 
     shops = {m.id: m for m in await db.scalars(select(Merchant).where(
@@ -2442,7 +2442,8 @@ async def reassign_order(
     传 rider_id=指定改派给在线骑手。PICKED_UP 的单餐在人手上,不可改派。"""
     from sqlalchemy import update as sa_update
 
-    from ..models import Order, OrderEvent, RiderProfile, UserRole, VerifyStatus
+    from ..models import (NOT_APPEND_ORDER, Order, OrderEvent, RiderProfile,
+                          UserRole, VerifyStatus)
     from ..services.push import push_to_user
     from ..state_machine import OrderStatus as OS
 
@@ -2477,7 +2478,7 @@ async def reassign_order(
             select(func.count(Order.id)).where(
                 Order.rider_id == target.id,
                 Order.status.in_([OS.ACCEPTED, OS.READY, OS.PICKED_UP]),
-                Order.parent_order_no == ""))
+                NOT_APPEND_ORDER))
         if active >= 3:
             raise HTTPException(409, f"目标骑手手头已有 {active} 单在途(上限 3)")
         order.rider_id = target.id
