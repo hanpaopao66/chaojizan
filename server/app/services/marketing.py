@@ -141,10 +141,45 @@ async def run_birthday(db: AsyncSession, today_mmdd: str, year: int) -> int:
     return sent
 
 
+#: 每店每天最多触达多少人。**是"发出去几条"的上限,不是"看几个候选"的上限**
+#: —— 区别见 run_winback 里的长注释。
+DAILY_PER_SHOP = 200
+
+
 async def run_winback(db: AsyncSession) -> int:
     """复购提醒:按店召回本店的沉睡老客,券由这家店自己出(#115/#117)。
 
-    每人每店每月最多一次(Redis),叠加全局每周 2 条的总频控。
+    每人每店每月最多一次(Redis),叠加全局每周 2 条的总频控,
+    每店每天最多发 DAILY_PER_SHOP 条。
+
+    ## 两处「静默漏人」,都修了
+
+    **一、每日上限原来切的是候选人,不是发出去的条数。**
+
+    老写法是 `for user in users[:200]` —— 先把候选名单砍到 200 再进循环,
+    而循环里第一件事就是按 Redis 月键跳过本月已发过的人。于是:
+
+    - 第 1 天:给前 200 人发,月键写上;
+    - 第 2 天:切出来的还是**同样这 200 人**,全被月键跳过,一条也发不出去;
+    - 第 201 人往后:这个月永远轮不到。
+
+    演示库里 1 号店有 214 个沉睡老客,末尾那 14 个就是这么消失的
+    (`select ... where id in (...)` 没有 ORDER BY,回来的顺序大致按 id
+    递增,新注册的人 id 最大、永远排在最后 —— 也就是**最该被召回的新客
+    反而最先被砍掉**)。
+
+    现在遍历全部候选,**发满 200 条才停**,并且补上 `order_by(User.id)`:
+    没有 ORDER BY 时顺序由执行计划决定,同一份名单换个计划就换一批人,
+    "每天 200 人"到底是哪 200 人不可复现。
+
+    **二、去重键在真的发出去之前就写上了。**
+
+    老写法先 `set nx` 占坑,再判周频控;周频控挡下的人 `continue` 走了,
+    坑却已经占上 —— 他这个月不会再被尝试,而他一条也没收到。
+    预算发完那次 `break` 同理,最后那个人白白被标记。
+
+    现在把它当成"先占坑,没发成就退坑":任何没真正发出去的路径都
+    `delete` 掉这个键,下一轮照常重试。
     """
     batches = await _active_batches(db, "winback")
     if not batches:
@@ -159,17 +194,22 @@ async def run_winback(db: AsyncSession) -> int:
         shop_name = await db.scalar(
             select(Merchant.name).where(Merchant.id == batch.merchant_id))
         users = (await db.scalars(select(User).where(
-            User.id.in_(dormant_ids), User.marketing_push.is_(True)))).all()
-        for user in users[:200]:  # 每店每天最多触达 200 人,细水长流
-            if not await redis.set(
-                    f"mkt:winback:{batch.merchant_id}:{user.id}:{month}", 1,
-                    ex=35 * 86400, nx=True):
-                continue
+            User.id.in_(dormant_ids), User.marketing_push.is_(True))
+            .order_by(User.id))).all()
+        shop_sent = 0
+        for user in users:
+            if shop_sent >= DAILY_PER_SHOP:
+                break  # 今天这家店发够了,剩下的明天接着来
+            key = f"mkt:winback:{batch.merchant_id}:{user.id}:{month}"
+            if not await redis.set(key, 1, ex=35 * 86400, nx=True):
+                continue  # 本月已发过
             if not await _under_cap(user.id):
+                await redis.delete(key)   # 没发成,退坑
                 continue
             from .coupons import issue_from_batch
             coupon = await issue_from_batch(db, batch, user.id, note="好久不见")
             if coupon is None:
+                await redis.delete(key)   # 没发成,退坑
                 break  # 预算发完了,这家店本轮到此为止
             await db.commit()
             await _count_send(user.id)
@@ -182,6 +222,7 @@ async def run_winback(db: AsyncSession) -> int:
             except Exception:
                 pass
             sent += 1
+            shop_sent += 1
     return sent
 
 
@@ -218,6 +259,11 @@ async def run_new_dish(db: AsyncSession) -> int:
         if not fresh_mids:
             continue
         if not await _under_cap(uid):
+            # **没推成就把坑退掉**(同 run_winback 里的第二条)。
+            # 不退的话:这周被总频控挡下的人,这几家店的上新在他那里
+            # 就是消失了 —— 键还挂着 7 天,而他一条都没收到
+            for mid in fresh_mids:
+                await redis.delete(f"mkt:favnew:{uid}:{mid}")
             continue
         await _count_send(uid)
         names = "、".join(shops.get(m, "") for m in fresh_mids[:3])
