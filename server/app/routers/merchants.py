@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, func, or_, select, text, update
+from sqlalchemy import (and_, func, literal_column, or_, select, text,
+                        update)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import date, datetime, timedelta, timezone
@@ -103,52 +104,69 @@ _NEARBY_SQL_TMPL = """
         ORDER BY {order_by}, m.id
         LIMIT :limit OFFSET :offset
     )
-    SELECT p.id, count(o.id) AS sales, p.distance_m,
-           -- 人均:近 30 天已完成单的**餐费**均价,不含配送费和打包费。
-           -- 用户比的是"这家菜多少钱",配送费在卡片上本来就单列了。
-           --
-           -- 样本不足时给 NULL,由调用方决定不显示 —— 三五单算出来的均价
-           -- 没有意义(一单 50 和一单 10 差得离谱),而一个瞎编的"人均"
-           -- 会让人按错误的价位预期点进去。和评分「暂无评价」一个道理:
-           -- 不知道就说不知道。
-           CASE WHEN count(o.id) >= :avg_min_orders
-                THEN round(avg(o.food_cents))::int END AS avg_spend_cents
-    FROM page p
-    LEFT JOIN orders o
-           ON o.merchant_id = p.id
-          AND o.status = 'completed'
-          AND o.created_at >= now() - interval '30 days'
-          AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
-    GROUP BY p.id, p.distance_m, p.rn
-    ORDER BY p.rn
+    -- 聚合和取整行分两层:**聚合这一层只带 id/距离/名次**,
+    -- 商家的 85 列在聚合之后才按主键 join 进来。
+    -- 直接 `SELECT m.*` + `GROUP BY m.id` 也对,但那样 85 列要跟着
+    -- 整个 GROUP BY 走一遍,省下的那趟往返正好被它吃掉(实测是平的)。
+    SELECT m.*, agg.sales, agg.distance_m, agg.avg_spend_cents
+    FROM (
+      SELECT p.id, p.distance_m, p.rn, count(o.id) AS sales,
+             -- 人均:近 30 天已完成单的**餐费**均价,不含配送费和打包费。
+             -- 用户比的是"这家菜多少钱",配送费在卡片上本来就单列了。
+             --
+             -- 样本不足时给 NULL,由调用方决定不显示 —— 三五单算出来的
+             -- 均价没有意义(一单 50 和一单 10 差得离谱),而一个瞎编的
+             -- "人均"会让人按错误的价位预期点进去。和评分「暂无评价」
+             -- 一个道理:不知道就说不知道。
+             CASE WHEN count(o.id) >= :avg_min_orders
+                  THEN round(avg(o.food_cents))::int END AS avg_spend_cents
+      FROM page p
+      LEFT JOIN orders o
+             ON o.merchant_id = p.id
+            AND o.status = 'completed'
+            AND o.created_at >= now() - interval '30 days'
+            AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
+      GROUP BY p.id, p.distance_m, p.rn
+    ) agg
+    JOIN merchants m ON m.id = agg.id
+    ORDER BY agg.rn
 """
 
 #: 按销量排序**只能**用这个:排序键就是聚合结果,没法把 LIMIT 推到
 #: 聚合前面。所以这条路径照旧要给半径内所有店算月售 —— 首页默认的
 #: distance 不走这里,影响面小
 _NEARBY_SQL_BY_SALES = """
-    SELECT m.id, count(o.id) AS sales, min({dist_expr}) AS distance_m,
-           CASE WHEN count(o.id) >= :avg_min_orders
-                THEN round(avg(o.food_cents))::int END AS avg_spend_cents
-    FROM merchants m
-    LEFT JOIN orders o
-           ON o.merchant_id = m.id
-          AND o.status = 'completed'
-          AND o.created_at >= now() - interval '30 days'
-          AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
-    WHERE m.is_open = true
-      AND m.status = 'approved'
-      AND m.biz_type = 'food'
-      {category_clause}
-      {filter_clause}
-      AND ST_DWithin(
-            ST_SetSRID(ST_MakePoint(m.lng, m.lat), 4326)::geography,
-            ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
-            :radius_m
-          )
-    GROUP BY m.id
-    ORDER BY {order_by}, m.id
-    LIMIT :limit OFFSET :offset
+    SELECT m.*, agg.sales, agg.distance_m, agg.avg_spend_cents
+    FROM (
+      SELECT m.id, count(o.id) AS sales, min({dist_expr}) AS distance_m,
+             -- 名次和 _NEARBY_SQL_TMPL 同一套路:外层只按 rn 排,
+             -- 不把排序键在外层再抄一遍 —— 抄漏一个 m.id 就不是全序了,
+             -- 翻页会重店漏店。窗口函数在 GROUP BY 之后、LIMIT 之前算
+             row_number() OVER (ORDER BY {order_by}, m.id) AS rn,
+             CASE WHEN count(o.id) >= :avg_min_orders
+                  THEN round(avg(o.food_cents))::int END AS avg_spend_cents
+      FROM merchants m
+      LEFT JOIN orders o
+             ON o.merchant_id = m.id
+            AND o.status = 'completed'
+            AND o.created_at >= now() - interval '30 days'
+            AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
+      WHERE m.is_open = true
+        AND m.status = 'approved'
+        AND m.biz_type = 'food'
+        {category_clause}
+        {filter_clause}
+        AND ST_DWithin(
+              ST_SetSRID(ST_MakePoint(m.lng, m.lat), 4326)::geography,
+              ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography,
+              :radius_m
+            )
+      GROUP BY m.id
+      ORDER BY {order_by}, m.id
+      LIMIT :limit OFFSET :offset
+    ) agg
+    JOIN merchants m ON m.id = agg.id
+    ORDER BY agg.rn
 """
 
 #: 算「人均」至少要几单。
@@ -268,35 +286,42 @@ async def list_merchants(
     if lat is not None and lng is not None:
         # 按销量排必须先聚合才知道谁在前 —— 只有那一种走全量模板
         tmpl = _NEARBY_SQL_BY_SALES if sort == "sales" else _NEARBY_SQL_TMPL
-        rows = await db.execute(
-            text(tmpl.format(
-                order_by=_SORTS[sort],
-                # 距离本来就为排序算了一次(_DIST_EXPR),顺手取出来返回 ——
-                # 不返回的话客户端只能拿两点直线再算一遍,而那份更糙
-                dist_expr=_DIST_EXPR,
-                category_clause=(
-                    "AND m.category = :category" if category else ""),
-                filter_clause="\n      ".join(filters))),
+        stmt = text(tmpl.format(
+            order_by=_SORTS[sort],
+            # 距离本来就为排序算了一次(_DIST_EXPR),顺手取出来返回 ——
+            # 不返回的话客户端只能拿两点直线再算一遍,而那份更糙
+            dist_expr=_DIST_EXPR,
+            category_clause=(
+                "AND m.category = :category" if category else ""),
+            filter_clause="\n      ".join(filters)))
+        # 一趟拿完:商家整行 + 月售 + 距离 + 人均。
+        #
+        # 老写法是两趟 —— 第一趟只取 id/月售/距离/人均,第二趟再
+        # `WHERE id IN (那 20 个)` 把商家 85 列取回来。第二趟纯属多余
+        # 往返:同一个页码,同一批 id,库里刚扫过的行。实测一页 20 家
+        # 0.52ms、一页 50 家 0.99ms,占函数本体的 12~14%。
+        #
+        # from_statement 让 ORM 直接吃这条原生 SQL 的结果:回来的仍是
+        # 真的 Merchant 实体,kitchen_cam / busy_active 这些挂在模型上的
+        # @property 照常可用 —— 不能改成手搓字典,那等于把这些口径
+        # 复制一份出来,迟早和模型对不上
+        rows = (await db.execute(
+            select(Merchant,
+                   literal_column("sales"),
+                   literal_column("distance_m"),
+                   literal_column("avg_spend_cents")).from_statement(stmt),
             {"lat": lat, "lng": lng,
              "radius_m": _browse_radius_m(radius_m),
              "avg_min_orders": AVG_SPEND_MIN_ORDERS,
              "limit": limit, "offset": offset,
              **({"category": category} if category else {}),
              **filter_params},
-        )
-        id_sales = [(r[0], r[1], r[2], r[3]) for r in rows]
-        if not id_sales:
+        )).all()
+        if not rows:
             return []
-        result = await db.scalars(
-            select(Merchant).where(
-                Merchant.id.in_([i for i, _, _, _ in id_sales]))
-        )
-        by_id = {m.id: m for m in result}
         outs = []
-        for mid, sales, dist, avg_spend in id_sales:
-            if mid not in by_id:
-                continue
-            out = MerchantOut.model_validate(by_id[mid])
+        for shop, sales, dist, avg_spend in rows:
+            out = MerchantOut.model_validate(shop)
             out.monthly_sales = sales
             # PostGIS geography 的 <-> 是**球面**距离(米),比客户端的
             # haversine 准;但它仍是直线不是骑行路径 —— 字段名和文案
