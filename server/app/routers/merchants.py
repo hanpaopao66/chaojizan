@@ -3419,35 +3419,63 @@ def _bj_day_bounds(offset_days: int = 0) -> tuple[datetime, datetime]:
         (start + timedelta(days=1)).astimezone(timezone.utc)
 
 
-async def _day_summary(db: AsyncSession, merchant_id: int,
-                       start: datetime, end: datetime) -> dict:
-    """某天的下单口径汇总。**这是「生意热度」,不是「实际入账」**:
-    对账页(finance/daily)按 merchant_earnings 结算口径,未完成的单不在里面;
-    这里按 created_at 数今天发生了什么,两边数字对不上是正常的。"""
-    rows = await db.execute(
-        select(Order.status, Order.total_cents, Order.refund_cents,
-               Order.pickup)
+#: 「今天发生了什么」里各口径的状态集合。挪到模块级是为了让 SQL 和
+#: 说明用同一份定义,别在两处各写一遍
+_ONGOING_STATES = (OrderStatus.PAID, OrderStatus.ACCEPTED,
+                   OrderStatus.READY, OrderStatus.PICKED_UP)
+_DONE_STATES = (OrderStatus.DELIVERED, OrderStatus.COMPLETED)
+_EMPTY_DAY = {"orders": 0, "gmv_cents": 0, "ongoing": 0,
+              "done": 0, "cancelled": 0, "pickup_orders": 0}
+
+
+async def _today_and_yesterday(db: AsyncSession,
+                               merchant_id: int) -> tuple[dict, dict]:
+    """今天 + 昨天的下单口径汇总,**一条 SQL**。
+
+    口径:这是「生意热度」,不是「实际入账」—— 对账页(finance/daily)按
+    merchant_earnings 结算口径,未完成的单不在里面;这里按 created_at
+    数今天发生了什么,两边数字对不上是正常的。
+
+    原来是 `_day_summary` 跑两遍:两个往返,而且每遍都把那一天的**订单
+    行全取回 Python** 再 for 循环数 —— 为了 6 个数字,一家一天 500 单的
+    店要传 500 行回来,两天就是 1000 行。商家端前台每 30 秒刷一次。
+
+    现在用条件聚合(`count(*) FILTER (WHERE ...)`)在库里数完,两天靠
+    `created_at >= 今天零点` 分组,一次取回 2 行。昨天和今天的时间段本来
+    就首尾相接,所以一个 BETWEEN 就够,不用查两次。
+    """
+    t_start, t_end = _bj_day_bounds(0)
+    y_start, _ = _bj_day_bounds(-1)
+    not_cancelled = Order.status != OrderStatus.CANCELLED
+    is_today = (Order.created_at >= t_start).label("is_today")
+    rows = (await db.execute(
+        select(
+            is_today,
+            func.count().filter(not_cancelled).label("orders"),
+            func.coalesce(
+                func.sum(Order.total_cents - Order.refund_cents)
+                .filter(not_cancelled), 0).label("gmv_cents"),
+            func.count().filter(
+                Order.status.in_(_ONGOING_STATES)).label("ongoing"),
+            func.count().filter(
+                Order.status.in_(_DONE_STATES)).label("done"),
+            func.count().filter(
+                Order.status == OrderStatus.CANCELLED).label("cancelled"),
+            func.count().filter(
+                and_(not_cancelled, Order.pickup)).label("pickup_orders"),
+        )
         .where(Order.merchant_id == merchant_id,
-               Order.created_at >= start, Order.created_at < end,
-               Order.status != OrderStatus.PENDING_PAYMENT))
-    ongoing_states = {OrderStatus.PAID, OrderStatus.ACCEPTED,
-                      OrderStatus.READY, OrderStatus.PICKED_UP}
-    done_states = {OrderStatus.DELIVERED, OrderStatus.COMPLETED}
-    orders = ongoing = done = cancelled = pickup_n = 0
-    gmv = 0
-    for status, total, refund, pickup in rows:
-        if status == OrderStatus.CANCELLED:
-            cancelled += 1
-            continue
-        orders += 1
-        gmv += total - refund
-        pickup_n += 1 if pickup else 0
-        if status in ongoing_states:
-            ongoing += 1
-        elif status in done_states:
-            done += 1
-    return {"orders": orders, "gmv_cents": gmv, "ongoing": ongoing,
-            "done": done, "cancelled": cancelled, "pickup_orders": pickup_n}
+               Order.created_at >= y_start, Order.created_at < t_end,
+               Order.status != OrderStatus.PENDING_PAYMENT)
+        .group_by(is_today))).all()
+    by_day = {r.is_today: {"orders": r.orders, "gmv_cents": r.gmv_cents,
+                           "ongoing": r.ongoing, "done": r.done,
+                           "cancelled": r.cancelled,
+                           "pickup_orders": r.pickup_orders}
+              for r in rows}
+    # 某一天一单都没有时这天没有行,给全零 —— 不能少一个键
+    return (by_day.get(True, dict(_EMPTY_DAY)),
+            by_day.get(False, dict(_EMPTY_DAY)))
 
 
 @router.get("/me/today")
@@ -3457,8 +3485,7 @@ async def my_today(
 ):
     """今日实时经营(下单口径,北京时区),附昨日全天做参照。"""
     shop = await _my_shop_or_404(db, user)
-    today = await _day_summary(db, shop.id, *_bj_day_bounds(0))
-    yesterday = await _day_summary(db, shop.id, *_bj_day_bounds(-1))
+    today, yesterday = await _today_and_yesterday(db, shop.id)
     return {"today": today, "yesterday": yesterday}
 
 
