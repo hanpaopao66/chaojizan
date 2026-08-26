@@ -98,29 +98,49 @@ async def html_aware_errors(request, exc):
     return await http_exception_handler(request, exc)
 
 
-@app.middleware("http")
-async def select_shop(request, call_next):
+# ---------------------------------------------------------------------------
+# 下面三个中间件都写成**纯 ASGI**,而不是 @app.middleware("http")。
+#
+# 那个装饰器背后是 Starlette 的 BaseHTTPMiddleware,它给**每一个请求**
+# 起一个 anyio task group 加两条内存对象流,好处是能拿到 Request/Response
+# 对象。而这三件事一件都用不上:两个只读请求头,一个只包一层 try。
+#
+# 三端所有接口、每一个请求都要穿过这一层,所以这里省下的是**乘以总请求数**
+# 的开销 —— 首页那种 7ms 的接口感觉不明显,但 /orders/{no}/rider-location
+# 这类 4ms 的高频轮询里,它占的比例并不小。
+# ---------------------------------------------------------------------------
+
+
+class SelectShopMiddleware:
     """连锁门店选择:X-Shop-Id 头写进 ContextVar,供权限解析读取。
 
     **这个头只是「选哪家」不是「有权限」** —— services.staff.resolve_shop
     拿到之后照样走完整校验,伪造别家的 id 只会拿到 404。
     没有这个头时一切照旧(单店商家零感知)。
     """
-    from .services.staff import current_shop_id
 
-    raw = request.headers.get("x-shop-id")
-    token = None
-    if raw and raw.isdigit():
-        token = current_shop_id.set(int(raw))
-    try:
-        return await call_next(request)
-    finally:
-        if token is not None:
-            current_shop_id.reset(token)
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        from .services.staff import current_shop_id
+
+        raw = ""
+        for k, v in scope["headers"]:
+            if k == b"x-shop-id":
+                raw = v.decode("latin-1")
+                break
+        token = current_shop_id.set(int(raw)) if raw.isdigit() else None
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            if token is not None:
+                current_shop_id.reset(token)
 
 
-@app.middleware("http")
-async def observe_app_build(request, call_next):
+class ObserveAppBuildMiddleware:
     """记录客户端上报的 X-App-Build。**只记录,不拦截。**
 
     现在我们答不上来「线上还有多少旧版在跑」这个问题 ——
@@ -137,20 +157,30 @@ async def observe_app_build(request, call_next):
 
     `/health` 这类高频探活不记,不然日志里全是它。
     """
-    build = request.headers.get("x-app-build", "")
-    if build and build.isdigit() and request.url.path not in ("/health",):
-        import logging as _logging
 
-        _logging.getLogger("superz.appbuild").info(
-            "app_build=%s platform=%s path=%s",
-            build[:12],
-            (request.headers.get("x-app-platform") or "?")[:16],
-            request.url.path)
-    return await call_next(request)
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        # 绝大多数请求根本没有这个头,所以先扫一遍头、没有就立刻放行:
+        # 不要为了极少数上报的请求让所有请求都去构造 Request 对象
+        if scope["type"] == "http":
+            build = platform = ""
+            for k, v in scope["headers"]:
+                if k == b"x-app-build":
+                    build = v.decode("latin-1")
+                elif k == b"x-app-platform":
+                    platform = v.decode("latin-1")
+            if build.isdigit() and scope.get("path") not in ("/health",):
+                import logging as _logging
+
+                _logging.getLogger("superz.appbuild").info(
+                    "app_build=%s platform=%s path=%s",
+                    build[:12], (platform or "?")[:16], scope.get("path"))
+        await self.app(scope, receive, send)
 
 
-@app.middleware("http")
-async def log_unhandled_errors(request, call_next):
+class LogUnhandledErrorsMiddleware:
     """未捕获异常统一留痕(#130)。
 
     此前线上报错只能翻 docker logs 的原始 traceback,而日志既没轮转上限、
@@ -160,17 +190,31 @@ async def log_unhandled_errors(request, call_next):
     把用户数据写进日志等于给自己造了第二个数据泄露面:
     日志会被复制、会被转发、会进备份,而且不受 /files 那套判权保护。
     """
-    import logging
-    import traceback
 
-    try:
-        return await call_next(request)
-    except Exception:
-        logging.getLogger("superz.error").error(
-            "未处理异常 %s %s\n%s",
-            request.method, request.url.path, traceback.format_exc())
-        raise
+    def __init__(self, app):
+        self.app = app
 
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        try:
+            await self.app(scope, receive, send)
+        except Exception:
+            import logging
+            import traceback
+
+            logging.getLogger("superz.error").error(
+                "未处理异常 %s %s\n%s",
+                scope.get("method"), scope.get("path"),
+                traceback.format_exc())
+            raise
+
+
+# 加入顺序 = 由内到外,和原先三个装饰器的嵌套顺序保持一致:
+# CORS → 异常留痕 → 版本上报 → 门店选择 → 路由
+app.add_middleware(SelectShopMiddleware)
+app.add_middleware(ObserveAppBuildMiddleware)
+app.add_middleware(LogUnhandledErrorsMiddleware)
 
 # 收紧到白名单(#130)。原先是 ["*"] —— 任何网站都能拿着用户浏览器里的
 # 凭据打我们的接口。原生 App 不发 Origin 头、不受 CORS 约束,
