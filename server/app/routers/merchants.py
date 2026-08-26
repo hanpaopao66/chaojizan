@@ -641,6 +641,9 @@ async def update_my_shop(
         shop.is_open = False
     await db.commit()
     await db.refresh(shop)
+    if payload.promise_ready_minutes is not None:
+        from ..services import prep_time
+        await prep_time.invalidate(shop.id)
     return shop
 
 

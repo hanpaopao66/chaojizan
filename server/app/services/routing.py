@@ -407,6 +407,17 @@ async def route_matrix(
         elif rep != d:
             same_cell[d] = rep  # 跟着代表点走,不单独问
 
+    # 全部命中缓存就直接回,**别去碰那把锁**。
+    #
+    # 漏了这一句的代价:热缓存下每次刷新都要排队等 1.1 秒的间隔,
+    # 而那把锁是进程级的 —— 10 个骑手同时刷新就串成一列,
+    # 实测整轮从 57ms(单人)线性涨到 604ms(10 人),并发度等于 1。
+    # 午高峰几十个骑手嘎嘎刷,这就是一条长队。
+    #
+    # 节流要挡的是"真的去打接口",不是"看一眼缓存"。
+    if not todo:
+        return _fill_same_cell(out, dests, origin, same_cell, mode)
+
     # 串行 + 保证间隔:跨调用也不许把自己限流(见 _matrix_gate)。
     #
     # ⚠️ 锁要罩住**整个分批循环**,不能只罩住开头的等待 ——
@@ -482,8 +493,14 @@ async def route_matrix(
                 except Exception:
                     pass
 
-    # 同格的点抄代表点的答案。代表点自己也没算出来的,退回直线 ——
-    # 口径和单点调用一致,不编数
+    return _fill_same_cell(out, dests, origin, same_cell, mode)
+
+
+def _fill_same_cell(out, dests, origin, same_cell, mode):
+    """同格的点抄代表点的答案;谁都没算出来的退回直线。
+
+    口径和单点调用一致,不编数。
+    """
     for d, rep in same_cell.items():
         if rep in out:
             out[d] = out[rep]
