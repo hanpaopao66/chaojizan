@@ -693,8 +693,14 @@ class ApiClient {
     return (data as List).cast<int>();
   }
 
-  Future<List<Merchant>> favorites() async {
-    final data = await _request('GET', '/favorites');
+  /// 我的收藏(分页,按收藏时间倒序)。不传 limit 就是服务端默认的一页
+  /// 100 家 —— 老调用方行为不变;要翻页就传 limit + offset,
+  /// 「没有下一页」的信号是这一页不足 limit 家(与 merchants 同款)
+  Future<List<Merchant>> favorites({int? limit, int offset = 0}) async {
+    final data = await _request('GET', '/favorites', query: {
+      if (limit != null) 'limit': '$limit',
+      if (offset > 0) 'offset': '$offset',
+    });
     return (data as List)
         .map((e) => Merchant.fromJson(e as Map<String, dynamic>))
         .toList();

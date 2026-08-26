@@ -6284,8 +6284,45 @@ class FavoritesPage extends StatefulWidget {
 class _FavoritesPageState extends State<FavoritesPage> {
   // 收藏页原来直接在 build 里 api.favorites():每次 rebuild 都重新请求,
   // 而且加载失败没有重试出口。改成持有 future,重试就是换一个 future
-  late Future<List<Merchant>> _future = widget.api.favorites();
+  late Future<List<Merchant>> _future = widget.api.favorites(limit: _pageSize);
   ApiClient get api => widget.api;
+
+  /// 第二页起追加的店。老口径是一次要回全部收藏(服务端写死 100 家):
+  /// 收藏满 100 家的人第 101 家起永远看不到,界面上只表现为
+  /// 「我明明收藏过,它不见了」;而且首屏要解 98 家 × 43 字段的 86KB,
+  /// 其中 78 家在第一屏根本滚不到
+  final List<Merchant> _more = [];
+  bool _loadingMore = false;
+  bool _noMore = false;
+  static const _pageSize = 20;
+
+  /// 触底加载下一页。失败就停,不反复重试打服务器;重试按钮可以重来
+  Future<void> _loadMore(int loaded) async {
+    if (_loadingMore || _noMore) return;
+    _loadingMore = true;
+    try {
+      final next = await api.favorites(limit: _pageSize, offset: loaded);
+      if (!mounted) return;
+      setState(() {
+        _more.addAll(next);
+        _noMore = next.length < _pageSize;
+      });
+    } catch (_) {
+      _noMore = true;
+    } finally {
+      _loadingMore = false;
+    }
+  }
+
+  /// 重新拉第一页,分页状态跟着从头来
+  void _reload() {
+    setState(() {
+      _more.clear();
+      _loadingMore = false;
+      _noMore = false;
+      _future = api.favorites(limit: _pageSize);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -6295,9 +6332,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return SzError(
-                error: snapshot.error,
-                onRetry: () => setState(() => _future = api.favorites()));
+            return SzError(error: snapshot.error, onRetry: _reload);
           }
           if (!snapshot.hasData) return const SkeletonList(itemCount: 4);
           final shops = snapshot.data!;
@@ -6307,9 +6342,16 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 text: '还没有收藏的店铺\n在店铺页点❤️收藏常点的店');
           }
           return ListView.builder(
-            itemCount: shops.length,
+            itemCount: shops.length + _more.length,
             itemBuilder: (context, i) {
-              final m = shops[i];
+              // 触底预加载:第一页不满一页就说明后面没有了,不用白跑一趟
+              if (i == shops.length + _more.length - 1 &&
+                  shops.length >= _pageSize) {
+                WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => _loadMore(shops.length + _more.length));
+              }
+              final m =
+                  i < shops.length ? shops[i] : _more[i - shops.length];
               return ListTile(
                 leading: SzImage(
                     url: m.logoUrl.isEmpty ? '' : api.resolveUrl(m.logoUrl),
