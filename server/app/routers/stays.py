@@ -393,13 +393,16 @@ async def list_hotels(
     # 算不出来就留 None,客户端只显示距离,不显示时间。
     if lat is not None and lng is not None and top:
         try:
-            from ..services.routing import route_matrix
+            from ..services.routing import MatrixBusy, route_matrix
             got = await route_matrix(
                 (lat, lng), [(c.lat, c.lng) for c in top], "drive")
             for c in top:
                 _d, mins, _src = got.get((c.lat, c.lng), (0, None, "straight"))
                 if mins is not None:
                     c.drive_minutes = max(1, round(mins))
+        except MatrixBusy:
+            pass  # 节流锁忙(抢单池是同一把)。这是预期状态不是故障,
+            #      不打带堆栈的日志 —— 只是这一页不显示驾车时长
         except Exception:
             logger.warning("酒店列表算驾车时长失败,只显示距离", exc_info=True)
     return top

@@ -76,6 +76,9 @@ _TTL_SECONDS = 7 * 24 * 3600      # 路网不常变,一周足够
 #: 比正缓存(7 天)短得多:路网确实会更新,新修的路该有机会被重新发现。
 #: 半小时是个折中:够挡住高频刷新,又不会让一条新路等一周。
 _NEG_TTL_SECONDS = 1800
+#: 瞬时失败(限流/超时/网络抖)的负缓存时长。短到一分钟就自愈,
+#: 长到足够让一场限流风暴退下去 —— 见 _give_up 的 transient
+_NEG_TTL_TRANSIENT = 60
 
 # 直线 → 骑行的经验放大系数。**只在路径规划不可用时兜底**,
 # 实测成都样本约 1.19;取 1.2 略偏保守(宁可高估一点,别让骑手吃亏)
@@ -121,6 +124,7 @@ def dump_route_cache(distance_m: float, duration_min: float | None) -> str:
 
 async def bicycling_m(
     from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+    cache_only: bool = False,
 ) -> tuple[float, str]:
     """骑行距离(米)与来源。
 
@@ -130,28 +134,77 @@ async def bicycling_m(
     要时长的话用 [bicycling_route],这个函数只是它的距离视图。
     """
     dist, _minutes, src = await bicycling_route(
-        from_lat, from_lng, to_lat, to_lng)
+        from_lat, from_lng, to_lat, to_lng, cache_only=cache_only)
     return dist, src
 
 
-async def _give_up(redis, key: str, fallback):
-    """记下「这个点对规划不出来」,然后返回直线兜底。
+async def _give_up(redis, key: str, fallback, transient: bool = False):
+    """记下「这个点对现在问不出来」,然后返回直线兜底。
 
     不记的话,抢单池里一个这样的点对会被每 5 秒重问一次 —— 实测 20 单的
     池子一次刷新要 6.1 秒,而客户端的轮询间隔就是 5 秒。
+
+    ⚠️ `transient` 必须分清楚,不然会把一次手抖变成半小时的降级:
+
+    - **持久失败**(status=384「两点之间规划不出路线」、返回空 routes):
+      这是这两个点的属性,半小时内不会变,记 30 分钟省得反复问;
+    - **瞬时失败**(每秒限流 status=120、超时、网络抖动):下一秒可能就好了。
+      按 30 分钟记的话,午高峰打快一下,那对坐标的路网距离就静默变成
+      直线,而且**半小时不自愈** —— 骑手只会看到跑程数字莫名其妙地变了,
+      没有任何地方告诉他为什么。所以只记一分钟,退一步就回来。
     """
     try:
         # 距离写 0 当负缓存标记:parse_route_cache 读得回来,
         # 而 0 米在业务上不可能是真实距离
-        await redis.set(key, dump_route_cache(0.0, None), ex=_NEG_TTL_SECONDS)
+        await redis.set(key, dump_route_cache(0.0, None),
+                        ex=_NEG_TTL_TRANSIENT if transient else _NEG_TTL_SECONDS)
     except Exception:
         pass  # 缓存挂了不影响正确性,只是下次还得再问一遍
     return fallback
 
 
+async def routes_cached(
+    pairs: list[tuple[tuple[float, float], tuple[float, float]]],
+    mode: str = "bike",
+) -> dict[tuple[tuple[float, float], tuple[float, float]], tuple[float, float | None, str]]:
+    """一次 mget 把这批点对的缓存读回来;读不到的不在返回里。
+
+    为什么需要它:抢单池一屏 42 单要算 84 段路(到店 + 送程),而
+    [route] 每段各发一次 `GET`。**84 次串行往返**,profile 下占了整个
+    接口 23% —— 而这些值上一步的矩阵预热刚刚算完写进去,转头又一个一个
+    读回来。批量读的语义和 [route] 完全一致(含负缓存标记),
+    调用方拿不到的再退回 [route] 去问。
+    """
+    if not pairs:
+        return {}
+    keys = [_key(a, b, mode) for a, b in pairs]
+    try:
+        raws = await get_redis().mget(keys)
+    except Exception:
+        return {}  # 缓存挂了就当全没命中,调用方照旧逐个问
+    out: dict[tuple[tuple[float, float], tuple[float, float]],
+              tuple[float, float | None, str]] = {}
+    for (a, b), raw in zip(pairs, raws):
+        if raw is None:
+            continue
+        try:
+            dist_c, dur_c = parse_route_cache(
+                raw.decode() if isinstance(raw, bytes) else raw)
+        except Exception:
+            continue
+        if dist_c <= 0:
+            # 负缓存标记:和 route 一样退回直线,而不是当成没命中 ——
+            # 当成没命中的话调用方又会去问一遍,负缓存就白记了
+            out[(a, b)] = (haversine_m(a[0], a[1], b[0], b[1])
+                           * _MODE_FALLBACK[mode], None, "straight")
+            continue
+        out[(a, b)] = (dist_c, dur_c, "route")
+    return out
+
+
 async def route(
     from_lat: float, from_lng: float, to_lat: float, to_lng: float,
-    mode: str = "bike",
+    mode: str = "bike", cache_only: bool = False,
 ) -> tuple[float, float | None, str]:
     """路径距离(米)、路网时长(分钟)与来源。`mode`:bike / walk / drive。
 
@@ -196,6 +249,17 @@ async def route(
     except Exception:
         pass  # 缓存挂了不影响主流程
 
+    if cache_only:
+        # 缓存没有就用直线,**不发请求**。
+        #
+        # 这不是省钱,是防雪崩:抢单池预热放弃时会走到这里,而一屏 20 单
+        # 是 40 次单点请求 —— 那 40 次不受任何节流约束,一发就撞上腾讯的
+        # 每秒上限,然后每个撞上的点对各自回退直线。等于用一次拥堵
+        # 换来一批降级,还顺手把限流坐实了。
+        #
+        # 也**不写负缓存**:这里根本没问过,不知道这个点对行不行。
+        return fallback
+
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             resp = await client.get(_MODE_API[mode], params={
@@ -208,7 +272,9 @@ async def route(
             # 配额用尽和参数错在结果上长得一样,把 message 记下来才查得清
             logger.warning("%s 路径 status=%s %s,回退直线", mode,
                            data.get("status"), data.get("message"))
-            return await _give_up(redis, ck, fallback)
+            return await _give_up(
+                redis, ck, fallback,
+                transient=data.get("status") in _RATE_LIMIT_STATUS)
         routes = (data.get("result") or {}).get("routes") or []
         if not routes:
             return await _give_up(redis, ck, fallback)
@@ -235,16 +301,19 @@ async def route(
             pass
         return dist, dur, "route"
     except Exception as e:
+        # 超时和网络抖都是瞬时的:下一次可能就通了,不该拉黑半小时
         logger.warning("%s 路径请求失败(%s),回退直线",
                        mode, type(e).__name__)
-        return await _give_up(redis, ck, fallback)
+        return await _give_up(redis, ck, fallback, transient=True)
 
 
 async def bicycling_route(
     from_lat: float, from_lng: float, to_lat: float, to_lng: float,
+    cache_only: bool = False,
 ) -> tuple[float, float | None, str]:
     """骑行路径。ETA、抢单距离都走这个 —— 主场景是骑手。"""
-    return await route(from_lat, from_lng, to_lat, to_lng, "bike")
+    return await route(from_lat, from_lng, to_lat, to_lng, "bike",
+                       cache_only=cache_only)
 
 
 async def billing_distance_m(
@@ -334,6 +403,23 @@ _RATE_LIMIT_PAUSE = 1.1
 #:
 #: 用一把锁串行化并保证间隔:矩阵本来就是"一次问一批",
 #: 它不需要并发,而它一旦被限流,代价是整批失效。
+#: 等这把锁最多等多久。超了就不等了 —— 见 MatrixBusy。
+#:
+#: 这个数是这么来的:锁全局只放行 1/_RATE_LIMIT_PAUSE ≈ 0.9 次/秒,
+#: 而缓存格是 111 米,骑手 20km/h 骑行大约 20 秒换一格、换格就要问一次。
+#: 也就是**大约 18 个移动中的骑手就把这把锁占满**。再多的人不是慢一点,
+#: 是排在队尾等好几秒 —— 实测 10 个骑手各在不同格,整轮 8.3 秒。
+#:
+#: 而路网距离对抢单池只是个更准的数字:等不到就用直线(已有的兜底口径,
+#: 前端也一直显示来源)。**让骑手多等 8 秒去换一个更准的距离,
+#: 这笔账无论如何都不划算。**
+_MATRIX_WAIT_BUDGET = 0.25
+
+
+class MatrixBusy(Exception):
+    """锁太忙,这次不热了。调用方应当退到缓存+直线,别自己去打接口。"""
+
+
 _matrix_gate = asyncio.Lock()
 _matrix_last = 0.0
 
@@ -424,7 +510,11 @@ async def route_matrix(
     # 只罩开头的话两个并发调用会同时拿到锁又同时放开,然后各自
     # 开始打接口,间隔等于没有。踩过一次。
     global _matrix_last
-    async with _matrix_gate:
+    try:
+        await asyncio.wait_for(_matrix_gate.acquire(), _MATRIX_WAIT_BUDGET)
+    except (asyncio.TimeoutError, TimeoutError):
+        raise MatrixBusy(len(todo))
+    try:
         gap = _RATE_LIMIT_PAUSE - (asyncio.get_event_loop().time() - _matrix_last)
         if gap > 0:
             await asyncio.sleep(gap)
@@ -492,6 +582,8 @@ async def route_matrix(
                                     ex=_TTL_SECONDS)
                 except Exception:
                     pass
+    finally:
+        _matrix_gate.release()
 
     return _fill_same_cell(out, dests, origin, same_cell, mode)
 

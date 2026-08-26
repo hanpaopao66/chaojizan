@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -902,6 +903,11 @@ async def _my_in_flight(db: AsyncSession, rider_id: int) -> list[Order]:
     ))
 
 
+#: 抢单池路网预热的总时间预算(秒)。见 available_orders 里的说明:
+#: 热不完就下一轮接着热,绝不让骑手等超过这个数
+_PREWARM_BUDGET = 2.5
+
+
 @router.get("/available-orders")
 async def available_orders(
     with_meta: bool = False,
@@ -930,7 +936,8 @@ async def available_orders(
     from datetime import datetime, timezone
 
     from ..services import dispatch, prep_time
-    from ..services.routing import bicycling_m, bicycling_matrix, detour_m
+    from ..services.routing import (
+        MatrixBusy, bicycling_m, bicycling_matrix, detour_m, routes_cached)
 
     # 取 200 条进来算分、只返回前 50:若只取最老的 50 条再排序,
     # 离骑手近的新单会被挤在池外,「新单不垫底」就落空了
@@ -1000,11 +1007,16 @@ async def available_orders(
     #
     # 矩阵写的缓存和单点调用是同一套键,所以下面的 bicycling_m 直接命中,
     # 一行调用都不用改口径。
+    # 预热没热成时,下面逐单算距离也**不许发请求**,只读缓存。
+    # 理由见 routing.route 里 cache_only 那段:一屏 20 单是 40 次不受
+    # 节流约束的单点请求,一发就把限流坐实,反而更糟
+    cache_only = False
     if rider_pos:
         shop_pts = list({(o.merchant_lat, o.merchant_lng) for o in outs
                          if o.merchant_lat is not None
                          and o.merchant_lng is not None})
-        try:
+
+        async def _prewarm() -> None:
             if shop_pts:
                 await bicycling_matrix(rider_pos, shop_pts)
             # **商家 → 送达点那一段也要热。**
@@ -1030,11 +1042,45 @@ async def available_orders(
                         (order.lat, order.lng))
             for shop_pt, drop_pts in by_shop.items():
                 await bicycling_matrix(shop_pt, list(set(drop_pts)))
+
+        try:
+            # 整段预热的**总预算**。
+            #
+            # 只给"等锁"设上限还不够:抢到锁的那个人要串行等完所有矩阵
+            # 调用,而调用次数 = 1(骑手→商家)+ 商家家数(商家→送达点),
+            # 每次之间强制间隔 1.1 秒。5 家店就是 6.6 秒 —— 超过骑手
+            # 5 秒的轮询间隔,请求会开始堆积。
+            #
+            # 到点就收手,热到哪算哪:已经写进 Redis 的那几段下一轮
+            # 直接命中,剩下的下一轮接着热(实测七轮补满)。
+            # 预热是加速,不是正确性。
+            await asyncio.wait_for(_prewarm(), _PREWARM_BUDGET)
+        except (asyncio.TimeoutError, TimeoutError):
+            cache_only = True
+        except MatrixBusy:
+            # 别人正占着那把节流锁。**不排队** —— 排一次要好几秒,
+            # 而代价只是这一屏的跑程用直线口径(前端本来就显示来源)。
+            # 下一次刷新(5 秒后)大概率就热上了。
+            cache_only = True
         except Exception:
-            # 预热失败不影响正确性:下面照旧逐单算,只是慢一点
+            # 其它预热失败不影响正确性:下面照旧逐单算,只是慢一点
             import logging
             logging.getLogger("superz.riders").warning(
                 "抢单列表路网预热失败,退回逐单", exc_info=True)
+
+        # 预热写进缓存的那些,**一次 mget 全读回来**。
+        #
+        # 不这么做的话下面每单要发两次 `GET`(到店一次、送程一次)——
+        # 一屏 42 单就是 84 次串行往返,profile 下占整个接口 23%。
+        # 荒唐的地方在于:这些值上一步刚算完写进去,转头一个一个读回来。
+        warm = await routes_cached(
+            [(rider_pos, (o.merchant_lat, o.merchant_lng)) for o in outs
+             if o.merchant_lat is not None and o.merchant_lng is not None]
+            + [((o.merchant_lat, o.merchant_lng), (od.lat, od.lng))
+               for od, o in zip(orders, outs)
+               if o.merchant_lat is not None and o.merchant_lng is not None])
+    else:
+        warm = {}
     radius_m = (user.grab_radius_km * 1000
                 if user.grab_radius_km and rider_pos else None)
     scored: list[tuple[float, OrderOut]] = []
@@ -1046,12 +1092,23 @@ async def available_orders(
         if rider_pos and out.merchant_lat is not None:
             # 到店距离用真实骑行路径(不可用时回退直线×1.2 并标明来源)——
             # 直线系统性低估,实测成都两点直线 1467m / 骑行 1745m,差 19%
-            distance, src = await bicycling_m(
-                rider_pos[0], rider_pos[1], out.merchant_lat, out.merchant_lng)
+            shop_pt = (out.merchant_lat, out.merchant_lng)
+            hit = warm.get((rider_pos, shop_pt))
+            if hit is None:
+                distance, src = await bicycling_m(
+                    rider_pos[0], rider_pos[1], shop_pt[0], shop_pt[1],
+                    cache_only=cache_only)
+            else:
+                distance, src = hit[0], hit[2]
             out.distance_m = int(distance)
             out.distance_source = src
-            trip, _ = await bicycling_m(
-                out.merchant_lat, out.merchant_lng, order.lat, order.lng)
+            hit = warm.get((shop_pt, (order.lat, order.lng)))
+            if hit is None:
+                trip, _ = await bicycling_m(
+                    shop_pt[0], shop_pt[1], order.lat, order.lng,
+                    cache_only=cache_only)
+            else:
+                trip = hit[0]
             out.trip_m = int(trip)
 
             # 顺路按**绕路增量**判,不按两点距离。
