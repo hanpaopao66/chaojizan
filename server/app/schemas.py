@@ -1,8 +1,24 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+# ---------- 坐标 ----------
+#
+# **凡是坐标都得在地球上。** 不设范围的浮点字段,`Infinity` 能直接穿进来,
+# 而它参与运算就是 `OverflowError: cannot convert float infinity to integer`
+# —— 一个裸 500(实测过下单 `{"lat": Infinity}` → HTTP 500)。
+#
+# 越界但有限的值(纬度 999)不会 500,但会走到「超出配送范围,换家近点的店吧」:
+# 坐标是坏的,却建议用户换家店,这个提示是误导。
+#
+# 影响面按入口差很多:下单/地址只影响这一单这个人;骑手上报影响他看到的跑程;
+# **商家自己设的店铺坐标影响所有从这家店下单的人**(「附近的店」和每一单的
+# 配送费都从它算)。所以判据是「凡是坐标」,不是「下单这条路要小心」。
+Lat = Annotated[float, Field(ge=-90, le=90)]
+Lng = Annotated[float, Field(ge=-180, le=180)]
+
 
 from .models import (
     AfterSaleStatus,
@@ -119,8 +135,8 @@ class MerchantIn(BaseModel):
     name: str
     description: str = ""
     address: str = ""
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
     # biz_type=food 时为食品经营许可证;hotel 时为营业执照
     license_no: str = ""
     license_image_url: str = ""  # 证照照片(新申请必传,老库存量允许为空)
@@ -148,8 +164,8 @@ class MerchantOut(BaseModel):
     name: str
     description: str
     address: str
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
 
     # 到用户的直线距离(米)。**服务端算的**(PostGIS geography,球面),
     # 客户端别再自己拿两点算一遍 —— 各算各的迟早对不上,而且客户端那份
@@ -817,8 +833,8 @@ class CancelSplitIn(BaseModel):
 
 class ChangeAddressIn(BaseModel):
     address: str = Field(min_length=4, max_length=200)
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
     contact_name: str = Field(default="", max_length=50)
     contact_phone: str = Field(default="", max_length=20)
 
@@ -904,14 +920,14 @@ class ErrandCreateIn(BaseModel):
     """帮送下单入参。取件点与送达点都是用户填的。"""
     # 取件点(东西现在在哪)
     pickup_address: str = Field(min_length=2, max_length=200)
-    pickup_lat: float
-    pickup_lng: float
+    pickup_lat: Lat
+    pickup_lng: Lng
     pickup_contact_name: str = Field(default="", max_length=50)
     pickup_contact_phone: str = Field(default="", max_length=20)
     # 送达点
     address: str = Field(min_length=2, max_length=200)
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
     contact_name: str = Field(default="", max_length=50)
     contact_phone: str = Field(default="", max_length=20)
     floor: int | None = None
@@ -985,8 +1001,8 @@ class OrderCreateIn(BaseModel):
     # 送上门 / 送到楼下。**顾客自己选** —— 选楼下就不收上门难度费,
     # 骑手也没有义务上楼。默认 true 与此前行为一致
     to_door: bool = True
-    lat: float | None = None
-    lng: float | None = None
+    lat: Lat | None = None
+    lng: Lng | None = None
     contact_name: str = Field(default="", max_length=50)
     # **空是允许的,乱填不行。** 骑手拨的就是这个号 ——
     # 空值由路由层回落到下单人的账号手机号(那个号注册时验过),
@@ -1065,8 +1081,8 @@ class OrderOut(BaseModel):
     fee_part_labels: dict = {}
     to_door: bool = True
     address: str
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
     contact_name: str = ""
     contact_phone: str = ""
     # 商家/骑手视角的可拨号码:AXB X 号 > 过渡期真号 > 严格模式空(隐藏拨打)。
@@ -1295,8 +1311,8 @@ class AddressIn(BaseModel):
     contact_phone: str = Field(pattern=r"^1\d{10}$")
     address: str = Field(min_length=2, max_length=200)
     detail: str = Field(default="", max_length=100)
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
     is_default: bool = False
     #: 楼层与电梯(选填)。填了 ETA 会诚实一点 —— 爬 6 楼和 1 楼临街
     #: 是两种活。**不填就是不填**,我们不猜(猜错就是个假承诺)
@@ -1321,8 +1337,8 @@ class AddressPatch(BaseModel):
     contact_phone: str | None = Field(default=None, pattern=r"^1\d{10}$")
     address: str | None = None
     detail: str | None = None
-    lat: float | None = None
-    lng: float | None = None
+    lat: Lat | None = None
+    lng: Lng | None = None
     is_default: bool | None = None
 
 
@@ -1334,8 +1350,8 @@ class AddressOut(BaseModel):
     contact_phone: str
     address: str
     detail: str
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
     is_default: bool
     floor: int | None = None
     has_elevator: bool | None = None
@@ -1347,8 +1363,8 @@ class AddressOut(BaseModel):
 class PoiTipOut(BaseModel):
     name: str
     district: str
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
     # 结构化城市名(「西安市」)。客户端拿它当腾讯 POI 搜索的 city 参数 ——
     # 以前是客户端从 district 那串行政区划里用正则抠,贪婪匹配会抠出
     # 「陕西省西安市」,搜出来 0 条而界面上看不出为什么。
@@ -1479,8 +1495,8 @@ class AdminWithdrawalOut(WithdrawalOut):
 
 # ---------- 骑手 ----------
 class LocationIn(BaseModel):
-    lat: float
-    lng: float
+    lat: Lat
+    lng: Lng
 
 
 class OnlineIn(BaseModel):
@@ -1489,8 +1505,8 @@ class OnlineIn(BaseModel):
 
 class RiderLocationOut(BaseModel):
     rider_id: int
-    lat: float | None
-    lng: float | None
+    lat: Lat | None
+    lng: Lng | None
     updated_at: float | None
 
 
@@ -1613,8 +1629,8 @@ class HotelCardOut(BaseModel):
     name: str
     tier: str = "economy"
     address: str = ""
-    lat: float = 0
-    lng: float = 0
+    lat: Lat = 0
+    lng: Lng = 0
     logo_url: str = ""
     photo_urls: list = []
     rating_avg: float | None = None
@@ -1652,8 +1668,8 @@ class HotelDetailOut(BaseModel):
     description: str = ""
     tier: str = "economy"
     address: str = ""
-    lat: float = 0
-    lng: float = 0
+    lat: Lat = 0
+    lng: Lng = 0
     front_desk_phone: str = ""
     checkin_from: str = "14:00"
     checkout_until: str = "12:00"

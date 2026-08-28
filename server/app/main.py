@@ -89,6 +89,8 @@ app = FastAPI(
 
 # 浏览器访问不存在的路径给品牌 404 页;API 客户端(Accept 非 html)仍收 JSON
 from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
@@ -97,6 +99,46 @@ async def html_aware_errors(request, exc):
     if exc.status_code == 404 and "text/html" in request.headers.get("accept", ""):
         return FileResponse(STATIC_DIR / "404.html", status_code=404)
     return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_errors(request, exc: RequestValidationError):
+    """422 的错误体里会**回显收到的那个值**,而 Infinity / NaN 不是合法 JSON。
+
+    表现是:客户端传 `{"lat": Infinity}`,校验正确地拒绝了它,
+    然后**序列化这条 422 的时候炸掉**,用户拿到的是裸 500 ——
+    校验越严,这个 500 越容易撞上。
+
+        ValueError: Out of range float values are not JSON compliant
+
+    这跟字段是不是坐标无关,任何 float 入参都会这样。所以修在这里,
+    而不是在某个字段上:把回显值里的非有限浮点换成它的字面写法。
+    实测过 `{"lat": Infinity}` 修前 500、修后 422。
+    """
+    return JSONResponse(status_code=422,
+                        content={"detail": _json_safe(exc.errors())})
+
+
+def _json_safe(obj):
+    """把 Infinity / NaN 换成字符串,其余原样。
+
+    只动不能编码的那部分 —— 错误信息里「你传的是什么」是排查的关键,
+    整个删掉的话客户端只知道"有个字段不对",不知道不对在哪。
+    """
+    import math
+
+    if isinstance(obj, float):
+        # **有限的浮点原样返回。** 漏掉这一支的话 1.5 会掉到最后那个
+        # str() 里变成 "1.5" —— 错误体里 ctx.le 之类的合法浮点全变字符串,
+        # 等于为了修一个 500 改了所有 422 的形状。(单测抓到过。)
+        return obj if math.isfinite(obj) else repr(obj)
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (str, int, bool, type(None))):
+        return obj
+    return str(obj)               # 异常类型等不可序列化的对象
 
 
 # ---------------------------------------------------------------------------
