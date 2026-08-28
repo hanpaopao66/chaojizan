@@ -60,6 +60,9 @@ jobs:
       # 的防刷闸门。生产那个 20 是对的,不能为 CI 调低 —— 这里只在 CI 抬高。
       # 注意仍**不放宽同手机号 8 条/滑块**那两条,e2e_auth_sms 正是在测它们。
       SMS_DAILY_IP_LIMIT: "100000"
+      # 同理:全套 e2e 从同一个 127.0.0.1 注册几十个账号,
+      # 而注册限流按 IP 算。生产那个 5 是对的,只在 CI 抬高。
+      RATE_LIMIT_REGISTER_PER_MINUTE: "100000"
 
     steps:
       - uses: actions/checkout@v4

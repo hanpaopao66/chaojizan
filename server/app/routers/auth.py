@@ -45,7 +45,13 @@ SMS_FAIL_KEY = "sms:fail:{phone}"
 
 
 @router.post("/register", response_model=TokenOut)
-async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
+async def register(payload: RegisterIn, request: Request,
+                   db: AsyncSession = Depends(get_db)):
+    # **限流按 IP,不按手机号。** 这个接口的滥用形态是"一个人换着号狂注册",
+    # 按手机号限等于没限。它是三个认证入口里最后一个补上的 ——
+    # 而它恰恰是唯一一个会直接发钱(新客券)的。
+    await check_rate_limit("register", client_ip(request),
+                           settings.rate_limit_register_per_minute)
     # 账号按 (手机号, 角色) 区分:同一手机号可分别注册用户/商家/骑手
     existing = await db.scalar(select(User).where(
         User.phone == payload.phone, User.role == UserRole(payload.role)))
@@ -56,6 +62,9 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
         password_hash=hash_password(payload.password),
         name=payload.name or payload.phone[-4:],
         role=UserRole(payload.role),
+        # 设备指纹要在**发新客券之前**落到 user 上 ——
+        # issue_newcomer 的防薅判定读的就是这个字段
+        device_id=payload.device_id,
     )
     db.add(user)
     # 这个号上次注销时带着风控标记的话,贴回来(注销不是洗白按钮)

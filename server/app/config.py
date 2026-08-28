@@ -84,6 +84,11 @@ class Settings(BaseSettings):
 
     # 接口限流(Redis 固定窗口,按 分钟 计):防爆破/防刷,不为限制正常用户
     rate_limit_enabled: bool = True
+    # 注册按 **IP** 限(换手机号狂注册是这个接口的滥用形态,按号限等于没限)。
+    # 5 次/分钟对真人绰绰有余;这个接口会直接发新客券,松了就是送钱。
+    # 本地与 CI 从同一个 127.0.0.1 跑几十个注册,在那边显式抬高,
+    # **生产这个 5 不动** —— 与 SMS_DAILY_IP_LIMIT 同一个处理方式。
+    rate_limit_register_per_minute: int = 5
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
     rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 60 秒重发限制)
     rate_limit_sms_login_per_minute: int = 10  # 同一手机号验证码登录尝试

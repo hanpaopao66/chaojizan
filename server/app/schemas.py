@@ -20,6 +20,12 @@ class RegisterIn(BaseModel):
     password: str = Field(min_length=6, max_length=64)
     name: str = ""
     role: str = Field(pattern="^(customer|merchant|rider)$")
+    #: 轻量设备指纹,口径与 LoginIn 一致。
+    #:
+    #: **注册这一侧不收的话,新客券的防薅闸门等于不存在** ——
+    #: `coupons._device_has_other_account` 第一句是
+    #: `if not user.device_id: return False`,而密码注册从来不写这个字段。
+    device_id: str = Field(default="", max_length=64)
 
 
 class LoginIn(BaseModel):
