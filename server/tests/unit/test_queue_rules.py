@@ -246,3 +246,42 @@ class Test按北京时间切日:
         src = code_of(q.beijing_today)
         assert "Asia/Shanghai" in src
         assert "date.today()" not in src
+
+
+class Test清场:
+    """一个号必须有终态 —— 不然「排到了」和「排了半天没排上」在数字上一样。"""
+
+    def test_刚取的号不清(self):
+        assert not q.is_stale(datetime.now(timezone.utc))
+
+    def test_排了五小时也不清(self):
+        """真实门店的队最长两三小时。5 小时还留着,是给极端情况留余地。"""
+        assert not q.is_stale(
+            datetime.now(timezone.utc) - timedelta(hours=5))
+
+    def test_超过上限才清(self):
+        assert q.is_stale(datetime.now(timezone.utc)
+                          - timedelta(hours=q.QUEUE_TICKET_MAX_HOURS + 1))
+
+    def test_判据不是日历天(self):
+        """**按日历天切会清掉活人。**
+
+        开到凌晨两点的店,23:50 取的号在 00:00 就"隔天"了 ——
+        而那个人还在门口站着。这条钉住判据是「取号后过了多久」。
+        """
+        src = code_of(q.is_stale)
+        assert "beijing_today" not in src and "day" not in src
+        assert "hours" in src
+
+    def test_跨零点的号不会被误清(self):
+        """具体场景:23:50 取号,00:10 时还在排 —— 只过了 20 分钟,不该清。"""
+        from datetime import datetime as dt
+        took = dt(2026, 8, 28, 15, 50, tzinfo=timezone.utc)   # 北京 23:50
+        now = dt(2026, 8, 28, 16, 10, tzinfo=timezone.utc)    # 北京次日 00:10
+        assert not q.is_stale(took, now), (
+            "跨过北京零点就把还在排队的人清掉了 —— "
+            "开到凌晨的店整条队会在 00:00 蒸发")
+
+    def test_上限是小时级不是分钟级(self):
+        """写成分钟会把正常排队的人清掉;写成天会让号挂一整天。"""
+        assert 2 <= q.QUEUE_TICKET_MAX_HOURS <= 24

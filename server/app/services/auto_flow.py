@@ -711,6 +711,10 @@ async def sweep_once() -> dict[str, int]:
         expired_vouchers = await _sweep_voucher_purchases(db, now)
         if expired_vouchers:
             logger.info("auto_flow: 关闭 %s 张超时未支付的团购券", expired_vouchers)
+        from .queue import sweep_stale_tickets
+        queue_expired = await sweep_stale_tickets(db, now)
+        if queue_expired:
+            logger.info("auto_flow: 清场 %s 个挂着没走完的排队号", queue_expired)
         stay_closed, stay_noshow, stay_autodone = await _sweep_stays(db, now)
         if stay_closed or stay_noshow or stay_autodone:
             logger.info("auto_flow: 住宿清扫 关单%s noshow%s 自动离店%s",
@@ -824,6 +828,7 @@ async def sweep_once() -> dict[str, int]:
         "stay_closed": stay_closed,
         "stay_noshow": stay_noshow,
         "stay_auto_completed": stay_autodone,
+        "queue_expired": queue_expired,
     }
 
 

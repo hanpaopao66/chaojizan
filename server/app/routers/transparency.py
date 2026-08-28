@@ -611,9 +611,18 @@ async def queue_spec(db: AsyncSession = Depends(get_db)):
     from ..services import queue as q
 
     spec = q.public_spec()
+    # **比例的分母只算已经走完的号。** 还在排队的那些结局未定,
+    # 把它们算进分母,过号率会被稀释得越接近饭点越好看 —— 那不叫公示。
     row = (await db.execute(sa_text("""
         SELECT count(*) AS taken,
+               count(*) FILTER (WHERE status NOT IN
+                     ('waiting', 'called', 'pending_restore')) AS finished,
+               count(*) FILTER (WHERE status = 'waiting'
+                     OR status = 'called'
+                     OR status = 'pending_restore') AS still_live,
                count(*) FILTER (WHERE status = 'seated') AS seated,
+               count(*) FILTER (WHERE status = 'cancelled') AS gave_up,
+               count(*) FILTER (WHERE status = 'expired') AS never_seated,
                count(*) FILTER (WHERE passed_count > 0) AS passed,
                round(avg(extract(epoch FROM (seated_at - created_at)) / 60.0)
                      FILTER (WHERE seated_at IS NOT NULL)::numeric, 1) AS avg_wait
@@ -621,16 +630,26 @@ async def queue_spec(db: AsyncSession = Depends(get_db)):
         WHERE created_at >= now() - interval '30 days'
     """))).first()
     taken = int(row.taken or 0)
+    finished = int(row.finished or 0)
     spec["current"] = {
         "days": 30,
         "taken": taken,
+        "still_waiting": int(row.still_live or 0),
+        "finished": finished,
         "seated": int(row.seated or 0),
+        "gave_up": int(row.gave_up or 0),
+        # 排到打烊也没坐上。**这个数单列出来** —— 它和「自己不等了」
+        # 是两回事:前者是放号放多了,后者是客人改主意
+        "never_seated": int(row.never_seated or 0),
         "passed": int(row.passed or 0),
         # 过号率:行业里 20% 是该去看看店里发生了什么的线
-        "pass_ratio": round((row.passed or 0) / taken, 3) if taken else 0.0,
+        "pass_ratio": round((row.passed or 0) / finished, 3) if finished else 0.0,
+        "seated_ratio": round((row.seated or 0) / finished, 3) if finished else 0.0,
         "avg_wait_minutes": float(row.avg_wait or 0),
         "note": ("取号数 / 平均等位 / 过号率 —— 这三项是行业通用口径。"
-                 "过号率偏高通常不是用户的问题,是叫号节奏或放号上限没配对。"),
+                 "过号率偏高通常不是用户的问题,是叫号节奏或放号上限没配对。"
+                 "**比例的分母只算已经走完的号**(还在排的结局未定,"
+                 "算进去会让饭点的数字凭空好看)。"),
     }
     _cache_put("tp:queue", spec, 600)
     return spec

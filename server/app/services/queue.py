@@ -520,3 +520,53 @@ async def undo_pass(db: AsyncSession, ticket: QueueTicket,
                   f"{ticket.ticket_no} 的那次过号经复核不成立,"
                   f"位置已还原。")
     return True
+
+
+#: 一个号最多活多久(小时)。超过就清场,置为 expired。
+#:
+#: **判据是「取号之后过了多久」,不是日历天,也不是营业时间。**
+#:
+#: 按日历天切是错的:开到凌晨两点的店,23:50 取的号在 00:00 就"隔天"了 ——
+#: 而那个人还在门口站着。跨零点营业的店按日历天清,清的是活人。
+#:
+#: 按营业结束时间切在语义上最准,但要串营业时间 + 节假日计划 + 临时歇业
+#: 三样,每一样都是一处能算错的地方;而算错的后果是把还在排队的人清掉。
+#: 「没有哪个餐厅的队要排 6 小时」这个判据简单得多,而且跨零点也对。
+QUEUE_TICKET_MAX_HOURS = 6
+
+
+def is_stale(created_at: datetime, now: datetime | None = None) -> bool:
+    """这个号是不是该清场了。"""
+    now = now or datetime.now(timezone.utc)
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return (now - created_at) >= timedelta(hours=QUEUE_TICKET_MAX_HOURS)
+
+
+async def sweep_stale_tickets(db: AsyncSession, now: datetime) -> int:
+    """清场:把挂着没走完的号置为 expired。返回清掉几个。
+
+    ## 为什么必须有终态
+
+    不清的话,一个号会永远停在 waiting。**它最后到底是坐上了、自己走了、
+    还是店打烊了没轮到,查不出来** —— 而公示里的 seated/taken 正是靠这个
+    区分「排到了」和「排了半天没排上」。没有终态,这两件事在数字上长得一样。
+
+    对用户端和商家端没有可见影响(两边的列表都按当天过滤),所以这不是
+    一个能从界面上看出来的毛病 —— 只会在数据里慢慢攒。
+
+    单轮最多 500 个,剩下的下一轮接着清(清扫每 30 秒跑一次,不会积压)。
+    """
+    stale = (await db.scalars(
+        select(QueueTicket).where(
+            QueueTicket.status.in_(QUEUE_LIVE_STATUSES),
+            QueueTicket.created_at
+            < now - timedelta(hours=QUEUE_TICKET_MAX_HOURS),
+        ).with_for_update(skip_locked=True).limit(500))).all()
+    for t in stale:
+        was = t.status.value
+        t.status = QueueTicketStatus.expired
+        t.closed_at = now
+        await _log(db, t, "expire", "system", None,
+                   f"超过 {QUEUE_TICKET_MAX_HOURS} 小时未走完(清场前状态:{was})")
+    return len(stale)

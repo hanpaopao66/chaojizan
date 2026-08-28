@@ -14,7 +14,10 @@
 
 在 server/ 目录下运行:python -m tests.e2e_queue
 """
+import asyncio
 import time
+
+from sqlalchemy import text
 
 from tests.util import call, demo_shop, login, register_fresh_customer
 
@@ -22,6 +25,30 @@ customer = login("13800000001")
 merchant = login("13800000002")
 shop = demo_shop()
 sid = shop["id"]
+
+
+async def age_and_sweep(ticket_no: str) -> None:
+    """把取号时刻推到清场线之外,然后跑一次清扫。
+
+    走库 + 直调 sweep_once,和 e2e_auto_flow 同一个写法 ——
+    没有接口能造"这个号是 7 小时前取的",而真等 7 小时没人愿意跑。
+    """
+    import sys
+    sys.path.insert(0, ".")
+    from app.db import SessionLocal, engine
+    from app.services.auto_flow import sweep_once
+    from app.services.queue import QUEUE_TICKET_MAX_HOURS
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text("""
+                UPDATE queue_tickets
+                   SET created_at = now() - make_interval(hours => :h)
+                 WHERE ticket_no = :no
+            """), {"h": QUEUE_TICKET_MAX_HOURS + 1, "no": ticket_no})
+            await db.commit()
+        await sweep_once()
+    finally:
+        await engine.dispose()
 
 
 def clear_live(token) -> None:
@@ -201,8 +228,35 @@ def main() -> None:
         "公示里的宽限期和接口实际用的对不上 —— 公示是拿来对着查的")
     assert spec["platform_take"]["text"], "没说排队平台收不收钱"
     assert "pass_ratio" in spec["current"]
-    print(f"✓ 公示齐了:过号率 {spec['current']['pass_ratio']:.1%}、"
-          f"平均等位 {spec['current']['avg_wait_minutes']} 分钟")
+    cur = spec["current"]
+    # **比例的分母只算走完的号。** 还在排的结局未定,算进分母的话
+    # 越到饭点数字越好看 —— 那不叫公示
+    assert cur["finished"] + cur["still_waiting"] == cur["taken"], (
+        f"走完的 {cur['finished']} + 还在排的 {cur['still_waiting']} "
+        f"≠ 取号总数 {cur['taken']}")
+    assert (cur["seated"] + cur["gave_up"] + cur["never_seated"]
+            == cur["finished"]), (
+        f"走完的号分不清去向:坐上 {cur['seated']} + 自己走 {cur['gave_up']} "
+        f"+ 没排上 {cur['never_seated']} ≠ {cur['finished']}")
+    print(f"✓ 公示齐了:走完 {cur['finished']} 个(坐上 {cur['seated']}、"
+          f"自己走 {cur['gave_up']}、没排上 {cur['never_seated']}),"
+          f"还在排 {cur['still_waiting']};过号率 {cur['pass_ratio']:.1%}")
+
+    # ---------- 11) 清场:挂着没走完的号必须有终态 ----------
+    #
+    # 不清的话号永远停在 waiting,一个号最后到底怎么了查不出来 ——
+    # 而公示的 seated/finished 正是靠终态区分「排到了」和「没排上」。
+    # 这里把一个号的取号时刻推到很久以前,再跑一次清扫。
+    aged = call("GET", "/queue/tickets/mine", big)[0]
+    asyncio.run(age_and_sweep(aged["ticket_no"]))
+    after = next(x for x in call("GET", "/queue/tickets/mine", big)
+                 if x["ticket_no"] == aged["ticket_no"])
+    assert after["status"] == "expired", (
+        f"挂了很久的号没被清场,还是 {after['status']} —— "
+        f"它会永远停在这个状态,最后到底怎么了没人查得出来")
+    evs = call("GET", f"/queue/tickets/{aged['ticket_no']}/events", big)
+    assert evs[-1]["action"] == "expire" and evs[-1]["actor_role"] == "system"
+    print("✓ 清场:挂着没走完的号置为 expired,并留痕(操作人是 system)")
 
     print("\ne2e_queue 全部通过 ✅")
 
