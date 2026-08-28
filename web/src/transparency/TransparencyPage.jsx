@@ -302,11 +302,18 @@ export default function TransparencyPage() {
           </div>
         </div>
 
-        <h2>评价<b>不删</b></h2>
+        <h2>评价<b>平台不删</b>,被隐藏的也报出来</h2>
+        <p className="tp-lede">
+          这里原来只写「一条不藏」,而店铺页其实会滤掉被隐藏的评价——
+          于是「删了一成」和「一条没删」在这份公示上长得一模一样。
+          证据按不可能证伪的方式算,那就不是证据。现在隐藏数一起摆出来。
+        </p>
         <div className="tp-cards">
           <div className="tp-card">
-            <div className="v">{fair?.reviews.total?.toLocaleString() ?? '–'}</div>
-            <div className="k">全量评价,一条不藏</div>
+            <div className="v">{fair?.reviews.visible?.toLocaleString() ?? '–'}</div>
+            <div className="k">
+              店铺页实际可见,共 {fair?.reviews.total?.toLocaleString() ?? '–'} 条
+            </div>
           </div>
           <div className="tp-card">
             <div className="v">{fair?.reviews.bad_ratio != null
@@ -314,10 +321,20 @@ export default function TransparencyPage() {
             <div className="k">差评占比(≤2 星)——好看不好看,都摆在这</div>
           </div>
           <div className="tp-card amber">
+            <div className="v">{fair?.reviews.hidden ?? '–'}<small> 条</small></div>
+            <div className="k">
+              被隐藏{fair?.reviews.hidden_ratio != null
+                ? `(${(fair.reviews.hidden_ratio * 100).toFixed(1)}%)` : ''}
+              ——只有商家申诉成立这一条路
+            </div>
+          </div>
+          <div className="tp-card amber">
             <div className="v">{fair?.reviews.flagged_still_visible ?? '–'}<small> 条</small></div>
             <div className="k">刷评嫌疑标记待复核——只标记,不隐藏不删除</div>
           </div>
         </div>
+        <p className="tp-note">{fair?.reviews.hidden_rule}</p>
+        <p className="tp-note">{fair?.reviews.hidden_recourse}</p>
 
         <h2 id="reports">月度财报<b>(收入侧实时)</b></h2>
         <p className="tp-lede">

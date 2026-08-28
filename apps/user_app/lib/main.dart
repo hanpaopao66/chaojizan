@@ -4922,7 +4922,17 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                     },
                   ),
                   _review != null
-                      ? _ReviewDisplay(review: _review!)
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // 评价被隐藏时**必须让作者看见**。
+                            // 商家申诉成立就能让它从店铺页消失、评分涨回去,
+                            // 而写的人一无所知 —— 平台在两个当事人之间
+                            // 做了裁决,只告诉赢的那一方,那不叫公平。
+                            if (_review!.hidden) _hiddenReviewNotice(),
+                            _ReviewDisplay(review: _review!),
+                          ],
+                        )
                       : _ReviewForm(
                           hasRider: order.riderId != null,
                           hasMerchant: !order.isErrand,
@@ -5101,6 +5111,117 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     );
   }
 
+  /// 评价被隐藏的提示条 + 申诉入口。
+  Widget _hiddenReviewNotice() {
+    final sz = Theme.of(context).sz;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: sz.claySoft,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.visibility_off_outlined, size: 18, color: sz.clay),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text('这条评价目前不显示在店铺页',
+                  style: TextStyle(
+                      fontWeight: FontWeight.w700, color: sz.clay)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            '商家就这条评价提出了申诉,平台复核后认定应当隐藏,'
+            '它也不再计入店铺评分。如果你不认同,可以在 72 小时内申诉,'
+            '平台会再核一次;改判就恢复显示、重新计入评分。',
+            style: TextStyle(fontSize: 12.5, color: sz.inkMuted),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.gavel_outlined, size: 16),
+              label: const Text('我不认同,申诉'),
+              onPressed: () => _appealHiddenReview(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 对「评价被隐藏」申诉。
+  Future<void> _appealHiddenReview() async {
+    final review = _review;
+    if (review == null) return;
+    final reason = await _askAppealReason(
+      title: '申诉:我的评价不该被隐藏',
+      hint: '例如:我写的是真实经历,有照片为证',
+      note: '平台会重新复核。改判的话评价恢复显示,并重新计入店铺评分。',
+    );
+    if (reason == null) return;
+    try {
+      await widget.api.submitAppeal(
+          targetType: 'review_hidden', targetId: review.id, reason: reason);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('申诉已提交,平台复核后通知你')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
+  /// 申诉理由输入。**理由必填**——复核的人要有东西可看。
+  /// 三个申诉入口(取消分摊 / 评价被隐藏 / 后续新增)共用这一个,
+  /// 各写一遍迟早措辞和校验都对不上。
+  Future<String?> _askAppealReason({
+    required String title,
+    required String hint,
+    required String note,
+  }) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => SzDialog(
+        title: Text(title),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(note, style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            maxLines: 3,
+            maxLength: 500,
+            decoration: InputDecoration(
+                hintText: hint, border: const OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('再想想')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('提交申诉')),
+        ],
+      ),
+    );
+    if (ok != true) return null;
+    final text = ctrl.text.trim();
+    if (text.length < 5) {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('理由至少写 5 个字,复核的人要有东西可看')));
+      return null;
+    }
+    return text;
+  }
+
   /// 用户在这一单里实际承担了多少(已付 − 已退)。
   int _borneCents(Order order) {
     final paid = (order.foodCents + order.packingFeeCents -
@@ -5152,47 +5273,16 @@ class _OrderDetailPageState extends State<OrderDetailPage>
 
   /// 对分摊判责申诉。理由必填 —— 复核的人要有东西可看。
   Future<void> _appealSplit(Order order) async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => SzDialog(
-        title: const Text('申诉这一单的判责'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('说说为什么你认为这一单不该由你承担。平台会复核;'
-              '改判的话由平台承担,不会向商家和骑手追款。',
-              style: TextStyle(fontSize: 13)),
-          const SizedBox(height: 12),
-          TextField(
-            controller: ctrl,
-            maxLines: 3,
-            maxLength: 500,
-            decoration: const InputDecoration(
-                hintText: '例如:商家做错了菜 / 骑手一直没动',
-                border: OutlineInputBorder()),
-          ),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('再想想')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('提交申诉')),
-        ],
-      ),
+    final reason = await _askAppealReason(
+      title: '申诉这一单的判责',
+      hint: '例如:商家做错了菜 / 骑手一直没动',
+      note: '说说为什么你认为这一单不该由你承担。平台会复核;'
+          '改判的话由平台承担,不会向商家和骑手追款。',
     );
-    if (ok != true) return;
-    if (ctrl.text.trim().length < 5) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('理由至少写 5 个字,复核的人要有东西可看')));
-      return;
-    }
+    if (reason == null) return;
     try {
       await widget.api.submitAppeal(
-          targetType: 'cancel_split',
-          targetId: order.id,
-          reason: ctrl.text.trim());
+          targetType: 'cancel_split', targetId: order.id, reason: reason);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('申诉已提交,平台复核后通知你')));

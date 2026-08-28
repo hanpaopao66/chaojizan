@@ -53,12 +53,13 @@ _TYPE_LABELS = {
     "delivery_issue": "配送异常裁决",
     "review": "差评",
     "cancel_split": "取消订单的判责分摊",
+    "review_hidden": "评价被隐藏",
 }
 
 
 class AppealIn(BaseModel):
     target_type: Literal["after_sale", "delivery_issue", "review",
-                         "cancel_split"]
+                         "cancel_split", "review_hidden"]
     target_id: int
     reason: str = Field(min_length=5, max_length=500)
     images: list[str] = Field(default=[], max_length=6)
@@ -186,6 +187,25 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
                    OrderEvent.to_status == OrderStatus.CANCELLED.value)
             .order_by(OrderEvent.created_at.desc()).limit(1))
         if not _within_window(cancelled_at):
+            raise HTTPException(422, "已超过 72 小时申诉时限")
+    elif payload.target_type == "review_hidden":
+        # 商家申诉差评成立 → 评价被隐藏、店铺评分加回去。
+        # **写评价的人对这个结果一直没有说话的地方**,而这是平台在两个
+        # 当事人之间做的单方面裁决 —— 一方能申诉、另一方连通知都收不到,
+        # 不叫公平。这一条把另一半补上。
+        if user.role.value != "customer":
+            raise HTTPException(403, "评价被隐藏只有写这条评价的人可以申诉")
+        review = await db.get(Review, payload.target_id)
+        if review is None or review.customer_id != user.id:
+            raise HTTPException(404, "评价不存在")
+        if not review.hidden:
+            raise HTTPException(409, "这条评价没有被隐藏")
+        # 窗口从**评价被隐藏那一刻**起算 —— 也就是商家那条申诉的复核时刻
+        hid_at = await db.scalar(
+            select(Appeal.resolved_at).where(
+                Appeal.target_type == "review", Appeal.target_id == review.id,
+                Appeal.status == "overturned"))
+        if not _within_window(hid_at):
             raise HTTPException(422, "已超过 72 小时申诉时限")
     else:  # review
         if user.role.value != "merchant":
@@ -380,6 +400,25 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str) -> None:
             await push_to_user(appeal.user_id, "申诉成立(已为你正名)",
                                "复核认定该次配送异常非你的责任,责任记录已消除",
                                {"type": "appeal"})
+    elif appeal.target_type == "review_hidden":
+        review = await db.get(Review, appeal.target_id, with_for_update=True)
+        if not review.hidden:
+            raise HTTPException(409, "这条评价已经是显示状态")
+        review.hidden = False
+        shop = await db.get(Merchant, review.merchant_id, with_for_update=True)
+        shop.rating_sum += review.merchant_rating
+        shop.rating_count += 1
+        await push_to_user(appeal.user_id, "申诉成立,评价已恢复",
+                           f"复核认定你的评价应当保留,已重新显示在店铺页,"
+                           f"并重新计入评分。{note}",
+                           {"type": "appeal"})
+        # 商家也要被告知 —— 他那条申诉的结果被推翻了,不能只通知赢的一方
+        # (这正是上一轮的毛病,不能在对称的位置再犯一次)
+        shop_owner = await db.get(Merchant, review.merchant_id)
+        await push_to_user(
+            shop_owner.owner_id, "一条已隐藏的评价被恢复",
+            f"顾客对隐藏结果提出申诉,平台复核后决定恢复显示。{note}",
+            {"type": "appeal"})
     elif appeal.target_type == "cancel_split":
         # 改判 = 平台认定这一单不该由用户承担。
         #
@@ -416,6 +455,17 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str) -> None:
         await push_to_user(appeal.user_id, "申诉成立",
                            "该条差评已隐藏,不再计入店铺评分",
                            {"type": "appeal"})
+        # **写评价的人必须被告知,而且要知道自己能申诉。**
+        #
+        # 原来这里只通知申诉人(商家)。于是发生的事是:用户写的评价从店铺页
+        # 消失了、店铺评分涨回去了,而他一无所知 —— 平台在两个当事人之间
+        # 做了单方面裁决,只告诉了赢的那一方。
+        await push_to_user(
+            review.customer_id, "你的一条评价被隐藏了",
+            f"商家就这条评价提出申诉,平台复核后认定应当隐藏。"
+            f"理由:{note or '复核认定该评价不成立'}。"
+            f"如果你不认同,72 小时内可以申诉,平台会再核一次。",
+            {"type": "review_hidden", "review_id": review.id})
 
 
 @router.post("/admin/appeals/{appeal_id}/resolve", response_model=AdminAppealOut)

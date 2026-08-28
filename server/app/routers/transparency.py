@@ -327,11 +327,25 @@ async def fairness_public(
         WHERE status = 'paid'
     """)))
 
-    # 4) 评价不删的证据:全量可见,连刷评嫌疑都只标记不隐藏
+    # 4) 评价的可见性。
+    #
+    # **必须把隐藏数一起报出来。** 这里原本只 `count(*)`,不带 hidden 过滤 ——
+    # 而店铺页是 `WHERE hidden IS FALSE`。于是「删了一成」和「一条没删」
+    # 在这份公示上长得一模一样:证据按不可能证伪的方式算,那就不是证据。
+    #
+    # 和 clean_streak_days 那次是同一个形状(「自检没跑成」和「零差错」
+    # 在公示上分不出来),那次的结论是:拿没结论冒充没问题,
+    # 性质和普通 bug 不一样。
+    #
+    # 隐藏只有一条路径:商家就某条差评申诉、平台复核认定成立。
+    # 平台自己不删任何评价,刷评嫌疑也只标记不隐藏。
+    # 而且作者会被通知、可以再申诉,恢复了就重新计入评分。
     reviews = (await db.execute(sa_text("""
         SELECT count(*),
                count(*) FILTER (WHERE merchant_rating <= 2),
-               count(*) FILTER (WHERE flagged)
+               count(*) FILTER (WHERE flagged AND NOT hidden),
+               count(*) FILTER (WHERE hidden),
+               count(*) FILTER (WHERE hidden AND merchant_rating <= 2)
         FROM reviews
     """))).one()
 
@@ -368,6 +382,17 @@ async def fairness_public(
             "total": reviews[0],
             "bad_ratio": round(reviews[1] / reviews[0], 4) if reviews[0] else None,
             "flagged_still_visible": reviews[2],
+            # 隐藏的数字**主动亮出来**,不藏在总数里
+            "hidden": reviews[3],
+            "hidden_bad": reviews[4],
+            "hidden_ratio": (round(reviews[3] / reviews[0], 4)
+                             if reviews[0] else None),
+            "visible": reviews[0] - reviews[3],
+            "hidden_rule": "平台自己不删任何评价;刷评嫌疑只标记不隐藏。"
+                           "唯一会被隐藏的情况是:商家就某条评价提出申诉、"
+                           "平台复核认定成立。",
+            "hidden_recourse": "评价被隐藏时作者会收到通知,并且可以在 72 小时内"
+                               "申诉;复核改判则恢复显示、重新计入评分。",
         },
         "window_days": 30,
     }
