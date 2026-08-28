@@ -8,6 +8,7 @@
   /fairness       分账公平证据:真实佣金率/每100元去向/骑手收入/评价不删
   /changelog      最近更新(GitHub 同源)+ 线上运行版本——代码即承诺
   /dispatch       派单算法:完整公式、每个权重的取值与理由、承诺不做的事
+  /liability      判责与分摊:一单出问题钱怎么分、平台承担哪些、三方怎么申诉
   /uptime         90 天可用率(auto_flow 自记探针,缺档按不可用计,只低不虚高)
 
 缓存与限流复用大屏(routers/screen.py)的进程内小缓存 + 按 IP 限流。
@@ -543,6 +544,26 @@ async def dispatch_spec():
     from ..services import dispatch as d
 
     return d.public_spec()
+
+
+@router.get("/liability")
+async def liability_spec():
+    """订单出问题时钱怎么分(公开无鉴权)。
+
+    为什么要公开:**这是三方都会被它扣钱的规则**。用户想取消、商家做了餐、
+    骑手跑了路,一单出岔子,总有人要承担 —— 那这个"谁承担"的口径就不能
+    只存在客服的话术里。资本平台的做法是规则写在几十页协议里、实际由客服
+    临场判,同一种情况两个人问出两个答案。
+
+    这里返回的每个数字**从 services/liability.py 的常量直接读**,不另抄一份;
+    连"平台承担的那部分为什么不算补贴"这种解释也放在代码里,
+    改代码就等于改公示。有测试钉着(tests/unit/test_liability.py)。
+
+    三方都能对判责结果申诉,窗口和处理方式一并公开。
+    """
+    from ..services import liability as lb
+
+    return lb.public_spec()
 
 
 @router.get("/kitchen-cam")
