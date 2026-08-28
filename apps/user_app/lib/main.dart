@@ -1946,6 +1946,8 @@ class _MenuPageState extends State<MenuPage>
   Timer? _cartSaveTimer;
   List<Dish> _frequent = []; // 我常买
   List<Map<String, dynamic>> _claimable = []; // 可领店铺券
+  Map<String, dynamic>? _queue;       // 这家店的排队现状(没开就是 null)
+  Map<String, dynamic>? _myTicket;    // 我在这家店的号
   bool _isFavorite = false;
   late final TabController _tabController =
       TabController(length: 3, vsync: this);
@@ -2048,6 +2050,7 @@ class _MenuPageState extends State<MenuPage>
       }).catchError((_) {});
       // 可领店铺券(失败静默)
       _loadClaimable();
+      _loadQueue();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -2448,6 +2451,7 @@ class _MenuPageState extends State<MenuPage>
                 ],
               ),
             ),
+          if (_queue?['enabled'] == true) _queueCard(),
           if (_claimable.isNotEmpty) _claimableStrip(),
         ],
       ),
@@ -2586,6 +2590,399 @@ class _MenuPageState extends State<MenuPage>
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(e.toString())));
     }
+  }
+
+  // ---------- 到店排队 ----------
+  //
+  // 放在可领券条**上面**:「今晚还进不进得去」比「能省几块」更早要决定。
+
+  Future<void> _loadQueue() async {
+    try {
+      final qd = await widget.api.shopQueue(widget.merchant.id);
+      List<Map<String, dynamic>> mine = const [];
+      if (widget.api.token != null) {
+        // 没登录时不去问「我的号」—— 那必然 401,只会在日志里刷红
+        mine = await widget.api.myQueueTickets().catchError(
+            (_) => <Map<String, dynamic>>[]);
+      }
+      if (!mounted) return;
+      setState(() {
+        _queue = qd;
+        _myTicket = mine.cast<Map<String, dynamic>?>().firstWhere(
+            (t) =>
+                t!['merchant_id'] == widget.merchant.id &&
+                const ['waiting', 'called', 'pending_restore']
+                    .contains(t['status']),
+            orElse: () => null);
+      });
+    } catch (_) {
+      // 排队没开、或者接口挂了 —— 静默。它是加分项,不该挡住看菜单
+    }
+  }
+
+  /// 店铺页的排队卡片。已经有号就显示位置,没有就显示各桌型的等位。
+  Widget _queueCard() {
+    final sz = Theme.of(context).sz;
+    final t = _myTicket;
+    final types = (_queue!['table_types'] as List? ?? [])
+        .cast<Map<String, dynamic>>();
+    if (types.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: sz.surfaceAlt,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.groups_2_outlined, size: 18, color: sz.ink),
+            const SizedBox(width: 6),
+            Text('到店排队',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700, color: sz.ink)),
+            const Spacer(),
+            // 这句话是这张卡片上最要紧的一行,不是脚注:
+            // 用户看到「排队」第一个念头就是"能不能花钱插队"
+            Text('买券不能插队',
+                style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
+          ]),
+          const SizedBox(height: 10),
+          if (t != null)
+            _myTicketRow(t)
+          else
+            for (final ty in types) _typeRow(ty),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 28),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              onPressed: _showQueueRules,
+              child: Text('排队规则与我的位置怎么算',
+                  style: TextStyle(fontSize: kFontNote, color: sz.link)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 一档桌型:名字、等几桌、最多等多久、取号按钮
+  Widget _typeRow(Map<String, dynamic> ty) {
+    final sz = Theme.of(context).sz;
+    final waiting = ty['waiting'] as int? ?? 0;
+    final upper = ty['wait_upper_minutes'] as int? ?? 0;
+    final full = waiting >= (ty['cap'] as int? ?? 1 << 30);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${ty['name']}(${ty['seats_min']}-${ty['seats_max']}人)',
+                  style: TextStyle(fontSize: kFontBody, color: sz.ink)),
+              const SizedBox(height: 2),
+              Text(
+                  waiting == 0
+                      ? '暂无人排队'
+                      : '前面 $waiting 桌,最多等 $upper 分钟',
+                  style:
+                      TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+            ],
+          ),
+        ),
+        // 号发完了就直说,别让人点进去再被 409 顶回来
+        full
+            ? Text('号已发完',
+                style: TextStyle(fontSize: kFontNote, color: sz.inkFaint))
+            : FilledButton(
+                style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 32),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                onPressed: () => _takeTicket(ty),
+                child: const Text('取号'),
+              ),
+      ]),
+    );
+  }
+
+  /// 已经有号:位置、状态、能做什么
+  Widget _myTicketRow(Map<String, dynamic> t) {
+    final sz = Theme.of(context).sz;
+    final status = t['status'] as String? ?? '';
+    final ahead = t['ahead'] as int?;
+    final upper = t['wait_upper_minutes'] as int?;
+    final passed = t['passed_count'] as int? ?? 0;
+
+    String line;
+    if (status == 'called') {
+      line = '已叫到你,请到店内前台';
+    } else if (status == 'pending_restore') {
+      line = '两次没赶上,已转「待恢复」—— 到店找商家可以恢复,号没作废';
+    } else if (ahead == 0) {
+      line = '就快到你了,该往店里走了';
+    } else {
+      line = '前面还有 $ahead 桌,最多等 $upper 分钟';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Text('${t['ticket_no']}'.split('-').last,
+              style: TextStyle(
+                  fontSize: kFontTitle,
+                  fontWeight: FontWeight.w800,
+                  color: sz.ink)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(line,
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+          ),
+        ]),
+        if (passed > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                    '被过号 $passed 次,已按规则顺延 —— 号还在',
+                    style:
+                        TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+              ),
+              // 过号是商家的单方面动作。不给一处质疑的地方,
+              // 「顺延」就成了随手清队列的按钮
+              TextButton(
+                style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 28),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                onPressed: () => _appealQueuePass(t),
+                child: Text('我要申诉',
+                    style: TextStyle(fontSize: kFontNote, color: sz.link)),
+              ),
+            ]),
+          ),
+        const SizedBox(height: 8),
+        Row(children: [
+          TextButton(
+            onPressed: () => _showTicketEvents(t),
+            child: Text('这个号的完整流水',
+                style: TextStyle(fontSize: kFontNote, color: sz.link)),
+          ),
+          const Spacer(),
+          TextButton(
+            onPressed: () => _cancelTicket(t),
+            child: Text('不等了',
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Future<void> _takeTicket(Map<String, dynamic> ty) async {
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
+    final lo = ty['seats_min'] as int? ?? 1;
+    final hi = ty['seats_max'] as int? ?? 4;
+    final size = await szShowSheet<int>(
+      context: context,
+      builder: (context) => _PartySizeSheet(lo: lo, hi: hi, name: '${ty['name']}'),
+    );
+    if (size == null || !mounted) return;
+    try {
+      final t = await widget.api.takeQueueTicket(widget.merchant.id, size);
+      if (!mounted) return;
+      setState(() => _myTicket = t);
+      _loadQueue();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('取到 ${t['ticket_no']},'
+              '前面 ${t['ahead']} 桌')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _cancelTicket(Map<String, dynamic> t) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => SzDialog(
+        title: const Text('不等了?'),
+        content: const Text('取消之后这个号就作废了,重新取号要排到队尾。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('再等等')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('取消排队')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.api.cancelQueueTicket('${t['ticket_no']}');
+      if (!mounted) return;
+      setState(() => _myTicket = null);
+      _loadQueue();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  /// 号的完整流水。公示里写着「谁动了你的号你自己查得到」——
+  /// 这个页面就是那句话的兑现,不是调试面板。
+  Future<void> _showTicketEvents(Map<String, dynamic> t) async {
+    List<Map<String, dynamic>> evs;
+    try {
+      evs = await widget.api.queueTicketEvents('${t['ticket_no']}');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    if (!mounted) return;
+    const label = {
+      'take': '取号',
+      'call': '商家叫号',
+      'pass': '商家标了过号',
+      'restore': '商家恢复了这个号',
+      'seat': '入座',
+      'cancel': '取消',
+      'undo_pass': '平台撤销了那次过号',
+      'expire': '当日清场',
+    };
+    await szShowSheet<void>(
+      context: context,
+      builder: (context) {
+        final sz = Theme.of(context).sz;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('${t['ticket_no']} 的完整流水',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text('这个号被谁、在什么时候动过,一条不落',
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+            const SizedBox(height: 16),
+            for (final e in evs)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 44,
+                        child: Text('${e['at']}'.substring(11, 16),
+                            style: TextStyle(
+                                fontSize: kFontNote, color: sz.inkFaint)),
+                      ),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(label[e['action']] ?? '${e['action']}',
+                                style: TextStyle(
+                                    fontSize: kFontBody, color: sz.ink)),
+                            if ('${e['detail']}'.isNotEmpty)
+                              Text('${e['detail']}',
+                                  style: TextStyle(
+                                      fontSize: kFontNote,
+                                      color: sz.inkMuted)),
+                          ],
+                        ),
+                      ),
+                    ]),
+              ),
+          ]),
+        );
+      },
+    );
+  }
+
+  Future<void> _appealQueuePass(Map<String, dynamic> t) async {
+    final reason = await askAppealReason(context,
+        title: '申诉这次过号',
+        hint: '说说当时的情况:你在哪、有没有听到叫号、店员有没有联系你',
+        note: '平台会查这个号的完整流水。判成立且这条队还在的话,'
+            '位置会还给你;队已经散了就还不回来了,那时候这次判决'
+            '会计入商家的排队记录。');
+    if (reason == null || !mounted) return;
+    try {
+      await widget.api.submitAppeal(
+          targetType: 'queue_pass',
+          targetId: t['id'] as int,
+          reason: reason);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('申诉已提交,平台会查这个号的流水')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _showQueueRules() async {
+    final rules = (_queue?['rules'] as Map?)?.cast<String, dynamic>() ?? {};
+    await szShowSheet<void>(
+      context: context,
+      builder: (context) {
+        final sz = Theme.of(context).sz;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('排队规则',
+                    style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 14),
+                _ruleLine('不卖插队权', '${_queue?['no_priority'] ?? ''}'),
+                _ruleLine('过号怎么算', '${rules['text'] ?? ''}'),
+                _ruleLine('等待时间怎么估', '${_queue?['wait_basis'] ?? ''}'),
+                const SizedBox(height: 6),
+                Text('完整口径公开在超级赞透明中心,任何人都能查。',
+                    style:
+                        TextStyle(fontSize: kFontNote, color: sz.inkFaint)),
+              ]),
+        );
+      },
+    );
+  }
+
+  Widget _ruleLine(String title, String body) {
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: TextStyle(
+                    fontSize: kFontBody,
+                    fontWeight: FontWeight.w700,
+                    color: sz.ink)),
+            const SizedBox(height: 4),
+            Text(body,
+                style: TextStyle(
+                    fontSize: kFontNote, height: 1.5, color: sz.inkMuted)),
+          ]),
+    );
   }
 
   /// 可领店铺券:一排「领」券横条(商家出成本)
@@ -7173,6 +7570,68 @@ class _ShopInfoTab extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 取号前问一句几位。
+///
+/// **只问人数,不让选桌型** —— 桌型由服务端按人数定。让用户挑的话,
+/// 2 个人会去挑包间那条队(看着人少),包间被占着,真 8 个人的反而排不上,
+/// 那本身就是一种插队。
+class _PartySizeSheet extends StatefulWidget {
+  const _PartySizeSheet({required this.lo, required this.hi, required this.name});
+
+  final int lo;
+  final int hi;
+  final String name;
+
+  @override
+  State<_PartySizeSheet> createState() => _PartySizeSheetState();
+}
+
+class _PartySizeSheetState extends State<_PartySizeSheet> {
+  late int _n = widget.lo;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('几位用餐', style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text('人数决定排哪条队 —— ${widget.name}坐 '
+                '${widget.lo}-${widget.hi} 位',
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var i = widget.lo; i <= widget.hi; i++)
+                  ChoiceChip(
+                    label: Text('$i 位'),
+                    selected: _n == i,
+                    onSelected: (_) => setState(() => _n = i),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.pop(context, _n),
+                child: Text('取号($_n 位)'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text('取号免费。买券、会员都不会让你排在前面。',
+                style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
+          ]),
     );
   }
 }

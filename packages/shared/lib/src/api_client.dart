@@ -532,6 +532,83 @@ class ApiClient {
     return await _request('GET', '/auth/slider') as Map<String, dynamic>;
   }
 
+  // ---------- 到店排队 ----------
+  //
+  // 券解决「钱先付了」,排队解决「位怎么排」。两件事故意不绑在一起 ——
+  // 取号不需要买券,买了券也不会排在前面。
+
+  /// 这家店现在排得怎么样。**不需要登录** —— 要不要去,得先看得到。
+  Future<Map<String, dynamic>> shopQueue(int merchantId) async {
+    return await _request('GET', '/queue/merchants/$merchantId')
+        as Map<String, dynamic>;
+  }
+
+  /// 取号。人数决定桌型,由服务端定 —— 不给选,免得 2 个人去占大桌那条队。
+  Future<Map<String, dynamic>> takeQueueTicket(
+      int merchantId, int partySize) async {
+    return await _request('POST', '/queue/merchants/$merchantId/take',
+        body: {'party_size': partySize}) as Map<String, dynamic>;
+  }
+
+  /// 我今天的号(含已结束的,方便对着看发生过什么)
+  Future<List<Map<String, dynamic>>> myQueueTickets() async {
+    final data = await _request('GET', '/queue/tickets/mine');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> cancelQueueTicket(String ticketNo) async {
+    return await _request('POST', '/queue/tickets/$ticketNo/cancel')
+        as Map<String, dynamic>;
+  }
+
+  /// 这个号经历过什么。**对当事人开放** ——
+  /// 公示里写着「谁动了你的号你自己查得到」,这个接口就是那句话的兑现。
+  Future<List<Map<String, dynamic>>> queueTicketEvents(String ticketNo) async {
+    final data = await _request('GET', '/queue/tickets/$ticketNo/events');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  // ---------- 到店排队(商家端叫号台) ----------
+
+  Future<Map<String, dynamic>> queueDesk() async {
+    return await _request('GET', '/queue/desk') as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> queueSettings() async {
+    return await _request('GET', '/queue/settings') as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> saveQueueSettings(
+      Map<String, dynamic> body) async {
+    return await _request('PUT', '/queue/settings', body: body)
+        as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> queueTableTypes() async {
+    final data = await _request('GET', '/queue/table-types');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> createQueueTableType(
+      Map<String, dynamic> body) async {
+    return await _request('POST', '/queue/table-types', body: body)
+        as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateQueueTableType(
+      int id, Map<String, dynamic> body) async {
+    return await _request('PATCH', '/queue/table-types/$id', body: body)
+        as Map<String, dynamic>;
+  }
+
+  /// 叫号台的四个动作。`pass` 在宽限期内会被服务端拒(409),
+  /// 那不是 bug —— 用户过号有代价,商家秒过号也不能零成本。
+  Future<Map<String, dynamic>> queueAction(
+      String ticketNo, String action) async {
+    return await _request('POST', '/queue/tickets/$ticketNo/$action')
+        as Map<String, dynamic>;
+  }
+
   // ---------- 团购券 ----------
   /// 在售团购列表(用户端)
   Future<List<VoucherDeal>> voucherDeals() async {

@@ -17,7 +17,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -31,6 +31,8 @@ from ..models import (
     MerchantEarning,
     Order,
     OrderEvent,
+    QueueEvent,
+    QueueTicket,
     Review,
     RiskActionLog,
     User,
@@ -58,13 +60,14 @@ _TYPE_LABELS = {
     "review_hidden": "评价被隐藏",
     "after_sale_rejected": "售后被拒绝",
     "risk_flag": "账号被风控限制",
+    "queue_pass": "排队被过号",
 }
 
 
 class AppealIn(BaseModel):
     target_type: Literal["after_sale", "delivery_issue", "review",
                          "cancel_split", "review_hidden",
-                         "after_sale_rejected", "risk_flag"]
+                         "after_sale_rejected", "risk_flag", "queue_pass"]
     target_id: int
     reason: str = Field(min_length=5, max_length=500)
     images: list[str] = Field(default=[], max_length=6)
@@ -215,6 +218,24 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         if user.risk_level != log.to_level:
             raise HTTPException(409, "这条处置已经不在生效中")
         if not _within_window(log.created_at):
+            raise HTTPException(422, "已超过 72 小时申诉时限")
+    elif payload.target_type == "queue_pass":
+        # 排队分配的是**没法补发的东西** —— 一个晚上的位子。
+        # 商家标过号是个单方面动作,不给用户说话的地方的话,
+        # 「顺延 N 桌」就成了一个随手清队列的按钮。
+        #
+        # 锚在号上:一个号一次申诉。窗口从**最后一次过号**起算。
+        if user.role.value != "customer":
+            raise HTTPException(403, "只有取号的本人可以申诉过号")
+        ticket = await db.get(QueueTicket, payload.target_id)
+        if ticket is None or ticket.customer_id != user.id:
+            raise HTTPException(404, "没有这个号")
+        if ticket.passed_count <= 0:
+            raise HTTPException(409, "这个号没有被过号")
+        last_pass = await db.scalar(
+            select(func.max(QueueEvent.created_at)).where(
+                QueueEvent.ticket_id == ticket.id, QueueEvent.action == "pass"))
+        if not _within_window(last_pass):
             raise HTTPException(422, "已超过 72 小时申诉时限")
     elif payload.target_type == "after_sale_rejected":
         # 商家**同意**售后(自己赔钱)一直有结构化申诉;商家**拒绝**售后
@@ -387,8 +408,13 @@ async def list_appeals(
     return out
 
 
-async def _overturn(db: AsyncSession, appeal: Appeal, note: str) -> None:
-    """改判动作。平台认亏:用户已得的退款不追回。"""
+async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
+                    admin_id: int | None = None) -> None:
+    """改判动作。平台认亏:用户已得的退款不追回。
+
+    [admin_id] 只有需要**留痕操作人**的分支用得上(queue_pass 的位置还原) ——
+    那一步会改动队列,谁批的必须记下来才能复核。
+    """
     if appeal.target_type == "after_sale":
         a = await db.get(AfterSale, appeal.target_id, with_for_update=True)
         earning = await db.scalar(select(MerchantEarning).where(
@@ -459,6 +485,31 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str) -> None:
             appeal.user_id, "申诉成立,账号限制已解除",
             f"复核认定这次限制不成立,已解除,相关权益恢复。"
             f"{note or ''}",
+            {"type": "appeal"})
+    elif appeal.target_type == "queue_pass":
+        # 改判 = 平台认定这次过号不成立。
+        #
+        # **能还原就还原,还不了就照实说。** 队还在(同一天、号还在排),
+        # 就撤销那次过号、还回过号前的位置 —— 这是 sort_key 唯一一条
+        # 会变小的路径,而且只能还原到留痕里记着的那个值,平台自己也
+        # 没有把谁挪到任意位置的能力。
+        #
+        # 队散了就补不回来了。排队分配的是一个晚上的位子,**这东西没法补发**,
+        # 不像退款那样能拿钱找齐。这时候不拿一句含糊话盖过去:
+        # 直说位置补不回来,判决本身计入商家的记录(和「提前点出餐」
+        # 同一条立场 —— 只标不罚,治理靠数据)。
+        from ..services import queue as q
+        ticket = await db.get(QueueTicket, appeal.target_id,
+                              with_for_update=True)
+        restored = False
+        if ticket is not None:
+            restored = await q.undo_pass(db, ticket, admin_id)
+        await push_to_user(
+            appeal.user_id, "申诉成立",
+            ("复核认定这次过号不成立,你的位置已还原。" if restored else
+             "复核认定这次过号不成立。当时那条队已经散了,位置补不回来 —— "
+             "这次判决计入商家的排队记录。")
+            + (note or ""),
             {"type": "appeal"})
     elif appeal.target_type == "after_sale_rejected":
         # 改判 = 平台认定这笔售后本来就该成立。那就**按商家同意的口径**走:
@@ -577,7 +628,7 @@ async def resolve_appeal(
     if appeal.status != "open":
         raise HTTPException(409, "该申诉已复核过")
     if payload.result == "overturned":
-        await _overturn(db, appeal, payload.note)
+        await _overturn(db, appeal, payload.note, admin.id)
     else:
         await push_to_user(
             appeal.user_id, "申诉复核结果",

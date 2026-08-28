@@ -591,6 +591,51 @@ async def liability_spec():
     return lb.public_spec()
 
 
+@router.get("/queue")
+async def queue_spec(db: AsyncSession = Depends(get_db)):
+    """到店排队的规则与现状(公开无鉴权)。
+
+    为什么要公开:排队分配的是**稀缺且没法补发的东西** —— 一个晚上的位子。
+    分错了不像退款那样能补回来,所以规则必须摆在明处,而且要能被对着查。
+
+    最要紧的一句是「买券不能插队」。调研同类产品时看到的乱象正是这个:
+    有商家引导办卡免排队,等于把先到者的等待卖了一次。我们把「做不到」
+    写进代码(services/queue.py 里没有任何往前挪位置的路径),
+    再把「怎么自己查」写进这里。
+
+    三项现状指标是行业通用的那三个:取号数、平均等位、过号率 ——
+    **只给聚合数,绝无个案**。
+    """
+    if (hit := _cache_get("tp:queue")) is not None:
+        return hit
+    from ..services import queue as q
+
+    spec = q.public_spec()
+    row = (await db.execute(sa_text("""
+        SELECT count(*) AS taken,
+               count(*) FILTER (WHERE status = 'seated') AS seated,
+               count(*) FILTER (WHERE passed_count > 0) AS passed,
+               round(avg(extract(epoch FROM (seated_at - created_at)) / 60.0)
+                     FILTER (WHERE seated_at IS NOT NULL)::numeric, 1) AS avg_wait
+        FROM queue_tickets
+        WHERE created_at >= now() - interval '30 days'
+    """))).first()
+    taken = int(row.taken or 0)
+    spec["current"] = {
+        "days": 30,
+        "taken": taken,
+        "seated": int(row.seated or 0),
+        "passed": int(row.passed or 0),
+        # 过号率:行业里 20% 是该去看看店里发生了什么的线
+        "pass_ratio": round((row.passed or 0) / taken, 3) if taken else 0.0,
+        "avg_wait_minutes": float(row.avg_wait or 0),
+        "note": ("取号数 / 平均等位 / 过号率 —— 这三项是行业通用口径。"
+                 "过号率偏高通常不是用户的问题,是叫号节奏或放号上限没配对。"),
+    }
+    _cache_put("tp:queue", spec, 600)
+    return spec
+
+
 @router.get("/kitchen-cam")
 async def kitchen_cam_spec(db: AsyncSession = Depends(get_db)):
     """明厨亮灶的规则与现状(#155-#157,公开)。

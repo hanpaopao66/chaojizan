@@ -41,6 +41,7 @@ from .routers import (
     transparency,
     tickets,
     platform,
+    queue,
     uploads,
     vouchers,
 )
@@ -256,6 +257,7 @@ app.include_router(screen.router)
 app.include_router(transparency.router)
 app.include_router(mini_apps.router)
 from .routers import carts, group_cart, referrals
+app.include_router(queue.router)
 app.include_router(group_cart.router)
 app.include_router(carts.router)
 app.include_router(referrals.router)

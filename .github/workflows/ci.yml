@@ -68,6 +68,11 @@ jobs:
       # 缓存住,e2e_review_hidden_appeal 之后隐藏了评价也读不出来。
       # 本地开发库积着历次跑出来的隐藏评价,所以那条断言在本地一直是绿的。
       PUBLIC_CACHE_MAX_SECONDS: "0"
+      # 排队叫号宽限期。生产是 120 秒(商家叫号后不足这个时间不能标客人过号),
+      # e2e 里真等 2 分钟 x2 会给每次 CI 加 4 分钟。
+      # 注意**只调这个数,不是关掉这条规则** —— e2e_queue 仍然验
+      # 「叫号当场标过号被拒」和「过了宽限期才能过号」两头。
+      QUEUE_CALL_GRACE_SECONDS: "2"
 
     steps:
       - uses: actions/checkout@v4

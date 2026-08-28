@@ -2870,3 +2870,141 @@ class MiniApp(Base):
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ---------- 到店排队(团购券的配套:券解决"钱",排队解决"位") ----------
+
+
+class QueueTicketStatus(str, enum.Enum):
+    waiting = "waiting"                  # 排队中
+    called = "called"                    # 已叫号,等人到店
+    pending_restore = "pending_restore"  # 两次没到,转待恢复(到店找商家恢复)
+    seated = "seated"                    # 已入座
+    cancelled = "cancelled"              # 用户自己取消
+    expired = "expired"                  # 当日打烊清场
+
+
+# 还在队列里、占着放号名额的状态
+QUEUE_LIVE_STATUSES = (
+    QueueTicketStatus.waiting,
+    QueueTicketStatus.called,
+    QueueTicketStatus.pending_restore,
+)
+
+
+class QueueTableType(Base):
+    """桌型:2人/4人/6人/包间**各自一条队**。
+
+    调研美团那套时,商家侧的第一条经验就是别用「大小桌」糊弄:
+    4 人桌翻台 45 分钟、6 人桌 60 分钟,混成一条队,预估等待必然是错的
+    —— 而用户就是照着这个数字决定要不要等。估错了等于骗人。
+    """
+
+    __tablename__ = "queue_table_types"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    name: Mapped[str] = mapped_column(String(20))          # 如「4人桌」「包间」
+    seats_min: Mapped[int] = mapped_column(Integer)        # 容纳人数下限
+    seats_max: Mapped[int] = mapped_column(Integer)        # 容纳人数上限
+    table_count: Mapped[int] = mapped_column(Integer)      # 这一档有几张桌
+    turn_minutes: Mapped[int] = mapped_column(Integer, default=45)  # 预计用餐时长
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class QueueSetting(Base):
+    """商家的排队设置。**注意哪些不在这里** —— 见 services/queue.py。
+
+    叫号后多久才允许标过号、平台收不收排队的钱、买券能不能插队,
+    这三样是平台规则,不给商家配。给商家配的开关只有节奏和容量。
+    """
+
+    __tablename__ = "queue_settings"
+
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 放号上限 = 桌数 × 这个倍数。美团教程给的经验值是 3:
+    # 不封顶的话队尾那些人等两小时也坐不上,取了号反而更生气
+    cap_multiplier: Mapped[int] = mapped_column(Integer, default=3)
+    defer_tables: Mapped[int] = mapped_column(Integer, default=3)   # 过号顺延几桌
+    notify_ahead: Mapped[int] = mapped_column(Integer, default=3)   # 前方剩几桌提醒
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class QueueTicket(Base):
+    """一个号。
+
+    `sort_key` 是队列里的位置,**只有三件事能改它**:取号(排到队尾)、
+    过号顺延(往后挪 N 桌)、以及什么都不改。没有任何接口能把号往前挪 ——
+    「平台不卖插队权」这句话要能被证伪,首先它得在代码里真的做不到。
+    """
+
+    __tablename__ = "queue_tickets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_no: Mapped[str] = mapped_column(String(24), unique=True, index=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    table_type_id: Mapped[int] = mapped_column(
+        ForeignKey("queue_table_types.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    party_size: Mapped[int] = mapped_column(Integer)
+    # 按**北京时间**切日。开发机在 PDT 时本地日期比北京晚一天,
+    # 用 date.today() 会让号码在下午 5 点整体串一天(账本那边踩过)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    seq: Mapped[int] = mapped_column(Integer)          # 当日该桌型的第几号
+    sort_key: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    # 过号前的位置。申诉判「这次过号不成立」时还原到它。
+    # **这是 sort_key 唯一一条会变小的路径,而且只能还原到这里记着的值** ——
+    # 不是"平台可以把谁挪到任意位置",是"平台可以撤销一次留了痕的过号"
+    pre_pass_sort_key: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 6), nullable=True)
+    status: Mapped[QueueTicketStatus] = mapped_column(
+        _enum_column(QueueTicketStatus, "queue_ticket_status"),
+        default=QueueTicketStatus.waiting,
+        index=True,
+    )
+    passed_count: Mapped[int] = mapped_column(Integer, default=0)
+    called_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    seated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)      # 取消/清场的时刻
+    # 提醒只发一次:重算队列是每次入座都在跑的,不记这个就会反复推送
+    notified_ahead_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class QueueEvent(Base):
+    """队列的每一次变化都留痕。
+
+    公示上写着「平台不卖插队权、商家不能随手把谁往前挪」,这句话
+    **必须能被证伪** —— 所以要有一份谁在什么时候被移到哪、谁动的手的完整记录。
+    用户申诉「我被莫名其妙过号了」时,查的也是这张表。
+    """
+
+    __tablename__ = "queue_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(
+        ForeignKey("queue_tickets.id"), index=True)
+    merchant_id: Mapped[int] = mapped_column(
+        ForeignKey("merchants.id"), index=True)
+    action: Mapped[str] = mapped_column(String(24))     # take/call/pass/restore/seat/cancel/expire
+    actor_role: Mapped[str] = mapped_column(String(12))  # customer/merchant/system
+    actor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )

@@ -108,6 +108,17 @@ class Settings(BaseSettings):
     # 历次跑出来的隐藏评价 —— 那条断言实际在断言历史残留,
     # 跟用例自己做了什么没有关系。
     public_cache_max_seconds: float = 86400
+
+    # 排队:商家叫号后至少多久才允许标过号,秒。
+    #
+    # **这是平台规则,不是商家可配项** —— 商家在自己的后台改不了它。
+    # 放成配置是因为 e2e 要验「宽限期过后能过号」,而真等 2 分钟 ×2
+    # 会给每次 CI 加 4 分钟,那种用例迟早被人删掉。
+    #
+    # 自部署者可以改,但**改了公示上就是改后的数** ——
+    # /transparency/queue 报的是实际生效值,不是这里的默认值。
+    # 设成 0 等于取消「商家不能秒过号」这条保护,那会写在公示上给所有人看。
+    queue_call_grace_seconds: int = 120
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
     rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 60 秒重发限制)
     rate_limit_sms_login_per_minute: int = 10  # 同一手机号验证码登录尝试

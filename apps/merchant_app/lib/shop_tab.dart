@@ -21,6 +21,7 @@ import 'kitchen_cam_page.dart';
 import 'printer_page.dart';
 import 'promises_page.dart';
 import 'promo_page.dart';
+import 'queue_page.dart';
 import 'voucher_manage_page.dart';
 import 'winback_page.dart';
 
@@ -1031,6 +1032,13 @@ class _ShopTabPageState extends State<ShopTabPage> {
           label: '团购券',
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => VoucherManagePage(api: widget.api)))),
+      // 紧挨着团购券:券解决「钱先付了」,排队解决「位怎么排」,
+      // 商家是当成一件事在想的
+      SzIconGridItem(
+          icon: Icons.groups_2_outlined,
+          label: '叫号台',
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => QueuePage(api: widget.api)))),
       SzIconGridItem(
           icon: Icons.print_outlined,
           label: '小票打印',
