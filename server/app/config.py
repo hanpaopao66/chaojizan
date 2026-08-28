@@ -58,6 +58,22 @@ class Settings(BaseSettings):
     # 宁可默认指向线上。本地联调想指到自己机器时再在 .env 覆盖
     public_base_url: str = "https://chaojizan.cc"
 
+    #: 部署环境。**默认 prod,这是故意的。**
+    #:
+    #: 审计时发现这个仓库里的开发便利有同一个形状:默认值站在**不安全**
+    #: 那一侧,安全性靠"记得在生产设 env"——
+    #:
+    #:   mock_pay_enabled = True        忘了设 → 任何人白嫖下单
+    #:   admin_password_login = True    忘了设 → 多一条爆破面
+    #:   二要素未配置 → 视为核验通过     忘了配 → 实名认证形同虚设
+    #:
+    #: 而这是**开源**平台,每一个默认值攻击者都读得到。所以判据反过来:
+    #: 默认生产,本地开发与 CI 显式设 `APP_ENV=dev`。
+    #: **忘了配的后果是某个开发便利不可用,而不是某道校验被跳过。**
+    #:
+    #: 新加的开发便利挂在 `is_dev` 上就自动继承这个安全默认值。
+    app_env: str = "prod"
+
     # 管理员密码登录开关:生产关闭(ADMIN_PASSWORD_LOGIN=false),
     # 管理员只能手机验证码登录;本地开发与 e2e 保持默认开启
     admin_password_login: bool = True
@@ -372,6 +388,15 @@ class Settings(BaseSettings):
     @property
     def insurance_configured(self) -> bool:
         return bool(self.insurance_app_id and self.insurance_secret)
+
+    @property
+    def is_dev(self) -> bool:
+        """是不是开发/测试环境。**猜不出来时一律按生产。**
+
+        拼错、留空、写成 staging —— 都不算开发环境。安全判据不做模糊匹配:
+        宁可本地开发多配一行,不可生产上因为一个错别字把校验放开。
+        """
+        return self.app_env.strip().lower() in ("dev", "development", "test")
 
     @property
     def sms_configured(self) -> bool:

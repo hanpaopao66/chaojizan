@@ -68,6 +68,17 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)):
     return TokenOut(token=create_token(user), user_id=user.id, role=user.role.value, name=user.name)
 
 
+def admin_password_login_allowed(cfg=None) -> bool:
+    """管理员能不能用密码登录。**环境 + 开关都要。**
+
+    生产上管理员只该走手机验证码 —— 密码登录多一条可爆破的面,
+    而管理员账号是全平台权限。只靠 `ADMIN_PASSWORD_LOGIN` 的话,
+    安全性依赖"记得在生产设 false"。
+    """
+    cfg = cfg or settings
+    return bool(cfg.admin_password_login and cfg.is_dev)
+
+
 @router.post("/login", response_model=TokenOut)
 async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
     await check_rate_limit("login", payload.phone,
@@ -81,7 +92,7 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
                  if verify_password(payload.password, u.password_hash)), None)
     if user is None:
         raise HTTPException(401, "手机号或密码错误")
-    if user.role == UserRole.admin and not settings.admin_password_login:
+    if user.role == UserRole.admin and not admin_password_login_allowed():
         raise HTTPException(403, "管理员请使用手机验证码登录")
     if payload.device_id and user.device_id != payload.device_id:
         user.device_id = payload.device_id  # 风控:记录最近登录设备
@@ -118,6 +129,33 @@ async def slider_challenge():
     target = 20 + secrets.randbelow(61)  # 20-80,避开两端
     await get_redis().set(f"slider:{ticket}", target, ex=120)
     return {"ticket": ticket, "target": target}
+
+
+def dev_code_visible() -> bool:
+    """验证码能不能随响应返回。
+
+    **判据是这个部署配没配短信,不是这一次发没发出去。**
+
+    原来的写法是 `if await send_verification_code(...): ... else: 回码` ——
+    而那个函数返回 False 有三种情况,只有第一种是开发环境:
+
+      1. 没配短信服务           → 开发/测试环境
+      2. 阿里云返回非 OK        → 配额用尽、签名被禁、模板停用、余额不足
+      3. 网络异常/超时/解析失败 → 生产上随时会发生
+
+    也就是说**生产上把短信配好了也没用**:短信商任何一次抖动,
+    攻击者打一次这个接口就能拿到任意手机号的验证码,再打一次 sms-login
+    就登进去了 —— 而 sms-login 的 role 由请求方指定(见那个函数的注释),
+    所以是**任意账号接管,包括管理员**。攻击者还能主动制造条件 2:
+    先用别的号把短信配额打满,再打目标。
+
+    这是开源平台,代码里每一个"不配就放行"的默认值攻击者都读得到。
+    所以判据只能看**部署配置**这种攻击者改不了的东西,
+    不能看"这一次的运行结果"这种他能影响的东西。
+
+    **不收参数是故意的** —— 结构上就不可能再把发送结果混进判据。
+    """
+    return settings.is_dev and not settings.sms_configured
 
 
 @router.post("/sms-code")
@@ -169,6 +207,14 @@ async def send_sms_code(payload: SmsCodeIn, request: Request):
 
     if await send_verification_code(payload.phone, code):
         return {"sent": True}
+
+    # 发不出去了。**能不能把码交给调用方,只看这个部署配没配短信。**
+    # 配了 = 真实部署,发送失败就如实报 503;把码降级返回等于当场
+    # 交出任意账号(见 dev_code_visible 的长注释)。
+    if not dev_code_visible():
+        logger.error("短信发送失败(服务已配置),不降级返回验证码: 尾号%s",
+                     payload.phone[-4:])
+        raise HTTPException(503, "验证码发送失败,请稍后再试")
     logger.warning("短信服务未配置,开发模式返回验证码 %s -> %s", payload.phone, code)
     return {"sent": False, "dev_code": code}
 

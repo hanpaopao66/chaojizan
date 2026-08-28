@@ -35,6 +35,11 @@ jobs:
         ports: ["6379:6379"]
 
     env:
+      # **CI 是开发环境,必须显式声明。** 安全开关(模拟支付、管理员密码登录、
+      # 验证码回显、二要素未配置放行)现在默认按生产处理 —— 忘了配的后果
+      # 是这几样不可用,而不是生产上某道校验被跳过。e2e 依赖模拟支付,
+      # 所以这里要有它;线上的 .env.prod **不许**有这一行。
+      APP_ENV: dev
       DATABASE_URL: postgresql+asyncpg://superz:superz@localhost:5432/superz
       REDIS_URL: redis://localhost:6379/0
       # 生产是 minio,CI 也用 minio:两边跑同一条代码路径

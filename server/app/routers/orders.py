@@ -881,6 +881,17 @@ async def my_coupons(
     } for c in sorted(rows, key=lambda c: not usable(c))]
 
 
+def mock_pay_allowed(cfg=None) -> bool:
+    """模拟支付能不能用。**环境是必要条件,开关是充分条件,两个都要。**
+
+    只看 `MOCK_PAY_ENABLED` 的话,安全性就依赖"记得在生产把它设成 false" ——
+    而忘了设的后果是**任何用户白嫖下单**。默认 prod 之后,忘配的后果变成
+    "本地 e2e 跑不了",那是能当场发现的。
+    """
+    cfg = cfg or settings
+    return bool(cfg.mock_pay_enabled and cfg.is_dev)
+
+
 @router.post("/{order_no}/pay/mock", response_model=OrderOut)
 async def mock_pay(
     order_no: str,
@@ -891,8 +902,12 @@ async def mock_pay(
 
     生产 MOCK_PAY_ENABLED=false 封死:真实收款上线后这个口子等于白送订单。
     """
-    if not settings.mock_pay_enabled:
-        raise HTTPException(403, "模拟支付已关闭,请使用微信支付")
+    if not mock_pay_allowed():
+        # 文案要能自解释:本地/CI 撞上这条,九成是漏了 APP_ENV=dev,
+        # 而不是真的要用微信支付。让人当场知道去看哪,别去翻源码
+        raise HTTPException(
+            403, "模拟支付已关闭,请使用微信支付"
+                 "(本地或 CI 撞到这条:检查 APP_ENV=dev 与 MOCK_PAY_ENABLED)")
     order = await db.scalar(
         select(Order).where(Order.order_no == order_no).with_for_update()
     )

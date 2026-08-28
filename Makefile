@@ -92,6 +92,7 @@ test:
 	  && python -m tests.e2e_review_hidden_appeal \
 	  && python -m tests.e2e_user_appeal_channels \
 	  && python -m tests.e2e_early_ready \
+	  && python -m tests.e2e_injection_probe \
 	  && python -m tests.e2e_merchant_promo && python -m tests.e2e_home_filters \
 	  && python -m tests.e2e_rider_new_order_push \
 	  && python -m tests.e2e_remote_copy \

@@ -52,10 +52,20 @@ def is_adult(birth: date) -> bool:
 async def verify_two_elements(real_name: str, id_no: str) -> bool:
     """三方二要素核验:姓名与身份证号是否一致。
 
-    未配置 = 开发模式,本地校验通过即视为一致(返回 True);
+    **未配置时只在开发环境放行。** 生产上没配就抛 RuntimeError,
+    调用方(riders.py 实名接口)据此返回 503 且**不放行** ——
+    与"核验服务挂了不放行"同一条纪律。
+
+    原来这里是无条件 `return True`:生产上忘了配三方核验,任何人填任意
+    姓名 + 任意格式合法的证号都算实名通过。而实名是骑手接单的前置,
+    也是「提现户名必须与实名一致」那道闸的基准 —— 实名能随便填,
+    那道闸等于绕过。
+
     配置后调三方 API,服务异常抛 RuntimeError(调用方给中文降级提示)。
     """
     if not settings.idcheck_configured:
+        if not settings.is_dev:
+            raise RuntimeError("实名核验服务未配置")
         return True
     try:
         async with httpx.AsyncClient(timeout=8) as client:
