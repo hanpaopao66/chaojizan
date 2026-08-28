@@ -233,6 +233,18 @@ LIABILITY_PROMISES = [
 ]
 
 
+def _sample(stage: str) -> Split:
+    """给公示用的样例:一笔 100 元餐费 + 10 元配送费的单过一遍分摊。
+
+    公示只取结果里的**去向和理由**,不取金额 —— 金额随每一单不同,
+    规则才是承诺。真的跑一遍而不是手抄一张表,是为了让公示和代码
+    改不脱节:分摊逻辑一改,这张表当场跟着变。
+    """
+    return split_for_cancel(stage, food_cents=10000, packing_fee_cents=0,
+                            discount_cents=0, delivery_fee_cents=1000,
+                            tip_cents=0)
+
+
 def public_spec() -> dict:
     """判责与分摊的公开说明(/transparency/liability)。
 
@@ -258,10 +270,25 @@ def public_spec() -> dict:
             "scope": "只在「罚责任方会污染平台赖以判断的数据」时适用,"
                      "不是一个可以随便援引的口子。",
         },
+        # 每一档的规则**是跑出来的,不是抄的**:拿一笔样例订单真的过一遍
+        # split_for_cancel,把结果里的去向和理由摆出来。改了分摊逻辑,
+        # 这张表当场跟着变 —— 与派单算法公开同一个规矩。
+        # 只出规则不出金额:金额随每一单不同,规则才是承诺。
         "stages": [
-            {"stage": k, "label": v,
-             "cost_incurred": _STAGE_COST_TEXT[k]} for k, v in STAGE_LABELS.items()
+            {
+                "stage": k,
+                "label": v,
+                "cost_incurred": _STAGE_COST_TEXT[k],
+                "rules": [{"name": l.name, "to": l.to, "why": l.why}
+                          for l in _sample(k).lines],
+                "food_to": _sample(k).food_to,
+            }
+            for k, v in STAGE_LABELS.items()
         ],
+        "to_labels": {
+            "customer": "退回用户", "merchant": "归商家",
+            "rider": "归骑手", "platform": "平台",
+        },
         "idle_trip_share": {
             "value": IDLE_TRIP_SHARE,
             "means": f"骑手到店没取到餐时,拿配送费的 {IDLE_TRIP_SHARE:.0%}",

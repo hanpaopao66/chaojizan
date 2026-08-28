@@ -557,6 +557,8 @@ class OrderItem {
 class Order {
   Order.fromJson(Map<String, dynamic> json)
       : orderNo = json['order_no'] as String,
+        // 申诉接口按数据库 id 定位目标(target_id),不是订单号
+        id = json['id'] as int? ?? 0,
         merchantId = json['merchant_id'] as int,
         merchantName = json['merchant_name'] as String? ?? '',
         merchantAddress = json['merchant_address'] as String? ?? '',
@@ -645,6 +647,7 @@ class Order {
         createdAt = json['created_at'] as String;
 
   final String orderNo;
+  final int id;
   final int merchantId;
   final String merchantName;
   final String merchantAddress;

@@ -111,6 +111,7 @@ export default function TransparencyPage() {
   const changelog = useFetch('/transparency/changelog')
   const gov = useFetch('/transparency/governance')
   const dispatch = useFetch('/transparency/dispatch')
+  const liability = useFetch('/transparency/liability')
   useEffect(() => {   // /status 直达系统状态区
     if (location.pathname.replace(/^\/site/, '').startsWith('/status')) {
       setTimeout(() => document.getElementById('status')
@@ -133,6 +134,7 @@ export default function TransparencyPage() {
           <a href="#compensation">赔付记录</a>
           <a href="#reports">月度财报</a>
           <a href="#dispatch">派单算法</a>
+          <a href="#liability">判责分摊</a>
           <a href="#governance">治理公开</a>
           <a href="#status">系统状态</a>
           <a href="#changelog">最近更新</a>
@@ -394,6 +396,84 @@ export default function TransparencyPage() {
                 </div>
               ))}
             </div>
+          </>
+        ) : <p className="tp-note">加载中……</p>}
+
+        <h2 id="liability">一单出了问题,<b>钱怎么分</b></h2>
+        <p className="tp-lede">
+          原则一句话:<b>谁的问题,谁负责;平台不出补贴。</b>
+          这是三方都会被它扣钱的规则——用户想取消、商家做了餐、骑手跑了路,
+          一单出岔子总有人要承担。别家把它写在几十页协议里、实际由客服临场判,
+          同一种情况两个人问出两个答案。下面这张表是代码里正在跑的那一套:
+          接口从分摊函数**真的跑一遍**取结果,不是另写一份说明。
+        </p>
+        {liability ? (
+          <>
+            <h3 className="tp-sub">分界线是「成本发生的时刻」,不是客服的判断</h3>
+            <p className="tp-note">
+              订单每往前走一步,就有一笔成本真实发生且不可回收。
+              判据是平台看得见的事实(订单状态、骑手有没有到店),
+              所以同一种情况永远是同一个答案。
+            </p>
+            <div className="tp-table-wrap">
+              <table className="tp-table">
+                <thead><tr>
+                  <th>取消发生在</th><th>此时已经发生的成本</th><th>钱怎么分</th>
+                </tr></thead>
+                <tbody>
+                  {liability.stages.map(st => (
+                    <tr key={st.stage}>
+                      <td>{st.label}</td>
+                      <td className="tp-why">{st.cost_incurred}</td>
+                      <td className="tp-why">
+                        {st.rules.map((r, i) => (
+                          <div key={i}>
+                            {r.name} → <b>{liability.to_labels[r.to]}</b>
+                            {r.to === 'platform' && <>(0 元)</>}
+                          </div>
+                        ))}
+                        {st.food_to && <div className="tp-reason">{st.food_to}</div>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="tp-sub">平台自己承担的部分,和「补贴」不是一回事</h3>
+            <p className="tp-lede">{liability.what_platform_bears.rule}。
+              {liability.what_platform_bears.why_not_subsidy}</p>
+            <ul className="tp-never">
+              {liability.what_platform_bears.examples.map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+            </ul>
+
+            <h3 className="tp-sub">有一条例外,而且写明了边界</h3>
+            <p className="tp-lede">
+              {liability.the_one_exception.case}——{liability.the_one_exception.why}
+            </p>
+            <p className="tp-note">{liability.the_one_exception.scope}</p>
+
+            <h3 className="tp-sub">
+              骑手白跑一趟拿多少:配送费的 {Math.round(liability.idle_trip_share.value * 100)}%
+            </h3>
+            <p className="tp-note">{liability.idle_trip_share.why}</p>
+
+            <h3 className="tp-sub">平台承诺不做的事</h3>
+            <ul className="tp-never">
+              {liability.promises.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+
+            <h3 className="tp-sub">判错了怎么办</h3>
+            <p className="tp-lede">
+              {liability.appeal.who},{liability.appeal.window_hours} 小时内提出。
+              {liability.appeal.what_happens}
+            </p>
+            <p className="tp-note">
+              自动判责必须配一个能找人的口子,否则「谁的问题」就成了系统
+              单方面说了算。
+            </p>
           </>
         ) : <p className="tp-note">加载中……</p>}
 

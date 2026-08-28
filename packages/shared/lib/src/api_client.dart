@@ -2585,6 +2585,9 @@ class ApiClient {
           .cast<Map<String, dynamic>>();
 
   /// targetType: after_sale / delivery_issue / review
+  /// 申诉平台的判责结果。**三端共用**:商家(售后判责/差评)、
+  /// 骑手(被判先行赔付的配送异常)、用户(取消分摊 / 被判用户责任的配送异常)。
+  /// 72 小时内、每个目标一次;改判平台认亏,不向已经把活干完的人追款。
   Future<void> submitAppeal({
     required String targetType,
     required int targetId,
@@ -2667,6 +2670,29 @@ class ApiClient {
   }
 
   /// 自助退款:规则明确场景即时退,不建工单
+  /// 出餐之后想取消:先取一份账 —— 能退多少、剩下的钱去哪、为什么。
+  ///
+  /// 出餐**之前**这个接口会 409(那段走 selfRefund 的全额退款规则)。
+  Future<Map<String, dynamic>> cancelQuote(String orderNo) async {
+    final data = await _request('GET', '/orders/$orderNo/cancel-quote');
+    return (data as Map).cast<String, dynamic>();
+  }
+
+  /// 按看到的那份账取消。
+  ///
+  /// **必须把用户同意的那份账带回去。** 他盯着「退配送费 5 元」犹豫的那几秒,
+  /// 骑手可能正好把餐取走了,真实账单就变成「退 0」—— 服务端对不上会 409,
+  /// 那时要重新取账、重新让他确认,不能默默按新账扣钱。
+  Future<Order> cancelWithSplit(
+      String orderNo, String agreedStage, int agreedRefundCents) async {
+    final data = await _request(
+        'POST', '/orders/$orderNo/cancel-with-split', body: {
+      'agreed_stage': agreedStage,
+      'agreed_refund_cents': agreedRefundCents,
+    });
+    return Order.fromJson(data as Map<String, dynamic>);
+  }
+
   Future<Order> selfRefund(String orderNo) async {
     final data = await _request('POST', '/orders/$orderNo/self-refund');
     return Order.fromJson(data as Map<String, dynamic>);

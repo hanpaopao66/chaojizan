@@ -5068,6 +5068,26 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                         ? '取消订单(商家接单前免费)'
                         : '取消订单(接单 2 分钟内可反悔)'),
                   ),
+                // 出餐之后也能取消 —— 但要先看账。
+                //
+                // 老版本这里什么都不给,用户只能看到「不支持退款」。
+                // 而没有出口的结果不是他不取消,是他去微信支付投诉。
+                if (order.status == OrderStatus.ready ||
+                    order.status == OrderStatus.pickedUp)
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                    onPressed: () => _cancelWithBill(order),
+                    label: const Text('取消订单(先看这一单的账)'),
+                  ),
+                // 承担了钱的取消单给申诉入口:分摊是系统自动判的,
+                // 自动判责必须配一个能找人的口子
+                if (order.status == OrderStatus.cancelled &&
+                    _borneCents(order) > 0)
+                  TextButton.icon(
+                    icon: const Icon(Icons.gavel_outlined, size: 18),
+                    onPressed: () => _appealSplit(order),
+                    label: const Text('我认为这个判责不对,申诉'),
+                  ),
                 // 退款/售后:自助能退的即时退,不能的转人工带上下文(减少工单)
                 if (order.status.index >= OrderStatus.accepted.index &&
                     order.status.index <= OrderStatus.delivered.index)
@@ -5079,6 +5099,108 @@ class _OrderDetailPageState extends State<OrderDetailPage>
               ],
             ),
     );
+  }
+
+  /// 用户在这一单里实际承担了多少(已付 − 已退)。
+  int _borneCents(Order order) {
+    final paid = (order.foodCents + order.packingFeeCents -
+                order.discountCents)
+            .clamp(0, 1 << 30) +
+        order.deliveryFeeCents +
+        order.tipCents;
+    return paid - order.refundCents;
+  }
+
+  /// 出餐之后取消:**先把账摆出来,再让他决定**。
+  ///
+  /// 只给一个「确认取消」按钮是不够的 —— 用户拿回 0 元的时候,他有权知道
+  /// 那笔钱去了哪、为什么。这正是账目透明该发挥作用的地方:他不是被系统
+  /// 拒绝,是看着账单自己决定要不要终止。
+  Future<void> _cancelWithBill(Order order) async {
+    Map<String, dynamic> q;
+    try {
+      q = await widget.api.cancelQuote(order.orderNo);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+      return;
+    }
+    if (!mounted) return;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _CancelBillSheet(quote: q),
+    );
+    if (ok != true) return;
+    try {
+      await widget.api.cancelWithSplit(order.orderNo,
+          q['stage'] as String, (q['refund_cents'] as num).toInt());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('订单已取消。对判责有异议可在 72 小时内申诉')));
+      _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      // 账在这几秒里变了(骑手取餐了)—— 重新取一次,让他重新确认,
+      // 绝不按新账默默扣钱
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('$e'), duration: const Duration(seconds: 6)));
+      _refresh();
+    }
+  }
+
+  /// 对分摊判责申诉。理由必填 —— 复核的人要有东西可看。
+  Future<void> _appealSplit(Order order) async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => SzDialog(
+        title: const Text('申诉这一单的判责'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('说说为什么你认为这一单不该由你承担。平台会复核;'
+              '改判的话由平台承担,不会向商家和骑手追款。',
+              style: TextStyle(fontSize: 13)),
+          const SizedBox(height: 12),
+          TextField(
+            controller: ctrl,
+            maxLines: 3,
+            maxLength: 500,
+            decoration: const InputDecoration(
+                hintText: '例如:商家做错了菜 / 骑手一直没动',
+                border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('再想想')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('提交申诉')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    if (ctrl.text.trim().length < 5) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('理由至少写 5 个字,复核的人要有东西可看')));
+      return;
+    }
+    try {
+      await widget.api.submitAppeal(
+          targetType: 'cancel_split',
+          targetId: order.id,
+          reason: ctrl.text.trim());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('申诉已提交,平台复核后通知你')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
   }
 
   /// 退款/售后:先判能否自助退,能则即时退,不能则转人工工单(预填上下文)
@@ -5128,6 +5250,115 @@ class _OrderDetailPageState extends State<OrderDetailPage>
               api: widget.api,
               prefill: (chk['ticket_context'] as String?) ?? '')));
     }
+  }
+}
+
+/// 出餐后取消的账单。
+///
+/// 这一屏的存在本身就是立场:用户拿回 0 元的时候,他有权知道那笔钱去了哪、
+/// 为什么。别家在这里给的是「不支持退款」四个字,而那四个字的结果不是
+/// 用户不取消,是他去微信支付投诉。
+class _CancelBillSheet extends StatelessWidget {
+  const _CancelBillSheet({required this.quote});
+
+  final Map<String, dynamic> quote;
+
+  static const _toLabel = {
+    'customer': '退回你', 'merchant': '归商家',
+    'rider': '归骑手', 'platform': '平台',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    final lines = ((quote['lines'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    final refund = (quote['refund_cents'] as num?)?.toInt() ?? 0;
+    final foodTo = (quote['food_to'] as String?) ?? '';
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('取消这一单,账是这样的',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 4),
+              Text('当前:${quote['stage_label'] ?? ''}',
+                  style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+              const SizedBox(height: 16),
+              for (final l in lines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Expanded(
+                            child: Text('${l['name']}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600))),
+                        Text(
+                          '¥${((l['cents'] as num) / 100).toStringAsFixed(2)}'
+                          ' · ${_toLabel[l['to']] ?? l['to']}',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: l['to'] == 'customer'
+                                  ? sz.earn
+                                  : sz.inkMuted),
+                        ),
+                      ]),
+                      const SizedBox(height: 2),
+                      Text('${l['why']}',
+                          style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
+                    ],
+                  ),
+                ),
+              if (foodTo.isNotEmpty) ...[
+                const Divider(height: 20),
+                Text(foodTo,
+                    style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
+              ],
+              const Divider(height: 24),
+              Row(children: [
+                const Expanded(
+                    child: Text('你能拿回',
+                        style: TextStyle(fontWeight: FontWeight.w700))),
+                Text('¥${(refund / 100).toStringAsFixed(2)}',
+                    style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: refund > 0 ? sz.earn : sz.inkMuted)),
+              ]),
+              const SizedBox(height: 10),
+              Text(
+                '${quote['appeal_hint'] ?? ''}'
+                '完整口径公开在超级赞透明中心,任何人都能查。',
+                style: TextStyle(fontSize: 12, color: sz.inkFaint),
+              ),
+              const SizedBox(height: 18),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('再想想'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('确认取消'),
+                  ),
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
