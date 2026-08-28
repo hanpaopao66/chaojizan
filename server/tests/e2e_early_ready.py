@@ -58,13 +58,12 @@ def suspects(days=90):
     return call("GET", f"/admin/early-ready-suspects?days={days}", admin)
 
 
-def main() -> None:
-    base = suspects()
-    thr = base["wait_threshold_minutes"]
-    before = next((x for x in base["items"] if x["merchant_id"] == sid), None)
-    before_waited = before["waited_orders"] if before else 0
+def one_order(wait_minutes: int) -> str:
+    """跑完整的一单,并把骑手到店时刻按 wait_minutes 往前推。
 
-    # 造一单:商家点出餐 → 骑手到店 → 干等到超过阈值 → 才取到餐
+    **跑到 delivered 才收手** —— 骑手同时最多 3 单在途,
+    停在 picked_up 的话造到第 4 单就 409。
+    """
     no = call("POST", "/orders", customer, {
         "merchant_id": sid,
         "items": [{"dish_id": dish["id"], "quantity": 1}],
@@ -76,15 +75,42 @@ def main() -> None:
     call("POST", f"/riders/grab/{no}", rider)
     call("POST", f"/orders/{no}/transition", rider,
          {"to_status": "picked_up", "force": True})
-    asyncio.run(make_rider_wait(no, thr + 10))
-    print(f"✓ 造了一单:商家点了出餐,骑手到店后干等 {thr + 10} 分钟才取到餐")
+    asyncio.run(make_rider_wait(no, wait_minutes))
+    # 放门口要配一张照片(顾客说没收到时那张照片替骑手说话),这里交给顾客本人
+    call("POST", f"/orders/{no}/transition", rider,
+         {"to_status": "delivered", "handoff": "hand"})
+    return no
+
+
+def main() -> None:
+    base = suspects()
+    thr = base["wait_threshold_minutes"]
+    before = next((x for x in base["items"] if x["merchant_id"] == sid), None)
+    before_waited = before["waited_orders"] if before else 0
+    before_orders = before["orders"] if before else 0
+
+    # ⚠️ 名单有 min_orders=5 的门槛(一家店只有一两单不该被点名),
+    # 所以**用例要自己凑够这 5 单**,不能指望库里本来就有 ——
+    # 原来只造 1 单,靠的是开发库里那家演示店攒了几百单,
+    # 干净库上这家店压根进不了名单。CI 上就是这么红的。
+    #
+    # 4 单如实出餐(骑手到店 1 分钟就取走)+ 1 单干等,
+    # 这样占比是 1/5 而不是 1/1,顺带把「占比算得对不对」也测了。
+    for _ in range(4):
+        one_order(1)
+    one_order(thr + 10)
+    print(f"✓ 造了 5 单:4 单如实出餐,1 单骑手到店后干等 {thr + 10} 分钟")
 
     now = suspects()
     hit = next((x for x in now["items"] if x["merchant_id"] == sid), None)
     assert hit is not None, (
-        "骑手白等了这么久,这家店却没出现在嫌疑名单里 —— 信号是哑的")
+        "骑手白等了这么久,这家店却没出现在嫌疑名单里 —— 信号是哑的"
+        "(名单有 min_orders=5 的门槛,用例已自己凑够)")
     assert hit["waited_orders"] == before_waited + 1, (
         f"可疑单数没涨:{before_waited} → {hit['waited_orders']}")
+    assert hit["orders"] == before_orders + 5, (
+        f"总单数对不上:{before_orders} + 5 ≠ {hit['orders']} —— "
+        f"如实出餐的那 4 单没被算进分母,占比会虚高")
     assert 0 < hit["suspect_ratio"] <= 1, hit
     print(f"✓ 信号响了:{hit['merchant_name']} 可疑 {hit['waited_orders']}/"
           f"{hit['orders']} 单(占比 {hit['suspect_ratio']:.1%},"
