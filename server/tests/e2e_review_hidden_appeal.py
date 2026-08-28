@@ -72,24 +72,33 @@ def main() -> None:
 
     # ---------- 3) 公示必须把隐藏数报出来 ----------
     #
-    # ⚠️ 这个接口有 1 小时的进程内缓存,所以**不能断言"隐藏数刚好 +1"** ——
-    # 那样写会因为缓存偶发假红。断言的是不会被缓存影响的那几件事:
-    # 字段在、数字自洽、规则和救济写清楚了。
-    # 真正要防的回归是「有人把 hidden 过滤去掉、或者把这几个字段删了」,
-    # 这三条就够抓。
+    # ⚠️ 这个接口缓存 1 小时,**跑之前要把 PUBLIC_CACHE_MAX_SECONDS 设成 0**
+    # (server/.env 和 CI 都设了)。否则 fair_before 那一读会把旧快照缓存住,
+    # 后面读到的是隐藏之前的数字。
+    #
+    # 原来这里写的是 `fair["hidden"] > 0`,配上缓存等于**在断言开发库里
+    # 攒了多少历史隐藏评价** —— 跟这个用例做了什么完全无关,本地永远绿,
+    # CI 干净库上当场红。改成断言**差值**:数字必须跟着这次操作动。
     fair = call("GET", "/transparency/fairness")["reviews"]
     assert "hidden" in fair and "visible" in fair, (
         f"公示里没有隐藏数:{sorted(fair)} —— "
         f"店铺页会滤掉 hidden,公示不报的话「删了一成」和「一条没删」"
         f"长得一模一样")
-    assert fair["hidden"] > 0, "库里明明有被隐藏的评价,公示却报 0"
+    assert fair["hidden"] == fair_before["hidden"] + 1, (
+        f"刚隐藏了一条评价,公示的隐藏数却从 {fair_before['hidden']} "
+        f"变成 {fair['hidden']} —— 要么公示根本没在数 hidden,"
+        f"要么你在拿缓存跑(把 PUBLIC_CACHE_MAX_SECONDS 设成 0)")
+    assert fair["visible"] == fair_before["visible"] - 1, (
+        f"隐藏了一条,可见数却从 {fair_before['visible']} "
+        f"变成 {fair['visible']} —— 隐藏的评价还留在可见数里")
+    assert fair["total"] == fair_before["total"], (
+        "总数变了 —— 隐藏不是删除,总数不该动")
     assert fair["visible"] == fair["total"] - fair["hidden"], (
         f"可见 {fair['visible']} + 隐藏 {fair['hidden']} "
         f"≠ 总数 {fair['total']}")
-    assert fair["hidden"] >= fair_before["hidden"], "隐藏数不该变少"
     assert fair["hidden_rule"] and fair["hidden_recourse"], "规则和救济没写清楚"
     print(f"✓ 公示如实报出:共 {fair['total']} 条、可见 {fair['visible']}、"
-          f"隐藏 {fair['hidden']}(接口有 1 小时缓存,数字可能略滞后)")
+          f"隐藏 {fair['hidden']}(比隐藏前正好多 1 条)")
 
     # ---------- 4) 只有作者能申诉这个隐藏 ----------
     err = call("POST", "/appeals", merchant,

@@ -52,6 +52,8 @@ analyze:
 # 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)
 unit:
 	cd server && python -m pytest tests/unit -q
+	@echo "—— 再按生产环境跑一遍(CI 的单测 job 没有 .env,APP_ENV 走默认的 prod)——"
+	cd server && APP_ENV=prod python -m pytest tests/unit -q
 
 # 端到端测试(需要 API 已在运行,默认 http://127.0.0.1:8010,可用 SUPERZ_API 覆盖)
 #

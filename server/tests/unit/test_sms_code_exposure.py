@@ -36,17 +36,41 @@ from app.routers import auth
 
 
 class Test判据是配没配而不是发没发成:
-    def test_没配短信才允许回码(self, monkeypatch):
+    """回码要**两个条件同时成立**:这是开发环境,且没配短信。
+
+    第一版这两条只 patch 了 `sms_configured`,把 `is_dev` 那一半交给进程环境 ——
+    本地 `.env` 有 `APP_ENV=dev` 所以是绿的,CI 的单测 job 没有这一行
+    (按生产处理)当场就红。**单元测试只断言代码的性质,不断言当前进程配了什么。**
+    """
+
+    @staticmethod
+    def _部署(monkeypatch, *, 开发: bool, 配了短信: bool) -> None:
+        """把两个判据都钉死 —— 少钉一个,这条测试就变成在测本机的 .env。"""
+        monkeypatch.setattr(type(settings), "is_dev",
+                            property(lambda self: 开发))
         monkeypatch.setattr(type(settings), "sms_configured",
-                            property(lambda self: False))
+                            property(lambda self: 配了短信))
+
+    def test_开发环境且没配短信才回码(self, monkeypatch):
+        self._部署(monkeypatch, 开发=True, 配了短信=False)
         assert auth.dev_code_visible() is True
 
     def test_配了短信一律不许回码(self, monkeypatch):
         """这一条是整个洞的要害:配了短信 = 真实部署。"""
-        monkeypatch.setattr(type(settings), "sms_configured",
-                            property(lambda self: True))
+        self._部署(monkeypatch, 开发=True, 配了短信=True)
         assert auth.dev_code_visible() is False, (
             "配了短信还把验证码随响应返回 —— 短信商一抖动就是任意账号接管")
+
+    def test_生产上没配短信也不回码(self, monkeypatch):
+        """`is_dev` 那一半以前没有任何守卫 —— 删掉它,上面两条照样绿。
+
+        而这一半正是自部署者最容易踩的:拿着开源代码起一套、短信还没接,
+        `/auth/sms-code` 就把任意手机号的验证码交出去了。
+        """
+        self._部署(monkeypatch, 开发=False, 配了短信=False)
+        assert auth.dev_code_visible() is False, (
+            "生产上没配短信就把验证码交出去 —— 自部署者接短信之前的那段时间,"
+            "任何人都能登进任何账号")
 
     def test_判据里不许出现发送结果(self):
         """`dev_code_visible` 不接受参数 —— 结构上就不可能拿"这次发成没有"

@@ -98,6 +98,16 @@ class Settings(BaseSettings):
     #: 显式打开这一项 —— 但要自己解决"注册前先验手机号"。
     password_register_enabled: bool = False
     rate_limit_register_per_minute: int = 5
+
+    # 公开页(大屏 /screen、透明中心 /transparency)进程内缓存时长的**上限**,秒。
+    # 默认 86400 = 不封顶(各接口自己的 TTL 最大 3600),生产按原样缓存。
+    #
+    # **e2e 必须设成 0。** /transparency/fairness 缓存 1 小时:干净库上
+    # 第一次读会把「隐藏 0 条」缓存住,之后这次运行里隐藏多少条都读不出来,
+    # 断言「隐藏数 > 0」于是永远失败。本地一直是绿的,因为开发库里积着
+    # 历次跑出来的隐藏评价 —— 那条断言实际在断言历史残留,
+    # 跟用例自己做了什么没有关系。
+    public_cache_max_seconds: float = 86400
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
     rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 60 秒重发限制)
     rate_limit_sms_login_per_minute: int = 10  # 同一手机号验证码登录尝试

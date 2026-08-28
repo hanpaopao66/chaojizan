@@ -41,7 +41,10 @@ def _cache_get(key: str) -> dict | None:
 
 
 def _cache_put(key: str, data: dict, ttl: float) -> None:
-    _cache[key] = (time.monotonic() + ttl, data)
+    # 十个调用点各写各的 TTL,上限统一压在这里 —— 设成 0 就等于不缓存。
+    # e2e 要在一次运行里「改完数据立刻看公示」,而公示缓存 1 小时。
+    _cache[key] = (time.monotonic() + min(ttl, settings.public_cache_max_seconds),
+                   data)
 
 
 async def _guard(request: Request) -> None:

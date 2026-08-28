@@ -63,6 +63,11 @@ jobs:
       # 同理:全套 e2e 从同一个 127.0.0.1 注册几十个账号,
       # 而注册限流按 IP 算。生产那个 5 是对的,只在 CI 抬高。
       RATE_LIMIT_REGISTER_PER_MINUTE: "100000"
+      # 公开页(大屏/透明中心)的进程内缓存上限,0 = 不缓存。
+      # /transparency/fairness 缓存 1 小时:干净库上第一次读把「隐藏 0 条」
+      # 缓存住,e2e_review_hidden_appeal 之后隐藏了评价也读不出来。
+      # 本地开发库积着历次跑出来的隐藏评价,所以那条断言在本地一直是绿的。
+      PUBLIC_CACHE_MAX_SECONDS: "0"
 
     steps:
       - uses: actions/checkout@v4
