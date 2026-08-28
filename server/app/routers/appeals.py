@@ -29,10 +29,12 @@ from ..models import (
     Merchant,
     MerchantEarning,
     Order,
+    OrderEvent,
     Review,
     User,
 )
 from ..security import require_role
+from ..state_machine import OrderStatus
 from ..services.push import push_to_user
 from ..services.staff import owned_shop
 
@@ -40,15 +42,23 @@ router = APIRouter(tags=["判责申诉"])
 
 APPEAL_WINDOW = timedelta(hours=72)
 
+#: 申诉改判退款的备注前缀。**审计靠它认出"这笔多退的钱是平台认亏"** ——
+#: 分摊单本来是"商家 + 骑手 + 退款 == 用户实付",平台补退之后这个等式
+#: 会多出一块,不认得它的话审计每次改判都报一条假红灯。
+#: 定义在这里,services/audit.py 从这儿读,不另抄一份。
+APPEAL_REFUND_NOTE = "申诉改判:平台承担,原路退回"
+
 _TYPE_LABELS = {
     "after_sale": "售后判责",
     "delivery_issue": "配送异常裁决",
     "review": "差评",
+    "cancel_split": "取消订单的判责分摊",
 }
 
 
 class AppealIn(BaseModel):
-    target_type: Literal["after_sale", "delivery_issue", "review"]
+    target_type: Literal["after_sale", "delivery_issue", "review",
+                         "cancel_split"]
     target_id: int
     reason: str = Field(min_length=5, max_length=500)
     images: list[str] = Field(default=[], max_length=6)
@@ -125,14 +135,57 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         if not _within_window(a.processed_at):
             raise HTTPException(422, "已超过 72 小时申诉时限")
     elif payload.target_type == "delivery_issue":
-        if user.role.value != "rider":
-            raise HTTPException(403, "配送异常裁决只有骑手可以申诉")
+        # 骑手申诉判他责的(先行赔付),用户申诉判**用户**责的(按送达处理)。
+        #
+        # 用户这一侧以前是空的,而那恰恰是最不公平的一格:骑手报「联系不上
+        # 顾客」、平台判 mark_delivered,于是用户付了全款、一口没吃到,
+        # **连说话的地方都没有**。判谁责,谁就该能申诉 —— 这是对称的,
+        # 不该只对骑手成立。
         issue = await db.get(DeliveryIssue, payload.target_id)
-        if issue is None or issue.rider_id != user.id:
+        if issue is None:
             raise HTTPException(404, "异常记录不存在")
-        if issue.status != "resolved" or issue.resolution != "refund":
-            raise HTTPException(409, "只有判骑手责任(先行赔付)的裁决才需要申诉")
+        if issue.status != "resolved":
+            raise HTTPException(409, "这条异常还没有裁决结果")
+        if user.role.value == "rider":
+            if issue.rider_id != user.id:
+                raise HTTPException(404, "异常记录不存在")
+            if issue.resolution != "refund":
+                raise HTTPException(409, "只有判骑手责任(先行赔付)的裁决才需要申诉")
+        elif user.role.value == "customer":
+            order = await db.get(Order, issue.order_id)
+            if order is None or order.customer_id != user.id:
+                raise HTTPException(404, "异常记录不存在")
+            if issue.resolution != "mark_delivered":
+                raise HTTPException(409, "只有判用户责任(按送达处理)的裁决才需要申诉")
+        else:
+            raise HTTPException(403, "配送异常裁决只有当事的骑手或用户可以申诉")
         if not _within_window(issue.resolved_at):
+            raise HTTPException(422, "已超过 72 小时申诉时限")
+    elif payload.target_type == "cancel_split":
+        # 出餐后取消的分摊是**系统按口径自动判的**,没有人看过。
+        # 自动判责必须配一个能找人的口子,否则"谁的问题谁负责"里的
+        # 「谁的问题」就成了系统单方面说了算。
+        if user.role.value != "customer":
+            raise HTTPException(403, "取消分摊只有下单的用户可以申诉")
+        order = await db.get(Order, payload.target_id)
+        if order is None or order.customer_id != user.id:
+            raise HTTPException(404, "订单不存在")
+        if order.status != OrderStatus.CANCELLED:
+            raise HTTPException(409, "这一单没有被取消,没有分摊结果可申诉")
+        from ..services.liability import SPLIT_EARNING_NOTE
+        went_split = await db.scalar(select(MerchantEarning.id).where(
+            MerchantEarning.order_id == order.id,
+            MerchantEarning.kind == EarningKind.earning,
+            MerchantEarning.note.like(SPLIT_EARNING_NOTE + "%")))
+        if went_split is None:
+            raise HTTPException(409, "这一单是全额退款,没有分摊,不需要申诉")
+        # 窗口从**取消那一刻**起算,取订单事件里那条,别拿 updated_at 凑合
+        cancelled_at = await db.scalar(
+            select(OrderEvent.created_at)
+            .where(OrderEvent.order_id == order.id,
+                   OrderEvent.to_status == OrderStatus.CANCELLED.value)
+            .order_by(OrderEvent.created_at.desc()).limit(1))
+        if not _within_window(cancelled_at):
             raise HTTPException(422, "已超过 72 小时申诉时限")
     else:  # review
         if user.role.value != "merchant":
@@ -152,7 +205,7 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
 @router.post("/appeals", response_model=AppealOut)
 async def submit_appeal(
     payload: AppealIn,
-    user: User = Depends(require_role("rider", "merchant")),
+    user: User = Depends(require_role("rider", "merchant", "customer")),
     db: AsyncSession = Depends(get_db),
 ):
     await _validate_target(db, user, payload)
@@ -178,7 +231,7 @@ async def submit_appeal(
 
 @router.get("/appeals/mine", response_model=list[AppealOut])
 async def my_appeals(
-    user: User = Depends(require_role("rider", "merchant")),
+    user: User = Depends(require_role("rider", "merchant", "customer")),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.scalars(
@@ -307,9 +360,51 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str) -> None:
                        if a.reply else "骑手申诉改判:非骑手责任")[:300]
         issue.resolve_note = (f"{issue.resolve_note};申诉改判:非骑手责任"
                               if issue.resolve_note else "申诉改判:非骑手责任")[:300]
-        await push_to_user(appeal.user_id, "申诉成立(已为你正名)",
-                           "复核认定该次配送异常非你的责任,责任记录已消除",
-                           {"type": "appeal"})
+        if appeal.role == "customer":
+            # 用户申诉的是「按送达处理」那类裁决:他付了全款、一口没吃到。
+            # 改判就得把钱退回去,只说一句"记录消除"对他毫无意义。
+            order = await db.get(Order, issue.order_id, with_for_update=True)
+            borne = (max(order.food_cents + order.packing_fee_cents
+                         - order.discount_cents, 0) - order.refund_cents)
+            if borne > 0:
+                from ..services.wechat_pay import request_refund
+                await request_refund(db, order, borne, APPEAL_REFUND_NOTE)
+            issue.resolve_note = (f"{issue.resolve_note};申诉改判:非用户责任"
+                                  )[:300]
+            await push_to_user(
+                appeal.user_id, "申诉成立",
+                f"复核认定这一单不是你的责任,¥{borne / 100:.2f} 已原路退回"
+                if borne > 0 else "复核认定这一单不是你的责任",
+                {"type": "appeal"})
+        else:
+            await push_to_user(appeal.user_id, "申诉成立(已为你正名)",
+                               "复核认定该次配送异常非你的责任,责任记录已消除",
+                               {"type": "appeal"})
+    elif appeal.target_type == "cancel_split":
+        # 改判 = 平台认定这一单不该由用户承担。
+        #
+        # **不向商家和骑手追款。** 他们各自把该做的做完了(餐做好了、路跑了),
+        # 把已经发出去的钱要回来,等于让他们为平台的一次判断失误买单 ——
+        # 与既有立场「改判平台认亏」一致(见本函数 docstring)。
+        # 所以这笔由平台掏,走退款通道原路退给用户。
+        #
+        # 若复核认定确属**商家**责任,那是另一条路径(售后冲账),
+        # 不在这里混着做 —— 一个动作只做一件事,账才查得清。
+        order = await db.get(Order, appeal.target_id, with_for_update=True)
+        borne = (max(order.food_cents + order.packing_fee_cents
+                     - order.discount_cents, 0)
+                 + order.delivery_fee_cents + order.tip_cents
+                 - order.refund_cents)
+        if borne <= 0:
+            raise HTTPException(409, "这一单用户没有承担任何金额,无可改判")
+        from ..services.wechat_pay import request_refund
+        await request_refund(db, order, borne, APPEAL_REFUND_NOTE)
+        order.cancel_reason = (f"{order.cancel_reason};申诉改判:非用户责任,"
+                               f"平台承担")[:200]
+        await push_to_user(
+            appeal.user_id, "申诉成立",
+            f"复核认定这一单不该由你承担,¥{borne / 100:.2f} 已原路退回",
+            {"type": "appeal"})
     else:  # review
         review = await db.get(Review, appeal.target_id, with_for_update=True)
         if review.hidden:

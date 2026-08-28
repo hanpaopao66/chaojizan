@@ -980,12 +980,26 @@ async def run_audit() -> list[dict]:
         # 用户已付按和 liability 同一个口径算(商家应收钳 0 之后再加配送费
         # 和小费),不直接用 total_cents —— 那一列是**剩余应付**不是累计实付,
         # 规则 5b 的长注释解释过为什么。
+        from ..routers.appeals import APPEAL_REFUND_NOTE
         from .liability import SPLIT_EARNING_NOTE
+
+        # 申诉改判会让平台**额外**退一笔给用户,于是「商家 + 骑手 + 退款」
+        # 会超过用户实付 —— 超出的正是平台认亏的那部分。不认得它的话,
+        # 每一次申诉成立都会报一条假红灯,而假红灯多了真红灯就没人看。
+        appeal_paid = {
+            oid: amt for oid, amt in (await db.execute(
+                select(Refund.order_id, sa_func.sum(Refund.amount_cents))
+                .where(Refund.reason == APPEAL_REFUND_NOTE,
+                       Refund.status == RefundStatus.success,
+                       Refund.order_id.is_not(None))
+                .group_by(Refund.order_id))).all()
+        }
 
         _re_sub = (
             select(RiderEarning.order_id,
                    RiderEarning.amount_cents.label("rider_cents"))
             .where(RiderEarning.kind == EarningKind.earning).subquery())
+        split_absorbed_n, split_absorbed_cents = 0, 0
         split_rows = (await db.execute(
             select(Order, MerchantEarning.net_cents,
                    MerchantEarning.commission_cents,
@@ -1002,20 +1016,30 @@ async def run_audit() -> list[dict]:
                         - o.discount_cents, 0)
                     + o.delivery_fee_cents + o.tip_cents)
             got = net_cents + rider_cents + o.refund_cents
-            if got != paid:
+            absorbed = appeal_paid.get(o.id, 0)   # 申诉改判平台补退的部分
+            if got - absorbed != paid:
                 problems.append({
                     "check": "cancel_split_not_balanced",
                     "detail": f"分摊取消单 {o.order_no}:商家 {net_cents} + "
                               f"骑手 {rider_cents} + 退款 {o.refund_cents} "
-                              f"= {got} 分,而用户实付 {paid} 分 —— "
-                              f"差 {got - paid} 分是凭空多出来或凭空少掉的钱",
+                              f"− 申诉改判平台补退 {absorbed} = {got - absorbed} 分,"
+                              f"而用户实付 {paid} 分 —— 差 "
+                              f"{got - absorbed - paid} 分是凭空多出来或"
+                              f"凭空少掉的钱",
                 })
+            elif absorbed:
+                split_absorbed_n += 1
+                split_absorbed_cents += absorbed
             if comm_cents != 0:
                 problems.append({
                     "check": "cancel_split_commission_charged",
                     "detail": f"分摊取消单 {o.order_no} 收了 {comm_cents} 分佣金"
                               f" —— 直接违背公示的「取消时平台一分佣金都不收」",
                 })
+
+        if split_absorbed_n:
+            logger.info("分摊取消的申诉改判(近 %s 天):%s 笔共 %s 分由平台认亏",
+                        WINDOW_DAYS, split_absorbed_n, split_absorbed_cents)
 
         for p in problems:
             db.add(AuditAlert(check_name=p["check"], detail=p["detail"][:500]))
