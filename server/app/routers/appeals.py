@@ -202,8 +202,11 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         # 锚在 RiskActionLog 上而不是 user_id 上:每次处置一行,所以
         # 「这次标记」和「上次标记」是两个可以各自申诉的目标 ——
         # 挂在 user_id 上的话唯一约束会让一个人一辈子只能申诉一次。
-        if user.role.value != "customer":
-            raise HTTPException(403, "账号风控只有被处置的本人可以申诉")
+        # **不限角色。** 风控处置接口接受任何 user_id,商家和骑手的账号
+        # 一样会被限制、被冻结,而冻结对他们是断收入。
+        # 只开给顾客的话,恰恰是把最受影响的两类人挡在外面 ——
+        # 这条通道的判据是「是不是本人」,不是「是什么角色」。
+        pass
         log = await db.get(RiskActionLog, payload.target_id)
         if log is None or log.user_id != user.id:
             raise HTTPException(404, "没有这条处置记录")

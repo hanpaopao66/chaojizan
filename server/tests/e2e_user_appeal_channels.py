@@ -135,6 +135,25 @@ def main() -> None:
     assert err["_error"] == 409, err
     print("✓ 已解除的处置不再受理申诉")
 
+    # ============ 三、风控申诉不限角色 ============
+    #
+    # 风控处置接口接受任何 user_id,商家和骑手的账号一样会被限制、被冻结,
+    # 而冻结对他们是断收入。只开给顾客的话,恰恰把最受影响的两类人
+    # 挡在外面 —— 判据是「是不是本人」,不是「是什么角色」。
+    rider_id = call("GET", "/auth/me", rider)["id"]
+    call("POST", f"/admin/users/{rider_id}/risk-level", admin,
+         {"level": "limit", "reason": "测试:骑手账号被限制"})
+    rme = call("GET", "/auth/me", rider)
+    assert rme["risk_action_id"] > 0, rme
+    rap = call("POST", "/appeals", rider,
+               {"target_type": "risk_flag", "target_id": rme["risk_action_id"],
+                "reason": "我没有违规,请复核这次限制"})
+    assert rap["status"] == "open", rap
+    call("POST", f"/admin/appeals/{rap['id']}/resolve", admin,
+         {"result": "overturned", "note": "复核:限制解除"})
+    assert call("GET", "/auth/me", rider)["risk_level"] == "", "骑手的限制没解除"
+    print("✓ 骑手账号被限制也能申诉并解除(不限角色 —— 冻结对他们是断收入)")
+
     print("\ne2e_user_appeal_channels 全部通过 ✅")
 
 
