@@ -88,6 +88,15 @@ class Settings(BaseSettings):
     # 5 次/分钟对真人绰绰有余;这个接口会直接发新客券,松了就是送钱。
     # 本地与 CI 从同一个 127.0.0.1 跑几十个注册,在那边显式抬高,
     # **生产这个 5 不动** —— 与 SMS_DAILY_IP_LIMIT 同一个处理方式。
+    #: 密码注册(`POST /auth/register`)。**默认关。**
+    #:
+    #: 三端都走短信登录(自动注册),没有任何客户端调它。而它**不验手机号** ——
+    #: 任何人可以拿别人的号注册,而且 409「该手机号已注册过此角色」
+    #: 就是"这个号有没有账号"的枚举口子。
+    #:
+    #: 开发环境自动开(45 个 e2e 套件在用);自部署者确实需要密码注册的,
+    #: 显式打开这一项 —— 但要自己解决"注册前先验手机号"。
+    password_register_enabled: bool = False
     rate_limit_register_per_minute: int = 5
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
     rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 60 秒重发限制)

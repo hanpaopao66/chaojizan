@@ -96,7 +96,17 @@ async def upload_image(
         if len(data) > MAX_SIZE:
             raise HTTPException(413, "图片转换后超过 5MB,请压缩后重试")
     if ext is None:
-        ext = Path(file.filename or "").suffix.lower()
+        # **认不出就拒绝,不回退到文件名后缀。**
+        #
+        # 原来这里是 `ext = Path(file.filename).suffix.lower()` —— 而文件名
+        # 是攻击者可控的。白名单里那三种(jpg/png/webp)加 heic 全都嗅得出来,
+        # 所以这条回退**只可能放进非图片**:传一个内容是 HTML 的 evil.jpg,
+        # 魔数认不出 → 用文件名的 .jpg → 过白名单 → 存进公开桶。
+        #
+        # 现代浏览器不会把 image/jpeg 嗅成 HTML,所以它不是一条可用的
+        # 利用链;但让任意字节以图片扩展名躺在平台域名下,本身没有任何好处。
+        raise HTTPException(
+            422, "认不出这是图片(只支持 jpg / png / webp / heic)")
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(422, "仅支持 jpg / png / webp 图片")
     try:
@@ -237,8 +247,11 @@ async def public_file(key: str):
     if data is None:
         raise HTTPException(404, "文件不存在")
     media = mimetypes.guess_type(key)[0] or "application/octet-stream"
+    # nosniff:告诉浏览器别拿内容去猜类型。上面已经保证入库的都是真图片,
+    # 这一条是第二道 —— 存量里可能还有走过老回退路径的文件
     return Response(data, media_type=media,
-                    headers={"Cache-Control": "public, max-age=604800"})
+                    headers={"Cache-Control": "public, max-age=604800",
+                             "X-Content-Type-Options": "nosniff"})
 
 
 @router.get("/uploads/{name:path}")

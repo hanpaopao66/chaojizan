@@ -24,8 +24,12 @@ from .util import ADMIN, CUSTOMER, MERCHANT, RIDER, BASE, call, login  # noqa: E
 JPEG = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01" + b"\x00" * 256
 
 
-def upload(token: str, purpose: str | None, name: str = "t.jpg"):
-    """multipart 上传。purpose=None 模拟老客户端(不带这个字段)。"""
+def upload(token: str, purpose: str | None, name: str = "t.jpg",
+           content: bytes | None = None):
+    """multipart 上传。purpose=None 模拟老客户端(不带这个字段)。
+
+    content 用来传**非图片内容**:格式判定必须看魔数,不能看文件名。
+    """
     boundary = "----superz-e2e"
     parts = []
     if purpose is not None:
@@ -35,7 +39,7 @@ def upload(token: str, purpose: str | None, name: str = "t.jpg"):
     parts.append(
         f'--{boundary}\r\nContent-Disposition: form-data; name="file";'
         f' filename="{name}"\r\nContent-Type: image/jpeg\r\n\r\n'.encode()
-        + JPEG + b"\r\n")
+        + (JPEG if content is None else content) + b"\r\n")
     parts.append(f"--{boundary}--\r\n".encode())
     body = b"".join(parts)
 
@@ -161,6 +165,27 @@ def main() -> None:
           "匿名 401 / 他人 403 / 本人 200")
 
     bind(original)   # 还原,不给别的用例留脏数据
+
+    # ---------- 格式判定看魔数,不看文件名 ----------
+    #
+    # 老写法是"魔数认不出 → 回退到文件名后缀"。而文件名是攻击者可控的,
+    # 白名单那三种(jpg/png/webp)加 heic 全都嗅得出来 ——
+    # 这条回退**只可能放进非图片**:内容是 HTML 的 evil.jpg 就这么进公开桶。
+    for label, blob in (
+        ("HTML", b"<html><script>alert(1)</script></html>" + b"x" * 300),
+        ("SVG", b"<svg xmlns='http://www.w3.org/2000/svg'><script/></svg>"),
+        ("ZIP", b"PK\x03\x04" + b"\x00" * 300),
+    ):
+        code, _ = upload(m_token, "dish", name="evil.jpg", content=blob)
+        assert code == 422, (
+            f"内容是 {label} 但叫 evil.jpg 的文件被收下了(HTTP {code})——"
+            f"格式判定又回退到文件名了")
+    print("✓ 内容不是图片就拒绝,叫什么名字都没用(HTML / SVG / ZIP 各试一次)")
+
+    # 真图片照常收(别把上面那条改成"一律拒绝")
+    code, _ = upload(m_token, "dish")
+    assert code == 200, f"真 JPEG 反而被拒了:{code}"
+    print("✓ 真图片照常收")
 
     print(f"\n全部通过:上传隐私边界({storage.backend().name} 后端)")
 

@@ -3758,8 +3758,13 @@ class _OrderDetailPageState extends State<OrderDetailPage>
   /// 订单状态实时推送:状态一变立刻刷新
   void _connectWs() {
     try {
-      _ws = WebSocketChannel.connect(
-          Uri.parse('${widget.api.wsBaseUrl}/ws/orders/${widget.orderNo}'));
+      // **带 token**:订单实时通道现在要验身份(这一单的顾客/骑手/商家
+      // 三方才连得上)。不带的话服务端 close(4401),表现是订单页不再
+      // 自动刷新 —— 那种故障没人会往鉴权上想,所以这里和商家听单通道
+      // 用同一个写法
+      _ws = WebSocketChannel.connect(Uri.parse(
+          '${widget.api.wsBaseUrl}/ws/orders/${widget.orderNo}'
+          '?token=${widget.api.token}'));
     } catch (_) {
       return;
     }

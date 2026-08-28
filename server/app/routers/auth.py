@@ -44,12 +44,26 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 SMS_FAIL_KEY = "sms:fail:{phone}"
 
 
+def password_register_allowed(cfg=None) -> bool:
+    """能不能用密码注册。开发环境自动开,生产要显式打开。
+
+    **和 mock_pay 那几个不同,这里是 or 不是 and。** 那几个是纯开发便利,
+    生产一律不该有;密码注册对自部署者可能是真需求(他们没有短信通道),
+    所以留一个显式开关 —— 但默认关,而且他们得自己解决"注册前先验手机号"。
+    """
+    cfg = cfg or settings
+    return bool(cfg.is_dev or cfg.password_register_enabled)
+
+
 @router.post("/register", response_model=TokenOut)
 async def register(payload: RegisterIn, request: Request,
                    db: AsyncSession = Depends(get_db)):
     # **限流按 IP,不按手机号。** 这个接口的滥用形态是"一个人换着号狂注册",
     # 按手机号限等于没限。它是三个认证入口里最后一个补上的 ——
     # 而它恰恰是唯一一个会直接发钱(新客券)的。
+    if not password_register_allowed():
+        raise HTTPException(
+            403, "请使用手机验证码登录(密码注册未开放)")
     await check_rate_limit("register", client_ip(request),
                            settings.rate_limit_register_per_minute)
     # 账号按 (手机号, 角色) 区分:同一手机号可分别注册用户/商家/骑手

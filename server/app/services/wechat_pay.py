@@ -151,9 +151,25 @@ async def _dispatch_refund(db, *, biz_type: str, biz_id: int, trade_no: str,
         channel="mock" if client is None else "wechat",
     )
     if client is None:
-        refund.status = RefundStatus.success
-        logger.info("模拟退款成功 %s 分: %s %s (%s)",
-                    refund_cents, biz_type, trade_no, reason)
+        # **判据是"是不是开发环境",不是"配没配微信"。**
+        #
+        # 原来只要 client is None 就把退款置 success —— 生产上微信没配好
+        # (或者配置掉了),账上写着"已退款",钱一分没动。而审计规则 5 比的是
+        # 「order.refund_cents == Σ refunds 流水」,两边都是这条假流水,
+        # 恒等式照样成立,查不出来。用户被告知已退款却收不到钱。
+        #
+        # 开发环境保留这条便利(全流程照跑);生产上留在 requested,
+        # 由审计那条「requested 挂账超时未走通」把它顶出来。
+        if settings.is_dev:
+            refund.status = RefundStatus.success
+            logger.info("模拟退款成功 %s 分: %s %s (%s)",
+                        refund_cents, biz_type, trade_no, reason)
+        else:
+            refund.status = RefundStatus.requested
+            refund.error = "微信支付未配置,退款未真正发起"
+            logger.error(
+                "退款无法发起(微信未配置)%s 分: %s %s —— "
+                "流水留在 requested,不谎报已退", refund_cents, biz_type, trade_no)
     else:
         code, message = await asyncio.to_thread(
             client.refund,
