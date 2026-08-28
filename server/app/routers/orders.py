@@ -16,6 +16,7 @@ from ..ratelimit import check_rate_limit
 from ..redis_client import RIDER_LOC_KEY, get_redis
 from ..schemas import (
     BoostTipIn,
+    CancelSplitIn,
     ChangeAddressIn,
     HardshipIn,
     OrderCreateIn,
@@ -1393,6 +1394,150 @@ async def self_refund(
                            f"订单#{order.order_no[-6:]} 因出餐超时被用户自助退款",
                            {"type": "order", "order_no": order.order_no})
     return order_out(order, merchant, user)
+
+
+# ---------- 出餐之后的取消:按判责口径分摊 ----------
+
+def _cancel_stage(order: Order) -> str:
+    """这一单现在处在哪个分摊阶段。判据只有平台看得见的事实。"""
+    from ..services import liability as lb
+    return lb.stage_of(order.status.value,
+                       rider_arrived=order.arrived_shop_at is not None)
+
+
+def _cancel_split(order: Order):
+    from ..services import liability as lb
+    return lb.split_for_cancel(
+        _cancel_stage(order),
+        food_cents=order.food_cents,
+        packing_fee_cents=order.packing_fee_cents,
+        discount_cents=order.discount_cents,
+        delivery_fee_cents=order.delivery_fee_cents,
+        tip_cents=order.tip_cents,
+    )
+
+
+def _quote_body(order: Order, split) -> dict:
+    from ..services import liability as lb
+    return {
+        "order_no": order.order_no,
+        "stage": split.stage,
+        "stage_label": lb.STAGE_LABELS[split.stage],
+        "refund_cents": split.refund_cents,
+        "lines": [{"name": l.name, "cents": l.cents, "to": l.to, "why": l.why}
+                  for l in split.lines],
+        "food_to": split.food_to,
+        # 口径是公开的,界面上要能点进去看,否则"透明"只是自称
+        "spec_url": "/transparency/liability",
+        "appeal_hint": "对这个结果有异议,可以在取消后 72 小时内申诉,"
+                       "平台复核。",
+    }
+
+
+@router.get("/{order_no}/cancel-quote")
+async def cancel_quote(
+    order_no: str,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """出餐之后想取消,先看账:能退多少、剩下的钱去哪了、为什么。
+
+    ## 为什么要有这个东西
+
+    老口径是出餐后一律禁止取消,理由站得住(餐已经做了,成本真实发生),
+    但手段太粗:**没有出口的结果不是用户不取消,是他去微信支付投诉或者
+    银行拒付** —— 那对三方都更糟。
+
+    所以把「不许取消」换成「取消要承担什么」。用户永远有出口,
+    只是账单按责任分,而且每一分钱都写明去向。口径见
+    services/liability.py,对外公开在 /transparency/liability。
+
+    出餐**之前**不走这里 —— 那套(未接单随时退、2 分钟反悔窗口、
+    商家超时可全退)已经在跑,走 /self-refund。
+    """
+    order = await db.scalar(select(Order).where(Order.order_no == order_no))
+    if order is None or order.customer_id != user.id:
+        raise HTTPException(404, "订单不存在")
+    try:
+        split = _cancel_split(order)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    return _quote_body(order, split)
+
+
+@router.post("/{order_no}/cancel-with-split", response_model=OrderOut)
+async def cancel_with_split(
+    order_no: str,
+    payload: CancelSplitIn,
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """按上一步看到的那份账取消。
+
+    ## 必须带上用户同意的是哪一份账
+
+    账单会变:用户盯着「退配送费 5 元」那一屏犹豫的时候,骑手正好把餐取走了,
+    真实账单就变成「退 0」。这时候直接按当前口径扣款,等于**用户同意的是
+    A,系统执行的是 B** —— 在钱的路径上这是不能接受的。
+
+    所以提交要带 `agreed_stage` 和 `agreed_refund_cents`,对不上直接 409,
+    让客户端重新取一次账再让用户确认。
+
+    ## 库存不回补、佣金归零、商家和骑手照口径入账
+
+    见 settlement.settle_cancelled_with_split。
+    """
+    order = await db.scalar(
+        select(Order).where(Order.order_no == order_no).with_for_update())
+    if order is None or order.customer_id != user.id:
+        raise HTTPException(404, "订单不存在")
+    try:
+        split = _cancel_split(order)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+    if (payload.agreed_stage != split.stage
+            or payload.agreed_refund_cents != split.refund_cents):
+        raise HTTPException(409, {
+            "message": "这一单的情况刚刚变了,账单跟着变了,请重新确认",
+            "quote": _quote_body(order, split),
+        })
+
+    from ..services.settlement import settle_cancelled_with_split
+    from_status = order.status
+    if split.refund_cents > 0:
+        await request_refund(db, order, split.refund_cents,
+                             f"用户取消({_quote_label(split)})")
+    await settle_cancelled_with_split(db, order, split)
+    order.status = OrderStatus.CANCELLED
+    order.cancel_reason = f"用户取消 · {_quote_label(split)}"
+    from ..services.eta import release_coupon
+    await release_coupon(db, order.order_no)
+    await _record_event(db, order, from_status.value,
+                        OrderStatus.CANCELLED.value, user)
+    await db.commit()
+    await db.refresh(order)
+    await _notify(order)
+
+    merchant = await db.get(Merchant, order.merchant_id)
+    # 三方都要被告知,尤其骑手 —— 他正拿着一份餐在路上
+    await push_to_user(
+        merchant.owner_id, "用户取消了订单",
+        f"订单#{order.order_no[-6:]} 用户取消,餐费照常入账、平台不收佣金",
+        {"type": "order", "order_no": order.order_no})
+    if order.rider_id is not None and split.rider_cents > 0:
+        await push_to_user(
+            order.rider_id, "订单已取消,这一趟的钱照付",
+            f"订单#{order.order_no[-6:]} 用户取消。"
+            f"{'这份餐归你处置。' if split.food_to else ''}"
+            f"配送这部分 ¥{split.rider_cents / 100:.2f} 照常入账",
+            {"type": "order", "order_no": order.order_no})
+    return order_out(order, merchant, user)
+
+
+def _quote_label(split) -> str:
+    from ..services import liability as lb
+    return lb.STAGE_LABELS[split.stage]
 
 
 URGE_MAX_TIMES = 3          # 每单最多催 3 次

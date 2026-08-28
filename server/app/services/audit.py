@@ -764,6 +764,7 @@ async def run_audit() -> list[dict]:
         # 支出(透明中心 /funds 已按 note 公示),天天红一条只会让人习惯忽略红灯;
         # 合规赔付的笔数金额随告警文案一起带出来,够对账就行。
         from .errand import KIND_FOOD
+        from .liability import SPLIT_EARNING_NOTE as _SPLIT_NOTE
         noncompleted_rows = (await db.execute(
             select(Order.order_no, Order.status, Order.order_kind,
                    Order.food_cents, Order.packing_fee_cents,
@@ -779,15 +780,28 @@ async def run_audit() -> list[dict]:
                       Order.discount_cents)
             .having(sa_func.sum(MerchantEarning.net_cents) != 0))).all()
         comp_n, comp_cents, bad_rows = 0, 0, []
+        split_n, split_cents = 0, 0
         for (order_no, status, kind, food, packing, discount,
              net, commission, note) in noncompleted_rows:
-            expected = food + packing - discount
-            sanctioned = (status == OrderStatus.CANCELLED
-                          and kind == KIND_FOOD
-                          and commission == 0
-                          and net == expected
-                          and note.startswith(NO_RIDER_COMP_NOTE))
-            if sanctioned:
+            expected = max(food + packing - discount, 0)
+            shape_ok = (status == OrderStatus.CANCELLED
+                        and kind == KIND_FOOD
+                        and commission == 0
+                        and net == expected)
+            # 取消单上有商家入账,现在有**两种**设计内的形态。两种都要
+            # 验形状(状态、业务线、佣金为 0、净额等于应收)再看 note ——
+            # 只看 note 的话,一个写错的备注字符串就能把错账洗白。
+            #
+            # 判责分摊在这里放行**不等于没人管它**:它转交给规则 16
+            # (cancel_split_not_balanced),那条比这里严 —— 这里只核商家
+            # 一侧,规则 16 核的是商家 + 骑手 + 退款 == 用户实付。
+            sanctioned = shape_ok and (
+                note.startswith(NO_RIDER_COMP_NOTE)         # 平台兜底赔付
+                or note.startswith(_SPLIT_NOTE))            # 用户取消判责分摊
+            if sanctioned and note.startswith(_SPLIT_NOTE):
+                split_n += 1
+                split_cents += net
+            elif sanctioned:
                 comp_n += 1
                 comp_cents += net
             else:
@@ -795,6 +809,11 @@ async def run_audit() -> list[dict]:
         if comp_n:  # 合规赔付不报警,记一行日志够管理端复核
             logger.info("平台兜底赔付(近 %s 天):%s 笔共 %s 分",
                         WINDOW_DAYS, comp_n, comp_cents)
+        if split_n:
+            # **和兜底赔付分开数。** 兜底那笔是平台真金白银流向商家,
+            # 分摊这笔的钱来自用户已付 —— 混在一起数,平台支出会虚高
+            logger.info("用户取消判责分摊(近 %s 天):%s 笔共 %s 分",
+                        WINDOW_DAYS, split_n, split_cents)
         for order_no, status, net, commission, note in bad_rows:
             problems.append({
                 "check": "noncompleted_order_earning",
@@ -944,6 +963,59 @@ async def run_audit() -> list[dict]:
                           f"用户实付,退款通道退不了,「转账到零钱」尚未接入 ——"
                           f"这是一笔真实负债,不是账目错误",
             })
+
+        # 规则 16:判责分摊取消的单,四方相加必须等于用户已付。
+        #
+        # **这条不加的话,分摊就是一条审计看不见的钱路径。** 上面每条恒等式
+        # 都按 `status == COMPLETED` 取数,而分摊发生在**取消单**上 ——
+        # 结构上整个落在它们的视野之外:商家和骑手都记了账、用户拿了部分退款,
+        # 却没有任何一条规则核对过它们加起来对不对。
+        #
+        # 取消单上现在有两种钱路径,必须分清楚,判据是入账行的备注前缀
+        # (由 liability.SPLIT_EARNING_NOTE 定义,结算和这里同源):
+        #
+        #   无人接单兜底   商家拿全额 + 用户也全额退,差额是**平台认赔**
+        #   判责分摊       商家 + 骑手 + 退款 == 用户已付,平台一分不垫
+        #
+        # 用户已付按和 liability 同一个口径算(商家应收钳 0 之后再加配送费
+        # 和小费),不直接用 total_cents —— 那一列是**剩余应付**不是累计实付,
+        # 规则 5b 的长注释解释过为什么。
+        from .liability import SPLIT_EARNING_NOTE
+
+        _re_sub = (
+            select(RiderEarning.order_id,
+                   RiderEarning.amount_cents.label("rider_cents"))
+            .where(RiderEarning.kind == EarningKind.earning).subquery())
+        split_rows = (await db.execute(
+            select(Order, MerchantEarning.net_cents,
+                   MerchantEarning.commission_cents,
+                   sa_func.coalesce(_re_sub.c.rider_cents, 0))
+            .join(MerchantEarning,
+                  and_(MerchantEarning.order_id == Order.id,
+                       MerchantEarning.kind == EarningKind.earning,
+                       MerchantEarning.note.like(SPLIT_EARNING_NOTE + "%")))
+            .outerjoin(_re_sub, _re_sub.c.order_id == Order.id)
+            .where(Order.status == OrderStatus.CANCELLED,
+                   Order.created_at >= since))).all()
+        for o, net_cents, comm_cents, rider_cents in split_rows:
+            paid = (max(o.food_cents + o.packing_fee_cents
+                        - o.discount_cents, 0)
+                    + o.delivery_fee_cents + o.tip_cents)
+            got = net_cents + rider_cents + o.refund_cents
+            if got != paid:
+                problems.append({
+                    "check": "cancel_split_not_balanced",
+                    "detail": f"分摊取消单 {o.order_no}:商家 {net_cents} + "
+                              f"骑手 {rider_cents} + 退款 {o.refund_cents} "
+                              f"= {got} 分,而用户实付 {paid} 分 —— "
+                              f"差 {got - paid} 分是凭空多出来或凭空少掉的钱",
+                })
+            if comm_cents != 0:
+                problems.append({
+                    "check": "cancel_split_commission_charged",
+                    "detail": f"分摊取消单 {o.order_no} 收了 {comm_cents} 分佣金"
+                              f" —— 直接违背公示的「取消时平台一分佣金都不收」",
+                })
 
         for p in problems:
             db.add(AuditAlert(check_name=p["check"], detail=p["detail"][:500]))

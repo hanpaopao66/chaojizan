@@ -112,6 +112,70 @@ async def credit_merchant_for_order(db: AsyncSession, order: Order) -> None:
     )
 
 
+async def settle_cancelled_with_split(db: AsyncSession, order: Order,
+                                      split) -> None:
+    """出餐之后用户取消:按判责口径给商家和骑手入账,平台佣金归零。
+
+    口径本身在 `services/liability.py`(纯函数、可单测、对外公开),
+    这里只负责把算好的数落成账目行 —— **两处不许各算一遍**。
+
+    ## 为什么佣金真的写 0,而不是"记着但不收"
+
+    `order.commission_cents` 直接改成 0,理由有两层:
+
+    - 事实层面平台确实没收这笔钱,账上就该是 0;
+    - 恒等式层面,商家入账行的 `net == food - commission` 必须成立。
+      留着原来的佣金数、净额却按不扣佣金算,这一行当场就是错账。
+
+    ## 库存不回补
+
+    餐已经做出来了,回补库存等于凭空多出一份可卖的餐。取消路径上那句
+    `restore_stock` 只对**制作前**的状态调用(RESTOCK_FROM_STATUSES),
+    这里不在其中。
+
+    ## 幂等
+
+    两条入账行都先查后写。用户手抖点两次、或者退款回调重放,
+    不能变成给商家记两笔钱。
+    """
+    from .errand import is_errand
+    from .liability import SPLIT_EARNING_NOTE, STAGE_LABELS
+    if is_errand(order):   # 跑腿没有商家主体,这条路径不适用
+        return
+
+    order.commission_cents = 0
+    note = f"{SPLIT_EARNING_NOTE}:{STAGE_LABELS[split.stage]}"
+
+    if split.merchant_cents > 0:
+        existing = await db.scalar(select(MerchantEarning.id).where(
+            MerchantEarning.order_id == order.id,
+            MerchantEarning.kind == EarningKind.earning))
+        if existing is None:
+            db.add(MerchantEarning(
+                merchant_id=order.merchant_id,
+                order_id=order.id,
+                order_no=order.order_no,
+                food_cents=split.merchant_cents,
+                commission_cents=0,
+                net_cents=split.merchant_cents,
+                settle_mode=order.settle_mode,
+                note=note,
+            ))
+
+    if order.rider_id is not None and split.rider_cents > 0:
+        existing = await db.scalar(select(RiderEarning.id).where(
+            RiderEarning.order_id == order.id,
+            RiderEarning.kind == EarningKind.earning))
+        if existing is None:
+            db.add(RiderEarning(
+                rider_id=order.rider_id,
+                order_id=order.id,
+                order_no=order.order_no,
+                amount_cents=split.rider_cents,
+                note=note,
+            ))
+
+
 async def settle_order(db: AsyncSession, order: Order) -> None:
     """订单完成的唯一结算入口。"""
     await credit_rider_for_order(db, order)

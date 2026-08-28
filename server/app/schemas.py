@@ -793,6 +793,18 @@ class DeliveryIssueResolveIn(BaseModel):
     note: str = Field(default="", max_length=300)
 
 
+class CancelSplitIn(BaseModel):
+    """出餐后取消:必须带上用户**看到并同意**的那份账。
+
+    不带的话就成了"用户同意的是 A、系统执行的是 B" —— 骑手在用户犹豫的
+    那几秒里把餐取走了,账单会从「退配送费」变成「退 0」。对不上直接 409,
+    让客户端重新取一次账、重新让用户确认。
+    """
+
+    agreed_stage: str = Field(min_length=1, max_length=32)
+    agreed_refund_cents: int = Field(ge=0)
+
+
 class ChangeAddressIn(BaseModel):
     address: str = Field(min_length=4, max_length=200)
     lat: float
