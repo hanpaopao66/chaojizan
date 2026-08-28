@@ -242,6 +242,43 @@ def main() -> None:
           f"自己走 {cur['gave_up']}、没排上 {cur['never_seated']}),"
           f"还在排 {cur['still_waiting']};过号率 {cur['pass_ratio']:.1%}")
 
+    # ---------- 10.5) 两条队各自的第一个号不能撞 ----------
+    #
+    # 号码是「店-月日-字母+序号」,字母取 `桌型id % 26`。序号原来按桌型
+    # 从 1 重新起 —— 桌型 id 差 26 的两条队第一个号就是同一个号码,
+    # ticket_no 唯一约束当场炸,取号 500。
+    #
+    # **这条要真的开两条队**:单条队怎么取都不会撞,所以这个 bug
+    # 单跑任何一条用例都看不见,是全套跑到桌型 id 攒够了才露头的。
+    call("PUT", "/queue/settings", merchant, {
+        "enabled": True, "cap_multiplier": 5, "defer_tables": 3,
+        "notify_ahead": 3})
+    small_t = call("POST", "/queue/table-types", merchant, {
+        "name": "双人桌", "seats_min": 2, "seats_max": 2,
+        "table_count": 3, "turn_minutes": 30})
+    big_t = call("POST", "/queue/table-types", merchant, {
+        "name": "大桌", "seats_min": 8, "seats_max": 10,
+        "table_count": 3, "turn_minutes": 60})
+    two = register_fresh_customer("两位")
+    ten = register_fresh_customer("十位")
+    n1 = call("POST", f"/queue/merchants/{sid}/take", two,
+              {"party_size": 2})["ticket_no"]
+    n2 = call("POST", f"/queue/merchants/{sid}/take", ten,
+              {"party_size": 10})["ticket_no"]
+    assert n1 != n2, (
+        f"两条队各自的第一个号是同一个号码({n1}) —— "
+        f"桌型 id 差 26 就会这样,取号会 500")
+    print(f"✓ 两条队的号不撞:{n1.split('-')[-1]} / {n2.split('-')[-1]}"
+          f"(序号按「店+当天」发,不按桌型)")
+    # 收拾干净,别影响后面的上限用例
+    for tok, t in ((two, n1), (ten, n2)):
+        call("POST", f"/queue/tickets/{t}/cancel", tok)
+    for t in (small_t, big_t):
+        call("PATCH", f"/queue/table-types/{t['id']}", merchant,
+             {**{k: t[k] for k in ("name", "seats_min", "seats_max",
+                                   "table_count", "turn_minutes")},
+              "is_active": False})
+
     # ---------- 11) 清场:挂着没走完的号必须有终态 ----------
     #
     # 不清的话号永远停在 waiting,一个号最后到底怎么了查不出来 ——

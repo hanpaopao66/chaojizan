@@ -285,3 +285,43 @@ class Test清场:
     def test_上限是小时级不是分钟级(self):
         """写成分钟会把正常排队的人清掉;写成天会让号挂一整天。"""
         assert 2 <= q.QUEUE_TICKET_MAX_HOURS <= 24
+
+
+class Test号码不能撞:
+    """全套 e2e 跑出来的真 bug:两条队各自的第一个号是同一个号码。
+
+    号码是「店-月日-字母+序号」,字母取 `桌型id % 26`。
+    **桌型 id 相差 26 的两条队字母相同** —— 而序号原来又是按桌型
+    从 1 重新起的,于是两条队的第一个号都是同一个号码,
+    `ticket_no` 的唯一约束当场炸,取号返回 500。
+
+    桌型 id 是全局递增的,一家店先后建的两个桌型差 26 很正常
+    (比如 id 12 和 38 都是 M),生产上会真踩到。
+    单跑任何一条用例都不会撞 —— 要跑到全套、桌型 id 攒够了才露头。
+    """
+
+    def test_桌型_id_差_26_的字母确实相同(self):
+        """这是根因。留着它,是为了让下一条断言的理由一眼可见。"""
+        assert q.ticket_code(12, 1) == q.ticket_code(38, 1) == "M001"
+
+    def test_序号按店加当天发而不是按桌型(self):
+        """修法:序号在「店 + 当天」维度上唯一,字母怎么取都不会撞。"""
+        src = code_of(q.take_ticket)
+        i = src.index("QueueTicket.seq")
+        window = src[i:i + 260]
+        assert "QueueTicket.merchant_id == shop.id" in window, (
+            "序号还是按桌型发的 —— 桌型 id 差 26 的两条队会撞号,取号 500")
+        assert "table_type_id == tt.id" not in window, (
+            "序号的口径里还留着桌型条件")
+
+    def test_行锁跟着锁在店上(self):
+        """序号按店发,那要串起来的就是同一家店的所有取号。
+
+        锁桌型的话,两条队同时取号会各自算出同一个序号 ——
+        这是把撞号从「必然」降成「偶发」,更难查。
+        """
+        src = code_of(q.take_ticket)
+        i = src.index("with_for_update")
+        head = src[max(0, i - 260):i]
+        assert "QueueSetting.merchant_id" in head, (
+            "行锁还锁在桌型上,而序号是按店发的 —— 并发取号会撞")

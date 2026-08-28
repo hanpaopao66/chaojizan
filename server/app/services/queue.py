@@ -268,10 +268,11 @@ async def take_ticket(db: AsyncSession, shop: Merchant, customer_id: int,
             f"{party_size} 位坐不下 —— 这家店最大的桌是 {biggest} 位"
             if biggest else "这家店还没设桌型")
 
-    # **行锁**:两个人同时取号会拿到同一个 seq。锁桌型这一行,
-    # 把「算号 + 落号」串起来
-    await db.execute(select(QueueTableType.id).where(
-        QueueTableType.id == tt.id).with_for_update())
+    # **行锁锁在店上,不是桌型上。** 序号按「店 + 当天」发(见下),
+    # 所以要串起来的是同一家店的所有取号,不是同一条队的。
+    # 锁桌型的话,两条队同时取号会各自算出同一个序号。
+    await db.execute(select(QueueSetting.merchant_id).where(
+        QueueSetting.merchant_id == shop.id).with_for_update())
 
     day = beijing_today()
     cap = issue_cap(tt.table_count, setting.cap_multiplier)
@@ -280,8 +281,18 @@ async def take_ticket(db: AsyncSession, shop: Merchant, customer_id: int,
             f"{tt.name}的号发完了(今天最多 {cap} 个)—— "
             f"再放号也是白等,晚点再来看看")
 
+    # **序号按「店 + 当天」递增,不按桌型。**
+    #
+    # 按桌型发的话号码会撞:号码是「店-月日-字母+序号」,字母取 桌型id % 26,
+    # 而序号又从 1 重新起 —— 桌型 id 相差 26 的两条队(比如 12 和 38 都是 M)
+    # 各自的第一个号都是 M001,`ticket_no` 的唯一约束当场炸,取号返回 500。
+    # 桌型 id 是全局递增的,一家店先后建的两个桌型差 26 很正常,
+    # 生产上会真踩到。(全套 e2e 跑出来的,单跑两条用例都不会撞。)
+    #
+    # 代价是同一条队的号不连号(A001、B002、A003)。可接受 ——
+    # 反而少了「两条队都有 001 号」那种叫号时的歧义。
     seq = int(await db.scalar(select(func.coalesce(func.max(QueueTicket.seq), 0))
-                              .where(QueueTicket.table_type_id == tt.id,
+                              .where(QueueTicket.merchant_id == shop.id,
                                      QueueTicket.day == day)) or 0) + 1
     top = await db.scalar(select(func.coalesce(func.max(QueueTicket.sort_key), 0))
                           .where(QueueTicket.table_type_id == tt.id,
