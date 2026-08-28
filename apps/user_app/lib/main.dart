@@ -5209,8 +5209,8 @@ class _OrderDetailPageState extends State<OrderDetailPage>
       return;
     }
     if (!mounted) return;
-    // 走 szShowSheet:宽屏上这张账单要弹成居中对话框,
-    // 底部弹层在侧栏布局里贴着屏幕最下沿,离视线很远。
+    // 走 szShowSheet 而不是 showModalBottomSheet:宽屏走侧栏布局时,
+    // 底部弹层贴着屏幕最下沿,而视线在中央 —— 这张账单要弹成居中对话框。
     final ok = await szShowSheet<bool>(
       context: context,
       builder: (context) => _CancelBillSheet(quote: q),
