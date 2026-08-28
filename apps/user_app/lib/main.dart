@@ -5143,7 +5143,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
             '商家就这条评价提出了申诉,平台复核后认定应当隐藏,'
             '它也不再计入店铺评分。如果你不认同,可以在 72 小时内申诉,'
             '平台会再核一次;改判就恢复显示、重新计入评分。',
-            style: TextStyle(fontSize: 12.5, color: sz.inkMuted),
+            style: TextStyle(fontSize: kFontNote, color: sz.inkMuted),
           ),
           const SizedBox(height: 8),
           Align(
@@ -5209,9 +5209,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
       return;
     }
     if (!mounted) return;
-    final ok = await showModalBottomSheet<bool>(
+    // 走 szShowSheet:宽屏上这张账单要弹成居中对话框,
+    // 底部弹层在侧栏布局里贴着屏幕最下沿,离视线很远。
+    final ok = await szShowSheet<bool>(
       context: context,
-      isScrollControlled: true,
       builder: (context) => _CancelBillSheet(quote: q),
     );
     if (ok != true) return;
@@ -5339,7 +5340,7 @@ class _CancelBillSheet extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 4),
               Text('当前:${quote['stage_label'] ?? ''}',
-                  style: TextStyle(fontSize: 13, color: sz.inkMuted)),
+                  style: TextStyle(fontSize: kFontBody, color: sz.inkMuted)),
               const SizedBox(height: 16),
               for (final l in lines)
                 Padding(
@@ -5364,14 +5365,14 @@ class _CancelBillSheet extends StatelessWidget {
                       ]),
                       const SizedBox(height: 2),
                       Text('${l['why']}',
-                          style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
+                          style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
                     ],
                   ),
                 ),
               if (foodTo.isNotEmpty) ...[
                 const Divider(height: 20),
                 Text(foodTo,
-                    style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
+                    style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
               ],
               const Divider(height: 24),
               Row(children: [
@@ -5388,7 +5389,7 @@ class _CancelBillSheet extends StatelessWidget {
               Text(
                 '${quote['appeal_hint'] ?? ''}'
                 '完整口径公开在超级赞透明中心,任何人都能查。',
-                style: TextStyle(fontSize: 12, color: sz.inkFaint),
+                style: TextStyle(fontSize: kFontNote, color: sz.inkFaint),
               ),
               const SizedBox(height: 18),
               Row(children: [
@@ -5432,7 +5433,7 @@ Future<String?> askAppealReason(
     builder: (context) => SzDialog(
       title: Text(title),
       content: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text(note, style: const TextStyle(fontSize: 13)),
+        Text(note, style: const TextStyle(fontSize: kFontBody)),
         const SizedBox(height: 12),
         TextField(
           controller: ctrl,

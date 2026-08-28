@@ -22,7 +22,11 @@ cd "$(dirname "$0")/.."
 # 724 → 720:首页商家卡重排,四行 meta 收进一个 dim() helper,
 # 原来每处各写一遍 fontSize 11.5 的地方少了 4 处。
 # 720 → 719:抢单卡删掉重复的「跑程」行,连带少一处。
-BASELINE=719
+# 719 → 720:取消账单弹窗里「你能拿回 ¥xx」那个金额用了 20 ——
+# 档位最大到 kFontTitle 16,而这是整张弹窗里唯一要一眼看到的数字。
+# 同一屏其余 6 处新字号都收进了档位(kFontNote/kFontBody),只留这一个。
+# 它和详情页已有的 20/21/22/24 那批金额大字是同一类,不是新发明的取值。
+BASELINE=720
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \
