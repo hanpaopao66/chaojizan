@@ -5158,7 +5158,8 @@ class _OrderDetailPageState extends State<OrderDetailPage>
   Future<void> _appealHiddenReview() async {
     final review = _review;
     if (review == null) return;
-    final reason = await _askAppealReason(
+    final reason = await askAppealReason(
+      context,
       title: '申诉:我的评价不该被隐藏',
       hint: '例如:我写的是真实经历,有照片为证',
       note: '平台会重新复核。改判的话评价恢复显示,并重新计入店铺评分。',
@@ -5175,51 +5176,6 @@ class _OrderDetailPageState extends State<OrderDetailPage>
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(e.toString())));
     }
-  }
-
-  /// 申诉理由输入。**理由必填**——复核的人要有东西可看。
-  /// 三个申诉入口(取消分摊 / 评价被隐藏 / 后续新增)共用这一个,
-  /// 各写一遍迟早措辞和校验都对不上。
-  Future<String?> _askAppealReason({
-    required String title,
-    required String hint,
-    required String note,
-  }) async {
-    final ctrl = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => SzDialog(
-        title: Text(title),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(note, style: const TextStyle(fontSize: 13)),
-          const SizedBox(height: 12),
-          TextField(
-            controller: ctrl,
-            maxLines: 3,
-            maxLength: 500,
-            decoration: InputDecoration(
-                hintText: hint, border: const OutlineInputBorder()),
-          ),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('再想想')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('提交申诉')),
-        ],
-      ),
-    );
-    if (ok != true) return null;
-    final text = ctrl.text.trim();
-    if (text.length < 5) {
-      if (!mounted) return null;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('理由至少写 5 个字,复核的人要有东西可看')));
-      return null;
-    }
-    return text;
   }
 
   /// 用户在这一单里实际承担了多少(已付 − 已退)。
@@ -5273,7 +5229,8 @@ class _OrderDetailPageState extends State<OrderDetailPage>
 
   /// 对分摊判责申诉。理由必填 —— 复核的人要有东西可看。
   Future<void> _appealSplit(Order order) async {
-    final reason = await _askAppealReason(
+    final reason = await askAppealReason(
+      context,
       title: '申诉这一单的判责',
       hint: '例如:商家做错了菜 / 骑手一直没动',
       note: '说说为什么你认为这一单不该由你承担。平台会复核;'
@@ -5450,6 +5407,56 @@ class _CancelBillSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 申诉理由输入。**理由必填**——复核的人要有东西可看。
+///
+/// 用户侧现在有四个申诉口(取消分摊 / 评价被隐藏 / 售后被拒 / 账号被限制),
+/// 共用这一个输入框。各写一遍的话措辞和校验迟早对不上,
+/// 而「理由至少几个字」这种东西一旦各处不一,用户就会在某一个口子上
+/// 被莫名其妙地挡回来。
+Future<String?> askAppealReason(
+  BuildContext context, {
+  required String title,
+  required String hint,
+  required String note,
+}) async {
+  final ctrl = TextEditingController();
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => SzDialog(
+      title: Text(title),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text(note, style: const TextStyle(fontSize: 13)),
+        const SizedBox(height: 12),
+        TextField(
+          controller: ctrl,
+          maxLines: 3,
+          maxLength: 500,
+          decoration: InputDecoration(
+              hintText: hint, border: const OutlineInputBorder()),
+        ),
+      ]),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('再想想')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('提交申诉')),
+      ],
+    ),
+  );
+  if (ok != true) return null;
+  final text = ctrl.text.trim();
+  if (text.length < 5) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('理由至少写 5 个字,复核的人要有东西可看')));
+    }
+    return null;
+  }
+  return text;
 }
 
 /// 五星选择器
@@ -6036,6 +6043,38 @@ class _ProfileViewState extends State<ProfileView> {
     }
   }
 
+  /// 对「账号被风控限制」申请平台复核。
+  ///
+  /// 后台那个接口的说明写着「reason 会展示给用户,**用户可申诉**」,
+  /// 而这个入口以前点进去只是个客服工单 —— 声称有的通道必须真的存在。
+  Future<void> _appealRiskFlag(UserProfile profile) async {
+    if (profile.riskActionId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('没有正在生效的限制')));
+      return;
+    }
+    final reason = await askAppealReason(
+      context,
+      title: '申请复核账号限制',
+      hint: '例如:这台设备是家里共用的,不是我在多开账号',
+      note: '平台会重新复核这次限制。认定不成立的话当场解除,权益恢复。',
+    );
+    if (reason == null) return;
+    try {
+      await widget.api.submitAppeal(
+          targetType: 'risk_flag',
+          targetId: profile.riskActionId,
+          reason: reason);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已提交复核,平台处理后通知你')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
   void _showInvoiceInfo() {
     showDialog<void>(
       context: context,
@@ -6128,13 +6167,13 @@ class _ProfileViewState extends State<ProfileView> {
                 fontWeight: FontWeight.bold)),
         subtitle: Text(
             '${profile.riskNote.isEmpty ? "系统检测到异常" : profile.riskNote}'
-            '\n下单不受影响;如有疑问点此联系客服申诉',
+            '\n下单不受影响。不认同?点这里申请平台复核',
             style: TextStyle(color: theme.colorScheme.onErrorContainer)),
         isThreeLine: true,
-        onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => SupportPage(
-                api: widget.api,
-                prefill: '对账号限制有疑问,申请复核:${profile.riskNote}'))),
+        // **有结论的复核,不是把人推去客服聊天。**
+        // 后台那个接口的说明写着「reason 会展示给用户,用户可申诉」,
+        // 而这里以前点进去只是个工单 —— 声称有的通道必须真的存在
+        onTap: () => _appealRiskFlag(profile),
       ),
     );
   }

@@ -886,7 +886,11 @@ class UserProfile {
         birthday = json['birthday'] as String? ?? '',
         marketingPush = json['marketing_push'] as bool? ?? true,
         riskLevel = json['risk_level'] as String? ?? '',
-        riskNote = json['risk_note'] as String? ?? '';
+        riskNote = json['risk_note'] as String? ?? '',
+        // 申诉得有个能指的目标:这是当前这次处置的记录 id。
+        // 只给 level 和原因的话,用户知道自己被限制了,
+        // 却不知道拿什么去申诉,那个入口就是点不动的。0 = 没有在生效的处置
+        riskActionId = json['risk_action_id'] as int? ?? 0;
 
   final int id;
   final String phone;
@@ -895,6 +899,7 @@ class UserProfile {
   final bool marketingPush;   // 营销推送开关
   final String riskLevel;     // ""正常 / limit 限制 / frozen 冻结(反作弊处置)
   final String riskNote;      // 处置原因(对用户可见)
+  final int riskActionId;     // 当前处置的记录 id,申诉用;0 = 没有处置
   final String role;
   final String avatarUrl;
 }

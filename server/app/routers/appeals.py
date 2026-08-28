@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..models import (
     AfterSale,
+    AfterSaleStatus,
     Appeal,
     DeliveryIssue,
     EarningKind,
@@ -31,6 +32,7 @@ from ..models import (
     Order,
     OrderEvent,
     Review,
+    RiskActionLog,
     User,
 )
 from ..security import require_role
@@ -54,12 +56,15 @@ _TYPE_LABELS = {
     "review": "差评",
     "cancel_split": "取消订单的判责分摊",
     "review_hidden": "评价被隐藏",
+    "after_sale_rejected": "售后被拒绝",
+    "risk_flag": "账号被风控限制",
 }
 
 
 class AppealIn(BaseModel):
     target_type: Literal["after_sale", "delivery_issue", "review",
-                         "cancel_split", "review_hidden"]
+                         "cancel_split", "review_hidden",
+                         "after_sale_rejected", "risk_flag"]
     target_id: int
     reason: str = Field(min_length=5, max_length=500)
     images: list[str] = Field(default=[], max_length=6)
@@ -187,6 +192,43 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
                    OrderEvent.to_status == OrderStatus.CANCELLED.value)
             .order_by(OrderEvent.created_at.desc()).limit(1))
         if not _within_window(cancelled_at):
+            raise HTTPException(422, "已超过 72 小时申诉时限")
+    elif payload.target_type == "risk_flag":
+        # `admin.set_user_risk_level` 的 docstring 写着「reason 会展示给用户,
+        # **用户可申诉**」—— 但申诉的 target_type 里一直没有它,
+        # 界面上那个「申请复核」点进去是人工工单,没有确定的结论。
+        # 声称有的通道必须真的存在。
+        #
+        # 锚在 RiskActionLog 上而不是 user_id 上:每次处置一行,所以
+        # 「这次标记」和「上次标记」是两个可以各自申诉的目标 ——
+        # 挂在 user_id 上的话唯一约束会让一个人一辈子只能申诉一次。
+        if user.role.value != "customer":
+            raise HTTPException(403, "账号风控只有被处置的本人可以申诉")
+        log = await db.get(RiskActionLog, payload.target_id)
+        if log is None or log.user_id != user.id:
+            raise HTTPException(404, "没有这条处置记录")
+        if not log.to_level:
+            raise HTTPException(409, "这条是解除限制的记录,不需要申诉")
+        if user.risk_level != log.to_level:
+            raise HTTPException(409, "这条处置已经不在生效中")
+        if not _within_window(log.created_at):
+            raise HTTPException(422, "已超过 72 小时申诉时限")
+    elif payload.target_type == "after_sale_rejected":
+        # 商家**同意**售后(自己赔钱)一直有结构化申诉;商家**拒绝**售后
+        # (用户一分拿不到)用户只能看到一句「如有异议可联系平台客服」——
+        # 而售后一单一次,被拒之后连重提都不行。
+        # 判谁责谁能申诉,这条现在只对一半的人成立,这里补另一半。
+        if user.role.value != "customer":
+            raise HTTPException(403, "售后被拒只有申请售后的用户可以申诉")
+        a = await db.get(AfterSale, payload.target_id)
+        if a is None:
+            raise HTTPException(404, "售后记录不存在")
+        order = await db.get(Order, a.order_id)
+        if order is None or order.customer_id != user.id:
+            raise HTTPException(404, "售后记录不存在")
+        if a.status != AfterSaleStatus.rejected:
+            raise HTTPException(409, "只有被拒绝的售后才需要申诉")
+        if not _within_window(a.processed_at):
             raise HTTPException(422, "已超过 72 小时申诉时限")
     elif payload.target_type == "review_hidden":
         # 商家申诉差评成立 → 评价被隐藏、店铺评分加回去。
@@ -400,6 +442,57 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str) -> None:
             await push_to_user(appeal.user_id, "申诉成立(已为你正名)",
                                "复核认定该次配送异常非你的责任,责任记录已消除",
                                {"type": "appeal"})
+    elif appeal.target_type == "risk_flag":
+        # 改判 = 平台认定这次限制不成立,当场解除。
+        # 顺手补一条解除的留痕 —— 处置有痕,撤销也要有痕,
+        # 否则公示里的「限制/解除各多少」会少算一次解除。
+        target = await db.get(User, appeal.user_id, with_for_update=True)
+        old_level = target.risk_level
+        target.risk_level = ""
+        target.risk_note = ""
+        db.add(RiskActionLog(user_id=target.id, from_level=old_level,
+                             to_level=""))
+        await push_to_user(
+            appeal.user_id, "申诉成立,账号限制已解除",
+            f"复核认定这次限制不成立,已解除,相关权益恢复。"
+            f"{note or ''}",
+            {"type": "appeal"})
+    elif appeal.target_type == "after_sale_rejected":
+        # 改判 = 平台认定这笔售后本来就该成立。那就**按商家同意的口径**走:
+        # 退款给用户、商家冲账。
+        #
+        # 这里**确实向商家追款**,和 cancel_split 那条(不追商家骑手)不一样,
+        # 因为性质不同:那边商家把餐做好了、没做错事;这边是平台认定商家
+        # 当初就该赔而他拒了。谁的问题谁负责 —— 判成商家的问题,就该商家出。
+        #
+        # 商家不服可以再申诉(走既有的 after_sale 那条)。两条的
+        # target_type 不同,唯一约束各管各的,所以最多两轮,不会来回拉锯。
+        a = await db.get(AfterSale, appeal.target_id, with_for_update=True)
+        order = await db.get(Order, a.order_id, with_for_update=True)
+        from ..services.settlement import reverse_merchant_earning
+        from ..services.wechat_pay import request_refund
+        refundable = max(order.food_cents + order.packing_fee_cents
+                         - order.discount_cents, 0) - order.refund_cents
+        if refundable > 0:
+            await request_refund(db, order, refundable,
+                                 "售后申诉改判:平台认定应当受理")
+        await reverse_merchant_earning(
+            db, order, f"售后申诉改判,商家应赔:{note or '复核认定售后成立'}")
+        a.status = AfterSaleStatus.accepted
+        a.fault = "merchant"
+        a.processed_at = datetime.now(timezone.utc)   # 商家的申诉窗口从这里起算
+        a.reply = (f"{a.reply};用户申诉改判:售后成立")[:300]
+        await push_to_user(
+            appeal.user_id, "申诉成立",
+            f"复核认定这笔售后应当受理,¥{refundable / 100:.2f} 已原路退回",
+            {"type": "appeal"})
+        shop = await db.get(Merchant, a.merchant_id)
+        if shop is not None:
+            await push_to_user(
+                shop.owner_id, "一笔被你拒绝的售后被改判",
+                f"顾客提出申诉,平台复核后认定应当受理。{note}"
+                f"(如不认同,72 小时内可再申诉)",
+                {"type": "appeal"})
     elif appeal.target_type == "review_hidden":
         review = await db.get(Review, appeal.target_id, with_for_update=True)
         if not review.hidden:

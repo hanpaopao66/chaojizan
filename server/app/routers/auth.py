@@ -508,11 +508,24 @@ async def identity_status(
 
 # ---------- 个人资料 ----------
 @router.get("/me", response_model=MeOut)
-async def me(user: User = Depends(get_current_user)):
+async def me(user: User = Depends(get_current_user),
+             db: AsyncSession = Depends(get_db)):
+    # 被风控限制时,把**这次处置的记录 id** 一并给出去。
+    # 申诉得有个能指的目标:只给 level 和 reason,客户端知道自己被限制了,
+    # 却不知道拿什么去申诉,那个入口就是点不动的。
+    risk_action_id = 0
+    if user.risk_level:
+        from ..models import RiskActionLog
+        risk_action_id = await db.scalar(
+            select(RiskActionLog.id)
+            .where(RiskActionLog.user_id == user.id,
+                   RiskActionLog.to_level == user.risk_level)
+            .order_by(RiskActionLog.created_at.desc()).limit(1)) or 0
     return MeOut(id=user.id, phone=user.phone, name=user.name,
                  role=user.role.value, avatar_url=user.avatar_url,
                  birthday=user.birthday, marketing_push=user.marketing_push,
-                 risk_level=user.risk_level, risk_note=user.risk_note)
+                 risk_level=user.risk_level, risk_note=user.risk_note,
+                 risk_action_id=risk_action_id)
 
 
 @router.patch("/me", response_model=MeOut)

@@ -67,6 +67,10 @@ class MeOut(BaseModel):
     # 反作弊处置(非空即对用户可见,客户端据此显示提示+申诉入口)
     risk_level: str = ""
     risk_note: str = ""
+    #: 当前这次处置的记录 id。**申诉必须有个能指的目标** ——
+    #: 只给 level 和 reason 的话,客户端知道自己被限制了,却不知道
+    #: 该拿什么去申诉,那个入口就点不动。0 = 没有在生效的处置。
+    risk_action_id: int = 0
 
 
 class MePatch(BaseModel):
