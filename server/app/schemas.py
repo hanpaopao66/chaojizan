@@ -962,13 +962,22 @@ class ErrandQuoteOut(BaseModel):
 
 
 class OrderCreateIn(BaseModel):
+    """下单入参。
+
+    ⚠️ **每个字符串字段都必须设 max_length,且不超过库里那一列的宽度。**
+    最早那批字段(address/contact_name/contact_phone/remark)曾经一个都没设,
+    而库里是 String(200)/String(50)/String(20) —— 备注写到 201 个字,
+    用户拿到的是裸的 Internal Server Error,重试还是 500。
+    tests/unit/test_order_input_bounds.py 用一条通用断言盯着整个模型。
+    """
+
     merchant_id: int
     items: list[OrderItemIn] = Field(min_length=1)
     # 加菜:传原单号则创建追加单(免配送费/免起送价,地址与骑手随原单)
-    append_to: str = ""
+    append_to: str = Field(default="", max_length=32)
     # 到店自取:免配送费、不走骑手,地址三件套可不传(服务端落商家坐标)
     pickup: bool = False
-    address: str = ""
+    address: str = Field(default="", max_length=200)
     # 楼层与电梯:客户端从所选地址带过来。填了 ETA 会诚实一点 ——
     # 爬 6 楼和 1 楼临街是两种活
     floor: int | None = Field(default=None, ge=-5, le=200)
@@ -978,16 +987,22 @@ class OrderCreateIn(BaseModel):
     to_door: bool = True
     lat: float | None = None
     lng: float | None = None
-    contact_name: str = ""
-    contact_phone: str = ""
-    remark: str = ""
+    contact_name: str = Field(default="", max_length=50)
+    # **空是允许的,乱填不行。** 骑手拨的就是这个号 ——
+    # 空值由路由层回落到下单人的账号手机号(那个号注册时验过),
+    # 而 "abcdefg" 这种存进去,骑手到了楼下就打不通。
+    # 硬性必填没必要:号码服务端本来就有,让客户端再传一遍是仪式;
+    # 自提单和加菜单也确实用不上它。
+    contact_phone: str = Field(default="", max_length=20,
+                               pattern=r"^(1\d{10})?$")
+    remark: str = Field(default="", max_length=200)
     scheduled_at: datetime | None = None  # 预约送达/预约自取(空 = 尽快)
     # 小费(分):100% 归骑手,平台不抽不计佣;自取单不收
     tip_cents: int = Field(default=0, ge=0, le=5000)
     # 平台券抵扣(超时安抚券等):平台承担,走 subsidy 口径
     coupon_id: int | None = None
     # 拼单码:发起人锁单后用它下单,服务端校验并原子关车
-    group_code: str = ""
+    group_code: str = Field(default="", max_length=32)
     # 地址保护(随所选地址):开启则骑手只见粗地址(address_public)与中性称呼
     addr_protect: bool = False
     address_public: str = Field(default="", max_length=200)

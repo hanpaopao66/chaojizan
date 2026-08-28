@@ -821,8 +821,13 @@ async def create_order(
              else (merchant.lng if payload.pickup else payload.lng)),
         contact_name=(parent.contact_name if parent is not None
                       else payload.contact_name),
+        # **空了就回落到下单人的账号手机号。**
+        # 骑手拨的就是这个号(privacy_phone 非严格模式直接给它),
+        # 存一个空串意味着这一单一出岔子就没法收场 —— 骑手到了楼下,
+        # 找不到门牌、也打不通人。而账号手机号服务端本来就有,
+        # 注册时验过,回落它比要求客户端再传一遍可靠。
         contact_phone=(parent.contact_phone if parent is not None
-                       else payload.contact_phone),
+                       else (payload.contact_phone or user.phone)),
         remark=(f"[追加到#{parent.order_no[-6:]}]{payload.remark}"
                 if parent is not None else payload.remark),
         scheduled_at=(parent.scheduled_at if parent is not None
