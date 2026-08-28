@@ -392,7 +392,15 @@ async def run_audit() -> list[dict]:
         bad_totals = (
             await db.scalars(
                 select(Order).where(
-                    Order.status != OrderStatus.CANCELLED,
+                    # **已取消单也要查。**
+                    #
+                    # 原来这里跳过它们,理由是取消会把金额字段置 0、
+                    # 恒等式自然不成立。但那只在「清得干净」时才对 ——
+                    # 整单缺货那条路径漏清了配送费和小费,254 单因此不自洽,
+                    # 而正因为这条规则跳过已取消单,它一直没人看见。
+                    #
+                    # 取消路径是真动钱的(退款、出餐后判责分摊),
+                    # 把它整个排除在恒等式之外,等于给动钱的代码留了一片盲区。
                     Order.created_at >= since,
                     Order.total_cents
                     != Order.food_cents + Order.packing_fee_cents

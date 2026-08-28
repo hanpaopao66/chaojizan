@@ -153,10 +153,40 @@ async def run():
     assert net_row > 0, f"商家净额 {net_row} 不该为负(退款不能倒扣商家)"
     print(f"✓ 结算:商家应收 {food_row} - 佣金 {comm_row} = 净额 {net_row}(不为负)")
 
+    # ---- 4.5) 整单缺货退款之后,恒等式仍要成立 ----
+    #
+    # 整单缺货那条路径把 菜/打包/满减/补贴/实付/佣金 全置 0,**唯独漏了配送费**
+    # (和小费)。于是 total(0) ≠ 0+0-0+配送费+小费-0 —— 254 单已取消订单
+    # 因此不自洽,而审计规则 3 又把已取消单整个排除在外,所以一直没人看见。
+    #
+    # 这单带小费下:小费和配送费同样是「取餐前取消、骑手一分没拿」,
+    # 漏掉哪一个恒等式都不成立。
+    tipped = call("POST", "/orders", customer, {
+        "merchant_id": SHOP["id"],
+        "items": [{"dish_id": big["id"], "quantity": 1}],
+        "address": "整单缺货测试", "lat": 30.66, "lng": 104.08,
+        "tip_cents": 300,
+    })
+    call("POST", f"/orders/{tipped['order_no']}/pay/mock", customer)
+    paid = call("GET", f"/orders/{tipped['order_no']}", customer)
+    assert paid["delivery_fee_cents"] > 0 and paid["tip_cents"] == 300, paid
+    call("POST", f"/orders/{tipped['order_no']}/refund-item", merchant,
+         {"dish_id": big["id"], "quantity": 1})
+    done = call("GET", f"/orders/{tipped['order_no']}", customer)
+    assert done["status"] == "cancelled", done["status"]
+    assert done["total_cents"] == identity(done), (
+        f"整单缺货退款后恒等式不成立:实付 {done['total_cents']} ≠ "
+        f"{identity(done)}(配送费 {done['delivery_fee_cents']}、"
+        f"小费 {done['tip_cents']} 没跟着清零)")
+    assert done["refund_cents"] == paid["total_cents"], (
+        f"退的钱和用户实付对不上:退 {done['refund_cents']} vs "
+        f"实付 {paid['total_cents']}")
+    print("✓ 整单缺货退款:配送费与小费一并清零,恒等式成立,退款等于实付")
+
     # ---- 5) 账务自检不能被这几单带红 ----
     from app.services.audit import run_audit
     problems = await run_audit()
-    mine = {no, no3}
+    mine = {no, no3, tipped['order_no']}
     bad = [p for p in problems
            if any(x in str(p.get("detail", "")) for x in mine)]
     assert not bad, f"退款上限用例把账务自检带红了:{bad}"

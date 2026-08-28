@@ -1829,6 +1829,17 @@ async def refund_item(
         order.packing_fee_cents = 0
         order.discount_cents = 0
         order.subsidy_cents = 0
+        # **配送费和小费也要清零。** 这两项和上面几项一样,已经随
+        # refund_amount(= 当时的 total_cents)整额退给用户了 ——
+        # 而这是取餐前的取消,骑手一分没拿。
+        #
+        # 漏掉它们的后果不是少退钱(钱退对了),是**订单不再自洽**:
+        # total(0) ≠ 0+0-0+配送费+小费-0。而审计规则 3 又把已取消单
+        # 整个排除在外,所以这类脏数据一直没人看见 —— 库里攒了 254 单。
+        # 现在两边一起改:这里清干净,规则 3 不再跳过已取消单。
+        order.delivery_fee_cents = 0
+        order.tip_cents = 0
+        order.fee_parts = {}
         order.total_cents = 0
         order.commission_cents = 0
         order.refund_note = (
