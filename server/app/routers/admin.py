@@ -2315,6 +2315,39 @@ async def set_user_risk_level(
             "previous": old}
 
 
+@router.get("/early-ready-suspects")
+async def early_ready_suspects(
+    days: int = 14,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """疑似「提前点出餐」的商家(只标不罚)。
+
+    出餐是商家自己点的,而出餐之后用户就失去全额退款权、商家的餐费也保住了
+    —— 商家因此有一个明确的动机早点按「出餐」。判责分摊把分界线划在这个
+    动作上是因为它是平台唯一看得见的事实,但**看得见不等于可信**,
+    所以要有一处在看它可不可信。
+
+    信号是骑手到店之后还要等多久:如实点出餐的话骑手到店就能取走。
+    这个差本来就在算等餐补偿,不是新埋点。
+
+    **不自动处罚** —— 与等餐补偿同一条立场:治理靠数据不靠罚钱。
+    罚下去商家会改成「等骑手快到了再点」,数据一样失真,平台连信号都没了。
+    """
+    from ..services.prep_time import (EARLY_READY_WAIT_MINUTES,
+                                      early_ready_suspects as _suspects)
+    days = max(1, min(days, 90))
+    rows = await _suspects(db, days=days)
+    return {
+        "days": days,
+        "wait_threshold_minutes": EARLY_READY_WAIT_MINUTES,
+        "how_to_read": "骑手到店后仍需等待超过阈值的单,占这家店的比例。"
+                       "比例高说明「已出餐」这个时刻不可信 —— "
+                       "去谈,不要直接扣钱。",
+        "items": rows,
+    }
+
+
 @router.get("/reviews/flagged")
 async def list_flagged_reviews(
     admin: User = Depends(require_role("admin")),

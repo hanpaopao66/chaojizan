@@ -105,6 +105,73 @@ class PrepStat:
         return "measured" if self.enough else "declared"
 
 
+#: 「提前点出餐」的判据:骑手到店之后还要等这么久,就算一次可疑。
+#: 复用等餐补偿的免费额度 —— 那条线的含义本来就是「正常出餐区间」,
+#: 超过它意味着骑手真的在白等,而商家早就把这一单标成「已出餐」了。
+EARLY_READY_WAIT_MINUTES = 15
+
+
+async def early_ready_suspects(db: AsyncSession, *, days: int = 14,
+                               min_orders: int = 5) -> list[dict]:
+    """「提前点出餐」的嫌疑商家。**只标出来,平台不自动处罚。**
+
+    ## 为什么要盯这个
+
+    出餐是**商家自己点的**,而出餐之后:用户失去全额退款权(取消要按判责
+    分摊,餐费归商家)、商家的餐费也就保住了。也就是说商家有一个明确的动机
+    ——**早点按「出餐」,既锁死用户的取消权,又把餐费收进口袋**,哪怕锅
+    还没热。
+
+    判责分摊那套口径把分界线划在「出餐」这个动作上,是因为它是平台唯一
+    看得见的事实。但看得见不等于可信 —— 所以必须有一处在看它可不可信。
+
+    ## 信号:骑手到店之后还要等多久
+
+    商家如实点出餐,骑手到店就能取走,等待接近 0;商家提前点,骑手到店
+    只能干等。`picked_up_at − arrived_shop_at` 就是这个差,而它本来就在
+    算等餐补偿,不是新埋点。
+
+    ## 为什么不自动处罚
+
+    与 `pricing.wait_compensation_cents` 同一条立场:**治理靠数据,
+    不靠罚钱**。罚下去商家会改成「等骑手快到了再点出餐」,数据一样失真,
+    而平台连信号都没了。摆在管理端让人去看、去谈,比自动扣钱有用。
+    """
+    from sqlalchemy import text as _text
+    rows = (await db.execute(_text("""
+        SELECT o.merchant_id, m.name,
+               count(*) AS n,
+               count(*) FILTER (
+                 WHERE extract(epoch FROM (o.picked_up_at - o.arrived_shop_at))
+                       / 60.0 > :thr) AS n_waited,
+               round(avg(extract(epoch FROM
+                     (o.picked_up_at - o.arrived_shop_at)) / 60.0)::numeric,
+                     1) AS avg_wait_min
+        FROM orders o JOIN merchants m ON m.id = o.merchant_id
+        WHERE o.arrived_shop_at IS NOT NULL
+          AND o.picked_up_at IS NOT NULL
+          AND o.picked_up_at > o.arrived_shop_at
+          AND o.created_at >= now() - make_interval(days => :days)
+        GROUP BY o.merchant_id, m.name
+        HAVING count(*) >= :min_orders
+    """), {"thr": EARLY_READY_WAIT_MINUTES, "days": days,
+           "min_orders": min_orders})).all()
+    out = []
+    for r in rows:
+        if not r.n_waited:
+            continue
+        out.append({
+            "merchant_id": r.merchant_id,
+            "merchant_name": r.name,
+            "orders": r.n,
+            "waited_orders": r.n_waited,
+            "suspect_ratio": round(r.n_waited / r.n, 3),
+            "avg_wait_minutes": float(r.avg_wait_min or 0),
+        })
+    out.sort(key=lambda x: (-x["suspect_ratio"], -x["waited_orders"]))
+    return out
+
+
 def _quantile(sorted_vals: list[float], q: float) -> float:
     """线性插值分位数。样本少时不引 numpy —— 为一个分位数拉个大依赖不值。"""
     if not sorted_vals:
