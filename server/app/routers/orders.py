@@ -1414,6 +1414,9 @@ def _cancel_split(order: Order):
         discount_cents=order.discount_cents,
         delivery_fee_cents=order.delivery_fee_cents,
         tip_cents=order.tip_cents,
+        # 自配送的运力是商家出的,配送费归他;而且这种单没有骑手 ——
+        # 不传的话那笔钱会被算给一个不存在的人,直接从账上蒸发
+        self_delivery=order.self_delivery,
     )
 
 

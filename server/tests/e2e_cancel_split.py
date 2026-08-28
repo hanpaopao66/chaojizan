@@ -122,6 +122,39 @@ def main() -> None:
     assert err["_error"] == 403, err
     print("✓ 只有下单本人能看自己的账单")
 
+    # ---------- 5) 商家自配送:配送费归商家,而且没有骑手 ----------
+    #
+    # 这一档最容易错:自配送单**没有 rider_id**,把配送费算给"骑手"的话
+    # settle_cancelled_with_split 那边直接不写入账行,钱就从账上蒸发,
+    # 而表面上接口还是 200。
+    call("PATCH", "/merchants/me", merchant, {"self_delivery": True})
+    try:
+        no4 = call("POST", "/orders", customer, {
+            "merchant_id": shop["id"],
+            "items": [{"dish_id": dish["id"], "quantity": 1}],
+            "address": "测试地址", "lat": 30.66, "lng": 104.08,
+        })["order_no"]
+        call("POST", f"/orders/{no4}/pay/mock", customer)
+        call("POST", f"/orders/{no4}/transition", merchant,
+             {"to_status": "accepted"})
+        call("POST", f"/orders/{no4}/transition", merchant,
+             {"to_status": "ready"})
+        call("POST", f"/orders/{no4}/transition", merchant,
+             {"to_status": "picked_up"})
+        q4 = call("GET", f"/orders/{no4}/cancel-quote", customer)
+        assert q4["stage"] == "in_delivery", q4
+        fee = [l for l in q4["lines"] if "配送费" in l["name"]]
+        assert fee and fee[0]["to"] == "merchant", (
+            f"自配送的配送费标成了 {fee[0]['to'] if fee else '没有'} —— "
+            f"这种单没有骑手,算给骑手等于让钱蒸发")
+        o4 = call("POST", f"/orders/{no4}/cancel-with-split", customer,
+                  {"agreed_stage": "in_delivery",
+                   "agreed_refund_cents": q4["refund_cents"]})
+        assert o4["status"] == "cancelled", o4
+        print(f"✓ 自配送单:配送费归商家(运力是他出的),没有骑手入账")
+    finally:
+        call("PATCH", "/merchants/me", merchant, {"self_delivery": False})
+
     print("\ne2e_cancel_split 全部通过 ✅")
 
 

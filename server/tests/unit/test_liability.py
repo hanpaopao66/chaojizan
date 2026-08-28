@@ -101,6 +101,53 @@ class Test各阶段谁拿什么:
             assert not L.split_for_cancel(stage, **MONEY).food_to
 
 
+class Test三种运力形态的配送费归属:
+    """配送费归谁,取决于**运力是谁出的** —— 这一条错了钱会直接从账上蒸发。"""
+
+    def test_平台骑手_配送费归骑手(self):
+        s = L.split_for_cancel(L.STAGE_IN_DELIVERY, **MONEY)
+        assert s.rider_cents == 487 + 113 and s.merchant_cents == 2100
+
+    def test_商家自配送_配送费归商家而不是骑手(self):
+        """自配送单**没有骑手**。算给"骑手"的话
+        `settle_cancelled_with_split` 那边 `rider_id is None` 直接不写入账行,
+        这笔钱就凭空消失,审计规则 16 当场报「凭空少掉的钱」。"""
+        s = L.split_for_cancel(L.STAGE_IN_DELIVERY, self_delivery=True, **MONEY)
+        assert s.rider_cents == 0, "自配送单没有骑手,不该有骑手入账"
+        assert s.merchant_cents == 2100 + 487 + 113
+        assert s.total_cents == PAID
+
+    def test_自配送_还没出发时配送费仍退用户(self):
+        """自配送的"配送中"是商家自己上路;已出餐但没出发,配送没发生。"""
+        s = L.split_for_cancel(L.STAGE_COOKED, self_delivery=True, **MONEY)
+        assert s.refund_cents == 487 + 113
+        assert s.merchant_cents == 2100
+
+    def test_自配送_账单上那笔标的是归商家(self):
+        s = L.split_for_cancel(L.STAGE_IN_DELIVERY, self_delivery=True, **MONEY)
+        fee = [l for l in s.lines if "配送费" in l.name]
+        assert fee and fee[0].to == "merchant", [l.to for l in s.lines]
+
+    def test_用户自提_没有配送费也没有小费(self):
+        """自提单下单时就把配送费和小费置 0,而且只走到「已出餐」。"""
+        money = dict(MONEY, delivery_fee_cents=0, tip_cents=0)
+        s = L.split_for_cancel(L.STAGE_COOKED, **money)
+        assert s.refund_cents == 0, "自提没有配送费,没什么可退"
+        assert s.merchant_cents == 2100
+        assert s.rider_cents == 0
+        assert s.total_cents == 2100
+        # 不该出现一行「配送费 0 元退回你」——这一屏的意义就是说清楚
+        assert not [l for l in s.lines if "配送费" in l.name], (
+            f"自提单摆了配送费那一行:{[l.name for l in s.lines]}")
+
+    @pytest.mark.parametrize("stage", [
+        L.STAGE_COOKED, L.STAGE_RIDER_ARRIVED, L.STAGE_IN_DELIVERY])
+    def test_自配送各档也要对得平(self, stage):
+        s = L.split_for_cancel(stage, self_delivery=True, **MONEY)
+        assert s.total_cents == PAID, f"{stage} 自配送对不平"
+        assert s.rider_cents == 0, f"{stage} 自配送不该有骑手入账"
+
+
 class Test出餐之前不归这个模块管:
     def test_ready之后才认(self):
         assert L.stage_of("ready", rider_arrived=False) == L.STAGE_COOKED

@@ -768,7 +768,8 @@ async def run_audit() -> list[dict]:
         noncompleted_rows = (await db.execute(
             select(Order.order_no, Order.status, Order.order_kind,
                    Order.food_cents, Order.packing_fee_cents,
-                   Order.discount_cents,
+                   Order.discount_cents, Order.self_delivery,
+                   Order.delivery_fee_cents,
                    sa_func.sum(MerchantEarning.net_cents),
                    sa_func.sum(MerchantEarning.commission_cents),
                    sa_func.min(MerchantEarning.note))
@@ -777,13 +778,21 @@ async def run_audit() -> list[dict]:
                    Order.created_at >= since)
             .group_by(Order.order_no, Order.status, Order.order_kind,
                       Order.food_cents, Order.packing_fee_cents,
-                      Order.discount_cents)
+                      Order.discount_cents, Order.self_delivery,
+                      Order.delivery_fee_cents)
             .having(sa_func.sum(MerchantEarning.net_cents) != 0))).all()
         comp_n, comp_cents, bad_rows = 0, 0, []
         split_n, split_cents = 0, 0
         for (order_no, status, kind, food, packing, discount,
+             self_deliv, delivery_fee,
              net, commission, note) in noncompleted_rows:
+            # 应收口径必须和 settlement.credit_merchant 一致:
+            # **自配送单的配送费归商家**(运力是他出的)。
+            # 少了这一句,自配送单的分摊取消会被判成"来路不明的入账",
+            # 每一单都红一条 —— 同一类坑这一批已经撞过三次了。
             expected = max(food + packing - discount, 0)
+            if self_deliv:
+                expected += delivery_fee
             shape_ok = (status == OrderStatus.CANCELLED
                         and kind == KIND_FOOD
                         and commission == 0

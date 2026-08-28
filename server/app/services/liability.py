@@ -154,11 +154,26 @@ def split_for_cancel(
     discount_cents: int,
     delivery_fee_cents: int,
     tip_cents: int,
+    self_delivery: bool = False,
 ) -> Split:
     """算一次用户取消的四方账。纯函数,不查库不看表。
 
     入参就是订单上那几个钱字段;商家应收口径与 settlement.credit_merchant
-    保持一致(菜品 + 打包 − 满减,钳 0)。
+    保持一致(菜品 + 打包 − 满减,钳 0;**自配送单还要加上配送费**)。
+
+    ## 三种运力形态,配送费的归属不一样
+
+    - **平台骑手**:配送费 + 小费全归骑手,平台一分不抽;
+    - **商家自配送**:运力是商家出的,配送费归商家(结算里 `gross +=
+      delivery_fee_cents` 就是这个口径),而且这种单**没有骑手**——
+      把配送费算给"骑手"的话,`settle_cancelled_with_split` 那边
+      `rider_id is None` 直接不写入账行,这笔钱就凭空消失了,
+      审计规则 16 当场报「凭空少掉的钱」;
+    - **用户自提**:没有配送费也没有小费(下单时就置 0),而且只到"已出餐"
+      为止,不会有配送中这一档 —— 算出来就是餐费归商家、用户拿回 0。
+
+    自配送还有一处要注意:它的"配送中"是**商家自己上路**,所以
+    `已出餐` 那一档配送费该退用户(还没出发),`配送中` 才归商家。
     """
     # **先钳 0 再加总。** 商家应收钳了 0(与 settlement.credit_merchant 同口径),
     # 用户已付这边就必须用同一个钳过的数 —— 否则满减大于餐费时,
@@ -166,6 +181,8 @@ def split_for_cancel(
     # 就是踩着这个写的。
     merchant_gross = max(food_cents + packing_fee_cents - discount_cents, 0)
     paid = merchant_gross + delivery_fee_cents + tip_cents
+    #: 配送这一段的钱该归谁:自配送归商家(运力是他出的),否则归骑手
+    courier = "merchant" if self_delivery else "rider"
     s = Split(stage=stage)
 
     if stage == STAGE_BEFORE_COST:
@@ -180,26 +197,40 @@ def split_for_cancel(
                         "餐已经做好了,商家没做错任何事,这笔成本收不回来"))
 
     if stage == STAGE_COOKED:
-        # 骑手还没到店,配送这段一点没发生 —— 全退用户
+        # 还没上路,配送这段一点没发生 —— 全退用户。
+        # 自提单走到这里时配送费和小费本来就是 0,算出来自然是"没得退"
         s.refund_cents = delivery_fee_cents + tip_cents
-        s.lines.append(Line("配送费 + 小费", delivery_fee_cents + tip_cents,
-                            "customer", "骑手还没到店,配送还没开始"))
+        # 自提单没有配送费也没有小费,这一行是 0 —— 摆一行「配送费 0 元
+        # 退回你」只会让人愣一下。这一屏的全部意义就是说清楚,
+        # 不该有莫名其妙的行
+        if s.refund_cents:
+            s.lines.append(Line(
+                "配送费 + 小费", s.refund_cents, "customer",
+                "还没出发去送,配送没有开始"))
     elif stage == STAGE_RIDER_ARRIVED:
         idle = min(int(delivery_fee_cents * IDLE_TRIP_SHARE), delivery_fee_cents)
-        s.rider_cents = idle
+        if self_delivery:
+            s.merchant_cents += idle
+        else:
+            s.rider_cents = idle
         s.refund_cents = delivery_fee_cents - idle + tip_cents
-        s.lines.append(Line("空跑费", idle, "rider",
-                            "骑手已经到店,这趟路白跑了,不是他的问题"))
+        s.lines.append(Line("空跑费", idle, courier,
+                            "已经到店取餐,这趟路白跑了,不是他的问题"))
         s.lines.append(Line("配送费余额 + 小费",
                             delivery_fee_cents - idle + tip_cents, "customer",
                             "剩下的配送段没有发生,退回"))
     elif stage == STAGE_IN_DELIVERY:
-        # 配送费归骑手是既有原则(售后冲账都不冲他),这里同口径
-        s.rider_cents = delivery_fee_cents + tip_cents
+        # 配送费归骑手是既有原则(售后冲账都不冲他)。
+        # 自配送单运力是商家出的,这笔就归商家 —— 和结算口径一致
+        if self_delivery:
+            s.merchant_cents += delivery_fee_cents + tip_cents
+        else:
+            s.rider_cents = delivery_fee_cents + tip_cents
         s.lines.append(Line("配送费 + 小费", delivery_fee_cents + tip_cents,
-                            "rider", "骑手已经取餐上路,这趟劳动付出了"))
-        s.food_to = ("这份餐归骑手处置 —— 餐在他车上,送回商家也不能再卖。"
-                     "这不是奖励,是让一份已经发生的成本少浪费一点。")
+                            courier, "已经取餐上路,这趟劳动付出了"))
+        s.food_to = (
+            "这份餐归送餐的人处置 —— 餐已经在路上,送回店里也不能再卖。"
+            "这不是奖励,是让一份已经发生的成本少浪费一点。")
     else:
         raise ValueError(f"未知的分摊阶段:{stage}")
 
