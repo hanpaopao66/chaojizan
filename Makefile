@@ -66,6 +66,10 @@ analyze:
 # 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)
 unit:
 	cd server && python -m pytest tests/unit -q
+# MCP 服务的协议层与「没有任何能付钱的工具」那几条。
+# 它不在 server/ 下,单独跑一次 —— 少这一行,「助手花不掉你的钱」
+# 就只有服务端一半有守卫。
+	python -m pytest mcp-server -q
 	@echo "—— 再按生产环境跑一遍(CI 的单测 job 没有 .env,APP_ENV 走默认的 prod)——"
 	cd server && APP_ENV=prod python -m pytest tests/unit -q
 
