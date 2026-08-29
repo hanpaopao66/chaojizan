@@ -532,6 +532,27 @@ class ApiClient {
     return await _request('GET', '/auth/slider') as Map<String, dynamic>;
   }
 
+  // ---------- AI 助手令牌(MCP 接入) ----------
+  //
+  // **它付不了款。** 助手能把单创建到「待支付」为止,付款那一下在用户
+  // 自己的 App 里由人按 —— 即使令牌泄露,对方花不掉一分钱。
+  // 能力范围在服务端 security.AGENT_ALLOWED 收口,默认拒绝。
+
+  /// 签发。**明文只在返回里给一次**,之后再也拿不到。
+  Future<Map<String, dynamic>> createAgentToken(String name, int days) async {
+    return await _request('POST', '/auth/agent-tokens',
+        body: {'name': name, 'days': days}) as Map<String, dynamic>;
+  }
+
+  /// 有哪些助手连着我的账号
+  Future<List<Map<String, dynamic>>> agentTokens() async {
+    final data = await _request('GET', '/auth/agent-tokens');
+    return (data as List).cast<Map<String, dynamic>>();
+  }
+
+  Future<void> revokeAgentToken(int id) =>
+      _request('DELETE', '/auth/agent-tokens/$id');
+
   // ---------- 异常订单标记(只上报,不给拉黑权) ----------
 
   /// 标记疑似职业索赔/恶意差评。

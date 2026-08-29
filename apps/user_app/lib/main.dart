@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'agent_tokens_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:geolocator/geolocator.dart';
@@ -7019,6 +7020,16 @@ class _ProfileViewState extends State<ProfileView> {
           title: '开发票',
           value: '暂未开放',
           onTap: _showInvoiceInfo,
+        ),
+        const Divider(height: 1),
+        // 副标题是**立场表达**,不是状态值:用户看到「AI 助手」第一个念头
+        // 就是「它会不会乱花我的钱」,那句答案值得占这一行
+        SzEntryTile(
+          icon: Icons.smart_toy_outlined,
+          title: 'AI 助手',
+          hint: '让助手帮你找店下单;它付不了款',
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => AgentTokensPage(api: widget.api))),
         ),
         const Divider(height: 1),
         // 商店审核要求:我的页可达协议全文。
