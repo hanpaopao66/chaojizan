@@ -1,6 +1,7 @@
 """平台运营基建:公告(发通知不用发版)+ 自建埋点。
 
 埋点原则:只收登录用户的产品行为(浏览/搜索/分享),不收设备指纹;
+**这条原则由 services/events 的白名单在服务端强制**,不是靠客户端自觉;
 服务端已有的交易数据不重复埋。收集范围写入隐私政策(legal.dart 第一.7 条)。
 """
 from datetime import datetime, timezone
@@ -185,12 +186,31 @@ async def track_events(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """批量上报(客户端攒够一批或退后台时发)。失败客户端直接丢弃,埋点不影响体验。"""
+    """批量上报(客户端攒够一批或退后台时发)。失败客户端直接丢弃,埋点不影响体验。
+
+    **白名单收口**(services/events):事件名不在册的整条丢,
+    props 里白名单外的键逐个丢。理由见那个模块的文档 ——
+    简单说:这是开源项目,「只收产品行为、不收设备指纹」这句话
+    以前只写在注释里,服务端照单全收;注释拦不住任何人。
+
+    未知事件**静默丢弃而不是报错**:老版本 App 里可能有这里没列的
+    事件名,回 400 会让整批失败,而埋点永远不该影响用户体验。
+    但丢了几条要回给客户端 —— 看不见的话这一层就成了黑洞。
+    """
+    from ..services.events import clean
+
+    accepted = dropped = 0
     for e in payload.events[:50]:
+        got = clean(e.name, e.props)
+        if got is None:
+            dropped += 1
+            continue
+        name, props = got
         db.add(AppEvent(user_id=user.id, role=user.role.value,
-                        event=e.name[:50], props=e.props))
+                        event=name, props=props))
+        accepted += 1
     await db.commit()
-    return {"accepted": min(len(payload.events), 50)}
+    return {"accepted": accepted, "dropped": dropped}
 
 
 # ---------- 推送运营 ----------

@@ -56,18 +56,42 @@ err = call("POST", "/events/batch", None,
 assert err["_error"] == 401
 print("✓ 未登录上报被拒(只收登录用户,与隐私政策一致)")
 
-event_name = f"e2e_event_{tag}"
+# 事件名必须是白名单里的真事件(#311)。以前这里用随机名
+# `e2e_event_{tag}`,而服务端照单全收 —— 那恰恰是白名单要堵的口子:
+# 「只收产品行为、不收设备指纹」以前只写在注释里,拦不住任何人
+event_name = "view_trust"
+before = 0
+summary = call("GET", f"/admin/events/summary?event={event_name}", admin)["events"]
+row = next((e for e in summary if e["event"] == event_name), None)
+if row:
+    before = row["count"]
 resp = call("POST", "/events/batch", customer, {"events": [
-    {"name": event_name, "props": {"merchant_id": 1}},
-    {"name": event_name, "props": {"q": "面"}},
+    {"name": event_name},
+    {"name": event_name},
 ]})
-assert resp["accepted"] == 2
+assert resp["accepted"] == 2, resp
 # 按事件名精确查,不在 Top 30 里捞 —— 跑久了的库有 35+ 种事件,
 # 而本用例刚上报的事件只有 2 次,必然挤不进计数前 30
 summary = call("GET", f"/admin/events/summary?event={event_name}", admin)["events"]
 row = next(e for e in summary if e["event"] == event_name)
-assert row["count"] == 2 and row["users"] == 1
-print("✓ 埋点批量入库,管理端 7 天汇总正确(2 次 / 1 独立用户)")
+assert row["count"] == before + 2
+print("✓ 埋点批量入库,管理端 7 天汇总正确(+2 次)")
+
+# ---- 白名单:不在册的事件与夹带的键都进不来 ----
+#
+# 这一条守的是「声明的原则由代码强制」。开源项目里,policy 写在注释里
+# 而 enforcement 是空的,等于自相矛盾的公开代码
+resp = call("POST", "/events/batch", customer, {"events": [
+    {"name": "device_info", "props": {"imei": "8613800000000"}},
+    {"name": "view_menu", "props": {"merchant_id": 1, "lat": 30.66}},
+]})
+assert resp["accepted"] == 1 and resp["dropped"] == 1, \
+    f"未知事件没被丢掉:{resp}"
+summary = call("GET", "/admin/events/summary?event=device_info",
+               admin)["events"]
+assert not any(e["event"] == "device_info" for e in summary), \
+    "设备指纹类事件落库了 —— 「不收设备指纹」这句话就不成立了"
+print("✓ 白名单生效:未知事件整条丢、夹带的坐标键被剥掉")
 
 err = call("GET", "/admin/events/summary", customer, expect_error=True)
 assert err["_error"] == 403
