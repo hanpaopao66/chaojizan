@@ -1424,15 +1424,22 @@ class _MerchantHomePageState extends State<MerchantHomePage>
             }
           },
           itemBuilder: (_) => [
-            const PopupMenuItem(
-              value: 'chat',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.chat_bubble_outline, size: 20),
-                title: Text('和顾客说句话'),
+            // 历史单的「⋯」里**只有标记异常**。
+            //
+            // 这一栏原本一个菜单都没有(测试里那条断言的理由是「它本来就
+            // 没有动作行」),历史列表干净是当初有意定的。标记异常必须有
+            // 入口——商家端没有订单详情页,卡片就是全部——所以只借这一格,
+            // 不顺手把聊天/打印也塞进来。
+            if (!canFlag)
+              const PopupMenuItem(
+                value: 'chat',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.chat_bubble_outline, size: 20),
+                  title: Text('和顾客说句话'),
+                ),
               ),
-            ),
             if (!canFlag)
               const PopupMenuItem(
                 value: 'print',

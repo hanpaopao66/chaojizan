@@ -38,6 +38,20 @@ analyze:
 	  (cd $$d && flutter pub get >/dev/null && flutter analyze --no-pub) \
 	    || exit 1; \
 	done
+# **Dart 单测也在这儿跑。**
+#
+# CI 的「三端静态检查」里有独立的一步 `dart 单测`,而本地 make analyze
+# 原来只跑 analyze —— 于是「本地全绿」和「CI 通过」之间一直差着 541 条
+# 测试。实际撞过一次:改了商家端订单卡的「⋯」菜单,analyze 干净、
+# 全套 e2e 干净、推上去被 CI 里的 order_tab_test 顶回来。
+#
+# analyze 只看类型,测试才看行为。少这一层,本地的绿是假的。
+	@for d in packages/shared apps/user_app apps/merchant_app apps/rider_app; do \
+	  if [ -n "$$(find $$d/test -name '*_test.dart' 2>/dev/null)" ]; then \
+	    echo "== $$d 单测 =="; \
+	    (cd $$d && flutter test) || exit 1; \
+	  fi; \
+	done
 	@echo "== 扫 Dart 字符串里的转义美元符 =="
 # 模式必须是「字面反斜杠 + 字面美元」= BRE 的 \\\$。
 # 原来写的是 '\\$$'(传给 shell 是 \\$),BRE 里 $ 在模式末尾是**行尾锚点**,

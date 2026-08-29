@@ -316,7 +316,14 @@ void main() {
       await teardown(t);
     });
 
-    testWidgets('历史单没有「⋯」—— 它本来就没有动作行', (t) async {
+    testWidgets('历史单的「⋯」里只有「标记异常」,别的一项都不许混进来',
+        (t) async {
+      // 这一栏原来一个菜单都没有(断言的理由是「它本来就没有动作行」)。
+      // 标记异常打破了那个前提:争议是单子结束之后才出现的,而商家端
+      // 没有订单详情页,卡片就是全部 —— 入口只能在这儿。
+      //
+      // 所以断言从「一个都没有」改成「**只有这一个**」:历史列表干净
+      // 是当初有意定的,借一格可以,顺手把聊天/打印塞进来不行。
       final api = orderFakeApi(
         pages: ordersJson(count: 3, prefix: 'SZDONE', status: 'completed'),
         todos: {'pending_orders': 0},
@@ -325,7 +332,14 @@ void main() {
       await t.tap(find.textContaining('历史'));
       await t.pump();
       await t.pump(const Duration(milliseconds: 300));
-      expect(find.byIcon(Icons.more_horiz), findsNothing);
+      expect(find.byIcon(Icons.more_horiz), findsNWidgets(3));
+      await t.tap(find.byIcon(Icons.more_horiz).first);
+      await t.pumpAndSettle();
+      expect(find.text('标记异常'), findsOneWidget);
+      expect(find.text('和顾客说句话'), findsNothing,
+          reason: '历史列表要干净:标记异常借一格,别的不许跟着进来');
+      expect(find.text('打印小票'), findsNothing);
+      expect(find.text('缺货退款'), findsNothing);
       await teardown(t);
     });
 
