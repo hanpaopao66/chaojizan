@@ -154,7 +154,7 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
                             '${d['cents_per_km'] == null ? '' : ' · 每公里 ¥'
                                 '${((d['cents_per_km'] as num) / 100).toStringAsFixed(1)}'}',
                             style: TextStyle(
-                                fontSize: 12.5,
+                                fontSize: kFontNote,
                                 fontWeight: FontWeight.w600,
                                 color: sz.earn)),
                         const SizedBox(height: 4),
@@ -164,7 +164,7 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
                         Text('${d['distance_note'] ?? ''}',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                                fontSize: 11, height: 1.5, color: sz.inkMuted)),
+                                fontSize: kFontMicro, height: 1.5, color: sz.inkMuted)),
                       ],
                     ]),
                   ),

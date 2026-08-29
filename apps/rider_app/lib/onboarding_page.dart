@@ -886,14 +886,14 @@ class _RiderFlowDrillPageState extends State<RiderFlowDrillPage> {
               children: [
                 Text('这是演练,不会产生真实订单',
                     style: TextStyle(
-                        fontSize: 15,
+                        fontSize: kFontTitle,
                         fontWeight: FontWeight.w600,
                         color: sz.ink)),
                 const SizedBox(height: 8),
                 Text('按顺序把下面几步点一遍。点错了不会怎么样 —— '
                     '这正是演练的意义,总比第一单在顾客门口按错强。',
                     style: TextStyle(
-                        fontSize: 12.5, height: 1.6, color: sz.inkMuted)),
+                        fontSize: kFontNote, height: 1.6, color: sz.inkMuted)),
               ],
             ),
           ),
@@ -906,7 +906,7 @@ class _RiderFlowDrillPageState extends State<RiderFlowDrillPage> {
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(_misstep,
-                  style: TextStyle(fontSize: 12.5, color: sz.hold)),
+                  style: TextStyle(fontSize: kFontNote, color: sz.hold)),
             ),
           if (_finished) ...[
             SzCard(
@@ -915,14 +915,14 @@ class _RiderFlowDrillPageState extends State<RiderFlowDrillPage> {
                 children: [
                   Text('走完了',
                       style: TextStyle(
-                          fontSize: 15,
+                          fontSize: kFontTitle,
                           fontWeight: FontWeight.w600,
                           color: sz.ink)),
                   const SizedBox(height: 8),
                   Text('真实订单里每一步都在订单卡上,位置和这里一样。'
                       '有拿不准的随时回这一页再走一遍。',
                       style: TextStyle(
-                          fontSize: 12.5, height: 1.6, color: sz.inkMuted)),
+                          fontSize: kFontNote, height: 1.6, color: sz.inkMuted)),
                 ],
               ),
             ),
@@ -961,7 +961,7 @@ class _RiderFlowDrillPageState extends State<RiderFlowDrillPage> {
             Expanded(
               child: Text('${i + 1}. ${step['action']}',
                   style: TextStyle(
-                      fontSize: 14.5,
+                      fontSize: kFontBodyLg,
                       fontWeight: now ? FontWeight.w600 : FontWeight.w400,
                       color: done ? sz.inkMuted : sz.ink)),
             ),
@@ -977,7 +977,7 @@ class _RiderFlowDrillPageState extends State<RiderFlowDrillPage> {
             const SizedBox(height: 8),
             Text(tip,
                 style:
-                    TextStyle(fontSize: 12, height: 1.6, color: sz.inkMuted)),
+                    TextStyle(fontSize: kFontNote, height: 1.6, color: sz.inkMuted)),
           ],
         ],
       ),

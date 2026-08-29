@@ -386,7 +386,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Row(children: [
             const Text('选择城市',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                style: TextStyle(fontSize: kFontTitle, fontWeight: FontWeight.w600)),
             const Spacer(),
             IconButton(
               icon: const Icon(Icons.close, size: 20),
@@ -396,7 +396,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
           Align(
             alignment: Alignment.centerLeft,
             child: Text('搜地址时只在选中的城市里找 —— 选错了会搜不到自己家',
-                style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+                style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
           ),
           const SizedBox(height: 10),
           TextField(
@@ -404,12 +404,12 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
               isDense: true,
               prefixIcon: const Icon(Icons.search, size: 18),
               hintText: '城市名或拼音,如 成都 / chengdu',
-              hintStyle: TextStyle(fontSize: 13, color: sz.inkFaint),
+              hintStyle: TextStyle(fontSize: kFontBody, color: sz.inkFaint),
               border: const OutlineInputBorder(),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
             ),
-            style: const TextStyle(fontSize: 14),
+            style: const TextStyle(fontSize: kFontBodyLg),
             onChanged: (v) => setState(() => _query = v.trim()),
           ),
           const SizedBox(height: 8),
@@ -417,7 +417,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 20),
               child: Text('拿不到城市列表:$_error',
-                  style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
             )
           else if (_catalog == null)
             const Padding(
@@ -479,7 +479,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
           padding: const EdgeInsets.fromLTRB(0, 10, 0, 4),
           child: Text(c.initial,
               style: TextStyle(
-                  fontSize: 12,
+                  fontSize: kFontNote,
                   fontWeight: FontWeight.w700,
                   color: sz.inkMuted)),
         ));
@@ -491,7 +491,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
         padding: const EdgeInsets.symmetric(vertical: 24),
         child: Text('没有匹配的城市',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
+            style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
       ));
     }
 
@@ -520,7 +520,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
                     child: Center(
                       child: Text(l,
                           style: TextStyle(
-                              fontSize: 10,
+                              fontSize: kFontMicro,
                               fontWeight: FontWeight.w600,
                               color: sz.inkMuted)),
                     ),
@@ -556,7 +556,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
         padding: const EdgeInsets.fromLTRB(0, 12, 0, 6),
         child: Text(t,
             style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w700, color: sz.ink)),
+                fontSize: kFontNote, fontWeight: FontWeight.w700, color: sz.ink)),
       );
 
   Widget _chipWrap(List<SzCity> cities) => Wrap(
@@ -580,7 +580,7 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
         ),
         child: Text(c.short,
             style: TextStyle(
-                fontSize: 13,
+                fontSize: kFontBody,
                 color: on ? sz.clay : sz.ink,
                 fontWeight: on ? FontWeight.w600 : FontWeight.w400)),
       ),
@@ -595,17 +595,17 @@ class _CityCatalogSheetState extends State<_CityCatalogSheet> {
       contentPadding: EdgeInsets.zero,
       visualDensity: VisualDensity.compact,
       title: Text(c.short,
-          style: TextStyle(fontSize: 14.5, color: on ? sz.clay : sz.ink)),
+          style: TextStyle(fontSize: kFontBodyLg, color: on ? sz.clay : sz.ink)),
       subtitle: c.province.isEmpty
           ? null
           : Text(c.province,
-              style: TextStyle(fontSize: 11, color: sz.inkFaint)),
+              style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
       // 有几家店必须露出来:全量清单里绝大多数城市还没开通,
       // 切过去会看到空列表 —— 先告诉他,别让他以为 App 坏了
       trailing: Text(
         c.merchants > 0 ? '${c.merchants} 家店' : '暂无商家',
         style: TextStyle(
-            fontSize: 11.5, color: c.merchants > 0 ? sz.inkMuted : sz.hold),
+            fontSize: kFontMicro, color: c.merchants > 0 ? sz.inkMuted : sz.hold),
       ),
       onTap: () => Navigator.of(context).pop(c.name),
     );

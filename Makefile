@@ -29,6 +29,24 @@ seed:
 # 请求会带着字面的 $orderNo 发出去。这个 analyze 不报(语法合法)、
 # e2e 也照不到(测的是服务端),只能靠扫。
 analyze:
+# CI 里那几个**独立脚本检查**也在这里跑。
+#
+# 它们本来只在 CI 的「三端静态检查」job 里,而本地一直拿 `make analyze`
+# 当"三端都验过了"的依据 —— 于是「字号不再发散」这条在本地一次都没跑过,
+# 22 处硬编码字号一路走到 CI 才红。
+#
+# 这是同一类坑的第三次:analyze 不跑 Dart 单测(已补)、
+# CI 不查 TypeScript(已补)、现在是本地不跑 CI 的脚本检查。
+# 判据都一样:**本地绿和 CI 绿必须是同一件事**,
+# 差一项,"本地全绿"就只是半句话。
+#
+# 放在最前面:纯 Python/shell、几秒钟,错了就该立刻红,
+# 没必要先等几分钟的 flutter pub get。
+	@python3 scripts/gen_tokens.py --check && echo "== 设计令牌一致 ✓"
+	@python3 scripts/check_channel_tones.py && echo "== 频道色可分辨 ✓"
+	@bash scripts/check_fontsize_drift.sh
+	@python3 scripts/check_macos_entitlements.py && echo "== macOS 权限声明 ✓"
+	@bash scripts/check_wide_layout.sh
 # 先 pub get 再 analyze。只写 --no-pub 的话,包解析一过期
 # (在别的 app 里跑过 flutter test 就会)analyze 会喷出几千条
 # "package:flutter/material.dart 不存在" —— 全是假的。
