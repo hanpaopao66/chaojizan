@@ -10,6 +10,7 @@ import {
   HomeOutlined,
   SolutionOutlined,
   ThunderboltOutlined,
+  FlagOutlined,
   WarningOutlined,
   DashboardOutlined,
   ExceptionOutlined,
@@ -33,6 +34,7 @@ import AuditPage from '../pages/AuditPage'
 import DashboardPage from '../pages/DashboardPage'
 import FoodSafetyPage from '../pages/FoodSafetyPage'
 import IssuesPage from '../pages/IssuesPage'
+import OrderFlagsPage from '../pages/OrderFlagsPage'
 import ModerationPage from '../pages/ModerationPage'
 import DispatchPage from '../pages/DispatchPage'
 import InvoicesPage from '../pages/InvoicesPage'
@@ -72,6 +74,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     { key: '/food-safety', icon: <MedicineBoxOutlined />, label: '食安投诉' },
     { key: '/moderation', icon: <EyeOutlined />, label: '内容审核' },
     { key: '/risk', icon: <WarningOutlined />, label: '风控' },
+    { key: '/order-flags', icon: <FlagOutlined />, label: '异常标记' },
     { key: '/appeals', icon: <SolutionOutlined />, label: '判责申诉' },
     { key: '/rider-care', icon: <HeartOutlined />, label: '骑手关怀' },
     { key: '/dispatch', icon: <ThunderboltOutlined />, label: '运力' },
@@ -148,6 +151,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/food-safety" element={<FoodSafetyPage />} />
             <Route path="/moderation" element={<ModerationPage />} />
             <Route path="/risk" element={<RiskPage />} />
+            <Route path="/order-flags" element={<OrderFlagsPage />} />
             <Route path="/appeals" element={<AppealsPage />} />
             <Route path="/rider-care" element={<RiderCarePage />} />
             <Route path="/dispatch" element={<DispatchPage />} />

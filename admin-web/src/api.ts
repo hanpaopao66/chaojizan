@@ -676,3 +676,42 @@ export interface Splash {
 }
 export const listSplash = () => get<Splash[]>('/platform/splash')
 export const toggleSplash = (id: number) => post(`/admin/splash/${id}/toggle`)
+
+// ---------- 异常订单标记(商家上报,平台跨店核查) ----------
+
+export interface OrderFlagDetail {
+  id: number
+  shop: string
+  order_no: string
+  kind: string
+  reason: string
+  status: string
+  created_at: string | null
+}
+
+export interface OrderFlagPerson {
+  user_id: number
+  name: string
+  phone: string
+  shop_count: number
+  flags: number
+  pending: number
+  kinds: Record<string, number>
+  details: OrderFlagDetail[]
+}
+
+export interface OrderFlagsOut {
+  items: OrderFlagPerson[]
+  only_cross_shop: boolean
+  how_to_read: string
+}
+
+export function listOrderFlags(onlyCrossShop: boolean) {
+  return request<OrderFlagsOut>(
+    'GET', `/admin/order-flags?only_cross_shop=${onlyCrossShop}`)
+}
+
+export function resolveOrderFlag(flagId: number, result: 'reviewed' | 'dismissed') {
+  return request<{ ok: boolean; status: string }>(
+    'POST', `/admin/order-flags/${flagId}/resolve`, { result })
+}
