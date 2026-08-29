@@ -8,7 +8,7 @@ import { defineConfig } from 'vite'
 // 静态站点抢了这个前缀,整个管理接口就全 404 了。
 export default defineConfig({
   plugins: [react()],
-  base: '/admin-console/',
+  base: '/admin/',
   build: {
     outDir: '../server/static/admin',
     emptyOutDir: true,

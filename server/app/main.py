@@ -50,6 +50,9 @@ from .services.auto_flow import auto_flow_loop
 from . import ws
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+# 平台管理后台(React SPA)。挂在 /admin —— 和 79 个管理接口同一个前缀,
+# 靠 AdminConsoleMiddleware 按「是不是浏览器在打开页面」分开。
+ADMIN_WEB_DIR = STATIC_DIR / "admin"
 SERVER_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -152,6 +155,87 @@ def _json_safe(obj):
 # 的开销 —— 首页那种 7ms 的接口感觉不明显,但 /orders/{no}/rider-location
 # 这类 4ms 的高频轮询里,它占的比例并不小。
 # ---------------------------------------------------------------------------
+
+
+class AdminConsoleMiddleware:
+    """`/admin` 既是**管理后台页面**,也是 79 个管理接口的前缀。
+
+    ## 为什么需要这一层
+
+    两者的路径真的会撞:`/admin/flags`、`/admin/merchants`、
+    `/admin/riders` 等 7 条,既是后台的前端路由,也是接口路径。
+    靠注册顺序分不开 —— 谁在前谁就把另一个全吃掉。
+
+    分开它们的是**这次请求是不是浏览器在打开一个页面**:
+
+    - 地址栏导航 / 刷新:`Sec-Fetch-Dest: document`,
+      并且 `Accept` 里有 `text/html`;
+    - 后台自己发的 fetch:`Sec-Fetch-Dest: empty`,
+      `Accept: */*`(admin-web 不设 Accept,浏览器默认就是它)。
+
+    两个条件都不满足就原样放行给接口。所以:
+    在浏览器里打开 `/admin/flags` 得到后台页面,
+    后台页面再去 fetch `/admin/flags` 拿到 JSON,互不干扰。
+
+    ## 为什么不把接口挪到 /api/admin
+
+    那才是干净的分法,但要改 91 个测试文件里的 344 处、admin-web 的
+    21 处,以及若干脚本 —— 为一个 URL 做这么大范围的改动,
+    风险远大于收益。真要挪,该单独做一次,而不是夹在发版里。
+
+    ## 老路径
+
+    `/admin-console` 保留成 302,老书签不断。
+    """
+
+    #: 只有这些前缀走后台页面。写死而不是 startswith("/admin"),
+    #: 免得以后加个 /administrators 之类的路径被误伤
+    PREFIXES = ("/admin", "/admin/")
+
+    def __init__(self, app):
+        self.app = app
+
+    @staticmethod
+    def _is_navigation(headers) -> bool:
+        dest = accept = b""
+        for k, v in headers:
+            if k == b"sec-fetch-dest":
+                dest = v
+            elif k == b"accept":
+                accept = v
+        if dest:
+            # 现代浏览器都带这个头,它最准:fetch/XHR 一定是 empty
+            return dest == b"document"
+        # 没有这个头(老浏览器、curl)时退回看 Accept
+        return b"text/html" in accept
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") != "GET":
+            return await self.app(scope, receive, send)
+        path = scope.get("path", "")
+        if not (path == "/admin" or path.startswith("/admin/")):
+            return await self.app(scope, receive, send)
+        index = ADMIN_WEB_DIR / "index.html"
+        if not index.exists():
+            return await self.app(scope, receive, send)
+
+        # 1) 真实文件优先 —— JS/CSS/图标。
+        #
+        # 它们**不是导航请求**(Sec-Fetch-Dest 是 script/style),
+        # 所以必须在导航判断之前处理,否则会被放行给接口路由然后 404 ——
+        # 表现是后台打得开但一片空白,而这是最难往"路由"上想的一种故障。
+        rel = path[len("/admin"):].lstrip("/")
+        if rel:
+            candidate = (ADMIN_WEB_DIR / rel).resolve()
+            if candidate.is_file() and \
+                    candidate.is_relative_to(ADMIN_WEB_DIR.resolve()):
+                return await FileResponse(candidate)(scope, receive, send)
+
+        # 2) 剩下的按「是不是浏览器在打开页面」分:是就给页面,
+        #    不是就原样放行给那 79 个管理接口
+        if not self._is_navigation(scope.get("headers") or []):
+            return await self.app(scope, receive, send)
+        return await FileResponse(index)(scope, receive, send)
 
 
 class SelectShopMiddleware:
@@ -343,6 +427,10 @@ class RecordApiCallMiddleware:
                 "调用日志写入失败(不影响请求)", exc_info=True)
 
 
+# 后台页面拦在最内层:它只认「浏览器在打开页面」这一种请求,
+# 其余原样放行给接口。放最内层是为了让上面几层(错误日志、调用记录)
+# 照常覆盖到接口调用
+app.add_middleware(AdminConsoleMiddleware)
 app.add_middleware(RecordApiCallMiddleware)
 app.add_middleware(SelectShopMiddleware)
 app.add_middleware(ObserveAppBuildMiddleware)
@@ -518,12 +606,6 @@ async def landing_page():
     return FileResponse(STATIC_DIR / "index.html")
 
 
-@app.get("/admin", include_in_schema=False)
-async def admin_page():
-    """商家入驻审核后台(单文件网页,无需前端构建)。"""
-    return FileResponse(STATIC_DIR / "admin.html")
-
-
 @app.get("/nodes", include_in_schema=False)
 async def nodes_page():
     """社区见证节点页:实时节点数 + 校验状态 + 如何运行你自己的节点。"""
@@ -628,24 +710,20 @@ async def merchant_console(path: str = ""):
     return FileResponse(MERCHANT_WEB_DIR / "index.html")
 
 
-# 平台管理后台(React SPA)。
-#
-# ⚠️ 路径**不能**叫 /admin —— 那是 79 个管理接口的前缀,
-# 而且 /admin 本身已经是老的单文件审核页(static/admin.html)。
-ADMIN_WEB_DIR = STATIC_DIR / "admin"
 
 
 @app.get("/admin-console", include_in_schema=False)
 @app.get("/admin-console/{path:path}", include_in_schema=False)
-async def admin_console(path: str = ""):
-    if not ADMIN_WEB_DIR.exists():
-        raise HTTPException(404, "平台后台尚未构建(admin-web/ 执行 npm run build)")
-    candidate = (ADMIN_WEB_DIR / path).resolve()
-    # 防路径穿越:只允许构建目录内的文件
-    if path and candidate.is_file() \
-            and candidate.is_relative_to(ADMIN_WEB_DIR.resolve()):
-        return FileResponse(candidate)
-    return FileResponse(ADMIN_WEB_DIR / "index.html")
+async def admin_console_moved(path: str = ""):
+    """后台已经搬到 /admin(见 AdminConsoleMiddleware)。这里只留跳转。
+
+    301 而不是 302:这次搬家是定的,不会再搬回来 ——
+    让浏览器和搜索引擎把它记住,老书签点一次就换过去了。
+    """
+    from fastapi.responses import RedirectResponse
+
+    target = f"/admin/{path}" if path else "/admin"
+    return RedirectResponse(target, status_code=301)
 
 
 @app.get("/mini-app-bridge.js", include_in_schema=False)

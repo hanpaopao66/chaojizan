@@ -137,6 +137,36 @@ _clear_demo_rider_backlog()
 _reset_demo_rider_transfer_count()
 
 
+def request_raw(method: str, path: str, *, headers: dict | None = None,
+                allow_redirects: bool = True) -> tuple[int, str, str]:
+    """发一个**不解析 JSON** 的请求,返回 (状态码, Content-Type, 正文)。
+
+    `call()` 假定返回体是 JSON。而有些东西要验的恰恰是
+    「它到底是不是 JSON」——比如 /admin 既服务后台页面又服务管理接口,
+    分流对不对只能靠看 Content-Type。
+    """
+    import urllib.error
+    import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **kw):
+            return None
+
+    url = f"{BASE}{path}"
+    req = urllib.request.Request(url, method=method)
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    opener = (urllib.request.build_opener()
+              if allow_redirects else urllib.request.build_opener(_NoRedirect))
+    try:
+        with opener.open(req) as resp:
+            return (resp.status, resp.headers.get("content-type", ""),
+                    resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        return (e.code, e.headers.get("content-type", ""),
+                e.read().decode("utf-8", "replace"))
+
+
 def fresh_phone(prefix: str = "137") -> str:
     """搓一个几乎不撞库的测试手机号。
 
