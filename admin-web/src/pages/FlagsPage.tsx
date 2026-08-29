@@ -24,12 +24,30 @@ interface FlagMeta {
   title: string
   /** 打开(或填上)之后会发生什么。写后果,不写字段含义 */
   effect: string
-  kind: 'switch' | 'text'
+  kind: 'switch' | 'text' | 'channels'
   placeholder?: string
   danger?: boolean
 }
 
+/** 频道注册表 —— 和 packages/shared/lib/src/channels.dart 的 kChannels 对应。
+ *
+ * 这里只列 key 和名字,**不复制那边的色板和副标题** —— 抄一份就会有一天
+ * 后台写的名字和用户看到的对不上。要加频道时两边都要加,而两边都加
+ * 好过一边悄悄漂移。 */
+const CHANNELS: { key: string; name: string }[] = [
+  { key: 'food', name: '点外卖' },
+  { key: 'stay', name: '住宿' },
+  { key: 'voucher', name: '超值团购' },
+  { key: 'errand', name: '帮我送(跑腿)' },
+]
+
 const METAS: FlagMeta[] = [
+  {
+    key: 'channels_enabled', title: '首页显示哪些业务', kind: 'channels',
+    danger: true,
+    effect: '用户端首页金刚区只显示勾上的;去掉的业务用户进不去(服务端接口仍在,'
+      + '已有订单不受影响)。改完立即生效,不用发版',
+  },
   {
     key: 'weather_shutdown', title: '极端天气停运', kind: 'switch', danger: true,
     effect: '立刻停止接新单,已接的单兜底取消线缩短,三端挂横幅,在线骑手收到安全提醒',
@@ -173,7 +191,32 @@ export default function FlagsPage() {
                     </div>
                   )}
                 </div>
-                {m.kind === 'switch' ? (
+                {m.kind === 'channels' ? (
+                  // **勾选,不让人手打 key。** 打错一个字的后果是那个频道
+                  // 从首页消失,而后台显示得好好的 —— 这种错没人查得出来
+                  <Space wrap>
+                    {CHANNELS.map((c) => {
+                      const on = cur.split(',').includes(c.key)
+                      return (
+                        <Tag.CheckableTag
+                          key={c.key}
+                          checked={on}
+                          onChange={(next) => {
+                            const set = new Set(
+                              cur.split(',').filter(Boolean))
+                            next ? set.add(c.key) : set.delete(c.key)
+                            // 按注册顺序输出,不按点击顺序 ——
+                            // 否则每次改动都产生一条"看起来变了"的留痕
+                            change(m, CHANNELS.filter((x) => set.has(x.key))
+                              .map((x) => x.key).join(','))
+                          }}
+                        >
+                          {c.name}
+                        </Tag.CheckableTag>
+                      )
+                    })}
+                  </Space>
+                ) : m.kind === 'switch' ? (
                   <Switch
                     checked={cur === 'on'}
                     onChange={(v) => change(m, v ? 'on' : 'off')}

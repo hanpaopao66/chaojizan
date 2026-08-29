@@ -1341,6 +1341,10 @@ _KNOWN_FLAGS = {
     # 写错也硬卡是刻意的 —— 配置错误不该让合规卡点形同虚设
     "rider_training_grace_until",
     "open_cities",          # 开城清单(逗号分隔城市名,空=全部开放)
+    # 首页金刚区显示哪些频道(逗号分隔 key,如 "food,voucher")。
+    # 「这次先只上外卖和团购」这种决定会反复变,做成编译期常量意味着
+    # 每变一次发一版 App、等审核三天 —— 那不是开关该有的成本
+    "channels_enabled",
     # 要求骑手持健康证的城市(逗号分隔)。**默认空 = 都不要求** ——
     # 国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员",
     # 四川已明确取消),只有查证过本地有规章的城市才加进来。
@@ -1358,8 +1362,12 @@ async def list_flags(
 ):
     rows = (await db.scalars(select(PlatformFlag))).all()
     current = {r.key: r.value for r in rows}
+    from ..services.flags import CHANNELS_FALLBACK
     defaults = {"night_curfew_hours": "01:00-06:00",
-                "screen_show_gmv": "on"}  # 大屏金额缺省展示,与 /screen 口径一致
+                "screen_show_gmv": "on",  # 大屏金额缺省展示,与 /screen 口径一致
+                # **从 services.flags 读,不另写一份** —— 抄一份就会有一天
+                # 后台显示的默认值和用户端实际看到的不一样
+                "channels_enabled": ",".join(CHANNELS_FALLBACK)}
     return {k: current.get(k, defaults.get(k, "off")) for k in _KNOWN_FLAGS}
 
 
@@ -1420,6 +1428,18 @@ async def set_flag(
         value = ",".join(
             c.strip() for c in value.replace("，", ",").split(",")
             if c.strip())[:200]
+    elif key == "channels_enabled":
+        # **只接受已注册的频道 key。** 打错一个字的后果是那个频道
+        # 从首页消失,而后台显示得好好的 —— 这种错没人查得出来。
+        known = {"food", "stay", "voucher", "errand"}
+        keys = [k.strip() for k in value.replace("，", ",").split(",")
+                if k.strip()]
+        bad = [k for k in keys if k not in known]
+        if bad:
+            raise HTTPException(
+                422, f"不认识的频道:{'、'.join(bad)};"
+                     f"可用的是 {'、'.join(sorted(known))}")
+        value = ",".join(keys)
     elif key == "rider_training_grace_until":
         # 宽限截止日:ISO 日期或空(空=立即生效)。
         # 写错**不能**当"没配置"处理 —— 运行时 _parse_grace 解析失败会硬卡,

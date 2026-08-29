@@ -117,3 +117,35 @@ async def health_cert_cities(db: AsyncSession) -> list[str]:
     if flag is None or not flag.value.strip():
         return []
     return [c.strip() for c in flag.value.split(",") if c.strip()]
+
+
+#: 频道开关的 flag 键。值是逗号分隔的 key 列表,如 "food,voucher"。
+CHANNELS_FLAG = "channels_enabled"
+
+#: 配不出来时的兜底。**保守取值** —— 读不到配置时宁可少显示,
+#: 不能把已经决定隐藏的业务露出来。
+#:
+#: 「读不到就显示全部」看着更友好,实际是把故障变成事故:
+#: 网络抖一下,下架的业务就在首页复活了。
+CHANNELS_FALLBACK = ("food", "voucher")
+
+
+async def enabled_channels(db: AsyncSession) -> list[str]:
+    """哪些频道对用户可见。管理员在后台改,**立即生效,不用发版**。
+
+    ## 为什么不做成编译期常量
+
+    项目里本来有一个 `feature_flags.dart` 的编译期开关(应用商店审核用)。
+    但「这次先只上外卖和团购」这种决定会反复变 —— 每变一次发一版 App,
+    等审核三天,这不是开关该有的成本。
+
+    ## 空值的含义
+
+    从来没配过(查不到这一行)= 用兜底;配成空串 = **一个频道都不显示**。
+    这两件事不一样,所以判据是「有没有这一行」,不是「值是不是空的」——
+    否则管理员想全关的时候会得到兜底那两个,而他以为自己关掉了。
+    """
+    flag = await db.get(PlatformFlag, CHANNELS_FLAG)
+    if flag is None:
+        return list(CHANNELS_FALLBACK)
+    return [k.strip() for k in flag.value.split(",") if k.strip()]

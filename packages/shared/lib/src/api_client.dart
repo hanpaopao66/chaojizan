@@ -532,6 +532,14 @@ class ApiClient {
     return await _request('GET', '/auth/slider') as Map<String, dynamic>;
   }
 
+  /// 首页金刚区显示哪些频道。**不需要登录**(首页在登录前就要画出来)。
+  ///
+  /// 管理员在后台改,立即生效,不用发版。
+  Future<List<String>> visibleChannels() async {
+    final data = await _request('GET', '/channels') as Map<String, dynamic>;
+    return (data['enabled'] as List? ?? []).cast<String>();
+  }
+
   // ---------- AI 助手令牌(MCP 接入) ----------
   //
   // **它付不了款。** 助手能把单创建到「待支付」为止,付款那一下在用户

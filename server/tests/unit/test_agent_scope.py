@@ -127,3 +127,41 @@ class Test前缀匹配不能被绕过:
     def test_前缀相近的别的路径不会被误放(self):
         """`/orders-export` 这种以 /orders 开头但不是它的路径。"""
         assert not agent_can("POST", "/orders-export")
+
+
+class Test认证入口的签名不能被位置传参绑死:
+    """`get_current_user` 加参数时,按位置调用它的地方会静默错位。
+
+    实际发生过:给它加了 `request` 作第一个参数,而 `get_current_user_optional`
+    是 `get_current_user(credentials, db)` 位置传参 —— credentials 落到
+    request 位、db 落到 credentials 位,运行时
+    `AsyncSession object has no attribute 'credentials'`,500。
+
+    而这条路径只有「登录用户访问私密的老 /uploads URL」才走到:
+    单测碰不到、大部分 e2e 碰不到,**全套跑到第 51 个套件才炸出来**。
+
+    所以钉两件事:调用点用关键字传参;两个函数的参数名保持一致。
+    """
+
+    def test_optional_按关键字调用(self):
+        import inspect
+        import re
+        from app import security
+        src = inspect.getsource(security.get_current_user_optional)
+        src = re.sub(r'"""(?:.|\n)*?"""', "", src)
+        src = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
+        assert "get_current_user(" in src, "optional 不再委托给 get_current_user?"
+        call = src[src.index("get_current_user("):]
+        for kw in ("request=", "credentials=", "db="):
+            assert kw in call, (
+                f"委托调用没有用关键字传 {kw} —— "
+                f"给 get_current_user 加参数时会静默错位,而错位只在冷门路径上炸")
+
+    def test_两个入口的参数名一致(self):
+        """名字不一致的话,关键字传参会 TypeError —— 那反而是好事(当场炸),
+        但更好的是根本别不一致。"""
+        import inspect
+        from app import security
+        a = list(inspect.signature(security.get_current_user).parameters)
+        b = list(inspect.signature(security.get_current_user_optional).parameters)
+        assert a == b, f"两个认证入口的参数不一致:{a} vs {b}"

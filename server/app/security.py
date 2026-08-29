@@ -140,6 +140,7 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
@@ -152,7 +153,17 @@ async def get_current_user_optional(
     if credentials is None:
         return None
     try:
-        return await get_current_user(credentials, db)
+        # **按关键字传,不按位置。**
+        #
+        # 原来是 `get_current_user(credentials, db)` —— 位置传参。
+        # 给 get_current_user 加了 `request` 作第一个参数之后,
+        # credentials 落到了 request 位、db 落到了 credentials 位,
+        # 于是 `AsyncSession object has no attribute 'credentials'`,500。
+        #
+        # 而这条路径只有「登录用户访问私密的老 /uploads URL」才走到,
+        # 单测和大部分 e2e 都碰不到 —— 全套跑到第 51 个套件才炸出来。
+        return await get_current_user(
+            request=request, credentials=credentials, db=db)
     except HTTPException:
         return None
 

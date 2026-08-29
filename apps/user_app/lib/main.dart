@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'channel_config.dart';
 import 'agent_tokens_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
@@ -1368,7 +1369,13 @@ class _MerchantListViewState extends State<MerchantListView>
           // 排版全在 shared 的 SzChannelGrid 里(有测试锁着:末行不孤单、
           // 频道多了自动换聚合式、长辈版 1.4× 下不撑爆)。
           // 这里只管点了之后去哪 —— 那是各端自己的事
-          child: SzChannelGrid(onTap: (ch) async {
+          // 显示哪些频道由**后台配置**决定(ChannelConfig)——
+          // 「这次先只上外卖和团购」这种决定会反复变,做成编译期常量
+          // 意味着每变一次发一版 App、等审核三天。
+          // 排版规则(列数、末行不孤单)照旧全在 SzChannelGrid 里
+          child: SzChannelGrid(
+              channels: ChannelConfig.visible(kChannels),
+              onTap: (ch) async {
             // 跑腿单一建出来就是「待支付」,必须把订单接回来直接进支付。
             // 之前这里和其他频道一样 push 完就不管返回值,
             // 结果用户填完地址、看完报价、点了下单,页面一关单子就没了
@@ -3717,16 +3724,22 @@ class _OrdersTabState extends State<OrdersTab> {
           // 频道多起来后这里会换成可横滑的频道条,现在两段够用
           SzChannelChip(_segment == 0 ? 'food' : 'stay', dense: false),
           const SizedBox(width: 10),
-          Expanded(
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('点外卖')),
-                ButtonSegment(value: 1, label: Text('住宿')),
-              ],
-              selected: {_segment},
-              onSelectionChanged: (s) => setState(() => _segment = s.first),
-            ),
-          ),
+          // 住宿关掉之后这里只剩一个分段 —— 一个选项的分段器是纯噪音,
+          // 整条藏掉。**判据和金刚区同一个** ChannelConfig,
+          // 不然会出现「首页没有住宿,订单页有个空的住宿页签」
+          if (ChannelConfig.current.contains('stay'))
+            Expanded(
+              child: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('点外卖')),
+                  ButtonSegment(value: 1, label: Text('住宿')),
+                ],
+                selected: {_segment},
+                onSelectionChanged: (s) => setState(() => _segment = s.first),
+              ),
+            )
+          else
+            const Spacer(),
           TextButton(
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                 builder: (_) => MyVouchersPage(api: widget.api))),

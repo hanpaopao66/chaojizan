@@ -119,6 +119,7 @@ test:
 	  && python -m tests.e2e_order_flag \
 	  && python -m tests.e2e_agent_token \
 	  && python -m tests.e2e_api_console \
+	  && python -m tests.e2e_channels_flag \
 	  && python -m tests.e2e_merchant_promo && python -m tests.e2e_home_filters \
 	  && python -m tests.e2e_rider_new_order_push \
 	  && python -m tests.e2e_remote_copy \

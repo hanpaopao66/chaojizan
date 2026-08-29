@@ -26,6 +26,26 @@ from ..security import get_current_user, require_role
 router = APIRouter(tags=["平台"])
 
 
+# ---------- 频道开关(金刚区显示哪些业务) ----------
+
+@router.get("/channels")
+async def visible_channels(db: AsyncSession = Depends(get_db)):
+    """首页金刚区显示哪些频道。**不需要登录** —— 首页在登录前就要画出来。
+
+    管理员在后台改,立即生效,不用发版。客户端拿到之后缓存在本地,
+    下次冷启动先用缓存画,再后台刷新 —— 首页不能等这个请求。
+
+    ## 读不到的时候显示什么
+
+    客户端有缓存用缓存,没缓存用它内置的兜底(和服务端 CHANNELS_FALLBACK
+    一致)。两边都**取保守值** —— 「读不到就显示全部」看着友好,
+    实际是把一次网络抖动变成「已下架的业务在首页复活」。
+    """
+    from ..services.flags import enabled_channels
+
+    return {"enabled": await enabled_channels(db)}
+
+
 # ---------- 开屏运营位 ----------
 @router.get("/splash")
 async def active_splash(
