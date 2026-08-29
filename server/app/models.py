@@ -3008,3 +3008,43 @@ class QueueEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
+
+
+class AgentToken(Base):
+    """给 AI 助手用的**受限令牌**(MCP 接入)。
+
+    ## 为什么不复用登录 token
+
+    「点单」意味着一个 agent 能花用户的钱。登录 token 什么都能干 ——
+    支付、退款、改地址、提现 —— 把它交给一个自动化程序,泄露的后果是
+    钱直接没了。
+
+    这个令牌**只能做只读的事,加上「创建一张待支付订单」**。付款那一下
+    永远在用户自己的 App 里,由人按。所以即使它泄露:
+    对方能看到你的订单、能替你创建一张待付的单(15 分钟不付自动关闭),
+    **但花不掉你一分钱**。
+
+    能力范围写在 security.AGENT_ALLOWED 里,**默认拒绝** ——
+    以后新加的接口自动不对 agent 开放,不需要谁记得去加限制。
+
+    ## 为什么要落库而不是只签 JWT
+
+    JWT 自己吊销不了。落一行是为了两件事:用户能在设置里看到「有哪些
+    助手连着我的账号」,以及能**当场吊销**其中一个。
+    """
+
+    __tablename__ = "agent_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    #: JWT 的 jti。校验时按它查这张表,查不到或已吊销一律 401
+    jti: Mapped[str] = mapped_column(String(43), unique=True, index=True)
+    #: 用户自己起的名字(「我的 Claude」),用来分辨吊销哪一个
+    name: Mapped[str] = mapped_column(String(40), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())

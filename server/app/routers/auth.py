@@ -1,7 +1,12 @@
 import logging
 import secrets
+from datetime import datetime, timezone
+
+import jwt
+from pydantic import BaseModel, Field
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func
 from sqlalchemy import func as sa_func
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -179,6 +184,99 @@ def dev_code_visible() -> bool:
     **不收参数是故意的** —— 结构上就不可能再把发送结果混进判据。
     """
     return settings.is_dev and not settings.sms_configured
+
+
+class AgentTokenIn(BaseModel):
+    name: str = Field(default="", max_length=40)
+    days: int = Field(default=90, ge=1, le=365)
+
+
+@router.post("/agent-tokens")
+async def create_agent_token(
+    payload: AgentTokenIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """签发一个 AI 助手令牌(MCP 接入)。**明文只在这一刻给一次。**
+
+    ## 它能做什么、不能做什么
+
+    能:查店、查菜、看配送费、看自己的订单、**创建一张待支付订单**。
+    不能:**付款**、退款、改地址、申诉、动地址簿、钱包与提现。
+
+    范围由 security.AGENT_ALLOWED 收口,**默认拒绝** —— 以后新加的接口
+    自动不对助手开放。
+
+    ## 为什么把「付款」留在外面
+
+    「点单」意味着一个自动化程序能花你的钱。这里给到「创建待支付订单」
+    为止,付款那一下永远在你自己的 App 里由你按。所以即使令牌泄露,
+    对方能替你创建一张 15 分钟后自动关闭的待付单,**但花不掉你一分钱**。
+    """
+    import secrets as _secrets
+    from datetime import timedelta
+
+    from ..models import AgentToken
+
+    # 一个账号最多挂 10 个助手 —— 超过多半是忘了吊销,而不是真有 10 个助手
+    live = await db.scalar(select(func.count()).select_from(AgentToken).where(
+        AgentToken.user_id == user.id, AgentToken.revoked_at.is_(None)))
+    if (live or 0) >= 10:
+        raise HTTPException(409, "最多同时挂 10 个助手令牌,先吊销用不到的")
+
+    jti = _secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(days=payload.days)
+    db.add(AgentToken(user_id=user.id, jti=jti,
+                      name=payload.name.strip()[:40] or "未命名助手",
+                      expires_at=expires))
+    await db.commit()
+    token = jwt.encode({
+        "sub": str(user.id), "role": user.role.value, "scope": "agent",
+        "jti": jti, "exp": int(expires.timestamp()),
+    }, settings.jwt_secret, algorithm="HS256")
+    return {
+        "token": token,
+        "expires_at": expires.isoformat(),
+        "note": ("**这串明文只显示这一次**,请立刻复制到助手的配置里。"
+                 "它付不了款 —— 助手下完单,你在 App 里确认支付。"),
+    }
+
+
+@router.get("/agent-tokens")
+async def list_agent_tokens(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """有哪些助手连着我的账号。"""
+    from ..models import AgentToken
+
+    rows = (await db.scalars(select(AgentToken).where(
+        AgentToken.user_id == user.id).order_by(AgentToken.id.desc()))).all()
+    return [{
+        "id": r.id, "name": r.name,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "expires_at": r.expires_at.isoformat(),
+        "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+        "revoked": r.revoked_at is not None,
+    } for r in rows]
+
+
+@router.delete("/agent-tokens/{token_id}")
+async def revoke_agent_token(
+    token_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """吊销。下一次调用就会 401 —— 校验每次都回库查这一行。"""
+    from ..models import AgentToken
+
+    row = await db.get(AgentToken, token_id)
+    if row is None or row.user_id != user.id:
+        raise HTTPException(404, "没有这个助手令牌")
+    if row.revoked_at is None:
+        row.revoked_at = datetime.now(timezone.utc)
+        await db.commit()
+    return {"ok": True}
 
 
 @router.post("/sms-code")
