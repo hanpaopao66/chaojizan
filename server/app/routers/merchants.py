@@ -2216,6 +2216,88 @@ async def set_customer_note(
     return {"ok": True, "note": note, "tags": tags}
 
 
+# ---------- 开放接口的用量与日志(开发者后台) ----------
+
+@router.get("/me/api-usage")
+async def my_api_usage(
+    days: int = Query(default=7, ge=1, le=30),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的 API Key 最近的用量:调用量、错误率、被限流次数。
+
+    **错误率和限流分开报**,因为它们要做的事完全不同:
+    错误率高多半是集成写错了(看日志改代码),
+    限流高是调得太密(改成退避重试)。混成一个"失败率"两边都指导不了。
+    """
+    from datetime import timedelta
+
+    from ..models import ApiCall
+
+    shop = await _my_shop_or_404(db, user)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    row = (await db.execute(text("""
+        SELECT count(*) AS total,
+               count(*) FILTER (WHERE status >= 400 AND status <> 429) AS errors,
+               count(*) FILTER (WHERE status = 429) AS throttled,
+               coalesce(round(avg(duration_ms)), 0) AS avg_ms,
+               coalesce(max(duration_ms), 0) AS max_ms
+        FROM api_calls
+        WHERE kind = 'key' AND merchant_id = :m AND created_at >= :s
+    """), {"m": shop.id, "s": since})).first()
+    total = int(row.total or 0)
+    by_day = [{"day": str(r[0]), "calls": r[1]} for r in (await db.execute(
+        text("""
+        SELECT created_at::date AS d, count(*) FROM api_calls
+        WHERE kind = 'key' AND merchant_id = :m AND created_at >= :s
+        GROUP BY 1 ORDER BY 1
+    """), {"m": shop.id, "s": since})).all()]
+    return {
+        "days": days,
+        "total": total,
+        "errors": int(row.errors or 0),
+        "throttled": int(row.throttled or 0),
+        "error_ratio": round((row.errors or 0) / total, 3) if total else 0.0,
+        "avg_ms": int(row.avg_ms or 0),
+        "max_ms": int(row.max_ms or 0),
+        "by_day": by_day,
+        "note": ("错误率高多半是集成写错了,看下面的日志改代码;"
+                 "限流高是调得太密,改成退避重试。限流额度公开在 docs/API.md。"),
+    }
+
+
+@router.get("/me/api-logs")
+async def my_api_logs(
+    limit: int = Query(default=100, ge=1, le=500),
+    status_min: int = Query(default=0, ge=0, le=599),
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """最近的调用记录。**不含请求体和响应体。**
+
+    里面是收货地址、手机号、备注里的忌口 —— 为了让开发者好排查而把这些
+    多存一份,是拿用户的隐私补贴开发体验。方法、路径、状态码、耗时,
+    足够回答「我的集成为什么失败」;答不了的那部分,复现一次比长期存着划算。
+    """
+    from ..models import ApiCall
+
+    shop = await _my_shop_or_404(db, user)
+    q = select(ApiCall).where(ApiCall.kind == "key",
+                              ApiCall.merchant_id == shop.id)
+    if status_min:
+        q = q.where(ApiCall.status >= status_min)   # 只看出错的
+    rows = (await db.scalars(
+        q.order_by(ApiCall.id.desc()).limit(limit))).all()
+    return {
+        "items": [{
+            "method": r.method, "path": r.path, "status": r.status,
+            "duration_ms": r.duration_ms,
+            "at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows],
+        "note": "不记请求体和响应体 —— 那里面有顾客的地址和手机号。",
+    }
+
+
 # ---------- 异常订单标记(只上报,不给拉黑权) ----------
 
 @router.post("/me/orders/{order_no}/flag")

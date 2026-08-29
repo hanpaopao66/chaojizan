@@ -119,6 +119,8 @@ async def get_current_user(
     # 漏一个就是一条没人看守的路。
     if payload.get("scope") == "agent":
         await _check_agent_token(db, payload)
+        # 打个标,记录交给中间件 —— 只有那儿同时拿得到状态码和耗时
+        request.state.api_client = ("agent", None, int(payload["sub"]))
         if not agent_can(request.method, request.url.path):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,

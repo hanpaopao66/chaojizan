@@ -25,7 +25,7 @@ import pytest
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.main import (LogUnhandledErrorsMiddleware, ObserveAppBuildMiddleware,
-                      SelectShopMiddleware, app)
+                      RecordApiCallMiddleware, SelectShopMiddleware, app)
 
 
 class Test中间件顺序:
@@ -34,8 +34,19 @@ class Test中间件顺序:
         反过来的话门店选择自己抛的异常就没人记了。"""
         names = [m.cls.__name__ for m in app.user_middleware]
         assert names == ["CORSMiddleware", "LogUnhandledErrorsMiddleware",
-                         "ObserveAppBuildMiddleware", "SelectShopMiddleware"], \
+                         "ObserveAppBuildMiddleware", "SelectShopMiddleware",
+                         "RecordApiCallMiddleware"], \
             f"中间件顺序变了:{names}"
+
+    def test_调用日志在最内(self):
+        """它要贴着路由,才量得准**路由自己**花了多久 ——
+        套在外面量出来的是「路由 + 外面几层」,那个数指导不了任何优化。
+
+        代价是路由抛未处理异常时它拿不到状态码,所以那一支里
+        显式记 500(见 RecordApiCallMiddleware 的 try/except)。
+        """
+        names = [m.cls.__name__ for m in app.user_middleware]
+        assert names[-1] == "RecordApiCallMiddleware"
 
     def test_不再用BaseHTTPMiddleware(self):
         """这是这次改动的全部意义。有人图省事加一个

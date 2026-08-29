@@ -242,6 +242,37 @@ async def create_agent_token(
     }
 
 
+@router.get("/agent-activity")
+async def agent_activity(
+    limit: int = 50,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """我的 AI 助手最近做了什么。
+
+    **一个能替你下单的东西,你得看得见它在干嘛。** 这不是调试功能 ——
+    平台把「助手花不掉你的钱」说给了用户,那就该让用户自己核对,
+    而不是让他信一句话。
+
+    只有方法、路径、状态码、时间,**没有请求体** —— 那里面是你自己的
+    地址和手机号,为了让你看得清而多存一份没有道理。
+    """
+    from ..models import ApiCall
+
+    rows = (await db.scalars(
+        select(ApiCall).where(ApiCall.kind == "agent",
+                              ApiCall.user_id == user.id)
+        .order_by(ApiCall.id.desc()).limit(max(1, min(limit, 200))))).all()
+    return {
+        "items": [{
+            "method": r.method, "path": r.path, "status": r.status,
+            "at": r.created_at.isoformat() if r.created_at else None,
+        } for r in rows],
+        "note": ("助手做过的每一次调用都在这里。它没有支付能力 —— "
+                 "如果你在这儿看到过付款相关的记录,那是 bug,请告诉我们。"),
+    }
+
+
 @router.get("/agent-tokens")
 async def list_agent_tokens(
     user: User = Depends(get_current_user),

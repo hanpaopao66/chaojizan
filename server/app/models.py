@@ -3048,3 +3048,44 @@ class AgentToken(Base):
         DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+
+
+class ApiCall(Base):
+    """开放接口的调用记录 —— 给开发者排查用。
+
+    ## 只记「发生了什么」,不记「内容是什么」
+
+    **没有请求体,没有响应体。** 里面是收货地址、手机号、备注里的忌口 ——
+    为了让开发者好排查而把这些多存一份,是拿用户的隐私补贴开发体验。
+    方法、路径、状态码、耗时,足够回答「我的集成为什么失败」这个问题;
+    答不了的那部分,让开发者复现一次,比长期存着划算。
+
+    ## 两种调用方都记
+
+    `kind='key'` 是商家的 POS/ERP,`kind='agent'` 是用户的 AI 助手。
+    记 agent 那一类不只是为了排查:用户有权知道**自己的助手做过什么** ——
+    一个能替你下单的东西,你得看得见它在干嘛。
+
+    ## 会长,所以要清
+
+    和 push_logs 一样进 sweep_log_retention 的清理计划。
+    只写不删的表迟早把备份撑爆,而这张表的价值随时间掉得很快 ——
+    上个月的 429 对今天的排查没有意义。
+    """
+
+    __tablename__ = "api_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: key = 商家 API Key;agent = 用户的 AI 助手令牌
+    kind: Mapped[str] = mapped_column(String(8), index=True)
+    merchant_id: Mapped[int | None] = mapped_column(Integer, nullable=True,
+                                                    index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True,
+                                                index=True)
+    method: Mapped[str] = mapped_column(String(8))
+    path: Mapped[str] = mapped_column(String(200))
+    status: Mapped[int] = mapped_column(Integer, index=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )

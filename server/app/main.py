@@ -255,6 +255,95 @@ class LogUnhandledErrorsMiddleware:
 
 # 加入顺序 = 由内到外,和原先三个装饰器的嵌套顺序保持一致:
 # CORS → 异常留痕 → 版本上报 → 门店选择 → 路由
+class RecordApiCallMiddleware:
+    """记录开放接口的调用(开发者后台的「调用日志」)。
+
+    ## 为什么在中间件里记
+
+    只有这一层同时拿得到**状态码**和**耗时** —— 认证层知道是谁在调,
+    但那时请求还没跑完。所以认证层往 `request.state.api_client` 打个标,
+    这里读标 + 状态码 + 耗时,凑齐了才写。
+
+    ## 只记打了标的
+
+    没打标 = 普通 App 请求,不记。开放接口的量级很小(POS 每分钟几次、
+    助手更少),而全站流量记下来是另一个数量级 —— 那会变成一张
+    只有成本没有读者的表。
+
+    ## 写失败不能影响请求
+
+    日志是附加价值,不是履约的一部分。写不进去就算了,记一行日志 ——
+    让排查工具把主流程拖挂,是本末倒置。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        import time as _t
+
+        started = _t.monotonic()
+        status = {"code": 0}
+
+        async def _send(message):
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+            await send(message)
+
+        # try/finally:路由抛未处理异常时,`await` 之后的代码根本不会执行 ——
+        # 那样 500 一条都记不到,而「我的集成一直 500」正是最需要看见的一类。
+        # 异常照常往外抛(外面那层 LogUnhandledErrorsMiddleware 要留痕)。
+        try:
+            await self.app(scope, receive, _send)
+        except Exception:
+            if not status["code"]:
+                status["code"] = 500
+            await self._record(scope, status["code"], started)
+            raise
+        await self._record(scope, status["code"], started)
+
+    async def _record(self, scope, code: int, started: float) -> None:
+        """**同步写,不是即发即忘。**
+
+        丢后台跑看着更快,但代价有两个:`create_task`/`ensure_future` 的
+        返回值不留引用会被 GC 提前回收、任务无声消失(push.spawn 的注释
+        专门记过这个坑);而且读日志的人可能比写入更快到 —— 表现是
+        「我明明调了,日志里没有」,那正是这个功能要消灭的困惑。
+
+        开放接口的量级很小(POS 每几秒一次、助手更少),一次 INSERT
+        几毫秒。这里确定性比那几毫秒值钱。
+        """
+        import time as _t
+
+        tag = (scope.get("state") or {}).get("api_client")
+        if not tag:
+            return
+        ms = int((_t.monotonic() - started) * 1000)
+        kind, merchant_id, user_id = tag
+        try:
+            from .db import SessionLocal
+            from .models import ApiCall
+            async with SessionLocal() as db:
+                db.add(ApiCall(
+                    kind=kind, merchant_id=merchant_id, user_id=user_id,
+                    method=scope.get("method", ""),
+                    # **只记路径,不记查询串** —— 里面可能有坐标和关键词
+                    path=scope.get("path", "")[:200],
+                    status=code, duration_ms=ms))
+                await db.commit()
+        except Exception:
+            # main.py 没有模块级 logger —— 第一版直接写 `logger.warning`,
+            # 而它在 except 里,**只有写失败时才会执行**,正常跑一辈子也
+            # 碰不到那行 NameError。这类"只在出错路径上才炸"的代码,
+            # 是让排查工具自己变成故障源的典型形状
+            logging.getLogger("superz.apicall").warning(
+                "调用日志写入失败(不影响请求)", exc_info=True)
+
+
+app.add_middleware(RecordApiCallMiddleware)
 app.add_middleware(SelectShopMiddleware)
 app.add_middleware(ObserveAppBuildMiddleware)
 app.add_middleware(LogUnhandledErrorsMiddleware)

@@ -17,7 +17,8 @@ import hashlib
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import (APIRouter, Depends, Header, HTTPException, Query,
+                     Request)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +44,7 @@ def new_key() -> tuple[str, str, str]:
 
 
 async def open_merchant(
+    request: Request,
     authorization: str = Header(default=""),
     db: AsyncSession = Depends(get_db),
 ) -> Merchant:
@@ -52,11 +54,22 @@ async def open_merchant(
         token = authorization[7:].strip()
     if not token.startswith(KEY_PREFIX):
         raise HTTPException(401, "缺少或非法的 API Key")
+    # **先不带 revoked 过滤地查一次。**
+    #
+    # 认得出是谁的失败要记进调用日志 —— 「我的 Key 怎么突然不好使了」
+    # 是接入方最常问的问题,而答案(被吊销了 / 店铺被停用了)只有在日志里
+    # 看得见才有用。对外的说法仍然是同一句,不区分 —— 那是给探测者看的。
+    #
+    # 完全不认识的 Key **不记**:否则任何人拿垃圾请求就能把这张表撑爆。
+    # 代价是「日志里一条都没有」这种情况需要解释,所以写进了 docs/API.md:
+    # 一条都没有 = 你的 Key 根本没被认出来。
     key = await db.scalar(
         select(MerchantApiKey).where(
-            MerchantApiKey.token_hash == hash_key(token),
-            MerchantApiKey.revoked_at.is_(None)))
+            MerchantApiKey.token_hash == hash_key(token)))
     if key is None:
+        raise HTTPException(401, "API Key 无效或已吊销")
+    request.state.api_client = ("key", key.merchant_id, None)
+    if key.revoked_at is not None:
         raise HTTPException(401, "API Key 无效或已吊销")
     shop = await db.get(Merchant, key.merchant_id)
     # 店铺被驳回/下架后,已发出的 Key 也不该继续拉单
