@@ -2253,6 +2253,76 @@ async def delete_moderation_word(
 
 # ---------- 防刷单风控(只标记不拦截,人工复核) ----------
 
+@router.get("/rider-stats")
+async def rider_daily_stats(
+    days: int = 14,
+    rider_id: int | None = None,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手每日汇总(#310)。**统计口,不是考核口。**
+
+    不传 rider_id = 全平台按天汇总(看运力);
+    传了 = 某个人的时间线(处理他的申诉、核对他的账时用)。
+
+    这里**不排名、不打分、不给「超过了百分之多少」** —— 一旦出现,
+    它就从"平台跑得怎么样"变成了另一根鞭子,而平台既定立场是
+    不做骑手评分体系(见 /transparency/dispatch 的 never_do)。
+    """
+    from datetime import date as _date
+    from ..models import RiderDailyStat
+    from ..services.rider_stats import bj_day
+
+    days = max(1, min(days, 90))
+    since = bj_day() - timedelta(days=days - 1)
+
+    if rider_id is not None:
+        rows = (await db.scalars(
+            select(RiderDailyStat)
+            .where(RiderDailyStat.rider_id == rider_id,
+                   RiderDailyStat.day >= since)
+            .order_by(RiderDailyStat.day.desc()))).all()
+        return {
+            "scope": "rider", "rider_id": rider_id,
+            "items": [{
+                "day": r.day.isoformat(), "orders": r.orders,
+                "earned_cents": r.earned_cents,
+                "online_minutes": r.online_minutes, "meters": r.meters,
+                "wait_minutes": r.wait_minutes, "transfers": r.transfers,
+                "issues": r.issues,
+                "filtered_by_prefs": r.filtered_by_prefs,
+            } for r in rows],
+            "note": "统计留存,不用于考核;里程是计价里程(取餐点→收货地)",
+        }
+
+    rows = (await db.execute(
+        select(RiderDailyStat.day,
+               func.count(func.distinct(RiderDailyStat.rider_id)),
+               func.coalesce(func.sum(RiderDailyStat.orders), 0),
+               func.coalesce(func.sum(RiderDailyStat.earned_cents), 0),
+               func.coalesce(func.sum(RiderDailyStat.online_minutes), 0),
+               func.coalesce(func.sum(RiderDailyStat.meters), 0),
+               func.coalesce(func.sum(RiderDailyStat.wait_minutes), 0),
+               func.coalesce(func.sum(RiderDailyStat.filtered_by_prefs), 0))
+        .where(RiderDailyStat.day >= since)
+        .group_by(RiderDailyStat.day)
+        .order_by(RiderDailyStat.day.desc()))).all()
+    return {
+        "scope": "platform",
+        "items": [{
+            "day": d.isoformat(), "active_riders": riders, "orders": orders,
+            "earned_cents": cents, "online_minutes": minutes,
+            "meters": meters, "wait_minutes": wait,
+            # 被自己偏好挡掉的单:这个数高说明很多人在"没单跑"而
+            # 实际上是被自己的开关挡住了 —— 该去改产品,不是去催骑手
+            "filtered_by_prefs": filtered,
+        } for (d, riders, orders, cents, minutes, meters, wait, filtered)
+            in rows],
+        "note": "统计留存,不用于考核。filtered_by_prefs 高说明"
+                "很多人被自己的接单偏好挡住了,该改产品而不是催人",
+    }
+
+
 # ---------- 恶劣天气加价审核(#307) ----------
 
 @router.get("/weather-alerts")

@@ -142,6 +142,7 @@ test:
 	  && python -m tests.e2e_fee_transparency \
 	  && python -m tests.e2e_rider_prefs \
 	  && python -m tests.e2e_weather_review \
+	  && python -m tests.e2e_rider_stats \
 	  && python -m tests.e2e_rider_growth \
 	  && python -m tests.e2e_drop_time \
 	  && python -m tests.e2e_wait_comp_audit \

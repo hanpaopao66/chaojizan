@@ -1259,6 +1259,11 @@ async def available_orders(
         grab_same_way_only=user.grab_same_way_only,
         go_home_on=user.go_home_on,
     )
+    # 「被自己的偏好挡掉几单」是这里现算的,**不记就永远还原不出来**。
+    # 它能回答一个要紧的问题:骑手是真没单跑,还是被自己两个月前设的
+    # 开关挡住了。攒在 Redis,每日汇总落库(services/rider_stats)
+    from ..services.rider_stats import bump_filtered
+    await bump_filtered(user.id, filtered)
     return {"items": items, "filtered_by_prefs": filtered,
             # 位置有没有:客户端据此决定要不要提示去开定位
             "has_location": rider_pos is not None,

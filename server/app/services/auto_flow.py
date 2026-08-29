@@ -784,6 +784,14 @@ async def sweep_once() -> dict[str, int]:
         weather_expired = await expire_due(db)
         if weather_expired:
             logger.info("auto_flow: %s 张天气加价单到期失效", weather_expired)
+        # 骑手日汇总(#310):统计留存,不做考核。
+        # 跑今天+昨天 —— 跨零点完成的单只跑今天会永远漏掉昨天最后几单
+        try:
+            from .rider_stats import rollup_recent
+            await rollup_recent(db, days=2)
+        except Exception:
+            # 汇总失败绝不能影响订单流转 —— 它是统计,不是业务
+            logger.exception("auto_flow: 骑手日汇总失败(不影响其他清扫)")
         # 分账重试兜底(桩模式下 pending 会累积 attempts,资质到位后自然走通)
         from .profit_sharing import sweep_pending as _ps_sweep
         await _ps_sweep(db)

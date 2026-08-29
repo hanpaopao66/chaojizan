@@ -1745,6 +1745,72 @@ class RiderGear(Base):
         DateTime(timezone=True), nullable=True)
 
 
+class RiderDailyStat(Base):
+    """骑手每日汇总。**只用来看清运力和成本,永远不进派单和考核。**
+
+    ## 为什么要固化,而不是每次现算
+
+    1. **有些数过了那一刻就没了。** 抢单池里「被你自己的偏好挡掉几单」
+       是每次请求现算的(riders.py 的 available_orders),不落库就没有
+       任何办法事后还原 —— 而它恰恰能回答一个重要问题:
+       骑手是真的没单跑,还是被自己两个月前设的开关挡住了。
+    2. **可重算的那些也会越来越慢。** 单量/收入/里程/在线时长现在靠
+       扫 orders + rider_earnings 现算,订单表只会越来越大;
+       而订单一旦归档,历史统计就直接断了。
+    3. 统计分析要的是能直接 group by 的宽表,不是每次现算一遍。
+
+    ## 红线:记录不等于考核
+
+    平台不做骑手评分体系(见 services/dispatch.py 的 never_do)。
+    这张表**不许**出现在任何派单、限流、封禁的判据里 ——
+    有测试钉着(tests/unit/test_rider_stats.py)。
+
+    这条边界的判断标准和评价体系那条一样:
+    **这个数字会不会影响他能看到的单?** 会,就是绳索;不会,才是数据。
+
+    ## 为什么不存位置轨迹
+
+    骑手端每 5 秒上报一次位置,现在只写 Redis、5 分钟过期。
+    **有意不留**:全量轨迹是劳动监控,而且一旦存下来,
+    「你为什么绕路」这种问题迟早会被问出口。
+    统计分析要的是聚合指标,不是每一步走在哪。
+    """
+
+    __tablename__ = "rider_daily_stats"
+    __table_args__ = (
+        # 一人一天一行。重跑汇总要能幂等覆盖,不能越跑越多
+        UniqueConstraint("rider_id", "day", name="uq_rider_daily_stats"),
+        # 统计分析最常见的两种查法:某人的时间线、某天的全平台
+        Index("ix_rider_daily_stats_day", "day"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    #: 北京自然日。按北京切是因为骑手对得上自己的记忆 ——
+    #: 跨零点的单算到前一天,他会觉得数字不对
+    day: Mapped[date] = mapped_column(Date)
+
+    orders: Mapped[int] = mapped_column(Integer, default=0)
+    earned_cents: Mapped[int] = mapped_column(Integer, default=0)
+    online_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    #: 计价里程(取餐点→收货地)之和,不含骑手到店那一段
+    meters: Mapped[int] = mapped_column(Integer, default=0)
+    #: 到店等餐总时长(分钟)。治理慢出餐商家靠它,不靠罚钱
+    wait_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    #: 转单次数。**不是考核项** —— 车坏了、身体不适本来就该能转
+    transfers: Mapped[int] = mapped_column(Integer, default=0)
+    #: 异常上报次数。多说明这一带有问题,不说明这个人有问题
+    issues: Mapped[int] = mapped_column(Integer, default=0)
+    #: 被自己的接单偏好挡掉的单数。**这是那个不落库就永远丢掉的数**
+    filtered_by_prefs: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now())
+
+
 class RiderSession(Base):
     """骑手在线时长记录(只统计不考核):上线开区间、下线闭区间;
     位置心跳断档超 5 分钟由清扫任务补写下线。"""
