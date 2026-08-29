@@ -160,9 +160,6 @@ class Settings(BaseSettings):
     delivery_wait_per_min_cents: int = 30   # 超出部分每分钟 ¥0.3
     delivery_wait_max_cents: int = 600      # 封顶 ¥6
 
-    # 配送费改用骑行路径距离(#145)。**直接改钱,默认关**,
-    # 灰度验证(新旧口径在真实订单上对比)后再开
-    delivery_use_route_distance: bool = False
 
     # 平台起送价下限:低于它的购物车不接单(单太小,佣金连支付通道费都覆盖不了)。
     # 商家可以设更高的起送价,但不能低于这个下限

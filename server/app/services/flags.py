@@ -51,6 +51,21 @@ async def night_curfew_window(db: AsyncSession) -> str | None:
     return hours.value if hours is not None and hours.value else "01:00-06:00"
 
 
+async def wait_comp_on(db: AsyncSession) -> bool:
+    """等餐补偿(平台承担)是否开启。**默认关 —— 平台现阶段没有这笔预算。**
+
+    机制、计算、审计口径全部保留(pricing.wait_compensation_cents /
+    settlement / e2e_wait_comp_audit),等餐时长照常落库(骑手申诉的
+    证据链不受影响)—— 关掉的只是「折成钱」这一步。
+    以后有预算了,后台把开关拨开即恢复,不用发版。
+
+    对外承诺的文案(派单公示、商家承诺页)都读这个开关:
+    **关着的时候不许说「有补偿」** —— 公开的数字对不上,比不公开更坏。
+    """
+    flag = await db.get(PlatformFlag, "wait_comp")
+    return flag is not None and flag.value == "on"
+
+
 async def weather_shutdown_on(db: AsyncSession) -> bool:
     """极端天气临时停运:开启时全平台停止接新单(已有订单尽力履约),
     无人接单兜底的取消线同步缩短——别让用户在暴雨里干等。"""

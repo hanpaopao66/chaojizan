@@ -27,7 +27,9 @@ async def credit_rider_for_order(db: AsyncSession, order: Order) -> None:
     # 这个补偿的函数和配置项早就写好了,但**在 AL 落地之前没有数据可算**
     # (没有到店时刻就没有等餐时长),所以一直是死代码。现在接上。
     wait_cents = 0
-    if order.arrived_shop_at and order.picked_up_at:
+    from .flags import wait_comp_on
+    if (order.arrived_shop_at and order.picked_up_at
+            and await wait_comp_on(db)):
         from .pricing import wait_compensation_cents
         wait_minutes = max(
             0.0,

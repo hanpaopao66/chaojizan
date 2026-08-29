@@ -33,8 +33,45 @@ from .util import orderable_dish  # noqa: E402
 customer = login(CUSTOMER)
 merchant = login(MERCHANT)
 rider = login(RIDER)
+admin = login("13800000000")
 
 NEAR = {"lat": 30.6612, "lng": 104.0823}
+
+
+def set_wait_comp(value: str):
+    call("POST", "/admin/flags/wait_comp", admin, {"value": value})
+
+
+def run_order(free: int):
+    """下一单并做旧到店时刻,跑完整链,返回订单详情(骑手视角)。"""
+    dishes = call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
+    dish = orderable_dish(dishes, min_stock=4)
+    o = call("POST", "/orders", customer, {
+        "merchant_id": DEMO_SHOP_ID,
+        "items": [{"dish_id": dish["id"], "quantity": 1}],
+        "address": "等餐补偿测试地址", **NEAR})
+    no = o["order_no"]
+    call("POST", f"/orders/{no}/pay/mock", customer)
+    call("POST", f"/orders/{no}/transition", merchant, {"to_status": "accepted"})
+    call("POST", f"/riders/grab/{no}", rider)
+    call("POST", f"/riders/orders/{no}/arrived", rider, NEAR)
+    return no
+
+
+async def age_arrival(no: str, minutes: int):
+    async with SessionLocal() as db:
+        await db.execute(
+            text("UPDATE orders SET arrived_shop_at = now() - interval "
+                 f"'{minutes} minutes' WHERE order_no = :n"), {"n": no})
+        await db.commit()
+
+
+def finish(no: str):
+    call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
+    call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
+    call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
+    call("POST", f"/orders/{no}/transition", customer,
+         {"to_status": "completed"})
 
 
 async def main():
@@ -48,56 +85,65 @@ async def main():
     assert wait_compensation_cents(free + 10) > 0, "超出部分要补"
     print(f"✓ 等餐补偿:前 {free} 分钟不补,超出按分钟计")
 
-    dishes = call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
-    dish = orderable_dish(dishes, min_stock=4)
-    o = call("POST", "/orders", customer, {
-        "merchant_id": DEMO_SHOP_ID,
-        "items": [{"dish_id": dish["id"], "quantity": 1}],
-        "address": "等餐补偿测试地址", **NEAR})
-    no = o["order_no"]
-    call("POST", f"/orders/{no}/pay/mock", customer)
-    call("POST", f"/orders/{no}/transition", merchant, {"to_status": "accepted"})
-    call("POST", f"/riders/grab/{no}", rider)
-    call("POST", f"/riders/orders/{no}/arrived", rider, NEAR)
-
-    # 把到店时刻做旧,制造一段真实的等餐时长
+    # ---- 默认态:开关关(平台现阶段没有这笔预算),等再久也不产生补偿 ----
+    set_wait_comp("off")
+    no_off = run_order(free)
+    await age_arrival(no_off, free + 20)
+    finish(no_off)
+    row_off = call("GET", f"/orders/{no_off}", rider)
+    assert not (row_off.get("fee_parts") or {}).get("wait"), \
+        f"开关关着还结了等餐补偿:{row_off.get('fee_parts')}"
     async with SessionLocal() as db:
-        await db.execute(
-            text("UPDATE orders SET arrived_shop_at = now() - interval "
-                 f"'{free + 20} minutes' WHERE order_no = :n"), {"n": no})
-        await db.commit()
-
-    call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
-    call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
-    call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
-    call("POST", f"/orders/{no}/transition", customer, {"to_status": "completed"})
-
-    row = call("GET", f"/orders/{no}", rider)
-    wait_cents = (row.get("fee_parts") or {}).get("wait", 0)
-    assert wait_cents > 0, f"这一单应当产生等餐补偿:{row.get('fee_parts')}"
-    # 补偿**不进 delivery_fee_cents** —— 那是顾客付的钱
-    assert sum(v for k, v in row["fee_parts"].items() if k != "wait") \
-        == row["delivery_fee_cents"], row["fee_parts"]
-    print(f"✓ 产生等餐补偿 {wait_cents} 分,且不计入顾客付的配送费")
-
-    # 骑手实际入账 = 配送费 + 小费 + 等餐补偿
-    async with SessionLocal() as db:
-        got = await db.scalar(text(
+        got_off = await db.scalar(text(
             "SELECT amount_cents FROM rider_earnings WHERE order_no = :n "
-            "AND kind = 'earning'"), {"n": no})
-    assert got == row["delivery_fee_cents"] + row["tip_cents"] + wait_cents, \
-        (got, row["delivery_fee_cents"], row["tip_cents"], wait_cents)
-    print(f"✓ 骑手入账 {got} 分 = 配送费 + 小费 + 等餐补偿")
+            "AND kind = 'earning'"), {"n": no_off})
+    assert got_off == row_off["delivery_fee_cents"] + row_off["tip_cents"], \
+        (got_off, row_off["delivery_fee_cents"], row_off["tip_cents"])
+    rules = call("GET", "/merchants/me/rules", merchant)
+    assert "等餐超时有补偿" not in str(rules), \
+        "开关关着,承诺页还在说「有补偿」—— 公示了却不给,比不公示更坏"
+    print("✓ 开关默认关:不结补偿、承诺页不出现「有补偿」")
 
-    # ---- 关键:账务自检必须仍然全绿 ----
-    from app.services.audit import run_audit
-    problems = await run_audit()
-    # 断言范围要够宽:只查全局恒等的话,逐单的 rider_earning_mismatch
-    # 会漏网 —— 第一版就是这么漏的,日志里明明打了告警,用例还是绿的
-    bad = [p for p in problems if "global_identity" in str(p.get("check"))
-           or no in str(p.get("detail", ""))]
-    assert not bad, f"这一单在账务自检里报了告警:{bad}"
-    print("✓ 账务自检仍全绿 —— 恒等式左边算的是「骑手应得」不是「顾客付的配送费」")
+    # ---- 打开开关:原有整条链照旧成立 ----
+    set_wait_comp("on")
+    try:
+        rules = call("GET", "/merchants/me/rules", merchant)
+        assert "等餐超时有补偿" in str(rules), "开了开关承诺页该说回来"
+        no = run_order(free)
+        await age_arrival(no, free + 20)
+        finish(no)
+        row = call("GET", f"/orders/{no}", rider)
+        wait_cents = (row.get("fee_parts") or {}).get("wait", 0)
+        assert wait_cents > 0, \
+            f"这一单应当产生等餐补偿:{row.get('fee_parts')}"
+        # 补偿**不进 delivery_fee_cents** —— 那是顾客付的钱
+        assert sum(v for k, v in row["fee_parts"].items() if k != "wait") \
+            == row["delivery_fee_cents"], row["fee_parts"]
+        print(f"✓ 产生等餐补偿 {wait_cents} 分,且不计入顾客付的配送费")
+
+        # 骑手实际入账 = 配送费 + 小费 + 等餐补偿
+        async with SessionLocal() as db:
+            got = await db.scalar(text(
+                "SELECT amount_cents FROM rider_earnings WHERE order_no = :n "
+                "AND kind = 'earning'"), {"n": no})
+        assert got == row["delivery_fee_cents"] + row["tip_cents"] \
+            + wait_cents, \
+            (got, row["delivery_fee_cents"], row["tip_cents"], wait_cents)
+        print(f"✓ 骑手入账 {got} 分 = 配送费 + 小费 + 等餐补偿")
+
+        # ---- 关键:账务自检必须仍然全绿 ----
+        from app.services.audit import run_audit
+        problems = await run_audit()
+        # 断言范围要够宽:只查全局恒等的话,逐单的 rider_earning_mismatch
+        # 会漏网 —— 第一版就是这么漏的,日志里明明打了告警,用例还是绿的
+        bad = [p for p in problems
+               if "global_identity" in str(p.get("check"))
+               or no in str(p.get("detail", ""))]
+        assert not bad, f"这一单在账务自检里报了告警:{bad}"
+        print("✓ 账务自检仍全绿 —— 恒等式左边是「骑手应得」不是「顾客付的配送费」")
+    finally:
+        # 开关是全局状态,不还原会漏进后面的套件
+        set_wait_comp("off")
 
     print("\ne2e_wait_comp_audit 全部通过 ✅")
 

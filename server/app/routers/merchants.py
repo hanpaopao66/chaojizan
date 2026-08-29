@@ -4513,6 +4513,7 @@ async def my_rules(
     from ..routers.admin import FS_AUTO_SUSPEND_COUNT
     from ..routers.appeals import APPEAL_WINDOW
     from ..services.staff import operable_shop
+    from ..services.flags import wait_comp_on
     # 店员也该看得到"什么算违规"——这一页没有任何敏感数据
     shop, _ = await operable_shop(db, user)
     if shop is None:
@@ -4559,7 +4560,11 @@ async def my_rules(
                     "遇到这种,72 小时内申诉,系统会自动附上这单的"
                     "接单/出餐/送达时间线供审核 —— 出餐正常而配送晚了,证据替你说话",
                     "超时安抚券由平台承担,不扣你也不扣骑手",
-                    "骑手到店等餐超时有补偿,同样平台出",
+                    # 等餐补偿是运行时开关(flags.wait_comp_on,默认关 ——
+                    # 平台现阶段没有这笔预算)。关着的时候这句话不能出现:
+                    # 公示了却不给,比不公示更坏
+                    *(["骑手到店等餐超时有补偿,同样平台出"]
+                      if await wait_comp_on(db) else []),
                 ],
             },
             {
