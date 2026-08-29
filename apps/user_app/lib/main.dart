@@ -7249,6 +7249,16 @@ class _OrderTimeline extends StatelessWidget {
 
   List<(String, String)> get _mySteps => order.pickup ? _pickupSteps : _steps;
 
+  /// 最近一条商家催单回复(没有就 null)。放在时间轴顶部:
+  /// 催单的人正盯着这一页等回音,商家点了「回复安抚」而这里不显示,
+  /// 商家以为安抚了,用户以为没人理 —— 两边都白做
+  OrderEvent? get _latestUrgeReply {
+    for (final e in events.reversed) {
+      if (e.toStatus == 'urge_reply' && e.note.isNotEmpty) return e;
+    }
+    return null;
+  }
+
   String? _timeOf(String status) {
     for (final e in events) {
       if (e.toStatus == status) {
@@ -7321,6 +7331,21 @@ class _OrderTimeline extends StatelessWidget {
         ],
         const SzSectionTitle('进度'),
         const SizedBox(height: 10),
+        // 商家对催单的回复。催单的人正盯着这一页等回音
+        if (_latestUrgeReply != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: SzCard(
+              child: Row(children: [
+                Icon(Icons.storefront_outlined, size: 18, color: sz.link),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('商家回复:${_latestUrgeReply!.note}',
+                      style: TextStyle(fontSize: kFontNote, color: sz.ink)),
+                ),
+              ]),
+            ),
+          ),
         SzCard(
           child: SzTimeline(steps: [
             for (var i = 0; i < _mySteps.length; i++)

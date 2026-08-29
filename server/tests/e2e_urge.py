@@ -75,8 +75,16 @@ o1 = call("GET", f"/orders/{no1}", customer)
 assert o1["status"] == "accepted", "催单不改变订单状态"
 call("POST", f"/orders/{no1}/urge-reply", merchant, {"text": "马上好,正在加急制作!"})
 events = call("GET", f"/orders/{no1}/events", customer)
-assert any(e["to_status"] == "urge_reply" for e in events)
-print("✓ 催单/回复写事件流水,订单状态不受影响")
+reply = next(e for e in events if e["to_status"] == "urge_reply")
+# 回复文本必须能被用户读到:推送在没配 JPush 的部署里是空操作,
+# events 的 note 是这句话到用户眼前的唯一通道
+assert reply.get("note") == "马上好,正在加急制作!", \
+    f"商家回复的文本用户读不到:{reply}"
+# note 白名单:其他事件的附言不下发(仲裁用的自由文本,不该全量给用户)
+assert all(not e.get("note") for e in events
+           if e["to_status"] != "urge_reply"), \
+    "非白名单事件的 note 漏给用户了"
+print("✓ 催单/回复写事件流水,回复文本用户可读,其他附言不外漏")
 
 # 3) 没催过的订单不能回复
 no2 = make_order("accepted")
@@ -85,11 +93,30 @@ err = call("POST", f"/orders/{no2}/urge-reply", merchant,
 assert err["_error"] == 409
 print("✓ 无催单记录不能回复")
 
-# 4) 配送中催骑手
+# 4) 配送中催骑手;催单数必须进骑手的订单返回体
+#
+# 骑手端是轮询架构、没有 WS —— 没配推送的部署里,列表/详情里的
+# urge_count 是催单能到骑手眼前的**唯一通道**。这几条红了,
+# 「催一下」按钮就是个只写数据库的摆设。
 no3 = make_order("picked_up")
 r = call("POST", f"/orders/{no3}/urge", customer)
 assert r["target"] == "rider"
-print("✓ 配送中催单对象自动切到骑手")
+rider_view = call("GET", f"/orders/{no3}", rider)
+assert rider_view["urge_count"] == 1, \
+    f"骑手详情里看不到被催:{rider_view.get('urge_count')}"
+rider_list = call("GET", "/orders?status=picked_up", rider)
+mine = next(o for o in rider_list if o["order_no"] == no3)
+assert mine["urge_count"] == 1, "骑手列表里看不到被催 —— 轮询拉的就是这个接口"
+print("✓ 配送中催单对象自动切到骑手,且骑手列表/详情都带催单数")
+
+# 4b) 历史单不统计(白扫事件表),字段恒 0
+done_list = call("GET", "/orders?status=accepted", customer)
+if done_list:
+    assert all("urge_count" in o for o in done_list)
+o_cancelled_probe = call("GET", f"/orders/{no1}/events", customer)  # no1 已催 3 次
+o1_again = call("GET", f"/orders/{no1}", customer)
+assert o1_again["urge_count"] == 3, "进行中的单要如实统计"
+print("✓ urge_count 口径:进行中如实统计")
 
 # 5) 自取单出餐后不给催(自己去取);已取消订单 409
 no4 = make_order("ready", pickup=True)

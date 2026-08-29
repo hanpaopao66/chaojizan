@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import false, or_, select, text, update
+from sqlalchemy import false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -134,7 +134,8 @@ def short_name(order: Order) -> str:
 def order_out(order: Order, merchant: Merchant | None,
               viewer: User | None = None, *,
               as_role: str | None = None,
-              has_review: bool = False) -> OrderOut:
+              has_review: bool = False,
+              urge_count: int = 0) -> OrderOut:
     """订单 + 商家取餐点信息。骑手端地图/导航需要知道店在哪。
 
     电话脱敏:商家/骑手视角 contact_phone 一律打码,可拨号码走 privacy_phone
@@ -146,6 +147,7 @@ def order_out(order: Order, merchant: Merchant | None,
     """
     out = OrderOut.model_validate(order)
     out.has_review = has_review
+    out.urge_count = urge_count
     # 拆分项的中文名跟着数一起给 —— 客户端不用各写一份映射
     if out.fee_parts:
         out.fee_part_labels = {k: FEE_PART_LABELS[k]
@@ -197,11 +199,31 @@ async def orders_out(db: AsyncSession, orders: list[Order],
     # 一次查完再进循环。写成 `o.id in await _reviewed_ids(...)` 的话
     # 每个订单各发一条 SQL —— 那正是这个字段要消灭的东西
     reviewed = await _reviewed_ids(db, orders)
+    urges = await _urge_counts(db, orders)
     return [
         order_out(o, merchants.get(o.merchant_id), viewer,
-                  has_review=o.id in reviewed)
+                  has_review=o.id in reviewed,
+                  urge_count=urges.get(o.id, 0))
         for o in orders
     ]
+
+
+async def _urge_counts(db: AsyncSession,
+                       orders: list[Order]) -> dict[int, int]:
+    """这批单里各被催了几次。**一次查完,不是一单一查。**
+
+    只查进行中的单:历史单显示"曾被催过"没有任何动作可接,
+    白扫一遍事件表。一单进行中的都没有就连查询都不发。
+    """
+    live = [o.id for o in orders if o.status in URGEABLE]
+    if not live:
+        return {}
+    rows = await db.execute(
+        select(OrderEvent.order_id, func.count())
+        .where(OrderEvent.order_id.in_(live),
+               OrderEvent.to_status == "urged")
+        .group_by(OrderEvent.order_id))
+    return dict(rows.all())
 
 
 async def _reviewed_ids(db: AsyncSession, orders: list[Order]) -> set[int]:
@@ -1564,7 +1586,13 @@ def _quote_label(split) -> str:
 
 
 URGE_MAX_TIMES = 3          # 每单最多催 3 次
+# 事件附言对用户可见的白名单(见 order_events)
+EVENT_NOTE_PUBLIC = frozenset({"urge_reply"})
 URGE_COOLDOWN_SECONDS = 180  # 两次催单间隔 ≥3 分钟
+# 可催 = 进行中:这个集合同时决定「能不能催」和「列表里带不带催单数」,
+# 两处必须是同一份 —— 不然会出现"催得动却看不见"的状态
+URGEABLE = frozenset({OrderStatus.PAID, OrderStatus.ACCEPTED,
+                      OrderStatus.READY, OrderStatus.PICKED_UP})
 
 
 @router.post("/{order_no}/urge")
@@ -1581,9 +1609,7 @@ async def urge_order(
     order = await db.scalar(select(Order).where(Order.order_no == order_no))
     if order is None or order.customer_id != user.id:
         raise HTTPException(404, "订单不存在")
-    urgeable = {OrderStatus.PAID, OrderStatus.ACCEPTED,
-                OrderStatus.READY, OrderStatus.PICKED_UP}
-    if order.status not in urgeable:
+    if order.status not in URGEABLE:
         raise HTTPException(409, "当前状态不需要催单")
     if order.pickup and order.status == OrderStatus.READY:
         raise HTTPException(409, "餐已备好,凭取餐码到店取餐即可")
@@ -1619,13 +1645,15 @@ async def urge_order(
     if target == "rider" and order.rider_id is not None:
         await push_to_user(order.rider_id, "用户催单",
                            f"订单#{tail} 用户在催了,辛苦快一点,注意安全",
-                           {"type": "order", "order_no": order.order_no})
+                           {"type": "order", "order_no": order.order_no},
+                           record_skip=True)
     else:
         shop = await db.get(Merchant, order.merchant_id)
         if shop:
             await push_to_user(shop.owner_id, "用户催单",
                                f"订单#{tail} 用户催单了,可一键回复安抚",
-                               {"type": "order", "order_no": order.order_no})
+                               {"type": "order", "order_no": order.order_no},
+                               record_skip=True)
         # 商家端前台:WS 横幅 + 语音(与新单同通道)
         await manager.broadcast(
             f"merchant:{order.merchant_id}",
@@ -1658,11 +1686,16 @@ async def urge_reply(
                                     OrderEvent.to_status == "urged").limit(1))
     if urged is None:
         raise HTTPException(409, "该订单没有催单记录")
-    await _record_event(db, order, order.status.value, "urge_reply", user)
+    # 回复文本必须落库:推送只是提醒,没配 JPush 的部署里推送是空操作,
+    # 文本只进推送的话商家这 50 个字就直接消失了 —— 用户端时间轴
+    # 从 events 的 note 里读它
+    await _record_event(db, order, order.status.value, "urge_reply", user,
+                        note=text_reply)
     await db.commit()
     await push_to_user(order.customer_id, f"商家回复:{text_reply}",
                        f"「{shop.name}」回复了你的催单",
-                       {"type": "order", "order_no": order.order_no})
+                       {"type": "order", "order_no": order.order_no},
+                       record_skip=True)
     return order_out(order, shop, user)
 
 
@@ -2138,7 +2171,9 @@ async def get_order(
     # 详情也填 has_review:同一个字段在列表里是真的、在详情里恒为 false,
     # 那它就是个陷阱 —— 下一个人照着详情写逻辑,错得毫无征兆
     out = order_out(order, merchant, user,
-                    has_review=order.id in await _reviewed_ids(db, [order]))
+                    has_review=order.id in await _reviewed_ids(db, [order]),
+                    urge_count=(await _urge_counts(db, [order])).get(
+                        order.id, 0))
     # 详情页专属:联系电话(用户联系骑手/商家,一键拨号)。
     # dial_phone 而不是 phone:已注销账号的 phone 是 `del{id}_{hex}` 哨兵,
     # 原样下发的话客户端会拿一串字母去拨号
@@ -2167,7 +2202,17 @@ async def order_events(
         .where(OrderEvent.order_id == order.id)
         .order_by(OrderEvent.created_at)
     )
-    return list(result)
+    # note 白名单:只有明确"写给用户看"的事件才带附言下发。
+    # 商家回复催单的那句话就存在 note 里 —— 不下发的话,
+    # 没配推送的部署里商家点了「回复安抚」用户什么都看不到,
+    # 商家以为安抚了,用户以为没人理
+    out = []
+    for e in result:
+        row = OrderEventOut.model_validate(e)
+        if e.to_status not in EVENT_NOTE_PUBLIC:
+            row.note = ""
+        out.append(row)
+    return out
 
 
 @router.get("/{order_no}/refunds")

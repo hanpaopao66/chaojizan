@@ -592,6 +592,7 @@ class Order {
         refundCents = json['refund_cents'] as int? ?? 0,
         refundNote = json['refund_note'] as String? ?? '',
         hasReview = json['has_review'] as bool? ?? false,
+        urgeCount = json['urge_count'] as int? ?? 0,
         scheduledAt = json['scheduled_at'] as String?,
         etaAt = json['eta_at'] as String?,
         // 到店时刻:骑手端据此决定还要不要显示「我到店了」。
@@ -692,6 +693,10 @@ class Order {
   /// 只能对每笔已完成订单各打一发 `GET /orders/{no}/review` 看 404,
   /// 那个形态在列表上不成立。非完成态恒为 false(本来也不能评)
   final bool hasReview;
+
+  /// 用户催了几次(只对进行中的单统计)。骑手端靠轮询看到它 ——
+  /// 没配推送的部署里这是催单能到骑手眼前的唯一通道
+  final int urgeCount;
   final String? scheduledAt; // 预约送达时间(空 = 尽快送)
   final String? etaAt;       // 预计送达时间(超时 15 分钟平台自动赔安抚券)
   /// 骑手到店时刻(空 = 还没标记)。等餐时长 = 取餐 − 到店,申诉的证据
@@ -946,11 +951,15 @@ class OrderEvent {
   OrderEvent.fromJson(Map<String, dynamic> json)
       : toStatus = json['to_status'] as String,
         actorRole = json['actor_role'] as String,
-        createdAt = json['created_at'] as String;
+        createdAt = json['created_at'] as String,
+        note = json['note'] as String? ?? '';
 
   final String toStatus;
   final String actorRole;
   final String createdAt;
+
+  /// 事件附言(服务端白名单下发)。目前只有商家回复催单的那句话
+  final String note;
 }
 
 class RiderLocation {

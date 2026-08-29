@@ -1851,6 +1851,16 @@ class _RiderHomePageState extends State<RiderHomePage>
               Text('⏰ ${order.scheduledLabel}',
                   style: TextStyle(
                       color: Theme.of(context).sz.hold, fontWeight: FontWeight.bold)),
+            // 被催标记:骑手端没有 WS、推送也可能没配 —— 轮询拉回来的
+            // 这行字就是催单能到骑手眼前的唯一通道。语气按平台立场写:
+            // 提醒而不施压,安全永远在快前面
+            if (order.urgeCount > 0)
+              Text(
+                  '🔔 用户催了${order.urgeCount > 1 ? " ${order.urgeCount} 次" : ""}'
+                  ',放心按安全速度骑,到店/送达点一下按钮就好',
+                  style: TextStyle(
+                      color: Theme.of(context).sz.hold,
+                      fontWeight: FontWeight.bold)),
             if (order.parentOrderNo.isNotEmpty)
               Text(
                   '📎 追加单,随#${order.parentOrderNo.substring(order.parentOrderNo.length - 6)} 一起取送',

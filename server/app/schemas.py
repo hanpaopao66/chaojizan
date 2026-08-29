@@ -1042,6 +1042,10 @@ class OrderOut(BaseModel):
     promo_note: str = ""
     delivery_fee_cents: int
     tip_cents: int = 0  # 小费,100% 归骑手
+    # 用户催了几次(只对进行中的单统计,历史单恒 0)。
+    # 为什么要进返回体:骑手端是轮询架构、没有 WS;没配推送的部署里,
+    # 这是催单能到骑手眼前的唯一通道 —— 推送和消息中心那两条路都到不了
+    urge_count: int = 0
     total_cents: int
     commission_cents: int
     scheduled_at: datetime | None = None
@@ -1162,6 +1166,10 @@ class OrderEventOut(BaseModel):
     to_status: str
     actor_role: str
     created_at: datetime
+    # 事件附言。**白名单下发**(见 order_events 端点):note 是给仲裁看的
+    # 自由文本,今天没有敏感内容不等于以后没有 —— 全量下发就是在赌
+    # 未来每个写入点都记得这里能被用户看到
+    note: str = ""
 
     @property
     def status_label(self) -> str:  # 方便调试,客户端用自己的映射
