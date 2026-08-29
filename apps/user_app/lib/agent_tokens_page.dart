@@ -165,6 +165,74 @@ class _AgentTokensPageState extends State<AgentTokensPage> {
     }
   }
 
+  /// 助手做过什么。
+  ///
+  /// 只有方法、路径、状态码、时间 —— **没有请求体**,那里面是用户自己的
+  /// 地址和手机号,为了让他看得清而多存一份没有道理。
+  Future<void> _showActivity() async {
+    Map<String, dynamic> data;
+    try {
+      data = await widget.api.agentActivity();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    if (!mounted) return;
+    final items = (data['items'] as List? ?? []).cast<Map<String, dynamic>>();
+    await szShowSheet<void>(
+      context: context,
+      builder: (context) {
+        final sz = Theme.of(context).sz;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('助手做过什么',
+                    style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 6),
+                Text('${data['note'] ?? ''}',
+                    style: TextStyle(
+                        fontSize: kFontNote, height: 1.5, color: sz.inkMuted)),
+                const SizedBox(height: 14),
+                if (items.isEmpty)
+                  Text('还没有记录',
+                      style: TextStyle(
+                          fontSize: kFontBody, color: sz.inkFaint))
+                else
+                  for (final it in items.take(30))
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(children: [
+                        SizedBox(
+                          width: 44,
+                          child: Text(
+                              '${it['at']}'.substring(11, 16),
+                              style: TextStyle(
+                                  fontSize: kFontNote, color: sz.inkFaint)),
+                        ),
+                        Expanded(
+                          child: Text('${it['method']} ${it['path']}',
+                              style: TextStyle(
+                                  fontSize: kFontNote, color: sz.ink)),
+                        ),
+                        Text('${it['status']}',
+                            style: TextStyle(
+                                fontSize: kFontNote,
+                                color: (it['status'] as int? ?? 0) >= 400
+                                    ? sz.danger
+                                    : sz.inkMuted)),
+                      ]),
+                    ),
+              ]),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
@@ -232,6 +300,19 @@ class _AgentTokensPageState extends State<AgentTokensPage> {
                   onPressed: _create,
                   icon: const Icon(Icons.add),
                   label: const Text('签发一个新令牌'),
+                ),
+              ),
+            ],
+            if (_items != null && _items!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              // 「花不掉你的钱」是一句承诺,而承诺该能被本人核对 ——
+              // 所以给一条通往「它做过什么」的路,而不是让人信一句话
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: _showActivity,
+                  child: Text('看看助手做过什么',
+                      style: TextStyle(fontSize: kFontNote, color: sz.link)),
                 ),
               ),
             ],

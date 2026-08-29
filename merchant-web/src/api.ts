@@ -1558,3 +1558,35 @@ export async function fetchPrivateImage(path: string): Promise<string> {
   if (!resp.ok) throw new ApiError(resp.status, `图片加载失败(${resp.status})`)
   return URL.createObjectURL(await resp.blob())
 }
+
+// ---------- 开放接口的用量与调用日志(开发者后台) ----------
+
+export interface ApiUsage {
+  days: number
+  total: number
+  errors: number
+  throttled: number
+  error_ratio: number
+  avg_ms: number
+  max_ms: number
+  by_day: { day: string; calls: number }[]
+  note: string
+}
+
+export interface ApiLogRow {
+  method: string
+  path: string
+  status: number
+  duration_ms: number
+  at: string | null
+}
+
+export function myApiUsage(days = 7) {
+  return request<ApiUsage>('GET', `/merchants/me/api-usage?days=${days}`)
+}
+
+export function myApiLogs(onlyErrors = false) {
+  const q = onlyErrors ? '&status_min=400' : ''
+  return request<{ items: ApiLogRow[]; note: string }>(
+    'GET', `/merchants/me/api-logs?limit=200${q}`)
+}

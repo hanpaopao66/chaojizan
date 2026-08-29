@@ -553,6 +553,13 @@ class ApiClient {
   Future<void> revokeAgentToken(int id) =>
       _request('DELETE', '/auth/agent-tokens/$id');
 
+  /// 我的助手做过什么。**一个能替你下单的东西,你得看得见它在干嘛** ——
+  /// 平台把「助手花不掉你的钱」说给了用户,那就该让他自己核对。
+  Future<Map<String, dynamic>> agentActivity() async {
+    return await _request('GET', '/auth/agent-activity')
+        as Map<String, dynamic>;
+  }
+
   // ---------- 异常订单标记(只上报,不给拉黑权) ----------
 
   /// 标记疑似职业索赔/恶意差评。

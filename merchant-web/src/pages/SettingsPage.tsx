@@ -1,12 +1,13 @@
 import {
-  Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch,
-  Table, Tag, Upload, message,
+  Alert, Button, Card, Form, Input, InputNumber, Select, Space, Statistic,
+  Switch, Table, Tag, Upload, message,
 } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, ApiKey, HotelProfileData, Merchant, StaffMember, addStaff,
-  createApiKey, myApiKeys, myHotelProfile, myShop, myStaff, removeStaff,
+  ApiError, ApiKey, ApiLogRow, ApiUsage, HotelProfileData, Merchant,
+  StaffMember, addStaff, createApiKey, myApiKeys, myApiLogs, myApiUsage,
+  myHotelProfile, myShop, myStaff, removeStaff,
   restShop, revokeApiKey, updateHotelProfile, updateShop,
   UPLOAD_ACCEPT, uploadImage,
 } from '../api'
@@ -452,6 +453,108 @@ function ApiKeyCard() {
           },
         ]}
       />
+      <ApiUsagePanel />
     </Card>
+  )
+}
+
+/**
+ * 用量与调用日志。
+ *
+ * ## 错误率和限流分开报
+ *
+ * 它们要做的事完全不同:错误率高多半是集成写错了(看日志改代码),
+ * 限流高是调得太密(改成退避重试)。混成一个「失败率」两边都指导不了。
+ *
+ * ## 「一条都没有」是有含义的
+ *
+ * 认得出是谁的失败会记(Key 被吊销、店铺被停用);完全不认识的 Key 不记
+ * —— 否则任何人拿垃圾请求就能撑爆这张表。所以空列表要说清这一点,
+ * 否则接入方会以为是页面坏了。
+ */
+function ApiUsagePanel() {
+  const [usage, setUsage] = useState<ApiUsage | null>(null)
+  const [logs, setLogs] = useState<ApiLogRow[]>([])
+  const [onlyErrors, setOnlyErrors] = useState(false)
+  const [err, setErr] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const [u, l] = await Promise.all([myApiUsage(7), myApiLogs(onlyErrors)])
+      setUsage(u)
+      setLogs(l.items)
+      setErr('')
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : String(e))
+    }
+  }, [onlyErrors])
+  useEffect(() => { void load() }, [load])
+
+  if (err) {
+    return <Alert type="error" showIcon message={err} style={{ marginTop: 16 }} />
+  }
+  if (!usage) return null
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <Space size={24} wrap style={{ marginBottom: 12 }}>
+        <Statistic title="近 7 天调用" value={usage.total} />
+        <Statistic
+          title="错误率"
+          value={usage.total ? usage.error_ratio * 100 : 0}
+          precision={1}
+          suffix="%"
+          valueStyle={usage.error_ratio > 0.05 ? { color: '#cf1322' } : undefined}
+        />
+        <Statistic
+          title="被限流"
+          value={usage.throttled}
+          valueStyle={usage.throttled ? { color: '#d46b08' } : undefined}
+        />
+        <Statistic title="平均耗时" value={usage.avg_ms} suffix="ms" />
+      </Space>
+      <Alert type="info" showIcon style={{ marginBottom: 12 }}
+             message={usage.note} />
+      <Space style={{ marginBottom: 8 }}>
+        <Switch checked={onlyErrors} onChange={setOnlyErrors}
+                checkedChildren="只看出错" unCheckedChildren="全部" />
+        <Button size="small" onClick={() => void load()}>刷新</Button>
+      </Space>
+      <Table<ApiLogRow>
+        size="small"
+        rowKey={(r) => `${r.at}-${r.path}-${r.status}`}
+        dataSource={logs}
+        pagination={{ pageSize: 10, showSizeChanger: false }}
+        locale={{
+          emptyText: onlyErrors
+            ? '近期没有出错的调用'
+            : '还没有调用记录。如果你确实调过,说明这把 Key 没被认出来'
+              + '(打错了,或者不是这个环境的)—— 完全不认识的 Key 不留记录。',
+        }}
+        columns={[
+          {
+            title: '时间', dataIndex: 'at',
+            render: (v: string | null) =>
+              v ? v.slice(0, 19).replace('T', ' ') : '—',
+          },
+          { title: '方法', dataIndex: 'method', width: 70 },
+          { title: '路径', dataIndex: 'path' },
+          {
+            title: '状态', dataIndex: 'status', width: 80,
+            render: (v: number) => (
+              <Tag color={v >= 500 ? 'red' : v === 429 ? 'orange'
+                : v >= 400 ? 'gold' : 'green'}>{v}</Tag>
+            ),
+          },
+          {
+            title: '耗时', dataIndex: 'duration_ms', width: 80,
+            render: (v: number) => `${v}ms`,
+          },
+        ]}
+      />
+      <div style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
+        日志不含请求体和响应体 —— 那里面有顾客的地址和手机号。
+      </div>
+    </div>
   )
 }
