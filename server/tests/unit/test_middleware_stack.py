@@ -24,8 +24,9 @@ import httpx
 import pytest
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.main import (LogUnhandledErrorsMiddleware, ObserveAppBuildMiddleware,
-                      RecordApiCallMiddleware, SelectShopMiddleware, app)
+from app.main import (AdminConsoleMiddleware, LogUnhandledErrorsMiddleware,
+                      ObserveAppBuildMiddleware, RecordApiCallMiddleware,
+                      SelectShopMiddleware, app)
 
 
 class Test中间件顺序:
@@ -35,6 +36,7 @@ class Test中间件顺序:
         names = [m.cls.__name__ for m in app.user_middleware]
         assert names == ["CORSMiddleware", "LogUnhandledErrorsMiddleware",
                          "ObserveAppBuildMiddleware", "SelectShopMiddleware",
+                         "AdminConsoleMiddleware",
                          "RecordApiCallMiddleware"], \
             f"中间件顺序变了:{names}"
 
@@ -47,6 +49,17 @@ class Test中间件顺序:
         """
         names = [m.cls.__name__ for m in app.user_middleware]
         assert names[-1] == "RecordApiCallMiddleware"
+
+    def test_后台页面拦在调用日志外面(self):
+        """打开一个后台页面**不是一次 API 调用**。
+
+        放在调用日志里面的话,每次刷新后台都会往里记一条 ——
+        把开发者控制台那份「我的集成调了什么」冲得没法看。
+        而且调用日志必须贴着路由才量得准,见上一条。
+        """
+        names = [m.cls.__name__ for m in app.user_middleware]
+        assert names.index("AdminConsoleMiddleware") \
+            < names.index("RecordApiCallMiddleware")
 
     def test_不再用BaseHTTPMiddleware(self):
         """这是这次改动的全部意义。有人图省事加一个

@@ -427,11 +427,15 @@ class RecordApiCallMiddleware:
                 "调用日志写入失败(不影响请求)", exc_info=True)
 
 
-# 后台页面拦在最内层:它只认「浏览器在打开页面」这一种请求,
-# 其余原样放行给接口。放最内层是为了让上面几层(错误日志、调用记录)
-# 照常覆盖到接口调用
-app.add_middleware(AdminConsoleMiddleware)
 app.add_middleware(RecordApiCallMiddleware)
+# 后台页面拦在**调用日志外面**。两个理由:
+#
+# 1. 调用日志必须贴着路由,它量的是「路由自己花了多久」——
+#    这条不变量有测试钉着(test_middleware_stack);
+# 2. 打开一个后台页面**不是一次 API 调用**。放在里面的话,
+#    每次刷新后台都会往调用日志里记一条,把开发者控制台里
+#    那份「我的集成调了什么」冲得没法看。
+app.add_middleware(AdminConsoleMiddleware)
 app.add_middleware(SelectShopMiddleware)
 app.add_middleware(ObserveAppBuildMiddleware)
 app.add_middleware(LogUnhandledErrorsMiddleware)
