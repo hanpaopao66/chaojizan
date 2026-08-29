@@ -425,12 +425,26 @@ async def search_merchants(
     if sort not in _SEARCH_SORTS:
         raise HTTPException(422, "sort 仅支持 comprehensive/distance/rating/sales")
 
-    params: dict = {"pattern": f"%{q.strip()}%"}
+    # **二元组预筛 + ILIKE 精确复核。**
+    #
+    # `sz_bigrams(name) @> sz_bigrams(:q)` 走得动 GIN 索引(迁移 0115),
+    # 负责把候选从几万缩到几个;ILIKE 负责判对错。
+    # 「name 含 q」⇒「q 的每个二元组都在 name 里」,所以预筛**不会漏**;
+    # 反过来会有假阳性,由 ILIKE 兜住。
+    #
+    # 单字查询时 sz_bigrams 是空数组,`@> '{}'` 对所有行成立 ——
+    # 自然退化成全表扫,结果仍然正确,只是没有索引收益。
+    #
+    # 为什么不用 pg_trgm:实测三元组要 3 个字符才有选择性,
+    # 而中文搜索多是两个字(烧烤/火锅/奶茶),那种情况它比全表扫还慢。
+    params: dict = {"pattern": f"%{q.strip()}%", "q": q.strip()}
     where = ["m.is_open = true", "m.status = 'approved'",
              "m.biz_type = 'food'",  # 酒店走 /stays 频道,不混进外卖搜索
-             "(m.name ILIKE :pattern OR EXISTS ("
+             "((sz_bigrams(m.name) @> sz_bigrams(:q) AND m.name ILIKE :pattern)"
+             " OR EXISTS ("
              " SELECT 1 FROM dishes d WHERE d.merchant_id = m.id"
-             " AND d.is_on_sale AND d.name ILIKE :pattern))"]
+             " AND d.is_on_sale AND sz_bigrams(d.name) @> sz_bigrams(:q)"
+             " AND d.name ILIKE :pattern))"]
     if has_pos:
         params["lat"], params["lng"] = lat, lng
         # 不传 max_distance_m 也要卡住:默认无限远等于把"搜得到但送不到"
