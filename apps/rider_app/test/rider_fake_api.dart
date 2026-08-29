@@ -124,6 +124,9 @@ ApiClient fakeRiderApi({
   int weekMinutes = 1980,
   int weekOrders = 71,
   int weekEarnedCents = 43200,
+  // 里程(#309):计价里程,不含骑手到店那一段。null = 服务端还没给这个字段
+  int? todayMeters = 42100,
+  int? weekMeters = 213400,
   // 本次连续在线(注意:这是**会话**不是**今天**,见 riders.py my_fatigue)
   double fatigueMinutes = 312,
   String fatigueLevel = 'ok',
@@ -163,6 +166,8 @@ ApiClient fakeRiderApi({
               'today_earned_cents': todayEarnedCents,
               'week_orders': weekOrders,
               'week_earned_cents': weekEarnedCents,
+              if (todayMeters != null) 'today_meters': todayMeters,
+              if (weekMeters != null) 'week_meters': weekMeters,
             };
           case '/riders/me/messages':
             payload = {'unread': unread, 'items': <dynamic>[]};

@@ -143,6 +143,29 @@ class _RiderWeeklyPageState extends State<RiderWeeklyPage> {
                               fontSize: 12.5,
                               fontWeight: FontWeight.w600,
                               color: sz.earn)),
+                      // 里程与每公里(#309)。时薪答的是「这段时间值不值」,
+                      // 每公里答的是「这些路值不值」—— 两个问题,
+                      // 顺路单多的一周时薪好看但公里数也高
+                      if ((d['meters'] as num?) != null &&
+                          (d['meters'] as num) > 0) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                            '跑了 ${((d['meters'] as num) / 1000).toStringAsFixed(1)} 公里'
+                            '${d['cents_per_km'] == null ? '' : ' · 每公里 ¥'
+                                '${((d['cents_per_km'] as num) / 100).toStringAsFixed(1)}'}',
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: sz.earn)),
+                        const SizedBox(height: 4),
+                        // 口径必须跟着数走:骑手会拿它跟车上里程表对,
+                        // 对不上会觉得平台在少算 —— 而少的不是里程,
+                        // 是我们没说清这个数不是全程
+                        Text('${d['distance_note'] ?? ''}',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 11, height: 1.5, color: sz.inkMuted)),
+                      ],
                     ]),
                   ),
                   const SizedBox(height: 12),

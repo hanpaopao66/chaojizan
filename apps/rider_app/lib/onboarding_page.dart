@@ -190,6 +190,24 @@ class _RiderExamPageState extends State<RiderExamPage> {
           const SizedBox(height: 12),
         ],
 
+        // 模拟跑一单(#309)。**放在答题之前** ——
+        // 规则背得出不等于按钮按得对,而新骑手的第一单是真顾客的饭。
+        // 步骤从服务端来,而服务端从状态机导出:真流程改了这里跟着变
+        if ((t['flow'] as List?)?.isNotEmpty ?? false) ...[
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.play_circle_outline, size: 18),
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => RiderFlowDrillPage(
+                      flow: (t['flow'] as List)
+                          .cast<Map<String, dynamic>>()))),
+              label: const Text('先模拟跑一单(不产生真实订单)'),
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+
         const SizedBox(height: 6),
         SizedBox(
           width: double.infinity,
@@ -801,6 +819,168 @@ class _EmergencyContactsPageState extends State<EmergencyContactsPage> {
             child: FilledButton(
                 onPressed: _save, child: const Text('保存(覆盖原有)'))),
       ]),
+    );
+  }
+}
+
+/// 模拟跑一单(#309)。**不产生任何真实订单。**
+///
+/// ## 为什么要有它
+///
+/// 培训讲的是规则(封签别拆、出事先保安全),而规则背得出**不等于
+/// 按钮按得对**。新骑手的第一单是真顾客的饭:到店忘了点「我到店了」,
+/// 等餐时长从零算起,那段白等的时间没人补;走到取餐那一步找不到按钮,
+/// 顾客在等、商家在催,他更慌。
+///
+/// 这一页让他先把整条路按一遍。按错不会怎么样 —— 这正是它的意义。
+///
+/// ## 步骤为什么从服务端来
+///
+/// `flow` 由服务端从**状态机**导出(riders.py 的 `_delivery_flow`)。
+/// 手写一份的话,真流程改了(插一步、改顺序)而演练没跟上,
+/// 教出来的就是错的操作,而那个错误只在他的第一单上暴露。
+class RiderFlowDrillPage extends StatefulWidget {
+  const RiderFlowDrillPage({super.key, required this.flow});
+
+  final List<Map<String, dynamic>> flow;
+
+  @override
+  State<RiderFlowDrillPage> createState() => _RiderFlowDrillPageState();
+}
+
+class _RiderFlowDrillPageState extends State<RiderFlowDrillPage> {
+  /// 已经按对几步
+  int _done = 0;
+
+  /// 上一次按错了 —— 显示一句为什么错,而不是静默不动
+  String _misstep = '';
+
+  bool get _finished => _done >= widget.flow.length;
+
+  void _tap(int i) {
+    if (i == _done) {
+      setState(() {
+        _done++;
+        _misstep = '';
+      });
+      return;
+    }
+    // 按错不惩罚,只说清楚为什么。**演练里按错是好事** ——
+    // 总比第一单在顾客门口按错强
+    setState(() => _misstep = i < _done
+        ? '这一步已经做过了。真实订单里也一样 —— 同一步重复点不会有第二次效果'
+        : '还轮不到这一步。上一步没做完就点它,真实订单里会被服务端顶回来');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return SzPageScaffold(
+      appBar: AppBar(title: const Text('模拟跑一单')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        children: [
+          SzCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('这是演练,不会产生真实订单',
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: sz.ink)),
+                const SizedBox(height: 8),
+                Text('按顺序把下面几步点一遍。点错了不会怎么样 —— '
+                    '这正是演练的意义,总比第一单在顾客门口按错强。',
+                    style: TextStyle(
+                        fontSize: 12.5, height: 1.6, color: sz.inkMuted)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          for (final (i, step) in widget.flow.indexed) ...[
+            _stepCard(sz, i, step),
+            const SizedBox(height: 10),
+          ],
+          if (_misstep.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(_misstep,
+                  style: TextStyle(fontSize: 12.5, color: sz.hold)),
+            ),
+          if (_finished) ...[
+            SzCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('走完了',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: sz.ink)),
+                  const SizedBox(height: 8),
+                  Text('真实订单里每一步都在订单卡上,位置和这里一样。'
+                      '有拿不准的随时回这一页再走一遍。',
+                      style: TextStyle(
+                          fontSize: 12.5, height: 1.6, color: sz.inkMuted)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('回去做确认题'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _stepCard(SzColors sz, int i, Map<String, dynamic> step) {
+    final done = i < _done;
+    final now = i == _done;
+    final tip = '${step['tip'] ?? ''}';
+    return SzCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(
+                done
+                    ? Icons.check_circle
+                    : (now
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked),
+                size: 18,
+                color: done ? sz.earn : (now ? sz.clay : sz.inkFaint)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('${i + 1}. ${step['action']}',
+                  style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: now ? FontWeight.w600 : FontWeight.w400,
+                      color: done ? sz.inkMuted : sz.ink)),
+            ),
+            // 只有轮到的那一步能按 —— 按钮长什么样、在哪儿,
+            // 和真实订单卡上一致
+            if (!done)
+              FilledButton(
+                onPressed: () => _tap(i),
+                child: Text('${step['action']}'),
+              ),
+          ]),
+          if (tip.isNotEmpty && (now || done)) ...[
+            const SizedBox(height: 8),
+            Text(tip,
+                style:
+                    TextStyle(fontSize: 12, height: 1.6, color: sz.inkMuted)),
+          ],
+        ],
+      ),
     );
   }
 }

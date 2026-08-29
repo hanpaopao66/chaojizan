@@ -285,6 +285,15 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
           _stat(sz, '今日收入', _yuan(_worklog?['today_earned_cents']), '元'),
         ]),
         const SizedBox(height: 8),
+        // 里程**不放这里**,放周报(#309)。
+        //
+        // 这张卡是「一眼看今天」的三个数,加第四行会把一个入口挤出首屏 ——
+        // profile_density_test 盯着那个数字(长辈版 1.4× 下 ≥10 个入口,
+        // 改版前只有 6,是调出来的)。做成第四格也不行:三格在 320 宽 +
+        // 1.4× 下已经贴边,而缩短标签会撞到按文字找入口的路由测试。
+        //
+        // 而「跑这些路值不值」本来就是来周报分析的事:那里有整周的量,
+        // 分母够大,能算每公里挣多少 —— 今日卡底下那行「看周报 →」就是路。
         Row(children: [
           Expanded(
             // 一行放得下:原来那句「收入按已完成订单统计,不含在途单;
@@ -430,6 +439,7 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
   /// 加载完之后的 0 是**真的 0**(今天还没跑单),照写不误。
   /// 这两种 0 现在分得开,因为 worklog 的字段要么有要么整个对象是 null。
   String _int(dynamic v) => v == null ? '—' : '${(v as num).toInt()}';
+
 
   String _hours(dynamic minutes) {
     final m = (minutes as num?)?.toDouble();

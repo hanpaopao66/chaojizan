@@ -458,6 +458,21 @@ async def my_worklog(
                    RiderEarning.created_at > since))).first()
         return row[0], row[1]
 
+    async def meters(since):
+        """跑了多少米。
+
+        口径是**计价里程**(取餐点 → 收货地),不含骑手到店那一段 ——
+        到店距离没有落库,现编一个数还不如不给。
+        标出口径是必须的:骑手会拿它跟里程表对,对不上就会觉得平台在少算。
+        """
+        return int(await db.scalar(
+            select(func.coalesce(func.sum(Order.bill_distance_m), 0))
+            .where(Order.rider_id == user.id,
+                   Order.status.in_([OrderStatus.DELIVERED,
+                                     OrderStatus.COMPLETED]),
+                   Order.delivered_at.is_not(None),
+                   Order.delivered_at > since)) or 0)
+
     t_orders, t_cents = await stats(today_start)
     w_orders, w_cents = await stats(week_start)
     return {
@@ -465,6 +480,11 @@ async def my_worklog(
         "week_minutes": minutes(sessions, week_start),
         "today_orders": t_orders, "today_earned_cents": t_cents,
         "week_orders": w_orders, "week_earned_cents": w_cents,
+        # 里程(#309):骑手判断「跑这些路值不值」靠的是每公里挣多少,
+        # 光有单量和收入算不出来。口径见 meters()
+        "today_meters": await meters(today_start),
+        "week_meters": await meters(week_start),
+        "distance_note": "计价里程(取餐点→收货地),不含到店那一段",
     }
 
 
@@ -565,6 +585,18 @@ async def my_weekly_report(
     total_cents = sum(d["earned_cents"] for d in days)
     total_orders = sum(d["orders"] for d in days)
     total_minutes = sum(d["minutes"] for d in days)
+
+    # 里程(#309)。放周报不放首页今日卡:今日卡是「一眼看今天」的三个数,
+    # 加第四行会把一个入口挤出首屏(profile_density_test 盯着这个数);
+    # 而「跑这些路值不值」本来就是来周报分析的事。
+    total_meters = int(await db.scalar(
+        select(func.coalesce(func.sum(Order.bill_distance_m), 0))
+        .where(Order.rider_id == user.id,
+               Order.status.in_([OrderStatus.DELIVERED,
+                                 OrderStatus.COMPLETED]),
+               Order.delivered_at.is_not(None),
+               Order.delivered_at >= week_start,
+               Order.delivered_at < week_end)) or 0)
     return {
         "week_start": week_start.isoformat(),
         "days": days,
@@ -576,6 +608,16 @@ async def my_weekly_report(
         # 而他会拿这个数去判断"今天值不值得跑"。宁可不显示
         "cents_per_hour": (round(total_cents / (total_minutes / 60))
                            if total_minutes >= 60 else None),
+        "meters": total_meters,
+        # 每公里挣多少。**不足 5 公里不给** —— 和时薪同一条理由:
+        # 分母太小算出来是荒唐数字,而他会拿它判断值不值得跑
+        "cents_per_km": (round(total_cents / (total_meters / 1000))
+                         if total_meters >= 5000 else None),
+        # 口径必须跟着数走:这是计价里程(取餐点→收货地),不含骑手到店
+        # 那一段。骑手会拿它跟车上里程表对,对不上会觉得平台在少算 ——
+        # 而少的不是里程,是我们没说清这个数不是全程
+        "distance_note": "计价里程(取餐点→收货地),不含到店那一段;"
+                         "所以每公里的数比按里程表算的偏高",
         "fee_parts": parts,
         "fee_part_labels": {k: labels[k] for k in parts if k in labels},
         "note": "只统计,不考核 —— 这里没有评分、等级和排名,"
@@ -2055,6 +2097,54 @@ def _training_content() -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _delivery_flow() -> list[dict]:
+    """跑一单的操作步骤。**步骤名与顺序从状态机导出,不手写。**
+
+    新手模拟跑单要照着它演练;真流程改了(比如插一步)而这里没跟上,
+    演练教出来的就是错的操作 —— 而那个错误只会在他的第一单上暴露。
+    """
+    from ..state_machine import GRABBABLE_STATUSES, TRANSITIONS, OrderStatus
+
+    # 抢单不改 status,单独一步;其余按状态机里 rider 有权做的流转排
+    rider_steps = [(a, b) for (a, b), roles in TRANSITIONS.items()
+                   if "rider" in roles]
+    order = [OrderStatus.PENDING_PAYMENT, OrderStatus.PAID,
+             OrderStatus.ACCEPTED, OrderStatus.READY,
+             OrderStatus.PICKED_UP, OrderStatus.DELIVERED]
+    rider_steps.sort(key=lambda ab: order.index(ab[0]))
+
+    #: 每一步要提醒什么。**只写会真的出事的那句** ——
+    #: 每步都写一段话等于没写,新手会直接划过去
+    tips = {
+        "grab": "抢之前先看清取餐点和送达点在哪,别抢了才发现是反方向。"
+                "被自己偏好挡掉的单还在池子里,不是没单了。",
+        OrderStatus.PICKED_UP.value:
+            "到店先点「我到店了」再等餐 —— 等餐时长从这一刻开始算,"
+            "不点就等于白等。取餐要核对尾号,拿错单是最难挽回的。",
+        OrderStatus.DELIVERED.value:
+            "送到楼下还是送上门,按订单上写的来;"
+            "顾客不在就按流程留证,别自己决定放哪儿。",
+    }
+    steps = [{
+        "key": "grab",
+        "action": "抢单",
+        "from": ",".join(sorted(s.value for s in GRABBABLE_STATUSES)),
+        "to": "",
+        "tip": tips["grab"],
+    }]
+    labels = {OrderStatus.PICKED_UP.value: "已取餐",
+              OrderStatus.DELIVERED.value: "送达"}
+    for a, b in rider_steps:
+        steps.append({
+            "key": b.value,
+            "action": labels.get(b.value, b.value),
+            "from": a.value,
+            "to": b.value,
+            "tip": tips.get(b.value, ""),
+        })
+    return steps
+
+
 async def _exam_passed(db: AsyncSession, rider_id: int) -> bool:
     from ..models import RiderExam
     return bool(await db.scalar(
@@ -2067,7 +2157,12 @@ async def training_content(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    """培训内容 + 我的完成状态。**先给内容,再谈答题。**"""
+    """培训内容 + 我的完成状态。**先给内容,再谈答题。**
+
+    `flow` 是跑一单的操作步骤,**从真实状态机导出**(state_machine 的
+    TRANSITIONS 里 rider 那几条 + 抢单),不是另抄一份 ——
+    抄的那份迟早和真流程对不上,而新骑手正是照着它按第一单的按钮。
+    """
     content = _training_content()
     return {
         "done": await _exam_passed(db, user.id),
@@ -2078,6 +2173,7 @@ async def training_content(
         "why": content["why"],
         "sections": content["sections"],
         "question_count": _TRAINING_QUESTIONS,
+        "flow": _delivery_flow(),
         "note": "答错不算不合格,会当场告诉你为什么,改完就能继续",
     }
 

@@ -140,6 +140,22 @@ void main() {
     });
   });
 
+  group('里程放周报,不放这张卡(#309)', () {
+    testWidgets('今日卡上不出现公里数 —— 加一行会把入口挤出首屏', (t) async {
+      await pump(t, fakeRiderApi(todayMeters: 42100));
+      expect(find.textContaining('公里'), findsNothing,
+          reason: '这张卡是「一眼看今天」的三个数。加第四行会把一个入口'
+              '挤出首屏(见 profile_density_test:长辈版 1.4× 下要 ≥10 个,'
+              '改版前只有 6,是调出来的)。里程去周报 —— '
+              '「跑这些路值不值」本来就是去那儿分析的');
+    });
+
+    testWidgets('通往周报的那行还在 —— 它是里程的唯一入口', (t) async {
+      await pump(t, fakeRiderApi(todayMeters: 42100));
+      expect(find.textContaining('看周报'), findsOneWidget);
+    });
+  });
+
   group('溢出护栏:多大的数都不许画出格', () {
     // ¥0 / 平常一天 / 好的一天 / 周结算那种大数,各来一遍
     for (final cents in [0, 8600, 48600, 128650]) {
