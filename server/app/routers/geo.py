@@ -273,16 +273,42 @@ async def open_city_list(db: AsyncSession = Depends(get_db)):
     """))).all()
     have = [{"name": c, "merchants": n} for c, n in rows]
 
+    by_name = {h["name"]: h["merchants"] for h in have}
     if allow:
         # 开城清单是权威:清单里的城市即便还没有商家也列出来(可能刚开城),
         # 但**标出来没有店** —— 让用户知道切过去会看到什么
-        by_name = {h["name"]: h["merchants"] for h in have}
-        return {
-            "items": [{"name": c, "merchants": by_name.get(c, 0)}
-                      for c in allow],
-            "source": "open_cities",
-        }
-    return {"items": have, "source": "merchants"}
+        items = [{"name": c, "merchants": by_name.get(c, 0)} for c in allow]
+        source = "open_cities"
+    else:
+        items, source = have, "merchants"
+
+    # ---- 全部城市(#308)----
+    #
+    # 原先这个接口只给「有店的城市」。而人是会出差、会搬家的:
+    # 到了一个还没开通的城市,列表里一条都没有,他连"这里到底开没开"
+    # 都看不出来 —— 只会以为 App 坏了。
+    #
+    # 所以给全量清单,但**每一条都标着有几家店**:
+    # 让他自己看到"这里还没有商家",而不是让他猜。
+    all_cities: list[dict] = []
+    try:
+        from ..services.city_list import all_cities as fetch_all
+        for c in await fetch_all():
+            # 商家的 city 存的是「成都市」这种全名(腾讯逆地理的口径),
+            # 而清单里 name 也是全名 —— 直接对得上,不做模糊匹配:
+            # 模糊匹配会把「吉林省」和「吉林市」算成一个
+            all_cities.append({**c, "merchants": by_name.get(c["name"], 0)})
+    except Exception:
+        # 拿不到全量清单不影响原有能力 —— 切换器照常能用有店的那几个
+        pass
+
+    return {
+        "items": items,
+        "source": source,
+        # 热门 = 有店且店多的。不是编辑推荐,也没有位置可以买
+        "hot": sorted(have, key=lambda h: -h["merchants"])[:12],
+        "all": all_cities,
+    }
 
 
 @router.get("/route")

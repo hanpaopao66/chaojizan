@@ -1133,6 +1133,15 @@ class ApiClient {
         .toList();
   }
 
+  /// 城市选择器要的三份数据:热门(有店且店多)、全部(全国)、当前口径。
+  ///
+  /// 一次请求拿齐 —— 分三个接口的话选择器要等三次往返才画得全,
+  /// 而它是个弹层,慢一点就很明显。
+  Future<SzCityCatalog> cityCatalog() async {
+    final d = await _request('GET', '/geo/cities') as Map<String, dynamic>;
+    return SzCityCatalog.fromJson(d);
+  }
+
   /// 商家推广物料:店铺短码 + 海报要印的内容(短码首次调用时懒生成)
   Future<Map<String, dynamic>> merchantPromo() async =>
       await _request('GET', '/merchants/me/promo') as Map<String, dynamic>;

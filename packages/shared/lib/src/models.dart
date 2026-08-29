@@ -947,6 +947,76 @@ class AfterSale {
       };
 }
 
+/// 一个城市。`merchants` = 这里有几家店(0 也要给,让用户自己看到)。
+class SzCity {
+  const SzCity({
+    required this.name,
+    required this.short,
+    required this.province,
+    required this.initial,
+    required this.pinyin,
+    required this.merchants,
+    this.lat,
+    this.lng,
+  });
+
+  factory SzCity.fromJson(Map<String, dynamic> j) => SzCity(
+        name: j['name'] as String? ?? '',
+        short: j['short'] as String? ?? (j['name'] as String? ?? ''),
+        province: j['province'] as String? ?? '',
+        initial: j['initial'] as String? ?? '#',
+        pinyin: j['pinyin'] as String? ?? '',
+        merchants: j['merchants'] as int? ?? 0,
+        lat: (j['lat'] as num?)?.toDouble(),
+        lng: (j['lng'] as num?)?.toDouble(),
+      );
+
+  final String name;
+
+  /// 不带「市」的短名。搜索要用它 —— 用户打「成都」不会打「成都市」
+  final String short;
+  final String province;
+
+  /// 拼音首字母(大写);拿不到是 '#'
+  final String initial;
+  final String pinyin;
+  final int merchants;
+
+  /// 城市中心坐标。选了城市直接按它找店,不用再打一次 POI 搜索
+  final double? lat;
+  final double? lng;
+}
+
+/// 城市选择器的数据源。
+class SzCityCatalog {
+  const SzCityCatalog({
+    required this.open,
+    required this.hot,
+    required this.all,
+  });
+
+  factory SzCityCatalog.fromJson(Map<String, dynamic> j) => SzCityCatalog(
+        open: ((j['items'] as List?) ?? const [])
+            .map((e) => SzCity.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        hot: ((j['hot'] as List?) ?? const [])
+            .map((e) => SzCity.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        all: ((j['all'] as List?) ?? const [])
+            .map((e) => SzCity.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+
+  /// 开通/有店的城市(老口径,切换器的兜底)
+  final List<SzCity> open;
+
+  /// 热门:有店且店多的。不是编辑推荐,也没有位置可以买
+  final List<SzCity> hot;
+
+  /// 全国城市。拿不到时是空 —— 调用方要能只靠 [open] 工作
+  final List<SzCity> all;
+}
+
 class OrderEvent {
   OrderEvent.fromJson(Map<String, dynamic> json)
       : toStatus = json['to_status'] as String,

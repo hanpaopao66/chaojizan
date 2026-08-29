@@ -1854,6 +1854,11 @@ class _MerchantListViewState extends State<MerchantListView>
                     SzCityChip(
                       city: _pickedCity,
                       loadCities: widget.api.openCities,
+                      // 全量清单(#308):人会出差、会搬家,到了没开通的城市
+                      // 只列有店城市的话一条都没有 —— 他连"这里开没开"
+                      // 都看不出来,只会以为 App 坏了
+                      loadCatalog: widget.api.cityCatalog,
+                      locatedCity: _farCity,
                       onChanged: _useCity,
                     ),
                   ]),
