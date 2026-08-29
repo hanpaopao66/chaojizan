@@ -186,8 +186,17 @@ class Test天气开关的语义:
         assert asyncio.run(go()) is True
 
     def test_没有强制关这条路(self):
-        """天气恶劣却关掉加价,没有正当理由 ——
-        所以关掉开关只是"不强制开",自动判定照常生效。"""
+        """天气恶劣却关掉加价,没有正当理由 —— 所以只有「强制开」没有「强制关」。
+
+        ⚠️ 这条的语义 2026-08-29 变过一次(#307)。原先是
+        「关了开关,下雨照样加价」—— 自动判定直接生效。
+        现在自动判定**只提请审核**,人点头才加价:
+        加价是用户实付的钱,误报(格点漂移、一阵过云雨)会让他凭空多花,
+        而他看不到那一刻的气象数据、也不知道找谁申诉。
+
+        所以这里断言的是**下雨也不直接加价,但会留下一张待审单** ——
+        「宁可漏加,不可错收」。
+        """
         import asyncio
         from unittest.mock import AsyncMock, patch
 
@@ -197,11 +206,40 @@ class Test天气开关的语义:
             db = AsyncMock()
             db.get.return_value = type("F", (), {"value": "off"})()
             with patch("app.services.weather.current",
-                       new=AsyncMock(return_value={"severe": severe})):
+                       new=AsyncMock(return_value={"severe": severe})), \
+                 patch("app.services.geo_city.district_of",
+                       new=AsyncMock(return_value=("成都市", "锦江区"))), \
+                 patch("app.services.weather_zone.active_alert",
+                       new=AsyncMock(return_value=None)), \
+                 patch("app.services.weather_zone.request_if_severe",
+                       new=AsyncMock(return_value=severe)) as req:
+                got = await flags.weather_surcharge_on(db, 30.66, 104.08)
+                return got, req.await_count
+
+        on_rain, asked_rain = asyncio.run(go(True))
+        assert on_rain is False, "自动判定直接加价了 —— 那审核就是摆设"
+        assert asked_rain == 1, "下雨了却没提请审核 —— 那这条路永远走不通"
+
+        on_sun, _ = asyncio.run(go(False))
+        assert on_sun is False
+
+    def test_有生效的审核单才加价(self):
+        """人点头之后才是真加价。这条和上一条合起来才是完整语义。"""
+        import asyncio
+        from unittest.mock import AsyncMock, patch
+
+        from app.services import flags
+
+        async def go():
+            db = AsyncMock()
+            db.get.return_value = type("F", (), {"value": "off"})()
+            with patch("app.services.geo_city.district_of",
+                       new=AsyncMock(return_value=("成都市", "锦江区"))), \
+                 patch("app.services.weather_zone.active_alert",
+                       new=AsyncMock(return_value=object())):
                 return await flags.weather_surcharge_on(db, 30.66, 104.08)
 
-        assert asyncio.run(go(True)) is True    # 关了开关,下雨照样加价
-        assert asyncio.run(go(False)) is False
+        assert asyncio.run(go()) is True
 
     def test_查不到天气时不加价但也不报错(self):
         """None 表示「不知道」,不是「天气很好」——
@@ -215,6 +253,10 @@ class Test天气开关的语义:
             db = AsyncMock()
             db.get.return_value = type("F", (), {"value": "off"})()
             with patch("app.services.weather.current",
+                       new=AsyncMock(return_value=None)), \
+                 patch("app.services.geo_city.district_of",
+                       new=AsyncMock(return_value=("成都市", "锦江区"))), \
+                 patch("app.services.weather_zone.active_alert",
                        new=AsyncMock(return_value=None)):
                 return await flags.weather_surcharge_on(db, 30.66, 104.08)
 

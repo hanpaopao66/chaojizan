@@ -1,7 +1,11 @@
 """平台运行时开关读取(写入在 routers/admin.py,仅管理员)。"""
+import logging
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import PlatformFlag
+
+logger = logging.getLogger("superz.flags")
 
 
 async def weather_surcharge_on(
@@ -17,8 +21,15 @@ async def weather_surcharge_on(
     北京下雪没人开开关,骑手就白挨冻。实测同一时刻成都锦江区降水 0.2mm、
     双流区 0.1mm、北京朝阳 0.0mm,**区县级差异真实存在**。
 
-    现在:传了坐标就按该点实时天气判(services/weather.py,判定阈值公开);
-    没传坐标(历史调用/批量场景)退回全局开关。
+    ## 再从「判定即生效」改为「判定后提请审核」(#307)
+
+    自动判定**不再直接加价**,只负责给该区县提请一张审核单
+    (services/weather_zone.py),人点头之后才生效、且限时。
+
+    为什么:这笔钱是用户实付的。误报(气象格点漂移、一阵过云雨、
+    传感器异常)的代价是用户凭空多花钱,而他看不到那一刻的气象数据、
+    也不知道找谁申诉。**宁可漏加,不可错收** —— 漏加平台可以事后
+    补给骑手,错收是从用户口袋里拿了不该拿的钱。
 
     管理员保留**强制开**的能力 —— 自动判定漏了也能救。
     但**不保留强制关**:天气恶劣却关掉加价,没有正当理由。
@@ -30,12 +41,22 @@ async def weather_surcharge_on(
     if lat is None or lng is None:
         return False
 
-    from . import weather
+    from .geo_city import district_of
+    from .weather_zone import active_alert, request_if_severe
 
-    w = await weather.current(lat, lng)
-    # 查不到时返回 False 而不是抛错;但**注意**:这不等于"天气很好",
-    # 只是"不知道"。真正的降级语义在调用侧 —— 已经加价的订单不会被追溯撤销
-    return bool(w and w.get("severe"))
+    city, district = await district_of(lat, lng)
+    if city and await active_alert(db, city, district) is not None:
+        return True
+    # 没有生效单:顺手看一眼天气,该提请就提请。
+    # **提请不影响本单** —— 这一单不加价,审批通过后的单才加。
+    # 放在这里而不是定时任务:有人下单的区域才值得查天气,
+    # 没有单的区县查了也没用,还白烧配额
+    try:
+        await request_if_severe(db, lat, lng)
+    except Exception:
+        # 提请失败绝不能挡住下单 —— 它只是一条运营线索
+        logger.warning("恶劣天气提请失败 (%.4f,%.4f)", lat, lng, exc_info=True)
+    return False
 
 
 async def night_curfew_window(db: AsyncSession) -> str | None:

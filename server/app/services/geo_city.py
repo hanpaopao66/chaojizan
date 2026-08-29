@@ -18,6 +18,45 @@ logger = logging.getLogger("superz.geo_city")
 _API = "https://apis.map.qq.com/ws/geocoder/v1/"
 
 
+async def district_of(lat: float, lng: float) -> tuple[str, str]:
+    """逆地理解析 (城市, 区县),如 ("成都市", "锦江区")。失败返回 ("", "")。
+
+    恶劣天气加价要按**区县**判(实测同一时刻成都锦江区降水 0.2mm、
+    双流区 0.1mm),city 那一层太粗 —— 全城一起加价必然误伤。
+    """
+    city = await city_of(lat, lng)
+    if not city:
+        return "", ""
+    # city_of 已经把整个 address_component 拿回来过一次并缓存了城市名。
+    # 区县单独缓存一份:两者 TTL 一样,但 key 不同,免得为了区县再打一次接口
+    cache_key = f"geo:district:{round(lat, 2)}:{round(lng, 2)}"
+    redis = get_redis()
+    cached = await redis.get(cache_key)
+    if cached is not None:
+        d = cached.decode() if isinstance(cached, bytes) else cached
+        return city, d
+    if not settings.tencent_map_key:
+        return city, ""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(_API, params={
+                "location": f"{lat},{lng}",
+                "key": settings.tencent_map_key,
+                "get_poi": 0,
+            })
+            data = resp.json()
+        if data.get("status") != 0:
+            return city, ""
+        comp = (data.get("result") or {}).get("address_component") or {}
+        district = str(comp.get("district") or "")[:20]
+        if district:
+            await redis.set(cache_key, district, ex=86400)
+        return city, district
+    except Exception:
+        logger.warning("腾讯逆地理(区县)失败 (%.4f,%.4f)", lat, lng)
+        return city, ""
+
+
 async def city_of(lat: float, lng: float) -> str:
     """逆地理解析城市名(如「成都市」)。失败返回 ""。"""
     if not settings.tencent_map_key:

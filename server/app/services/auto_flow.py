@@ -778,6 +778,12 @@ async def sweep_once() -> dict[str, int]:
         orphan_appends = await _sweep_orphan_appends(db, now)
         unbound = await _sweep_privacy_unbind(db, now)
         await _sweep_rider_offline(db, now)
+        # 恶劣天气加价单到期(#307):批准是限时的,天气会停 ——
+        # 不到期就变成「批一次收一辈子」,而钱是用户出的
+        from .weather_zone import expire_due
+        weather_expired = await expire_due(db)
+        if weather_expired:
+            logger.info("auto_flow: %s 张天气加价单到期失效", weather_expired)
         # 分账重试兜底(桩模式下 pending 会累积 attempts,资质到位后自然走通)
         from .profit_sharing import sweep_pending as _ps_sweep
         await _ps_sweep(db)

@@ -2253,6 +2253,83 @@ async def delete_moderation_word(
 
 # ---------- 防刷单风控(只标记不拦截,人工复核) ----------
 
+# ---------- 恶劣天气加价审核(#307) ----------
+
+@router.get("/weather-alerts")
+async def list_weather_alerts(
+    status: str = "pending",
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """恶劣天气加价的审核队列。
+
+    默认只看 pending —— 这一页存在的意义就是"有没有要我点头的"。
+    返回体带**气象快照**:审的是判据本身,不是一句「系统说恶劣」。
+    """
+    from ..models import WeatherAlert, WeatherAlertStatus
+    from ..services import weather_zone
+
+    q = select(WeatherAlert).order_by(WeatherAlert.id.desc()).limit(100)
+    if status:
+        try:
+            q = q.where(WeatherAlert.status == WeatherAlertStatus(status))
+        except ValueError:
+            raise HTTPException(422, "未知状态")
+    rows = (await db.scalars(q)).all()
+    return {
+        "spec": weather_zone.public_spec(),
+        "items": [{
+            "id": r.id, "city": r.city, "district": r.district,
+            "status": r.status.value,
+            "weather_code": r.weather_code,
+            "precip_mm": r.precip_mm, "wind_kmh": r.wind_kmh,
+            "lat": r.lat, "lng": r.lng,
+            "created_at": r.created_at,
+            "decided_at": r.decided_at,
+            "expires_at": r.expires_at,
+            "note": r.note,
+        } for r in rows],
+    }
+
+
+@router.post("/weather-alerts/{alert_id}/decide")
+async def decide_weather_alert(
+    alert_id: int,
+    payload: dict,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """批准或驳回一张加价审核单。
+
+    批准后该区县加价生效 `APPROVED_HOURS` 小时 —— **有效期不可自定义**。
+    可自定义就会出现"批一次生效到月底",而天气两小时后就停了,
+    那笔钱仍在从用户口袋里出。
+    """
+    from datetime import timedelta
+    from ..models import WeatherAlert, WeatherAlertStatus
+    from ..services import weather_zone
+
+    approve = bool(payload.get("approve"))
+    note = str(payload.get("note") or "")[:200]
+    row = await db.get(WeatherAlert, alert_id)
+    if row is None:
+        raise HTTPException(404, "审核单不存在")
+    if row.status != WeatherAlertStatus.pending:
+        raise HTTPException(409, f"这单已经是「{row.status.value}」了")
+    now = datetime.now(timezone.utc)
+    row.status = (WeatherAlertStatus.approved if approve
+                  else WeatherAlertStatus.rejected)
+    row.decided_at = now
+    row.decided_by = admin.id
+    row.note = note
+    if approve:
+        row.expires_at = now + timedelta(
+            hours=weather_zone.APPROVED_HOURS)
+    await db.commit()
+    return {"id": row.id, "status": row.status.value,
+            "expires_at": row.expires_at}
+
+
 @router.get("/order-flags")
 async def list_order_flags(
     only_cross_shop: bool = True,

@@ -1933,6 +1933,72 @@ class WitnessNode(Base):
     )
 
 
+class WeatherAlertStatus(str, enum.Enum):
+    pending = "pending"       # 自动判定已提请,等管理员审核
+    approved = "approved"     # 审核通过,该区县在有效期内加价
+    rejected = "rejected"     # 审核不通过(误报),同一区县进入冷静期
+    expired = "expired"       # 有效期到,自动失效
+
+
+class WeatherAlert(Base):
+    """恶劣天气加价的**审核单**(一区县一单)。
+
+    ## 为什么加价不能自动生效
+
+    这笔钱由**用户实付**。自动判定误报(气象格点漂移、一阵过云雨、
+    传感器异常)的代价是用户凭空多花钱,而他无从申诉 ——
+    他看不到那一刻的气象数据,也不知道该找谁。
+
+    所以自动判定只负责**提请**,生效要人点头。代价是响应变慢
+    (下暴雨到加价之间隔着一次人工确认),这是有意的取舍:
+    **宁可漏加,不可错收。** 漏加时骑手可以由平台事后补,
+    错收则是从用户口袋里拿了不该拿的钱。
+
+    ## 为什么按区县而不是按城市
+
+    实测同一时刻成都锦江区降水 0.2mm、双流区 0.1mm、北京朝阳 0.0mm。
+    按城市判必然误伤 —— 城东下暴雨,城西的用户凭什么多付。
+
+    ## 为什么有有效期
+
+    天气会停。审批通过如果永久生效,雨停了还在加价,就变成了
+    「批一次收一辈子」。到期自动失效,要继续加价就重新提请、重新审。
+    """
+
+    __tablename__ = "weather_alerts"
+    __table_args__ = (
+        # 查「这个区县现在该不该加价」是每次算价都要走的路径
+        Index("ix_weather_alerts_zone_status", "city", "district", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    city: Mapped[str] = mapped_column(String(20), index=True)
+    district: Mapped[str] = mapped_column(String(20), default="")
+    status: Mapped[WeatherAlertStatus] = mapped_column(
+        SAEnum(WeatherAlertStatus, native_enum=False),
+        default=WeatherAlertStatus.pending, index=True)
+
+    # 提请时的气象快照。**审的就是它** —— 管理员要能看到判据本身,
+    # 而不是只看到一句「系统说恶劣」。也是事后复核的证据
+    weather_code: Mapped[int] = mapped_column(Integer, default=0)
+    precip_mm: Mapped[float] = mapped_column(Float, default=0.0)
+    wind_kmh: Mapped[float] = mapped_column(Float, default=0.0)
+    # 触发点坐标:管理员想核实时能定位到具体哪儿
+    lat: Mapped[float] = mapped_column(Float, default=0.0)
+    lng: Mapped[float] = mapped_column(Float, default=0.0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    decided_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    #: 审核通过后加价生效到什么时候;到点由 auto_flow 置 expired
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    note: Mapped[str] = mapped_column(String(200), default="")
+
+
 class PlatformFlag(Base):
     """平台运行时开关(极简 KV):管理员改,立即生效,不用发版。
 
