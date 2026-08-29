@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -50,6 +51,16 @@ class ChannelConfig {
       // 拉不到就用缓存/兜底,首页照常画
     }
   }
+
+  /// 测试用:直接置位,免得每条用例都要起一个假 ApiClient 再等它刷新完。
+  /// 传 null 等于「没拉到过」,回落到内置兜底。
+  @visibleForTesting
+  static void setForTest(List<String>? channels) => _memo = channels;
+
+  /// 测试用:恢复到「没拉到过」的初始状态。静态量在同一个进程里的用例之间
+  /// 会串,不重置的话上一条用例配的频道会漏给下一条
+  @visibleForTesting
+  static void resetForTest() => _memo = null;
 
   /// 过滤频道注册表。**不改 tone** —— tone 是色槽下标,
   /// 隐藏两个频道不能让剩下的换颜色。

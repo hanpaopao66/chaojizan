@@ -1956,6 +1956,7 @@ class _MenuPageState extends State<MenuPage>
   List<Map<String, dynamic>> _claimable = []; // 可领店铺券
   Map<String, dynamic>? _queue;       // 这家店的排队现状(没开就是 null)
   Map<String, dynamic>? _myTicket;    // 我在这家店的号
+  Timer? _queuePoll;                  // 持号期间的状态轮询
   bool _isFavorite = false;
   late final TabController _tabController =
       TabController(length: 3, vsync: this);
@@ -1975,7 +1976,26 @@ class _MenuPageState extends State<MenuPage>
       _flushCart();
     }
     _tabController.dispose();
+    _queuePoll?.cancel();
     super.dispose();
+  }
+
+  /// 手里有号才轮询,没号立刻停。
+  ///
+  /// 为什么必须轮询:线上没配推送时「到号了」只写审计日志,用户端又
+  /// 没有消息中心 —— 不刷新的话,取了号的人**没有任何途径**知道被叫号,
+  /// 而叫号 120 秒宽限一过商家就能标过号。15 秒和商家叫号台的 10 秒
+  /// 同一个量级:过号是分钟级的事,秒级刷新只是白打接口。
+  /// 只在这一页开着时跑 —— dispose 即停,不做全局后台轮询。
+  void _syncQueuePoll() {
+    final active = _myTicket != null;
+    if (active && _queuePoll == null) {
+      _queuePoll = Timer.periodic(
+          const Duration(seconds: 15), (_) => _loadQueue());
+    } else if (!active && _queuePoll != null) {
+      _queuePoll!.cancel();
+      _queuePoll = null;
+    }
   }
 
   /// 购物车 → 云端 items 快照
@@ -2623,6 +2643,7 @@ class _MenuPageState extends State<MenuPage>
                     .contains(t['status']),
             orElse: () => null);
       });
+      _syncQueuePoll();
     } catch (_) {
       // 排队没开、或者接口挂了 —— 静默。它是加分项,不该挡住看菜单
     }
@@ -3668,10 +3689,43 @@ class _OrdersTabState extends State<OrdersTab> {
   late int _segment = widget.segment;
   late OrderFilter _filter = widget.filter;
 
+  /// 住宿频道关掉、且此人没有历史住宿单 —— 两个条件都满足才藏分段。
+  ///
+  /// 频道开关管的是「能不能**新**买」,不管「已买的还能不能看」:
+  /// 订单是凭证,用户要拿它入住、退款,关频道不能没收它们。
+  /// 「我的」页四格也照常统计住宿单 —— 数字说有 2 单,点进来却没有
+  /// 入口,那是数字在撒谎。
+  bool _hasLegacyStays = false;
+
+  /// 住宿分段还该不该存在
+  bool get _stayVisible =>
+      ChannelConfig.current.contains('stay') || _hasLegacyStays;
+
+  /// 读侧钳制。**在读的地方钳,不在写的地方拦** ——
+  /// 往这儿送 segment 的路不止一条(「我的」页四格按「哪边有单落哪边」
+  /// 跳,不看 ChannelConfig),挨个入口去改总会漏;而这里只有一个出口。
+  /// 不钳的话:分段器在住宿关掉时整条隐藏,_segment 停在 1,
+  /// 页面上再没有任何控件能切回外卖 —— 能进不能出,只能杀进程。
+  int get _effectiveSegment => _stayVisible ? _segment : 0;
+
+  /// 频道关了才需要问「有没有历史单」;开着的时候分段本来就在。
+  /// 拉不到按没有算 —— 宁可少显示,和 ChannelConfig 同一个立场
+  Future<void> _probeLegacyStays() async {
+    if (ChannelConfig.current.contains('stay')) return;
+    if (!widget.api.isLoggedIn) return;
+    try {
+      final stays = await widget.api.myStayOrders();
+      if (mounted && stays.isNotEmpty) {
+        setState(() => _hasLegacyStays = true);
+      }
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
     authTick.addListener(_onAuthChanged); // 游客登录成功后刷新
+    _probeLegacyStays();
   }
 
   /// 这个 tab 在 IndexedStack 里是保活的 —— 从「我的」页再跳一次过来,
@@ -3722,19 +3776,19 @@ class _OrdersTabState extends State<OrdersTab> {
           // 频道归属标(#132):切换器只说"看哪一类",这个标说"你正在看的是
           // 哪个频道",带频道色 —— 聚合平台里用户经常忘了自己在哪个世界。
           // 频道多起来后这里会换成可横滑的频道条,现在两段够用
-          SzChannelChip(_segment == 0 ? 'food' : 'stay', dense: false),
+          SzChannelChip(_effectiveSegment == 0 ? 'food' : 'stay', dense: false),
           const SizedBox(width: 10),
           // 住宿关掉之后这里只剩一个分段 —— 一个选项的分段器是纯噪音,
           // 整条藏掉。**判据和金刚区同一个** ChannelConfig,
           // 不然会出现「首页没有住宿,订单页有个空的住宿页签」
-          if (ChannelConfig.current.contains('stay'))
+          if (_stayVisible)
             Expanded(
               child: SegmentedButton<int>(
                 segments: const [
                   ButtonSegment(value: 0, label: Text('点外卖')),
                   ButtonSegment(value: 1, label: Text('住宿')),
                 ],
-                selected: {_segment},
+                selected: {_effectiveSegment},
                 onSelectionChanged: (s) => setState(() => _segment = s.first),
               ),
             )
@@ -3766,7 +3820,7 @@ class _OrdersTabState extends State<OrdersTab> {
         ),
       ),
       Expanded(
-        child: _segment == 0
+        child: _effectiveSegment == 0
             ? OrderListView(api: widget.api, filter: _filter)
             : StayOrderListView(api: widget.api, filter: _filter),
       ),
