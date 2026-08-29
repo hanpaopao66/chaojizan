@@ -195,6 +195,22 @@ jobs:
       # 只有让机器比对才不会。
       - name: 设计令牌一致性
         run: python3 scripts/gen_tokens.py --check
+      # 两个后台是 TypeScript,而这个 job 此前只查 Flutter ——
+      # admin-web / merchant-web 的类型错误在 CI 里一次都没被拦过,
+      # 全靠本机手跑 tsc 才发现得了。放在装 Flutter 之前:node 装得快,
+      # 类型错了就该立刻红,不用先等三分钟的 SDK 下载。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 后台类型检查
+        run: |
+          fail=0
+          for d in admin-web merchant-web; do
+            echo "── $d"
+            (cd "$d" && npm ci --no-audit --no-fund >/dev/null \
+              && npx tsc --noEmit) || fail=1
+          done
+          exit $fail
       # 频道色是功能不是装饰:首页一排图标,用户要一眼找到"打车"。
       # 「能不能一眼分开」是可以量的,而且**只能靠量** ——
       # 旧色板在绿色盲下最差色差 4.0(等于一排一样的方块),肉眼永远看不出来。

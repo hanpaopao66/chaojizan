@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from .util import CUSTOMER, MERCHANT, RIDER, call, login  # noqa: E402
+from .util import orderable_dish  # noqa: E402
 from .util import DEMO_SHOP_ID  # noqa: E402
 
 customer = login(CUSTOMER)
@@ -74,8 +75,10 @@ def run():
     print("✓ 单价下限封顶 ¥20 —— 再高就该用下线开关而不是隐形过滤器")
 
     # ---- 过滤生效,且**挡掉几单要说出来** ----
-    dish = [d for d in call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
-            if d.get("stock", 0) > 3][0]
+    # 这里后面要连下 3 单,所以库存要够;价格也必须过起送价下限 ——
+    # 自己手搓筛选漏掉价格那一条,撞的是一个跟本用例无关的 409
+    dish = orderable_dish(
+        call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes"), min_stock=4)
     no = make_order(dish["id"])
 
     set_prefs(grab_min_fee_cents=0)

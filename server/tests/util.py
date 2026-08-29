@@ -38,7 +38,15 @@ def call(method, path, token=None, body=None, expect_error=False,
             raw = resp.read()
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as e:
-        detail = json.loads(e.read()).get("detail")
+        # 错误体**不一定是 JSON**:502/503 是代理给的纯文本,uvicorn 兜底的
+        # 500 是 "Internal Server Error",连接被掐时干脆是空的。
+        # 这里直接 json.loads 的话,真实状态码会被一个 JSONDecodeError 盖掉,
+        # 排查的人看到的是 json/decoder.py 的栈,而不是「服务端 502 了」。
+        raw = e.read()
+        try:
+            detail = json.loads(raw).get("detail")
+        except (ValueError, AttributeError):
+            detail = f"(非 JSON 响应体){raw[:200]!r}"
         if expect_error and not (e.code == 429 and retry_429):
             return {"_error": e.code, "detail": detail}
         if e.code == 429 and not _retried:
@@ -129,8 +137,8 @@ _clear_demo_rider_backlog()
 _reset_demo_rider_transfer_count()
 
 
-def orderable_dish(dishes, min_cents=1500):
-    """挑一道真能下单的菜:单价过起送价下限、在售、有库存、且不是酒类。
+def orderable_dish(dishes, min_cents=1500, min_stock=1):
+    """挑一道真能下单的菜:单价过起送价下限、在售、库存够、且不是酒类。
 
     公共演示店的菜单会被历史测试残留污染,dishes[0] 可能是低价菜,
     盲取会撞上起送价 409 —— 所有下单测试统一走这里。
@@ -138,12 +146,17 @@ def orderable_dish(dishes, min_cents=1500):
     酒类必须排除:买酒要先实名认证(未成年人保护,#alcohol),
     普通用例的账号没实名,撞上就是一个跟本用例毫无关系的 422。
     库存也要看:菜单接口照常返回估清的菜,只有下单那一刻才报库存不足。
+
+    需要下多单的用例用 min_stock 说明要几份,不要自己手搓筛选 ——
+    手搓的版本十有八九会漏掉价格这一条,撞上起送价 409;而
+    `stock` 为 None 表示不限量,手写的 `d.get("stock", 0) > 3` 会
+    拿 None 跟数字比大小,直接 TypeError。
     """
     return next(d for d in dishes
                 if d["price_cents"] >= min_cents
                 and d.get("is_on_sale", True)
                 and not d.get("is_alcohol")
-                and (d.get("stock") is None or d["stock"] > 0))
+                and (d.get("stock") is None or d["stock"] >= min_stock))
 
 
 async def drain_order_pool():

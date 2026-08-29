@@ -62,6 +62,7 @@ analyze:
 	  || { echo "✗ 上面这些 '\\$$x' 是字面量,不是插值"; exit 1; }
 	@echo "  没有转义美元符 ✓"
 	@cd merchant-web && npx tsc --noEmit && echo "== merchant-web tsc ✓"
+	@cd admin-web && npx tsc --noEmit && echo "== admin-web tsc ✓"
 
 # 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)
 unit:

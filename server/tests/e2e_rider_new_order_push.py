@@ -26,12 +26,18 @@ def main() -> None:
     c_token = login(CUSTOMER)
     lat, lng = unique_spot("push")
     # 挑一个单价够高的在售菜:一份就过起送价,不受库存余量影响
+    # 酒类要排除:买酒得先实名(未成年人保护),而演示店最贵的那道
+    # 很可能就是酒 —— 撞上就是一个跟本用例毫无关系的 422。
+    # stock 为 None 是「不限量」,`or 0` 会把它当成缺货给筛掉
     dishes = [d for d in call("GET", "/merchants/1/dishes")
-              if d.get("is_on_sale", True) and (d.get("stock") or 0) > 0]
+              if d.get("is_on_sale", True)
+              and not d.get("is_alcohol")
+              and (d.get("stock") is None or d["stock"] > 0)]
     dishes.sort(key=lambda d: -d["price_cents"])
     dish = dishes[0]
     qty = max(1, -(-2500 // dish["price_cents"]))  # 凑够起送价
-    assert (dish.get("stock") or 0) >= qty, f"库存不够跑这条用例:{dish}"
+    assert dish.get("stock") is None or dish["stock"] >= qty, \
+        f"库存不够跑这条用例:{dish}"
     order = call("POST", "/orders", token=c_token, body={
         "merchant_id": 1,
         "items": [{"dish_id": dish["id"], "quantity": qty}],

@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from .util import CUSTOMER, MERCHANT, RIDER, call, login  # noqa: E402
 from .util import DEMO_SHOP_ID  # noqa: E402
+from .util import orderable_dish  # noqa: E402
 
 customer = login(CUSTOMER)
 merchant = login(MERCHANT)
@@ -64,7 +65,7 @@ def main():
     print(f"✓ 聚合键按坐标网格+楼层段(不看地址字符串);样本门槛 {MIN_SAMPLE}")
 
     dishes = call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
-    dish = [d for d in dishes if d.get("stock", 0) > 5][0]
+    dish = orderable_dish(dishes, min_stock=6)
 
     # ---- 没点「我到了」→ 不猜,drop_minutes 必须为空 ----
     no_skip = take_to_picked(dish["id"], floor=6, has_elevator=False)

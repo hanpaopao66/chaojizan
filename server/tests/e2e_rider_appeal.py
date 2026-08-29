@@ -28,6 +28,7 @@ from app.db import SessionLocal  # noqa: E402
 
 from .util import ADMIN, CUSTOMER, MERCHANT, call, login  # noqa: E402
 from .util import DEMO_SHOP_ID  # noqa: E402
+from .util import orderable_dish  # noqa: E402
 
 admin = login(ADMIN)
 merchant = login(MERCHANT)
@@ -102,7 +103,7 @@ async def main():
 
     # ---- 同一家店、同一个坐标,6 楼无电梯的 ETA 更长 ----
     dishes = call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
-    dish = [d for d in dishes if d.get("stock", 0) > 3][0]
+    dish = orderable_dish(dishes, min_stock=4)
     base = call("POST", "/orders", customer, {
         "merchant_id": DEMO_SHOP_ID,
         "items": [{"dish_id": dish["id"], "quantity": 1}],

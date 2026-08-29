@@ -28,6 +28,7 @@ from app.db import SessionLocal  # noqa: E402
 
 from .util import CUSTOMER, MERCHANT, RIDER, call, login  # noqa: E402
 from .util import DEMO_SHOP_ID  # noqa: E402
+from .util import orderable_dish  # noqa: E402
 
 customer = login(CUSTOMER)
 merchant = login(MERCHANT)
@@ -48,7 +49,7 @@ async def main():
     print(f"✓ 等餐补偿:前 {free} 分钟不补,超出按分钟计")
 
     dishes = call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
-    dish = [d for d in dishes if d.get("stock", 0) > 3][0]
+    dish = orderable_dish(dishes, min_stock=4)
     o = call("POST", "/orders", customer, {
         "merchant_id": DEMO_SHOP_ID,
         "items": [{"dish_id": dish["id"], "quantity": 1}],
