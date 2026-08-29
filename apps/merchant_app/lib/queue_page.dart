@@ -615,3 +615,124 @@ class _TableTypeSheetState extends State<_TableTypeSheet> {
     );
   }
 }
+
+/// 我标记过的异常订单与核查进度。
+///
+/// 表单里承诺了「核查有结果会在这里更新状态」—— 那就得有这个「这里」。
+/// 没有它,商家标完就再也见不到那条记录,承诺落空。
+class MyOrderFlagsPage extends StatefulWidget {
+  const MyOrderFlagsPage({super.key, required this.api});
+
+  final ApiClient api;
+
+  @override
+  State<MyOrderFlagsPage> createState() => _MyOrderFlagsPageState();
+}
+
+class _MyOrderFlagsPageState extends State<MyOrderFlagsPage> {
+  List<Map<String, dynamic>>? _items;
+
+  /// 非空 = 上一次加载失败。「一条没标过」和「没拉到」不能长得一样
+  String _error = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final r = await widget.api.myOrderFlags();
+      if (!mounted) return;
+      setState(() {
+        _items = (r['items'] as List? ?? []).cast<Map<String, dynamic>>();
+        _error = '';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '$e');
+    }
+  }
+
+  static const _kindLabel = {
+    'claim': '疑似职业索赔',
+    'review': '疑似恶意差评',
+    'other': '其他异常',
+  };
+  static const _statusLabel = {
+    'pending': '平台核查中',
+    'reviewed': '核查属实',
+    'dismissed': '核查不成立',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return SzPageScaffold(
+      appBar: AppBar(title: const Text('我标记的异常订单')),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: _error.isNotEmpty
+            ? ListView(children: [
+                const SizedBox(height: 80),
+                Center(child: Text(_error)),
+              ])
+            : _items == null
+                ? const Center(child: CircularProgressIndicator())
+                : ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: sz.surfaceAlt,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                            '标记只上报平台核查,不会自动对顾客做任何处置。'
+                            '职业索赔多是跨店行为,平台把多家店的标记放在一起看 ——'
+                            '这是单店看不出来的那部分。',
+                            style: TextStyle(
+                                fontSize: kFontNote,
+                                height: 1.6,
+                                color: sz.inkMuted)),
+                      ),
+                      if (_items!.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 40),
+                          child: Center(
+                            child: Text('还没有标记过订单',
+                                style: TextStyle(
+                                    fontSize: kFontBody, color: sz.inkFaint)),
+                          ),
+                        ),
+                      for (final f in _items!)
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          child: ListTile(
+                            title: Text(
+                                '#${'${f['order_no']}'.substring(
+                                    '${f['order_no']}'.length - 6)}'
+                                ' · ${_kindLabel[f['kind']] ?? f['kind']}'),
+                            subtitle: Text('${f['reason']}'),
+                            trailing: Text(
+                              _statusLabel[f['status']] ?? '${f['status']}',
+                              style: TextStyle(
+                                fontSize: kFontNote,
+                                color: f['status'] == 'pending'
+                                    ? sz.hold
+                                    : (f['status'] == 'reviewed'
+                                        ? sz.earn
+                                        : sz.inkMuted),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+      ),
+    );
+  }
+}

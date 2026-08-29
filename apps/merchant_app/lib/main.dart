@@ -1367,6 +1367,14 @@ class _MerchantHomePageState extends State<MerchantHomePage>
   /// 在支付成功时就打了)、缺货退款是异常路径。
   ///
   /// 历史单(default 分支)本来就没有动作行,也就没有这个菜单 —— 保持原样。
+  Future<void> _flagSheet(Order order) async {
+    await szShowSheet<bool>(
+      context: context,
+      builder: (context) =>
+          FlagOrderSheet(api: widget.api, orderNo: order.orderNo),
+    );
+  }
+
   Widget? _moreMenuFor(Order order) {
     final who = _orderSpeech(order);
     final canRefund = order.status == OrderStatus.paid ||
@@ -1377,7 +1385,16 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       OrderStatus.ready,
       OrderStatus.pickedUp,
     };
-    if (!live.contains(order.status)) return null;
+    // 标记异常发生在**单子结束之后** —— 争议(说少了一份、乱打差评)
+    // 那时候才出现。所以已送达/已完成/已取消的单也要有这个菜单,
+    // 只是里面只有「标记异常」一项。
+    const done = {
+      OrderStatus.delivered,
+      OrderStatus.completed,
+      OrderStatus.cancelled,
+    };
+    final canFlag = done.contains(order.status);
+    if (!live.contains(order.status) && !canFlag) return null;
     return Semantics(
       label: '更多操作,$who',
       button: true,
@@ -1402,6 +1419,8 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 _printTicket(order);
               case 'refund':
                 _refundSheet(order);
+              case 'flag':
+                _flagSheet(order);
             }
           },
           itemBuilder: (_) => [
@@ -1414,15 +1433,16 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 title: Text('和顾客说句话'),
               ),
             ),
-            const PopupMenuItem(
-              value: 'print',
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.print_outlined, size: 20),
-                title: Text('打印小票'),
+            if (!canFlag)
+              const PopupMenuItem(
+                value: 'print',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.print_outlined, size: 20),
+                  title: Text('打印小票'),
+                ),
               ),
-            ),
             if (canRefund)
               const PopupMenuItem(
                 value: 'refund',
@@ -1431,6 +1451,17 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.remove_shopping_cart_outlined, size: 20),
                   title: Text('缺货退款'),
+                ),
+              ),
+            // 单子结束之后才给 —— 争议是那时候才出现的
+            if (canFlag)
+              const PopupMenuItem(
+                value: 'flag',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.flag_outlined, size: 20),
+                  title: Text('标记异常'),
                 ),
               ),
           ],
@@ -2245,6 +2276,155 @@ class _NoFinanceForManager extends StatelessWidget {
           ),
         ]),
       ),
+    );
+  }
+}
+
+/// 标记异常订单的表单。
+///
+/// ## 这张表单的重点是文案,不是控件
+///
+/// 平台**不给商家拉黑顾客的权力** —— 给了它会变成报复工具(差评了就拉黑)。
+/// 作为交换,平台做一件单店做不到的事:把多家店的标记放在一起看,
+/// 因为真正的职业索赔是跨店行为。
+///
+/// 代价是商家标记完**不会立刻发生任何事**,体感是「我说了没用」。
+/// 所以这里必须原样说清楚会发生什么、多久有回音 —— 说不清楚的话,
+/// 商家会以为按下去就解决了,然后在没解决时觉得平台在敷衍。
+class FlagOrderSheet extends StatefulWidget {
+  const FlagOrderSheet({super.key, required this.api, required this.orderNo});
+
+  final ApiClient api;
+  final String orderNo;
+
+  @override
+  State<FlagOrderSheet> createState() => _FlagOrderSheetState();
+}
+
+class _FlagOrderSheetState extends State<FlagOrderSheet> {
+  String _kind = 'claim';
+  final _reason = TextEditingController();
+  bool _busy = false;
+
+  static const _kinds = {
+    'claim': '疑似职业索赔',
+    'review': '疑似恶意差评',
+    'other': '其他异常',
+  };
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final reason = _reason.text.trim();
+    if (reason.length < 5) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('请写清楚为什么可疑(至少 5 个字)——平台要靠这段话去核查')));
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final r = await widget.api.flagOrder(widget.orderNo, _kind, reason);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+      // 结果用对话框而不是 SnackBar:这段话是承诺,一闪而过的提示读不完
+      showDialog<void>(
+        context: context,
+        builder: (context) => SzDialog(
+          title: const Text('已上报'),
+          content: Text('${r['note'] ?? ''}'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('知道了')),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+          20, 8, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('标记异常订单',
+                style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 4),
+            Text('订单 #${widget.orderNo.substring(widget.orderNo.length - 6)}',
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final e in _kinds.entries)
+                  ChoiceChip(
+                    label: Text(e.value),
+                    selected: _kind == e.key,
+                    onSelected: (_) => setState(() => _kind = e.key),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _reason,
+              maxLines: 3,
+              maxLength: 300,
+              decoration: const InputDecoration(
+                labelText: '为什么可疑',
+                hintText: '越具体越有用:说了什么、要求什么、有没有凭证',
+              ),
+            ),
+            // 这一段是这张表单的重点。不说清楚,商家会以为按下去就解决了
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: sz.surfaceAlt,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('标记之后会发生什么',
+                        style: TextStyle(
+                            fontSize: kFontBody,
+                            fontWeight: FontWeight.w700,
+                            color: sz.ink)),
+                    const SizedBox(height: 6),
+                    Text(
+                        '· 上报平台核查,**不会自动对这位顾客做任何处置**。\n'
+                        '· 我们不给商家拉黑顾客的权力 —— 那会变成报复工具。\n'
+                        '· 职业索赔多是跨店行为:同一个人在几家店用同样的话术,'
+                        '单店看不出来,平台把多家的标记放在一起才看得见。\n'
+                        '· 核查有结果会在这里更新状态,并给你发一条通知。',
+                        style: TextStyle(
+                            fontSize: kFontNote,
+                            height: 1.6,
+                            color: sz.inkMuted)),
+                  ]),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: _busy ? null : _submit,
+                child: Text(_busy ? '上报中…' : '上报平台'),
+              ),
+            ),
+          ]),
     );
   }
 }

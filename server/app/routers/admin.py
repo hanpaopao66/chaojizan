@@ -2230,6 +2230,120 @@ async def delete_moderation_word(
 
 # ---------- 防刷单风控(只标记不拦截,人工复核) ----------
 
+@router.get("/order-flags")
+async def list_order_flags(
+    only_cross_shop: bool = True,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """商家标记的异常订单,**按顾客聚合、跨店优先**。
+
+    ## 这一页存在的理由
+
+    商家标记完不会自动发生任何事 —— 这是拍板定下的口径,给商家拉黑顾客
+    的权力会让它变成报复工具(差评了就拉黑)。作为交换,平台承诺了一件
+    单店老板做不到的事:**把多家店的标记放在一起看**。
+
+    真正的职业索赔是跨店行为:同一个人在十家店用同样的话术要退款,
+    每个老板各自只看到"一个难缠的客人",只有平台看得到那是同一个人。
+
+    这个接口以前**不存在** —— 商家标了 45 条,平台一条都没在看。
+    那等于收下了商家的举报然后扔进抽屉,比不做更坏:界面上告诉他
+    「平台会核查」,而实际没有任何人核查。
+
+    ## 默认只看跨店的
+
+    单店标记里噪音很多(一次不愉快的退款就可能被标)。**被两家以上不同的
+    店标记过**才是这个功能真正要找的信号。`only_cross_shop=false`
+    可以看全部。
+    """
+    from ..models import Merchant as M
+    from ..models import OrderFlag
+    from ..services.privacy_phone import mask_phone
+
+    rows = (await db.execute(
+        select(OrderFlag, M.name, User.name, User.phone)
+        .join(M, M.id == OrderFlag.merchant_id)
+        .join(User, User.id == OrderFlag.user_id)
+        .order_by(OrderFlag.id.desc()).limit(1000))).all()
+
+    people: dict[int, dict] = {}
+    for flag, shop_name, user_name, phone in rows:
+        p = people.setdefault(flag.user_id, {
+            "user_id": flag.user_id, "name": user_name,
+            "phone": mask_phone(phone), "shops": set(),
+            "flags": 0, "pending": 0, "kinds": {}, "details": [],
+        })
+        p["shops"].add(flag.merchant_id)
+        p["flags"] += 1
+        if flag.status == "pending":
+            p["pending"] += 1
+        p["kinds"][flag.kind] = p["kinds"].get(flag.kind, 0) + 1
+        p["details"].append({
+            "id": flag.id, "shop": shop_name, "order_no": flag.order_no,
+            "kind": flag.kind, "reason": flag.reason, "status": flag.status,
+            "created_at": flag.created_at.isoformat() if flag.created_at else None,
+        })
+
+    items = []
+    for p in people.values():
+        p["shop_count"] = len(p.pop("shops"))
+        if only_cross_shop and p["shop_count"] < 2:
+            continue
+        items.append(p)
+    # 跨店家数优先,其次标记条数 —— 排序口径就是这个功能要找的信号
+    items.sort(key=lambda x: (-x["shop_count"], -x["flags"]))
+    return {
+        "items": items,
+        "only_cross_shop": only_cross_shop,
+        "how_to_read": (
+            "按顾客聚合。**被两家以上不同的店标记过**才是值得看的信号 —— "
+            "单店标记噪音很多,一次不愉快的退款就可能被标。"
+            "核查结论只改标记状态,不对顾客做任何自动处置;"
+            "要限制账号请走风控处置(那条有申诉通道)。"),
+    }
+
+
+@router.post("/order-flags/{flag_id}/resolve")
+async def resolve_order_flag(
+    flag_id: int,
+    payload: dict,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """给一条标记下结论:reviewed 属实 / dismissed 不成立。
+
+    **下结论本身不对顾客做任何处置。** 要限制账号走风控处置接口 ——
+    那条路径有留痕、有申诉通道,而这里没有。两件事不能合并,
+    否则「商家标记」就成了一条绕过申诉的处罚路径。
+    """
+    from ..models import OrderFlag
+
+    result = str(payload.get("result") or "")
+    if result not in ("reviewed", "dismissed"):
+        raise HTTPException(422, "结论只支持 reviewed(属实)/ dismissed(不成立)")
+    flag = await db.get(OrderFlag, flag_id, with_for_update=True)
+    if flag is None:
+        raise HTTPException(404, "没有这条标记")
+    if flag.status != "pending":
+        raise HTTPException(409, "这条已经有结论了")
+    flag.status = result
+    await db.commit()
+    # 商家在界面上被告知「核查有结果会通知你」—— 那就必须真的通知
+    from ..services.push import push_to_user
+    from ..models import Merchant as M
+    shop = await db.get(M, flag.merchant_id)
+    if shop is not None:
+        await push_to_user(
+            shop.owner_id, "标记核查有结果了",
+            f"订单#{flag.order_no[-6:]} 的标记:"
+            + ("平台核查属实,已记入该顾客的跨店记录。"
+               if result == "reviewed" else "平台核查后认为不成立。")
+            + "无论结论如何,平台都不会因为单次标记限制顾客账号。",
+            {"type": "order_flag"}, record_skip=True)
+    return {"ok": True, "status": flag.status}
+
+
 @router.get("/risk-orders")
 async def list_risk_orders(
     status: str = "",

@@ -532,6 +532,25 @@ class ApiClient {
     return await _request('GET', '/auth/slider') as Map<String, dynamic>;
   }
 
+  // ---------- 异常订单标记(只上报,不给拉黑权) ----------
+
+  /// 标记疑似职业索赔/恶意差评。
+  ///
+  /// **标记之后不会对顾客发生任何事** —— 平台不给商家拉黑顾客的权力
+  /// (那会变成报复工具)。作为交换,平台做一件单店做不到的事:
+  /// 把多家店的标记放在一起看。界面上必须把这一点说清楚。
+  Future<Map<String, dynamic>> flagOrder(
+      String orderNo, String kind, String reason) async {
+    return await _request('POST', '/merchants/me/orders/$orderNo/flag',
+        body: {'kind': kind, 'reason': reason}) as Map<String, dynamic>;
+  }
+
+  /// 我标记过的单与核查进度
+  Future<Map<String, dynamic>> myOrderFlags() async {
+    return await _request('GET', '/merchants/me/order-flags')
+        as Map<String, dynamic>;
+  }
+
   // ---------- 到店排队 ----------
   //
   // 券解决「钱先付了」,排队解决「位怎么排」。两件事故意不绑在一起 ——

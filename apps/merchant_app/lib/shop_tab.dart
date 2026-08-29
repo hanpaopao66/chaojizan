@@ -1035,6 +1035,11 @@ class _ShopTabPageState extends State<ShopTabPage> {
       // 紧挨着团购券:券解决「钱先付了」,排队解决「位怎么排」,
       // 商家是当成一件事在想的
       SzIconGridItem(
+          icon: Icons.flag_outlined,
+          label: '异常标记',
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => MyOrderFlagsPage(api: widget.api)))),
+      SzIconGridItem(
           icon: Icons.groups_2_outlined,
           label: '叫号台',
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
