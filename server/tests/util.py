@@ -188,11 +188,23 @@ def orderable_dish(dishes, min_cents=1500, min_stock=1):
     `stock` 为 None 表示不限量,手写的 `d.get("stock", 0) > 3` 会
     拿 None 跟数字比大小,直接 TypeError。
     """
-    return next(d for d in dishes
-                if d["price_cents"] >= min_cents
-                and d.get("is_on_sale", True)
-                and not d.get("is_alcohol")
-                and (d.get("stock") is None or d["stock"] >= min_stock))
+    ok = [d for d in dishes
+          if d["price_cents"] >= min_cents
+          and d.get("is_on_sale", True)
+          and not d.get("is_alcohol")
+          and (d.get("stock") is None or d["stock"] >= min_stock)]
+    if not ok:
+        raise StopIteration(
+            f"演示店里没有满足条件的菜(价 >= {min_cents} 分、库存 >= "
+            f"{min_stock}、在售、非酒类)")
+    # **挑库存最多的那道,不是第一道。**
+    #
+    # 取第一道的话,105 个套件跑一轮全在下同一道菜 —— 实测把它从
+    # 174 份抽到 0,然后后面的用例撞「库存不足」而红,
+    # 而那个红和它自己要测的东西毫无关系。
+    # 不限量(stock 为 None)的排最前:它永远抽不干。
+    return max(ok, key=lambda d: (d.get("stock") is None,
+                                  d.get("stock") or 0))
 
 
 async def drain_order_pool():
