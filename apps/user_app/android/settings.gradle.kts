@@ -11,14 +11,23 @@ pluginManagement {
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
 
     repositories {
-        // 国内镜像放前面,官方源保留兜底。
-        // dl.google.com 在很多国内网络下直接不通(实测 12s 超时),
-        // 只写 google() 的话换个网络就打不出包 —— 而"打不出包"这件事
-        // 只会在发版当天才发现。阿里云的 google 镜像是完整代理,
-        // 拉不到的再回落官方源
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
-        maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        // 国内镜像只在**国内网络**上是加速,在海外 runner 上是瓶颈。
+        // Gradle 对 5xx/网络错误是 fail fast —— 只有 404 才往下找下一个仓库,
+        // 所以「阿里云在前、google() 在后」这条 fallback 链根本兜不住:
+        // 镜像一抖,整个解析直接失败(2026-08-29 发 v0.14.3 时就是这样挂的)。
+        //
+        // ⚠️ 这个开关 build.gradle.kts 里早就加过了,**唯独漏了这里** ——
+        // 而 pluginManagement 比 build.gradle.kts 更早执行,
+        // 所以漏在这里等于整条防线没生效。
+        //
+        // CI 里设 SUPERZ_SKIP_CN_MIRROR=1 直连官方源(runner 在海外,
+        // dl.google.com 是通的);开发机不设,照旧走镜像 ——
+        // 那边的问题正相反,是 dl.google.com 被挡。
+        if (System.getenv("SUPERZ_SKIP_CN_MIRROR") != "1") {
+            maven { url = uri("https://maven.aliyun.com/repository/google") }
+            maven { url = uri("https://maven.aliyun.com/repository/public") }
+            maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+        }
         google()
         mavenCentral()
         gradlePluginPortal()

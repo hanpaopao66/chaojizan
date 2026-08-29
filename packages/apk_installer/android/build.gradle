@@ -5,9 +5,14 @@ version '0.1.0'
 // 插件再 apply 一遍会触发 "Future versions of Flutter will fail to build" 警告
 buildscript {
     repositories {
-        // 国内源:官方源在服务器/家宽上经常超时
-        maven { url 'https://maven.aliyun.com/repository/public' }
-        maven { url 'https://maven.aliyun.com/repository/google' }
+        // 国内源只在国内网络上是加速,海外 runner 上是瓶颈。
+        // Gradle 对 5xx/网络错误 fail fast,不会往下找官方源 ——
+        // 镜像一抖整个解析就失败(2026-08-29 发 v0.14.3 时挂过)。
+        // CI 设 SUPERZ_SKIP_CN_MIRROR=1 直连官方源;开发机不设照旧走镜像
+        if (System.getenv('SUPERZ_SKIP_CN_MIRROR') != '1') {
+            maven { url 'https://maven.aliyun.com/repository/public' }
+            maven { url 'https://maven.aliyun.com/repository/google' }
+        }
         google()
         mavenCentral()
     }
@@ -18,8 +23,10 @@ buildscript {
 
 rootProject.allprojects {
     repositories {
-        maven { url 'https://maven.aliyun.com/repository/public' }
-        maven { url 'https://maven.aliyun.com/repository/google' }
+        if (System.getenv('SUPERZ_SKIP_CN_MIRROR') != '1') {
+            maven { url 'https://maven.aliyun.com/repository/public' }
+            maven { url 'https://maven.aliyun.com/repository/google' }
+        }
         google()
         mavenCentral()
     }
