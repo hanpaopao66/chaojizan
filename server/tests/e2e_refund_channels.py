@@ -37,7 +37,7 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.services.auto_flow import sweep_once
-from tests.util import ADMIN, call, login
+from tests.util import ADMIN, call, login, register_user
 
 admin_token = login(ADMIN)
 today = date.today()
@@ -109,9 +109,7 @@ vcust = call("POST", "/auth/register", body={
 
 # ---------------- 住宿 ----------------
 
-hphone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
-mt = call("POST", "/auth/register", body={
-    "phone": hphone, "password": "hotel123", "role": "merchant"})["token"]
+mt, hphone = register_user("merchant", "hotel123", prefix="138")
 hshop = call("POST", "/merchants", token=mt, body={
     "name": f"退款客栈{hphone[-4:]}", "lat": 30.66, "lng": 104.06,
     "biz_type": "hotel", "license_no": "91510100MA6TEST11",
@@ -121,9 +119,7 @@ hshop = call("POST", "/merchants", token=mt, body={
 call("POST", f"/admin/merchants/{hshop['id']}/approve", token=admin_token)
 call("PATCH", "/merchants/me", token=mt, body={"is_open": True})
 
-cphone = "137" + "".join(str(random.randint(0, 9)) for _ in range(8))
-ct = call("POST", "/auth/register", body={
-    "phone": cphone, "password": "guest123", "role": "customer"})["token"]
+ct, cphone = register_user("customer", "guest123")
 
 
 def make_rt(name, policy, until="18:00"):

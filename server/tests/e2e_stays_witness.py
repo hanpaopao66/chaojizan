@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.services.ledger import build_missing_anchors, hash_no
-from tests.util import ADMIN, call, login
+from tests.util import ADMIN, call, login, register_user
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "witness"))
 from superz_witness import verify_rows  # noqa: E402
@@ -30,10 +30,7 @@ today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
 yesterday = (today - timedelta(days=1)).isoformat()
 
 # 造两笔住宿资金:离店结算 + 取消扣首晚
-phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
-mt = call("POST", "/auth/register",
-          body={"phone": phone, "password": "hotel123",
-                "role": "merchant"})["token"]
+mt, phone = register_user("merchant", "hotel123", prefix="138")
 shop = call("POST", "/merchants", token=mt, body={
     "name": f"账本客栈{phone[-4:]}", "lat": 30.66, "lng": 104.06,
     "biz_type": "hotel", "license_no": "91510100MA6TEST08",
@@ -48,10 +45,7 @@ call("PUT", "/stays/me/calendar", token=mt, body={
     "room_type_ids": [rt["id"]], "from_date": str(today),
     "to_date": str(today + timedelta(days=10)),
     "price_cents": 30000, "total_qty": 3})
-cphone = "137" + "".join(str(random.randint(0, 9)) for _ in range(8))
-ct = call("POST", "/auth/register",
-          body={"phone": cphone, "password": "guest123",
-                "role": "customer"})["token"]
+ct, cphone = register_user("customer", "guest123", prefix="137")
 ci, co = today + timedelta(days=2), today + timedelta(days=4)
 
 

@@ -21,15 +21,12 @@ from sqlalchemy import text
 from app.db import SessionLocal
 from app.services.auto_flow import sweep_once
 
-from .util import ADMIN, call, login
+from .util import ADMIN, call, login, register_user
 
 admin_token = login(ADMIN)
 today = date.today()
 
-phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
-mt = call("POST", "/auth/register",
-          body={"phone": phone, "password": "hotel123",
-                "role": "merchant"})["token"]
+mt, phone = register_user("merchant", "hotel123", prefix="138")
 shop = call("POST", "/merchants", token=mt, body={
     "name": f"未入住客栈{phone[-4:]}", "lat": 30.66, "lng": 104.06,
     "biz_type": "hotel", "license_no": "91510100MA6TEST07",
@@ -46,10 +43,7 @@ call("PUT", "/stays/me/calendar", token=mt, body={
     "to_date": str(today + timedelta(days=30)),
     "price_cents": 10000, "total_qty": 2})
 
-cphone = "137" + "".join(str(random.randint(0, 9)) for _ in range(8))
-ct = call("POST", "/auth/register",
-          body={"phone": cphone, "password": "guest123",
-                "role": "customer"})["token"]
+ct, cphone = register_user("customer", "guest123", prefix="137")
 
 NIGHTS = 5
 CHECKIN = today - timedelta(days=2)      # 判定要求「次日中午已过」,退两天最稳

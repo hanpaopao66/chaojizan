@@ -6,7 +6,7 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-from tests.util import ADMIN, call, login
+from tests.util import ADMIN, call, login, register_user
 
 admin_token = login(ADMIN)
 today = date.today()
@@ -14,17 +14,11 @@ ci, co = today + timedelta(days=10), today + timedelta(days=12)  # 2 晚
 
 
 def new_customer():
-    phone = "137" + "".join(str(random.randint(0, 9)) for _ in range(8))
-    return call("POST", "/auth/register",
-                body={"phone": phone, "password": "guest123",
-                      "role": "customer"})["token"]
+    return register_user("customer", "guest123", prefix="137")[0]
 
 
 # 建酒店:1 个房型,区间内每晚只有 1 间
-phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
-mt = call("POST", "/auth/register",
-          body={"phone": phone, "password": "hotel123",
-                "role": "merchant"})["token"]
+mt, phone = register_user("merchant", "hotel123", prefix="138")
 shop = call("POST", "/merchants", token=mt, body={
     "name": f"抢房客栈{phone[-4:]}", "lat": 30.66, "lng": 104.06,
     "biz_type": "hotel", "license_no": "91510100MA6TEST04",

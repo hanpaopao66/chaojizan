@@ -6,7 +6,7 @@ import random
 from datetime import date, timedelta
 from urllib.parse import quote
 
-from tests.util import ADMIN, call, login
+from tests.util import ADMIN, call, login, register_user
 
 admin_token = login(ADMIN)
 tag = str(random.randint(1000, 9999))
@@ -15,11 +15,7 @@ ci, co = today + timedelta(days=7), today + timedelta(days=9)  # 2 晚
 
 
 def make_hotel(name, lat, lng, tier):
-    phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
-    reg = call("POST", "/auth/register",
-               body={"phone": phone, "password": "hotel123",
-                     "role": "merchant"})
-    t = reg["token"]
+    t, phone = register_user("merchant", "hotel123", prefix="138")
     shop = call("POST", "/merchants", token=t, body={
         "name": name, "lat": lat, "lng": lng, "biz_type": "hotel",
         "address": f"搜索测试路{tag}号",

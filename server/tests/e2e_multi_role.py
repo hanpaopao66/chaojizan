@@ -4,17 +4,19 @@
 """
 import random
 
-from tests.util import call
+from tests.util import call, register_user
 
-phone = "137" + "".join(str(random.randint(0, 9)) for _ in range(8))
 P_CUSTOMER, P_RIDER = "pw-customer-1", "pw-rider-22"
 
-# 1) 同号先后注册 用户 与 骑手 账号,都应成功且 user_id 不同
-r1 = call("POST", "/auth/register",
+# 1) 同号先后注册 用户 与 骑手 账号,都应成功且 user_id 不同。
+# 第一步用 register_user:纯随机号会撞开发库里的历史残留(万分之一量级,
+# 账号只增不减),撞上了这条用例就死在自己没在测的东西上
+_tok, phone = register_user("customer", P_CUSTOMER)
+r1 = call("POST", "/auth/login",
           body={"phone": phone, "password": P_CUSTOMER, "role": "customer"})
 r2 = call("POST", "/auth/register",
           body={"phone": phone, "password": P_RIDER, "role": "rider"})
-assert r1["role"] == "customer" and r2["role"] == "rider"
+assert r2["role"] == "rider"
 assert r1["user_id"] != r2["user_id"], "两角色应是两个独立账号"
 print(f"OK 同号双角色注册: customer={r1['user_id']} rider={r2['user_id']}")
 

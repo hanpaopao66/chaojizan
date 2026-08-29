@@ -6,15 +6,12 @@
 import random
 from datetime import date, timedelta
 
-from tests.util import ADMIN, MERCHANT, call, login
+from tests.util import ADMIN, MERCHANT, call, login, register_user
 
 admin_token = login(ADMIN)
 
 # 建一家新酒店并过审(复用 #66 的入驻链路)
-phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
-reg = call("POST", "/auth/register",
-           body={"phone": phone, "password": "hotel123", "role": "merchant"})
-mt = reg["token"]
+mt, phone = register_user("merchant", "hotel123", prefix="138")
 shop = call("POST", "/merchants", token=mt, body={
     "name": f"日历客栈{phone[-4:]}", "lat": 30.66, "lng": 104.06,
     "biz_type": "hotel",

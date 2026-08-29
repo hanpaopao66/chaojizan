@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import urllib.request
 from datetime import date, timedelta
 
-from tests.util import ADMIN, BASE, call, login
+from tests.util import ADMIN, BASE, call, login, register_user
 
 
 def fetch_csv(path, token):
@@ -26,10 +26,7 @@ today = date.today()          # 住宿日期用本地日期即可(房态按天,�
 _bj = datetime.now(ZoneInfo("Asia/Shanghai"))
 period = f"{_bj.year:04d}-{_bj.month:02d}"
 
-phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
-mt = call("POST", "/auth/register",
-          body={"phone": phone, "password": "hotel123",
-                "role": "merchant"})["token"]
+mt, phone = register_user("merchant", "hotel123", prefix="138")
 shop = call("POST", "/merchants", token=mt, body={
     "name": f"结算客栈{phone[-4:]}", "lat": 30.66, "lng": 104.06,
     "biz_type": "hotel", "license_no": "91510100MA6TEST07",
@@ -49,10 +46,7 @@ call("PUT", "/stays/me/calendar", token=mt, body={
     "to_date": str(today + timedelta(days=30)),
     "price_cents": 20000, "total_qty": 3})
 
-cphone = "137" + "".join(str(random.randint(0, 9)) for _ in range(8))
-ct = call("POST", "/auth/register",
-          body={"phone": cphone, "password": "guest123",
-                "role": "customer"})["token"]
+ct, cphone = register_user("customer", "guest123", prefix="137")
 
 ci, co = today + timedelta(days=3), today + timedelta(days=5)  # 2 晚 40000
 

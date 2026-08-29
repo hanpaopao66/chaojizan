@@ -5,16 +5,13 @@
 import random
 from urllib.parse import quote
 
-from tests.util import ADMIN, call, login
+from tests.util import ADMIN, call, login, register_user
 
 admin_token = login(ADMIN)
 
 # 全新商家账号(手机号跨角色分账号已支持)
-phone = "138" + "".join(str(random.randint(0, 9)) for _ in range(8))
+mt, phone = register_user("merchant", "hotel123", prefix="138")
 hotel_name = f"闪电客栈{phone[-4:]}"
-reg = call("POST", "/auth/register",
-           body={"phone": phone, "password": "hotel123", "role": "merchant"})
-mt = reg["token"]
 
 base = {
     "name": hotel_name, "description": "e2e 测试酒店",

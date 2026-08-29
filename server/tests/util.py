@@ -137,6 +137,42 @@ _clear_demo_rider_backlog()
 _reset_demo_rider_transfer_count()
 
 
+def fresh_phone(prefix: str = "137") -> str:
+    """搓一个几乎不撞库的测试手机号。
+
+    开发库里已经积累了一万五千多个测试账号 —— 手机号只有 8 位自由空间,
+    **任何生成策略**单次撞上历史号的概率都在万分之一量级,而账号只增不减,
+    这个概率单调上涨。所以别直接拿它去注册,用 register_user():
+    撞了 409 换个号重试,这才是根治。
+    """
+    import random
+    return prefix + "".join(str(random.randint(0, 9)) for _ in range(8))
+
+
+def register_user(role: str, password: str = "123456", *,
+                  name: str = "", prefix: str = "137",
+                  attempts: int = 5) -> tuple[str, str]:
+    """注册一个新账号,返回 (token, phone)。撞号自动换号重试。
+
+    「该手机号已注册过此角色」不是本用例要测的东西 —— 它只说明
+    随机号撞上了历史残留,换一个就好。别的 409(比如限流语义)照常抛。
+    """
+    last = None
+    for _ in range(attempts):
+        phone = fresh_phone(prefix)
+        r = call("POST", "/auth/register",
+                 body={"phone": phone, "password": password,
+                       "name": name or f"测试{phone[-4:]}", "role": role},
+                 expect_error=True)
+        if isinstance(r, dict) and r.get("_error"):
+            if r["_error"] == 409 and "已注册" in (r.get("detail") or ""):
+                last = r
+                continue
+            raise SystemExit(f"FAIL 注册 {role}: {r['_error']} {r.get('detail')}")
+        return r["token"], phone
+    raise SystemExit(f"FAIL 注册 {role}: 连撞 {attempts} 次已注册号:{last}")
+
+
 def orderable_dish(dishes, min_cents=1500, min_stock=1):
     """挑一道真能下单的菜:单价过起送价下限、在售、库存够、且不是酒类。
 
