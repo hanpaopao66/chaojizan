@@ -341,6 +341,23 @@ _AUDIT_ORDER_NO = re.compile(r"[0-9a-f]{20}")
 AUDIT_TIME_THRESHOLD = ("profit_sharing_stuck", "profit_sharing_failed",
                         "refund_stuck", "stay_paid_stuck")
 
+#: 补账(/admin/audit/backfill)能修的三类。**它们必然不在基线里**,
+#: 所以在种类级比较里是一颗保证会响的假红灯。
+#:
+#: e2e_support_audit 的做法是:开头先补账、断言这三类归零,**再取基线** ——
+#: 于是基线里永远没有它们。而全套跑到这条用例时,前面十几个套件已经造了
+#: 上百单(刚实测:一次补账清掉 180 条),其中任何一条历史单在基线和终检
+#: 之间被推到 completed,这三类就冒出来一个,种类级差集当场变红。
+#:
+#: 实际撞到的那次:被点名的是一张 **24 小时前**的单,退款理由是别的用例的
+#: (「退款顺序用例」),和本次运行毫无关系 —— 整轮全套(25 分钟)因此白跑。
+#:
+#: 排除它们不会放松任何东西:两个调用点都**另有**一条「本单不许被点名」的
+#: 逐单断言(`[p for p in problems if no in p["detail"]]`),那条覆盖所有检查项。
+#: 这里放掉的只是"别人的历史单"。
+AUDIT_BACKFILLABLE = ("merchant_earning_missing", "rider_earning_missing",
+                      "reversal_missing")
+
 
 def audit_fingerprint(detail_rows) -> set:
     """一次自检结果的指纹:{(检查项, 被点名的订单号)}。
@@ -361,4 +378,4 @@ def audit_regressions(problems, baseline_checks) -> set:
     订单号,调用方通常再单独断言一次自己那一单)。
     """
     return ({p["check"] for p in problems} - set(baseline_checks)
-            - set(AUDIT_TIME_THRESHOLD))
+            - set(AUDIT_TIME_THRESHOLD) - set(AUDIT_BACKFILLABLE))
