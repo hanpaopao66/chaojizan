@@ -14,7 +14,7 @@ import httpx
 import mimetypes
 import secrets
 
-from ..categories import CATEGORIES_BY_BIZ, MERCHANT_CATEGORIES
+from ..categories import CATEGORIES_BY_BIZ, FOOD_CATEGORIES, categories_of
 from ..config import settings
 from ..db import get_db
 from ..services import cloud_print
@@ -373,15 +373,16 @@ async def list_merchants(
 async def merchant_categories(biz_type: str | None = None):
     """品类清单(slug -> 中文名),管理后台下拉与三端展示共用。
 
-    带 `biz_type` 给该业态的品类(入驻和店铺设置该用这个 —— 水果店不该
-    选得到「川湘菜」);不带则给合并表,**为的是老客户端和"把 key 翻译成
-    中文"这类不关心业态的场合**照旧能用。
+    带 `biz_type` 给该业态的品类;**不带给餐饮**,和加零售之前一字不差。
 
-    这个默认值是有意保留的向后兼容:改成必填会让所有存量客户端的
-    品类下拉直接空掉,而它们并不知道自己该传什么。
+    这个默认值不是随手定的。这个接口喂的是商家端的品类下拉,
+    所以它必须是**某一个业态**的清单,不能是合并表 —— 合并表意味着
+    一家快餐店的下拉里出现「母婴玩具」,选了之后服务端才报错。
+    默认给餐饮既保住了存量客户端,又不会让它们看见不该看见的选项。
+    (e2e_category 守着这条:它断言这里正好 23 个。)
     """
     if biz_type is None:
-        return MERCHANT_CATEGORIES
+        return FOOD_CATEGORIES
     if biz_type not in CATEGORIES_BY_BIZ:
         raise HTTPException(422, "biz_type 仅支持 food / retail")
     return CATEGORIES_BY_BIZ[biz_type]
@@ -579,8 +580,11 @@ async def apply_shop(
             raise HTTPException(422, "请填写食品经营许可证号")
         if not payload.license_image_url.strip():
             raise HTTPException(422, "请上传食品经营许可证照片")
-        if payload.category not in MERCHANT_CATEGORIES:
-            raise HTTPException(422, "未知品类")
+        # **按申请的业态校验**,不查合并表 —— 查合并表的话一家快餐店
+        # 能把自己归到「母婴玩具」,而 category 只有一列,之后光看它
+        # 解释不了这个值属于哪个业态
+        if payload.category not in categories_of(payload.biz_type):
+            raise HTTPException(422, f"{payload.biz_type} 业态没有这个品类")
     existing = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
     if existing:
         raise HTTPException(409, "你已提交过申请,一个账号一家店")
@@ -647,8 +651,10 @@ async def update_my_shop(
         raise HTTPException(404, "还没开店")
 
     changes = payload.model_dump(exclude_none=True)
-    if "category" in changes and changes["category"] not in MERCHANT_CATEGORIES:
-        raise HTTPException(422, "未知品类")
+    # 同入驻:按**这家店的**业态校验,不查合并表
+    if ("category" in changes
+            and changes["category"] not in categories_of(shop.biz_type)):
+        raise HTTPException(422, f"{shop.biz_type} 业态没有这个品类")
     if changes.get("is_open") and shop.status != MerchantStatus.approved:
         raise HTTPException(403, "店铺还未通过审核,暂时不能营业")
     # 食安停业期间商家自己开不回来 —— 否则"暂停营业待人工复核"只是一句话
@@ -814,21 +820,112 @@ _DISH_SALES_SQL = text(
 )
 
 
+#: 菜品月售的缓存时长(秒)。
+#:
+#: 这条聚合要扫 30 天的 orders 再把 items(JSONB)逐行展开,
+#: 实测 **19.7ms 一次,而且和拉多少个菜无关** —— 它是按商家算的。
+#:
+#: 分页之前一次菜单只算一次,无所谓;分页之后客户端**每切一个分类就调一次**,
+#: 十个分类的超市就要白付十遍。这是分页顺手引入的开销,得一起解决。
+#:
+#: 敢缓存的理由和 prep_time 一样:这是 30 天的累计销量,一分钟里多一单
+#: 少一单挪不动它。代价是新上架的菜"月售 0"最多晚一分钟变成 1。
+_DISH_SALES_TTL_SECONDS = 60
+_DISH_SALES_PREFIX = "dishsales:v1:"
+
+
+async def _dish_sales(db: AsyncSession, merchant_id: int) -> dict[int, int]:
+    """菜品 → 近 30 天售出份数。带缓存,见 _DISH_SALES_TTL_SECONDS。"""
+    import json as _json
+
+    from ..redis_client import get_redis
+
+    key = f"{_DISH_SALES_PREFIX}{merchant_id}"
+    redis = get_redis()
+    try:
+        raw = await redis.get(key)
+        if raw is not None:
+            return {int(k): v for k, v in _json.loads(raw).items()}
+    except Exception:
+        pass  # 缓存挂了照常现算,只是慢一点
+
+    rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": merchant_id})
+    sales = {row.dish_id: row.sold for row in rows}
+    try:
+        await redis.set(key, _json.dumps({str(k): v for k, v in sales.items()}),
+                        ex=_DISH_SALES_TTL_SECONDS)
+    except Exception:
+        pass  # 写不进去只是下次还得现算,不影响正确性
+    return sales
+
+
+#: 分类清单的排序 = 该分类第一道菜的建立顺序,和菜单接口同一条规则。
+#: **不能按 category 字符串排** —— 未分类的菜 category 是空串,
+#: 一排就把它顶到分类栏第一个并默认选中。
+_DISH_CATEGORIES_SQL = text(
+    """
+    SELECT category AS name, count(*)::int AS count, min(id) AS ord
+    FROM dishes
+    WHERE merchant_id = :merchant_id AND is_on_sale = true
+    GROUP BY category
+    ORDER BY ord
+    """
+)
+
+
+@router.get("/{merchant_id}/dish-categories")
+async def dish_categories(merchant_id: int,
+                          db: AsyncSession = Depends(get_db)):
+    """点单页左侧的分类栏(名称 + 每类多少个),按菜单同一条顺序。
+
+    ## 为什么要单独一个接口
+
+    分类栏原先是客户端从**整份菜单**里推出来的。餐馆几十道菜没问题,
+    超市不行:实测演示店 2837 个在售商品一次拉完是 1.25 MB,
+    而即时零售的前置仓 SKU 是 5000–10000。
+
+    有了它,客户端就能只拉当前分类的商品(见 menu 的 category 参数),
+    而分类栏照样一次拿全 —— 分类数是个位数,这个接口很轻。
+
+    空字符串是「未分类」,原样返回,不在服务端改写成"其他" ——
+    客户端本来就有这个映射,两边各写一份迟早对不上。
+    """
+    rows = (await db.execute(
+        _DISH_CATEGORIES_SQL, {"merchant_id": merchant_id})).all()
+    return [{"name": r.name, "count": r.count} for r in rows]
+
+
 @router.get("/{merchant_id}/dishes", response_model=list[DishOut])
-async def menu(merchant_id: int, db: AsyncSession = Depends(get_db)):
+async def menu(
+    merchant_id: int,
+    category: str | None = None,
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """商家在售商品。`category` 只取这一类,`limit`/`offset` 翻页。
+
+    ⚠️ **limit 默认不限,而且不许改成有默认值**。这个接口的老调用方
+    (存量 App)不传参数、拿的是整份菜单;加一个默认上限的话它们会
+    **静默地少几道菜**,而界面上看不出任何异常 —— 用户只会觉得
+    "这家店怎么没有那道菜了"。宁可老客户端慢,不能让它错。
+
+    新客户端按分类拉(见 /dish-categories),超市才不会一次吞几 MB。
+    """
     result = await db.scalars(
         select(Dish)
-        .where(Dish.merchant_id == merchant_id, Dish.is_on_sale.is_(True))
+        .where(Dish.merchant_id == merchant_id, Dish.is_on_sale.is_(True),
+               *([Dish.category == category] if category is not None else []))
         # 分类之间的先后 = 该分类第一道菜的建立顺序(与加 sort 之前的
         # 行为一致)。**不能直接按 category 字符串排** —— 未分类的菜
         # category 是空串,一排就把"其他"顶到分类栏第一个并默认选中。
         # 组内再按 sort(商家排的顺序,用户端照着看)
         .order_by(func.min(Dish.id).over(partition_by=Dish.category),
                   Dish.sort, Dish.id)
+        .limit(limit).offset(offset)
     )
     dishes = list(result)
-    sales_rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": merchant_id})
-    sales = {row.dish_id: row.sold for row in sales_rows}
+    sales = await _dish_sales(db, merchant_id)
     outs = []
     combo_ref = await _combo_reference(db, merchant_id, dishes)
     now_hhmm = datetime.now(CN_TZ).strftime("%H:%M")

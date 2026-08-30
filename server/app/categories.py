@@ -67,8 +67,14 @@ CATEGORIES_BY_BIZ: dict[str, dict[str, str]] = {
     "retail": RETAIL_CATEGORIES,
 }
 
-#: 全部品类的合并视图。**只用于「把 key 翻译成中文」这类不关心业态的场合**;
-#: 校验一律走 CATEGORIES_BY_BIZ,否则水果店能选「川湘菜」
+#: 全部品类的合并视图。
+#:
+#: **不要拿它做校验** —— 校验一律走 categories_of(biz_type),
+#: 否则一家快餐店能把自己归到「母婴玩具」,而 category 只有一列,
+#: 之后光看它解释不了这个值属于哪个业态。加零售时这个洞在
+#: 入驻、改店铺设置、后台纠错三处各有一份,是 e2e_category 抓出来的。
+#:
+#: 留着它是给「把 key 翻译成中文」这类不关心业态的场合用的。
 MERCHANT_CATEGORIES: dict[str, str] = {**FOOD_CATEGORIES, **RETAIL_CATEGORIES}
 
 #: 各业态的默认品类(存量商家、以及入驻时没选的兜底)
