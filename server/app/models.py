@@ -3283,3 +3283,56 @@ class RuleRevision(Base):
                          name="uq_rule_revisions_audience_rev"),
         Index("ix_rule_revisions_audience", "audience", "revision"),
     )
+
+
+class Violation(Base):
+    """一条成立的违规事件。**处置的唯一事实来源。**
+
+    ## 这张表没有 level 列
+
+    级别永远是算出来的(services/enforcement.level_from_counts):
+    窗口内这一类成立了几次、够不够阈值。这条不变量换来两件计分做不到的事:
+
+    - **归零是自动的** —— 窗口一滚出去就不算了,不需要"修复"机制;
+    - **申诉推翻一条,级别自动重算** —— 不需要手动减分,而"减多少"
+      这个问题在计分制里永远说不清。
+
+    谁想加一列 level,先想清楚上面两件事怎么办。
+
+    ## overturned_at 而不是删行
+
+    申诉成立不是"这件事没发生过",是"这件事不算数"。删了的话:公示的
+    处置总数对不上、当事人看不到自己申诉赢了、审计也查不出改过什么。
+    """
+
+    __tablename__ = "violations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: 被判定的那个人(用户/店主/骑手)。连锁店员做的事记在店主头上 ——
+    #: 处置的是经营主体,店员换人不该让计数归零
+    subject_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), index=True)
+    #: 判定**时**的身份。一个人既是用户又是骑手时,
+    #: 骂商家和恶意售后不是一回事
+    audience: Mapped[str] = mapped_column(String(16))
+    #: 见 services/enforcement.CATALOG
+    kind: Mapped[str] = mapped_column(String(32))
+    order_no: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: 判定说明。**对本人可见** —— 处置必须写明原因
+    note: Mapped[str] = mapped_column(String(300), default="")
+    #: 管理员 user id;系统自动判定的为 None
+    decided_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    #: 申诉成立:非空 = 不计入。**不删行**
+    overturned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    overturn_note: Mapped[str] = mapped_column(String(300), default="")
+
+    __table_args__ = (
+        Index("ix_violations_subject_time", "subject_id", "created_at"),
+        # 自动判定要幂等:同一单同一类不许记两次
+        Index("uq_violations_auto", "kind", "order_no", unique=True,
+              postgresql_where=text("order_no IS NOT NULL")),
+    )
