@@ -139,7 +139,9 @@ async def _issue_favorite_coupon(db: AsyncSession, merchant_id: int,
 
     logger = logging.getLogger(__name__)
     try:
-        if user.risk_level in ("limit", "frozen"):
+        # 走 level_for:目录计次和人工直接处置两条通道都要认
+        from ..services.enforcement import LEVEL_NONE, level_for
+        if await level_for(user, db) != LEVEL_NONE:
             return None
         if not await marketing_on(db):
             return None

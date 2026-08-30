@@ -113,7 +113,13 @@ class Test公示的表就是执行的表:
     def test_公示表每行都说清了判据和后果(self, a):
         for row in E.public_table(a):
             assert row["label"] and row["when"] and row["level_label"]
-            assert row["decided"] in ("auto", "manual")
+
+    @pytest.mark.parametrize("a", ["customer", "merchant", "rider"])
+    def test_每行都说得出系统能给什么线索(self, a):
+        """**系统给线索,不给结论。** 说不出线索的那一条,
+        意味着判定完全靠人一句话 —— 那种规则不该进目录。"""
+        for row in E.public_table(a):
+            assert row["evidence"], f"{row['label']} 说不出系统能给什么线索"
 
 
 class Test级别取最强:

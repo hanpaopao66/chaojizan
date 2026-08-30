@@ -2599,6 +2599,128 @@ async def set_user_risk_level(
             "previous": old}
 
 
+@router.post("/violations")
+async def record_violation(
+    payload: dict,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """判定一条违规。**单条由人判定,累计和处置由系统算** ——
+    见 services/enforcement 的抬头。
+
+    这里不写级别:级别是 `level_for` 从「这一类窗口内成立几次」算出来的。
+    所以判定的人只需要回答一个问题:**这件事成立吗**。
+    "该给什么处置"不是他要拍的板,那是目录定的。
+
+    `note` 会原样展示给当事人 —— 处置必须写明原因。
+    """
+    from ..models import Violation
+    from ..services.enforcement import CATALOG, level_for
+
+    kind = str(payload.get("kind", "")).strip()
+    subject_id = payload.get("subject_id")
+    note = str(payload.get("note", "")).strip()[:300]
+    order_no = (str(payload.get("order_no", "")).strip() or None)
+
+    rule = next((r for r in CATALOG if r.kind == kind), None)
+    if rule is None:
+        raise HTTPException(422, f"未知的行为类型 {kind!r}")
+    if not note:
+        raise HTTPException(422, "必须写明原因 —— 它会原样展示给当事人")
+    target = await db.get(User, subject_id)
+    if target is None:
+        raise HTTPException(404, "用户不存在")
+    role = getattr(target.role, "value", target.role)
+    if str(role) != rule.audience:
+        raise HTTPException(
+            422, f"{rule.label} 是 {rule.audience} 的行为,"
+                 f"而这个账号是 {role}")
+
+    db.add(Violation(subject_id=subject_id, audience=rule.audience,
+                     kind=kind, order_no=order_no, note=note,
+                     decided_by=admin.id))
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        # 同一单同一类的唯一索引:重复判定不该报错,当成幂等
+        raise HTTPException(409, "这一单的这类问题已经判定过了")
+    await db.refresh(target)
+    logger.info("违规判定 subject=%s kind=%s by admin=%s", subject_id,
+                kind, admin.id)
+    return {"ok": True, "level": await level_for(target, db)}
+
+
+@router.post("/violations/{violation_id}/overturn")
+async def overturn_violation(
+    violation_id: int,
+    payload: dict,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """申诉成立,这一条不算数了。
+
+    **不删行。** 申诉成立不是"这件事没发生过",是"这件事不算数" ——
+    删了的话公示的处置总数对不上、当事人看不到自己申诉赢了、
+    审计也查不出改过什么。
+
+    推翻之后级别**自动重算**,不需要另外做什么 ——
+    这正是计次强于计分的地方(计分制里"该减多少分"永远说不清)。
+    """
+    from datetime import datetime, timezone
+
+    from ..models import Violation
+    from ..services.enforcement import level_for
+
+    v = await db.get(Violation, violation_id, with_for_update=True)
+    if v is None:
+        raise HTTPException(404, "记录不存在")
+    if v.overturned_at is not None:
+        return {"ok": True, "already": True}
+    v.overturned_at = datetime.now(timezone.utc)
+    v.overturn_note = str(payload.get("note", "")).strip()[:300]
+    await db.commit()
+    target = await db.get(User, v.subject_id)
+    logger.info("违规推翻 id=%s subject=%s by admin=%s", violation_id,
+                v.subject_id, admin.id)
+    return {"ok": True, "level": await level_for(target, db) if target else ""}
+
+
+@router.get("/violations")
+async def list_violations(
+    subject_id: int | None = None,
+    limit: int = 50,
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    """违规记录。带 subject_id 查某个人,不带看最近的。"""
+    from sqlalchemy import desc
+
+    from ..models import Violation
+    from ..services.enforcement import CATALOG
+
+    labels = {r.kind: r.label for r in CATALOG}
+    q = select(Violation).order_by(desc(Violation.created_at))
+    if subject_id is not None:
+        q = q.where(Violation.subject_id == subject_id)
+    rows = list(await db.scalars(q.limit(max(1, min(limit, 200)))))
+    out = {"items": [
+        {"id": v.id, "subject_id": v.subject_id, "audience": v.audience,
+         "kind": v.kind, "label": labels.get(v.kind, v.kind),
+         "order_no": v.order_no, "note": v.note, "at": v.created_at,
+         "overturned_at": v.overturned_at,
+         "overturn_note": v.overturn_note}
+        for v in rows]}
+    if subject_id is not None:
+        target = await db.get(User, subject_id)
+        if target is not None:
+            from ..services.enforcement import counts_for, level_for
+            out["level"] = await level_for(target, db)
+            out["counts"] = await counts_for(
+                subject_id, str(getattr(target.role, "value", target.role)), db)
+    return out
+
+
 @router.get("/early-ready-suspects")
 async def early_ready_suspects(
     days: int = 14,

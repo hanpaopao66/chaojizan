@@ -1551,10 +1551,13 @@ async def claim_shop_coupon(
     db: AsyncSession = Depends(get_db),
 ):
     """领取店铺券:发一张 funder=merchant 的券(限定本店使用)。"""
-    # 反作弊软限制:limit/frozen 用户暂停领券(下单不拦),给可见提示可申诉
-    if user.risk_level in ("limit", "frozen"):
+    # 被处置的账号暂停领券(**下单不拦**),给可见提示可申诉。
+    # 走 level_for:目录计次和人工直接处置两条通道都要认,理由同 orders.py
+    from ..services.enforcement import LEVEL_NONE, level_for
+    if await level_for(user, db) != LEVEL_NONE:
         raise HTTPException(
-            403, "账号存在异常,已暂停领券;如有疑问可在「我的-客服」申诉")
+            403, "账号存在处置中,已暂停领券;"
+                 "原因和申诉入口在「我的 - 账号状态」")
     batch = await db.get(CouponBatch, batch_id, with_for_update=True)
     if (batch is None or batch.merchant_id != merchant_id
             or not batch.active or batch.trigger != "shop"):

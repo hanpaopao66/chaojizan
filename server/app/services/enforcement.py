@@ -89,9 +89,17 @@ class Rule:
     kind: str
     label: str
     severity: str
-    #: 怎么认定的。auto = 系统判定(判据写在 detect 里);
-    #: manual = 人工判定(证据链靠工单/申诉,系统给不出结论)
-    decided: str
+    #: 系统能提供什么线索。**单条事件一律由人判定** —— 系统给线索,不给结论。
+    #:
+    #: 曾经把虚假出餐标成"系统自动判定",那是错的:true_ready_at 能看出
+    #: "申报时餐没好",但那也可能是厨房临时耽搁。**按单自动记违规会把忙的店
+    #: 天天判成作恶。** 已有的 early-ready-suspects 用的是占比 + 最少 5 单,
+    #: 那才是给人看的线索该有的形状。
+    #:
+    #: 自动的是**累计和处置**,不是判定:成立几条由人定,够不够阈值、到哪一级、
+    #: 什么时候归零,全是算出来的。食安那条早就是这个模型(人判"投诉成立",
+    #: 系统按 30 天 3 起自动停业)。
+    evidence: str = ""
     note: str = ""
 
     @property
@@ -103,29 +111,31 @@ class Rule:
 #: 慢、少、晚都是能力和条件的问题,不在这里,也不折算成任何分数。
 CATALOG: tuple[Rule, ...] = (
     # ---- 用户 ----
-    Rule("customer", "malicious_after_sale", "恶意售后", "major", "manual",
-         "虚构问题骗退款、批量薅券。判定后禁止自助售后,只能走工单"),
-    Rule("customer", "fake_order", "刷单", "major", "manual",
-         "与商家串通制造虚假交易"),
-    Rule("customer", "harassment", "骚扰、辱骂、威胁", "severe", "manual",
-         "对骑手或商家"),
+    Rule("customer", "malicious_after_sale", "恶意售后", "major",
+         evidence="退款频次与理由分布",
+         note="虚构问题骗退款、批量薅券。判定后禁止自助售后,只能走工单"),
+    Rule("customer", "fake_order", "刷单", "major",
+         evidence="风控命中标记(risk_flags)",
+         note="与商家串通制造虚假交易"),
+    Rule("customer", "harassment", "骚扰、辱骂、威胁", "severe",
+         evidence="订单内会话记录", note="对骑手或商家"),
     # ---- 商家 ----
-    Rule("merchant", "fake_ready", "虚假出餐", "major", "auto",
-         "餐没好就点「已出餐」,把骑手骗到店里干等。"
-         "判据是骑手到店后仍要等 —— 系统看得见,不用人举报"),
+    Rule("merchant", "fake_ready", "虚假出餐", "major",
+         evidence="骑手到店后仍需等待的**占比**(early-ready-suspects)",
+         note="餐没好就点「已出餐」,把骑手骗到店里干等。看占比不看单次 —— 忙的店偶尔耽搁不是作恶"),
     Rule("merchant", "force_cancel", "私自取消、强迫用户取消、下单后加价",
-         "major", "manual"),
-    Rule("merchant", "food_safety", "食品安全事故", "severe", "manual",
-         "成立即转人工复核"),
-    Rule("merchant", "harassment", "骚扰、辱骂、威胁", "severe", "manual",
-         "对用户或骑手"),
+         "major", evidence="取消原因与订单内会话"),
+    Rule("merchant", "food_safety", "食品安全事故", "severe",
+         evidence="食安投诉工单", note="成立即转人工复核"),
+    Rule("merchant", "harassment", "骚扰、辱骂、威胁", "severe",
+         evidence="订单内会话记录", note="对用户或骑手"),
     # ---- 骑手 ----
-    Rule("rider", "theft", "偷餐、恶意毁损、私自处置他人物品",
-         "severe", "manual"),
-    Rule("rider", "fake_delivery", "虚假送达", "major", "manual",
-         "没送到却点送达"),
-    Rule("rider", "harassment", "骚扰、辱骂、威胁", "severe", "manual",
-         "对用户或商家"),
+    Rule("rider", "theft", "偷餐、恶意毁损、私自处置他人物品", "severe",
+         evidence="发货照与送达照、异常上报"),
+    Rule("rider", "fake_delivery", "虚假送达", "major",
+         evidence="送达留证照片与定位", note="没送到却点送达"),
+    Rule("rider", "harassment", "骚扰、辱骂、威胁", "severe",
+         evidence="订单内会话记录", note="对用户或商家"),
 )
 
 
@@ -165,7 +175,7 @@ def public_table(audience: str) -> list[dict]:
             "when": when,
             "level": sev.level,
             "level_label": LEVEL_LABELS[sev.level],
-            "decided": r.decided,
+            "evidence": r.evidence,
             "note": r.note,
         })
     return out

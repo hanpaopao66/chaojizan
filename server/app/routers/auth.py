@@ -726,6 +726,68 @@ async def me(user: User = Depends(get_current_user),
                  risk_action_id=risk_action_id)
 
 
+@router.get("/me/violations")
+async def my_violations(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """**我被处置了什么、为什么、还剩多久。**
+
+    规则页上写着「任何处置都对本人可见,写明原因,并且可以申诉」——
+    这个接口就是那句话的兑现。没有它,那句话只是话术。
+
+    每一条都给出:哪天、哪一类、判定说明、**什么时候滚出窗口**。
+    最后一项是计次制特有的:当事人能自己算出"再过多少天我就回正常了",
+    而计分制给不出这个数 —— 那也正是计分让人焦虑的原因之一。
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import desc
+
+    from ..models import Violation
+    from ..services.enforcement import (CATALOG, LEVEL_LABELS, counts_for,
+                                        level_for, rules_of)
+
+    audience = str(getattr(user.role, "value", user.role))
+    by_kind = {r.kind: r for r in rules_of(audience)}
+    rows = list(await db.scalars(
+        select(Violation)
+        .where(Violation.subject_id == user.id)
+        .order_by(desc(Violation.created_at))
+        .limit(50)))
+    items = []
+    for v in rows:
+        rule = by_kind.get(v.kind)
+        expires = None
+        if rule is not None and v.overturned_at is None:
+            expires = v.created_at + timedelta(days=rule.sev.window_days)
+        items.append({
+            "id": v.id,
+            "kind": v.kind,
+            "label": rule.label if rule else v.kind,
+            "at": v.created_at,
+            "note": v.note,
+            "order_no": v.order_no,
+            "counted": v.overturned_at is None,
+            "overturned_at": v.overturned_at,
+            "overturn_note": v.overturn_note,
+            # 计次制才给得出这个数:到这天它就自动不算了
+            "expires_at": expires,
+        })
+    level = await level_for(user, db)
+    return {
+        "level": level,
+        "level_label": LEVEL_LABELS[level],
+        # 人工那条通道(User.risk_level)的原因单独给 —— 它不在下面的
+        # 逐条记录里,不说明的话当事人会以为"我明明一条都没有"
+        "manual_note": user.risk_note if user.risk_level else "",
+        "counts": await counts_for(user.id, audience, db),
+        "items": items,
+        "note": "申诉成立的那一条立刻不计入,级别自动重算;"
+                "其余的到 expires_at 自动不算,不需要你做任何事",
+    }
+
+
 @router.patch("/me", response_model=MeOut)
 async def update_me(
     payload: MePatch,

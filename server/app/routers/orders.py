@@ -613,9 +613,15 @@ async def create_order(
     manjian_discount = discount  # 记住满减档,店铺券与它二选其一取最优
 
     # 平台首单立减:从没支付过订单的新用户,成本平台承担。
-    # 反作弊软限制:limit/frozen 用户暂停平台补贴(下单照常,不拦)
+    # 被处置的账号暂停平台补贴(**下单照常,不拦** —— 误伤优先放行)。
+    #
+    # 走 level_for 而不是直接读 user.risk_level:处置现在有两条通道 ——
+    # 按目录计次算出来的,和人工直接设的。只看后者的话,
+    # 按目录被限制的人照样领补贴,目录就成了一张纸。
+    from ..services.enforcement import LEVEL_NONE, level_for
     subsidy = 0
-    if settings.first_order_discount_cents > 0 and user.risk_level == "":
+    if (settings.first_order_discount_cents > 0
+            and await level_for(user, db) == LEVEL_NONE):
         has_paid = await db.scalar(
             select(Order.id).where(
                 Order.customer_id == user.id,
