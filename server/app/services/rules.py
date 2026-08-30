@@ -226,3 +226,81 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
         "audience_label": AUDIENCE_LABELS[audience],
         "sections": sections,
     }
+
+
+# ---------------------------------------------------------------------------
+# 变更留痕
+# ---------------------------------------------------------------------------
+
+
+def content_hash(sections: list) -> str:
+    """规则内容的指纹。**只认内容,不认顺序之外的东西**。"""
+    import hashlib
+    import json
+
+    blob = json.dumps(sections, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+async def record_if_changed(audience: str, sections: list,
+                            db: AsyncSession) -> None:
+    """规则变了就记一版。没变什么都不做。
+
+    ## 为什么在读的时候记,而不是启动时或部署时
+
+    规则是**算出来的**,而它依赖运行时开关(等餐补偿那种)。启动时记一次
+    的话,后台拨一下开关、规则实际变了,却没有任何一版留痕。
+    在读的时候比对,是唯一能覆盖"内容真的变了"这件事的时机。
+
+    代价是给一个 GET 加了写。规则页是低频接口,而且只在**真的变了**
+    的时候才写,所以稳态下就是一次索引查询。
+
+    并发两个人同时打开:后一个插入撞唯一约束,吞掉。留痕不该因为
+    两个人同时看规则而报错。
+    """
+    from sqlalchemy import desc, select
+
+    from ..models import RuleRevision
+
+    h = content_hash(sections)
+    last = await db.scalar(
+        select(RuleRevision)
+        .where(RuleRevision.audience == audience)
+        .order_by(desc(RuleRevision.revision))
+        .limit(1))
+    # 只跟**最近一版**比,不跟历史上所有版本比 ——
+    # A→B→A 的第三步是一次真实的变更(改回去也是改),该记
+    if last is not None and last.content_hash == h:
+        return
+    db.add(RuleRevision(
+        audience=audience,
+        revision=(last.revision + 1) if last else 1,
+        content_hash=h,
+        sections=sections,
+    ))
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()   # 撞唯一约束 = 别人刚记过,不是错
+
+
+def diff_sections(old: list, new: list) -> list:
+    """两版规则之间逐条的增删。
+
+    按「小节标题 + 条目原文」比,不做字级 diff:规则是**一条一条**的,
+    改一条的实质是"旧的这条没了、新的这条来了",字级 diff 只会把
+    "30 天 3 起"改成"30 天 5 起"显示成一堆红绿字符,反而看不清。
+    """
+    def flat(secs):
+        return {(s.get("title", ""), i)
+                for s in secs for i in s.get("items", []) if i}
+
+    a, b = flat(old), flat(new)
+    out = []
+    for title in dict.fromkeys(
+            [s.get("title", "") for s in old] + [s.get("title", "") for s in new]):
+        removed = sorted(i for (t, i) in a - b if t == title)
+        added = sorted(i for (t, i) in b - a if t == title)
+        if removed or added:
+            out.append({"title": title, "removed": removed, "added": added})
+    return out

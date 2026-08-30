@@ -39,11 +39,63 @@ async def public_rules(audience: str, db: AsyncSession = Depends(get_db)):
 
     `audience` ∈ customer / merchant / rider。
     """
-    from ..services.rules import AUDIENCES, rules_for
+    from ..services.rules import AUDIENCES, record_if_changed, rules_for
 
     if audience not in AUDIENCES:
         raise HTTPException(422, f"audience 仅支持 {' / '.join(AUDIENCES)}")
-    return await rules_for(audience, db)
+    out = await rules_for(audience, db)
+    # 变了就记一版。**规则不许静默地改** —— 见 RuleRevision 的抬头
+    await record_if_changed(audience, out["sections"], db)
+    return out
+
+
+@router.get("/rules/{audience}/revisions")
+async def public_rule_revisions(
+    audience: str,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """这一端的规则改过什么。**公开可读**,最新的在前。
+
+    每一版带上它相对上一版的逐条增删 —— 规则是一条一条的,
+    所以 diff 也按条给,不做字级 diff。
+
+    ⚠️ 这里回答的是「改过什么、什么时候改的」,**不是「什么时候生效」**。
+    生效前置(先公告、N 天后才起作用)要每条规则各自有开关,还没做。
+    别把这一页读成公示期。
+    """
+    from sqlalchemy import desc
+
+    from ..models import RuleRevision
+    from ..services.rules import AUDIENCES, diff_sections
+
+    if audience not in AUDIENCES:
+        raise HTTPException(422, f"audience 仅支持 {' / '.join(AUDIENCES)}")
+    rows = list(await db.scalars(
+        select(RuleRevision)
+        .where(RuleRevision.audience == audience)
+        .order_by(desc(RuleRevision.revision))
+        .limit(max(1, min(limit, 100)))))
+    # 多取一版用来算最老那条的 diff;取不到就说明它本来就是第一版
+    oldest = rows[-1] if rows else None
+    prev = None
+    if oldest is not None and oldest.revision > 1:
+        prev = await db.scalar(
+            select(RuleRevision).where(
+                RuleRevision.audience == audience,
+                RuleRevision.revision == oldest.revision - 1))
+    out = []
+    for i, r in enumerate(rows):
+        before = rows[i + 1] if i + 1 < len(rows) else prev
+        out.append({
+            "revision": r.revision,
+            "at": r.created_at,
+            "content_hash": r.content_hash,
+            "is_first": r.revision == 1,
+            "changes": diff_sections(before.sections, r.sections)
+                       if before is not None else [],
+        })
+    return {"audience": audience, "items": out}
 
 
 @router.get("/channels")

@@ -3247,3 +3247,39 @@ class ApiCall(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
+
+
+class RuleRevision(Base):
+    """规则页的历史版本。**规则改了什么、什么时候改的,公开可查。**
+
+    规则页的每个数字都从代码常量算出来 —— 这比"后台可编辑的文案"强,
+    文档不可能和实现对不上。但它有个反面:**改一个常量就等于悄悄改了规则,
+    没有任何人被告知**。给零售商家加「发货必须拍照」就是这么进去的。
+
+    存快照不存 diff:diff 是快照的函数,反过来不成立。存 diff 的话算法
+    改进了没法重算,中间漏一次就再也对不上(账本锚点是同一个理由)。
+
+    ⚠️ **这一版只做「不再静默」,不做「生效前置」。** 真正的公示是
+    "先公告、N 天后生效",那要求每条新规则都有自己的开关。别把这张表
+    当成已经有了公示期。
+    """
+
+    __tablename__ = "rule_revisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: customer / merchant / rider,见 services/rules.AUDIENCES
+    audience: Mapped[str] = mapped_column(String(16))
+    #: 每端独立的版本号,从 1 起
+    revision: Mapped[int] = mapped_column(Integer)
+    content_hash: Mapped[str] = mapped_column(String(16))
+    sections: Mapped[list] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # 并发时后一个插入撞这条、被吞掉 ——
+        # 留痕不该因为两个人同时打开规则页而报错
+        UniqueConstraint("audience", "revision",
+                         name="uq_rule_revisions_audience_rev"),
+        Index("ix_rule_revisions_audience", "audience", "revision"),
+    )
