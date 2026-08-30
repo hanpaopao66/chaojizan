@@ -29,6 +29,23 @@ router = APIRouter(tags=["平台"])
 
 # ---------- 频道开关(金刚区显示哪些业务) ----------
 
+@router.get("/rules/{audience}")
+async def public_rules(audience: str, db: AsyncSession = Depends(get_db)):
+    """三端规则页。**公开可读,不需要登录。**
+
+    规则要在加入之前就能读到 —— 想入驻的商家、想跑单的骑手,
+    得先看见规则再决定要不要来。登录后才给看,顺序是反的。
+    这一页也没有任何敏感数据。
+
+    `audience` ∈ customer / merchant / rider。
+    """
+    from ..services.rules import AUDIENCES, rules_for
+
+    if audience not in AUDIENCES:
+        raise HTTPException(422, f"audience 仅支持 {' / '.join(AUDIENCES)}")
+    return await rules_for(audience, db)
+
+
 @router.get("/channels")
 async def visible_channels(db: AsyncSession = Depends(get_db)):
     """首页金刚区显示哪些频道。**不需要登录** —— 首页在登录前就要画出来。
