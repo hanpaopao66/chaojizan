@@ -585,6 +585,22 @@ class Dish(Base):
     image_url: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
+    # ---- 零售字段(biz_type=retail;餐饮店留空)----
+    #
+    # 超市/水果店和快餐店的区别只在货架上,所以不新建表也不改名 ——
+    # 改名要动订单项、购物车、套餐、券核销的所有引用,而用户看不到 "dish"。
+    #
+    # ⚠️ spec 是**文案不是计价维度**:"500g" 只印在卡片上给人看。
+    # 不做按重量计价 —— 生鲜按标准份卖,短重走缺货部分退款(refund_cents)。
+    barcode: Mapped[str] = mapped_column(
+        String(20), default="", server_default="")
+    brand: Mapped[str] = mapped_column(
+        String(40), default="", server_default="")
+    spec: Mapped[str] = mapped_column(
+        String(30), default="", server_default="")
+    unit: Mapped[str] = mapped_column(
+        String(10), default="", server_default="")
+
     # 规格/加料组:[{"name":"份量","required":true,"multi":false,
     #   "choices":[{"name":"小份","delta_cents":0},{"name":"大份","delta_cents":300}]}]
     # 单价 = price_cents + Σ选中项 delta;下单时服务端按本字段重算,不信客户端

@@ -482,6 +482,12 @@ class DishIn(BaseModel):
     daily_stock: int | None = Field(default=None, ge=0, le=100_000)
     is_alcohol: bool = False  # 酒类:购买需实名且成年,商家上架自助勾选
     image_url: str = ""
+    # ---- 零售字段(超市/水果店;餐饮店留空)----
+    # spec 是**印在卡片上给人看的文案**,不是计价维度 —— 不做按重量计价
+    barcode: str = Field(default="", max_length=20)
+    brand: str = Field(default="", max_length=40)
+    spec: str = Field(default="", max_length=30)
+    unit: str = Field(default="", max_length=10)
     description: str = Field(default="", max_length=200)
     badges: list[str] = Field(default=[], max_length=4)
     options: list[OptionGroup] = Field(default=[], max_length=5)
@@ -523,6 +529,11 @@ class DishPatch(BaseModel):
     # 限时折扣:两者同传开启,同传 null 关闭(折扣价必须低于现价,服务端校验)
     flash_price_cents: int | None = Field(default=None, gt=0)
     flash_until: datetime | None = None
+    # ---- 零售字段 ----
+    barcode: str | None = Field(default=None, max_length=20)
+    brand: str | None = Field(default=None, max_length=40)
+    spec: str | None = Field(default=None, max_length=30)
+    unit: str | None = Field(default=None, max_length=10)
 
 
 class DishOut(BaseModel):
@@ -554,6 +565,12 @@ class DishOut(BaseModel):
     flash_price_cents: int | None = None
     flash_until: datetime | None = None
     monthly_sales: int = 0  # 近 30 天售出份数,菜单接口填充
+    # ---- 零售字段(超市/水果店;餐饮店留空)----
+    # spec 是**印在卡片上给人看的文案**,不是计价维度 —— 不做按重量计价
+    barcode: str = Field(default="", max_length=20)
+    brand: str = Field(default="", max_length=40)
+    spec: str = Field(default="", max_length=30)
+    unit: str = Field(default="", max_length=10)
 
     @model_validator(mode="after")
     def _compute_servable(self):

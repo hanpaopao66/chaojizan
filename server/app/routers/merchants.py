@@ -14,7 +14,7 @@ import httpx
 import mimetypes
 import secrets
 
-from ..categories import MERCHANT_CATEGORIES
+from ..categories import CATEGORIES_BY_BIZ, MERCHANT_CATEGORIES
 from ..config import settings
 from ..db import get_db
 from ..services import cloud_print
@@ -93,7 +93,7 @@ _NEARBY_SQL_TMPL = """
         FROM merchants m
         WHERE m.is_open = true
           AND m.status = 'approved'
-          AND m.biz_type = 'food'
+          AND m.biz_type = :biz_type
           {category_clause}
           {filter_clause}
           AND ST_DWithin(
@@ -153,7 +153,7 @@ _NEARBY_SQL_BY_SALES = """
             AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
       WHERE m.is_open = true
         AND m.status = 'approved'
-        AND m.biz_type = 'food'
+        AND m.biz_type = :biz_type
         {category_clause}
         {filter_clause}
         AND ST_DWithin(
@@ -249,9 +249,15 @@ async def list_merchants(
     max_min_order_cents: int | None = Query(default=None, ge=0, le=100_000),
     limit: int = Query(default=_PAGE_MAX, ge=1, le=_PAGE_MAX),
     offset: int = Query(default=0, ge=0),
+    biz_type: str = "food",
     db: AsyncSession = Depends(get_db),
 ):
     """附近营业中的商家(带月售),sort=distance|rating|sales,category 按品类筛选。
+
+    `biz_type` 选业态:food 外卖 / retail 零售(超市、水果店)。
+    **同一套卡片、同一套排序**,零售和外卖的区别只在货架上,不在这个接口 ——
+    所以不另起一个 /retail 接口。默认 food 是为了老客户端原样能用。
+    住宿不在这里:它没有配送、按夜计价,走 /stays。
 
     筛选与 /merchants/search 同口径:min_rating 评分下限、has_promo 有优惠、
     max_min_order_cents 起送价上限。首页和搜索页给的是同一套条件,
@@ -266,8 +272,13 @@ async def list_merchants(
     """
     if sort not in _SORTS:
         raise HTTPException(422, "sort 仅支持 distance / rating / sales")
-    if category is not None and category not in MERCHANT_CATEGORIES:
-        raise HTTPException(422, "未知品类")
+    if biz_type not in CATEGORIES_BY_BIZ:
+        raise HTTPException(422, "biz_type 仅支持 food / retail")
+    # 品类要**按业态**校验:水果店不该选得到「川湘菜」。
+    # 只查合并表的话两个业态的品类互相串,而 category 只有一列,
+    # 串进去之后光看这一列解释不了它属于哪个业态
+    if category is not None and category not in CATEGORIES_BY_BIZ[biz_type]:
+        raise HTTPException(422, "该业态没有这个品类")
 
     # 筛选条件三端共用:拼进 SQL 的只有固定串,取值一律走绑定参数
     filters: list[str] = []
@@ -310,7 +321,7 @@ async def list_merchants(
                    literal_column("sales"),
                    literal_column("distance_m"),
                    literal_column("avg_spend_cents")).from_statement(stmt),
-            {"lat": lat, "lng": lng,
+            {"lat": lat, "lng": lng, "biz_type": biz_type,
              "radius_m": _browse_radius_m(radius_m),
              "avg_min_orders": AVG_SPEND_MIN_ORDERS,
              "limit": limit, "offset": offset,
@@ -336,7 +347,7 @@ async def list_merchants(
     # 无定位兜底:同样要认筛选条件,否则用户一关定位筛选就静默失效
     query = select(Merchant).where(
         Merchant.is_open.is_(True), Merchant.status == MerchantStatus.approved,
-        Merchant.biz_type == "food")
+        Merchant.biz_type == biz_type)
     if category:
         query = query.where(Merchant.category == category)
     if min_rating is not None:
@@ -359,9 +370,21 @@ async def list_merchants(
 
 
 @router.get("/categories")
-async def merchant_categories():
-    """外卖品类清单(slug -> 中文名),管理后台下拉与三端展示共用。"""
-    return MERCHANT_CATEGORIES
+async def merchant_categories(biz_type: str | None = None):
+    """品类清单(slug -> 中文名),管理后台下拉与三端展示共用。
+
+    带 `biz_type` 给该业态的品类(入驻和店铺设置该用这个 —— 水果店不该
+    选得到「川湘菜」);不带则给合并表,**为的是老客户端和"把 key 翻译成
+    中文"这类不关心业态的场合**照旧能用。
+
+    这个默认值是有意保留的向后兼容:改成必填会让所有存量客户端的
+    品类下拉直接空掉,而它们并不知道自己该传什么。
+    """
+    if biz_type is None:
+        return MERCHANT_CATEGORIES
+    if biz_type not in CATEGORIES_BY_BIZ:
+        raise HTTPException(422, "biz_type 仅支持 food / retail")
+    return CATEGORIES_BY_BIZ[biz_type]
 
 
 @router.get("/hot-keywords")
@@ -407,6 +430,7 @@ async def search_merchants(
     min_rating: float | None = Query(default=None, ge=0, le=5),
     has_promo: bool = False,          # 有满减或满赠
     max_min_order_cents: int | None = Query(default=None, ge=0, le=100_000),
+    biz_type: str = "food",
     db: AsyncSession = Depends(get_db),
 ):
     """搜索营业中的商家:店名或在售菜名命中。
@@ -437,9 +461,13 @@ async def search_merchants(
     #
     # 为什么不用 pg_trgm:实测三元组要 3 个字符才有选择性,
     # 而中文搜索多是两个字(烧烤/火锅/奶茶),那种情况它比全表扫还慢。
-    params: dict = {"pattern": f"%{q.strip()}%", "q": q.strip()}
+    if biz_type not in CATEGORIES_BY_BIZ:
+        raise HTTPException(422, "biz_type 仅支持 food / retail")
+    params: dict = {"pattern": f"%{q.strip()}%", "q": q.strip(),
+                    "biz_type": biz_type}
     where = ["m.is_open = true", "m.status = 'approved'",
-             "m.biz_type = 'food'",  # 酒店走 /stays 频道,不混进外卖搜索
+             # 酒店走 /stays 频道,不混进这里;零售与外卖各搜各的业态
+             "m.biz_type = :biz_type",
              "((sz_bigrams(m.name) @> sz_bigrams(:q) AND m.name ILIKE :pattern)"
              " OR EXISTS ("
              " SELECT 1 FROM dishes d WHERE d.merchant_id = m.id"
@@ -501,6 +529,7 @@ async def search_merchants(
 @router.get("/suggest")
 async def search_suggest(
     q: str = Query(min_length=1, max_length=30),
+    biz_type: str = "food",
     db: AsyncSession = Depends(get_db),
 ):
     """搜索联想:匹配的店名 + 热门在售菜名(前缀优先),各最多 6 条。"""
@@ -510,7 +539,7 @@ async def search_suggest(
         select(Merchant.name).where(
             Merchant.is_open.is_(True),
             Merchant.status == MerchantStatus.approved,
-            Merchant.biz_type == "food",
+            Merchant.biz_type == biz_type,
             Merchant.name.ilike(pattern))
         .order_by(Merchant.name.ilike(prefix).desc(),
                   Merchant.rating_sum.desc())

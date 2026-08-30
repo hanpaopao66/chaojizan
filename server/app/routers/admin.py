@@ -1434,7 +1434,7 @@ async def set_flag(
     elif key == "channels_enabled":
         # **只接受已注册的频道 key。** 打错一个字的后果是那个频道
         # 从首页消失,而后台显示得好好的 —— 这种错没人查得出来。
-        known = {"food", "stay", "voucher", "errand"}
+        known = {"food", "retail", "stay", "voucher", "errand"}
         keys = [k.strip() for k in value.replace("，", ",").split(",")
                 if k.strip()]
         bad = [k for k in keys if k not in known]
@@ -2996,14 +2996,19 @@ async def set_merchant_category(
     db: AsyncSession = Depends(get_db),
 ):
     """人工改商家品类(商家错归类时纠错,白名单见 categories.py)。"""
-    from ..categories import MERCHANT_CATEGORIES
+    from ..categories import categories_of
 
     category = str(payload.get("category", ""))
-    if category not in MERCHANT_CATEGORIES:
-        raise HTTPException(422, "未知品类")
     shop = await db.get(Merchant, merchant_id)
     if shop is None:
         raise HTTPException(404, "商家不存在")
+    # **按这家店的业态校验**,不查合并表 —— 否则纠错时能把一家水果店
+    # 改成「川湘菜」,而 category 只有一列,之后光看它解释不了这个值
+    allowed = categories_of(shop.biz_type)
+    if category not in allowed:
+        raise HTTPException(
+            422, f"{shop.biz_type} 业态没有这个品类"
+                 if allowed else f"业态 {shop.biz_type} 不使用品类")
     shop.category = category
     await db.commit()
     return {"id": merchant_id, "category": category}
