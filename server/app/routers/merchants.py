@@ -899,11 +899,17 @@ async def dish_categories(merchant_id: int,
 async def menu(
     merchant_id: int,
     category: str | None = None,
+    ids: list[int] = Query(default=[]),
     limit: int | None = Query(default=None, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """商家在售商品。`category` 只取这一类,`limit`/`offset` 翻页。
+    """商家在售商品。`category` 只取这一类,`ids` 按 id 取,`limit`/`offset` 翻页。
+
+    `ids` 是**分页的配套**,不是可有可无的便利:购物车里只存
+    `{dish_id, quantity, choices}`,进店时要靠菜单把 id 映射回商品对象才能
+    还原。不分页时整份菜单里什么都有;一分页,跨分类的购物车就还原不了 ——
+    用户会发现"我加的东西没了"。所以按 id 取这条路必须有。
 
     ⚠️ **limit 默认不限,而且不许改成有默认值**。这个接口的老调用方
     (存量 App)不传参数、拿的是整份菜单;加一个默认上限的话它们会
@@ -915,7 +921,10 @@ async def menu(
     result = await db.scalars(
         select(Dish)
         .where(Dish.merchant_id == merchant_id, Dish.is_on_sale.is_(True),
-               *([Dish.category == category] if category is not None else []))
+               *([Dish.category == category] if category is not None else []),
+               # 上限和 limit 同一个数:这条路径也是客户端能直接控制条数的,
+               # 不封顶就等于给了一个绕过分页的口子
+               *([Dish.id.in_(ids[:200])] if ids else []))
         # 分类之间的先后 = 该分类第一道菜的建立顺序(与加 sort 之前的
         # 行为一致)。**不能直接按 category 字符串排** —— 未分类的菜
         # category 是空串,一排就把"其他"顶到分类栏第一个并默认选中。

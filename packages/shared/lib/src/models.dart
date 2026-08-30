@@ -378,13 +378,26 @@ class Dish {
         flashUntil = json['flash_until'] == null
             ? null
             : DateTime.tryParse(json['flash_until'] as String),
-        monthlySales = json['monthly_sales'] as int? ?? 0;
+        monthlySales = json['monthly_sales'] as int? ?? 0,
+        barcode = json['barcode'] as String? ?? '',
+        brand = json['brand'] as String? ?? '',
+        spec = json['spec'] as String? ?? '',
+        unit = json['unit'] as String? ?? '';
 
   final int id;
   final int merchantId;
   final String name;
   final String category;
   final int priceCents;
+
+  /// 零售字段(超市/水果店;餐饮店是空串)。
+  ///
+  /// **spec 是印在卡片上给人看的文案,不是计价维度** —— "500g" 只是标注,
+  /// 不做按重量计价(生鲜按标准份卖,短重走缺货部分退款)。
+  final String barcode;
+  final String brand;
+  final String spec;
+  final String unit;
 
   /// 成本(分/份),0 = **没录过**(不是成本为零)。
   /// 只有商家自己的接口下发这个字段;用户端菜单里恒为 0。

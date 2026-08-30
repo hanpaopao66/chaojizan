@@ -485,12 +485,17 @@ class MerchantListView extends StatefulWidget {
   const MerchantListView(
       {super.key,
       required this.api,
+      // 业态:food 外卖 / retail 超市水果。**同一套卡片同一套排序** ——
+      // 区别只在货架上,所以复用这个列表而不是另写一个页面
+      this.bizType = 'food',
       this.deliveryAddress,
       this.category,
       this.onLocated,
       this.onUseCurrentLocation});
 
   final ApiClient api;
+
+  final String bizType;
 
   /// 顶部地址栏选中的地址;null = 用手机定位
   final Address? deliveryAddress;
@@ -886,7 +891,7 @@ class _MerchantListViewState extends State<MerchantListView>
       final next = await widget.api.merchants(
           lat: _myLat, lng: _myLng, sort: _sort, category: widget.category,
           radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
-          maxMinOrderCents: _maxMinOrderCents, offset: loaded);
+          maxMinOrderCents: _maxMinOrderCents, bizType: widget.bizType, offset: loaded);
       if (!mounted) return;
       setState(() {
         _more.addAll(next);
@@ -929,14 +934,14 @@ class _MerchantListViewState extends State<MerchantListView>
     var list = await widget.api.merchants(
         lat: _myLat, lng: _myLng, sort: _sort, category: widget.category,
         radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
-        maxMinOrderCents: _maxMinOrderCents);
+        maxMinOrderCents: _maxMinOrderCents, bizType: widget.bizType);
     // 审核兜底:定位正常但离已开通城市远(如审核人员在外地/海外)时列表为空,
     // 降级展示演示城市商家——数据链路与真实用户一致,可浏览可下单
     if (list.isEmpty && _realLocation && address == null) {
       final demo = await widget.api.merchants(
           lat: demoLat, lng: demoLng, sort: _sort, category: widget.category,
           radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
-          maxMinOrderCents: _maxMinOrderCents);
+          maxMinOrderCents: _maxMinOrderCents, bizType: widget.bizType);
       if (demo.isNotEmpty) {
         _fellBack = true;
         _myLat = demoLat;
@@ -1004,7 +1009,7 @@ class _MerchantListViewState extends State<MerchantListView>
     return widget.api.merchants(
         lat: lat, lng: lng, sort: _sort, category: widget.category,
         radiusM: _radiusM, minRating: _minRating, hasPromo: _hasPromo,
-        maxMinOrderCents: _maxMinOrderCents);
+        maxMinOrderCents: _maxMinOrderCents, bizType: widget.bizType);
   }
 
   /// 手选城市之后按该城市找店(#283)。
@@ -2022,7 +2027,20 @@ class _MenuPageState extends State<MenuPage>
     try {
       final items = await widget.api.getCart(widget.merchant.id);
       if (!mounted || _cart.isNotEmpty) return;
-      final byId = {for (final d in dishes) d.id: d};
+      var pool = dishes;
+      if (_paged) {
+        // 分页时手上只有当前分类,而购物车里的东西可能来自任何分类 ——
+        // 不补这一下,用户回到店里会发现"我加的东西没了"。
+        // 按 id 取是菜单接口的配套入口,专为这件事留的
+        final want = [
+          for (final it in items)
+            if (it['dish_id'] is int) it['dish_id'] as int,
+        ];
+        if (want.isEmpty) return;
+        pool = await widget.api.menu(widget.merchant.id, ids: want);
+        if (!mounted || _cart.isNotEmpty) return;
+      }
+      final byId = {for (final d in pool) d.id: d};
       final restored = <CartLine>[];
       for (final it in items) {
         final dish = byId[it['dish_id'] as int?];
@@ -2039,13 +2057,38 @@ class _MenuPageState extends State<MenuPage>
     } catch (_) {/* 云端购物车不可用不影响点单 */}
   }
 
+  /// 零售(超市/水果店)才按分类拉。
+  ///
+  /// 餐馆几十道菜,一次拉完最省事,也没必要改既有行为;超市几千个 SKU
+  /// 一次拉完是几 MB(实测演示店 2837 个商品 = 1.37MB)。
+  bool get _paged => widget.merchant.bizType == 'retail';
+
+  /// 已经拉过的分类。分页时用它避免来回切 tab 反复请求
+  final Set<String> _loadedCats = {};
+
+  /// 一次拉多少个(与服务端菜单接口的上限一致)
+  static const _menuPageSize = 50;
+
+  /// 服务端给的分类栏。**分页时分类栏不能再从已拉到的商品里推** ——
+  /// 那样只会显示当前这一类,用户点不到别的
+  List<String> _serverCats = const [];
+
+  bool _catLoading = false;
+
   Future<void> _load() async {
     try {
-      // 并发:店铺详情和菜单互不依赖,串起来发等于让用户多等一个来回
-      final (detail, dishes) = await (
+      // 并发:店铺详情和菜单互不依赖,串起来发等于让用户多等一个来回。
+      // 零售只拉第一个分类,分类栏走单独那个轻接口
+      final (detail, dishes, cats) = await (
         widget.api.merchantDetail(widget.merchant.id),
-        widget.api.menu(widget.merchant.id),
+        _paged
+            ? widget.api.menu(widget.merchant.id, limit: _menuPageSize)
+            : widget.api.menu(widget.merchant.id),
+        _paged
+            ? widget.api.dishCategories(widget.merchant.id)
+            : Future.value(const <({String name, int count})>[]),
       ).wait;
+      _serverCats = [for (final c in cats) c.name];
       bool fav = _isFavorite;
       if (widget.api.isLoggedIn) {
         try {
@@ -2060,6 +2103,11 @@ class _MenuPageState extends State<MenuPage>
         _loaded = true;
         if (_category.isEmpty && dishes.isNotEmpty) {
           _category = _categoryOf(dishes.first);
+        }
+        if (_paged) {
+          for (final d in dishes) {
+            _loadedCats.add(d.category);
+          }
         }
         // 再来一单:还在售且库存够的菜自动入车(带规格的菜请重新选规格)
         final initial = widget.initialCart;
@@ -2096,6 +2144,11 @@ class _MenuPageState extends State<MenuPage>
   String _categoryOf(Dish dish) => dish.category.isEmpty ? '其他' : dish.category;
 
   List<String> get _categories {
+    // 分页时分类栏来自服务端:此刻 _dishes 里只有当前分类,
+    // 从它推的话分类栏只会有一项,用户永远点不到第二类
+    if (_paged && _serverCats.isNotEmpty) {
+      return [for (final c in _serverCats) c.isEmpty ? '其他' : c];
+    }
     final seen = <String>{};
     final list = <String>[];
     for (final dish in _dishes) {
@@ -2103,6 +2156,28 @@ class _MenuPageState extends State<MenuPage>
       if (seen.add(c)) list.add(c);
     }
     return list;
+  }
+
+  /// 切到某个分类:没拉过就拉一次。餐饮走不到这里(整份菜单已在手上)
+  Future<void> _ensureCategory(String shown) async {
+    if (!_paged || _catLoading) return;
+    final raw = shown == '其他' ? '' : shown;
+    if (_loadedCats.contains(raw)) return;
+    setState(() => _catLoading = true);
+    try {
+      final more = await widget.api.menu(widget.merchant.id,
+          category: raw, limit: _menuPageSize);
+      if (!mounted) return;
+      setState(() {
+        final have = {for (final d in _dishes) d.id};
+        _dishes.addAll(more.where((d) => !have.contains(d.id)));
+        _loadedCats.add(raw);
+      });
+    } catch (_) {
+      // 拉不到就让用户还能切回别的分类,不把整页卡住
+    } finally {
+      if (mounted) setState(() => _catLoading = false);
+    }
   }
 
   int get _totalCents =>
@@ -2530,7 +2605,10 @@ class _MenuPageState extends State<MenuPage>
         children: [
           for (final c in _categories)
             InkWell(
-              onTap: () => setState(() => _category = c),
+              onTap: () {
+                setState(() => _category = c);
+                _ensureCategory(c);
+              },
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(vertical: 13, horizontal: 8),

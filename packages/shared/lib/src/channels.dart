@@ -69,6 +69,16 @@ const List<SzChannel> kChannels = [
     tone: 0, bizType: 'food',
   ),
   SzChannel(
+    // 超市、水果店、便利店。**和外卖是同一套下单流程** ——
+    // 骑手接单、到店、拣货、取货、送达,只是货架上摆的东西不同。
+    // 所以它复用 /merchants 那套接口(带 biz_type=retail),不另起一路。
+    // 色槽取 5 —— 前五个是**语义绑定**的(0 外卖 1 住宿 2 团购
+    // 3 打车 4 帮送),5 起才是预留槽。按顺序往下顺号会把住宿的苔绿
+    // 挪成团购的赭金,整排颜色跟着错位。
+    key: 'retail', name: '买菜买水果', glyph: '果', sub: '超市 / 水果 / 便利店',
+    tone: 5, bizType: 'retail',
+  ),
+  SzChannel(
     key: 'stay', name: '住宿', glyph: '宿', sub: '钟点房 / 民宿',
     tone: 1, bizType: 'hotel',
   ),

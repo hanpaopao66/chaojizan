@@ -274,7 +274,7 @@ class ApiClient {
   static void Function()? onSessionCleared;
 
   Future<dynamic> _request(String method, String path,
-      {Object? body, Map<String, String>? query}) async {
+      {Object? body, Map<String, dynamic>? query}) async {
     try {
       return await _rawRequest(method, path, body: body, query: query);
     } catch (e) {
@@ -296,9 +296,12 @@ class ApiClient {
   final Duration _timeout;
 
   Future<dynamic> _rawRequest(String method, String path,
-      {Object? body, Map<String, String>? query}) async {
+      {Object? body, Map<String, dynamic>? query}) async {
     if (path != '/auth/refresh') await _maybeRefreshToken();
     await loadAppBuild();
+    // query 的值是 dynamic 而不是 String:`Uri.replace` 本来就接受
+    // String 或 Iterable<String>,而**重复参数**(?ids=1&ids=2)只能用后者。
+    // 按 id 批量取商品要用到它(见 menu 的 ids)
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final request = http.Request(method, uri)..headers.addAll(_headers);
     if (body != null) request.body = jsonEncode(body);
@@ -856,11 +859,14 @@ class ApiClient {
       {double? lat, double? lng, String sort = 'distance',
       String? category, int? radiusM, double? minRating,
       bool hasPromo = false, int? maxMinOrderCents,
-      int? limit, int offset = 0}) async {
+      int? limit, int offset = 0, String bizType = 'food'}) async {
     final data = await _request('GET', '/merchants', query: {
       if (lat != null) 'lat': '$lat',
       if (lng != null) 'lng': '$lng',
       'sort': sort,
+      // 业态:food 外卖 / retail 超市水果。**同一套接口同一套卡片** ——
+      // 零售和外卖的区别只在货架上,不在这一层。默认 food 与老行为一致
+      if (bizType != 'food') 'biz_type': bizType,
       if (category != null && category.isNotEmpty) 'category': category,
       if (radiusM != null) 'radius_m': '$radiusM',
       if (minRating != null) 'min_rating': '$minRating',
@@ -871,6 +877,21 @@ class ApiClient {
     });
     return (data as List)
         .map((e) => Merchant.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 点单页左侧的分类栏(名称 + 每类多少个)。
+  ///
+  /// 分类栏原先是客户端从整份菜单里推出来的 —— 餐馆几十道菜没问题,
+  /// 超市几千个商品就是一次几 MB。有了它就能只拉当前分类。
+  Future<List<({String name, int count})>> dishCategories(
+      int merchantId) async {
+    final data = await _request('GET', '/merchants/$merchantId/dish-categories');
+    return (data as List)
+        .map((e) => (
+              name: (e as Map<String, dynamic>)['name'] as String? ?? '',
+              count: e['count'] as int? ?? 0,
+            ))
         .toList();
   }
 
@@ -932,8 +953,18 @@ class ApiClient {
     );
   }
 
-  Future<List<Dish>> menu(int merchantId) async {
-    final data = await _request('GET', '/merchants/$merchantId/dishes');
+  /// 商家在售商品。`category` 只取这一类,`limit`/`offset` 翻页。
+  ///
+  /// 都不传 = 整份菜单(老行为)。餐馆几十道菜照旧一次拉完最省事;
+  /// 超市要按分类拉,否则一次几 MB(见 [dishCategories])。
+  Future<List<Dish>> menu(int merchantId,
+      {String? category, List<int>? ids, int? limit, int offset = 0}) async {
+    final data = await _request('GET', '/merchants/$merchantId/dishes', query: {
+      if (category != null) 'category': category,
+      if (ids != null && ids.isNotEmpty) 'ids': ids.map((e) => '$e').toList(),
+      if (limit != null) 'limit': '$limit',
+      if (offset > 0) 'offset': '$offset',
+    });
     return (data as List)
         .map((e) => Dish.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -1423,18 +1454,6 @@ class ApiClient {
   }
 
   Future<void> deleteAddress(int id) => _request('DELETE', '/addresses/$id');
-
-  /// 智能识别:一段粘贴文本 → {name, phone, address, detail, salutation}。
-  ///
-  /// 用户的地址往往已经存在于别处(微信里同事发的、上一个平台复制的)。
-  /// 让他对着现成的文字重新手打一遍是在制造错误 —— 打错一个数字,
-  /// 骑手就打不通电话。
-  ///
-  /// **返回的是建议值,必须填进表单让用户过目** —— 服务端用本地正则
-  /// (不把姓名手机号外发给第三方),解析不了刁钻写法是常态。
-  Future<Map<String, dynamic>> parseAddress(String text) async =>
-      await _request('POST', '/addresses/parse', body: {'text': text})
-          as Map<String, dynamic>;
 
   /// POI 输入提示(服务端代理腾讯位置服务,Key 不下发 ——
   /// key 一旦进了 APK 就等于公开,配额按 key 计费,被盗刷是迟早的事)
