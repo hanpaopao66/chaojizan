@@ -31,7 +31,7 @@ class Test缓存键按单个商家:
         那正是"按集合存"的写法,压测数据会好看,线上没有命中。
         """
         src = inspect.getsource(prep_time.stats_for)
-        assert 'f"prep:v1:{i}"' in src, "缓存键必须按单个商家算"
+        assert 'f"{_CACHE_PREFIX}{i}"' in src, "缓存键必须按单个商家算"
         assert "hashlib" not in src, (
             "对 id 列表做 hash = 按集合存;骑手散在城里时命中率为零")
 
@@ -67,9 +67,20 @@ class Test商家改自报值立刻失效:
 
     def test_删的是同一个键(self):
         """失效和写入必须是同一套键。这条是防手滑改了一边 ——
-        键一旦对不上,失效就是个空操作,而且完全不报错。"""
-        assert 'f"prep:v1:{merchant_id}"' in inspect.getsource(
-            prep_time.invalidate)
+        键一旦对不上,失效就是个空操作,而且完全不报错。
+
+        所以两边都必须走 `_CACHE_PREFIX` 这个常量,不许各写各的字面量。"""
+        for fn in (prep_time.invalidate, prep_time.stats_for):
+            assert "_CACHE_PREFIX" in inspect.getsource(fn), (
+                f"{fn.__name__} 没走共用的键前缀常量")
+
+    def test_口径变了要升版号(self):
+        """缓存里存的是**算好的**分位数。`true_ready_at` 的口径一改,
+        旧值就不该再被回答 —— 而 TTL 是 60 秒,不升版号的话
+        部署后这一分钟里新旧口径混着发。"""
+        assert prep_time._CACHE_PREFIX.startswith("prep:v")
+        ver = int(prep_time._CACHE_PREFIX.removeprefix("prep:v").rstrip(":"))
+        assert ver >= 2, "引入骑手时刻校准之后,版本号至少是 2"
 
     def test_改自报值的路由会调它(self):
         import app.routers.merchants as m
