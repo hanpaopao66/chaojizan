@@ -1130,6 +1130,9 @@ class OrderOut(BaseModel):
     addr_protect: bool = False
     addr_revealed: bool = False
     delivery_photo_url: str = ""  # 送达拍照留证(仅用户/平台可见)
+    #: 发货照(零售):商家拣完货拍的。纠纷时"少给了/给错了"看它。
+    #: 可见范围见 uploads._may_read_private —— 顾客、该店、在途骑手、管理员
+    handover_photo_url: str = ""
     # 到店自取:取餐码印在小票上,商家核对用户报的码后完成订单
     pickup: bool = False
     pickup_code: str = ""

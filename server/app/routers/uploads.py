@@ -14,11 +14,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Merchant, Order, RiderProfile, User, UserRole
+from ..models import (Merchant, Order, OrderStatus, RiderProfile, User,
+                      UserRole)
 from ..security import (get_current_user, get_current_user_optional,
                         require_role)
 from ..services import storage
@@ -194,6 +195,26 @@ async def _may_read_private(
     if await db.scalar(select(Order.id).where(
             Order.customer_id == user.id,
             Order.delivery_photo_url.contains(ref))):
+        return True
+
+    # 发货照(零售):**三方都要看得到,但各有各的理由**。
+    #
+    #   顾客   —— 纠纷时是他在主张"少给了",不给他看等于让他空口说
+    #   该店   —— 是他拍的、拍的是他自己柜台上的货
+    #   骑手   —— 取货时照着核对。**只在这单还在他手上时** ——
+    #             送完就没有继续看的理由了,而照片说明这个人买了什么
+    #             (买药、买成人用品都在这一类里)
+    #
+    # 和送达留证那条的差别:那张拍的是别人家门口,所以拍摄者(骑手)
+    # 拍完就该看不到;这张拍的是商家自己的货,所以商家可以一直看。
+    if await db.scalar(select(Order.id).where(
+            Order.handover_photo_url.contains(ref),
+            or_(Order.customer_id == user.id,
+                Order.merchant_id.in_(
+                    select(Merchant.id).where(Merchant.owner_id == user.id)),
+                and_(Order.rider_id == user.id,
+                     Order.status.notin_((OrderStatus.COMPLETED,
+                                          OrderStatus.CANCELLED)))))):
         return True
 
     # 上传者本人:key 里编着 u{id}-(见 storage._new_key)。

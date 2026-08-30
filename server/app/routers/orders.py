@@ -1104,6 +1104,34 @@ async def transition(
         await release_coupon(db, order.order_no)
     # 出餐了就把「到店未出餐」的催单工单自动销掉(不占用同单一张 open 工单的名额)
     if payload.to_status == OrderStatus.READY:
+        # 发货照:**零售必须拍,餐饮不要求**。
+        #
+        # 零售的纠纷是"少给了/给错了/坏的",那正是一张照片能定的事;
+        # 而外卖的纠纷是"味道不对""洒了",照片帮不上,凭空多一步只是
+        # 让每个快餐店每天多按几十次快门。
+        #
+        # ⚠️ 和跑腿的取件照(errands.upload_pickup_photo)是**有意相反**的
+        # 决定。那里不强制,理由写着「骑手在楼道里手忙脚乱,卡住照片就等于
+        # 卡住取件」—— 商家发货的处境不同:在自己柜台前、有平板、
+        # 是每天重复几十遍的动作。两个处境,两个判断,不是其中一个漏了。
+        #
+        # 卡住了会怎样:订单停在 accepted。骑手照样抢得到、到得了店
+        # (抢单池收 accepted 和 ready 两种),所以**不会卡死**,
+        # 只是商家得把照片补上才走得到下一步。
+        shop_ = (shop if role == "merchant"
+                 else await db.get(Merchant, order.merchant_id))
+        if shop_ is not None and shop_.biz_type == "retail":
+            url = payload.photo_url.strip()
+            if url:
+                order.handover_photo_url = url[:300]
+            if not order.handover_photo_url:
+                raise HTTPException(
+                    422, "发货前请拍一张商品照 —— "
+                         "顾客说少给了或者拿错了的时候,这张照片替你说话")
+        elif payload.photo_url.strip():
+            # 餐饮商家愿意拍就存着,不拦
+            order.handover_photo_url = payload.photo_url.strip()[:300]
+
         from ..models import DeliveryIssue
         await db.execute(
             update(DeliveryIssue)

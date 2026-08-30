@@ -40,6 +40,9 @@ PURPOSES: dict[str, bool] = {
     "health_cert": True,    # 健康证
     "license": True,        # 营业执照 / 特种行业许可证
     "delivery_proof": True, # 送达拍照留证(拍的是别人家门口)
+    # 发货照(零售):商家拣完货拍的。是商品不是住处,但**照片会说明
+    # 这个人买了什么** —— 买药、买成人用品都在这一类里,所以进私密桶
+    "handover_proof": True,
     "incident": True,       # 骑手事故/配送异常现场照
     "after_sale": True,     # 售后凭证照
     # 食安投诉可附**医疗凭证** —— 医疗健康信息在个保法下属于敏感个人信息,

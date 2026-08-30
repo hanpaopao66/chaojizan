@@ -773,6 +773,16 @@ class Order(Base):
     addr_revealed: Mapped[bool] = mapped_column(Boolean, default=False)
     salutation: Mapped[str] = mapped_column(String(12), default="")
     delivery_photo_url: Mapped[str] = mapped_column(String(300), default="")
+    #: 发货照(零售):商家拣完货、点「已出餐」前拍的一张。
+    #:
+    #: **零售纠纷的事实来源。** 外卖的纠纷是"味道不对""洒了",照片帮不上;
+    #: 零售的纠纷是**少给了、给错了、坏的**,那正是一张照片能定的事。
+    #: 跑腿的 pickup_photo_url 是同一个道理,只是拍的人和时刻不同。
+    #:
+    #: 商家拍不是骑手拍:骑手不知道这单该有什么,也不会拆袋清点。
+    #: 而这是责任转移的时刻(判责分摊里 STAGE_COOKED 那个点)。
+    handover_photo_url: Mapped[str] = mapped_column(
+        String(300), default="", server_default="")
     # 到店自取:免配送费、不走骑手;用户凭取餐码到店,商家核对后完成订单
     pickup: Mapped[bool] = mapped_column(Boolean, default=False)
     pickup_code: Mapped[str] = mapped_column(String(8), default="")
