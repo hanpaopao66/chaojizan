@@ -372,9 +372,23 @@ class RecordApiCallMiddleware:
         started = _t.monotonic()
         status = {"code": 0}
 
+        done = {"recorded": False}
+
         async def _send(message):
             if message["type"] == "http.response.start":
                 status["code"] = message["status"]
+                # **在转发响应之前写。**
+                #
+                # 写在 `await self.app(...)` 之后的话,响应早就发出去了 ——
+                # 客户端拿到响应立刻回头读日志,而那条 INSERT 还没提交。
+                # 表现正好是这个功能要消灭的那句「我明明调了,日志里没有」。
+                # e2e_api_console 就是这么闪的:同一台机器上有时过有时不过。
+                #
+                # 代价是一次 INSERT 进了响应路径。这和上面「同步写不是
+                # 即发即忘」是同一个取舍,而且开放接口量级很小 ——
+                # 确定性比那几毫秒值钱。
+                await self._record(scope, message["status"], started)
+                done["recorded"] = True
             await send(message)
 
         # try/finally:路由抛未处理异常时,`await` 之后的代码根本不会执行 ——
@@ -385,9 +399,14 @@ class RecordApiCallMiddleware:
         except Exception:
             if not status["code"]:
                 status["code"] = 500
-            await self._record(scope, status["code"], started)
+            if not done["recorded"]:
+                await self._record(scope, status["code"], started)
             raise
-        await self._record(scope, status["code"], started)
+        # 正常情况在 _send 里已经记过了。走到这里说明**一条响应都没发出去**
+        # (ASGI 应用直接返回),那种情况仍然该留一条 —— 否则最难查的
+        # 那一类(请求进来了但什么都没发生)在日志里是空白
+        if not done["recorded"]:
+            await self._record(scope, status["code"] or 500, started)
 
     async def _record(self, scope, code: int, started: float) -> None:
         """**同步写,不是即发即忘。**

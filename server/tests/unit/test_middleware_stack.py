@@ -201,3 +201,39 @@ class Test非http的连接直接放行:
         async def snd(m): pass
         asyncio.run(mw(inner)({"type": "websocket", "headers": []}, rcv, snd))
         assert got["type"] == "websocket"
+
+
+class Test调用日志必须在响应之前写:
+    """**「我明明调了,日志里没有」是这个功能要消灭的困惑,不是它的症状。**
+
+    中间件原先在 `await self.app(...)` 之后才写日志 —— 那时响应早就发给
+    客户端了。客户端拿到响应立刻回头读日志,而那条 INSERT 还没提交。
+    表现是 e2e_api_console 在同一台机器上有时过有时不过,而业务侧完全
+    看不出任何异常。
+
+    写在 `_send` 收到 http.response.start 时、**转发之前**,
+    这个顺序就成立了:客户端看见响应的那一刻,日志已经在库里。
+    """
+
+    def test_在转发响应之前记(self):
+        import inspect
+
+        from app.main import RecordApiCallMiddleware
+        src = inspect.getsource(RecordApiCallMiddleware)
+        send_body = src[src.index("async def _send"):src.index("try:")]
+        assert "_record" in send_body, (
+            "日志没在 _send 里写 —— 那就是响应先出去、日志后落库,"
+            "客户端读得到响应却读不到日志")
+        i = send_body.index("_record")
+        j = send_body.index("await send(message)")
+        assert i < j, "_record 必须在 await send(message) **之前**"
+
+    def test_一条响应都没发出去时仍然要记(self):
+        """最难查的那一类:请求进来了但什么都没发生。
+        日志里是空白的话,连"它到底有没有进来"都答不了。"""
+        import inspect
+
+        from app.main import RecordApiCallMiddleware
+        src = inspect.getsource(RecordApiCallMiddleware)
+        assert 'if not done["recorded"]:' in src
+

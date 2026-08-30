@@ -131,6 +131,7 @@ test:
 	  && python -m tests.e2e_review_hidden_appeal \
 	  && python -m tests.e2e_user_appeal_channels \
 	  && python -m tests.e2e_early_ready \
+	  && python -m tests.e2e_true_prep \
 	  && python -m tests.e2e_injection_probe \
 	  && python -m tests.e2e_ws_order_auth \
 	  && python -m tests.e2e_queue \
