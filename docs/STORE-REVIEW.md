@@ -46,15 +46,17 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArnOaFr2IxaDGX9eyukdO/oOQeLec3mCmrj0Q
 
 - 服务端 `.env.prod` 配置 `SMS_REVIEW_ACCOUNTS=手机号:固定码`(逗号分隔多个);
   命中的号码不真发短信,登录界面输入固定码即可通过。固定码不进仓库,
-  以部署机实际配置为准(建议格式:`13900000001:246810`)。
+  **以部署机 `.env.prod` 实际配置为准**(格式示例:`手机号:六位固定码`)。
+  现行配置里用户端、商家端各一个号;`role=admin` 被实现排除(config.py
+  `sms_review_code` + auth.py 校验),管理后台不能用这条路进。
 - 提审前用 `python -m scripts.demo_seed` 保证演示商家/团购券/酒店数据就绪,
   并给测试账号预置 1-2 笔历史订单和一个演示城市的收货地址,看起来像真实用户。
 
 **粘贴到审核备注的模板**(手机号/验证码按 .env.prod 实际值替换):
 
 ```
-测试账号:139 0000 0001
-登录方式:输入手机号 → 点击"获取验证码" → 输入验证码 246810 → 登录
+测试账号:138 0000 0001
+登录方式:输入手机号 → 点击"获取验证码" → 输入验证码 <固定码,见部署机 .env.prod> → 登录
 说明:该账号为审核专用白名单账号,验证码为固定值,不会真实发送短信。
 定位提示:若您所在地区无商家,App 会自动展示演示城市内容(带提示条),全部功能可正常体验。
 ```
@@ -77,7 +79,8 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArnOaFr2IxaDGX9eyukdO/oOQeLec3mCmrj0Q
    注销成功回游客首页(有在途订单会被拦截并提示原因)。
 
 商家端/骑手端(B 端工具 App):登录后于「店铺」tab /「钱包」tab 底部可达
-协议全文、退出登录与注销账号;如需商家端/骑手端测试账号,同样走白名单机制配置。
+协议全文、退出登录与注销账号。商家端测试账号(138 0000 0002)已在白名单内,
+固定码同样见 `.env.prod`;骑手端目前未配,需要时按同样格式加一条。
 
 ## 四、权限与隐私速查(审核员常问)
 
@@ -113,7 +116,9 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArnOaFr2IxaDGX9eyukdO/oOQeLec3mCmrj0Q
 
 ## 六、提审前检查清单
 
-- [ ] `.env.prod` 已配置 `SMS_REVIEW_ACCOUNTS`,固定码与审核备注一致
+- [ ] `.env.prod` 已配置 `SMS_REVIEW_ACCOUNTS`,**手机号与固定码都与审核备注逐位一致**
+      (2026-09-02 查出过一次不一致:文档写 139 开头、实配 138 开头,
+      审核员照文档输会走真实短信通道,海外收不到,直接卡在登录页)
 - [ ] 生产库已跑 `python -m scripts.demo_seed`,测试账号有历史订单与演示城市地址
 - [ ] App 备案号已办理并填入商店后台;开发者账号主体 = 陕西爱卡斯科技有限公司
 - [ ] 构建时注入 `--dart-define=SUPERZ_ICP=陕ICP备2025064101号-5`(登录页页脚展示)
