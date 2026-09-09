@@ -422,6 +422,7 @@ class SzPageScaffold extends StatelessWidget {
     this.floatingActionButton,
     this.bottomNavigationBar,
     this.resizeToAvoidBottomInset,
+    this.extendBody = false,
     this.contentMaxWidth = kContentMaxWidth,
   });
 
@@ -431,6 +432,13 @@ class SzPageScaffold extends StatelessWidget {
   final Widget? floatingActionButton;
   final Widget? bottomNavigationBar;
   final bool? resizeToAvoidBottomInset;
+
+  /// 让 [body] 一直铺到 [bottomNavigationBar] 底下(默认 false,行为不变)。
+  ///
+  /// **开了它,底栏底下的内容就不再自动让位** —— 滚动体最后一项会被底栏
+  /// 永久盖住。开的那一页必须自己给滚动体加等于底栏高度的底部留白,
+  /// Scaffold 会把这个高度经 `MediaQuery.padding.bottom` 送进 body。
+  final bool extendBody;
 
   /// 内容(含 [appBar])的最大宽度。两者用**同一个值**才对得齐。
   final double contentMaxWidth;
@@ -445,12 +453,14 @@ class SzPageScaffold extends StatelessWidget {
         floatingActionButton: floatingActionButton,
         bottomNavigationBar: bottomNavigationBar,
         resizeToAvoidBottomInset: resizeToAvoidBottomInset,
+        extendBody: extendBody,
       );
     }
     return Scaffold(
       backgroundColor: backgroundColor,
       floatingActionButton: floatingActionButton,
       resizeToAvoidBottomInset: resizeToAvoidBottomInset,
+      extendBody: extendBody,
       // 底栏(提交按钮那种)也跟着限宽:让它横跨 1440 的话,
       // 一个"确认下单"按钮一米宽,点哪儿都行反而不知道点哪儿
       bottomNavigationBar: bottomNavigationBar == null

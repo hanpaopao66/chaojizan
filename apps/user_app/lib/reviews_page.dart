@@ -55,7 +55,11 @@ class _ReviewsListState extends State<ReviewsList> {
             return const Center(child: Text('还没有评价,下单后来做第一个评价的人'));
           }
           return ListView.separated(
-            padding: const EdgeInsets.all(12),
+            // 店铺页把这个列表放在开了 extendBody 的 Scaffold 里,
+            // 购物车条会盖住页尾。独立的评价页没有底栏,这里读到 0,
+            // 所以两处都对
+            padding: EdgeInsets.fromLTRB(
+                12, 12, 12, 12 + MediaQuery.of(context).padding.bottom),
             itemCount: reviews.length,
             separatorBuilder: (_, __) => const Divider(),
             itemBuilder: (context, i) {

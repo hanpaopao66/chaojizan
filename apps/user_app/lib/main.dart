@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -469,10 +470,32 @@ class _PinnedChipsDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(BuildContext context, double shrinkOffset,
       bool overlapsContent) {
-    return Container(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      alignment: Alignment.centerLeft,
-      child: child,
+    // 吸顶筛选条:商家卡片(每张带一张店铺图)就是从它底下滚过去的,
+    // 这正是玻璃唯一有意义的场景 —— 背后真有东西在动。
+    //
+    // 这里**不需要** extendBody、也不用给列表补底部留白:吸顶 sliver
+    // 本来就不占内容的位,内容天然从它下面走(和购物车条那边不一样)。
+    //
+    // 可读性也不是问题,不必像购物车条那样另配次级色:条上只有 SzChip,
+    // 选中的自带 sz.ink 实心底,未选中的文字是 sz.ink —— 压在最坏合成底
+    // (近黑店铺图 + .82 的 paper = #CAC6BE)上仍有 10.87,远高于 AA 的 4.5。
+    return LiquidGlassLens(
+      style: LiquidGlassStyle(
+        // 贴边的横条,不留圆角 —— 圆角会在屏幕两侧切出两个缺口
+        shape: const LiquidGlassShape.continuousRoundedRectangle(
+          cornerRadius: 0,
+        ),
+        appearance: LiquidGlassAppearance(
+          // 底色沿用购物车条那条同样的 .82(推导见 [_kInkMutedOnGlass] 上方),
+          // 但基色取 scaffoldBackgroundColor 而不是 surface:这条原来就是
+          // 页面底色,换成卡片色会凭空多出一条色带
+          color: Theme.of(context)
+              .scaffoldBackgroundColor
+              .withValues(alpha: .82),
+          blur: const LiquidGlassBlur(sigmaX: 3, sigmaY: 3),
+        ),
+      ),
+      child: Align(alignment: Alignment.centerLeft, child: child),
     );
   }
 
@@ -3197,7 +3220,10 @@ class _MenuPageState extends State<MenuPage>
     );
   }
 
-  Widget _dishList() {
+  /// [bottomInset] 是购物车条盖住的高度。**必须由调用方传进来** ——
+  /// 这个 State 自己的 context 在 Scaffold 之上,读到的是屏幕安全区,
+  /// 不是底栏高度;extendBody 把底栏高度只送进 body 那一层 MediaQuery
+  Widget _dishList(double bottomInset) {
     final dishes =
         _dishes.where((d) => _categoryOf(d) == _category).toList();
     // 我常买:只在第一个分类顶部露出一次,避免各分类重复
@@ -3205,6 +3231,9 @@ class _MenuPageState extends State<MenuPage>
         _categories.isNotEmpty &&
         _category == _categories.first;
     return ListView.builder(
+      // 留白加在**视口内部**:列表照样铺到底栏底下(菜品从玻璃后面滚过),
+      // 只是最后一道菜能滑到底栏上方,不被永久盖住
+      padding: EdgeInsets.only(bottom: bottomInset),
       itemCount: dishes.length + (showFrequent ? 1 : 0),
       itemBuilder: (context, rawIndex) {
         if (showFrequent && rawIndex == 0) return _frequentRow();
@@ -3605,12 +3634,18 @@ class _MenuPageState extends State<MenuPage>
             child: TabBarView(
               controller: _tabController,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _categoryRail(),
-                    Expanded(child: _dishList()),
-                  ],
+                Builder(
+                  // 这层 Builder 就是为了拿到 Scaffold **底下**的 MediaQuery
+                  builder: (context) => Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _categoryRail(),
+                      Expanded(
+                        child:
+                            _dishList(MediaQuery.of(context).padding.bottom),
+                      ),
+                    ],
+                  ),
                 ),
                 ReviewsList(api: widget.api, merchantId: widget.merchant.id),
                 _ShopInfoTab(
@@ -3623,6 +3658,11 @@ class _MenuPageState extends State<MenuPage>
     }
 
     return SzPageScaffold(
+      // 菜单要从购物车条底下滚过去 —— 玻璃折射的是「背后真实画的东西」,
+      // 底栏底下是一片纯色的话,这个效果和一个半透明 Container 没区别。
+      // 代价是三个 tab 的滚动体都得自己补底部留白(见 _dishList /
+      // ReviewsList / _ShopInfoTab),不补的话最后一项被底栏永久盖住
+      extendBody: true,
       appBar: AppBar(
         title: Text(widget.merchant.name),
         actions: [
@@ -3682,69 +3722,106 @@ class _MenuPageState extends State<MenuPage>
       ),
       body: body,
       bottomNavigationBar: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-          decoration: BoxDecoration(
-            color: Theme.of(context).sz.surface,
-            border: Border(top: BorderSide(color: Theme.of(context).sz.line)),
-          ),
-          child: Row(
-            children: [
-              TweenAnimationBuilder<double>(
-                key: ValueKey(_totalCount), // 数量一变,重放一次轻微放大
-                // 原来是 elasticOut 弹跳 350ms:回弹属于"卖萌"的动效,
-                // 和这套克制的观感对不上。改成 easeOutCubic 200ms,
-                // 只给一下"数字变了"的确认,不表演
-                tween: Tween(begin: 0.88, end: 1.0),
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOutCubic,
-                builder: (context, scale, child) =>
-                    Transform.scale(scale: scale, child: child),
-                child: Badge.count(
-                  count: _totalCount,
-                  isLabelVisible: _totalCount > 0,
-                  child: IconButton(
-                    tooltip: '查看购物车',
-                    icon: const Icon(Icons.shopping_cart_outlined),
-                    onPressed: _cart.isEmpty ? null : _openCartSheet,
+        child: Padding(
+          // 悬浮成一条,不再贴着屏幕两边 —— 贴边的话圆角会顶进安全区,
+          // 而且两侧看不见菜单从底下经过,这个效果就白做了
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: LiquidGlassLens(
+            style: LiquidGlassStyle(
+              shape: const LiquidGlassShape.continuousRoundedRectangle(
+                cornerRadius: 22,
+              ),
+              appearance: LiquidGlassAppearance(
+                // .82 是**算出来的,不是调出来的**。菜品图从玻璃底下滚过去,
+                // 底色越淡,压在深色图上的次级文字越看不清:
+                //
+                //   surface 透明度   近黑菜品图上 inkMuted 的对比度
+                //   .72              2.85   ✗
+                //   .82              3.62   ✗(配下面那个次级色才够)
+                //   .92              4.51   ✓ —— 但这时已经等于原来那条不透明栏
+                //
+                // 取 .82(后面有东西在动还看得出来),欠的对比度由
+                // [_kInkMutedOnGlass] 补,而不是把玻璃调没。
+                //
+                // **不能指望 adaptivity 兜底**:它要经 LiquidGlassView 采样
+                // 才知道背后是深是浅(包里 LiquidGlassAdaptiveArea 的注释写着
+                // ——没有 view 时它照样能用,只是采不了样,回落到平台亮度),
+                // 而那条路要每秒截好几次屏,低端安卓上不划算
+                color: Theme.of(context).sz.surface.withValues(alpha: .82),
+                blur: const LiquidGlassBlur(sigmaX: 3, sigmaY: 3),
+                shadow: const LiquidGlassShadow(blur: 5, opacity: .16),
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              child: Row(
+                children: [
+                  TweenAnimationBuilder<double>(
+                    key: ValueKey(_totalCount), // 数量一变,重放一次轻微放大
+                    // 原来是 elasticOut 弹跳 350ms:回弹属于"卖萌"的动效,
+                    // 和这套克制的观感对不上。改成 easeOutCubic 200ms,
+                    // 只给一下"数字变了"的确认,不表演
+                    tween: Tween(begin: 0.88, end: 1.0),
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, scale, child) =>
+                        Transform.scale(scale: scale, child: child),
+                    child: Badge.count(
+                      count: _totalCount,
+                      isLabelVisible: _totalCount > 0,
+                      child: IconButton(
+                        tooltip: '查看购物车',
+                        icon: const Icon(Icons.shopping_cart_outlined),
+                        onPressed: _cart.isEmpty ? null : _openCartSheet,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_cart.isEmpty ? '¥0.00' : yuan(_totalCents),
+                            style: szMoney(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                                color: _cart.isEmpty
+                                    ? _kInkMutedOnGlass
+                                    : Theme.of(context).sz.ink)),
+                        const SizedBox(height: 1),
+                        Text(_cartNote(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: 10.5, color: _kInkMutedOnGlass)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: _cart.isEmpty ? null : _checkout,
+                    child: const Text('去结算'),
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(_cart.isEmpty ? '¥0.00' : yuan(_totalCents),
-                        style: szMoney(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: _cart.isEmpty
-                                ? Theme.of(context).sz.inkMuted
-                                : Theme.of(context).sz.ink)),
-                    const SizedBox(height: 1),
-                    Text(_cartNote(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 10.5,
-                            color: Theme.of(context).sz.inkMuted)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              FilledButton(
-                onPressed: _cart.isEmpty ? null : _checkout,
-                child: const Text('去结算'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 }
+
+/// 购物车玻璃条上的次级文字色。**只在那条玻璃上用,别的地方照旧 sz.inkMuted。**
+///
+/// 玻璃底下会滚过任意菜品图,合成底最坏是「近黑图 + .82 的 surface」=
+/// #D3D0CB。inkMuted(#6B6862)在这个底上只有 3.62,10.5px 的小字过不了
+/// AA 的 4.5 —— 而这行写的是「还差多少能满减」,是真信息,不是装饰。
+///
+/// #5C5953 是**最浅的**仍能过 AA 的取值(最坏底 4.50,骨白底 6.01),
+/// 比 inkMuted 深一档,肉眼几乎看不出差别,但不再有看不清的底。
+const Color _kInkMutedOnGlass = Color(0xFF5C5953);
 
 /// 订单 tab:类型切换(点外卖/住宿);团购券在「我的-我的券包」保持原习惯,
 /// 这里给个快捷入口不搬家
@@ -7654,7 +7731,9 @@ class _ShopInfoTab extends StatelessWidget {
         ? '${shop.openTime} - ${shop.closeTime}'
         : '营业中(商家手动开关)';
     return ListView(
-      padding: const EdgeInsets.all(16),
+      // 底栏(购物车条)在 extendBody 下盖住页尾,补等高留白
+      padding: EdgeInsets.fromLTRB(
+          16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),
       children: [
         Row(
           children: [
