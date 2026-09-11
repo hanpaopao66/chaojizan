@@ -705,25 +705,38 @@ async def identity_status(
 
 
 # ---------- 个人资料 ----------
-@router.get("/me", response_model=MeOut)
-async def me(user: User = Depends(get_current_user),
-             db: AsyncSession = Depends(get_db)):
+async def _me_out(user: User, db: AsyncSession) -> MeOut:
+    """GET 和 PATCH /me 共用的响应。
+
+    两处原先各拼一份,PATCH 那份漏了风控三项 —— 改完昵称拿到的响应里
+    risk_level 是空的,谁要是拿它刷新界面,风控提示就凭空消失了。
+    """
+    from ..models import RiskActionLog, UserIdentity
+
     # 被风控限制时,把**这次处置的记录 id** 一并给出去。
     # 申诉得有个能指的目标:只给 level 和 reason,客户端知道自己被限制了,
     # 却不知道拿什么去申诉,那个入口就是点不动的。
     risk_action_id = 0
     if user.risk_level:
-        from ..models import RiskActionLog
         risk_action_id = await db.scalar(
             select(RiskActionLog.id)
             .where(RiskActionLog.user_id == user.id,
                    RiskActionLog.to_level == user.risk_level)
             .order_by(RiskActionLog.created_at.desc()).limit(1)) or 0
+    verified = await db.scalar(
+        select(UserIdentity.id).where(UserIdentity.user_id == user.id)) is not None
     return MeOut(id=user.id, phone=user.phone, name=user.name,
                  role=user.role.value, avatar_url=user.avatar_url,
                  birthday=user.birthday, marketing_push=user.marketing_push,
                  risk_level=user.risk_level, risk_note=user.risk_note,
-                 risk_action_id=risk_action_id)
+                 risk_action_id=risk_action_id,
+                 identity_verified=verified, created_at=user.created_at)
+
+
+@router.get("/me", response_model=MeOut)
+async def me(user: User = Depends(get_current_user),
+             db: AsyncSession = Depends(get_db)):
+    return await _me_out(user, db)
 
 
 @router.get("/me/violations")
@@ -809,6 +822,4 @@ async def update_me(
         user.marketing_push = payload.marketing_push
     await db.commit()
     await db.refresh(user)
-    return MeOut(id=user.id, phone=user.phone, name=user.name,
-                 role=user.role.value, avatar_url=user.avatar_url,
-                 birthday=user.birthday, marketing_push=user.marketing_push)
+    return await _me_out(user, db)

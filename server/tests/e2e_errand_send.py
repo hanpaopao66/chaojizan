@@ -70,6 +70,13 @@ async def main():
     o = call("POST", "/errands", customer, body())
     no = o["order_no"]
     assert o["status"] == "pending_payment", o["status"]
+    # 跑腿单挂在本城 biz_type='errand' 的服务主体上 —— 用户端订单页据此
+    # 把它归到「帮我送」频道,而不是当成一单外卖
+    assert o["biz_type"] == "errand", o["biz_type"]
+    listed = next(x for x in call("GET", "/orders", customer)
+                  if x["order_no"] == no)
+    assert listed["biz_type"] == "errand", listed["biz_type"]
+    print("✓ 跑腿单 biz_type = errand(详情与列表一致)")
     assert o["fee_parts"] and o["total_cents"] == q["fee_cents"], o
     # 取件点在订单自己身上,不是那个服务主体的坐标(它是 0,0)
     assert abs(o["merchant_lat"] - PICKUP["pickup_lat"]) < 1e-6, o

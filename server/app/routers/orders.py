@@ -148,6 +148,8 @@ def order_out(order: Order, merchant: Merchant | None,
     out = OrderOut.model_validate(order)
     out.has_review = has_review
     out.urge_count = urge_count
+    if merchant is not None:
+        out.biz_type = merchant.biz_type
     # 拆分项的中文名跟着数一起给 —— 客户端不用各写一份映射
     if out.fee_parts:
         out.fee_part_labels = {k: FEE_PART_LABELS[k]

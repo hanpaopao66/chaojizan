@@ -28,6 +28,11 @@ order = call("POST", "/orders", customer, {
 })
 no = order["order_no"]
 print(f"✓ 下单成功 {no},合计 ¥{order['total_cents']/100}(含配送费 ¥{order['delivery_fee_cents']/100})")
+# 订单带上商家业态:用户端订单页靠它把买菜和外卖分到各自的频道
+assert order["biz_type"] == "food", order["biz_type"]
+listed = next(o for o in call("GET", "/orders", customer) if o["order_no"] == no)
+assert listed["biz_type"] == "food", listed["biz_type"]
+print("✓ 订单(详情与列表)都带 biz_type")
 
 paid = call("POST", f"/orders/{no}/pay/mock", customer)
 # 佣金按**该店实际费率**断言,不写死 5%。

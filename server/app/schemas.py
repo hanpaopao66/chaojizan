@@ -93,6 +93,12 @@ class MeOut(BaseModel):
     #: 只给 level 和 reason 的话,客户端知道自己被限制了,却不知道
     #: 该拿什么去申诉,那个入口就点不动。0 = 没有在生效的处置。
     risk_action_id: int = 0
+    #: 做过实名认证(user_identities 有这个人的记录)。「我的」页身份行据此挂
+    #: 「已实名」。**只给布尔** —— 打码姓名、是否成年仍走 /auth/identity-status,
+    #: 证件信息不往这个每次进「我的」都要拉的接口里放
+    identity_verified: bool = False
+    #: 注册时间。身份行写「2026 年 7 月加入」
+    created_at: datetime | None = None
 
 
 class MePatch(BaseModel):
@@ -1079,6 +1085,10 @@ class OrderOut(BaseModel):
     # 跑腿:订单类型与取件点。外卖单这几个是默认值/空串。
     # 骑手端据此把「取餐」改成「取件」、把商家名改成取件点
     order_kind: str = "food"
+    #: 这单挂在哪类商家下(merchants.biz_type):food / retail / errand。
+    #: 用户端订单页按它分频道 —— 买菜和外卖是同一套订单,只有商家的业态不同,
+    #: 订单自己身上没有这个字段。由 order_out() 从商家补上
+    biz_type: str = "food"
     errand_note: str = ""
     pickup_address: str = ""
     pickup_contact_name: str = ""

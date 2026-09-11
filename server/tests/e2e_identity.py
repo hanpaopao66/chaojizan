@@ -46,7 +46,10 @@ async def main():
     user = register_fresh_customer()
     s = call("GET", "/auth/identity-status", user)
     assert s["verified"] is False, s
-    print("✓ 初始状态未实名")
+    me = call("GET", "/auth/me", user)
+    assert me["identity_verified"] is False, me
+    assert me["created_at"], "身份行要写「X 年 X 月加入」,/auth/me 得带注册时间"
+    print("✓ 初始状态未实名(/auth/me 同口径)")
 
     # 2) 非法证号被拒:校验位错误 / 日期非法 / 长度不对
     bad_checksum = adult_id[:17] + ("0" if adult_id[17] != "0" else "1")
@@ -73,6 +76,16 @@ async def main():
     raw = raw_call("GET", "/auth/identity-status", user)
     assert adult_id not in raw and json.loads(raw)["is_adult"] is True
     print("✓ 成年实名通过,打码姓名,接口无证号明文")
+
+    # 「我的」页身份行读 /auth/me 的 identity_verified;只给布尔,不带证件信息
+    raw = raw_call("GET", "/auth/me", user)
+    assert json.loads(raw)["identity_verified"] is True, raw
+    assert adult_id not in raw and "王小明" not in raw and "王**" not in raw, \
+        "/auth/me 不许带证件信息"
+    # 改昵称的响应和 GET 同一份口径(原先 PATCH 那份漏字段)
+    patched = call("PATCH", "/auth/me", user, {"name": "改个昵称"})
+    assert patched["identity_verified"] is True, patched
+    print("✓ /auth/me 带 identity_verified,且不带证件信息")
 
     # 4) 库里是密文;重复提交 409
     row = await db_row(
