@@ -1,7 +1,8 @@
-# Super-Z 官网(React + Three.js)
+# Super-Z 官网(React)
 
-叙述平缓的单页官网:炉火余烬 3D hero(react-three-fiber)+ 滚动渐现叙事 +
-实时信任数据(/stats/overview,与公开账本同源)。
+首页(`src/Home.jsx`)讲聚合平台:服务台(频道开没开读 `/channels`)+ 一张费率表 +
+实时账目(/stats/overview、/transparency/audit,与公开账本同源)。
+入驻页、品牌页、大屏、透明中心是同一个包里的子路由。
 
 ## 开发
 
@@ -22,7 +23,10 @@ npm run build      # 产物直接输出到 ../server/static/site/
 
 ## 设计约定
 
-- 品牌色与 App 一致:炉火橙 #FF5A1F / 账目绿 / 促销琥珀(见 docs/BRAND.md)
-- 动画平缓:入场 0.9s 位移+淡入;余烬粒子慢速旋转上浮;
-  全部动画尊重 `prefers-reduced-motion`
+- 首页颜色取 `packages/shared/lib/src/brand.dart` 产品层(骨白 / 黏土 / earn / hold /
+  频道色槽),写在 `src/home.css` 顶部;子页仍是旧的深色版(`src/styles.css`)
+- `styles.css` 是**全局**样式,首页的类名不能和它重名(`.brand` `.cta` `.btn` `.app` 等),
+  否则那些规则会漏进首页。原因和实测现象见 `Home.jsx` 顶部注释
+- 首页标题用的衬线字是子集:改了 h1 / h2 / 频道字块的文案要重跑
+  `python3 scripts/gen_font_subset.py --web`(CI 的「显示字覆盖率」会拦漏跑)
 - 不喊口号:页面上的每个数字都来自公开接口,可点进原始数据

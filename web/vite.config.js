@@ -19,6 +19,8 @@ export default defineConfig({
     // 本地开发时把数据接口代理到后端
     proxy: {
       '/stats': 'http://127.0.0.1:8010',
+      // 首页服务台读哪些频道开着(和 App 金刚区同一份后台配置)
+      '/channels': 'http://127.0.0.1:8010',
       '/nodes/summary': 'http://127.0.0.1:8010',
       '/ledger': 'http://127.0.0.1:8010',
       '/screen/stats': 'http://127.0.0.1:8010',

@@ -35,9 +35,10 @@ GB2312 一二级是简体中文的常用全集(6763 字),UGC 基本都在里面�
 商家起名用繁体(「老麵館」)是真实存在的情况 —— 这一档没覆盖,
 要覆盖得再往上走一级(见 assets/fonts/README.md 里的体积表)。
 
-## 两种用法
+## 三种用法
 
     python3 scripts/gen_font_subset.py           # 重新生成(要下载 24MB 源字体)
+    python3 scripts/gen_font_subset.py --web     # 只重做官网首页那两份(不下载)
     python3 scripts/gen_font_subset.py --check   # 只校验覆盖率(CI 用,不下载)
 
 `--check` 读已提交的子集里的 cmap,和源码里扫出来的汉字比对。
@@ -171,11 +172,96 @@ def build() -> int:
         total += size
         print(f"  {out.name:<28} {size/1024:6.0f} KB")
     print(f"  合计 {total/1048576:.2f} MB")
+    # 官网那份是从 App 子集里再切出来的,App 子集变了它要跟着重做
+    return build_web()
+
+
+# ---------- 官网首页(web/src/Home.jsx) ----------
+#
+# 官网首页的衬线只用在 h1 / h2 / 频道字块上,文案全是写死的 ——
+# 用不着 App 那份 GB2312 全集(2.9MB,手机上开官网要白下这么多)。
+# 所以按这几处实际出现的字,从已提交的 App 子集里再切一份。
+#
+# 拉丁字母和数字走 SzSerif(本来就只有 33KB),这里只换成 WOFF。
+# 用 WOFF 不用 WOFF2:WOFF2 要 brotli,CI 的覆盖率检查只装了 fonttools;
+# 字这么少,两者差不到 10KB。
+
+WEB_HOME = ROOT / "web/src/Home.jsx"
+WEB_FONT_DIR = ROOT / "web/public/fonts"
+WEB_CJK = WEB_FONT_DIR / "SzSerifCJK-Semibold.site.woff"
+WEB_LATIN = WEB_FONT_DIR / "SzSerif-Semibold.woff"
+
+
+def web_chars() -> set[str]:
+    """官网首页里会用衬线显示的汉字:h1、h2 与频道字块。
+
+    **判据要和 home.css 里挂 SzSerifCJK 的选择器对上**
+    (`.h3 h1, .h3 h2`、`.glyph`)。那边多挂一处,这里就要多扫一处。
+    """
+    src = WEB_HOME.read_text()
+    found = set()
+    for m in re.finditer(r"<h([12])[^>]*>(.*?)</h\1>", src, re.S):
+        found.update(CJK.findall(m.group(2)))
+    for m in re.finditer(r"glyph: '(.)'", src):
+        found.update(CJK.findall(m.group(1)))
+    return found
+
+
+def build_web() -> int:
+    from fontTools import subset
+    from fontTools.ttLib import TTFont
+
+    chars = web_chars()
+    if not chars:
+        raise SystemExit(f"✗ 在 {WEB_HOME.relative_to(ROOT)} 里一个标题字都没扫到,"
+                         "扫描规则和页面对不上了")
+    WEB_FONT_DIR.mkdir(parents=True, exist_ok=True)
+
+    opts = subset.Options()
+    opts.flavor = "woff"
+    opts.layout_features = ["kern", "ccmp", "locl", "liga"]
+    opts.hinting = False
+    opts.desubroutinize = True
+    opts.name_IDs = ["*"]
+    opts.name_legacy = True
+    font = subset.load_font(str(FONT_DIR / "SzSerifCJK-Semibold.ttf"), opts)
+    sub = subset.Subsetter(opts)
+    sub.populate(text="".join(sorted(chars)) + PUNCT)
+    sub.subset(font)
+    subset.save_font(font, str(WEB_CJK), opts)
+
+    latin = TTFont(FONT_DIR / "SzSerif-Semibold.ttf")
+    latin.flavor = "woff"
+    latin.save(WEB_LATIN)
+
+    print(f"  官网首页标题字 {len(chars)} 个")
+    for out in (WEB_CJK, WEB_LATIN):
+        print(f"  {out.relative_to(ROOT)!s:<48} {out.stat().st_size/1024:6.1f} KB")
     return 0
 
 
+def check_web() -> bool:
+    """官网首页的标题字是否都在官网子集里。改了标题没重跑,这里拦。"""
+    from fontTools.ttLib import TTFont
+
+    if not WEB_CJK.exists():
+        print(f"  ✗ 找不到 {WEB_CJK.relative_to(ROOT)},"
+              "跑 `python3 scripts/gen_font_subset.py --web`")
+        return False
+    cmap = TTFont(WEB_CJK).getBestCmap()
+    have = {chr(c) for c in cmap if CJK.match(chr(c))}
+    need = web_chars()
+    missing = sorted(need - have)
+    mark = "✗" if missing else "✓"
+    print(f"  {mark} 官网首页标题:需要 {len(need)} 字,缺 {len(missing)} 字")
+    if missing:
+        print("     " + "".join(missing))
+        print("   跑 `python3 scripts/gen_font_subset.py --web` 重新切官网子集。")
+    return not missing
+
+
 def check() -> int:
-    """校验两件事:源码文案全覆盖、GB2312 常用字全覆盖。
+    """校验三件事:源码文案全覆盖、GB2312 常用字全覆盖、官网首页标题全覆盖。
 
     第二条看着多余(子集就是照它生成的),但它挡的是**手改字体文件**
     这种事 —— 有人为了省体积单独重新子集了一次,包变小了、
@@ -193,6 +279,8 @@ def check() -> int:
             print("     " + "".join(missing[:60])
                   + ("…" if len(missing) > 60 else ""))
     print(f"  子集共覆盖 {len(have)} 个汉字")
+    if not check_web():
+        bad = True
     if bad:
         print("\n✗ 缺的字会**默默**掉回系统黑体 —— 不报错、不崩、"
               "同一行里字形打架。")
@@ -206,4 +294,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true",
                     help="只校验覆盖率,不重新生成(CI 用)")
-    raise SystemExit(check() if ap.parse_args().check else build())
+    ap.add_argument("--web", action="store_true",
+                    help="只重做官网首页那两份字体(从已提交的 App 子集切,不下载)")
+    args = ap.parse_args()
+    raise SystemExit(check() if args.check else build_web() if args.web else build())

@@ -11,6 +11,17 @@
   <link rel="icon" type="image/png" sizes="64x64" href="/site/brand/favicon_64.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/site/brand/favicon_192.png" />
   <link rel="apple-touch-icon" href="/site/brand/favicon_192.png" />
+  <!-- 首页是骨白底,子页(入驻/品牌/大屏/透明中心)仍是深色。
+       在 JS 包加载之前就把首页标出来(home.css 的 html.h3-root),
+       否则首屏会先闪一下深色。前缀表和 src/App.jsx 的路由是同一份,改一处要改两处 -->
+  <script>
+    (function () {
+      var p = location.pathname.replace(/^\/site/, '') || '/';
+      if (!/^\/(join\/merchant|join\/rider|brand|screen|transparency|status)/.test(p)) {
+        document.documentElement.className += ' h3-root';
+      }
+    })();
+  </script>
   <!-- Open Graph / 社交分享卡片 -->
   <meta property="og:site_name" content="超级赞 Super-Z" />
   <meta property="og:title" content="超级赞 Super-Z · 一场把钱分公平的运动" />
@@ -98,8 +109,8 @@
     ]
   }
   </script>
-  <script type="module" crossorigin src="/site/assets/index-QatxD1_8.js"></script>
-  <link rel="stylesheet" crossorigin href="/site/assets/index-C0unGsez.css">
+  <script type="module" crossorigin src="/site/assets/index-pbehxblT.js"></script>
+  <link rel="stylesheet" crossorigin href="/site/assets/index-Bg8da_yS.css">
 </head>
 <body>
   <noscript>

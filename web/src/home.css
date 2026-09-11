@@ -1,0 +1,160 @@
+/* 官网首页 v3(Home.jsx)。颜色 = brand.dart 产品层浅色态,不另起色板。
+   作用域全部在 .h3 下,不影响 /screen /transparency 等子页。
+   反方向也要防:styles.css 是全局样式,同名的类会漏进来 —— 见 Home.jsx 顶部注释。 */
+
+/* 两个字体都是子集,由 scripts/gen_font_subset.py 生成(--web 只重做官网这两份)。
+   中文衬线只切了 h1 / h2 / 频道字块里出现的字:App 那份 GB2312 全集 2.9MB,
+   而官网这几处文案是写死的,用不着。改了这几处文案要重跑,CI 的覆盖率检查会拦 */
+@font-face { font-family: 'SzSerif'; src: url('/fonts/SzSerif-Semibold.woff') format('woff'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'SzSerifCJK'; src: url('/fonts/SzSerifCJK-Semibold.site.woff') format('woff'); font-weight: 600; font-display: swap; }
+
+/* 首页是骨白底,其余子页仍是深色(body 的底色在 styles.css 里)。
+   index.html 的内联脚本在首页给 <html> 挂 h3-root —— 它跑在 JS 包之前,
+   首屏不会先闪一下深色;iOS 橡皮筋回弹露出来的也是骨白 */
+html.h3-root, html.h3-root body { background: #F0EEE6; }
+
+.h3 {
+  --paper: #F0EEE6; --surface: #FBFAF6; --surface-alt: #F5F3EC;
+  --ink: #141413; --ink-muted: #6B6862; --ink-faint: #9A968C; --line: #E2DED2;
+  --clay: #C15F3C; --earn: #4E6B4F; --hold: #A6763E; --danger: #D03030; --ledger: #1F1E1B;
+  --ch0: #943F2F; --ch1: #4E7054; --ch2: #88611C; --ch3: #2B5F7A; --ch4: #7A59A0; --ch5: #01756C;
+  background: var(--paper); color: var(--ink); line-height: 1.7;
+  font-family: -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  min-height: 100vh;
+}
+.h3 a { color: inherit; text-decoration: none; }
+/* 拉丁字母走 SzSerif,中文走 SzSerifCJK —— 中文子集里没有拉丁字母,
+   反过来排的话标题里的「App」会掉回黑体 */
+.h3 h1, .h3 h2 { font-family: 'SzSerif', 'SzSerifCJK', 'PingFang SC', 'Noto Sans CJK SC', serif; font-weight: 600; margin: 0; }
+.h3 .rate, .h3 .n, .h3 .facts b { font-family: 'SzSerif', Georgia, serif; font-weight: 600; }
+
+/* 分段标题:弱化小字 + 字距(同 SzSectionTitle) */
+.h3 .sec { font-size: 11px; letter-spacing: 1.2px; color: var(--ink-muted); }
+.h3 .muted { color: var(--ink-muted); }
+.h3 .note { color: var(--ink-muted); font-size: 13px; margin: 14px 0 0; }
+.h3 .note a { color: #2C5F87; }
+
+/* 按钮:8 圆角矩形,不是胶囊;一屏一个实底。
+   前缀带 .h3 是为了压过上面的 `.h3 a { color: inherit }` */
+.h3 .h3-btn { display: inline-block; padding: 12px 22px; border-radius: 8px; font-size: 15px; border: 1px solid var(--line); color: var(--ink); white-space: nowrap; }
+.h3 .h3-btn.primary { background: var(--clay); border-color: var(--clay); color: var(--surface); font-weight: 600; }
+.h3 .h3-btn.ghost:hover { border-color: var(--ink); }
+.h3-cta { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* 顶栏 */
+.h3-nav { display: flex; align-items: center; gap: 22px; padding: 14px 32px; border-bottom: 1px solid var(--line); background: var(--paper); position: sticky; top: 0; z-index: 10; }
+.h3-nav .h3-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; }
+.h3-nav .links { margin-left: auto; display: flex; gap: 24px; font-size: 14px; color: var(--ink-muted); }
+.h3-nav .links a:hover { color: var(--ink); }
+.h3 .h3-nav .h3-btn { padding: 9px 18px; font-size: 14px; }
+
+/* hero:左话右服务台 */
+.h3-hero { display: grid; grid-template-columns: 1fr 420px; gap: 48px; padding: 88px 32px 72px; max-width: 1040px; margin: 0 auto; align-items: center; }
+.h3-hero .eyebrow { font-size: 12px; letter-spacing: 2px; color: var(--ink-muted); margin-bottom: 20px; }
+.h3-hero h1 { font-size: clamp(36px, 4.6vw, 56px); line-height: 1.18; text-wrap: pretty; }
+.h3-hero .h3-lede { color: var(--ink-muted); margin: 26px 0 0; max-width: 30em; font-size: 17px; }
+.h3-hero .h3-cta { margin-top: 34px; }
+.h3-hero .facts { display: flex; gap: 28px; margin-top: 40px; font-size: 12.5px; color: var(--ink-muted); flex-wrap: wrap; align-items: baseline; }
+.h3-hero .facts b { font-size: 22px; color: var(--ink); }
+.h3-hero .facts b.earn { color: var(--earn); }
+/* 核账有差错时的那句:这是整页唯一不能看起来令人安心的东西(同透明中心的红字) */
+.h3-hero .facts a.bad { color: var(--danger); }
+
+.desk { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 22px; display: flex; flex-direction: column; gap: 9px; }
+.desk .sec { margin-bottom: 4px; }
+.chgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.chcard { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; gap: 11px; align-items: center; }
+/* 暂未开放 / 筹备中:虚线、透明底,和「能点进去用」的格子一眼分开 */
+.chcard.off { background: transparent; border-style: dashed; color: var(--ink-muted); }
+.chcard .nm { font-size: 14.5px; font-weight: 600; line-height: 1.25; }
+.chcard .sb { font-size: 11.5px; color: var(--ink-muted); margin-top: 2px; }
+.chcard.off .sb { color: var(--ink-faint); }
+
+/* 频道字块:一个汉字画在自身 12% 淡底上(同 SzChannelGrid.glyph) */
+.glyph { display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; flex: none;
+  font-family: 'SzSerifCJK', 'PingFang SC', serif; font-weight: 600; line-height: 1; }
+.glyph.t0 { color: var(--ch0); background: color-mix(in srgb, var(--ch0) 12%, transparent); }
+.glyph.t1 { color: var(--ch1); background: color-mix(in srgb, var(--ch1) 12%, transparent); }
+.glyph.t2 { color: var(--ch2); background: color-mix(in srgb, var(--ch2) 12%, transparent); }
+.glyph.t3 { color: var(--ch3); background: color-mix(in srgb, var(--ch3) 12%, transparent); }
+.glyph.t4 { color: var(--ch4); background: color-mix(in srgb, var(--ch4) 12%, transparent); }
+.glyph.t5 { color: var(--ch5); background: color-mix(in srgb, var(--ch5) 12%, transparent); }
+.glyph.off { color: var(--ink-faint); background: var(--surface-alt); }
+
+/* 通用 section */
+.h3-sec { max-width: 1040px; margin: 0 auto; padding: 72px 32px 24px; }
+.h3-sec .sec { margin-bottom: 12px; }
+.h3-sec h2 { font-size: clamp(26px, 3vw, 34px); line-height: 1.3; }
+.h3-sec .h3-cta { margin-top: 22px; }
+
+/* 费率表 */
+.rates { margin-top: 28px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); font-size: 14.5px; }
+.rates .row { display: grid; grid-template-columns: 1.1fr .8fr 1.3fr 1.6fr; border-top: 1px solid var(--line); }
+.rates .row > div { padding: 14px 18px; }
+.rates .row.head { border-top: 0; background: var(--surface-alt); color: var(--ink-muted); font-size: 12px; letter-spacing: .5px; }
+.rates .row.head > div { padding: 12px 18px; }
+.rates .row.off { color: var(--ink-faint); }
+.rates .ch { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rates .dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.rates .dot.t0 { background: var(--ch0); } .rates .dot.t1 { background: var(--ch1); } .rates .dot.t2 { background: var(--ch2); }
+.rates .dot.t3 { background: var(--ch3); } .rates .dot.t4 { background: var(--ch4); } .rates .dot.t5 { background: var(--ch5); }
+.rates .dot.off { background: var(--line); }
+.rates .rate { color: var(--hold); }
+.rates .row.off .rate { color: var(--ink-faint); }
+.rates .h3-tag { font-size: 11px; line-height: 1.6; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-faint); }
+
+/* 账目台面:可查账的地方用深台面(同 SzLedgerCard) */
+.ledger { margin-top: 28px; background: var(--ledger); color: #F2F0E8; border-radius: 12px; padding: 24px 28px; }
+.ledger .nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.12); border-radius: 12px; overflow: hidden; }
+.h3-num { background: var(--ledger); padding: 20px 22px; }
+.h3-num .n { font-size: 36px; line-height: 1.1; }
+.h3-num .n.earn { color: #8FB08D; }
+.h3-num .n.clay { color: #E08A6B; }
+.h3-num .l { font-size: 12.5px; color: #A8A49A; margin-top: 6px; }
+/* 「今天还没有订单」这类补白:比标签再轻一档 */
+.h3-num .l.zero { font-size: 11.5px; color: #7A766D; margin-top: 2px; }
+.ledger .hashrow { display: flex; gap: 12px; align-items: center; margin-top: 20px; font-size: 12px; color: #A8A49A; flex-wrap: wrap; }
+.ledger .hashrow code { font-family: ui-monospace, Menlo, monospace; color: #F2F0E8; background: #100F0D; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 5px 10px; }
+.ledger .hashrow a { margin-left: auto; color: #E08A6B; }
+
+/* 下载 */
+.dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; }
+.dlcard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+.dlcard b { font-size: 16px; }
+.dlcard p { margin: 0; color: var(--ink-muted); font-size: 13.5px; flex: 1; }
+.dlcard p a { color: #2C5F87; }
+.h3 .dlcard .h3-btn { align-self: flex-start; padding: 9px 16px; font-size: 14px; }
+
+/* 关于我们 */
+.h3-about { max-width: 42em; margin: 16px 0 0; color: var(--ink-muted); font-size: 15px; }
+
+.h3-foot { text-align: center; padding: 72px 24px 44px; font-size: 14px; }
+.h3-foot .muted { font-size: 12.5px; margin-top: 6px; }
+.h3-foot a { color: #2C5F87; }
+
+@media (max-width: 900px) {
+  .h3-nav { flex-wrap: wrap; gap: 12px; padding: 10px 14px; }
+  .h3-nav .links { order: 3; width: 100%; margin-left: 0; gap: 18px; overflow-x: auto; scrollbar-width: none; }
+  .h3-nav .links::-webkit-scrollbar { display: none; }
+  .h3-nav .links a { white-space: nowrap; }
+  .h3-hero { grid-template-columns: 1fr; padding: 48px 20px 40px; gap: 32px; }
+  .h3-sec { padding: 56px 20px 16px; }
+  .rates .row { grid-template-columns: 1fr 1fr; }
+  .rates .row.head { display: none; }
+  .ledger .nums, .dl { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 520px) {
+  .ledger .nums, .dl { grid-template-columns: 1fr; }
+  /* 服务台两列时,横排的格子留给文字的只剩 36px(320 屏实测),
+     「买菜买水果」折成三行。改成字块在上、文字在下,一行放得下 */
+  .chcard { flex-direction: column; align-items: flex-start; gap: 8px; }
+}
+@media (max-width: 380px) {
+  /* 320 屏上顶栏会折成三行(logo+透明中心 / 下载 App / 链接),
+     吸顶时吃掉五分之一屏。按钮收小一档就回到两行 */
+  .h3-nav { gap: 10px; }
+  .h3 .h3-nav .h3-btn { padding: 7px 12px; font-size: 13px; }
+  /* 页内锚点收起来:往下滑一样到得了,留着会把「开源仓」这种真页面挤出屏幕
+     (老首页的同一条规矩) */
+  .h3-nav .links a.h3-jump { display: none; }
+}
