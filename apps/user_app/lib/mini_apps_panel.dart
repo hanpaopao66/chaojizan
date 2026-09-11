@@ -41,15 +41,39 @@ class MiniAppsPeek extends StatelessWidget {
           child: Container(
             height: 56,
             alignment: Alignment.center,
+            // 露头条盖在列表顶上:不给底色和底边,它和底下的搜索框
+            // 会叠成一层(安卓的拉伸回弹不挪列表,字直接压在字上)
+            decoration: BoxDecoration(
+              color: sz.paper,
+              border: Border(bottom: BorderSide(color: sz.line)),
+            ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               for (final a in apps.take(4)) ...[
-                Text(a.icon.startsWith('http') ? '🧩' : a.icon,
-                    style: const TextStyle(fontSize: 16)),
+                // 和面板里同一套格子(surface 底 + 发丝描边),缩到 22。
+                // 内容也和面板一致:图片地址画图,否则画运营配的 emoji ——
+                // 露头条和面板画法不同的话,同一个小程序在一次手势里
+                // 先后是两副样子
+                Container(
+                  width: 22,
+                  height: 22,
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: sz.surface,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: sz.line),
+                  ),
+                  child: a.icon.startsWith('http')
+                      ? SzImage(url: a.icon, name: a.name, size: 20, radius: 5)
+                      : Text(a.icon,
+                          style:
+                              const TextStyle(fontSize: kFontNote, height: 1)),
+                ),
                 const SizedBox(width: 6),
               ],
               const SizedBox(width: 2),
               Text(armed ? '松手打开小程序' : '继续下拉',
-                  style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
             ]),
           ),
         ),
@@ -155,6 +179,15 @@ class _MiniAppsPanel extends StatelessWidget {
                   );
                 },
               ),
+            ),
+            // 顺序是运营在后台排的(mini_apps.sort),不是推荐算法,也不是
+            // 登记顺序 —— 写「按登记顺序」就是一句查不实的话。
+            // 「不卖位置」是 DEV-PROMPTS-31「明确不做」里那条
+            Padding(
+              padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 6),
+              child: Text('顺序由平台人工排定 · 不做推荐,也不卖位置',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
             ),
             // 收起提示:面板怎么来的就怎么走
             Padding(

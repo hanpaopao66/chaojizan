@@ -628,6 +628,15 @@ class _MerchantListViewState extends State<MerchantListView>
   bool _miniArmed = false;
   bool _miniOpening = false;
 
+  /// 下拉抽屉是隐性手势(#278),没人告诉的话几乎没人会去拉。
+  /// 首页给一行字,**拉开过一次(或点过这行字)就永久不再出现** ——
+  /// 学会了还天天提示就是打扰。
+  ///
+  /// 默认当成已看过:读到缓存之前先不画,免得老用户每次启动闪一下
+  bool _miniHintSeen = true;
+
+  static const _kMiniHintSeen = 'home_miniapps_hint_seen';
+
   @override
   void initState() {
     super.initState();
@@ -637,6 +646,7 @@ class _MerchantListViewState extends State<MerchantListView>
     _loadRecent();
     _restorePledge();
     _loadMiniApps();
+    _restoreMiniHint();
   }
 
   @override
@@ -781,12 +791,52 @@ class _MerchantListViewState extends State<MerchantListView>
         _miniArmed = false;
       });
       if (open) {
+        _markMiniHintSeen(); // 自己拉开过一次,就算学会了
         _miniOpening = true;
         showMiniAppsPanel(context, api: widget.api, apps: _miniApps)
             .whenComplete(() => _miniOpening = false);
       }
     }
     return false;
+  }
+
+  Future<void> _restoreMiniHint() async {
+    final sp = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _miniHintSeen = sp.getBool(_kMiniHintSeen) ?? false);
+  }
+
+  Future<void> _markMiniHintSeen() async {
+    if (_miniHintSeen) return;
+    setState(() => _miniHintSeen = true);
+    final sp = await SharedPreferences.getInstance();
+    await sp.setBool(_kMiniHintSeen, true);
+  }
+
+  /// 「↓ 下拉打开小程序」:一行字,不是横幅。只在有小程序、且还没学会手势时出现。
+  ///
+  /// 这行字本身也能点 —— 用鼠标的桌面浏览器上拉不动列表,
+  /// 光说「下拉」等于告诉他一件做不到的事
+  Widget _miniHint() {
+    if (_miniHintSeen || _miniApps.isEmpty) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 6, kPagePad, 0),
+      child: Center(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(kRadiusSm),
+          onTap: () {
+            _markMiniHintSeen();
+            showMiniAppsPanel(context, api: widget.api, apps: _miniApps);
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Text('↓ 下拉打开小程序',
+                style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _restorePledge() async {
@@ -1844,6 +1894,7 @@ class _MerchantListViewState extends State<MerchantListView>
                 SliverToBoxAdapter(
                   child: Column(children: [
                     _searchBar(),
+                    _miniHint(),
                     // 平台公告(运营配置,发通知不用发版);无公告时零高度
                     AnnouncementBanner(api: widget.api, audience: 'user'),
                     // 人不在收货地址那一片了(#282)。非阻断,他点了才换
