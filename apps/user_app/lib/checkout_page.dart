@@ -292,6 +292,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
         merchantId: widget.merchant.id,
         lat: a.lat, lng: a.lng,
         floor: a.floor, hasElevator: a.hasElevator, toDoor: _toDoor,
+        scheduledAt: _scheduledAt,
       );
       if (mounted) setState(() => _feePreview = p);
     } catch (_) {
@@ -537,6 +538,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
       return;
     }
     setState(() => _scheduledAt = picked);
+    _refreshFee(); // 夜间加价按送达时段判,预约时间一变配送费可能跟着变
   }
 
   String get _scheduleLabel {
@@ -666,7 +668,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
               trailing: _scheduledAt == null
                   ? const Icon(Icons.chevron_right)
                   : TextButton(
-                      onPressed: () => setState(() => _scheduledAt = null),
+                      onPressed: () {
+                        setState(() => _scheduledAt = null);
+                        _refreshFee();
+                      },
                       child: const Text('改为尽快')),
               onTap: _pickScheduledTime,
             ),

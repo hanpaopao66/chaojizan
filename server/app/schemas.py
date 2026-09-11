@@ -971,6 +971,8 @@ class ErrandBuyCreateIn(ErrandCreateIn):
 
 class ErrandBuyQuoteOut(BaseModel):
     distance_m: int
+    #: route=腾讯骑行路网 / straight=接口不可用时的直线兜底(和外卖同一口径)
+    distance_source: str
     fee_cents: int
     parts: dict
     labels: dict
@@ -985,6 +987,8 @@ class ErrandBuyQuoteOut(BaseModel):
 
 class ErrandQuoteOut(BaseModel):
     distance_m: int
+    #: route=腾讯骑行路网 / straight=接口不可用时的直线兜底(和外卖同一口径)
+    distance_source: str
     fee_cents: int
     parts: dict
     labels: dict

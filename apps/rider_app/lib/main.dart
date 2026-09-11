@@ -97,6 +97,10 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 时它们静默失效 —— 而界面上 chip 还选着「3km」。
   /// 骑手不会想到是定位的问题,只会觉得"这破筛选没用"。
   List<String> _stalePrefs = const [];
+
+  /// 等餐补偿开没开(服务端 flags.wait_comp_on,当前默认关)。
+  /// 关着的时候,卡片上的「含等餐 N 分钟」要标明不计费
+  bool _waitCompOn = true;
   /// 其余接单偏好(单价下限 / 只看顺路 / 避开酒类)
   Map<String, dynamic> _prefs = const {};
   bool _gpsActive = false;
@@ -245,10 +249,12 @@ class _RiderHomePageState extends State<RiderHomePage>
               filteredByPrefs: 0,
               hasLocation: true,
               stalePrefs: const <String>[],
+              waitCompOn: true,
             );
       final available = pool.items;
       _filteredByPrefs = pool.filteredByPrefs;
       _stalePrefs = pool.stalePrefs;
+      _waitCompOn = pool.waitCompOn;
       final mine = await widget.api.myOrders();
       // 疲劳提醒:只提醒不断单(见服务端 labor_guard)。
       // 取不到就不显示 —— 疲劳提示挂了不该影响接单
@@ -1901,7 +1907,9 @@ class _RiderHomePageState extends State<RiderHomePage>
                   const SizedBox(width: 4),
                   Text(
                       '(含等餐 ${order.estWaitMinutes!.toStringAsFixed(0)}'
-                      '${order.waitSource == "declared" ? "·商家自报" : ""})',
+                      '${order.waitSource == "declared" ? "·商家自报" : ""}'
+                      // 等餐补偿关着时明说:这段时间算在耗时里,但没有钱
+                      '${_waitCompOn ? "" : "·不计费"})',
                       style: TextStyle(
                           fontSize: 11, color: Theme.of(context).sz.inkMuted)),
                 ],

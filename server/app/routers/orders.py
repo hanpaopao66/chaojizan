@@ -756,6 +756,11 @@ async def create_order(
             distance_m,
             weather_on=await weather_surcharge_on(
                 db, merchant.lat, merchant.lng),
+            # 夜间加价按**送达时段**判,不按下单那一刻。预约单可以提前
+            # 30 分钟到 48 小时下:22:00 下单预约次日中午送,按下单时刻判
+            # 就是用户多付 2 块、骑手白天送拿了夜间费;20:30 下单预约
+            # 21:30 送则反过来。非预约单 scheduled_at 是 None,照旧取当下
+            when=scheduled_at,
             floor=payload.floor, has_elevator=payload.has_elevator,
             to_door=payload.to_door,
             hardship_cents=_hs.comp_cents(
@@ -1950,10 +1955,14 @@ async def preview_delivery_fee(
     floor: int | None = None,
     has_elevator: bool | None = None,
     to_door: bool = True,
+    scheduled_at: datetime | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """下单前预览配送费(点单页选完地址就能展示)。
+
+    `scheduled_at`:预约送达时间。夜间加价按它判 —— 和下单同一口径,
+    否则结算页预览 ¥3、付款变 ¥5(#295 那种病)。
 
     返回组成明细:base 距离阶梯 / night 夜间加价 / weather 恶劣天气加价
     / door 上门难度(无电梯高楼层),**全部归骑手**;
@@ -1978,9 +1987,13 @@ async def preview_delivery_fee(
     from ..services import hardship as _hs
     _cons = await _hs.address_consensus(db, lat, lng, floor)
     _hard = _hs.comp_cents(_cons["kinds"], _cons["floors"], _cons["walk_m"])
+    # 和 create_order 一样把 naive 当 UTC,别让 is_night 拿系统时区去猜
+    if scheduled_at is not None and scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
     parts = delivery_fee_parts(
         distance,
         weather_on=await weather_surcharge_on(db, merchant.lat, merchant.lng),
+        when=scheduled_at,
         floor=floor, has_elevator=has_elevator, to_door=to_door,
         hardship_cents=_hard)
     # 送到楼下时能省多少:让顾客在选之前就看到差价,而不是选完才发现

@@ -1007,6 +1007,9 @@ class ApiClient {
     int? floor,
     bool? hasElevator,
     bool toDoor = true,
+    // 预约送达时间:夜间加价按它判。不传的话服务端按当下判,
+    // 22:00 预约明天中午的单预览会多出 2 块夜间费,付款时又没有
+    DateTime? scheduledAt,
   }) async {
     final data = await _request('GET', '/orders/delivery-fee', query: {
       'merchant_id': '$merchantId',
@@ -1015,6 +1018,8 @@ class ApiClient {
       if (floor != null) 'floor': '$floor',
       if (hasElevator != null) 'has_elevator': '$hasElevator',
       'to_door': '$toDoor',
+      if (scheduledAt != null)
+        'scheduled_at': scheduledAt.toUtc().toIso8601String(),
     });
     return data as Map<String, dynamic>;
   }
@@ -2360,6 +2365,7 @@ class ApiClient {
     int filteredByPrefs,
     bool hasLocation,
     List<String> stalePrefs,
+    bool waitCompOn,
   })> availablePool() async {
     final data = await _request('GET',
         '/riders/available-orders?with_meta=true') as Map<String, dynamic>;
@@ -2374,6 +2380,10 @@ class ApiClient {
       stalePrefs: ((data['stale_prefs'] as List?) ?? const [])
           .map((e) => '$e')
           .toList(),
+      // 等餐补偿开没开(flags.wait_comp_on,当前默认关)。卡片上写着
+      // 「含等餐 15 分钟」,不说清楚骑手会以为那 15 分钟是计费的。
+      // 老服务端没这个字段:那时开关还不存在、补偿一直是开的,按 true 处理
+      waitCompOn: data['wait_comp_on'] as bool? ?? true,
     );
   }
 

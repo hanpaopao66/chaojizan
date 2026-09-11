@@ -176,9 +176,11 @@ class _DeliveryMapViewState extends State<DeliveryMapView> {
                   ),
             },
             polylines: {
+              // 直线连点,**不是路线**。导航在外部地图 App 里做,
+              // 这条线只表示先后顺序(取餐 → 送达),别把它当路径看
               if (path.length > 1)
                 tx.Polyline(
-                  id: 'route',
+                  id: 'legs',
                   points: [
                     for (final i in path)
                       tx.LatLng(widget.points[i].lat, widget.points[i].lng)

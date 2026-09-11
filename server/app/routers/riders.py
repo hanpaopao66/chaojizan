@@ -1011,7 +1011,21 @@ async def available_orders(
     # 手头在途单 → 顺路判断基准(同商家取、收货点相近送)
     mine = await _my_in_flight(db, user.id)
     my_shops = {o.merchant_id for o in mine}
-    my_drops = [(o.lat, o.lng) for o in mine]
+    # 顺路的参照点:**还没取餐的单,下一站是那家店,不是送达点。**
+    #
+    # 原来一律用送达点。手上一个刚抢到还没取的单,绕路增量却按
+    # 「当前位置 → 那单的送达点」当基准 —— 可骑手根本不会往那儿去,
+    # 他要先去店里。基准错了,顺路等级就偏。只影响排序,不影响钱。
+    shop_pos: dict[int, tuple[float, float]] = {}
+    if my_shops:
+        shop_pos = {mid: (lat, lng) for mid, lat, lng in (await db.execute(
+            select(Merchant.id, Merchant.lat, Merchant.lng)
+            .where(Merchant.id.in_(my_shops)))).all()}
+    my_drops = [
+        (o.lat, o.lng) if o.status == OrderStatus.PICKED_UP
+        else shop_pos.get(o.merchant_id, (o.lat, o.lng))
+        for o in mine
+    ]
     # 收工单(#264):开着的时候,顺路的参照点换成「我要回的方向」。
     #
     # 为什么需要它:`same_way` 按手上单的送达点算绕路增量,而
@@ -1264,7 +1278,11 @@ async def available_orders(
     # 开关挡住了。攒在 Redis,每日汇总落库(services/rider_stats)
     from ..services.rider_stats import bump_filtered
     await bump_filtered(user.id, filtered)
+    # 等餐补偿现在开没开:卡片上写着「含等餐 15 分钟」,骑手会以为那
+    # 15 分钟是计费的。开关默认关(flags.wait_comp_on),这一条得摆出来
+    from ..services.flags import wait_comp_on
     return {"items": items, "filtered_by_prefs": filtered,
+            "wait_comp_on": await wait_comp_on(db),
             # 位置有没有:客户端据此决定要不要提示去开定位
             "has_location": rider_pos is not None,
             # 因为没定位而没生效的偏好键;空数组 = 一切正常

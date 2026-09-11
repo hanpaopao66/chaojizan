@@ -59,10 +59,18 @@ async def _quote(db: AsyncSession, payload: ErrandCreateIn) -> dict:
     不另起一套 —— 另起一套的下场是两份费率迟早分叉,
     而配送费透明是我们的立身之本。"""
     from ..services.pricing import delivery_fee_parts, haversine_m
+    from ..services.routing import billing_distance_m
     from ..services.flags import weather_surcharge_on
 
-    distance = haversine_m(payload.pickup_lat, payload.pickup_lng,
+    # 范围按直线判、钱按路网算 —— 和外卖 create_order 同一口径。
+    #
+    # 原来两件事都用直线:费率是复用了,**距离口径没复用**。直线永远 ≤
+    # 实际要骑的路(几何决定的,实测差 19–42%),而跑腿费扣掉 2% 之后
+    # 全归骑手 —— 用直线算就是系统性少付,而且只会少不会多。
+    straight = haversine_m(payload.pickup_lat, payload.pickup_lng,
                            payload.lat, payload.lng)
+    distance, distance_source = await billing_distance_m(
+        payload.pickup_lat, payload.pickup_lng, payload.lat, payload.lng)
     parts = delivery_fee_parts(
         distance,
         weather_on=await weather_surcharge_on(
@@ -72,7 +80,10 @@ async def _quote(db: AsyncSession, payload: ErrandCreateIn) -> dict:
         to_door=payload.to_door,
     )
     fee = sum(parts.values())
-    return {"distance_m": int(distance), "parts": parts, "fee_cents": fee,
+    return {"distance_m": int(distance), "distance_source": distance_source,
+            # 配送范围用这把尺子(用户看得见的那把),不用路网
+            "straight_m": int(straight),
+            "parts": parts, "fee_cents": fee,
             "service_fee_cents": service_fee_cents(fee)}
 
 
@@ -91,6 +102,7 @@ async def quote(
               if k in FEE_PART_LABELS}
     return ErrandQuoteOut(
         distance_m=q["distance_m"],
+        distance_source=q["distance_source"],
         fee_cents=q["fee_cents"],
         parts=q["parts"],
         labels=labels,
@@ -137,7 +149,7 @@ async def create_errand(
         raise HTTPException(422, "写一下寄的是什么,骑手取件时要核对")
 
     q = await _quote(db, payload)
-    if q["distance_m"] > settings.delivery_max_km * 1000:
+    if q["straight_m"] > settings.delivery_max_km * 1000:
         raise HTTPException(
             409, f"这一单要跑 {q['distance_m'] / 1000:.1f} 公里,"
                  f"超出 {settings.delivery_max_km:g} 公里配送范围")
@@ -153,6 +165,9 @@ async def create_errand(
         food_cents=0, packing_fee_cents=0, discount_cents=0,
         delivery_fee_cents=q["fee_cents"],
         fee_parts=q["parts"],
+        # 锁进订单,和外卖同一口径:事后要查得到「这 6 块钱按几公里算的」
+        bill_distance_m=q["distance_m"],
+        bill_distance_source=q["distance_source"],
         to_door=payload.to_door,
         tip_cents=0,
         total_cents=q["fee_cents"],
@@ -248,6 +263,7 @@ async def buy_quote(
     limit = raise_limit_cents(payload.goods_budget_cents)
     return ErrandBuyQuoteOut(
         distance_m=q["distance_m"],
+        distance_source=q["distance_source"],
         fee_cents=q["fee_cents"],
         parts=q["parts"],
         labels=labels,
@@ -296,7 +312,7 @@ async def create_errand_buy(
         raise HTTPException(422, "请先确认所买物品不在不支持的范围内")
 
     q = await _quote(db, payload)
-    if q["distance_m"] > settings.delivery_max_km * 1000:
+    if q["straight_m"] > settings.delivery_max_km * 1000:
         raise HTTPException(
             409, f"这一单要跑 {q['distance_m'] / 1000:.1f} 公里,超出配送范围")
 
@@ -316,6 +332,9 @@ async def create_errand_buy(
         packing_fee_cents=0, discount_cents=0,
         delivery_fee_cents=q["fee_cents"],
         fee_parts=q["parts"],
+        # 锁进订单,和外卖同一口径:事后要查得到「这 6 块钱按几公里算的」
+        bill_distance_m=q["distance_m"],
+        bill_distance_source=q["distance_source"],
         to_door=payload.to_door,
         tip_cents=0,
         total_cents=total,
