@@ -646,6 +646,9 @@ class Order {
         toDoor = json['to_door'] as bool? ?? true,
         // 跑腿:food(外卖) / errand_send(帮送) / errand_buy(帮买)
         orderKind = '${json['order_kind'] ?? 'food'}',
+        // 商家业态,服务端从商家补上。老服务端不给 —— 回落 food,
+        // 和这个字段出现之前的口径一样
+        bizType = json['biz_type'] as String? ?? 'food',
         errandNote = '${json['errand_note'] ?? ''}',
         pickupAddress = '${json['pickup_address'] ?? ''}',
         pickupPhotoUrl = '${json['pickup_photo_url'] ?? ''}',
@@ -761,6 +764,10 @@ class Order {
   /// 商家端根本看不到这类单(它挂在独立的服务主体上)
   final String orderKind;
   bool get isErrand => orderKind.startsWith('errand');
+
+  /// 这单挂在哪类商家下(merchants.biz_type):food / retail / errand。
+  /// 订单页按它分频道 —— 买菜和外卖是同一套订单,只有商家的业态不同
+  final String bizType;
   /// 寄什么 / 买什么
   final String errandNote;
   /// 取件点地址(跑腿单的取件点在订单自己身上,不在商家上)
@@ -908,11 +915,19 @@ class UserProfile {
         // 申诉得有个能指的目标:这是当前这次处置的记录 id。
         // 只给 level 和原因的话,用户知道自己被限制了,
         // 却不知道拿什么去申诉,那个入口就是点不动的。0 = 没有在生效的处置
-        riskActionId = json['risk_action_id'] as int? ?? 0;
+        riskActionId = json['risk_action_id'] as int? ?? 0,
+        identityVerified = json['identity_verified'] as bool? ?? false,
+        createdAt = DateTime.tryParse('${json['created_at'] ?? ''}')?.toLocal();
 
   final int id;
   final String phone;
   final String name;
+
+  /// 做过实名认证。**只有布尔** —— 打码姓名、是否成年走 identity-status
+  final bool identityVerified;
+
+  /// 注册时间(身份行「X 年 X 月加入」);老服务端不给时为 null
+  final DateTime? createdAt;
   final String birthday;      // MM-DD,生日当天发券
   final bool marketingPush;   // 营销推送开关
   final String riskLevel;     // ""正常 / limit 限制 / frozen 冻结(反作弊处置)

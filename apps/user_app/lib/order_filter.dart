@@ -1,5 +1,12 @@
 import 'package:superz_shared/superz_shared.dart';
 
+/// 一单外卖接口里的订单属于哪个频道(住宿单走另一个接口,恒为 `stay`)。
+///
+/// 按服务端给的 biz_type 认;跑腿单**先看 order_kind** ——
+/// 老服务端不给 biz_type,那时跑腿单会被回落成 food,混进外卖里
+String orderChannelKey(Order o) =>
+    o.isErrand ? 'errand' : (channelOfBizType(o.bizType)?.key ?? 'food');
+
 /// 订单按状态分流。
 ///
 /// ## 为什么「我的」页要有订单入口,而底部已经有一个订单 tab

@@ -87,8 +87,10 @@ const List<SzChannel> kChannels = [
     tone: 2,
   ),
   SzChannel(
+    // 跑腿单没有真商家,挂在本城一个 biz_type='errand' 的服务主体上
+    // (server/app/services/errand.py)—— 所以订单页能按 biz_type 把它认出来
     key: 'errand', name: '帮我送', glyph: '跑', sub: '取件送件 · 收 2%',
-    tone: 3,
+    tone: 3, bizType: 'errand',
   ),
   // 下一个频道加在这里即可,例如:
   // SzChannel(key: 'ride', name: '打车', glyph: '车', sub: '一口价 · 不抽司机',

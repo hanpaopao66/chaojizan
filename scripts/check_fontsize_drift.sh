@@ -26,7 +26,9 @@ cd "$(dirname "$0")/.."
 # 档位最大到 kFontTitle 16,而这是整张弹窗里唯一要一眼看到的数字。
 # 同一屏其余 6 处新字号都收进了档位(kFontNote/kFontBody),只留这一个。
 # 它和详情页已有的 20/21/22/24 那批金额大字是同一类,不是新发明的取值。
-BASELINE=720
+# 720 → 712:小程序露头条、订单卡重写(设计稿 2a / 3b)时,
+# 原来写死的 12 换成 kFontNote、新写的地方一律用档位,少了 8 处。
+BASELINE=712
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \

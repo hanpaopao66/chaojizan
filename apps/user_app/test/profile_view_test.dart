@@ -112,6 +112,9 @@ void main() {
     bool marketing = true,
     List<Map<String, dynamic>> orders = const [],
     List<Map<String, dynamic>> stays = const [],
+    bool verified = false,
+    String? createdAt,
+    List<Map<String, dynamic>> miniApps = const [],
   }) {
     return ApiClient(
       baseUrl: 'http://test.local',
@@ -136,7 +139,11 @@ void main() {
               'marketing_push': true,
               'risk_level': riskLevel,
               'risk_note': riskLevel.isEmpty ? '' : '系统检测到异常',
+              'identity_verified': verified,
+              if (createdAt != null) 'created_at': createdAt,
             };
+          case '/mini-apps':
+            payload = miniApps;
           case '/config':
             payload = {'marketing': marketing};
           case '/orders':
@@ -178,13 +185,19 @@ void main() {
     bool marketing = true,
     List<Map<String, dynamic>> orders = const [],
     List<Map<String, dynamic>> stays = const [],
+    bool verified = false,
+    String? createdAt,
+    List<Map<String, dynamic>> miniApps = const [],
   }) async {
     SharedPreferences.setMockInitialValues({});
     final api = fakeApi(
         riskLevel: riskLevel,
         marketing: marketing,
         orders: orders,
-        stays: stays);
+        stays: stays,
+        verified: verified,
+        createdAt: createdAt,
+        miniApps: miniApps);
     await api.login('13800000001', 'pw');
     return api;
   }
@@ -425,6 +438,62 @@ void main() {
       final n = visibleEntries(t);
       expect(n, greaterThanOrEqualTo(12),
           reason: '风控横幅 88px 不缩,但也不该把整页挤没(当前 $n)');
+    });
+  });
+
+  group('身份行、账目台面、网格(设计稿 3e)', () {
+    testWidgets('实名了挂「已实名」,手机号打码,写哪年哪月加入', (t) async {
+      final api = await loggedIn(
+          verified: true, createdAt: '2026-07-15T10:00:00+08:00');
+      await pumpProfile(t, api);
+      expect(find.text('已实名'), findsOneWidget);
+      expect(find.text('138 **** 0001 · 2026 年 7 月加入'), findsOneWidget);
+      expect(find.text('13800000001'), findsNothing,
+          reason: '这一页常被截图,完整手机号不该摆在最显眼的位置');
+    });
+
+    testWidgets('没实名不挂标,实名入口还在下面的列表里', (t) async {
+      final api = await loggedIn();
+      await pumpProfile(t, api);
+      expect(find.text('已实名'), findsNothing);
+      // 身份行只在已实名时出标记、点它是改昵称 —— 没实名的人要去实名,
+      // 靠的就是这一格。设计稿原本想删掉它,删了就只剩结算页买酒那一个入口
+      await t.scrollUntilVisible(find.text('实名认证'), 200);
+      expect(find.text('实名认证'), findsOneWidget);
+    });
+
+    testWidgets('账目台面里的字取的是深色态颜色 —— 不是黑底黑字', (t) async {
+      final api = await loggedIn();
+      await pumpProfile(t, api);
+      // SzLedgerCard 在台面**里面**把 SzColors 换成深色态。
+      // 在台面外面先取 sz 再传进来,拿到的是浅色那套墨色 —— 深底上看不见
+      final title = t.widget<Text>(find.text('平台只抽这么多'));
+      expect(title.style?.color, SzColors.dark.ink);
+      expect(find.byType(SzLedgerCard), findsOneWidget);
+    });
+
+    testWidgets('有小程序才出「小程序」格子,点开是抽屉面板', (t) async {
+      final api = await loggedIn(miniApps: [
+        {
+          'id': 1,
+          'name': '透明中心',
+          'icon': '📊',
+          'tagline': '',
+          'entry_url': 'https://chaojizan.cc/transparency',
+          'allowed_origins': ['https://chaojizan.cc'],
+          'perms': ['initData'],
+        },
+      ]);
+      await pumpProfile(t, api);
+      await t.tap(find.text('小程序'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('人工排定'), findsOneWidget);
+    });
+
+    testWidgets('清单是空的就不出这一格 —— 点开一个空面板比没有入口更糟', (t) async {
+      final api = await loggedIn();
+      await pumpProfile(t, api);
+      expect(find.text('小程序'), findsNothing);
     });
   });
 }

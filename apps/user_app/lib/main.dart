@@ -242,17 +242,16 @@ class _HomePageState extends State<HomePage> {
   /// 消息中心红点(有新公告)
   bool _hasUnread = false;
 
-  /// 从「我的」页的订单四格跳过来时,订单 tab 要落在哪个筛选、哪个频道上。
+  /// 从「我的」页的订单四格跳过来时,订单 tab 要落在哪个筛选上。
+  /// 频道一律落在「全部」:四格的数字是各频道一起数的。
   ///
   /// **切 tab 而不是 push 新页** —— push 的话会多出第二个订单列表,
   /// 返回行为和底部 tab 不一致,用户点两次「订单」看到的是两个地方
   OrderFilter _ordersFilter = OrderFilter.all;
-  int _ordersSegment = 0;
 
-  void _openOrders(OrderFilter filter, {int segment = 0}) {
+  void _openOrders(OrderFilter filter) {
     setState(() {
       _ordersFilter = filter;
-      _ordersSegment = segment;
       _tab = 1;
       _visited.add(1);
     });
@@ -371,6 +370,19 @@ class _HomePageState extends State<HomePage> {
                   builder: (_) => MessageCenterPage(api: widget.api)));
             },
           ),
+          // 团购券原来挂在订单页分段器那一行的最右边。分段器换成频道条
+          // 之后挪到这里(设计稿 3b)—— 团购券不走订单接口,频道条上没有它,
+          // 订单 tab 不能因为改版就少了这个入口
+          if (_tab == 1)
+            TextButton(
+              onPressed: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MyVouchersPage(api: widget.api)));
+              },
+              child: const Text('券包'),
+            ),
           // 「我的」tab 上换成客服 + 设置。
           //
           // 这两样一个是「随时可能要」、一个是「一年点几次的目录页」,
@@ -441,10 +453,7 @@ class _HomePageState extends State<HomePage> {
                   })
               : const SizedBox.shrink(),
           _visited.contains(1)
-              ? OrdersTab(
-                  api: widget.api,
-                  filter: _ordersFilter,
-                  segment: _ordersSegment)
+              ? OrdersTab(api: widget.api, filter: _ordersFilter)
               : const SizedBox.shrink(),
           _visited.contains(2)
               ? ProfileView(api: widget.api, onOpenOrders: _openOrders)
@@ -3881,7 +3890,6 @@ class OrdersTab extends StatefulWidget {
     super.key,
     required this.api,
     this.filter = OrderFilter.all,
-    this.segment = 0,
   });
 
   final ApiClient api;
@@ -3889,66 +3897,43 @@ class OrdersTab extends StatefulWidget {
   /// 从「我的」页四格跳过来时带的筛选;直接点底部 tab 时是 [OrderFilter.all]
   final OrderFilter filter;
 
-  /// 0 = 点外卖,1 = 住宿
-  final int segment;
-
   @override
   State<OrdersTab> createState() => _OrdersTabState();
 }
 
 class _OrdersTabState extends State<OrdersTab> {
-  late int _segment = widget.segment;
   late OrderFilter _filter = widget.filter;
 
-  /// 住宿频道关掉、且此人没有历史住宿单 —— 两个条件都满足才藏分段。
+  /// 频道条上选中的频道;null = 全部
+  String? _channel;
+
+  /// 有单的频道,由 [OrderListView] 拉到数据后报上来。
   ///
-  /// 频道开关管的是「能不能**新**买」,不管「已买的还能不能看」:
-  /// 订单是凭证,用户要拿它入住、退款,关频道不能没收它们。
-  /// 「我的」页四格也照常统计住宿单 —— 数字说有 2 单,点进来却没有
-  /// 入口,那是数字在撒谎。
-  bool _hasLegacyStays = false;
-
-  /// 住宿分段还该不该存在
-  bool get _stayVisible =>
-      ChannelConfig.current.contains('stay') || _hasLegacyStays;
-
-  /// 读侧钳制。**在读的地方钳,不在写的地方拦** ——
-  /// 往这儿送 segment 的路不止一条(「我的」页四格按「哪边有单落哪边」
-  /// 跳,不看 ChannelConfig),挨个入口去改总会漏;而这里只有一个出口。
-  /// 不钳的话:分段器在住宿关掉时整条隐藏,_segment 停在 1,
-  /// 页面上再没有任何控件能切回外卖 —— 能进不能出,只能杀进程。
-  int get _effectiveSegment => _stayVisible ? _segment : 0;
-
-  /// 频道关了才需要问「有没有历史单」;开着的时候分段本来就在。
-  /// 拉不到按没有算 —— 宁可少显示,和 ChannelConfig 同一个立场
-  Future<void> _probeLegacyStays() async {
-    if (ChannelConfig.current.contains('stay')) return;
-    if (!widget.api.isLoggedIn) return;
-    try {
-      final stays = await widget.api.myStayOrders();
-      if (mounted && stays.isNotEmpty) {
-        setState(() => _hasLegacyStays = true);
-      }
-    } catch (_) {}
-  }
+  /// **只看有没有单,不看 ChannelConfig** —— 频道开关管的是「能不能**新**买」,
+  /// 不管「已买的还能不能看」:订单是凭证,用户要拿它入住、退款、售后,
+  /// 关频道不能没收它们。原先住宿分段为此还专门探过一次历史单;
+  /// 现在「全部」本来就把各频道的单排在一起,没有「藏掉一段就回不去」这回事
+  Set<String> _present = const {};
 
   @override
   void initState() {
     super.initState();
     authTick.addListener(_onAuthChanged); // 游客登录成功后刷新
-    _probeLegacyStays();
   }
 
   /// 这个 tab 在 IndexedStack 里是保活的 —— 从「我的」页再跳一次过来,
   /// State 不会重建,只有 widget 换新。不接这一下的话第二次点「待评价」
-  /// 会停在上一次的筛选上
+  /// 会停在上一次的筛选上。
+  ///
+  /// 频道同时回到「全部」:「我的」页四格的数字是外卖 + 住宿一起数的,
+  /// 落在某一个频道上的话,数字说 2 单、列表里只看得到 1 单
   @override
   void didUpdateWidget(OrdersTab old) {
     super.didUpdateWidget(old);
-    if (widget.filter != old.filter || widget.segment != old.segment) {
+    if (widget.filter != old.filter) {
       setState(() {
         _filter = widget.filter;
-        _segment = widget.segment;
+        _channel = null;
       });
     }
   }
@@ -3961,6 +3946,12 @@ class _OrdersTabState extends State<OrdersTab> {
 
   void _onAuthChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _onChannels(Set<String> keys) {
+    if (!mounted) return;
+    if (keys.length == _present.length && keys.containsAll(_present)) return;
+    setState(() => _present = keys);
   }
 
   @override
@@ -3980,45 +3971,47 @@ class _OrdersTabState extends State<OrdersTab> {
         ]),
       );
     }
+    // 频道条(#132 注释里预留的方向,设计稿 3b):**只列有单的频道** ——
+    // 没单的频道放上来是一个空页签。只有一个频道有单时整条不出:
+    // 「全部」和那个频道是同一张列表,一个选项的切换器是纯噪音
+    final pills = [
+      for (final ch in kChannels)
+        if (_present.contains(ch.key)) ch,
+    ];
+    final showStrip = pills.length >= 2;
+    // 选中的频道刷新后没单了,就回到全部 —— 否则条上没有它、列表却按它滤,
+    // 人被关在一个看不见的筛选里
+    final channel = showStrip && pills.any((c) => c.key == _channel)
+        ? _channel
+        : null;
     return Column(children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-        child: Row(children: [
-          // 频道归属标(#132):切换器只说"看哪一类",这个标说"你正在看的是
-          // 哪个频道",带频道色 —— 聚合平台里用户经常忘了自己在哪个世界。
-          // 频道多起来后这里会换成可横滑的频道条,现在两段够用
-          SzChannelChip(_effectiveSegment == 0 ? 'food' : 'stay', dense: false),
-          const SizedBox(width: 10),
-          // 住宿关掉之后这里只剩一个分段 —— 一个选项的分段器是纯噪音,
-          // 整条藏掉。**判据和金刚区同一个** ChannelConfig,
-          // 不然会出现「首页没有住宿,订单页有个空的住宿页签」
-          if (_stayVisible)
-            Expanded(
-              child: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('点外卖')),
-                  ButtonSegment(value: 1, label: Text('住宿')),
-                ],
-                selected: {_effectiveSegment},
-                onSelectionChanged: (s) => setState(() => _segment = s.first),
-              ),
-            )
-          else
-            const Spacer(),
-          TextButton(
-            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => MyVouchersPage(api: widget.api))),
-            child: const Text('券包'),
+      if (showStrip)
+        SizedBox(
+          height: 44,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+            children: [
+              _ChannelPill(
+                  label: '全部',
+                  selected: channel == null,
+                  onTap: () => setState(() => _channel = null)),
+              for (final ch in pills)
+                _ChannelPill(
+                    channel: ch,
+                    label: ch.name,
+                    selected: channel == ch.key,
+                    onTap: () => setState(() => _channel = ch.key)),
+            ],
           ),
-        ]),
-      ),
+        ),
       // 状态筛选:「我的」页四格点进来要有地方落。
       // 横滑而不是折行 —— 五个筛选在 320 窄屏 + 长辈版下排不进一行
       SizedBox(
         height: 42,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
           children: [
             for (final f in OrderFilter.values)
               Padding(
@@ -4031,17 +4024,172 @@ class _OrdersTabState extends State<OrdersTab> {
         ),
       ),
       Expanded(
-        child: _effectiveSegment == 0
-            ? OrderListView(api: widget.api, filter: _filter)
-            : StayOrderListView(api: widget.api, filter: _filter),
+        child: OrderListView(
+            api: widget.api,
+            filter: _filter,
+            channel: channel,
+            onChannels: _onChannels),
       ),
     ]);
   }
 }
 
+/// 频道条上的一颗。选中时墨色实底反白,和下面的状态 chip 同一套语言;
+/// 频道字块缩到 16px 放在名字前,颜色走频道色槽。
+class _ChannelPill extends StatelessWidget {
+  const _ChannelPill({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.channel,
+  });
+
+  /// null = 「全部」
+  final SzChannel? channel;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    final ch = channel;
+    final c = ch == null ? sz.ink : channelColor(context, ch.key);
+    return Padding(
+      padding: const EdgeInsets.only(right: 7),
+      child: Material(
+        color: selected ? sz.ink : Colors.transparent,
+        shape: StadiumBorder(
+            side: BorderSide(color: selected ? sz.ink : sz.line)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(ch == null ? 12 : 7, 5, 12, 5),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (ch != null) ...[
+                // 字块里用系统黑体,**不用 szDisplay**:宋体只给 19px 以上的大字
+                // (assets/fonts/README 那条,11px 的宋体发虚)
+                Container(
+                  width: 16,
+                  height: 16,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: c.withValues(alpha: selected ? .3 : .12),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(ch.glyph,
+                      style: TextStyle(
+                          fontSize: kFontMicro,
+                          height: 1,
+                          color: selected ? sz.paper : c)),
+                ),
+                const SizedBox(width: 6),
+              ],
+              Text(label,
+                  style: TextStyle(
+                      fontSize: kFontBody,
+                      fontWeight: FontWeight.w500,
+                      color: selected ? sz.paper : sz.ink)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 进行中订单的进度行。节点按单子的类型取:外卖五步、到店自取三步、跑腿四步。
+///
+/// 节点只用两个字:五个三字标签在 320 屏 + 长辈版 1.4× 下要 278px,
+/// 卡里只有 256px。当前节点黏土色,走过的 earn,还没到的淡墨。
+class _OrderProgress extends StatelessWidget {
+  const _OrderProgress({required this.order});
+
+  final Order order;
+
+  /// (节点名, 当前在第几个)。第几个 = -1 表示这个状态不画进度
+  static (List<String>, int) stepsOf(Order o) {
+    if (o.isErrand) {
+      // 跑腿单付完就进抢单池(状态直接是 ready),有没有骑手接看 riderId
+      return (
+        const ['接单', '取件', '送件', '送达'],
+        switch (o.status) {
+          OrderStatus.paid => 0,
+          OrderStatus.ready => o.riderId == null ? 0 : 1,
+          OrderStatus.pickedUp => 2,
+          OrderStatus.delivered => 3,
+          _ => -1,
+        },
+      );
+    }
+    if (o.pickup) {
+      // 到店自取没有配送:出餐之后就等人来拿
+      return (
+        const ['接单', '出餐', '取餐'],
+        switch (o.status) {
+          OrderStatus.paid => 0,
+          OrderStatus.accepted => 1,
+          OrderStatus.ready => 2,
+          _ => -1,
+        },
+      );
+    }
+    return (
+      const ['接单', '出餐', '取餐', '配送', '送达'],
+      switch (o.status) {
+        OrderStatus.paid => 0,
+        OrderStatus.accepted => 1,
+        OrderStatus.ready => 2,
+        OrderStatus.pickedUp => 3,
+        // 骑手放下了,等用户「确认收货」—— 这一步是用户自己的事
+        OrderStatus.delivered => 4,
+        _ => -1,
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    final (labels, current) = stepsOf(order);
+    if (current < 0) return const SizedBox.shrink();
+    return Row(children: [
+      for (var i = 0; i < labels.length; i++) ...[
+        Text(labels[i],
+            style: TextStyle(
+                fontSize: kFontMicro,
+                fontWeight: i == current ? FontWeight.w600 : FontWeight.w400,
+                color: i < current
+                    ? sz.earn
+                    : i == current
+                        ? sz.clay
+                        : sz.inkFaint)),
+        if (i < labels.length - 1)
+          Expanded(
+            child: Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              color: i < current
+                  ? sz.earn
+                  : i == current
+                      ? sz.clay
+                      : sz.line,
+            ),
+          ),
+      ],
+    ]);
+  }
+}
+
 class OrderListView extends StatefulWidget {
-  const OrderListView(
-      {super.key, required this.api, this.filter = OrderFilter.all});
+  const OrderListView({
+    super.key,
+    required this.api,
+    this.filter = OrderFilter.all,
+    this.channel,
+    this.onChannels,
+  });
 
   final ApiClient api;
 
@@ -4051,19 +4199,45 @@ class OrderListView extends StatefulWidget {
   /// 一个参数表达不了。混着用会让游标分页和过滤互相打架
   final OrderFilter filter;
 
+  /// 频道;null = 全部。和状态筛选一样**在已拉到的数据上滤**,切频道不重新请求
+  final String? channel;
+
+  /// 数据拉到(或加载了下一页)后,报告哪些频道有单 —— 频道条靠它决定列哪几颗
+  final ValueChanged<Set<String>>? onChannels;
+
   @override
   State<OrderListView> createState() => _OrderListViewState();
 }
 
 class _OrderListViewState extends State<OrderListView> {
-  late Future<List<Order>> _future = _loadOrders();
+  /// 外卖接口一页几条。**一页没拉满就是没有更早的了**,不用再空发一次请求
+  static const _kPage = 20;
+
+  late Future<void> _future = _loadFirst();
 
   /// 各单的聊天未读数。骑手/商家发来的消息以前在列表上毫无痕迹,
   /// 用户不点进详情就永远不知道有人在等回话
   final Map<String, int> _unread = {};
 
-  Future<List<Order>> _loadOrders() async {
-    final orders = await widget.api.myOrders();
+  // 分页:老口径是服务端写死 limit(50) 不分页,用户超过 50 单后就永远看不到
+  // 更早的订单——跟「每一单的账都可查」直接冲突。改成游标分页 + 触底加载。
+  // 外卖、买菜、跑腿是同一个接口(订单上的 biz_type 分得开)
+  final List<Order> _loaded = [];
+  bool _loadingMore = false;
+  bool _noMore = false;
+
+  /// 住宿单:另一条竖井,接口不分页(服务端最多回 100 条),一次拉全
+  List<StayOrder> _stays = const [];
+
+  Future<void> _loadFirst() async {
+    final ordersF = widget.api.myOrders(limit: _kPage);
+    // 错误要**当场接住**:外卖那个请求还没回来时住宿先失败的话,
+    // 这个 Future 在没人监听的时候报错,会被当成未处理的异常
+    final staysF = widget.api
+        .myStayOrders()
+        .onError((_, __) => const <StayOrder>[]); // 住宿拉不到不拖累外卖列表
+    final orders = await ordersF;
+    final stays = await staysF;
     // 只查进行中的单:已完成/已取消的单不会再有人说话,
     // 给全部订单各发一个请求纯属浪费
     final active = orders
@@ -4074,30 +4248,41 @@ class _OrderListViewState extends State<OrderListView> {
         .toList();
     final counts = await Future.wait(active
         .map((o) => widget.api.orderUnread(o.orderNo).onError((_, __) => 0)));
-    if (!mounted) return orders;
+    if (!mounted) return;
     _unread
       ..clear()
       ..addEntries(
           [for (final (i, o) in active.indexed) MapEntry(o.orderNo, counts[i])]);
-    return orders;
+    _loaded
+      ..clear()
+      ..addAll(orders);
+    _noMore = orders.length < _kPage;
+    _stays = stays;
+    _reportChannels();
   }
 
-  // 分页:老口径是服务端写死 limit(50) 不分页,用户超过 50 单后就永远看不到
-  // 更早的订单——跟「每一单的账都可查」直接冲突。改成游标分页 + 触底加载。
-  final List<Order> _loaded = [];
-  bool _loadingMore = false;
-  bool _noMore = false;
+  void _reportChannels() {
+    final cb = widget.onChannels;
+    if (cb == null) return;
+    final keys = {
+      for (final o in _loaded) orderChannelKey(o),
+      if (_stays.isNotEmpty) 'stay',
+    };
+    WidgetsBinding.instance.addPostFrameCallback((_) => cb(keys));
+  }
 
   Future<void> _loadMore() async {
     if (_loadingMore || _noMore || _loaded.isEmpty) return;
     setState(() => _loadingMore = true);
     try {
-      final more = await widget.api.myOrders(before: _loaded.last.createdAt);
+      final more = await widget.api
+          .myOrders(before: _loaded.last.createdAt, limit: _kPage);
       if (!mounted) return;
       setState(() {
         _loaded.addAll(more);
-        _noMore = more.isEmpty;
+        _noMore = more.length < _kPage;
       });
+      _reportChannels();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -4109,8 +4294,61 @@ class _OrderListViewState extends State<OrderListView> {
 
   void _reset() {
     _loaded.clear();
+    _stays = const [];
     _noMore = false;
-    _future = _loadOrders();
+    _future = _loadFirst();
+  }
+
+  static DateTime _at(String iso) =>
+      DateTime.tryParse(iso)?.toUtc() ??
+      DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+
+  /// 当前频道 + 状态筛选下要画的单:外卖接口的 [Order] 和住宿的 [StayOrder]
+  /// 按下单时间混排(两边各自已经是新的在前,这里做一次归并)。
+  ///
+  /// **比已拉到的最早一单外卖还早的住宿单,先不放。** 放了的话往下再拉一页,
+  /// 新到的外卖单会插到它上面 —— 列表在手指底下重新排序。外卖翻到底了才全放
+  List<Object> _visible() {
+    final ch = widget.channel;
+    final food = ch == 'stay'
+        ? const <Order>[]
+        : [
+            for (final o in _loaded)
+              if (widget.filter.matchesFood(o) &&
+                  (ch == null || orderChannelKey(o) == ch))
+                o,
+          ];
+    if (ch != null && ch != 'stay') return food;
+    final cutoff = ch == 'stay' || _noMore || _loaded.isEmpty
+        ? null
+        : _at(_loaded.last.createdAt);
+    final stays = [
+      for (final s in _stays)
+        if (widget.filter.matchesStay(s) &&
+            (cutoff == null || !_at(s.createdAt).isBefore(cutoff)))
+          s,
+    ];
+    if (stays.isEmpty) return food;
+    final out = <Object>[];
+    var i = 0, j = 0;
+    while (i < food.length || j < stays.length) {
+      final takeFood = j >= stays.length ||
+          (i < food.length &&
+              !_at(food[i].createdAt).isBefore(_at(stays[j].createdAt)));
+      out.add(takeFood ? food[i++] : stays[j++]);
+    }
+    return out;
+  }
+
+  String _emptyText() {
+    final ch = channelOf(widget.channel);
+    final f = widget.filter;
+    if (ch == null) {
+      return f == OrderFilter.all ? '还没有订单\n去点一单支持身边小店吧' : '没有${f.label}的订单';
+    }
+    return f == OrderFilter.all
+        ? '「${ch.name}」还没有订单'
+        : '「${ch.name}」没有${f.label}的订单';
   }
 
   /// 状态语义色:进行中 = 品牌橙(需要关注),完成 = 账目绿(钱已结清),取消 = 灰
@@ -4119,6 +4357,27 @@ class _OrderListViewState extends State<OrderListView> {
         OrderStatus.cancelled => theme.colorScheme.outline,
         _ => theme.colorScheme.primary,
       };
+
+  /// 右上角那句:状态名,加上这个状态下用户最想知道的那一件事。
+  ///
+  /// 跑腿单换成跑腿的说法 —— 通用状态名是按外卖起的,「待取餐」放在
+  /// 一单帮送上是错的(它付完直接进抢单池,状态就是 ready)
+  String _statusText(Order o) {
+    if (o.isErrand && o.status == OrderStatus.ready) {
+      return o.riderId == null ? '等骑手接单' : '骑手去取件';
+    }
+    if (o.isErrand && o.status == OrderStatus.pickedUp) return '送件中';
+    if (o.status == OrderStatus.pickedUp && o.etaAt != null) {
+      final t = DateTime.tryParse(o.etaAt!)?.toLocal();
+      if (t != null) {
+        final hm = '${t.hour.toString().padLeft(2, '0')}:'
+            '${t.minute.toString().padLeft(2, '0')}';
+        return '${o.status.label} · 预计 $hm';
+      }
+    }
+    if (o.status == OrderStatus.completed && !o.hasReview) return '已完成 · 待评价';
+    return o.status.label;
+  }
 
   /// 订单时间:近的说「多久前」,远的才给日期。
   /// 外卖是分钟级的生意,「12 分钟前」和「7/27 17:21」的信息量差很远。
@@ -4145,141 +4404,215 @@ class _OrderListViewState extends State<OrderListView> {
     }
   }
 
+  void _openDetail(Order order) => Navigator.of(context).push(
+      MaterialPageRoute(
+          builder: (_) =>
+              OrderDetailPage(api: widget.api, orderNo: order.orderNo)));
+
+  /// 完成单的分账行只画在「菜品 + 骑手配送」的外卖 / 买菜单上。
+  ///
+  /// 跑腿单(没有商家,平台收的是跑腿费的 2%)和商家自送单(配送费归商家)
+  /// 不是这个分法;退过款的单三个数也对不上实付。这几类在详情页的
+  /// 「这一单的钱去哪了」里也还没按各自的口径算 —— 列表上宁可不画,
+  /// 不画一行对不上的数
+  bool _splitShown(Order o) =>
+      o.status == OrderStatus.completed &&
+      !o.isErrand &&
+      !o.selfDelivery &&
+      o.refundCents == 0 &&
+      o.totalCents > 0;
+
+  /// 商家 / 骑手 / 平台三个数:读订单上的数,**不另算** ——
+  /// 和 MoneyFlowPage、详情页分账卡同一口径(商家实收 / 配送费 + 小费 / 佣金)
+  Widget _splitRow(Order o) {
+    final sz = Theme.of(context).sz;
+    final rider = o.deliveryFeeCents + o.tipCents;
+    Widget part(String who, int cents, Color c) =>
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(who, style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+          const SizedBox(width: 3),
+          Text(yuan(cents),
+              style: szMoney(
+                  fontSize: kFontMicro, fontWeight: FontWeight.w500, color: c)),
+        ]);
+    return Row(children: [
+      Expanded(
+        child: Wrap(spacing: 10, runSpacing: 2, children: [
+          part('商家', o.merchantNetCents, sz.earn),
+          if (rider > 0) part('骑手', rider, sz.earn),
+          part('平台', o.commissionCents, sz.hold),
+        ]),
+      ),
+      const SizedBox(width: 8),
+      InkWell(
+        borderRadius: BorderRadius.circular(kRadiusSm),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => MoneyFlowPage(api: widget.api, order: o))),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Text('钱去哪了 →',
+              style: TextStyle(fontSize: kFontMicro, color: sz.clay)),
+        ),
+      ),
+    ]);
+  }
+
   Widget _orderCard(Order order, int index) {
     final theme = Theme.of(context);
+    final sz = theme.sz;
     final color = _statusColor(order.status, theme);
-    final active = order.status != OrderStatus.completed &&
-        order.status != OrderStatus.cancelled;
+    final unread = _unread[order.orderNo] ?? 0;
+    // 按钮的样子和原来一样,只是收成一个 helper
+    Widget action(String label, VoidCallback onPressed, {bool filled = false}) {
+      const pad = EdgeInsets.symmetric(horizontal: 12);
+      final child = Text(label, style: const TextStyle(fontSize: kFontNote));
+      return SizedBox(
+        height: 30,
+        child: filled
+            ? FilledButton(
+                style: FilledButton.styleFrom(
+                    padding: pad, visualDensity: VisualDensity.compact),
+                onPressed: onPressed,
+                child: child)
+            : OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                    padding: pad, visualDensity: VisualDensity.compact),
+                onPressed: onPressed,
+                child: child),
+      );
+    }
+
+    final actions = <Widget>[
+      // 待支付的单必须在列表里就能付。跑腿单建出来就是这个状态,
+      // 支付中断(切后台、网断)留下的单也落在这儿
+      if (order.status == OrderStatus.pendingPayment)
+        action('去支付', () async {
+          final paid = await payPendingOrder(widget.api, order, context);
+          if (paid != null && mounted) setState(_reset);
+        }, filled: true),
+      // 评价表单就在详情页里,这里是直达的那一下
+      if (order.status == OrderStatus.completed && !order.hasReview)
+        action('去评价', () => _openDetail(order)),
+      // 跑腿单没有菜单可回购(商家是那个虚拟的服务主体)
+      if (order.status == OrderStatus.completed && !order.isErrand)
+        action('再来一单', () => _reorder(order)),
+    ];
+
     return FadeSlideIn(
       index: index,
-      child: Card(
-        margin: const EdgeInsets.fromLTRB(12, 5, 12, 5),
-        // 进行中订单描一圈橙,列表里一眼找到"正在路上的那单"
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: active
-              ? BorderSide(
-                  color: theme.colorScheme.primary.withValues(alpha: 0.45))
-              : BorderSide.none,
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) =>
-                  OrderDetailPage(api: widget.api, orderNo: order.orderNo))),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                          order.merchantName.isEmpty
-                              ? '订单'
-                              : order.merchantName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 15)),
-                    ),
-                    // 有人在等你回话:红点比什么文案都管用
-                    if ((_unread[order.orderNo] ?? 0) > 0) ...[
-                      Icon(Icons.mark_chat_unread,
-                          size: 15, color: theme.colorScheme.primary),
-                      const SizedBox(width: 4),
-                      Text('${_unread[order.orderNo]}',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: theme.colorScheme.primary)),
-                      const SizedBox(width: 8),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 9),
+        child: SzCard(
+          padding: EdgeInsets.zero,
+          onTap: () => _openDetail(order),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // 3px 频道条:这单属于哪个频道一眼可见。
+            // 原来进行中的单描一圈橙边,那件事现在交给下面的进度行
+            SzChannelBar(orderChannelKey(order)),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(kCardPad, 12, kCardPad, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                            order.merchantName.isEmpty
+                                ? '订单'
+                                : order.merchantName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w600, fontSize: 15)),
                       ),
-                      child: Text(order.status.label,
+                      // 有人在等你回话:红点比什么文案都管用
+                      if (unread > 0) ...[
+                        Icon(Icons.mark_chat_unread,
+                            size: 15, color: theme.colorScheme.primary),
+                        const SizedBox(width: 4),
+                        Text('$unread',
+                            style: TextStyle(
+                                fontSize: kFontNote,
+                                fontWeight: FontWeight.w700,
+                                color: theme.colorScheme.primary)),
+                      ],
+                      const SizedBox(width: 8),
+                      Text(_statusText(order),
                           style: TextStyle(
-                              fontSize: 12,
+                              fontSize: kFontNote,
                               fontWeight: FontWeight.w600,
                               color: color)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  // 跑腿单没有菜品,摘要是「寄什么 / 买什么」
+                  Text(order.isErrand ? order.errandNote : order.summary,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(height: 1.4)),
+                  if (order.scheduledLabel != null) ...[
+                    const SizedBox(height: 4),
+                    Text('⏰ ${order.scheduledLabel}',
+                        style: TextStyle(
+                            fontSize: kFontNote,
+                            color: sz.hold,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                  if (order.selfDelivery) ...[
+                    const SizedBox(height: 4),
+                    Text('🛵 商家自送',
+                        style: TextStyle(
+                            fontSize: kFontNote,
+                            color: sz.earn,
+                            fontWeight: FontWeight.w600)),
+                  ],
+                  if (_OrderProgress.stepsOf(order).$2 >= 0) ...[
+                    const SizedBox(height: 10),
+                    _OrderProgress(order: order),
+                  ],
+                  if (_splitShown(order)) ...[
+                    const SizedBox(height: 8),
+                    _splitRow(order),
+                  ],
+                  const SizedBox(height: 8),
+                  // 两个按钮在 320 屏 + 长辈版下和金额挤不进一行,
+                  // 用 Wrap:放得下就一行,放不下按钮换到下一行,不画出界。
+                  // 撑满宽度是为了 spaceBetween 生效 —— Wrap 默认只有内容那么宽
+                  SizedBox(
+                    width: double.infinity,
+                    child: Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      runSpacing: 8,
+                      children: [
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text(yuan(order.totalCents), style: szMoney()),
+                          const SizedBox(width: 8),
+                          // 老单的时间是「9/1 18:00」这种,长辈版下金额 + 时间
+                          // 自己就能超宽 —— 时间让位,金额不能被截
+                          Flexible(
+                            child: Text(_timeLabel(order),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.outline)),
+                          ),
+                        ]),
+                        if (actions.isNotEmpty)
+                          Row(mainAxisSize: MainAxisSize.min, children: [
+                            for (final (i, a) in actions.indexed) ...[
+                              if (i > 0) const SizedBox(width: 8),
+                              a,
+                            ],
+                          ]),
+                      ],
                     ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(order.summary,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(height: 1.4)),
-                if (order.scheduledLabel != null) ...[
-                  const SizedBox(height: 4),
-                  Text('⏰ ${order.scheduledLabel}',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).sz.hold,
-                          fontWeight: FontWeight.w600)),
+                  ),
                 ],
-                if (order.selfDelivery) ...[
-                  const SizedBox(height: 4),
-                  Text('🛵 商家自送',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).sz.earn,
-                          fontWeight: FontWeight.w600)),
-                ],
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Text(yuan(order.totalCents),
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 15)),
-                    const SizedBox(width: 8),
-                    Text(_timeLabel(order),
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.outline)),
-                    const Spacer(),
-                    // 待支付的单必须在列表里就能付。跑腿单建出来就是这个状态,
-                    // 支付中断(切后台、网断)留下的单也落在这儿
-                    if (order.status == OrderStatus.pendingPayment)
-                      SizedBox(
-                        height: 30,
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12),
-                              visualDensity: VisualDensity.compact),
-                          onPressed: () async {
-                            final paid = await payPendingOrder(
-                                widget.api, order, context);
-                            if (paid != null && mounted) setState(_reset);
-                          },
-                          child: const Text('去支付',
-                              style: TextStyle(fontSize: 12)),
-                        ),
-                      ),
-                    if (order.status == OrderStatus.completed)
-                      SizedBox(
-                        height: 30,
-                        child: OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12),
-                              visualDensity: VisualDensity.compact),
-                          onPressed: () => _reorder(order),
-                          child: const Text('再来一单',
-                              style: TextStyle(fontSize: 12)),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
+              ),
             ),
-          ),
+          ]),
         ),
       ),
     );
@@ -4289,35 +4622,30 @@ class _OrderListViewState extends State<OrderListView> {
   Widget build(BuildContext context) {
     return RefreshIndicator(
       onRefresh: () async => setState(_reset),
-      child: FutureBuilder(
+      child: FutureBuilder<void>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return SzError(
                 error: snapshot.error, onRetry: () => setState(_reset));
           }
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState != ConnectionState.done) {
             return const SkeletonList();
           }
-          // 第一页由 future 给,后续页累加进 _loaded
-          if (_loaded.isEmpty) _loaded.addAll(snapshot.data!);
-          final orders =
-              _loaded.where(widget.filter.matchesFood).toList();
+          final items = _visible();
           // 筛选后可能一屏都填不满 —— 那样用户滚不动,触底加载永远不触发,
           // 更早的同类订单就永远看不到。这里替他把下一页要来
-          if (orders.length < 6 && !_noMore && !_loadingMore &&
-              _loaded.isNotEmpty) {
-            WidgetsBinding.instance
-                .addPostFrameCallback((_) => _loadMore());
+          if (items.length < 6 &&
+              !_noMore &&
+              !_loadingMore &&
+              _loaded.isNotEmpty &&
+              widget.channel != 'stay') {
+            WidgetsBinding.instance.addPostFrameCallback((_) => _loadMore());
           }
-          if (orders.isEmpty) {
+          if (items.isEmpty) {
             return ListView(children: [
               const SizedBox(height: 120),
-              SzEmpty(
-                  art: BrandArt.receipt,
-                  text: widget.filter == OrderFilter.all
-                      ? '还没有订单\n去点一单支持身边小店吧'
-                      : '没有${widget.filter.label}的订单'),
+              SzEmpty(art: BrandArt.receipt, text: _emptyText()),
             ]);
           }
           return NotificationListener<ScrollNotification>(
@@ -4329,10 +4657,10 @@ class _OrderListViewState extends State<OrderListView> {
               return false;
             },
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              itemCount: orders.length + 1,
+              padding: const EdgeInsets.only(top: 8, bottom: 8),
+              itemCount: items.length + 1,
               itemBuilder: (context, i) {
-                if (i == orders.length) {
+                if (i == items.length) {
                   if (_loadingMore) {
                     return const Padding(
                       padding: EdgeInsets.all(20),
@@ -4344,7 +4672,7 @@ class _OrderListViewState extends State<OrderListView> {
                                   CircularProgressIndicator(strokeWidth: 2))),
                     );
                   }
-                  if (_noMore && orders.length > 10) {
+                  if (_noMore && items.length > 10) {
                     return Padding(
                       padding: const EdgeInsets.fromLTRB(0, 16, 0, 24),
                       child: Text('没有更早的订单了',
@@ -4356,7 +4684,18 @@ class _OrderListViewState extends State<OrderListView> {
                   }
                   return const SizedBox(height: 8);
                 }
-                return _orderCard(orders[i], i);
+                final it = items[i];
+                return it is Order
+                    ? _orderCard(it, i)
+                    : FadeSlideIn(
+                        index: i,
+                        child: StayOrderCard(
+                            api: widget.api,
+                            order: it as StayOrder,
+                            onReturn: () {
+                              if (mounted) setState(_reset);
+                            }),
+                      );
               },
             ),
           );
@@ -6495,7 +6834,7 @@ class ProfileView extends StatefulWidget {
   /// 为什么是回调不是 push:`_tab` 在外壳的 State 里,这一页够不着;
   /// 而 push 一个新的订单列表页会造出第二个订单列表,
   /// 返回行为和底部 tab 不一致。null = 没接外壳(测试里),按钮仍可点但不跳
-  final void Function(OrderFilter filter, {int segment})? onOpenOrders;
+  final void Function(OrderFilter filter)? onOpenOrders;
 
   @override
   State<ProfileView> createState() => _ProfileViewState();
@@ -6519,6 +6858,13 @@ class _ProfileViewState extends State<ProfileView> {
   List<Order> _orders = const [];
   List<StayOrder> _stays = const [];
 
+  /// 小程序清单,给网格里「小程序」那一格用。
+  ///
+  /// 首页的下拉抽屉是隐性手势,而用鼠标的桌面浏览器根本拉不动列表 ——
+  /// 这里是一个看得见的入口。空清单(游客 401、桌面端没有容器、
+  /// 运营还没上架)时这一格不出:点开一个空面板比没有入口更糟
+  List<MiniAppInfo> _miniApps = const [];
+
   /// 顶上那张账目卡关掉了没有。**默认不关,关了就永久关。**
   ///
   /// 和首页 `_promiseStrip` 同一个道理:「5% 平台只抽这么多」是一句宣言,
@@ -6531,7 +6877,7 @@ class _ProfileViewState extends State<ProfileView> {
   /// 一单没下过,这两页就从 App 里彻底没了。
   ///
   /// 所以这里**关掉的是卡,不是入口**:卡收起的同时,
-  /// 三条入口落到 [_entryList] 里(见那儿的 `if (_ledgerHidden)`)。
+  /// 三条入口落到 [_gridCard] 里(见那儿的 `if (_ledgerHidden)`)。
   bool _ledgerHidden = false;
 
   static const _kLedgerHidden = 'profile_ledger_hidden';
@@ -6579,6 +6925,11 @@ class _ProfileViewState extends State<ProfileView> {
     // 待支付角标能把住宿算进去 —— 住宿的待支付单 15 分钟不付就自动关闭,
     // 角标漏数它是用户真金白银的损失
     final staysF = loggedIn ? widget.api.myStayOrders() : null;
+    // 桌面端没有小程序容器,清单都不拉(同首页 _loadMiniApps)。
+    // 错误当场接住:前面几个请求还没回来时它先失败,就是一个没人接的异常
+    final appsF = loggedIn && miniAppSupported
+        ? widget.api.miniApps().onError((_, __) => const <MiniAppInfo>[])
+        : null;
     if (profileF != null) {
       try {
         final profile = await profileF;
@@ -6609,6 +6960,8 @@ class _ProfileViewState extends State<ProfileView> {
     } else if (mounted) {
       setState(() => _stays = const []);
     }
+    final apps = appsF == null ? const <MiniAppInfo>[] : await appsF;
+    if (mounted) setState(() => _miniApps = apps);
   }
 
   /// 某个筛选下有多少单(外卖 + 住宿)。
@@ -6616,15 +6969,12 @@ class _ProfileViewState extends State<ProfileView> {
       _orders.where(f.matchesFood).length +
       _stays.where(f.matchesStay).length;
 
-  /// 点这一格该落在哪个频道:哪边有就落哪边,两边都有落外卖。
-  int _segmentFor(OrderFilter f) =>
-      _orders.where(f.matchesFood).isEmpty &&
-              _stays.where(f.matchesStay).isNotEmpty
-          ? 1
-          : 0;
-
-  void _openOrders(OrderFilter f) =>
-      widget.onOpenOrders?.call(f, segment: _segmentFor(f));
+  /// 点这一格:订单 tab 落在「全部」+ 这个筛选。
+  ///
+  /// 原先要替用户挑「外卖还是住宿」(哪边有单落哪边,两边都有落外卖)——
+  /// 两边都有时,角标说 2 单、落地的列表只看得到外卖那 1 单。
+  /// 现在「全部」里各频道的单本来就排在一起,不用再挑
+  void _openOrders(OrderFilter f) => widget.onOpenOrders?.call(f);
 
   Future<void> _editBirthdayAndPush() async {
     final me = _profile ?? await widget.api.me();
@@ -6821,8 +7171,7 @@ class _ProfileViewState extends State<ProfileView> {
           _ordersCard(context),
           const SizedBox(height: 12),
         ],
-        _quickGrid(context),
-        _serviceGrid(context),
+        _gridCard(context),
         const SizedBox(height: 12),
         _entryList(context, marketing: marketing),
       ],
@@ -6875,7 +7224,12 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  /// 身份行:头像(点=换头像)+ 昵称(点=改昵称)+ 手机号。
+  /// 138 **** 5678。不是 11 位的(海外号、测试号)原样给 ——
+  /// 按位数硬截,截错了位置比不打码更糟
+  static String _maskPhone(String p) =>
+      p.length == 11 ? '${p.substring(0, 3)} **** ${p.substring(7)}' : p;
+
+  /// 身份行:头像(点=换头像)+ 昵称(点=改昵称)+ 实名标 + 手机号与加入时间。
   Widget _identityRow(BuildContext context, UserProfile? profile) {
     final theme = Theme.of(context);
     return Card(
@@ -6914,9 +7268,27 @@ class _ProfileViewState extends State<ProfileView> {
         // 闪成真号,用户看到的是"先给我看了个别的,然后偷偷换掉了"。
         // 缓存里也没有(极少见:刚装且还没登录成功过)时留空,
         // 空白至少是诚实的
-        title: Text(profile?.name ?? widget.api.userName ?? '',
-            style: theme.textTheme.titleLarge),
-        subtitle: Text(profile?.phone ?? widget.api.userPhone ?? ''),
+        title: Row(children: [
+          Flexible(
+            child: Text(profile?.name ?? widget.api.userName ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge),
+          ),
+          // 只标「已实名」,不标「未实名」:没实名不是毛病,
+          // 需要实名的时候(买酒)结算页会说,入口在下面的列表里
+          if (profile?.identityVerified == true) ...[
+            const SizedBox(width: 8),
+            SzChip('已实名', color: theme.sz.earn, dense: true),
+          ],
+        ]),
+        // 手机号打码:这一页常被截图、被人看着屏幕问「你怎么设置的」。
+        // 要看完整号码的场景(改绑、收验证码)自己知道是哪个号
+        subtitle: Text([
+          _maskPhone(profile?.phone ?? widget.api.userPhone ?? ''),
+          if (profile?.createdAt case final at?) '${at.year} 年 ${at.month} 月加入',
+        ].where((s) => s.isNotEmpty).join(' · ')),
+        // 点这一行是改昵称,所以右边还是笔,不是「进下一页」的箭头
         trailing: const Icon(Icons.edit, size: 18),
         onTap: _editName,
       ),
@@ -6933,110 +7305,117 @@ class _ProfileViewState extends State<ProfileView> {
   /// 第 21 单之后就是错的。一个把账目透明当立身之本的平台,
   /// 顶上挂两个静悄悄算错的数字,比不显示糟得多。
   Widget _ledgerCard(BuildContext context) {
-    final sz = Theme.of(context).sz;
-    Widget entry(String label, VoidCallback onTap, {bool last = false}) =>
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(right: last ? 0 : 8),
-            child: Material(
-              color: sz.surface,
-              borderRadius: BorderRadius.circular(kRadiusSm),
-              child: InkWell(
-                onTap: onTap,
-                borderRadius: BorderRadius.circular(kRadiusSm),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 9),
-                  child: Text(label,
-                      maxLines: 2,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize: kFontNote,
-                          height: 1.2,
-                          fontWeight: FontWeight.w500,
-                          color: sz.ink)),
-                ),
-              ),
-            ),
-          ),
-        );
-
-    return Container(
-      // 全页唯一一张有色卡:和首页那条 5% 承诺条同一套视觉语言,
-      // 「这两处说的是同一件事」不用写出来
-      decoration: BoxDecoration(
-        color: sz.claySoft,
-        borderRadius: BorderRadius.circular(kRadiusMd),
-      ),
-      padding: const EdgeInsets.all(kCardPad),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(children: [
-            // 标题两截仍按基线对齐(衬线的 5% 和黑体的中文各有各的字高),
-            // 所以关闭键**不能进这个 Row** —— 一个没有基线的盒子塞进
-            // baseline 行里,对齐会退化成按顶边排
+    // 深台面(#133 SzLedgerCard,设计稿 3e):这张卡里全是查账的入口,
+    // 用「这块是账」的台面托出来,读到字之前就认得出。
+    // 原来是 claySoft 浅卡,和首页 5% 承诺条配成一对;首页那条还是浅色,
+    // 两处从此不再同色 —— 同一件事由「5% 平台只抽这么多」这句话连着
+    return SzLedgerCard(
+      // **颜色必须在台面里面取。** 台面在内部把 SzColors 换成深色态,
+      // 在这儿(台面外面)先取 sz 的话拿到的是浅色那一套 —— 深底上一片墨色字,
+      // 就是黑底黑字。所以内容整个套一层 Builder,用台面里面的 context
+      child: Builder(builder: (context) {
+        final sz = Theme.of(context).sz;
+        Widget entry(String label, VoidCallback onTap, {bool last = false}) =>
             Expanded(
-              child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    Text('5%',
-                        style: szFigure(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: sz.clay)),
-                    const SizedBox(width: 8),
-                    Text('平台只抽这么多',
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: sz.ink)),
-                  ]),
-            ),
-            // 关闭:热区做到 40×40(图标只有 16,光按图标点不中),
-            // 和首页承诺条同一套尺寸。
-            //
-            // **不用 OverflowBox 去省那 16px 高。** 试过:画出来是 40×40,
-            // 但父级 SizedBox 只有 24 高,命中测试在它那儿就被挡掉了 ——
-            // 量尺寸的断言照样绿,手指点上去只有 40×24 管用。
-            // 高度的账在卡的内边距上找补(见 padding)
-            Semantics(
-              label: '不再显示这张账目卡',
-              button: true,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: _hideLedger,
-                child: SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: Icon(Icons.close, size: 16, color: sz.inkMuted),
+              child: Padding(
+                padding: EdgeInsets.only(right: last ? 0 : 8),
+                child: Material(
+                  // 台面上再叠一层更深的井,加一道 12% 的细边 ——
+                  // 深色上叠深色,光靠明度分不出是两层(#133 深色态那条)
+                  color: sz.ledger,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(kRadiusSm),
+                    side: BorderSide(color: sz.ink.withValues(alpha: .12)),
+                  ),
+                  child: InkWell(
+                    onTap: onTap,
+                    borderRadius: BorderRadius.circular(kRadiusSm),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      child: Text(label,
+                          maxLines: 2,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontSize: kFontNote,
+                              height: 1.2,
+                              fontWeight: FontWeight.w500,
+                              color: sz.ink)),
+                    ),
+                  ),
                 ),
               ),
-            ),
-          ]),
-          const SizedBox(height: 4),
-          // 立场整卡说一次,不摊到每个入口上(同 SzEntryGroup.footnote 的规矩)
-          Text('每一单的钱去了哪里,平台的账本长什么样,都查得到',
-              style: TextStyle(
-                  fontSize: kFontNote, height: 1.4, color: sz.inkMuted)),
-          const SizedBox(height: 12),
-          Row(children: [
-            entry('钱去哪了', () => openMoneyFlow(context, widget.api)),
-            entry(
-                '平台账本',
-                () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => TrustPage(api: widget.api)))),
-            // 直达入口:这一页是我们和三大平台唯一的结构性差别,
-            // 不该只藏在信任页里点两层才看得到
-            entry(
-                '平台体检',
-                () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => TransparencyPage(api: widget.api))),
-                last: true),
-          ]),
-        ],
-      ),
+            );
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              // 标题两截仍按基线对齐(衬线的 5% 和黑体的中文各有各的字高),
+              // 所以关闭键**不能进这个 Row** —— 一个没有基线的盒子塞进
+              // baseline 行里,对齐会退化成按顶边排
+              Expanded(
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text('5%',
+                          style: szFigure(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w600,
+                              color: sz.clay)),
+                      const SizedBox(width: 8),
+                      Text('平台只抽这么多',
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: sz.ink)),
+                    ]),
+              ),
+              // 关闭:热区做到 40×40(图标只有 16,光按图标点不中),
+              // 和首页承诺条同一套尺寸。
+              //
+              // **不用 OverflowBox 去省那 16px 高。** 试过:画出来是 40×40,
+              // 但父级 SizedBox 只有 24 高,命中测试在它那儿就被挡掉了 ——
+              // 量尺寸的断言照样绿,手指点上去只有 40×24 管用。
+              // 高度的账在卡的内边距上找补(见 padding)
+              Semantics(
+                label: '不再显示这张账目卡',
+                button: true,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: _hideLedger,
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Icon(Icons.close, size: 16, color: sz.inkMuted),
+                  ),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 4),
+            // 立场整卡说一次,不摊到每个入口上(同 SzEntryGroup.footnote 的规矩)
+            Text('每一单的钱去了哪里,平台的账本长什么样,都查得到',
+                style: TextStyle(
+                    fontSize: kFontNote, height: 1.4, color: sz.inkMuted)),
+            const SizedBox(height: 12),
+            Row(children: [
+              entry('钱去哪了', () => openMoneyFlow(context, widget.api)),
+              entry(
+                  '平台账本',
+                  () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => TrustPage(api: widget.api)))),
+              // 直达入口:这一页是我们和三大平台唯一的结构性差别,
+              // 不该只藏在信任页里点两层才看得到
+              entry(
+                  '平台体检',
+                  () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => TransparencyPage(api: widget.api))),
+                  last: true),
+            ]),
+          ],
+        );
+      }),
     );
   }
 
@@ -7084,58 +7463,31 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  /// 卡券与常用:四个平级入口,标题两三个字,给不出状态值 —— 网格档。
+  /// 卡券与常用 + 找平台的事(+ 账目卡收起后的三个查账入口):一张卡,几行网格。
   ///
-  /// 每格 23px,同样四条排成列表要 184px。收货地址在这里留一份,
-  /// 所以「我的」tab 的 AppBar 才腾得出位置给客服和设置
-  Widget _quickGrid(BuildContext context) {
-    return Card(
-      child: SzIconGrid(items: [
-        for (final (icon, label, page) in [
-          (Icons.local_activity_outlined, '优惠券',
-              () => CouponsPage(api: widget.api) as Widget),
-          (Icons.confirmation_number_outlined, '团购券',
-              () => MyVouchersPage(api: widget.api) as Widget),
-          (Icons.favorite_outline, '我的收藏',
-              () => FavoritesPage(api: widget.api) as Widget),
-          (Icons.place_outlined, '收货地址',
-              () => AddressBookPage(api: widget.api) as Widget),
-        ])
-          SzIconGridItem(
-            icon: icon,
-            label: label,
-            onTap: () async {
-              if (!await ensureLoggedIn(context)) return;
-              if (!context.mounted) return;
-              await Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => page()));
-            },
-          ),
-      ]),
-    );
-  }
-
-  /// 找平台的四类事 + 查账的三个入口:全部横过来。
+  /// 原来是两张卡,卡券一张、找人和查账一张。并成一张(设计稿 3e):
+  /// 两张卡之间那道缝和两圈描边说的是同一件事 —— 这些都是「点进去办事」的入口。
+  /// 分组还在,只是从两张卡换成卡里的一道细线。
   ///
-  /// ## 为什么这几条该是网格而不是列表条
+  /// ## 为什么是网格
   ///
   /// 判据没变,还是 `SzIconGrid` 文档里那条:**标题两三个字就说清、
-  /// 彼此完全平级、给不出状态值**。这六条正好全中 ——
-  /// 「帮助中心」「意见反馈」「平台账本」都是一看就懂的名词,
-  /// 没有"当前是什么值"可言,也不需要一句解释。
+  /// 彼此完全平级、给不出状态值**。排成竖列的话每条 46px 只放三四个字。
   ///
-  /// 排成竖列的代价是每条 46px 只放三四个字。横过来之后
-  /// **六条 ≈ 100px,原来要 276px**。
+  /// - 第一行「卡券与常用」。收货地址在这里留一份,
+  ///   所以「我的」tab 的 AppBar 才腾得出位置给客服和设置;
+  /// - 第二行「找平台」:问、说、查自己的投诉,再加「小程序」
+  ///   (有清单才出 —— 首页下拉抽屉是隐性手势,这是一个看得见的入口);
+  /// - 账目卡收起时,第三行是它的三个入口。
   ///
-  /// ## 分成两行,不是拼成一行
+  /// ## 三行都按 4 列排
   ///
-  /// 前三条是「找人」(问、说、查自己的投诉),后三条是「查账」。
-  /// 挤成一行六格的话,每格在 375px 屏上只剩 57px —— 四个字要折两行,
-  /// 而且两类事混在一起,扫一眼分不出哪三个是一伙的。
-  ///
-  /// 一行三个是刻意的:格子宽 114px,四个字一行放得下,
-  /// 两组之间天然断开,不用加分组头(那要 41px)。
-  Widget _serviceGrid(BuildContext context) {
+  /// 不满一行的补空位(`columns: 4`),上下格子对得齐 ——
+  /// 同一张卡里 4 格压 3 格,看着像布局坏了。原来第二行是刻意的一行三个
+  /// (两组分在两张卡里,对不齐也看不出来),并成一张卡之后这个理由没了。
+  /// 4 列在 320 屏上每格 70px,「我的食安投诉」六个字会折成两行 ——
+  /// SzIconGrid 允许折行,字是全的(见它文档「标签必须能换行」)。
+  Widget _gridCard(BuildContext context) {
     Future<void> guarded(Widget Function() page) async {
       if (!await ensureLoggedIn(context)) return;
       if (!context.mounted) return;
@@ -7143,9 +7495,26 @@ class _ProfileViewState extends State<ProfileView> {
           .push(MaterialPageRoute(builder: (_) => page()));
     }
 
+    const divider = Divider(height: 1, indent: kCardPad, endIndent: kCardPad);
+
     return Card(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        SzIconGrid(items: [
+        SzIconGrid(columns: 4, items: [
+          for (final (icon, label, page) in [
+            (Icons.local_activity_outlined, '优惠券',
+                () => CouponsPage(api: widget.api) as Widget),
+            (Icons.confirmation_number_outlined, '团购券',
+                () => MyVouchersPage(api: widget.api) as Widget),
+            (Icons.favorite_outline, '我的收藏',
+                () => FavoritesPage(api: widget.api) as Widget),
+            (Icons.place_outlined, '收货地址',
+                () => AddressBookPage(api: widget.api) as Widget),
+          ])
+            SzIconGridItem(
+                icon: icon, label: label, onTap: () => guarded(page)),
+        ]),
+        divider,
+        SzIconGrid(columns: 4, items: [
           SzIconGridItem(
             icon: Icons.help_outline,
             label: '帮助中心',
@@ -7165,6 +7534,13 @@ class _ProfileViewState extends State<ProfileView> {
             label: '我的食安投诉',
             onTap: () => guarded(() => FoodSafetyRecordsPage(api: widget.api)),
           ),
+          if (_miniApps.isNotEmpty)
+            SzIconGridItem(
+              icon: Icons.apps_outlined,
+              label: '小程序',
+              onTap: () => showMiniAppsPanel(context,
+                  api: widget.api, apps: _miniApps),
+            ),
         ]),
         // 账目卡收起时,它的三个入口落在这儿。**只在收起时出现** ——
         // 卡开着还挂一份就是同一个入口在一页上出现两次。
@@ -7174,8 +7550,8 @@ class _ProfileViewState extends State<ProfileView> {
         // 而分账页要么从首页那条(也能关)进、要么得先有一笔带佣金的订单。
         // 少了这一段,关卡片 = 删功能
         if (_ledgerHidden) ...[
-          const Divider(height: 1),
-          SzIconGrid(items: [
+          divider,
+          SzIconGrid(columns: 4, items: [
             SzIconGridItem(
               icon: Icons.pie_chart_outline,
               label: '钱去哪了',

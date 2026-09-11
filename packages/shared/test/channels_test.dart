@@ -44,7 +44,10 @@ void main() {
 
     test('按 biz_type 反查', () {
       expect(channelOfBizType('food')?.key, 'food');
+      expect(channelOfBizType('retail')?.key, 'retail');
       expect(channelOfBizType('hotel')?.key, 'stay');
+      // 跑腿单挂在 biz_type='errand' 的服务主体上,订单页靠这条把它归到「帮我送」
+      expect(channelOfBizType('errand')?.key, 'errand');
       expect(channelOfBizType('还没有的业务'), isNull);
     });
   });

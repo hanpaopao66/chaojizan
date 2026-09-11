@@ -6,92 +6,73 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'order_filter.dart';
 
-/// 住宿订单列表(嵌在订单 tab 的「住宿」分栏,无 Scaffold)。
-class StayOrderListView extends StatefulWidget {
-  const StayOrderListView(
-      {super.key, required this.api, this.filter = OrderFilter.all});
+/// 住宿订单卡(订单 tab 列表里的一格)。
+///
+/// 住宿单原先有自己的一个列表页签;频道条改版(设计稿 3b)后,「全部」里
+/// 住宿单和外卖单按下单时间排在同一列 —— 所以长相要和外卖卡一家:
+/// SzCard + 顶上 3px 频道条,状态字在右上,金额走 szMoney。
+/// 筛选口径仍在 [OrderFilter.matchesStay],别在这儿再抄一份状态名。
+class StayOrderCard extends StatelessWidget {
+  const StayOrderCard(
+      {super.key, required this.api, required this.order, this.onReturn});
 
   final ApiClient api;
+  final StayOrder order;
 
-  /// 状态筛选。住宿走的是 StayOrderStatus,和外卖那套平行 ——
-  /// 判断落在 [OrderFilter.matchesStay] 里,别在这儿再抄一份状态名
-  final OrderFilter filter;
-
-  @override
-  State<StayOrderListView> createState() => _StayOrderListViewState();
-}
-
-class _StayOrderListViewState extends State<StayOrderListView> {
-  late Future<List<StayOrder>> _future = widget.api.myStayOrders();
-
-  Color _statusColor(String status, ThemeData theme) => switch (status) {
-        'completed' => Theme.of(context).sz.earn,
-        'cancelled' || 'closed' || 'rejected' || 'noshow' =>
-          theme.colorScheme.outline,
-        _ => theme.colorScheme.primary,
-      };
-
-  Future<void> _refresh() async {
-    setState(() => _future = widget.api.myStayOrders());
-    await _future;
-  }
+  /// 从详情页回来时调:详情里可能取消了、评价了,列表要跟着刷新
+  final VoidCallback? onReturn;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return FutureBuilder<List<StayOrder>>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final orders = (snapshot.data ?? const <StayOrder>[])
-            .where(widget.filter.matchesStay)
-            .toList();
-        if (orders.isEmpty) {
-          return RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView(children: [
-              Padding(
-                  padding: const EdgeInsets.all(48),
-                  child: Center(
-                      child: Text(
-                          widget.filter == OrderFilter.all
-                              ? '还没有住宿订单\n首页「住宿」逛逛?'
-                              : '没有${widget.filter.label}的住宿订单',
-                          textAlign: TextAlign.center))),
-            ]),
-          );
-        }
-        return RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView.builder(
-            itemCount: orders.length,
-            itemBuilder: (context, i) {
-              final o = orders[i];
-              return Card(
-                margin:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: ListTile(
-                  title: Text('${o.hotelName} · ${o.roomTypeName}'),
-                  subtitle: Text('${o.stayLabel}\n${yuan(o.totalCents)}'),
-                  isThreeLine: true,
-                  trailing: Text(o.statusLabel,
-                      style: TextStyle(
-                          color: _statusColor(o.status, theme),
-                          fontWeight: FontWeight.bold)),
-                  onTap: () async {
-                    await Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => StayOrderDetailPage(
-                            api: widget.api, orderNo: o.orderNo)));
-                    _refresh();
-                  },
-                ),
-              );
-            },
+    final sz = theme.sz;
+    final color = switch (order.status) {
+      'completed' => sz.earn,
+      'cancelled' || 'closed' || 'rejected' || 'noshow' =>
+        theme.colorScheme.outline,
+      _ => theme.colorScheme.primary,
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 9),
+      child: SzCard(
+        padding: EdgeInsets.zero,
+        onTap: () async {
+          await Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) =>
+                  StayOrderDetailPage(api: api, orderNo: order.orderNo)));
+          onReturn?.call();
+        },
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          const SzChannelBar('stay'),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(kCardPad, 12, kCardPad, 12),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Expanded(
+                      child: Text('${order.hotelName} · ${order.roomTypeName}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 15)),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(order.statusLabel,
+                        style: TextStyle(
+                            fontSize: kFontNote,
+                            fontWeight: FontWeight.w600,
+                            color: color)),
+                  ]),
+                  const SizedBox(height: 6),
+                  Text(order.stayLabel,
+                      style: theme.textTheme.bodySmall?.copyWith(height: 1.4)),
+                  const SizedBox(height: 8),
+                  Text(yuan(order.totalCents), style: szMoney()),
+                ]),
           ),
-        );
-      },
+        ]),
+      ),
     );
   }
 }
