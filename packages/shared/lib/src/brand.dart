@@ -10,6 +10,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'motion.dart';
+
 /// 三端设计令牌。取法:`Theme.of(context).sz`(见 [SzColorsX])。
 ///
 /// 页面代码里不许再出现裸 `Color(0xFF...)`——加新颜色先往这里加令牌。
@@ -319,20 +321,76 @@ const double kFontBody = 13;
 const double kFontBodyLg = 14;
 const double kFontTitle = 16;
 
+/// 名字 / 菜名这类「要一眼认出来」的一行(身份行的名字、新单详情的菜名)。
+const double kFontLead = 18;
+
+/// 金额与数字的档位(2026-09 浅色定稿)。**钱是这套设计的主角**,
+/// 数字比文字多一档:列表金额 15、编号/统计 20、卡上大数 24、
+/// 账本台面 32、弹层里要一眼看到的那个钱 38。
+///
+/// 设计稿里 26 / 36 / 40 这几个近邻值归到最近的一档 ——
+/// 差 2px 看不出来,而多一种取值,「字号不再发散」那条棘轮就多一格。
+const double kFigureSm = 15;
+const double kFigureMd = 20;
+const double kFigureLg = 24;
+const double kFigureXl = 32;
+const double kFigureHero = 38;
+
+// ⚠️ 字族名必须带 `packages/superz_shared/` 前缀。
+//
+// 字体声明在 shared 包的 pubspec 里,而 Flutter 给**依赖包**的字体注册的名字
+// 是 `packages/<包名>/<字族>`(三端构建出来的 FontManifest.json 里就是这么写的)。
+// 这里原来写的是裸名 'SzSerif' —— 在三端 App 里一个都对不上,于是金额、评分、
+// 大标题**一直在用系统字**,只是恰好 Roboto 也认 onum 特性,旧式数字照样出来,
+// 看着像是对的。设计稿上的衬线数字(Literata)从来没在真机上出现过。
+// 不报错、不崩,只有把截图和设计稿并排放才看得出来。
+
 /// 衬线字族(Literata 子集):金额、评分、距离等数字。
 /// 选它是因为 Literata 与 claude.ai 大标题用的 Galaxie Copernicus 同属
 /// Plantin 一脉的过渡期衬线;Copernicus 本身是商用授权,打不进开源仓。
-const String kSerifFamily = 'SzSerif';
+const String kSerifFamily = 'packages/superz_shared/SzSerif';
 
 /// 无衬线字族(Space Grotesk 子集):界面里的拉丁词与英文。
 /// claude.ai 正文用的 Styrene B 是商用授权,Space Grotesk 是它公认最接近的
 /// OFL 替代。中文一律回落系统字——这两款都不含 CJK。
-const String kSansFamily = 'SzSans';
+const String kSansFamily = 'packages/superz_shared/SzSans';
 
 /// 中文衬线显示字(思源宋体子集)。**只给大字用**,见 [szDisplay]。
-const String kSerifCjkFamily = 'SzSerifCJK';
+const String kSerifCjkFamily = 'packages/superz_shared/SzSerifCJK';
 
 const List<String> _cjkFallback = ['PingFang SC', 'Noto Sans CJK SC', 'Heiti SC'];
+
+/// 自带字族的界面字样:主题里各组件的字(按钮、标题栏、输入提示、页签、弹窗…),
+/// 以及 `AnimatedDefaultTextStyle` 这类**整个替换**默认字样的地方。
+///
+/// **必须自己带字族。** `ThemeData.fontFamily` 只套进 textTheme,
+/// 组件主题里直接写的 TextStyle 不经过它;`AnimatedDefaultTextStyle` 也是
+/// 整个换掉上层的默认字样,不是合并 —— 不带的话这些字落到引擎默认字:
+/// 拉丁和数字是 Roboto 不是 SzSans,按钮上的「接单 · 12 分出餐」和正文里的
+/// 数字是两套字形;测试环境里没有系统字可回落,直接画成方块。
+TextStyle szSans({
+  double? fontSize,
+  FontWeight? fontWeight,
+  Color? color,
+  double? height,
+}) =>
+    TextStyle(
+      fontFamily: kSansFamily,
+      fontFamilyFallback: _cjkFallback,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      height: height,
+    );
+
+TextStyle _ui({
+  double? fontSize,
+  FontWeight? fontWeight,
+  Color? color,
+  double? height,
+}) =>
+    szSans(
+        fontSize: fontSize, fontWeight: fontWeight, color: color, height: height);
 
 /// 大字位置的中文回落链:先找打包的宋体子集,没有再交给系统黑体。
 ///
@@ -605,19 +663,39 @@ extension SzMetricsX on ThemeData {
 ///  5. AppBar 与背景同色、无阴影、左对齐,标题不再是超大号
 ///  6. 页面底色是骨白(paper),卡片(surface)比它亮一档才浮得起来
 ///  7. 数字与拉丁字母走 SzSerif,中文回落系统字(见 szFigure/szMoney)
+///
+/// ## 各端的主强调色([accentTone])
+///
+/// 用户端是聚合平台,主行动色是平台色 clay —— 频道之间地位平等,
+/// 谁也不该独占按钮的颜色(见 channels.dart 抬头)。
+///
+/// 骑手端和商家端不一样:它们各自只干一件事,设计稿(2026-09 浅色定稿)
+/// 给了各自一个频道色当主强调 —— 骑手端「跑」、商家端「碗」。
+/// 实底主按钮、底部导航选中态、进度条跟着它走;**clay 仍然是 clay**:
+/// 「账本 →」这类文字链接、待办高亮、当前节点照旧用 clay,
+/// 钱的语义色(earn / hold)也不变。
+///
+/// 开关同理:两端的「营业中 / 在售 / 在线」是好事,开 = earn;
+/// 用户端的开关没进这次设计稿,保持 clay。
+///
+/// [bouncy]:出场动效带不带回弹。骑手端传 false(见 motion.dart)。
 ThemeData brandTheme(Brightness brightness,
-    {SzDensity density = SzDensity.browse}) {
+    {SzDensity density = SzDensity.browse,
+    int? accentTone,
+    bool bouncy = true}) {
   final light = brightness == Brightness.light;
   final sz = light ? SzColors.light : SzColors.dark;
+  final accent = accentTone == null ? sz.clay : sz.channelTones[accentTone];
+  final switchOn = accentTone == null ? sz.clay : sz.earn;
 
   // M3 的 tone 映射会把黏土橘压暗;主行动色钉死为 clay,
   // 其余层次仍由 seed 派生,保持体系和谐
   final seeded = ColorScheme.fromSeed(
-    seedColor: sz.clay,
+    seedColor: accent,
     brightness: brightness,
   );
   final scheme = seeded.copyWith(
-    primary: sz.clay,
+    primary: accent,
     onPrimary: light ? const Color(0xFFFBFAF6) : const Color(0xFF1B1A17),
     surface: sz.surface,
     onSurface: sz.ink,
@@ -646,7 +724,13 @@ ThemeData brandTheme(Brightness brightness,
     canvasColor: sz.paper,
     // 涟漪比 InkSparkle 安静,和这套克制的观感匹配
     splashFactory: InkRipple.splashFactory,
-    extensions: <ThemeExtension<dynamic>>[sz, SzMetrics(density: density)],
+    extensions: <ThemeExtension<dynamic>>[
+      sz,
+      SzMetrics(density: density),
+      SzMotionStyle(bouncy: bouncy),
+    ],
+    // 页面切换:Android fade-through 220ms 不缩放,iOS 走系统侧滑(motion.dart)
+    pageTransitionsTheme: kSzPageTransitions,
 
     // ---- 字阶:26 页面大标题、21 卡标题、15 正文、13 辅助、11 分段标题 ----
     // 中文不做字距,字重比旧版整体轻一档(w900 在中文里糊成一团)
@@ -672,7 +756,7 @@ ThemeData brandTheme(Brightness brightness,
       scrolledUnderElevation: 0,
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: TextStyle(
+      titleTextStyle: _ui(
           fontSize: 16.5, fontWeight: FontWeight.w600, color: sz.ink),
     ),
 
@@ -691,24 +775,24 @@ ThemeData brandTheme(Brightness brightness,
     // ---- 按钮:胶囊形;Filled=clay 主按钮(一屏一个),Outlined=次,Text=弱 ----
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
-        backgroundColor: sz.clay,
+        backgroundColor: accent,
         foregroundColor: scheme.onPrimary,
         minimumSize: Size(64, density.buttonHeight),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(kRadiusSm)),
-        textStyle: TextStyle(
+        textStyle: _ui(
             fontSize: 15 + density.fontBump, fontWeight: FontWeight.w600),
       ),
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         elevation: 0,
-        backgroundColor: sz.clay,
+        backgroundColor: accent,
         foregroundColor: scheme.onPrimary,
         minimumSize: Size(64, density.buttonHeight),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(kRadiusSm)),
-        textStyle: TextStyle(
+        textStyle: _ui(
             fontSize: 15 + density.fontBump, fontWeight: FontWeight.w600),
       ),
     ),
@@ -720,7 +804,7 @@ ThemeData brandTheme(Brightness brightness,
         minimumSize: Size(64, density.secondaryHeight),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(kRadiusSm)),
-        textStyle: TextStyle(
+        textStyle: _ui(
             fontSize: 14 + density.fontBump, fontWeight: FontWeight.w500),
       ),
     ),
@@ -728,7 +812,7 @@ ThemeData brandTheme(Brightness brightness,
       style: TextButton.styleFrom(
         foregroundColor: sz.clay,
         minimumSize: Size(48, density.secondaryHeight),
-        textStyle: TextStyle(
+        textStyle: _ui(
             fontSize: 14 + density.fontBump, fontWeight: FontWeight.w500),
       ),
     ),
@@ -746,7 +830,7 @@ ThemeData brandTheme(Brightness brightness,
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: sz.surfaceAlt,
-      hintStyle: TextStyle(
+      hintStyle: _ui(
           color: sz.inkMuted, fontSize: 14.5 + density.fontBump),
       contentPadding: EdgeInsets.symmetric(
           horizontal: 16, vertical: 13 + density.inputPadBump),
@@ -760,7 +844,7 @@ ThemeData brandTheme(Brightness brightness,
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(kRadiusMd),
-        borderSide: BorderSide(color: sz.clay, width: 1.5),
+        borderSide: BorderSide(color: accent, width: 1.5),
       ),
     ),
 
@@ -785,12 +869,12 @@ ThemeData brandTheme(Brightness brightness,
       // 勾选标记同理:FilterChip 选中会画一个勾,
       // 墨底上再画墨色的勾一样是隐身
       checkmarkColor: sz.paper,
-      labelStyle: TextStyle(
+      labelStyle: _ui(
           fontSize: 12.5,
           fontWeight: FontWeight.w500,
           color: WidgetStateColor.resolveWith((states) =>
               states.contains(WidgetState.selected) ? sz.paper : sz.ink)),
-      secondaryLabelStyle: TextStyle(
+      secondaryLabelStyle: _ui(
           fontSize: 12.5,
           fontWeight: FontWeight.w500,
           color: WidgetStateColor.resolveWith((states) =>
@@ -807,24 +891,24 @@ ThemeData brandTheme(Brightness brightness,
       indicatorColor: Colors.transparent,
       iconTheme: WidgetStateProperty.resolveWith((states) => IconThemeData(
           size: 23,
-          color: states.contains(WidgetState.selected) ? sz.clay : sz.inkMuted)),
-      labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
+          color: states.contains(WidgetState.selected) ? accent : sz.inkMuted)),
+      labelTextStyle: WidgetStateProperty.resolveWith((states) => _ui(
           fontSize: 10.5,
           fontWeight: states.contains(WidgetState.selected)
               ? FontWeight.w600
               : FontWeight.w500,
-          color: states.contains(WidgetState.selected) ? sz.clay : sz.inkMuted)),
+          color: states.contains(WidgetState.selected) ? accent : sz.inkMuted)),
     ),
 
     // ---- TabBar 与分段控件 ----
     tabBarTheme: TabBarThemeData(
       labelColor: sz.ink,
       unselectedLabelColor: sz.inkMuted,
-      indicatorColor: sz.clay,
+      indicatorColor: accent,
       indicatorSize: TabBarIndicatorSize.label,
-      labelStyle: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600),
+      labelStyle: _ui(fontSize: 14.5, fontWeight: FontWeight.w600),
       unselectedLabelStyle:
-          const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w500),
+          _ui(fontSize: 14.5, fontWeight: FontWeight.w500),
       dividerColor: Colors.transparent,
     ),
     segmentedButtonTheme: SegmentedButtonThemeData(
@@ -836,7 +920,7 @@ ThemeData brandTheme(Brightness brightness,
         side: BorderSide(color: sz.line),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(kRadiusSm)),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+        textStyle: _ui(fontSize: 13, fontWeight: FontWeight.w500),
       ),
     ),
 
@@ -846,10 +930,10 @@ ThemeData brandTheme(Brightness brightness,
           borderRadius: BorderRadius.circular(kRadiusLg)),
       backgroundColor: sz.surface,
       surfaceTintColor: Colors.transparent,
-      titleTextStyle: TextStyle(
+      titleTextStyle: _ui(
           fontSize: 16.5, fontWeight: FontWeight.w600, color: sz.ink),
       contentTextStyle:
-          TextStyle(fontSize: 14, height: 1.6, color: sz.inkMuted),
+          _ui(fontSize: 14, height: 1.6, color: sz.inkMuted),
       // 默认水平 40 太窄:窄屏上一句十来个字的提示会被逼成三行,
       // 高度全长在换行上。收到 24 之后同样的字少一行
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
@@ -869,7 +953,7 @@ ThemeData brandTheme(Brightness brightness,
       shape:
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
       backgroundColor: sz.ink,
-      contentTextStyle: TextStyle(fontSize: 13.5, color: sz.paper),
+      contentTextStyle: _ui(fontSize: 13.5, color: sz.paper),
     ),
 
     // ---- 分割线与列表 ----
@@ -878,23 +962,23 @@ ThemeData brandTheme(Brightness brightness,
     listTileTheme: ListTileThemeData(
       contentPadding: const EdgeInsets.symmetric(horizontal: kPagePad),
       minVerticalPadding: density.listVerticalPad,
-      titleTextStyle: TextStyle(
+      titleTextStyle: _ui(
           fontSize: 14.5 + density.fontBump,
           fontWeight: FontWeight.w500,
           color: sz.ink),
       subtitleTextStyle:
-          TextStyle(fontSize: 12.5 + density.fontBump, color: sz.inkMuted),
+          _ui(fontSize: 12.5 + density.fontBump, color: sz.inkMuted),
       iconColor: sz.inkFaint,
     ),
     switchTheme: SwitchThemeData(
       thumbColor: WidgetStateProperty.resolveWith((s) =>
           s.contains(WidgetState.selected) ? scheme.onPrimary : sz.surface),
       trackColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? sz.clay : sz.surfaceAlt),
+          (s) => s.contains(WidgetState.selected) ? switchOn : sz.surfaceAlt),
       trackOutlineColor: WidgetStatePropertyAll(sz.line),
     ),
     progressIndicatorTheme: ProgressIndicatorThemeData(
-      color: sz.clay,
+      color: accent,
       linearTrackColor: sz.surfaceAlt,
       circularTrackColor: sz.surfaceAlt,
     ),

@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import 'brand.dart';
+import 'motion.dart';
 import 'brand_art.dart';
 import 'net_image.dart';
 import 'ui_bits.dart';
@@ -112,20 +113,35 @@ class SzChip extends StatelessWidget {
     final fg = selected ? sz.paper : (color ?? sz.ink);
     final bg = selected ? sz.ink : Colors.transparent;
     final border = selected ? sz.ink : (color ?? sz.line);
-    return Material(
-      color: bg,
-      shape: StadiumBorder(side: BorderSide(color: border)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-              horizontal: dense ? 9 : 13, vertical: dense ? 3 : 6),
-          child: Text(label,
-              style: TextStyle(
+    // 选中/取消 120ms 过渡(动效规范:按压、开关、chip 选中一律 fast)
+    final d = SzMotion.of(context, SzMotion.fast);
+    return AnimatedContainer(
+      duration: d,
+      curve: SzMotion.standard,
+      decoration: ShapeDecoration(
+        color: bg,
+        shape: StadiumBorder(side: BorderSide(color: border)),
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        shape: const StadiumBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+                horizontal: dense ? 9 : 13, vertical: dense ? 3 : 6),
+            // szSans 不是 TextStyle:AnimatedDefaultTextStyle 整个替换上层字样,
+            // 不自带字族的话拉丁和数字会落到引擎默认字(见 brand.dart szSans)
+            child: AnimatedDefaultTextStyle(
+              duration: d,
+              style: szSans(
                   fontSize: dense ? 11 : 12.5,
                   fontWeight: FontWeight.w500,
-                  color: fg)),
+                  color: fg),
+              child: Text(label),
+            ),
+          ),
         ),
       ),
     );
@@ -336,12 +352,18 @@ class _SzMoneyFlowState extends State<SzMoneyFlow> {
                 const SizedBox(height: 8),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(2),
+                  // 分账条生长:900ms standard,一行比一行晚 120ms(动效规范 09)。
+                  // 钱是唯一允许慢下来的东西 —— 要让人看清它往哪边流
                   child: TweenAnimationBuilder<double>(
                     tween: Tween(
                         begin: 0,
                         end: (instant || _grown) ? item.fraction : 0),
-                    duration: Duration(milliseconds: instant ? 0 : 450),
-                    curve: Curves.easeOutCubic,
+                    duration: instant
+                        ? Duration.zero
+                        : SzMotion.ledger + const Duration(milliseconds: 120) * i,
+                    curve: Interval(
+                        instant ? 0 : (120 * i) / (900 + 120 * i), 1,
+                        curve: SzMotion.standard),
                     builder: (context, v, _) => LinearProgressIndicator(
                       value: v.clamp(0, 1),
                       minHeight: 4,
@@ -1056,7 +1078,14 @@ class SzLedgerCard extends StatelessWidget {
     final body = Padding(
       padding: padding,
       child: Theme(
-        data: Theme.of(context).copyWith(extensions: [inside]),
+        // 只换 SzColors,别的扩展(密度 SzMetrics、动效 SzMotionStyle)原样带进去。
+        // 原来是 `extensions: [inside]`,整张扩展表被换掉,台面里的组件
+        // 就丢了商家端/骑手端的密度档和骑手端「不回弹」的动效性格
+        data: Theme.of(context).copyWith(extensions: [
+          for (final e in Theme.of(context).extensions.values)
+            if (e is! SzColors) e,
+          inside,
+        ]),
         // DefaultTextStyle 也要换:台面里裸 Text 不带颜色时会继承页面的墨色,
         // 压在深底上就是黑底黑字
         child: DefaultTextStyle.merge(

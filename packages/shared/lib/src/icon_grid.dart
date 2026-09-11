@@ -8,6 +8,7 @@ class SzIconGridItem {
     required this.icon,
     required this.label,
     this.badge = 0,
+    this.badgeColor,
     this.onTap,
   });
 
@@ -22,6 +23,13 @@ class SzIconGridItem {
   /// 给它们挂个红数字只会制造焦虑 —— 用户点进去发现什么也不用做,
   /// 下一次就不信这个角标了。
   final int badge;
+
+  /// 角标底色。不给 = 待办的红。
+  ///
+  /// 「优惠券 3」「团购券 2」这种**手里还有几张能用**的数用 hold 色
+  /// (设计稿 3e):它不是待办,不该和「待支付 1」同一个红 ——
+  /// 两种数一个颜色,用户就分不清哪个是催他的
+  final Color? badgeColor;
 
   final VoidCallback? onTap;
 }
@@ -116,10 +124,11 @@ class SzIconGrid extends StatelessWidget {
                           children: [
                             Badge(
                               isLabelVisible: it.badge > 0,
-                              // 20+ 是列表首页的上限(myOrders 一页 20 条)。
-                              // 显示 21 会是**猜**的 —— 第 21 条还没拉下来
+                              backgroundColor: it.badgeColor,
+                              // 数来自服务端全量 count(/orders/counts),是准的;
+                              // 99 以上只是角标放不下
                               label:
-                                  Text(it.badge > 20 ? '20+' : '${it.badge}'),
+                                  Text(it.badge > 99 ? '99+' : '${it.badge}'),
                               child: SizedBox(
                                 width: 40,
                                 height: 40,

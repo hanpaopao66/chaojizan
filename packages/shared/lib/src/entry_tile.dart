@@ -80,11 +80,13 @@ class SzEntryTile extends StatelessWidget {
       child: Padding(
         padding: EdgeInsets.symmetric(
             horizontal: kCardPad, vertical: dense ? 9 : 12),
-        child: Row(
+        child: LayoutBuilder(builder: (context, box) => Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: 20, color: sz.inkFaint),
+              // 图标用 inkMuted、右箭头用 inkFaint(2026-09 设计稿三端一致):
+              // 图标帮人扫到这一行,是要看得见的;箭头只是装饰
+              Icon(icon, size: 20, color: sz.inkMuted),
               const SizedBox(width: 12),
             ],
             Expanded(
@@ -123,8 +125,12 @@ class SzEntryTile extends StatelessWidget {
             if (value != null && value!.isNotEmpty) ...[
               const SizedBox(width: 10),
               // 状态值收窄:它是个值不是段落,长了就省略 ——
-              // 让它换行会把这一行的高度顶回去,那就白改了
-              Flexible(
+              // 让它换行会把这一行的高度顶回去,那就白改了。
+              //
+              // 用上限宽度,不用 Flexible:Flexible 和标题的 Expanded 平分
+              // 剩余宽度,短的状态值就停在行中间、箭头跟着悬在半路
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: box.maxWidth * .45),
                 child: Text(value!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -143,7 +149,7 @@ class SzEntryTile extends StatelessWidget {
               Icon(Icons.chevron_right, size: 18, color: sz.inkFaint),
             ],
           ],
-        ),
+        )),
       ),
     );
   }

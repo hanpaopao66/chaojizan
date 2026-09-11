@@ -6,6 +6,8 @@ export 'src/announcement_banner.dart';
 export 'src/api_client.dart';
 export 'src/brand.dart';
 export 'src/brand_art.dart';
+export 'src/motion.dart';
+export 'src/sz_parts.dart';
 export 'src/channel_grid.dart';
 export 'src/channels.dart';
 export 'src/entry_tile.dart';

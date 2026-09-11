@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'brand.dart';
 import 'brand_art.dart';
+import 'motion.dart';
 
 /// 入场:成功图标/空态插画用,轻微放大 + 淡入。
 ///
@@ -31,7 +32,10 @@ class PopIn extends StatelessWidget {
   }
 }
 
-/// 列表项进场:淡入 + 上滑,按 index 依次错开(只对前几项生效,避免长列表拖沓)。
+/// 列表项进场:淡入 + 上滑,按 index 依次错开。
+///
+/// 现在就是 [SzEnter](动效规范 01:220ms、y +12、错落 40ms、最多累加 6 项,
+/// 位移用各端的出场曲线)。保留这个名字是为了三端存量调用不用一次改完。
 class FadeSlideIn extends StatelessWidget {
   const FadeSlideIn({super.key, required this.index, required this.child});
 
@@ -39,25 +43,7 @@ class FadeSlideIn extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    if (index >= 8) return child; // 首屏之外不做进场,滚动性能优先
-    if (MediaQuery.of(context).disableAnimations) return child;
-    // 位移从 16 收到 10、时长从 320 收到 240:列表进场该是"已经在那儿了"
-    // 的感觉,不是一个个飞进来
-    final delay = index * 35;
-    final total = 240 + delay;
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: Duration(milliseconds: total),
-      curve: Interval(delay / total, 1, curve: Curves.easeOutCubic),
-      builder: (context, t, child) => Opacity(
-        opacity: t,
-        child: Transform.translate(
-            offset: Offset(0, 10 * (1 - t)), child: child),
-      ),
-      child: child,
-    );
-  }
+  Widget build(BuildContext context) => SzEnter(index: index, child: child);
 }
 
 /// 列表加载骨架屏:灰色占位块 + 呼吸动画,替代满屏转圈。
