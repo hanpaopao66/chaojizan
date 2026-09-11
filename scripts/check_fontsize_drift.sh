@@ -28,7 +28,9 @@ cd "$(dirname "$0")/.."
 # 它和详情页已有的 20/21/22/24 那批金额大字是同一类,不是新发明的取值。
 # 720 → 712:小程序露头条、订单卡重写(设计稿 2a / 3b)时,
 # 原来写死的 12 换成 kFontNote、新写的地方一律用档位,少了 8 处。
-BASELINE=712
+# 712 → 631:浅色定稿整批重写骑手端(5a-5i)、商家端(6a-6l)。
+# 新页面一律用字号档位和 kFigure* 数字档,商家端从 290 处降到 233 处。
+BASELINE=631
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \
