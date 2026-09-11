@@ -45,10 +45,20 @@ class _WebLimitsBannerState extends State<WebLimitsBanner> {
                       fontWeight: FontWeight.w600,
                       color: sz.ink)),
               const SizedBox(height: 2),
-              Text(
-                  '但**不能替代手机 App 听单** —— 浏览器没有后台常驻,'
-                      '关掉这个页面就收不到新单提醒了。'
-                      '蓝牙小票机也连不了(云打印可以)。',
+              // 加粗那一截用 TextSpan —— 原来写的是 markdown 的 **,
+              // 普通 Text 不认,星号原样印在页面上
+              Text.rich(
+                  TextSpan(children: [
+                    const TextSpan(text: '但'),
+                    TextSpan(
+                        text: '不能替代手机 App 听单',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600, color: sz.ink)),
+                    const TextSpan(
+                        text: ' —— 浏览器没有后台常驻,'
+                            '关掉这个页面就收不到新单提醒了。'
+                            '蓝牙小票机也连不了(云打印可以)。'),
+                  ]),
                   style: TextStyle(
                       fontSize: kFontNote, height: 1.6, color: sz.inkMuted)),
             ],

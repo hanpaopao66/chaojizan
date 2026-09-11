@@ -7,7 +7,16 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'shop_fake_api.dart';
 
-/// 店铺页:入口密度、待办数字的来源、以及几条不许被密度改造碰掉的东西。
+/// 店铺页:首屏放什么、待办数字的来源、以及几条不许被改版碰掉的东西。
+///
+/// ## 2026-09 浅色定稿(设计稿 6i)改了首屏的判据
+///
+/// 上一版的验收标准是「首屏至少 17 个可点入口」—— 那时首屏是费率卡 + 身份卡
+/// + 十格工具网格。设计稿 6i 把首屏让给了**此刻的营业状态**:身份行、
+/// 营业开关、忙碌模式 / 承诺出餐时间两格、五条最常改的设置、「随时能走」那句话。
+/// 工具网格、营业与出餐、价格活动、合规证照、账号这些块**一样不少**,
+/// 挪到了第二屏起。所以这里的判据从「数入口」换成两条:
+/// 首屏按稿子的顺序放齐那几样;挪下去的每一个入口都还在、点得到。
 ///
 /// ## 这个测试防的是什么
 ///
@@ -76,20 +85,6 @@ void main() {
     return box.localToGlobal(Offset.zero) & box.size;
   }
 
-  /// 竖直区间 [top, bottom) 内出现的所有文字。
-  List<String> textsInBand(WidgetTester t, double top, double bottom) {
-    final out = <String>[];
-    for (final e in find.byType(Text).evaluate()) {
-      final data = (e.widget as Text).data;
-      if (data == null) continue;
-      final box = e.renderObject as RenderBox?;
-      if (box == null || !box.hasSize) continue;
-      final r = box.localToGlobal(Offset.zero) & box.size;
-      if (r.top >= top && r.bottom <= bottom) out.add(data);
-    }
-    return out;
-  }
-
   /// 把店铺页放进真机口径的可视区:宽 [width]、高 [boxHeight]。
   ///
   /// ⚠️ **[viewHeight] 必须 ≥ [boxHeight]。** `SizedBox` 会被父级约束夹住 ——
@@ -105,19 +100,22 @@ void main() {
     double boxHeight = firstScreen,
     double? viewHeight,
     VoidCallback? onOpenFinance,
+    Widget Function(ApiClient api)? page,
   }) async {
     setPhoneViewport(t, Size(width, viewHeight ?? 844));
     await t.pumpWidget(MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(scale)),
       child: MaterialApp(
-        theme: brandTheme(Brightness.light, density: SzDensity.operate),
+        theme: brandTheme(Brightness.light,
+            density: SzDensity.operate, accentTone: 0),
         home: Scaffold(
           body: Align(
             alignment: Alignment.topLeft,
             child: SizedBox(
               width: width,
               height: boxHeight,
-              child: ShopTabPage(api: api, onOpenFinance: onOpenFinance),
+              child: page?.call(api) ??
+                  ShopTabPage(api: api, onOpenFinance: onOpenFinance),
             ),
           ),
         ),
@@ -128,9 +126,13 @@ void main() {
 
   /// 整页渲染(验"某一行存不存在""它在哪一屏"用)。视口和盒子一起给到 3600。
   Future<void> pumpShopFull(WidgetTester t, ApiClient api,
-          {VoidCallback? onOpenFinance}) =>
+          {VoidCallback? onOpenFinance,
+          Widget Function(ApiClient api)? page}) =>
       pumpShop(t, api,
-          boxHeight: 3600, viewHeight: 3600, onOpenFinance: onOpenFinance);
+          boxHeight: 3600,
+          viewHeight: 3600,
+          onOpenFinance: onOpenFinance,
+          page: page);
 
   Future<ApiClient> loggedIn({
     Map<String, dynamic>? shop,
@@ -140,6 +142,8 @@ void main() {
     Map<String, dynamic>? todos,
     Map<String, dynamic>? tier,
     void Function(String path)? onRequest,
+    Map<String, dynamic>? printers,
+    Map<String, dynamic>? payout,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final api = shopFakeApi(
@@ -150,6 +154,8 @@ void main() {
       todos: todos,
       tier: tier,
       onRequest: onRequest,
+      printers: printers,
+      payout: payout,
     );
     await api.login('13800000009', 'pw');
     return api;
@@ -233,30 +239,50 @@ void main() {
     });
   });
 
-  group('首屏密度 —— 这一页唯一的验收标准', () {
-    testWidgets('正常营业:首屏至少 17 个入口', (t) async {
+  group('首屏:设计稿 6i 的顺序', () {
+    /// 首屏该有的几样,按从上到下的顺序
+    const firstScreenOrder = [
+      '张记牛肉面', // 身份行
+      '营业中', // 营业开关
+      '承诺出餐时间', // 两格(店主还有「忙碌模式」,见下面那组)
+      '营业时间与歇业', // 五条设置
+      '小票打印机',
+      '资质证照',
+      '费率与规则 · 5% 封顶',
+    ];
+
+    testWidgets('正常营业:身份、营业开关、承诺、五条设置都在首屏,顺序照稿子', (t) async {
       final api = await loggedIn();
       await pumpShop(t, api);
-      final n = visibleEntries(t);
-      expect(n, greaterThanOrEqualTo(17),
-          reason: '首屏只看得到 $n 个入口。改版前是 5 个,'
-              '这一页的全部意义就是把这个数字提上来');
+      var lastTop = -1.0;
+      for (final label in firstScreenOrder) {
+        final r = rectOf(t, find.text(label));
+        expect(r.bottom, lessThanOrEqualTo(firstScreen),
+            reason: '「$label」被推出首屏了');
+        expect(r.top, greaterThan(lastTop), reason: '「$label」的顺序和稿子不一样');
+        lastTop = r.top;
+      }
+      expect(find.textContaining('不想干了随时能走'), findsOneWidget,
+          reason: '「随时能走」是承诺的一部分,稿子上它就在设置组下面');
     });
 
-    testWidgets('证照横幅在场:横幅吃掉 84px,首屏仍有 15 个', (t) async {
+    testWidgets('证照横幅在场:横幅吃掉 84px,营业开关和营业时间仍在首屏', (t) async {
       final api = await loggedIn(
         shop: shopJson(licenseStage: 'soon', licenseDaysLeft: 23),
       );
       await pumpShop(t, api);
-      final n = visibleEntries(t, limit: withLicenseBanner);
-      expect(n, greaterThanOrEqualTo(15),
-          reason: '横幅一分不缩(它是到点自动停业的提醒),'
-              '但也不该把整页挤没(当前 $n)');
+      for (final label in ['营业中', '营业时间与歇业']) {
+        expect(rectOf(t, find.text(label)).bottom,
+            lessThanOrEqualTo(withLicenseBanner),
+            reason: '横幅一分不缩(它是到点自动停业的提醒),'
+                '但营业状态不该被挤出首屏');
+      }
     });
 
-    testWidgets('有售后待处理:售后块置顶,且首屏仍有 12 个入口', (t) async {
-      // 订单页的待办行「售后待处理 N」点了就切到这一页(main.dart:788)。
-      // 改版前它在 y≈2170 —— 商家点了待办,落地要再滚两千多像素才找得到
+    testWidgets('有售后待处理:售后块置顶,处理按钮在首屏', (t) async {
+      // 订单页的待办行「售后待处理 N」点了就切到这一页。改版前它在 y≈2170 ——
+      // 商家点了待办,落地要再滚两千多像素才找得到。
+      // 设计稿 6i 没画这一块:它只在有售后待处理时出现,出现时仍然排第一
       final api = await loggedIn(
         afterSales: [afterSaleJson()],
         todos: todosJson(afterSales: 1),
@@ -265,26 +291,20 @@ void main() {
       expect(rectOf(t, find.text('同意退款')).bottom,
           lessThanOrEqualTo(firstScreen),
           reason: '售后的处理按钮不在首屏 —— 商家从待办点过来要现找');
-      final n = visibleEntries(t);
-      // ⚠️ 这条判据从 12 降到 9,是**拿一行网格换全端字号一致**(#33 第 5 节,
-      // 已拍板)。SzEntryTile / SzIconGrid 接上密度后每条涨约 1.6px,
-      // 十几条累积 20px 左右,正好把最后一整行图标网格(5 格)推出 645 的线
-      // —— 掉的不是线性的 1 个 2 个,是临界效应。
-      //
-      // 只有**这一种状态**掉:正常营业 18、临时歇业 18、证照到期 17 全都不变
-      // (MEASURE 那条打印的就是这三个数)。而有售后待处理时商家是从订单页
-      // 待办点过来处理售后的,首屏的核心是「同意退款」(上面那条断言守着它),
-      // 下面那些入口本来就不是他此刻要找的。
-      expect(n, greaterThanOrEqualTo(9), reason: '当前 $n');
+      expect(rectOf(t, find.text('同意退款')).top,
+          lessThan(rectOf(t, find.text('张记牛肉面')).top),
+          reason: '有钱、有时限、且平台在等你表态的事,排在一切之前');
     });
 
     // 改造前后的对比数字从这里出。**只打印不断言** —— 断言在上面。
-    // 这条的用处是让「改了多少」有一份可复现的记录:
-    // `git stash` 掉 lib/ 的改动再跑一次,拿到的就是改造前的三个数
+    // 这条的用处是让「改了多少」有一份可复现的记录
     testWidgets('MEASURE 三种状态的首屏入口数', (t) async {
       await pumpShop(t, await loggedIn());
       final normal = visibleEntries(t);
 
+      // 每换一种状态先拆掉:同一个位置同一种页面,State 会被复用,
+      // 量到的还是上一种状态
+      await t.pumpWidget(const SizedBox());
       await pumpShop(
           t,
           await loggedIn(
@@ -296,6 +316,7 @@ void main() {
                       .toIso8601String())));
       final resting = visibleEntries(t);
 
+      await t.pumpWidget(const SizedBox());
       await pumpShop(t,
           await loggedIn(shop: shopJson(licenseStage: 'soon', licenseDaysLeft: 23)));
       final licensed = visibleEntries(t, limit: withLicenseBanner);
@@ -305,57 +326,189 @@ void main() {
     });
   });
 
-  group('黄金位:平台与你的账', () {
-    testWidgets('三个入口都在首屏,且排在营业设置之上', (t) async {
+  group('营业开关:和看板那枚 pill 是同一个状态源', () {
+    testWidgets('开关读外层给的值,不读这一页自己拉到的', (t) async {
+      // 店铺信息里 is_open 是 true;外层(工作台)说已经打烊了 ——
+      // 以外层为准,否则看板说「已打烊」、店铺页说「营业中」
+      final api = await loggedIn(shop: shopJson(isOpen: true));
+      bool? asked;
+      await pumpShop(t, api,
+          page: (api) => ShopTabPage(
+              api: api, isOpen: false, onSetOpen: (v) async => asked = v));
+      expect(find.text('已打烊'), findsOneWidget);
+      expect(t.widget<SzSwitch>(find.byType(SzSwitch)).value, isFalse);
+      await t.tap(find.byType(SzSwitch));
+      await t.pumpAndSettle();
+      expect(asked, isTrue, reason: '拨开关要交给外层(关店前的确认也在那边)');
+    });
+
+    testWidgets('食安停业:开关锁住,并说清谁能解', (t) async {
+      final api = await loggedIn(shop: shopJson(foodSafetyHold: true));
+      await pumpShop(t, api);
+      expect(find.text('食安停业'), findsOneWidget);
+      expect(t.widget<SzSwitch>(find.byType(SzSwitch)).onChanged, isNull,
+          reason: '服务端会 403,直接锁住比让他点了报错好');
+      expect(find.textContaining('由平台恢复'), findsOneWidget);
+    });
+
+    testWidgets('营业中时写今天几点到几点,且说明用户端可见', (t) async {
       final api = await loggedIn();
       await pumpShop(t, api);
+      expect(find.text('今日 09:00–21:00 · 用户端可见'), findsOneWidget);
+    });
+  });
+
+  group('两格:忙碌模式 / 承诺出餐时间(稿子上的「同时最多接」服务端没有)', () {
+    testWidgets('外层给了忙碌模式的入口才出现;开着时写到几点、加几分', (t) async {
+      final until = DateTime.now().add(const Duration(hours: 1));
+      final hhmm = '${until.hour.toString().padLeft(2, '0')}:'
+          '${until.minute.toString().padLeft(2, '0')}';
+      var tapped = false;
+      final api = await loggedIn();
+      await pumpShop(t, api,
+          page: (api) => ShopTabPage(
+              api: api,
+              busyUntil: until.toUtc(),
+              busyExtraMinutes: 15,
+              onBusy: () => tapped = true));
+      expect(find.text('忙碌模式'), findsOneWidget);
+      expect(find.text('到 $hhmm'), findsOneWidget);
+      expect(find.text('出餐 +15 分'), findsOneWidget);
+      await t.tap(find.text('忙碌模式'));
+      expect(tapped, isTrue);
+      expect(find.textContaining('同时最多接'), findsNothing,
+          reason: '服务端没有接单上限这个设置,不编一个');
+    });
+
+    testWidgets('店员看不到忙碌模式 —— 接口只认店主', (t) async {
+      final api = await loggedIn(
+          shop: shopJson(viewerIsStaff: true, viewerIsOwner: false));
+      await pumpShop(t, api,
+          page: (api) => ShopTabPage(api: api, onBusy: () {}));
+      expect(find.text('忙碌模式'), findsNothing);
+      expect(find.text('承诺出餐时间'), findsOneWidget);
+    });
+
+    testWidgets('承诺出餐时间那格点开就是改承诺的弹窗', (t) async {
+      final api = await loggedIn(shop: shopJson(promiseReadyMinutes: 12));
+      await pumpShop(t, api);
+      expect(find.text('12'), findsOneWidget);
+      await t.tap(find.text('承诺出餐时间'));
+      await t.pumpAndSettle();
+      expect(find.text('承诺出餐时长(分钟)'), findsOneWidget);
+    });
+  });
+
+  group('五条设置:只说有据可查的状态', () {
+    testWidgets('打印机只说绑了几台,不说「已连接」', (t) async {
+      final api = await loggedIn(printers: {
+        'enabled': true,
+        'items': [
+          {'id': 1, 'purpose': 'front'},
+          {'id': 2, 'purpose': 'kitchen'},
+        ],
+      });
+      await pumpShop(t, api);
+      expect(find.text('已绑定 2 台'), findsOneWidget);
+      expect(find.textContaining('已连接'), findsNothing,
+          reason: '服务端不知道小票机在不在线,「已连接」是编的');
+    });
+
+    testWidgets('结算卡:店主看得到打到哪张卡;店员看不到这一条', (t) async {
+      final payout = {
+        'configured': true,
+        'kind': 'bank_personal',
+        'bank_name': '建设银行',
+        'account_tail': '0417',
+      };
+      await pumpShop(t, await loggedIn(payout: payout));
+      expect(find.text('建设银行 0417 · T+1'), findsOneWidget);
+
+      // 先拆掉:同一个位置同一种页面,State 会被复用,新的那份店铺信息还没拉就断言了
+      await t.pumpWidget(const SizedBox());
+      await pumpShop(
+          t,
+          await loggedIn(
+              shop: shopJson(viewerIsStaff: true, viewerIsOwner: false),
+              payout: payout));
+      expect(find.text('结算卡'), findsNothing,
+          reason: '/payout-account 是登录者自己的账户,店员拉到的是他自己的');
+    });
+
+    testWidgets('入驻年月来自 created_at,不编', (t) async {
+      final api = await loggedIn();
+      await pumpShop(t, api);
+      expect(find.textContaining('2026 年 2 月入驻'), findsOneWidget);
+    });
+  });
+
+  /// 费率卡(原「黄金位」)。改版前它在店铺页最顶上;设计稿 6i 把首屏让给了
+  /// 营业状态,它挪到「随时能走」那句话下面、工具网格之前 —— 仍然是
+  /// 「平台与你的账」,三个入口一个不少。
+  group('费率卡:平台与你的账', () {
+    Rect goldRect(WidgetTester t) =>
+        rectOf(t, find.byKey(const ValueKey('shop-gold')));
+
+    testWidgets('三个入口都在,排在工具网格之前', (t) async {
+      final api = await loggedIn();
+      await pumpShopFull(t, api);
       for (final label in ['钱怎么分的', '平台对你的承诺', '平台规则']) {
         expect(find.text(label), findsOneWidget, reason: '缺了「$label」');
-        expect(rectOf(t, find.text(label)).bottom,
-            lessThanOrEqualTo(firstScreen),
-            reason: '「$label」被推出首屏了');
       }
-      expect(rectOf(t, find.text('钱怎么分的')).top,
-          lessThan(rectOf(t, find.text('营业时间与歇业')).top),
-          reason: '这段关系的三份文件该排在店铺设置之前');
+      expect(goldRect(t).bottom, lessThan(rectOf(t, find.text('券核销')).top),
+          reason: '这段关系的三份文件该排在工具之前');
     });
 
     testWidgets('显示费率与单量(服务端聚合的),但不显示金额', (t) async {
       final api = await loggedIn(tier: tierJson(rate: 0.045, thisMonth: 128));
-      await pumpShop(t, api);
-      expect(find.textContaining('4.5%'), findsOneWidget,
+      await pumpShopFull(t, api);
+      final gold = [
+        for (final e in find
+            .descendant(
+                of: find.byKey(const ValueKey('shop-gold')),
+                matching: find.byType(Text))
+            .evaluate())
+          (e.widget as Text).data ?? '',
+      ];
+      expect(gold.where((s) => s.contains('4.5%')), isNotEmpty,
           reason: '费率来自 commission-tier 的 commission_rate,'
-              '和对账页「阶梯佣金」同一个字段');
-      expect(find.textContaining('128'), findsOneWidget,
+              '和账本页「阶梯佣金」同一个字段');
+      expect(gold.where((s) => s.contains('128')), isNotEmpty,
           reason: '本月单量来自服务端 completed_counts,不是客户端求和');
-
-      // 「本月被抽了多少钱」拿不到正确的数:客户端只有近 30 天日账单,
-      // 按日求和得到的是「近 30 天」却要标成「本月」——
-      // 这正是用户端 myOrders() limit=20 算「累计」那个 bug 的形状
-      final gold = textsInBand(t, 0, 170);
+      // 「本月被抽了多少钱」拿不到正确的数:客户端按日求和得到的是「近 N 天」
+      // 却要标成「本月」—— 这正是用户端 myOrders() limit=20 算「累计」那个 bug 的形状
       expect(gold.where((s) => s.contains('¥')), isEmpty,
-          reason: '黄金位卡上出现了金额:${gold.where((s) => s.contains("¥"))} —— '
+          reason: '费率卡上出现了金额:${gold.where((s) => s.contains("¥"))} —— '
               '客户端算不出正确的「本月服务费合计」,服务端还没给这个字段');
     });
 
-    testWidgets('不放今日营业数据 —— 订单 tab 已经在说同一个数', (t) async {
+    testWidgets('不重复今日营业额 —— 看板台面已经在说同一个数', (t) async {
       final api = await loggedIn();
       await pumpShopFull(t, api);
-      expect(find.textContaining('今日'), findsNothing,
-          reason: '_todayCard() 已经在订单 tab(商家开 App 的落地页)显示'
-              '「今日 N 单 · ¥X」。同一个数字放两处,迟早两处口径不一样');
+      // 「今日 09:00–21:00 · 用户端可见」是营业时间,可以有;
+      // 「今日 N 单 · ¥X」这类营业额不许有:同一个数放两处,迟早口径不一样
+      final texts = [
+        for (final e in find.byType(Text).evaluate())
+          (e.widget as Text).data ?? '',
+      ];
+      expect(
+          texts.where((s) =>
+              s.contains('今日') && (s.contains('单') || s.contains('¥'))),
+          isEmpty);
     });
 
     testWidgets('店员看不到费率与单量,但看得到承诺', (t) async {
-      // 对账 tab 对非店主是一块「这不是给你看的」占位页(main.dart:1516),
+      // 账本 tab 对非店主是一块「这不是给你看的」占位页,
       // 所以费率/单量不给;但「平台对你的承诺」是这段关系本身,给
       final api = await loggedIn(shop: shopJson(viewerIsStaff: true, viewerIsOwner: false));
-      await pumpShop(t, api);
+      await pumpShopFull(t, api);
       expect(find.text('平台对你的承诺'), findsOneWidget);
       expect(find.text('钱怎么分的'), findsNothing,
           reason: '切过去是一块占位页 —— 点进去才发现是死路的入口不该给');
       expect(find.textContaining('128'), findsNothing,
           reason: '单量属于经营数据,不给店员');
+      expect(find.textContaining('当前 4.5%'), findsNothing,
+          reason: '「费率与规则」那一条的当前费率同样只给店主');
     });
   });
 
@@ -414,7 +567,7 @@ void main() {
     testWidgets('入口上显示的是顾客此刻真正看到的那句话', (t) async {
       final api =
           await loggedIn(shop: shopJson(announcement: '今天牛肉卖完了,明天早上补货'));
-      await pumpShop(t, api);
+      await pumpShopFull(t, api);
       expect(find.text('今天牛肉卖完了,明天早上补货'), findsOneWidget,
           reason: '公告要显示在入口的 value 上 —— '
               '「元旦放假」挂到三月还没撤,这样才看得见');
@@ -422,13 +575,17 @@ void main() {
 
     testWidgets('没设公告时显示「未设置」', (t) async {
       final api = await loggedIn(shop: shopJson(announcement: ''));
-      await pumpShop(t, api);
-      expect(find.text('未设置'), findsWidgets);
+      await pumpShopFull(t, api);
+      // 限定在「店铺公告」那一条上找:结算卡没设时也显示「未设置」
+      expect(
+          find.byWidgetPredicate((w) =>
+              w is SzEntryTile && w.title == '店铺公告' && w.value == '未设置'),
+          findsOneWidget);
     });
 
     testWidgets('点开才有输入框,而且有明确的保存点', (t) async {
       final api = await loggedIn();
-      await pumpShop(t, api);
+      await pumpShopFull(t, api);
       await t.tap(find.text('店铺公告'));
       await t.pumpAndSettle();
       expect(find.byType(TextField), findsOneWidget);
@@ -475,7 +632,7 @@ void main() {
       final api = await loggedIn();
       await pumpShopFull(t, api);
       for (final label in [
-        '券核销', '店铺券', '团购券', '小票打印', '经营看板',
+        '券核销', '店铺券', '团购券', '小票打印', '经营趋势',
         '老客召回', '专属码', '消息', '客服', '判责申诉',
         '门店相册', '店员', '健康证', '进货台账', '连锁店群',
       ]) {
@@ -483,29 +640,31 @@ void main() {
       }
     });
 
-    testWidgets('常用工具那 10 格全在首屏', (t) async {
+    testWidgets('常用工具那 10 格挪到了第二屏,但一格不少、翻一屏就到', (t) async {
+      // 改版前这 10 格全在首屏(判据:首屏至少 17 个入口)。设计稿 6i 把首屏
+      // 给了营业状态,网格挪到费率卡下面 —— 这里守的是它没被挤到很远
       final api = await loggedIn();
-      await pumpShop(t, api);
+      await pumpShopFull(t, api);
       for (final label in [
-        '券核销', '店铺券', '团购券', '小票打印', '经营看板',
+        '券核销', '店铺券', '团购券', '小票打印', '经营趋势',
         '老客召回', '专属码', '消息', '客服', '判责申诉',
       ]) {
         expect(rectOf(t, find.text(label)).bottom,
-            lessThanOrEqualTo(firstScreen),
-            reason: '「$label」被推出首屏');
+            lessThanOrEqualTo(firstScreen * 2),
+            reason: '「$label」在第三屏以后了');
       }
     });
 
     testWidgets('角标只给「你还有事要做」的', (t) async {
       final api = await loggedIn(todos: todosJson(messagesUnread: 3, appealable: 0));
-      await pumpShop(t, api);
+      await pumpShopFull(t, api);
       expect(find.text('3'), findsOneWidget, reason: '未读消息该挂角标');
       expect(find.text('0'), findsNothing, reason: '0 不显示');
     });
 
     testWidgets('判责申诉的角标是「还来得及申诉的」,不是历史判责数', (t) async {
       final api = await loggedIn(todos: todosJson(appealable: 2));
-      await pumpShop(t, api);
+      await pumpShopFull(t, api);
       expect(find.text('2'), findsOneWidget);
     });
 

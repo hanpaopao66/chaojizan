@@ -6,6 +6,7 @@
 ///  3. 引导商家把 App 加入电池优化白名单(国产 ROM 杀后台的主要豁免通道)
 library;
 
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:audioplayers/audioplayers.dart';
@@ -18,21 +19,90 @@ import 'package:superz_shared/superz_shared.dart';
 bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
 /// 新单语音播报。播放失败时退回系统提示音,保证"至少响一声"。
+///
+/// [announce] 的 `times`:外卖新单按动效规范 07 响**两声**,两声之间隔 600ms
+/// (第一声播完再等 600ms,不叠音)。住宿接单页照旧一声。
 class OrderAnnouncer {
-  final AudioPlayer _player = AudioPlayer();
+  factory OrderAnnouncer() {
+    // 播放器第一次要响时才建:一建出来就去初始化原生播放插件,
+    // 一单没来的时候不必先占着
+    AudioPlayer? player;
+    StreamSubscription<void>? relay;
+    final completions = StreamController<void>.broadcast();
+    AudioPlayer ensure() {
+      final existing = player;
+      if (existing != null) return existing;
+      final p = AudioPlayer();
+      relay = p.onPlayerComplete.listen(completions.add);
+      return player = p;
+    }
+    return OrderAnnouncer.custom(
+      playOnce: () async {
+        final p = ensure();
+        await p.stop(); // 上一遍没播完就来了新单:重头播,不叠音
+        await p.play(AssetSource('new_order.m4a'));
+      },
+      completions: completions.stream,
+      onDispose: () {
+        relay?.cancel();
+        completions.close();
+        player?.dispose();
+      },
+    );
+  }
 
-  Future<void> announce() async {
+  /// 把「播一声」和「播完了」换成别的实现 —— 测试里没有播放器插件,
+  /// 两声的节奏只能这样量
+  OrderAnnouncer.custom({
+    required Future<void> Function() playOnce,
+    required Stream<void> completions,
+    VoidCallback? onDispose,
+  })  : _play = playOnce,
+        _onDispose = onDispose {
+    _done = completions.listen((_) => _next());
+  }
+
+  final Future<void> Function() _play;
+  final VoidCallback? _onDispose;
+  late final StreamSubscription<void> _done;
+
+  /// 两声之间的间隔(规范 07)
+  static const gap = Duration(milliseconds: 600);
+
+  /// 这一轮还剩几声
+  int _left = 0;
+
+  /// 排队中的下一声。**只能有一个**,新的一轮进来先取消上一轮剩下的
+  Timer? _gapTimer;
+
+  Future<void> announce({int times = 1}) async {
     HapticFeedback.vibrate();
+    _gapTimer?.cancel();
+    _left = times - 1;
+    await _playOnce();
+  }
+
+  void _next() {
+    if (_left <= 0) return;
+    _left--;
+    _gapTimer?.cancel();
+    _gapTimer = Timer(gap, _playOnce);
+  }
+
+  Future<void> _playOnce() async {
     try {
-      await _player.stop(); // 上一遍没播完就来了新单:重头播,不叠音
-      await _player.play(AssetSource('new_order.m4a'));
+      await _play();
     } catch (_) {
       SystemSound.play(SystemSoundType.alert);
+      // 播放失败就收不到「播完」事件,第二声按间隔直接排上
+      _next();
     }
   }
 
   void dispose() {
-    _player.dispose();
+    _gapTimer?.cancel();
+    _done.cancel();
+    _onDispose?.call();
   }
 }
 

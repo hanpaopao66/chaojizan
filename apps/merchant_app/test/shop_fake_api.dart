@@ -87,6 +87,7 @@ Map<String, dynamic> shopJson({
       'busy_extra_minutes': 10,
       'license_no': 'JY11105080012345',
       'license_image_url': '',
+      'created_at': '2026-02-14T02:00:00Z',
     };
 
 Map<String, dynamic> afterSaleJson({int id = 1}) => {
@@ -195,6 +196,8 @@ ApiClient shopFakeApi({
   Map<String, dynamic>? tier,
   String kitchenCamStatus = 'none',
   void Function(String path)? onRequest,
+  Map<String, dynamic>? printers,
+  Map<String, dynamic>? payout,
 }) {
   return ApiClient(
     baseUrl: 'http://test.local',
@@ -231,6 +234,12 @@ ApiClient shopFakeApi({
           payload = tier ?? tierJson();
         case '/appeals/mine':
           payload = <Map<String, dynamic>>[];
+        // 店铺页顶上的设置组:打印机几台、结算卡。不给就回空对象 ——
+        // 那一行照实不显示值(和线上拉不到时一样)
+        case '/merchants/me/printers':
+          payload = printers ?? <String, dynamic>{};
+        case '/payout-account':
+          payload = payout ?? <String, dynamic>{};
         default:
           payload = <String, dynamic>{};
       }

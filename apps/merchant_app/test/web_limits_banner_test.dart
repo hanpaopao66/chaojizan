@@ -32,8 +32,10 @@ void main() {
 
     // 不能用的必须点名,而且要说**为什么** ——
     // 只说"不支持"会被当成 bug 报上来
+    // 加粗那一截是 Text.rich,data 为空 —— 连同 span 里的字一起取
     final body = t.widgetList<Text>(find.byType(Text))
-        .map((w) => w.data ?? '').join();
+        .map((w) => w.data ?? w.textSpan?.toPlainText() ?? '').join();
+    expect(body, isNot(contains('**')), reason: 'markdown 星号原样印在页面上了');
     expect(body, contains('听单'), reason: '没说清听单的边界 —— 那是最容易误解的');
     expect(body, contains('蓝牙'), reason: '没提蓝牙小票机连不了');
     expect(body, contains('云打印'), reason: '只说不能用、不说替代方案,等于把人堵死');

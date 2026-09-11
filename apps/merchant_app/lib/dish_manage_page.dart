@@ -2,11 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:superz_shared/superz_shared.dart';
 
-/// 菜品管理:按分类分组的列表,上下架开关,点击编辑,长按置顶,右下角新增。
+import 'merchant_ui.dart';
+
+/// 菜单(设计稿 6e):左边竖排分类,右边菜品行,每行一个「在售 / 售罄」开关。
+///
+/// ## 行上那个开关管的是「今天」
+///
+/// 开 = 在售;关 = **今日售罄**(估清:用户端灰着显示「今日售罄」,
+/// 明早 04:00 自动恢复)。高峰时后厨喊一声「肥肠卖完了」,商家要的是这一下,
+/// 而不是把菜从菜单上拿掉。
+///
+/// 永久的上架 / 下架搬进了编辑页和批量操作 —— 它低频,而且拿掉之后
+/// 用户就看不到这道菜了,不该和「今天卖完了」长在同一个开关上。
+/// 下架了的菜行上照样有开关,拨开就是重新上架。
 class DishManagePage extends StatefulWidget {
-  const DishManagePage({super.key, required this.api});
+  const DishManagePage({super.key, required this.api, this.active = true});
 
   final ApiClient api;
+
+  /// 这一页是不是当前 tab。从别的 tab 切回来时悄悄刷一遍
+  final bool active;
 
   @override
   State<DishManagePage> createState() => _DishManagePageState();
@@ -16,17 +31,31 @@ class _DishManagePageState extends State<DishManagePage> {
   List<Dish>? _dishes;
   Map<String, dynamic>? _stocking; // 高峰备货建议(纯建议,不自动改)
 
-  /// 分类条选中的分类。null = 全部。**只影响显示** ——
+  /// 分类栏选中的分类。null = 全部。**只影响显示** ——
   /// 批量/置顶/估清这些操作照旧作用在真实的菜上
   String? _activeCategory;
 
   /// 非空 = 菜单没拉到。「没有菜品」和「没拉到」在这一页含义天差地别
   String _error = '';
 
+  /// 行上开关的「先动起来」:拨下去就按新值画,请求回来(成功或失败)再对齐。
+  /// 不这么做的话开关要等一个来回才动,商家会以为没点上又点一下
+  final Map<int, bool> _optimistic = {};
+
+  /// 入场动效:第一次拉到菜、下拉刷新时各播一次
+  final EnterGate _enter = EnterGate();
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant DishManagePage old) {
+    super.didUpdateWidget(old);
+    // 切回这个 tab:页面一直留着(外层是 IndexedStack),菜可能已经在别处改了
+    if (widget.active && !old.active) _load();
   }
 
   Future<void> _load() async {
@@ -48,11 +77,25 @@ class _DishManagePageState extends State<DishManagePage> {
       return;
     }
     setState(() {
+      if (_dishes == null) _enter.open();
       _error = '';
       _dishes = dishes;
       _stocking = stocking;
     });
   }
+
+  Future<void> _pull() async {
+    setState(() => _enter.open(replay: true));
+    await _load();
+  }
+
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _errText(Object e) => e is ApiException ? e.message : '$e';
 
   /// 一键按建议补库存(可能不够卖的菜全部补到建议份数)
   Future<void> _adoptStocking() async {
@@ -63,14 +106,10 @@ class _DishManagePageState extends State<DishManagePage> {
         for (final s in short)
           {'dish_id': s['dish_id'] as int, 'stock': s['suggested'] as int},
       ]);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('已按建议补 ${short.length} 道菜的库存(估清自动解除)')));
+      _snack('已按建议补 ${short.length} 道菜的库存(估清自动解除)');
       _load();
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      _snack(_errText(e));
     }
   }
 
@@ -118,7 +157,7 @@ class _DishManagePageState extends State<DishManagePage> {
               Expanded(
                 child: Text('纯建议,不会自动改库存',
                     style:
-                        TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
+                        TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
               ),
               FilledButton.tonal(
                   onPressed: () {
@@ -133,127 +172,109 @@ class _DishManagePageState extends State<DishManagePage> {
     );
   }
 
-  /// 分类条:横向可滚,点一下只看这一类。
+  /// 左边的竖排分类(设计稿 6e)。**两类及以上才出现** —— 只有一类时它是纯噪音。
   ///
-  /// **这是菜品页唯一主动加的高度**(43px,#33 4.2)。换回来的是:
-  /// 100 道菜的店找一道菜,从「滚 N 屏」变成「点一次 + 半屏」。
-  /// 只有一个分类时不出现 —— 那时它是纯噪音。
-  Widget _categoryStrip(Map<String, List<Dish>> grouped, String? active) {
-    if (grouped.length < 2) return const SizedBox.shrink();
-    final total = grouped.values.fold<int>(0, (n, l) => n + l.length);
-    return SizedBox(
-      height: 43,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-        children: [
-          SzChip('全部 $total',
-              selected: active == null,
-              dense: true,
-              onTap: () => setState(() => _activeCategory = null)),
-          for (final e in grouped.entries) ...[
-            const SizedBox(width: 6),
-            SzChip('${e.key} ${e.value.length}',
-                selected: active == e.key,
-                dense: true,
-                onTap: () => setState(() => _activeCategory = e.key)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// 宽屏的左侧分类导航(#33 4.2 宽屏)。
-  ///
-  /// 和横向的 [_categoryStrip] 是同一份数据、同一个选中状态 ——
-  /// 两处各存一份迟早对不上。窄屏出横条、宽屏出这个,只换排法。
+  /// 顶上多一格「全部」:设计稿里没有,但原来的分类条就有,
+  /// 商家找一道记不清分类的菜时要靠它(选中的分类不存在了也会退回全部)。
   Widget _categoryRail(Map<String, List<Dish>> grouped, String? active) {
     final sz = Theme.of(context).sz;
+    final accent = Theme.of(context).colorScheme.primary;
     final total = grouped.values.fold<int>(0, (n, l) => n + l.length);
-    Widget row(String label, int count, bool on, VoidCallback onTap) => InkWell(
-          onTap: onTap,
-          child: Container(
-            color: on ? sz.claySoft : null,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-            child: Row(children: [
-              Expanded(
-                child: Text(label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: kFontBody,
-                        color: on ? sz.clay : sz.ink,
-                        fontWeight: on ? FontWeight.w600 : null)),
+    Widget item(String label, bool on, VoidCallback onTap) => Material(
+          color: on ? sz.surface : Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                border: Border(
+                    left: BorderSide(
+                        color: on ? accent : Colors.transparent, width: 3)),
               ),
-              Text('$count',
-                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-            ]),
+              padding: const EdgeInsets.fromLTRB(9, 14, 8, 14),
+              child: Text(label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: kFontBody,
+                      height: 1.3,
+                      fontWeight: on ? FontWeight.w600 : FontWeight.w400,
+                      color: on ? sz.ink : sz.inkMuted)),
+            ),
           ),
         );
-    return ListView(children: [
-      row('全部', total, active == null,
-          () => setState(() => _activeCategory = null)),
-      for (final e in grouped.entries)
-        row(e.key, e.value.length, active == e.key,
-            () => setState(() => _activeCategory = e.key)),
-    ]);
+    return ColoredBox(
+      color: sz.surfaceAlt,
+      child: ListView(children: [
+        item('全部 · $total', active == null,
+            () => setState(() => _activeCategory = null)),
+        for (final e in grouped.entries)
+          item('${e.key} · ${e.value.length}', active == e.key,
+              () => setState(() => _activeCategory = e.key)),
+      ]),
+    );
   }
 
   /// 提示组:备货 + 菜单体检。两条都是**条件性的**,没事时整组不出现。
   ///
   /// 原先是三张卡 428px(备货卡列明细、缺图卡三行解释、销量榜前三名)。
   /// #33 4.2 压到一组 ~127px:明细进弹层、解释进脚注、**销量榜整块砍掉**
-  /// —— 每行副标题已经有「月售 N」,对账页 AnalyticsPage 也明说包含
-  /// 「菜品排行」,那是同一份东西的第三份。零销量留下,因为它是待办。
-  Widget _hintsGroup({required int noPhoto, required int stale}) {
+  /// —— 对账页 AnalyticsPage 明说包含「菜品排行」,那是同一份东西的另一份。
+  /// 零销量留下,因为它是待办。
+  List<Widget> _hintRows({required int noPhoto, required int stale}) {
     final st = _stocking;
     final short = (st?['shortlist'] as List?) ?? [];
     final hasStocking = st != null && short.isNotEmpty;
     final hasCheck = noPhoto > 0 || stale > 0;
-    if (!hasStocking && !hasCheck) return const SizedBox.shrink();
+    if (!hasStocking && !hasCheck) return const [];
     final sz = Theme.of(context).sz;
     final notes = <String>[
       if (hasStocking) '备货是纯建议,不会自动改库存;点这一条看是哪几道',
-      if (noPhoto > 0) '缺图的菜在列表里显示店名首字占位',
+      if (noPhoto > 0) '缺图的菜在列表里显示菜名首字占位',
     ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      child: SzEntryGroup(
-        footnote: notes.isEmpty ? null : notes.join(' · '),
-        children: [
-          if (hasStocking)
-            SzEntryTile(
-              title: '${st['meal_label']}备货提示',
-              value: '${short.length} 道可能不够卖',
-              valueTone: sz.hold,
-              onTap: _stockingSheet,
-              trailing: InkWell(
-                onTap: _adoptStocking,
+    Widget rule(Widget child) => DecoratedBox(
+          decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: sz.line))),
+          child: child,
+        );
+    return [
+      if (hasStocking)
+        rule(SzEntryTile(
+          title: '${st['meal_label']}备货提示',
+          value: '${short.length} 道可能不够卖',
+          valueTone: sz.hold,
+          onTap: _stockingSheet,
+          trailing: InkWell(
+            onTap: _adoptStocking,
+            borderRadius: BorderRadius.circular(kRadiusSm),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: sz.claySoft,
                 borderRadius: BorderRadius.circular(kRadiusSm),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: sz.claySoft,
-                    borderRadius: BorderRadius.circular(kRadiusSm),
-                  ),
-                  child: Text('一键补货',
-                      style: TextStyle(fontSize: 12, color: sz.clay)),
-                ),
               ),
+              child: Text('一键补货',
+                  style: TextStyle(fontSize: kFontNote, color: sz.clay)),
             ),
-          if (hasCheck)
-            SzEntryTile(
-              title: '菜单体检',
-              value: [
-                if (noPhoto > 0) '$noPhoto 道缺图',
-                if (stale > 0) '$stale 道近 30 天零销量',
-              ].join(' · '),
-              valueTone: sz.hold,
-            ),
-        ],
-      ),
-    );
+          ),
+        )),
+      if (hasCheck)
+        rule(SzEntryTile(
+          title: '菜单体检',
+          value: [
+            if (noPhoto > 0) '$noPhoto 道缺图',
+            if (stale > 0) '$stale 道近 30 天零销量',
+          ].join(' · '),
+          valueTone: sz.hold,
+        )),
+      if (notes.isNotEmpty)
+        rule(Padding(
+          padding: const EdgeInsets.fromLTRB(kCardPad, 6, kCardPad, 8),
+          child: Text(notes.join(' · '),
+              style: TextStyle(
+                  fontSize: kFontMicro, height: 1.5, color: sz.inkMuted)),
+        )),
+    ];
   }
 
   Future<void> _edit([Dish? dish]) async {
@@ -262,30 +283,56 @@ class _DishManagePageState extends State<DishManagePage> {
     if (changed == true) _load();
   }
 
-  Future<void> _toggleOnSale(Dish dish, bool value) async {
-    try {
-      await widget.api.updateDish(dish.id, {'is_on_sale': value});
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
-
-  /// 补货(stock=100)。高峰期缺货一秒处理
+  /// 补货。高峰期缺货一秒处理
   Future<void> _setStock(Dish dish, int stock) async {
     try {
       await widget.api.updateDish(dish.id, {'stock': stock});
-      _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${dish.name}」已补货至 $stock')));
+      await _load();
+      _snack('「${dish.name}」已补货至 $stock');
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      _snack(_errText(e));
     }
+  }
+
+  /// 库存卖到 0 的菜,拨开关 = 补货。先问补多少 —— 一声不响补成 100 份的话,
+  /// 商家以为只是「恢复」,其实库存被改了
+  Future<void> _restockPrompt(Dish dish) async {
+    final controller =
+        TextEditingController(text: '${dish.dailyStock ?? 100}');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (d) => SzDialog(
+        title: Text('「${dish.name}」库存是 0'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('补了货才能接着卖。补到多少份?'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+                suffixText: '份', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(d, false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(d, true),
+              child: const Text('补货')),
+        ],
+      ),
+    );
+    // controller 不在这里 dispose:弹窗退场动画还要画几帧输入框,
+    // 这时候 dispose 会报「用了已释放的 controller」
+    final n = int.tryParse(controller.text.trim());
+    if (ok != true) return;
+    if (n == null || n <= 0) {
+      _snack('请输入大于 0 的份数');
+      return;
+    }
+    await _setStock(dish, n);
   }
 
   /// 置顶:把这道菜排到本分类最前(招牌菜该在第一屏,不该靠改分类名硬凑)。
@@ -295,9 +342,7 @@ class _DishManagePageState extends State<DishManagePage> {
         .map((d) => d.sort)
         .fold<int>(0, (a, b) => a < b ? a : b);
     if (sameCategory.isNotEmpty && sameCategory.first.id == dish.id) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${dish.name}」已经在最前面了')));
+      _snack('「${dish.name}」已经在最前面了');
       return;
     }
     try {
@@ -305,43 +350,53 @@ class _DishManagePageState extends State<DishManagePage> {
         {'dish_id': dish.id, 'sort': (minSort - 1).clamp(-9999, 9999)},
       ]);
       _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${dish.name}」已置顶到「${dish.category}」最前')));
+      _snack('「${dish.name}」已置顶到「${dish.category}」最前');
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      _snack(_errText(e));
     }
   }
 
-  /// 估清(今日售罄):库存清零打标,用户端灰态,次日 04:00 自动恢复
-  Future<void> _sellOut(Dish dish) async {
-    try {
-      await widget.api.sellOutDish(dish.id);
-      _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('「${dish.name}」已估清,明天 4 点自动恢复')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
-  }
+  /// 此刻能不能卖:上架、没估清、有库存
+  static bool _sellableOf(Dish d) =>
+      d.isOnSale && !d.soldOutToday && d.stock > 0;
 
-  Future<void> _cancelSellOut(Dish dish) async {
-    try {
-      final d = await widget.api.cancelSellOut(dish.id);
-      _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${dish.name}」已恢复,库存 ${d.stock}')));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+  bool _sellable(Dish d) => _optimistic[d.id] ?? _sellableOf(d);
+
+  /// 行上的开关。
+  ///
+  /// - 关:估清(今日售罄),明早 04:00 自动恢复;
+  /// - 开:估清的撤销估清;下架的重新上架;库存卖到 0 的先问补多少。
+  ///
+  /// 服务端 409 是「状态已经变了」(比如另一台手机刚估清过):
+  /// 说清楚现在是什么状态,再拉一遍,不当成故障报。
+  Future<void> _toggleSellable(Dish dish, bool on) async {
+    if (on && dish.isOnSale && !dish.soldOutToday && dish.stock <= 0) {
+      await _restockPrompt(dish);
+      return;
     }
+    setState(() => _optimistic[dish.id] = on);
+    try {
+      if (!on) {
+        await widget.api.sellOutDish(dish.id);
+        _snack('「${dish.name}」标为今日售罄,明早 04:00 自动恢复');
+      } else if (!dish.isOnSale) {
+        await widget.api.updateDish(dish.id, {'is_on_sale': true});
+        _snack('「${dish.name}」已重新上架');
+      } else {
+        final d = await widget.api.cancelSellOut(dish.id);
+        _snack(d.stock > 0
+            ? '「${dish.name}」恢复在售,库存 ${d.stock}'
+            : '「${dish.name}」撤销了售罄,但库存是 0 —— 补货后才能卖');
+      }
+    } on ApiException catch (e) {
+      _snack(e.statusCode == 409
+          ? '「${dish.name}」${e.message}(可能另一台设备刚改过),已刷新'
+          : e.message);
+    } catch (e) {
+      _snack(_errText(e));
+    }
+    await _load();
+    if (mounted) setState(() => _optimistic.remove(dish.id));
   }
 
   // ---- 批量操作(网页端早有,App 端此前只能一道一道点) ----
@@ -379,8 +434,7 @@ class _DishManagePageState extends State<DishManagePage> {
     final skipped = _selected.length - ids.length;
     if (ids.isEmpty) {
       _exitSelect();
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$label:选中的菜已经是这个状态了')));
+      _snack('$label:选中的菜已经是这个状态了');
       return;
     }
     setState(() => _batching = true);
@@ -399,10 +453,9 @@ class _DishManagePageState extends State<DishManagePage> {
     });
     _load();
     final tail = skipped > 0 ? '(另有 $skipped 道无需处理)' : '';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok == ids.length
-            ? '$label:${ids.length} 道已处理$tail'
-            : '$label:成功 $ok 道,失败 ${ids.length - ok} 道$tail')));
+    _snack(ok == ids.length
+        ? '$label:${ids.length} 道已处理$tail'
+        : '$label:成功 $ok 道,失败 ${ids.length - ok} 道$tail');
   }
 
   Future<void> _batchCategory() async {
@@ -441,9 +494,8 @@ class _DishManagePageState extends State<DishManagePage> {
 
   /// 缩略图。缺图的压一个角标在右下角(#33 4.2)。
   ///
-  /// 原先这个 chip 在 `trailing` 里,和估清按钮、上下架开关抢那一列 ——
-  /// 它挤窄标题列、逼副标题折行,每行 64→78。12 道全缺图就是 +168px,
-  /// 而角标是**压在已有的 48px 上**,零额外高度。
+  /// 角标是**压在已有的 48px 上**,零额外高度 —— 它原先在行尾和开关抢一列,
+  /// 把菜名挤窄、逼副标题折行。
   Widget _thumb(Dish dish) {
     final img = SzImage(
       url: dish.imageUrl.isEmpty ? '' : widget.api.resolveUrl(dish.imageUrl),
@@ -468,106 +520,247 @@ class _DishManagePageState extends State<DishManagePage> {
               borderRadius: const BorderRadius.vertical(
                   bottom: Radius.circular(kRadiusSm)),
             ),
-            child: const Text('缺图',
+            child: Text('缺图',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 9, height: 1.3, color: Colors.white)),
+                    fontSize: kFontMicro - 2, height: 1.3, color: sz.surface)),
           ),
         ),
       ]),
     );
   }
 
-  Widget _categoryHeader(String name) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-        child: Text(name,
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(color: Theme.of(context).colorScheme.primary)),
-      );
+  Widget _categoryHeader(String name) {
+    final sz = Theme.of(context).sz;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(kCardPad, 12, kCardPad, 6),
+      decoration:
+          BoxDecoration(border: Border(bottom: BorderSide(color: sz.line))),
+      child: Text(name,
+          style: TextStyle(
+              fontSize: kFontNote,
+              letterSpacing: 1,
+              fontWeight: FontWeight.w600,
+              color: sz.inkMuted)),
+    );
+  }
 
-  /// 菜品行。[sameCategory] 是同分类的菜,置顶要靠它算最小 sort
+  /// 行上的副标题:今天卖了几份;卖不了时说为什么、什么时候恢复。
+  (String, Color?) _metaOf(Dish d, SzColors sz) {
+    final unit = d.unit.isNotEmpty ? d.unit : '份';
+    if (!d.isOnSale) return ('已下架 · 用户看不到', sz.inkMuted);
+    // 估清 = 今日售罄,次日 04:00 由服务端清扫任务恢复
+    if (d.soldOutToday) return ('售罄 · 明早 04:00 自动恢复', sz.inkMuted);
+    if (d.stock <= 0) {
+      // 卖到 0 不是估清:只有设了每日回满的菜 04:00 会自己回来
+      return d.dailyStock != null
+          ? ('卖完了 · 明早 04:00 回满 ${d.dailyStock} $unit', sz.inkMuted)
+          // 这一种不会自己回来,要人动手:用 hold 提醒
+          : ('库存 0 · 补货后才能卖', sz.hold);
+    }
+    final parts = <String>[
+      '今日已卖 ${d.todaySold} $unit',
+      // 库存只在「管着库存」的时候说:设了每日回满,或者快卖完了
+      if (d.dailyStock != null || d.stock <= 10) '库存 ${d.stock}',
+      if (d.flashActive) '限时 · 原价 ${yuan(d.priceCents)}',
+    ];
+    return (parts.join(' · '), d.stock <= 10 ? sz.hold : null);
+  }
+
+  /// 菜品行(设计稿 6e)。[sameCategory] 是同分类的菜,置顶要靠它算最小 sort
   Widget _dishTile(Dish dish, List<Dish> sameCategory) {
-    return ListTile(
-      selected: _selected.contains(dish.id),
-      selectedTileColor: Theme.of(context).sz.claySoft.withValues(alpha: 0.4),
-      // **长按始终是置顶**:这是上一版就教给商家的手势,
-      // 改成"第一次长按进多选、第二次才置顶"会让老用户
-      // 按肌肉记忆连按两下,结果置顶了错的那道菜(写库且无撤销)。
-      // 多选走上方显式的「批量」按钮进入
-      onLongPress: _batching
-          ? null
-          : () => _selecting
-              ? _toggleSelect(dish)
-              : _pinToTop(dish, sameCategory),
-      leading: _selecting
-          ? Icon(
-              _selected.contains(dish.id)
-                  ? Icons.check_circle
-                  : Icons.radio_button_unchecked,
-              color: _selected.contains(dish.id)
-                  ? Theme.of(context).colorScheme.primary
-                  : Theme.of(context).sz.inkFaint,
-            )
-          : _thumb(dish),
-      title: Text(
-        dish.name,
-        style: dish.isOnSale
+    final sz = Theme.of(context).sz;
+    final selected = _selected.contains(dish.id);
+    final sellable = _sellable(dish);
+    final (meta, metaTone) = _metaOf(dish, sz);
+    // 卖不了的菜名、价格退一档:还要读得清(不用 inkFaint,那只给装饰)
+    final nameColor = sellable ? sz.ink : sz.inkMuted;
+    return Material(
+      color: selected ? sz.claySoft.withValues(alpha: 0.4) : sz.surface,
+      child: InkWell(
+        // **长按始终是置顶**:这是上一版就教给商家的手势,
+        // 改成"第一次长按进多选、第二次才置顶"会让老用户
+        // 按肌肉记忆连按两下,结果置顶了错的那道菜(写库且无撤销)。
+        // 多选走标题行「⋯」里的「批量操作」
+        onLongPress: _batching
             ? null
-            : TextStyle(
-                color: Theme.of(context).colorScheme.outline,
-                decoration: TextDecoration.lineThrough),
-      ),
-      subtitle: Text(
-        '${yuan(dish.effectivePriceCents)}'
-        '${dish.flashActive ? "(限时中,原价 ${yuan(dish.priceCents)})" : ""} · '
-        '${dish.soldOutToday ? "今日售罄(明日自动恢复)" : dish.stock == 0 ? "已售罄" : "库存 ${dish.stock}"}'
-        '${dish.dailyStock != null ? " · 每日回满${dish.dailyStock}" : ""}'
-        ' · 月售 ${dish.monthlySales}',
-        style: dish.stock == 0
-            ? TextStyle(color: Theme.of(context).colorScheme.error)
-            : null,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 缺图提示挪去了缩略图右下角(见 _thumb):它和估清按钮、
-          // 上下架开关挤同一列时,把标题列挤窄、副标题挤折行
-          // 批量执行中锁掉行内控件:否则能对正在批量处理的
-          // 同一道菜发一个反向请求,最后谁赢看运气
-          if (dish.isOnSale)
-            dish.soldOutToday
-                ? TextButton(
-                    onPressed: _batching ? null : () => _cancelSellOut(dish),
-                    child: const Text('恢复'))
-                : dish.stock > 0
-                    ? TextButton(
-                        onPressed: _batching ? null : () => _sellOut(dish),
-                        child: const Text('估清'))
-                    : TextButton(
-                        onPressed:
-                            _batching ? null : () => _setStock(dish, 100),
-                        child: const Text('补货')),
-          // 读屏用户听到的只有"开关",不知道是哪道菜的。
-          // 上下架直接决定这道菜能不能被点,按错了整天卖不出去
-          Semantics(
-            label: '${dish.name} ${dish.isOnSale ? "在售" : "已下架"}',
-            child: Switch(
-              value: dish.isOnSale,
-              onChanged: _batching ? null : (v) => _toggleOnSale(dish, v),
+            : () => _selecting
+                ? _toggleSelect(dish)
+                : _pinToTop(dish, sameCategory),
+        onTap: _batching
+            ? null
+            : () => _selecting ? _toggleSelect(dish) : _edit(dish),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(kCardPad, 12, kCardPad, 12),
+          decoration:
+              BoxDecoration(border: Border(bottom: BorderSide(color: sz.line))),
+          child: Row(children: [
+            _selecting
+                ? SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Icon(
+                      selected
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      color: selected
+                          ? Theme.of(context).colorScheme.primary
+                          : sz.inkMuted,
+                    ),
+                  )
+                : _thumb(dish),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(dish.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: kFontBodyLg + 0.5,
+                          fontWeight: FontWeight.w600,
+                          color: nameColor)),
+                  const SizedBox(height: 2),
+                  Text(meta,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: kFontNote,
+                          height: 1.35,
+                          color: metaTone ?? sz.inkMuted)),
+                ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 8),
+            // 价格在上、开关在下。开关的点击区是 48(戴手套也按得到),
+            // 视觉只有 36×20,多出来的那圈压在行的留白上,不把行撑高
+            SizedBox(
+              height: 48,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.topRight,
+                children: [
+                  Text(yuan(dish.effectivePriceCents),
+                      style: szMoney(
+                          fontSize: kFigureSm,
+                          fontWeight: FontWeight.w600,
+                          color: nameColor)),
+                  Positioned(
+                    right: -6,
+                    top: 12,
+                    child: SzSwitch(
+                      small: true,
+                      value: sellable,
+                      // 读屏用户听到的只有"开关",不知道是哪道菜的 ——
+                      // 按错了整天卖不出去
+                      semanticLabel:
+                          '${dish.name} ${sellable ? "在售" : "售罄"}',
+                      // 批量执行中锁掉行内开关:否则能对正在批量处理的
+                      // 同一道菜发一个反向请求,最后谁赢看运气
+                      onChanged: _batching || _selecting
+                          ? null
+                          : (v) => _toggleSellable(dish, v),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ]),
+        ),
       ),
-      onTap: _batching
-          ? null
-          : () => _selecting ? _toggleSelect(dish) : _edit(dish),
+    );
+  }
+
+  /// 「18 个在售 · 2 售罄」。下架的菜也在列表里,有就一并说出来
+  String _countsLabel(List<Dish> dishes) {
+    final onSale = dishes.where(_sellableOf).length;
+    final soldOut =
+        dishes.where((d) => d.isOnSale && !_sellableOf(d)).length;
+    final off = dishes.where((d) => !d.isOnSale).length;
+    return [
+      '$onSale 个在售',
+      if (soldOut > 0) '$soldOut 售罄',
+      if (off > 0) '$off 下架',
+    ].join(' · ');
+  }
+
+  /// 标题行(设计稿 6e):菜单 + 在售/售罄数 + 添加 + 「⋯」(批量、备货)
+  Widget _header() {
+    final sz = Theme.of(context).sz;
+    final dishes = _dishes;
+    final hasStocking =
+        ((_stocking?['shortlist'] as List?) ?? const []).isNotEmpty;
+    return SizedBox(
+      height: 56,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(kPagePad, 0, 4, 0),
+        child: Row(children: [
+          Expanded(
+            child: Text('菜单',
+                style: Theme.of(context).appBarTheme.titleTextStyle),
+          ),
+          if (dishes != null && dishes.isNotEmpty)
+            Flexible(
+              child: Text(_countsLabel(dishes),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: kFontBody, color: sz.inkMuted)),
+            ),
+          const SizedBox(width: 10),
+          if (!_selecting)
+            FilledButton.icon(
+              onPressed: () => _edit(),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('添加'),
+              style: smallFilledStyle().copyWith(
+                padding: const WidgetStatePropertyAll(
+                    EdgeInsets.fromLTRB(10, 0, 12, 0)),
+              ),
+            ),
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            icon: const Icon(Icons.more_horiz),
+            onSelected: (v) {
+              switch (v) {
+                case 'batch':
+                  setState(() => _selectMode = true);
+                case 'stocking':
+                  _stockingSheet();
+              }
+            },
+            itemBuilder: (_) => [
+              // 多选的显式入口(长按留给置顶,不重载手势)
+              const PopupMenuItem(
+                value: 'batch',
+                child: ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.checklist, size: 20),
+                  title: Text('批量操作'),
+                  subtitle: Text('上架 · 下架 · 估清 · 改分类'),
+                ),
+              ),
+              if (hasStocking)
+                const PopupMenuItem(
+                  value: 'stocking',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.inventory_2_outlined, size: 20),
+                    title: Text('备货建议'),
+                  ),
+                ),
+            ],
+          ),
+        ]),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
     final dishes = _dishes;
     Widget body;
     if (dishes == null) {
@@ -592,9 +785,8 @@ class _DishManagePageState extends State<DishManagePage> {
         final key = dish.category.isEmpty ? '未分类' : dish.category;
         grouped.putIfAbsent(key, () => []).add(dish);
       }
-      // 菜单体检的两个数(#33 4.2:销量榜整块砍掉了 —— 每行副标题已经有
-      // 「月售 N」,对账页 AnalyticsPage 明说包含「菜品排行」,那是同一份
-      // 东西的第三份。**只留零销量**:它是待办,排行榜不是)
+      // 菜单体检的两个数。零销量是待办;窗口是服务端的滚动 30 天,
+      // 所以文案写「近 30 天」,不写「本月」
       final stale =
           dishes.where((d) => d.isOnSale && d.monthlySales == 0).length;
       final noPhoto = dishes.where((d) => d.imageUrl.isEmpty).length;
@@ -606,90 +798,88 @@ class _DishManagePageState extends State<DishManagePage> {
 
       // 把「分类标题 + 该分类下的菜」拍平成一维,交给 ListView.builder 按需构建。
       // 原来是 ListView(children: [...]):菜单上百道时,首帧要把每一行的缩略图、
-      // 上下架开关、估清/补货按钮全建出来 —— 而卡住的那几百毫秒,商家正在接单
+      // 开关全建出来 —— 而卡住的那几百毫秒,商家正在接单
       final rows = <_MenuRow>[];
       for (final entry in grouped.entries) {
         if (active != null && entry.key != active) continue;
-        // 只筛出一个分类时不再重复它的名字 —— 分类条上已经高亮着
-        if (active == null) rows.add(_MenuRow.header(entry.key));
+        // 只筛出一个分类时不再重复它的名字 —— 左边分类栏上已经高亮着
+        if (active == null && grouped.length > 1) {
+          rows.add(_MenuRow.header(entry.key));
+        }
         for (final dish in entry.value) {
           rows.add(_MenuRow.dish(dish, entry.value));
         }
       }
-
-      // 顶部这几块是固定的,数量有限,直接建出来
-      final leading = <Widget>[
-            // 多选的显式入口(长按留给置顶,不重载手势)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Row(children: [
-                Text('共 ${dishes.length} 道 · 长按可置顶',
-                    style: TextStyle(
-                        fontSize: 12, color: Theme.of(context).sz.inkMuted)),
-                const Spacer(),
-                if (!_selecting)
-                  TextButton.icon(
-                    icon: const Icon(Icons.checklist, size: 18),
-                    label: const Text('批量'),
-                    onPressed: () => setState(() => _selectMode = true),
-                  ),
-              ]),
-            ),
-            // 宽屏走左侧分类导航,这条横向的就不出现了(见 _categoryRail)
-            if (MediaQuery.of(context).size.width < 900)
-              _categoryStrip(grouped, active),
-            _hintsGroup(noPhoto: noPhoto, stale: stale),
-      ];
-      Widget list() => ListView.builder(
-            // +1 是尾部留白,给悬浮的「新增菜品」按钮让位
+      final leading = _hintRows(noPhoto: noPhoto, stale: stale);
+      final list = ColoredBox(
+        color: sz.surface,
+        child: RefreshIndicator(
+          onRefresh: _pull,
+          child: ListView.builder(
+            key: ValueKey('menu-${_enter.epoch}'),
+            // +1 是尾部那句手势说明
             itemCount: leading.length + rows.length + 1,
             itemBuilder: (context, i) {
               if (i < leading.length) return leading[i];
               final j = i - leading.length;
-              if (j >= rows.length) return const SizedBox(height: 80);
+              if (j >= rows.length) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(kCardPad, 12, kCardPad, 32),
+                  child: Text('点一道菜改价、改库存、上下架;长按置顶到本分类最前',
+                      style: TextStyle(
+                          fontSize: kFontMicro, height: 1.5, color: sz.inkMuted)),
+                );
+              }
               final row = rows[j];
               final dish = row.dish;
-              return dish == null
-                  ? _categoryHeader(row.category!)
-                  : _dishTile(dish, row.siblings);
+              if (dish == null) return _categoryHeader(row.category!);
+              return EnterOnce(
+                key: ValueKey(dish.id),
+                gate: _enter,
+                index: j,
+                child: _dishTile(dish, row.siblings),
+              );
             },
-          );
-      body = RefreshIndicator(
-        onRefresh: _load,
-        child: LayoutBuilder(builder: (context, c) {
-          // 宽屏(≥900)改主从(#33 4.2 宽屏):左边固定 220 的分类导航,
-          // 右边菜品列表。宽屏正是「批量改菜」的场景 —— 一整屏只看得见
-          // 十几行菜、分类还要横向滚,那是把手机布局拉大而已。
-          //
-          // 判据是**可用宽度**不是平台:平板横屏、网页版拉宽都算。
-          if (c.maxWidth < 900 || grouped.length < 2) return list();
-          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SizedBox(
-              width: 220,
-              child: _categoryRail(grouped, active),
-            ),
-            VerticalDivider(width: 1, color: Theme.of(context).sz.line),
-            Expanded(child: list()),
-          ]);
-        }),
+          ),
+        ),
       );
+      body = grouped.length < 2
+          ? list
+          : LayoutBuilder(builder: (context, c) {
+              // 窄屏 88(设计稿),宽屏放宽 —— 长分类名在 88 里要折两行
+              final rail = c.maxWidth >= 900 ? 168.0 : 88.0;
+              return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(width: rail, child: _categoryRail(grouped, active)),
+                    Expanded(child: list),
+                  ]);
+            });
     }
 
     return Scaffold(
-      body: body,
+      body: Column(children: [
+        _header(),
+        Expanded(child: body),
+      ]),
       // 多选态:底部条给批量动作,别占常驻空间
       bottomNavigationBar: _selecting
           ? SafeArea(
               child: Container(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).sz.surface,
-                  border: Border(
-                      top: BorderSide(color: Theme.of(context).sz.line)),
+                  color: sz.surface,
+                  border: Border(top: BorderSide(color: sz.line)),
                 ),
+                // 动作一排五个,窄屏大字放不下时横着滑,一个都不藏
                 child: Row(children: [
                   Text('已选 ${_selected.length}'),
-                  const Spacer(),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      reverse: true,
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (_batching)
                     const Padding(
                       padding: EdgeInsets.only(right: 12),
@@ -729,17 +919,13 @@ class _DishManagePageState extends State<DishManagePage> {
                           : () => _batch('上架', (id) => widget.api
                               .updateDish(id, {'is_on_sale': true})),
                       child: const Text('上架')),
+                      ]),
+                    ),
+                  ),
                 ]),
               ),
             )
           : null,
-      floatingActionButton: _selecting
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: () => _edit(),
-              icon: const Icon(Icons.add),
-              label: const Text('新增菜品'),
-            ),
     );
   }
 }
@@ -796,6 +982,10 @@ class _DishEditPageState extends State<DishEditPage> {
       TextEditingController(text: widget.dish?.serveWindow ?? '');
   late String _imageUrl = widget.dish?.imageUrl ?? '';
   late bool _isAlcohol = widget.dish?.isAlcohol ?? false;
+
+  /// 上架(在菜单里显示)。列表行上的开关改管「今日售罄」之后,
+  /// 永久的上下架落在这里和批量操作里
+  late bool _onSale = widget.dish?.isOnSale ?? true;
   bool _uploading = false;
   bool _saving = false;
 
@@ -937,6 +1127,7 @@ class _DishEditPageState extends State<DishEditPage> {
           'stock': stock,
           'daily_stock': dailyStock, // null = 关闭每日回满
           'is_alcohol': _isAlcohol,
+          'is_on_sale': _onSale,
           'image_url': _imageUrl,
           'description': _description.text.trim(),
           'badges': _badges.toList(),
@@ -968,8 +1159,8 @@ class _DishEditPageState extends State<DishEditPage> {
           // 保存在第三屏 —— 一次改价 2 触摸 + 2 滚动。现在两个框和常驻的
           // 保存条都在首屏,0 滚动。
           //
-          // **上下架没有搬过来**:它在列表页每一行上已经是 1 触摸的开关,
-          // 编辑页再放一个只会多出第二个状态源(#33 第 6 节的同类问题)。
+          // 上下架在这一页的最下面(见「上架」开关):列表行上的开关
+          // 2026-09 起管的是「今日售罄」,永久下架是低频动作,不和它挤一处。
           Row(children: [
             Expanded(
               child: TextField(
@@ -1019,7 +1210,7 @@ class _DishEditPageState extends State<DishEditPage> {
                                   color:
                                       Theme.of(context).colorScheme.outline),
                               const SizedBox(height: 4),
-                              const Text('选菜品图', style: TextStyle(fontSize: 12)),
+                              const Text('选菜品图', style: TextStyle(fontSize: kFontNote)),
                             ],
                           )
                         : Image(image: szNetImage(widget.api.resolveUrl(_imageUrl)),
@@ -1057,7 +1248,7 @@ class _DishEditPageState extends State<DishEditPage> {
           Wrap(spacing: 6, runSpacing: 2, children: [
             for (final badge in kDishBadges)
               FilterChip(
-                label: Text(badge, style: const TextStyle(fontSize: 12)),
+                label: Text(badge, style: const TextStyle(fontSize: kFontNote)),
                 selected: _badges.contains(badge),
                 visualDensity: VisualDensity.compact,
                 onSelected: (on) => setState(() {
@@ -1111,7 +1302,7 @@ class _DishEditPageState extends State<DishEditPage> {
               padding: const EdgeInsets.only(top: 8),
               child: Text(_grossHint!,
                   style: TextStyle(
-                      fontSize: 12,
+                      fontSize: kFontNote,
                       color: Theme.of(context).colorScheme.onSurfaceVariant)),
             ),
           const SizedBox(height: 12),
@@ -1123,12 +1314,23 @@ class _DishEditPageState extends State<DishEditPage> {
                   helperText: '设置后每天凌晨 4 点库存自动重置为该值,估清同时解除',
                   border: OutlineInputBorder())),
           const SizedBox(height: 4),
+          if (widget.dish != null)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('上架(在菜单里显示)'),
+              subtitle: const Text(
+                  '关掉就是下架,用户看不到这道菜。只是今天卖完了的话,'
+                  '用菜单列表里那个开关标售罄,明早 04:00 自动恢复',
+                  style: TextStyle(fontSize: kFontMicro)),
+              value: _onSale,
+              onChanged: (v) => setState(() => _onSale = v),
+            ),
           // 酒类标记:依法只售成年人,勾选后用户须实名且成年才能下单
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('酒类商品'),
             subtitle: const Text('勾选后用户需实名认证且年满 18 岁才能购买;小票与骑手端会提示查验收件人',
-                style: TextStyle(fontSize: 11)),
+                style: TextStyle(fontSize: kFontMicro)),
             value: _isAlcohol,
             onChanged: (v) => setState(() => _isAlcohol = v),
           ),

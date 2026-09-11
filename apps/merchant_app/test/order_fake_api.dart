@@ -29,6 +29,7 @@ Map<String, dynamic> orderJson({
   String remark = '',
   String cancelReason = '',
   int refund = 0,
+  String contactPhone = '138****3382',
 }) =>
     {
       'order_no': no,
@@ -45,6 +46,7 @@ Map<String, dynamic> orderJson({
       'address': '望京 SOHO T1 座 2308 室',
       'lat': 39.99,
       'lng': 116.47,
+      'contact_phone': contactPhone,
       'remark': remark,
       'cancel_reason': cancelReason,
       'refund_cents': refund,
@@ -104,11 +106,23 @@ Map<String, dynamic> merchantTodayJson({int orders = 0, int gmv = 0}) => {
 ///
 /// 用来证明「待接单是不是真的单独按状态拉了一次」——
 /// 只看屏幕上的数字分不出「服务端给的」和「凑巧对上的」。
+///
+/// [writes] 记下写操作(`POST /orders/{no}/transition`、`PATCH /merchants/me`),
+/// 「全部接单」「关店」这类动作要靠它证明请求真的发出去了、发了几次。
 class OrdersRequestLog {
   final List<Map<String, String>> calls = [];
+  final List<(String method, String path, Map<String, dynamic> body)> writes =
+      [];
 
   List<Map<String, String>> get byStatus =>
       calls.where((q) => q.containsKey('status')).toList();
+
+  /// 接了哪几单(按发生顺序)
+  List<String> get accepted => [
+        for (final (_, path, body) in writes)
+          if (path.endsWith('/transition') && body['to_status'] == 'accepted')
+            path.split('/')[2],
+      ];
 }
 
 /// 造一个只认订单页那几条路径的 ApiClient。
@@ -117,17 +131,44 @@ class OrdersRequestLog {
 /// 假服务端照 `/orders` 的真口径切片(`before` 严格小于、`limit` 上限 50、
 /// `status` 精确过滤),而不是「不管问什么都回同一批」——
 /// 假服务端比真服务端宽松的话,测试守不住任何东西。
+///
+/// 看板要的另外几条:[shop] 是 `/merchants/me`(30 秒刷新会拉),
+/// [daily] 是 `/merchants/me/finance/daily`(台面上的今日实收)。
+/// 不给就回空对象 —— 和老版本一样,那一块安静地少显示。
 ApiClient orderFakeApi({
   required List<Map<String, dynamic>> pages,
   Map<String, dynamic>? todos,
   Map<String, dynamic>? today,
   OrdersRequestLog? log,
+  Map<String, dynamic>? shop,
+  List<Map<String, dynamic>>? daily,
 }) {
   return ApiClient(
     baseUrl: 'http://test.local',
     httpClient: MockClient((req) async {
       Object? payload;
-      switch (req.url.path) {
+      final path = req.url.path;
+      if (req.method != 'GET') {
+        final body = req.body.isEmpty
+            ? <String, dynamic>{}
+            : (jsonDecode(req.body) as Map).cast<String, dynamic>();
+        log?.writes.add((req.method, path, body));
+        // 状态流转:照真服务端的样子,回那一单的新状态
+        if (path.startsWith('/orders/') && path.endsWith('/transition')) {
+          final no = path.split('/')[2];
+          final row = pages.firstWhere((o) => o['order_no'] == no,
+              orElse: () => orderJson(no: no));
+          payload = {...row, 'status': body['to_status']};
+          return http.Response(jsonEncode(payload), 200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+        if (path == '/merchants/me' && shop != null) {
+          payload = {...shop, ...body};
+          return http.Response(jsonEncode(payload), 200,
+              headers: {'content-type': 'application/json; charset=utf-8'});
+        }
+      }
+      switch (path) {
         case '/orders':
           final q = req.url.queryParameters;
           log?.calls.add(q);
@@ -150,6 +191,10 @@ ApiClient orderFakeApi({
           payload = today ?? merchantTodayJson();
         case '/merchants/me/todos':
           payload = todos ?? <String, dynamic>{'pending_orders': 0};
+        case '/merchants/me':
+          payload = shop ?? <String, dynamic>{};
+        case '/merchants/me/finance/daily':
+          payload = daily ?? <String, dynamic>{};
         case '/announcements':
           payload = <Map<String, dynamic>>[];
         default:
@@ -197,9 +242,10 @@ List<String> textsPaintingOutside(WidgetTester tester) {
   return bad;
 }
 
-/// 订单卡内容区的右边界:屏宽 − 12(卡外边距)− 1(描边)− 12(卡内边距)。
-/// 见 `main.dart` 订单卡的 `margin` / `Border.all` / `padding`。
-double cardContentRight(double screenWidth) => screenWidth - 25;
+/// 订单卡内容区的右边界:屏宽 − 18(卡外边距 kPagePad)− 1(描边)
+/// − 14(卡内边距 kCardPad)。见 `main.dart` 订单卡的 margin / Border / padding
+/// (2026-09 浅色定稿:页边距 18、卡内边距 14,原来是 12 / 12)。
+double cardContentRight(double screenWidth) => screenWidth - 33;
 
 /// 有哪些按钮被画到了订单卡外面。
 ///

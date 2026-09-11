@@ -84,7 +84,7 @@ class _MerchantPromisesPageState extends State<MerchantPromisesPage> {
                 : '你现在是 ${(rate * 100).toStringAsFixed(1)}%。'
                     '月度重算时取「档位费率」和「你现在的费率」里更低的那个 —— '
                     '手工给你调低过的店,重算绝不会把它调回去。',
-            verify: '对账页「阶梯佣金」看你的真实费率与下一档还差多少单',
+            verify: '账本页「阶梯佣金」看你的真实费率与下一档还差多少单',
             onTap: _toFinance,
           ),
 
@@ -93,7 +93,7 @@ class _MerchantPromisesPageState extends State<MerchantPromisesPage> {
             '配送费不抽成',
             '佣金只按**餐费**计。配送费、打包费不进佣金基数 —— '
             '配送费全额归骑手,平台一分不留。',
-            verify: '对账页每一单都拆开列:餐费 / 佣金 / 到手,自己加一遍',
+            verify: '账本页每一单都拆开列:餐费 / 佣金 / 到手,自己加一遍',
             onTap: _toFinance,
           ),
 
@@ -127,7 +127,7 @@ class _MerchantPromisesPageState extends State<MerchantPromisesPage> {
             '**不排名、不扣分、不影响你在用户端的曝光。** '
             '理由很实在:一旦这个数影响生意,你就会开始为它经营 —— '
             '比如菜还没好先点「出餐」—— 那这个数就废了,骑手和用户也跟着倒霉。',
-            verify: '看板「出餐时长分布」里这条红线原样写着',
+            verify: '店铺页「经营趋势」的「出餐时长分布」里这条红线原样写着',
             onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => DashboardPage(api: widget.api))),
           ),
@@ -145,7 +145,7 @@ class _MerchantPromisesPageState extends State<MerchantPromisesPage> {
           const SizedBox(height: 8),
           Text(
             '这几条写进代码里,不是写在这一页上。'
-            '哪天我们自己违背了,你在对账页和看板上会先看出来。',
+            '哪天我们自己违背了,你在账本页和经营趋势上会先看出来。',
             style: TextStyle(fontSize: 11.5, height: 1.6, color: sz.inkMuted),
           ),
         ],

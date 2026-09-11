@@ -12,6 +12,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'real_fonts.dart';
 import 'shop_fake_api.dart';
 
 /// 店铺页三种状态的截图(真机口径 390×844)。
@@ -29,77 +30,43 @@ import 'shop_fake_api.dart';
 /// 是一屏黑方块 —— 那种图既看不出问题也证明不了什么。
 /// 这里把项目真正用的三套字体和 Material 图标都装上,截出来的才是商家看到的。
 void main() {
-  const bg = Color(0xFFFFFFFF);
-
   Future<void> loadFonts() async {
-    Future<void> load(String family, List<String> paths) async {
-      final loader = FontLoader(family);
-      for (final p in paths) {
-        final f = File(p);
-        if (!f.existsSync()) continue;
-        loader.addFont(
-            f.readAsBytes().then((b) => ByteData.view(Uint8List.fromList(b).buffer)));
-      }
+    // 字族名必须带 packages/superz_shared/ 前缀 —— brand.dart 的 kSansFamily 等
+    // 就是这么叫的(依赖包的字体在 FontManifest 里注册成这个名字)。
+    // 这里原来按裸名 'SzSans' 装,和主题要的名字对不上,截图里的衬线数字
+    // 其实一直是回落字体。见 real_fonts.dart
+    await loadRealFonts();
+    final loader = FontLoader('MaterialIcons');
+    final icons = File('build/unit_test_assets/fonts/MaterialIcons-Regular.otf');
+    if (icons.existsSync()) {
+      loader.addFont(icons
+          .readAsBytes()
+          .then((b) => ByteData.view(Uint8List.fromList(b).buffer)));
       await loader.load();
     }
-
-    const shared = '../../packages/shared/assets/fonts';
-    // SzSans / SzSerif 是拉丁子集,**不含 CJK 字形**(brand.dart 的注释
-    // 就写着「中文一律回落系统字」)。测试里没有系统字,所以给这两族
-    // 各补一份中文子集,不然凡是显式指定了字族的地方都是方块
-    const cjk = '$shared/SzSerifCJK-Regular.ttf';
-    await load('SzSans',
-        ['$shared/SzSans-Regular.ttf', '$shared/SzSans-Semibold.ttf', cjk]);
-    await load('SzSerif',
-        ['$shared/SzSerif-Regular.ttf', '$shared/SzSerif-Semibold.ttf', cjk]);
-    await load('SzSerifCJK',
-        ['$shared/SzSerifCJK-Regular.ttf', '$shared/SzSerifCJK-Semibold.ttf']);
-    // ⚠️ 中文的回落链(brand.dart 的 `_cjkFallback`)指的是**系统字体**
-    // ['PingFang SC', 'Noto Sans CJK SC', 'Heiti SC'] —— widget 测试里
-    // 一个都不存在,于是整屏中文渲染成方块(第一版截出来就是那样)。
-    // 拿打包的思源宋体子集顶上这三个名字,只是替系统字占位。
-    for (final sys in ['PingFang SC', 'Noto Sans CJK SC', 'Heiti SC']) {
-      await load(sys, ['$shared/SzSerifCJK-Regular.ttf']);
-    }
-    // 正文的默认字族也铺上中文字形,否则没写 fontFamily 的那些 Text 还是方块
-    await load('Roboto', ['$shared/SzSerifCJK-Regular.ttf']);
-    await load('MaterialIcons',
-        ['build/unit_test_assets/fonts/MaterialIcons-Regular.otf']);
   }
 
-  /// 截图用的主题。
-  ///
-  /// ⚠️ `brandTheme` 里没写 `fontFamily` 的那些样式(bodyMedium 之类)
-  /// 在 widget 测试里会落到 **Ahem** —— 每个字符都是一个实心方块,
-  /// 而 Ahem 号称"覆盖所有字形",于是 `fontFamilyFallback` 永远不会触发。
-  /// 只补 fallback 是没用的(第二版截出来 ListTile 的副标题仍是灰块),
-  /// 必须把主字族显式指过去。
+  /// 截图用的主题:商家端那一套(碗色主强调),外加一处测试专用的补丁 ——
+  /// 组件主题里**没写字族**的样式(按钮文字、AppBar 标题)在真机上落到系统字,
+  /// 测试环境没有系统字,不补就是一排方块。
   ThemeData goldenTheme() {
-    final base = brandTheme(Brightness.light, density: SzDensity.operate);
-    TextStyle? fix(TextStyle? s) => s?.copyWith(
-        fontFamily: s.fontFamily ?? 'SzSans',
-        fontFamilyFallback: const ['PingFang SC', 'SzSerifCJK']);
+    final base = brandTheme(Brightness.light,
+        density: SzDensity.operate, accentTone: 0);
+    TextStyle? fix(TextStyle? s) => (s ?? const TextStyle()).copyWith(
+        fontFamily: kSansFamily, fontFamilyFallback: const ['PingFang SC']);
+    ButtonStyle fixButton(ButtonStyle? b) => (b ?? const ButtonStyle())
+        .copyWith(
+            textStyle: WidgetStatePropertyAll(
+                fix(b?.textStyle?.resolve(const <WidgetState>{}))));
     return base.copyWith(
-      textTheme: base.textTheme.apply(
-          fontFamily: 'SzSans',
-          fontFamilyFallback: const ['PingFang SC', 'SzSerifCJK']),
-      listTileTheme: base.listTileTheme.copyWith(
-        titleTextStyle: fix(base.listTileTheme.titleTextStyle),
-        subtitleTextStyle: fix(base.listTileTheme.subtitleTextStyle),
-      ),
       appBarTheme: base.appBarTheme
           .copyWith(titleTextStyle: fix(base.appBarTheme.titleTextStyle)),
-      // 按钮的文字样式走 WidgetStateProperty,textTheme.apply 盖不到它们 ——
-      // 不补的话「立即恢复」「同意退款」这些都是方块
-      textButtonTheme: TextButtonThemeData(
-          style: (base.textButtonTheme.style ?? const ButtonStyle())
-              .copyWith(textStyle: WidgetStatePropertyAll(fix(const TextStyle())))),
-      filledButtonTheme: FilledButtonThemeData(
-          style: (base.filledButtonTheme.style ?? const ButtonStyle())
-              .copyWith(textStyle: WidgetStatePropertyAll(fix(const TextStyle())))),
+      textButtonTheme:
+          TextButtonThemeData(style: fixButton(base.textButtonTheme.style)),
+      filledButtonTheme:
+          FilledButtonThemeData(style: fixButton(base.filledButtonTheme.style)),
       outlinedButtonTheme: OutlinedButtonThemeData(
-          style: (base.outlinedButtonTheme.style ?? const ButtonStyle())
-              .copyWith(textStyle: WidgetStatePropertyAll(fix(const TextStyle())))),
+          style: fixButton(base.outlinedButtonTheme.style)),
     );
   }
 
@@ -117,16 +84,17 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  /// 把整个 tab 壳子搭出来:AppBar(营业开关)+ 可选的证照横幅 + 店铺页。
+  /// 把整个 tab 壳子搭出来:可选的证照横幅 + 店铺页 + 底部导航。
   /// 截的是商家真正看到的那一屏,不是脱了壳的 ListView。
+  ///
+  /// 2026-09 浅色定稿(设计稿 6i)起店铺 tab 没有标题栏:身份行就是第一行,
+  /// 营业开关从标题栏挪进了页面里的那张卡
   Future<void> pumpFrame(
     WidgetTester t, {
     required Map<String, dynamic> shop,
     Map<String, dynamic>? todos,
     List<Map<String, dynamic>> afterSales = const [],
     Widget? banner,
-    required String openLabel,
-    required bool isOpen,
   }) async {
     final api = shopFakeApi(shop: shop, todos: todos, afterSales: afterSales);
     await api.login('13800000009', 'pw');
@@ -141,39 +109,28 @@ void main() {
         data: const MediaQueryData(
             size: Size(390, 844),
             padding: EdgeInsets.only(top: 47, bottom: 34)),
-        // SzPageScaffold 不是 Scaffold:带 appBar 的页面在宽屏上要限宽,
-        // 走查用的壳也得和真页面一致,否则 golden 量的不是线上那个布局
-        child: SzPageScaffold(
-          backgroundColor: bg,
-          appBar: AppBar(
-            title: const Text('店铺'),
-            actions: [
-              IconButton(
-                  icon: const Icon(Icons.local_fire_department_outlined),
-                  onPressed: () {}),
-              Row(children: [
-                const Icon(Icons.notifications_active, size: 18),
-                const SizedBox(width: 8),
-                Text(openLabel),
-                Switch(value: isOpen, onChanged: (_) {}),
-                const SizedBox(width: 8),
-              ]),
-            ],
+        child: Scaffold(
+          body: SafeArea(
+            bottom: false,
+            child: Column(children: [
+              if (banner != null) banner,
+              Expanded(child: ShopTabPage(api: api, onOpenFinance: () {})),
+            ]),
           ),
-          body: Column(children: [
-            if (banner != null) banner,
-            Expanded(child: ShopTabPage(api: api, onOpenFinance: () {})),
-          ]),
           bottomNavigationBar: NavigationBar(
-            selectedIndex: 3,
+            selectedIndex: 4,
             destinations: const [
+              NavigationDestination(
+                  icon: Icon(Icons.dashboard_outlined), label: '看板'),
               NavigationDestination(
                   icon: Icon(Icons.receipt_long_outlined), label: '订单'),
               NavigationDestination(
-                  icon: Icon(Icons.restaurant_menu_outlined), label: '菜品'),
+                  icon: Icon(Icons.menu_book_outlined), label: '菜单'),
               NavigationDestination(
-                  icon: Icon(Icons.bar_chart_outlined), label: '对账'),
-              NavigationDestination(icon: Icon(Icons.store), label: '店铺'),
+                  icon: Icon(Icons.account_balance_wallet_outlined),
+                  label: '账本'),
+              NavigationDestination(
+                  icon: Icon(Icons.storefront), label: '店铺'),
             ],
           ),
         ),
@@ -185,9 +142,7 @@ void main() {
   testWidgets('① 正常营业', (t) async {
     await pumpFrame(t,
         shop: shopJson(),
-        todos: todosJson(badUnreplied: 3, messagesUnread: 1),
-        openLabel: '营业中',
-        isOpen: true);
+        todos: todosJson(badUnreplied: 3, messagesUnread: 1));
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/shop_01_open.png'));
   });
@@ -203,9 +158,7 @@ void main() {
             // 用本地墙钟 14:00 折成 UTC:`_hhmmLocal` 会把它折回本地,
             // 于是任何机器上都稳定显示「14:00 自动恢复」,截图可复现
             closedUntil: DateTime(2030, 8, 21, 14).toUtc().toIso8601String()),
-        todos: todosJson(badUnreplied: 3),
-        openLabel: '已打烊',
-        isOpen: false);
+        todos: todosJson(badUnreplied: 3));
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/shop_02_resting.png'));
   });
@@ -238,7 +191,7 @@ void main() {
                         const SizedBox(height: 2),
                         Text('到期后有 7 天宽限,逾期自动停业。点此提交新证',
                             style: TextStyle(
-                                fontSize: 12,
+                                fontSize: kFontNote,
                                 color: scheme.onSecondaryContainer)),
                       ]),
                 ),
@@ -246,9 +199,7 @@ void main() {
               ]),
             ),
           );
-        }),
-        openLabel: '营业中',
-        isOpen: true);
+        }));
     await expectLater(find.byType(MaterialApp),
         matchesGoldenFile('goldens/shop_03_license.png'));
   });

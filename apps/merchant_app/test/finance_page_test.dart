@@ -11,7 +11,7 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'order_fake_api.dart' show setPhoneViewport;
 
-/// 对账页:这一页上的每一个百分数和每一句「共 N 条」都得是真的。
+/// 账本页(原「对账」):这一页上的每一个百分数和每一句「共 N 条」都得是真的。
 ///
 /// ## 为什么这一页格外不能错
 ///
@@ -105,12 +105,15 @@ void main() {
       {double height = 4600}) async {
     setPhoneViewport(t, Size(390, height));
     await t.pumpWidget(MaterialApp(
-      theme: brandTheme(Brightness.light, density: SzDensity.operate),
+      theme: brandTheme(Brightness.light,
+          density: SzDensity.operate, accentTone: 0),
       home: Scaffold(
         body: Align(
           alignment: Alignment.topLeft,
           child: SizedBox(
-              width: 390, height: height, child: FinancePage(api: api)),
+              width: 390,
+              height: height,
+              child: FinancePage(api: api, title: '账本')),
         ),
       ),
     ));
@@ -126,156 +129,212 @@ void main() {
       .toList();
 
 
-  /// #33 4.3 的三条判据。指标是那句原话:
-  /// 「今天到手多少 / 为什么是这个数 / 能不能提出来」这三件事在第几屏。
+  /// 某一天的 key(yyyy-MM-dd),[daysAgo] 天前
+  String dayKey(int daysAgo) {
+    final d = DateTime.now().subtract(Duration(days: daysAgo));
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+  }
+
+  /// 近 [n] 天,每天一行
+  List<Map<String, dynamic>> lastDays(int n, {double rate = 0.045}) => [
+        for (var i = 0; i < n; i++)
+          dayJson(dayKey(i), 10 + i, 10000 + i * 100, rate),
+      ];
+
+  /// 台面上那个大数(SzRollingAmount)的分
+  int heroCents(WidgetTester t) =>
+      t.widget<SzRollingAmount>(find.byType(SzRollingAmount)).cents;
+
+  Future<void> pickPeriod(WidgetTester t, String label) async {
+    await t.tap(find.descendant(
+        of: find.byType(SzTextTabs), matching: find.text(label)));
+    await t.pump();
+  }
+
+  /// 设计稿 6g:台面(一段时间的实收)+ 按日结算表。
   ///
-  /// 改之前:首屏 645px 里**没有一个「今天」的数字**(今日实收在 y=806)。
-  group('对账页首屏要答得出「今天到手多少」', () {
-    testWidgets('今日实收落在首屏 645 以内', (t) async {
-      await pumpFinance(t, financeFakeApi());
-      final row = find.textContaining('今日实收');
-      expect(row, findsOneWidget);
-      final y = t.getTopLeft(row).dy;
-      expect(y, lessThan(645),
-          reason: '可视区是 844 − 47(安全区) − 56(AppBar) − 96(底部导航) = 645。'
-              '今日实收在 y=$y —— 商家要滚一屏才知道今天挣了多少');
+  /// #33 4.3 的判据还在:「今天到手多少 / 为什么是这个数 / 能不能提出来」
+  /// 要在首屏答得出来 —— 只是答法换成了「这个月的实收 + 表里今天那一行」。
+  group('账本首屏答得出「到手多少、为什么是这个数」', () {
+    testWidgets('本月实收和今天那一行都在首屏 645 以内', (t) async {
+      await pumpFinance(t, financeFakeApi(daily: lastDays(1)));
+      final hero = find.byType(SzRollingAmount);
+      expect(hero, findsOneWidget);
+      expect(t.getBottomLeft(hero).dy, lessThan(645));
+      final now = DateTime.now();
+      final todayRow = find.text('${now.month}/${now.day}');
+      expect(todayRow, findsOneWidget, reason: '表里没有今天那一行');
+      expect(t.getBottomLeft(todayRow).dy, lessThan(645),
+          reason: '可视区是 844 − 47(安全区) − 56(标题行) − 96(底部导航) = 645。'
+              '今天到手多少要滚一屏才看得到');
     });
 
-    testWidgets('「钱去哪了」的等式三行一行不少', (t) async {
-      await pumpFinance(t, financeFakeApi());
-      // 流水 − 佣金 = 实收。这个等式闭合在 SzLedgerCard 上,
-      // 那是账目透明的表达 —— 为省地方砍掉其中任何一行,等式就断了
-      expect(find.text('菜品流水'), findsOneWidget);
-      expect(find.text('平台佣金'), findsOneWidget);
-      expect(find.textContaining('今日实收'), findsOneWidget);
+    testWidgets('「菜价 − 平台 = 实收」闭合在台面上', (t) async {
+      final rows = lastDays(3);
+      await pumpFinance(t, financeFakeApi(daily: rows));
+      // 本月里有几天取决于今天是几号:只算落在这个月的那几行
+      final now = DateTime.now();
+      final inMonth = [
+        for (final r in rows)
+          if (DateTime.parse(r['day'] as String).month == now.month) r,
+      ];
+      final food = inMonth.fold<int>(0, (s, r) => s + (r['food_cents'] as int));
+      final fee =
+          inMonth.fold<int>(0, (s, r) => s + (r['commission_cents'] as int));
+      final net = inMonth.fold<int>(0, (s, r) => s + (r['net_cents'] as int));
+      expect(net, food - fee, reason: '(前置)假数据自己要平');
+      expect(heroCents(t), net,
+          reason: '台面的大数就是这一期的实收合计,不是今天、也不是钱包余额');
+      expect(find.text('菜价'), findsOneWidget);
+      expect(find.text('平台 4.5%'), findsOneWidget);
+      expect(find.textContaining('· 实收'), findsOneWidget);
+      // 两格结构性的 0:配送费全额归骑手、平台不卖排名位
+      expect(find.text('配送费抽'), findsOneWidget);
+      expect(find.text('推广位'), findsOneWidget);
     });
 
     testWidgets('同一个数不写两遍:hero 卡不许回来', (t) async {
       await pumpFinance(t, financeFakeApi());
-      // 改之前台面**上方**还有一张 MoneyHeroCard,显示的是同一个「今日实收」。
-      // #33 4.3 砍掉它、给台面合计行加 hero 档(26px)补回视觉重量。
-      // 这条断言防的是有人觉得"首屏不够醒目"又把那张卡加回来。
-      //
-      // 注意不能拿「这个数出现几次」来判:按日账单里今天那一行本来就是
-      // 同一个数,那不是重复,那是列表里含今天
+      // 台面上方原来还有一张 MoneyHeroCard,和台面合计是同一个数(#33 4.3)。
+      // 现在台面自己就是那个大数(SzRollingAmount),页面上只许有这一个
       expect(find.byType(MoneyHeroCard), findsNothing,
-          reason: 'hero 卡和台面合计行是同一个数的两处显示 —— '
-              '留一处就够,而等式闭合在台面上');
-      final heroRow = t.widget<SzFeeRow>(find.byWidgetPredicate(
-          (w) => w is SzFeeRow && w.label.contains('今日实收')));
-      expect(heroRow.hero, isTrue,
-          reason: '砍了 hero 卡就得把合计行提到 hero 档,'
-              '否则今日实收在首屏上没有视觉重量 —— 这是方案里写明要拍板的代价');
+          reason: 'hero 卡和台面是同一个数的两处显示 —— 留一处就够');
+      expect(find.byType(SzRollingAmount), findsOneWidget);
+    });
+
+    testWidgets('台面上能直接导出对账单,可提现和打到哪张卡说在一起', (t) async {
+      await pumpFinance(t, financeFakeApi());
+      expect(find.text('导出对账单'), findsOneWidget);
+      expect(find.textContaining('可提现'), findsWidgets);
+    });
+
+    testWidgets('没有「到卡」这一列 —— 服务端没有哪天的钱哪天到卡的数', (t) async {
+      await pumpFinance(t, financeFakeApi(daily: lastDays(5)));
+      // 设计稿每行后面有「已到卡 / 明日到卡」。提现是商家自己点、按笔打款,
+      // 不按天;硬画一列就是编的
+      expect(allTexts().where((s) => s.contains('已到卡') || s.contains('明日到卡')),
+          isEmpty);
     });
   });
 
-  group('按日账单默认近 7 天,更早的一按就出来', () {
-    List<Map<String, dynamic>> thirtyDays() {
+  /// 设计稿的页签是「9 月 / 8 月 / 全部」;日账单接口最多 90 天,
+  /// 第三个照实叫「近 90 天」。
+  group('月份页签:哪一段就只算哪一段', () {
+    testWidgets('上个月只算上个月那几天', (t) async {
       final now = DateTime.now();
-      return [
-        for (var i = 0; i < 30; i++)
-          dayJson(
-              '${now.subtract(Duration(days: i)).year}-'
-              '${now.subtract(Duration(days: i)).month.toString().padLeft(2, '0')}-'
-              '${now.subtract(Duration(days: i)).day.toString().padLeft(2, '0')}',
-              10 + i,
-              10000 + i * 100,
-              0.045),
+      final prev = DateTime(now.year, now.month - 1);
+      String d(DateTime x) => '${x.year}-${x.month.toString().padLeft(2, '0')}-'
+          '${x.day.toString().padLeft(2, '0')}';
+      final rows = [
+        dayJson(d(DateTime(now.year, now.month, 1)), 10, 20000, 0.045),
+        dayJson(d(DateTime(prev.year, prev.month, 3)), 12, 30000, 0.045),
+        dayJson(d(DateTime(prev.year, prev.month, 2)), 11, 40000, 0.045),
       ];
-    }
+      await pumpFinance(t, financeFakeApi(daily: rows));
+      await pickPeriod(t, '${prev.month} 月');
+      final last = DateTime(now.year, now.month, 0).day;
+      expect(find.text('${prev.month} 月 1 日 — $last 日 · 实收'), findsOneWidget);
+      expect(heroCents(t),
+          (rows[1]['net_cents'] as int) + (rows[2]['net_cents'] as int),
+          reason: '上个月的实收混进了这个月的单');
+    });
 
+    testWidgets('近 90 天不收最早那个不完整的日子', (t) async {
+      // 接口按 now() − 90 天滚动取数:第 90 天前那一天只取到一部分。
+      // 照原样加进来,总数就小了一截还说不清 —— 所以不要它
+      final rows = [
+        dayJson(dayKey(0), 10, 10000, 0.045),
+        dayJson(dayKey(90), 3, 5000, 0.045),
+      ];
+      await pumpFinance(t, financeFakeApi(daily: rows));
+      await pickPeriod(t, '近 90 天');
+      expect(heroCents(t), rows[0]['net_cents']);
+    });
+  });
+
+  group('按日账单默认 7 行,更早的一按就出来', () {
     testWidgets('默认只列 7 天,并说清还有多少天没列', (t) async {
-      await pumpFinance(t, financeFakeApi(daily: thirtyDays()));
-      expect(find.text('按日账单 · 近 7 天'), findsOneWidget);
+      await pumpFinance(t, financeFakeApi(daily: lastDays(30)));
+      await pickPeriod(t, '近 90 天');
       expect(find.text('看更早的 23 天'), findsOneWidget,
           reason: '不说还有多少天,商家不知道自己没看全 —— '
               '这正是提现记录那条曾经犯过的错');
     });
 
     testWidgets('展开后 30 天一条不少', (t) async {
-      await pumpFinance(t, financeFakeApi(daily: thirtyDays()));
+      await pumpFinance(t, financeFakeApi(daily: lastDays(30)));
+      await pickPeriod(t, '近 90 天');
       await t.tap(find.text('看更早的 23 天'));
       await t.pump();
-      expect(find.text('按日账单 · 近 30 天'), findsOneWidget);
+      final rowTexts = allTexts()
+          .where((s) => RegExp(r'^\d{1,2}/\d{1,2}$').hasMatch(s))
+          .toSet();
+      expect(rowTexts, hasLength(30));
       expect(find.text('看更早的 23 天'), findsNothing,
           reason: '全列出来之后按钮该消失,不留一个点了没反应的按钮');
     });
   });
 
-  /// #33 4.3 宽屏:≥1100 两栏,按日账单变五列真表格。
-  /// `merchantTabMaxWidth` 的注释写着「对账要并排放表格和图表」,
-  /// 而这一页此前并没有表格。
+  /// #33 4.3 宽屏:≥620 的列宽上,单数单独成一列。
   group('宽屏两栏与按日表格', () {
-    List<Map<String, dynamic>> week() {
-      final now = DateTime.now();
-      return [
-        for (var i = 0; i < 7; i++)
-          dayJson(
-              '${now.subtract(Duration(days: i)).year}-'
-              '${now.subtract(Duration(days: i)).month.toString().padLeft(2, '0')}-'
-              '${now.subtract(Duration(days: i)).day.toString().padLeft(2, '0')}',
-              10 + i,
-              10000 + i * 100,
-              0.045),
-      ];
-    }
-
-    testWidgets('1200 宽:出现表头五列', (t) async {
+    testWidgets('1200 宽:表头五列', (t) async {
       setPhoneViewport(t, const Size(1200, 1000));
       await t.pumpWidget(MaterialApp(
-        theme: brandTheme(Brightness.light, density: SzDensity.operate),
+        theme: brandTheme(Brightness.light,
+            density: SzDensity.operate, accentTone: 0),
         home: Scaffold(
           body: SizedBox(
               width: 1200,
               height: 1000,
-              child: FinancePage(api: financeFakeApi(daily: week()))),
+              child: FinancePage(
+                  api: financeFakeApi(daily: lastDays(7)), title: '账本')),
         ),
       ));
       await t.pump();
       await t.pump(const Duration(milliseconds: 400));
 
-      for (final h in ['日期', '单量', '菜品流水', '平台佣金', '实收']) {
+      for (final h in ['日期', '单数', '菜价', '平台', '实收']) {
         expect(find.text(h), findsWidgets, reason: '表头缺「$h」这一列');
       }
     });
 
-    testWidgets('390 窄屏不出表头 —— 五列塞不进 390', (t) async {
-      await pumpFinance(t, financeFakeApi(daily: week()));
-      expect(find.text('单量'), findsNothing,
-          reason: '窄屏还是「日期+单量」摞「流水−佣金」那一行,不是表格');
+    testWidgets('390 窄屏四列:菜价和单数合在一格', (t) async {
+      await pumpFinance(t, financeFakeApi(daily: lastDays(7)));
+      expect(find.text('菜价 · 单数'), findsOneWidget);
+      expect(find.text('单数'), findsNothing,
+          reason: '五列塞不进 390,单数和菜价合成一格');
     });
   });
 
   group('费率不许被整除截断', () {
-    testWidgets('4.5% 的店,分账台面要写 4.5% —— 不是 4%', (t) async {
+    testWidgets('4.5% 的店,台面要写 4.5% —— 不是 4%', (t) async {
       // config.py 的档位表就有 0.045(500–999 单/月那一档),
       // 这不是极端输入。`0.045 * 100 ~/ 1` == 4
-      await pumpFinance(t, financeFakeApi(rate: 0.045));
+      await pumpFinance(t, financeFakeApi(rate: 0.045, daily: lastDays(1)));
 
       final texts = allTexts();
-      expect(texts.where((s) => s.contains('按 4% 计')), isEmpty,
+      expect(texts.where((s) => s == '平台 4%'), isEmpty,
           reason: '整数除法把 4.5% 截成了 4% —— '
               '在账目透明的台面上,平台把自己的抽成说小了 0.5 个点');
       expect(texts.where((s) => s.contains('4.5%')).length,
           greaterThanOrEqualTo(2),
-          reason: '阶梯佣金卡和分账台面说的是同一个费率,同一屏上必须一致');
+          reason: '阶梯佣金卡和台面说的是同一个费率,同一屏上必须一致');
     });
 
-    testWidgets('5% 的新店也不许显示成 5.0 以外的数', (t) async {
-      await pumpFinance(t, financeFakeApi(rate: 0.05));
-      final texts = allTexts();
-      expect(texts.where((s) => s.contains('按 5.0% 计')), isNotEmpty);
+    testWidgets('5% 的新店写「平台 5%」', (t) async {
+      await pumpFinance(
+          t, financeFakeApi(rate: 0.05, daily: lastDays(1, rate: 0.05)));
+      expect(find.text('平台 5%'), findsOneWidget);
     });
 
-    testWidgets('今天还没有流水时,退回按当前档位说,仍然不截断', (t) async {
+    testWidgets('这一期没有流水时,退回按当前档位说,仍然不截断', (t) async {
       await pumpFinance(
           t,
           financeFakeApi(
               rate: 0.045, daily: [dayJson('2020-01-01', 3, 10000, 0.045)]));
-      final texts = allTexts();
-      expect(texts.where((s) => s.contains('按 4% 计')), isEmpty);
-      expect(texts.where((s) => s.contains('按 4.5% 计')), isNotEmpty,
-          reason: '今天没单也要说清这一档是多少,而且同样不许截断');
+      expect(find.text('平台 4.5%'), findsOneWidget,
+          reason: '这个月一单没有也要说清这一档是多少,而且同样不许截断');
     });
   });
 

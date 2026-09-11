@@ -18,21 +18,137 @@ import 'holiday_plans_dialog.dart';
 import 'promo_rules_sheets.dart';
 import 'staff_sheet.dart';
 import 'kitchen_cam_page.dart';
+import 'merchant_ui.dart';
 import 'printer_page.dart';
+import 'printer_service.dart';
 import 'promises_page.dart';
 import 'promo_page.dart';
 import 'queue_page.dart';
 import 'voucher_manage_page.dart';
 import 'winback_page.dart';
 
-/// 店铺 Tab:门头照、公告编辑、评价管理(查看 + 回复)。
+/// 承诺出餐时长的编辑弹窗(5–60 分钟)。店铺页的承诺格、新单详情的
+/// 「改承诺 →」共用这一个 —— 两处各写一份,校验范围迟早不一样。
+///
+/// [prepTime] 是实测出餐时长(`/merchants/me/prep-time`);没传就在弹窗里现拉,
+/// 拉不到只是少一行参考,不拦着改。保存成功返回新的分钟数,取消/失败返回 null。
+Future<int?> editPromiseMinutes(
+  BuildContext context,
+  ApiClient api, {
+  required int current,
+  Map<String, dynamic>? prepTime,
+}) async {
+  final controller = TextEditingController(text: '$current');
+  final measured = prepTime != null
+      ? Future.value(prepTime)
+      : api.merchantPrepTime().then<Map<String, dynamic>?>((v) => v,
+          onError: (_) => null);
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (context) => SzDialog(
+      title: const Text('承诺出餐时长(分钟)'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+              helperText: '5-60 分钟;定得实在比定得短更重要',
+              border: OutlineInputBorder()),
+        ),
+        // 填的这一刻最需要看到实测值 —— 否则他还是在闭着眼填
+        FutureBuilder<Map<String, dynamic>?>(
+          future: measured,
+          builder: (context, snap) {
+            final p = snap.data;
+            if (p == null || p['enough'] != true) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                '你近 ${p['window_days']} 天的实测:'
+                '八成的单在 ${(p['p80'] as num).toStringAsFixed(0)} 分钟内出餐',
+                style: TextStyle(
+                    fontSize: kFontNote, color: Theme.of(context).sz.inkMuted),
+              ),
+            );
+          },
+        ),
+      ]),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消')),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存')),
+      ],
+    ),
+  );
+  // controller 不在这里 dispose:弹窗退场动画还要画几帧输入框
+  final text = controller.text.trim();
+  if (saved != true || !context.mounted) return null;
+  final minutes = int.tryParse(text);
+  if (minutes == null || minutes < 5 || minutes > 60) {
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入 5~60 之间的分钟数')));
+    return null;
+  }
+  try {
+    await api.updateShop({'promise_ready_minutes': minutes});
+    return minutes;
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e is ApiException ? e.message : '$e')));
+    }
+    return null;
+  }
+}
+
+/// 店铺 Tab(设计稿 6i):身份行 + 营业开关 + 忙碌/承诺两格 + 五条设置,
+/// 下面照旧是工具网格、营业与出餐、价格活动、合规证照、账号。
+///
+/// **营业开关和看板标题栏那枚 pill 是同一个状态源**:由工作台传 [isOpen] 和
+/// [onSetOpen] 进来,这一页不自己存一份 —— 两处各存一份,关了一边另一边还亮着。
+/// 单独渲染(测试、走查)时不传,就读自己拉到的店铺信息、直接调接口。
 class ShopTabPage extends StatefulWidget {
-  const ShopTabPage({super.key, required this.api, this.onOpenFinance});
+  const ShopTabPage({
+    super.key,
+    required this.api,
+    this.onOpenFinance,
+    this.isOpen,
+    this.onSetOpen,
+    this.busyUntil,
+    this.busyExtraMinutes = 10,
+    this.onBusy,
+    this.onShopLoaded,
+    this.active = true,
+  });
 
   final ApiClient api;
 
   /// 承诺页里「去对账页验」由外层切底部 tab
   final VoidCallback? onOpenFinance;
+
+  /// 营业中?null = 读这一页自己拉到的店铺信息
+  final bool? isOpen;
+
+  /// 拨营业开关。关店的确认弹窗(手上还有几单)在外层
+  final Future<void> Function(bool open)? onSetOpen;
+
+  /// 忙碌模式到几点;null = 没开
+  final DateTime? busyUntil;
+  final int busyExtraMinutes;
+
+  /// 点「忙碌模式」那一格。null = 不给入口(店员:接口只认店主)
+  final VoidCallback? onBusy;
+
+  /// 每次拉到店铺信息都报给外层:歇业、节假日计划、承诺时长改了,
+  /// 看板那枚 pill 和接单按钮上的「N 分出餐」要跟着变
+  final ValueChanged<Merchant>? onShopLoaded;
+
+  /// 这一页是不是当前 tab。从别的 tab 切回来时悄悄刷一遍
+  final bool active;
 
   @override
   State<ShopTabPage> createState() => _ShopTabPageState();
@@ -43,6 +159,14 @@ class _ShopTabPageState extends State<ShopTabPage> {
   List<AfterSale> _afterSales = [];
   List<Map<String, dynamic>> _shopCoupons = [];
   final _announcement = TextEditingController();
+
+  /// 绑了几台打印机(云打印 + 本机记住的蓝牙机)。null = 没拉到。
+  /// **只数绑定,不说在线** —— 服务端没有打印机在线状态,编一个「已连接」
+  /// 会让商家以为小票一定打得出来
+  int? _printerCount;
+
+  /// 结算卡(提现打款去哪)。只有店主本人拉得到
+  PayoutAccount? _payout;
 
   /// 非空 = 店铺信息没拉到
   String _error = '';
@@ -98,6 +222,18 @@ class _ShopTabPageState extends State<ShopTabPage> {
     _restoreGold();
   }
 
+  @override
+  void didUpdateWidget(covariant ShopTabPage old) {
+    super.didUpdateWidget(old);
+    // 切回这个 tab:页面一直留着(外层是 IndexedStack),数据可能已经旧了。
+    // 悄悄刷一遍,不转圈、不打回加载态
+    if (widget.active && !old.active) _load();
+  }
+
+  /// 收款资料、结算卡只给店主本人 —— 接口走 money_shop 判权(和提现同一口径)。
+  /// `/payout-account` 是**当前登录者自己的**账户,店员拉到的是他自己的,不是店的
+  bool _isOwner(Merchant s) => s.viewerIsOwner && !s.viewerIsStaff;
+
   Future<void> _restoreGold() async {
     final sp = await SharedPreferences.getInstance();
     if (!mounted) return;
@@ -111,7 +247,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
     if (!mounted) return;
     // 说清楚去哪还能看到 —— 不说的话商家以为这几样没了
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Text('已收起。「平台对你的承诺」「平台规则」已移到本页底部;费率明细在对账页'),
+      content: Text('已收起。「平台对你的承诺」「平台规则」已移到本页底部;费率明细在账本页'),
       duration: Duration(seconds: 4),
     ));
   }
@@ -129,6 +265,11 @@ class _ShopTabPageState extends State<ShopTabPage> {
     final camF = widget.api.merchantKitchenCam();
     final todosF = widget.api.merchantTodos();
     final tierF = widget.api.merchantCommissionTier();
+    final printersF = widget.api.printers();
+    // 第一次还不知道是不是店主,先拉;知道不是之后就不再拉
+    final payoutF = _shop == null || _isOwner(_shop!)
+        ? widget.api.payoutAccount()
+        : null;
 
     final g = SzGather();
     final shop = await g.take(shopF);
@@ -138,6 +279,12 @@ class _ShopTabPageState extends State<ShopTabPage> {
     final cam = await g.soft(camF, _cam);
     final todos = await g.soft(todosF, _todos);
     final tier = await g.soft(tierF, _tier);
+    final printers = await g.soft<Map<String, dynamic>?>(printersF, null);
+    final payout = payoutF == null
+        ? null
+        : await g.soft<PayoutAccount?>(payoutF, _payout);
+    // 蓝牙小票机记在本机(printer_service.dart),不在服务端
+    final bt = await g.soft(BtPrinter.savedDevice(), null);
 
     if (!mounted) return;
     if (g.failed) {
@@ -146,6 +293,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
           .showSnackBar(SnackBar(content: Text(g.message)));
       return;
     }
+    final cloud = (printers?['items'] as List?)?.length;
     setState(() {
       _error = '';
       _shop = shop;
@@ -155,10 +303,13 @@ class _ShopTabPageState extends State<ShopTabPage> {
       _cam = cam;
       _todos = todos;
       _tier = tier;
+      _payout = payout;
+      _printerCount = cloud == null ? null : cloud + (bt == null ? 0 : 1);
       if (_announcement.text.isEmpty) {
         _announcement.text = shop?.announcement ?? '';
       }
     });
+    if (shop != null) widget.onShopLoaded?.call(shop);
   }
 
   Future<void> _pickLogo() async {
@@ -443,7 +594,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
         child: Text(
             '近 ${p['window_days']} 天完成 ${p['samples']} 单,'
             '还不够算实测值(要 ${p['min_samples']} 单)',
-            style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
+            style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
       );
     }
 
@@ -480,7 +631,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
           const SizedBox(width: 5),
           Expanded(
             child: Text(line,
-                style: TextStyle(fontSize: 12.5, height: 1.4, color: color)),
+                style: TextStyle(fontSize: kFontNote, height: 1.4, color: color)),
           ),
         ]),
         const SizedBox(height: 3),
@@ -491,13 +642,13 @@ class _ShopTabPageState extends State<ShopTabPage> {
                 'P95 ${(p['p95'] as num).toStringAsFixed(0)} 分钟',
             if (peer != null) '同品类中位 ${peer.toStringAsFixed(0)} 分钟(参照系,不是排名)',
           ].join(' · '),
-          style: TextStyle(fontSize: 11, color: sz.inkMuted),
+          style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted),
         ),
         const SizedBox(height: 3),
         // 红线原样显示。不写清楚,商家会担心这个数影响生意,
         // 然后开始为它经营 —— 比如菜还没好就先点「出餐」,数据反而失真
         Text('${p['never_used_for']}',
-            style: TextStyle(fontSize: 11, height: 1.4, color: sz.inkMuted)),
+            style: TextStyle(fontSize: kFontMicro, height: 1.4, color: sz.inkMuted)),
       ]),
     );
   }
@@ -575,7 +726,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
             padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text('这是市场监管总局令第 123 号要求公示的信息,'
                 '会展示在用户端的商家列表和店铺页。请照实填',
-                style: TextStyle(fontSize: 12.5, height: 1.4)),
+                style: TextStyle(fontSize: kFontNote, height: 1.4)),
           ),
           for (final (value, title, hint) in options)
             ListTile(
@@ -600,60 +751,12 @@ class _ShopTabPageState extends State<ShopTabPage> {
     }
   }
 
-  /// 承诺出餐时长(5-60 分钟)
+  /// 承诺出餐时长(5-60 分钟)。弹窗与新单详情的「改承诺 →」共用
   Future<void> _editPromiseMinutes() async {
     final shop = _shop!;
-    final controller =
-        TextEditingController(text: '${shop.promiseReadyMinutes}');
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => SzDialog(
-        title: const Text('承诺出餐时长(分钟)'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            controller: controller,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-                helperText: '5-60 分钟;定得实在比定得短更重要',
-                border: OutlineInputBorder()),
-          ),
-          // 填的这一刻最需要看到实测值 —— 否则他还是在闭着眼填
-          if (_prepTime?['enough'] == true) ...[
-            const SizedBox(height: 12),
-            Text(
-              '你近 ${_prepTime!['window_days']} 天的实测:'
-              '八成的单在 ${(_prepTime!['p80'] as num).toStringAsFixed(0)} 分钟内出餐',
-              style: TextStyle(
-                  fontSize: 12.5, color: Theme.of(context).sz.inkMuted),
-            ),
-          ],
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('保存')),
-        ],
-      ),
-    );
-    if (saved != true || !mounted) return;
-    final minutes = int.tryParse(controller.text.trim());
-    if (minutes == null || minutes < 5 || minutes > 60) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请输入 5~60 之间的分钟数')));
-      return;
-    }
-    try {
-      await widget.api.updateShop({'promise_ready_minutes': minutes});
-      _load();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
-    }
+    final saved = await editPromiseMinutes(context, widget.api,
+        current: shop.promiseReadyMinutes, prepTime: _prepTime);
+    if (saved != null && mounted) _load();
   }
 
   /// 编辑金额类设置(起送价/打包费),输入以元为单位,存储为分。
@@ -722,9 +825,19 @@ class _ShopTabPageState extends State<ShopTabPage> {
   }
 
   /// 提前结束歇业 = 直接开店(服务端开店动作会清歇业标记)
-  Future<void> _endRest() async {
+  Future<void> _endRest() => _setOpen(true);
+
+  /// 拨营业开关。有外层就交给外层(看板那枚 pill 读的是外层那一份),
+  /// 关店前「手上还有几单」的确认也在外层;单独渲染时直接调接口
+  Future<void> _setOpen(bool open) async {
+    final outer = widget.onSetOpen;
+    if (outer != null) {
+      await outer(open);
+      if (mounted) _load();
+      return;
+    }
     try {
-      await widget.api.updateShop({'is_open': true});
+      await widget.api.setShopOpen(open);
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -863,6 +976,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
         : '配送费 100% 归骑手;服务费按满减后的实收计';
 
     return Container(
+      key: const ValueKey('shop-gold'),
       // 全页唯一一张有色卡:和用户端「我的」页那张账目卡同一套视觉语言,
       // 「这两处说的是同一件事」不用写出来
       decoration: BoxDecoration(
@@ -885,7 +999,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
                   children: [
                     Text(headline,
                         style: szFigure(
-                            fontSize: 20,
+                            fontSize: kFigureMd,
                             fontWeight: FontWeight.w600,
                             color: sz.clay)),
                     const SizedBox(width: 8),
@@ -936,73 +1050,442 @@ class _ShopTabPageState extends State<ShopTabPage> {
     );
   }
 
-  /// 身份卡:门头照 + 店名 + 公告 + 顾客评价。
+  /// 身份行(设计稿 6i 顶部):门头照 + 店名 + 已核验 + 地址 · 频道 · 入驻年月。
   ///
-  /// 评价放在这张卡里,是因为身份行本来就显示「4.8 分 · 312 条评价」——
-  /// 评价详情就是同一件事的下一层,不该隔着三张卡。
-  Widget _identityCard(Merchant shop) {
-    final theme = Theme.of(context);
-    return Card(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        ListTile(
+  /// 门头照单独可点(换图);整行点开是店铺资料的几个入口。
+  /// 「已核验」只在审核通过时出现 —— 那是平台审过证照的意思,不是装饰。
+  Widget _identityHeader(Merchant shop) {
+    final sz = Theme.of(context).sz;
+    final joined = localTimeOf(shop.createdAt);
+    final sub = [
+      if (shop.address.isNotEmpty) shop.address,
+      if (channelOfBizType(shop.bizType) != null)
+        channelOfBizType(shop.bizType)!.name,
+      if (joined != null) '${joined.year} 年 ${joined.month} 月入驻',
+    ].join(' · ');
+    return InkWell(
+      onTap: _openProfileSheet,
+      borderRadius: BorderRadius.circular(kRadiusMd),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
           // 门头照:缺图时是 SzImage(店名首字),右下角压相机角标 ——
           // 商家这一侧要的是"提醒你补图",所以提示不能丢
-          leading: InkWell(
-            onTap: _uploadingLogo ? null : _pickLogo,
-            borderRadius: BorderRadius.circular(26),
-            child: _uploadingLogo
-                ? const SizedBox(
-                    width: 52,
-                    height: 52,
-                    child: Center(child: CircularProgressIndicator()))
-                : Stack(clipBehavior: Clip.none, children: [
-                    SzImage(
-                        url: shop.logoUrl.isEmpty
-                            ? ''
-                            : widget.api.resolveUrl(shop.logoUrl),
-                        name: shop.name,
-                        size: 52,
-                        circle: true,
-                        categoryIcon: merchantCategoryIcon(shop.category)),
-                    Positioned(
-                      right: -2,
-                      bottom: -2,
-                      child: Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          color: theme.sz.surface,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: theme.sz.line),
+          Semantics(
+            button: true,
+            label: '更换门头照',
+            child: InkWell(
+              onTap: _uploadingLogo ? null : _pickLogo,
+              borderRadius: BorderRadius.circular(kRadiusMd),
+              child: _uploadingLogo
+                  ? const SizedBox(
+                      width: 56,
+                      height: 56,
+                      child: Center(child: CircularProgressIndicator()))
+                  : Stack(clipBehavior: Clip.none, children: [
+                      SzImage(
+                          url: shop.logoUrl.isEmpty
+                              ? ''
+                              : widget.api.resolveUrl(shop.logoUrl),
+                          name: shop.name,
+                          size: 56,
+                          radius: kRadiusMd,
+                          categoryIcon: merchantCategoryIcon(shop.category)),
+                      if (shop.logoUrl.isEmpty)
+                        Positioned(
+                          right: -3,
+                          bottom: -3,
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: sz.surface,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: sz.line),
+                            ),
+                            child: Icon(Icons.photo_camera_outlined,
+                                size: 12, color: sz.inkMuted),
+                          ),
                         ),
-                        child: Icon(Icons.photo_camera_outlined,
-                            size: 11, color: theme.sz.inkMuted),
-                      ),
-                    ),
-                  ]),
+                    ]),
+            ),
           ),
-          title: Text(shop.name, style: theme.textTheme.titleLarge),
-          subtitle: Text('${shop.ratingLabel} · ${shop.address}',
-              maxLines: 1, overflow: TextOverflow.ellipsis),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Flexible(
+                    child: Text(shop.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: kFontLead,
+                            fontWeight: FontWeight.w600,
+                            color: sz.ink)),
+                  ),
+                  if (shop.isApproved) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(6, 2, 8, 2),
+                      decoration: BoxDecoration(
+                        color: sz.earn.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.verified_outlined, size: 13, color: sz.earn),
+                        const SizedBox(width: 3),
+                        Text('已核验',
+                            style: TextStyle(
+                                fontSize: kFontMicro,
+                                fontWeight: FontWeight.w600,
+                                color: sz.earn)),
+                      ]),
+                    ),
+                  ],
+                ]),
+                if (sub.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(sub,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                ],
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, size: 22, color: sz.inkFaint),
+        ]),
+      ),
+    );
+  }
+
+  /// 身份行点开:店铺资料的几个入口。没有单独的「资料页」,
+  /// 这几样本来就散在下面,弹层只是把它们收到一处
+  Future<void> _openProfileSheet() async {
+    final shop = _shop;
+    if (shop == null) return;
+    await szShowSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const SzSectionTitle('店铺资料'),
+          const SizedBox(height: 6),
+          SzEntryTile(
+            icon: Icons.photo_camera_outlined,
+            title: '门头照',
+            value: shop.logoUrl.isEmpty ? '未上传' : '已上传',
+            valueTone: shop.logoUrl.isEmpty ? Theme.of(ctx).sz.hold : null,
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _pickLogo();
+            },
+          ),
+          SzEntryTile(
+            icon: Icons.campaign_outlined,
+            title: '店铺公告',
+            value: shop.announcement.isEmpty ? '未设置' : shop.announcement,
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _editAnnouncement();
+            },
+          ),
+          SzEntryTile(
+            icon: Icons.category_outlined,
+            title: '外卖品类',
+            value: merchantCategoryLabel(shop.category),
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _editCategory();
+            },
+          ),
+          SzEntryTile(
+            icon: Icons.photo_library_outlined,
+            title: '门店相册',
+            value: '${shop.photoUrls.length} 张',
+            onTap: () {
+              Navigator.of(ctx).pop();
+              _openAlbum();
+            },
+          ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+  }
+
+  /// 营业开关卡(设计稿 6i):开 = 用户端能下单。
+  ///
+  /// 副标题说的是**用户那边此刻看到什么**,不是开关的说明文字。
+  Widget _openCard(Merchant shop) {
+    final sz = Theme.of(context).sz;
+    final open = widget.isOpen ?? shop.isOpen;
+    final resting = !open &&
+        shop.closedUntil != null &&
+        shop.closedUntil!.isAfter(DateTime.now().toUtc());
+    final plan = shop.todayHolidayPlan;
+    final planClosed = plan?['closed'] == true;
+    final start = (plan?['open'] as String?)?.isNotEmpty == true
+        ? plan!['open'] as String
+        : shop.openTime;
+    final end = (plan?['close'] as String?)?.isNotEmpty == true
+        ? plan!['close'] as String
+        : shop.closeTime;
+    final String title;
+    final String sub;
+    if (shop.foodSafetyHold) {
+      title = '食安停业';
+      sub = '整改复核通过后由平台恢复,你这边开不了';
+    } else if (open) {
+      title = '营业中';
+      sub = start.isEmpty || end.isEmpty
+          ? '用户端可见 · 没设营业时间,手动开关'
+          : '今日 $start–$end · 用户端可见';
+    } else if (resting) {
+      title = '歇业中';
+      sub = '${_hhmmLocal(shop.closedUntil!)} 自动恢复营业';
+    } else {
+      title = '已打烊';
+      sub = planClosed ? '今天按节假日计划休息' : '用户端显示「今日已打烊」';
+    }
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+      decoration: BoxDecoration(
+        color: sz.surface,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        border: Border.all(color: sz.line),
+      ),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
+                style: TextStyle(
+                    fontSize: kFontTitle,
+                    fontWeight: FontWeight.w600,
+                    color: shop.foodSafetyHold
+                        ? sz.danger
+                        : (open ? sz.ink : sz.inkMuted))),
+            const SizedBox(height: 2),
+            Text(sub,
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+          ]),
         ),
-        Divider(height: 1, thickness: 1, color: theme.sz.line),
-        // 公告收成一条带状态值的入口。**value 显示的是顾客此刻真正看到的
-        // 那句话** —— 「元旦放假」挂到三月还没撤,这样才看得见。
-        //
-        // 原来是内联输入框:167px(两行 TextField + 字数 counter + 保存按钮),
-        // 而公告一个月改几次。更要紧的是旧版那个静默歧义 —— `_load()` 里
-        // `if (_announcement.text.isEmpty)` 会把清空但没保存的公告用服务端旧值
-        // 填回来,商家看到的是「我删了它,它自己又回来了」;改完不点保存直接切
-        // tab 也是无声丢失。收进弹层之后保存点唯一、明确。
-        SzEntryTile(
-          icon: Icons.campaign_outlined,
-          title: '店铺公告',
-          value: shop.announcement.isEmpty ? '未设置' : shop.announcement,
-          onTap: _editAnnouncement,
+        SzSwitch(
+          value: open,
+          semanticLabel: '营业开关',
+          // 食安停业闸门置位时商家自己开不回来(服务端也会 403),
+          // 直接禁用开关比让他点了报错好
+          onChanged: shop.foodSafetyHold ? null : _setOpen,
         ),
-        Divider(height: 1, thickness: 1, color: theme.sz.line),
-        _reviewsTile(),
       ]),
     );
+  }
+
+  /// 忙碌模式 + 承诺出餐时间两格。
+  ///
+  /// 稿子上左边那格是「同时最多接 N 单」—— 服务端没有接单上限这个设置,
+  /// 不编;这一格换成真有的忙碌模式(高峰压单时放宽出餐时间)。
+  /// 店员看不到忙碌模式:接口只认店主,给了也只会报错。
+  Widget _quickTiles(Merchant shop) {
+    final sz = Theme.of(context).sz;
+    Widget tile({
+      required String label,
+      required String value,
+      required String unit,
+      required VoidCallback? onTap,
+      Color? tone,
+      bool figure = true,
+    }) =>
+        Expanded(
+          child: Material(
+            color: sz.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(kRadiusMd),
+              side: BorderSide(color: tone ?? sz.line),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(kCardPad, 12, kCardPad, 12),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label,
+                          style: TextStyle(
+                              fontSize: kFontNote, color: sz.inkMuted)),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.end,
+                        spacing: 4,
+                        children: [
+                          Text(value,
+                              style: (figure
+                                      ? szMoney(fontSize: kFigureLg)
+                                      : szFigure(
+                                          fontSize: kFigureLg,
+                                          fontWeight: FontWeight.w600))
+                                  .copyWith(color: tone ?? sz.ink, height: 1.15)),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Text(unit,
+                                style: TextStyle(
+                                    fontSize: kFontNote, color: sz.inkMuted)),
+                          ),
+                        ],
+                      ),
+                    ]),
+              ),
+            ),
+          ),
+        );
+
+    final busyUntil = widget.busyUntil;
+    final busy = busyUntil != null && busyUntil.isAfter(DateTime.now().toUtc());
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (widget.onBusy != null && !shop.viewerIsStaff) ...[
+        tile(
+          label: '忙碌模式',
+          value: busy ? '到 ${_hhmmLocal(busyUntil)}' : '关',
+          unit: busy ? '出餐 +${widget.busyExtraMinutes} 分' : '高峰压单时开',
+          tone: busy ? sz.hold : null,
+          figure: false,
+          onTap: widget.onBusy,
+        ),
+        const SizedBox(width: 8),
+      ],
+      tile(
+        label: '承诺出餐时间',
+        value: '${shop.promiseReadyMinutes}',
+        unit: '分钟',
+        onTap: _editPromiseMinutes,
+      ),
+    ]);
+  }
+
+  /// 五条最常改的设置(设计稿 6i)。
+  ///
+  /// - 打印机只说**绑了几台**:服务端不知道小票机在不在线,「已连接」是编的;
+  /// - 结算卡、费率只给店主本人看(钱的边界,和对账页同一条);
+  /// - 许可证到期日挂在「资质」这一条上,原来合规卡里那条并到这里,不留两份。
+  Widget _settingsGroup(Merchant shop) {
+    final sz = Theme.of(context).sz;
+    final resting = shop.closedUntil != null &&
+        shop.closedUntil!.isAfter(DateTime.now().toUtc());
+    final owner = _isOwner(shop);
+    final rate = (_tier?['commission_rate'] as num?)?.toDouble();
+    final payout = _payout;
+    final printers = _printerCount;
+    return SzEntryGroup(children: [
+      // 歇业中才出现,而且排**第一条**:这是当前状态,不是常驻入口。
+      //
+      // 营业开关只说得出「歇业中」,说不出「14:00 会自动恢复」之外的补救 ——
+      // 这一条给「立即恢复」。**没歇业时一条都不占**:天天摆着等于每天
+      // 提醒一件不该常做的事,歇业选项收在「营业时间与歇业」的弹层里
+      if (resting)
+        SzEntryTile(
+          icon: Icons.pause_circle_outline,
+          title: '临时歇业中',
+          value: '${_hhmmLocal(shop.closedUntil!)} 自动恢复',
+          valueTone: sz.hold,
+          trailing:
+              TextButton(onPressed: _endRest, child: const Text('立即恢复')),
+        ),
+      SzEntryTile(
+        icon: Icons.schedule_outlined,
+        title: '营业时间与歇业',
+        value: (shop.openTime.isEmpty || shop.closeTime.isEmpty)
+            ? '未设置'
+            : '${shop.openTime}–${shop.closeTime}',
+        valueTone: (shop.openTime.isEmpty || shop.closeTime.isEmpty)
+            ? sz.hold
+            : null,
+        onTap: _editBusinessHours,
+      ),
+      SzEntryTile(
+        icon: Icons.print_outlined,
+        title: '小票打印机',
+        value: printers == null
+            ? null
+            : (printers == 0 ? '未绑定' : '已绑定 $printers 台'),
+        valueTone: printers == 0 ? sz.hold : null,
+        onTap: () => Navigator.of(context)
+            .push(MaterialPageRoute(
+                builder: (_) =>
+                    PrinterPage(api: widget.api, shopName: shop.name)))
+            .then((_) => _load()),
+      ),
+      if (owner)
+        SzEntryTile(
+          icon: Icons.account_balance_outlined,
+          title: '结算卡',
+          value: payout == null
+              ? null
+              : (payout.configured
+                  ? '${payout.bankName.isNotEmpty ? payout.bankName : payout.kindLabel}'
+                      ' ${payout.accountTail} · T+1'
+                  : '未设置'),
+          valueTone: payout != null && !payout.configured ? sz.hold : null,
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(
+                  builder: (_) => PayoutAccountPage(api: widget.api)))
+              .then((_) => _load()),
+        ),
+      // 店员不给资质入口:资质材料不是接单要用的东西
+      if (!shop.viewerIsStaff)
+        SzEntryTile(
+          icon: Icons.description_outlined,
+          // 稿子上是「资质 · 营业执照、食品经营许可」;右边还要放到期日,
+          // 390 宽放不下两样,标题收短,到期日不收
+          title: '资质证照',
+          // 有有效期就显示它 —— 这才是商家点进来想知道的
+          value: shop.licenseExpiresAt.isEmpty
+              ? null
+              : (shop.licenseDaysLeft != null && shop.licenseDaysLeft! <= 30
+                  ? '${shop.licenseExpiresAt} 到期(还剩 ${shop.licenseDaysLeft} 天)'
+                  : '${shop.licenseExpiresAt} 到期'),
+          valueTone: shop.licenseDaysLeft != null && shop.licenseDaysLeft! <= 30
+              ? sz.danger
+              : null,
+          hint: '还没登记有效期 —— 登记后到期前会提醒你',
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(
+                  builder: (_) =>
+                      LicenseRenewalPage(api: widget.api, shop: shop)))
+              .then((_) => _load()),
+        ),
+      SzEntryTile(
+        icon: Icons.gavel_outlined,
+        title: '费率与规则 · 5% 封顶',
+        value: owner && rate != null ? '当前 ${pctLabel(rate)}' : null,
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => MerchantRulesPage(api: widget.api))),
+      ),
+    ]);
+  }
+
+  /// 顾客看得到的店铺资料:公告 + 评价。
+  ///
+  /// 原来这两条和门头照、店名一起在身份卡里;身份那一行搬到了页顶,
+  /// 这两条留在一组 —— 它们都是「顾客看到的你」。
+  Widget _profileGroup(Merchant shop) {
+    return SzEntryGroup(children: [
+      // 公告收成一条带状态值的入口。**value 显示的是顾客此刻真正看到的
+      // 那句话** —— 「元旦放假」挂到三月还没撤,这样才看得见。
+      //
+      // 原来是内联输入框:167px(两行 TextField + 字数 counter + 保存按钮),
+      // 而公告一个月改几次。更要紧的是旧版那个静默歧义 —— `_load()` 里
+      // `if (_announcement.text.isEmpty)` 会把清空但没保存的公告用服务端旧值
+      // 填回来,商家看到的是「我删了它,它自己又回来了」;改完不点保存直接切
+      // tab 也是无声丢失。收进弹层之后保存点唯一、明确。
+      SzEntryTile(
+        icon: Icons.campaign_outlined,
+        title: '店铺公告',
+        value: shop.announcement.isEmpty ? '未设置' : shop.announcement,
+        onTap: _editAnnouncement,
+      ),
+      _reviewsTile(),
+    ]);
   }
 
   /// 常用工具:10 个跳转型入口。
@@ -1050,11 +1533,12 @@ class _ShopTabPageState extends State<ShopTabPage> {
           onTap: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) =>
                   PrinterPage(api: widget.api, shopName: shop.name)))),
-      // 「趋势」二字是和对账 tab 的「经营分析」分工:那边答「最近怎么样」,
-      // 这边答「在变好还是变坏」(#33 第 5 节遗留:商家不该猜是哪一个)
+      // 「趋势」二字是和账本 tab 的「经营分析」分工:那边答「最近怎么样」,
+      // 这边答「在变好还是变坏」(#33 第 5 节遗留:商家不该猜是哪一个)。
+      // 原名「经营看板」—— 底部导航有了「看板」tab,两个看板商家分不清
       SzIconGridItem(
           icon: Icons.insights_outlined,
-          label: '经营看板',
+          label: '经营趋势',
           onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => DashboardPage(api: widget.api)))),
       SzIconGridItem(
@@ -1103,40 +1587,11 @@ class _ShopTabPageState extends State<ShopTabPage> {
 
   /// 营业与出餐。**不加分组头** —— 卡片边界 + 12px 留白已经把分区表达完了,
   /// 六个分组头是 246px,一屏的一半。
+  ///
+  /// 「临时歇业中」「营业时间与歇业」搬到了页顶的设置组,「承诺出餐时长」
+  /// 成了页顶的一格(设计稿 6i);这里留下的是不常动的那几条。
   Widget _bizList(Merchant shop) {
-    final resting = shop.closedUntil != null &&
-        shop.closedUntil!.isAfter(DateTime.now().toUtc());
     return SzEntryGroup(children: [
-      // 歇业中才出现,而且排**第一条**:这是当前状态,不是常驻入口。
-      //
-      // AppBar 那个开关只说得出「已打烊」,说不出「14:00 会自动恢复」——
-      // 这两件事对商家完全不同(一个要他记着回来开店,一个不用)。
-      //
-      // 反过来:**没歇业时一条都不占**。旧版这里的注释就写着
-      // 「没歇业时显示一条『临时歇业』等于每天都在提醒一件不该常做的事」,
-      // 而下面的 else 分支恰恰在每天显示 —— 注释和代码打架。歇业选项收进
-      // 「营业时间与歇业」的弹层,该有的一个没少。
-      if (resting)
-        SzEntryTile(
-          icon: Icons.pause_circle_outline,
-          title: '临时歇业中',
-          value: '${_hhmmLocal(shop.closedUntil!)} 自动恢复',
-          valueTone: Theme.of(context).sz.hold,
-          trailing:
-              TextButton(onPressed: _endRest, child: const Text('立即恢复')),
-        ),
-      SzEntryTile(
-        icon: Icons.schedule_outlined,
-        title: '营业时间与歇业',
-        value: (shop.openTime.isEmpty || shop.closeTime.isEmpty)
-            ? '未设置'
-            : '${shop.openTime} – ${shop.closeTime}',
-        valueTone: (shop.openTime.isEmpty || shop.closeTime.isEmpty)
-            ? Theme.of(context).sz.hold
-            : null,
-        hint: '设置后到点自动开关店,临时手动开关不受影响',
-        onTap: _editBusinessHours,
-      ),
       SzEntryTile(
         icon: Icons.event_outlined,
         title: '节假日计划',
@@ -1144,16 +1599,6 @@ class _ShopTabPageState extends State<ShopTabPage> {
         // 这句留着:它讲的是两套规则谁赢,不是"这个入口是干嘛的"
         hint: '计划优先于每日营业时间',
         onTap: () => editHolidayPlans(context, widget.api, shop, _load),
-      ),
-      SzEntryTile(
-        icon: Icons.timer_outlined,
-        title: '承诺出餐时长',
-        value: shop.promiseReadyMinutes > 0
-            ? '${shop.promiseReadyMinutes} 分钟'
-            : null,
-        // hint「不设就按平台默认估算」砍掉 —— 紧接在下面的 103px 实测块
-        // 才是这一条真正的说明
-        onTap: _editPromiseMinutes,
       ),
       // 三条开关:**hint 一句都不砍**。实测带 Switch 的条无论有没有副标题
       // 都是 72px(那 72 是 Switch 的 48px 触控区撑的)——
@@ -1270,27 +1715,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
       // 免责立场进脚注,不是每行都说一遍
       footnote: '这几样都是监管会查的。平台只做提醒和留档,不替你担责。',
       children: [
-        if (!shop.viewerIsStaff)
-          SzEntryTile(
-            icon: Icons.badge_outlined,
-            title: '食品经营许可证',
-            // 有有效期就显示它 —— 这才是商家点进来想知道的
-            value: shop.licenseExpiresAt.isEmpty
-                ? null
-                : (shop.licenseDaysLeft != null && shop.licenseDaysLeft! <= 30
-                    ? '${shop.licenseExpiresAt} 到期(还剩 ${shop.licenseDaysLeft} 天)'
-                    : '${shop.licenseExpiresAt} 到期'),
-            valueTone:
-                shop.licenseDaysLeft != null && shop.licenseDaysLeft! <= 30
-                    ? theme.sz.danger
-                    : null,
-            hint: '还没登记有效期 —— 登记后到期前会提醒你',
-            onTap: () => Navigator.of(context)
-                .push(MaterialPageRoute(
-                    builder: (_) =>
-                        LicenseRenewalPage(api: widget.api, shop: shop)))
-                .then((_) => _load()),
-          ),
+        // 「食品经营许可证」那条并进了页顶设置组的「资质」(同一个去向、
+        // 同一个到期日),这里不再挂第二份
         SzEntryTile(
           icon: Icons.restaurant_outlined,
           title: '堂食标识',
@@ -1488,20 +1914,36 @@ class _ShopTabPageState extends State<ShopTabPage> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(kPagePad, 16, kPagePad, 24),
         // 块与块之间**只留白,不画分隔线** —— 卡片自己的 1px 描边已经在分区了,
         // 再加横线就是同一件事说两遍。发丝线只出现在同一张卡内部
         children: [
-          // 有钱、有时限、且平台在等你表态的事,排在一切之前
+          // 有钱、有时限、且平台在等你表态的事,排在一切之前。
+          // 设计稿 6i 没画这一块:它只在有售后待处理时出现,平时不占地方
           ..._afterSaleBlock(),
+          // ── 设计稿 6i:身份 → 营业开关 → 两格 → 五条设置 → 随时能走 ──
+          _identityHeader(shop),
+          const SizedBox(height: 14),
+          _openCard(shop),
+          const SizedBox(height: 12),
+          _quickTiles(shop),
+          const SizedBox(height: 12),
+          _settingsGroup(shop),
+          const SizedBox(height: 12),
+          // 这句是承诺的一部分,每一条都有出处:对账单导出在账本页、
+          // 保证金「退店无纠纷全额退还」写在钱包说明里、入驻没有违约条款
+          const SzDashedNote(
+            child: Text('不想干了随时能走:对账单随时导出,没有违约金;'
+                '保证金退店无纠纷全额退。'),
+          ),
+          const SizedBox(height: 16),
+          // ── 以下是原有的各块,一样不少 ──
           // 关掉之后连同它的间距一起消失 —— 留一个 12px 的空档
           // 就是"关了但还占着位"
           if (!_goldHidden) ...[
             _goldCard(shop),
             const SizedBox(height: 12),
           ],
-          _identityCard(shop),
-          const SizedBox(height: 12),
           _toolsGrid(shop),
           const SizedBox(height: 12),
           _bizList(shop),
@@ -1514,6 +1956,8 @@ class _ShopTabPageState extends State<ShopTabPage> {
             padding: const EdgeInsets.fromLTRB(kCardPad, 2, kCardPad, 0),
             child: _measuredPrep(),
           ),
+          const SizedBox(height: 12),
+          _profileGroup(shop),
           const SizedBox(height: 12),
           _priceList(shop),
           const SizedBox(height: 12),

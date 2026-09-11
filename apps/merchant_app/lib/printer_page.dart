@@ -146,7 +146,7 @@ class _PrinterPageState extends State<PrinterPage> {
             const SizedBox(height: 8),
             Text(
               purpose == 'kitchen'
-                  ? '后厨备餐单**不印顾客手机号和地址** —— 后厨用不到,'
+                  ? '后厨备餐单不印顾客手机号和地址 —— 后厨用不到,'
                       '而单子会被随手丢在操作台上。'
                   : purpose == 'label'
                       ? '标签贴在打包袋外面,只印店名与单号后六位。'

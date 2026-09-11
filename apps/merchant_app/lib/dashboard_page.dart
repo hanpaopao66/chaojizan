@@ -3,7 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
-/// 经营看板(#154):打烊后坐下来看的那一屏。
+/// 经营趋势(#154,原名「经营看板」):打烊后坐下来看的那一屏。
+///
+/// 改名是因为底部导航有了「看板」tab(今日台面 + 待接单),两个看板商家分不清。
 ///
 /// ## 为什么这一页可以"满屏图表",而订单页不行
 ///
@@ -125,7 +127,7 @@ class _DashboardPageState extends State<DashboardPage> {
       // 限宽用宽档:看板挤在 720 里看不清 —— 
       // 宽度上限按**内容形态**选,不是统一限死
       contentMaxWidth: kWideMaxWidth,
-      appBar: AppBar(title: const Text('经营看板')),
+      appBar: AppBar(title: const Text('经营趋势')),
       body: _error != null
           ? SzError(error: _error, onRetry: _load)
           : loading
@@ -218,7 +220,7 @@ class _DashboardPageState extends State<DashboardPage> {
           cell('已取消', '${today['cancelled'] ?? 0}'),
         ]),
         const SizedBox(height: 6),
-        Text('按今日下单统计,是生意热度;对账页按结算入账,两边对不上是正常的',
+        Text('按今日下单统计,是生意热度;账本页按结算入账,两边对不上是正常的',
             style: TextStyle(fontSize: 10.5, color: sz.inkMuted)),
       ]),
     );

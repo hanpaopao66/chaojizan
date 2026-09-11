@@ -12,11 +12,15 @@ import 'shop_fake_api.dart';
 /// 订单 tab:待接单这个数从哪儿来、催单语音的判据是什么、历史是不是真历史、
 /// 动作行在窄屏放不放得下。
 ///
+/// 2026-09 浅色定稿之后工作台落地是「看板」(五个 tab:看板 / 订单 / 菜单 /
+/// 账本 / 店铺),这一组测的是订单 tab,所以 [pumpHome] 进来先切过去。
+/// 看板自己的判据在 board_tab_test.dart。
+///
 /// ## 这四件事都是「安静地错」
 ///
 /// `/orders` 默认 `limit=20`(api_client.dart),服务端按 `created_at desc`
 /// 切片、不带状态过滤(orders.py)。而 `_orders` 这一个列表同时驱动:
-/// 顶栏「N 单待接」、三个分段的内容、**以及每 10 秒一次的催单语音**。
+/// 「N 单待接」、三个分段的内容、**以及每 30 秒一轮的催单提示音**。
 ///
 /// 午高峰 20 单以上时,更早的未接单会掉出这个窗口 —— 数不到、
 /// 列表里看不见、**语音也不再响**。而这个文件自己的注释写着
@@ -42,6 +46,15 @@ void main() {
   });
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  /// 底部导航(窄屏)或侧栏(宽屏)里点一个 tab
+  Future<void> openTab(WidgetTester t, String label) async {
+    final bar = find.byType(NavigationBar);
+    final nav = bar.evaluate().isNotEmpty ? bar : find.byType(NavigationRail);
+    await t.tap(find.descendant(of: nav, matching: find.text(label)));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 300));
+  }
+
   Future<void> pumpHome(
     WidgetTester t,
     ApiClient api, {
@@ -53,13 +66,20 @@ void main() {
     await t.pumpWidget(MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(scale)),
       child: MaterialApp(
-        theme: brandTheme(Brightness.light, density: SzDensity.operate),
+        theme: brandTheme(Brightness.light,
+            density: SzDensity.operate, accentTone: 0),
         home: MerchantHomePage(api: api, shop: Merchant.fromJson(shopJson())),
       ),
     ));
     await t.pump();
     await t.pump(const Duration(milliseconds: 300));
+    // 落地是看板;这一组测订单 tab
+    await openTab(t, '订单');
   }
+
+  /// 待接单卡上的主按钮。按钮上写明出餐时间(承诺 15 分钟,shopJson 的默认)——
+  /// 设计稿 6a 的「接单 · 12 分出餐」,原来只写「接单」
+  const accept = '接单 · 15 分出餐';
 
   /// 拆掉页面,让 `dispose()` 把三个定时器和 WebSocket 收干净。
   /// 不拆的话 `testWidgets` 结束时会报 "A Timer is still pending"。
@@ -157,7 +177,7 @@ void main() {
               '光把数字改对,商家听见响却找不到那一单');
       expect(hasTextContaining('SZOLD'), isFalse,
           reason: '(订单号不直接上屏,这里只是防止断言写错)');
-      expect(find.widgetWithText(FilledButton, '接单'), findsWidgets,
+      expect(find.widgetWithText(FilledButton, accept), findsWidgets,
           reason: '待接单栏里必须真有单可接,不能是「这一栏没有订单」');
       await teardown(t);
     });
@@ -181,7 +201,7 @@ void main() {
       return calls;
     }
 
-    testWidgets('未接单掉出 20 条窗口之后,语音仍然要催', (t) async {
+    testWidgets('未接单掉出 20 条窗口之后,提示音仍然要催', (t) async {
       final api = orderFakeApi(
         pages: [
           ...ordersJson(count: 20, prefix: 'SZDONE', status: 'completed'),
@@ -192,8 +212,8 @@ void main() {
       await pumpHome(t, api);
       final calls = hookPlatformChannel(t);
 
-      // 催单定时器 10 秒一跳
-      await t.pump(const Duration(seconds: 11));
+      // 催单定时器 30 秒一跳(动效规范 07:「30 秒未处理再响一轮」)
+      await t.pump(const Duration(seconds: 31));
 
       expect(calls.where((c) => c == 'vibrate'), isNotEmpty,
           reason: '列表里数不到待接单,催单就哑了 —— '
@@ -208,7 +228,7 @@ void main() {
       );
       await pumpHome(t, api);
       final calls = hookPlatformChannel(t);
-      await t.pump(const Duration(seconds: 11));
+      await t.pump(const Duration(seconds: 31));
 
       expect(calls.where((c) => c == 'vibrate'), isEmpty,
           reason: '没有待接单还在响,商家下次就不信这个提示音了');
@@ -255,7 +275,9 @@ void main() {
         ],
         todos: {'pending_orders': 0},
       );
-      await pumpHome(t, api, height: 2400);
+      // 视口要装得下 20 张历史卡再加底下那一条入口:ListView 按需构建,
+      // 装不下的话「看更早的订单」根本没建出来,断言会假红
+      await pumpHome(t, api, height: 3200);
       await t.tap(find.text('历史'));
       await t.pump();
       await t.pump(const Duration(milliseconds: 300));
@@ -285,7 +307,7 @@ void main() {
       await pumpHome(t, api);
 
       // 动作行只剩主操作
-      expect(find.text('接单'), findsOneWidget);
+      expect(find.text(accept), findsOneWidget);
       expect(find.text('拒单'), findsOneWidget);
       expect(find.text('缺货退款'), findsNothing,
           reason: '次要操作还留在动作行的话,窄屏上照旧要折行 —— 这一点就白改了');
@@ -343,33 +365,9 @@ void main() {
       await teardown(t);
     });
 
-    testWidgets('390 窄屏上待接单卡从 238 回到 180', (t) async {
-      final api = orderFakeApi(
-        pages: [orderJson(no: 'SZ0001')],
-        todos: {'pending_orders': 1},
-      );
-      await pumpHome(t, api);
-      // 卡片是订单列表里那个带描边的 Container。取第一张的高度 ——
-      // 0294c4a 把动作行换成 Wrap 之后,窄屏上它是 238;方案要求回到 180 以下
-      final card = find
-          .descendant(
-              of: find.byType(RefreshIndicator),
-              matching: find.byType(Container))
-          .evaluate()
-          .map((e) => e.renderObject as RenderBox?)
-          .where((b) => b != null && b.hasSize && b.size.height > 60)
-          .map((b) => b!.size.height)
-          .toList();
-      expect(card, isNotEmpty, reason: '没找到订单卡');
-      // 实测 180,方案估的是 160。差的这 20px 在动作行两个按钮的触控高度上,
-      // 要拿到就得缩触控区 —— 干活页不干这事(同 shop_tab「带开关的入口条
-      // 不超过 72px,不许缩触控区」那条)。238 → 180 已经拿到了这一点的
-      // 收益:首屏多放一张待接单卡
-      expect(card.first, lessThanOrEqualTo(180),
-          reason: '待接单卡 ${card.first}px —— 动作行又在折行了,'
-              '这一点的收益(首屏多放一张)就没拿到');
-      await teardown(t);
-    });
+    // 「390 窄屏上待接单卡不超过 180」挪到了 order_card_height_test.dart:
+    // 高度要用 App 真用的字体量。测试默认字体里拉丁字母一个字一个 em 宽,
+    // 「菜价 ¥34.00 − 4.5%」会折成三行,量出来的是一张不存在的卡
   });
 
   /// #33 4.1 宽屏:可用宽度 ≥700 时订单卡两栏,首屏 3 → 6 张。
@@ -446,8 +444,8 @@ void main() {
       testWidgets('${width.toInt()}dp × ${scale}x 不溢出', (t) async {
         await pumpHome(t, twoCards(), width: width, height: 2400, scale: scale);
 
-        // 待接单栏:打印 + 聊天 + 缺货退款 + 拒单 + 接单(实测本征宽 354px)
-        expect(find.widgetWithText(FilledButton, '接单'), findsOneWidget,
+        // 待接单栏:拒单 + 「接单 · 15 分出餐」,右边还要放下钱
+        expect(find.widgetWithText(FilledButton, accept), findsOneWidget,
             reason: '卡没渲染出来的话,下面几条断言等于没测');
         expect(t.takeException(), isNull,
             reason: 'RenderFlex 溢出了 —— 溢出时 end 对齐退化成 start,'

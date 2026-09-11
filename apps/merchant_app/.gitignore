@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 和设计稿并排对照的截图(test/design_render_test.dart --update-goldens 生成)。
+# 页面上有跟着时钟走的字,每次生成都不一样,只在本机看,不进仓库
+/test/goldens/design_*.png
+# golden 比对失败时 flutter test 吐出来的差异图
+/test/failures/

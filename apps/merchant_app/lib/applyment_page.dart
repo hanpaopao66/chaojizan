@@ -719,7 +719,7 @@ class _ApplymentPageState extends State<ApplymentPage> {
           icon: Icons.verified_outlined,
           title: '已开通:货款直接进你的账户',
           what: '从现在起,用户付的钱由微信支付直接结算到 $bankText,不在平台账上停留。'
-              '平台的佣金走分账,在对账页一笔一笔看得到。',
+              '平台的佣金走分账,在账本(对账)页一笔一笔看得到。',
           todo: const [
             '要换银行卡或改法人信息,先联系客服 —— 变更期间收款会暂停,'
                 '别挑生意最忙的时候改',
@@ -808,7 +808,7 @@ class _ApplymentPageState extends State<ApplymentPage> {
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
         const SizedBox(height: 8),
         Text(
-          '因为收款要换个走法:让用户的钱**直接进你自己的账户**,不再先经过平台。\n\n'
+          '因为收款要换个走法:让用户的钱直接进你自己的账户,不再先经过平台。\n\n'
           '要走通这条路,微信支付得先认识你这家店 —— 营业执照、法人身份证、'
           '你要收款的银行账户,一样都不能少。这是微信开户的硬要求,'
           '不是平台加的门槛。',
