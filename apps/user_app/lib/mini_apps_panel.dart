@@ -83,17 +83,33 @@ class MiniAppsPeek extends StatelessWidget {
 }
 
 /// 全屏面板:从顶部滑入,上滑或点空白收起。
+///
+/// 动效规范 02:整体 y −100%→0,320ms spring(带一点回弹);
+/// 收起 220ms exit —— 消失比出现快,图标不单独动。
+/// 图标跟在面板后面 80ms 开始,一个比一个晚 40ms 淡入上浮 8px(见 [_MiniAppsPanel])。
 Future<void> showMiniAppsPanel(BuildContext context,
     {required ApiClient api, required List<MiniAppInfo> apps}) {
   return Navigator.of(context).push(PageRouteBuilder(
     opaque: false,
-    transitionDuration: const Duration(milliseconds: 240),
-    reverseTransitionDuration: const Duration(milliseconds: 200),
+    transitionDuration: SzMotion.of(context, SzMotion.slow),
+    reverseTransitionDuration: SzMotion.of(context, SzMotion.base),
     pageBuilder: (_, __, ___) => _MiniAppsPanel(api: api, apps: apps),
-    transitionsBuilder: (_, anim, __, child) => SlideTransition(
-      position: anim.drive(Tween(begin: const Offset(0, -1), end: Offset.zero)
-          .chain(CurveTween(curve: Curves.easeOutCubic))),
-      child: child,
+    transitionsBuilder: (context, anim, __, child) => SlideTransition(
+      position: CurvedAnimation(
+              parent: anim, curve: SzMotion.spring, reverseCurve: SzMotion.exit)
+          .drive(Tween(begin: const Offset(0, -1), end: Offset.zero)),
+      // 回弹那一下面板会往下多走几十像素,顶上垫一截纸色,
+      // 不然会从缝里看见后面的首页
+      child: Stack(clipBehavior: Clip.none, children: [
+        Positioned(
+          left: 0,
+          right: 0,
+          top: -120,
+          height: 121,
+          child: ColoredBox(color: Theme.of(context).sz.paper),
+        ),
+        Positioned.fill(child: child),
+      ]),
     ),
   ));
 }
@@ -142,7 +158,10 @@ class _MiniAppsPanel extends StatelessWidget {
                 itemCount: apps.length,
                 itemBuilder: (context, i) {
                   final a = apps[i];
-                  return InkWell(
+                  return SzDelayedIn(
+                    delay: const Duration(milliseconds: 80) + SzMotion.staggerAt(i),
+                    curve: SzMotion.standard,
+                    child: InkWell(
                     borderRadius: BorderRadius.circular(kRadiusMd),
                     onTap: () => showMiniAppSheet(context, api: api, app: a),
                     child: Column(children: [
@@ -176,6 +195,7 @@ class _MiniAppsPanel extends StatelessWidget {
                             style:
                                 TextStyle(fontSize: 9.5, color: sz.inkFaint)),
                     ]),
+                    ),
                   );
                 },
               ),

@@ -99,6 +99,36 @@ void main() {
         'created_at': '2026-08-20T12:00:00+08:00',
       };
 
+  /// 照服务端 `/orders/counts` 的口径从同一批单子算出数 ——
+  /// 角标只能来自服务端,但测试里「服务端」就是这两个列表
+  Map<String, dynamic> countsOf(
+      List<Map<String, dynamic>> orders, List<Map<String, dynamic>> stays) {
+    const active = {'paid', 'accepted', 'ready', 'picked_up', 'delivered'};
+    int n(bool Function(Map<String, dynamic>) f) => orders.where(f).length;
+    return {
+      'food': [
+        if (orders.isNotEmpty)
+          {
+            'biz_type': 'food',
+            'total': orders.length,
+            'pending_payment': n((o) => o['status'] == 'pending_payment'),
+            'active': n((o) => active.contains(o['status'])),
+            'to_review': n(
+                (o) => o['status'] == 'completed' && o['has_review'] != true),
+          },
+      ],
+      'stay': {
+        'total': stays.length,
+        'pending_payment': stays.where((s) => s['status'] == 'created').length,
+        'active': stays
+            .where((s) =>
+                const {'paid', 'confirmed', 'checked_in'}.contains(s['status']))
+            .length,
+        'to_review': 0,
+      },
+    };
+  }
+
   Map<String, dynamic> stay({String status = 'created'}) => {
         'order_no': 'ST1',
         'checkin_date': '2026-09-01',
@@ -115,6 +145,8 @@ void main() {
     bool verified = false,
     String? createdAt,
     List<Map<String, dynamic>> miniApps = const [],
+    bool countsEndpoint = true,
+    Map<String, dynamic>? counts,
   }) {
     return ApiClient(
       baseUrl: 'http://test.local',
@@ -148,6 +180,13 @@ void main() {
             payload = {'marketing': marketing};
           case '/orders':
             payload = orders;
+          case '/orders/counts':
+            // 老服务端没有这个接口:「我的」页要退回数第一页
+            if (!countsEndpoint) {
+              return http.Response('{"detail":"Not Found"}', 404,
+                  headers: {'content-type': 'application/json'});
+            }
+            payload = counts ?? countsOf(orders, stays);
           case '/stays/orders/mine':
             payload = stays;
           default:
@@ -188,6 +227,8 @@ void main() {
     bool verified = false,
     String? createdAt,
     List<Map<String, dynamic>> miniApps = const [],
+    bool countsEndpoint = true,
+    Map<String, dynamic>? counts,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final api = fakeApi(
@@ -197,7 +238,9 @@ void main() {
         stays: stays,
         verified: verified,
         createdAt: createdAt,
-        miniApps: miniApps);
+        miniApps: miniApps,
+        countsEndpoint: countsEndpoint,
+        counts: counts);
     await api.login('13800000001', 'pw');
     return api;
   }
@@ -303,6 +346,10 @@ void main() {
     });
   });
 
+  /// 角标上的数。订单卡头上还有频道足迹(「■ 2」),光按文字找会撞上
+  Finder badgeText(String n) =>
+      find.descendant(of: find.byType(Badge), matching: find.text(n));
+
   group('订单区:按状态分流,数字是它区别于底部 tab 的全部理由', () {
     testWidgets('四格都在,且待评价/退款售后不是凭空造的状态', (t) async {
       final api = await loggedIn(orders: [order()]);
@@ -310,7 +357,7 @@ void main() {
       for (final label in ['待支付', '进行中', '待评价', '退款售后']) {
         expect(find.text(label), findsOneWidget, reason: '缺了「$label」格');
       }
-      expect(find.text('全部订单'), findsOneWidget);
+      expect(find.text('我的订单'), findsOneWidget);
     });
 
     testWidgets('待支付角标 = 外卖 + 住宿', (t) async {
@@ -324,7 +371,7 @@ void main() {
       await pumpProfile(t, api);
       // 外卖 1 笔待支付 + 住宿 1 笔待支付 = 2。
       // 住宿的 created 单 15 分钟不付就自动关闭,漏数它是真金白银的损失
-      expect(find.text('2'), findsOneWidget,
+      expect(badgeText('2'), findsOneWidget,
           reason: '待支付角标没把住宿的待支付单算进去');
     });
 
@@ -335,8 +382,95 @@ void main() {
         order(no: 'C', status: 'completed', hasReview: true),
       ]);
       await pumpProfile(t, api);
-      expect(find.text('2'), findsOneWidget,
+      expect(badgeText('2'), findsOneWidget,
           reason: '待评价应为 2(3 笔完成,1 笔已评)');
+    });
+
+    testWidgets('角标用服务端全量 count,不数列表第一页', (t) async {
+      // 列表只回来 1 单(第一页),服务端说一共有 5 单待评价 ——
+      // 评价没有时限,老单也算,第一页数不出来
+      final api = await loggedIn(orders: [
+        order(no: 'A', status: 'completed', hasReview: false),
+      ], counts: {
+        'food': [
+          {
+            'biz_type': 'food',
+            'total': 40,
+            'pending_payment': 0,
+            'active': 0,
+            'to_review': 5,
+          },
+        ],
+        'stay': {'total': 0, 'pending_payment': 0, 'active': 0, 'to_review': 0},
+      });
+      await pumpProfile(t, api);
+      expect(badgeText('5'), findsOneWidget,
+          reason: '待评价该是服务端数的 5,不是第一页里那 1 单');
+    });
+
+    testWidgets('老服务端没有 /orders/counts:退回数第一页,不是全 0', (t) async {
+      final api = await loggedIn(countsEndpoint: false, orders: [
+        order(no: 'A', status: 'completed', hasReview: false),
+        order(no: 'B', status: 'completed', hasReview: false),
+      ]);
+      await pumpProfile(t, api);
+      expect(badgeText('2'), findsOneWidget,
+          reason: '接口 404 时角标不能变成 0 —— 那等于藏起待办');
+    });
+
+    testWidgets('订单卡头上是频道足迹:买过的频道各一个色块 + 单数', (t) async {
+      final api = await loggedIn(
+        // 都评过了:待评价没有角标,页面上的「3」只可能是足迹
+        orders: [
+          order(no: 'A', hasReview: true),
+          order(no: 'B', hasReview: true),
+          order(no: 'C', hasReview: true),
+        ],
+        stays: [stay(status: 'confirmed')],
+      );
+      await pumpProfile(t, api);
+      // 外卖 3、住宿 1;数不在角标里,在卡头上
+      expect(find.text('3'), findsOneWidget);
+      expect(badgeText('3'), findsNothing);
+      expect(find.text('全部订单'), findsNothing,
+          reason: '有足迹时卡头不再重复写「全部订单」—— 整行本身就是那个入口');
+    });
+
+    testWidgets('优惠券 / 团购券挂的是「还能用几张」,hold 色,不是待办红', (t) async {
+      final api = await loggedIn(orders: [
+        order(no: 'A', hasReview: true),
+      ], counts: {
+        'food': [
+          {
+            'biz_type': 'food',
+            'total': 1,
+            'pending_payment': 0,
+            'active': 0,
+            'to_review': 0,
+          },
+        ],
+        'stay': {'total': 0, 'pending_payment': 0, 'active': 0, 'to_review': 0},
+        'coupons_usable': 3,
+        'tickets': {'total': 4, 'usable': 2},
+      });
+      await pumpProfile(t, api);
+      expect(badgeText('3'), findsOneWidget, reason: '优惠券还能用 3 张');
+      expect(badgeText('2'), findsOneWidget, reason: '团购券还能用 2 张');
+      final hold = Theme.of(t.element(find.byType(ProfileView))).sz.hold;
+      for (final n in ['3', '2']) {
+        final badge = t.widget<Badge>(
+            find.ancestor(of: badgeText(n), matching: find.byType(Badge)));
+        expect(badge.backgroundColor, hold);
+      }
+      // 团购买过 4 张:在卡头足迹里,不在角标里
+      expect(find.text('4'), findsOneWidget);
+      expect(badgeText('4'), findsNothing);
+    });
+
+    testWidgets('拿不到数(老服务端):卡头退回「全部订单」', (t) async {
+      final api = await loggedIn(countsEndpoint: false, orders: [order()]);
+      await pumpProfile(t, api);
+      expect(find.text('全部订单'), findsOneWidget);
     });
 
     testWidgets('退款售后不给角标 —— 退款到账不是待办', (t) async {
@@ -347,14 +481,14 @@ void main() {
         order(no: 'B', status: 'completed', hasReview: true),
       ]);
       await pumpProfile(t, api);
-      expect(find.text('1'), findsNothing,
+      expect(badgeText('1'), findsNothing,
           reason: '给退款记录挂红点只会制造焦虑');
     });
 
     testWidgets('未登录不渲染订单区 —— 四个 0 的格子就是灰占位', (t) async {
       SharedPreferences.setMockInitialValues({});
       await pumpProfile(t, fakeApi());
-      expect(find.text('全部订单'), findsNothing);
+      expect(find.text('我的订单'), findsNothing);
       expect(find.text('待评价'), findsNothing);
     });
   });
@@ -372,7 +506,7 @@ void main() {
         expect(find.text(label), findsOneWidget);
         expect(bottomOf(label), lessThanOrEqualTo(firstScreen));
       }
-      expect(bottomOf('钱去哪了'), lessThan(bottomOf('全部订单')),
+      expect(bottomOf('钱去哪了'), lessThan(bottomOf('我的订单')),
           reason: '账目该在订单之上 —— 这是这个平台要用户记住的东西');
     });
 

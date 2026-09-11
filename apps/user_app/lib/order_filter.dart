@@ -79,3 +79,64 @@ enum OrderFilter {
               o.refundCents > 0,
       };
 }
+
+/// 订单页上的数(设计稿 3b:「全部 38」「点外卖 31」「待支付 · 1」)。
+///
+/// 来自 `/orders/counts` 的**全量 count**。频道怎么归还是走
+/// [channelOfBizType],和列表里每一单的归属([orderChannelKey])同一个判据 ——
+/// 条上说 31 单,点进去就该是 31 单。
+///
+/// 只数「全部」和三个待办(待支付 / 进行中 / 待评价),和「我的」页角标
+/// 同一口径([OrderFilter.badged]);退款售后不是待办,不给数。
+class OrderCounts {
+  OrderCounts.fromJson(Map<String, dynamic> j) {
+    for (final r in (j['food'] as List? ?? const [])) {
+      final m = r as Map<String, dynamic>;
+      final biz = m['biz_type'] as String?;
+      _add(channelOfBizType(biz)?.key ?? 'food', m);
+    }
+    final stay = j['stay'];
+    if (stay is Map<String, dynamic>) _add('stay', stay);
+    couponsUsable = (j['coupons_usable'] as num?)?.toInt();
+    final tickets = j['tickets'];
+    if (tickets is Map<String, dynamic>) {
+      ticketsTotal = (tickets['total'] as num?)?.toInt();
+      ticketsUsable = (tickets['usable'] as num?)?.toInt();
+    }
+  }
+
+  /// 「我的」页网格上两张券的角标:还有几张能用(全量 count,不是券包第一页)。
+  /// null = 老服务端没给
+  int? couponsUsable;
+  int? ticketsUsable;
+
+  /// 团购券一共买过几张(订单卡头上的频道足迹,团购不走订单接口)
+  int? ticketsTotal;
+
+  /// 频道 key → [全部, 待支付, 进行中, 待评价]
+  final Map<String, List<int>> _by = {};
+
+  static const _fields = ['total', 'pending_payment', 'active', 'to_review'];
+
+  void _add(String channel, Map<String, dynamic> m) {
+    final row = _by.putIfAbsent(channel, () => [0, 0, 0, 0]);
+    for (var i = 0; i < _fields.length; i++) {
+      row[i] += (m[_fields[i]] as num?)?.toInt() ?? 0;
+    }
+  }
+
+  int _sum(String? channel, int i) => channel == null
+      ? _by.values.fold(0, (s, r) => s + r[i])
+      : (_by[channel]?[i] ?? 0);
+
+  /// 这个频道一共多少单;null = 所有频道
+  int total(String? channel) => _sum(channel, 0);
+
+  /// 这个频道里某个待办筛选有几单。不给数的筛选([OrderFilter.badged] 为假)回 null
+  int? of(String? channel, OrderFilter f) => switch (f) {
+        OrderFilter.pendingPayment => _sum(channel, 1),
+        OrderFilter.active => _sum(channel, 2),
+        OrderFilter.toReview => _sum(channel, 3),
+        _ => null,
+      };
+}

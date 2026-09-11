@@ -97,6 +97,7 @@ void main() {
   ApiClient fakeApi({
     List<Map<String, dynamic>> orders = const [],
     List<Map<String, dynamic>> stays = const [],
+    Map<String, dynamic>? counts,
   }) =>
       ApiClient(
         baseUrl: 'http://test.local',
@@ -117,6 +118,8 @@ void main() {
                   : orders;
             case '/stays/orders/mine':
               payload = stays;
+            case '/orders/counts':
+              payload = counts ?? <String, Object>{};
             default:
               payload = <String, Object>{};
           }
@@ -131,12 +134,13 @@ void main() {
     List<Map<String, dynamic>> stays = const [],
     Size size = const Size(390, 844),
     double textScale = 1.0,
+    Map<String, dynamic>? counts,
   }) async {
     tester.view
       ..devicePixelRatio = 3.0
       ..physicalSize = size * 3.0;
     addTearDown(tester.view.reset);
-    final api = fakeApi(orders: orders, stays: stays);
+    final api = fakeApi(orders: orders, stays: stays, counts: counts);
     // 不登录的话订单页整页短路成登录引导,断言的是另一个界面
     await api.login('13800000001', '123456');
     await tester.pumpWidget(MaterialApp(
@@ -152,12 +156,69 @@ void main() {
   }
 
   /// 频道条上的一颗。频道名在页面上是唯一的(状态 chip 里没有「点外卖」这些词);
-  /// 「全部」两处都有 —— 频道条和状态 chip 各一个,频道条在上面,取第一个
+  /// 状态那一排的第一颗叫「全部状态」(设计稿 3b),所以「全部」只在频道条上
   Finder pill(String label) => find.text(label);
-  Finder allPill() => find.text('全部').first;
+  Finder allPill() => find.text('全部');
 
-  /// 频道条出没出来:它在的时候页面上有两个「全部」
-  bool stripShown() => find.text('全部').evaluate().length == 2;
+  /// 频道条出没出来:它在的时候页面上有「全部」
+  bool stripShown() => find.text('全部').evaluate().length == 1;
+
+  group('条上的数来自服务端全量 count(设计稿 3b)', () {
+    // 列表第一页只有三单,服务端说一共 38 单 —— 条上写 38,不写 3
+    final counts = {
+      'food': [
+        {
+          'biz_type': 'food',
+          'total': 31,
+          'pending_payment': 1,
+          'active': 1,
+          'to_review': 3,
+        },
+        {
+          'biz_type': 'errand',
+          'total': 5,
+          'pending_payment': 0,
+          'active': 0,
+          'to_review': 0,
+        },
+      ],
+      'stay': {'total': 2, 'pending_payment': 0, 'active': 0, 'to_review': 0},
+    };
+    final three = [
+      order('F1'),
+      order('E1', bizType: 'errand', kind: 'errand_send', merchant: '帮送'),
+    ];
+
+    testWidgets('频道后面是单数,状态只给三个待办带数', (tester) async {
+      await pump(tester,
+          orders: three, stays: [stay('S1')], counts: counts);
+      for (final n in ['38', '31', '5', '2']) {
+        expect(find.text(n), findsOneWidget, reason: '条上缺了「$n」');
+      }
+      expect(find.text('全部状态'), findsOneWidget);
+      expect(find.text('待支付 · 1'), findsOneWidget);
+      expect(find.text('进行中 · 1'), findsOneWidget);
+      expect(find.text('待评价 · 3'), findsOneWidget);
+      // 退款售后不是待办,不给数。它排在第五颗,390 宽下在横滑的屏外
+      expect(find.text('退款售后', skipOffstage: false), findsOneWidget);
+    });
+
+    testWidgets('换到「帮我送」:状态上的数跟着换成这个频道的,0 不写', (tester) async {
+      await pump(tester,
+          orders: three, stays: [stay('S1')], counts: counts);
+      await tester.tap(pill('帮我送'));
+      await tester.pumpAndSettle();
+      expect(find.text('待支付'), findsOneWidget);
+      expect(find.text('待评价 · 3'), findsNothing);
+    });
+
+    testWidgets('接口回了不认识的形状:不挂数,更不挂 0', (tester) async {
+      await pump(tester, orders: three, stays: [stay('S1')], counts: {});
+      expect(stripShown(), isTrue);
+      expect(find.text('0'), findsNothing);
+      expect(find.text('待支付'), findsOneWidget);
+    });
+  });
 
   group('关频道不能没收凭证', () {
     testWidgets('住宿关掉了,历史住宿单照样在「全部」里,条上照样有「住宿」',

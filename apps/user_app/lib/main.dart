@@ -655,6 +655,14 @@ class _MerchantListViewState extends State<MerchantListView>
     _restorePledge();
     _loadMiniApps();
     _restoreMiniHint();
+    // 金刚区显示哪些频道是后台配置(ChannelConfig)。load() 以前没有任何地方调,
+    // 首页永远画内置兜底 —— 管理员在后台开了新频道,首页照样只有两个。
+    // 先用缓存画,拉到后台配置再重画一次
+    if (widget.category == null) {
+      ChannelConfig.load(widget.api).then((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   @override
@@ -3914,10 +3922,27 @@ class _OrdersTabState extends State<OrdersTab> {
   /// 现在「全部」本来就把各频道的单排在一起,没有「藏掉一段就回不去」这回事
   Set<String> _present = const {};
 
+  /// 频道条和状态筛选上的数(设计稿 3b)。拉不到就不显示数,不影响列表
+  OrderCounts? _counts;
+  DateTime? _countsAt;
+
   @override
   void initState() {
     super.initState();
     authTick.addListener(_onAuthChanged); // 游客登录成功后刷新
+  }
+
+  /// 列表每次重拉(进页、下拉、翻页)都会报一次频道,顺手刷新数。
+  /// 翻页时数不会变,5 秒内的重复请求直接跳过
+  Future<void> _loadCounts() async {
+    if (!widget.api.isLoggedIn) return;
+    final now = DateTime.now();
+    if (_countsAt != null && now.difference(_countsAt!).inSeconds < 5) return;
+    _countsAt = now;
+    try {
+      final c = OrderCounts.fromJson(await widget.api.myOrderCounts());
+      if (mounted) setState(() => _counts = c);
+    } catch (_) {}
   }
 
   /// 这个 tab 在 IndexedStack 里是保活的 —— 从「我的」页再跳一次过来,
@@ -3949,6 +3974,7 @@ class _OrdersTabState extends State<OrdersTab> {
 
   void _onChannels(Set<String> keys) {
     if (!mounted) return;
+    _loadCounts();
     if (keys.length == _present.length && keys.containsAll(_present)) return;
     setState(() => _present = keys);
   }
@@ -3983,41 +4009,37 @@ class _OrdersTabState extends State<OrdersTab> {
     final channel = showStrip && pills.any((c) => c.key == _channel)
         ? _channel
         : null;
+    // 列表里明明有单、数却全是 0:那是接口回了个不认识的形状,
+    // 不是真没有单 —— 不显示数,也不能在「点外卖」后面挂一个 0
+    final counts = (_counts?.total(null) ?? 0) > 0 ? _counts : null;
     return Column(children: [
       if (showStrip)
-        SizedBox(
-          height: 44,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
-            children: [
-              _ChannelPill(
-                  label: '全部',
-                  selected: channel == null,
-                  onTap: () => setState(() => _channel = null)),
-              for (final ch in pills)
-                _ChannelPill(
-                    channel: ch,
-                    label: ch.name,
-                    selected: channel == ch.key,
-                    onTap: () => setState(() => _channel = ch.key)),
-            ],
-          ),
+        _ChannelStrip(
+          pills: pills,
+          selected: channel,
+          counts: counts,
+          onSelect: (key) => setState(() => _channel = key),
         ),
       // 状态筛选:「我的」页四格点进来要有地方落。
-      // 横滑而不是折行 —— 五个筛选在 320 窄屏 + 长辈版下排不进一行
+      // 横滑而不是折行 —— 五个筛选在 320 窄屏 + 长辈版下排不进一行。
+      //
+      // 稿子上这一排是**描边小胶囊**,比上面的频道条轻一档:
+      // 两排都是墨底实心的话,两个选中态抢同一个注意力
       SizedBox(
-        height: 42,
+        height: 38,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+          padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 2),
           children: [
             for (final f in OrderFilter.values)
               Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: SzChip(f.label,
-                    selected: _filter == f,
-                    onTap: () => setState(() => _filter = f)),
+                padding: const EdgeInsets.only(right: 7),
+                child: _StatusChip(
+                  label: f == OrderFilter.all ? '全部状态' : f.label,
+                  count: counts?.of(channel, f),
+                  selected: _filter == f,
+                  onTap: () => setState(() => _filter = f),
+                ),
               ),
           ],
         ),
@@ -4033,33 +4055,143 @@ class _OrdersTabState extends State<OrdersTab> {
   }
 }
 
+/// 频道条(设计稿 3b + 动效规范 03):选中那颗底下是一块**墨色滑块**,
+/// 换频道时滑块的位置和宽度 220ms standard 滑过去,字色 120ms 跟着变。
+///
+/// 滑块的位置要等各颗排好之后量出来,所以第一帧还没量到时,
+/// 选中那颗自己画墨底(不闪一下空白)。
+class _ChannelStrip extends StatefulWidget {
+  const _ChannelStrip({
+    required this.pills,
+    required this.selected,
+    required this.onSelect,
+    this.counts,
+  });
+
+  final List<SzChannel> pills;
+
+  /// null = 全部
+  final String? selected;
+  final ValueChanged<String?> onSelect;
+
+  /// 每颗后面的单数;null = 还没拉到,先不显示
+  final OrderCounts? counts;
+
+  @override
+  State<_ChannelStrip> createState() => _ChannelStripState();
+}
+
+class _ChannelStripState extends State<_ChannelStrip> {
+  final _row = GlobalKey();
+  final _keys = <String, GlobalKey>{};
+  Rect? _slider;
+
+  GlobalKey _keyOf(String? k) => _keys.putIfAbsent(k ?? '', GlobalKey.new);
+
+  void _measure() {
+    if (!mounted) return;
+    final rowBox = _row.currentContext?.findRenderObject() as RenderBox?;
+    final pill =
+        _keyOf(widget.selected).currentContext?.findRenderObject() as RenderBox?;
+    if (rowBox == null || pill == null || !pill.hasSize) return;
+    final at = pill.localToGlobal(Offset.zero, ancestor: rowBox);
+    // 每颗右边带 7px 间距,滑块只盖住胶囊本身
+    final r = Rect.fromLTWH(at.dx, at.dy, pill.size.width - 7, pill.size.height);
+    if (r != _slider) setState(() => _slider = r);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+    final ready = _slider != null;
+    final counts = widget.counts;
+    // 宽度要撑满:横向 SingleChildScrollView 在宽松约束下会收成内容宽,
+    // 被外层 Column 摆到正中间(稿子上是左对齐)
+    return SizedBox(
+      width: double.infinity,
+      height: 44,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+        child: Stack(children: [
+          if (ready)
+            AnimatedPositioned(
+              duration: SzMotion.of(context, SzMotion.base),
+              curve: SzMotion.standard,
+              left: _slider!.left,
+              top: _slider!.top,
+              width: _slider!.width,
+              height: _slider!.height,
+              child: DecoratedBox(
+                decoration: ShapeDecoration(
+                    color: sz.ink, shape: const StadiumBorder()),
+              ),
+            ),
+          Row(key: _row, mainAxisSize: MainAxisSize.min, children: [
+            _ChannelPill(
+                key: _keyOf(null),
+                label: '全部',
+                count: counts?.total(null),
+                selected: widget.selected == null,
+                sliderReady: ready,
+                onTap: () => widget.onSelect(null)),
+            for (final ch in widget.pills)
+              _ChannelPill(
+                  key: _keyOf(ch.key),
+                  channel: ch,
+                  label: ch.name,
+                  count: counts?.total(ch.key),
+                  selected: widget.selected == ch.key,
+                  sliderReady: ready,
+                  onTap: () => widget.onSelect(ch.key)),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
 /// 频道条上的一颗。选中时墨色实底反白,和下面的状态 chip 同一套语言;
 /// 频道字块缩到 16px 放在名字前,颜色走频道色槽。
 class _ChannelPill extends StatelessWidget {
   const _ChannelPill({
+    super.key,
     required this.label,
     required this.selected,
     required this.onTap,
     this.channel,
+    this.count,
+    this.sliderReady = false,
   });
 
   /// null = 「全部」
   final SzChannel? channel;
   final String label;
+
+  /// 名字后面那个数(衬线数字);null = 不显示
+  final int? count;
   final bool selected;
   final VoidCallback onTap;
+
+  /// 墨色滑块量好了:选中这颗就不自己画底,让滑块在底下滑
+  final bool sliderReady;
 
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
     final ch = channel;
     final c = ch == null ? sz.ink : channelColor(context, ch.key);
+    final fast = SzMotion.of(context, SzMotion.fast);
     return Padding(
       padding: const EdgeInsets.only(right: 7),
       child: Material(
-        color: selected ? sz.ink : Colors.transparent,
+        color: selected && !sliderReady ? sz.ink : Colors.transparent,
         shape: StadiumBorder(
-            side: BorderSide(color: selected ? sz.ink : sz.line)),
+            side: BorderSide(
+                color: selected
+                    ? (sliderReady ? Colors.transparent : sz.ink)
+                    : sz.line)),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
@@ -4069,7 +4201,8 @@ class _ChannelPill extends StatelessWidget {
               if (ch != null) ...[
                 // 字块里用系统黑体,**不用 szDisplay**:宋体只给 19px 以上的大字
                 // (assets/fonts/README 那条,11px 的宋体发虚)
-                Container(
+                AnimatedContainer(
+                  duration: fast,
                   width: 16,
                   height: 16,
                   alignment: Alignment.center,
@@ -4077,20 +4210,83 @@ class _ChannelPill extends StatelessWidget {
                     color: c.withValues(alpha: selected ? .3 : .12),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: Text(ch.glyph,
-                      style: TextStyle(
-                          fontSize: kFontMicro,
-                          height: 1,
-                          color: selected ? sz.paper : c)),
+                  child: AnimatedDefaultTextStyle(
+                    duration: fast,
+                    style: szSans(
+                        fontSize: kFontMicro,
+                        height: 1,
+                        color: selected ? sz.paper : c),
+                    child: Text(ch.glyph),
+                  ),
                 ),
                 const SizedBox(width: 6),
               ],
-              Text(label,
-                  style: TextStyle(
-                      fontSize: kFontBody,
-                      fontWeight: FontWeight.w500,
-                      color: selected ? sz.paper : sz.ink)),
+              AnimatedDefaultTextStyle(
+                duration: fast,
+                style: szSans(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: selected ? sz.paper : sz.ink),
+                child: Text(label),
+              ),
+              if (count != null) ...[
+                const SizedBox(width: 6),
+                AnimatedDefaultTextStyle(
+                  duration: fast,
+                  style: szFigure(
+                      fontSize: 12.5,
+                      color: selected
+                          ? sz.paper.withValues(alpha: .75)
+                          : sz.inkMuted),
+                  child: Text('$count'),
+                ),
+              ],
             ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 订单页第二排的状态筛选(设计稿 3b):描边小胶囊,选中换墨色描边和墨色字,
+/// **不填底** —— 频道条那一排才是墨底实心。待办三种带数:「待支付 · 1」。
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.count,
+  });
+
+  final String label;
+  final int? count;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    final fast = SzMotion.of(context, SzMotion.fast);
+    // 0 不写:「待支付 · 0」是一句废话,还会让人以为有东西要看
+    final text = count == null || count == 0 ? label : '$label · $count';
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        shape: StadiumBorder(
+            side: BorderSide(color: selected ? sz.ink : sz.line)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: AnimatedDefaultTextStyle(
+              duration: fast,
+              style: szSans(
+                  fontSize: kFontNote,
+                  color: selected ? sz.ink : sz.inkMuted),
+              child: Text(text),
+            ),
           ),
         ),
       ),
@@ -4150,34 +4346,11 @@ class _OrderProgress extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sz = Theme.of(context).sz;
     final (labels, current) = stepsOf(order);
     if (current < 0) return const SizedBox.shrink();
-    return Row(children: [
-      for (var i = 0; i < labels.length; i++) ...[
-        Text(labels[i],
-            style: TextStyle(
-                fontSize: kFontMicro,
-                fontWeight: i == current ? FontWeight.w600 : FontWeight.w400,
-                color: i < current
-                    ? sz.earn
-                    : i == current
-                        ? sz.clay
-                        : sz.inkFaint)),
-        if (i < labels.length - 1)
-          Expanded(
-            child: Container(
-              height: 1,
-              margin: const EdgeInsets.symmetric(horizontal: 6),
-              color: i < current
-                  ? sz.earn
-                  : i == current
-                      ? sz.clay
-                      : sz.line,
-            ),
-          ),
-      ],
-    ]);
+    // 动效规范 04:状态往前走一格时,先把那一段线画过去(220ms standard),
+    // 再点亮当前节点(120ms spring)。轮询刷新状态没变就什么都不动
+    return SzProgressRail(labels: labels, step: current);
   }
 }
 
@@ -4211,6 +4384,20 @@ class OrderListView extends StatefulWidget {
 class _OrderListViewState extends State<OrderListView> {
   /// 外卖接口一页几条。**一页没拉满就是没有更早的了**,不用再空发一次请求
   static const _kPage = 20;
+
+  /// 换频道时列表从哪边进来:往右边的频道切,新列表从右边滑进(动效规范 03)
+  int _dir = 1;
+
+  static int _channelIndex(String? key) =>
+      key == null ? -1 : kChannels.indexWhere((c) => c.key == key);
+
+  @override
+  void didUpdateWidget(covariant OrderListView old) {
+    super.didUpdateWidget(old);
+    if (old.channel != widget.channel) {
+      _dir = _channelIndex(widget.channel) >= _channelIndex(old.channel) ? 1 : -1;
+    }
+  }
 
   late Future<void> _future = _loadFirst();
 
@@ -4530,11 +4717,19 @@ class _OrderListViewState extends State<OrderListView> {
                                 color: theme.colorScheme.primary)),
                       ],
                       const SizedBox(width: 8),
-                      Text(_statusText(order),
-                          style: TextStyle(
-                              fontSize: kFontNote,
-                              fontWeight: FontWeight.w600,
-                              color: color)),
+                      // 状态推进时字交叉淡入淡出 220ms(动效规范 04):
+                      // 轮询刷出新状态,旧字不是「啪」地换掉
+                      AnimatedSwitcher(
+                        duration: SzMotion.of(context, SzMotion.base),
+                        switchInCurve: SzMotion.standard,
+                        switchOutCurve: SzMotion.exit,
+                        child: Text(_statusText(order),
+                            key: ValueKey(_statusText(order)),
+                            style: TextStyle(
+                                fontSize: kFontNote,
+                                fontWeight: FontWeight.w600,
+                                color: color)),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -4640,7 +4835,21 @@ class _OrderListViewState extends State<OrderListView> {
               SzEmpty(art: BrandArt.receipt, text: _emptyText()),
             ]);
           }
-          return NotificationListener<ScrollNotification>(
+          // 换频道:新列表 220ms 从一侧滑进来(x ±12 + 淡入),卡片入场跟着重播。
+          // 按频道 key 换一棵新子树 —— 只是换了筛选,数据不重新拉。
+          // 没做「旧列表同时淡出」:两棵 ListView 同时挂在同一个
+          // PrimaryScrollController 上会断言失败,旧的直接让位
+          return TweenAnimationBuilder<double>(
+            key: ValueKey('ch-${widget.channel}'),
+            tween: Tween(begin: 0, end: 1),
+            duration: SzMotion.of(context, SzMotion.base),
+            curve: SzMotion.standard,
+            builder: (context, t, child) => Opacity(
+              opacity: t,
+              child: Transform.translate(
+                  offset: Offset(12.0 * _dir * (1 - t), 0), child: child),
+            ),
+            child: NotificationListener<ScrollNotification>(
             onNotification: (n) {
               // 触底前 400px 就开始加载,滚到底时下一页通常已经在了
               if (n.metrics.pixels >= n.metrics.maxScrollExtent - 400) {
@@ -4690,6 +4899,7 @@ class _OrderListViewState extends State<OrderListView> {
                       );
               },
             ),
+          ),
           );
         },
       ),
@@ -6837,18 +7047,26 @@ class _ProfileViewState extends State<ProfileView> {
   // 营销总开关(服务端 /config):关着时邀请有礼等入口整体隐藏
   bool _marketingOn = false;
 
-  /// 订单四格的角标数据源。**只用已拉到的这一页算。**
+  /// 订单四格的角标数据源:优先用 `/orders/counts` 的全量 count,
+  /// 和订单页状态筛选上的「待评价 · 3」是同一个数。
   ///
-  /// 服务端按 created_at desc 排、一页 20 条,而待支付/进行中的单必然是
-  /// 最新的那批 —— 所以从第一页数出来的数字,对任何「同时未完结订单
-  /// 少于 20」的用户都是准的。超过 20 的极端情况在角标上显示「20+」,
-  /// 不假装知道确切数(见 SzIconGrid)。
+  /// 拉不到(老服务端没有这个接口)才退回数第一页:服务端按 created_at desc
+  /// 排、一页 20 条,待支付/进行中的单必然是最新的那批,第一页数出来基本准;
+  /// 待评价就不一定了 —— 评价没有时限,老单也算,这正是改用全量的原因。
   ///
   /// 这里**没有**旧版那个「累计优惠 / 已完成订单」三格数字卡:
   /// 它拿同一个 limit=20 的列表算「累计」,第 21 单之后就是错的,
   /// 而且错得悄无声息。要找回来的话得服务端算,不该在入口页上。
   List<Order> _orders = const [];
   List<StayOrder> _stays = const [];
+  OrderCounts? _counts;
+
+  /// 手里还能用的优惠券 / 团购券张数(网格上 hold 色的角标,设计稿 3e)
+  /// 和团购券一共买过几张(订单卡头上的频道足迹),都跟 [_counts] 一起来。
+  /// 拉不到就不挂
+  int get _usableCoupons => _counts?.couponsUsable ?? 0;
+  int get _usableTickets => _counts?.ticketsUsable ?? 0;
+  int get _ticketsTotal => _counts?.ticketsTotal ?? 0;
 
   /// 小程序清单,给网格里「小程序」那一格用。
   ///
@@ -6917,6 +7135,13 @@ class _ProfileViewState extends State<ProfileView> {
     // 待支付角标能把住宿算进去 —— 住宿的待支付单 15 分钟不付就自动关闭,
     // 角标漏数它是用户真金白银的损失
     final staysF = loggedIn ? widget.api.myStayOrders() : null;
+    final countsF = loggedIn
+        ? widget.api
+            .myOrderCounts()
+            .then<OrderCounts?>(OrderCounts.fromJson)
+            .onError((_, __) => null)
+        : null;
+
     // 桌面端没有小程序容器,清单都不拉(同首页 _loadMiniApps)。
     // 错误当场接住:前面几个请求还没回来时它先失败,就是一个没人接的异常
     final appsF = loggedIn && miniAppSupported
@@ -6952,14 +7177,16 @@ class _ProfileViewState extends State<ProfileView> {
     } else if (mounted) {
       setState(() => _stays = const []);
     }
+    final counts = countsF == null ? null : await countsF;
+    if (mounted) setState(() => _counts = counts);
     final apps = appsF == null ? const <MiniAppInfo>[] : await appsF;
     if (mounted) setState(() => _miniApps = apps);
   }
 
   /// 某个筛选下有多少单(外卖 + 住宿)。
   int _count(OrderFilter f) =>
-      _orders.where(f.matchesFood).length +
-      _stays.where(f.matchesStay).length;
+      _counts?.of(null, f) ??
+      _orders.where(f.matchesFood).length + _stays.where(f.matchesStay).length;
 
   /// 点这一格:订单 tab 落在「全部」+ 这个筛选。
   ///
@@ -7141,7 +7368,9 @@ class _ProfileViewState extends State<ProfileView> {
     final marketing =
         _marketingOn && !guest && profile != null && profile.riskLevel.isEmpty;
     return ListView(
-      padding: const EdgeInsets.all(16),
+      // 左右 18 和其他页同一条页边(设计稿 3e);顶上只留 4 —— 身份行不套卡,
+      // 自己就是页头
+      padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 24),
       // 块与块之间只留白,**不画分隔线** —— 卡片自己的 1px 描边已经在分区了,
       // 再加横线就是同一件事说两遍
       children: [
@@ -7223,66 +7452,106 @@ class _ProfileViewState extends State<ProfileView> {
 
   /// 身份行:头像(点=换头像)+ 昵称(点=改昵称)+ 实名标 + 手机号与加入时间。
   Widget _identityRow(BuildContext context, UserProfile? profile) {
-    final theme = Theme.of(context);
-    return Card(
-      child: ListTile(
-        // 自己的头像:缺图时也用 SzImage(名字首字),但压一个相机角标
-        // 保住"点这里换头像"的提示——这里要的是促使补图,不只是好看
-        leading: InkWell(
-          onTap: _pickAvatar,
-          borderRadius: BorderRadius.circular(26),
-          child: Stack(clipBehavior: Clip.none, children: [
-            SzImage(
-                url: profile == null || profile.avatarUrl.isEmpty
-                    ? ''
-                    : widget.api.resolveUrl(profile.avatarUrl),
-                name: profile?.name ?? widget.api.userName ?? '我',
-                size: 52,
-                circle: true),
-            Positioned(
-              right: -2,
-              bottom: -2,
-              child: Container(
-                padding: const EdgeInsets.all(3),
-                decoration: BoxDecoration(
-                  color: theme.sz.surface,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: theme.sz.line),
+    final sz = Theme.of(context).sz;
+    final name = profile?.name ?? widget.api.userName ?? '';
+    // 设计稿 3e:身份行**不套卡**,直接落在纸面上 —— 它是页头,不是一个入口块。
+    // 头像 56、名字 21,和骑手端「我的」同一套身份行
+    return InkWell(
+      onTap: _editName,
+      borderRadius: BorderRadius.circular(kRadiusMd),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
+          // 自己的头像:缺图时也用 SzImage(名字首字),但压一个相机角标
+          // 保住"点这里换头像"的提示——这里要的是促使补图,不只是好看
+          InkWell(
+            onTap: _pickAvatar,
+            customBorder: const CircleBorder(),
+            child: Stack(clipBehavior: Clip.none, children: [
+              SzImage(
+                  url: profile == null || profile.avatarUrl.isEmpty
+                      ? ''
+                      : widget.api.resolveUrl(profile.avatarUrl),
+                  name: name.isEmpty ? '我' : name,
+                  size: 56,
+                  circle: true),
+              Positioned(
+                right: -2,
+                bottom: -2,
+                child: Container(
+                  width: 19,
+                  height: 19,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: sz.surface,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: sz.line),
+                  ),
+                  child: Icon(Icons.photo_camera_outlined,
+                      size: 11, color: sz.inkMuted),
                 ),
-                child: Icon(Icons.photo_camera_outlined,
-                    size: 11, color: theme.sz.inkMuted),
               ),
-            ),
-          ]),
-        ),
-        // 首帧用会话里缓存的昵称/手机号,**不要拿默认值或口号顶上** ——
-        // 「感谢你支持劳动者互助平台」占在手机号的位置上,接口一回来
-        // 闪成真号,用户看到的是"先给我看了个别的,然后偷偷换掉了"。
-        // 缓存里也没有(极少见:刚装且还没登录成功过)时留空,
-        // 空白至少是诚实的
-        title: Row(children: [
-          Flexible(
-            child: Text(profile?.name ?? widget.api.userName ?? '',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.titleLarge),
+            ]),
           ),
-          // 只标「已实名」,不标「未实名」:没实名不是毛病,
-          // 需要实名的时候(买酒)结算页会说,入口在下面的列表里
-          if (profile?.identityVerified == true) ...[
-            const SizedBox(width: 8),
-            SzChip('已实名', color: theme.sz.earn, dense: true),
-          ],
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // 首帧用会话里缓存的昵称/手机号,**不要拿默认值或口号顶上** ——
+                  // 「感谢你支持劳动者互助平台」占在手机号的位置上,接口一回来
+                  // 闪成真号,用户看到的是"先给我看了个别的,然后偷偷换掉了"。
+                  // 缓存里也没有(极少见:刚装且还没登录成功过)时留空,
+                  // 空白至少是诚实的
+                  Row(children: [
+                    Flexible(
+                      child: Text(name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 21,
+                              height: 1.3,
+                              fontWeight: FontWeight.w600,
+                              color: sz.ink)),
+                    ),
+                    // 只标「已实名」,不标「未实名」:没实名不是毛病,
+                    // 需要实名的时候(买酒)结算页会说,入口在下面的列表里
+                    if (profile?.identityVerified == true) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: sz.earn),
+                        ),
+                        child: Text('已实名',
+                            style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w500,
+                                color: sz.earn)),
+                      ),
+                    ],
+                  ]),
+                  const SizedBox(height: 2),
+                  // 手机号打码:这一页常被截图、被人看着屏幕问「你怎么设置的」。
+                  // 要看完整号码的场景(改绑、收验证码)自己知道是哪个号
+                  Text(
+                      [
+                        _maskPhone(profile?.phone ?? widget.api.userPhone ?? ''),
+                        if (profile?.createdAt case final at?)
+                          '${at.year} 年 ${at.month} 月加入',
+                      ].where((s) => s.isNotEmpty).join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.5, color: sz.inkMuted)),
+                ]),
+          ),
+          // 稿子上是箭头;这一行点了是改昵称(不进下一页),所以还是笔 ——
+          // 箭头会让人以为有个「个人主页」
+          Icon(Icons.edit_outlined, size: 18, color: sz.inkFaint),
         ]),
-        // 手机号打码:这一页常被截图、被人看着屏幕问「你怎么设置的」。
-        // 要看完整号码的场景(改绑、收验证码)自己知道是哪个号
-        subtitle: Text([
-          _maskPhone(profile?.phone ?? widget.api.userPhone ?? ''),
-          if (profile?.createdAt case final at?) '${at.year} 年 ${at.month} 月加入',
-        ].where((s) => s.isNotEmpty).join(' · ')),
-        // 点这一行是改昵称,所以右边还是笔,不是「进下一页」的箭头
-        trailing: const Icon(Icons.edit, size: 18),
-        onTap: _editName,
       ),
     );
   }
@@ -7418,23 +7687,54 @@ class _ProfileViewState extends State<ProfileView> {
   /// 通往同一个列表的重复入口。
   Widget _ordersCard(BuildContext context) {
     final sz = Theme.of(context).sz;
+    // 频道足迹(设计稿 3e):每个买过的频道一个色块 + 单数。
+    // 团购券不走订单接口,张数从券包那边来
+    final counts = _counts;
+    final footprint = <(String, int)>[
+      if (counts != null)
+        for (final ch in kChannels)
+          if (ch.key != 'voucher' && counts.total(ch.key) > 0)
+            (ch.key, counts.total(ch.key)),
+      if (_ticketsTotal > 0) ('voucher', _ticketsTotal),
+    ];
     return Card(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        InkWell(
-          onTap: () => _openOrders(OrderFilter.all),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(kCardPad, 12, 8, 0),
-            child: Row(children: [
-              Text('我的订单',
-                  style: TextStyle(
-                      fontSize: kFontBodyLg,
-                      fontWeight: FontWeight.w600,
-                      color: sz.ink)),
-              const Spacer(),
-              Text('全部订单',
-                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-              Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
-            ]),
+        Semantics(
+          label: '全部订单',
+          button: true,
+          child: InkWell(
+            onTap: () => _openOrders(OrderFilter.all),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(kCardPad, 12, 8, 0),
+              child: Row(children: [
+                Text('我的订单',
+                    style: TextStyle(
+                        fontSize: kFontBodyLg,
+                        fontWeight: FontWeight.w600,
+                        color: sz.ink)),
+                const Spacer(),
+                if (footprint.isEmpty)
+                  Text('全部订单',
+                      style: TextStyle(fontSize: kFontNote, color: sz.inkMuted))
+                else
+                  for (final (key, n) in footprint) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: channelColor(context, key),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 3),
+                    Text('$n',
+                        style:
+                            TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+                  ],
+                Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
+              ]),
+            ),
           ),
         ),
         SzIconGrid(items: [
@@ -7492,18 +7792,23 @@ class _ProfileViewState extends State<ProfileView> {
     return Card(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         SzIconGrid(columns: 4, items: [
-          for (final (icon, label, page) in [
-            (Icons.local_activity_outlined, '优惠券',
+          // 券的角标是「还有几张能用」,hold 色,和订单的待办红分开(设计稿 3e)
+          for (final (icon, label, badge, page) in [
+            (Icons.local_activity_outlined, '优惠券', _usableCoupons,
                 () => CouponsPage(api: widget.api) as Widget),
-            (Icons.confirmation_number_outlined, '团购券',
+            (Icons.confirmation_number_outlined, '团购券', _usableTickets,
                 () => MyVouchersPage(api: widget.api) as Widget),
-            (Icons.favorite_outline, '我的收藏',
+            (Icons.favorite_outline, '我的收藏', 0,
                 () => FavoritesPage(api: widget.api) as Widget),
-            (Icons.place_outlined, '收货地址',
+            (Icons.place_outlined, '收货地址', 0,
                 () => AddressBookPage(api: widget.api) as Widget),
           ])
             SzIconGridItem(
-                icon: icon, label: label, onTap: () => guarded(page)),
+                icon: icon,
+                label: label,
+                badge: badge,
+                badgeColor: Theme.of(context).sz.hold,
+                onTap: () => guarded(page)),
         ]),
         divider,
         SzIconGrid(columns: 4, items: [
@@ -7865,6 +8170,13 @@ class _OrderTimeline extends StatelessWidget {
     // 打开订单页第一眼只想知道"还要多久",这一眼就得和别处对得上;
     // 拿不到 eta_at 就整行不显示,不自己编一个。
     String? etaText;
+    // 大标题的三段:前半句 / 那个数(衬线大字)/ 后半句。
+    //
+    // 原来是把 etaText 里的数字全抠出来拼进「预计 _ 分钟内送达」——
+    // 「预计还有 20 分钟送到(约 18:40)」抠出来是 201840,
+    // 页面上就写着「预计 201840 分钟内送达」;「马上就到」抠出来是空串。
+    // 三种情况各说各的话,数字只放真正的那一个
+    (String, String, String)? etaHead;
     final etaAt = order.etaAt == null
         ? null
         : DateTime.tryParse(order.etaAt!)?.toLocal();
@@ -7883,6 +8195,11 @@ class _OrderTimeline extends StatelessWidget {
           : (left > -5
               ? '马上就到'
               : '比预计($hhmm)晚了 ${-left} 分钟,骑手还在路上');
+      etaHead = left > 0
+          ? ('预计 ', '$left', ' 分钟内送达 · 约 $hhmm')
+          : (left > -5
+              ? ('马上就到', '', '')
+              : ('比预计晚了 ', '${-left}', ' 分钟,骑手还在路上'));
     }
 
     final sz = theme.sz;
@@ -7897,11 +8214,14 @@ class _OrderTimeline extends StatelessWidget {
           const SizedBox(height: 5),
           Text.rich(
             TextSpan(children: [
-              const TextSpan(text: '预计 '),
+              TextSpan(text: etaHead!.$1),
+              if (etaHead.$2.isNotEmpty)
+                TextSpan(
+                    text: etaHead.$2,
+                    style: szFigure(fontSize: 26, fontWeight: FontWeight.w600)),
               TextSpan(
-                  text: etaText.replaceAll(RegExp(r'[^0-9]'), ''),
-                  style: szFigure(fontSize: 26, fontWeight: FontWeight.w600)),
-              const TextSpan(text: ' 分钟内送达'),
+                  text: etaHead.$3,
+                  style: const TextStyle(fontSize: kFontBodyLg)),
             ]),
             style: TextStyle(
                 fontSize: 22, fontWeight: FontWeight.w500, color: sz.ink),
