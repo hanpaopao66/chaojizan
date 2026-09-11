@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import false, func, or_, select, text, update
+from sqlalchemy import bindparam, false, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -2157,6 +2157,74 @@ async def my_frequent_dishes(
          "last_at": r[8].isoformat() if r[8] else None}
         for r in rows
     ]}
+
+
+# 「进行中」的外卖状态。和 user_app/lib/order_filter.dart 的 active 同一口径:
+# delivered 也算 —— 骑手放下了,确认收货还是用户要做的事
+_ACTIVE_FOOD = ("paid", "accepted", "ready", "picked_up", "delivered")
+_ACTIVE_STAY = ("paid", "confirmed", "checked_in")
+
+
+# 同上,排在 `/{order_no}` 之前
+@router.get("/counts")
+async def my_order_counts(
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """订单页频道条和状态筛选上的数(设计稿 3b:「全部 38」「待支付 · 1」)。
+
+    **全量 count,不是拿列表第一页数出来的** —— 列表 20 条一页,
+    用第一页去数「全部」,老用户永远看到 20。
+
+    外卖按店的 biz_type 分组原样给(跑腿单挂在 biz_type='errand' 的服务主体上),
+    频道怎么归由客户端的 channelOfBizType 决定,服务端不抄第二份映射。
+    状态只数三种「你还有事要做」的:待支付 / 进行中 / 待评价,
+    和「我的」页角标同一口径;退款售后不是待办,不给数。
+    """
+    rows = await db.execute(text("""
+        SELECT coalesce(m.biz_type, 'food') AS biz,
+               count(*) AS total,
+               count(*) FILTER (WHERE o.status = 'pending_payment') AS pending,
+               count(*) FILTER (WHERE o.status::text IN :active) AS active,
+               count(*) FILTER (
+                   WHERE o.status = 'completed'
+                     AND NOT EXISTS (SELECT 1 FROM reviews r
+                                     WHERE r.order_id = o.id)) AS to_review
+        FROM orders o LEFT JOIN merchants m ON m.id = o.merchant_id
+        WHERE o.customer_id = :uid
+        GROUP BY 1
+    """).bindparams(bindparam("active", expanding=True)),
+        {"uid": user.id, "active": list(_ACTIVE_FOOD)})
+    stay = (await db.execute(text("""
+        SELECT count(*),
+               count(*) FILTER (WHERE status = 'created'),
+               count(*) FILTER (WHERE status::text IN :active)
+        FROM stay_orders WHERE customer_id = :uid
+    """).bindparams(bindparam("active", expanding=True)),
+        {"uid": user.id, "active": list(_ACTIVE_STAY)})).one()
+    # 「我的」页网格上的两张券(设计稿 3e「优惠券 3」「团购券 2」)也在这里数:
+    # 券包接口只回近 30 张,拿它数「还有几张能用」,满 30 就是错的。
+    # 能用 = 没用掉、没过期;团购券的过期是查询时判的(同 vouchers._purchase_out)
+    wallet = (await db.execute(text("""
+        SELECT
+          (SELECT count(*) FROM coupons
+            WHERE user_id = :uid AND coalesce(used_order_no, '') = ''
+              AND expires_at >= now()),
+          (SELECT count(*) FROM voucher_purchases WHERE customer_id = :uid),
+          (SELECT count(*) FROM voucher_purchases
+            WHERE customer_id = :uid AND status = 'paid'
+              AND (expires_at IS NULL OR expires_at >= now()))
+    """), {"uid": user.id})).one()
+    return {
+        "food": [{"biz_type": r.biz, "total": r.total,
+                  "pending_payment": r.pending, "active": r.active,
+                  "to_review": r.to_review} for r in rows],
+        # 住宿评价是另一条线,这里不认领待评价(同 order_filter.dart)
+        "stay": {"total": stay[0], "pending_payment": stay[1],
+                 "active": stay[2], "to_review": 0},
+        "coupons_usable": wallet[0],
+        "tickets": {"total": wallet[1], "usable": wallet[2]},
+    }
 
 
 # ⚠️ 这条必须排在 `/{order_no}` **之前**:FastAPI 按注册顺序匹配,

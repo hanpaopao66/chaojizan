@@ -112,6 +112,43 @@ async def my_vouchers(
     return [_deal_out(v, shop) for v in rows]
 
 
+@router.get("/redeemed-today")
+async def redeemed_today(
+    user: User = Depends(require_role("merchant")),
+    db: AsyncSession = Depends(get_db),
+):
+    """本店今天(北京时间)核销过的券:核销页「今日已核销」列表和「今日 N 张」。
+
+    券码只给后 4 位 —— 完整券码就是那张券本身,核销页的列表会被旁人看到。
+    分账三格和核销那一刻落定的是同一组数(售价、2% 服务费、净额),不重算。
+    """
+    from zoneinfo import ZoneInfo
+
+    shop = await _my_shop(db, user)
+    sh = ZoneInfo("Asia/Shanghai")
+    start = datetime.now(sh).replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = (await db.execute(
+        select(VoucherPurchase, Voucher.title)
+        .join(Voucher, Voucher.id == VoucherPurchase.voucher_id)
+        .where(VoucherPurchase.merchant_id == shop.id,
+               VoucherPurchase.status == VoucherPurchaseStatus.redeemed,
+               VoucherPurchase.redeemed_at >= start)
+        .order_by(VoucherPurchase.redeemed_at.desc())
+        .limit(200))).all()
+    items = [{
+        "title": title,
+        "redeemed_at": p.redeemed_at,
+        "code_tail": p.code[-4:],
+        "sell_price_cents": p.sell_price_cents,
+        "face_value_cents": p.face_value_cents,
+        "commission_cents": p.commission_cents,
+        "net_cents": p.net_cents,
+    } for p, title in rows]
+    return {"count": len(items),
+            "net_cents": sum(i["net_cents"] for i in items),
+            "items": items}
+
+
 @router.patch("/{voucher_id}", response_model=VoucherOut)
 async def update_voucher(
     voucher_id: int,

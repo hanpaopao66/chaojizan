@@ -790,6 +790,8 @@ async def my_dishes(
     # 带上近 30 天销量:商家端销量榜/滞销提示的数据源
     sales_rows = await db.execute(_DISH_SALES_SQL, {"merchant_id": shop.id})
     sales = {row.dish_id: row.sold for row in sales_rows}
+    today_rows = await db.execute(_DISH_TODAY_SQL, {"merchant_id": shop.id})
+    today = {row.dish_id: row.sold for row in today_rows}
     outs = []
     combo_ref = await _combo_reference(db, shop.id, dishes)
     now_hhmm = datetime.now(CN_TZ).strftime("%H:%M")
@@ -799,6 +801,7 @@ async def my_dishes(
         # 只剩默认的 0 —— 库里是对的,是序列化这一步丢的
         out = MerchantDishOut.model_validate(dish)
         out.monthly_sales = sales.get(dish.id, 0)
+        out.today_sold = today.get(dish.id, 0)
         _fill_combo_and_window(out, dish, combo_ref, now_hhmm)
         outs.append(out)
     return outs
@@ -815,6 +818,24 @@ _DISH_SALES_SQL = text(
       AND o.status = 'completed'
       AND o.created_at >= now() - interval '30 days'
       AND coalesce(o.risk_flags->>'status', '') != 'confirmed'
+    GROUP BY 1
+    """
+)
+
+
+# 今天每个菜卖了多少份(菜单页「今日已卖」):北京时间今天、有效订单(付了钱没取消),
+# 含在途单 —— 和商家端「今日 N 单」同口径。只扫今天的单,不走缓存也不贵
+_DISH_TODAY_SQL = text(
+    """
+    SELECT (item->>'dish_id')::int AS dish_id,
+           sum((item->>'quantity')::int)::int AS sold
+    FROM orders o
+    CROSS JOIN LATERAL jsonb_array_elements(o.items) AS item
+    WHERE o.merchant_id = :merchant_id
+      AND o.status NOT IN ('pending_payment', 'cancelled')
+      AND o.created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')
+                         AT TIME ZONE 'Asia/Shanghai'
+      AND item->>'dish_id' IS NOT NULL
     GROUP BY 1
     """
 )

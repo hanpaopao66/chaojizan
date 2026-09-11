@@ -248,6 +248,8 @@ class MerchantMeOut(MerchantOut):
     """店主自查视角(仅 GET /merchants/me):多了本店证照,驳回后回填表单用。
     店员拿到的是空串 —— 资质材料不是接单要用的东西。"""
 
+    # 入驻时间(店铺页身份行「YYYY 年 M 月入驻」)
+    created_at: datetime | None = None
     license_no: str = ""
     license_image_url: str = ""
     license_expires_at: date | None = None
@@ -604,6 +606,9 @@ class MerchantDishOut(DishOut):
     """
 
     cost_cents: int = 0
+    # 今天(北京时间)有效订单里卖了多少份(菜单页「今日已卖 N 份」)。
+    # 按下单算、含在途单 —— 厨房关心的是「今天做了多少」,不是「完成了多少」
+    today_sold: int = 0
 
 
 
@@ -1478,6 +1483,16 @@ class EarningOut(BaseModel):
     order_no: str
     amount_cents: int
     created_at: datetime
+    # 账本页逐单行用(GET /riders/earnings 填;老客户端不读也不影响)
+    kind: str = "earning"
+    biz_type: str = ""
+    order_kind: str = ""
+    from_name: str = ""          # 取餐店名;跑腿单是取件地址的短写
+    to_area: str = ""            # 送达地址的短写(去掉省市区)
+    distance_m: int | None = None   # 计价里程
+    delivered_at: datetime | None = None
+    fee_cents: int = 0           # 这单的配送费/跑腿费(用户付的那一项)
+    platform_cut_cents: int = 0  # 平台从跑腿费里收的 2%;外卖单恒为 0
 
 
 class PayoutAccountIn(BaseModel):

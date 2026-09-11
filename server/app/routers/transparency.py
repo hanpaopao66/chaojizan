@@ -113,6 +113,163 @@ async def audit_public(request: Request, db: AsyncSession = Depends(get_db)):
     return data
 
 
+# ---------- 今日逐单(透明中心首屏) ----------
+
+_CH_LABEL = {
+    "food": "点外卖", "retail": "买菜买水果", "errand_send": "帮我送",
+    "errand_buy": "帮我买", "voucher": "团购核销", "stay": "住宿离店",
+}
+_TODAY_SH = ("date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')"
+             " AT TIME ZONE 'Asia/Shanghai'")
+
+
+def split_order_row(r: dict) -> dict:
+    """一笔外卖/零售/跑腿单按**支付时的口径**拆成商家 / 骑手 / 平台三份。
+
+    三份加起来**恒等于用户实付** —— 平台补贴(首单立减)算平台自己掏的钱,
+    所以平台那一份是「佣金 − 补贴」,可以是负数(平台倒贴)。
+    骑手那一份用「实付 − 商家 − 平台」求出来,而不是另拼一遍配送费 + 小费 ——
+    上门费、夜间费这些都在 delivery_fee 里,另拼一遍迟早漏一项,
+    而求差保证这一行永远对得上。
+
+    - 跑腿单没有商家(那个服务主体不入账,见 settlement.credit_merchant_for_order);
+    - 到店自取没有骑手;
+    - 商家自送,配送费归商家。
+
+    和结算(services/settlement)是同一个分法,只是提前到支付那一刻看:
+    在途的单还没入账,但它**会**这么分。等餐补偿是平台另付给骑手的钱,
+    不是用户付的,这里不含。
+    """
+    paid = r["total_cents"]
+    platform = r["commission_cents"] - r["subsidy_cents"]
+    if r["order_kind"] in ("errand_send", "errand_buy"):
+        merchant = 0
+    else:
+        merchant = max(r["food_cents"] + r["packing_fee_cents"]
+                       - r["discount_cents"], 0) - r["commission_cents"]
+        if r["self_delivery"]:
+            # 自送单的配送费(和小费)归商家;骑手那份是 0
+            merchant = paid - platform
+    rider = 0 if (r["pickup"] or r["self_delivery"]) else paid - merchant - platform
+    if r["pickup"] and not r["self_delivery"]:
+        merchant = paid - platform
+    return {"paid": paid, "merchant": merchant, "rider": rider,
+            "platform": platform}
+
+
+async def _today_rows(db: AsyncSession) -> list[dict]:
+    """今天(北京时间)的全部成交,逐笔。三张表:外卖/零售/跑腿按下单时刻、
+    团购按核销时刻、住宿按离店时刻 —— 各自是「钱在这一刻被分掉」的时刻,
+    和公开账本(services/ledger.build_day_payload)取的是同一组时间列。
+
+    **单号只给指纹**:sha256(单号) 前 24 位,和公开账本同一个算法 ——
+    知道自己单号的人能在这里、也能在明天的账本锚点里认出自己那一单,
+    别人反推不出单号。零个人信息,也不带店名和地址。
+    """
+    from ..services.ledger import hash_no
+
+    rows = []
+    for r in (await db.execute(sa_text(f"""
+        SELECT o.order_no, o.created_at, m.biz_type, o.order_kind,
+               o.total_cents, o.food_cents, o.packing_fee_cents,
+               o.discount_cents, o.subsidy_cents, o.commission_cents,
+               coalesce(o.self_delivery, false), coalesce(o.pickup, false)
+        FROM orders o JOIN merchants m ON m.id = o.merchant_id
+        WHERE o.created_at >= {_TODAY_SH}
+          AND o.status NOT IN ('pending_payment', 'cancelled')
+    """))).all():
+        kind = r[3] if r[3] in ("errand_send", "errand_buy") else (
+            "retail" if r[2] == "retail" else "food")
+        split = split_order_row({
+            "total_cents": r[4], "food_cents": r[5], "packing_fee_cents": r[6],
+            "discount_cents": r[7], "subsidy_cents": r[8],
+            "commission_cents": r[9], "self_delivery": r[10], "pickup": r[11],
+            "order_kind": r[3],
+        })
+        rows.append({"at": r[1], "ch": kind, "hash": hash_no(r[0]), **split})
+    for r in (await db.execute(sa_text(f"""
+        SELECT purchase_no, redeemed_at, sell_price_cents, commission_cents,
+               net_cents
+        FROM voucher_purchases
+        WHERE status = 'redeemed' AND redeemed_at >= {_TODAY_SH}
+    """))).all():
+        rows.append({"at": r[1], "ch": "voucher", "hash": hash_no(r[0]),
+                     "paid": r[2], "merchant": r[4], "rider": 0,
+                     "platform": r[3]})
+    for r in (await db.execute(sa_text(f"""
+        SELECT order_no, completed_at, total_cents, fee_cents, net_cents
+        FROM stay_orders
+        WHERE status = 'completed' AND completed_at >= {_TODAY_SH}
+    """))).all():
+        rows.append({"at": r[1], "ch": "stay", "hash": hash_no(r[0]),
+                     "paid": r[2], "merchant": r[4], "rider": 0,
+                     "platform": r[3]})
+    rows.sort(key=lambda x: x["at"], reverse=True)
+    return rows
+
+
+def _today_totals(rows: list[dict]) -> dict:
+    return {k: sum(r[k] for r in rows)
+            for k in ("paid", "merchant", "rider", "platform")}
+
+
+@router.get("/today")
+async def today_public(request: Request, db: AsyncSession = Depends(get_db)):
+    """今日逐单:每一笔的钱分给了谁。公开,不需要登录。
+
+    列表只回最近 200 笔(页面放不下更多);**合计按今天全部**算,
+    全量逐笔走 /transparency/today.csv。
+    """
+    await _guard(request)
+    if (hit := _cache_get("tp:today")) is not None:
+        return hit
+    rows = await _today_rows(db)
+    data = {
+        "day": datetime.now(SH).date().isoformat(),
+        "count": len(rows),
+        "totals": _today_totals(rows),
+        "items": [{
+            "t": r["at"].astimezone(SH).strftime("%H:%M"),
+            "ch": r["ch"], "label": _CH_LABEL[r["ch"]],
+            # 页面上只放前 6 位;CSV 里是完整的 24 位,能和账本锚点对上
+            "id": r["hash"][:6],
+            "paid": r["paid"], "merchant": r["merchant"],
+            "rider": r["rider"], "platform": r["platform"],
+        } for r in rows[:200]],
+    }
+    _cache_put("tp:today", data, 30)
+    return data
+
+
+@router.get("/today.csv")
+async def today_csv(request: Request, db: AsyncSession = Depends(get_db)):
+    """今日逐单全量 CSV。谁都能下,不需要登录。"""
+    from fastapi.responses import Response
+
+    await _guard(request)
+    rows = await _today_rows(db)
+    day = datetime.now(SH).date().isoformat()
+
+    def y(c: int) -> str:
+        return f"{c / 100:.2f}"
+
+    lines = ["时间,频道,单号指纹(sha256 前 24 位),用户付,商家,骑手,平台"]
+    for r in rows[:5000]:
+        lines.append(",".join([
+            r["at"].astimezone(SH).strftime("%H:%M:%S"), _CH_LABEL[r["ch"]],
+            r["hash"], y(r["paid"]), y(r["merchant"]), y(r["rider"]),
+            y(r["platform"])]))
+    t = _today_totals(rows)
+    lines.append(",".join(["合计", f"{len(rows)} 笔", "", y(t["paid"]),
+                           y(t["merchant"]), y(t["rider"]), y(t["platform"])]))
+    # BOM:Excel 双击打开不乱码
+    body = "﻿" + "\n".join(lines) + "\n"
+    return Response(
+        body, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="chaojizan-{day}.csv"'})
+
+
 @router.get("/funds")
 async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
     """佣金去哪了:收入(外卖佣金+团购服务费) vs 支出去向,差额=平台留存。

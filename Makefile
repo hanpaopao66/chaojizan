@@ -124,7 +124,8 @@ test:
 	  && python -m tests.e2e_stays_cancel && python -m tests.e2e_stays_autoflow \
 	  && python -m tests.e2e_stays_settle && python -m tests.e2e_stays_witness \
 	  && python -m tests.e2e_stays_review && python -m tests.e2e_stays_aftersale \
-	  && python -m tests.e2e_orders_paging && python -m tests.e2e_referral_funding \
+	  && python -m tests.e2e_orders_paging && python -m tests.e2e_order_counts \
+	  && python -m tests.e2e_referral_funding \
 	  && python -m tests.e2e_favorites_paging \
 	  && python -m tests.e2e_cancel_split \
 	  && python -m tests.e2e_cancel_appeal \

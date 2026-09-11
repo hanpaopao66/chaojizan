@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Float, cast, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from ..db import get_db
 from ..models import (
     NOT_APPEND_ORDER,
     DeliveryIssue,
+    EarningKind,
     Merchant,
     Order,
     OrderEvent,
@@ -431,6 +432,8 @@ async def my_worklog(
     today_start = (bj_now.replace(hour=0, minute=0, second=0, microsecond=0)
                    - timedelta(hours=8))
     week_start = today_start - timedelta(days=bj_now.weekday())
+    # 本月(账本页「本月」那一档):北京时间当月 1 号零点
+    month_start = today_start - timedelta(days=bj_now.day - 1)
 
     def minutes(sessions, since):
         total = 0.0
@@ -447,7 +450,7 @@ async def my_worklog(
 
     sessions = (await db.scalars(
         select(RiderSession).where(RiderSession.rider_id == user.id,
-                                   RiderSession.online_at > week_start
+                                   RiderSession.online_at > min(week_start, month_start)
                                    - timedelta(days=1)))).all()
 
     async def stats(since):
@@ -457,6 +460,22 @@ async def my_worklog(
             .where(RiderEarning.rider_id == user.id,
                    RiderEarning.created_at > since))).first()
         return row[0], row[1]
+
+    async def platform_cut(since):
+        """这段时间里平台从**跑腿费**里收走的 2%。
+
+        外卖配送费平台一分不抽,所以账本页原来可以直接写「平台抽 ¥0」——
+        可骑手一接跑腿单这句话就不对了。按入账的单去订单上取 commission
+        (跑腿单的 commission 就是那 2%,见 payment_core.mark_order_paid)。
+        """
+        return int(await db.scalar(
+            select(func.coalesce(func.sum(Order.commission_cents), 0))
+            .select_from(RiderEarning)
+            .join(Order, Order.id == RiderEarning.order_id)
+            .where(RiderEarning.rider_id == user.id,
+                   RiderEarning.kind == EarningKind.earning,
+                   RiderEarning.created_at > since,
+                   Order.order_kind.in_(["errand_send", "errand_buy"]))) or 0)
 
     async def meters(since):
         """跑了多少米。
@@ -475,11 +494,23 @@ async def my_worklog(
 
     t_orders, t_cents = await stats(today_start)
     w_orders, w_cents = await stats(week_start)
+    m_orders, m_cents = await stats(month_start)
+    # 累计送了多少单(「我的」页身份行):只数正常入账行,调整行不算一单
+    total_orders = int(await db.scalar(
+        select(func.count(RiderEarning.id))
+        .where(RiderEarning.rider_id == user.id,
+               RiderEarning.kind == EarningKind.earning)) or 0)
     return {
         "today_minutes": minutes(sessions, today_start),
         "week_minutes": minutes(sessions, week_start),
+        "month_minutes": minutes(sessions, month_start),
         "today_orders": t_orders, "today_earned_cents": t_cents,
         "week_orders": w_orders, "week_earned_cents": w_cents,
+        "month_orders": m_orders, "month_earned_cents": m_cents,
+        "today_platform_cut_cents": await platform_cut(today_start),
+        "week_platform_cut_cents": await platform_cut(week_start),
+        "month_platform_cut_cents": await platform_cut(month_start),
+        "total_orders": total_orders,
         # 里程(#309):骑手判断「跑这些路值不值」靠的是每公里挣多少,
         # 光有单量和收入算不出来。口径见 meters()
         "today_meters": await meters(today_start),
@@ -2012,18 +2043,64 @@ async def wallet(
     return await _wallet(db, user.id)
 
 
+def _short_addr(addr: str) -> str:
+    """账本行里的目的地:去掉省市区前缀,留到能认出「送的是哪」的那一截。
+
+    这是骑手**自己送过的单**,完整地址他送的时候就看过;
+    账本里只是回忆用,十几个字足够,整条地址挤在一行里反而读不出来。
+    """
+    import re
+
+    s = re.sub(r"^.{0,8}?(省|自治区)", "", addr or "")
+    s = re.sub(r"^.{0,8}?(市|自治州|盟)", "", s)
+    s = re.sub(r"^.{0,8}?(区|县|旗)", "", s)
+    s = s.strip() or (addr or "")
+    return s[:16]
+
+
 @router.get("/earnings", response_model=list[EarningOut])
 async def earnings(
+    period: str = Query("all", pattern="^(all|today|week|month)$"),
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.scalars(
-        select(RiderEarning)
-        .where(RiderEarning.rider_id == user.id)
-        .order_by(RiderEarning.created_at.desc())
-        .limit(100)
-    )
-    return list(result)
+    """收入明细。账本页按「今天 / 本周 / 本月」切,每行带上从哪送到哪 ——
+    骑手对账时认的是「哪一单」,光一个单号和金额认不出来。
+
+    all = 最近 100 条(老口径);分时段的最多 500 条。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    q = (select(RiderEarning, Order, Merchant)
+         .join(Order, Order.id == RiderEarning.order_id)
+         .join(Merchant, Merchant.id == Order.merchant_id)
+         .where(RiderEarning.rider_id == user.id))
+    if period != "all":
+        now = datetime.now(timezone.utc)
+        bj = now + timedelta(hours=8)
+        day0 = bj.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=8)
+        since = {"today": day0,
+                 "week": day0 - timedelta(days=bj.weekday()),
+                 "month": day0 - timedelta(days=bj.day - 1)}[period]
+        q = q.where(RiderEarning.created_at > since)
+    rows = (await db.execute(
+        q.order_by(RiderEarning.created_at.desc())
+        .limit(100 if period == "all" else 500))).all()
+    out = []
+    for e, o, m in rows:
+        errand = o.order_kind in ("errand_send", "errand_buy")
+        out.append(EarningOut(
+            id=e.id, order_no=e.order_no, amount_cents=e.amount_cents,
+            created_at=e.created_at, kind=e.kind.value,
+            biz_type=m.biz_type, order_kind=o.order_kind,
+            from_name=(_short_addr(o.pickup_address) if errand else m.name),
+            to_area=_short_addr(o.address),
+            distance_m=o.bill_distance_m,
+            delivered_at=o.delivered_at,
+            fee_cents=o.delivery_fee_cents,
+            platform_cut_cents=(o.commission_cents if errand else 0),
+        ))
+    return out
 
 
 @router.get("/withdrawals", response_model=list[WithdrawalOut])

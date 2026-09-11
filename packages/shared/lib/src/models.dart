@@ -119,6 +119,7 @@ class Merchant {
         dineInLabel = json['dine_in_label'] as String? ?? '未填报',
         bizType = json['biz_type'] as String? ?? 'food',
         autoAccept = json['auto_accept'] as bool? ?? false,
+        createdAt = json['created_at'] as String?,
         foodSeal = json['food_seal'] as bool? ?? false,
         foodSafetyHold = json['food_safety_hold'] as bool? ?? false,
         busyActive = json['busy_active'] as bool? ?? false,
@@ -193,6 +194,9 @@ class Merchant {
 
   /// 自动接单(仅 GET /merchants/me 下发;支付成功即进入制作)
   final bool autoAccept;
+
+  /// 入驻时间(仅 GET /merchants/me 下发;店铺页「YYYY 年 M 月入驻」)
+  final String? createdAt;
 
   /// 食安封签:商家自述使用一次性封签(**不是平台认证**,文案要照此口径写)
   final bool foodSeal;
@@ -379,6 +383,7 @@ class Dish {
             ? null
             : DateTime.tryParse(json['flash_until'] as String),
         monthlySales = json['monthly_sales'] as int? ?? 0,
+        todaySold = json['today_sold'] as int? ?? 0,
         barcode = json['barcode'] as String? ?? '',
         brand = json['brand'] as String? ?? '',
         spec = json['spec'] as String? ?? '',
@@ -455,6 +460,9 @@ class Dish {
   final int? flashPriceCents;
   final DateTime? flashUntil;
   final int monthlySales;
+
+  /// 今天有效订单里卖了几份(仅商家自查 /merchants/me/dishes 下发)
+  final int todaySold;
 
   bool get hasOptions => options.isNotEmpty;
 
@@ -821,6 +829,16 @@ class Order {
     final mm = t.minute.toString().padLeft(2, '0');
     return '预计 $hh:$mm 前送达';
   }
+
+  /// 预计送达的钟点「18:30」,给已经有前缀的地方用(骑手端「用户参考送达 18:30」)。
+  /// 拿 [etaLabel] 去拼会出「用户参考送达 预计 18:30 前送达」
+  String? get etaClock {
+    final s = etaAt;
+    if (s == null) return null;
+    final t = DateTime.tryParse(s)?.toLocal();
+    if (t == null) return null;
+    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
 }
 
 class Address {
@@ -1173,11 +1191,41 @@ class Earning {
   Earning.fromJson(Map<String, dynamic> json)
       : orderNo = json['order_no'] as String,
         amountCents = json['amount_cents'] as int,
-        createdAt = json['created_at'] as String;
+        createdAt = json['created_at'] as String,
+        kind = json['kind'] as String? ?? 'earning',
+        bizType = json['biz_type'] as String? ?? '',
+        orderKind = json['order_kind'] as String? ?? '',
+        fromName = json['from_name'] as String? ?? '',
+        toArea = json['to_area'] as String? ?? '',
+        distanceM = json['distance_m'] as int?,
+        feeCents = json['fee_cents'] as int? ?? 0,
+        platformCutCents = json['platform_cut_cents'] as int? ?? 0;
 
   final String orderNo;
   final int amountCents;
   final String createdAt;
+
+  /// earning 正常入账 / adjustment 调整
+  final String kind;
+  final String bizType;
+  final String orderKind;
+
+  /// 取餐店名(跑腿单是取件地址的短写)
+  final String fromName;
+
+  /// 送达地址的短写(服务端去掉了省市区)
+  final String toArea;
+
+  /// 计价里程(米)
+  final int? distanceM;
+
+  /// 这单的配送费 / 跑腿费(用户付的那一项)
+  final int feeCents;
+
+  /// 平台从跑腿费里收的 2%;外卖单恒为 0
+  final int platformCutCents;
+
+  bool get isErrand => orderKind == 'errand_send' || orderKind == 'errand_buy';
 }
 
 class Withdrawal {

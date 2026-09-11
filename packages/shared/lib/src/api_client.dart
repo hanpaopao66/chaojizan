@@ -775,6 +775,10 @@ class ApiClient {
   }
 
   /// 商家:输码核销
+  /// 本店今天核销过的券(核销页「今日已核销」)。券码只有后 4 位
+  Future<Map<String, dynamic>> vouchersRedeemedToday() async =>
+      await _request('GET', '/vouchers/redeemed-today') as Map<String, dynamic>;
+
   Future<VoucherTicket> redeemVoucher(String code) async {
     final data =
         await _request('POST', '/vouchers/redeem', body: {'code': code});
@@ -1698,6 +1702,11 @@ class ApiClient {
         .map((e) => Order.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  /// 顾客订单页频道条 / 状态筛选上的数:服务端全量 count,不是数列表第一页。
+  /// `{food: [{biz_type, total, pending_payment, active, to_review}], stay: {...}}`
+  Future<Map<String, dynamic>> myOrderCounts() async =>
+      await _request('GET', '/orders/counts') as Map<String, dynamic>;
 
   Future<Order> getOrder(String orderNo) async {
     final data = await _request('GET', '/orders/$orderNo');
@@ -2655,8 +2664,11 @@ class ApiClient {
     return Wallet.fromJson(data as Map<String, dynamic>);
   }
 
-  Future<List<Earning>> earnings() async {
-    final data = await _request('GET', '/riders/earnings');
+  /// 收入明细。[period] = today / week / month 时按时段取(账本页三档),
+  /// 不传就是最近 100 条的老口径。
+  Future<List<Earning>> earnings({String? period}) async {
+    final data = await _request('GET', '/riders/earnings',
+        query: period == null ? null : {'period': period});
     return (data as List)
         .map((e) => Earning.fromJson(e as Map<String, dynamic>))
         .toList();
