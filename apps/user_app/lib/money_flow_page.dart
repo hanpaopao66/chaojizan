@@ -3,9 +3,9 @@
 ///
 /// 三处入口都进这里:首页承诺条、订单详情的「钱去哪了」按钮、我的页「账目」组。
 ///
-/// 金额全部由订单已有字段算出,不新增接口;三条之和必须等于用户实付——
+/// 金额全部由订单已有字段算出,不新增接口;各份之和必须对得上用户实付——
 /// 这与服务端 services/audit.py 的恒等式是同一口径,对不上就是有 bug,
-/// debug 模式下会打日志。
+/// debug 模式下会打日志。分法本身在 [orderSplit]。
 library;
 
 import 'package:flutter/material.dart';
@@ -13,6 +13,150 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'five_percent.dart';
 import 'trust_page.dart';
+
+/// 分账里的一份钱。
+class SplitPart {
+  const SplitPart({
+    required this.name,
+    required this.short,
+    required this.cents,
+    required this.note,
+    this.isHold = false,
+  });
+
+  /// 页面上的名字,如「商家实收」
+  final String name;
+
+  /// 订单列表那一行用的短名,如「商家」
+  final String short;
+  final int cents;
+  final String note;
+
+  /// 平台拿走的那一份(hold 色);其余是流到别人手里的钱
+  final bool isHold;
+}
+
+/// 一单的钱怎么分。
+class OrderSplit {
+  const OrderSplit(this.parts, {this.extraCents = 0});
+
+  /// 已经去掉金额为 0 的份,顺序就是页面上的顺序
+  final List<SplitPart> parts;
+
+  /// 帮买实付超出预估、事后向用户补收的那部分。不在 totalCents 里,
+  /// 但同样经平台结给了骑手 —— 对账时要加回来
+  final int extraCents;
+
+  int get sumCents => parts.fold(0, (a, p) => a + p.cents);
+}
+
+/// 一单的钱怎么分 —— **和服务端 services/settlement.py 同一个分法**。
+///
+/// 原来三处(订单卡、详情分账卡、这一页)对所有单都用外卖那一个公式:
+/// 商家 = 菜品 + 打包 − 满减 − 佣金、骑手 = 配送费 + 小费、平台 = 佣金。
+/// 有两类单套不上:
+///
+/// - **跑腿单**:没有商家。平台收的是跑腿费的 2%(支付时落在 commission_cents 上),
+///   骑手拿剩下的。套外卖公式的话「商家实收」是一个负数,
+///   而「配送费 100% 归骑手」那句是错的。帮买的商品款存在 food_cents 里,
+///   它是**替用户垫付的钱**,按小票实付结给骑手、多的退回,谁的收入都不是 —— 单列;
+/// - **商家自送单**:没有骑手,配送费并进商家那一行
+///   (settlement.credit_merchant_for_order)。原来它被写成「骑手所得」。
+///
+/// 对账口径:各份之和 = 用户实付 + 平台补贴 + 帮买补收([OrderSplit.extraCents])。
+OrderSplit orderSplit(Order o) {
+  if (o.isErrand) {
+    final service = o.commissionCents;
+    final parts = <SplitPart>[
+      SplitPart(
+          name: '骑手所得',
+          short: '骑手',
+          cents: o.deliveryFeeCents + o.tipCents - service,
+          note: '跑腿费扣掉平台服务费,余下全归骑手'),
+      SplitPart(
+          name: '平台服务费',
+          short: '平台',
+          cents: service,
+          note: '跑腿费的 2%。跑腿没有商家,这是平台在这条业务上唯一的收入',
+          isHold: true),
+    ];
+    var extra = 0;
+    if (o.isErrandBuy) {
+      final goods = o.goodsActualCents ?? o.goodsBudgetCents;
+      final back = o.goodsBudgetCents - goods;
+      extra = back < 0 ? -back : 0;
+      parts.add(SplitPart(
+          name: '商品款',
+          short: '商品款',
+          cents: goods,
+          note: o.goodsActualCents == null
+              ? '骑手替你垫付,按小票实付结给他;小票还没传,先按预付算'
+              : '骑手替你垫付,按小票实付结给他,平台一分不抽'));
+      if (back > 0) {
+        parts.add(SplitPart(
+            name: '退回给你',
+            short: '退回',
+            cents: back,
+            note: '预付的商品款比小票多出的部分,原路退回'));
+      }
+    }
+    return OrderSplit([for (final p in parts) if (p.cents != 0) p],
+        extraCents: extra);
+  }
+  // 商家侧毛额:佣金是按这个数收的,不是按用户实付
+  final gross = o.merchantNetCents + o.commissionCents;
+  final rider = o.selfDelivery ? 0 : o.deliveryFeeCents + o.tipCents;
+  final parts = <SplitPart>[
+    SplitPart(
+        name: '商家实收',
+        short: '商家',
+        cents: o.merchantNetCents + (o.selfDelivery ? o.deliveryFeeCents : 0),
+        note: o.selfDelivery
+            ? '菜品 + 打包 − 满减,加上配送费(商家自己送),只扣 5% 服务费'
+            : '菜品 + 打包 − 满减,只扣 5% 服务费'),
+    if (rider > 0)
+      SplitPart(
+          name: '骑手所得',
+          short: '骑手',
+          cents: rider,
+          note: o.tipCents > 0
+              ? '配送费 + 小费 100% 归骑手,平台分文不取'
+              : '配送费 100% 归骑手,平台分文不取'),
+    SplitPart(
+        name: '平台留存',
+        short: '平台',
+        cents: o.commissionCents,
+        // 占实付 4.5%、占商家侧 5% —— 两个口径都写出来,
+        // 只写一个数会被当成玩数字
+        note: '服务器、客服与赔付池 · 按商家侧口径 '
+            '${yuan(o.commissionCents)} / ${yuan(gross)} = '
+            '${gross == 0 ? "5" : (o.commissionCents / gross * 100).toStringAsFixed(0)}%',
+        isHold: true),
+  ];
+  return OrderSplit(parts);
+}
+
+/// 把 [orderSplit] 画成分账条(这一页和订单详情的分账卡共用)。
+///
+/// 平台那一份在外卖 / 买菜单上挂「为什么是 5%」的追问;
+/// 跑腿单那一份是跑腿费的 2%,5% 那张说明对不上它,不挂
+List<SzFlowItem> flowItems(
+    BuildContext context, Order order, OrderSplit split) {
+  final total = order.totalCents;
+  return [
+    for (final p in split.parts)
+      SzFlowItem(
+        name: p.name,
+        amountCents: p.cents,
+        fraction: total == 0 ? 0 : p.cents / total,
+        note: p.note,
+        isHold: p.isHold,
+        onWhy: p.isHold && !order.isErrand
+            ? () => showFivePercentSheet(context)
+            : null,
+      ),
+  ];
+}
 
 /// 无订单上下文的入口(首页承诺条、我的页「账目」组)。
 ///
@@ -57,25 +201,29 @@ class MoneyFlowPage extends StatelessWidget {
   ];
 
   /// 用「不做什么」写,比「我们致力于」有力。
-  static const _promises = [
-    '不做竞价排名,钱买不到靠前的位置',
-    '不抽配送费和小费,这两项 100% 归骑手',
-    '不做大数据杀熟,同一时刻同一家店,所有人同价',
-    '不靠补贴换增长,也就不会有断补后的涨价',
-  ];
+  ///
+  /// 第二条看单子说:跑腿单上平台确实从跑腿费里收了 2%,
+  /// 这时候还写「不抽配送费」,就是在同一页上自相矛盾
+  List<String> _promisesFor(Order o) => [
+        '不做竞价排名,钱买不到靠前的位置',
+        o.isErrand
+            ? '跑腿只收跑腿费的 2%,账单上单列;帮买的商品款一分不抽'
+            : '不抽配送费和小费,这两项 100% 归骑手',
+        '不做大数据杀熟,同一时刻同一家店,所有人同价',
+        '不靠补贴换增长,也就不会有断补后的涨价',
+      ];
 
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
     final total = order.totalCents;
-    final riderGot = order.deliveryFeeCents + order.tipCents;
-    // 商家侧毛额:佣金是按这个数收 5%,不是按用户实付
-    final merchantGross = order.merchantNetCents + order.commissionCents;
+    final split = orderSplit(order);
 
     assert(() {
-      final sum = order.merchantNetCents + riderGot + order.commissionCents;
-      if (sum != total) {
-        debugPrint('分账对不上:$sum != $total(订单 ${order.orderNo})'
+      // 平台补贴(首单立减)用户没付、商家照收;帮买超支是事后补收的
+      final expect = total + order.subsidyCents + split.extraCents;
+      if (split.sumCents != expect) {
+        debugPrint('分账对不上:${split.sumCents} != $expect(订单 ${order.orderNo})'
             ' —— 与 services/audit.py 的恒等式同口径,请查后端');
       }
       return true;
@@ -116,37 +264,18 @@ class MoneyFlowPage extends StatelessWidget {
                 horizontal: kCardPad, vertical: 2),
             child: SzMoneyFlow(
               whyLabel: '为什么是 5%',
-              items: [
-                SzFlowItem(
-                  name: '商家实收',
-                  amountCents: order.merchantNetCents,
-                  fraction: total == 0 ? 0 : order.merchantNetCents / total,
-                  note: '菜品 + 打包 − 满减,只扣 5% 服务费',
-                ),
-                if (riderGot > 0)
-                  SzFlowItem(
-                    name: '骑手所得',
-                    amountCents: riderGot,
-                    fraction: total == 0 ? 0 : riderGot / total,
-                    note: order.tipCents > 0
-                        ? '配送费 + 小费 100% 归骑手,平台分文不取'
-                        : '配送费 100% 归骑手,平台分文不取',
-                  ),
-                SzFlowItem(
-                  name: '平台留存',
-                  amountCents: order.commissionCents,
-                  fraction: total == 0 ? 0 : order.commissionCents / total,
-                  // 占实付 4.5%、占商家侧 5%——两个口径都写出来,
-                  // 只写一个数会被当成玩数字
-                  note: '服务器、客服与赔付池 · 按商家侧口径 '
-                      '${yuan(order.commissionCents)} / ${yuan(merchantGross)} = '
-                      '${merchantGross == 0 ? "5" : (order.commissionCents / merchantGross * 100).toStringAsFixed(0)}%',
-                  isHold: true,
-                  onWhy: () => showFivePercentSheet(context),
-                ),
-              ],
+              items: flowItems(context, order, split),
             ),
           ),
+
+          // 退过款的单:上面是原始分法,退款怎么从各方扣回来在账本里
+          if (order.refundCents > 0) ...[
+            const SizedBox(height: 8),
+            Text('这一单退过 ${yuan(order.refundCents)}。上面是退款前的分法,'
+                '退款从哪一方扣回,以账本存证为准。',
+                style: TextStyle(
+                    fontSize: kFontNote, height: 1.5, color: sz.inkMuted)),
+          ],
 
           if (order.discountCents > 0 || order.subsidyCents > 0) ...[
             const SizedBox(height: 10),
@@ -171,7 +300,7 @@ class MoneyFlowPage extends StatelessWidget {
           ],
 
           const SizedBox(height: 22),
-          const SzSectionTitle('平台留存的 5% 用在哪'),
+          SzSectionTitle(order.isErrand ? '平台收的服务费用在哪' : '平台留存的 5% 用在哪'),
           const SizedBox(height: 9),
           SzCard(
             padding: const EdgeInsets.symmetric(
@@ -198,7 +327,7 @@ class MoneyFlowPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                for (final (i, line) in _promises.indexed) ...[
+                for (final (i, line) in _promisesFor(order).indexed) ...[
                   if (i > 0) const SizedBox(height: 9),
                   Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('—', style: TextStyle(color: sz.inkMuted)),

@@ -31,7 +31,6 @@ import 'money_flow_page.dart';
 import 'order_filter.dart';
 import 'invite_page.dart';
 import 'share_card.dart';
-import 'five_percent.dart';
 import 'food_safety_records_page.dart';
 import 'identity_page.dart';
 import 'coming_soon_page.dart';
@@ -4409,38 +4408,31 @@ class _OrderListViewState extends State<OrderListView> {
           builder: (_) =>
               OrderDetailPage(api: widget.api, orderNo: order.orderNo)));
 
-  /// 完成单的分账行只画在「菜品 + 骑手配送」的外卖 / 买菜单上。
-  ///
-  /// 跑腿单(没有商家,平台收的是跑腿费的 2%)和商家自送单(配送费归商家)
-  /// 不是这个分法;退过款的单三个数也对不上实付。这几类在详情页的
-  /// 「这一单的钱去哪了」里也还没按各自的口径算 —— 列表上宁可不画,
-  /// 不画一行对不上的数
+  /// 完成单画一行分账。退过款的单不画:退款从哪一方扣回在账本里,
+  /// 光看订单上的数,几份加起来对不上实付
   bool _splitShown(Order o) =>
       o.status == OrderStatus.completed &&
-      !o.isErrand &&
-      !o.selfDelivery &&
       o.refundCents == 0 &&
       o.totalCents > 0;
 
-  /// 商家 / 骑手 / 平台三个数:读订单上的数,**不另算** ——
-  /// 和 MoneyFlowPage、详情页分账卡同一口径(商家实收 / 配送费 + 小费 / 佣金)
+  /// 分账那一行:和详情分账卡、「钱去哪了」页是**同一个函数**(orderSplit),
+  /// 跑腿单没有「商家」、商家自送单没有「骑手」、帮买多一份商品款
   Widget _splitRow(Order o) {
     final sz = Theme.of(context).sz;
-    final rider = o.deliveryFeeCents + o.tipCents;
-    Widget part(String who, int cents, Color c) =>
-        Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(who, style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+    Widget part(SplitPart p) => Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(p.short,
+              style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
           const SizedBox(width: 3),
-          Text(yuan(cents),
+          Text(yuan(p.cents),
               style: szMoney(
-                  fontSize: kFontMicro, fontWeight: FontWeight.w500, color: c)),
+                  fontSize: kFontMicro,
+                  fontWeight: FontWeight.w500,
+                  color: p.isHold ? sz.hold : sz.earn)),
         ]);
     return Row(children: [
       Expanded(
         child: Wrap(spacing: 10, runSpacing: 2, children: [
-          part('商家', o.merchantNetCents, sz.earn),
-          if (rider > 0) part('骑手', rider, sz.earn),
-          part('平台', o.commissionCents, sz.hold),
+          for (final p in orderSplit(o).parts) part(p),
         ]),
       ),
       const SizedBox(width: 8),
@@ -8054,7 +8046,6 @@ class _MoneyFlowCard extends StatelessWidget {
     final sz = Theme.of(context).sz;
     final total = order.totalCents;
     if (total <= 0) return const SizedBox.shrink();
-    final riderGot = order.deliveryFeeCents + order.tipCents;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -8066,33 +8057,11 @@ class _MoneyFlowCard extends StatelessWidget {
               builder: (_) => MoneyFlowPage(api: api, order: order))),
           padding:
               const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 2),
+          // 分法和完整页是同一个函数(money_flow_page.dart 的 orderSplit):
+          // 跑腿单没有商家那一行、商家自送单没有骑手那一行
           child: SzMoneyFlow(
             whyLabel: '为什么是 5%',
-            items: [
-              SzFlowItem(
-                name: '商家实收',
-                amountCents: order.merchantNetCents,
-                fraction: order.merchantNetCents / total,
-                note: '菜品 + 打包 − 满减,只扣 5% 服务费',
-              ),
-              if (riderGot > 0)
-                SzFlowItem(
-                  name: '骑手所得',
-                  amountCents: riderGot,
-                  fraction: riderGot / total,
-                  note: order.tipCents > 0
-                      ? '配送费 + 小费 100% 归骑手'
-                      : '配送费 100% 归骑手,平台分文不取',
-                ),
-              SzFlowItem(
-                name: '平台留存',
-                amountCents: order.commissionCents,
-                fraction: order.commissionCents / total,
-                note: '服务器、客服与赔付池',
-                isHold: true,
-                onWhy: () => showFivePercentSheet(context),
-              ),
-            ],
+            items: flowItems(context, order, orderSplit(order)),
           ),
         ),
         const SizedBox(height: 8),
