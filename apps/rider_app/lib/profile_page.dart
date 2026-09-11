@@ -1,78 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'alert_prefs.dart';
 import 'appeal_page.dart';
 import 'dispatch_spec_page.dart';
 import 'heatmap_page.dart';
+import 'issues_page.dart';
 import 'messages_page.dart';
 import 'onboarding_page.dart';
 import 'reviews_page.dart';
 import 'verify_page.dart';
 import 'weekly_page.dart';
+import 'witness_page.dart';
 
-/// 骑手「我的」中心(#147,密度重排 #297)。
-///
-/// ## 为什么要有这一页
-///
-/// 对照竞品(蜂鸟众包/美团骑手)发现:**我们的空白不在能力,在入口**。
-/// 服务端有 24 个骑手端点、客户端 API 方法也齐全,但入口散落各处 ——
-/// 工时埋在钱包页、违规申诉埋在「异常上报」、转单纪律埋在入驻页。
+/// 骑手「我的」(设计稿 5i):身份卡 + 两项认证 + 结算卡 + 三个数 + 设置列表。
 ///
 /// ## 刻意不做的:评分与段位
 ///
 /// 竞品这一页最显眼的是**服务分 70.0 / 安全分 70 / 派单分 200 / 一星青铜**。
+/// 我们**一个都不做**:把骑手的收入和一个平台单方面控制的分数绑在一起,
+/// 他就不敢拒单、不敢休息、不敢跟顾客理论。/transparency/dispatch 的
+/// never_do 里公开承诺过「不按骑手评分或等级差别对待」。
+/// 三个数里的「用户评价」是**顾客打的分的平均**,不参与任何排序和派单。
 ///
-/// 我们**一个都不做**。那是「算法困住人」的核心机制:把骑手的收入与一个
-/// 平台单方面控制的分数绑定,于是骑手不敢拒单、不敢休息、不敢跟顾客理论。
-/// **那不是激励,是绳索。** 而且 /transparency/dispatch 的 never_do 里
-/// 已经公开承诺「不按骑手评分或等级差别对待」—— 抄了就是当众违背承诺。
+/// ## 稿子上有、代码里没有的
 ///
-/// ## #297 改了什么
+/// - 健康证「2026-11-02 到期 · 提前 30 天提醒」:骑手的健康证只存了一张照片,
+///   没有到期日(国家层面不要求送餐员持证,只有部分城市要求)。这一行写的是
+///   「上传了没有 / 本市要不要求」,不编到期日;
+/// - 结算卡「每日 22:00」:没有定时结算,提现 T+1;
+/// - 「骑手互助会」:平台没有这个组织,那一行只留见证节点;
+/// - 「罚款 · 永远是 0」:平台确实没有任何罚款项,但「永远」是一句承诺,
+///   不是代码里的事实 —— 写「没有这项」。
 ///
-/// **① 16 个入口里有 8 个不去它说的地方。** 6 个走 `_toWallet()`(切到钱包
-/// tab 再弹一句「相关入口在『保障与规则』」叫他自己翻),2 个只弹 SnackBar。
-/// 而这 8 个的目标页全都现成。最糟的是**事故上报**:骑手出了事故点它,
-/// App 把他扔到钱包页 —— 那不是密度问题,是安全问题。判据锁在
-/// `test/profile_routes_test.dart`。
+/// ## 稿子上没画、但一个都不能少的入口
 ///
-/// **② 黄金位那两个数字对每个骑手每一天都是 0。** 老代码从主页传进来的
-/// `todayOrders`/`todayCents` 由 `_todayDone` 算,而 `_todayDone` 从 `_mine`
-/// 里筛 `completed||delivered` —— `_mine` 却只留 `accepted/ready/pickedUp`。
-/// **两个集合不相交,恒为空。** 就算筛对了也还是错的:它的源头
-/// `myOrders()` 默认 `limit=20`,是「拿一页列表求和却安一个更大的名字」,
-/// 和用户端刚删掉的「累计优惠」同一个错误。
-/// 现在三个数全部改用 `/riders/me/worklog` —— 服务端 `func.count()` +
-/// `func.sum()` 全量聚合,无 limit。
-///
-/// **③「在线时长」量的不是今天。** `/riders/me/fatigue` 服务端注释写着
-/// 「本次连续在线:取最近一条还没下线的会话」,没有开着的会话返回 0。
-/// 中午下线吃个饭再上线,读数归零;收工回家打开写着 0.0 小时。
-/// 改用 `worklog.today_minutes`(服务端按北京自然日算)。
-/// `fatigue` 只留着出休息提醒。
-///
-/// ## 黄金位为什么放「今日」不放承诺
-///
-/// 候选是今日收入卡 / 保障状态卡 / 配送费透明卡。
-///
-/// - **保障状态卡**只在坏掉的时候有信息量,而它绝大多数时候是好的。
-///   一张常年写着「一切正常」的卡占的是这页最贵的 110px ——
-///   所以它改成了[_readyGroup]:**只在真有事要做时才存在**。
-/// - **配送费透明卡**在这个 App 里已经有三份(钱包页的 PledgeCard、
-///   本页底部的承诺卡、今日卡的口径行)。放黄金位是第四份。
-///   而且承诺是读一遍就记住的东西,黄金位该给**值会变**的东西。
-/// - **今日**是这页上唯一每 20 分钟就变一次的数,
-///   也是骑手跑单间隙打开这个 tab 的原因。
-///
-/// 和钱包 tab 的分工:**钱包答「有多少钱能拿走」**(可提现余额是它的
-/// hero),**这里答「今天这几个小时跑得怎么样」**。所以这张卡里
-/// 不出现余额、不出现提现按钮,整卡点进去是**周报**不是钱包 ——
-/// 「今天」→「这周」是自然下钻,而周报里有时薪和配送费构成。
+/// 稿子只画了首屏。原来这一页上的保障(意外保障、紧急联系人、**事故上报**、
+/// 装备申领)、申诉、培训、客服、协议全部排在设置列表下面,
+/// 一条都没删 —— 入口去哪由 test/profile_routes_test.dart 盯着。
 class RiderProfilePage extends StatefulWidget {
   const RiderProfilePage({
     super.key,
     required this.api,
     this.onOpenWallet,
     this.onOpenOrders,
+    this.alerts = const RiderAlertPrefs(),
+    this.onAlertsChanged,
   });
 
   final ApiClient api;
@@ -80,25 +53,28 @@ class RiderProfilePage extends StatefulWidget {
   final VoidCallback? onOpenWallet;
   final VoidCallback? onOpenOrders;
 
+  /// 新单提醒的声音 / 震动(主页持有,改完回写)
+  final RiderAlertPrefs alerts;
+  final ValueChanged<RiderAlertPrefs>? onAlertsChanged;
+
   @override
   State<RiderProfilePage> createState() => _RiderProfilePageState();
 }
 
 class _RiderProfilePageState extends State<RiderProfilePage> {
-  /// 本次连续在线 + 疲劳档位。**只用来出休息提醒** ——
-  /// 它的 online_minutes 是会话时长不是今天,别拿去当「今日在线」
-  Map<String, dynamic>? _fatigue;
-
-  /// 今日/本周在线时长、完成单、入账。服务端 SQL 全量聚合
+  /// 今日/本周/本月在线时长、完成单、入账,以及累计单数。服务端 SQL 全量聚合
   Map<String, dynamic>? _worklog;
 
-  int _unread = 0;
-
-  // 开工准备三件套。取不到就当没问题 ——
-  // 拉不到状态而误报「你没认证」,比不报更糟
+  /// 本次连续在线 + 疲劳档位。**只用来出休息提醒** —— 它的 online_minutes
+  /// 是会话时长不是今天,别拿去当「今日在线」
+  Map<String, dynamic>? _fatigue;
+  UserProfile? _me;
   RiderProfile? _verify;
   PayoutAccount? _payout;
   bool? _examPassed;
+  double? _rating;
+  int _ratingCount = 0;
+  int _unread = 0;
 
   @override
   void initState() {
@@ -107,16 +83,22 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
   }
 
   Future<void> _load() async {
-    // 六个请求各自失败静默:入口本身才是这页的主体,
-    // 为了一个状态值把整页搞崩不值得
+    // 各自失败静默:入口本身才是这页的主体,为了一个状态值把整页搞崩不值得。
+    // 拉不到的一律当「没问题」—— 挂一个假的「你没实名」会让骑手白跑一趟认证页
     await Future.wait([
-      _try(() async => _fatigue = await widget.api.riderFatigue()),
       _try(() async => _worklog = await widget.api.riderWorklog()),
-      _loadUnread(),
+      _try(() async => _fatigue = await widget.api.riderFatigue()),
+      _try(() async => _me = await widget.api.me()),
       _try(() async => _verify = await widget.api.riderProfile()),
       _try(() async => _payout = await widget.api.payoutAccount()),
       _try(() async => _examPassed =
           (await widget.api.riderExamStatus())['passed'] as bool?),
+      _try(() async {
+        final r = await widget.api.riderReviews();
+        _ratingCount = (r['count'] as num?)?.toInt() ?? 0;
+        _rating = _ratingCount == 0 ? null : (r['average'] as num?)?.toDouble();
+      }),
+      _loadUnread(),
     ]);
     if (mounted) setState(() {});
   }
@@ -127,130 +109,170 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
     } catch (_) {}
   }
 
-  /// 未读数取不到就当 0:入口照常在,只是不显角标
   Future<void> _loadUnread() => _try(() async {
         final m = await widget.api.riderMessages();
         _unread = (m['unread'] as num?)?.toInt() ?? 0;
       });
 
+  Future<void> _push(Widget page) => Navigator.of(context)
+      .push<void>(MaterialPageRoute<void>(builder: (_) => page));
+
+  /// 办完一件事回来要重拉 —— 不然他刚登记完收款账户,返回一看还是「未登记」
+  Future<void> _pushThenReload(Widget page) async {
+    await _push(page);
+    await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    // 不套 AppBar:外层 Scaffold 已经有一个,套两层会出现
-    // 「我的钱包 / 我的」两个标题叠在一起(实机撞过)。
-    //
-    // 也**不往 AppBar 右上角加东西**:那里已经是 SOS(leading)+ GPS +
-    // 「接单中/已下线」+ Switch。上线开关是骑手端唯一一个比任何入口
-    // 都重要的控件,不该为了腾位置给「客服」「设置」而让它变窄 ——
-    // 「高频动作提到 AppBar」这条在另外两端成立,在这一端位置已经占满了
+    // 这一 tab 不带标题栏(稿子上身份卡就是页头),顶部安全区自己让
+    final top = MediaQuery.paddingOf(context).top;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 28),
+        padding: EdgeInsets.fromLTRB(kPagePad, top + 20, kPagePad, 28),
         children: [
-          _todayCard(sz),
-          // 块之间用留白分,不用分隔线也不用分组头 ——
-          // 原来四个 SzSectionTitle 一共吃掉 104px(4 × 26),
-          // 那是两个多入口的地方,而卡片边界本来就已经把组分开了
+          SzEnter(index: 0, child: _identity(sz)),
+          const SizedBox(height: 18),
+          SzEnter(index: 1, child: _certs(sz)),
           const SizedBox(height: 12),
-          ..._readyGroup(sz),
-          // 网格:标题两三个字就说清、给不出状态值、彼此平级的那一档。
-          // **不套 SzCard** —— 卡的 14px 横向内边距会把每格从 88.5 压到
-          // 81.5,高度从 82 涨到 110,为了一个边框付 28px 不划算
-          SzIconGrid(items: [
-            SzIconGridItem(
-                icon: Icons.receipt_long_outlined,
-                label: '我的订单',
-                onTap: widget.onOpenOrders),
-            // 只给历史,不预测、不推荐去哪跑 —— 后者是软性派单
-            SzIconGridItem(
-                icon: Icons.map_outlined,
-                label: '哪儿有单',
-                onTap: () => _push(RiderHeatmapPage(api: widget.api))),
-            SzIconGridItem(
-                icon: Icons.reviews_outlined,
-                label: '顾客评价',
-                onTap: () => _push(RiderReviewsPage(api: widget.api))),
-            // 全页唯一一个数字角标。unread 是服务端 COUNT,
-            // 和 page_size 无关 —— 别的候选见类文档下面那段
-            SzIconGridItem(
+          SzEnter(index: 2, child: _stats(sz)),
+          ..._restHint(sz),
+          const SizedBox(height: 12),
+          SzEnter(
+            index: 3,
+            child: SzEntryGroup(children: [
+              // 「接单区域」落到热力图:只给历史单量,不预测、不推荐去哪跑 ——
+              // 后者是软性派单
+              SzEntryTile(
+                icon: Icons.location_on_outlined,
+                title: _verify == null || _verify!.city.isEmpty
+                    ? '接单区域'
+                    : '接单区域 · ${_verify!.city}',
+                onTap: () => _push(RiderHeatmapPage(api: widget.api)),
+              ),
+              SzEntryTile(
                 icon: Icons.notifications_none,
-                label: '消息',
-                badge: _unread,
-                onTap: () async {
-                  await _push(RiderMessagesPage(api: widget.api));
-                  await _loadUnread();
-                  if (mounted) setState(() {});
-                }),
+                title: '新单提醒 · ${widget.alerts.label}',
+                onTap: () => _push(RiderAlertPrefsPage(
+                    initial: widget.alerts, onChanged: widget.onAlertsChanged)),
+              ),
+              SzEntryTile(
+                icon: Icons.groups_outlined,
+                title: '见证节点 · 自己复算账本',
+                onTap: () => _push(RiderWitnessPage(api: widget.api)),
+              ),
+              SzEntryTile(
+                icon: Icons.gavel_outlined,
+                title: '规则与费率 · 开源可查',
+                onTap: () => _push(RiderRulesPage(api: widget.api)),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          SzEntryGroup(children: [
+            SzEntryTile(
+              icon: Icons.notifications_none,
+              title: '消息',
+              // 超过 20 就写 20+:消息中心一页只拉 20 条,再往上的数是猜的
+              value: _unread <= 0
+                  ? null
+                  : (_unread > 20 ? '20+ 条未读' : '$_unread 条未读'),
+              valueTone: sz.clay,
+              onTap: () async {
+                await _push(RiderMessagesPage(api: widget.api));
+                await _loadUnread();
+                if (mounted) setState(() {});
+              },
+            ),
+            SzEntryTile(
+              icon: Icons.reviews_outlined,
+              title: '顾客评价',
+              onTap: () => _push(RiderReviewsPage(api: widget.api)),
+            ),
+            SzEntryTile(
+              icon: Icons.bar_chart_outlined,
+              title: '我的周报',
+              hint: '每天跑了多少、时薪、配送费构成',
+              onTap: () => _push(RiderWeeklyPage(api: widget.api)),
+            ),
           ]),
           const SizedBox(height: 12),
-          _group([
-            // **不给它状态值。** /riders/insurance 是按天的列表,
-            // 今天没有行意味着「今天还没上过线」,不是「没保障」——
-            // 挂个「今日未投保」会在每个骑手每天早上误报一次
-            _Item('意外保障', '每日上线自动登记,出险有兜底', Icons.health_and_safety_outlined,
-                () => _push(RiderInsurancePage(api: widget.api))),
-            _Item('紧急联系人', '', Icons.contact_phone_outlined,
-                () => _push(EmergencyContactsPage(api: widget.api))),
-            // 这一条的 hint 不许砍。它是这页唯一的紧急动作,
-            // 需要整行热区、需要 danger 色、需要那句话摆在外面 ——
-            // 压成一个 22px 图标 + 四个字的网格格子是反的
-            _Item('事故上报', '人先安全;在途订单自动处理', Icons.report_outlined,
-                () => _push(RiderAccidentPage(api: widget.api)),
-                tone: sz.danger),
-            // 「头盔 / 保温餐箱 / 雨衣」是**内容**不是解释,留着 ——
-            // 它回答的是"能领什么",不是"这个入口是干嘛的"
-            _Item('装备申领', '头盔 / 保温餐箱 / 雨衣', Icons.backpack_outlined,
-                () => _push(RiderGearPage(api: widget.api))),
-          ]),
-          const SizedBox(height: 12),
-          _group([
-            _Item('我的钱包', '', Icons.account_balance_wallet_outlined,
-                widget.onOpenWallet),
-            // 状态值白来的:_payout 已经为[_readyGroup]拉过了
-            _Item('收款账户', '提现打款到这里', Icons.credit_card_outlined,
-                () => _push(PayoutAccountPage(api: widget.api)),
-                value: _payout == null || !_payout!.configured
-                    ? null
-                    : '尾号 ${_payout!.accountTail}'),
-            _Item('联系平台客服', '', Icons.support_agent_outlined,
-                () => _push(SupportPage(api: widget.api))),
+          SzEntryGroup(children: [
+            // 不给状态值:/riders/insurance 是按天的列表,今天没有行只说明
+            // 今天还没上过线,不是「没保障」
+            SzEntryTile(
+              icon: Icons.health_and_safety_outlined,
+              title: '意外保障',
+              hint: '每日上线自动登记,出险有兜底',
+              onTap: () => _push(RiderInsurancePage(api: widget.api)),
+            ),
+            SzEntryTile(
+              icon: Icons.contact_phone_outlined,
+              title: '紧急联系人',
+              onTap: () => _push(EmergencyContactsPage(api: widget.api)),
+            ),
+            // 这一条的 hint 不许砍:这页唯一的紧急动作,整行热区 + danger 色
+            SzEntryTile(
+              icon: Icons.report_outlined,
+              title: '事故上报',
+              hint: '人先安全;在途订单自动处理',
+              valueTone: sz.danger,
+              onTap: () => _push(RiderAccidentPage(api: widget.api)),
+            ),
+            SzEntryTile(
+              icon: Icons.backpack_outlined,
+              title: '装备申领',
+              hint: '头盔 / 保温餐箱 / 雨衣',
+              onTap: () => _push(RiderGearPage(api: widget.api)),
+            ),
           ]),
           const SizedBox(height: 12),
           SzEntryGroup(
-            // 立场表达收进脚注,不塞进每一行 —— 原来这三句分别挂在
-            // 三条的 hint 上,各付 17px
             footnote: '派单公式与每个权重全部公开;申诉一律人工复核;'
                 '你提的意见一定有人看。',
             children: [
-              for (final it in [
-                _Item('抢单怎么排的', '', Icons.help_outline,
-                    () => _push(DispatchSpecPage(api: widget.api))),
-                _Item('规则中心', '', Icons.menu_book_outlined,
-                    () => _push(RiderRulesPage(api: widget.api))),
-                // RiderAppealPage 的构造函数注释写着「从「我的」进来时为
-                // null(只看列表)」—— 这个页当初就是为这个入口写的,
-                // 线一直没接上,老代码只弹一句「去『配送』页的异常上报里发起」
-                _Item('违规申诉', '', Icons.gavel_outlined,
-                    () => _push(RiderAppealPage(api: widget.api))),
-                _Item('上岗培训', '', Icons.school_outlined,
-                    () => _push(RiderExamPage(api: widget.api)),
-                    value: _examPassed == null
-                        ? null
-                        : (_examPassed! ? '已通过' : '未通过')),
-                // 平台自己也得有个挨骂的地方。与申诉分开:
-                // 申诉是"这一单不怪我",这里是"你们这东西不好用"
-                _Item('给平台提意见', '', Icons.forum_outlined,
-                    () => _push(RiderFeedbackPage(api: widget.api))),
-              ])
-                _tile(it),
+              SzEntryTile(
+                icon: Icons.help_outline,
+                title: '抢单怎么排的',
+                onTap: () => _push(DispatchSpecPage(api: widget.api)),
+              ),
+              SzEntryTile(
+                icon: Icons.report_problem_outlined,
+                title: '配送异常与申诉',
+                onTap: () => _push(RiderIssuesPage(api: widget.api)),
+              ),
+              SzEntryTile(
+                icon: Icons.policy_outlined,
+                title: '违规申诉',
+                onTap: () => _push(RiderAppealPage(api: widget.api)),
+              ),
+              SzEntryTile(
+                icon: Icons.school_outlined,
+                title: '上岗培训',
+                value: _examPassed == null
+                    ? null
+                    : (_examPassed! ? '已通过' : '未通过'),
+                valueTone: _examPassed == false ? sz.hold : null,
+                onTap: () => _pushThenReload(RiderExamPage(api: widget.api)),
+              ),
+              SzEntryTile(
+                icon: Icons.forum_outlined,
+                title: '给平台提意见',
+                onTap: () => _push(RiderFeedbackPage(api: widget.api)),
+              ),
+              SzEntryTile(
+                icon: Icons.support_agent_outlined,
+                title: '联系平台客服',
+                onTap: () => _push(SupportPage(api: widget.api)),
+              ),
             ],
           ),
           const SizedBox(height: 12),
           _promises(),
           const SizedBox(height: 12),
-          // 商店审核三件套。钱包页那份**先不删** ——
-          // 审核路径突然变了比多一份更麻烦,下一轮再清
+          // 商店审核三件套
           AccountLegalSection(
             api: widget.api,
             onLoggedOut: (ctx) {
@@ -267,218 +289,312 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
     );
   }
 
-  /// 今日战报。**不放任何分数、等级、段位** —— 见类文档的红线。
-  ///
-  /// 三个数全部来自 `worklog` 一个来源,不再和订单列表各算各的。
-  Widget _todayCard(SzColors sz) {
-    final level = _fatigue?['level'] as String?;
-    final tired = level == 'throttle' || level == 'remind';
-    final msg = _fatigue?['message'] as String?;
-    return SzCard(
-      onTap: () => _push(RiderWeeklyPage(api: widget.api)),
-      child: Column(children: [
-        Row(children: [
-          _stat(sz, '今日完成', _int(_worklog?['today_orders']), '单'),
-          _divider(sz),
-          _stat(sz, '今日在线', _hours(_worklog?['today_minutes']), '小时'),
-          _divider(sz),
-          _stat(sz, '今日收入', _yuan(_worklog?['today_earned_cents']), '元'),
-        ]),
-        const SizedBox(height: 8),
-        // 里程**不放这里**,放周报(#309)。
-        //
-        // 这张卡是「一眼看今天」的三个数,加第四行会把一个入口挤出首屏 ——
-        // profile_density_test 盯着那个数字(长辈版 1.4× 下 ≥10 个入口,
-        // 改版前只有 6,是调出来的)。做成第四格也不行:三格在 320 宽 +
-        // 1.4× 下已经贴边,而缩短标签会撞到按文字找入口的路由测试。
-        //
-        // 而「跑这些路值不值」本来就是来周报分析的事:那里有整周的量,
-        // 分母够大,能算每公里挣多少 —— 今日卡底下那行「看周报 →」就是路。
-        Row(children: [
-          Expanded(
-            // 一行放得下:原来那句「收入按已完成订单统计,不含在途单;
-            // 配送费与小费 100% 归你」要 348.8px,盒子只有 326,一直折两行
-            child: Text('配送费 100% 归你 · 看周报 →',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+  /// 身份卡:头像、名字、实名标,「骑手 · 哪年哪月加入 · 累计多少单」。
+  Widget _identity(SzColors sz) {
+    final name = (_me?.name.isNotEmpty ?? false)
+        ? _me!.name
+        : (widget.api.userName ?? '骑手');
+    final joined = _me?.createdAt;
+    final total = (_worklog?['total_orders'] as num?)?.toInt();
+    final sub = [
+      '骑手',
+      if (joined != null) '${joined.year} 年 ${joined.month} 月加入',
+      if (total != null) '${_thousands(total)} 单',
+    ].join(' · ');
+    final avatar = _me?.avatarUrl ?? '';
+    return InkWell(
+      borderRadius: BorderRadius.circular(kRadiusMd),
+      onTap: () => _pushThenReload(RiderVerifyFlowPage(api: widget.api)),
+      child: Row(children: [
+        ClipOval(
+          child: SizedBox(
+            width: 56,
+            height: 56,
+            child: avatar.isNotEmpty
+                ? SzImage(url: avatar, name: name, size: 56, radius: 28)
+                : ColoredBox(
+                    color: sz.line,
+                    child: Center(
+                      child: Text(szInitialOf(name),
+                          style: szDisplay(fontSize: kFigureMd, color: sz.inkMuted)),
+                    ),
+                  ),
           ),
-        ]),
-        if (tired && msg != null && msg.isNotEmpty) ...[
-          const SizedBox(height: 8),
-          Row(children: [
-            Expanded(
-                child:
-                    Text(msg, style: TextStyle(fontSize: 12, color: sz.hold))),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Flexible(
+                child: Text(name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: kFontLead,
+                        fontWeight: FontWeight.w600,
+                        color: sz.ink)),
+              ),
+              if (_verify?.isApproved ?? false) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(6, 2, 8, 2),
+                  decoration: BoxDecoration(
+                    color: sz.earn.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.verified_outlined, size: 13, color: sz.earn),
+                    const SizedBox(width: 4),
+                    Text('已实名',
+                        style: TextStyle(
+                            fontSize: kFontMicro,
+                            fontWeight: FontWeight.w600,
+                            color: sz.earn)),
+                  ]),
+                ),
+              ],
+            ]),
+            const SizedBox(height: 2),
+            Text(sub, style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
           ]),
+        ),
+        Icon(Icons.chevron_right, size: 22, color: sz.inkFaint),
+      ]),
+    );
+  }
+
+  /// 认证台面:实名 / 健康证 / 结算卡(+ 培训没过时多一行)。
+  Widget _certs(SzColors sz) {
+    final v = _verify;
+    final rows = <Widget>[
+      _certRow(
+        sz,
+        icon: Icons.badge_outlined,
+        iconColor: v == null
+            ? sz.inkMuted
+            : (v.isApproved ? sz.earn : (v.status == 'pending' ? sz.hold : sz.danger)),
+        title: '实名认证',
+        sub: switch (v?.status) {
+          'approved' => '身份证 · 已通过',
+          'pending' => '已提交,平台审核中',
+          'rejected' => '被驳回:${v!.rejectReason}',
+          null => '—',
+          _ => '跑单前要先实名(身份证,满 18 岁)',
+        },
+        status: switch (v?.status) {
+          'approved' => ('有效', sz.earn),
+          'pending' => ('审核中', sz.hold),
+          'rejected' => ('被驳回', sz.danger),
+          null => null,
+          _ => ('去提交', sz.danger),
+        },
+        onTap: () => _pushThenReload(RiderVerifyFlowPage(api: widget.api)),
+      ),
+      // 副标题说「本市要不要求」,右边说「传了没有」—— 两处不说同一句话。
+      // 图标颜色和实名那行同一套:齐了 earn、要补 hold、可选 inkMuted
+      _certRow(
+        sz,
+        icon: Icons.health_and_safety_outlined,
+        iconColor: v == null
+            ? sz.inkMuted
+            : v.healthCertPhotoUrl.isNotEmpty
+                ? sz.earn
+                : (v.healthCertRequired ? sz.hold : sz.inkMuted),
+        title: '健康证',
+        sub: v == null
+            ? '—'
+            : v.healthCertRequired
+                ? '你所在城市要求持证'
+                : '你所在城市目前不要求,可选上传',
+        status: v == null
+            ? null
+            : v.healthCertPhotoUrl.isNotEmpty
+                ? ('已上传', sz.earn)
+                : (v.healthCertRequired ? ('待上传', sz.hold) : ('可选', sz.inkMuted)),
+        onTap: () => _pushThenReload(RiderVerifyFlowPage(api: widget.api)),
+      ),
+      _certRow(
+        sz,
+        icon: Icons.account_balance_outlined,
+        iconColor: sz.inkMuted,
+        title: '结算卡',
+        sub: _payout == null
+            ? '—'
+            : _payout!.configured
+                ? '${_payout!.bankName.isNotEmpty ? _payout!.bankName : _payout!.kindLabel}'
+                    ' · 尾号 ${_payout!.accountTail} · 提现 T+1 到账'
+                : '还没登记 · 提现前要先登记',
+        status: _payout != null && !_payout!.configured ? ('未登记', sz.hold) : null,
+        onTap: () => _pushThenReload(PayoutAccountPage(api: widget.api)),
+      ),
+      if (_examPassed == false)
+        _certRow(
+          sz,
+          icon: Icons.school_outlined,
+          iconColor: sz.hold,
+          title: '上岗培训',
+          sub: '食品安全培训,三分钟看完',
+          status: ('未通过', sz.hold),
+          onTap: () => _pushThenReload(RiderExamPage(api: widget.api)),
+        ),
+    ];
+    return Material(
+      color: sz.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        side: BorderSide(color: sz.line),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        for (final (i, r) in rows.indexed) ...[
+          if (i > 0) Divider(height: 1, color: sz.line),
+          r,
         ],
       ]),
     );
   }
 
-  /// 开工准备:**只在真有事要做时才存在**,全通过时整块(连同间距)不渲染。
-  ///
-  /// 这是「保障状态卡」的正确形态。三个信号全部是服务端算好的扁平值,
-  /// 没有一个是客户端凑的:
-  ///
-  /// | 行 | 判据 | 来源 |
-  /// |---|---|---|
-  /// | 实名认证 | `status ∈ {unsubmitted, rejected}` | `GET /riders/profile` |
-  /// | 收款账户 | `configured == false` | `GET /payout-account` |
-  /// | 上岗培训 | `passed == false` | `GET /riders/exam/status` |
-  ///
-  /// 这是全页仅有的三件**能让骑手跑不了单或拿不到钱**的事。
-  /// 现在收款账户没登记,骑手要到点「提现」被顶回来才知道。
-  ///
-  /// **不用红点角标用带色 value** —— 这三条是「状态」不是「几件待办」,
-  /// 「未登记」比一个红点有信息量。
-  ///
-  /// ⚠️ 拉不到一律当"没问题"。宁可漏报,不可误报 ——
-  /// 挂一个假的「你没实名」会让骑手白跑一趟认证页。
-  List<Widget> _readyGroup(SzColors sz) {
-    final v = _verify;
-    final rows = <Widget>[
-      if (v != null && v.status != 'approved' && v.status != 'pending')
-        _tile(_Item('实名认证', '', Icons.badge_outlined,
-            () => _pushThenReload(RiderVerifyFlowPage(api: widget.api)),
-            value: v.status == 'rejected' ? '被驳回' : '去提交', tone: sz.danger)),
-      if (_payout != null && !_payout!.configured)
-        _tile(_Item('收款账户', '', Icons.credit_card_outlined,
-            () => _pushThenReload(PayoutAccountPage(api: widget.api)),
-            value: '未登记', tone: sz.hold)),
-      if (_examPassed == false)
-        _tile(_Item('上岗培训', '', Icons.school_outlined,
-            () => _pushThenReload(RiderExamPage(api: widget.api)),
-            value: '未通过', tone: sz.hold)),
-    ];
-    if (rows.isEmpty) return const [];
-    return [SzEntryGroup(children: rows), const SizedBox(height: 12)];
-  }
-
-  Widget _stat(SzColors sz, String label, String value, String unit) =>
-      Expanded(
-        child: Column(children: [
-          // ⚠️ 溢出护栏。每格只有 108px,而「86.00」在 szMoney 22px 下
-          // 要 111.3px —— 加上「元」和间距是 124.6,老代码在这里
-          // `RenderFlex overflowed by 17 pixels`,1.4× 下溢出 65px。
-          // **只要日收入 ≥ ¥10 就溢出。** 之前没人报,是因为上面那个
-          // 恒为 0 的 bug 让它永远显示「0.00」(4 字符,刚好塞得下)——
-          // 修了数据源就会当场暴露这个。判据锁在 profile_today_card_test.dart
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(value,
-                  maxLines: 1,
-                  style: szMoney(
-                      fontSize: 22,
+  Widget _certRow(SzColors sz,
+      {required IconData icon,
+      required Color iconColor,
+      required String title,
+      required String sub,
+      required (String, Color)? status,
+      required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          Icon(icon, size: 22, color: iconColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title,
+                  style: TextStyle(
+                      fontSize: kFontBodyLg,
                       fontWeight: FontWeight.w600,
                       color: sz.ink)),
-              const SizedBox(width: 2),
-              Text(unit, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+              Text(sub,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
             ]),
           ),
-          const SizedBox(height: 2),
-          Text(label,
-              maxLines: 1, style: TextStyle(fontSize: 12, color: sz.inkMuted)),
+          const SizedBox(width: 8),
+          if (status != null)
+            Text(status.$1,
+                style: TextStyle(
+                    fontSize: kFontNote,
+                    fontWeight: FontWeight.w600,
+                    color: status.$2))
+          else
+            Icon(Icons.chevron_right, size: 20, color: sz.inkFaint),
         ]),
-      );
+      ),
+    );
+  }
 
-  Widget _divider(SzColors sz) =>
-      Container(width: 1, height: 30, color: sz.line);
+  /// 连续在线太久的休息提醒。**只提醒不断单**,也不给关 ——
+  /// 这是安全提示,可以被关掉的容器不该装它
+  List<Widget> _restHint(SzColors sz) {
+    final level = _fatigue?['level'] as String?;
+    final msg = _fatigue?['message'] as String?;
+    if ((level != 'remind' && level != 'throttle') || msg == null || msg.isEmpty) {
+      return const [];
+    }
+    return [
+      const SizedBox(height: 10),
+      Row(children: [
+        Icon(Icons.bedtime_outlined, size: 17, color: sz.hold),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(msg,
+              style: TextStyle(fontSize: kFontNote, height: 1.4, color: sz.hold)),
+        ),
+      ]),
+    ];
+  }
 
-  /// 一组入口。用 shared 的 SzEntryGroup / SzEntryTile(#294)。
-  Widget _group(List<_Item> items) =>
-      SzEntryGroup(children: [for (final it in items) _tile(it)]);
+  /// 三个数:用户评价 / 本月所得 / 罚款。整卡点进周报。
+  Widget _stats(SzColors sz) {
+    final month = (_worklog?['month_earned_cents'] as num?)?.toInt();
+    // 数和标签都缩放不折行:三格等分,320 屏 1.4× 下一格只有九十来宽
+    Widget cell(String value, String label) => Expanded(
+          child: Column(children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value,
+                  maxLines: 1,
+                  style: szMoney(fontSize: kFigureMd, color: sz.ink)),
+            ),
+            const SizedBox(height: 2),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(label,
+                  maxLines: 1,
+                  style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+            ),
+          ]),
+        );
+    Widget bar() => Container(width: 1, height: 34, color: sz.line);
+    return SzCard(
+      onTap: () => _push(RiderWeeklyPage(api: widget.api)),
+      child: Row(children: [
+        cell(_rating == null ? '—' : _rating!.toStringAsFixed(1),
+            _ratingCount == 0 ? '用户评价' : '用户评价 · $_ratingCount 条'),
+        bar(),
+        cell(month == null ? '—' : szYuanText(month, '¥', 0), '本月所得'),
+        bar(),
+        cell('0', '罚款 · 没有这项'),
+      ]),
+    );
+  }
 
-  Widget _tile(_Item it) => SzEntryTile(
-        icon: it.icon,
-        title: it.title,
-        value: it.value,
-        hint: it.sub,
-        valueTone: it.tone,
-        onTap: it.onTap,
-      );
-
-  /// 竞品这个位置放活动 banner。我们放**平台对骑手的承诺**。
-  ///
-  /// **刻意在折叠线以下**:它是身份声明不是入口,滚到底看见一次就够。
-  /// 承诺是读一遍就记住的东西,不该占黄金位那 110px。
+  /// 平台对骑手的承诺。**刻意在折叠线以下**:它是身份声明不是入口。
   Widget _promises() => SzLedgerCard(
         onTap: () => _push(DispatchSpecPage(api: widget.api)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('平台对你的承诺',
-              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          for (final p in const [
-            '配送费与小费 100% 归你,平台分文不取',
-            '派单算法完整公开,你可以拿自己的单代进去算',
-            '不按评分或等级差别对待 —— 我们没有服务分,也不会有',
-            '不用你的实际速度反过来缩短配送时限',
-            '连续在线过久会提醒你休息,但不会断你的单',
-          ])
-            Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child:
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('· ', style: TextStyle(fontSize: 12.5)),
-                Expanded(
-                  child: Text(p,
-                      style: const TextStyle(fontSize: 12.5, height: 1.5)),
-                ),
-              ]),
-            ),
-          const SizedBox(height: 4),
-          Text('点这里看完整算法与权重 →',
-              style: TextStyle(fontSize: 12, color: SzColors.dark.clay)),
-        ]),
+        child: Builder(builder: (context) {
+          final s = Theme.of(context).sz;
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('平台对你的承诺',
+                style: TextStyle(
+                    fontSize: kFontBodyLg,
+                    fontWeight: FontWeight.w600,
+                    color: s.ink)),
+            const SizedBox(height: 8),
+            for (final p in const [
+              '外卖配送费与小费 100% 归你,平台分文不取;跑腿费平台收 2%',
+              '派单算法完整公开,你可以拿自己的单代进去算',
+              '不按评分或等级差别对待 —— 我们没有服务分,也不会有',
+              '不用你的实际速度反过来缩短配送时限',
+              '连续在线过久会提醒你休息,但不会断你的单',
+            ])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 5),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('· ', style: TextStyle(fontSize: kFontNote, color: s.ink)),
+                  Expanded(
+                    child: Text(p,
+                        style: TextStyle(
+                            fontSize: kFontNote, height: 1.5, color: s.ink)),
+                  ),
+                ]),
+              ),
+            const SizedBox(height: 4),
+            Text('点这里看完整算法与权重 →',
+                style: TextStyle(fontSize: kFontNote, color: s.clay)),
+          ]);
+        }),
       );
 
-  /// 还没加载出来给「—」不给 0 —— **0 是一个看起来像真值的数**,
-  /// 骑手会读它("我今天怎么才跑 0 单"),然后它又自己变了。
-  ///
-  /// 加载完之后的 0 是**真的 0**(今天还没跑单),照写不误。
-  /// 这两种 0 现在分得开,因为 worklog 的字段要么有要么整个对象是 null。
-  String _int(dynamic v) => v == null ? '—' : '${(v as num).toInt()}';
-
-
-  String _hours(dynamic minutes) {
-    final m = (minutes as num?)?.toDouble();
-    return m == null ? '—' : (m / 60).toStringAsFixed(1);
+  String _thousands(int n) {
+    final s = '$n';
+    final b = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      if (i > 0 && (s.length - i) % 3 == 0) b.write(',');
+      b.write(s[i]);
+    }
+    return b.toString();
   }
-
-  String _yuan(dynamic cents) {
-    final c = (cents as num?)?.toInt();
-    return c == null ? '—' : (c / 100).toStringAsFixed(2);
-  }
-
-  Future<void> _push(Widget page) => Navigator.of(context)
-      .push<void>(MaterialPageRoute<void>(builder: (_) => page));
-
-  /// 办完一件待办回来要重拉 —— 不然他刚登记完收款账户,
-  /// 返回一看「未登记」还挂在那儿
-  Future<void> _pushThenReload(Widget page) async {
-    await _push(page);
-    await _load();
-  }
-}
-
-class _Item {
-  const _Item(this.title, this.sub, this.icon, this.onTap,
-      {this.value, this.tone});
-
-  final String title;
-
-  /// 一次性解释。**只在 [value] 为空时显示** —— 见 SzEntryTile 的类文档。
-  /// 标题已经说清是什么的(「我的钱包」「规则中心」)就传空串,
-  /// 别为了"看起来完整"硬凑一句 —— 那一行只省 12%,还占着屏幕。
-  final String sub;
-
-  /// 当前值。和标题同一行,零额外高度。
-  final String? value;
-
-  /// 状态的语气:待办用 hold、异常用 danger、正常留空。
-  final Color? tone;
-
-  final IconData icon;
-  final VoidCallback? onTap;
 }

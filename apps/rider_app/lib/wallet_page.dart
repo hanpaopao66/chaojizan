@@ -1,14 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import 'issues_page.dart';
-import 'onboarding_page.dart';
+import 'weekly_page.dart';
 
-/// 骑手钱包:余额卡片 + 提现 + 收入/提现记录。
+/// 骑手账本(设计稿 5g):深台面 + 逐单。
+///
+/// 台面答「这一段挣了多少、平台拿走多少」,逐单答「是哪几单」。
+/// 时段(今天 / 本周 / 本月)在标题栏右边切,状态由主页持有([period])。
+///
+/// ## 和设计稿不一样的两处,都是因为稿子上的事不存在
+///
+/// - 稿子写「22:00 结算到 尾号 6210」。**没有定时结算**:钱在订单完成时
+///   进钱包,骑手自己点提现,平台 T+1 打款。所以台面底下那一块是
+///   「可提现 ¥x」+「提现 T+1 到尾号 xxxx」两行,点它就是提现。
+/// - 稿子写「平台抽 ¥0」常显。外卖配送费确实一分不抽,但**跑腿单平台收
+///   跑腿费的 2%** —— 这个数由服务端按这一段的跑腿单算好(worklog 的
+///   `*_platform_cut_cents`),是多少写多少,没接跑腿单就是真的 ¥0。
+///
+/// 「罚款 ¥0」照写:平台没有任何罚款项(结算里骑手入账只有 earning /
+/// reversal / adjustment 三种,且骑手行从不冲减)。
 class WalletPage extends StatefulWidget {
-  const WalletPage({super.key, required this.api});
+  const WalletPage({super.key, required this.api, this.period = 0});
 
   final ApiClient api;
+
+  /// 0 今天 / 1 本周 / 2 本月
+  final int period;
+
+  static const periods = ['今天', '本周', '本月'];
 
   @override
   State<WalletPage> createState() => _WalletPageState();
@@ -16,18 +36,22 @@ class WalletPage extends StatefulWidget {
 
 class _WalletPageState extends State<WalletPage> {
   Wallet? _wallet;
-  Map<String, dynamic>? _worklog; // 我的数据:在线时长/单量(只统计不考核)
+  Map<String, dynamic>? _worklog;
+  PayoutAccount? _payout;
   List<Earning> _earnings = [];
   List<Withdrawal> _withdrawals = [];
-  int _segment = 0; // 0 收入明细 / 1 提现记录
 
   /// 拉钱包失败的原因;空串 = 上一次是成功的。
   ///
   /// 之前只弹一条 SnackBar 就完了,而 `_wallet` 还是 null ——
-  /// 于是这一页**永久转圈**;更糟的是 `RefreshIndicator` 写在
-  /// `wallet != null` 分支里面,转圈的时候连下拉自救的路都没有,
-  /// 只能杀掉 App 重开。钱的那一页不该是这样。
+  /// 于是这一页**永久转圈**,连下拉自救的路都没有。钱的那一页不该是这样。
   String _error = '';
+
+  /// 下拉刷新时换一个值,台面数字和分账条从 0 再滚一次;
+  /// 轮询、切时段、切 tab 回来都不重播(动效规范 09)
+  int _replay = 0;
+
+  String get _periodKey => const ['today', 'week', 'month'][widget.period];
 
   @override
   void initState() {
@@ -35,35 +59,53 @@ class _WalletPageState extends State<WalletPage> {
     _load();
   }
 
-  Future<void> _load() async {
+  @override
+  void didUpdateWidget(covariant WalletPage old) {
+    super.didUpdateWidget(old);
+    if (old.period != widget.period) _loadEarnings();
+  }
+
+  Future<void> _load({bool replay = false}) async {
     try {
       final wallet = await widget.api.wallet();
-      final earnings = await widget.api.earnings();
       final withdrawals = await widget.api.withdrawals();
       Map<String, dynamic>? worklog;
+      PayoutAccount? payout;
       try {
         worklog = await widget.api.riderWorklog();
       } catch (_) {}
-      if (mounted) {
-        setState(() {
-          _wallet = wallet;
-          _earnings = earnings;
-          _withdrawals = withdrawals;
-          _worklog = worklog;
-          _error = '';
-        });
-      }
+      try {
+        payout = await widget.api.payoutAccount();
+      } catch (_) {}
+      final earnings = await widget.api.earnings(period: _periodKey);
+      if (!mounted) return;
+      setState(() {
+        _wallet = wallet;
+        _withdrawals = withdrawals;
+        _worklog = worklog;
+        _payout = payout;
+        _earnings = earnings;
+        _error = '';
+        if (replay) _replay++;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e is ApiException ? e.message : e.toString());
     }
   }
 
+  Future<void> _loadEarnings() async {
+    try {
+      final earnings = await widget.api.earnings(period: _periodKey);
+      if (mounted) setState(() => _earnings = earnings);
+    } catch (_) {}
+  }
+
   Future<void> _withdraw() async {
     final wallet = _wallet;
     if (wallet == null) return;
     final controller = TextEditingController(
-        text: (wallet.balanceCents / 100).toStringAsFixed(2));
+        text: (wallet.withdrawableCents / 100).toStringAsFixed(2));
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => SzDialog(
@@ -71,7 +113,8 @@ class _WalletPageState extends State<WalletPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('可提现 ${yuan(wallet.balanceCents)},最低 ¥10'),
+            Text('可提现 ${yuan(wallet.withdrawableCents)},最低 ¥10;'
+                'T+1 到账,零手续费'),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
@@ -97,7 +140,7 @@ class _WalletPageState extends State<WalletPage> {
       await widget.api.requestWithdrawal(amount);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('提现申请已提交,平台确认后打款')));
+          const SnackBar(content: Text('提现申请已提交,平台确认后 T+1 打款')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -106,61 +149,23 @@ class _WalletPageState extends State<WalletPage> {
     }
   }
 
-  /// UTC ISO 时间 → 本地 "MM-dd HH:mm"
-  /// 近的说「多久前」,超过昨天自动退回「M/D HH:MM」——
-  /// 精度不丢,但「2 小时前提的」比「07-29 05:12」好读得多。
-  String _localTime(String iso) => szTimeAgo(iso);
+  int? _num(String key) => (_worklog?[key] as num?)?.toInt();
 
-  Widget _sep() => Divider(height: 1, color: Theme.of(context).sz.line);
-
-  /// 入口行:标题 + 一句说明 + 右箭头。整行热区,高度不小于 48。
-  Widget _navRow(String title, String desc, Widget Function() page,
-      {bool danger = false}) {
-    final sz = Theme.of(context).sz;
-    return InkWell(
-      onTap: () => Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => page())),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: kCardPad, vertical: 13),
-        child: Row(children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: TextStyle(
-                        fontSize: 14, color: danger ? sz.danger : sz.ink)),
-                const SizedBox(height: 2),
-                Text(desc,
-                    style: TextStyle(fontSize: 11.5, color: sz.inkMuted)),
-              ],
-            ),
-          ),
-          Icon(Icons.chevron_right, size: 16, color: sz.inkFaint),
-        ]),
-      ),
-    );
-  }
-
-  Widget _metric(String label, int cents) {
-    final sz = Theme.of(context).sz;
-    return Expanded(
-      child: Column(children: [
-        Text(yuan(cents),
-            style: szMoney(
-                fontSize: 15, fontWeight: FontWeight.w600, color: sz.ink)),
-        const SizedBox(height: 2),
-        Text(label, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
-      ]),
-    );
+  String _periodTitle() {
+    final now = DateTime.now();
+    return switch (widget.period) {
+      0 => '${now.month} 月 ${now.day} 日',
+      1 => '本周 · ${now.subtract(Duration(days: now.weekday - 1)).month} 月 '
+          '${now.subtract(Duration(days: now.weekday - 1)).day} 日起',
+      _ => '${now.month} 月',
+    };
   }
 
   @override
   Widget build(BuildContext context) {
     final wallet = _wallet;
     if (wallet == null) {
-      // 转圈 / 失败要分开。而且失败态也得能下拉重试 ——
-      // 一个只会转圈又拉不动的页面,骑手唯一的出路是杀 App
+      // 转圈 / 失败要分开,而且失败态也得能下拉重试
       return RefreshIndicator(
         onRefresh: _load,
         child: ListView(children: [
@@ -169,233 +174,363 @@ class _WalletPageState extends State<WalletPage> {
             child: _error.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : SzError(
-                    error: '钱包没能加载出来:$_error\n余额和流水都还在,只是这会儿读不到',
+                    error: '账本没能加载出来:$_error\n余额和流水都还在,只是这会儿读不到',
                     onRetry: _load),
           ),
         ]),
       );
     }
-    // 今日战报:后端时间戳是 UTC,必须转本地时区再按日归属
-    final now = DateTime.now();
-    bool isToday(String iso) {
-      final t = DateTime.tryParse(iso)?.toLocal();
-      return t != null &&
-          t.year == now.year && t.month == now.month && t.day == now.day;
-    }
-
-    final todayEarnings = _earnings.where((e) => isToday(e.createdAt)).toList();
-    final todayCents =
-        todayEarnings.fold(0, (sum, e) => sum + e.amountCents);
+    final sz = Theme.of(context).sz;
+    final p = const ['today', 'week', 'month'][widget.period];
+    final earned = _num('${p}_earned_cents');
+    final orders = _num('${p}_orders');
+    final minutes = _num('${p}_minutes');
+    final cut = _num('${p}_platform_cut_cents');
 
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: () => _load(replay: true),
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 28),
         children: [
-          // 拉过一次之后又失败:下面的数字是**旧的**。金额尤其不能让人
-          // 以为是刚刚的 —— 他会拿这个数去判断今天还要不要再跑两单
           if (_error.isNotEmpty) ...[
             SzRetryBanner(
-                text: '余额和流水没刷新成功($_error),下面是上一次的数。点这里重试',
+                text: '账本没刷新成功($_error),下面是上一次的数。点这里重试',
                 onRetry: _load),
             const SizedBox(height: 8),
           ],
-          // 这一屏要能一眼回答:能提多少、今天跑了多少、什么时候能到账。
-          // 户外单手,所以金额和按钮都比另外两端再大一档
-          MoneyHeroCard(
-            label: '可提现余额',
-            amountCents: wallet.balanceCents,
-          ),
-          const SizedBox(height: 8),
-          SzCard(
-            child: Column(children: [
-              Row(children: [
-                Expanded(
-                  child: Text.rich(
-                    TextSpan(children: [
-                      const TextSpan(text: '今天跑了 '),
-                      TextSpan(
-                          text: '${todayEarnings.length}',
-                          style: szFigure(
-                              fontSize: 15, fontWeight: FontWeight.w600)),
-                      const TextSpan(text: ' 单,入账 '),
-                      TextSpan(
-                          text: yuan(todayCents),
-                          style: szMoney(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context).sz.earn)),
-                    ]),
-                    style: TextStyle(
-                        fontSize: 13, color: Theme.of(context).sz.ink),
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 52)),
-                  onPressed: wallet.balanceCents >= 1000 ? _withdraw : null,
-                  child: Text(wallet.balanceCents >= 1000
-                      ? '提现 · T+1 到账,零手续费'
-                      : '满 ¥10 可提现'),
-                ),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 8),
-          SzCard(
-            child: Row(
-              children: [
-                _metric('累计收入', wallet.totalEarnedCents),
-                _metric('提现中', wallet.pendingWithdrawalCents),
-                _metric('已提现', wallet.withdrawnCents),
-              ],
+          _ledgerCard(wallet, earned, orders, minutes, cut),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(
+              child: Text('逐单',
+                  style: TextStyle(
+                      fontSize: kFontNote, letterSpacing: 1, color: sz.inkMuted)),
             ),
-          ),
-          if (_worklog != null) ...[
+            Text('配送费一分不抽 · 跑腿费扣 2%',
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+          ]),
+          const SizedBox(height: 6),
+          _earningsCard(sz),
+          if (widget.period == 1) ...[
             const SizedBox(height: 8),
-            // 我的数据:自我参考,不做考核
-            SzCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('我的数据 · 仅自己可见,不做考核',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).sz.ink)),
-                  const SizedBox(height: 8),
-                  Text(
-                    '今日在线 ${(_worklog!['today_minutes'] as int) ~/ 60} 小时'
-                    '${(_worklog!['today_minutes'] as int) % 60} 分 · '
-                    '${_worklog!['today_orders']} 单 ${yuan(_worklog!['today_earned_cents'] as int)}\n'
-                    '本周在线 ${(_worklog!['week_minutes'] as int) ~/ 60} 小时'
-                    '${(_worklog!['week_minutes'] as int) % 60} 分 · '
-                    '${_worklog!['week_orders']} 单 ${yuan(_worklog!['week_earned_cents'] as int)}',
-                    style: TextStyle(
-                        fontSize: 12,
-                        height: 1.7,
-                        color: Theme.of(context).sz.inkMuted),
-                  ),
-                ],
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => RiderWeeklyPage(api: widget.api))),
+                child: const Text('看周报:每天明细、时薪、配送费构成 →'),
               ),
             ),
           ],
           const SizedBox(height: 18),
-          const SzSectionTitle('保障与规则'),
-          const SizedBox(height: 9),
-          SzCard(
-            padding: EdgeInsets.zero,
-            child: Column(children: [
-              _navRow('食品安全培训', '三分钟看完 —— 监管对平台的要求,不是给你加规矩',
-                  () => RiderExamPage(api: widget.api)),
-              _sep(),
-              _navRow('规则中心', '转单 / 考核 / 结算 / 申诉,规则先说清',
-                  () => RiderRulesPage(api: widget.api)),
-              _sep(),
-              _navRow('意外保障', '每日上线自动登记,出险有兜底',
-                  () => RiderInsurancePage(api: widget.api)),
-              _sep(),
-              _navRow('紧急联系人', 'SOS 时平台第一时间联系(加密存储)',
-                  () => EmergencyContactsPage(api: widget.api)),
-              _sep(),
-              // 事故上报是唯一该用 danger 的入口:人先安全
-              _navRow('事故上报', '人先安全;在途订单自动处理',
-                  () => RiderAccidentPage(api: widget.api),
-                  danger: true),
-              _sep(),
-              _navRow('装备申领', '头盔 / 保温餐箱 / 雨衣',
-                  () => RiderGearPage(api: widget.api)),
-            ]),
-          ),
-          const SizedBox(height: 18),
-          const SzSectionTitle('账目与账户'),
-          const SizedBox(height: 9),
-          SzCard(
-            padding: EdgeInsets.zero,
-            child: Column(children: [
-              _navRow('收款账户', '提现打款到这里;未登记不能提现',
-                  () => PayoutAccountPage(api: widget.api)),
-              _sep(),
-              _navRow('配送异常与申诉', '上报记录;判骑手责的裁决 72 小时内可申诉',
-                  () => RiderIssuesPage(api: widget.api)),
-              _sep(),
-              _navRow('联系平台客服', '提现、账目、认证有疑问?直接找平台',
-                  () => SupportPage(api: widget.api)),
-            ]),
-          ),
-          const SizedBox(height: 18),
+          Row(children: [
+            Expanded(
+              child: Text('提现记录',
+                  style: TextStyle(
+                      fontSize: kFontNote, letterSpacing: 1, color: sz.inkMuted)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          _withdrawalsCard(sz, wallet),
+          const SizedBox(height: 12),
           const PledgeCard(
             title: '配送费 100% 归骑手',
-            body: '平台分文不取,提现零手续费,每一分都看得见。\n'
+            body: '外卖配送费和小费平台分文不取,跑腿费平台收 2%;提现零手续费。\n'
                 '配送收入属劳务报酬,请依法申报个税;'
                 '平台接入灵活用工代发后将自动完税并另行通知。',
           ),
-          const SizedBox(height: 8),
-          // 商店审核三件套:协议全文 / 退出登录 / 注销账号
+          const SizedBox(height: 18),
+          // 商店审核三件套:协议全文 / 退出登录 / 注销账号。
+          // 「我的」页也有一份;这里先不删 —— 审核路径突然变了比多一份更麻烦
           AccountLegalSection(
             api: widget.api,
             onLoggedOut: (ctx) {
               Navigator.of(ctx).popUntil((route) => route.isFirst);
-              ApiClient.onUnauthorized?.call(); // AuthGate 切回登录页
+              ApiClient.onUnauthorized?.call();
             },
             onDeleted: (ctx) {
               Navigator.of(ctx).popUntil((route) => route.isFirst);
               ApiClient.onUnauthorized?.call();
             },
           ),
-          const SizedBox(height: 12),
-          SegmentedButton<int>(
-            segments: const [
-              ButtonSegment(value: 0, label: Text('收入明细')),
-              ButtonSegment(value: 1, label: Text('提现记录')),
-            ],
-            selected: {_segment},
-            onSelectionChanged: (s) => setState(() => _segment = s.first),
-          ),
-          const SizedBox(height: 8),
-          if (_segment == 0)
-            if (_earnings.isEmpty)
-              const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Center(child: Text('还没有收入,去抢单吧')))
-            else
-              ..._earnings.map((e) => ListTile(
-                    dense: true,
-                    leading: Icon(Icons.add_circle, color: Theme.of(context).sz.earn),
-                    title: Text('配送费 +${yuan(e.amountCents)}'),
-                    subtitle: Text('订单 ${e.orderNo}'),
-                    trailing: Text(_localTime(e.createdAt)),
-                  ))
-          else if (_withdrawals.isEmpty)
-            const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: Text('还没有提现记录')))
-          else
-            ..._withdrawals.map((w) => ListTile(
-                  dense: true,
-                  leading: Icon(
-                    switch (w.status) {
-                      'paid' => Icons.check_circle,
-                      'rejected' => Icons.cancel,
-                      _ => Icons.hourglass_top,
-                    },
-                    color: switch (w.status) {
-                      'paid' => Theme.of(context).sz.earn,
-                      'rejected' || 'failed' => Theme.of(context).sz.danger,
-                      _ => Theme.of(context).sz.hold,
-                    },
-                  ),
-                  title: Text('提现 ${yuan(w.amountCents)} · ${w.statusLabel}'),
-                  subtitle: w.rejectReason.isNotEmpty
-                      ? Text('原因:${w.rejectReason}')
-                      : Text(_localTime(w.createdAt)),
-                )),
         ],
       ),
+    );
+  }
+
+  Widget _ledgerCard(
+      Wallet wallet, int? earned, int? orders, int? minutes, int? cut) {
+    return SzLedgerCard(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      child: Builder(builder: (context) {
+        // 台面里取色要在台面里取(SzLedgerCard 把 SzColors 换成了深色态)
+        final s = Theme.of(context).sz;
+        final dim = TextStyle(fontSize: kFontNote, color: s.inkMuted);
+        final fig = szFigure(fontSize: kFontNote, color: s.ink);
+        final canWithdraw = wallet.withdrawableCents >= 1000;
+        // 两行:余额一行、去向一行。挤成一行的话余额上了四位数就从
+        // 「尾号」中间折开(390 宽实测)
+        final tail = !canWithdraw
+            ? '满 ¥10 可提'
+            : (_payout != null && _payout!.configured
+                ? '提现 T+1 到尾号 ${_payout!.accountTail}'
+                : '提现前先登记收款账户');
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${_periodTitle()} · 配送费全额',
+              style: TextStyle(
+                  fontSize: kFontMicro, letterSpacing: 1, color: s.inkMuted)),
+          const SizedBox(height: 6),
+          earned == null
+              ? Text('—',
+                  style: szMoney(fontSize: kFigureHero, color: s.earn, height: 1.1))
+              : SzRollingAmount(
+                  cents: earned,
+                  replayKey: _replay,
+                  style: szMoney(
+                      fontSize: kFigureHero, color: s.earn, height: 1.1)),
+          const SizedBox(height: 12),
+          Wrap(spacing: 18, runSpacing: 4, children: [
+            Text.rich(TextSpan(children: [
+              TextSpan(text: orders == null ? '—' : '$orders', style: fig),
+              TextSpan(text: ' 单', style: dim),
+            ])),
+            Text.rich(TextSpan(children: [
+              TextSpan(
+                  text: minutes == null
+                      ? '—'
+                      : (minutes / 60).toStringAsFixed(1),
+                  style: fig),
+              TextSpan(text: ' 小时在线', style: dim),
+            ])),
+            Text.rich(TextSpan(children: [
+              TextSpan(text: '平台抽 ', style: dim),
+              // 整元不带小数(稿子上是「¥0」);跑腿单那 2% 有零头才带
+              TextSpan(
+                  text: cut == null
+                      ? '—'
+                      : szYuanText(cut, '¥', cut % 100 == 0 ? 0 : 2),
+                  style: fig),
+            ])),
+            Text.rich(TextSpan(children: [
+              TextSpan(text: '罚款 ', style: dim),
+              TextSpan(text: '¥0', style: fig),
+            ])),
+          ]),
+          const SizedBox(height: 14),
+          Container(height: 1, color: s.line),
+          const SizedBox(height: 12),
+          Row(children: [
+            Container(
+              width: 7,
+              height: 7,
+              decoration: BoxDecoration(color: s.earn, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: InkWell(
+                onTap: canWithdraw ? _withdraw : null,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text.rich(TextSpan(children: [
+                          TextSpan(text: '可提现 ', style: dim),
+                          TextSpan(
+                              text: szYuanText(wallet.withdrawableCents),
+                              style: fig),
+                        ])),
+                        Text(tail,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: kFontMicro, color: s.inkMuted)),
+                      ]),
+                ),
+              ),
+            ),
+            InkWell(
+              onTap: () => launchUrl(
+                  Uri.parse('https://chaojizan.cc/transparency'),
+                  mode: LaunchMode.externalApplication),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text('在透明中心核对 →',
+                    style: TextStyle(fontSize: kFontNote, color: s.clay)),
+              ),
+            ),
+          ]),
+        ]);
+      }),
+    );
+  }
+
+  Widget _earningsCard(SzColors sz) {
+    if (_earnings.isEmpty) {
+      return SzCard(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 18),
+          child: Center(
+            child: Text(
+                const ['今天还没有入账的单', '这周还没有入账的单', '这个月还没有入账的单']
+                    [widget.period],
+                style: TextStyle(fontSize: kFontBody, color: sz.inkMuted)),
+          ),
+        ),
+      );
+    }
+    return Material(
+      color: sz.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        side: BorderSide(color: sz.line),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        for (final (i, e) in _earnings.indexed) ...[
+          if (i > 0) Divider(height: 1, color: sz.line),
+          _earningRow(sz, e),
+        ],
+      ]),
+    );
+  }
+
+  Widget _earningRow(SzColors sz, Earning e) {
+    final t = DateTime.tryParse(e.createdAt)?.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final time = t == null
+        ? ''
+        : (widget.period == 0
+            ? '${two(t.hour)}:${two(t.minute)}'
+            : '${t.month}/${t.day}');
+    final channel = e.isErrand
+        ? 'errand'
+        : (channelOfBizType(e.bizType)?.key ?? 'food');
+    final title = e.fromName.isEmpty && e.toArea.isEmpty
+        ? '订单 ${e.orderNo.substring(e.orderNo.length - 6)}'
+        : '${e.isErrand ? "帮我送 · " : ""}${e.fromName} → ${e.toArea}';
+    final sub = [
+      if (e.distanceM != null) distanceLabelShort(e.distanceM!.toDouble()),
+      if (e.isErrand && e.platformCutCents > 0)
+        '${yuan(e.feeCents)} − 2%',
+      if (e.kind == 'adjustment') '调整',
+    ].join(' · ');
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+      child: Row(children: [
+        SizedBox(
+          width: 40,
+          child: Text(time,
+              style: szFigure(fontSize: kFontNote, color: sz.inkMuted)),
+        ),
+        Container(
+          width: 3,
+          height: 26,
+          decoration: BoxDecoration(
+            color: channelColor(context, channel),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: kFontBody,
+                    fontWeight: FontWeight.w600,
+                    color: sz.ink)),
+            if (sub.isNotEmpty)
+              Text(sub,
+                  style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+          ]),
+        ),
+        const SizedBox(width: 8),
+        Text(szYuanText(e.amountCents),
+            style: szMoney(fontSize: kFontBodyLg, color: sz.earn)),
+      ]),
+    );
+  }
+
+  Widget _metric(SzColors sz, String label, int cents) => Expanded(
+        child: Column(children: [
+          Text(szYuanText(cents),
+              style: szMoney(fontSize: kFigureSm, color: sz.ink)),
+          const SizedBox(height: 2),
+          Text(label, style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+        ]),
+      );
+
+  Widget _withdrawalsCard(SzColors sz, Wallet wallet) {
+    final metrics = Padding(
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
+      child: Row(children: [
+        _metric(sz, '累计入账', wallet.totalEarnedCents),
+        _metric(sz, '提现中', wallet.pendingWithdrawalCents),
+        _metric(sz, '已提现', wallet.withdrawnCents),
+      ]),
+    );
+    if (_withdrawals.isEmpty) {
+      return SzCard(
+        padding: EdgeInsets.zero,
+        child: Column(children: [
+          metrics,
+          Divider(height: 1, color: sz.line),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Center(
+              child: Text('还没有提现记录',
+                  style: TextStyle(fontSize: kFontBody, color: sz.inkMuted)),
+            ),
+          ),
+        ]),
+      );
+    }
+    return Material(
+      color: sz.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        side: BorderSide(color: sz.line),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        metrics,
+        for (final w in _withdrawals.take(10)) ...[
+          Divider(height: 1, color: sz.line),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+            child: Row(children: [
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('提现 ${yuan(w.amountCents)}',
+                          style: TextStyle(
+                              fontSize: kFontBody,
+                              fontWeight: FontWeight.w600,
+                              color: sz.ink)),
+                      Text(
+                          w.rejectReason.isNotEmpty
+                              ? '原因:${w.rejectReason}'
+                              : szTimeAgo(w.createdAt),
+                          style: TextStyle(
+                              fontSize: kFontMicro, color: sz.inkMuted)),
+                    ]),
+              ),
+              Text(w.statusLabel,
+                  style: TextStyle(
+                      fontSize: kFontNote,
+                      fontWeight: FontWeight.w600,
+                      color: switch (w.status) {
+                        'paid' => sz.earn,
+                        'rejected' || 'failed' => sz.danger,
+                        _ => sz.hold,
+                      })),
+            ]),
+          ),
+        ],
+      ]),
     );
   }
 }

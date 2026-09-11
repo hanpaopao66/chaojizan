@@ -124,6 +124,14 @@ ApiClient fakeRiderApi({
   int weekMinutes = 1980,
   int weekOrders = 71,
   int weekEarnedCents = 43200,
+  // 本月 / 累计(5i「本月所得」、身份行「N 单」)
+  int monthEarnedCents = 521400,
+  int monthOrders = 301,
+  int totalOrders = 1842,
+  int weekPlatformCutCents = 24,
+  // 顾客评价(5i 三个数里的第一个)。count = 0 时显示「—」
+  double ratingAverage = 4.9,
+  int ratingCount = 36,
   // 里程(#309):计价里程,不含骑手到店那一段。null = 服务端还没给这个字段
   int? todayMeters = 42100,
   int? weekMeters = 213400,
@@ -166,6 +174,13 @@ ApiClient fakeRiderApi({
               'today_earned_cents': todayEarnedCents,
               'week_orders': weekOrders,
               'week_earned_cents': weekEarnedCents,
+              'month_minutes': weekMinutes * 4,
+              'month_orders': monthOrders,
+              'month_earned_cents': monthEarnedCents,
+              'today_platform_cut_cents': 0,
+              'week_platform_cut_cents': weekPlatformCutCents,
+              'month_platform_cut_cents': weekPlatformCutCents,
+              'total_orders': totalOrders,
               if (todayMeters != null) 'today_meters': todayMeters,
               if (weekMeters != null) 'week_meters': weekMeters,
             };
@@ -199,6 +214,21 @@ ApiClient fakeRiderApi({
             };
           case '/orders':
             payload = orders;
+          case '/auth/me':
+            payload = {
+              'id': 3,
+              'phone': '13800000003',
+              'name': '王师傅',
+              'role': 'rider',
+              'avatar_url': '',
+              'created_at': '2026-03-02T08:00:00Z',
+            };
+          case '/riders/me/reviews':
+            payload = {
+              'average': ratingAverage,
+              'count': ratingCount,
+              'items': <dynamic>[],
+            };
           default:
             payload = <String, dynamic>{};
         }

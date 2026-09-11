@@ -5,37 +5,21 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'rider_fake_api.dart';
 
-/// 「我的」页的首屏入口密度(#297)。
+/// 「我的」页的首屏入口密度。
 ///
 /// ## 为什么拿数字锁
 ///
 /// 密度这种事**没有报错** —— 功能全对、测试全绿,只是难用。
-/// 改版前真机 390×844 上首屏只看得到 **7** 个入口:一张不可点的 128px
-/// 数据卡,加四个 `SzSectionTitle`(每个连间距 26px,四个就是 104px,
-/// 相当于两个多入口的地方),剩下的位置放六条带 hint 的列表。
 ///
-/// 改完是 **12**。省下来的高度来自三处:去掉四个分组头(−104px)、
-/// 三句立场表达从三条 hint 收进一条 footnote(−11px)、
-/// 今日卡的口径行从两行压到一行(−18px)。
+/// ## 设计稿 5i 之后的口径
 ///
-/// ## 算式(390×844,可视区 645)
+/// #297 那一版把首屏压到 12 个入口(一张今日卡 + 4 格网格 + 两组列表)。
+/// 5i 的首屏换了主角:身份卡、认证台面(实名 / 健康证 / 结算卡)、
+/// 三个数、四条设置 —— 认证台面三行各带一句状态,比光杆入口高,
+/// 所以首屏入口数降到 9(实测)。这是稿子的取舍:**跑单前置的三件事
+/// 放到最上面**,比多挤两个入口进首屏更要紧。
 ///
-/// ```
-/// 12   顶部 padding
-/// +110 今日战报卡(整卡可点)           → 122   1 个
-/// +12  留白                            → 134
-/// +82  网格 4 格                       → 216   4 个(累计 5)
-/// +12                                  → 228
-/// +240 保障组 4 条                     → 468   4 个(累计 9)
-/// +12                                  → 480
-/// +142 账目组 3 条                     → 622   3 个(累计 12)
-/// +12                                  → 634
-///      规则组第一条底 = 634+1+46 = 681 > 645  ✗
-/// ```
-///
-/// 剩 23px 吃不到第 13 个(规则组第一条要 47px)。想凑的话砍
-/// 「意外保障」或「装备申领」的 hint 各能省 17px —— **不建议**:
-/// 为 2px 动保障组那几句是亏的。
+/// 锁的是「别再往下掉」:掉了说明有人往上面加了高度,或者把分组头加回来了。
 void main() {
   setUpRiderTest();
 
@@ -43,7 +27,8 @@ void main() {
   /// 也就是**只给它首屏那么大的窗**。
   Future<void> pump(WidgetTester t, ApiClient api,
       {double scale = 1.0, double height = kFirstScreen}) async {
-    setPhoneViewport(t, const Size(390, 844));
+    // 折叠线以下的断言给足视口:ListView 是懒构建的,视口外的条目根本不建
+    setPhoneViewport(t, Size(390, height > 844 ? height : 844));
     await t.pumpWidget(MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(scale)),
       child: MaterialApp(
@@ -67,39 +52,35 @@ void main() {
   }
 
   group('首屏入口数', () {
-    testWidgets('已上线跑单中:12 个(改版前 7)', (t) async {
+    testWidgets('已上线跑单中:9 个', (t) async {
       await pump(t, fakeRiderApi(unread: 3));
       final n = visibleEntries(t);
-      expect(n, greaterThanOrEqualTo(12),
-          reason: '首屏入口掉到了 $n 个。改版前是 7,这一版量到 12 ——'
+      expect(n, greaterThanOrEqualTo(9),
+          reason: '首屏入口掉到了 $n 个(5i 之后实测 9)——'
               '掉下来说明有人往上面加了高度,或者把分组头加回来了');
     });
 
-    testWidgets('已下线:和跑单中一样 12 个', (t) async {
-      // 下线只影响 AppBar 上那个开关和疲劳提示行,不影响入口排布。
-      // 今天的数照常显示(worklog 按自然日算,与有没有开着的会话无关)
+    testWidgets('已下线:和跑单中一样', (t) async {
       await pump(t, fakeRiderApi(fatigueLevel: 'none', fatigueMinutes: 0));
-      expect(visibleEntries(t), greaterThanOrEqualTo(12));
+      expect(visibleEntries(t), greaterThanOrEqualTo(9));
     });
 
-    testWidgets('长辈版 1.4×:10 个(改版前 6)', (t) async {
+    testWidgets('长辈版 1.4×:7 个', (t) async {
       await pump(t, fakeRiderApi(unread: 3), scale: 1.4);
       final n = visibleEntries(t);
-      expect(n, greaterThanOrEqualTo(10), reason: '1.4× 下首屏只剩 $n 个入口');
+      expect(n, greaterThanOrEqualTo(7), reason: '1.4× 下首屏只剩 $n 个入口');
     });
 
-    testWidgets('疲劳提醒占一行,首屏仍有 11 个', (t) async {
-      // 提示行是该出现的 —— 它比第 12 个入口重要
+    testWidgets('疲劳提醒占一行,首屏仍有 8 个', (t) async {
+      // 提示行是该出现的 —— 它比最后一个入口重要
       await pump(
           t,
           fakeRiderApi(
               fatigueLevel: 'remind', fatigueMessage: '已连续在线 8 小时,歇会儿'));
-      expect(visibleEntries(t), greaterThanOrEqualTo(11));
+      expect(visibleEntries(t), greaterThanOrEqualTo(8));
     });
 
-    testWidgets('未通过实名认证(顶部横幅吃掉 40px):11 个', (t) async {
-      // main.dart 的 _verifyBanner 在每个 tab 上方常驻,约 40px。
-      // 开工准备块这时候会出现,把三件待办顶到首屏
+    testWidgets('三件待办都没办(认证台面多一行培训):首屏仍有 8 个', (t) async {
       await pump(
           t,
           fakeRiderApi(
@@ -108,19 +89,21 @@ void main() {
               examPassed: false),
           height: kFirstScreen - 40);
       expect(visibleEntries(t, limit: kFirstScreen - 40),
-          greaterThanOrEqualTo(11));
+          greaterThanOrEqualTo(8));
     });
   });
 
-  group('开工准备块:只在真有事要做时才存在', () {
-    testWidgets('三件都办好了 → 整块不渲染', (t) async {
+  group('认证台面:办好了写状态,没办写待办', () {
+    testWidgets('三件都办好了 → 有效 / 尾号,没有待办字样', (t) async {
       await pump(t, fakeRiderApi());
-      expect(find.text('实名认证'), findsNothing);
+      expect(find.text('有效'), findsOneWidget);
+      expect(find.textContaining('尾号 4821'), findsOneWidget);
       expect(find.text('未登记'), findsNothing);
       expect(find.text('未通过'), findsNothing);
+      expect(find.text('去提交'), findsNothing);
     });
 
-    testWidgets('未实名 → 出现一条带 danger 语气的「实名认证」', (t) async {
+    testWidgets('未实名 → 「去提交」', (t) async {
       await pump(t, fakeRiderApi(verifyStatus: 'unsubmitted'));
       expect(find.text('实名认证'), findsOneWidget);
       expect(find.text('去提交'), findsOneWidget);
@@ -131,10 +114,11 @@ void main() {
       expect(find.text('被驳回'), findsOneWidget);
     });
 
-    testWidgets('审核中 → 不催他(pending 不算待办)', (t) async {
+    testWidgets('审核中 → 写「审核中」,不催他', (t) async {
       // 球在平台这边,催骑手没有意义
       await pump(t, fakeRiderApi(verifyStatus: 'pending'));
-      expect(find.text('实名认证'), findsNothing);
+      expect(find.text('审核中'), findsOneWidget);
+      expect(find.text('去提交'), findsNothing);
     });
 
     testWidgets('收款账户未登记 → 提前告诉他,别等提现被顶回来', (t) async {
@@ -163,9 +147,9 @@ void main() {
   });
 
   group('状态值:能变成值的 hint 就该变', () {
-    testWidgets('收款账户已登记 → 同行右对齐显示尾号,零额外高度', (t) async {
+    testWidgets('结算卡已登记 → 写银行和尾号', (t) async {
       await pump(t, fakeRiderApi(payoutTail: '4821'));
-      expect(find.text('尾号 4821'), findsOneWidget);
+      expect(find.textContaining('招商银行 · 尾号 4821'), findsOneWidget);
     });
 
     testWidgets('上岗培训显示「已通过」', (t) async {

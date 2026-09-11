@@ -6,15 +6,18 @@ import 'package:image_picker/image_picker.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'appeal_page.dart';
+import 'alert_prefs.dart';
+import 'dispatch_spec_page.dart';
+import 'hall_widgets.dart';
+import 'hardship_sheet.dart';
 import 'location_service.dart';
 import 'map_page.dart';
-import 'hardship_sheet.dart';
+import 'offer_sheet.dart';
 import 'pool_map_page.dart';
+import 'profile_page.dart';
+import 'task_panel.dart';
 import 'verify_page.dart';
 import 'wallet_page.dart';
-import 'dispatch_spec_page.dart';
-import 'profile_page.dart';
 
 // GPS 不可用时(如 iOS 模拟器没设置位置)的兜底坐标,保证开发期照常演示
 const fallbackLat = 30.6605;
@@ -40,9 +43,13 @@ class RiderApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '超级赞骑手端',
-      // 深浅两套令牌都在 brand.dart 里定义(第八辑 #101),#111 走查后放开
-      theme: brandTheme(Brightness.light, density: SzDensity.operate),
-      darkTheme: brandTheme(Brightness.dark, density: SzDensity.operate),
+      // 深浅两套令牌都在 brand.dart 里定义(第八辑 #101),#111 走查后放开。
+      // 主强调取频道色「跑」(2026-09 浅色定稿:抢单、底部导航选中都是它);
+      // 动效不回弹 —— 骑手在路上看手机,回弹那一下是在跟他抢注意力
+      theme: brandTheme(Brightness.light,
+          density: SzDensity.operate, accentTone: 3, bouncy: false),
+      darkTheme: brandTheme(Brightness.dark,
+          density: SzDensity.operate, accentTone: 3, bouncy: false),
       themeMode: ThemeMode.system,
       home: SplashGate(
           app: 'rider',
@@ -122,15 +129,15 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 最近一次刷新失败的原因;空串 = 上一次是成功的
   String _refreshError = '';
 
-  /// 抢单池排序。0 综合(服务端算的)/ 1 配送费 / 2 距离 / 3 等待时长。
+  /// 抢单池怎么看:综合(服务端算的)/ 离我最近 / 配送费高 / 顺路 / 帮我送。
   ///
   /// **不做服务端持久化**:这是个当下的选择,不是长期偏好 ——
   /// 他午高峰想按配送费挑、收工前想按距离挑,不该被记成"这个人偏好配送费"。
   ///
   /// 给这个切换本身是有立场的:dispatch.py 写着「算法只负责把信息排得
   /// 更有用」,那**排得对不对该由骑手说了算**。我们已经把算法公开给他看,
-  /// 却不让他换个排法,中间是断的。
-  int _sortMode = 0;
+  /// 却不让他换个排法,中间是断的。默认为什么是「综合」见 [HallSort]。
+  HallSort _sort = HallSort.composite;
   List<Order> _mine = [];
 
   // 这里原来有个 `_todayDone` getter,给「我的」页算今日单量和收入。
@@ -151,6 +158,34 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 骑手当前位置(GCJ-02),地图页监听它实时刷新
   final _riderPosition = ValueNotifier<({double lat, double lng})?>(null);
 
+  /// 今日所得(大厅顶上那张卡)。worklog 是服务端全量聚合,30 秒拉一次就够
+  Map<String, dynamic>? _worklog;
+  DateTime? _worklogAt;
+
+  /// 新单推送正在展示的那一单(设计稿 5c);null = 没有弹层
+  Order? _offer;
+  bool _offerGrabbed = false;
+
+  /// 在大厅卡片上刚抢到的那一单:按钮换成成功块,停一下再切到「进行中」。
+  ///
+  /// 连同原来的位置一起记着:抢到后池子一刷新这单就不在里面了,
+  /// 不钉住的话卡片当场消失,「已抢到」根本没机会露面
+  Order? _grabbedOrder;
+  int _grabbedIndex = 0;
+
+  /// 下拉刷新时 +1:卡片入场动画重播;轮询刷新不动它,就不重播(动效规范)
+  int _hallGen = 0;
+
+  /// 进行中各单的顾客未读消息数(任务卡上的「用户 N 条」)
+  Map<String, int> _unread = const {};
+  DateTime? _unreadAt;
+
+  /// 账本看哪一段:0 今天 / 1 本周 / 2 本月(标题栏右边的文字页签)
+  int _ledgerPeriod = 0;
+
+  /// 新单提醒的声音 / 震动(「我的 → 新单提醒」,存在本机)
+  RiderAlertPrefs _alerts = const RiderAlertPrefs();
+
   @override
   void initState() {
     super.initState();
@@ -158,6 +193,9 @@ class _RiderHomePageState extends State<RiderHomePage>
     WidgetsBinding.instance.addPostFrameCallback((_) =>
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'rider'));
     _loadVerify(); // 认证状态:只做提示与跑单前置,不挡浏览
+    RiderAlertPrefs.load().then((p) {
+      if (mounted) setState(() => _alerts = p);
+    });
     _refresh();
     _startPolling();
   }
@@ -224,10 +262,10 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 两份口径迟早会分叉,而这里分叉的后果是"骑手端说 3 块爬楼费、
   /// 顾客端说 3 块远距离费",两边都不信平台了。
   /// 服务端漏给名字时退回原始 key,总比吞掉这一项强。
-  String _feePartsLine(Order order) {
+  String _feePartsLine(Order order, {bool skipBase = false}) {
     final parts = <String>[];
     order.feeParts.forEach((k, v) {
-      if (v <= 0) return;
+      if (v <= 0 || (skipBase && k == 'base')) return;
       parts.add('${order.feePartLabels[k] ?? k} ${(v / 100).toStringAsFixed(2)}');
     });
     return parts.join(' · ');
@@ -268,19 +306,23 @@ class _RiderHomePageState extends State<RiderHomePage>
         _fatigue = null;
       }
 
-      // 新的可抢订单出现 → 响铃 + 振动提醒(首轮加载不响,避免一上线就炸铃)
+      // 今日所得 30 秒拉一次:它是服务端聚合,不跟着 5 秒的抢单池一起刷
+      if (_worklogAt == null ||
+          DateTime.now().difference(_worklogAt!).inSeconds >= 30) {
+        try {
+          _worklog = await widget.api.riderWorklog();
+          _worklogAt = DateTime.now();
+        } catch (_) {} // 拉不到就显示「—」,不挡抢单
+      }
+
+      // 新的可抢订单出现 → 响铃 + 振动 + 推一张单子上来。
+      // 首轮加载不响(上线那一刻池子里的单都是「新」的,全响一遍就是炸铃)
       final fresh = available
           .where((o) => !_seenOrderNos.contains(o.orderNo))
           .toList();
       _seenOrderNos.addAll(available.map((o) => o.orderNo));
       if (!_firstLoad && _online && fresh.isNotEmpty && mounted) {
-        SystemSound.play(SystemSoundType.alert);
-        HapticFeedback.vibrate();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('🔔 新单来了:${fresh.first.merchantName} '
-              '→ ${fresh.first.address},配送费 ${yuan(fresh.first.deliveryFeeCents)}'),
-          duration: const Duration(seconds: 4),
-        ));
+        _announce(fresh);
       }
       _firstLoad = false;
 
@@ -297,6 +339,7 @@ class _RiderHomePageState extends State<RiderHomePage>
           _refreshError = '';
         });
       }
+      await _refreshUnread();
     } catch (e) {
       // **一个字都不说是不行的。**
       //
@@ -640,6 +683,10 @@ class _RiderHomePageState extends State<RiderHomePage>
       _keepaliveTimer = null;
       _setGpsProblem(null);
     }
+    // 上线后的第一轮只记下池子里已有的单,不当新单响铃。
+    // 原来这个标志在 initState 那一轮(下线状态、池子是空的)就用掉了,
+    // 于是一上线,池子里现有的每一单都被当成新单:铃响、弹层
+    if (value) _firstLoad = true;
     _refresh();
   }
 
@@ -648,26 +695,91 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 商家「接单」和用户「提交订单」都有防重标志,这里原先漏了。
   final Set<String> _grabbing = {};
 
-  Future<void> _grab(Order order) async {
+  /// 抢单。成功后按钮换成「已抢到」停 [SzSuccessSwap.hold](动效规范 06),
+  /// 再切到「进行中」—— 原来是一条 SnackBar + 立刻跳走,
+  /// 骑手手指还没离开屏幕页面就换了,常常以为自己没点上又点一次。
+  Future<void> _grab(Order order, {bool fromOffer = false}) async {
     if (_grabbing.contains(order.orderNo)) return;
-    if (!await _ensureVerified()) return;
+    if (!await _ensureVerified()) {
+      if (fromOffer && mounted) setState(() => _offer = null);
+      return;
+    }
     if (!mounted) return;
     setState(() => _grabbing.add(order.orderNo));
     try {
       await widget.api.grabOrder(order.orderNo);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('抢单成功!')));
-      setState(() => _tab = 1);
+      setState(() {
+        _grabbing.remove(order.orderNo);
+        if (fromOffer) {
+          _offerGrabbed = true;
+        } else {
+          final at = _sortedAvailable.indexWhere((o) => o.orderNo == order.orderNo);
+          _grabbedOrder = order;
+          _grabbedIndex = at < 0 ? 0 : at;
+        }
+      });
       _refresh();
+      await Future<void>.delayed(SzSuccessSwap.hold);
+      if (!mounted) return;
+      setState(() {
+        if (fromOffer) {
+          _offer = null;
+          _offerGrabbed = false;
+        }
+        _grabbedOrder = null;
+        _tab = 1;
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$e')));
+      setState(() {
+        if (fromOffer) _offer = null;
+      });
       _refresh();
     } finally {
       if (mounted) setState(() => _grabbing.remove(order.orderNo));
     }
+  }
+
+  /// 新单来了:按「新单提醒」的设置响一声、震一下,再把最值得看的那一单
+  /// 推上来(设计稿 5c)。
+  ///
+  /// 只响不弹的三种情况:屏幕上已经有一张新单弹层;页面上压着别的东西
+  /// (取餐核验、地图、设置页 —— 一张单子盖在另一件正在做的事上,
+  /// 比漏看一张单更容易出错);疲劳到了「降频」档(labor_guard 的本意是让人歇)。
+  void _announce(List<Order> fresh) {
+    if (_alerts.sound) SystemSound.play(SystemSoundType.alert);
+    if (_alerts.vibrate) HapticFeedback.vibrate();
+    final throttled = _fatigue?['level'] == 'throttle';
+    final covered = !(ModalRoute.of(context)?.isCurrent ?? true);
+    if (_offer != null || throttled || covered) return;
+    // 按骑手当前选的看法取第一单:他选了「配送费高」,就推最贵的那张
+    final ordered = _sortOrders(fresh);
+    if (ordered.isEmpty) return;
+    setState(() {
+      _offer = ordered.first;
+      _offerGrabbed = false;
+    });
+  }
+
+  /// 进行中各单的未读消息数。只在「进行中」那一页上拉,15 秒一次 ——
+  /// 五秒一轮的抢单池刷新里每单再打一个请求不值当
+  Future<void> _refreshUnread() async {
+    if (_tab != 1 || _mine.isEmpty) return;
+    if (_unreadAt != null &&
+        DateTime.now().difference(_unreadAt!).inSeconds < 15) {
+      return;
+    }
+    _unreadAt = DateTime.now();
+    final out = <String, int>{};
+    await Future.wait(_mine.take(5).map((o) async {
+      try {
+        out[o.orderNo] = await widget.api.orderUnread(o.orderNo);
+      } catch (_) {}
+    }));
+    if (mounted) setState(() => _unread = out);
   }
 
   /// 送达:保护单引导拍照留证(深夜强制,白天可选,放门口拍一张)
@@ -1392,113 +1504,189 @@ class _RiderHomePageState extends State<RiderHomePage>
     );
   }
 
-  /// 按当前排序模式排好的抢单池。
+  /// 按当前看法排好的抢单池。
   ///
-  /// 综合(0)= **原样用服务端的顺序**,不在客户端重排 —— 那个顺序里
+  /// 综合 = **原样用服务端的顺序**,不在客户端重排 —— 那个顺序里
   /// 含了顺路增量、等待时长加权这些客户端算不出来的东西。
-  ///
-  /// 其余三档是骑手自己要的单一维度。缺字段的排最后:
-  /// 服务端拿不到定位时 distance_m 是空的,把它们当成 0 会顶到最前面,
-  /// 而那是**最没把握**的几单。
-  List<Order> get _sortedAvailable {
-    if (_sortMode == 0) return _available;
-    final list = [..._available];
-    switch (_sortMode) {
-      case 1: // 配送费(含小费),高的在前
-        list.sort((a, b) => (b.deliveryFeeCents + b.tipCents)
-            .compareTo(a.deliveryFeeCents + a.tipCents));
-      case 2: // 到店距离,近的在前;没算出距离的沉底
-        list.sort((a, b) => (a.distanceM ?? 1 << 30)
-            .compareTo(b.distanceM ?? 1 << 30));
-      case 3: // 等待时长,等久的在前(下单时间早的)
-        list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+  /// 其余几档是骑手自己要的单一维度。缺字段的排最后:服务端拿不到定位时
+  /// distance_m 是空的,把它们当成 0 会顶到最前面,而那是**最没把握**的几单。
+  List<Order> _sortOrders(List<Order> src) {
+    final list = [...src];
+    double toShop(Order o) =>
+        o.distanceM?.toDouble() ?? _distanceToShop(o) ?? double.infinity;
+    switch (_sort) {
+      case HallSort.composite:
+        return list;
+      case HallSort.nearest:
+        list.sort((a, b) => toShop(a).compareTo(toShop(b)));
+      case HallSort.highFee:
+        list.sort((a, b) => HallOrderCard.riderTakeCents(b)
+            .compareTo(HallOrderCard.riderTakeCents(a)));
+      case HallSort.sameWay:
+        // 同店 > 顺路(绕得少的在前)> 其余按服务端原序
+        int rank(Order o) => o.sameShop ? 0 : (o.sameWay ? 1 : 2);
+        list.sort((a, b) {
+          final r = rank(a).compareTo(rank(b));
+          if (r != 0) return r;
+          return (a.detourM ?? 1 << 30).compareTo(b.detourM ?? 1 << 30);
+        });
+      case HallSort.errand:
+        return list.where((o) => o.isErrand).toList();
     }
     return list;
   }
 
-  /// 排序切换。
+  List<Order> get _sortedAvailable => _sortOrders(_available);
+
+  /// 「费高」的门槛:眼前这些单里骑手实得排前四分之一的那一档。
   ///
-  /// 放在「抢单怎么排的」入口旁边:换了排法之后**更**该能查
-  /// 综合分是怎么算的。
-  Widget _sortBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Row(children: [
-        Text('排序', style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Wrap(spacing: 6, children: [
-            for (final (mode, label) in const [
-              (0, '综合'), (1, '配送费'), (2, '距离'), (3, '等待久'),
-            ])
-              ChoiceChip(
-                label: Text(label, style: const TextStyle(fontSize: 12)),
-                visualDensity: VisualDensity.compact,
-                selected: _sortMode == mode,
-                onSelected: (_) => setState(() => _sortMode = mode),
-              ),
-          ]),
-        ),
-      ]),
-    );
+  /// 服务端没有这个标 —— 它是**相对于大厅里此刻这些单**的,不是一个绝对价。
+  /// 少于 4 单不标(三单里挑一个「费高」没有意义);大家都一个价也不标。
+  int? get _highFeeCents {
+    if (_available.length < 4) return null;
+    final fees = _available.map(HallOrderCard.riderTakeCents).toList()..sort();
+    final q = fees[(fees.length * 3) ~/ 4];
+    return q > fees[fees.length ~/ 2] ? q : null;
   }
 
-  /// 接单半径 chips:只看 N 公里内的单(顺路单豁免),服务端持久化。
-  Widget _radiusBar() {
-    Future<void> setRadius(int? km) async {
-      try {
-        final saved = await widget.api.setGrabRadius(km);
-        if (mounted) setState(() => _grabRadiusKm = saved);
-        _refresh();
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.toString())));
-      }
+  HallTag _tagFor(Order o) {
+    if (o.sameShop || o.sameWay) return HallTag.sameWay;
+    final hi = _highFeeCents;
+    if (hi != null && HallOrderCard.riderTakeCents(o) >= hi) {
+      return HallTag.highFee;
     }
+    return HallTag.open;
+  }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Row(children: [
-        Text('接单半径', style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Wrap(spacing: 6, children: [
-            for (final (km, label) in const [
-              (null, '不限'), (1, '1km'), (2, '2km'), (3, '3km'), (5, '5km'),
-            ])
-              ChoiceChip(
-                label: Text(label, style: const TextStyle(fontSize: 12)),
-                visualDensity: VisualDensity.compact,
-                selected: _grabRadiusKm == km,
-                onSelected: (_) => setRadius(km),
-              ),
-          ]),
+  /// 「380m」:有服务端算的骑行距离就用它,没有才退回本地直线,并带「≈」
+  /// —— 直线系统性低估(实测差 19%),不标出来骑手会按它判断「近」。
+  ///
+  /// 用紧凑单位(m / km):它挂在地址那一行的末尾,是一个角标位的数,
+  /// 稿子上也是这么写的;句子里的距离仍然用中文单位(distanceLabel)
+  String? _toShopText(Order o) {
+    final routed = o.distanceM?.toDouble();
+    final d = routed ?? _distanceToShop(o);
+    if (d == null) return null;
+    return routed == null ? '≈${distanceLabelShort(d)}' : distanceLabelShort(d);
+  }
+
+  String? _tripText(Order o) {
+    final t = o.tripM?.toDouble() ?? _tripDistance(o);
+    return t == null ? null : distanceLabelShort(t);
+  }
+
+  /// 抢单卡底部那一行:出餐状态、全程几分钟、时薪、跑腿费口径、配送费里的加价。
+  ///
+  /// 配送费构成(夜间 / 上楼 / 难度)是**接单前就摊开**的那条原则 ——
+  /// 别家骑手端只给一个总数,骑手要跑到楼下才知道是 6 楼没电梯
+  String _hallNote(Order o) {
+    final parts = <String>[];
+    if (o.isErrand) {
+      parts.add('帮我送 · 跑腿费 ${yuan(o.deliveryFeeCents)} − 2%');
+      if (o.errandNote.isNotEmpty) parts.add(o.errandNote);
+    } else if (o.status == OrderStatus.ready) {
+      parts.add('已出餐');
+    } else if ((o.estWaitMinutes ?? 0) > 0) {
+      // 稿子上写的是钟点(「出餐 12:01」),比「等餐约 29 分钟」好对表
+      final t = DateTime.now().add(Duration(minutes: o.estWaitMinutes!.round()));
+      parts.add('出餐约 ${_clock(t)}'
+          '${o.waitSource == "declared" ? "(商家自报)" : ""}'
+          // 等餐补偿关着时明说:这段时间算在耗时里,但没有钱
+          '${_waitCompOn ? "" : "·等餐不计费"}');
+    }
+    if (o.estMinutes != null) parts.add('全程约 ${o.estMinutes!.round()} 分钟');
+    if (o.centsPerMinute != null && o.centsPerMinute! > 0) {
+      parts.add('≈¥${(o.centsPerMinute! * 60 / 100).toStringAsFixed(0)}/小时');
+    }
+    final extras = _feePartsLine(o, skipBase: true);
+    if (extras.isNotEmpty) parts.add('含 $extras');
+    if (o.remark.isNotEmpty) parts.add(o.remark);
+    return parts.join(' · ');
+  }
+
+  /// 条件行:只在真有这件事时出现,不占固定高度
+  List<({String text, Color color})> _alertsFor(Order o) {
+    final sz = Theme.of(context).sz;
+    return [
+      if (o.scheduledLabel != null)
+        (text: '预约单 · ${o.scheduledLabel}', color: sz.hold),
+      // 被催标记:骑手端没有 WS、推送也可能没配 —— 轮询拉回来的这行字
+      // 就是催单能到骑手眼前的唯一通道。提醒而不施压,安全永远在快前面
+      if (o.urgeCount > 0)
+        (
+          text: '用户催了${o.urgeCount > 1 ? " ${o.urgeCount} 次" : ""},'
+              '放心按安全速度骑',
+          color: sz.hold
         ),
-        // 总览图放这儿而不是每张卡上:卡上的「看路线」回答「这一单在哪」,
-        // 这个回答「这些单挨得近吗」—— 后者是看整个池子时才有的问题(#297)
-        IconButton(
-          icon: const Icon(Icons.map_outlined, size: 20),
-          tooltip: '取餐点总览',
-          onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => RiderPoolMapPage(
-                  orders: _sortedAvailable, riderPosition: _riderPosition))),
+      if (o.parentOrderNo.isNotEmpty)
+        (
+          text: '追加单,随 #${o.parentOrderNo.substring(o.parentOrderNo.length - 6)}'
+              ' 一起取送',
+          color: sz.earn
         ),
-        IconButton(
-          icon: const Icon(Icons.tune, size: 20),
-          tooltip: '接单偏好',
-          onPressed: _openPrefs,
+      // 顺路**带上绕路多少米**,不给一句模糊的「顺路」
+      if (o.sameShop)
+        (text: '同店取餐 · 和手头单是一家店', color: sz.earn)
+      else if (o.sameWay)
+        (
+          text: '${o.sameWayLevel == "strong" ? "强" : ""}顺路 · '
+              '比只送手头单多跑约 ${o.detourM ?? 0} 米',
+          color: sz.earn
         ),
-        // 算法公开的入口就放在排序结果旁边 —— 公开给外人看却不给骑手看
-        // 是本末倒置。骑手对着这个池子最常问的就是"凭什么这么排"
-        IconButton(
-          icon: const Icon(Icons.help_outline, size: 20),
-          tooltip: '抢单怎么排的',
-          onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => DispatchSpecPage(api: widget.api))),
+      // 样本不足就直说不知道 —— 拿 3 单算出来的数摆给骑手看比不给更误导
+      if (o.dropP75Minutes != null)
+        (
+          text: '这个点位送到手上平均还要 ${o.dropP75Minutes!.round()} 分钟'
+              '(${o.dropSample} 单实测)',
+          color: sz.inkMuted
         ),
-      ]),
-    );
+      if (o.isErrandBuy && o.goodsRaiseStatus == 'pending')
+        (
+          text: '已问顾客能不能花 ${yuan(o.goodsRaiseCents ?? 0)},等他回复;别先垫钱',
+          color: sz.hold
+        ),
+      if (o.isErrandBuy && o.goodsRaiseStatus == 'approved')
+        (text: '顾客同意花到 ${yuan(o.goodsRaiseCents ?? 0)},可以买了', color: sz.earn),
+      if (o.isErrandBuy && o.goodsRaiseStatus == 'rejected')
+        (
+          text: '顾客不同意多花钱 —— 按「买不到」处理,商品款全额退他,'
+              '你的跑腿费照收到店那一段',
+          color: sz.hold
+        ),
+      if (o.hasAlcohol) (text: '含酒精饮品,送达请查验收件人年龄', color: sz.hold),
+      // 这个地方难在哪 —— 接单前就说(#301)。是跑过这里的骑手告诉我们的
+      if (o.hardshipNote.isNotEmpty) (text: '难送:${o.hardshipNote}', color: sz.hold),
+    ];
+  }
+
+  /// 新单弹层那一行:什么时候能出餐、顾客那边显示几点送到
+  String _offerInfo(Order o) {
+    final eta = o.etaClock;
+    final parts = <String>[
+      if (o.status == OrderStatus.ready)
+        '已出餐'
+      else if ((o.estWaitMinutes ?? 0) > 0)
+        '预计出餐 ${_clock(DateTime.now().add(Duration(minutes: o.estWaitMinutes!.round())))}',
+      if (eta != null) '用户参考送达 $eta',
+    ];
+    return parts.join('   ');
+  }
+
+  static String _clock(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+  /// 接单半径:只看 N 公里内的单(顺路单豁免),服务端持久化。
+  /// 原来在大厅里单独占一行,现在收进「接单偏好」面板的最上面
+  Future<void> _setRadius(int? km) async {
+    try {
+      final saved = await widget.api.setGrabRadius(km);
+      if (mounted) setState(() => _grabRadiusKm = saved);
+      _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
   }
 
   /// 「你设的筛选现在没生效」。
@@ -1607,8 +1795,48 @@ class _RiderHomePageState extends State<RiderHomePage>
                     '下面除了「同时接单上限」,其余几项只改「你看到哪些单」。'
                     '被挡掉的单还在池子里等别人抢,平台不会因为你设了偏好'
                     '就少派单给你。',
-                    style: TextStyle(fontSize: 12)),
+                    style: TextStyle(fontSize: kFontNote)),
               ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('接单半径(顺路单不受限)',
+                    style: Theme.of(sheet).textTheme.bodySmall),
+              ),
+              const SizedBox(height: 4),
+              Wrap(spacing: 6, children: [
+                for (final (km, label) in const [
+                  (null, '不限'), (1, '1km'), (2, '2km'), (3, '3km'), (5, '5km'),
+                ])
+                  ChoiceChip(
+                    label: Text(label),
+                    visualDensity: VisualDensity.compact,
+                    selected: _grabRadiusKm == km,
+                    onSelected: (_) async {
+                      await _setRadius(km);
+                      setSheet(() {});
+                    },
+                  ),
+              ]),
+              // 总览图回答「这些单挨得近吗」,「怎么排的」回答「凭什么这么排」——
+              // 两个都是看整个池子时才有的问题,和偏好放在一起
+              Row(children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: const Text('取餐点总览'),
+                  onPressed: () => Navigator.of(sheet).push(
+                      MaterialPageRoute<void>(
+                          builder: (_) => RiderPoolMapPage(
+                              orders: _sortedAvailable,
+                              riderPosition: _riderPosition))),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.help_outline, size: 18),
+                  label: const Text('抢单怎么排的'),
+                  onPressed: () => Navigator.of(sheet).push(
+                      MaterialPageRoute<void>(
+                          builder: (_) => DispatchSpecPage(api: widget.api))),
+                ),
+              ]),
               const Divider(height: 1),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -1837,288 +2065,266 @@ class _RiderHomePageState extends State<RiderHomePage>
             DeliveryMapPage(order: order, riderPosition: _riderPosition)));
   }
 
-  Widget _orderCard(Order order, {List<Widget> actions = const []}) {
-    // 户外 + 单手 + 可能戴手套:卡片内边距和行距都比另外两端松
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Expanded(
-                  child: Text(order.summary,
-                      style: Theme.of(context).textTheme.titleMedium)),
-              Chip(label: Text(order.status.label)),
-            ]),
-            const SizedBox(height: 4),
-            if (order.scheduledLabel != null)
-              Text('⏰ ${order.scheduledLabel}',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.hold, fontWeight: FontWeight.bold)),
-            // 被催标记:骑手端没有 WS、推送也可能没配 —— 轮询拉回来的
-            // 这行字就是催单能到骑手眼前的唯一通道。语气按平台立场写:
-            // 提醒而不施压,安全永远在快前面
-            if (order.urgeCount > 0)
-              Text(
-                  '🔔 用户催了${order.urgeCount > 1 ? " ${order.urgeCount} 次" : ""}'
-                  ',放心按安全速度骑,到店/送达点一下按钮就好',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.hold,
-                      fontWeight: FontWeight.bold)),
-            if (order.parentOrderNo.isNotEmpty)
-              Text(
-                  '📎 追加单,随#${order.parentOrderNo.substring(order.parentOrderNo.length - 6)} 一起取送',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
-            // 顺路标记:**带上绕路多少米**,不给一句模糊的「顺路」。
-            // 旧口径只比两个送达点的距离,会把「送达点相邻但取餐点在反方向
-            // 3 公里」的单也标成顺路 —— 骑手信了就多跑近 6 公里。
-            // 现在按绕路增量判,并把这个数摆出来让骑手自己核
-            if (order.sameShop || order.sameWay)
-              Text(
-                  order.sameShop
-                      ? '🛵 同店取餐 · 与手头单一家店,取餐几乎不多花时间'
-                      : '🛵 ${order.sameWayLevel == "strong" ? "强" : ""}顺路 · '
-                          '比只送手头单多跑约 ${order.detourM ?? 0} 米',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.earn, fontWeight: FontWeight.bold)),
-            // ⚠️ 这里曾经还有一行「跑程:到店 X 米 + 送 Y 米」,**删了**。
-            //
-            // 它和卡片下方那行「去取餐 1.7 公里(约 7 分钟)· 再送 2.3 公里
-            // · 全程 4.0 公里」是**同两个数**,一个用米一个用公里,
-            // 一个在上一个在下 —— #293 加下面那行时忘了删这行。
-            //
-            // 重复不会报错。代价是骑手在雨里要读两遍才找得到他真正要的
-            // 那个数,而下面那行还多给了骑行分钟数和「全程」,严格更好。
-            //
-            // 时薪那行留着:一个 3 公里 8 块的单和一个 1 公里 4 块的单
-            // 哪个划算,**不看总价看时薪**(实测 ¥14.2/小时 vs ¥21.8/小时,
-            // 总价高的反而不划算)。
-            if (order.estMinutes != null)
-              Row(children: [
-                Text('约 ${order.estMinutes!.toStringAsFixed(0)} 分钟',
-                    style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: Theme.of(context).sz.ink)),
-                if ((order.estWaitMinutes ?? 0) > 0) ...[
-                  const SizedBox(width: 4),
-                  Text(
-                      '(含等餐 ${order.estWaitMinutes!.toStringAsFixed(0)}'
-                      '${order.waitSource == "declared" ? "·商家自报" : ""}'
-                      // 等餐补偿关着时明说:这段时间算在耗时里,但没有钱
-                      '${_waitCompOn ? "" : "·不计费"})',
-                      style: TextStyle(
-                          fontSize: 11, color: Theme.of(context).sz.inkMuted)),
-                ],
-                const Spacer(),
-                if (order.centsPerMinute != null && order.centsPerMinute! > 0)
-                  Text(
-                      '≈ ¥${(order.centsPerMinute! * 60 / 100).toStringAsFixed(0)}/小时',
-                      style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          color: Theme.of(context).sz.earn)),
-              ]),
-            // 这个收货点历史上要花多久。**样本不足就直说不知道** ——
-            // 拿 3 单算出来的数摆给骑手看,比不给更误导
-            if (order.dropP75Minutes != null)
-              Text(
-                  '这个点位:送到手上平均还要 '
-                  '${order.dropP75Minutes!.toStringAsFixed(0)} 分钟'
-                  '(${order.dropSample} 单实测)',
-                  style: TextStyle(
-                      fontSize: 12, color: Theme.of(context).sz.inkMuted)),
-            // 跑腿单:标出来并写清寄什么 —— 骑手取件时要照着核对,
-            // 而"取餐"这个词对跑腿是错的(那里没有餐也没有店)
-            if (order.isErrand)
-              Text(
-                  '🎒 跑腿单 · ${order.errandNote.isEmpty ? "物品" : order.errandNote}',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.earn,
-                      fontWeight: FontWeight.bold)),
-            // 帮买加价的进展。不显示的话骑手站在收银台前完全不知道
-            // 该等还是该走 —— 而这三种状态下他要做的事完全不同
-            if (order.isErrandBuy && order.goodsRaiseStatus == 'pending')
-              Text('⏳ 已问顾客能不能花 ${yuan(order.goodsRaiseCents ?? 0)},'
-                  '等他回复;别先垫钱',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.hold,
-                      fontWeight: FontWeight.bold)),
-            if (order.isErrandBuy && order.goodsRaiseStatus == 'approved')
-              Text('✅ 顾客同意花到 ${yuan(order.goodsRaiseCents ?? 0)},可以买了',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.earn,
-                      fontWeight: FontWeight.bold)),
-            if (order.isErrandBuy && order.goodsRaiseStatus == 'rejected')
-              Text('❌ 顾客不同意多花钱 —— 按「买不到」处理,商品款全额退他,'
-                  '你的跑腿费照收到店那一段',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.hold,
-                      fontWeight: FontWeight.bold)),
-            if (order.hasAlcohol)
-              Text('🍺 含酒精饮品,送达请查验收件人年龄',
-                  style: TextStyle(
-                      color: Theme.of(context).sz.hold, fontWeight: FontWeight.bold)),
-            Text('${order.isErrand ? "取件" : "取餐"}:'
-                '${order.merchantName} · ${order.merchantAddress}'),
-            Text('送达:${order.address}'),
-            if (order.contactPhone.isNotEmpty)
-              Row(children: [
-                // 号码打码展示;拨打走隐私号通道(严格模式下无号可拨则不显示按钮)
-                Expanded(
-                    child:
-                        Text('联系:${order.contactName} ${order.contactPhone}')),
-                IconButton(
-                  icon: const Icon(Icons.chat_bubble_outline, size: 18),
-                  visualDensity: VisualDensity.compact,
-                  tooltip: '发消息',
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => OrderChatPage(
-                              api: widget.api,
-                              orderNo: order.orderNo,
-                              title: '和顾客说句话',
-                              quickReplies: kRiderQuickReplies))),
-                ),
-                if (order.privacyPhone.isNotEmpty)
-                  IconButton(
-                    icon: const Icon(Icons.phone, size: 18),
-                    visualDensity: VisualDensity.compact,
-                    tooltip: '拨打(号码保护)',
-                    onPressed: () => launchUrl(
-                        Uri.parse('tel:${order.privacyPhone}')),
-                  ),
-              ]),
-            Builder(builder: (context) {
-              // 两段路都优先用**服务端算的骑行路径距离**(#293)。
-              //
-              // 原来是 `_distanceToShop(order) ?? order.distanceM` ——
-              // 客户端直线优先、服务端路径兜底,**正好反了**:
-              // 直线系统性低估(实测成都两点直线 1467m、骑行 1745m,差 19%),
-              // 骑手按直线判断「顺路、近」接了单,实际要多骑三成。
-              //
-              // 本地定位的价值是「更新快」,但它只能算直线;服务端那个数
-              // 走的是腾讯骑行路网,含单行道和过街。所以:
-              // **有路网数就用路网数,没有才退回本地直线并标出来**。
-              final routed = order.distanceM?.toDouble();
-              final toShop = routed ?? _distanceToShop(order);
-              final trip = order.tripM?.toDouble() ?? _tripDistance(order);
-              // 直线兜底时说一句,别让骑手以为这是骑行距离
-              final approx = routed == null && toShop != null;
-              // 说人话(#293):「距你 1.7km」看不出要骑多久,也看不出
-              // 这一单总共要跑多远。骑手真正要判断的是两件事:
-              // 「我去取要多久」「取到之后还要跑多远」——
-              // 所以两段分开写清楚,并且各带一个骑行分钟数
-              final parts = [
-                if (toShop != null)
-                  '去取餐 ${distanceLabel(toShop)}'
-                      '(约 ${rideMinutes(toShop)} 分钟)${approx ? ' 直线估算' : ''}',
-                if (trip != null) '再送 ${distanceLabel(trip)}',
-                if (toShop != null && trip != null)
-                  '全程 ${distanceLabel(toShop + trip)}',
-              ];
-              final sz = Theme.of(context).sz;
-              final mine = order.deliveryFeeCents + order.tipCents;
-              // 骑手端最该被一眼看到的是"这一单我能拿多少",
-              // 所以金额比别处再大一档,并明说没人从里面抽走
-              return Padding(
-                padding: const EdgeInsets.only(top: 6),
-                // ⚠️ 两边都要能收缩。
-                //
-                // 原来左右两个 Column 都按内容自然宽度撑开,中间一个
-                // Spacer —— 390 屏上实测**横向溢出 424px**:
-                // 左边的费用拆分「基础配送费 3.00 · 夜间配送 2.00 · 爬楼费…」
-                // 和右边的「⚠ 无电梯爬楼6楼;门禁难进」都可能很长,
-                // 谁都不肯让,于是一起画出界。
-                //
-                // 溢出在真机上是黄黑条 + 文字被裁,而**测试里之前没有
-                // 任何用例渲染过这张卡**,所以一直没人发现。
-                child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Flexible(
-                        child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(yuan(mine),
-                              style: szMoney(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.w600,
-                                  color: sz.earn)),
-                          Text(
-                              order.tipCents > 0
-                                  ? '配送费 + 小费,100% 归你'
-                                  : '配送费 100% 归你,平台不抽',
-                              style: TextStyle(
-                                  fontSize: 11, color: sz.inkMuted)),
-                          // 这 8 块钱是怎么来的 —— **接单前就摊开**。
-                          // 别家骑手端只给一个总数,骑手要跑到楼下才知道
-                          // 是 6 楼没电梯;知道钱里有 3 块是爬楼费,
-                          // 才谈得上"判断这单值不值"
-                          if (order.feeParts.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 2),
-                              child: Text(
-                                  _feePartsLine(order),
-                                  style: TextStyle(
-                                      fontSize: 11, color: sz.inkMuted)),
-                            ),
-                        ],
-                      ),
-                      ),
-                      const SizedBox(width: 10),
-                      Flexible(
-                        child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // 这个地方难在哪 —— **接单前**就说(#301)。
-                          //
-                          // 光给一个"难度费 ¥3"没用,他还是要骑到楼下
-                          // 才知道是六楼没电梯。而这条信息不是平台猜的,
-                          // 是跑过这里的骑手告诉我们的
-                          if (order.hardshipNote.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Text('⚠ ${order.hardshipNote}',
-                                  style: TextStyle(
-                                      fontSize: kFontNote,
-                                      fontWeight: FontWeight.w600,
-                                      color: sz.hold)),
-                            ),
-                          if (parts.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 2),
-                              child: Text(parts.join(' · '),
-                                  style: TextStyle(
-                                      fontSize: kFontNote, color: sz.inkMuted)),
-                            ),
-                        ],
-                      ),
-                      ),
-                    ]),
-              );
-            }),
-            if (actions.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  for (final (i, action) in actions.indexed) ...[
-                    if (i > 0) const SizedBox(width: 8),
-                    action,
-                  ],
-                ],
-              ),
-            ],
+  /// 去下一站的外部导航:没取餐去店里,取了餐去送达点
+  void _navigateTask(Order order) {
+    final picked = order.status == OrderStatus.pickedUp;
+    if (!picked && order.merchantLat != null && order.merchantLng != null) {
+      navigateTo(context,
+          lat: order.merchantLat!,
+          lng: order.merchantLng!,
+          name: order.merchantName,
+          mode: NavMode.ride);
+      return;
+    }
+    navigateTo(context,
+        lat: order.lat, lng: order.lng, name: order.address, mode: NavMode.ride);
+  }
+
+  void _openChat(Order order) {
+    Navigator.of(context)
+        .push(MaterialPageRoute(
+            builder: (_) => OrderChatPage(
+                api: widget.api,
+                orderNo: order.orderNo,
+                title: '和顾客说句话',
+                quickReplies: kRiderQuickReplies)))
+        .then((_) {
+      _unreadAt = null; // 看完回来立刻刷一次未读数
+      _refreshUnread();
+    });
+  }
+
+  /// 任务卡上的动作:**一个主按钮**(下一步该做的那件事)+ 一排小字按钮。
+  ///
+  /// 状态 → 主按钮:
+  /// - 商家还在做(accepted):没到店是「我到店了」;到了就是灰的「等商家出餐」
+  ///   —— 取餐要等商家点出餐,按钮亮着点下去只会被服务端拒;
+  /// - 已出餐(ready):「已取到餐」(跑腿是「已取到件」,不走小票尾号核验);
+  /// - 已取餐(pickedUp):「已送达」。
+  ///
+  /// 「我到店了」「我到了」是等餐 / 送到手上那段时长的**证据**,不是必经步骤,
+  /// 所以在 ready / pickedUp 时退到小字按钮里。
+  List<TaskAction> _taskActions(Order order) {
+    final busy = _grabbing.contains(order.orderNo);
+    final arrived = order.arrivedShopAt.isNotEmpty;
+    final arriveLabel = order.isErrand ? '我到取件点了' : '我到店了';
+    final a = <TaskAction>[];
+    switch (order.status) {
+      case OrderStatus.accepted:
+        a.add(arrived
+            ? const TaskAction('等商家出餐', null, primary: true)
+            : TaskAction(arriveLabel, () => _markArrived(order), primary: true));
+      case OrderStatus.ready:
+        a.add(TaskAction(order.isErrand ? '已取到件' : '已取到餐',
+            busy ? null : () => _pickUpErrandAware(order),
+            primary: true));
+        // 帮买:先填小票再谈取件 —— 小票是这一单唯一的对账依据,顾客也看得到
+        if (order.isErrandBuy && order.goodsActualCents == null) {
+          a.add(TaskAction('填小票', () => _submitReceipt(order)));
+          a.add(TaskAction('买不到', () => _markUnavailable(order)));
+        }
+        // 帮送:物品照。东西是顾客的,平台不做保价也不知道原样
+        if (order.isErrand && !order.isErrandBuy) {
+          a.add(TaskAction(order.pickupPhotoUrl.isEmpty ? '拍物品照' : '重拍物品照',
+              () => _uploadPickupPhoto(order)));
+        }
+        if (!arrived) a.add(TaskAction(arriveLabel, () => _markArrived(order)));
+      case OrderStatus.pickedUp:
+        a.add(TaskAction(busy ? '提交中…' : '已送达',
+            busy ? null : () => _deliver(order),
+            primary: true));
+        if (order.arrivedDropAt.isEmpty) {
+          a.add(TaskAction('我到了', () => _markArrivedDrop(order)));
+        }
+        a.add(TaskAction('地址不准', () => _reportAddress(order)));
+      default:
+        break;
+    }
+    // 未取餐且非追加单可转单;追加单随原单一起转
+    if (order.status != OrderStatus.pickedUp && order.parentOrderNo.isEmpty) {
+      a.add(TaskAction('转单', () => _transferOrder(order)));
+    }
+    a.add(TaskAction('异常上报', () => _reportIssue(order)));
+    a.add(TaskAction('全屏地图', () => _openMap(order)));
+    return a;
+  }
+
+  /// 下线要不要先问一句:手上还有单的时候问 —— 下线只是不收新单,
+  /// 手上的单照常送;不说清楚,骑手会以为下线就把手上的单丢了
+  Future<void> _tapOnlinePill() async {
+    if (_online && _mine.isNotEmpty) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dlg) => SzDialog(
+          title: const Text('下线?'),
+          content: Text('手上还有 ${_mine.length} 单没送完。下线后不再收新单,'
+              '手上的单照常送完。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dlg, false),
+                child: const Text('先不下线')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dlg, true),
+                child: const Text('下线')),
           ],
         ),
+      );
+      if (ok != true) return;
+    }
+    await _toggleOnline(!_online);
+  }
+
+  PreferredSizeWidget _hallAppBar() {
+    final sz = Theme.of(context).sz;
+    final city = _verify?.city ?? '';
+    return AppBar(
+      title: const Text('接单大厅'),
+      actions: [
+        SzStatePill(
+          label: _online
+              ? (city.isEmpty ? '在线' : '在线 · $city')
+              : '已下线 · 点这里上线',
+          on: _online,
+          onTap: _tapOnlinePill,
+        ),
+        // SOS 在大厅右上角(稿子上这里只有状态 pill;求助入口不能因为对齐稿子而没了)。
+        // 长按 3 秒才触发,防误触
+        Tooltip(
+          message: '长按 3 秒紧急求助',
+          child: GestureDetector(
+            onLongPress: _triggerSos,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(10, 12, 14, 12),
+              child: Icon(Icons.sos, color: sz.danger),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _hallTab() {
+    final sz = Theme.of(context).sz;
+    final today = HallTodayCard(
+      earnedCents: (_worklog?['today_earned_cents'] as num?)?.toInt(),
+      orders: (_worklog?['today_orders'] as num?)?.toInt(),
+      onOpenLedger: () => setState(() => _tab = 2),
+    );
+    if (!_online) {
+      return RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 24),
+          children: [
+            today,
+            const SizedBox(height: 48),
+            Center(
+              child: Text('现在是下线状态,不会收到新单',
+                  style: TextStyle(fontSize: kFontBodyLg, color: sz.inkMuted)),
+            ),
+            const SizedBox(height: 16),
+            Center(
+              child: FilledButton(
+                style: FilledButton.styleFrom(minimumSize: const Size(200, 52)),
+                onPressed: () => _toggleOnline(true),
+                child: const Text('上线接单'),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    var list = _sortedAvailable;
+    final pinned = _grabbedOrder;
+    if (pinned != null && !list.any((o) => o.orderNo == pinned.orderNo)) {
+      list = [...list]..insert(_grabbedIndex.clamp(0, list.length), pinned);
+    }
+    return RefreshIndicator(
+      onRefresh: () async {
+        setState(() => _hallGen++);
+        await _refresh();
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 24),
+        itemCount: list.length + 1,
+        itemBuilder: (context, i) {
+          if (i == 0) {
+            // 疲劳提示在最上面:它比任何一单都重要
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              _staleBanner('抢单池'),
+              _fatigueBar(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 0),
+                child: today,
+              ),
+              const SizedBox(height: 6),
+              HallSortBar(
+                value: _sort,
+                onChanged: (s) => setState(() => _sort = s),
+                onOpenPrefs: _openPrefs,
+              ),
+              _stalePrefHint(),
+              _filteredHint(),
+              if (list.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(kPagePad, 40, kPagePad, 0),
+                  child: Column(children: [
+                    Text(
+                        _sort == HallSort.errand
+                            ? '大厅里暂时没有帮我送的单'
+                            : '大厅里暂时没有单',
+                        style: TextStyle(
+                            fontSize: kFontBodyLg, color: sz.inkMuted)),
+                    const SizedBox(height: 6),
+                    Text('有新单会响铃,并从底部推上来',
+                        style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                  ]),
+                ),
+              const SizedBox(height: 4),
+            ]);
+          }
+          final o = list[i - 1];
+          return Padding(
+            key: ValueKey('$_hallGen-${o.orderNo}'),
+            padding: const EdgeInsets.fromLTRB(kPagePad, 5, kPagePad, 4),
+            child: SzEnter(
+              index: i - 1,
+              child: HallOrderCard(
+                order: o,
+                tag: _tagFor(o),
+                toShopText: _toShopText(o),
+                tripText: _tripText(o),
+                note: _hallNote(o),
+                alerts: _alertsFor(o),
+                grabbing: _grabbing.contains(o.orderNo),
+                grabbed: _grabbedOrder?.orderNo == o.orderNo,
+                onGrab: () => _grab(o),
+                onOpenRoute: () => _openMap(o),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
+
+  Widget _taskTab() => TaskPanel(
+        orders: _mine,
+        riderPosition: _riderPosition,
+        actionsFor: _taskActions,
+        alertsFor: _alertsFor,
+        unread: _unread,
+        onChat: _openChat,
+        onCall: (o) => launchUrl(Uri.parse('tel:${o.privacyPhone}')),
+        onSos: _triggerSos,
+        onNavigate: _navigateTask,
+        onGoHall: () => setState(() => _tab = 0),
+        onRefresh: _refresh,
+        header: Column(mainAxisSize: MainAxisSize.min, children: [
+          _staleBanner('配送列表'),
+          _batchBar(),
+        ]),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -2127,259 +2333,128 @@ class _RiderHomePageState extends State<RiderHomePage>
     // 首次就没拉到:**整页错误态**,绝不能让它长得像"今天没单"。
     // 有过一次成功就退回顶部横条 —— 旧列表还能看,别把能用的也拿走
     final firstLoadFailed = _neverLoaded && _refreshError.isNotEmpty;
-    final tabList = _tab == 0
-        ? RefreshIndicator(
-            onRefresh: _refresh,
-            child: !_online
-                ? ListView(children: const [
-                    Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text('上线后开始接单(右上角开关)'))
-                  ])
-                : ListView.builder(
-                        itemCount: _sortedAvailable.length + 1,
-                        itemBuilder: (context, i) {
-                          if (i == 0) {
-                            // 疲劳提示置顶:它比任何一单都重要
-                            return Column(children: [
-                              _staleBanner('抢单池'),
-                              _fatigueBar(),
-                              _sortBar(),
-                              _radiusBar(),
-                              _stalePrefHint(),
-                              _filteredHint(),
-                            ]);
-                          }
-                          return _orderCard(
-                          _sortedAvailable[i - 1],
-                          actions: [
-                            OutlinedButton(
-                                onPressed: () =>
-                                    _openMap(_sortedAvailable[i - 1]),
-                                child: const Text('看路线')),
-                            // 户外单手操作:主按钮高 52、宽一点,戴手套也点得中
-                            Builder(builder: (context) {
-                              final o = _sortedAvailable[i - 1];
-                              final busy = _grabbing.contains(o.orderNo);
-                              return FilledButton(
-                                  style: FilledButton.styleFrom(
-                                      minimumSize: const Size(112, 52)),
-                                  onPressed: busy ? null : () => _grab(o),
-                                  child: Text(busy ? '抢单中…' : '抢单'));
-                            }),
-                          ],
-                        );
-                        },
-                      ),
-          )
-        : RefreshIndicator(
-            onRefresh: _refresh,
-            child: _mine.isEmpty
-                ? ListView(children: [
-                    _staleBanner('配送列表'),
-                    const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text('没有进行中的配送')),
-                  ])
-                : ListView.builder(
-                    itemCount: _mine.length + 1,
-                    itemBuilder: (context, i) {
-                      if (i == 0) {
-                        return Column(
-                            children: [_staleBanner('配送列表'), _batchBar()]);
-                      }
-                      final order = _mine[i - 1];
-                      final actions = <Widget>[
-                        OutlinedButton.icon(
-                            icon: const Icon(Icons.map, size: 18),
-                            onPressed: () => _openMap(order),
-                            label: const Text('地图')),
-                        OutlinedButton.icon(
-                            icon: const Icon(Icons.report_problem_outlined,
-                                size: 18),
-                            onPressed: () => _reportIssue(order),
-                            label: const Text('异常')),
-                      ];
-                      // 未取餐时给「我到店了」:等餐时长 = 取餐 − 到店,
-                      // 是申诉超时时的证据。在店里干等二十分钟不该算到
-                      // 骑手头上,而在这之前他没有办法证明这件事
-                      if (order.status != OrderStatus.pickedUp &&
-                          order.arrivedShopAt.isEmpty) {
-                        actions.add(OutlinedButton.icon(
-                            icon: const Icon(Icons.storefront, size: 18),
-                            onPressed: () => _markArrived(order),
-                            label: Text(order.isErrand ? '我到取件点了' : '我到店了')));
-                      }
-                      // 未取餐(接单中/待取餐)且非追加单可转单;追加单随原单一起转
-                      if (order.status != OrderStatus.pickedUp &&
-                          order.parentOrderNo.isEmpty) {
-                        actions.add(OutlinedButton.icon(
-                            icon: const Icon(Icons.swap_horiz, size: 18),
-                            onPressed: () => _transferOrder(order),
-                            label: const Text('转单')));
-                      }
-                      if (order.status == OrderStatus.ready) {
-                        // 帮买:先填小票再谈取件 —— 小票是这一单唯一的
-                        // 对账依据,顾客也看得到
-                        if (order.isErrandBuy &&
-                            order.goodsActualCents == null) {
-                          actions.add(OutlinedButton.icon(
-                              icon: const Icon(Icons.receipt_long, size: 18),
-                              onPressed: () => _submitReceipt(order),
-                              label: const Text('填小票')));
-                          actions.add(TextButton(
-                              onPressed: () => _markUnavailable(order),
-                              child: const Text('买不到')));
-                        }
-                        // 帮送:物品照。东西是顾客的,平台不做保价也不知道原样,
-                        // 出了丢件/损坏纠纷只有这张照片说得清
-                        if (order.isErrand && !order.isErrandBuy) {
-                          actions.add(OutlinedButton.icon(
-                              icon: Icon(
-                                  order.pickupPhotoUrl.isEmpty
-                                      ? Icons.photo_camera_outlined
-                                      : Icons.check_circle_outline,
-                                  size: 18),
-                              onPressed: () => _uploadPickupPhoto(order),
-                              label: Text(order.pickupPhotoUrl.isEmpty
-                                  ? '拍物品照'
-                                  : '已拍 ✓')));
-                        }
-                        actions.add(FilledButton(
-                            onPressed: () => _pickUpErrandAware(order),
-                            child: Text(order.isErrand ? '已取件' : '已取餐')));
-                      } else if (order.status == OrderStatus.delivered ||
-                          order.status == OrderStatus.completed) {
-                        // 送完了才谈得上「这单超时不怪我」——
-                        // 进行中的单该先把它送完
-                        actions.add(TextButton(
-                            onPressed: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                    builder: (_) => RiderAppealPage(
-                                        api: widget.api, order: order))),
-                            child: const Text('申诉')));
-                      } else if (order.status == OrderStatus.pickedUp) {
-                        // 「我到了」:到这里到点送达之间的时长花在找门、
-                        // 等门禁、等电梯、爬楼上。点了才有数,不点不猜
-                        if (order.arrivedDropAt.isEmpty) {
-                          actions.add(OutlinedButton.icon(
-                              icon: const Icon(Icons.pin_drop_outlined,
-                                  size: 18),
-                              onPressed: () => _markArrivedDrop(order),
-                              label: const Text('我到了')));
-                        }
-                        actions.add(TextButton(
-                            onPressed: () => _reportAddress(order),
-                            child: const Text('地址不准')));
-                        actions.add(FilledButton(
-                            onPressed: () => _deliver(order),
-                            child: const Text('已送达')));
-                      }
-                      return _orderCard(order, actions: actions);
-                    },
-                  ),
-          );
-
-    // 一次都没成功拉到过:**整页错误态**。
-    //
-    // 这是这一批在骑手端要修的核心 —— 抢单页一片空白和"现在真的没单"
-    // 长得一模一样;「我的」页写着"没有进行中的配送",而他手上明明有单。
-    // 电梯、地库、信号弱在这份工作里是常态,不是边角情况。
-    //
-    // 有过一次成功就不走这里,退回顶部的 [_staleBanner] —— 旧列表还能看,
-    // 别把本来能用的东西也一起拿走。
-    final body = firstLoadFailed
-        ? RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView(children: [
-              SizedBox(
-                height: 360,
-                child: SzError(
-                    error: _tab == 0
-                        ? '抢单池没能加载出来:$_refreshError\n这不代表现在没有单'
-                        : '你的配送单没能加载出来:$_refreshError\n'
-                            '手上的单还在,只是这会儿显示不出来',
-                    onRetry: _refresh),
-              ),
-            ]),
-          )
-        : tabList;
-
-    final tabBody = switch (_tab) {
-      2 => WalletPage(api: widget.api),
-      3 => RiderProfilePage(
-          api: widget.api,
-          onOpenWallet: () => setState(() => _tab = 2),
-          onOpenOrders: () => setState(() => _tab = 1),
-        ),
-      _ => body,
-    };
+    final Widget tabBody;
+    if (firstLoadFailed && _tab <= 1) {
+      tabBody = RefreshIndicator(
+        onRefresh: _refresh,
+        child: ListView(children: [
+          SizedBox(
+            height: 360,
+            child: SzError(
+                error: _tab == 0
+                    ? '抢单池没能加载出来:$_refreshError\n这不代表现在没有单'
+                    : '你的配送单没能加载出来:$_refreshError\n'
+                        '手上的单还在,只是这会儿显示不出来',
+                onRetry: _refresh),
+          ),
+        ]),
+      );
+    } else {
+      tabBody = switch (_tab) {
+        0 => _hallTab(),
+        1 => _taskTab(),
+        2 => WalletPage(api: widget.api, period: _ledgerPeriod),
+        _ => RiderProfilePage(
+            api: widget.api,
+            onOpenWallet: () => setState(() => _tab = 2),
+            onOpenOrders: () => setState(() => _tab = 1),
+            alerts: _alerts,
+            onAlertsChanged: (p) => setState(() => _alerts = p),
+          ),
+      };
+    }
     // 认证提示 + 定位异常横幅置顶(恢复后自动消失)。
-    // 定位挂了影响的是**每一个** tab —— 抢单靠它筛,配送靠它给顾客看进度,
-    // 所以放在页面级而不是塞进抢单列表里
+    // 定位挂了影响的是**每一个** tab,所以放在页面级
     final banners = <Widget>[
       if (banner != null) banner,
       if (gpsBanner != null) gpsBanner,
     ];
+    // 「进行中」「我的」两页没有标题栏(稿子上一个是满屏地图,一个是身份卡当页头),
+    // 横幅得自己让开状态栏
+    final noBar = _tab == 1 || _tab == 3;
     final page = banners.isEmpty
         ? tabBody
-        : Column(children: [...banners, Expanded(child: tabBody)]);
+        : Column(children: [
+            noBar
+                ? SafeArea(bottom: false, child: Column(children: banners))
+                : Column(children: banners),
+            Expanded(
+              child: noBar
+                  ? MediaQuery.removePadding(
+                      context: context, removeTop: true, child: tabBody)
+                  : tabBody,
+            ),
+          ]);
 
-    // 宽屏(≥600)换左侧栏(#295)。
-    //
-    // 骑手端跑在手机上的时候几乎都是 compact,这一条主要为**平板横屏**
-    // 和调度台场景 —— 有的团队会把一台平板架在站点里看单
-    return SzNavScaffold(
+    // 宽屏(≥600)换左侧栏(#295)。骑手端跑在手机上时几乎都是 compact,
+    // 这一条主要为平板横屏和站点里架着看单的平板
+    final scaffold = SzNavScaffold(
       selectedIndex: _tab,
-      // 骑手端是单列信息流(单卡、钱包流水),用窄一档。
-      // 宽度交给外壳,标题栏才会跟内容对齐
-      contentMaxWidth: kContentMaxWidth,
-      onSelected: (i) => setState(() => _tab = i),
-      items: const [
+      // 进行中是地图,用宽档;其余是单列信息流
+      contentMaxWidth: _tab == 1 ? kWideMaxWidth : kContentMaxWidth,
+      onSelected: (i) {
+        setState(() => _tab = i);
+        if (i == 1) {
+          _unreadAt = null;
+          _refreshUnread();
+        }
+      },
+      items: [
+        const SzNavItem(
+            icon: Icons.list_alt_outlined,
+            selectedIcon: Icons.list_alt,
+            label: '大厅'),
+        // 手上几单写在标签里(稿子:「进行中 · 1」),不挂红色角标 ——
+        // 这不是待办提醒,是一个状态
         SzNavItem(
-            icon: Icons.flash_on_outlined,
-            selectedIcon: Icons.flash_on,
-            label: '抢单'),
-        SzNavItem(
-            icon: Icons.moped_outlined, selectedIcon: Icons.moped, label: '配送'),
-        SzNavItem(
+            icon: Icons.two_wheeler_outlined,
+            selectedIcon: Icons.two_wheeler,
+            label: _mine.isEmpty ? '进行中' : '进行中 · ${_mine.length}'),
+        const SzNavItem(
             icon: Icons.account_balance_wallet_outlined,
             selectedIcon: Icons.account_balance_wallet,
-            label: '钱包'),
-        SzNavItem(
-            icon: Icons.person_outline,
-            selectedIcon: Icons.person,
-            label: '我的'),
+            label: '账本'),
+        const SzNavItem(
+            icon: Icons.person_outline, selectedIcon: Icons.person, label: '我的'),
       ],
-      appBar: AppBar(
-        title: Text(switch (_tab) {
-          0 => '抢单大厅',
-          1 => '我的配送',
-          2 => '我的钱包',
-          _ => '我的',
-        }),
-        leading: Tooltip(
-          message: '长按 3 秒紧急求助',
-          child: GestureDetector(
-            onLongPress: _triggerSos,
-            child: Icon(Icons.sos, color: Theme.of(context).sz.danger),
+      appBar: switch (_tab) {
+        0 => _hallAppBar(),
+        2 => AppBar(
+            title: const Text('账本'),
+            actions: [
+              SzTextTabs(
+                labels: WalletPage.periods,
+                index: _ledgerPeriod,
+                onChanged: (i) => setState(() => _ledgerPeriod = i),
+              ),
+              const SizedBox(width: 12),
+            ],
           ),
-        ),
-        actions: [
-          Row(children: [
-            Icon(
-              _gpsActive ? Icons.gps_fixed : Icons.gps_off,
-              size: 18,
-              color: _gpsActive ? Theme.of(context).sz.earn : Theme.of(context).sz.inkMuted,
-            ),
-            const SizedBox(width: 4),
-            Text(_online ? '接单中' : '已下线'),
-            Switch(value: _online, onChanged: _toggleOnline),
-            const SizedBox(width: 8),
-          ]),
-        ],
-      ),
+        _ => null,
+      },
       body: page,
     );
+    final offer = _offer;
+    if (offer == null) return scaffold;
+    return Stack(children: [
+      scaffold,
+      Positioned.fill(
+        child: RiderOfferOverlay(
+          key: ValueKey(offer.orderNo),
+          order: offer,
+          toShopText: _toShopText(offer),
+          tripText: _tripText(offer),
+          infoLine: _offerInfo(offer),
+          sameWay: offer.sameShop || offer.sameWay,
+          grabbing: _grabbing.contains(offer.orderNo),
+          grabbed: _offerGrabbed,
+          vibrate: _alerts.vibrate,
+          onGrab: () => _grab(offer, fromOffer: true),
+          onDismiss: () {
+            if (mounted) setState(() => _offer = null);
+          },
+        ),
+      ),
+    ]);
   }
 }

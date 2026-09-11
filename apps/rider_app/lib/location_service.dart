@@ -135,6 +135,9 @@ class LocationService {
       (position) {
         final gcj = wgs84ToGcj02(position.latitude, position.longitude);
         lastFix = (lat: gcj.lat, lng: gcj.lng, at: DateTime.now());
+        // 骑行中(> 8 km/h)关掉一切非必要动效,只留新单推送(动效规范·通用约束)。
+        // speed 取不到时是 0 或负数,当作停着
+        SzMotion.riding.value = position.speed > 8 / 3.6;
         onFix(gcj.lat, gcj.lng);
       },
       // 流一出错就终止,所以这里必须把订阅清干净并**告诉上层** ——
@@ -170,6 +173,7 @@ class LocationService {
   void stop() {
     _subscription?.cancel();
     _subscription = null;
+    SzMotion.riding.value = false;
     // 位置作废:停了之后再拿这个坐标上报就是在报一个过去的位置
     lastFix = null;
   }

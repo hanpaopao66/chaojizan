@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:rider_app/hall_widgets.dart';
 import 'package:rider_app/main.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -95,11 +96,11 @@ void main() {
       home: RiderHomePage(api: poolApi([order ?? poolOrder()])),
     ));
     await t.pumpAndSettle();
-    // _online 只由开关设置,不从接口读 —— 不点它,抢单池永远是空的,
-    // 而所有断言都会报"找不到文字",看不出真正的原因
-    final sw = find.byType(Switch);
-    if (sw.evaluate().isNotEmpty) {
-      await t.tap(sw.first);
+    // _online 只由标题栏的状态 pill 设置,不从接口读 —— 不点它,
+    // 抢单池永远是空的,而所有断言都会报"找不到文字",看不出真正的原因
+    final pill = find.byType(SzStatePill);
+    if (pill.evaluate().isNotEmpty) {
+      await t.tap(pill.first);
       await t.pumpAndSettle();
     }
     // 上线之后靠 5 秒轮询拉抢单池,pumpAndSettle 不推进定时器 ——
@@ -117,22 +118,16 @@ void main() {
       .join(' | ');
 
   group('别再长回去', () {
-    testWidgets('一张卡不超过 340px', (t) async {
+    testWidgets('一张卡不超过 200px', (t) async {
       await pump(t);
-      double h = 0;
-      for (final e in find.byType(Card).evaluate()) {
-        final b = e.renderObject as RenderBox?;
-        if (b == null || !b.hasSize || b.size.width < 300) continue;
-        h = b.size.height;
-      }
-      // 删掉重复的「跑程」行之后实测 335px。
+      final h = t.getSize(find.byType(HallOrderCard).first).height;
+      // 设计稿 5a 的卡:配送费大字 + 取送两点 + 一行备注 + 抢单,实测 160 上下。
+      // 原来的卡 335px,因为每条决策信息各占一整行(还带 emoji)。
       //
-      // 这一端**不追求一屏多塞几张** —— 触控区是硬底线(骑手单手、
-      // 可能戴手套、屏幕有雨)。这条守的是另一件事:别再往上堆行。
-      // 卡上每一行现在都是决策信息,再加就该先问"删哪一行"。
-      expect(h, lessThanOrEqualTo(340),
-          reason: '卡高 ${h.toStringAsFixed(0)}px。删重复行之后是 335 —— '
-              '又加了什么?先想想能删哪行');
+      // 这一端**不追求一屏多塞几张** —— 触控区是硬底线。这条守的是
+      // 另一件事:别再往上堆行。条件行(难度提示、酒类…)只在真有这事时出现。
+      expect(h, lessThanOrEqualTo(200),
+          reason: '卡高 ${h.toStringAsFixed(0)}px —— 又加了什么?先想想能删哪行');
       expect(h, greaterThan(0), reason: '没量到卡,测试脚手架坏了');
     });
   });
@@ -168,14 +163,22 @@ void main() {
   });
 
   group('同一件事只说一遍', () {
-    testWidgets('两段距离不重复显示', (t) async {
+    testWidgets('两段距离各出现一次:取餐点那行的「距你」、送达点那行的「送程」',
+        (t) async {
       await pump(t);
       final s = cardText(t);
       expect(s.contains('跑程:到店'), isFalse,
-          reason: '旧的「跑程:到店 X 米 + 送 Y 米」还在 —— '
-              '它和「去取餐 …·再送 …·全程 …」是同两个数,'
-              '一个用米一个用公里,骑手要读两遍才找得到要的那个');
-      expect(s.contains('去取餐'), isTrue, reason: '新的那行不能一起删掉');
+          reason: '旧的「跑程:到店 X 米 + 送 Y 米」回来了');
+      // 1700m / 2300m 各只出现一次,挂在各自那一行的末尾
+      expect(find.text('1.7km'), findsOneWidget);
+      expect(find.text('2.3km'), findsOneWidget);
+    });
+
+    testWidgets('钱只写一次,写的是骑手实得', (t) async {
+      await pump(t);
+      // 配送费 5 + 小费 1 = 6,不是订单总额 26
+      expect(find.text('¥6.00'), findsOneWidget);
+      expect(find.text('¥26.00'), findsNothing);
     });
   });
 }

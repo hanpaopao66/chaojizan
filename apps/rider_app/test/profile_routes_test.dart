@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rider_app/alert_prefs.dart';
 import 'package:rider_app/appeal_page.dart';
 import 'package:rider_app/dispatch_spec_page.dart';
 import 'package:rider_app/heatmap_page.dart';
+import 'package:rider_app/issues_page.dart';
 import 'package:rider_app/messages_page.dart';
 import 'package:rider_app/onboarding_page.dart';
 import 'package:rider_app/profile_page.dart';
 import 'package:rider_app/reviews_page.dart';
+import 'package:rider_app/verify_page.dart';
 import 'package:rider_app/weekly_page.dart';
+import 'package:rider_app/witness_page.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'rider_fake_api.dart';
@@ -41,33 +45,39 @@ int _seq = 0;
 void main() {
   setUpRiderTest();
 
-  /// 这一页应该有的全部入口,以及点下去该发生什么。
+  /// 这一页应该有的全部入口,以及点下去该发生什么(设计稿 5i 之后)。
   ///
-  /// `page` = 该 push 出来的页面类型;`tab` = 该切到的 tab
-  /// (只有「我的钱包」「我的订单」两个,它们本来就是 tab)。
+  /// 「我的订单」「我的钱包」两个切 tab 的入口删掉了 —— 底部导航就是它们,
+  /// 在这一页再放一份是重复;「收款账户」并进了认证台面的「结算卡」,
+  /// 「规则中心」改名「规则与费率 · 开源可查」,「哪儿有单」落在「接单区域」。
   const wallet = Object();
   const orders = Object();
   final expected = <String, Object>{
-    // 网格
-    '我的订单': orders,
-    '哪儿有单': RiderHeatmapPage,
-    '顾客评价': RiderReviewsPage,
+    // 认证台面
+    '实名认证': RiderVerifyFlowPage,
+    '健康证': RiderVerifyFlowPage,
+    '结算卡': PayoutAccountPage,
+    // 设置列表(稿子上那四条)
+    '接单区域 · 成都': RiderHeatmapPage,
+    '新单提醒 · 声音 + 震动': RiderAlertPrefsPage,
+    '见证节点 · 自己复算账本': RiderWitnessPage,
+    '规则与费率 · 开源可查': RiderRulesPage,
+    // 常用
     '消息': RiderMessagesPage,
+    '顾客评价': RiderReviewsPage,
+    '我的周报': RiderWeeklyPage,
     // 保障
     '意外保障': RiderInsurancePage,
     '紧急联系人': EmergencyContactsPage,
     '事故上报': RiderAccidentPage,
     '装备申领': RiderGearPage,
-    // 账目
-    '我的钱包': wallet,
-    '收款账户': PayoutAccountPage,
-    '联系平台客服': SupportPage,
-    // 规则
+    // 规则与申诉
     '抢单怎么排的': DispatchSpecPage,
-    '规则中心': RiderRulesPage,
+    '配送异常与申诉': RiderIssuesPage,
     '违规申诉': RiderAppealPage,
     '上岗培训': RiderExamPage,
     '给平台提意见': RiderFeedbackPage,
+    '联系平台客服': SupportPage,
   };
 
   /// 点一个入口,回答三件事:push 出了什么页 / 切了哪个 tab / 弹没弹 SnackBar。
@@ -136,6 +146,7 @@ void main() {
           (e.widget as SzEntryTile).title,
         for (final e in find.byType(SzIconGrid).evaluate())
           ...(e.widget as SzIconGrid).items.map((i) => i.label),
+        '实名认证', '健康证', '结算卡',
       ];
       expect(titles, isNotEmpty);
 
@@ -184,23 +195,14 @@ void main() {
     });
   });
 
-  group('今日卡是「我的周报」唯一的入口,不许当装饰删掉', () {
-    testWidgets('卡底那行可供性文字在', (t) async {
-      setPhoneViewport(t, const Size(390, 844));
-      await t.pumpWidget(MaterialApp(
-        theme: brandTheme(Brightness.light),
-        home: Scaffold(body: RiderProfilePage(api: fakeRiderApi())),
-      ));
-      await t.pumpAndSettle();
-      // 周报没有自己的列表条 —— 它是今日卡的落点。
-      // 那行「看周报 →」是**唯一**告诉骑手这张卡能点的东西,
-      // 删了它周报就真的没入口了
-      expect(find.textContaining('看周报'), findsOneWidget,
-          reason: '卡底的「看周报 →」没了 —— 周报现在没有任何入口');
+  group('周报有两个入口,不许当装饰删掉', () {
+    testWidgets('「我的周报」那一行在', (t) async {
+      final r = await tapEntry(t, '我的周报');
+      expect(r.pushed, RiderWeeklyPage);
     });
 
-    testWidgets('点今日卡进周报', (t) async {
-      final r = await tapEntry(t, '今日在线');
+    testWidgets('点三个数那张卡也进周报', (t) async {
+      final r = await tapEntry(t, '本月所得');
       expect(r.pushed, RiderWeeklyPage);
       expect(r.snacked, isFalse);
     });

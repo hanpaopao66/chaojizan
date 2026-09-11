@@ -15,6 +15,9 @@ dependencies:
   url_launcher: ^6.3.0  # 唤起高德 App 导航
   image_picker: ^1.1.0  # 实名认证证件照
   flutter_tencent_map: 1.0.1
+  # 新单提醒的声音 / 震动开关存本机(alert_prefs.dart)。
+  # shared 包本来就依赖它,这里显式写出来是因为骑手端自己也 import 了
+  shared_preferences: ^2.5.5
 
 flutter:
   uses-material-design: true
@@ -28,7 +31,6 @@ dev_dependencies:
   # 「我的」页才能在没有后端的情况下按真机口径量密度、验跳转
   http: ^1.2.0
   package_info_plus: ^8.0.0
-  shared_preferences: ^2.5.5
 
 # App 图标(生成:dart run flutter_launcher_icons)
 flutter_launcher_icons:
