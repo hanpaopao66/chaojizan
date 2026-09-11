@@ -90,15 +90,19 @@ jobs:
       # MinIO 不作为 service 容器起:它需要 `server /data` 这个 command,
       # 而 GitHub 的 service 容器给不了 command。
       #
-      # 镜像用**生产同款** minio/minio。原先用的 bitnami/minio 公开 tag 已被
+      # 镜像用**生产同款** MinIO 官方镜像。原先用的 bitnami/minio 公开 tag 已被
       # 下架(Bitnami 2025 年把免费镜像挪走了),CI 直接拉不到 ——
-      # 而且 CI 和生产用不同的镜像本来就违背"同一套东西"的原则
+      # 而且 CI 和生产用不同的镜像本来就违背"同一套东西"的原则。
+      #
+      # 从 quay.io 拉,不从 Docker Hub:Docker Hub 上的 minio/minio 在 2026 年
+      # 整个仓库没了(拉取直接 "repository does not exist"),官方的同一份镜像
+      # 还在 quay.io/minio/minio。生产机上是早先缓存的 minio/minio,暂时不受影响
       - name: 起 MinIO(生产同款镜像)
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=superz \
             -e MINIO_ROOT_PASSWORD=superz-ci-secret \
-            minio/minio server /data
+            quay.io/minio/minio server /data
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:9000/minio/health/live && break
             sleep 2
