@@ -171,12 +171,26 @@ async def stats_overview(db: AsyncSession = Depends(get_db)):
             "voucher_fee": t.get("voucher_fee", 0),
         })
 
+    # rider_cents = 骑手今日所得:今天的有效单里**归骑手的那一部分**。
+    #
+    # 原来是「今天全部配送费之和」,而大屏标的是「骑手今日所得」—— 两件事差在:
+    #   - 商家自送单的配送费归商家(settlement.credit_merchant_for_order),不算;
+    #     到店自取没有配送,本来就是 0;
+    #   - 跑腿单的跑腿费里平台收 2% 服务费(支付时落在 commission_cents 上),扣掉;
+    #   - 小费 100% 归骑手,原来漏算了。
+    # 和 settlement.credit_rider_for_order 同一个分法。按下单日算、含在途单
+    # (和旁边的「今日订单」同口径);不含平台另付的等餐补偿和帮买的商品款 ——
+    # 前者不是用户付的钱,后者是替用户垫的,都不是这一单分给骑手的
     today = (await db.execute(sa_text("""
         SELECT count(*) FILTER (WHERE status NOT IN ('pending_payment','cancelled')),
                coalesce(sum(total_cents) FILTER (
                    WHERE status NOT IN ('pending_payment','cancelled')), 0),
-               coalesce(sum(delivery_fee_cents) FILTER (
-                   WHERE status NOT IN ('pending_payment','cancelled')), 0)
+               coalesce(sum(delivery_fee_cents + tip_cents
+                            - CASE WHEN order_kind IN ('errand_send', 'errand_buy')
+                                   THEN commission_cents ELSE 0 END) FILTER (
+                   WHERE status NOT IN ('pending_payment','cancelled')
+                     AND NOT coalesce(self_delivery, false)
+                     AND NOT coalesce(pickup, false)), 0)
         FROM orders
         WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')
                             AT TIME ZONE 'Asia/Shanghai'

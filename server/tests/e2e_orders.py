@@ -21,6 +21,8 @@ dish_a = call("POST", "/merchants/me/dishes", merchant,
 dish_b = call("POST", "/merchants/me/dishes", merchant,
               {"name": f"测试豆浆-{tag}", "price_cents": 600, "stock": 200})
 
+# 大屏/官网的「骑手今日所得」:下单前后取差值(开发库里今天已有别的单,只能比差)
+rider_before = call("GET", "/stats/overview")["today"]["rider_cents"]
 order = call("POST", "/orders", customer, {
     "merchant_id": shop0["id"],
     "items": [{"dish_id": dish_a["id"], "quantity": 2}, {"dish_id": dish_b["id"], "quantity": 1}],
@@ -35,6 +37,10 @@ assert listed["biz_type"] == "food", listed["biz_type"]
 print("✓ 订单(详情与列表)都带 biz_type")
 
 paid = call("POST", f"/orders/{no}/pay/mock", customer)
+rider_delta = call("GET", "/stats/overview")["today"]["rider_cents"] - rider_before
+assert rider_delta == order["delivery_fee_cents"] + order["tip_cents"], \
+    f"外卖单付款后「骑手今日所得」应涨配送费 + 小费,实际涨了 {rider_delta}"
+print("✓ 骑手今日所得:外卖单记配送费 + 小费")
 # 佣金按**该店实际费率**断言,不写死 5%。
 # 阶梯佣金(#tier)会按上月单量把老店降到 4.5% / 4%,而演示店在跑久了的库上
 # 必然累计到降档区间(实测已 1255 单、正确降到 4%)——

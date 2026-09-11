@@ -200,9 +200,10 @@ export default function Home() {
           <div className="nums">
             <Num value={stats?.today?.orders} label="今日订单" tone="clay"
               zeroHint="今天还没有订单" />
-            {/* 这个数是当天全部订单的配送费之和,不是「骑手所得」:
-                商家自送单的配送费归商家,跑腿费里还有 2% 平台服务费。标签只说它是什么 */}
-            <Num value={stats?.today?.rider_cents} label="今日配送费" tone="earn"
+            {/* rider_cents 是今天的有效单里归骑手的那部分:配送费 + 小费,
+                跑腿单扣掉 2% 服务费,商家自送单不算(口径在 routers/ledger.py)。
+                它原来是「全部配送费之和」,那时这里只敢叫「今日配送费」 */}
+            <Num value={stats?.today?.rider_cents} label="骑手今日所得" tone="earn"
               render={v => `¥${yuan(v)}`} zeroHint="今天还没有配送单" />
             <Num value={stats?.nodes?.online} label="社区见证节点在线" tone="earn"
               zeroHint="暂时没有节点在线，锚点仍在逐日生成" />

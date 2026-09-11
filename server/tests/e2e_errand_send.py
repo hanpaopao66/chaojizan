@@ -67,6 +67,7 @@ async def main():
     print("✓ 不确认「不含违禁品」不让下单")
 
     # ---- 下单 → 支付 → **直接进抢单池** ----
+    rider_before = call("GET", "/stats/overview")["today"]["rider_cents"]
     o = call("POST", "/errands", customer, body())
     no = o["order_no"]
     assert o["status"] == "pending_payment", o["status"]
@@ -84,6 +85,12 @@ async def main():
     print("✓ 取件点取的是订单自带的地址,不是服务主体的坐标")
 
     paid = call("POST", f"/orders/{no}/pay/mock", customer)
+    # 大屏的「骑手今日所得」:跑腿费里平台收 2%,只有剩下那部分归骑手
+    rider_delta = (call("GET", "/stats/overview")["today"]["rider_cents"]
+                   - rider_before)
+    assert rider_delta == q["fee_cents"] - q["service_fee_cents"], \
+        f"跑腿单应记跑腿费 − 服务费,实际涨了 {rider_delta}"
+    print("✓ 骑手今日所得:跑腿单扣掉 2% 服务费")
     assert paid["status"] == "ready", \
         f"跑腿单支付后应直接到待取餐(没有商家出餐这一步),实际 {paid['status']}"
     print("✓ 支付成功直接进抢单池,不经过商家接单/出餐")

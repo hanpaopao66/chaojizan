@@ -37,6 +37,7 @@ async def main():
         print("✓ 自配送单拒收小费")
 
         # 2) 下单:快照自配送,备注标注;不进抢单池、不可抢、不可改派
+        rider_before = call("GET", "/stats/overview")["today"]["rider_cents"]
         order = call("POST", "/orders", customer, {
             "merchant_id": sid,
             "items": [{"dish_id": dish["id"], "quantity": 1}],
@@ -47,6 +48,11 @@ async def main():
         fee = order["delivery_fee_cents"]
         assert fee > 0, "配送单应照常向用户收配送费"
         call("POST", f"/orders/{no}/pay/mock", customer)
+        # 配送费归商家:大屏的「骑手今日所得」不该因为这一单涨
+        rider_delta = (call("GET", "/stats/overview")["today"]["rider_cents"]
+                       - rider_before)
+        assert rider_delta == 0, f"自送单的配送费不归骑手,实际涨了 {rider_delta}"
+        print("✓ 骑手今日所得:商家自送单不计")
         call("POST", f"/orders/{no}/transition", merchant,
              {"to_status": "accepted"})
         pool = call("GET", "/riders/available-orders?lat=30.66&lng=104.08",
