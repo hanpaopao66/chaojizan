@@ -11,13 +11,13 @@
   <link rel="icon" type="image/png" sizes="64x64" href="/site/brand/favicon_64.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="/site/brand/favicon_192.png" />
   <link rel="apple-touch-icon" href="/site/brand/favicon_192.png" />
-  <!-- 首页是骨白底,子页(入驻/品牌/大屏/透明中心)仍是深色。
-       在 JS 包加载之前就把首页标出来(home.css 的 html.h3-root),
-       否则首屏会先闪一下深色。前缀表和 src/App.jsx 的路由是同一份,改一处要改两处 -->
+  <!-- 官网除 /screen(店内电视用的深色大屏)以外都是骨白底。
+       在 JS 包加载之前就给 <html> 挂上 h3-root(site.css),否则首屏会先闪一下深色。
+       哪条路由是深色,这里和 src/App.jsx 各有一份,改一处要改两处 -->
   <script>
     (function () {
       var p = location.pathname.replace(/^\/site/, '') || '/';
-      if (!/^\/(join\/merchant|join\/rider|brand|screen|transparency|status)/.test(p)) {
+      if (!/^\/screen/.test(p)) {
         document.documentElement.className += ' h3-root';
       }
     })();
@@ -42,7 +42,7 @@
         "alternateName": "Super-Z",
         "url": "https://chaojizan.cc/",
         "description": "劳动者互助外卖平台:商家佣金 5%,配送费 100% 归骑手,账目公开、社区可验证,AGPL-3.0 开源。",
-        "sameAs": ["https://github.com/hanpaopao66/super-z"]
+        "sameAs": ["https://github.com/hanpaopao66/chaojizan"]
       },
       {
         "@type": "WebSite",
@@ -87,7 +87,7 @@
           {
             "@type": "Question",
             "name": "在哪里下载超级赞 App?",
-            "acceptedAnswer": { "@type": "Answer", "text": "官网下载页 https://chaojizan.cc/download 提供用户端、商家端、骑手端三个 Android 安装包;也可从 GitHub Releases(https://github.com/hanpaopao66/super-z/releases)下载同一份安装包。" }
+            "acceptedAnswer": { "@type": "Answer", "text": "官网下载页 https://chaojizan.cc/download 提供用户端、商家端、骑手端三个 Android 安装包;也可从 GitHub Releases(https://github.com/hanpaopao66/chaojizan/releases)下载同一份安装包。" }
           },
           {
             "@type": "Question",

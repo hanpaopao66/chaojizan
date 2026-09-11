@@ -21,10 +21,15 @@ export default defineConfig({
       '/stats': 'http://127.0.0.1:8010',
       // 首页服务台读哪些频道开着(和 App 金刚区同一份后台配置)
       '/channels': 'http://127.0.0.1:8010',
-      '/nodes/summary': 'http://127.0.0.1:8010',
+      // /nodes/summary(透明中心的见证节点卡)和 /nodes 那一页本身
+      '/nodes': 'http://127.0.0.1:8010',
       '/ledger': 'http://127.0.0.1:8010',
+      // 三端规则的改动留痕(开源仓页):/rules/{customer|merchant|rider}/revisions
+      '/rules': 'http://127.0.0.1:8010',
       '/screen/stats': 'http://127.0.0.1:8010',
       '/screen/orders': 'http://127.0.0.1:8010',
+      // 今日逐单(透明中心首屏)与它的 CSV:/transparency/today、/transparency/today.csv
+      '/transparency/today': 'http://127.0.0.1:8010',
       '/transparency/audit': 'http://127.0.0.1:8010',
       '/transparency/funds': 'http://127.0.0.1:8010',
       '/transparency/compensation': 'http://127.0.0.1:8010',
@@ -34,6 +39,7 @@ export default defineConfig({
       '/transparency/uptime': 'http://127.0.0.1:8010',
       '/transparency/dispatch': 'http://127.0.0.1:8010',
       '/transparency/governance': 'http://127.0.0.1:8010',
+      '/transparency/liability': 'http://127.0.0.1:8010',
     },
   },
 })

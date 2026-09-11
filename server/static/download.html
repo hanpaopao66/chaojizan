@@ -4,75 +4,117 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>下载超级赞 Super-Z App · Android 用户端/商家端/骑手端</title>
-<meta name="description" content="下载超级赞(Super-Z)Android 安装包:用户端点外卖、商家端接单出餐、骑手端抢单配送。商家佣金 5%,配送费 100% 归骑手,账目公开可验证。">
+<meta name="description" content="下载超级赞(Super-Z)Android 安装包:用户端点外卖、商家端接单出餐、骑手端抢单配送。商家佣金 5% 封顶,配送费 100% 归骑手,账目公开可验证。">
 <link rel="canonical" href="https://chaojizan.cc/download">
+<link rel="icon" type="image/png" sizes="64x64" href="/site/brand/favicon_64.png">
+<!-- 官网浅色版的独立下载页(不走 React 包,手机上点开要快)。
+     颜色同 web/src/site.css;标题和三个字块用官网那份中文衬线子集,
+     scripts/gen_font_subset.py 会扫这一页的 h1 标题和字块(class 为 g 的那三个) -->
 <style>
-  :root { --orange:#FF5A1F; --green:#2FBF8F; --bg:#0B0E14; --card:#12161F;
-          --line:#1E2430; --text:#EAEEF6; --muted:#8B94A9; }
+  @font-face { font-family: 'SzSerif'; src: url('/site/fonts/SzSerif-Semibold.woff') format('woff'); font-weight: 600; font-display: swap; }
+  @font-face { font-family: 'SzSerifCJK'; src: url('/site/fonts/SzSerifCJK-Semibold.site.woff') format('woff'); font-weight: 600; font-display: swap; }
+  :root { --paper:#F0EEE6; --surface:#FBFAF6; --line:#E2DED2; --ink:#141413; --ink2:#6B6862;
+          --ink3:#9A968C; --clay:#C15F3C; --earn:#4E6B4F; --link:#2C5F87; }
   * { box-sizing:border-box; margin:0; }
-  body { background:var(--bg); color:var(--text); font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-         line-height:1.8; padding:40px 20px 60px; }
-  .wrap { max-width:760px; margin:0 auto; }
-  h1 { font-size:1.7rem; } h1 b { color:var(--orange); }
-  .sub { color:var(--muted); margin:6px 0 8px; font-size:.95rem; }
-  .ver { color:var(--green); font-size:.88rem; margin-bottom:22px; min-height:1.4em; }
-  .cards { display:grid; gap:14px; }
-  .dl { display:flex; align-items:center; gap:16px; background:var(--card); border:1px solid var(--line);
-        border-radius:16px; padding:18px 20px; text-decoration:none; color:inherit; transition:border-color .25s; }
-  .dl:hover { border-color:var(--orange); }
-  .dl .icon { font-size:1.9rem; }
-  .dl .t { flex:1; }
-  .dl .t b { font-size:1.05rem; }
-  .dl .t div { color:var(--muted); font-size:.82rem; }
-  .dl .btn { background:var(--orange); color:#fff; border-radius:999px; padding:8px 18px;
-             font-size:.88rem; white-space:nowrap; }
-  .note { color:var(--muted); font-size:.8rem; margin-top:20px; }
-  .note a { color:var(--green); text-decoration:none; }
-  .back { display:inline-block; margin-top:26px; color:var(--muted); text-decoration:none; font-size:.85rem; }
-  .back:hover { color:var(--orange); }
+  body { background:var(--paper); color:var(--ink); line-height:1.7; -webkit-font-smoothing:antialiased;
+         font-family:-apple-system,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif; }
+  a { color:inherit; text-decoration:none; }
+  .top { display:flex; align-items:center; gap:10px; padding:14px 24px; border-bottom:1px solid var(--line); }
+  .top .brand { display:flex; align-items:center; gap:10px; font-weight:600; font-size:17px; }
+  .top .back { margin-left:auto; font-size:14px; color:var(--ink2); }
+  .top .back:hover { color:var(--ink); }
+  .wrap { max-width:760px; margin:0 auto; padding:48px 20px 24px; }
+  .eyebrow { font-size:12px; letter-spacing:1.5px; color:var(--ink2); }
+  h1 { font-family:'SzSerif','SzSerifCJK','PingFang SC',serif; font-weight:600; font-size:40px; line-height:1.2; margin-top:14px; }
+  .sub { color:var(--ink2); margin-top:14px; font-size:15px; max-width:34em; }
+  .ver { color:var(--earn); font-size:13.5px; margin-top:10px; min-height:1.5em; }
+  .cards { display:grid; gap:12px; margin-top:26px; }
+  .dl { display:flex; align-items:center; gap:16px; background:var(--surface); border:1px solid var(--line);
+        border-radius:12px; padding:18px; position:relative; overflow:hidden; transition:border-color .12s; }
+  .dl::before { content:""; position:absolute; left:0; top:0; right:0; height:3px; background:var(--bar); }
+  .dl:hover { border-color:#CFCABD; }
+  .g { width:44px; height:44px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex:none;
+       font-family:'SzSerifCJK','PingFang SC',serif; font-weight:600; font-size:21px; line-height:1; }
+  .t { flex:1; min-width:0; }
+  .t b { font-size:16px; font-weight:600; }
+  .t div { color:var(--ink2); font-size:13px; }
+  .btn { border:1px solid var(--line); border-radius:8px; padding:8px 16px; font-size:14px; white-space:nowrap; }
+  .dl:hover .btn { border-color:var(--ink); }
+  /* 一屏一个实底按钮:用户端 */
+  .dl.primary .btn { background:var(--clay); border-color:var(--clay); color:var(--surface); font-weight:600; }
+  .note { color:var(--ink2); font-size:13px; margin-top:22px; line-height:1.85; }
+  .note a { color:var(--link); }
+  .note a:hover { color:var(--clay); }
+  .foot { text-align:center; font-size:12.5px; color:var(--ink2); padding:48px 20px 40px; line-height:1.9; }
+  .foot a { color:var(--link); }
+  @media (max-width:520px) {
+    .wrap { padding-top:36px; }
+    h1 { font-size:32px; }
+    .dl { flex-wrap:wrap; gap:12px 14px; padding:16px; }
+    .dl .btn { flex:1 0 100%; text-align:center; }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1><b>超级赞</b> Super-Z 下载</h1>
-  <div class="sub">Android 安装包(arm64)。低抽成、账目透明——商家佣金 5%,配送费 100% 归骑手。</div>
+<header class="top">
+  <a class="brand" href="/">
+    <svg width="28" height="28" viewBox="0 0 512 512" aria-hidden="true">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#FF7A45"/><stop offset="1" stop-color="#E1251B"/></linearGradient></defs>
+      <rect width="512" height="512" rx="116" fill="url(#g)"/>
+      <rect x="108" y="246" width="64" height="168" rx="22" fill="#FFD34D"/>
+      <path d="M 244 300 C 239 258 237 234 233 212 C 229 190 224 174 215 154" fill="none" stroke="#FFFFFF" stroke-width="68" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="190" y="246" width="204" height="168" rx="36" fill="#FFFFFF"/>
+      <rect x="262" y="288" width="106" height="14" rx="7" fill="url(#g)"/>
+      <rect x="262" y="326" width="106" height="14" rx="7" fill="url(#g)"/>
+      <rect x="262" y="364" width="106" height="14" rx="7" fill="url(#g)"/>
+    </svg>
+    超级赞
+  </a>
+  <a class="back" href="/">← 返回官网</a>
+</header>
+
+<main class="wrap">
+  <div class="eyebrow">下载 · Android</div>
+  <h1>下载超级赞</h1>
+  <p class="sub">Android 安装包（arm64），用户、商家、骑手各一个。装一次以后 App 内置更新检查，有新版会提醒。</p>
   <div class="ver" id="ver">正在读取最新版本…</div>
 
   <div class="cards">
-    <a class="dl" href="/appdist/chaojizan-user-arm64.apk">
-      <span class="icon">🍜</span>
-      <span class="t"><b>用户端</b><div>点外卖 / 到店自取 / 团购,每一单的钱去向可查</div></span>
+    <a class="dl primary" style="--bar:#C15F3C" href="/appdist/chaojizan-user-arm64.apk">
+      <span class="g" style="color:#C15F3C;background:rgba(193,95,60,.12)">用</span>
+      <span class="t"><b>用户端</b><div>点外卖、到店自取、团购，每一单的钱去向可查</div></span>
       <span class="btn">下载 APK</span>
     </a>
-    <a class="dl" href="/appdist/chaojizan-merchant-arm64.apk">
-      <span class="icon">🏪</span>
-      <span class="t"><b>商家端</b><div>接单出餐 / 小票打印 / 对账提现,只收 5% 服务费</div></span>
+    <a class="dl" style="--bar:#943F2F" href="/appdist/chaojizan-merchant-arm64.apk">
+      <span class="g" style="color:#943F2F;background:rgba(148,63,47,.12)">商</span>
+      <span class="t"><b>商家端</b><div>接单出餐、小票打印、对账提现，佣金 5% 封顶</div></span>
       <span class="btn">下载 APK</span>
     </a>
-    <a class="dl" href="/appdist/chaojizan-rider-arm64.apk">
-      <span class="icon">🛵</span>
-      <span class="t"><b>骑手端</b><div>抢单配送,配送费全额到手,提现 T+1 零手续费</div></span>
+    <a class="dl" style="--bar:#2B5F7A" href="/appdist/chaojizan-rider-arm64.apk">
+      <span class="g" style="color:#2B5F7A;background:rgba(43,95,122,.12)">骑</span>
+      <span class="t"><b>骑手端</b><div>抢单配送，配送费全额到手，提现 T+1 零手续费</div></span>
       <span class="btn">下载 APK</span>
     </a>
   </div>
 
-  <div class="note">
-    安装提示:浏览器下载后直接打开安装;系统提示"未知来源"时允许本次安装即可。
-    App 内置更新检查,装一次后有新版会自动提醒。
-    也可以从 <a href="https://github.com/hanpaopao66/super-z/releases/latest" target="_blank">GitHub Releases</a> 下载同一份安装包
-    (代码开源,欢迎自行构建校验)。
-  </div>
-  <a class="back" href="/">← 返回官网</a>
-  <div class="note" style="text-align:center">
-    <a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>
-  </div>
-</div>
+  <!-- 汉字之间别换行:HTML 会把换行当成一个空格,中文句子里就多出一格空白 -->
+  <p class="note">安装提示：浏览器下载后直接打开安装；系统提示“未知来源”时，允许本次安装即可。商家在电脑上管店、管酒店房态，用<a href="/merchant">网页版商家后台</a>。也可以从 <a href="https://github.com/hanpaopao66/chaojizan/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a> 下载同一份安装包，附件里有 SHA256SUMS.txt 可以校验（代码开源，欢迎自行构建）。</p>
+</main>
+
+<footer class="foot">
+  <div>超级赞 Super-Z · 群众帮群众</div>
+  <div>运营主体：陕西爱卡斯科技有限公司 · <a href="tel:15231109698">15231109698</a> · <a href="mailto:support@chaojizan.cc">support@chaojizan.cc</a></div>
+  <div><a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a> · <a href="/legal/terms">用户协议</a> · <a href="/legal/privacy">隐私政策</a></div>
+</footer>
 <script>
   // 版本信息与应用内更新同源(versions.json 由发版脚本维护)
-  fetch('/appdist/versions.json').then(r => r.json()).then(d => {
-    const u = d.user || {};
-    document.getElementById('ver').textContent =
-      '最新版本 v' + u.version + ' (build ' + u.build + ') · ' + (u.notes || '');
+  // 读不到(404、字段缺)就不写,别写出「vundefined」
+  fetch('/appdist/versions.json').then(r => (r.ok ? r.json() : null)).then(d => {
+    const u = (d && d.user) || {};
+    const el = document.getElementById('ver');
+    if (!u.version) { el.textContent = ''; return; }
+    el.textContent = '最新版本 v' + u.version + (u.build ? ' (build ' + u.build + ')' : '')
+      + (u.notes ? ' · ' + u.notes : '');
   }).catch(() => { document.getElementById('ver').textContent = ''; });
 </script>
 </body>

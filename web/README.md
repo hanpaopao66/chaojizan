@@ -1,8 +1,10 @@
 # Super-Z 官网(React)
 
-首页(`src/Home.jsx`)讲聚合平台:服务台(频道开没开读 `/channels`)+ 一张费率表 +
-实时账目(/stats/overview、/transparency/audit,与公开账本同源)。
-入驻页、品牌页、大屏、透明中心是同一个包里的子路由。
+首页(`src/Home.jsx`)讲聚合平台:服务台(频道开没开读 `/channels`)+ 一笔单子的
+流程动画(`src/FlowFilm.jsx`)+ 一张费率表 + 实时账目(/stats/overview、
+/transparency/audit,与公开账本同源)。
+费率(`/rates`)、透明中心(`/transparency`)、商家入驻 / 骑手加入(`/join/*`)、
+开源仓(`/opensource`)、频道页(`/channel/{key}`)、品牌页、大屏是同一个包里的子路由。
 
 ## 开发
 
@@ -23,10 +25,13 @@ npm run build      # 产物直接输出到 ../server/static/site/
 
 ## 设计约定
 
-- 首页颜色取 `packages/shared/lib/src/brand.dart` 产品层(骨白 / 黏土 / earn / hold /
-  频道色槽),写在 `src/home.css` 顶部;子页仍是旧的深色版(`src/styles.css`)
-- `styles.css` 是**全局**样式,首页的类名不能和它重名(`.brand` `.cta` `.btn` `.app` 等),
-  否则那些规则会漏进首页。原因和实测现象见 `Home.jsx` 顶部注释
-- 首页标题用的衬线字是子集:改了 h1 / h2 / 频道字块的文案要重跑
+- 除大屏(`/screen`)外全站浅色,颜色取 `packages/shared/lib/src/brand.dart` 产品层
+  (骨白 / 黏土 / earn / hold / 频道色槽)。公共令牌、顶栏页脚、按钮表格在 `src/site.css`,
+  各子页的版式在 `src/pages.css`,首页自己的在 `src/home.css`
+- `styles.css` 只剩大屏还在用的深色底和 `.tag`,但它仍是**全局**样式 ——
+  新类名别和它重名,否则规则会漏进浅色页。原因和实测现象见 `Home.jsx` 顶部注释
+- 动效和 App 同一套(令牌在 `packages/shared/lib/src/motion.dart`):分账条 900ms 生长、段间 120ms,
+  数字 900ms 滚到终值,卡片 220ms 淡入;系统开了「减少动态效果」就直接给终态
+- 标题用的衬线字是子集(全站 h1 / h2、频道字块、流程动画的字幕):改了这些文案要重跑
   `python3 scripts/gen_font_subset.py --web`(CI 的「显示字覆盖率」会拦漏跑)
 - 不喊口号:页面上的每个数字都来自公开接口,可点进原始数据

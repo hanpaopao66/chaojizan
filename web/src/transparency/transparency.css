@@ -1,191 +1,198 @@
-/* 透明中心:滚动长页,沿用官网变量(--orange/--green/--card/--line)。 */
+/* 透明中心(TransparencyPage.jsx)。浅色版:令牌、卡片、表格、分账条在 site.css;
+   这里只有这一页独有的块。颜色只用 earn(到手的钱)/ hold(平台那份)/ danger(差错),
+   不再用老版的荧光绿和橙 —— 红色只留给「账不对」。 */
 
-.tp-page { max-width: 1080px; margin: 0 auto; padding: 0 24px 80px; }
-.tp-page h2 { font-size: 1.6rem; margin: 64px 0 8px; }
-.tp-page h2 b { color: var(--orange); }
-.tp-lede { color: var(--muted, #7A8499); max-width: 760px; margin-bottom: 20px; }
-.tp-lede a { color: var(--orange); text-decoration: none; }
+/* ---------- 4a:今天的账 ---------- */
+.tp-eyebrow { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; font-size: 12px; letter-spacing: 1.5px; color: var(--ink-muted); }
+.tp-pill { display: inline-flex; align-items: center; gap: 6px; color: var(--earn); letter-spacing: 0; }
+.tp-pill .sz-led { align-self: center; }
+.tp-pill.bad { color: var(--danger); }
+.tp-pill.off { color: var(--ink-faint); }
 
-/* 顶部核账英雄区 */
-.tp-hero { text-align: center; padding: 72px 0 12px; }
-.tp-hero .eyebrow { color: var(--muted, #7A8499); letter-spacing: .3em; }
-.tp-hero .big { font-size: 2.4rem; font-weight: 800; margin: 10px 0; }
-.tp-hero .big b { color: var(--green); }
-/* 差错不为 0 时转红。绿色的「差错 10 笔」比没有这个数字更糟 ——
-   它在告诉人"一切正常",而事实相反 */
-.tp-hero .big b.bad { color: #E5484D; }
-.tp-hero .streak { color: var(--amber); font-size: 1.05rem; }
-.tp-hero .sub { color: var(--muted, #7A8499); font-size: .9rem; max-width: 640px;
-  margin: 10px auto 0; }
+.tp-bigs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin-top: 32px; }
+.tp-big { background: var(--surface); padding: 20px 22px; }
+.tp-big .n { font-size: 36px; line-height: 1.1; }
+.tp-big .n.earn { color: var(--earn); }
+.tp-big .n.hold { color: var(--hold); }
+.tp-big .l { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; }
+.tp-big .l.hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 2px; }
+.tp-todaybar { margin-top: 18px; }
 
-/* 90 天核账格子 */
-.tp-days { display: flex; flex-wrap: wrap; gap: 5px; justify-content: center;
-  margin: 22px auto 0; max-width: 720px; }
-.tp-days .d { width: 14px; height: 14px; border-radius: 3px;
-  background: rgba(47, 191, 143, .75); }
-.tp-days .d.bad { background: #E5484D; }
-.tp-days .d.blank { background: rgba(122, 132, 153, .18); }
+.h3 .tp-today-cols { grid-template-columns: minmax(0, 1fr) 320px; gap: 32px; margin-top: 44px; }
+.tp-list-head { display: flex; align-items: baseline; gap: 12px; }
+.tp-list-head h2 { flex: 1; }
+.tp-list-head .muted { font-size: 13px; }
+.tp-list-head + .sz-table-wrap { margin-top: 14px; }
 
-/* 通用卡片网格 */
-.tp-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.tp-card { background: var(--card, #12161F); border: 1px solid var(--line, #1E2430);
-  border-radius: 14px; padding: 18px 20px; }
-.tp-card .v { font-size: 1.9rem; font-weight: 700;
-  font-variant-numeric: tabular-nums; }
-.tp-card .v small { font-size: 1rem; color: var(--muted, #7A8499); font-weight: 400; }
-.tp-card .k { color: var(--muted, #7A8499); font-size: .85rem; margin-top: 2px; }
-.tp-card .m { color: var(--amber); font-size: .82rem; margin-top: 8px;
-  font-variant-numeric: tabular-nums; }
-.tp-card.green .v { color: var(--green); }
-.tp-card.orange .v { color: var(--orange); }
-.tp-card.amber .v { color: var(--amber); }
+/* 列宽照 4a:时间 70 / 频道 自适应 / 三列金额 90 / 平台 80 */
+.tp-today { min-width: 560px; table-layout: fixed; }
+.tp-today th.c-t { width: 70px; }
+.tp-today th.c-m { width: 90px; }
+.tp-today th.c-p { width: 80px; }
+.tp-today td { padding: 11px 14px; }
+.tp-today td.t { color: var(--ink-muted); font-weight: 400; }
+.tp-today td.num { font-weight: 400; white-space: nowrap; }
+.tp-today td.ch { white-space: nowrap; }
+.tp-today td.ch .sz-dot { margin-right: 8px; vertical-align: 1px; }
+.tp-today td.ch .id { color: var(--ink-faint); font-size: 12px; margin-left: 8px; }
+.tp-empty { color: var(--ink-muted); text-align: center; padding: 28px 14px !important; font-size: 13px; }
+.h3 .tp-more { margin-top: 12px; }
 
-/* 佣金去向:收支对照 */
-.tp-funds { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.tp-funds .col { background: var(--card, #12161F);
-  border: 1px solid var(--line, #1E2430); border-radius: 14px; padding: 18px 20px; }
-.tp-funds .col h4 { margin: 0 0 10px; font-size: .95rem;
-  color: var(--muted, #7A8499); font-weight: 600; }
-.tp-funds .row { display: flex; justify-content: space-between; padding: 7px 0;
-  border-bottom: 1px dashed var(--line, #1E2430); font-size: .92rem; }
-.tp-funds .row:last-child { border-bottom: 0; }
-.tp-funds .row .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
-.tp-funds .total { margin-top: 8px; padding-top: 10px;
-  border-top: 1px solid var(--line, #1E2430); }
-.tp-retained { grid-column: 1 / -1; text-align: center; padding: 14px;
-  background: rgba(255, 90, 31, .07); border: 1px solid rgba(255, 90, 31, .25);
-  border-radius: 14px; color: var(--text, #E8ECF4); }
-.tp-retained b { color: var(--orange); font-variant-numeric: tabular-nums; }
+.tp-side-col { display: flex; flex-direction: column; gap: 12px; }
+.tp-side > .body { padding: 18px; }
+/* 按四位一组的空格换行,不在组中间断 */
+.tp-hash { font-size: 13px; margin-top: 8px; overflow-wrap: break-word; line-height: 1.55; letter-spacing: .2px; }
+.tp-side-p { font-size: 12.5px; margin-top: 8px; line-height: 1.65; }
+.tp-side-p .lnk { white-space: nowrap; margin-left: 4px; }
+.tp-warn { font-size: 12.5px; margin-top: 8px; color: var(--hold); }
+.tp-warn.bad { color: var(--danger); }
+.tp-warn a { color: inherit; text-decoration: underline; }
+.tp-wit-cap { margin-bottom: 10px; }
+.tp-wit { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--line); }
+.tp-wit .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-wit .at { color: var(--ink-muted); font-size: 12px; font-weight: 400; }
+.h3 .tp-wit-more { display: inline-block; font-size: 12.5px; margin-top: 10px; }
+.tp-streak { font-size: 12.5px; color: var(--ink-muted); padding: 0 4px; }
+.tp-streak b { color: var(--ink); }
+.tp-streak a.bad { color: var(--danger); }
 
-/* 每 100 元分账条 */
-.tp-split { display: flex; height: 46px; border-radius: 10px; overflow: hidden;
-  margin: 18px 0 6px; }
-.tp-split .seg { display: flex; align-items: center; justify-content: center;
-  font-size: .85rem; font-weight: 600; white-space: nowrap; min-width: 0;
-  overflow: hidden; }
-.tp-split-legend { display: flex; gap: 22px; flex-wrap: wrap;
-  color: var(--muted, #7A8499); font-size: .85rem; margin-bottom: 6px; }
-.tp-split-legend i { display: inline-block; width: 10px; height: 10px;
-  border-radius: 2px; margin-right: 6px; }
-.tp-note { color: var(--muted, #7A8499); font-size: .8rem; }
+/* 各栏目录:横向一行,窄屏可滚 */
+.tp-toc { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 56px; padding-top: 24px; border-top: 1px solid var(--line); font-size: 13px; }
+.tp-toc a { padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-muted); white-space: nowrap; }
+.tp-toc a:hover { color: var(--ink); border-color: #CFCABD; }
 
-/* 佣金率对比 */
-.tp-rate { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
-.tp-rate .now { font-size: 3.4rem; font-weight: 800; color: var(--green);
-  font-variant-numeric: tabular-nums; }
-.tp-rate .cap { color: var(--muted, #7A8499); }
-.tp-rate .cap b { color: var(--orange); }
+/* ---------- 各栏 ---------- */
+.tp-sec { margin-top: 72px; }
+.tp-sec > .sec { margin-bottom: 10px; }
+.h3 .tp-sec h2 { font-size: 26px; line-height: 1.3; }
+.tp-lede { color: var(--ink-muted); max-width: 46em; margin-top: 12px; font-size: 14.5px; line-height: 1.75; }
+.tp-lede a { color: var(--link); }
+.tp-lede b { color: var(--ink); font-weight: 600; }
+.tp-note { color: var(--ink-faint); font-size: 12.5px; margin-top: 10px; line-height: 1.65; }
+.tp-note a { color: var(--link); }
+.h3 .tp-sub { font-size: 16px; font-weight: 600; margin: 32px 0 0; }
+.tp-sec .sz-table-wrap, .tp-sec .tp-log, .tp-sec .tp-cards, .tp-sec .tp-funds { margin-top: 20px; }
+
+/* 核账日历 / 可用率格子(每格一天,90 天) */
+.tp-audit-line { font-size: 17px; margin-top: 16px; }
+.tp-audit-line b { font-size: 22px; }
+.tp-audit-streak { color: var(--earn); font-size: 14px; margin-top: 4px; }
+/* 45 格一行,90 天正好两行 */
+.tp-days { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 18px; max-width: 762px; }
+.tp-days .d { width: 13px; height: 13px; border-radius: 3px; background: var(--earn); opacity: .85; }
+.tp-days .d.bad { background: var(--danger); opacity: 1; }
+.tp-days .d.warn { background: var(--hold); opacity: 1; }
+.tp-days .d.blank { background: var(--line); opacity: 1; }
+.tp-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-muted); margin-top: 10px; }
+.tp-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.tp-legend i.ok { background: var(--earn); opacity: .85; }
+.tp-legend i.bad { background: var(--danger); }
+.tp-legend i.warn { background: var(--hold); }
+.tp-legend i.blank { background: var(--line); }
+
+/* 数字卡 */
+.tp-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.tp-cards.four { grid-template-columns: repeat(4, 1fr); }
+.tp-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+.tp-card .v { font-size: 30px; line-height: 1.15; }
+.tp-card .v small { font-size: 14px; color: var(--ink-muted); font-weight: 400; font-family: -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+.tp-card .k { color: var(--ink-muted); font-size: 12.5px; margin-top: 6px; line-height: 1.6; }
+.tp-card .m { color: var(--ink-faint); font-size: 12px; margin-top: 8px; font-variant-numeric: tabular-nums; }
+.tp-card.earn .v { color: var(--earn); }
+.tp-card.hold .v { color: var(--hold); }
+
+/* 钱去哪了:收支对照 */
+.tp-funds { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tp-funds .col { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
+.tp-funds h4 { margin: 0 0 6px; font-size: 11px; letter-spacing: 1.2px; color: var(--ink-muted); font-weight: 400; }
+.tp-funds .row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 13.5px; }
+.tp-funds .row .num { white-space: nowrap; }
+.tp-funds .row.total { font-weight: 600; }
+.tp-retained { grid-column: 1 / -1; padding: 14px 20px; background: var(--surface-alt); border-radius: 12px; font-size: 14px; color: var(--ink-muted); }
+.tp-retained b { color: var(--hold); font-size: 18px; }
+
+/* 每 100 元 */
+.tp-per100 { margin-top: 20px; }
+.tp-split-legend { display: flex; gap: 8px 22px; flex-wrap: wrap; font-size: 13px; color: var(--ink-muted); margin-top: 12px; }
+.tp-split-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.tp-split-legend b { color: var(--ink); }
+
+/* 佣金率 */
+.tp-rate { display: flex; align-items: center; gap: 32px; flex-wrap: wrap; margin-top: 18px; }
+.tp-rate .now { font-size: 48px; line-height: 1.1; color: var(--earn); }
+.tp-rate .cap { color: var(--ink-muted); font-size: 13px; margin-top: 4px; }
+.tp-rate .cap b { color: var(--hold); }
 .tp-tiers { flex: 1; min-width: 260px; }
-.tp-tiers .t { display: flex; align-items: center; gap: 10px; margin: 6px 0;
-  font-size: .85rem; color: var(--muted, #7A8499); }
-.tp-tiers .bar { height: 10px; border-radius: 5px; background: var(--green);
-  opacity: .75; }
+.tp-tiers .t { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 13px; color: var(--ink-muted); }
+.tp-tiers .t .r { width: 44px; font-weight: 400; }
+.tp-tiers .bar { height: 8px; border-radius: 4px; background: var(--earn); opacity: .7; min-width: 2px; }
 
-/* 月度财报表 */
-.tp-table-wrap { overflow-x: auto; border: 1px solid var(--line, #1E2430);
-  border-radius: 14px; }
-.tp-table { width: 100%; border-collapse: collapse; font-size: .9rem;
-  min-width: 720px; }
-.tp-table th, .tp-table td { padding: 10px 16px; text-align: right;
-  border-bottom: 1px solid var(--line, #1E2430);
-  font-variant-numeric: tabular-nums; }
-.tp-table th:first-child, .tp-table td:first-child { text-align: left; }
-.tp-table th { color: var(--muted, #7A8499); font-weight: 500;
-  background: rgba(122, 132, 153, .06); }
-.tp-table tr:last-child td { border-bottom: 0; }
+/* 宽表(财报 / 派单权重 / 判责 / 处置) */
+.tp-wide { min-width: 680px; }
+.tp-wide td.num { font-weight: 400; }
+.tp-wide .nowrap { white-space: nowrap; }
+.tp-why { font-size: 12.5px; line-height: 1.65; color: var(--ink-muted); max-width: 34em; }
+.tp-why b { color: var(--ink); }
 
-.tp-footer-links { margin-top: 56px; display: flex; gap: 14px; flex-wrap: wrap; }
+/* 公式:深台面,像「可以照着算」的东西(同 SzLedgerCard) */
+.tp-formula { background: var(--ledger); color: #F2F0E8; border-radius: 12px; padding: 14px 18px; font-size: 14px; line-height: 1.7; margin-top: 18px; overflow-x: auto; }
+/* 「顺路」的式子:整块一行一行地摆,不做行内代码(行内的话折行后碎成两截小框) */
+.tp-code { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.8; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.tp-never { margin: 10px 0 0; padding-left: 0; list-style: none; font-size: 14px; }
+.tp-never li { position: relative; padding-left: 22px; margin-bottom: 8px; line-height: 1.65; }
+/* 承诺不做 = 好事,用「到手的钱」那个绿 */
+.tp-never li::before { content: '✕'; position: absolute; left: 0; color: var(--earn); font-weight: 700; }
+.tp-reason { color: var(--ink-faint); margin-left: 4px; }
 
-/* 系统状态 + 最近更新 */
-.tp-days .d.warn { background: rgba(255, 184, 77, .8); }
-.tp-status-now { margin: 6px 0 14px; font-size: 1.05rem; }
-.tp-ok { color: var(--green); }
-.tp-bad { color: #E5484D; }
-.tp-ver { color: var(--orange); font-variant-numeric: tabular-nums; }
-.tp-log { border: 1px solid var(--line, #1E2430); border-radius: 14px;
-  margin-bottom: 14px; overflow: hidden; }
-.tp-log .row { display: flex; align-items: baseline; gap: 14px;
-  padding: 10px 16px; border-bottom: 1px solid var(--line, #1E2430);
-  font-size: .9rem; }
-.tp-log .row:last-child { border-bottom: 0; }
-.tp-log .tag { flex: none; color: var(--orange); font-weight: 600;
-  min-width: 74px; }
-.tp-log .tag.mono { font-family: ui-monospace, Menlo, monospace;
-  color: var(--amber); font-weight: 400; }
-.tp-log .msg { flex: 1; min-width: 0; overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
-.tp-log .date { flex: none; color: var(--muted, #7A8499);
-  font-variant-numeric: tabular-nums; font-size: .82rem; }
+/* 流水式记录(算法改动 / 开关变更 / 公告 / 发版) */
+.tp-log { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
+.tp-log .row { display: flex; align-items: baseline; gap: 14px; padding: 11px 16px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.tp-log .row:first-child { border-top: 0; }
+.tp-log .row .sz-tag { flex: none; }
+.tp-log .msg { flex: 1; min-width: 0; line-height: 1.6; }
+.tp-log .date { flex: none; color: var(--ink-muted); font-size: 12.5px; font-weight: 400; }
+.tp-sha { flex: none; color: var(--ink-faint); font-size: 12px; min-width: 64px; }
+.tp-sec .tp-log + .tp-log { margin-top: 12px; }
 
-/* 治理公开 */
-.tp-reason { color: var(--amber); margin-left: 6px; }
-
-.tp-today-probes { display: inline-block; margin-left: 14px;
-  color: var(--muted, #7A8499); font-size: .85rem;
-  font-variant-numeric: tabular-nums; }
-
-/* ---------- 移动端适配 ---------- */
-@media (max-width: 760px) {
-  .tp-page { padding: 0 16px 56px; }
-  .tp-page h2 { font-size: 1.3rem; margin: 44px 0 8px; }
-  .tp-hero { padding: 64px 0 8px; }  /* 吸顶导航下留足,眉题不被压 */
-  .tp-hero .big { font-size: 1.55rem; }
-  .tp-cards { grid-template-columns: 1fr; }
-  .tp-funds { grid-template-columns: 1fr; }
-  .tp-rate { gap: 16px; }
-  .tp-rate .now { font-size: 2.4rem; }
-  .tp-days { gap: 4px; }
-  .tp-days .d { width: 10px; height: 10px; }
-  .tp-split { height: 40px; }
-  .tp-split .seg { font-size: .72rem; }
-  .tp-log .row { flex-wrap: wrap; row-gap: 2px; }
-  .tp-log .msg { white-space: normal; }
-  .tp-today-probes { display: block; margin: 6px 0 0; }
-  .tp-footer-links { margin-top: 36px; }
-  .tp-footer-links .btn { flex: 1 1 44%; text-align: center; }
-}
-
-/* ---- 派单算法公开(#141) ---- */
-/* 公式用等宽 + 深色台面:它是这一节的主角,要像"可以照着算"的东西,
-   而不是一句排版好看的宣传语 */
-.tp-formula {
-  background: #1F1E1B;
-  color: #F2F0E8;
-  border-radius: 12px;
-  padding: 14px 16px;
-  font-size: 14px;
-  line-height: 1.7;
-  margin: 12px 0 18px;
-  overflow-x: auto;
-}
-.tp-sub { font-size: 17px; margin: 26px 0 6px; }
-/* 「为什么是这个数」是这张表最重要的一列 —— 光给数字等于没公开 */
-.tp-why { font-size: 12.5px; line-height: 1.6; color: #6B6862; max-width: 34em; }
-.tp-never { margin: 8px 0 0; padding-left: 0; list-style: none; }
-.tp-never li {
-  position: relative;
-  padding-left: 22px;
-  margin-bottom: 8px;
-  line-height: 1.6;
-}
-.tp-never li::before {
-  content: '✕';
-  position: absolute;
-  left: 0;
-  color: #4E6B4F;      /* 承诺不做 = 好事,用「到手的钱」那个绿 */
-  font-weight: 700;
-}
+/* 系统状态 */
+.tp-status-now { margin-top: 16px; font-size: 15px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tp-status-now .sz-led { vertical-align: 1px; margin-right: 2px; }
+.tp-today-probes { font-size: 13px; }
 
 /* 账本纪元公告。**刻意不是红色** —— 它不是异常,是一条已经说明过的事实。
    红色留给「有节点说账被改了,而我们没解释过」 */
-.tp-epoch { margin: 0 0 18px; }
-.tp-epoch-card { border: 1px solid var(--line, #23262E);
-                 border-left: 4px solid var(--amber, #FFB84D);
-                 border-radius: 12px; padding: 14px 16px;
-                 background: var(--card, #14161C); line-height: 1.75; }
-.tp-epoch-card h3 { margin: 0 0 6px; font-size: .95rem;
-                    color: var(--amber, #FFB84D); }
-.tp-epoch-card p { margin: 0; font-size: .88rem; }
-.tp-epoch-card .meta { margin-top: 8px; font-size: .78rem;
-                       color: var(--muted, #7A8499); word-break: break-all;
-                       font-family: ui-monospace, Menlo, monospace; }
+.tp-epoch { margin-top: 28px; }
+.tp-epoch-card { border: 1px solid var(--line); border-left: 3px solid var(--hold); border-radius: 12px; padding: 14px 18px; background: var(--surface); line-height: 1.7; }
+.tp-epoch-card h3 { font-size: 14px; color: var(--hold); font-weight: 600; margin-bottom: 4px; }
+.tp-epoch-card p { font-size: 13px; color: var(--ink-muted); }
+.tp-epoch-card .meta { margin-top: 8px; font-size: 12px; color: var(--ink-muted); word-break: break-all; }
+
+.tp-footer-links { margin-top: 64px; display: flex; gap: 12px; flex-wrap: wrap; }
+
+@media (max-width: 900px) {
+  .tp-bigs { grid-template-columns: 1fr 1fr; }
+  .tp-big .n { font-size: 30px; }
+  .tp-cards, .tp-cards.four { grid-template-columns: 1fr 1fr; }
+  .tp-funds { grid-template-columns: 1fr; }
+  .tp-sec { margin-top: 56px; }
+  .h3 .tp-sec h2 { font-size: 22px; }
+  .tp-toc { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; margin-top: 44px; }
+  .tp-toc::-webkit-scrollbar { display: none; }
+}
+@media (max-width: 520px) {
+  .tp-big { padding: 16px; }
+  .tp-big .n { font-size: 26px; }
+  .tp-list-head { flex-wrap: wrap; }
+  .tp-list-head h2 { flex: 1 0 100%; }
+  /* 空表在手机上不横滑:表头藏起来,只留那句「今天还没有成交」 */
+  .tp-today.empty { min-width: 0; }
+  .tp-today.empty thead { display: none; }
+  .tp-today.empty .tp-empty { text-align: left; border-top: 0; }
+  .tp-cards, .tp-cards.four { grid-template-columns: 1fr; }
+  .tp-rate .now { font-size: 38px; }
+  .tp-days { gap: 2px; }
+  .tp-days .d { width: 9px; height: 9px; border-radius: 2px; }
+  .tp-log .row { flex-wrap: wrap; row-gap: 4px; padding: 11px 14px; }
+  .tp-log .msg { flex: 1 0 100%; order: 3; }
+  .tp-footer-links .h3-btn { flex: 1 1 44%; text-align: center; }
+}

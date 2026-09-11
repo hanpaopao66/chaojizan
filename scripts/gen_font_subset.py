@@ -38,7 +38,7 @@ GB2312 一二级是简体中文的常用全集(6763 字),UGC 基本都在里面�
 ## 三种用法
 
     python3 scripts/gen_font_subset.py           # 重新生成(要下载 24MB 源字体)
-    python3 scripts/gen_font_subset.py --web     # 只重做官网首页那两份(不下载)
+    python3 scripts/gen_font_subset.py --web     # 只重做官网那几份(不下载)
     python3 scripts/gen_font_subset.py --check   # 只校验覆盖率(CI 用,不下载)
 
 `--check` 读已提交的子集里的 cmap,和源码里扫出来的汉字比对。
@@ -176,34 +176,59 @@ def build() -> int:
     return build_web()
 
 
-# ---------- 官网首页(web/src/Home.jsx) ----------
+# ---------- 官网(web/src/**,外加独立的下载页) ----------
 #
-# 官网首页的衬线只用在 h1 / h2 / 频道字块上,文案全是写死的 ——
-# 用不着 App 那份 GB2312 全集(2.9MB,手机上开官网要白下这么多)。
-# 所以按这几处实际出现的字,从已提交的 App 子集里再切一份。
+# 官网的中文衬线只用在大字上 —— 各页 h1 / h2、频道字块、首页流程动画的字幕,
+# 文案全是写死的,用不着 App 那份 GB2312 全集(2.9MB,手机上开官网要白下这么多)。
+# 所以按这些地方实际出现的字,从已提交的 App 子集里再切一份。
 #
-# 拉丁字母和数字走 SzSerif(本来就只有 33KB),这里只换成 WOFF。
+# 拉丁字母和数字走 SzSerif(常规、半粗两个字重,各 33KB),这里只换成 WOFF。
 # 用 WOFF 不用 WOFF2:WOFF2 要 brotli,CI 的覆盖率检查只装了 fonttools;
 # 字这么少,两者差不到 10KB。
 
-WEB_HOME = ROOT / "web/src/Home.jsx"
+WEB_SRC = ROOT / "web/src"
+WEB_DOWNLOAD = ROOT / "server/static/download.html"
 WEB_FONT_DIR = ROOT / "web/public/fonts"
 WEB_CJK = WEB_FONT_DIR / "SzSerifCJK-Semibold.site.woff"
 WEB_LATIN = WEB_FONT_DIR / "SzSerif-Semibold.woff"
+#: 数字的常规字重:表格里逐行的金额、时间用它(设计稿里只有大字是 600)
+WEB_LATIN_REGULAR = WEB_FONT_DIR / "SzSerif-Regular.woff"
+
+#: 源码里用衬线显示、但不在 <h1>/<h2> 里写死的字(频道页标题表、流程动画字幕),
+#: 用这一对注释圈起来;圈里的**字符串字面量**都算
+SERIF_BLOCK = re.compile(r"@serif-cjk-begin(.*?)@serif-cjk-end", re.S)
 
 
 def web_chars() -> set[str]:
-    """官网首页里会用衬线显示的汉字:h1、h2 与频道字块。
+    """官网上会用中文衬线(SzSerifCJK)显示的汉字。
 
-    **判据要和 home.css 里挂 SzSerifCJK 的选择器对上**
-    (`.h3 h1, .h3 h2`、`.glyph`)。那边多挂一处,这里就要多扫一处。
+    **判据要和挂 SzSerifCJK 的样式对上**:
+    - site.css 的 `.h3 h1, .h3 h2` → web/src 里所有 .jsx 的 <h1>…</h1>、<h2>…</h2>;
+    - `.glyph`、频道页的 `.cp-pill .g` → 频道注册表里的 `glyph: '碗'`;
+    - 频道页规矩左边那一格 `.cp-rules .v` → ChannelPage.jsx 标题表同一个圈里的 V;
+    - FlowFilm.jsx 的字幕 / 收尾卡、ChannelPage.jsx 的标题表 → @serif-cjk-begin/end 圈住的字面量;
+    - server/static/download.html 的 <h1> 和 class="g" 的字块(那页自己挂的字体)。
+    那边多挂一处,这里就要多扫一处。标题写成变量传进去的话这里扫不到 ——
+    所以标题要么写死在 <h1>/<h2> 里,要么放进 serif-cjk 圈里。
     """
-    src = WEB_HOME.read_text()
     found = set()
-    for m in re.finditer(r"<h([12])[^>]*>(.*?)</h\1>", src, re.S):
-        found.update(CJK.findall(m.group(2)))
-    for m in re.finditer(r"glyph: '(.)'", src):
-        found.update(CJK.findall(m.group(1)))
+    for path in sorted(WEB_SRC.rglob("*.js*")):
+        if path.suffix not in (".jsx", ".js"):
+            continue
+        src = path.read_text()
+        for m in re.finditer(r"<h([12])[^>]*>(.*?)</h\1>", src, re.S):
+            found.update(CJK.findall(m.group(2)))
+        for m in re.finditer(r"glyph: '(.)'", src):
+            found.update(CJK.findall(m.group(1)))
+        for block in SERIF_BLOCK.findall(src):
+            for m in LITERAL.finditer(block):
+                found.update(CJK.findall(m.group(1) or m.group(2) or ""))
+    if WEB_DOWNLOAD.exists():
+        html = WEB_DOWNLOAD.read_text()
+        for m in re.finditer(r"<h1[^>]*>(.*?)</h1>", html, re.S):
+            found.update(CJK.findall(m.group(1)))
+        for m in re.finditer(r'class="g"[^>]*>([^<]*)<', html):
+            found.update(CJK.findall(m.group(1)))
     return found
 
 
@@ -213,7 +238,7 @@ def build_web() -> int:
 
     chars = web_chars()
     if not chars:
-        raise SystemExit(f"✗ 在 {WEB_HOME.relative_to(ROOT)} 里一个标题字都没扫到,"
+        raise SystemExit(f"✗ 在 {WEB_SRC.relative_to(ROOT)} 里一个标题字都没扫到,"
                          "扫描规则和页面对不上了")
     WEB_FONT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -230,18 +255,23 @@ def build_web() -> int:
     sub.subset(font)
     subset.save_font(font, str(WEB_CJK), opts)
 
-    latin = TTFont(FONT_DIR / "SzSerif-Semibold.ttf")
-    latin.flavor = "woff"
-    latin.save(WEB_LATIN)
+    for name, out in (("Semibold", WEB_LATIN), ("Regular", WEB_LATIN_REGULAR)):
+        latin = TTFont(FONT_DIR / f"SzSerif-{name}.ttf")
+        latin.flavor = "woff"
+        latin.save(out)
 
-    print(f"  官网首页标题字 {len(chars)} 个")
-    for out in (WEB_CJK, WEB_LATIN):
+    missing = sorted(chars - {chr(c) for c in font.getBestCmap()})
+    if missing:
+        # App 子集(GB2312 一二级 + App 源码)里本来就没有的字,官网子集也切不出来
+        print("  ⚠ App 子集里没有这些字,官网上会掉回系统字体:" + "".join(missing))
+    print(f"  官网衬线显示字 {len(chars)} 个")
+    for out in (WEB_CJK, WEB_LATIN, WEB_LATIN_REGULAR):
         print(f"  {out.relative_to(ROOT)!s:<48} {out.stat().st_size/1024:6.1f} KB")
     return 0
 
 
 def check_web() -> bool:
-    """官网首页的标题字是否都在官网子集里。改了标题没重跑,这里拦。"""
+    """官网的衬线显示字是否都在官网子集里。改了标题没重跑,这里拦。"""
     from fontTools.ttLib import TTFont
 
     if not WEB_CJK.exists():
@@ -253,7 +283,7 @@ def check_web() -> bool:
     need = web_chars()
     missing = sorted(need - have)
     mark = "✗" if missing else "✓"
-    print(f"  {mark} 官网首页标题:需要 {len(need)} 字,缺 {len(missing)} 字")
+    print(f"  {mark} 官网衬线显示字:需要 {len(need)} 字,缺 {len(missing)} 字")
     if missing:
         print("     " + "".join(missing))
         print("   跑 `python3 scripts/gen_font_subset.py --web` 重新切官网子集。")
@@ -261,7 +291,7 @@ def check_web() -> bool:
 
 
 def check() -> int:
-    """校验三件事:源码文案全覆盖、GB2312 常用字全覆盖、官网首页标题全覆盖。
+    """校验三件事:源码文案全覆盖、GB2312 常用字全覆盖、官网衬线显示字全覆盖。
 
     第二条看着多余(子集就是照它生成的),但它挡的是**手改字体文件**
     这种事 —— 有人为了省体积单独重新子集了一次,包变小了、
@@ -295,6 +325,6 @@ if __name__ == "__main__":
     ap.add_argument("--check", action="store_true",
                     help="只校验覆盖率,不重新生成(CI 用)")
     ap.add_argument("--web", action="store_true",
-                    help="只重做官网首页那两份字体(从已提交的 App 子集切,不下载)")
+                    help="只重做官网那几份字体(从已提交的 App 子集切,不下载)")
     args = ap.parse_args()
     raise SystemExit(check() if args.check else build_web() if args.web else build())

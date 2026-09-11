@@ -1,0 +1,186 @@
+/* 官网浅色版的公共样式:令牌、字体、顶栏、页脚、按钮、页头、卡片、表格、
+   分账条、标签。除 /screen 以外的每一页都在 .h3 底下(SiteChrome.jsx)。
+   颜色 = brand.dart 产品层浅色态 + 设计定稿的频道色,不另起色板。
+
+   ⚠️ styles.css 是全局的,类名别和它撞(现在它只剩重置和 .tag);
+   反过来这份文件的规则也都挂在 .h3 或 h3- / sz- 前缀上,不漏进 /screen。 */
+
+/* 两个字体都是子集,由 scripts/gen_font_subset.py --web 生成。
+   中文衬线只切了**官网上用衬线显示的字**:各页 h1 / h2、频道字块、首页流程动画的
+   字幕(FlowFilm.jsx 里标了 serif-cjk 的那一段)。App 那份 GB2312 全集 2.9MB,
+   官网用不着。改了这些文案要重跑,CI 的覆盖率检查会拦。
+   挂 SzSerifCJK 的选择器改了,脚本里的扫描规则也要跟着改 */
+@font-face { font-family: 'SzSerif'; src: url('/fonts/SzSerif-Regular.woff') format('woff'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'SzSerif'; src: url('/fonts/SzSerif-Semibold.woff') format('woff'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'SzSerifCJK'; src: url('/fonts/SzSerifCJK-Semibold.site.woff') format('woff'); font-weight: 600; font-display: swap; }
+
+/* 除 /screen 外都是骨白底。index.html 的内联脚本在 JS 包之前给 <html> 挂 h3-root,
+   首屏不会先闪一下深色;iOS 橡皮筋回弹露出来的也是骨白 */
+html.h3-root, html.h3-root body { background: #F0EEE6; }
+
+.h3 {
+  --paper: #F0EEE6; --surface: #FBFAF6; --surface-alt: #F5F3EC;
+  --ink: #141413; --ink-muted: #6B6862; --ink-faint: #9A968C; --line: #E2DED2;
+  --clay: #C15F3C; --earn: #4E6B4F; --hold: #A6763E; --danger: #D03030; --link: #2C5F87;
+  --ledger: #1F1E1B;
+  --std: cubic-bezier(.2, .8, .2, 1); --spring: cubic-bezier(.34, 1.3, .64, 1); --exit: cubic-bezier(.4, 0, 1, 1);
+  background: var(--paper); color: var(--ink); line-height: 1.7;
+  font-family: -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+.h3 a { color: inherit; text-decoration: none; }
+/* 拉丁字母走 SzSerif,中文走 SzSerifCJK —— 中文子集里没有拉丁字母,
+   反过来排的话标题里的「App」会掉回黑体 */
+.h3 h1, .h3 h2 { font-family: 'SzSerif', 'SzSerifCJK', 'PingFang SC', 'Noto Sans CJK SC', serif; font-weight: 600; margin: 0; }
+/* 数字一律 SzSerif(tabular,滚动时不跳宽) */
+.h3 .num, .h3 .rate, .h3 .n, .h3 .facts b { font-family: 'SzSerif', Georgia, serif; font-weight: 600; font-variant-numeric: tabular-nums; }
+.h3 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+/* 标题里的一个短语(SiteChrome 的 kw()):整段不拆行 */
+.h3 .kw { display: inline-block; }
+/* 吸顶顶栏下留出锚点的落脚处 */
+.h3 [id] { scroll-margin-top: 76px; }
+
+/* 分段标题:弱化小字 + 字距(同 SzSectionTitle) */
+.h3 .sec { font-size: 11px; letter-spacing: 1.2px; color: var(--ink-muted); }
+.h3 .muted { color: var(--ink-muted); }
+.h3 .faint { color: var(--ink-faint); }
+.h3 .earn { color: var(--earn); }
+.h3 .hold { color: var(--hold); }
+.h3 .bad { color: var(--danger); }
+.h3 .note { color: var(--ink-muted); font-size: 13px; margin: 14px 0 0; }
+.h3 .note a, .h3 a.lnk, .h3 .lnk a { color: var(--link); }
+.h3 .note a:hover, .h3 a.lnk:hover { color: var(--clay); }
+
+/* 按钮:8 圆角矩形,不是胶囊;一屏一个实底。
+   前缀带 .h3 是为了压过上面的 `.h3 a { color: inherit }` */
+.h3 .h3-btn { display: inline-block; padding: 12px 22px; border-radius: 8px; font-size: 15px; line-height: 1.5; border: 1px solid var(--line); color: var(--ink); white-space: nowrap; background: none; font-family: inherit; cursor: pointer; transition: border-color 120ms var(--std), transform 120ms var(--std); }
+.h3 .h3-btn.primary { background: var(--clay); border-color: var(--clay); color: var(--surface); font-weight: 600; }
+.h3 .h3-btn.ghost:hover { border-color: var(--ink); }
+.h3 .h3-btn:active { transform: scale(.97); }
+.h3 .h3-btn.lg { padding: 13px 24px; }
+.h3 .h3-btn.sm { padding: 6px 12px; font-size: 13px; }
+.h3-cta { display: flex; gap: 12px; flex-wrap: wrap; }
+
+/* ---------- 顶栏 ---------- */
+.h3-nav { display: flex; align-items: center; gap: 22px; padding: 14px 32px; border-bottom: 1px solid var(--line); background: var(--paper); position: -webkit-sticky; position: sticky; top: 0; z-index: 10; }
+.h3-nav .h3-brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; white-space: nowrap; }
+.h3-nav .links { margin-left: auto; display: flex; gap: 24px; font-size: 14px; color: var(--ink-muted); }
+.h3-nav .links a { white-space: nowrap; }
+.h3-nav .links a:hover { color: var(--ink); }
+.h3-nav .links a.on { color: var(--ink); font-weight: 600; }
+.h3 .h3-nav .h3-btn { padding: 9px 18px; font-size: 14px; }
+.h3 .h3-nav .h3-btn.ghost { font-weight: 500; }
+
+/* ---------- 页脚 ---------- */
+.h3-foot { text-align: center; padding: 72px 24px 44px; font-size: 14px; }
+.h3-foot .muted { font-size: 12.5px; margin-top: 6px; }
+.h3-foot a { color: var(--link); }
+
+/* ---------- 频道字块 / 色点 ---------- */
+.glyph { display: inline-flex; align-items: center; justify-content: center; flex: none;
+  font-family: 'SzSerifCJK', 'PingFang SC', serif; font-weight: 600; line-height: 1; }
+.sz-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; display: inline-block; }
+
+/* ---------- 子页页头(4a–4k 共用) ---------- */
+.sz-page { max-width: 1040px; margin: 0 auto; padding: 56px 32px 64px; line-height: 1.6; }
+.sz-eyebrow { font-size: 12px; letter-spacing: 1.5px; color: var(--ink-muted); }
+.h3 .sz-h1 { font-size: 44px; line-height: 1.2; margin-top: 16px; text-wrap: pretty; }
+.sz-lede { color: var(--ink-muted); font-size: 16px; margin-top: 18px; max-width: 30em; line-height: 1.7; }
+.h3 .sz-h2 { font-size: 22px; line-height: 1.35; }
+
+/* 页头下的两栏:比例各页不同,在各页的类上给 grid-template-columns */
+.sz-cols { display: grid; gap: 48px; align-items: start; }
+
+/* ---------- 卡片:12 圆角 + 发丝边 + 可选 3px 频道识别条 ---------- */
+.sz-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.sz-card > .bar { height: 3px; }
+.sz-card > .body { padding: 18px 20px; }
+.sz-cap { font-size: 11px; letter-spacing: 1.2px; color: var(--ink-muted); }
+/* 卡里的逐行明细(一笔样单 / 骑手示例账) */
+.sz-rows { display: flex; flex-direction: column; font-size: 13.5px; }
+.sz-rows > div { display: flex; gap: 10px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--line); }
+.sz-rows > div > .k { flex: 1; min-width: 0; }
+.sz-rows .num { font-weight: 600; }
+
+/* ---------- 表格(4a 逐单、4c 费率、透明中心各表共用的样子) ---------- */
+.sz-table-wrap { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
+.sz-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.sz-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.sz-table th { text-align: left; font-weight: 400; color: var(--ink-muted); font-size: 12px; background: var(--surface-alt); padding: 10px 14px; white-space: nowrap; }
+.sz-table td { padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+.sz-table .r { text-align: right; }
+.sz-table td.num { font-weight: 400; }
+
+/* 频道费率表(首页 1g、费率页 4c):grid 行,不是 table —— 窄屏要改成两列卡 */
+.rates { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); font-size: 14.5px; }
+.rates .row { display: grid; grid-template-columns: 1.1fr .8fr 1.3fr 1.6fr; border-top: 1px solid var(--line); }
+.rates .row > div { padding: 14px 18px; }
+.rates .row.head { border-top: 0; background: var(--surface-alt); color: var(--ink-muted); font-size: 12px; letter-spacing: .5px; }
+.rates .row.head > div { padding: 12px 18px; }
+.rates .row.off { color: var(--ink-faint); }
+.rates .ch { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rates .rate { color: var(--hold); }
+.rates .row.off .rate { color: var(--ink-faint); }
+.rates .h3-tag { font-size: 11px; line-height: 1.6; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-faint); white-space: nowrap; }
+
+/* ---------- 分账条(商家 earn / 骑手 earn 半透 / 平台 hold) ---------- */
+.sz-split { display: flex; border-radius: 999px; overflow: hidden; background: transparent; }
+.sz-split > span { flex-basis: 0; min-width: 0; transition: flex-grow 900ms var(--std); }
+.sz-split.empty { background: var(--line); }
+
+/* ---------- 小标签(规则留痕) ---------- */
+.sz-tag { font-size: 12px; line-height: 1.5; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+.sz-tag.ok { background: rgba(78,107,79,.12); color: #4E6B4F; }
+.sz-tag.info { background: rgba(43,95,122,.12); color: #2B5F7A; }
+.sz-tag.warn { background: rgba(166,118,62,.14); color: #A6763E; }
+.sz-tag.plain { background: var(--surface-alt); color: var(--ink-muted); }
+
+/* 状态小点(核账通过 / 见证节点在线) */
+.sz-led { width: 7px; height: 7px; border-radius: 50%; background: var(--earn); display: inline-block; flex: none; }
+.sz-led.bad { background: var(--danger); }
+.sz-led.off { background: var(--ink-faint); }
+
+/* ---------- 入场:220ms spring,y 12→0,错落 40ms、最多 6 项 ---------- */
+@keyframes sz-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.sz-enter { animation: sz-enter 220ms var(--spring) both; animation-delay: calc(var(--i, 0) * 40ms); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sz-enter { animation: none; }
+  .sz-split > span, .h3 .h3-btn { transition: none; }
+  html { scroll-behavior: auto; }
+}
+
+@media (max-width: 900px) {
+  .h3-nav { flex-wrap: wrap; gap: 12px; padding: 10px 14px; }
+  /* 链接那行横向可滚,不隐藏(老官网藏了之后,手机上一个子页入口都没有) */
+  .h3-nav .links { order: 3; width: 100%; margin-left: 0; gap: 18px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .h3-nav .links::-webkit-scrollbar { display: none; }
+  .h3-nav .h3-btn.primary { margin-left: auto; }
+  .h3-nav .h3-btn.ghost + .h3-btn.primary { margin-left: 0; }
+  .h3-nav .h3-brand + .links + .h3-btn.ghost { margin-left: auto; }
+  .h3 [id] { scroll-margin-top: 104px; }
+  .sz-page { padding: 40px 20px 48px; }
+  .h3 .sz-h1 { font-size: clamp(30px, 7.4vw, 40px); }
+  /* minmax(0, 1fr),不是 1fr:1fr 的下限是内容的最小宽度,
+     里面有 min-width 560 的宽表时整列被撑宽,整页横着溢出 */
+  .sz-cols { grid-template-columns: minmax(0, 1fr) !important; gap: 32px; }
+  .rates .row { grid-template-columns: 1fr 1fr; }
+  .rates .row.head { display: none; }
+  /* 表头藏了,后两格没头没尾 —— 把列名作小字补在格子上方 */
+  .rates .row > div[data-k]::before { content: attr(data-k); display: block; font-size: 11px; letter-spacing: .5px; color: var(--ink-faint); margin-bottom: 2px; }
+  .h3-foot { padding: 56px 20px 40px; }
+}
+@media (max-width: 520px) {
+  .sz-lede { font-size: 15px; }
+  .rates .row > div { padding: 10px 14px; }
+  .rates .row > div:first-child { padding-top: 14px; }
+  .rates .row > div:last-child { padding-bottom: 14px; }
+}
+@media (max-width: 380px) {
+  /* 320 屏上顶栏会折成三行,吸顶时吃掉五分之一屏。按钮收小一档就回到两行 */
+  .h3-nav { gap: 10px; }
+  .h3 .h3-nav .h3-btn { padding: 7px 12px; font-size: 13px; }
+  /* 页内锚点收起来:往下滑一样到得了,留着会把「开源仓」这种真页面挤出屏幕 */
+  .h3-nav .links a.h3-jump { display: none; }
+}
