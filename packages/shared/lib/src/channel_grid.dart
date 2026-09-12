@@ -2,18 +2,14 @@ import 'package:flutter/material.dart';
 
 import 'brand.dart';
 import 'channels.dart';
-import 'sz_widgets.dart';
 
-/// 首页金刚区。
+/// 首页金刚区:一律聚合式(字块 + 名字),排几列问 [channelGridColumns]。
 ///
 /// ## 为什么在 shared 而不是在首页里
 ///
-/// 排版规则([channelGridLayout] / [channelGridColumns])本来就在这儿,
-/// 有测试锁着;但**渲染**留在首页时,聚合式那套代码在只有 4 个频道的今天
-/// 一次都跑不到 —— 等于写完就搁着,等打车上线那天才第一次运行。
-///
-/// 搬过来之后,聚合式可以拿 5 个、8 个频道当场渲染,
-/// 连长辈版 1.4× 下会不会撑爆都能测(见 `channel_grid_test.dart`)。
+/// 排版规则本来就在这儿,有测试锁着;渲染也放在这儿,
+/// 就能拿 1 个、5 个、12 个频道当场渲染,
+/// 连长辈版 1.4× 下会不会撑爆都能测(见 `channel_grid_render_test.dart`)。
 ///
 /// ## 只管长相,不管去哪
 ///
@@ -67,86 +63,10 @@ class SzChannelGrid extends StatelessWidget {
     );
   }
 
-  /// 宽卡(卡片式 2 列时用):字块在左、标题副标题在右。
-  /// 横过来排才用得上宽度 —— 竖着堆的话副标题旁边永远空着一半。
-  Widget _wide(BuildContext context, SzChannel ch, VoidCallback tap) {
-    final sz = Theme.of(context).sz;
-    return SzCard(
-      onTap: tap,
-      padding: const EdgeInsets.all(12),
-      child: Row(children: [
-        glyph(context, ch, 40),
-        const SizedBox(width: 11),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 频道名**允许折两行**。320 窄屏 + 长辈版 1.4× 下,
-              // 字块和间距吃掉之后只剩 64px,「超值团购」要 81px ——
-              // maxLines:1 会切成「超值团…」。频道名截断等于没写,
-              // 宁可卡片高一点
-              Text(ch.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 14.5,
-                      fontWeight: FontWeight.w600,
-                      height: 1.25,
-                      color: sz.ink)),
-              const SizedBox(height: 2),
-              // 长辈版 1.4× 下窄卡放不下,允许折两行而不是切成省略号 ——
-              // 「取件送件 · 收…」这种半截话不如换行
-              Text(ch.sub,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                      fontSize: 11.5, height: 1.35, color: sz.inkMuted)),
-            ],
-          ),
-        ),
-      ]),
-    );
-  }
-
-  /// 窄卡(卡片式 3 列时用):竖排居中。宽度不够横排就别横排,
-  /// 硬横排会把副标题挤成一列一个字。
-  Widget _narrow(BuildContext context, SzChannel ch, VoidCallback tap) {
-    final sz = Theme.of(context).sz;
-    return SzCard(
-      onTap: tap,
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          glyph(context, ch, 36),
-          const SizedBox(height: 8),
-          // 同 _wide:宁可折行也不截断频道名
-          Text(ch.name,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  height: 1.2,
-                  color: sz.ink)),
-          const SizedBox(height: 3),
-          Text(ch.sub,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  fontSize: 10.5, height: 1.3, color: sz.inkMuted)),
-        ],
-      ),
-    );
-  }
-
-  /// 聚合式(≥5 个频道时用):只有字块和名称,没有卡片底、没有副标题。
+  /// 一格:字块 44 + 名字,没有卡片底、没有副标题(设计稿 1b / 2a 的聚合式)。
   ///
   /// 聚合平台的首页都是这个排法,每行 4–5 个,一屏放得下十几个频道。
-  /// 代价是没地方写「取件送件 · 收 2%」—— 所以频道少的时候不用它。
+  /// 「取件送件 · 收 2%」这类说明放在频道页和官网费率表里,不占首页。
   Widget _compact(BuildContext context, SzChannel ch, VoidCallback tap) {
     final sz = Theme.of(context).sz;
     return InkWell(
@@ -184,15 +104,9 @@ class SzChannelGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, box) {
-      // 把可用宽度传进去:宽屏上一格 550px 是浪费,该多排几列(#295)
+      // 把可用宽度传进去:宽屏上格子太宽是浪费,该多排几列(#295)
       final cols = channelGridColumns(channels.length, width: box.maxWidth);
       final cell = (box.maxWidth - gap * (cols - 1)) / cols;
-      // 排法由**频道数**决定,不是由列数决定。
-      // 卡片式内部再按宽度选横排还是竖排
-      final entry = switch (channelGridLayout(channels.length)) {
-        SzChannelLayout.compact => _compact,
-        SzChannelLayout.card => cols <= 2 ? _wide : _narrow,
-      };
       return Wrap(
         spacing: gap,
         runSpacing: gap,
@@ -200,7 +114,7 @@ class SzChannelGrid extends StatelessWidget {
           for (final ch in channels)
             SizedBox(
                 width: cell,
-                child: entry(context, ch, () => onTap(ch))),
+                child: _compact(context, ch, () => onTap(ch))),
         ],
       );
     });

@@ -7,14 +7,8 @@ import 'text_fit.dart';
 
 /// 金刚区**渲染**测试(排版规则的测试在 channel_grid_test.dart)。
 ///
-/// ## 为什么非要有这个
-///
-/// 聚合式排法(≥5 个频道)是为打车上线准备的,而今天只有 4 个频道 ——
-/// 也就是说那段代码**在真机上一次都跑不到**。写完搁着、等上线那天
-/// 才第一次运行,是最容易出事的形态。
-///
-/// 这里拿 5 个和 8 个频道当场渲染,顺便把最容易翻车的一条盯住:
-/// **长辈版 1.4×**。5 列时每格只有 58px 宽(360 屏),
+/// 一律聚合式(设计稿 1b / 2a),这里拿 1~12 个频道当场渲染,
+/// 把最容易翻车的一条盯住:**长辈版 1.4×**。5 列时每格只有 58px 宽(360 屏),
 /// 「超值团购」四个字放大到 1.4× 就是 64px —— 处理不好会直接画到隔壁格子上。
 void main() {
   /// 造 n 个频道。名字都用四个字 —— 那是最挤的情况。
@@ -84,23 +78,30 @@ void main() {
     });
   });
 
-  group('两种排法长相不同', () {
-    testWidgets('卡片式(4 个)有副标题', (tester) async {
+  group('聚合式长相', () {
+    testWidgets('没有副标题 —— 说明挪去了频道页和费率表', (tester) async {
       setPhoneViewport(tester, const Size(360, 780));
-      await tester.pumpWidget(host(fake(4)));
-      expect(find.textContaining('一句话说明'), findsNWidgets(4));
+      for (final n in [2, 4, 5]) {
+        await tester.pumpWidget(host(fake(n)));
+        expect(find.textContaining('一句话说明'), findsNothing,
+            reason: '$n 个频道时还画了副标题');
+        expect(find.text('超值频道0'), findsOneWidget);
+      }
     });
 
-    testWidgets('聚合式(5 个)没有副标题 —— 那是它换排法的代价', (tester) async {
+    testWidgets('两个频道两格平分一行,不是挤在左边', (tester) async {
       setPhoneViewport(tester, const Size(360, 780));
-      await tester.pumpWidget(host(fake(5)));
-      expect(find.textContaining('一句话说明'), findsNothing);
-      expect(find.text('超值频道0'), findsOneWidget);
+      await tester.pumpWidget(host(fake(2)));
+      final a = tester.getCenter(find.text('频').first).dx;
+      final b = tester.getCenter(find.text('频').last).dx;
+      // 行宽 324(360 减两边 18):两格中心应该在 1/4 和 3/4 附近
+      expect(a, closeTo(18 + (324 - 9) / 4, 2));
+      expect(b, closeTo(360 - 18 - (324 - 9) / 4, 2));
     });
 
-    testWidgets('两种排法都保留频道字 —— 色觉缺陷下那是唯一的标识', (tester) async {
+    testWidgets('频道字都在 —— 色觉缺陷下那是唯一的标识', (tester) async {
       setPhoneViewport(tester, const Size(360, 780));
-      for (final n in [4, 5, 8]) {
+      for (final n in [2, 5, 8]) {
         await tester.pumpWidget(host(fake(n)));
         expect(find.text('频'), findsNWidgets(n),
             reason: '$n 个频道少画了字块');
