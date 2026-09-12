@@ -7,24 +7,28 @@
 
 - 代码:服务端、SDK 2.0.0、用户端容器 v2、开发者后台 `/dev/`、审核后台、官网 `/developers` `/miniapps` `/m/<appid>`、
   透明中心「小程序」栏都在仓库里,本地和开发库上验证过(见 [安全审计记录](MINIAPP-SECURITY-AUDIT.md));
-- 生产:还是老版本,`mini_apps` 表是空的 —— 用户端下拉抽屉没有条目,手势就退回成下拉刷新;
+- 生产:服务端和 App 从 v0.17.0 起带上开放平台的代码,但 `mini_apps` 表是空的 —— 用户端下拉抽屉没有条目,手势就退回成下拉刷新;签名密钥(`MINI_APP_SIGNING_KEY`)还没配;
 - 托管域名(D1)2026-09-12 定为主站下专门的一级 `mp.chaojizan.cc`(不另买域名,见 2.1);解析、泛域名证书、签名密钥都还没做。
 
 ## 1. 先修现在的问题(不等托管域名)
 
-目标:老版本 App 下拉就能打开透明中心和公开账本(外部地址条目,桥 v1 兼容)。
+目标:新老版本 App 下拉都能打开透明中心和公开账本(外部地址条目,桥 v1 兼容)。
 
 1. 部署服务端:容器启动时自动跑迁移 `0124_miniapp_platform`。**这条迁移会写一行数据**:建一条「官方开发者」
    (没有账号,`is_official`,公司名陕西爱卡斯科技有限公司),并把存量 `mini_apps` 条目挂到它名下 —— 生产存量是 0 条。
    迁移有 downgrade(本地 up → down → up 验过);
-2. ⚠ 插入两条自家条目(幂等,重复跑不会多插):
+2. **先配签名密钥,再插条目**:`.env.prod` 加 `MINI_APP_SIGNING_KEY`(生成和离线备份见 2.3),重建 api 容器。
+   新版 App(0.17.0 起,容器 v2)打开**任何**条目都走 v2 启动、签 initData,外部地址条目也一样;
+   没配密钥时新版 App 点开会报「小程序签名密钥未配置」(503),老版本 App 走 v1 不受影响。
+   验:`curl https://chaojizan.cc/.well-known/superz-webapp-keys.json` 返回带 kid 的公钥,不是 503;
+3. ⚠ 插入两条自家条目(幂等,重复跑不会多插):
 
    ```bash
    docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python -m scripts.seed_official_miniapps          # 先看会做什么
    docker compose -f docker-compose.prod.yml --env-file .env.prod exec api python -m scripts.seed_official_miniapps --apply  # 真做
    ```
 
-3. 验:老版本 App 下拉出现「透明中心」「公开账本」两条,点开能用;`/mini-apps/catalog` 匿名能看到这两条。
+4. 验:新老版本 App 下拉都出现「透明中心」「公开账本」两条,点开能用;`/mini-apps/catalog` 匿名能看到这两条。
 
 回退:把两条条目下架(管理后台「小程序治理 → 应用与处罚」,或 `POST /mini-apps/admin/{id}/toggle`)。
 
