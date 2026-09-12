@@ -829,6 +829,15 @@ async def mini_app_bridge():
     )
 
 
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+async def android_asset_links():
+    """安卓 App Links 的域名验证(DEV-PROMPTS-39 #326):装了 App 的人点
+    https://chaojizan.cc/m/<appid> 直接拉起用户端。指纹是正式签名证书的 SHA-256
+    (docs/STORE-REVIEW.md);换签名证书要一起换这里。"""
+    return FileResponse(STATIC_DIR / "assetlinks.json", media_type="application/json",
+                        headers={"Cache-Control": "public, max-age=3600"})
+
+
 @app.get("/legal/terms", include_in_schema=False)
 async def legal_terms():
     """用户协议(网页版,应用商店审核和备案材料引用)。"""

@@ -288,6 +288,9 @@ def render_all(tokens: dict) -> dict:
         # 这个仓库已经因为手抄色板出过一次三种主色了
         "admin-web/src/tokens.css": css(tokens),
         "admin-web/src/theme.ts": antd_theme(tokens),
+        # 小程序开发者后台(DEV-PROMPTS-39 #330)同一份令牌
+        "developer-web/src/tokens.css": css(tokens),
+        "developer-web/src/theme.ts": antd_theme(tokens),
     }
     for app in ("user_app_harmony", "merchant_app_harmony"):
         base = f"apps/{app}/entry/src/main/resources"

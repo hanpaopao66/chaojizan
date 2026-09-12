@@ -1,4 +1,5 @@
 import {
+  AppstoreOutlined,
   AuditOutlined,
   CarOutlined,
   CustomerServiceOutlined,
@@ -47,6 +48,7 @@ import TicketsPage from '../pages/TicketsPage'
 import FlagsPage from '../pages/FlagsPage'
 import LogsPage from '../pages/LogsPage'
 import MerchantsPage from '../pages/MerchantsPage'
+import MiniAppsPage from '../pages/MiniAppsPage'
 import RidersPage from '../pages/RidersPage'
 import WithdrawalsPage from '../pages/WithdrawalsPage'
 
@@ -73,6 +75,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     { key: '/issues', icon: <CarOutlined />, label: '配送异常' },
     { key: '/food-safety', icon: <MedicineBoxOutlined />, label: '食安投诉' },
     { key: '/moderation', icon: <EyeOutlined />, label: '内容审核' },
+    { key: '/mini-apps', icon: <AppstoreOutlined />, label: '小程序' },
     { key: '/risk', icon: <WarningOutlined />, label: '风控' },
     { key: '/order-flags', icon: <FlagOutlined />, label: '异常标记' },
     { key: '/appeals', icon: <SolutionOutlined />, label: '判责申诉' },
@@ -150,6 +153,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/issues" element={<IssuesPage />} />
             <Route path="/food-safety" element={<FoodSafetyPage />} />
             <Route path="/moderation" element={<ModerationPage />} />
+            <Route path="/mini-apps" element={<MiniAppsPage />} />
             <Route path="/risk" element={<RiskPage />} />
             <Route path="/order-flags" element={<OrderFlagsPage />} />
             <Route path="/appeals" element={<AppealsPage />} />

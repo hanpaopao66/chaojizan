@@ -152,6 +152,14 @@ async def public_sdk(path: str):
     return _sdk_file(path)
 
 
+@router.get("/_sdk/{path:path}")
+async def dev_host_sdk(path: str):
+    """开发模式下托管页和 API 同源,页面照生产的写法引 /_sdk/2/sz-webapp.js 也得能拿到。
+    (生产上托管域名的 /_sdk/ 由 MiniHostMiddleware 改写到 /_mini-host/_sdk/;
+    主域名上多出这一份也无妨 —— SDK 本来就是公开文件)"""
+    return _sdk_file(path)
+
+
 def _sdk_file(path: str) -> Response:
     target = (STATIC_SDK / path).resolve()
     if not path or ".." in path or not target.is_file() \

@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.chaojizan.user",
+      "sha256_cert_fingerprints": [
+        "E6:1E:C7:9B:AE:6B:28:FC:A8:56:3B:FD:93:BD:EA:83:2B:46:E7:21:4F:A7:41:2B:F6:C0:DD:58:1C:D6:32:49"
+      ]
+    }
+  }
+]

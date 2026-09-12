@@ -1,0 +1,101 @@
+/* 由 scripts/gen_tokens.py 生成,**不要手改**。
+ * 改 packages/shared/lib/src/brand.dart 再跑 `python3 scripts/gen_tokens.py`。
+ *
+ * 为什么这份文件是生成的:品牌主色一度在仓库里有三个不同的值,
+ * 而其中一个是 BRAND.md 里标着「已废弃」的旧色板 —— 手工同步一定会分叉。
+ */
+:root {
+  --sz-paper: #F0EEE6;  /* 页面底色 */
+  --sz-surface: #FBFAF6;  /* 卡片/浮层底 */
+  --sz-surface-alt: #F5F3EC;  /* 次级底(输入框、弱化区块) */
+  --sz-ink: #141413;  /* 正文 */
+  --sz-ink-muted: #6B6862;  /* 次要文字。**要读懂的字用它,不要用 inkFaint** */
+  --sz-ink-faint: #9A968C;  /* 只给装饰:图标、进度圈、分隔性元素。对比度不到 3.0 */
+  --sz-line: #E2DED2;  /* 发丝线:卡片描边、列表分隔 */
+  --sz-clay: #C15F3C;  /* 平台行动色:主 CTA、选中态 */
+  --sz-clay-soft: #EFDDD3;  /* clay 的淡底 */
+  --sz-earn: #4E6B4F;  /* 钱的正向:实收、到账、余额 */
+  --sz-hold: #A6763E;  /* 被抽走/待处理:佣金、超时、警示 */
+  --sz-danger: #D03030;  /* 错误与不可逆操作 */
+  --sz-ledger: #1F1E1B;  /* 账目专属深台面 */
+  --sz-link: #2C5F87;  /* 站外可跳转链接 */
+  --sz-channel-0: #943F2F;
+  --sz-channel-1: #4E7054;
+  --sz-channel-2: #88611C;
+  --sz-channel-3: #2B5F7A;
+  --sz-channel-4: #7A59A0;
+  --sz-channel-5: #01756C;
+  --sz-channel-6: #29763E;
+  --sz-channel-7: #944F8D;
+
+  --sz-danger-soft: #F6E2DE;
+  --sz-hold-soft: #F1EAE0;
+  --sz-earn-soft: #E6E9E2;
+
+  --sz-k-radius-sm: 8px;
+  --sz-k-radius-md: 12px;
+  --sz-k-radius-lg: 18px;
+  --sz-k-page-pad: 18px;
+  --sz-k-card-pad: 14px;
+}
+
+/* 深色态。**只重定义颜色**,尺寸不随主题变 */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sz-paper: #1B1A17;  /* 页面底色 */
+    --sz-surface: #24231F;  /* 卡片/浮层底 */
+    --sz-surface-alt: #2C2A25;  /* 次级底(输入框、弱化区块) */
+    --sz-ink: #F2F0E8;  /* 正文 */
+    --sz-ink-muted: #A8A49A;  /* 次要文字。**要读懂的字用它,不要用 inkFaint** */
+    --sz-ink-faint: #7A766D;  /* 只给装饰:图标、进度圈、分隔性元素。对比度不到 3.0 */
+    --sz-line: #37342D;  /* 发丝线:卡片描边、列表分隔 */
+    --sz-clay: #E08A6B;  /* 平台行动色:主 CTA、选中态 */
+    --sz-clay-soft: #3A2C25;  /* clay 的淡底 */
+    --sz-earn: #8FB08D;  /* 钱的正向:实收、到账、余额 */
+    --sz-hold: #D2A86C;  /* 被抽走/待处理:佣金、超时、警示 */
+    --sz-danger: #E06B6B;  /* 错误与不可逆操作 */
+    --sz-ledger: #100F0D;  /* 账目专属深台面 */
+    --sz-link: #7FB2D9;  /* 站外可跳转链接 */
+    --sz-channel-0: #D98573;
+    --sz-channel-1: #A2C4A7;
+    --sz-channel-2: #E1B473;
+    --sz-channel-3: #56C7FF;
+    --sz-channel-4: #AA91C4;
+    --sz-channel-5: #28A79B;
+    --sz-channel-6: #FAA0CC;
+    --sz-channel-7: #BE9455;
+
+    --sz-danger-soft: #3B2C28;
+    --sz-hold-soft: #393328;
+    --sz-earn-soft: #31342C;
+  }
+}
+
+:root[data-theme="dark"] {
+  --sz-paper: #1B1A17;  /* 页面底色 */
+  --sz-surface: #24231F;  /* 卡片/浮层底 */
+  --sz-surface-alt: #2C2A25;  /* 次级底(输入框、弱化区块) */
+  --sz-ink: #F2F0E8;  /* 正文 */
+  --sz-ink-muted: #A8A49A;  /* 次要文字。**要读懂的字用它,不要用 inkFaint** */
+  --sz-ink-faint: #7A766D;  /* 只给装饰:图标、进度圈、分隔性元素。对比度不到 3.0 */
+  --sz-line: #37342D;  /* 发丝线:卡片描边、列表分隔 */
+  --sz-clay: #E08A6B;  /* 平台行动色:主 CTA、选中态 */
+  --sz-clay-soft: #3A2C25;  /* clay 的淡底 */
+  --sz-earn: #8FB08D;  /* 钱的正向:实收、到账、余额 */
+  --sz-hold: #D2A86C;  /* 被抽走/待处理:佣金、超时、警示 */
+  --sz-danger: #E06B6B;  /* 错误与不可逆操作 */
+  --sz-ledger: #100F0D;  /* 账目专属深台面 */
+  --sz-link: #7FB2D9;  /* 站外可跳转链接 */
+  --sz-channel-0: #D98573;
+  --sz-channel-1: #A2C4A7;
+  --sz-channel-2: #E1B473;
+  --sz-channel-3: #56C7FF;
+  --sz-channel-4: #AA91C4;
+  --sz-channel-5: #28A79B;
+  --sz-channel-6: #FAA0CC;
+  --sz-channel-7: #BE9455;
+
+  --sz-danger-soft: #3B2C28;
+  --sz-hold-soft: #393328;
+  --sz-earn-soft: #31342C;
+}
