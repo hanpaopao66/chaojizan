@@ -63,6 +63,12 @@ assert grabbed["contact_name"] == "小明" and grabbed["contact_phone"] == "135*
 assert grabbed["privacy_phone"] == "13511112222"  # 过渡期(未接 AXB)可拨真号
 print("✓ 骑手抢单后能看到联系人和电话")
 
+# 智能识别已下线:老版本点那个按钮要拿到一句看得懂的话,不是 404
+gone = call("POST", "/addresses/parse", customer, {"text": "成都市锦江区春熙路8号 张三 13800138000"},
+            expect_error=True)
+assert gone["_error"] == 410 and "已下线" in str(gone["detail"]), gone
+print("✓ 智能识别接口只剩一个壳,老版本拿到「已下线」")
+
 # 清场:把订单走完,避免影响后续测试
 call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
 call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})

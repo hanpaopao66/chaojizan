@@ -1,5 +1,3 @@
-from pydantic import BaseModel, Field
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,32 +82,11 @@ async def delete_address(
     await db.commit()
 
 
-class AddrParseIn(BaseModel):
-    """一段粘贴文本。上限 400 字 —— 再长多半是误粘了整段聊天记录。"""
+@router.post("/parse", include_in_schema=False)
+async def parse_address_gone():
+    """智能识别已下线(2026-09-12,新建收货地址不再有这一块)。
 
-    text: str = Field(min_length=1, max_length=400)
-
-
-@router.post("/parse")
-async def parse_address(
-    payload: AddrParseIn,
-    user: User = Depends(require_role("customer")),
-):
-    """智能识别:把粘贴的一段文字拆成 姓名 / 电话 / 地址 / 门牌 / 称谓。
-
-    ## 为什么值得做
-
-    用户的地址往往已经存在于别处:微信里同事发的、上一个平台复制的、
-    快递单上抄的。让他对着现成的文字**重新手打一遍**是在制造错误 ——
-    打错一个数字,骑手就打不通电话。
-
-    ## 纯本地正则,不外发
-
-    这段文本里有姓名和手机号,**送去第三方解析等于把用户的个人信息交出去**。
-    本地能做就不该外发;顺带也不花按次计费的钱。
-
-    代价是解析不了特别刁钻的写法,所以返回的一律是**建议值** ——
-    客户端必须填进表单让用户过目,不能直接保存。
+    只留一个壳给已经发出去的老版本:它们点「智能识别」会拿到下面这句话,
+    而不是一个看不懂的 404。老版本都更新之后,连这个壳一起删。
     """
-    from ..services.addr_parse import parse
-    return parse(payload.text)
+    raise HTTPException(410, "智能识别已下线,请直接搜索或填写地址")

@@ -34,7 +34,7 @@ cd "$(dirname "$0")/.."
 #  少一处,照它写成 631,CI 上就红了)
 # 632 → 619:用户端小程序容器重写(DEV-PROMPTS-39 #324),老的弹层、桥、面板里
 # 写死的字号随文件删掉,新写的一律用字号档位。
-BASELINE=619
+BASELINE=618
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \
