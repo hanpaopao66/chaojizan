@@ -32,7 +32,9 @@ cd "$(dirname "$0")/.."
 # 新页面一律用字号档位和 kFigure* 数字档,商家端从 290 处降到 233 处。
 # (基数按**提交进仓库的代码**数,不按本地工作区 —— 工作区里别人没提交的改动
 #  少一处,照它写成 631,CI 上就红了)
-BASELINE=632
+# 632 → 619:用户端小程序容器重写(DEV-PROMPTS-39 #324),老的弹层、桥、面板里
+# 写死的字号随文件删掉,新写的一律用字号档位。
+BASELINE=619
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \
