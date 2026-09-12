@@ -206,18 +206,27 @@ def main():
     for who in (b, c):
         code, _, _ = raw(who, ph["url"])
         assert code == 404, f"没发出来之前,别人拿不到:{code}"
-    code, _, _ = raw(None, ph["url"])
-    assert code == 404, "没登录拿不到"
+    plain = f"/media/v1/files/{ph['id']}"
+    assert raw(None, plain)[0] == 404, "没登录、不带签名拿不到"
+    forged = ph["url"].replace(f"u={a.id}", f"u={c.id}")
+    assert raw(None, forged)[0] == 404, "把签名地址里的用户换成别人:签名对不上"
     m = a.send(cid, "", kind="photo", media_ids=[ph["id"]])
     assert m["media"][0]["id"] == ph["id"] and m["media"][0]["thumb"], m
-    assert raw(b, ph["url"])[0] == 200, "发到私聊之后,对方能下载"
-    assert raw(c, ph["url"])[0] == 404, "S1:会话外的人还是拿不到"
+    assert raw(b, plain)[0] == 200, "发到私聊之后,对方能下载"
+    assert raw(c, plain)[0] == 404, "S1:会话外的人还是拿不到"
+    b_url = next(x for x in b.get(f"/chat/v1/chats/{cid}/messages")["messages"]
+                 if x["seq"] == m["seq"])["media"][0]["url"]
+    assert f"u={b.id}" in b_url and raw(None, b_url)[0] == 200, "B 的签名地址不带头也能下(网页版 <video> 用)"
+    signed = b.post("/media/v1/sign", {"ids": [ph["id"]]})["items"]
+    assert f"u={b.id}" in signed[str(ph["id"])]["url"]
+    assert c.post("/media/v1/sign", {"ids": [ph["id"]]})["items"] == {}, "看不了的不给签"
     a.post(f"/chat/v1/chats/{cid}/messages/delete", {"seqs": [m["seq"]], "revoke": True})
-    assert raw(b, ph["url"])[0] == 404, "为双方删除之后,对方再也拿不到这个文件"
+    assert raw(b, plain)[0] == 404, "为双方删除之后,对方再也拿不到这个文件"
+    assert raw(None, b_url)[0] == 404, "签名地址也跟着失效:签名绑人,下载时照样判权"
     cm = upload(c, png_bytes(100, 100), "c.png", "photo")
     r = a.send(cid, "", kind="photo", media_ids=[cm["id"]], expect_error=True)
     assert r.get("_error") == 404, "不能拿别人上传的文件发消息"
-    print("  ✓ S1:发出来之前只有自己能下;发到会话后会话里的人能下、外人不能;删了就没了;不能盗用别人的文件")
+    print("  ✓ S1:发出来之前只有自己能下;签名绑人不能改;会话里的人能下、外人不能;删了连签名地址一起失效;不能盗用别人的文件")
 
     # ---- 各类媒体消息 ----
     for kind, media in (("voice", vo), ("video", v1), ("file", f), ("gif", g)):

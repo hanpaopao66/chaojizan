@@ -21,7 +21,8 @@ from ..models import MediaFile, Upload, User
 from ..ratelimit import check_rate_limit
 from ..security import get_current_user_optional
 from ..services import storage
-from ..services.media import LIMITS, TMP_DIR, can_read, check_quota, ingest, media_out
+from ..services.media import (LIMITS, TMP_DIR, can_read, check_quota, check_url_sig, ingest,
+                             media_out, signed_url)
 from .social import social_user
 
 router = APIRouter(prefix="/media/v1", tags=["媒体"])
@@ -75,7 +76,7 @@ async def upload(file: UploadFile = File(...), kind: str = Form("auto"),
                           (file.content_type or "").startswith("image/") else kind,
                           name=file.filename or "", purpose=purpose)
         await db.commit()
-        return media_out(mf)
+        return media_out(mf, me.id)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -172,7 +173,7 @@ async def complete_upload(upload_id: str, body: CompleteIn, me: User = Depends(s
     u = await _own_upload(db, upload_id, me)
     if u.status == "done" and u.media_id:
         mf = await db.get(MediaFile, u.media_id)
-        return media_out(mf)
+        return media_out(mf, me.id)
     _check_purpose(u.purpose, body.kind)
     total = -(-u.size // u.chunk_size)
     missing = sorted(set(range(total)) - set(u.received or []))
@@ -194,7 +195,7 @@ async def complete_upload(upload_id: str, body: CompleteIn, me: User = Depends(s
         mf = await ingest(db, me, whole, declared=body.kind, name=u.name, purpose=u.purpose)
         u.status, u.media_id = "done", mf.id
         await db.commit()
-        return media_out(mf)
+        return media_out(mf, me.id)
     finally:
         whole.unlink(missing_ok=True)
         shutil.rmtree(d, ignore_errors=True)
@@ -206,7 +207,24 @@ async def get_media(media_id: int, me: User = Depends(social_user),
     mf = await db.get(MediaFile, media_id)
     if mf is None or not await can_read(db, me, mf):
         raise HTTPException(404, "没有这个文件")
-    return media_out(mf)
+    return media_out(mf, me.id)
+
+
+class SignIn(BaseModel):
+    ids: list[int] = Field(max_length=200)
+
+
+@router.post("/sign")
+async def sign(body: SignIn, me: User = Depends(social_user), db: AsyncSession = Depends(get_db)):
+    """实时事件里的媒体地址不带签名(事件是发给所有人的),客户端拿 id 来这里换自己的。
+    看不了的 id 直接不返回。"""
+    out = {}
+    for mid in dict.fromkeys(body.ids):
+        mf = await db.get(MediaFile, mid)
+        if mf is not None and await can_read(db, me, mf):
+            out[str(mid)] = {"url": signed_url(mid, me.id),
+                             "thumb": signed_url(mid, me.id, True) if mf.thumb_key else None}
+    return {"items": out}
 
 
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
@@ -274,8 +292,13 @@ def file_response(request: Request, key: str, private: bool, size: int, mime: st
 
 @router.get("/files/{media_id}")
 async def get_file(media_id: int, request: Request, thumb: int = 0, download: int = 0,
+                   u: int | None = None, e: int | None = None, s: str = "",
                    me: User | None = Depends(get_current_user_optional),
                    db: AsyncSession = Depends(get_db)):
+    if me is None and u and e and s:
+        # 带签名的地址:签名绑定用户,下面照样按这个用户判权
+        if check_url_sig(media_id, u, e, s, bool(thumb)):
+            me = await db.get(User, u)
     mf = await db.get(MediaFile, media_id)
     # 没有、没权限、还没转完 —— 一律 404,不告诉你「有这个文件但你看不了」
     if mf is None or not await can_read(db, me, mf):

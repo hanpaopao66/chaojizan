@@ -275,12 +275,54 @@ async def ingest(db: AsyncSession, owner: User, src: Path, *, declared: str, nam
     return mf
 
 
-def media_out(mf: MediaFile) -> dict:
+# ---------------- 带签名的下载地址 ----------------
+#
+# 网页版的 <video>、图片组件带不了 Authorization 头,所以下载地址可以带签名:
+# `?u=<用户>&e=<到期>&s=<签名>`。签名**绑定用户**,下载时照样按这个用户重新判权(can_read)——
+# 消息删了、人被移出会话,旧地址立刻失效(S1),不是「拿到链接就能下七天」。
+# 到期取「7 天后的零点」:同一天签出来的地址一样,客户端的图片缓存能命中。
+
+URL_TTL_DAYS = 7
+
+
+def _url_key() -> bytes:
+    from ..config import settings
+    return hashlib.sha256(f"superz-media-url:{settings.jwt_secret}".encode()).digest()
+
+
+def url_sig(media_id: int, user_id: int, exp: int, thumb: bool) -> str:
+    import hmac
+    msg = f"{media_id}:{user_id}:{exp}:{1 if thumb else 0}".encode()
+    return hmac.new(_url_key(), msg, hashlib.sha256).hexdigest()[:32]
+
+
+def url_expiry(now: datetime | None = None) -> int:
+    now = now or datetime.now(timezone.utc)
+    day = int(now.timestamp()) // 86400
+    return (day + URL_TTL_DAYS + 1) * 86400
+
+
+def signed_url(media_id: int, user_id: int, thumb: bool = False, exp: int | None = None) -> str:
+    exp = exp or url_expiry()
+    base = f"/media/v1/files/{media_id}?u={user_id}&e={exp}&s={url_sig(media_id, user_id, exp, thumb)}"
+    return base + ("&thumb=1" if thumb else "")
+
+
+def check_url_sig(media_id: int, user_id: int, exp: int, sig: str, thumb: bool) -> bool:
+    import hmac
+    import time
+    if exp < time.time():
+        return False
+    return hmac.compare_digest(url_sig(media_id, user_id, exp, thumb), sig or "")
+
+
+def media_out(mf: MediaFile, viewer_id: int | None = None) -> dict:
     return {"id": mf.id, "kind": mf.kind, "status": mf.status, "error": mf.error,
             "w": mf.w, "h": mf.h, "size": mf.size, "mime": mf.mime, "name": mf.name,
             "duration_ms": mf.duration_ms, "waveform": mf.waveform or [],
-            "url": f"/media/v1/files/{mf.id}",
-            "thumb": f"/media/v1/files/{mf.id}?thumb=1" if mf.thumb_key else None,
+            "url": signed_url(mf.id, viewer_id) if viewer_id else f"/media/v1/files/{mf.id}",
+            "thumb": (signed_url(mf.id, viewer_id, True) if viewer_id
+                      else f"/media/v1/files/{mf.id}?thumb=1") if mf.thumb_key else None,
             "public_url": storage.url_for(mf.key, False) if not mf.private and mf.key else None}
 
 

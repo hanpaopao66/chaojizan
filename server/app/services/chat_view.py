@@ -62,14 +62,21 @@ async def can_read_chat(db: AsyncSession, chat: Chat, user_id: int) -> tuple[boo
 
 # ---------------- 输出 ----------------
 
-def media_out(items: list | None) -> list[dict]:
+def media_out(items: list | None, viewer_id: int | None = None) -> list[dict]:
+    """消息里的媒体。给了 viewer_id(接口响应,按人)就签好下载地址;
+    事件是发给会话里所有人的,不签,客户端拿 `/media/v1/sign` 换(见 services/media.signed_url)。"""
+    from .media import signed_url
     out = []
     for it in items or []:
         mid = it.get("id")
         d = {k: it.get(k) for k in ("id", "kind", "w", "h", "size", "mime", "name",
                                     "duration_ms", "waveform", "loop") if k in it}
-        d["url"] = f"/media/v1/files/{mid}"
-        d["thumb"] = f"/media/v1/files/{mid}?thumb=1" if it.get("has_thumb") else None
+        if viewer_id:
+            d["url"] = signed_url(mid, viewer_id)
+            d["thumb"] = signed_url(mid, viewer_id, True) if it.get("has_thumb") else None
+        else:
+            d["url"] = f"/media/v1/files/{mid}"
+            d["thumb"] = f"/media/v1/files/{mid}?thumb=1" if it.get("has_thumb") else None
         out.append(d)
     return out
 
@@ -90,7 +97,7 @@ def sender_out(user: User | None, profile: SocialProfile | None) -> dict | None:
 
 def message_out(m: ChatMessage, *, sender: dict | None, chat: Chat | None = None,
                 reactions: list | None = None, reply: dict | None = None,
-                poll: dict | None = None) -> dict:
+                poll: dict | None = None, viewer_id: int | None = None) -> dict:
     extra = m.extra or {}
     out = {
         "chat_id": m.chat_id,
@@ -100,7 +107,7 @@ def message_out(m: ChatMessage, *, sender: dict | None, chat: Chat | None = None
         "kind": m.kind,
         "text": m.text or "",
         "entities": m.entities or [],
-        "media": media_out(m.media),
+        "media": media_out(m.media, viewer_id),
         "reply_to": reply if m.reply_to_seq else None,
         "reply_to_seq": m.reply_to_seq,
         "forward": m.forward,
@@ -229,7 +236,7 @@ async def enrich_messages(db: AsyncSession, viewer_id: int, chat: Chat,
         out.append(message_out(
             m, sender=sender_out(u, profiles.get(m.sender_id)) if u else None, chat=chat,
             reactions=reactions.get(m.seq), reply=replies.get(m.reply_to_seq) if m.reply_to_seq
-            else None, poll=polls.get(m.seq)))
+            else None, poll=polls.get(m.seq), viewer_id=viewer_id))
     return out
 
 
