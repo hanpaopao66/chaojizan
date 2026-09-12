@@ -36,6 +36,21 @@ cd apps/user_app && flutter test test/miniapp_bridge_test.dart
 | 15 | 缓存投毒 | 缓存键含 host + 版本 | 执行时没有用 nginx `auth_request`(改成 API 直出,见 DEV-PROMPTS-39 执行记录),不存在那个缓存键。托管地址本身带 appid(子域名)和版本号(`/v/<版本>/`);入口 HTML `no-cache`,其余文件 `immutable`(地址带版本,内容永不变);上线文档里的 nginx 示例不缓存托管站点,要缓存时 `proxy_cache_key` 必须含 `$host` | 通过 | 同 12:入口 HTML 长缓存 → 红 |
 | 16 | 日志卫生 | 不记请求体 | 全局异常留痕只记方法 + 路径;开放接口调用日志只记路径;小程序的云存储、启动不写日志;CSP 报告的日志只记被拦的 origin(单测喂一条带 open_id 和日记内容的被拦地址,日志里只剩 origin) | 通过 | CSP 日志记完整被拦地址 → 单测红 |
 
+## §3 不变量的守卫(DEV-PROMPTS-39 §12 第 3 条)
+
+每条不变量都有守卫测试,每个守卫都弄坏过一次、确认会红:
+
+| 不变量 | 守卫 | 弄坏 → 红 |
+|---|---|---|
+| I1 登录 token 不进 WebView | `e2e_miniapp_security` 13 处扫描、`e2e_miniapp_identity` | 启动应答塞一个 JWT → 红 |
+| I2 默认只给 open_id | `e2e_miniapp_security`(删映射再启动得到新的)、`e2e_miniapp_identity`(按应用不同) | open_id 改成从用户 id 派生 → 红 |
+| I3 不卖位置 | `test_miniapp_catalog`:排序函数的输入字段、目录相关表的列名 | 目录表加 `boost` 列 → 红;排序输入加打开次数 → 红 |
+| I4 审核的就是上线的 | `test_miniapp_invariants`:版本对象只写一次(已存在一个都不写)、版本路由上没有 PUT / PATCH / DELETE;`e2e_miniapp_hosting`:托管出去的字节就是上传的那份 | 去掉「已存在就拒绝」→ 红;加一条改文件的 PUT 路由 → 红(这条守卫第一版是空转的:新版 FastAPI 的 `include_router` 不再摊平路由,只扫 `app.routes` 一层什么都扫不到,弄坏一次才发现,已改成钻进 `original_router`,并断言至少扫到 8 条版本路由) |
+| I5 处罚有原因、能申诉、换人复核 | `e2e_miniapp_review`:驳回必须带原因代码和说明、原结论人处理申诉 403 | 申诉不强制换人 → 红 |
+| I6 不收钱、不接广告 | `test_miniapp_invariants`:SDK、宿主、服务端三张方法 / 能力表一致,且没有付款相关的名字;用户端没装广告 SDK | 能力表加「付款」→ 红 |
+| I7 敏感能力逐次确认 | `test_miniapp_invariants`:定位、扫码、剪贴板、手机号不在可申请清单里,宿主和 SDK 没有对应方法;`e2e_miniapp_dev`:申请回「暂未开放」;昵称头像首次确认、可撤回(`miniapp_bridge_test`) | 定位直接可申请 → 红 |
+| I8 用户的数据用户说了算 | `e2e_miniapp_storage`:看用量、导出、清空、注销级联删除;`test_miniapp_invariants`:开发者后台、管理后台碰云存储的只有模拟器,且只能是开发者自己的账号 | 注销不删云存储 → 红;开发者后台按任意用户读云存储 → 红 |
+
 ## 审计中发现并修掉的
 
 1. **网页版导航逃逸没有防护**(第 3 项):补了 ping/pong。协议加了两种消息,SDK、App 网页版宿主、开发者后台模拟器、
@@ -53,8 +68,8 @@ cd apps/user_app && flutter test test/miniapp_bridge_test.dart
 
 ## 没覆盖到的 / 剩下的风险
 
-- **真机**:手机端的导航拦截、令牌只注入主框架,目前是 Dart 单测 + 代码走查 + 网页版实测;安卓模拟器和真机的那一遍
-  在 #338 的验证里做,做完补在这里。
+- **真机**:安卓模拟器(Android 16)上走过一遍(见 DEV-PROMPTS-39 执行记录):下拉抽屉、目录、记事本离线编辑后联网同步、
+  2048 全屏与系统返回键、冷启动直达链接;手机端的导航拦截、令牌只注入主框架是 Dart 单测 + 代码走查。**真机那一遍还没做。**
 - 同源的 iframe(开发者自己包里的页面)读得到令牌 —— 那本来就是开发者自己的内容;跨域第三方 iframe 被 `frame-src 'none'` 挡住。
 - `style-src` 保留 `'unsafe-inline'`(前端框架常用内联样式;样式注入执行不了脚本)。
 - 网页版的逃逸判定有 8 秒窗口:页面跳走后最多 8 秒内外站内容还显示在容器里(桥已经不认它了,拿不到任何身份和能力)。
