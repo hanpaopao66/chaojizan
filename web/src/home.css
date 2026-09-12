@@ -66,8 +66,9 @@
 .ledger .hashrow code { font-family: ui-monospace, Menlo, monospace; color: #F2F0E8; background: #100F0D; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; padding: 5px 10px; }
 .ledger .hashrow a { margin-left: auto; color: #E08A6B; }
 
-/* 下载 */
-.dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 28px; }
+/* 下载:上面是三端片子(films/ThreeAppsFilm.jsx),下面三张卡 */
+.h3-dl-film { margin-top: 28px; }
+.dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
 .dlcard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
 .dlcard b { font-size: 16px; }
 .dlcard p { margin: 0; color: var(--ink-muted); font-size: 13.5px; flex: 1; }

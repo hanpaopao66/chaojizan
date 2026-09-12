@@ -1,0 +1,31 @@
+/* 官网动画片(web/src/films/)的外框。画面本身是行内样式(同 FlowFilm.jsx),
+   这里只有外框、头上那一行和暂停键 —— 按钮要 :hover / :focus-visible,行内样式写不了。 */
+
+.sz-film {
+  font-family: -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  color: var(--ink); line-height: 1.6; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 18px; min-width: 0;
+}
+.sz-film.dark { color: #F2F0E8; }
+.sz-film-hd { display: flex; align-items: center; gap: 12px; min-height: 26px; }
+.sz-film-hd .lb { flex: 1; min-width: 0; font-size: 11px; letter-spacing: 1.2px; color: var(--ink-muted); }
+.sz-film-hd .lp { font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; }
+.sz-film-hd .pp {
+  flex: none; width: 26px; height: 26px; border-radius: 7px; padding: 0; cursor: pointer;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: border-color 120ms var(--std);
+}
+.sz-film-hd .pp:hover { border-color: var(--ink); }
+.sz-film-hd .pp:focus-visible { outline: 2px solid var(--clay); outline-offset: 2px; }
+.sz-film.dark .sz-film-hd .lb { color: #A8A49A; }
+.sz-film.dark .sz-film-hd .lp { color: #7A766D; }
+.sz-film.dark .sz-film-hd .pp { border-color: #37342D; background: transparent; color: #F2F0E8; }
+.sz-film.dark .sz-film-hd .pp:hover { border-color: #A8A49A; }
+.sz-film-bd { display: flex; flex-direction: column; min-width: 0; }
+.sz-film-cap { border-top: 1px solid var(--line); padding-top: 14px; }
+.sz-film.dark .sz-film-cap { border-top-color: #37342D; }
+
+/* 片子在页面里的位置:和上下文之间留一段 */
+.sz-film-slot { margin-top: 40px; }
+@media (max-width: 900px) { .sz-film-slot { margin-top: 28px; } }

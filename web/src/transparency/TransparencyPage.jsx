@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import {
   SitePage, SplitBar, bjDay, bjParts, kw, mdOf, money, useCountUp, useJson,
 } from '../SiteChrome.jsx'
+import AuditLampFilm from '../films/AuditLampFilm.jsx'
 import './transparency.css'
 
 /* 透明中心(/transparency,/status 直达系统状态区)。
@@ -19,7 +20,10 @@ import './transparency.css'
  * - 稿子的「差额 ¥0.00」:核账给的是差错笔数,没有金额差额,就写差错笔数;
  * - 「骑手所得 · 配送费全额」:骑手那份是配送费 + 小费,跑腿单扣 2%,写成
  *   「配送费 + 小费」;
- * - 单号那一列是单号指纹(sha256 前 6 位,和账本锚点同一个算法),不是单号。 */
+ * - 单号那一列是单号指纹(sha256 前 6 位,和账本锚点同一个算法),不是单号。
+ *
+ * 核账那一栏的开场是「差一分钱都亮红灯」那支示例片(films/AuditLampFilm.jsx,
+ * 官网动画集第二批),真的数和 90 格紧跟在它下面。 */
 
 const CH_COLOR = {
   food: '#943F2F', retail: '#01756C', errand_send: '#2B5F7A', errand_buy: '#2B5F7A',
@@ -362,6 +366,7 @@ export default function TransparencyPage() {
 
         <Sec id="audit" eyebrow="核账公示">
           <h2>每天 04:00，把近 30 天的账核一遍</h2>
+          <div className="tp-film"><AuditLampFilm /></div>
           <div className="tp-audit-line">
             {/* 差错数**有值时必须是红的**。这里原来两个数都吃同一个绿色 ——
                 于是有差错的那天,页面用一个让人安心的绿色写着「差错 10 笔」。

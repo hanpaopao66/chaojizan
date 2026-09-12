@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 
-import { Icon, reducedMotion } from './SiteChrome.jsx'
+import { Icon, reducedMotion, useReducedMotion } from './SiteChrome.jsx'
 
 /* 首页流程动画:一笔 ¥26 的外卖单,钱是怎么走的。16:9,30 秒一循环。
  *
@@ -433,22 +433,6 @@ const stepSpan = i => {
   const start = CUE[STEPS[i].key]
   const end = i + 1 < STEPS.length ? CUE[STEPS[i + 1].key] : TOTAL
   return [start, end]
-}
-
-function useReducedMotion() {
-  const [r, setR] = useState(reducedMotion)
-  useEffect(() => {
-    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)')
-    if (!mq) return undefined
-    const on = () => setR(mq.matches)
-    if (mq.addEventListener) mq.addEventListener('change', on)
-    else mq.addListener(on)
-    return () => {
-      if (mq.removeEventListener) mq.removeEventListener('change', on)
-      else mq.removeListener(on)
-    }
-  }, [])
-  return r
 }
 
 export default function FlowFilm() {

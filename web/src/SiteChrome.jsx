@@ -138,6 +138,23 @@ export const reducedMotion = () => typeof window !== 'undefined'
   && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 const easeOutCubic = t => 1 - Math.pow(1 - t, 3)
 
+/** 同 reducedMotion(),但系统开关在页面开着的时候被拨了,会跟着变 */
+export function useReducedMotion() {
+  const [r, setR] = useState(reducedMotion)
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    if (!mq) return undefined
+    const on = () => setR(mq.matches)
+    if (mq.addEventListener) mq.addEventListener('change', on)
+    else mq.addListener(on)
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', on)
+      else mq.removeListener(on)
+    }
+  }, [])
+  return r
+}
+
 /** 数字从上一次的值滚到新值(第一次从 0 起),900ms。轮询刷新时从旧值滚过去,
  *  不从 0 重播 */
 export function useCountUp(target, dur = 900) {

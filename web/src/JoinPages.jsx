@@ -2,6 +2,8 @@ import React from 'react'
 
 import './pages.css'
 import { Icon, SitePage } from './SiteChrome.jsx'
+import MerchantSplitFilm from './films/MerchantSplitFilm.jsx'
+import RiderPayFilm from './films/RiderPayFilm.jsx'
 
 /* 商家入驻(/join/merchant,设计稿 4e)与骑手加入(/join/rider,设计稿 4g)。
  *
@@ -27,7 +29,12 @@ import { Icon, SitePage } from './SiteChrome.jsx'
  * - 稿子写「要求:健康证 + 实名」。要求是实名认证(18 岁以上)+ 食品安全培训,
  *   健康证只在要求的城市才要;
  * - 稿子右边是「一位骑手昨天的真实账单(脱敏)」。没有这样的公开接口,
- *   所以标成示例,每一行都能自己算得出来。 */
+ *   所以标成示例,每一行都能自己算得出来。
+ *
+ * 2026-09「官网动画集」第二批:商家页「三步入驻」底下那组静态对照块换成
+ * 算账片(films/MerchantSplitFilm.jsx),骑手页右边那张示例账卡由到账片
+ * (films/RiderPayFilm.jsx)接管、放在三条规矩上面 —— 两支片子都要整页宽,
+ * 骑手页的两栏因此改成一栏。 */
 
 // ================= 商家入驻 =================
 
@@ -64,19 +71,6 @@ export function JoinMerchant() {
                 </li>
               ))}
             </ol>
-
-            <div className="jm-vs">
-              <div className="elsewhere">
-                <div className="sz-cap">行业平台 · 同一单（示例）</div>
-                <div className="ln muted"><span>商家总负担普遍 20%+</span><span className="num thin">−¥4 多</span></div>
-                <div className="ln"><span>菜价 ¥21，到手</span><span className="num">不到 ¥17</span></div>
-              </div>
-              <div className="here">
-                <div className="sz-cap">在这里 · 同一单</div>
-                <div className="ln muted"><span>菜价 5%，配送费不抽</span><span className="num thin">−¥1.05</span></div>
-                <div className="ln"><span>到手</span><span className="num earn">¥19.95</span></div>
-              </div>
-            </div>
           </div>
 
           <aside className="sz-card jm-apply sz-enter">
@@ -96,6 +90,8 @@ export function JoinMerchant() {
             </div>
           </aside>
         </div>
+
+        <div className="sz-film-slot"><MerchantSplitFilm /></div>
 
         <section className="jm-more">
           <div className="sz-eyebrow">其余的规矩</div>
@@ -120,59 +116,30 @@ const R_RULES = [
   ['receipt', '每单都能对账', '你的每一单在透明中心的「今日逐单」里都有一行（脱敏），和用户、商家看到的是同一份。'],
 ]
 
-/* 示例账:四单,每一行都能自己算出来。帮我送那单跑腿费 ¥12,平台收 2% = ¥0.24 */
-const R_DAY = [
-  ['11:52', '张记面馆 → 高新路 · 1.8km', 500],
-  ['12:10', '李婶砂锅粥 → 阳光花园 · 2.4km', 600],
-  ['12:31', '帮我送 · 文件 · 3.2km', 1176],
-  ['12:55', '川香居 → 学府街 · 1.1km', 500],
-]
-const yuan2 = c => `¥${(c / 100).toFixed(2)}`
-
 export function JoinRider() {
-  const total = R_DAY.reduce((s, r) => s + r[2], 0)
   return (
     <SitePage active="rider" title="超级赞 · 骑手加入:配送费 100% 归你">
       <div className="sz-page">
-        <div className="sz-cols jr-cols">
-          <div>
-            <div className="sz-eyebrow">骑手加入</div>
-            <h1 className="sz-h1">用户付的配送费，<br />一分不少到你手里。</h1>
-            <p className="sz-lede">配送费和小费 100% 归你，平台不抽；只有帮我送、帮我买收跑腿费的 2%。用户付 ¥5 配送费，你的钱包里就是 ¥5：订单完成就入账，提现 T+1 到卡、零手续费。</p>
+        <div className="sz-eyebrow">骑手加入</div>
+        <h1 className="sz-h1">用户付的配送费，<br />一分不少到你手里。</h1>
+        <p className="sz-lede">配送费和小费 100% 归你，平台不抽；只有帮我送、帮我买收跑腿费的 2%。用户付 ¥5 配送费，你的钱包里就是 ¥5：订单完成就入账，提现 T+1 到卡、零手续费。</p>
 
-            <ul className="jr-rules">
-              {R_RULES.map(([icon, t, d]) => (
-                <li key={t}>
-                  <Icon name={icon} size={22} color="#2B5F7A" />
-                  <div><div className="t">{t}</div><div className="d">{d}</div></div>
-                </li>
-              ))}
-            </ul>
+        <div className="sz-film-slot"><RiderPayFilm /></div>
 
-            <div className="jr-cta">
-              <a className="h3-btn primary lg" href="/download">下载骑手端</a>
-              <span className="jr-req">要求：实名认证 + 食品安全培训</span>
-            </div>
-            <p className="note">实名认证要年满 18 岁；健康证只在要求的城市才需要。</p>
-          </div>
+        <ul className="jr-rules">
+          {R_RULES.map(([icon, t, d]) => (
+            <li key={t}>
+              <Icon name={icon} size={22} color="#2B5F7A" />
+              <div><div className="t">{t}</div><div className="d">{d}</div></div>
+            </li>
+          ))}
+        </ul>
 
-          <aside className="sz-card jr-day sz-enter">
-            <div className="bar" style={{ background: '#2B5F7A' }} />
-            <div className="body">
-              <div className="hd"><span className="sz-cap">示例 · 一位骑手的午高峰</span><span className="faint">不是真实账单</span></div>
-              <div className="big"><span className="num earn">{yuan2(total)}</span><span className="muted">{R_DAY.length} 单 · 全部进钱包</span></div>
-              <div className="sz-rows">
-                {R_DAY.map(([t, d, v]) => (
-                  <div key={t}><span className="num t">{t}</span><span className="k">{d}</span><span className="num earn">{yuan2(v)}</span></div>
-                ))}
-                <div className="muted"><span className="k">平台从配送费、小费里抽</span><span className="num thin">¥0.00</span></div>
-                <div className="muted"><span className="k">帮我送那单：跑腿费 ¥12，平台收 2%</span><span className="num thin hold">¥0.24</span></div>
-                <div className="muted"><span className="k">什么时候到账</span><span className="earn">订单完成即进钱包</span></div>
-              </div>
-              <p className="fine">提现自己点，最低 ¥10，T+1 到卡，零手续费。</p>
-            </div>
-          </aside>
+        <div className="jr-cta">
+          <a className="h3-btn primary lg" href="/download">下载骑手端</a>
+          <span className="jr-req">要求：实名认证 + 食品安全培训</span>
         </div>
+        <p className="note">实名认证要年满 18 岁；健康证只在要求的城市才需要。</p>
 
         <section className="jm-more">
           <div className="sz-eyebrow">其余的规矩</div>

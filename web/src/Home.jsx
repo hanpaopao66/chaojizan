@@ -5,6 +5,9 @@ import {
   CHANNELS, Glyph, STATE_LABEL, SiteFooter, SiteNav, useChannelState, useCountUp, useJson,
 } from './SiteChrome.jsx'
 
+/* 下载段那支「一笔单,三端各看到什么」在页面底部,单独成 chunk,不拖首屏 */
+const ThreeAppsFilm = React.lazy(() => import('./films/ThreeAppsFilm.jsx'))
+
 /* 官网首页 v3(设计稿 1g):讲「聚合平台」,不讲「外卖」。
  *
  * 首屏左边一句话 + 右边就是 App 里的服务台(频道),
@@ -183,6 +186,9 @@ export default function Home() {
       <section className="h3-sec" id="download">
         <div className="sec">下载</div>
         <h2>Android 三端安装包，内置更新检查</h2>
+        <div className="h3-dl-film">
+          <React.Suspense fallback={null}><ThreeAppsFilm /></React.Suspense>
+        </div>
         <div className="dl">
           <div className="dlcard"><b>用户端</b><p>点外卖、订酒店、买券、叫跑腿，每一单分账可查</p><a className="h3-btn ghost" href="/appdist/chaojizan-user-arm64.apk">下载 APK</a></div>
           <div className="dlcard"><b>商家端</b><p>入驻免费，总负担 5% 封顶，每日对账 · <a href="/merchant">网页版后台</a></p><a className="h3-btn ghost" href="/appdist/chaojizan-merchant-arm64.apk">下载 APK</a></div>

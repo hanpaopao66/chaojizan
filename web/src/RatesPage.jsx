@@ -4,6 +4,7 @@ import './pages.css'
 import {
   CHANNELS, STATE_LABEL, SitePage, SplitBar, useChannelState, useJson,
 } from './SiteChrome.jsx'
+import RatesFilm from './films/RatesFilm.jsx'
 
 /* 费率页(/rates,设计稿 4c):一张表 + 一笔样单。
  *
@@ -16,7 +17,10 @@ import {
  * - 样单底下稿子写「同一单在别处:商家到手约 ¥15–17,平台拿 ¥6–8」。
  *   这组数我们核不了,改成站上一直在用的那句:行业商家总负担普遍 20% 以上,
  *   这一单(菜价 ¥21)就是 ¥4 多。
- * 哪些频道开着读 /channels,和首页、App 首页是同一份配置。 */
+ * 哪些频道开着读 /channels,和首页、App 首页是同一份配置。
+ *
+ * 表上方是「同一把尺量六个频道」那支片子(films/RatesFilm.jsx,官网动画集第二批),
+ * 开没开由这一页读好传进去,和底下的表挂同一句「暂未开放」。 */
 
 const ROWS = {
   food: { rate: '5%', when: '订单完成才收', not: '配送费、小费' },
@@ -39,6 +43,8 @@ export default function RatesPage() {
         <div className="sz-eyebrow">费率</div>
         <h1 className="sz-h1">抽多少、什么时候抽、<br />为什么是这个数。</h1>
         <p className="sz-lede rt-lede">5% 是上限不是目标。它要付服务器、带宽、短信、客服和核账；平台收入在透明中心按月公示，结余了就往下调，调了会留痕。</p>
+
+        <div className="sz-film-slot"><RatesFilm stateOf={stateOf} /></div>
 
         <div className="sz-cols rt-cols">
           <div>

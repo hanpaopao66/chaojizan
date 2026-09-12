@@ -2,6 +2,8 @@ import React from 'react'
 
 import './pages.css'
 import { Icon, SitePage, bjParts, useJson } from './SiteChrome.jsx'
+import LedgerChainFilm from './films/LedgerChainFilm.jsx'
+import OpenCityMapFilm from './films/OpenCityMapFilm.jsx'
 
 /* 开源仓 · 规则变更留痕(/opensource,设计稿 4i)。
  *
@@ -16,7 +18,11 @@ import { Icon, SitePage, bjParts, useJson } from './SiteChrome.jsx'
  *   (/rules/{customer|merchant|rider}/revisions,带内容哈希和逐条增删),
  *   派单算法另有带日期的改动记录(/transparency/dispatch 的 changelog)。
  *   接口自己的注释也写着:这里回答「改过什么、什么时候改的」,不是公示期;
- * - 稿子的时间线是示例数据,这里是接口里的真记录;只有第一版时照实说。 */
+ * - 稿子的时间线是示例数据,这里是接口里的真记录;只有第一版时照实说。
+ *
+ * 官网动画集第二批(2026-09)加了两支片子:页头和「规则变更留痕」之间是
+ * 哈希链片(films/LedgerChainFilm.jsx),页底是开城地图(films/OpenCityMapFilm.jsx)。
+ * 片子要整页宽,页头因此从左栏里提出来,两栏只剩「规矩所在」和留痕。 */
 
 const REPO = 'https://github.com/hanpaopao66/chaojizan'
 const PATHS = [
@@ -89,14 +95,18 @@ export default function OpenSourcePage() {
   return (
     <SitePage active="opensource" title="超级赞 · 开源仓与规则变更留痕">
       <div className="sz-page">
+        <div className="sz-eyebrow">开源仓</div>
+        <h1 className="sz-h1 os-h1">规矩写在代码里，<br />改了就有记录。</h1>
+        <p className="sz-lede os-lede">费率、分账、排序、核账，全部在同一个仓库，AGPL-3.0 开源。三端规则的内容一变，系统就自动记一版；派单算法另有带日期的改动记录。</p>
+        <a className="os-repo" href={REPO} target="_blank" rel="noreferrer">
+          <Icon name="repo" size={18} /> github.com/hanpaopao66/chaojizan
+        </a>
+
+        <div className="sz-film-slot"><LedgerChainFilm /></div>
+
         <div className="sz-cols os-cols">
           <div>
-            <div className="sz-eyebrow">开源仓</div>
-            <h1 className="sz-h1 os-h1">规矩写在代码里，<br />改了就有记录。</h1>
-            <p className="sz-lede os-lede">费率、分账、排序、核账，全部在同一个仓库，AGPL-3.0 开源。三端规则的内容一变，系统就自动记一版；派单算法另有带日期的改动记录。</p>
-            <a className="os-repo" href={REPO} target="_blank" rel="noreferrer">
-              <Icon name="repo" size={18} /> github.com/hanpaopao66/chaojizan
-            </a>
+            <h2 className="sz-h2">规矩在哪几个文件里</h2>
             <div className="os-paths">
               {PATHS.map((p, i) => (
                 <a key={p.name} className="sz-card os-path sz-enter" style={{ '--i': i }} href={p.href} target="_blank" rel="noreferrer">
@@ -132,6 +142,13 @@ export default function OpenSourcePage() {
             <p className="note">每一版带内容哈希（左边那串）和逐条增删；同一版规则内容，哈希就一样。平台开关的变更（恶劣天气加价、停运、开城……）另记在<a href="/transparency#governance">透明中心 · 治理公开</a>。</p>
           </div>
         </div>
+
+        <section className="os-city" id="city">
+          <div className="sz-eyebrow">开城</div>
+          <h2 className="sz-h2">一个行当一个行当地打，一座城一座城地开。</h2>
+          <p className="sz-lede os-lede">开城手册在开源仓的 docs/OPEN-A-CITY.md：从零起一套自己的实例，每一步花什么钱、办什么证、错了怎么看出来。</p>
+          <div className="sz-film-slot"><OpenCityMapFilm /></div>
+        </section>
       </div>
     </SitePage>
   )

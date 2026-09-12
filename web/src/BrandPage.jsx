@@ -2,6 +2,7 @@ import React from 'react'
 
 import './pages.css'
 import { SitePage } from './SiteChrome.jsx'
+import SzMicroKit from './films/SzMicroKit.jsx'
 
 /* 品牌物料页:标志/用色/海报传单/社媒背景,全部开放下载。
    立场:欢迎任何人拿去转发传播——唯一要求是别改数字承诺。
@@ -9,7 +10,10 @@ import { SitePage } from './SiteChrome.jsx'
    2026-09 换成官网浅色外壳(没有单独的设计稿,套 4x 的页头、卡片)。
    物料和链接一个没动;「品牌色」一栏原来写的 App 行动色(炉火橙 #FF5A1F)和
    账目绿(#0E8A5F)是改版前的,现在 App 和官网用的是 brand.dart 产品层那一套,
-   所以分成「传播层 / 产品层」两组照实列。 */
+   所以分成「传播层 / 产品层」两组照实列。
+
+   「动效」一栏是官网动画集第二批的六格演示(films/SzMicroKit.jsx),
+   照 motion.dart 里三端真实的时长和曲线演。 */
 
 const B = '/site/brand'
 
@@ -83,6 +87,12 @@ export default function BrandPage() {
           <Swatches list={SWATCH_SPREAD} />
           <p className="br-p muted">产品层：App 和官网的界面用，页面本身不用渐变。</p>
           <Swatches list={SWATCH_PRODUCT} />
+        </section>
+
+        <section className="br-sec">
+          <h2 className="sz-h2">动效</h2>
+          <p className="br-p muted">动得少，动得准：四个时长、三条曲线，别的一律不新增。唯一允许的慢动作是账本数字和分账条——因为钱要看清。三端的实现在 packages/shared/lib/src/motion.dart，官网用的是同一组数。</p>
+          <div className="br-film"><SzMicroKit /></div>
         </section>
 
         <section className="br-sec">
