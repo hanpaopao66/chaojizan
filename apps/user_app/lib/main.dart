@@ -18,13 +18,13 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'address_pages.dart';
 import 'append_order_page.dart';
 import 'category_page.dart';
+import 'chat/chat_tab.dart';
 import 'checkout_page.dart';
 import 'coupons_page.dart';
 import 'group_cart_page.dart';
 import 'help_page.dart';
 import 'hotel_pages.dart';
 import 'licenses_page.dart';
-import 'messages_page.dart';
 import 'mini_apps_panel.dart';
 import 'miniapp/container.dart';
 import 'miniapp/pages.dart';
@@ -46,6 +46,7 @@ import 'settings_page.dart';
 import 'stay_order_pages.dart';
 import 'transparency_page.dart';
 import 'trust_page.dart';
+import 'video/video_tab.dart';
 import 'voucher_pages.dart';
 
 // 定位失败(权限拒绝/模拟器没设位置)时的兜底坐标 demoLat/demoLng 在 session.dart
@@ -248,25 +249,14 @@ class _HomePageState extends State<HomePage> {
   /// 定位失败(权限关了/取不到)。顶部要说出来,不能继续假装「当前位置」
   bool _hereFailed = false;
 
-  /// 消息中心红点(有新公告)
-  bool _hasUnread = false;
-
-  /// 券包里还能用的团购券张数,订单 tab 拉计数时报上来(设计稿 3b「券包 · 2」)
-  int _ticketsUsable = 0;
-
-  /// 从「我的」页的订单四格跳过来时,订单 tab 要落在哪个筛选上。
-  /// 频道一律落在「全部」:四格的数字是各频道一起数的。
+  /// 「我的」页订单四格、首页进行中订单条都走这里:push 独立的订单页。
   ///
-  /// **切 tab 而不是 push 新页** —— push 的话会多出第二个订单列表,
-  /// 返回行为和底部 tab 不一致,用户点两次「订单」看到的是两个地方
-  OrderFilter _ordersFilter = OrderFilter.all;
-
+  /// 底部原来有「订单」tab,四格是**切 tab**;2026-09 底部换成「消息」「视频」
+  /// (DEV-PROMPTS-40 #339),订单页改成 push 出来的子页 —— 返回回到来的地方,
+  /// 不会出现第二个订单列表
   void _openOrders(OrderFilter filter) {
-    setState(() {
-      _ordersFilter = filter;
-      _tab = 1;
-      _visited.add(1);
-    });
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => OrdersPage(api: widget.api, filter: filter)));
   }
 
   @override
@@ -275,9 +265,19 @@ class _HomePageState extends State<HomePage> {
     Analytics.instance.init(widget.api);
     WidgetsBinding.instance.addPostFrameCallback((_) =>
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'user'));
-    MessageCenterPage.hasUnread(widget.api).then((v) {
-      if (mounted && v) setState(() => _hasUnread = true);
-    });
+    chatUnreadBadge.addListener(_onBadge);
+    videoImmersive.addListener(_onBadge);
+  }
+
+  @override
+  void dispose() {
+    chatUnreadBadge.removeListener(_onBadge);
+    videoImmersive.removeListener(_onBadge);
+    super.dispose();
+  }
+
+  void _onBadge() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickDeliveryAddress() async {
@@ -296,34 +296,41 @@ class _HomePageState extends State<HomePage> {
     // 桌面上鼠标的"家"在内容附近,把导航钉在 1440px 屏的最底部,
     // 每次切页都要横跨半个屏幕跑一趟。侧栏还顺带省下 80px 竖向空间,
     // 而桌面浏览器的可视高度本来就比手机紧张(地址栏、标签栏都在吃)
-    return SzNavScaffold(
+    final scaffold = SzNavScaffold(
       selectedIndex: _tab,
       // 宽度上限交给外壳,标题栏和内容才会用**同一个**宽度对齐。
       // 自己在 body 上套 SzContentWidth 的话,标题栏还是横跨全屏:
       // 标题贴最左、图标钉最右,而下面的内容是居中的。
       //
-      // 三个 tab 不同宽,因为**内容形态不同**:首页是卡片流(可以宽一点),
-      // 订单和「我的」是单列(要短行才好读)。统一限死会把卡片流也压成 720
-      contentMaxWidth: _tab == 0 ? kFeedMaxWidth : kContentMaxWidth,
+      // 各 tab 不同宽,因为**内容形态不同**:首页、视频是卡片流(可以宽一点),
+      // 消息和「我的」是单列(要短行才好读)。统一限死会把卡片流也压成 720
+      contentMaxWidth: _tab == 0 || _tab == 2 ? kFeedMaxWidth : kContentMaxWidth,
       onSelected: (i) => setState(() {
         _tab = i;
         _visited.add(i);
       }),
-      items: const [
-        SzNavItem(
+      items: [
+        const SzNavItem(
             icon: Icons.storefront_outlined,
             selectedIcon: Icons.storefront,
             label: '首页'),
         SzNavItem(
-            icon: Icons.receipt_long_outlined,
-            selectedIcon: Icons.receipt_long,
-            label: '订单'),
-        SzNavItem(
+            icon: Icons.chat_bubble_outline,
+            selectedIcon: Icons.chat_bubble,
+            label: '消息',
+            badgeCount: chatUnreadBadge.value),
+        const SzNavItem(
+            icon: Icons.smart_display_outlined,
+            selectedIcon: Icons.smart_display,
+            label: '视频'),
+        const SzNavItem(
             icon: Icons.person_outline,
             selectedIcon: Icons.person,
             label: '我的'),
       ],
-      appBar: AppBar(
+      // 「消息」「视频」两个 tab 自己画顶部(消息要放分组条,视频要放搜索框和子页签,
+      // 竖屏子页还要整块变黑),外壳这里不给标题栏
+      appBar: _tab == 1 || _tab == 2 ? null : AppBar(
         title: _tab == 0
             // 商业平台标配:顶部地址栏,让用户知道「附近」是哪儿附近。
             // 地址与送达时间同行——打开外卖 App 第一秒只关心这两件事。
@@ -366,37 +373,13 @@ class _HomePageState extends State<HomePage> {
                   ],
                 ),
               )
-            : Text(_tab == 1 ? '我的订单' : '我的'),
+            : const Text('我的'),
         actions: [
-          // 团购券原来挂在订单页分段器那一行的最右边。分段器换成频道条
-          // 之后挪到这里(设计稿 3b:「券包 · 2」在铃铛左边)—— 团购券不走订单接口,
-          // 频道条上没有它,订单 tab 不能因为改版就少了这个入口
-          if (_tab == 1)
-            TextButton(
-              onPressed: () async {
-                if (!await ensureLoggedIn(context)) return;
-                if (!context.mounted) return;
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => MyVouchersPage(api: widget.api)));
-              },
-              child: Text(
-                  _ticketsUsable > 0 ? '券包 · $_ticketsUsable' : '券包'),
-            ),
-          // 消息中心:公告 + 订单通知,有新公告带红点
-          IconButton(
-            tooltip: '消息中心',
-            icon: Badge(
-              isLabelVisible: _hasUnread,
-              smallSize: 8,
-              child: const Icon(Icons.notifications_outlined),
-            ),
-            onPressed: () async {
-              setState(() => _hasUnread = false); // 打开即已读
-              await Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => MessageCenterPage(api: widget.api)));
-            },
-          ),
-          // 「我的」tab 上换成客服 + 设置。
+          // 右上角原来的铃铛(消息中心)挪进了「消息」tab 顶部的「通知」一行
+          // (DEV-PROMPTS-40 D24):两个地方都有未读的话,用户不知道该看哪。
+          // 券包跟着订单页走了(OrdersPage 顶栏)。
+          //
+          // 「我的」tab 上是客服 + 设置。
           //
           // 这两样一个是「随时可能要」、一个是「一年点几次的目录页」,
           // 都不该按位置在正文里排优先级 —— 提到右上角之后,正文列表
@@ -404,7 +387,7 @@ class _HomePageState extends State<HomePage> {
           //
           // 收货地址在「我的」页的卡券网格里有一份,这里让位不丢入口;
           // 首页/订单 tab 保持原样(那两个 tab 的地址是下单上下文)
-          if (_tab == 2) ...[
+          if (_tab == 3) ...[
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: '联系平台客服',
@@ -427,7 +410,7 @@ class _HomePageState extends State<HomePage> {
           // 「我的」页网格里也有一份 —— 两个入口够了,第三个只是图标堆积
         ],
       ),
-      // 底部 tab 只放功能(首页/订单/我的),业务一律走金刚区——
+      // 底部 tab 只放功能(首页/消息/视频/我的),业务一律走金刚区——
       // 业务会持续增加(团购/住宿/打车…),金刚区横向扩展,tab 保持稳定。
       //
       // 用 IndexedStack 保活,不再用 AnimatedSwitcher:后者三个 tab 各带一个 key,
@@ -457,20 +440,185 @@ class _HomePageState extends State<HomePage> {
                   })
               : const SizedBox.shrink(),
           _visited.contains(1)
-              ? OrdersTab(
-                  api: widget.api,
-                  filter: _ordersFilter,
-                  onCounts: (c) {
-                    final n = c.ticketsUsable ?? 0;
-                    if (mounted && n != _ticketsUsable) {
-                      setState(() => _ticketsUsable = n);
-                    }
-                  })
+              ? ChatTab(api: widget.api)
               : const SizedBox.shrink(),
           _visited.contains(2)
+              ? VideoTab(api: widget.api)
+              : const SizedBox.shrink(),
+          _visited.contains(3)
               ? ProfileView(api: widget.api, onOpenOrders: _openOrders)
               : const SizedBox.shrink(),
         ],
+      ),
+    );
+    // 视频 tab 的「竖屏」子页:整页黑底,导航条跟着换深色主题
+    if (_tab == 2 && videoImmersive.value) {
+      return Theme(data: superZTheme(Brightness.dark), child: scaffold);
+    }
+    return scaffold;
+  }
+}
+
+/// 首页顶部的进行中订单条(DEV-PROMPTS-40 #339)。
+///
+/// 底部原来有「订单」tab,外卖用户最常做的事 —— 看骑手到哪了 —— 一下就到。
+/// tab 换成「消息」「视频」之后,这件事不能变成「我的 → 订单 → 详情」三步:
+/// 有进行中的单就在首页顶上出一条,一单直达详情,多单进订单页的「进行中」。
+/// 没有进行中的单时零高度,不占首页的位置。
+class ActiveOrdersBar extends StatefulWidget {
+  const ActiveOrdersBar({super.key, required this.api});
+
+  final ApiClient api;
+
+  @override
+  State<ActiveOrdersBar> createState() => _ActiveOrdersBarState();
+}
+
+class _ActiveOrdersBarState extends State<ActiveOrdersBar>
+    with WidgetsBindingObserver {
+  List<Order> _active = const [];
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    authTick.addListener(_load);
+    _load();
+    // 配送中状态一分钟变一次就够了;详情页里有实时通道,这里只是个入口
+    _timer = Timer.periodic(const Duration(seconds: 60), (_) => _load());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    authTick.removeListener(_load);
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  Future<void> _load() async {
+    if (!widget.api.isLoggedIn) {
+      if (_active.isNotEmpty && mounted) setState(() => _active = const []);
+      return;
+    }
+    try {
+      final orders = await widget.api.myOrders(limit: 20);
+      final active = orders.where(OrderFilter.active.matchesFood).toList();
+      if (mounted) setState(() => _active = active);
+    } catch (_) {
+      // 拉不到就不显示,不在首页顶上摆一条报错
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_active.isEmpty) return const SizedBox.shrink();
+    final sz = Theme.of(context).sz;
+    final first = _active.first;
+    final eta = DateTime.tryParse(first.etaAt ?? '')?.toLocal();
+    final title = _active.length == 1
+        ? '${first.merchantName} · ${first.status.label}'
+        : '${_active.length} 个订单进行中';
+    final sub = _active.length == 1
+        ? (eta == null
+            ? '点开看进度'
+            : '预计 ${eta.hour.toString().padLeft(2, '0')}:${eta.minute.toString().padLeft(2, '0')} 送达')
+        : '最新一单:${first.merchantName} · ${first.status.label}';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+      child: Material(
+        color: sz.claySoft,
+        borderRadius: BorderRadius.circular(kRadiusMd),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(kRadiusMd),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => _active.length == 1
+                  ? OrderDetailPage(api: widget.api, orderNo: first.orderNo)
+                  : OrdersPage(api: widget.api, filter: OrderFilter.active))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(children: [
+              Icon(Icons.delivery_dining_outlined, color: sz.clay),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: kFontBodyLg,
+                            fontWeight: FontWeight.w600,
+                            color: sz.ink)),
+                    Text(sub,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: sz.inkFaint),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 订单页(原底部「订单」tab)。
+///
+/// 入口:「我的」页订单四格和「我的订单」、首页进行中订单条。
+/// 顶栏右边是券包:团购券不走订单接口,订单页不能因为改版就少了这个入口
+class OrdersPage extends StatefulWidget {
+  const OrdersPage({super.key, required this.api, this.filter = OrderFilter.all});
+
+  final ApiClient api;
+  final OrderFilter filter;
+
+  @override
+  State<OrdersPage> createState() => _OrdersPageState();
+}
+
+class _OrdersPageState extends State<OrdersPage> {
+  /// 券包里还能用的团购券张数,订单列表拉计数时报上来(设计稿 3b「券包 · 2」)
+  int _ticketsUsable = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return SzPageScaffold(
+      contentMaxWidth: kContentMaxWidth,
+      appBar: AppBar(
+        title: const Text('我的订单'),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              if (!await ensureLoggedIn(context)) return;
+              if (!context.mounted) return;
+              await Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => MyVouchersPage(api: widget.api)));
+            },
+            child: Text(_ticketsUsable > 0 ? '券包 · $_ticketsUsable' : '券包'),
+          ),
+        ],
+      ),
+      body: OrdersTab(
+        api: widget.api,
+        filter: widget.filter,
+        onCounts: (c) {
+          final n = c.ticketsUsable ?? 0;
+          if (mounted && n != _ticketsUsable) {
+            setState(() => _ticketsUsable = n);
+          }
+        },
       ),
     );
   }
@@ -1773,6 +1921,8 @@ class _MerchantListViewState extends State<MerchantListView>
                 SliverToBoxAdapter(
                   child: Column(children: [
                     _searchBar(),
+                    // 底部没有订单 tab 了(DEV-PROMPTS-40 #339):进行中的单在首页顶上给一条
+                    ActiveOrdersBar(api: widget.api),
                     _miniHint(),
                     // 平台公告(运营配置,发通知不用发版);无公告时零高度
                     AnnouncementBanner(api: widget.api, audience: 'user'),
