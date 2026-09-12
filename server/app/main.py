@@ -48,7 +48,11 @@ from .routers import (
     uploads,
     vouchers,
 )
+from .routers import chat as chat_router
+from .routers import social as social_router
 from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
+from .realtime import gateway as rt_gateway
+from .services import rt_events  # noqa: F401  注册提交后分发实时事件的钩子
 from .services.auto_flow import auto_flow_loop
 from . import ws
 
@@ -77,9 +81,14 @@ async def lifespan(app: FastAPI):
     sweeper = (
         asyncio.create_task(auto_flow_loop()) if settings.auto_flow_enabled else None
     )
+    # 实时事件的跨进程订阅(DEV-PROMPTS-40 §6):每个 api 进程各一份,和清扫不一样
+    from .realtime.bus import listen_forever
+    rt_bus = asyncio.create_task(listen_forever()) if settings.realtime_bus else None
     yield
     if sweeper is not None:
         sweeper.cancel()
+    if rt_bus is not None:
+        rt_bus.cancel()
     # 共享的推送 HTTP 客户端(连接池)随进程一起收掉
     from .services.push import aclose_push_client
     await aclose_push_client()
@@ -514,6 +523,10 @@ app.include_router(carts.router)
 app.include_router(referrals.router)
 app.include_router(admin.router)
 app.include_router(ws.router)
+# 消息与视频(DEV-PROMPTS-40)
+app.include_router(social_router.router)
+app.include_router(chat_router.router)
+app.include_router(rt_gateway.router)
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 PRIVATE_DIR.mkdir(exist_ok=True)

@@ -43,6 +43,20 @@ class Settings(BaseSettings):
     # 托管页 CSP 的 frame-ancestors 额外放行的 origin(逗号分隔):web 版用户端、开发者后台
     # 模拟器、管理后台审核预览所在的 origin。public_base_url 总是放行
     mini_app_frame_ancestors: str = ""
+    # ---- 消息与视频(DEV-PROMPTS-40)----
+    # 实时事件经 Redis 转给其他 api 进程。单进程时是自己发给自己再丢掉;
+    # 照多进程写是为了以后加 worker 不用改协议(见 realtime/bus.py)
+    realtime_bus: bool = True
+    # 转码在哪跑:inline = api 进程里的后台任务(开发 / CI,零配置能跑通);
+    # external = 独立的 media-worker 容器(生产,重活不占 api 的事件循环)
+    media_worker: str = "inline"
+    # 生产上视频 / 大文件由 nginx 从对象存储直出(api 判权后回 X-Accel-Redirect);
+    # 开发没有 nginx,api 自己按 Range 流式返回
+    media_accel: bool = False
+    # 通话的 TURN(coturn,REST 共享密钥方案)。不配时只给 STUN,局域网能通、跨网络多半不通
+    turn_urls: str = ""
+    turn_secret: str = ""
+    stun_urls: str = ""
     # 7 天 + 客户端自动续期(/auth/refresh):商家端长期挂机也不会掉线,
     # 但被泄露的旧 token 一周后自然作废
     jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线

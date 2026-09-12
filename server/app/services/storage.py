@@ -36,6 +36,11 @@ PURPOSES: dict[str, bool] = {
     "review": False,        # 评价配图(评价本身就是公开的)
     "miniapp_icon": False,  # 小程序图标、截图:详情页公开展示
     "miniapp_shot": False,
+    # 消息与视频(DEV-PROMPTS-40)。聊天媒体**不走这里**:它们在 media_files 里、一律私密
+    "link_preview": False,  # 链接预览的配图:取自公开网页的 og:image,由服务端代取(不让客户端直连第三方)
+    "sticker": False,       # 贴纸:发出去就是给会话里所有人看的
+    "chat_photo": False,    # 群 / 频道头像
+    "video_cover": False,   # 视频封面、雪碧图(视频本身在私密桶,判权后播放)
 
     # ---- 私密:泄露了会伤到具体的人 ----
     "id_card": True,        # 身份证

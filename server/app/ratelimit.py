@@ -53,3 +53,45 @@ async def check_rate_limit(scope: str, key: str, per_minute: int) -> None:
         return
     if count > per_minute:
         raise HTTPException(429, "操作太频繁,请稍后再试")
+
+
+async def check_daily_limit(scope: str, key: str, per_day: int,
+                            message: str = "今天的次数用完了,明天再试") -> None:
+    """同一 (scope, key) 每个**北京自然日**最多 per_day 次,超出抛 429(DEV-PROMPTS-40 §5.7)。
+
+    按北京日期切窗,不按 UTC:用户说的「今天」是北京的今天,UTC 切的话
+    每天早上 8 点额度莫名其妙地重置一次。Redis 不可用时放行(同上)。
+    """
+    if not settings.rate_limit_enabled:
+        return
+    day = time.strftime("%Y%m%d", time.gmtime(time.time() + 8 * 3600))
+    redis_key = f"rld:{scope}:{key}:{day}"
+    try:
+        r = get_redis()
+        count = await r.incr(redis_key)
+        if count == 1:
+            await r.expire(redis_key, 26 * 3600)
+    except Exception as exc:
+        logger.warning("限流检查失败,放行: %s", exc)
+        return
+    if count > per_day:
+        raise HTTPException(429, message)
+
+
+async def check_rate_limit_seconds(scope: str, key: str, limit: int, seconds: int = 1,
+                                   message: str = "发得太快了,歇一下再发") -> None:
+    """同一 (scope, key) 每 seconds 秒最多 limit 次(聊天的「每秒 5 条」用它,§5.7)。"""
+    if not settings.rate_limit_enabled:
+        return
+    window = int(time.time() // seconds)
+    redis_key = f"rls:{scope}:{key}:{seconds}:{window}"
+    try:
+        r = get_redis()
+        count = await r.incr(redis_key)
+        if count == 1:
+            await r.expire(redis_key, seconds + 5)
+    except Exception as exc:
+        logger.warning("限流检查失败,放行: %s", exc)
+        return
+    if count > limit:
+        raise HTTPException(429, message)

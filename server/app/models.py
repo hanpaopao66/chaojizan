@@ -34,6 +34,9 @@ class UserRole(str, enum.Enum):
     # 小程序开发者(#329)。和三端一样按 (手机号, 角色) 独立成号;
     # 开关是邀请制时只有 developer_invites 里的手机号能注册
     developer = "developer"
+    # 聊天机器人(DEV-PROMPTS-40 #355)。没有手机号、不能登录,只能用 Bot API 的 token 说话;
+    # 由开发者在 /dev/ 创建。角色列是 VARCHAR 非原生枚举,加值不用改库
+    bot = "bot"
 
 
 class MerchantStatus(str, enum.Enum):
@@ -3653,3 +3656,17 @@ class Violation(Base):
         Index("uq_violations_auto", "kind", "order_no", unique=True,
               postgresql_where=text("order_no IS NOT NULL")),
     )
+
+
+# ---- 消息与视频(DEV-PROMPTS-40)的模型分文件放,在这里汇总导入:
+# `from .models import X` 照旧能用,alembic 和 create_all 也能看到这些表 ----
+from .models_social import (NOTIFY_DEFAULTS, PRIVACY_DEFAULTS,  # noqa: E402,F401
+                            PRIVACY_VALUES, SocialBlock, SocialContact,
+                            SocialProfile, Username)
+from .models_chat import (ACTIVE_ROLES, CHAT_TYPES, MEMBER_ROLES,  # noqa: E402,F401
+                          AdminChatView, Bot, BotUpdate, Call, Chat, ChatEvent,
+                          ChatFolder, ChatMember, ChatReport, InviteLink, JoinRequest,
+                          ChatMessage, MessageHide, MessageMention, MessageReaction, Poll,
+                          PollVote, ScheduledMessage, Sticker, StickerSet, UserEvent,
+                          UserStickerSet)
+from .models_media import MEDIA_KINDS, MediaFile, Upload  # noqa: E402,F401
