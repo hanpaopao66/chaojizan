@@ -107,9 +107,13 @@ async def main():
         "name": f"生日批次{ts}", "trigger": "birthday",
         "threshold_cents": 0, "off_cents": 500, "total": 100,
         "per_user_limit": 1, "valid_days": 7})
+    # 复购批次的预算开到上限:演示店的沉睡老客按 id 排队领,库里攒了上千个
+    # (本机副本实测 1449),预算 100 的话每个月头一轮就被前 100 个领光,
+    # 这条用例自己造的新用户 id 最大、永远排不到 —— 红绿取决于库里攒了多少人和今天是几号,
+    # 不取决于代码(2026-09-12 在月初撞上)。预算封顶的逻辑不在这条用例里验
     call("POST", "/merchants/me/coupon-batches", merchant, {
         "name": f"复购批次{ts}", "trigger": "winback",
-        "threshold_cents": 0, "off_cents": 300, "total": 100,
+        "threshold_cents": 0, "off_cents": 300, "total": 100_000,
         "per_user_limit": 1, "valid_days": 7})
 
     # 1) 生日券:今天生日的发,一年一张;非今天不发。
