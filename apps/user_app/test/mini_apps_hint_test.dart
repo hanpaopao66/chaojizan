@@ -37,21 +37,26 @@ void main() {
   const hint = '↓ 下拉打开小程序';
 
   Map<String, dynamic> app({String icon = '📊'}) => {
+        'appid': 'sz0123456789abcdef',
         'id': 1,
         'name': '透明中心',
         'icon': icon,
         'tagline': '平台账本',
-        'entry_url': 'https://chaojizan.cc/transparency',
-        'allowed_origins': ['https://chaojizan.cc'],
-        'perms': ['initData'],
+        'kind': 'app',
+        'hosting': 'external',
+        'developer': {'name': '陕西爱卡斯科技有限公司', 'label': '官方', 'official': true},
       };
 
   ApiClient fakeApi(List<Map<String, dynamic>> apps) => ApiClient(
         baseUrl: 'http://test.local',
         httpClient: MockClient((req) async {
           Object? payload;
-          if (req.url.path == '/mini-apps') {
-            payload = apps;
+          if (req.url.path == '/mini-apps/catalog') {
+            // 公开目录(v2):抽屉和露头条的数据源
+            payload = {'items': apps, 'total': apps.length, 'next_cursor': null,
+                       'categories': [], 'sort_rule': ''};
+          } else if (req.url.path == '/mini-apps/me') {
+            payload = {'recent': [], 'starred': []};
           } else {
             payload = req.url.path.endsWith('s') ? [] : {};
           }
@@ -122,12 +127,13 @@ void main() {
   });
 
   group('面板与露头条', () {
-    testWidgets('面板底部说清顺序是人工排的,不写「登记顺序」', (t) async {
+    testWidgets('面板底部说清顺序:精选是人工挑的,不写「登记顺序」', (t) async {
       SharedPreferences.setMockInitialValues({});
       await pump(t, [app()]);
       await t.tap(find.text(hint));
       await t.pumpAndSettle();
-      expect(find.textContaining('人工排定'), findsOneWidget);
+      expect(find.textContaining('人工挑选'), findsOneWidget);
+      expect(find.textContaining('不卖位置'), findsOneWidget);
       expect(find.textContaining('登记顺序'), findsNothing);
     });
 
@@ -137,7 +143,8 @@ void main() {
         home: Scaffold(
           body: MiniAppsPeek(
             pull: kMiniAppsPullThreshold,
-            apps: [MiniAppInfo.fromJson(app(icon: '账'))],
+            apps: [MiniAppCard.fromJson(app(icon: '账'))],
+            api: fakeApi(const []),
           ),
         ),
       ));
@@ -154,7 +161,8 @@ void main() {
         home: Scaffold(
           body: MiniAppsPeek(
             pull: kMiniAppsPullThreshold,
-            apps: [MiniAppInfo.fromJson(app(icon: '🏪'))],
+            apps: [MiniAppCard.fromJson(app(icon: '🏪'))],
+            api: fakeApi(const []),
           ),
         ),
       ));
@@ -164,8 +172,8 @@ void main() {
     });
 
     test('选字规则', () {
-      MiniAppInfo a(String icon, String name) =>
-          MiniAppInfo.fromJson({...app(icon: icon), 'name': name});
+      MiniAppCard a(String icon, String name) =>
+          MiniAppCard.fromJson({...app(icon: icon), 'name': name});
       expect(miniAppGlyph(a('水', '交水电费')), '水');
       expect(miniAppGlyph(a('💧', '交水电费')), '交');
       expect(miniAppGlyph(a('', '公开账本')), '公');

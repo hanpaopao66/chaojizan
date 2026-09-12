@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'miniapp/pages.dart';
 import 'session.dart';
 
 /// 设置页:通知开关(本地记忆)/清除缓存/检查更新/关于我们。
@@ -99,6 +100,16 @@ class _SettingsPageState extends State<SettingsPage> {
                     child: CircularProgressIndicator(strokeWidth: 2))
                 : null,
             onTap: _checking ? null : _checkUpdate,
+          ),
+        ],
+        if (widget.api.isLoggedIn) ...[
+          const Divider(height: 1),
+          // 每个用过的小程序:授权项、云存储用量、导出、清空、移除(DEV-PROMPTS-39 I8)
+          SzEntryTile(
+            icon: Icons.apps_outlined,
+            title: '小程序授权与数据',
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => MiniAppDataPage(api: widget.api))),
           ),
         ],
         const Divider(height: 1),

@@ -174,8 +174,11 @@ void main() {
               'identity_verified': verified,
               if (createdAt != null) 'created_at': createdAt,
             };
-          case '/mini-apps':
-            payload = miniApps;
+          case '/mini-apps/catalog':
+            payload = {'items': miniApps, 'total': miniApps.length,
+                       'next_cursor': null, 'categories': [], 'sort_rule': ''};
+          case '/mini-apps/me':
+            payload = {'recent': [], 'starred': []};
           case '/config':
             payload = {'marketing': marketing};
           case '/orders':
@@ -609,19 +612,20 @@ void main() {
     testWidgets('有小程序才出「小程序」格子,点开是抽屉面板', (t) async {
       final api = await loggedIn(miniApps: [
         {
+          'appid': 'sz0123456789abcdef',
           'id': 1,
           'name': '透明中心',
           'icon': '📊',
           'tagline': '',
-          'entry_url': 'https://chaojizan.cc/transparency',
-          'allowed_origins': ['https://chaojizan.cc'],
-          'perms': ['initData'],
+          'kind': 'app',
+          'hosting': 'external',
+          'developer': {'name': '陕西爱卡斯科技有限公司', 'label': '官方'},
         },
       ]);
       await pumpProfile(t, api);
       await t.tap(find.text('小程序'));
       await t.pumpAndSettle();
-      expect(find.textContaining('人工排定'), findsOneWidget);
+      expect(find.textContaining('人工挑选'), findsOneWidget);
     });
 
     testWidgets('清单是空的就不出这一格 —— 点开一个空面板比没有入口更糟', (t) async {

@@ -25,8 +25,9 @@ import 'help_page.dart';
 import 'hotel_pages.dart';
 import 'licenses_page.dart';
 import 'messages_page.dart';
-import 'mini_app_sheet.dart';
 import 'mini_apps_panel.dart';
+import 'miniapp/container.dart';
+import 'miniapp/pages.dart';
 import 'money_flow_page.dart';
 import 'order_filter.dart';
 import 'invite_page.dart';
@@ -180,6 +181,15 @@ class UserApp extends StatelessWidget {
         },
         // 隐私门必须在最外层:开屏页会请求 /splash 并下载开屏图,
         // 套在里面的话首次启动"同意"之前就已经联网了
+        // 直达链接 https://…/m/<appid>(安卓 App Links 拉起)。落地页自己检查隐私门,
+        // 没同意之前什么都不做 —— 直达链接不能绕过隐私弹窗
+        onGenerateRoute: (settings) {
+          final uri = Uri.tryParse(settings.name ?? '');
+          if (uri != null && MiniAppLinkPage.parse(uri) != null) {
+            return MaterialPageRoute(builder: (_) => MiniAppLinkPage(api: rootApi, uri: uri));
+          }
+          return null;
+        },
         home: PrivacyGate(
             onAgreed: () async {
               // 同意之后才初始化收集类 SDK。地图 SDK 尤其不能提前:
@@ -626,7 +636,7 @@ class _MerchantListViewState extends State<MerchantListView>
 
   /// 小程序清单(#278):空(含游客 401)时下拉手势整个不生效 ——
   /// 没有内容的抽屉比没有抽屉更糟
-  List<MiniAppInfo> _miniApps = const [];
+  List<MiniAppCard> _miniApps = const [];
 
   /// 列表到顶后继续下拉的累计拉距;>0 时顶部预览条露头
   double _miniPull = 0;
@@ -763,7 +773,8 @@ class _MerchantListViewState extends State<MerchantListView>
     // web 现在能用了(iframe + postMessage,见 mini_app_host_web.dart)
     if (!miniAppSupported) return;
     try {
-      final apps = await widget.api.miniApps();
+      // 公开目录:游客也拉得到。**只要目录不空就能下拉**(清单为空时手势不生效)
+      final apps = (await widget.api.miniAppCatalog(limit: 24)).items;
       if (mounted) setState(() => _miniApps = apps);
     } catch (_) {
       // 游客/网络失败:按没有小程序处理,静默
@@ -1711,7 +1722,7 @@ class _MerchantListViewState extends State<MerchantListView>
                 _miniPullByOverscroll
                     ? 0
                     : _miniPull - kMiniAppsPeekHeight * t),
-            child: MiniAppsPeek(pull: _miniPull, apps: _miniApps),
+            child: MiniAppsPeek(pull: _miniPull, apps: _miniApps, api: widget.api),
           ),
         ),
     ]);
@@ -7007,7 +7018,7 @@ class _ProfileViewState extends State<ProfileView> {
   /// 首页的下拉抽屉是隐性手势,而用鼠标的桌面浏览器根本拉不动列表 ——
   /// 这里是一个看得见的入口。空清单(游客 401、桌面端没有容器、
   /// 运营还没上架)时这一格不出:点开一个空面板比没有入口更糟
-  List<MiniAppInfo> _miniApps = const [];
+  List<MiniAppCard> _miniApps = const [];
 
   /// 顶上那张账目卡关掉了没有。**默认不关,关了就永久关。**
   ///
@@ -7079,7 +7090,10 @@ class _ProfileViewState extends State<ProfileView> {
     // 桌面端没有小程序容器,清单都不拉(同首页 _loadMiniApps)。
     // 错误当场接住:前面几个请求还没回来时它先失败,就是一个没人接的异常
     final appsF = loggedIn && miniAppSupported
-        ? widget.api.miniApps().onError((_, __) => const <MiniAppInfo>[])
+        ? widget.api
+            .miniAppCatalog(limit: 24)
+            .then((c) => c.items)
+            .onError((_, __) => const <MiniAppCard>[])
         : null;
     if (profileF != null) {
       try {
@@ -7113,7 +7127,7 @@ class _ProfileViewState extends State<ProfileView> {
     }
     final counts = countsF == null ? null : await countsF;
     if (mounted) setState(() => _counts = counts);
-    final apps = appsF == null ? const <MiniAppInfo>[] : await appsF;
+    final apps = appsF == null ? const <MiniAppCard>[] : await appsF;
     if (mounted) setState(() => _miniApps = apps);
   }
 

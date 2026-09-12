@@ -12,10 +12,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
-  ApiException(this.statusCode, this.message);
+  ApiException(this.statusCode, this.message, {this.code});
 
   final int statusCode;
   final String message;
+
+  /// 小程序桥错误码(DEV-PROMPTS-39 §5.4,如 4007 版本冲突、4009 已暂停)。
+  /// 服务端的 detail 是 `{code, message}` 时才有;宿主原样转给页面
+  final int? code;
 
   /// 网络层问题(断网/超时/连不上),不是服务端返回的业务错误。
   /// 页面据此决定是"给个重试按钮"还是"照实说明原因"。
@@ -310,9 +314,16 @@ class ApiClient {
     final text = utf8.decode(response.bodyBytes);
     if (response.statusCode >= 400) {
       String message = '请求失败(${response.statusCode})';
+      int? code;
       try {
         final detail = (jsonDecode(text) as Map)['detail'];
-        if (detail is String) message = detail;
+        if (detail is String) {
+          message = detail;
+        } else if (detail is Map) {
+          // 小程序接口的错误体:{code: 4007, message: "…"}
+          if (detail['message'] is String) message = detail['message'] as String;
+          if (detail['code'] is int) code = detail['code'] as int;
+        }
       } catch (_) {}
       if (response.statusCode == 401 && _token != null &&
           !path.startsWith('/auth/')) {
@@ -320,7 +331,7 @@ class ApiClient {
         await clearSession();
         onUnauthorized?.call();
       }
-      throw ApiException(response.statusCode, message);
+      throw ApiException(response.statusCode, message, code: code);
     }
     return text.isEmpty ? null : jsonDecode(text);
   }
@@ -3194,8 +3205,105 @@ class ApiClient {
 
   /// 给某个小程序签一份 initData 身份包:{payload: {...}, sign: hex}。
   /// 整包经桥透传给页面 —— 登录 token 永远不进 WebView。
+  /// **v1,已废弃**:只剩外部地址的老条目还用它(新接入走 [miniAppLaunch])。
   Future<Map<String, dynamic>> miniAppInitData(int appId) async {
     final data = await _request('POST', '/mini-apps/$appId/init-data');
     return data as Map<String, dynamic>;
+  }
+
+  // ---------- 小程序开放平台 v2(DEV-PROMPTS-39) ----------
+
+  /// 公开目录。**不需要登录** —— 游客也能看到有哪些小程序。
+  Future<MiniAppCatalog> miniAppCatalog(
+      {String? kind, String? category, String q = '', int cursor = 0, int limit = 50}) async {
+    final data = await _request('GET', '/mini-apps/catalog', query: {
+      if (kind != null) 'kind': kind,
+      if (category != null) 'category': category,
+      if (q.trim().isNotEmpty) 'q': q.trim(),
+      'cursor': '$cursor',
+      'limit': '$limit',
+    });
+    return MiniAppCatalog.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<MiniAppDetail> miniAppDetail(String appid) async {
+    final data = await _request('GET', '/mini-apps/$appid');
+    return MiniAppDetail.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 最近使用(≤ 8)+ 我的小程序(收藏)。存在服务端,换设备也在。
+  Future<({List<MiniAppCard> recent, List<MiniAppCard> starred})> miniAppMine() async {
+    final data = await _request('GET', '/mini-apps/me') as Map<String, dynamic>;
+    List<MiniAppCard> cards(String k) => (data[k] as List? ?? const [])
+        .map((e) => MiniAppCard.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return (recent: cards('recent'), starred: cards('starred'));
+  }
+
+  /// 启动:服务端校验、签 initData v2,返回版本化地址(已带启动片段)。
+  Future<MiniAppLaunch> miniAppLaunch(String appid,
+      {bool trial = false,
+      String? startParam,
+      String platform = 'unknown',
+      Map<String, String>? theme}) async {
+    final data = await _request('POST', '/mini-apps/$appid/launch', body: {
+      'trial': trial,
+      'platform': platform,
+      if (startParam != null && startParam.isNotEmpty) 'start_param': startParam,
+      if (theme != null) 'theme': theme,
+    });
+    return MiniAppLaunch.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 宿主每分钟、回到前台时查一次:被暂停或隔离了就关掉(桥错误码 4009)。
+  Future<bool> miniAppBlocked(String appid) async {
+    final data = await _request('GET', '/mini-apps/$appid/status') as Map<String, dynamic>;
+    return data['blocked'] as bool? ?? false;
+  }
+
+  Future<void> miniAppStar(String appid, {required bool starred}) async {
+    await _request(starred ? 'POST' : 'DELETE', '/mini-apps/$appid/star');
+  }
+
+  Future<void> miniAppReport(String appid,
+      {required String reasonCode, String detail = ''}) async {
+    await _request('POST', '/mini-apps/$appid/report',
+        body: {'reason_code': reasonCode, 'detail': detail});
+  }
+
+  /// 云存储(宿主代页面调用)。op ∈ get / set / remove / keys / usage。
+  /// 失败抛 [ApiException],桥错误码在 `code` 上(4004 / 4005 / 4006 / 4007 / 4009)。
+  Future<dynamic> miniAppStorage(String appid, String op, Map<String, dynamic> body) =>
+      _request('POST', '/mini-apps/$appid/storage/$op', body: body);
+
+  /// 用户在授权弹窗里点了「允许」之后调:记授权 + 当场签一份带昵称头像的新 initData。
+  Future<String> miniAppProfile(String appid) async {
+    final data = await _request('POST', '/mini-apps/$appid/profile') as Map<String, dynamic>;
+    return data['init_data'] as String? ?? '';
+  }
+
+  Future<void> miniAppRevokeGrant(String appid, String scope) async {
+    await _request('DELETE', '/mini-apps/$appid/grants/$scope');
+  }
+
+  /// 「设置 → 小程序授权与数据」的列表。
+  Future<List<MiniAppDataItem>> miniAppDataList() async {
+    final data = await _request('GET', '/mini-apps/me/data') as Map<String, dynamic>;
+    return (data['items'] as List? ?? const [])
+        .map((e) => MiniAppDataItem.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// 导出:这个小程序在云存储里存的全部内容(键 → 值)。
+  Future<Map<String, dynamic>> miniAppExport(String appid) async {
+    final data = await _request('GET', '/mini-apps/$appid/data', query: {'export': 'true'});
+    return data as Map<String, dynamic>;
+  }
+
+  /// 清空云存储;[all] 再加撤回授权、从最近使用和我的小程序里移除。
+  Future<int> miniAppClearData(String appid, {bool all = false}) async {
+    final data = await _request('DELETE', '/mini-apps/$appid/data',
+        query: {'scope': all ? 'all' : 'storage'}) as Map<String, dynamic>;
+    return (data['removed_keys'] as num?)?.toInt() ?? 0;
   }
 }

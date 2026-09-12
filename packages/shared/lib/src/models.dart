@@ -1889,3 +1889,309 @@ class MiniAppInfo {
   final List<String> allowedOrigins;
   final List<String> perms;
 }
+
+// ---------- 小程序开放平台 v2(DEV-PROMPTS-39) ----------
+
+/// 开发者的公开信息。个人开发者只有自取的名字 +「个人开发者 · 已实名」,真名不下发。
+class MiniAppDeveloper {
+  const MiniAppDeveloper({
+    this.name = '',
+    this.kind = '',
+    this.verified = false,
+    this.official = false,
+    this.label = '',
+  });
+
+  factory MiniAppDeveloper.fromJson(Map<String, dynamic>? j) => MiniAppDeveloper(
+        name: j?['name'] as String? ?? '',
+        kind: j?['kind'] as String? ?? '',
+        verified: j?['verified'] as bool? ?? false,
+        official: j?['official'] as bool? ?? false,
+        label: j?['label'] as String? ?? '',
+      );
+
+  final String name;
+  final String kind;
+  final bool verified;
+  final bool official;
+
+  /// 「官方」「企业 · 已认证」「个人开发者 · 已实名」「未认证」
+  final String label;
+}
+
+/// 目录、抽屉、最近使用里的一格。
+class MiniAppCard {
+  const MiniAppCard({
+    required this.appid,
+    required this.id,
+    required this.name,
+    this.icon = '',
+    this.tagline = '',
+    this.kind = 'app',
+    this.category = '',
+    this.categoryLabel = '',
+    this.hosting = 'hosted',
+    this.isOfficial = false,
+    this.curated = false,
+    this.developer = const MiniAppDeveloper(),
+    this.firstReleasedAt,
+  });
+
+  factory MiniAppCard.fromJson(Map<String, dynamic> j) => MiniAppCard(
+        appid: j['appid'] as String? ?? '',
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: j['name'] as String? ?? '',
+        icon: j['icon'] as String? ?? '',
+        tagline: j['tagline'] as String? ?? '',
+        kind: j['kind'] as String? ?? 'app',
+        category: j['category'] as String? ?? '',
+        categoryLabel: j['category_label'] as String? ?? '',
+        hosting: j['hosting'] as String? ?? 'hosted',
+        isOfficial: j['is_official'] as bool? ?? false,
+        curated: j['curated'] as bool? ?? false,
+        developer: MiniAppDeveloper.fromJson(j['developer'] as Map<String, dynamic>?),
+        firstReleasedAt: DateTime.tryParse(j['first_released_at'] as String? ?? ''),
+      );
+
+  /// 公开标识:sz + 16 位十六进制
+  final String appid;
+
+  /// 老接口(v1)用的数字 id —— 只有外部地址的官方条目还会用到
+  final int id;
+  final String name;
+
+  /// 一个汉字或图片地址(平台的 /img/…)
+  final String icon;
+  final String tagline;
+
+  /// app 应用 / game 小游戏(小游戏全屏打开)
+  final String kind;
+  final String category;
+  final String categoryLabel;
+
+  /// hosted 平台托管 / external 外部地址(只有官方存量条目)
+  final String hosting;
+  final bool isOfficial;
+  final bool curated;
+  final MiniAppDeveloper developer;
+  final DateTime? firstReleasedAt;
+
+  bool get isGame => kind == 'game';
+}
+
+/// 公开目录的一页。
+class MiniAppCatalog {
+  const MiniAppCatalog({
+    this.items = const [],
+    this.total = 0,
+    this.nextCursor,
+    this.categories = const [],
+    this.sortRule = '',
+  });
+
+  factory MiniAppCatalog.fromJson(Map<String, dynamic> j) => MiniAppCatalog(
+        items: (j['items'] as List? ?? const [])
+            .map((e) => MiniAppCard.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        total: (j['total'] as num?)?.toInt() ?? 0,
+        nextCursor: (j['next_cursor'] as num?)?.toInt(),
+        categories: (j['categories'] as List? ?? const [])
+            .map((e) => (
+                  key: (e as Map)['key'] as String? ?? '',
+                  label: e['label'] as String? ?? '',
+                ))
+            .toList(),
+        sortRule: j['sort_rule'] as String? ?? '',
+      );
+
+  final List<MiniAppCard> items;
+  final int total;
+  final int? nextCursor;
+  final List<({String key, String label})> categories;
+
+  /// 排序规则原文(服务端给的,页脚照抄 —— 规则只写一处)
+  final String sortRule;
+}
+
+/// 小程序的一个版本(详情页公示 SHA-256)。
+class MiniAppVersionInfo {
+  const MiniAppVersionInfo({
+    required this.id,
+    this.version = '',
+    this.build = 0,
+    this.sha256 = '',
+    this.size = 0,
+    this.releasedAt,
+  });
+
+  factory MiniAppVersionInfo.fromJson(Map<String, dynamic> j) => MiniAppVersionInfo(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        version: j['version'] as String? ?? '',
+        build: (j['build'] as num?)?.toInt() ?? 0,
+        sha256: j['sha256'] as String? ?? '',
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        releasedAt: DateTime.tryParse(j['released_at'] as String? ?? ''),
+      );
+
+  final int id;
+  final String version;
+  final int build;
+  final String sha256;
+  final int size;
+  final DateTime? releasedAt;
+}
+
+/// 详情页。
+class MiniAppDetail {
+  const MiniAppDetail({
+    required this.card,
+    this.status = 'online',
+    this.statusLabel = '',
+    this.available = true,
+    this.description = '',
+    this.screenshots = const [],
+    this.privacyPolicy = '',
+    this.dataDeclaration = const [],
+    this.capabilities = const [],
+    this.requestDomains = const [],
+    this.version,
+    this.link = '',
+    this.starred = false,
+    this.tester = false,
+    this.profileGranted = false,
+  });
+
+  factory MiniAppDetail.fromJson(Map<String, dynamic> j) {
+    final me = j['me'] as Map<String, dynamic>?;
+    return MiniAppDetail(
+      card: MiniAppCard.fromJson(j),
+      status: j['status'] as String? ?? 'online',
+      statusLabel: j['status_label'] as String? ?? '',
+      available: j['available'] as bool? ?? false,
+      description: j['description'] as String? ?? '',
+      screenshots: (j['screenshots'] as List? ?? const []).cast<String>(),
+      privacyPolicy: j['privacy_policy'] as String? ?? '',
+      dataDeclaration: (j['data_declaration'] as List? ?? const [])
+          .map((e) => (
+                field: (e as Map)['field'] as String? ?? '',
+                purpose: e['purpose'] as String? ?? '',
+              ))
+          .toList(),
+      capabilities: (j['capabilities'] as List? ?? const []).cast<String>(),
+      requestDomains: (j['request_domains'] as List? ?? const []).cast<String>(),
+      version: j['version'] is Map
+          ? MiniAppVersionInfo.fromJson(j['version'] as Map<String, dynamic>)
+          : null,
+      link: j['link'] as String? ?? '',
+      starred: me?['starred'] as bool? ?? false,
+      tester: me?['tester'] as bool? ?? false,
+      profileGranted: me?['profile_granted'] as bool? ?? false,
+    );
+  }
+
+  final MiniAppCard card;
+  final String status;
+  final String statusLabel;
+  final bool available;
+  final String description;
+  final List<String> screenshots;
+  final String privacyPolicy;
+  final List<({String field, String purpose})> dataDeclaration;
+  final List<String> capabilities;
+  final List<String> requestDomains;
+  final MiniAppVersionInfo? version;
+
+  /// 直达链接 https://…/m/<appid>
+  final String link;
+  final bool starred;
+  final bool tester;
+  final bool profileGranted;
+}
+
+/// 启动接口的应答:版本化地址(已带启动片段)+ 这个应用的呈现参数和能力。
+class MiniAppLaunch {
+  const MiniAppLaunch({
+    required this.url,
+    required this.initData,
+    required this.card,
+    this.backgroundColor = '#F0EEE6',
+    this.orientation = 'portrait',
+    this.allowedOrigins = const [],
+    this.capabilities = const [],
+    this.bridge = 2,
+    this.version,
+    this.trial = false,
+  });
+
+  factory MiniAppLaunch.fromJson(Map<String, dynamic> j) {
+    final app = j['app'] as Map<String, dynamic>? ?? const {};
+    return MiniAppLaunch(
+      url: j['url'] as String? ?? '',
+      initData: j['init_data'] as String? ?? '',
+      card: MiniAppCard.fromJson(app),
+      backgroundColor: app['background_color'] as String? ?? '#F0EEE6',
+      orientation: app['orientation'] as String? ?? 'portrait',
+      allowedOrigins: (app['allowed_origins'] as List? ?? const []).cast<String>(),
+      capabilities: (app['capabilities'] as List? ?? const []).cast<String>(),
+      bridge: (app['bridge'] as num?)?.toInt() ?? 2,
+      version: j['version'] is Map
+          ? MiniAppVersionInfo.fromJson(j['version'] as Map<String, dynamic>)
+          : null,
+      trial: j['trial'] as bool? ?? false,
+    );
+  }
+
+  final String url;
+  final String initData;
+  final MiniAppCard card;
+  final String backgroundColor;
+
+  /// portrait / landscape / any(superz.json 里写的)
+  final String orientation;
+
+  /// 桥只对这些 origin 应答;托管应用就是它自己的托管 origin
+  final List<String> allowedOrigins;
+  final List<String> capabilities;
+
+  /// 2 = 托管应用(SDK v2);1 = 老的外部地址条目(v1 桥)
+  final int bridge;
+  final MiniAppVersionInfo? version;
+  final bool trial;
+}
+
+/// 「设置 → 小程序授权与数据」的一行。
+class MiniAppDataItem {
+  const MiniAppDataItem({
+    required this.card,
+    this.status = 'online',
+    this.statusLabel = '',
+    this.grants = const [],
+    this.keys = 0,
+    this.bytes = 0,
+    this.maxBytes = 5 * 1024 * 1024,
+    this.lastOpenedAt,
+  });
+
+  factory MiniAppDataItem.fromJson(Map<String, dynamic> j) {
+    final usage = j['usage'] as Map<String, dynamic>? ?? const {};
+    return MiniAppDataItem(
+      card: MiniAppCard.fromJson(j),
+      status: j['status'] as String? ?? 'online',
+      statusLabel: j['status_label'] as String? ?? '',
+      grants: (j['grants'] as List? ?? const []).cast<String>(),
+      keys: (usage['keys'] as num?)?.toInt() ?? 0,
+      bytes: (usage['bytes'] as num?)?.toInt() ?? 0,
+      maxBytes: (usage['max_bytes'] as num?)?.toInt() ?? 5 * 1024 * 1024,
+      lastOpenedAt: DateTime.tryParse(j['last_opened_at'] as String? ?? ''),
+    );
+  }
+
+  final MiniAppCard card;
+  final String status;
+  final String statusLabel;
+  final List<String> grants;
+  final int keys;
+  final int bytes;
+  final int maxBytes;
+  final DateTime? lastOpenedAt;
+}

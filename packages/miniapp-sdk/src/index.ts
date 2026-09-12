@@ -370,6 +370,10 @@ function applyEvent(name: string, d: any): void {
     case 'settingsButtonClicked':
       SettingsButton._fire()
       break
+    case 'clearLocalData':
+      // 用户在宿主的「···→ 清除数据」里点的:web 端宿主碰不到跨域 iframe 的存储,由 SDK 在页面里清
+      try { w.localStorage?.clear(); w.sessionStorage?.clear() } catch (_) { /* 无存储 */ }
+      break
   }
   emit(name, d)
 }

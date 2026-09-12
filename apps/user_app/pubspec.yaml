@@ -24,6 +24,9 @@ dependencies:
   flutter_tencent_map: 1.0.1
   video_player: ^2.9.2       # 明厨亮灶直播(HLS,安卓走 ExoPlayer / iOS 走 AVPlayer)
   webview_flutter: ^4.8.0    # 小程序容器(#279,手机端:原生 WebView)
+  # 小程序调试开关(#331):安卓 enableDebugging、iOS setInspectable 在平台实现包里
+  webview_flutter_android: ^4.14.0
+  webview_flutter_wkwebview: ^3.26.0
   # 液态玻璃:只给用户端,**不进 shared** —— 进了 shared 就等于把 6 个
   # 着色器一并塞进商家端和骑手端的包里,而那两端不用这个效果
   liquid_glass_easy: ^4.2.0
