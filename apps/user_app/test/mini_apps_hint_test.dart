@@ -131,7 +131,24 @@ void main() {
       expect(find.textContaining('登记顺序'), findsNothing);
     });
 
-    testWidgets('露头条和面板一样画运营配的图标,不再用 🧩 顶替', (t) async {
+    testWidgets('露头条画衬线字块(设计稿 2a):运营配的汉字照用', (t) async {
+      await t.pumpWidget(MaterialApp(
+        theme: brandTheme(Brightness.light),
+        home: Scaffold(
+          body: MiniAppsPeek(
+            pull: kMiniAppsPullThreshold,
+            apps: [MiniAppInfo.fromJson(app(icon: '账'))],
+          ),
+        ),
+      ));
+      expect(find.text('账'), findsOneWidget);
+      expect(find.text('松手打开小程序'), findsOneWidget);
+      // 和频道字块同一种字:回落链第一顺位是打包的宋体子集
+      final glyph = t.widget<Text>(find.text('账'));
+      expect(glyph.style?.fontFamilyFallback?.first, kSerifCjkFamily);
+    });
+
+    testWidgets('老数据里的 emoji 不画,退回名字的第一个字', (t) async {
       await t.pumpWidget(MaterialApp(
         theme: brandTheme(Brightness.light),
         home: Scaffold(
@@ -141,9 +158,28 @@ void main() {
           ),
         ),
       ));
-      expect(find.text('🏪'), findsOneWidget);
-      expect(find.text('🧩'), findsNothing);
-      expect(find.text('松手打开小程序'), findsOneWidget);
+      expect(find.text('🏪'), findsNothing,
+          reason: 'emoji 自带颜色,和整页的衬线字块不是一套');
+      expect(find.text('透'), findsOneWidget, reason: '「透明中心」的第一个字');
+    });
+
+    test('选字规则', () {
+      MiniAppInfo a(String icon, String name) =>
+          MiniAppInfo.fromJson({...app(icon: icon), 'name': name});
+      expect(miniAppGlyph(a('水', '交水电费')), '水');
+      expect(miniAppGlyph(a('💧', '交水电费')), '交');
+      expect(miniAppGlyph(a('', '公开账本')), '公');
+      // 两个字的 icon 不是「一个字」,也退回名字
+      expect(miniAppGlyph(a('账本', '公开账本')), '公');
+    });
+
+    testWidgets('面板里是同一个字,不是另一副样子', (t) async {
+      SharedPreferences.setMockInitialValues({});
+      await pump(t, [app(icon: '账')]);
+      await t.tap(find.text(hint));
+      await t.pumpAndSettle();
+      expect(find.text('账'), findsOneWidget);
+      expect(find.text('透明中心'), findsOneWidget);
     });
   });
 }

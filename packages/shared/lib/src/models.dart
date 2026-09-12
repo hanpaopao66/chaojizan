@@ -1869,7 +1869,8 @@ class MiniAppInfo {
   final int id;
   final String name;
 
-  /// emoji 字面量或 https 图片地址,按内容渲染
+  /// 一个汉字或 https 图片地址。用户端面板把汉字画成衬线字块;
+  /// 老数据里的 emoji 不画,退回名字的第一个字(见 user_app 的 miniAppGlyph)
   final String icon;
   final String tagline;
   final String entryUrl;

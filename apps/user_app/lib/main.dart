@@ -241,6 +241,9 @@ class _HomePageState extends State<HomePage> {
   /// 消息中心红点(有新公告)
   bool _hasUnread = false;
 
+  /// 券包里还能用的团购券张数,订单 tab 拉计数时报上来(设计稿 3b「券包 · 2」)
+  int _ticketsUsable = 0;
+
   /// 从「我的」页的订单四格跳过来时,订单 tab 要落在哪个筛选上。
   /// 频道一律落在「全部」:四格的数字是各频道一起数的。
   ///
@@ -380,7 +383,8 @@ class _HomePageState extends State<HomePage> {
                 await Navigator.of(context).push(MaterialPageRoute(
                     builder: (_) => MyVouchersPage(api: widget.api)));
               },
-              child: const Text('券包'),
+              child: Text(
+                  _ticketsUsable > 0 ? '券包 · $_ticketsUsable' : '券包'),
             ),
           // 「我的」tab 上换成客服 + 设置。
           //
@@ -407,19 +411,10 @@ class _HomePageState extends State<HomePage> {
               onPressed: () => Navigator.of(context).push(MaterialPageRoute(
                   builder: (_) => SettingsPage(api: widget.api))),
             ),
-          ] else
-            // 搜索是主页第一交互,已做成显眼的大搜索框(点餐页顶部),
-            // 这里只保留地址簿入口,避免图标堆积
-            IconButton(
-              icon: const Icon(Icons.place_outlined),
-              tooltip: '收货地址',
-              onPressed: () async {
-                if (!await ensureLoggedIn(context)) return;
-                if (!context.mounted) return;
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => AddressBookPage(api: widget.api)));
-              },
-            ),
+          ],
+          // 首页和订单 tab 右上角原来还有一个地址簿图标。设计稿(2a / 3b)
+          // 上没有它:点顶上的地址本来就进地址簿(选择模式,也能增删改),
+          // 「我的」页网格里也有一份 —— 两个入口够了,第三个只是图标堆积
         ],
       ),
       // 底部 tab 只放功能(首页/订单/我的),业务一律走金刚区——
@@ -452,7 +447,15 @@ class _HomePageState extends State<HomePage> {
                   })
               : const SizedBox.shrink(),
           _visited.contains(1)
-              ? OrdersTab(api: widget.api, filter: _ordersFilter)
+              ? OrdersTab(
+                  api: widget.api,
+                  filter: _ordersFilter,
+                  onCounts: (c) {
+                    final n = c.ticketsUsable ?? 0;
+                    if (mounted && n != _ticketsUsable) {
+                      setState(() => _ticketsUsable = n);
+                    }
+                  })
               : const SizedBox.shrink(),
           _visited.contains(2)
               ? ProfileView(api: widget.api, onOpenOrders: _openOrders)
@@ -636,6 +639,10 @@ class _MerchantListViewState extends State<MerchantListView>
   bool _miniArmed = false;
   bool _miniOpening = false;
 
+  /// 这一次下拉是不是走的 overscroll(安卓的拉伸回弹):那种回弹不挪列表,
+  /// 露头条要让出来的那一截位移得自己给;iOS 的弹性回弹本来就把列表往下带
+  bool _miniPullByOverscroll = false;
+
   /// 下拉抽屉是隐性手势(#278),没人告诉的话几乎没人会去拉。
   /// 首页给一行字,**拉开过一次(或点过这行字)就永久不再出现** ——
   /// 学会了还天天提示就是打扰。
@@ -778,11 +785,13 @@ class _MerchantListViewState extends State<MerchantListView>
   bool _onScrollForMiniApps(ScrollNotification n) {
     if (widget.category != null || _miniApps.isEmpty) return false;
     double? pull;
+    var byOverscroll = false;
     if (n is OverscrollNotification &&
         n.dragDetails != null &&
         n.overscroll < 0 &&
         n.metrics.extentBefore <= 0) {
       pull = _miniPull - n.overscroll;
+      byOverscroll = true;
     } else if (n is ScrollUpdateNotification &&
         n.dragDetails != null &&
         n.metrics.pixels < 0) {
@@ -795,6 +804,7 @@ class _MerchantListViewState extends State<MerchantListView>
       setState(() {
         _miniPull = p;
         _miniArmed = armed;
+        _miniPullByOverscroll = byOverscroll;
       });
       return false;
     }
@@ -1332,7 +1342,9 @@ class _MerchantListViewState extends State<MerchantListView>
             children: [
               Icon(Icons.search, color: sz.inkFaint, size: 19),
               const SizedBox(width: 8),
-              Text('搜店铺、搜菜名',
+              // 稿子上是「搜店铺、菜名、酒店、团购」;搜索页现在只搜店和菜,
+              // 写上酒店、团购就是一句点进去兑现不了的话
+              Text('搜店铺、菜名',
                   style: TextStyle(color: sz.inkMuted, fontSize: 13.5)),
             ],
           ),
@@ -1352,6 +1364,16 @@ class _MerchantListViewState extends State<MerchantListView>
     if (_pledgeHidden) {
       return const SizedBox.shrink();
     }
+    // 左边衬线大字就是那个百分数,右边那句不再重复它(设计稿 2a:
+    // 「5%」+「商家总负担封顶,配送费 100% 归骑手」)。
+    // 百分数从服务端算好的承诺文案里取,不在客户端写死 ——
+    // 承诺文案按真实费率生成、后台改不了(#122),大字也得跟着它走
+    final pledge = RemoteCopy.text(
+        'pledge.commission', '商家总负担 5% 封顶,配送费 100% 归骑手');
+    final pct = RegExp(r'\d+(?:\.\d+)?%').firstMatch(pledge)?.group(0);
+    final line = pct == null
+        ? pledge
+        : pledge.replaceFirst(RegExp('\\s*${RegExp.escape(pct)}\\s*'), '');
     return Padding(
       padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
       child: InkWell(
@@ -1366,7 +1388,7 @@ class _MerchantListViewState extends State<MerchantListView>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text('5%',
+              Text(pct ?? '5%',
                   style: szFigure(
                       fontSize: 22,
                       fontWeight: FontWeight.w600,
@@ -1378,13 +1400,11 @@ class _MerchantListViewState extends State<MerchantListView>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                        RemoteCopy.text('pledge.commission',
-                            '商家总负担 5% 封顶,配送费 100% 归骑手'),
+                    Text(line,
                         style: TextStyle(
                             fontSize: 12, height: 1.5, color: sz.ink)),
                     const SizedBox(height: 2),
-                    Text('这钱怎么算的 →',
+                    Text('怎么算的 →',
                         style: TextStyle(
                             fontSize: 12,
                             height: 1.4,
@@ -1876,24 +1896,64 @@ class _MerchantListViewState extends State<MerchantListView>
 
   @override
   Widget build(BuildContext context) {
+    // 设计稿 2a 的「下拉中」:露头条挤在地址栏和搜索框之间,
+    // 底下的内容往下让出这一截、淡到九成。
+    //
+    // 只在 overscroll 那条路上给位移:安卓的拉伸回弹不挪列表,不给的话
+    // 露头条直接压在搜索框上;iOS 的弹性回弹本来就把列表往下带,再给一次是双倍。
+    // 松手时 220ms 弹回去,拖动中跟手(时长 0)
+    final t = (_miniPull / kMiniAppsPullThreshold).clamp(0.0, 1.0);
+    final shift = _miniPullByOverscroll ? t * kMiniAppsPeekHeight : 0.0;
     return Stack(children: [
-      NotificationListener<ScrollNotification>(
-        onNotification: _onScrollForMiniApps,
-        child: _buildList(context),
+      // 结构永远是 Transform + Opacity 两层,拉没拉都一样:
+      // 拉的时候才插进来的话,底下的列表会被当成新的一棵树重建,滚动位置就丢了。
+      // 透明度 1.0 时 Opacity 不开图层,平时没有开销
+      TweenAnimationBuilder<double>(
+        tween: Tween(end: shift),
+        duration: _miniPull > 0
+            ? Duration.zero
+            : SzMotion.of(context, SzMotion.base),
+        curve: SzMotion.standard,
+        builder: (context, dy, child) => Transform.translate(
+          offset: Offset(0, dy),
+          child: Opacity(
+              opacity: 1 - .1 * (dy / kMiniAppsPeekHeight), child: child),
+        ),
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _onScrollForMiniApps,
+          child: _buildList(context),
+        ),
       ),
-      // 下拉预览条:跟手露头,盖在列表上方(#278)
+      // 下拉预览条:跟手露头(#278),**贴着内容的上沿**(设计稿 2a:露头条下面紧挨着搜索框)。
+      // 安卓那条路上内容只让出 t×56,露头条自己的滑入正好对上;
+      // iOS 回弹时内容被拉下来整整 _miniPull,露头条要跟着往下走,
+      // 不然两者之间空出一大块
       if (_miniPull > 0)
         Positioned(
           top: 0,
           left: 0,
           right: 0,
-          child: MiniAppsPeek(pull: _miniPull, apps: _miniApps),
+          child: Transform.translate(
+            offset: Offset(
+                0,
+                _miniPullByOverscroll
+                    ? 0
+                    : _miniPull - kMiniAppsPeekHeight * t),
+            child: MiniAppsPeek(pull: _miniPull, apps: _miniApps),
+          ),
         ),
     ]);
   }
 
   Widget _buildList(BuildContext context) {
+    // 露头条出来之后,拉的时候就不画刷新的小圆圈了(设计稿 2a 的「下拉中」只有露头条):
+    // 两样东西叠在同一个位置,圆圈正好压在「松手打开小程序」上。
+    // 刷新本身照旧 —— 松手照样刷新,转圈也照样出现,只是拖动的那几百毫秒让给露头条
+    final peeking = _miniPull > 0;
     return RefreshIndicator(
+      color: peeking ? Colors.transparent : null,
+      backgroundColor: peeking ? Colors.transparent : null,
+      elevation: peeking ? 0 : 2,
       onRefresh: () async {
         _loadRecent();
         _loadMiniApps(); // 登录状态变过的话,清单跟着刷新
@@ -3897,9 +3957,13 @@ class OrdersTab extends StatefulWidget {
     super.key,
     required this.api,
     this.filter = OrderFilter.all,
+    this.onCounts,
   });
 
   final ApiClient api;
+
+  /// 计数拉到了告诉外面一声:标题栏的「券包 · N」用它,不再单独请求一次
+  final ValueChanged<OrderCounts>? onCounts;
 
   /// 从「我的」页四格跳过来时带的筛选;直接点底部 tab 时是 [OrderFilter.all]
   final OrderFilter filter;
@@ -3941,7 +4005,9 @@ class _OrdersTabState extends State<OrdersTab> {
     _countsAt = now;
     try {
       final c = OrderCounts.fromJson(await widget.api.myOrderCounts());
-      if (mounted) setState(() => _counts = c);
+      if (!mounted) return;
+      setState(() => _counts = c);
+      widget.onCounts?.call(c);
     } catch (_) {}
   }
 

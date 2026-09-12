@@ -197,8 +197,8 @@ async def main():
         from app.models import MiniApp
         base = _settings.public_base_url.rstrip("/")
         for name, icon, tagline, path, sort in [
-            ("透明中心", "👁️", "每天核账,差一分都亮红灯", "/transparency", 0),
-            ("公开账本", "📒", "哈希链锚点,人人可复算", "/nodes", 1),
+            ("透明中心", "透", "每天核账,差一分都亮红灯", "/transparency", 0),
+            ("公开账本", "账", "哈希链锚点,人人可复算", "/nodes", 1),
         ]:
             existing_ma = await db.scalar(select(MiniApp).where(MiniApp.name == name))
             if existing_ma is None:

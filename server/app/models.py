@@ -3011,7 +3011,8 @@ class MiniApp(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(30))
-    # 图标:emoji 字面量或 https 图片地址,客户端按内容渲染
+    # 图标:一个汉字(面板里画成衬线字块,和首页频道字同一套)或 https 图片地址。
+    # 老数据里的 emoji 客户端不再画 —— 退回名字的第一个字
     icon: Mapped[str] = mapped_column(String(200), default="")
     # 一句话副标题,面板宫格下方灰字
     tagline: Mapped[str] = mapped_column(String(60), default="")
