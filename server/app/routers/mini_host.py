@@ -34,8 +34,8 @@ from ..models import MiniApp, MiniAppVersion
 from ..services import storage
 from ..services.mini_app_v2 import public_keys
 from ..services.miniapp_package import PERMISSIONS_POLICY, build_csp, content_type
-from ..services.miniapp_platform import (SWITCH_HOSTED, frame_ancestors, switch_on,
-                                         version_servable)
+from ..services.miniapp_platform import (SWITCH_HOSTED, frame_ancestors, host_domain,
+                                         switch_on, version_servable)
 from ..services.miniapp_publish import object_key
 
 logger = logging.getLogger("superz.miniapp.host")
@@ -87,7 +87,7 @@ class MiniHostMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
-        domain = settings.mini_app_host_domain.strip().lower()
+        domain = host_domain()
         path = scope.get("path", "")
         host = ""
         for k, v in scope.get("headers", []):
@@ -116,13 +116,13 @@ class MiniHostMiddleware:
 
 def _host_ok(request: Request, appid: str) -> bool:
     """这次请求是不是从正确的入口进来的(见模块文档「两种入口」)。"""
-    if settings.mini_app_host_domain:
+    if host_domain():
         return getattr(request.state, "mini_host_appid", None) == appid
     return settings.is_dev
 
 
 def _report_uri(request: Request) -> str:
-    base = (settings.public_base_url if settings.mini_app_host_domain
+    base = (settings.public_base_url if host_domain()
             else str(request.base_url)).rstrip("/")
     return f"{base}/mini-apps/csp-report"
 

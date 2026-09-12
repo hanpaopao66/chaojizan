@@ -20,6 +20,8 @@ App 网页版在页面每次加载后会问一声(`ping`),SDK 自动回答。8 �
 被拦的请求会出现在模拟器日志(「CSP 拦截」)和后台「数据」页的计数里。解决:在「开发设置 → 服务器域名」声明
 (只收 https origin),或者把资源打进包里。
 
+声明了还是连不上,看浏览器控制台是不是跨域(CORS)报错:页面和你的服务器不同源,你的服务器要对托管地址(开发者后台应用概览里的「托管地址」,形如 `https://<AppID>.mp.chaojizan.cc`)返回 `Access-Control-Allow-Origin`。
+
 ## 验签失败
 
 - 用的是 **URL 解码后**的 value 拼 data_check_string 吗?`user` 的值是 JSON 原文,不要重新序列化;

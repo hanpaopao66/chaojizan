@@ -36,7 +36,9 @@ class Settings(BaseSettings):
     # 轮换签名钥时,旧钥的公钥(逗号分隔的 base64url)继续发布一段时间,见 mini_app_v2.public_keys
     mini_app_previous_public_keys: str = ""
     # 托管域名(D1):每个应用一个子域名 <appid>.<这个域名>。**不配置时生产上托管应用不能启动**;
-    # 开发环境不配时走 API 直出路由 /_mini-host/<appid>/…(和 API 同源,只供本地联调)
+    # 开发环境不配时走 API 直出路由 /_mini-host/<appid>/…(和 API 同源,只供本地联调)。
+    # 可以是主站下专门的一级(mp.chaojizan.cc),不能是主站域名本身或它的上级 —— 那样配会被忽略,
+    # 见 services/miniapp_platform.host_domain
     mini_app_host_domain: str = ""
     # 托管页 CSP 的 frame-ancestors 额外放行的 origin(逗号分隔):web 版用户端、开发者后台
     # 模拟器、管理后台审核预览所在的 origin。public_base_url 总是放行

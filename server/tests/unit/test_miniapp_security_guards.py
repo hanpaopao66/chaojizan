@@ -2,6 +2,7 @@
 
 - Host 头:托管域名下只认 `sz<16 位十六进制>.<托管域名>`;大小写变体、带端口、多一级子域名、
   非 GET/HEAD、/v/ 和 /_sdk/ 以外的路径一律 404;主域名上的内部路径 /_mini-host/ 在生产 404;
+- 托管域名可以是主站下专门的一级(mp.chaojizan.cc),配成主站本身或它的上级按没配处理,不能把主站吞掉;
 - 点击劫持:生产的 frame-ancestors 只有主站和配置的宿主 origin,没有 `*`;
 - CSP:脚本只许同源(不许 unsafe-inline / unsafe-eval),不许嵌 iframe / object、不许提交表单;
 - CSP 违规报告:日志只记被拦的 origin,不记路径和参数 —— 被拦下的请求里可能正是想外带的用户数据;
@@ -20,7 +21,7 @@ import pytest
 from app.config import settings
 from app.routers import mini_apps, mini_host
 from app.services.miniapp_package import build_csp
-from app.services.miniapp_platform import frame_ancestors
+from app.services.miniapp_platform import frame_ancestors, host_domain
 
 APPID = "sz0123456789abcdef"
 DOMAIN = "szapps.example.cn"
@@ -93,6 +94,28 @@ def test_internal_path_closed_on_main_domain_in_prod(prod, monkeypatch):
     assert through("chaojizan.cc", f"/_mini-host/{APPID}/v/7/index.html")[0] == 404
     # 主站其余路径不受影响
     assert through("chaojizan.cc", "/mini-apps/catalog")[0] == 200
+
+
+def test_host_domain_can_be_a_dedicated_level_under_the_main_domain(prod, monkeypatch):
+    """用主站下专门的一级(mp.chaojizan.cc):应用子域名照常改写,主站和它别的子域名原样放行。"""
+    monkeypatch.setattr(settings, "mini_app_host_domain", "mp.chaojizan.cc")
+    assert host_domain() == "mp.chaojizan.cc"
+    assert through(f"{APPID}.mp.chaojizan.cc") == (200, f"/_mini-host/{APPID}/v/7/index.html", APPID)
+    assert through("chaojizan.cc", "/mini-apps/catalog") == (200, "/mini-apps/catalog", None)
+    assert through("www.chaojizan.cc", "/") == (200, "/", None)
+    assert through(f"{APPID}.chaojizan.cc") == (200, "/v/7/index.html", None), "不在托管那一级下的不改写"
+    assert through("mp.chaojizan.cc")[0] == 404, "裸托管域名什么都不出"
+
+
+def test_host_domain_cannot_swallow_the_main_site(prod, monkeypatch):
+    """托管域名配成主站本身或它的上级:按没配处理 —— 主站照常,托管小程序打不开。
+    不拦的话,主站(和 www 之类的子域名)的每个请求都会被当成托管请求,整站 404。"""
+    for bad in ("chaojizan.cc", "CHAOJIZAN.CC", ".chaojizan.cc", "cc"):
+        monkeypatch.setattr(settings, "mini_app_host_domain", bad)
+        assert host_domain() == "", bad
+        assert through("chaojizan.cc", "/mini-apps/catalog") == (200, "/mini-apps/catalog", None), bad
+        assert through("www.chaojizan.cc", "/") == (200, "/", None), bad
+        assert through("chaojizan.cc", f"/_mini-host/{APPID}/v/7/index.html")[0] == 404, bad
 
 
 def test_frame_ancestors_in_prod_are_explicit_origins(prod):

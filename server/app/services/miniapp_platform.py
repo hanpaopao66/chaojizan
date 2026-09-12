@@ -146,10 +146,36 @@ def app_secret(app: MiniApp) -> str:
 
 # ---------------- 托管地址 ----------------
 
+_host_domain_warned = False
+
+
+def host_domain() -> str:
+    """实际生效的托管域名(D1),没有就是空串。
+
+    可以用主站域名下专门的一级,比如 `mp.chaojizan.cc`(应用在 `<appid>.mp.chaojizan.cc`,
+    和主站、和别的应用都不同源)。**不能是主站域名本身,也不能是主站的上级域名**:那样主站和它的
+    其他子域名(www 之类)的请求全会被当成托管请求,整站 404。配成那样时按没配处理
+    (托管小程序打不开,主站照常),记一条错误日志。
+    """
+    global _host_domain_warned
+    domain = settings.mini_app_host_domain.strip().lower().strip(".")
+    if not domain:
+        return ""
+    main = (urlsplit(settings.public_base_url).hostname or "").lower()
+    if main and (main == domain or main.endswith("." + domain)):
+        if not _host_domain_warned:
+            _host_domain_warned = True
+            logger.error("MINI_APP_HOST_DOMAIN=%s 是主站 %s 本身或它的上级域名,已忽略;"
+                         "要用主站的域名就配一个专门的下级,比如 mp.%s", domain, main, main)
+        return ""
+    return domain
+
+
 def hosted_origin(request: Request, app: MiniApp) -> str:
     """托管页的 origin。生产:https://<appid>.<托管域名>;开发:API 自己的 origin(同源,仅联调)。"""
-    if settings.mini_app_host_domain:
-        return f"https://{app.appid}.{settings.mini_app_host_domain.strip().lower()}"
+    domain = host_domain()
+    if domain:
+        return f"https://{app.appid}.{domain}"
     if not settings.is_dev:
         raise HTTPException(503, "托管域名还没配置,托管小程序暂不能打开")
     base = str(request.base_url).rstrip("/")
@@ -159,13 +185,13 @@ def hosted_origin(request: Request, app: MiniApp) -> str:
 def hosted_base(request: Request, app: MiniApp) -> str:
     """托管文件的 URL 前缀(到 appid 这一级,后面接 /v/<version_id>/…)。"""
     origin = hosted_origin(request, app)
-    if settings.mini_app_host_domain:
+    if host_domain():
         return origin
     return f"{origin}/_mini-host/{app.appid}"
 
 
 def frame_ancestors() -> list[str]:
-    if settings.is_dev and not settings.mini_app_host_domain:
+    if settings.is_dev and not host_domain():
         return ["*"]  # 本地联调:web 版宿主、模拟器在各种 localhost 端口上
     out = [_origin(settings.public_base_url)]
     for o in settings.mini_app_frame_ancestors.split(","):

@@ -8,7 +8,7 @@
 - 代码:服务端、SDK 2.0.0、用户端容器 v2、开发者后台 `/dev/`、审核后台、官网 `/developers` `/miniapps` `/m/<appid>`、
   透明中心「小程序」栏都在仓库里,本地和开发库上验证过(见 [安全审计记录](MINIAPP-SECURITY-AUDIT.md));
 - 生产:还是老版本,`mini_apps` 表是空的 —— 用户端下拉抽屉没有条目,手势就退回成下拉刷新;
-- 托管域名(D1)未定、未备案;签名密钥未生成。
+- 托管域名(D1)2026-09-12 定为主站下专门的一级 `mp.chaojizan.cc`(不另买域名,见 2.1);解析、泛域名证书、签名密钥都还没做。
 
 ## 1. 先修现在的问题(不等托管域名)
 
@@ -30,21 +30,32 @@
 
 ## 2. 基础设施(托管第三方代码之前必须有)
 
-### 2.1 托管域名(D1)
+### 2.1 托管域名(D1):`mp.chaojizan.cc`
 
-- **单独注册一个域名**专门托管,每个应用一个子域名 `<appid>.<托管域名>`,和 chaojizan.cc 彻底分开
-  (同一个注册域下,第三方页面能写主站的 cookie、仿冒同源);
-- ICP 备案(1–3 周);备案主体、用途写「小程序托管」(合规问题见 [合规清单](MINIAPP-COMPLIANCE.md));
-- 泛域名解析:`*.<托管域名>` → 和主域名同一条入口链路;
+2026-09-12 定:不另买域名,用主站下专门的一级。每个应用一个子域名 `<appid>.mp.chaojizan.cc`,
+`.env.prod` 配 `MINI_APP_HOST_DOMAIN=mp.chaojizan.cc`。
+
+- **不能配成 `chaojizan.cc` 本身**,也不能把小程序放在主站的路径下(`chaojizan.cc/xxx/`):
+  那样第三方的代码和主站同一个 origin,能直接读写主站页面里的登录令牌。代码里有防护 ——
+  配成主站本身或它的上级会被当成没配(托管小程序打不开,主站照常,日志里有一条 error),
+  见 `services/miniapp_platform.host_domain` 和对应单测;
+- 和单独买域名比,省了买域名和备案(chaojizan.cc 已备案,子域名不用再备;用途变化要不要报备见
+  [合规清单](MINIAPP-COMPLIANCE.md) 第 2 条);**多出来的三个风险**写在
+  [安全审计记录](MINIAPP-SECURITY-AUDIT.md)的「放在 chaojizan.cc 下面的代价」:cookie 塞满让主站在这个浏览器里打不开、
+  地址看着像官方页面、审核预览和网页版宿主里的托管页可能和主站页面同一个进程;
+- 泛域名解析:加一条 `*.mp.chaojizan.cc` 的 A 记录,指向和 `chaojizan.cc` 同一个云服务器 IP。
+  frp 是 TCP 转发(`deploy/tunnel/frpc.toml.example`),不看域名,**云服务器那边不用改**;
 - 泛域名证书只能走 **DNS-01**(现在的 `deploy/renew-cert.sh` 是 HTTP-01 webroot,签不了泛域名):
-  用 acme.sh 或 certbot 的 DNS 插件接域名服务商的 DNS API,续期另排一条 cron,证书放 `deploy/certs/<简称>/`。
+  用 acme.sh 或 certbot 的 DNS 插件接域名服务商的 DNS API,签 `*.mp.chaojizan.cc` + `mp.chaojizan.cc`,
+  续期另排一条 cron,证书放 `deploy/certs/mp/`。**别把它加进 renew-cert.sh 的 DOMAINS**
+  (那个脚本按域名首段起目录名,`*.mp…` 会得到 `*`)。
 
 ### 2.2 nginx
 
 主域名 chaojizan.cc **不用改**:`/.well-known/assetlinks.json`(App Links)、`/.well-known/superz-webapp-keys.json`(平台公钥)
 走现有的 `location /` 到 api;主域名上的 `/_mini-host/…` 由 api 自己在生产挡成 404。
 
-托管域名加两个 server 块(域名定了再加进 `deploy/nginx/conf.d/`;证书没到位之前别加,证书路径不存在 nginx 起不来):
+托管域名加两个 server 块(证书到位之后再加进 `deploy/nginx/conf.d/`;证书路径不存在 nginx 起不来,整站都会挂):
 
 ```nginx
 # 小程序托管域名:整站只做一件事 —— 原样交给 api,由 MiniHostMiddleware 按 Host 头认 appid
@@ -53,9 +64,9 @@
 # 返回头是 immutable,浏览器自己会长缓存。以后真要加 proxy_cache,键必须含 $host(appid 在子域名里)
 server {
     listen 443 ssl;
-    server_name *.<托管域名>;
-    ssl_certificate     /etc/nginx/certs/<简称>/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/<简称>/privkey.pem;
+    server_name *.mp.chaojizan.cc;
+    ssl_certificate     /etc/nginx/certs/mp/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/mp/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     client_max_body_size 1k;              # 托管站点只读,不收请求体
 
@@ -75,9 +86,9 @@ server {
 # 裸托管域名不出任何东西
 server {
     listen 443 ssl;
-    server_name <托管域名>;
-    ssl_certificate     /etc/nginx/certs/<简称>/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/<简称>/privkey.pem;
+    server_name mp.chaojizan.cc;
+    ssl_certificate     /etc/nginx/certs/mp/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/mp/privkey.pem;
     return 404;
 }
 ```
@@ -86,7 +97,7 @@ server {
 
 | 变量 | 值 | 说明 |
 |---|---|---|
-| `MINI_APP_HOST_DOMAIN` | 托管域名(不带 `*.`) | 不配时生产上托管应用启动不了、托管文件 404 |
+| `MINI_APP_HOST_DOMAIN` | `mp.chaojizan.cc`(不带 `*.`) | 不配时生产上托管应用启动不了、托管文件 404;配成 `chaojizan.cc` 会被忽略,效果同不配 |
 | `MINI_APP_SIGNING_KEY` | 32 字节种子的 base64url | initData 的平台 Ed25519 私钥。生成见下;**离线备份两份**(纸 + 离线介质),丢了开发者后端用 signature 验签的全部失效 |
 | `MINI_APP_PREVIOUS_PUBLIC_KEYS` | 空 | 轮换签名钥时把旧公钥写这里,继续发布一段时间 |
 | `MINI_APP_FRAME_ANCESTORS` | App 网页版的 origin | 托管页 CSP 的 frame-ancestors 额外放行的 origin(逗号分隔);主站 `PUBLIC_BASE_URL` 总是放行 |
@@ -101,13 +112,16 @@ python -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decod
 
 ### 2.4 上生产后按这个清单验一遍
 
-安全审计里 Host 头、frame-ancestors、主域名挡内部路径这几条,本地是按生产配置跑的单测,上线后在生产上再验:
+安全审计里 Host 头、frame-ancestors、主域名挡内部路径这几条,本地是按生产配置跑的单测,上线后在生产上再验
+(`<版本 id>` 是版本记录的 id,不是版本号,启动应答里的 `url` 就是这个形状):
 
 ```bash
-curl -sI https://<appid>.<托管域名>/v/<版本>/index.html | grep -iE 'content-security|permissions-policy|cache-control'
-curl -s -o /dev/null -w '%{http_code}\n' https://SZ<大写的appid>.<托管域名>/v/<版本>/index.html   # 404
-curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<appid>.<托管域名>/v/<版本>/index.html   # 403 或 404
-curl -s -o /dev/null -w '%{http_code}\n' https://chaojizan.cc/_mini-host/<appid>/v/<版本>/index.html # 404
+curl -sI https://<appid>.mp.chaojizan.cc/v/<版本 id>/index.html | grep -iE 'content-security|permissions-policy|cache-control|set-cookie'  # 没有 set-cookie
+curl -s -o /dev/null -w '%{http_code}\n' https://SZ<大写的appid>.mp.chaojizan.cc/v/<版本 id>/index.html   # 404
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<appid>.mp.chaojizan.cc/v/<版本 id>/index.html   # 403 或 404
+curl -s -o /dev/null -w '%{http_code}\n' https://mp.chaojizan.cc/                                     # 404
+curl -s -o /dev/null -w '%{http_code}\n' https://chaojizan.cc/mini-apps/catalog                        # 200:主站没被托管吞掉
+curl -s -o /dev/null -w '%{http_code}\n' https://chaojizan.cc/_mini-host/<appid>/v/<版本 id>/index.html # 404
 curl -s https://chaojizan.cc/.well-known/assetlinks.json          # 指纹和正式签名证书一致
 curl -s https://chaojizan.cc/.well-known/superz-webapp-keys.json  # 有 kid,和 MINI_APP_SIGNING_KEY 对应
 ```
