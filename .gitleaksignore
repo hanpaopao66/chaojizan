@@ -8,3 +8,9 @@
 3778836a01e2dded6c0037eb780fb554529b40a3:packages/jpush_flutter/README_Harmony.md:generic-api-key:410
 0f9e060e42fe7afed7bb7eaedec5ed829572c5f9:packages/jpush_flutter/README_Harmony.md:generic-api-key:372
 0f9e060e42fe7afed7bb7eaedec5ed829572c5f9:packages/jpush_flutter/README_Harmony.md:generic-api-key:410
+
+# 下面两条是代码 `k = key or signing_key()`(小程序 initData v2 签名,传了 key 就用传进来的,
+# 否则取平台签名钥)。规则把「key or signing_key」当成了密钥串;这一行没有任何密钥值,
+# 生产签名钥只在部署机 .env.prod 的 MINI_APP_SIGNING_KEY 里。
+10691b4d722fd52f2ccc47af44ecf4af89d6e296:server/app/services/mini_app_v2.py:generic-api-key:103
+10691b4d722fd52f2ccc47af44ecf4af89d6e296:server/app/services/mini_app_v2.py:generic-api-key:163
