@@ -14,7 +14,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { loadDocs, readToc, slug } from '../web/scripts/miniapp-docs.mjs'
+import { loadDocs, readToc, renderDoc, slug } from '../web/scripts/miniapp-docs.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const docs = join(root, 'docs/miniapp')
@@ -111,6 +111,14 @@ for (const d of site) {
     if (!pages.has(page)) problems.push(`官网 ${d.slug} 页:链接到不存在的 /developers/${page}`)
     else if (hash && !pages.get(page).has(hash.slice(1))) problems.push(`官网 ${d.slug} 页:/developers/${page}${hash} 找不到这个标题`)
   }
+}
+
+// ---------------------------------------------------------------- 4. 转换不透传原始 HTML
+// 官网文档页用 dangerouslySetInnerHTML 放转出来的 HTML(安全审计 #335 的唯一例外),这里是那扇门的锁
+const probe = renderDoc('# t\n\n<script>alert(1)</script> <img src=x onerror=alert(2)>\n\n'
+  + '[a](javascript:alert(3)) [b](data:text/html,x) `<b>` **<i>x</i>**\n\n| <u>c</u> |\n|---|\n| <s>d</s> |\n').html
+for (const bad of ['<script', '<img', '<b>', '<i>', '<u>', '<s>', 'javascript:', 'data:text']) {
+  if (probe.includes(bad)) problems.push(`文档转换透传了 ${bad}(官网文档页会原样当 HTML 放)`)
 }
 
 if (problems.length) {

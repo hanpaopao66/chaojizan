@@ -195,6 +195,10 @@ signature  = base64url(Ed25519_sign(平台私钥[sig_kid], "<app_id>:SuperZWebAp
   这是为了挡住**页面里嵌的第三方 iframe**:原生 JS 通道对页面内所有 frame 都可见,
   光校验主框架 URL 挡不住 iframe 冒充;
 - web 端:宿主校验 `event.source === iframe.contentWindow` 且 `event.origin` 等于该应用的托管 origin;
+- web 端的导航逃逸(#335 执行时补的):页面自己跳去别的站,父页面拦不住也读不到地址。宿主在 iframe 每次 load 后
+  发 `{"v":2,"type":"ping","nonce":"…"}`(targetOrigin 写托管 origin,只有托管页收得到),SDK 回
+  `{"v":2,"type":"pong","nonce":"…"}`;8 秒没回答就清空 iframe、报「页面跳到了这个小程序以外的地址」。
+  所以托管的每个 HTML 页都要引 SDK;
 - 宿主对每次调用都**当场**查能力(不是打开时查一次)。
 
 **方法清单**(「能力」一列:basic = 所有应用都有;其余要在后台申请并审核通过):

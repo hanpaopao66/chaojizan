@@ -70,6 +70,10 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
   const [showPayload, setShowPayload] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
   const tok = useRef(token())
+  // 导航逃逸(和 App 网页版宿主同一个办法,见 user_app 的 EscapeWatch):iframe 每次 load 后发 ping,
+  // 只有托管 origin 上、引了 SDK 的页面答得上;8 秒没有 pong 就在日志里标红
+  const pingNonce = useRef<string | null>(null)
+  const pingTimer = useRef<number | undefined>(undefined)
   const origin = launch ? new URL(launch.url).origin : ''
 
   const add = (row: Omit<LogRow, 'at'>) =>
@@ -111,6 +115,10 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
       if (e.source !== frame.current?.contentWindow || e.origin !== origin) return
       const m = e.data as Record<string, any>
       if (!m || m.__sz !== 2 || m.v !== 2) return
+      if (m.type === 'pong') {
+        if (m.nonce && m.nonce === pingNonce.current) pingNonce.current = null
+        return
+      }
       if (m.type === 'hello') {
         tok.current = token()
         add({ dir: '←', text: `hello(SDK ${m.sdk || '?'})` })
@@ -196,6 +204,26 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
     return () => window.removeEventListener('message', onMessage)
   }, [launch, origin, send, scheme, platform, safeTop, safeBottom, device, fullscreen, main])
 
+  // iframe 每加载一个文档就问一声(见 pingNonce 的注释)。每秒问一次:async 引 SDK 的页面,监听装上前的几问会丢
+  const onFrameLoad = () => {
+    window.clearInterval(pingTimer.current)
+    const nonce = token()
+    pingNonce.current = nonce
+    let asked = 0
+    const ask = () => { asked++; send({ v: 2, type: 'ping', nonce }) }
+    ask()
+    pingTimer.current = window.setInterval(() => {
+      if (pingNonce.current !== nonce) { window.clearInterval(pingTimer.current); return }
+      if (asked >= 8) {
+        window.clearInterval(pingTimer.current)
+        add({ dir: '!', bad: true, text: '页面加载后 8 秒没回应 ping:要么跳到了托管 origin 以外(真机上会被拦下,App 网页版会停止显示),要么这个页面没引 SDK' })
+        return
+      }
+      ask()
+    }, 1000)
+  }
+  useEffect(() => () => window.clearInterval(pingTimer.current), [])
+
   // 改主题、安全区:照真机一样发事件
   useEffect(() => { if (launch) send({ v: 2, type: 'event', name: 'themeChanged', data: { themeParams: THEMES[scheme], colorScheme: scheme } }) }, [scheme])
   useEffect(() => {
@@ -263,7 +291,7 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
           )}
           <div style={{ flex: 1, position: 'relative' }}>
             {launch ? (
-              <iframe ref={frame} key={launch.url} src={launch.url} title="模拟器"
+              <iframe ref={frame} key={launch.url} src={launch.url} title="模拟器" onLoad={onFrameLoad}
                 sandbox="allow-scripts allow-same-origin allow-forms"
                 style={{ border: 0, width: '100%', height: '100%', background: launch.app.background_color }} />
             ) : (

@@ -658,6 +658,10 @@ class _MiniAppLinkPageState extends State<MiniAppLinkPage> {
       Navigator.of(context).maybePop();
       return;
     }
+    // 冷启动从直达链接进来(安卓 App Links、网页版带着 #/m/… 打开):这一页比 AuthGate 先跑,
+    // 本地存着的会话还没恢复 —— 不先恢复的话,登录着的人也会被带去登录页
+    if (!widget.api.isLoggedIn) await widget.api.restoreSession(expectRole: 'customer');
+    if (!mounted) return;
     await openMiniApp(context, widget.api, appid: link.appid, trial: link.trial, startParam: link.startParam);
     if (mounted) Navigator.of(context).maybePop();
   }

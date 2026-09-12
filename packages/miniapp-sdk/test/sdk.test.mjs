@@ -284,3 +284,15 @@ test('isVersionAtLeast 做宿主能力协商', () => {
   h.init({ version: '2.1' })
   assert.equal(h.app.isVersionAtLeast('2.1'), true)
 })
+
+test('宿主的 ping 回 pong(带同一个 nonce、不带令牌);别的 frame 发来的 ping 不理', () => {
+  const h = page({ mode: 'iframe' })
+  h.init()
+  h.deliver({ v: 2, type: 'ping', nonce: 'n1' })
+  const pong = h.sent.filter((m) => m.type === 'pong')
+  assert.equal(pong.length, 1)
+  assert.equal(pong[0].nonce, 'n1')
+  assert.equal(pong[0].token, undefined)
+  h.forge({ v: 2, type: 'ping', nonce: 'n2' })
+  assert.equal(h.sent.filter((m) => m.type === 'pong').length, 1)
+})

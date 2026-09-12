@@ -9,7 +9,10 @@
 /// - 托管应用的 iframe 给 `allow-same-origin`:它在**自己的**子域名上,拿到的是自己的存储,
 ///   碰不到宿主的 localStorage(登录 token 在那儿)。宿主和托管地址同源时拒绝加载 ——
 ///   那种部署下 allow-same-origin 等于把宿主的存储交出去;
-/// - 页面每次重新握手(hello)都换令牌:这里 source 已经验过是主框架,不怕别的 frame 冒充着换。
+/// - 页面每次重新握手(hello)都换令牌:这里 source 已经验过是主框架,不怕别的 frame 冒充着换;
+/// - 导航逃逸:页面自己跳去别的站,父页面拦不住也读不到地址。iframe 每次 load 之后发 ping
+///   (targetOrigin 是托管 origin,只有托管页收得到),8 秒内没有 pong 就清空 iframe、报错
+///   —— 见 bridge.dart 的 [EscapeWatch]。
 library;
 
 import 'dart:async';
@@ -21,6 +24,7 @@ import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
+import 'bridge.dart';
 import 'controller.dart';
 
 int _seq = 0;
@@ -45,6 +49,10 @@ class MiniAppViewState extends State<MiniAppView> {
   late final String _viewType = 'superz-miniapp-v2-${_seq++}';
   late final web.HTMLIFrameElement _frame;
   web.EventListener? _listener;
+  web.EventListener? _loadListener;
+  final _escape = EscapeWatch();
+  Timer? _pingTimer;
+  bool _left = false;
   MiniAppController get _c => widget.controller;
 
   late final Set<String> _origins = _c.launch.allowedOrigins
@@ -75,6 +83,10 @@ class MiniAppViewState extends State<MiniAppView> {
     if (hosted && sameOrigin) {
       scheduleMicrotask(() => widget.onError('托管地址和宿主同源,为了你的账号安全不加载'));
     } else {
+      if (hosted) {
+        _loadListener = ((web.Event _) => _onFrameLoad()).toJS;
+        _frame.addEventListener('load', _loadListener);
+      }
       _frame.src = _c.launch.url;
     }
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int _) => _frame);
@@ -88,6 +100,29 @@ class MiniAppViewState extends State<MiniAppView> {
 
   void reload() => _frame.src = _c.launch.url;
 
+  /// iframe 又加载了一个文档:问它还是不是这个小程序(见 [EscapeWatch])。
+  /// 每秒问一次 —— async 引 SDK 的页面,监听装上之前的那几问会丢
+  void _onFrameLoad() {
+    if (_left || !mounted) return;
+    final nonce = _escape.onLoad();
+    void ping() => _c.send?.call({'v': 2, 'type': 'ping', 'nonce': nonce});
+    var asked = 1;
+    ping();
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted || _left || !_escape.waiting) return t.cancel();
+      if (asked >= _escape.deadline.inSeconds) {
+        t.cancel();
+        _left = true;
+        _frame.src = 'about:blank';
+        widget.onError('页面跳到了这个小程序以外的地址,为了安全已经停止显示');
+        return;
+      }
+      asked++;
+      ping();
+    });
+  }
+
   Future<void> clearLocalData() async {
     // 跨域 iframe 的存储宿主碰不到;托管页的 SDK 会在收到这个事件后自己清(见 SDK 文档)
     _c.emit('clearLocalData');
@@ -96,6 +131,8 @@ class MiniAppViewState extends State<MiniAppView> {
   @override
   void dispose() {
     if (_listener != null) web.window.removeEventListener('message', _listener);
+    if (_loadListener != null) _frame.removeEventListener('load', _loadListener);
+    _pingTimer?.cancel();
     _c.send = null;
     super.dispose();
   }
@@ -128,6 +165,7 @@ class MiniAppViewState extends State<MiniAppView> {
     } catch (_) {
       return;
     }
+    if (msg is Map && msg['type'] == 'pong') return _escape.onPong(msg['nonce']);
     if (msg is Map && msg['type'] == 'hello') _c.dispatcher.rotate();
     final reply = await _c.receive(msg);
     if (reply != null && mounted) _c.send?.call(reply);

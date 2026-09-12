@@ -209,6 +209,7 @@ test:
 	  && python -m tests.e2e_miniapp_identity && python -m tests.e2e_miniapp_hosting \
 	  && python -m tests.e2e_miniapp_storage && python -m tests.e2e_miniapp_dev \
 	  && python -m tests.e2e_miniapp_review && python -m tests.e2e_miniapp_catalog \
+	  && python -m tests.e2e_miniapp_security && python -m tests.e2e_miniapp_switches \
 	  && python -m tests.e2e_audit_coverage && python -m tests.e2e_authz_regression \
 	  && python -m tests.e2e_coupon_release \
 	  && python -m tests.e2e_errand_receipt_replay \

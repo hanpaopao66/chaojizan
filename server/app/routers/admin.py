@@ -1355,6 +1355,10 @@ _KNOWN_FLAGS = {
     # 开着才结算补偿、才对外公示「有补偿」;机制与数据链保留,拨开即恢复
     "wait_comp",
     "screen_show_gmv",      # 公开大屏是否展示交易额(缺省=展示,off=接口不下发金额)
+    # 小程序急停闸(缺省=开,off=关;语义见 services/miniapp_platform.SWITCHES)
+    "miniapp_hosted",       # 托管小程序:关了托管应用打不开、文件 404、从目录消失
+    "miniapp_catalog",      # 小程序目录:关了只列官方小程序
+    "miniapp_profile",      # 小程序读昵称头像:关了 requestProfile 一律 4001
 }
 
 
@@ -1368,6 +1372,8 @@ async def list_flags(
     from ..services.flags import CHANNELS_FALLBACK
     defaults = {"night_curfew_hours": "01:00-06:00",
                 "screen_show_gmv": "on",  # 大屏金额缺省展示,与 /screen 口径一致
+                # 小程序急停闸缺省是开(miniapp_platform.switch_on:没写过 = 开)
+                "miniapp_hosted": "on", "miniapp_catalog": "on", "miniapp_profile": "on",
                 # **从 services.flags 读,不另写一份** —— 抄一份就会有一天
                 # 后台显示的默认值和用户端实际看到的不一样
                 "channels_enabled": ",".join(CHANNELS_FALLBACK)}

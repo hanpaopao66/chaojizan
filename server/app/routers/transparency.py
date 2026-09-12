@@ -709,6 +709,9 @@ _PUBLIC_FLAGS = {
     "alcohol_curfew": "酒类夜间禁售时段",
     "open_cities": "开城清单",
     "screen_show_gmv": "公开大屏金额展示",
+    "miniapp_hosted": "托管小程序",
+    "miniapp_catalog": "小程序目录(第三方应用)",
+    "miniapp_profile": "小程序读取昵称头像",
 }
 
 

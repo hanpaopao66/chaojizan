@@ -46,7 +46,8 @@ app_id=sz0123456789abcdef&auth_date=1790000000&launch_id=…&sig_kid=56475aa7
 - 线上地址:`https://<AppID>.<托管域名>/v/<版本号>/index.html`,每个应用一个子域名,互相隔离;
 - 平台按应用生成 CSP:脚本只能同源,网络请求只能去你声明的服务器域名,相机、麦克风、定位被 Permissions-Policy 堵住
   (敏感能力只能走桥,有确认、有记录);
-- SDK 在每个托管子域名下都有一份:`/_sdk/2/sz-webapp.js`(最新 2.x)和 `/_sdk/2.0.0/sz-webapp.js`(不可变)。
+- SDK 在每个托管子域名下都有一份:`/_sdk/2/sz-webapp.js`(最新 2.x)和 `/_sdk/2.0.0/sz-webapp.js`(不可变);
+  **每个 HTML 页都要引它** —— App 网页版靠它确认页面没有跳出小程序(见[故障排查](troubleshooting.md#页面跳到了这个小程序以外的地址))。
 
 ## 版本
 

@@ -319,3 +319,5 @@ body { background: var(--sz-theme-bg-color, #F0EEE6); color: var(--sz-theme-text
 页面和宿主之间是 `{v:2, type, id, method, params, token}` 的消息:页面先发 `hello`,宿主回 `init`(带会话令牌),
 之后每条 `call` 都要带令牌,宿主回 `reply`、主动发 `event`。原生 App 走注入的 `SuperzBridge` 通道,
 网页版走 iframe `postMessage`。宿主只把令牌发给主框架 —— 页面里嵌的第三方 iframe 冒充不了。
+网页版宿主还会在 iframe 每次加载后发 `{type:"ping", nonce}`(targetOrigin 是托管 origin),SDK 自动回
+`{type:"pong", nonce}`;8 秒没有回答的页面会被当成跳出了小程序、停止显示。

@@ -36,12 +36,12 @@ from ..services.mini_app import sign_init_data
 from ..services.miniapp_catalog import CatalogItem, catalog_order, search
 from ..services.miniapp_platform import (APPID_PATTERN, CATEGORIES, REASON_CODES,
                                          REPORT_REVIEW_THRESHOLD, REPORTS_PER_DAY,
-                                         LAUNCH_PER_MINUTE, app_by_appid, app_card,
-                                         capabilities_of, curated_ids, developer_of,
-                                         entry_path, has_grant, hosted_base, hosted_origin,
-                                         is_tester, launch_fragment, now, record_decision,
-                                         record_open, sign_for, version_public,
-                                         version_servable)
+                                         LAUNCH_PER_MINUTE, SWITCH_CATALOG, SWITCH_HOSTED,
+                                         app_by_appid, app_card, capabilities_of, curated_ids,
+                                         developer_of, entry_path, has_grant, hosted_base,
+                                         hosted_origin, is_tester, launch_fragment, now,
+                                         record_decision, record_open, sign_for, switch_on,
+                                         today_bj, version_public, version_servable)
 from ..services.miniapp_state import LABELS, assert_transition
 from ..state_machine import TransitionError
 
@@ -110,9 +110,18 @@ async def _cards(db: AsyncSession, apps: list[MiniApp]) -> list[dict]:
     return [app_card(a, devs.get(a.developer_id), curated=a.id in curated) for a in apps]
 
 
-async def _listable(db: AsyncSession) -> list[MiniApp]:
-    """目录里能出现的:在线,且托管应用的当前版本能出(没被隔离)。"""
+async def _listable(db: AsyncSession, *, discovery: bool = False) -> list[MiniApp]:
+    """能列出来的:在线,且托管应用的当前版本能出(没被隔离)。
+
+    急停闸(miniapp_platform.SWITCHES):托管小程序关了,托管应用哪儿都不列;
+    discovery=True(公开目录)时再看「小程序目录」闸 —— 关了只列官方的。
+    用户自己的「最近使用」「我的小程序」不受目录闸影响。
+    """
     apps = list((await db.execute(select(MiniApp).where(MiniApp.status == "online"))).scalars())
+    if not await switch_on(db, SWITCH_HOSTED):
+        apps = [a for a in apps if a.hosting != "hosted"]
+    if discovery and not await switch_on(db, SWITCH_CATALOG):
+        apps = [a for a in apps if a.is_official]
     vids = [a.current_version_id for a in apps if a.hosting == "hosted" and a.current_version_id]
     ok = set()
     if vids:
@@ -137,7 +146,7 @@ async def catalog(
     排序是纯函数(services/miniapp_catalog.py),输入只有名称、首次上架时间、精选位置、
     一句话介绍和开发者名;打开次数、评分、付费这类字段根本不进这个函数(I3,有守卫测试)。
     """
-    apps = await _listable(db)
+    apps = await _listable(db, discovery=True)
     if kind:
         apps = [a for a in apps if a.kind == kind]
     if category:
@@ -258,7 +267,8 @@ async def csp_report(request: Request):
         if m:
             try:
                 from ..redis_client import get_redis
-                key = f"miniapp:csp:{m.group(1)}:{now().strftime('%Y%m%d')}"
+                # 按北京时间的日期记:开发者后台的数据页按北京时间的天读(dev_miniapps.stats)
+                key = f"miniapp:csp:{m.group(1)}:{today_bj().strftime('%Y%m%d')}"
                 r2 = get_redis()
                 await r2.incr(key)
                 await r2.expire(key, 40 * 86400)
@@ -367,7 +377,8 @@ async def detail(
     curated = await curated_ids(db)
     card = app_card(app, dev, curated=app.id in curated)
     cur = await db.get(MiniAppVersion, app.current_version_id) if app.current_version_id else None
-    available = app.status == "online" and (app.hosting == "external" or version_servable(cur))
+    available = app.status == "online" and (app.hosting == "external" or (
+        version_servable(cur) and await switch_on(db, SWITCH_HOSTED)))
     me = None
     if user:
         pref = await db.get(MiniAppUserPref, (user.id, app.id))
@@ -397,7 +408,8 @@ async def status(
     """宿主每分钟、以及回到前台时查一次:应用被暂停或当前版本被隔离时,宿主关掉它(§5.4 的 4009)。"""
     app = await app_by_appid(db, appid)
     cur = await db.get(MiniAppVersion, app.current_version_id) if app.current_version_id else None
-    blocked = app.status in ("suspended", "removed") or bool(cur and cur.quarantined)
+    blocked = app.status in ("suspended", "removed") or bool(cur and cur.quarantined) or (
+        app.hosting == "hosted" and not await switch_on(db, SWITCH_HOSTED))
     return {"status": app.status, "blocked": blocked,
             "current_version_id": app.current_version_id}
 
@@ -430,6 +442,9 @@ async def launch(
     await check_rate_limit("miniapp_launch", str(user.id), LAUNCH_PER_MINUTE)
     app = await app_by_appid(db, appid)
     theme = _theme_ok(body.theme)
+    if app.hosting == "hosted" and not await switch_on(db, SWITCH_HOSTED):
+        # 急停闸拉下来了(见 miniapp_platform.SWITCHES):体验版也不开
+        raise bridge_error(503, 4009, "平台暂停了托管小程序,稍后再试")
     v = None
     if body.trial:
         if not await is_tester(db, app, user):

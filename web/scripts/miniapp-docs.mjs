@@ -26,7 +26,7 @@ const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, 
 
 // 中文和中文之间的软换行不能变成空格(「平台托管、\n审核」会读成「托管、 审核」);
 // 两边都是西文时才补一个空格
-const CJKISH = /[—…　-〿㐀-鿿＀-￯]/
+const CJKISH = /[\u2014\u2026\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/
 function joinLines(parts) {
   let out = ''
   for (const p of parts) {
@@ -76,7 +76,9 @@ function matchLink(s, at) {
 
 /** 文档里的链接 → 官网上的地址。外链新窗口打开 */
 export function mapHref(href) {
-  if (/^https?:\/\//.test(href)) return { href, external: true }
+  if (/^(https?:)?\/\//.test(href)) return { href, external: true }
+  // http(s) 以外的协议(javascript:、data: ……)一律不出链接
+  if (/^[a-z][\w+.-]*:/i.test(href)) return { href: '#', external: false }
   if (href.startsWith('#') || href.startsWith('/')) return { href, external: false }
   const m = /^([\w-]+\.md)(#.*)?$/.exec(href)
   if (m) return { href: `/developers/${pageSlug(m[1])}${m[2] || ''}`, external: false }

@@ -15,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..models import (Developer, MiniApp, MiniAppCapability, MiniAppCuration,
                       MiniAppDailyUser, MiniAppDecision, MiniAppGrant, MiniAppOpenId,
-                      MiniAppTester, MiniAppUsageDaily, MiniAppUserPref, MiniAppVersion, User)
+                      MiniAppTester, MiniAppUsageDaily, MiniAppUserPref, MiniAppVersion,
+                      PlatformFlag, User)
 from . import mini_app_v2 as v2
 from .crypto import decrypt, encrypt, pseudonym
 from .miniapp_state import SERVABLE_VERSION_STATES
@@ -35,6 +36,17 @@ GAME_CAPABILITIES = ("fullscreen", "orientation")
 REQUESTABLE_CAPABILITIES = {"profile": "昵称和头像"}
 FUTURE_CAPABILITIES = {"location": "定位", "scanQr": "扫码", "clipboard": "读取剪贴板",
                        "phone": "手机号"}
+
+#: 急停闸(PlatformFlag,管理后台「平台开关」页改;改动带原因进透明中心的治理时间线,#337)。
+#: **缺省是开**,写成 off 才关 —— 这些是出了问题先拉下来的闸,不是逐步放量的开关:
+#: - 托管小程序:关了托管应用一律打不开(启动回 4009、已开着的下一次轮询就关)、托管文件 404、
+#:   从目录和「最近使用」里消失;外部地址条目(透明中心、公开账本)不受影响;
+#: - 小程序目录:关了目录只列官方小程序,第三方应用只能从直达链接和自己的「最近使用」进;
+#: - 昵称头像:关了 profile 能力对所有应用收回,requestProfile 一律 4001。
+SWITCH_HOSTED = "miniapp_hosted"
+SWITCH_CATALOG = "miniapp_catalog"
+SWITCH_PROFILE = "miniapp_profile"
+SWITCHES = (SWITCH_HOSTED, SWITCH_CATALOG, SWITCH_PROFILE)
 REASON_CODES = {
     "R101": "打不开或核心功能不可用", "R102": "与名称、描述、截图不符", "R103": "空壳、测试页、半成品",
     "R201": "违法违规内容", "R202": "色情低俗", "R203": "赌博、彩票、博彩",
@@ -98,13 +110,21 @@ def tester_key(phone: str) -> str:
     return pseudonym(phone, "miniapp-tester")
 
 
+async def switch_on(db: AsyncSession, key: str) -> bool:
+    """急停闸开着没有(见 SWITCHES)。没写过 = 开。每次现查,不缓存 —— 拉闸要立刻生效。"""
+    flag = await db.get(PlatformFlag, key)
+    return flag is None or flag.value != "off"
+
+
 async def capabilities_of(db: AsyncSession, app: MiniApp) -> list[str]:
     caps = list(BASIC_CAPABILITIES)
     if app.kind == "game":
         caps += list(GAME_CAPABILITIES)
-    granted = (await db.execute(select(MiniAppCapability.capability).where(
-        MiniAppCapability.app_id == app.id, MiniAppCapability.status == "approved"))).scalars()
-    caps += list(granted)
+    granted = list((await db.execute(select(MiniAppCapability.capability).where(
+        MiniAppCapability.app_id == app.id, MiniAppCapability.status == "approved"))).scalars())
+    if "profile" in granted and not await switch_on(db, SWITCH_PROFILE):
+        granted.remove("profile")
+    caps += granted
     return caps
 
 

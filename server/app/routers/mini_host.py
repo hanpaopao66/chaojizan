@@ -34,7 +34,8 @@ from ..models import MiniApp, MiniAppVersion
 from ..services import storage
 from ..services.mini_app_v2 import public_keys
 from ..services.miniapp_package import PERMISSIONS_POLICY, build_csp, content_type
-from ..services.miniapp_platform import frame_ancestors, version_servable
+from ..services.miniapp_platform import (SWITCH_HOSTED, frame_ancestors, switch_on,
+                                         version_servable)
 from ..services.miniapp_publish import object_key
 
 logger = logging.getLogger("superz.miniapp.host")
@@ -183,6 +184,9 @@ async def hosted_file(appid: str, version_id: int, path: str, request: Request,
         return _not_found()
     app = (await db.execute(select(MiniApp).where(MiniApp.appid == appid))).scalar_one_or_none()
     if app is None or app.status == "removed" or app.hosting != "hosted":
+        return _not_found()
+    if not await switch_on(db, SWITCH_HOSTED):
+        # 急停闸:托管的文件一个都不出(模拟器、审核预览也一样)
         return _not_found()
     v = await db.get(MiniAppVersion, version_id)
     if v is None or v.app_id != app.id or not version_servable(v):

@@ -95,6 +95,20 @@ const METAS: FlagMeta[] = [
     key: 'screen_show_gmv', title: '公开大屏展示交易额', kind: 'switch',
     effect: '关掉后 /screen 接口不下发金额',
   },
+  // 小程序急停闸(缺省开):出了问题先拉这里,再查原因。语义见 services/miniapp_platform.py 的 SWITCHES
+  {
+    key: 'miniapp_hosted', title: '托管小程序', kind: 'switch', danger: true,
+    effect: '关掉后所有托管小程序立刻打不开(已开着的一分钟内被宿主关掉),托管文件一律 404,'
+      + '目录里消失;透明中心、公开账本这类外部地址条目不受影响',
+  },
+  {
+    key: 'miniapp_catalog', title: '小程序目录(第三方应用)', kind: 'switch',
+    effect: '关掉后公开目录和 App 的「全部小程序」只列官方小程序;第三方应用只能从直达链接和用户自己的「最近使用」进',
+  },
+  {
+    key: 'miniapp_profile', title: '小程序读取昵称头像', kind: 'switch',
+    effect: '关掉后所有小程序的 profile 能力当场收回,requestProfile 一律回 4001(用户已给过的授权记录保留)',
+  },
 ]
 
 export default function FlagsPage() {

@@ -255,4 +255,32 @@ void main() {
       expect(newSessionToken(), isNot(a));
     });
   });
+
+  group('导航逃逸(网页版)', () {
+    test('load 之后回了同一个 nonce 的 pong:还是这个小程序', () {
+      final w = EscapeWatch();
+      final n = w.onLoad();
+      expect(w.waiting, isTrue);
+      w.onPong(n);
+      expect(w.waiting, isFalse);
+    });
+
+    test('上一个文档的 pong 顶不了这一个(nonce 每次 load 都换)', () {
+      final w = EscapeWatch();
+      final first = w.onLoad();
+      w.onPong(first);
+      final second = w.onLoad(); // 页面跳去了别的站:这一问没人答
+      expect(second, isNot(first));
+      w.onPong(first);
+      expect(w.waiting, isTrue);
+    });
+
+    test('答错 nonce、空 nonce 都不算', () {
+      final w = EscapeWatch();
+      w.onLoad();
+      w.onPong('guess');
+      w.onPong(null);
+      expect(w.waiting, isTrue);
+    });
+  });
 }

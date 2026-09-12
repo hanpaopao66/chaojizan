@@ -17,8 +17,8 @@
  * - 启动参数在 URL 片段里(§5.2):加载时同步读,读完用 history.replaceState 抹掉,
  *   存进 sessionStorage(页面在 WebView 里刷新仍可用;复制地址不会把身份包带出去);
  * - 消息体 {v:2, type, id, method, params, token}:
- *   页面 → 宿主:hello(握手)、call(调用)、notice(CSP 违规等,宿主可以不理);
- *   宿主 → 页面:init(带会话令牌与初始状态)、reply、event;
+ *   页面 → 宿主:hello(握手)、call(调用)、notice(CSP 违规等,宿主可以不理)、pong(应答宿主的 ping);
+ *   宿主 → 页面:init(带会话令牌与初始状态)、reply、event、ping(网页版确认页面还是这个小程序);
  * - **会话令牌**:宿主每次加载生成、只发给主框架。不带或带错令牌的调用一律被宿主丢弃 ——
  *   原生 JS 通道对页面里所有 frame 都可见,光看主框架 URL 挡不住 iframe 冒充;
  * - 传输:手机端是原生注入的 SuperzBridge 通道(宿主经 window.__szReceive 回话),
@@ -259,6 +259,11 @@ function receive(msg: any): void {
     return
   }
   if (msg.type === 'event') applyEvent(String(msg.name), msg.data)
+  if (msg.type === 'ping') {
+    // 网页版宿主在 iframe 每次加载后问一声「还是这个小程序吗」:它的 targetOrigin 写的是托管 origin,
+    // 只有托管 origin 上的页面收得到。回一声就行,不带令牌(页面跳去别的站后,这一问没人答 → 宿主停止显示)
+    post({ v: 2, type: 'pong', nonce: String(msg.nonce || '') })
+  }
 }
 
 if (native) {

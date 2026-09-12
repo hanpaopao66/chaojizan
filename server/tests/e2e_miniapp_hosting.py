@@ -30,8 +30,9 @@ def rejected(data: bytes, needle: str):
     return report
 
 
-slip = make_zip(HELLO, raw_entries=[(zipfile.ZipInfo("../evil.js"), "x")])
-rejected(slip, "..")
+# 断言具体的那句话:「..」开头的段也会被「隐藏文件」那条拦下,只看报告里有没有「..」分不清是哪条在守
+for name in ("../evil.js", "a/../../evil.js"):
+    rejected(make_zip(HELLO, raw_entries=[(zipfile.ZipInfo(name), "x")]), "不能有 .. 或 .")
 link = zipfile.ZipInfo("link.js")
 link.external_attr = (stat.S_IFLNK | 0o777) << 16
 rejected(make_zip(HELLO, raw_entries=[(link, "/etc/passwd")]), "符号链接")

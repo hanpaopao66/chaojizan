@@ -190,3 +190,31 @@ bool originAllowed(String url, Iterable<String> allowed) {
   final set = allowed.map((o) => Uri.tryParse(o)?.origin).whereType<String>().toSet();
   return set.contains(uri.origin);
 }
+
+/// 网页版宿主的「导航逃逸」判定(#335)。
+///
+/// 手机上 WebView 的导航回调拦得住页面跳去别的站;网页版是跨域 iframe,页面自己
+/// `location.href = 别的站` 父页面既拦不住、也读不到新地址。
+///
+/// 办法:iframe 每次 load 之后,宿主用 postMessage 发一条带新 nonce 的 `ping`,
+/// **targetOrigin 写托管 origin** —— 浏览器只在 iframe 当前文档正是这个 origin 时才投递。
+/// SDK 收到就回 `pong`(同一个 nonce)。[deadline] 内等不到,现在显示的就不是这个小程序:
+/// 别的站根本收不到这一问;没引 SDK 的页面也答不上(所以文档要求托管的每个 HTML 页都引 SDK)。
+/// nonce 每次 load 都换:上一个文档的回答顶不了这一个。
+class EscapeWatch {
+  EscapeWatch({this.deadline = const Duration(seconds: 8), Random? random}) : _random = random;
+
+  final Duration deadline;
+  final Random? _random;
+  String? _nonce;
+
+  /// iframe 又 load 了一次:换一个 nonce,返回它(拿去发 ping)。
+  String onLoad() => _nonce = newSessionToken(_random);
+
+  void onPong(Object? nonce) {
+    if (nonce != null && nonce == _nonce) _nonce = null;
+  }
+
+  /// 还在等这次 load 的回答
+  bool get waiting => _nonce != null;
+}
