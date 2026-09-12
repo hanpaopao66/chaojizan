@@ -26,8 +26,11 @@ from .routers import (
     geo,
     invoices,
     ledger,
+    admin_miniapps,
+    dev_miniapps,
     merchants,
     mini_apps,
+    mini_host,
     ocr,
     open_api,
     orders,
@@ -469,6 +472,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 小程序托管域名(<appid>.<托管域名>)在最外层分流(#322):那些 Host 只许进 /v/ 和 /_sdk/,
+# 连 CORS、后台页面这些层都不该经过;主域名上的内部路径 /_mini-host/ 在生产也在这里挡掉
+app.add_middleware(mini_host.MiniHostMiddleware)
 
 app.include_router(auth.router)
 app.include_router(merchants.router)
@@ -498,6 +504,9 @@ app.include_router(ledger.router)
 app.include_router(screen.router)
 app.include_router(transparency.router)
 app.include_router(mini_apps.router)
+app.include_router(mini_host.router)
+app.include_router(dev_miniapps.router)
+app.include_router(admin_miniapps.router)
 from .routers import carts, group_cart, referrals
 app.include_router(queue.router)
 app.include_router(group_cart.router)
@@ -689,6 +698,18 @@ async def site_subpages(key: str = ""):
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/miniapps", include_in_schema=False)
+@app.get("/m/{appid}", include_in_schema=False)
+@app.get("/developers", include_in_schema=False)
+@app.get("/developers/{path:path}", include_in_schema=False)
+async def miniapp_site_pages(appid: str = "", path: str = ""):
+    """小程序公开目录、直达链接兜底页(§5.7)、开发者中心与文档站(官网前端路由)。"""
+    site_index = SITE_DIR / "index.html"
+    if site_index.exists():
+        return FileResponse(site_index)
+    return FileResponse(STATIC_DIR / "index.html")
+
+
 @app.get("/status", include_in_schema=False)
 async def status_page():
     """系统状态页(透明中心的状态区直达入口)。"""
@@ -733,6 +754,24 @@ if SITE_DIR.exists():
 # 商家网页工作台(merchant-web/ 构建产物;同源部署,生产机无需 node)。
 # SPA:资源命中直接回文件,其余路径都回 index.html(前端路由刷新不 404)
 MERCHANT_WEB_DIR = STATIC_DIR / "merchant"
+
+
+# 小程序开发者后台(developer-web/ 构建产物,#330)。页面在 /dev/,接口在 /dev/v1/ ——
+# 页面路由不会以 v1 开头,接口 404 也不该回一张 HTML
+DEV_WEB_DIR = STATIC_DIR / "dev"
+
+
+@app.get("/dev", include_in_schema=False)
+@app.get("/dev/{path:path}", include_in_schema=False)
+async def developer_console(path: str = ""):
+    if path == "v1" or path.startswith("v1/"):
+        raise HTTPException(404, "接口不存在")
+    if not DEV_WEB_DIR.exists():
+        raise HTTPException(404, "开发者后台尚未构建(developer-web/ 执行 npm run build)")
+    candidate = (DEV_WEB_DIR / path).resolve()
+    if path and candidate.is_file() and candidate.is_relative_to(DEV_WEB_DIR.resolve()):
+        return FileResponse(candidate)
+    return FileResponse(DEV_WEB_DIR / "index.html")
 
 
 @app.get("/merchant", include_in_schema=False)

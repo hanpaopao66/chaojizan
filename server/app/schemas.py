@@ -35,7 +35,7 @@ class RegisterIn(BaseModel):
     phone: str = Field(pattern=r"^1\d{10}$")
     password: str = Field(min_length=6, max_length=64)
     name: str = ""
-    role: str = Field(pattern="^(customer|merchant|rider)$")
+    role: str = Field(pattern="^(customer|merchant|rider|developer)$")
     #: 轻量设备指纹,口径与 LoginIn 一致。
     #:
     #: **注册这一侧不收的话,新客券的防薅闸门等于不存在** ——
@@ -49,7 +49,7 @@ class LoginIn(BaseModel):
     password: str
     device_id: str = Field(default="", max_length=64)  # 风控用轻量设备指纹
     # 同一手机号可有多角色账号;不传则逐账号验密取首个命中(兼容旧调用方)
-    role: str = Field(default="", pattern="^(customer|merchant|rider|admin)?$")
+    role: str = Field(default="", pattern="^(customer|merchant|rider|admin|developer)?$")
 
 
 class SmsCodeIn(BaseModel):
@@ -66,7 +66,7 @@ class SmsLoginIn(BaseModel):
     # 新手机号自动注册时的角色(三端各传各的;已有账号忽略此参数保原角色)。
     # admin 仅允许已存在的管理员账号登录,绝不自动注册(见 sms_login)
     role: str = Field(default="customer",
-                      pattern="^(customer|merchant|rider|admin)$")
+                      pattern="^(customer|merchant|rider|admin|developer)$")
 
 
 class TokenOut(BaseModel):

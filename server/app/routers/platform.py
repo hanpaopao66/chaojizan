@@ -41,8 +41,14 @@ async def public_rules(audience: str, db: AsyncSession = Depends(get_db)):
     """
     from ..services.rules import AUDIENCES, record_if_changed, rules_for
 
+    if audience == "developer":
+        # 开发者不是交易三方之一,规则形状不同,单独生成(services/miniapp_rules.py)
+        from ..services.miniapp_rules import developer_rules
+        out = developer_rules()
+        await record_if_changed(audience, out["sections"], db)
+        return out
     if audience not in AUDIENCES:
-        raise HTTPException(422, f"audience 仅支持 {' / '.join(AUDIENCES)}")
+        raise HTTPException(422, f"audience 仅支持 {' / '.join(AUDIENCES)} / developer")
     out = await rules_for(audience, db)
     # 变了就记一版。**规则不许静默地改** —— 见 RuleRevision 的抬头
     await record_if_changed(audience, out["sections"], db)
@@ -69,8 +75,8 @@ async def public_rule_revisions(
     from ..models import RuleRevision
     from ..services.rules import AUDIENCES, diff_sections
 
-    if audience not in AUDIENCES:
-        raise HTTPException(422, f"audience 仅支持 {' / '.join(AUDIENCES)}")
+    if audience not in (*AUDIENCES, "developer"):
+        raise HTTPException(422, f"audience 仅支持 {' / '.join(AUDIENCES)} / developer")
     rows = list(await db.scalars(
         select(RuleRevision)
         .where(RuleRevision.audience == audience)

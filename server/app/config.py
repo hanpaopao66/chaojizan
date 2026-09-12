@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     # 小程序 initData 签名密钥;不配置时从 jwt_secret 带命名空间派生
     # (见 services/mini_app.py)。有第三方小程序接入后再换要通知所有验签方
     mini_app_secret: str = ""
+    # ---- 小程序开放平台(DEV-PROMPTS-39)----
+    # initData v2 的平台 Ed25519 私钥(32 字节种子的 base64url)。**生产必须配置并离线备份**;
+    # 开发环境不配时从 jwt_secret 带命名空间派生(见 services/mini_app_v2.py)。
+    # 生成:python -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decode().rstrip('='))"
+    mini_app_signing_key: str = ""
+    # 轮换签名钥时,旧钥的公钥(逗号分隔的 base64url)继续发布一段时间,见 mini_app_v2.public_keys
+    mini_app_previous_public_keys: str = ""
+    # 托管域名(D1):每个应用一个子域名 <appid>.<这个域名>。**不配置时生产上托管应用不能启动**;
+    # 开发环境不配时走 API 直出路由 /_mini-host/<appid>/…(和 API 同源,只供本地联调)
+    mini_app_host_domain: str = ""
+    # 托管页 CSP 的 frame-ancestors 额外放行的 origin(逗号分隔):web 版用户端、开发者后台
+    # 模拟器、管理后台审核预览所在的 origin。public_base_url 总是放行
+    mini_app_frame_ancestors: str = ""
     # 7 天 + 客户端自动续期(/auth/refresh):商家端长期挂机也不会掉线,
     # 但被泄露的旧 token 一周后自然作废
     jwt_expire_minutes: int = 43200  # 30 天;客户端>1天龄自动续期,活跃用户不掉线

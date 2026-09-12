@@ -31,6 +31,9 @@ class UserRole(str, enum.Enum):
     merchant = "merchant"
     rider = "rider"
     admin = "admin"  # 平台管理员,只能由 seed/运维创建,不开放注册
+    # 小程序开发者(#329)。和三端一样按 (手机号, 角色) 独立成号;
+    # 开关是邀请制时只有 developer_invites 里的手机号能注册
+    developer = "developer"
 
 
 class MerchantStatus(str, enum.Enum):
@@ -3021,14 +3024,327 @@ class MiniApp(Base):
     allowed_origins: Mapped[list] = mapped_column(JSONB, default=list)
     # 允许调用的桥能力,如 ["initData"];支付/定位/扫码等以后按需加
     perms: Mapped[list] = mapped_column(JSONB, default=list)
-    # on 上架 / off 下架(表结构为第三方入驻留位,这批清单只有自家条目)
+    # 生命周期(#320,services/miniapp_state.py):
+    # draft 草稿 / online 在线 / offline 开发者自己下架 / suspended 平台暂停 / removed 移除(终态)。
+    # 0124 之前是 on/off,迁移时 on→online、off→offline
     status: Mapped[str] = mapped_column(
-        String(10), default="on", server_default="on", index=True)
+        String(10), default="draft", server_default="draft", index=True)
+    # 老清单的人工顺序。开放平台的目录排序不读它(见 services/miniapp_catalog.py),
+    # 只剩 v1 老接口还按它排
     sort: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+    # ---- 开放平台(#320,DEV-PROMPTS-39)----
+    # 公开标识:sz + 16 位十六进制,同时是托管子域名
+    appid: Mapped[str] = mapped_column(String(18), unique=True, index=True)
+    developer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("developers.id"), nullable=True, index=True)
+    # app 应用 / game 小游戏(小游戏才给全屏、锁方向)
+    kind: Mapped[str] = mapped_column(String(8), default="app", server_default="app")
+    category: Mapped[str] = mapped_column(String(16), default="tools", server_default="tools")
+    description: Mapped[str] = mapped_column(Text, default="", server_default="")
+    screenshots: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    privacy_policy: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # [{"field": "昵称", "purpose": "…"}]:收集什么、为什么。审核按它核「超范围收集」(R302)
+    data_declaration: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    # hosted 平台托管 / external 外部地址(只留给官方存量条目,不对第三方开放,D3)
+    hosting: Mapped[str] = mapped_column(String(10), default="hosted", server_default="hosted")
+    # 声明的服务器域名(https origin),进托管页 CSP 的 connect-src / img-src / media-src
+    request_domains: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    domain_changes_month: Mapped[str] = mapped_column(String(7), default="", server_default="")
+    domain_changes_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # 当前正式版本 / 体验版本(指向 mini_app_versions.id;循环引用不建外键)
+    current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trial_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    auto_release: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # AppSecret:Fernet 密文(services/crypto.py)。只在创建/轮换时明文显示一次
+    secret_enc: Mapped[str] = mapped_column(Text, default="", server_default="")
+    # 两步轮换:先生成待生效密钥,开发者部署完再切换
+    secret_pending_enc: Mapped[str] = mapped_column(Text, default="", server_default="")
+    secret_rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    # 首次上架时间:目录排序用它,不用 updated_at —— 反复发版刷不上去(I3)
+    first_released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    is_official: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # 上架后再改名称、图标、描述等展示信息,改动先存这里,**随下一个版本送审**,
+    # 发布时才生效 —— 否则过审的应用可以当场改名成「超级赞支付」(仿冒,R501)。
+    # 从没上架过的应用直接改正式字段(反正没人看得见)
+    listing_draft: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # 进入 removed 的时间:30 天后清掉用户的云存储(开发者协议里写明)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Developer(Base):
+    """小程序开发者(#329)。一个 developer 角色账号对应一行;官方开发者没有账号。
+
+    个人的真名、证号只存密文(接口只回尾号),**不公开**;企业名公开。
+    认证状态机见 services/miniapp_state.py。
+    """
+
+    __tablename__ = "developers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, unique=True)
+    kind: Mapped[str] = mapped_column(String(16), default="individual")
+    display_name: Mapped[str] = mapped_column(String(40), default="")
+    status: Mapped[str] = mapped_column(String(16), default="unverified", index=True)
+    real_name_enc: Mapped[str] = mapped_column(Text, default="")
+    id_no_enc: Mapped[str] = mapped_column(Text, default="")
+    id_no_tail: Mapped[str] = mapped_column(String(4), default="")
+    company_name: Mapped[str] = mapped_column(String(100), default="")
+    uscc: Mapped[str] = mapped_column(String(18), default="")
+    license_key: Mapped[str] = mapped_column(String(200), default="")
+    contact_name: Mapped[str] = mapped_column(String(40), default="")
+    contact_email: Mapped[str] = mapped_column(String(120), default="")
+    # 接受的开发者规则版本号(规则留痕 /rules/developer/revisions)
+    agreement_version: Mapped[int] = mapped_column(Integer, default=0)
+    agreement_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reject_reason: Mapped[str] = mapped_column(String(300), default="")
+    is_official: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DeveloperInvite(Base):
+    """开发者邀请制(D5):开关是 invite 时,只有这里有的手机号能注册开发者账号。
+    不存明文手机号,用 crypto.pseudonym 匹配。"""
+
+    __tablename__ = "developer_invites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    phone_pseudonym: Mapped[str] = mapped_column(String(64), unique=True)
+    phone_tail: Mapped[str] = mapped_column(String(4), default="")
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MiniAppVersion(Base):
+    """小程序版本(#322)。**托管的对象只写一次**(I4):审核看的就是上线的那一份。
+
+    状态机见 services/miniapp_state.py。处罚时 quarantined=true,托管出口立即 404。
+    """
+
+    __tablename__ = "mini_app_versions"
+    __table_args__ = (UniqueConstraint("app_id", "build", name="uq_miniapp_version_build"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), index=True)
+    version: Mapped[str] = mapped_column(String(32), default="")
+    build: Mapped[int] = mapped_column(Integer, default=1)
+    package_key: Mapped[str] = mapped_column(String(200), default="")
+    sha256: Mapped[str] = mapped_column(String(64), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    file_count: Mapped[int] = mapped_column(Integer, default=0)
+    # {"superz": {...superz.json}, "files": {"index.html": {"size", "sha256", "type"}}}
+    manifest: Mapped[dict] = mapped_column(JSONB, default=dict)
+    entry_url: Mapped[str] = mapped_column(String(500), default="")
+    changelog: Mapped[str] = mapped_column(String(1000), default="")
+    review_note: Mapped[str] = mapped_column(String(1000), default="")
+    status: Mapped[str] = mapped_column(String(16), default="uploaded", index=True)
+    quarantined: Mapped[bool] = mapped_column(Boolean, default=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reject_code: Mapped[str] = mapped_column(String(8), default="")
+    reject_note: Mapped[str] = mapped_column(String(500), default="")
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class MiniAppTester(Base):
+    """体验者:用手机号的假名匹配用户端账号,不存明文手机号。"""
+
+    __tablename__ = "mini_app_testers"
+    __table_args__ = (UniqueConstraint("app_id", "phone_pseudonym", name="uq_miniapp_tester"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), index=True)
+    phone_pseudonym: Mapped[str] = mapped_column(String(64))
+    phone_tail: Mapped[str] = mapped_column(String(4), default="")
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class MiniAppCapability(Base):
+    """能力申请(basic 以外的桥能力要申请 + 审核)。"""
+
+    __tablename__ = "mini_app_capabilities"
+    __table_args__ = (UniqueConstraint("app_id", "capability", name="uq_miniapp_capability"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), index=True)
+    capability: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(12), default="requested", index=True)
+    justification: Mapped[str] = mapped_column(String(300), default="")
+    decided_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class MiniAppOpenId(Base):
+    """按应用隔离的 open_id(I2)。**表映射、随机生成**,不从 user_id 派生 ——
+    派生密钥一旦丢失或泄露,全部 open_id 同时失效或可被反推。"""
+
+    __tablename__ = "mini_app_openids"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), primary_key=True)
+    open_id: Mapped[str] = mapped_column(String(32), unique=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class MiniAppGrant(Base):
+    """用户给小程序的持久授权(目前只有 profile:昵称、头像)。撤回写 revoked_at,不删行。"""
+
+    __tablename__ = "mini_app_grants"
+    __table_args__ = (UniqueConstraint("user_id", "app_id", "scope", name="uq_miniapp_grant"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), index=True)
+    scope: Mapped[str] = mapped_column(String(24))
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MiniAppKV(Base):
+    """云存储(#325):(应用, 用户) 作用域的键值。rev 单调递增,乐观并发用。"""
+
+    __tablename__ = "mini_app_kv"
+
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    bytes: Mapped[int] = mapped_column(Integer, default=0)
+    rev: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class MiniAppKVUsage(Base):
+    """云存储用量:配额在同一事务里 FOR UPDATE 维护,不靠 count(*) 现算。"""
+
+    __tablename__ = "mini_app_kv_usage"
+
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    keys: Mapped[int] = mapped_column(Integer, default=0)
+    bytes: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MiniAppUserPref(Base):
+    """最近使用 / 我的小程序,多端同步。"""
+
+    __tablename__ = "mini_app_user_prefs"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), primary_key=True)
+    starred: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_opened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    open_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MiniAppDailyUser(Base):
+    """某天打开过某应用的用户(只为算日活;保留 35 天,auto_flow 清理)。"""
+
+    __tablename__ = "mini_app_daily_users"
+
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+
+
+class MiniAppUsageDaily(Base):
+    """给开发者看的聚合数。users < 10 时后台只显示「< 10」(防止反推到个人)。"""
+
+    __tablename__ = "mini_app_usage_daily"
+
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    opens: Mapped[int] = mapped_column(Integer, default=0)
+    users: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MiniAppDecision(Base):
+    """审核、处罚、申诉的全部记录(I5)。透明中心的小程序栏从这里投影。
+
+    申诉也是一行:action=appeal,appeal_of 指向被申诉的结论;
+    申诉结果再一行:action=appeal_upheld / appeal_overturned,appeal_of 指向申诉那一行。
+    note_internal 永不公开。
+    """
+
+    __tablename__ = "mini_app_decisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # developer / app / version / capability / report
+    target_type: Mapped[str] = mapped_column(String(16))
+    target_id: Mapped[int] = mapped_column(Integer)
+    app_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    developer_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(24))
+    reason_code: Mapped[str] = mapped_column(String(8), default="")
+    note_public: Mapped[str] = mapped_column(String(500), default="")
+    note_internal: Mapped[str] = mapped_column(String(500), default="")
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    appeal_of: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class MiniAppReport(Base):
+    """用户举报。举报人身份永不公开、不给开发者。"""
+
+    __tablename__ = "mini_app_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), index=True)
+    reporter_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    reason_code: Mapped[str] = mapped_column(String(8))
+    detail: Mapped[str] = mapped_column(String(500), default="")
+    evidence_keys: Mapped[list] = mapped_column(JSONB, default=list)
+    status: Mapped[str] = mapped_column(String(12), default="open", index=True)
+    handled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution: Mapped[str] = mapped_column(String(300), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
+class MiniAppCuration(Base):
+    """精选位(人工)。每次变动进 mini_app_decisions(action=curate/uncurate),公示理由。"""
+
+    __tablename__ = "mini_app_curation"
+
+    app_id: Mapped[int] = mapped_column(ForeignKey("mini_apps.id"), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    added_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
 
 
 # ---------- 到店排队(团购券的配套:券解决"钱",排队解决"位") ----------

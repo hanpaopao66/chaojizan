@@ -944,3 +944,20 @@ async def governance_public(
     }
     _cache_put("tp:gov", data, 30)
     return data
+
+
+@router.get("/miniapps")
+async def miniapps_public(request: Request, db: AsyncSession = Depends(get_db)):
+    """小程序栏(#334):开发者与应用数、审核统计、下架记录、精选及变动理由、排序规则。
+
+    全部从审核记录投影(services/miniapp_transparency.py);个人开发者真名、
+    举报人身份、内部审核备注一概不读。
+    """
+    await _guard(request)
+    if (hit := _cache_get("tp:miniapps")) is not None:
+        return hit
+    from ..services.miniapp_transparency import public_section
+
+    data = await public_section(db)
+    _cache_put("tp:miniapps", data, 300)
+    return data

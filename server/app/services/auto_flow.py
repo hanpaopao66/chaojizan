@@ -16,7 +16,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -1234,6 +1234,45 @@ async def sweep_log_retention() -> dict[str, int]:
     return removed
 
 
+async def sweep_miniapp_retention() -> dict[str, int]:
+    """小程序的两条保留期(每天一次,和日志清理同一个防重做法):
+
+    - 日活明细 mini_app_daily_users 只为算「当天有几个人」,35 天后删
+      (聚合数在 mini_app_usage_daily 里,那里没有人);
+    - 应用移除 30 天后,删掉用户在它里面的云存储 —— 这 30 天是留给用户导出的,
+      开发者协议里写明了(services/miniapp_rules.py)。
+    """
+    from ..models import MiniApp, MiniAppDailyUser, MiniAppKV, MiniAppKVUsage
+    from ..redis_client import get_redis
+    from .miniapp_platform import (DAILY_USERS_RETENTION_DAYS,
+                                   REMOVED_DATA_RETENTION_DAYS)
+
+    try:
+        day = datetime.now(BEIJING).strftime("%Y-%m-%d")
+        if not await get_redis().set(f"miniapp:retention:{day}", 1, ex=90000, nx=True):
+            return {}
+    except Exception:
+        logger.warning("小程序数据清理防重失败(Redis 不可用),本轮跳过")
+        return {}
+    out: dict[str, int] = {}
+    try:
+        async with SessionLocal() as db:
+            cutoff = (datetime.now(BEIJING) - timedelta(days=DAILY_USERS_RETENTION_DAYS)).date()
+            r = await db.execute(delete(MiniAppDailyUser).where(MiniAppDailyUser.day < cutoff))
+            out["daily_users"] = r.rowcount or 0
+            gone = datetime.now(timezone.utc) - timedelta(days=REMOVED_DATA_RETENTION_DAYS)
+            ids = list((await db.execute(select(MiniApp.id).where(
+                MiniApp.status == "removed", MiniApp.removed_at < gone))).scalars())
+            if ids:
+                r = await db.execute(delete(MiniAppKV).where(MiniAppKV.app_id.in_(ids)))
+                await db.execute(delete(MiniAppKVUsage).where(MiniAppKVUsage.app_id.in_(ids)))
+                out["removed_app_kv"] = r.rowcount or 0
+            await db.commit()
+    except Exception:
+        logger.exception("小程序数据清理失败")
+    return out
+
+
 async def auto_flow_loop() -> None:
     logger.info("auto_flow loop started, interval=%ss", settings.sweep_interval_seconds)
     while True:
@@ -1271,6 +1310,7 @@ async def auto_flow_loop() -> None:
             # 运维日志按保留期清理(每天一次,内部防重)。
             # **不含 order_events** —— 那是三年法定留存,见函数注释
             await sweep_log_retention()
+            await sweep_miniapp_retention()
             # 公开账本锚点补到昨天(幂等,通常零工作量;见 services/ledger.py)
             from .ledger import backfill_epoch_start, build_missing_anchors
             async with SessionLocal() as db:

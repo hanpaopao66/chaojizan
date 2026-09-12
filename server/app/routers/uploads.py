@@ -76,8 +76,9 @@ async def upload_image(
     # **没有默认值**:调用方必须显式声明用途。让它猜一个"安全默认"看似稳妥,
     # 但猜错的那一次就是一张身份证进了公开桶
     purpose: str = Form(...),
-    # 商家传菜品/门头照,骑手传证件照,用户传头像,管理员传开屏运营图
-    user: User = Depends(require_role("merchant", "rider", "customer", "admin")),
+    # 商家传菜品/门头照,骑手传证件照,用户传头像,管理员传开屏运营图,
+    # 开发者传小程序图标、截图、营业执照
+    user: User = Depends(require_role("merchant", "rider", "customer", "admin", "developer")),
 ):
     try:
         private = storage.is_private(purpose)

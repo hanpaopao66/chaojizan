@@ -34,7 +34,9 @@ class Test中间件顺序:
         """`user_middleware` 是外→内。异常留痕在门店选择外面 ——
         反过来的话门店选择自己抛的异常就没人记了。"""
         names = [m.cls.__name__ for m in app.user_middleware]
-        assert names == ["CORSMiddleware", "LogUnhandledErrorsMiddleware",
+        # 小程序托管域名分流在最外(#322):那些 Host 只许进 /v/ 和 /_sdk/,
+        # CORS、后台页面这些层对它们都没有意义
+        assert names == ["MiniHostMiddleware", "CORSMiddleware", "LogUnhandledErrorsMiddleware",
                          "ObserveAppBuildMiddleware", "SelectShopMiddleware",
                          "AdminConsoleMiddleware",
                          "RecordApiCallMiddleware"], \

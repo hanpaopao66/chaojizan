@@ -76,6 +76,10 @@ async def register(payload: RegisterIn, request: Request,
         User.phone == payload.phone, User.role == UserRole(payload.role)))
     if existing:
         raise HTTPException(409, "该手机号已注册过此角色的账号")
+    invite = None
+    if payload.role == "developer":
+        from ..services import developer_signup
+        invite = await developer_signup.gate(db, payload.phone)
     user = User(
         phone=payload.phone,
         password_hash=hash_password(payload.password),
@@ -88,6 +92,10 @@ async def register(payload: RegisterIn, request: Request,
     db.add(user)
     # 这个号上次注销时带着风控标记的话,贴回来(注销不是洗白按钮)
     await apply_risk_carryover(db, user)
+    if user.role == UserRole.developer:
+        from ..services import developer_signup
+        await db.flush()
+        developer_signup.on_created(db, user, invite)
     await db.commit()
     if user.role == UserRole.customer:
         from ..services.coupons import issue_newcomer
@@ -432,7 +440,12 @@ async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
         # 管理员绝不自动注册:验证码对了也不行,得先有管理员账号
         raise HTTPException(403, "该手机号不是管理员")
     if user is None:
-        prefix = {"customer": "用户", "merchant": "商家", "rider": "骑手"}[payload.role]
+        invite = None
+        if role == UserRole.developer:
+            from ..services import developer_signup
+            invite = await developer_signup.gate(db, payload.phone)
+        prefix = {"customer": "用户", "merchant": "商家", "rider": "骑手",
+                  "developer": "开发者"}[payload.role]
         user = User(
             phone=payload.phone,
             name=f"{prefix}{payload.phone[-4:]}",
@@ -444,10 +457,15 @@ async def sms_login(payload: SmsLoginIn, db: AsyncSession = Depends(get_db)):
         db.add(user)
         # 与 /register 同一条口径:注销前的风控标记跟着手机号回来
         await apply_risk_carryover(db, user)
+        if role == UserRole.developer:
+            from ..services import developer_signup
+            await db.flush()
+            developer_signup.on_created(db, user, invite)
         await db.commit()
         await db.refresh(user)
-        from ..services.coupons import issue_newcomer
-        await issue_newcomer(db, user)  # 新客券,失败不影响注册
+        if role != UserRole.developer:
+            from ..services.coupons import issue_newcomer
+            await issue_newcomer(db, user)  # 新客券,失败不影响注册
     elif payload.device_id and user.device_id != payload.device_id:
         user.device_id = payload.device_id
         await db.commit()
@@ -479,6 +497,14 @@ async def delete_account(
     )
     if active:
         raise HTTPException(409, f"还有 {active} 笔进行中的订单,完结后才能注销")
+    if user.role == UserRole.developer:
+        # 名下还有没移除的小程序时拒绝:应用的用户还在用,开发者一注销就成了无主应用
+        from ..models import Developer, MiniApp
+        dev_id = await db.scalar(select(Developer.id).where(Developer.user_id == user.id))
+        live = await db.scalar(select(sa_func.count(MiniApp.id)).where(
+            MiniApp.developer_id == dev_id, MiniApp.status != "removed")) if dev_id else 0
+        if live:
+            raise HTTPException(409, f"名下还有 {live} 个小程序,请先在开发者后台移除后再注销")
     if user.role == UserRole.merchant:
         shop = await db.scalar(select(Merchant).where(Merchant.owner_id == user.id))
         if shop is not None:
@@ -551,6 +577,13 @@ async def delete_account(
     # 订单自带地址快照(orders.address / contact_phone),删地址簿不影响
     # 任何历史订单的可读性与对账。
     await db.execute(sa_delete(Address).where(Address.user_id == user.id))
+    # 小程序(DEV-PROMPTS-39 §5.5「注销账号级联删除」):云存储、授权、最近使用、
+    # 日活明细、open_id 映射一起删。聚合数(mini_app_usage_daily)里没有人,不动
+    from ..models import (MiniAppDailyUser, MiniAppGrant, MiniAppKV, MiniAppKVUsage,
+                          MiniAppOpenId, MiniAppUserPref)
+    for model in (MiniAppKV, MiniAppKVUsage, MiniAppGrant, MiniAppUserPref,
+                  MiniAppDailyUser, MiniAppOpenId):
+        await db.execute(sa_delete(model).where(model.user_id == user.id))
     # 店员名单:人都注销了还挂在名单上,店主看到的是 `del****9af0`。
     # 店主本人有店时上面已经 409 拒了,能走到这里的必然是店员或普通账号。
     await db.execute(

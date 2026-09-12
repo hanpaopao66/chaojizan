@@ -34,6 +34,8 @@ PURPOSES: dict[str, bool] = {
     "splash": False,        # 开屏运营图
     "avatar": False,        # 用户头像
     "review": False,        # 评价配图(评价本身就是公开的)
+    "miniapp_icon": False,  # 小程序图标、截图:详情页公开展示
+    "miniapp_shot": False,
 
     # ---- 私密:泄露了会伤到具体的人 ----
     "id_card": True,        # 身份证
@@ -48,6 +50,11 @@ PURPOSES: dict[str, bool] = {
     # 食安投诉可附**医疗凭证** —— 医疗健康信息在个保法下属于敏感个人信息,
     # 这一类比身份证更不能公开直出
     "food_safety": True,
+    # 小程序举报截图(#332):截的是举报人自己手机上的画面,可能带着别的通知、
+    # 聊天内容;只给举报人和审核员看,**不给被举报的开发者**
+    "miniapp_report": True,
+    # 开发者企业认证的营业执照(#329):和商家的执照同一类材料
+    "dev_license": True,
 }
 
 SERVER_DIR = Path(__file__).resolve().parent.parent.parent
