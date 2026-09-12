@@ -1,0 +1,150 @@
+/* 颜色全部走宿主下发的主题变量(SDK 写在 :root 上),后面的值是不在宿主里时的兜底 —— 骨白 / 墨 / 黏土 */
+:root {
+  --bg: var(--sz-theme-bg-color, #F0EEE6);
+  --card: var(--sz-theme-secondary-bg-color, #FBFAF6);
+  --ink: var(--sz-theme-text-color, #141413);
+  --muted: var(--sz-theme-hint-color, #6B6862);
+  --line: var(--sz-theme-line-color, #E2DED2);
+  --accent: var(--sz-theme-accent-text-color, #C15F3C);
+  --button: var(--sz-theme-button-color, #C15F3C);
+  --button-ink: var(--sz-theme-button-text-color, #FFFFFF);
+  --danger: var(--sz-theme-destructive-text-color, #D03030);
+  --link: var(--sz-theme-link-color, #2C5F87);
+  --mark: color-mix(in srgb, var(--accent) 22%, transparent);
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --fast: 120ms;
+  --base: 220ms;
+  --pad: 1rem;
+  --top: var(--sz-content-safe-area-inset-top, 0px);
+  --bottom: var(--sz-safe-area-inset-bottom, 0px);
+  color-scheme: light dark;
+}
+:root.dark-fallback {
+  --bg: #1B1A17; --card: #24231F; --ink: #F2F0E8; --muted: #A8A49A; --line: #37342D;
+  --accent: #E08A6B; --button: #E08A6B; --button-ink: #1B1A17; --danger: #E06B6B; --link: #7FB2D9;
+}
+@supports not (color: color-mix(in srgb, red 10%, white)) {
+  :root { --mark: rgba(193, 95, 60, 0.22); }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 1rem/1.55 system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, .note:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+#app { max-width: 42rem; margin: 0 auto; min-height: 100%; padding-top: var(--top); }
+
+/* ---------- 列表 ---------- */
+.bar {
+  position: sticky; top: 0; z-index: 2; background: var(--bg);
+  padding: .75rem var(--pad) .5rem; display: grid; gap: .5rem;
+}
+.search {
+  display: flex; align-items: center; gap: .5rem;
+  background: var(--card); border: 1px solid var(--line); border-radius: .75rem; padding: 0 .75rem;
+}
+.search input {
+  flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); font: inherit;
+  padding: .6rem 0; outline: none;
+}
+.search .clear { color: var(--muted); font-size: .9rem; padding: .25rem; }
+.search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.banner { font-size: .8125rem; color: var(--muted); padding: .4rem .75rem; border-radius: .5rem; background: var(--card); border: 1px dashed var(--line); }
+.banner.warn { color: var(--danger); }
+
+.list { list-style: none; margin: 0; padding: 0 var(--pad); display: grid; gap: .5rem; }
+.note {
+  display: grid; grid-template-columns: 1fr auto; gap: .15rem .75rem; align-items: baseline;
+  background: var(--card); border: 1px solid var(--line); border-radius: .75rem; padding: .75rem .9rem;
+  text-align: left; width: 100%;
+  animation: rise var(--fast) var(--ease) both;
+}
+.note .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note .time { font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.note .snippet { grid-column: 1 / -1; font-size: .875rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 1.2em; }
+.note .pin { color: var(--accent); font-size: .75rem; margin-right: .35rem; font-weight: 500; }
+.note .unsynced { color: var(--muted); font-size: .7rem; margin-left: .35rem; }
+
+.empty { text-align: center; color: var(--muted); padding: 4rem var(--pad) 2rem; }
+.empty .big { font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif; font-size: 2.5rem; color: var(--line); display: block; margin-bottom: .5rem; }
+
+.foot {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: .25rem 1rem;
+  font-size: .8125rem; color: var(--muted); padding: 1.25rem var(--pad) calc(5.5rem + var(--bottom));
+}
+.foot button { color: var(--link); }
+
+.fab {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(1rem + var(--bottom));
+  background: var(--button); color: var(--button-ink); border-radius: 999px; padding: .75rem 1.75rem;
+  font-weight: 600; box-shadow: 0 6px 20px rgba(20, 20, 19, .18);
+}
+
+/* ---------- 编辑 ---------- */
+.editor { display: flex; flex-direction: column; min-height: 100vh; min-height: var(--sz-viewport-height, 100vh); }
+.editor .tools {
+  display: flex; align-items: center; gap: .25rem; padding: .5rem calc(var(--pad) - .5rem);
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 2;
+}
+.editor .tools button { padding: .45rem .6rem; border-radius: .5rem; font-size: .875rem; color: var(--muted); }
+.editor .tools button.on { color: var(--accent); }
+.editor .tools .back { color: var(--ink); font-weight: 600; margin-right: auto; }
+.editor .tools .danger { color: var(--danger); }
+.editor textarea {
+  flex: 1; width: 100%; resize: none; border: 0; outline: none; background: var(--bg); color: var(--ink);
+  font: 1.0625rem/1.7 system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  padding: 1rem var(--pad) 2rem;
+}
+.editor .status {
+  display: flex; justify-content: space-between; gap: 1rem; padding: .5rem var(--pad) calc(.5rem + var(--bottom));
+  font-size: .75rem; color: var(--muted); border-top: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.editor .status .over { color: var(--danger); }
+
+/* ---------- 回收站 / 关于 ---------- */
+.page { padding: .75rem var(--pad) calc(2rem + var(--bottom)); }
+.page h1 { font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif; font-size: 1.375rem; font-weight: 600; margin: .5rem 0 1rem; }
+.page .back { color: var(--link); font-size: .9375rem; margin-bottom: .25rem; }
+.page p, .page li { color: var(--ink); font-size: .9375rem; max-width: 36em; }
+.page .muted { color: var(--muted); }
+.trash-item { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem; align-items: center; padding: .7rem 0; border-bottom: 1px solid var(--line); }
+.trash-item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-item .left { font-size: .75rem; color: var(--muted); display: block; }
+.trash-item button { font-size: .875rem; padding: .35rem .5rem; color: var(--link); }
+.trash-item button.danger { color: var(--danger); }
+.linkish { color: var(--link); }
+
+/* ---------- 操作面板(页面内) ---------- */
+.sheet-mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: rgba(20, 20, 19, .35); z-index: 10; animation: fade var(--fast) var(--ease) both; }
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 11; max-width: 42rem; margin: 0 auto;
+  background: var(--card); border-radius: 1rem 1rem 0 0; padding: .5rem 0 calc(.5rem + var(--bottom));
+  animation: up var(--base) var(--ease) both;
+}
+.sheet button { display: block; width: 100%; text-align: left; padding: .9rem 1.25rem; font-size: 1rem; }
+.sheet button.danger { color: var(--danger); }
+.sheet .cap { font-size: .8125rem; color: var(--muted); padding: .5rem 1.25rem .25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(5rem + var(--bottom)); z-index: 20;
+  background: var(--ink); color: var(--bg); padding: .6rem 1rem; border-radius: .6rem; font-size: .875rem;
+  max-width: calc(100% - 2rem); animation: fade var(--fast) var(--ease) both;
+}
+
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes up { from { transform: translateY(100%); } to { transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

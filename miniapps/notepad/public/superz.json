@@ -1,0 +1,7 @@
+{
+  "sdk": "2",
+  "kind": "app",
+  "orientation": "portrait",
+  "background_color": "#F0EEE6",
+  "spa_fallback": false
+}

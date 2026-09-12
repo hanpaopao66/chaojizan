@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>你好,超级赞</title>
+  <!-- SDK 由平台在每个托管 origin 下提供,同源引用即可(CSP 只放行 'self') -->
+  <script src="/_sdk/2/sz-webapp.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>你好,<span id="who">朋友</span></h1>
+    <p class="muted">这是超级赞小程序的最小模板:主题、主按钮、initData 验签,一样不少。</p>
+    <dl>
+      <dt>open_id(按应用隔离)</dt><dd id="open-id">—</dd>
+      <dt>平台</dt><dd id="platform">—</dd>
+      <dt>宿主版本</dt><dd id="version">—</dd>
+      <dt>后端验签</dt><dd id="verify">点下面的主按钮试试</dd>
+    </dl>
+    <p class="muted small">不在超级赞里打开时,把地址后面加上 <code>?sz_mock=1</code> 就能在浏览器里调试。</p>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

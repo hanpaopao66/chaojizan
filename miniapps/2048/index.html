@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>2048</title>
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+  <main id="game">
+    <header class="head">
+      <h1>2048</h1>
+      <div class="scores">
+        <div class="score"><span>分数</span><b id="score">0</b></div>
+        <div class="score"><span>最好</span><b id="best">0</b></div>
+      </div>
+    </header>
+    <div class="actions">
+      <p class="hint">滑动或用方向键,相同的数字会合并</p>
+      <button id="new" type="button">新游戏</button>
+    </div>
+    <div id="board" class="board" role="grid" aria-label="2048 棋盘" tabindex="0">
+      <div class="cells" aria-hidden="true"></div>
+      <div class="tiles"></div>
+    </div>
+    <p id="live" class="sr" aria-live="polite"></p>
+    <footer class="foot"><button id="about-btn" type="button">关于</button></footer>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

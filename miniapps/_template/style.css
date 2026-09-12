@@ -1,0 +1,16 @@
+:root {
+  --bg: var(--sz-theme-bg-color, #F0EEE6);
+  --ink: var(--sz-theme-text-color, #141413);
+  --muted: var(--sz-theme-hint-color, #6B6862);
+  --line: var(--sz-theme-line-color, #E2DED2);
+  --card: var(--sz-theme-secondary-bg-color, #FBFAF6);
+}
+body { margin: 0; background: var(--bg); color: var(--ink); font: 1rem/1.6 system-ui, -apple-system, "PingFang SC", sans-serif; }
+main { max-width: 36rem; margin: 0 auto; padding: calc(1.25rem + var(--sz-content-safe-area-inset-top, 0px)) 1.25rem 6rem; }
+h1 { font-size: 1.6rem; margin: .5rem 0; }
+.muted { color: var(--muted); }
+.small { font-size: .8125rem; }
+dl { background: var(--card); border: 1px solid var(--line); border-radius: .75rem; padding: .75rem 1rem; }
+dt { font-size: .75rem; color: var(--muted); margin-top: .5rem; }
+dd { margin: 0; word-break: break-all; }
+code { background: var(--card); padding: 0 .25rem; border-radius: .25rem; }

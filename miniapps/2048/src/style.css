@@ -1,0 +1,125 @@
+:root {
+  --bg: var(--sz-theme-bg-color, #F0EEE6);
+  --card: var(--sz-theme-secondary-bg-color, #FBFAF6);
+  --ink: var(--sz-theme-text-color, #141413);
+  --muted: var(--sz-theme-hint-color, #6B6862);
+  --line: var(--sz-theme-line-color, #E2DED2);
+  --accent: var(--sz-theme-accent-text-color, #C15F3C);
+  --button: var(--sz-theme-button-color, #C15F3C);
+  --button-ink: var(--sz-theme-button-text-color, #FFFFFF);
+  --board: color-mix(in srgb, var(--line) 70%, var(--ink) 8%);
+  --cell-bg: color-mix(in srgb, var(--bg) 55%, var(--line));
+  --gap: 3%;
+  --slide: 120ms;
+  --std: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --top: max(var(--sz-safe-area-inset-top, 0px), var(--sz-content-safe-area-inset-top, 0px));
+  --bottom: var(--sz-safe-area-inset-bottom, 0px);
+}
+:root.dark-fallback {
+  --bg: #1B1A17; --card: #24231F; --ink: #F2F0E8; --muted: #A8A49A; --line: #37342D;
+  --accent: #E08A6B; --button: #E08A6B; --button-ink: #1B1A17;
+}
+@supports not (color: color-mix(in srgb, red 10%, white)) {
+  :root { --board: #D9D3C4; --cell-bg: #E6E1D5; }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 1rem/1.5 system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible, .board:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+#game {
+  width: min(92vw, 420px); margin: 0 auto;
+  padding: calc(1rem + var(--top)) 0 calc(1rem + var(--bottom));
+  display: flex; flex-direction: column; gap: .9rem; height: 100%; justify-content: center;
+}
+.head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.head h1 {
+  margin: 0; font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+  font-size: 2.5rem; font-weight: 700; letter-spacing: .02em; font-variant-numeric: tabular-nums;
+}
+.scores { display: flex; gap: .5rem; }
+.score {
+  min-width: 4.75rem; padding: .35rem .7rem; border-radius: .6rem; background: var(--card);
+  border: 1px solid var(--line); text-align: center; display: grid;
+}
+.score span { font-size: .6875rem; color: var(--muted); letter-spacing: .08em; }
+.score b { font-size: 1.125rem; font-variant-numeric: tabular-nums; }
+.score.bump b { animation: bump 220ms var(--spring); }
+
+.actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.hint { margin: 0; font-size: .8125rem; color: var(--muted); }
+#new {
+  flex: none; background: var(--button); color: var(--button-ink); font-weight: 600;
+  padding: .5rem 1rem; border-radius: .6rem;
+}
+
+.board {
+  position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: .9rem;
+  background: var(--board); padding: var(--gap); touch-action: none; outline: none;
+}
+@supports not (aspect-ratio: 1 / 1) {
+  .board { height: min(92vw, 420px); }
+}
+.cells, .tiles { position: absolute; top: var(--gap); left: var(--gap); right: var(--gap); bottom: var(--gap); }
+/* 格子尺寸由 main.ts 按棋盘实际宽度算好写进 --cell / --g / --step(px),避免百分比在 grid gap 和 translate 里口径不一 */
+.cells { display: grid; grid-template-columns: repeat(4, var(--cell, 1fr)); grid-template-rows: repeat(4, var(--cell, 1fr)); gap: var(--g, 10px); }
+.cells i { background: var(--cell-bg); border-radius: .55rem; }
+.tile {
+  position: absolute; top: 0; left: 0; width: var(--cell); height: var(--cell);
+  transform: translate(calc(var(--c) * var(--step)), calc(var(--r) * var(--step)));
+  transition: transform var(--slide) var(--std);
+  will-change: transform;
+}
+.tile b {
+  display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+  border-radius: .55rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  font-size: clamp(1.25rem, 8.5vw, 2.4rem);
+}
+.tile.d3 b { font-size: clamp(1.1rem, 7vw, 2rem); }
+.tile.d4 b { font-size: clamp(.95rem, 5.6vw, 1.6rem); }
+.tile.d5 b { font-size: clamp(.8rem, 4.6vw, 1.3rem); }
+.tile.new b { animation: appear var(--slide) var(--std) both; }
+.tile.pop b { animation: pop 220ms var(--spring) both; }
+.tile.v2048 b { box-shadow: 0 0 0 3px var(--accent) inset; }
+
+.foot { text-align: center; }
+.foot button { color: var(--muted); font-size: .8125rem; padding: .25rem .5rem; }
+
+.overlay {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+  animation: fade 220ms var(--std) both;
+}
+@supports not (color: color-mix(in srgb, red 10%, white)) { .overlay { background: rgba(240, 238, 230, .88); } }
+.overlay[hidden] { display: none; }
+.panel {
+  width: min(88vw, 380px); background: var(--card); border: 1px solid var(--line); border-radius: 1rem;
+  padding: 1.5rem 1.25rem 1.25rem; text-align: center; box-shadow: 0 12px 40px rgba(20, 20, 19, .16);
+}
+.panel h2 { margin: 0 0 .5rem; font-family: "Songti SC", "Noto Serif CJK SC", serif; font-size: 1.5rem; }
+.panel p { margin: .35rem 0; color: var(--muted); font-size: .9375rem; }
+.panel .big { font-size: 2.25rem; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.panel .row { display: flex; gap: .5rem; justify-content: center; margin-top: 1.1rem; }
+.panel .row button { padding: .6rem 1.1rem; border-radius: .6rem; font-weight: 600; border: 1px solid var(--line); }
+.panel .row button.primary { background: var(--button); color: var(--button-ink); border-color: transparent; }
+.panel.about { text-align: left; }
+.panel.about li { color: var(--ink); font-size: .9375rem; margin: .3rem 0; }
+
+@keyframes appear { from { transform: scale(.6); opacity: .4; } to { transform: none; opacity: 1; } }
+@keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.12); } 100% { transform: scale(1); } }
+@keyframes bump { 50% { transform: scale(1.15); } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: none; }
+  *, *::before, *::after { animation: none !important; }
+}
