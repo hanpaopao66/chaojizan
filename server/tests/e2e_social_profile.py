@@ -5,7 +5,7 @@
 import json
 import random
 
-from tests.chat_util import Person, person, sql
+from tests.chat_util import person, sql
 from tests.miniapp_util import sms_login
 from tests.util import call, fresh_phone
 

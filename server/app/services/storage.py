@@ -223,3 +223,116 @@ def save(data: bytes, ext: str, purpose: str,
 
 def read(key: str, private: bool) -> bytes | None:
     return backend().get(key, private)
+
+
+# ---------------- 大文件(DEV-PROMPTS-40 #341):按路径写、按区间读 ----------------
+#
+# 聊天视频、视频投稿动辄几百 MB,不能像图片那样整块读进内存再 put。
+# 下面这几个函数给 media 服务用:落盘的文件直接传、下载按 Range 一段段读。
+# 用途判定(公开 / 私密)仍由调用方显式给,和上面 save() 同一个原则:没有默认值。
+
+CHUNK = 1024 * 1024
+
+
+def _local_path(key: str, private: bool) -> Path:
+    base = PRIVATE_DIR if private else UPLOAD_DIR
+    path = (base / key).resolve()
+    if not path.is_relative_to(base.resolve()):
+        raise StorageError("非法的存储路径")
+    return path
+
+
+def put_path(src: Path, key: str, private: bool, content_type: str = "") -> None:
+    b = backend()
+    if isinstance(b, MinioBackend):
+        from minio.error import S3Error
+        try:
+            b._client.fput_object(b._bucket(private), key, str(src),
+                                  content_type=content_type or "application/octet-stream")
+        except S3Error as e:
+            raise StorageError(f"对象存储写入失败:{e.code}") from e
+        except Exception as e:
+            raise StorageError(f"对象存储不可用:{type(e).__name__}") from e
+        return
+    dst = _local_path(key, private)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copyfile(src, dst)
+
+
+def stat_size(key: str, private: bool) -> int | None:
+    b = backend()
+    if isinstance(b, MinioBackend):
+        from minio.error import S3Error
+        try:
+            return b._client.stat_object(b._bucket(private), key).size
+        except S3Error:
+            return None
+        except Exception as e:
+            raise StorageError(f"对象存储不可用:{type(e).__name__}") from e
+    p = _local_path(key, private)
+    return p.stat().st_size if p.exists() else None
+
+
+def read_range(key: str, private: bool, start: int, length: int) -> bytes:
+    """读 [start, start+length) 这一段。给 Range 下载用,一次最多读一个 CHUNK 的量级。"""
+    b = backend()
+    if isinstance(b, MinioBackend):
+        from minio.error import S3Error
+        resp = None
+        try:
+            resp = b._client.get_object(b._bucket(private), key, offset=start, length=length)
+            return resp.read()
+        except S3Error as e:
+            raise StorageError(f"对象存储读取失败:{e.code}") from e
+        except Exception as e:
+            raise StorageError(f"对象存储不可用:{type(e).__name__}") from e
+        finally:
+            if resp is not None:
+                resp.close()
+                resp.release_conn()
+    with open(_local_path(key, private), "rb") as f:
+        f.seek(start)
+        return f.read(length)
+
+
+def download_to(key: str, private: bool, dst: Path) -> None:
+    b = backend()
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(b, MinioBackend):
+        from minio.error import S3Error
+        try:
+            b._client.fget_object(b._bucket(private), key, str(dst))
+        except S3Error as e:
+            raise StorageError(f"对象存储读取失败:{e.code}") from e
+        except Exception as e:
+            raise StorageError(f"对象存储不可用:{type(e).__name__}") from e
+        return
+    import shutil
+    shutil.copyfile(_local_path(key, private), dst)
+
+
+def remove(key: str, private: bool) -> None:
+    if not key:
+        return
+    b = backend()
+    if isinstance(b, MinioBackend):
+        try:
+            b._client.remove_object(b._bucket(private), key)
+        except Exception:
+            pass
+        return
+    try:
+        _local_path(key, private).unlink(missing_ok=True)
+    except StorageError:
+        pass
+
+
+def presigned_get(key: str, private: bool, seconds: int = 120) -> str | None:
+    """生产上 nginx 直出大文件用(X-Accel-Redirect 带着预签名参数去 MinIO 取)。本地后端没有。"""
+    b = backend()
+    if not isinstance(b, MinioBackend):
+        return None
+    from datetime import timedelta
+    return b._client.presigned_get_object(b._bucket(private), key,
+                                          expires=timedelta(seconds=seconds))

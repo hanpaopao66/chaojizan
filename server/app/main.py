@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -49,6 +50,7 @@ from .routers import (
     vouchers,
 )
 from .routers import chat as chat_router
+from .routers import media as media_router
 from .routers import social as social_router
 from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
 from .realtime import gateway as rt_gateway
@@ -84,6 +86,10 @@ async def lifespan(app: FastAPI):
     # 实时事件的跨进程订阅(DEV-PROMPTS-40 §6):每个 api 进程各一份,和清扫不一样
     from .realtime.bus import listen_forever
     rt_bus = asyncio.create_task(listen_forever()) if settings.realtime_bus else None
+    # 转码在 api 进程里跑(开发 / CI)时,上次没做完的重新排队
+    if settings.media_worker == "inline":
+        from .workers.media import recover
+        asyncio.create_task(recover())
     yield
     if sweeper is not None:
         sweeper.cancel()
@@ -526,6 +532,7 @@ app.include_router(ws.router)
 # 消息与视频(DEV-PROMPTS-40)
 app.include_router(social_router.router)
 app.include_router(chat_router.router)
+app.include_router(media_router.router)
 app.include_router(rt_gateway.router)
 
 UPLOAD_DIR.mkdir(exist_ok=True)

@@ -125,6 +125,11 @@ jobs:
               print("bucket", b, "ok")
           PY
 
+      # 消息与视频的转码 e2e(DEV-PROMPTS-40 #342)要用 ffmpeg / ffprobe。
+      # 服务端镜像里本来就装了(server/Dockerfile),这里补上 runner 的,两边一致
+      - name: 装 ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null && ffmpeg -version | head -1
+
       - name: 迁移 + 种子数据
         working-directory: server
         run: |
