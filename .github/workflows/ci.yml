@@ -209,12 +209,19 @@ jobs:
       - name: 后台类型检查
         run: |
           fail=0
-          for d in admin-web merchant-web; do
+          for d in admin-web merchant-web developer-web; do
             echo "── $d"
             (cd "$d" && npm ci --no-audit --no-fund >/dev/null \
               && npx tsc --noEmit) || fail=1
           done
           exit $fail
+      # 小程序 SDK(假宿主覆盖每个方法)和官方小程序的纯函数(记事本的对账冲突、2048 的引擎)。
+      # SDK 构建脚本顺带卡 gzip 12 KB 预算;文档参考页与 SDK 导出的一致性也在这里对
+      - name: 小程序 SDK 与官方小程序
+        run: |
+          (cd packages/miniapp-sdk && npm ci --no-audit --no-fund >/dev/null && npm test)
+          (cd miniapps && npm ci --no-audit --no-fund >/dev/null && npx tsc -p . && npm test)
+          node scripts/check_sdk_docs.mjs
       # 频道色是功能不是装饰:首页一排图标,用户要一眼找到"打车"。
       # 「能不能一眼分开」是可以量的,而且**只能靠量** ——
       # 旧色板在绿色盲下最差色差 4.0(等于一排一样的方块),肉眼永远看不出来。

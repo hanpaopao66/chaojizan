@@ -81,6 +81,11 @@ analyze:
 	@echo "  没有转义美元符 ✓"
 	@cd merchant-web && npx tsc --noEmit && echo "== merchant-web tsc ✓"
 	@cd admin-web && npx tsc --noEmit && echo "== admin-web tsc ✓"
+	@cd developer-web && npx tsc --noEmit && echo "== developer-web tsc ✓"
+# 小程序:SDK(假宿主)、官方小程序的纯函数、文档参考页与 SDK 导出一致(DEV-PROMPTS-39 #338)
+	@cd packages/miniapp-sdk && npm test >/dev/null && echo "== miniapp-sdk 测试 ✓"
+	@cd miniapps && npx tsc -p . && node scripts/test.mjs >/dev/null && echo "== 官方小程序 tsc + 测试 ✓"
+	@node scripts/check_sdk_docs.mjs
 
 # 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)
 unit:
@@ -201,6 +206,9 @@ test:
 	  && python -m tests.e2e_urge && python -m tests.e2e_weather_shutdown \
 	  && python -m tests.e2e_withdrawal_failed \
 	  && python -m tests.e2e_mini_apps \
+	  && python -m tests.e2e_miniapp_identity && python -m tests.e2e_miniapp_hosting \
+	  && python -m tests.e2e_miniapp_storage && python -m tests.e2e_miniapp_dev \
+	  && python -m tests.e2e_miniapp_review && python -m tests.e2e_miniapp_catalog \
 	  && python -m tests.e2e_audit_coverage && python -m tests.e2e_authz_regression \
 	  && python -m tests.e2e_coupon_release \
 	  && python -m tests.e2e_errand_receipt_replay \

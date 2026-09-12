@@ -401,7 +401,7 @@ class BottomButton {
     for (const fn of this.handlers.slice()) fn()
   }
 
-  private sync(): this {
+  private _sync(): this {
     // 同一轮里连着改几个属性(setText + show),只发一次
     if (!this.scheduled) {
       this.scheduled = true
@@ -417,13 +417,13 @@ class BottomButton {
     return this
   }
 
-  setText(text: string): this { this.text = String(text).slice(0, 64); return this.sync() }
-  show(): this { this.isVisible = true; return this.sync() }
-  hide(): this { this.isVisible = false; return this.sync() }
-  enable(): this { this.isActive = true; return this.sync() }
-  disable(): this { this.isActive = false; return this.sync() }
-  showProgress(_leaveActive?: boolean): this { this.isProgressVisible = true; return this.sync() }
-  hideProgress(): this { this.isProgressVisible = false; return this.sync() }
+  setText(text: string): this { this.text = String(text).slice(0, 64); return this._sync() }
+  show(): this { this.isVisible = true; return this._sync() }
+  hide(): this { this.isVisible = false; return this._sync() }
+  enable(): this { this.isActive = true; return this._sync() }
+  disable(): this { this.isActive = false; return this._sync() }
+  showProgress(_leaveActive?: boolean): this { this.isProgressVisible = true; return this._sync() }
+  hideProgress(): this { this.isProgressVisible = false; return this._sync() }
   setParams(p: BottomButtonParams): this {
     if (p.text !== undefined) this.text = String(p.text).slice(0, 64)
     if (p.color !== undefined) this.color = p.color
@@ -432,7 +432,7 @@ class BottomButton {
     if (p.is_active !== undefined) this.isActive = !!p.is_active
     if (p.is_progress_visible !== undefined) this.isProgressVisible = !!p.is_progress_visible
     if (p.position !== undefined) this.position = p.position
-    return this.sync()
+    return this._sync()
   }
   onClick(fn: Listener): this { this.handlers.push(fn); return this }
   offClick(fn: Listener): this { this.handlers = this.handlers.filter((h) => h !== fn); return this }
