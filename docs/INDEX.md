@@ -116,4 +116,5 @@
 | 文档 | 说明 |
 |---|---|
 | [LEDGER-SPEC.md](LEDGER-SPEC.md) | 公开账本哈希链协议规格:第三方不读代码即可实现独立验证器 |
+| [DEV-PROMPTS-39.md](DEV-PROMPTS-39.md) | #320–338 小程序开放平台(技术对标 Telegram Mini Apps)+ 首批官方记事本、2048。initData v2 用 HMAC + Ed25519,**第三方只拿按应用隔离的 open_id**;平台托管的版本不可变;**目录不卖位置写成代码里的不变量**。开工前有 12 条待拍板 |
 | [../SECURITY.md](../SECURITY.md) | 漏洞报告方式与威胁模型 |
