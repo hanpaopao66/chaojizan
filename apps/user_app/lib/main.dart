@@ -615,12 +615,6 @@ class _MerchantListViewState extends State<MerchantListView>
 
   late Future<List<Merchant>> _future = _load();
 
-  /// 再来一单:最近点过的店(按商家去重,最多 6 家)
-  List<Order> _reorder = [];
-
-  /// 我的常点:近 90 天点得最多的单品(#119)
-  List<FrequentDish> _frequent = [];
-
   /// 5% 承诺条关掉了没有。
   ///
   /// **默认不关**,但关了就永久关 —— 它是一句宣言,老用户看过一次就够了,
@@ -658,7 +652,6 @@ class _MerchantListViewState extends State<MerchantListView>
     // 首页要跟随位置(#281):App 从后台回来时人可能已经换了城市。
     // 全 App 此前只有订单详情/地图/拼单页监听生命周期,首页反而没有
     if (widget.category == null) WidgetsBinding.instance.addObserver(this);
-    _loadRecent();
     _restorePledge();
     _loadMiniApps();
     _restoreMiniHint();
@@ -881,78 +874,6 @@ class _MerchantListViewState extends State<MerchantListView>
       content: Text('已收起。想看分账明细,「我的 → 这钱怎么算的」一直在'),
       duration: Duration(seconds: 4),
     ));
-  }
-
-  Future<void> _loadRecent() async {
-    // 两块首页数据并发拉:互不依赖,串起来发就是白等一个来回。
-    // 各自兜底,一个挂了不影响另一个
-    final ordersF = widget.api.myOrders();
-    final frequentF = widget.api.myFrequentDishes();
-    try {
-      final orders = await ordersF;
-      final seen = <int>{};
-      final recent = <Order>[];
-      for (final o in orders) {
-        if (o.status != OrderStatus.completed &&
-            o.status != OrderStatus.delivered) {
-          continue;
-        }
-        // 跑腿单不进「再来一单」。它的 merchantId 指向「本城跑腿服务」
-        // 那个虚拟主体,点进去是一张空菜单 —— 而且"再来一单"对跑腿
-        // 本来就不成立:上次寄的东西和这次要寄的没有任何关系
-        if (o.isErrand) continue;
-        if (seen.add(o.merchantId)) recent.add(o);
-        if (recent.length >= 6) break;
-      }
-      if (mounted) setState(() => _reorder = recent);
-    } catch (_) {}
-    try {
-      final frequent = await frequentF;
-      if (mounted) setState(() => _frequent = frequent);
-    } catch (_) {}
-  }
-
-  /// 常点单品进店:直接把这道菜预填进购物车,不用再翻菜单
-  Future<void> _openFrequent(FrequentDish f) async {
-    if (!f.merchantOpen) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${f.merchantName} 现在没营业')));
-      return;
-    }
-    try {
-      final merchant = await widget.api.merchantDetail(f.merchantId);
-      if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => MenuPage(
-              api: widget.api,
-              merchant: merchant,
-              initialCart: {f.dishId: 1})));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
-    }
-  }
-
-  /// 一键回购:拉店铺详情,带上历史购物车进店(缺货/带规格的菜会被过滤/重选)
-  Future<void> _openReorder(Order order) async {
-    try {
-      final merchant = await widget.api.merchantDetail(order.merchantId);
-      if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => MenuPage(
-                api: widget.api,
-                merchant: merchant,
-                initialCart: {
-                  for (final it in order.items)
-                    if (it.dishId != 0) it.dishId: it.quantity,
-                },
-              )));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$e')));
-    }
   }
 
   @override
@@ -1552,155 +1473,6 @@ class _MerchantListViewState extends State<MerchantListView>
     );
   }
 
-  /// 再来一单:外卖最高频的路径是回头单,抬到首屏(Grab 的 Order it again)
-  Widget _reorderRow() {
-    final sz = Theme.of(context).sz;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(kPagePad, 20, kPagePad, 9),
-          child: const SzSectionTitle('再来一单'),
-        ),
-        SizedBox(
-          // 卡高跟着字号缩放走:写死 88 的话,长辈版/系统大字下
-          // 摘要那行会被从中间切断(1.3× 实测)
-          height: 88 * MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.5),
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: kPagePad),
-            itemCount: _reorder.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 9),
-            itemBuilder: (context, i) {
-              final order = _reorder[i];
-              return SizedBox(
-                width: 168,
-                child: SzCard(
-                  onTap: () => _openReorder(order),
-                  padding: const EdgeInsets.all(11),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                          order.merchantName.isEmpty
-                              ? '常点的店'
-                              : order.merchantName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: sz.ink)),
-                      const SizedBox(height: 2),
-                      Expanded(
-                        child: Text(order.summary,
-                            // 字号放大后两行塞不下,降成一行省略号,
-                            // 比让第二行被从中间切断体面
-                            maxLines: MediaQuery.textScalerOf(context)
-                                        .scale(1.0) >
-                                    1.15
-                                ? 1
-                                : 2,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                TextStyle(fontSize: 11, color: sz.inkMuted)),
-                      ),
-                      Text(yuan(order.totalCents),
-                          style: szMoney(fontSize: 12.5, color: sz.inkMuted)),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 我的常点:比「再来一单」更细一档 —— 整单重下改一个菜就得重翻菜单,
-  /// 这里按单品复购,点一下就进店带着这道菜。次数是真实下单数,不可运营干预。
-  Widget _frequentRow() {
-    final sz = Theme.of(context).sz;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(kPagePad, 20, kPagePad, 9),
-          child: const SzSectionTitle('我的常点'),
-        ),
-        SizedBox(
-          height:
-              104 * MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.5),
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: kPagePad),
-            itemCount: _frequent.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 9),
-            itemBuilder: (context, i) {
-              final f = _frequent[i];
-              return SizedBox(
-                width: 150,
-                child: Opacity(
-                  // 打烊的店淡掉但不隐藏:藏起来用户会以为自己的常点丢了
-                  opacity: f.merchantOpen ? 1 : 0.45,
-                  child: SzCard(
-                    onTap: () => _openFrequent(f),
-                    padding: const EdgeInsets.all(10),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        SzImage(
-                          url: f.imageUrl.isEmpty
-                              ? ''
-                              : widget.api.resolveUrl(f.imageUrl),
-                          name: f.dishName,
-                          size: 40,
-                        ),
-                        const SizedBox(width: 9),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(f.dishName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12.5,
-                                      color: sz.ink)),
-                              Text(f.merchantName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 10.5, color: sz.inkMuted)),
-                              const Spacer(),
-                              Text(yuan(f.priceCents),
-                                  style:
-                                      szMoney(fontSize: 12.5, color: sz.ink)),
-                              Text(
-                                  f.merchantOpen
-                                      ? '点过 ${f.times} 次'
-                                      : '休息中 · 点过 ${f.times} 次',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                      fontSize: 10, color: sz.inkMuted)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
   /// 商家行:62px 缩略图 + 店名 + 两行 meta,行间 1px 发丝线。
   ///
   /// 从 132px 大封面改成缩略图,是为了让店名和价格先被读到;
@@ -1955,7 +1727,6 @@ class _MerchantListViewState extends State<MerchantListView>
       backgroundColor: peeking ? Colors.transparent : null,
       elevation: peeking ? 0 : 2,
       onRefresh: () async {
-        _loadRecent();
         _loadMiniApps(); // 登录状态变过的话,清单跟着刷新
         setState(() => _future = _load());
       },
@@ -1965,7 +1736,7 @@ class _MerchantListViewState extends State<MerchantListView>
           final merchants = snapshot.data;
           return CustomScrollView(
             slivers: [
-              // 品类模式只留列表,首页头部(搜索/公告/金刚区/再来一单)不重复出现
+              // 品类模式只留列表,首页头部(搜索/公告/金刚区)不重复出现
               if (widget.category == null)
                 SliverToBoxAdapter(
                   child: Column(children: [
@@ -1977,8 +1748,8 @@ class _MerchantListViewState extends State<MerchantListView>
                     if (_farFromHere) _farBanner(),
                     _kingKong(),
                     _promiseStrip(),
-                    if (_frequent.isNotEmpty) _frequentRow(),
-                    if (_reorder.isNotEmpty) _reorderRow(),
+                    // 「我的常点」「再来一单」两块 2026-09 从首页撤了(设计稿 2a):
+                    // 频道格、5% 条下面直接是排序和店。回头单走订单卡上的「再来一单」
                   ]),
                 ),
               SliverPersistentHeader(
