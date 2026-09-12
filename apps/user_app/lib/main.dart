@@ -643,6 +643,9 @@ class _MerchantListViewState extends State<MerchantListView>
   bool _miniArmed = false;
   bool _miniOpening = false;
 
+  /// 浅拉松手时由这里替 RefreshIndicator 扣扳机(见 kMiniAppsRefreshPull)
+  final _refreshKey = GlobalKey<RefreshIndicatorState>();
+
   /// 这一次下拉是不是走的 overscroll(安卓的拉伸回弹):那种回弹不挪列表,
   /// 露头条要让出来的那一截位移得自己给;iOS 的弹性回弹本来就把列表往下带
   bool _miniPullByOverscroll = false;
@@ -719,7 +722,9 @@ class _MerchantListViewState extends State<MerchantListView>
       if (widget.deliveryAddress == null &&
           Geolocator.distanceBetween(_myLat, _myLng, gcj.lat, gcj.lng) >
               _kFarMeters) {
-        setState(() => _future = _load());
+        setState(() {
+          _future = _load();
+        });
         return;
       }
       if (_farFromHere) setState(() {}); // 让提示条出现
@@ -782,8 +787,10 @@ class _MerchantListViewState extends State<MerchantListView>
   }
 
   /// 与 RefreshIndicator 的共存口径(#278 的验收重点):不抢、不禁用。
-  /// 浅拉松手 → 刷新,和从前一样;深拉过 kMiniAppsPullThreshold 松手 →
-  /// 面板展开(此时刷新也会触发,列表在面板底下顺手更新了,无害)。
+  /// 浅拉(过 kMiniAppsRefreshPull)松手 → 刷新;深拉过 kMiniAppsPullThreshold 松手 →
+  /// 面板展开(拉得够深时 RefreshIndicator 自己也会上膛,列表在面板底下顺手更新了,无害)。
+  /// 浅拉的那次刷新是这里在松手时调 RefreshIndicatorState.show() 触发的 —— 它自己要拉到
+  /// 视口的 1/6(约 130)才上膛,比面板阈值还深,原先的「浅拉照旧刷新」在真机上拉不出来。
   /// Android 默认 clamping 没有 overscroll 位移,用 OverscrollNotification
   /// 累计拉距;iOS bouncing 用负 pixels —— 两平台靠同一个阈值对齐手感
   bool _onScrollForMiniApps(ScrollNotification n) {
@@ -816,6 +823,7 @@ class _MerchantListViewState extends State<MerchantListView>
         (n is ScrollUpdateNotification && n.dragDetails == null);
     if (released && _miniPull > 0) {
       final open = _miniArmed && !_miniOpening;
+      final refresh = !_miniArmed && _miniPull >= kMiniAppsRefreshPull;
       setState(() {
         _miniPull = 0;
         _miniArmed = false;
@@ -825,6 +833,9 @@ class _MerchantListViewState extends State<MerchantListView>
         _miniOpening = true;
         showMiniAppsPanel(context, api: widget.api, apps: _miniApps)
             .whenComplete(() => _miniOpening = false);
+      } else if (refresh) {
+        // 等 RefreshIndicator 先处理完这次松手(它没上膛,会把自己收起来),下一帧再让它转圈刷新
+        WidgetsBinding.instance.addPostFrameCallback((_) => _refreshKey.currentState?.show());
       }
     }
     return false;
@@ -902,7 +913,9 @@ class _MerchantListViewState extends State<MerchantListView>
       _hereAtPick = (_hereLat == null || _hereLng == null)
           ? null
           : (lat: _hereLat!, lng: _hereLng!);
-      setState(() => _future = _load());
+      setState(() {
+        _future = _load();
+      });
     }
   }
 
@@ -1734,12 +1747,20 @@ class _MerchantListViewState extends State<MerchantListView>
     // 刷新本身照旧 —— 松手照样刷新,转圈也照样出现,只是拖动的那几百毫秒让给露头条
     final peeking = _miniPull > 0;
     return RefreshIndicator(
+      key: _refreshKey,
       color: peeking ? Colors.transparent : null,
       backgroundColor: peeking ? Colors.transparent : null,
       elevation: peeking ? 0 : 2,
       onRefresh: () async {
         _loadMiniApps(); // 登录状态变过的话,清单跟着刷新
-        setState(() => _future = _load());
+        // 不能写成箭头 setState(() => _future = …):箭头把 Future 当返回值交给了 setState,
+        // debug 下直接断言失败、这一轮不重建(release 下断言被剥掉才碰巧能用)
+        final f = _load();
+        setState(() {
+          _future = f;
+        });
+        // 圈转到真拉完为止;拉失败由 FutureBuilder 那边显示错误,这里不再抛
+        await f.then((_) {}, onError: (_) {});
       },
       child: FutureBuilder(
         future: _future,
@@ -1803,7 +1824,9 @@ class _MerchantListViewState extends State<MerchantListView>
               if (snapshot.hasError)
                 SzError(
                     error: snapshot.error,
-                    onRetry: () => setState(() => _future = _load())),
+                    onRetry: () => setState(() {
+                          _future = _load();
+                        })),
               if (!snapshot.hasData && !snapshot.hasError) ...[
                 _bigCardSkeleton(),
                 _bigCardSkeleton(),

@@ -22,6 +22,11 @@ import 'miniapp/pages.dart';
 /// 下拉超过这个逻辑像素数,松手即展开面板(微信手感约 90–120)
 const kMiniAppsPullThreshold = 120.0;
 
+/// 拉过这么多、但没到 [kMiniAppsPullThreshold] 就松手 = 刷新(DEV-PROMPTS-39 #338 真机验出来的):
+/// RefreshIndicator 自己要拉到视口高度的 1/6 才上膛,常见手机上约 130,比面板阈值还深 ——
+/// 靠它自己的话,「浅拉刷新」根本拉不出来,一拉就是面板。首页在松手时替它扣扳机
+const kMiniAppsRefreshPull = 56.0;
+
 /// 露头条的高度。首页下拉时底下的内容跟着让出这么多(设计稿 2a 的「下拉中」)
 const kMiniAppsPeekHeight = 56.0;
 
@@ -43,6 +48,12 @@ class MiniAppsPeek extends StatelessWidget {
     final sz = Theme.of(context).sz;
     final t = (pull / kMiniAppsPullThreshold).clamp(0.0, 1.0);
     final armed = t >= 1.0;
+    // 两段手势,文案跟着说清楚:浅拉松手刷新,拉过阈值松手开面板
+    final label = armed
+        ? '松手打开小程序'
+        : pull >= kMiniAppsRefreshPull
+            ? '松手刷新 · 继续下拉打开小程序'
+            : '继续下拉';
     return IgnorePointer(
       child: Opacity(
         opacity: t,
@@ -63,8 +74,7 @@ class MiniAppsPeek extends StatelessWidget {
                   const SizedBox(width: 6),
                 ],
                 const SizedBox(width: 2),
-                Text(armed ? '松手打开小程序' : '继续下拉',
-                    style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                Text(label, style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
               ]),
             ),
           ),
@@ -137,18 +147,47 @@ class _MiniAppsPanel extends StatefulWidget {
 class _MiniAppsPanelState extends State<_MiniAppsPanel> {
   List<MiniAppCard> _recent = const [];
   List<MiniAppCard> _starred = const [];
+  double _upPull = 0;
+  bool _closing = false;
 
   @override
   void initState() {
     super.initState();
-    if (widget.api.isLoggedIn) {
-      widget.api.miniAppMine().then((m) {
-        if (mounted) setState(() => (_recent = m.recent, _starred = m.starred));
-      }).catchError((_) {});
-    }
+    _loadMine();
   }
 
-  void _open(MiniAppCard a) => openMiniApp(context, widget.api, appid: a.appid, card: a);
+  Future<void> _loadMine() async {
+    if (!widget.api.isLoggedIn) return;
+    try {
+      final m = await widget.api.miniAppMine();
+      if (mounted) setState(() => (_recent = m.recent, _starred = m.starred));
+    } catch (_) {}
+  }
+
+  Future<void> _open(MiniAppCard a) async {
+    await openMiniApp(context, widget.api, appid: a.appid, card: a);
+    // 关掉回到抽屉:刚用过的要排到「最近使用」第一个,在详情里收藏的也要出现
+    await _loadMine();
+  }
+
+  void _close() {
+    if (_closing) return;
+    _closing = true;
+    Navigator.of(context).maybePop();
+  }
+
+  /// 在列表上往上推也要能收起:列表是 primary 的,默认物理是「总能滚」,会把竖向拖动抢走,
+  /// 外层 GestureDetector 的上滑就收不到(原先只有标题和底下那一截能上滑收起)。
+  /// 所以看列表自己的越界:推到底还往上推(内容不满一屏时一推就是到底)超过一小段,就收起
+  bool _onScroll(ScrollNotification n) {
+    if (n is OverscrollNotification && n.dragDetails != null && n.overscroll > 0) {
+      _upPull += n.overscroll;
+      if (_upPull > 48) _close();
+    } else if (n is ScrollStartNotification || n is ScrollEndNotification) {
+      _upPull = 0;
+    }
+    return false;
+  }
 
   Widget _grid(List<MiniAppCard> apps, {int offset = 0}) {
     final sz = Theme.of(context).sz;
@@ -204,9 +243,9 @@ class _MiniAppsPanelState extends State<_MiniAppsPanel> {
     return GestureDetector(
       // 上滑收起(面板从上面来,回上面去);点空白也收
       onVerticalDragEnd: (d) {
-        if ((d.primaryVelocity ?? 0) < -300) Navigator.of(context).pop();
+        if ((d.primaryVelocity ?? 0) < -300) _close();
       },
-      onTap: () => Navigator.of(context).pop(),
+      onTap: _close,
       child: Scaffold(
         backgroundColor: sz.paper,
         body: SafeArea(
@@ -220,17 +259,20 @@ class _MiniAppsPanelState extends State<_MiniAppsPanel> {
               ]),
             ),
             Expanded(
-              child: ListView(padding: EdgeInsets.zero, children: [
-                if (recent.isNotEmpty) ...[_title('最近使用'), _grid(recent)],
-                if (_starred.isNotEmpty) ...[_title('我的小程序'), _grid(_starred, offset: recent.length)],
-                _title('全部小程序',
-                    trailing: TextButton(
-                      onPressed: () => Navigator.of(context)
-                          .push(MaterialPageRoute(builder: (_) => MiniAppCatalogPage(api: widget.api))),
-                      child: Text('查看全部 ›', style: TextStyle(fontSize: kFontNote, color: sz.link)),
-                    )),
-                _grid(all, offset: recent.length + _starred.length),
-              ]),
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onScroll,
+                child: ListView(padding: EdgeInsets.zero, children: [
+                  if (recent.isNotEmpty) ...[_title('最近使用'), _grid(recent)],
+                  if (_starred.isNotEmpty) ...[_title('我的小程序'), _grid(_starred, offset: recent.length)],
+                  _title('全部小程序',
+                      trailing: TextButton(
+                        onPressed: () => Navigator.of(context)
+                            .push(MaterialPageRoute(builder: (_) => MiniAppCatalogPage(api: widget.api))),
+                        child: Text('查看全部 ›', style: TextStyle(fontSize: kFontNote, color: sz.link)),
+                      )),
+                  _grid(all, offset: recent.length + _starred.length),
+                ]),
+              ),
             ),
             // 顺序说明是一句对外承诺:精选是人工的(理由公示),其余按上架时间 —— 没有可以买的位置
             Padding(

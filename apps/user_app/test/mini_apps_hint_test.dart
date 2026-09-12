@@ -47,9 +47,10 @@ void main() {
         'developer': {'name': '陕西爱卡斯科技有限公司', 'label': '官方', 'official': true},
       };
 
-  ApiClient fakeApi(List<Map<String, dynamic>> apps) => ApiClient(
+  ApiClient fakeApi(List<Map<String, dynamic>> apps, {List<String>? calls}) => ApiClient(
         baseUrl: 'http://test.local',
         httpClient: MockClient((req) async {
+          calls?.add(req.url.path);
           Object? payload;
           if (req.url.path == '/mini-apps/catalog') {
             // 公开目录(v2):抽屉和露头条的数据源
@@ -77,7 +78,7 @@ void main() {
   });
 
   Future<void> pump(WidgetTester t, List<Map<String, dynamic>> apps,
-      {Key? key}) async {
+      {Key? key, List<String>? calls}) async {
     t.view
       ..devicePixelRatio = 3.0
       ..physicalSize = const Size(390, 844) * 3.0;
@@ -86,7 +87,7 @@ void main() {
       key: key,
       theme: brandTheme(Brightness.light),
       home: Scaffold(
-          body: MerchantListView(api: fakeApi(apps), deliveryAddress: addr)),
+          body: MerchantListView(api: fakeApi(apps, calls: calls), deliveryAddress: addr)),
     ));
     await t.pumpAndSettle();
     addTearDown(Analytics.resetSession);
@@ -123,6 +124,56 @@ void main() {
       // 重进首页(同一份本地存储)
       await pump(t, [app()], key: const ValueKey('second-launch'));
       expect(find.text(hint), findsNothing);
+    });
+  });
+
+  // RefreshIndicator 自己要拉到视口的 1/6 才上膛(常见手机约 130),比面板阈值 120 还深 ——
+  // 不在松手时替它扣扳机的话,有小程序的首页上「浅拉刷新」根本拉不出来(DEV-PROMPTS-39 #338 真机验出来的)
+  group('下拉的两段:浅拉刷新、深拉开面板', () {
+    int loads(List<String> calls) => calls.where((p) => p == '/merchants').length;
+
+    testWidgets('浅拉松手:刷新,不开面板', (t) async {
+      SharedPreferences.setMockInitialValues({'home_miniapps_hint_seen': true});
+      final calls = <String>[];
+      await pump(t, [app()], calls: calls);
+      final before = loads(calls);
+      await t.drag(find.byType(RefreshIndicator), const Offset(0, 100));
+      await t.pumpAndSettle();
+      expect(find.text('网页应用 · 不装包'), findsNothing, reason: '没过面板阈值,不该开面板');
+      expect(loads(calls), greaterThan(before), reason: '浅拉松手要刷新');
+    });
+
+    testWidgets('拉得不够(没过刷新那一段)松手:什么都不做', (t) async {
+      SharedPreferences.setMockInitialValues({'home_miniapps_hint_seen': true});
+      final calls = <String>[];
+      await pump(t, [app()], calls: calls);
+      final before = loads(calls);
+      await t.drag(find.byType(RefreshIndicator), const Offset(0, 40));
+      await t.pumpAndSettle();
+      expect(loads(calls), before);
+    });
+
+    testWidgets('深拉过阈值松手:开面板', (t) async {
+      SharedPreferences.setMockInitialValues({'home_miniapps_hint_seen': true});
+      await pump(t, [app()]);
+      await t.drag(find.byType(RefreshIndicator), const Offset(0, 220));
+      await t.pumpAndSettle();
+      expect(find.text('网页应用 · 不装包'), findsOneWidget);
+    });
+
+    testWidgets('露头条的文案跟着两段走', (t) async {
+      Future<void> peek(double pull) => t.pumpWidget(MaterialApp(
+            theme: brandTheme(Brightness.light),
+            home: Scaffold(
+              body: MiniAppsPeek(pull: pull, apps: [MiniAppCard.fromJson(app())], api: fakeApi(const [])),
+            ),
+          ));
+      await peek(30);
+      expect(find.text('继续下拉'), findsOneWidget);
+      await peek(kMiniAppsRefreshPull + 10);
+      expect(find.text('松手刷新 · 继续下拉打开小程序'), findsOneWidget);
+      await peek(kMiniAppsPullThreshold);
+      expect(find.text('松手打开小程序'), findsOneWidget);
     });
   });
 
