@@ -148,6 +148,11 @@ def order_out(order: Order, merchant: Merchant | None,
     out = OrderOut.model_validate(order)
     out.has_review = has_review
     out.urge_count = urge_count
+    if order.status == OrderStatus.PENDING_PAYMENT and order.created_at:
+        created = (order.created_at if order.created_at.tzinfo
+                   else order.created_at.replace(tzinfo=timezone.utc))
+        # 口径同 auto_flow 的关单判据:created_at 早于 now - pay_timeout 就关
+        out.pay_deadline = created + timedelta(minutes=settings.pay_timeout_minutes)
     if merchant is not None:
         out.biz_type = merchant.biz_type
     # 拆分项的中文名跟着数一起给 —— 客户端不用各写一份映射

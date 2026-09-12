@@ -600,6 +600,7 @@ def _stay_out(order: StayOrder, m: Merchant | None = None,
     out.status_label = STAY_STATUS_LABELS[status]
     out.cancel_policy_text = cancel_policy_text(
         order.cancel_policy, order.free_cancel_until, order.checkin_date)
+    out.commission_rate = settings.stay_commission_rate
     if m is not None:
         out.hotel_name = m.name
         out.hotel_address = m.address

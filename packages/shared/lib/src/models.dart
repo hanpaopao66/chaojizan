@@ -632,6 +632,8 @@ class Order {
         hardshipNote = json['hardship_note'] as String? ?? '',
         distanceM = json['distance_m'] as int?,
         tripM = json['trip_m'] as int?,
+        billDistanceM = (json['bill_distance_m'] as num?)?.toInt(),
+        payDeadline = json['pay_deadline'] as String?,
         distanceSource = json['distance_source'] as String? ?? 'straight',
         sameShop = json['same_shop'] as bool? ?? false,
         sameWay = json['same_way'] as bool? ?? false,
@@ -741,6 +743,12 @@ class Order {
   final String hardshipNote;
   final int? distanceM;   // 骑手 → 取餐点(骑行路径距离),无定位为空
   final int? tripM;       // 取餐点 → 送达点。整单划不划算要看它
+
+  /// 下单时算配送费用的那段距离(米),和钱对得上的那个数;老服务端为空
+  final int? billDistanceM;
+
+  /// 待支付单几点自动关(ISO);其余状态、老服务端为空
+  final String? payDeadline;
   /// route=腾讯骑行路径规划,straight=回退直线×1.2。
   /// 展示时要标出来 —— 距离准不准,骑手有权知道
   final String distanceSource;
@@ -1651,6 +1659,7 @@ class StayOrder {
         status = json['status'] as String,
         statusLabel = json['status_label'] as String? ?? '',
         cancelPolicyText = json['cancel_policy_text'] as String? ?? '',
+        commissionRate = (json['commission_rate'] as num?)?.toDouble() ?? 0,
         rejectReason = json['reject_reason'] as String? ?? '',
         refundCents = json['refund_cents'] as int? ?? 0,
         refundNote = json['refund_note'] as String? ?? '',
@@ -1686,6 +1695,9 @@ class StayOrder {
   final String status;
   final String statusLabel;
   final String cancelPolicyText;
+
+  /// 离店时平台收的比例(0.05);老服务端为 0
+  final double commissionRate;
   final String rejectReason;
   final int refundCents;
   final String refundNote;

@@ -1172,6 +1172,12 @@ class OrderOut(BaseModel):
     hardship_note: str = ""
     distance_m: int | None = None          # 骑手 → 取餐点
     trip_m: int | None = None              # 取餐点 → 送达点(整单划不划算要看它)
+    # 下单时算配送费用的那段距离(米)。订单卡上跑腿单那行「3.2km」就是它 ——
+    # 和钱对得上的距离,不是客户端自己拿坐标算的直线
+    bill_distance_m: int | None = None
+    # 待支付单几点自动关(created_at + pay_timeout_minutes),其余状态为空。
+    # 订单卡写「待支付 · 14:32 关闭」:超时关单是真会发生的事,得让人看得见几点
+    pay_deadline: datetime | None = None
     # 距离来源:route=腾讯骑行路径规划,straight=回退直线×1.2。
     # **必须透传给骑手** —— 距离准不准,他有权知道,而不是时准时不准却不知为何
     distance_source: str = "straight"
@@ -1776,6 +1782,9 @@ class StayOrderOut(BaseModel):
     status: str
     status_label: str = ""       # 中文状态(后端统一,三端一致)
     cancel_policy_text: str = ""
+    # 离店时平台收的比例(settings.stay_commission_rate)。订单卡写「离店才收 5%」,
+    # 数从这里来,客户端不写死 —— 费率改了,卡上跟着变
+    commission_rate: float = 0.0
     reject_reason: str = ""
     refund_cents: int = 0
     refund_note: str = ""
