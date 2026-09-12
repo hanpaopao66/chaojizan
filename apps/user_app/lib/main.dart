@@ -358,6 +358,20 @@ class _HomePageState extends State<HomePage> {
               )
             : Text(_tab == 1 ? '我的订单' : '我的'),
         actions: [
+          // 团购券原来挂在订单页分段器那一行的最右边。分段器换成频道条
+          // 之后挪到这里(设计稿 3b:「券包 · 2」在铃铛左边)—— 团购券不走订单接口,
+          // 频道条上没有它,订单 tab 不能因为改版就少了这个入口
+          if (_tab == 1)
+            TextButton(
+              onPressed: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!context.mounted) return;
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => MyVouchersPage(api: widget.api)));
+              },
+              child: Text(
+                  _ticketsUsable > 0 ? '券包 · $_ticketsUsable' : '券包'),
+            ),
           // 消息中心:公告 + 订单通知,有新公告带红点
           IconButton(
             tooltip: '消息中心',
@@ -372,20 +386,6 @@ class _HomePageState extends State<HomePage> {
                   builder: (_) => MessageCenterPage(api: widget.api)));
             },
           ),
-          // 团购券原来挂在订单页分段器那一行的最右边。分段器换成频道条
-          // 之后挪到这里(设计稿 3b)—— 团购券不走订单接口,频道条上没有它,
-          // 订单 tab 不能因为改版就少了这个入口
-          if (_tab == 1)
-            TextButton(
-              onPressed: () async {
-                if (!await ensureLoggedIn(context)) return;
-                if (!context.mounted) return;
-                await Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => MyVouchersPage(api: widget.api)));
-              },
-              child: Text(
-                  _ticketsUsable > 0 ? '券包 · $_ticketsUsable' : '券包'),
-            ),
           // 「我的」tab 上换成客服 + 设置。
           //
           // 这两样一个是「随时可能要」、一个是「一年点几次的目录页」,
@@ -4140,43 +4140,62 @@ class _OrderProgress extends StatelessWidget {
 
   final Order order;
 
-  /// (节点名, 当前在第几个)。第几个 = -1 表示这个状态不画进度
-  static (List<String>, int) stepsOf(Order o) {
+  /// (节点名, 当前在第几个)。节点名是**状态**不是动作(设计稿 3b:
+  /// 「已接单 — 已取餐 — 配送中 — 送达」)。
+  ///
+  /// 第几个:null = 这个状态不画进度(待支付、完成、取消);
+  /// -1 = 画但还没开始(付了款、商家还没接),整条是灰的
+  static (List<String>, int?) stepsOf(Order o) {
     if (o.isErrand) {
       // 跑腿单付完就进抢单池(状态直接是 ready),有没有骑手接看 riderId
       return (
-        const ['接单', '取件', '送件', '送达'],
+        const ['已接单', '已取件', '送件中', '送达'],
         switch (o.status) {
-          OrderStatus.paid => 0,
-          OrderStatus.ready => o.riderId == null ? 0 : 1,
+          OrderStatus.paid => -1,
+          OrderStatus.ready => o.riderId == null ? -1 : 0,
           OrderStatus.pickedUp => 2,
           OrderStatus.delivered => 3,
-          _ => -1,
+          _ => null,
         },
       );
     }
     if (o.pickup) {
-      // 到店自取没有配送:出餐之后就等人来拿
+      // 到店自取没有配送:出餐之后就等人来拿,拿走就是完成
       return (
-        const ['接单', '出餐', '取餐'],
+        const ['已接单', '已出餐', '已取餐'],
         switch (o.status) {
-          OrderStatus.paid => 0,
-          OrderStatus.accepted => 1,
-          OrderStatus.ready => 2,
-          _ => -1,
+          OrderStatus.paid => -1,
+          OrderStatus.accepted => 0,
+          OrderStatus.ready => 1,
+          _ => null,
         },
       );
     }
+    // 商家自己送:没有「骑手取餐」这一步,中间那格是出餐
+    if (o.selfDelivery) {
+      return (
+        const ['已接单', '已出餐', '配送中', '送达'],
+        switch (o.status) {
+          OrderStatus.paid => -1,
+          OrderStatus.accepted => 0,
+          OrderStatus.ready => 1,
+          OrderStatus.pickedUp => 2,
+          OrderStatus.delivered => 3,
+          _ => null,
+        },
+      );
+    }
+    // 骑手送:骑手拿到餐就是在路上了,「已取餐」和「配送中」是同一个状态的两截 ——
+    // 取了餐那格点亮、配送中是当前格
     return (
-      const ['接单', '出餐', '取餐', '配送', '送达'],
+      const ['已接单', '已取餐', '配送中', '送达'],
       switch (o.status) {
-        OrderStatus.paid => 0,
-        OrderStatus.accepted => 1,
-        OrderStatus.ready => 2,
-        OrderStatus.pickedUp => 3,
+        OrderStatus.paid => -1,
+        OrderStatus.accepted || OrderStatus.ready => 0,
+        OrderStatus.pickedUp => 2,
         // 骑手放下了,等用户「确认收货」—— 这一步是用户自己的事
-        OrderStatus.delivered => 4,
-        _ => -1,
+        OrderStatus.delivered => 3,
+        _ => null,
       },
     );
   }
@@ -4184,10 +4203,17 @@ class _OrderProgress extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (labels, current) = stepsOf(order);
-    if (current < 0) return const SizedBox.shrink();
+    if (current == null) return const SizedBox.shrink();
     // 动效规范 04:状态往前走一格时,先把那一段线画过去(220ms standard),
-    // 再点亮当前节点(120ms spring)。轮询刷新状态没变就什么都不动
-    return SzProgressRail(labels: labels, step: current);
+    // 再点亮当前节点。轮询刷新状态没变就什么都不动。
+    // 卡片里的这条不画圆点,走进当前格的那一段是 clay(设计稿 3b)
+    return SzProgressRail(
+      labels: labels,
+      step: current,
+      dots: false,
+      fontSize: 10.5,
+      leadColor: Theme.of(context).sz.clay,
+    );
   }
 }
 
@@ -4381,25 +4407,88 @@ class _OrderListViewState extends State<OrderListView> {
         _ => theme.colorScheme.primary,
       };
 
-  /// 右上角那句:状态名,加上这个状态下用户最想知道的那一件事。
+  /// 右上角那句:状态名,加上这个状态下用户最想知道的那一件事(设计稿 3b):
+  /// 「配送中 · 约 8 分钟」「待支付 · 14:32 关闭」「已完成 · 待评价」。
   ///
   /// 跑腿单换成跑腿的说法 —— 通用状态名是按外卖起的,「待取餐」放在
   /// 一单帮送上是错的(它付完直接进抢单池,状态就是 ready)
   String _statusText(Order o) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    /// 离预计送达还有几分钟;过了点或没有 ETA 回 null(不写「约 0 分钟」)
+    String? minutesLeft() {
+      final t = o.etaAt == null ? null : DateTime.tryParse(o.etaAt!)?.toLocal();
+      if (t == null) return null;
+      final m = (t.difference(DateTime.now()).inSeconds / 60).ceil();
+      return m > 0 ? '约 $m 分钟' : null;
+    }
+
+    if (o.status == OrderStatus.pendingPayment) {
+      final d = o.payDeadline == null
+          ? null
+          : DateTime.tryParse(o.payDeadline!)?.toLocal();
+      return d == null ? '待支付' : '待支付 · ${two(d.hour)}:${two(d.minute)} 关闭';
+    }
     if (o.isErrand && o.status == OrderStatus.ready) {
       return o.riderId == null ? '等骑手接单' : '骑手去取件';
     }
-    if (o.isErrand && o.status == OrderStatus.pickedUp) return '送件中';
-    if (o.status == OrderStatus.pickedUp && o.etaAt != null) {
-      final t = DateTime.tryParse(o.etaAt!)?.toLocal();
-      if (t != null) {
-        final hm = '${t.hour.toString().padLeft(2, '0')}:'
-            '${t.minute.toString().padLeft(2, '0')}';
-        return '${o.status.label} · 预计 $hm';
-      }
+    if (o.status == OrderStatus.pickedUp) {
+      final label = o.isErrand ? '送件中' : o.status.label;
+      final left = minutesLeft();
+      return left == null ? label : '$label · $left';
     }
-    if (o.status == OrderStatus.completed && !o.hasReview) return '已完成 · 待评价';
+    if (o.status == OrderStatus.completed) {
+      return o.hasReview ? '已完成' : '已完成 · 待评价';
+    }
     return o.status.label;
+  }
+
+  /// 地址里「是哪儿」的那一截:跑腿单标题「帮我送 · 阳光花园 → 高新路」用。
+  /// 去掉省市区前缀,在第一个空格、数字、括号前截断,最多 8 个字。
+  /// 前缀只在去掉之后还剩一个地名时才去 ——「阳光社区 3 栋」的「社区」不是区
+  static String _placeShort(String addr) {
+    var s = addr.trim();
+    for (final prefix in [
+      RegExp(r'^.{1,8}?(省|自治区)'),
+      RegExp(r'^.{1,8}?(市|自治州|盟)'),
+      RegExp(r'^.{1,6}?(区|县|旗)'),
+    ]) {
+      final m = prefix.firstMatch(s);
+      if (m == null) continue;
+      final rest = s.substring(m.end);
+      if (rest.length >= 2 && !RegExp(r'^[\s\d]').hasMatch(rest)) s = rest;
+    }
+    final cut = RegExp(r'[\s\d(（,，]').firstMatch(s);
+    if (cut != null && cut.start > 0) s = s.substring(0, cut.start);
+    if (s.isEmpty) s = addr.trim();
+    final chars = s.characters;
+    return chars.length > 8 ? '${chars.take(8)}…' : s;
+  }
+
+  /// 卡片标题:外卖是店名;跑腿是「帮我送 · 取件地 → 送达地」
+  String _cardTitle(Order o) {
+    if (!o.isErrand) return o.merchantName.isEmpty ? '订单' : o.merchantName;
+    final from = o.pickupAddress.isNotEmpty ? o.pickupAddress : o.merchantAddress;
+    final kind = o.isErrandBuy ? '帮我买' : '帮我送';
+    if (from.isEmpty || o.address.isEmpty) return kind;
+    return '$kind · ${_placeShort(from)} → ${_placeShort(o.address)}';
+  }
+
+  /// 标题下那一行:外卖是菜(「牛肉面 ×1、卤蛋 ×2」);跑腿是
+  /// 「文件一份 · 3.2km · 跑腿费 ¥11.76 + 平台 2% ¥0.24」
+  String _cardLine(Order o) {
+    if (!o.isErrand) {
+      return o.items.map((i) => '${i.name} ×${i.quantity}').join('、');
+    }
+    final fee = o.deliveryFeeCents + o.tipCents;
+    return [
+      if (o.errandNote.isNotEmpty) o.errandNote,
+      if (o.billDistanceM != null) distanceLabelShort(o.billDistanceM!.toDouble()),
+      // 那 2% 是**付款时**才落定的(payment_core):没付之前服务端给的是 0,
+      // 这时候只说「含」,不拿客户端自己算一个数出来
+      o.commissionCents > 0
+          ? '跑腿费 ${yuan(fee - o.commissionCents)} + 平台 2% ${yuan(o.commissionCents)}'
+          : '跑腿费 ${yuan(fee)} · 含平台 2%',
+    ].join(' · ');
   }
 
   /// 订单时间:近的说「多久前」,远的才给日期。
@@ -4478,7 +4567,7 @@ class _OrderListViewState extends State<OrderListView> {
     final sz = theme.sz;
     final color = _statusColor(order.status, theme);
     final unread = _unread[order.orderNo] ?? 0;
-    // 按钮的样子和原来一样,只是收成一个 helper
+    // 按钮照稿子:30 高、8 圆角、12 号字;实底是 clay(去支付),其余描边
     Widget action(String label, VoidCallback onPressed, {bool filled = false}) {
       const pad = EdgeInsets.symmetric(horizontal: 12);
       final child = Text(label, style: const TextStyle(fontSize: kFontNote));
@@ -4492,7 +4581,10 @@ class _OrderListViewState extends State<OrderListView> {
                 child: child)
             : OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                    padding: pad, visualDensity: VisualDensity.compact),
+                    padding: pad,
+                    visualDensity: VisualDensity.compact,
+                    foregroundColor: sz.ink,
+                    side: BorderSide(color: sz.line)),
                 onPressed: onPressed,
                 child: child),
       );
@@ -4514,6 +4606,13 @@ class _OrderListViewState extends State<OrderListView> {
         action('再来一单', () => _reorder(order)),
     ];
 
+    // 下单时间后面跟一句这单特殊在哪:商家自己送的单没有骑手
+    final when = [
+      _timeLabel(order),
+      if (order.selfDelivery) '商家自送',
+    ].join(' · ');
+    final line = _cardLine(order);
+
     return FadeSlideIn(
       index: index,
       child: Padding(
@@ -4522,8 +4621,7 @@ class _OrderListViewState extends State<OrderListView> {
           padding: EdgeInsets.zero,
           onTap: () => _openDetail(order),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // 3px 频道条:这单属于哪个频道一眼可见。
-            // 原来进行中的单描一圈橙边,那件事现在交给下面的进度行
+            // 3px 频道条:这单属于哪个频道一眼可见
             SzChannelBar(orderChannelKey(order)),
             Padding(
               padding: const EdgeInsets.fromLTRB(kCardPad, 12, kCardPad, 12),
@@ -4533,26 +4631,14 @@ class _OrderListViewState extends State<OrderListView> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                            order.merchantName.isEmpty
-                                ? '订单'
-                                : order.merchantName,
+                        child: Text(_cardTitle(order),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w600, fontSize: 15)),
-                      ),
-                      // 有人在等你回话:红点比什么文案都管用
-                      if (unread > 0) ...[
-                        Icon(Icons.mark_chat_unread,
-                            size: 15, color: theme.colorScheme.primary),
-                        const SizedBox(width: 4),
-                        Text('$unread',
                             style: TextStyle(
-                                fontSize: kFontNote,
-                                fontWeight: FontWeight.w700,
-                                color: theme.colorScheme.primary)),
-                      ],
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                                color: sz.ink)),
+                      ),
                       const SizedBox(width: 8),
                       // 状态推进时字交叉淡入淡出 220ms(动效规范 04):
                       // 轮询刷出新状态,旧字不是「啪」地换掉
@@ -4569,29 +4655,23 @@ class _OrderListViewState extends State<OrderListView> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  // 跑腿单没有菜品,摘要是「寄什么 / 买什么」
-                  Text(order.isErrand ? order.errandNote : order.summary,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodySmall?.copyWith(height: 1.4)),
+                  if (line.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(line,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12.5, height: 1.4, color: sz.inkMuted)),
+                  ],
                   if (order.scheduledLabel != null) ...[
                     const SizedBox(height: 4),
-                    Text('⏰ ${order.scheduledLabel}',
+                    Text(order.scheduledLabel!,
                         style: TextStyle(
                             fontSize: kFontNote,
                             color: sz.hold,
                             fontWeight: FontWeight.w600)),
                   ],
-                  if (order.selfDelivery) ...[
-                    const SizedBox(height: 4),
-                    Text('🛵 商家自送',
-                        style: TextStyle(
-                            fontSize: kFontNote,
-                            color: sz.earn,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                  if (_OrderProgress.stepsOf(order).$2 >= 0) ...[
+                  if (_OrderProgress.stepsOf(order).$2 != null) ...[
                     const SizedBox(height: 10),
                     _OrderProgress(order: order),
                   ],
@@ -4599,7 +4679,7 @@ class _OrderListViewState extends State<OrderListView> {
                     const SizedBox(height: 8),
                     _splitRow(order),
                   ],
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   // 两个按钮在 320 屏 + 长辈版下和金额挤不进一行,
                   // 用 Wrap:放得下就一行,放不下按钮换到下一行,不画出界。
                   // 撑满宽度是为了 spaceBetween 生效 —— Wrap 默认只有内容那么宽
@@ -4611,20 +4691,37 @@ class _OrderListViewState extends State<OrderListView> {
                       runSpacing: 8,
                       children: [
                         Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text(yuan(order.totalCents), style: szMoney()),
+                          Text(yuan(order.totalCents),
+                              style: szMoney(fontSize: 15)),
                           const SizedBox(width: 8),
                           // 老单的时间是「9/1 18:00」这种,长辈版下金额 + 时间
                           // 自己就能超宽 —— 时间让位,金额不能被截
                           Flexible(
-                            child: Text(_timeLabel(order),
+                            child: Text(when,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                    color: theme.colorScheme.outline)),
+                                style: TextStyle(
+                                    fontSize: kFontNote, color: sz.inkMuted)),
                           ),
                         ]),
-                        if (actions.isNotEmpty)
+                        if (unread > 0 || actions.isNotEmpty)
                           Row(mainAxisSize: MainAxisSize.min, children: [
+                            // 有人在等你回话(设计稿 3b 右下角「骑手 1 条」)。
+                            // 顾客这边的会话里有商家也有骑手,未读数不分是谁发的 ——
+                            // 写「新消息」,不猜是骑手
+                            if (unread > 0)
+                              Padding(
+                                padding: EdgeInsets.only(
+                                    right: actions.isEmpty ? 0 : 10),
+                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                  Icon(Icons.chat_bubble_outline,
+                                      size: 15, color: sz.clay),
+                                  const SizedBox(width: 4),
+                                  Text('新消息 $unread 条',
+                                      style: TextStyle(
+                                          fontSize: kFontNote, color: sz.clay)),
+                                ]),
+                              ),
                             for (final (i, a) in actions.indexed) ...[
                               if (i > 0) const SizedBox(width: 8),
                               a,

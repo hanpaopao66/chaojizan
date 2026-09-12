@@ -22,16 +22,64 @@ class StayOrderCard extends StatelessWidget {
   /// 从详情页回来时调:详情里可能取消了、评价了,列表要跟着刷新
   final VoidCallback? onReturn;
 
+  /// 右上角那句(设计稿 3b):「已确认 · 9/12 入住」。
+  /// 还没住进去的单带入住日,住着的带离店日 —— 这两个日子是这张卡最该让人看见的
+  String _statusLine() {
+    String md(String iso) {
+      final d = DateTime.tryParse(iso);
+      return d == null ? iso : '${d.month}/${d.day}';
+    }
+
+    return switch (order.status) {
+      'paid' || 'confirmed' => '${order.statusLabel} · ${md(order.checkinDate)} 入住',
+      'checked_in' => '${order.statusLabel} · ${md(order.checkoutDate)} 离店',
+      _ => order.statusLabel,
+    };
+  }
+
+  /// 标题下那一行:「2 晚 · 离店才收 5% · 9/12 18:00 前可免费取消」。
+  /// 取消规则只在还能取消的时候写;离店以后再说「可免费取消」就是一句废话
+  String _stayLine() {
+    final active = const {'created', 'paid', 'confirmed'}.contains(order.status);
+    final d = DateTime.tryParse(order.checkinDate);
+    final cancel = switch (order.cancelPolicy) {
+      'limited_free' => d == null
+          ? '可免费取消'
+          : '${d.month}/${d.day} ${order.freeCancelUntil} 前可免费取消',
+      'first_night' => '取消扣首晚',
+      _ => '付款后不可退',
+    };
+    final rate = order.commissionRate;
+    final pct = rate <= 0
+        ? null
+        : ((rate * 1000).round() % 10 == 0
+            ? '${(rate * 100).round()}%'
+            : '${(rate * 100).toStringAsFixed(1)}%');
+    return [
+      '${order.nights} 晚',
+      if (order.roomsQty > 1) '${order.roomsQty} 间',
+      // 佣金只在离店那一刻产生;取消、未入住都不收(models.StayOrder 的约定)
+      if (pct != null) '离店才收 $pct',
+      if (active) cancel,
+    ].join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final sz = theme.sz;
+    // 商家确认了、住进去了、离店了都是「顺」的状态,用 earn;
+    // 待支付 / 待确认是要人等的,用 clay;没住成的一律灰
     final color = switch (order.status) {
-      'completed' => sz.earn,
-      'cancelled' || 'closed' || 'rejected' || 'noshow' =>
-        theme.colorScheme.outline,
-      _ => theme.colorScheme.primary,
+      'confirmed' || 'checked_in' || 'completed' => sz.earn,
+      'cancelled' || 'closed' || 'rejected' || 'noshow' => sz.inkMuted,
+      _ => sz.clay,
     };
+    final created = DateTime.tryParse(order.createdAt)?.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final when = created == null
+        ? ''
+        : '${created.month}/${created.day} ${two(created.hour)}:${two(created.minute)}';
     return Padding(
       padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 9),
       child: SzCard(
@@ -54,21 +102,36 @@ class StayOrderCard extends StatelessWidget {
                       child: Text('${order.hotelName} · ${order.roomTypeName}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 15)),
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                              color: sz.ink)),
                     ),
                     const SizedBox(width: 8),
-                    Text(order.statusLabel,
+                    Text(_statusLine(),
                         style: TextStyle(
                             fontSize: kFontNote,
                             fontWeight: FontWeight.w600,
                             color: color)),
                   ]),
                   const SizedBox(height: 6),
-                  Text(order.stayLabel,
-                      style: theme.textTheme.bodySmall?.copyWith(height: 1.4)),
-                  const SizedBox(height: 8),
-                  Text(yuan(order.totalCents), style: szMoney()),
+                  Text(_stayLine(),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12.5, height: 1.4, color: sz.inkMuted)),
+                  const SizedBox(height: 10),
+                  Row(children: [
+                    Text(yuan(order.totalCents), style: szMoney(fontSize: 15)),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(when,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: kFontNote, color: sz.inkMuted)),
+                    ),
+                  ]),
                 ]),
           ),
         ]),

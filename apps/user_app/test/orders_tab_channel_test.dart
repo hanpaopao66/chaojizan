@@ -98,6 +98,7 @@ void main() {
     List<Map<String, dynamic>> orders = const [],
     List<Map<String, dynamic>> stays = const [],
     Map<String, dynamic>? counts,
+    int unread = 0,
   }) =>
       ApiClient(
         baseUrl: 'http://test.local',
@@ -121,7 +122,9 @@ void main() {
             case '/orders/counts':
               payload = counts ?? <String, Object>{};
             default:
-              payload = <String, Object>{};
+              payload = req.url.path.endsWith('/unread')
+                  ? {'unread': unread}
+                  : <String, Object>{};
           }
           return http.Response(jsonEncode(payload), 200,
               headers: {'content-type': 'application/json; charset=utf-8'});
@@ -135,12 +138,14 @@ void main() {
     Size size = const Size(390, 844),
     double textScale = 1.0,
     Map<String, dynamic>? counts,
+    int unread = 0,
   }) async {
     tester.view
       ..devicePixelRatio = 3.0
       ..physicalSize = size * 3.0;
     addTearDown(tester.view.reset);
-    final api = fakeApi(orders: orders, stays: stays, counts: counts);
+    final api =
+        fakeApi(orders: orders, stays: stays, counts: counts, unread: unread);
     // 不登录的话订单页整页短路成登录引导,断言的是另一个界面
     await api.login('13800000001', '123456');
     await tester.pumpWidget(MaterialApp(
@@ -155,9 +160,11 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 频道条上的一颗。频道名在页面上是唯一的(状态 chip 里没有「点外卖」这些词);
-  /// 状态那一排的第一颗叫「全部状态」(设计稿 3b),所以「全部」只在频道条上
-  Finder pill(String label) => find.text(label);
+  /// 频道条上的一颗。状态 chip 里没有「点外卖」这些词;但跑腿单的卡片标题
+  /// 也以「帮我送」开头(设计稿 3b:「帮我送 · 阳光花园 → 高新路」)——
+  /// 频道条在列表上面,取第一个。
+  /// 状态那一排的第一颗叫「全部状态」,所以「全部」只在频道条上
+  Finder pill(String label) => find.text(label).first;
   Finder allPill() => find.text('全部');
 
   /// 频道条出没出来:它在的时候页面上有「全部」
@@ -217,6 +224,92 @@ void main() {
       expect(stripShown(), isTrue);
       expect(find.text('0'), findsNothing);
       expect(find.text('待支付'), findsOneWidget);
+    });
+  });
+
+  group('卡片上的字(设计稿 3b)', () {
+    testWidgets('待支付写几点自动关 —— 那是真会发生的事', (tester) async {
+      final deadline = DateTime(2026, 9, 1, 14, 32);
+      await pump(tester, orders: [
+        {
+          ...order('P1', status: 'pending_payment'),
+          'pay_deadline': deadline.toIso8601String(),
+        },
+      ]);
+      expect(find.text('待支付 · 14:32 关闭'), findsOneWidget);
+      expect(find.text('去支付'), findsOneWidget);
+    });
+
+    testWidgets('跑腿单:「帮我送 · 取件地 → 送达地」,费用拆成骑手和平台两截',
+        (tester) async {
+      await pump(tester, orders: [
+        {
+          ...order('E1', status: 'ready', bizType: 'errand', kind: 'errand_send'),
+          'pickup_address': '阳光花园 2 栋',
+          'address': '高新路 88 号 3 栋',
+          'errand_note': '文件一份',
+          'bill_distance_m': 3200,
+          'delivery_fee_cents': 1200,
+          'commission_cents': 24,
+        },
+      ]);
+      expect(find.text('帮我送 · 阳光花园 → 高新路'), findsOneWidget);
+      expect(find.text('文件一份 · 3.2km · 跑腿费 ¥11.76 + 平台 2% ¥0.24'),
+          findsOneWidget);
+    });
+
+    testWidgets('跑腿单还没付:2% 服务端还没落定,只说「含」,不自己算', (tester) async {
+      await pump(tester, orders: [
+        {
+          ...order('E2',
+              status: 'pending_payment', bizType: 'errand', kind: 'errand_send'),
+          'errand_note': '文件一份',
+          'delivery_fee_cents': 1200,
+          'commission_cents': 0,
+        },
+      ]);
+      expect(find.textContaining('跑腿费 ¥12.00 · 含平台 2%'), findsOneWidget);
+    });
+
+    testWidgets('配送中写还有几分钟,不写钟点', (tester) async {
+      final eta = DateTime.now().add(const Duration(minutes: 8, seconds: 20));
+      await pump(tester, orders: [
+        {
+          ...order('F2', status: 'picked_up'),
+          'eta_at': eta.toUtc().toIso8601String(),
+        },
+      ]);
+      expect(find.text('配送中 · 约 9 分钟'), findsOneWidget);
+    });
+
+    testWidgets('有未读写在右下角「新消息 N 条」(商家和骑手都可能发,不猜是谁)',
+        (tester) async {
+      await pump(tester,
+          orders: [order('F3', status: 'picked_up')], unread: 1);
+      expect(find.text('新消息 1 条'), findsOneWidget);
+      expect(find.textContaining('骑手 1 条'), findsNothing);
+    });
+
+    testWidgets('菜名写成「牛肉面 ×1」,中间有空格', (tester) async {
+      await pump(tester, orders: [order('F4')]);
+      expect(find.text('牛肉面 ×1'), findsOneWidget);
+    });
+
+    testWidgets('住宿:「已确认 · 9/20 入住」和「2 晚 · 离店才收 5% · 取消规则」',
+        (tester) async {
+      await pump(tester, orders: [order('F5')], stays: [
+        {
+          ...stay('S9', status: 'confirmed', createdAt: '2026-09-02T10:00:00Z'),
+          'status_label': '已确认',
+          'nights': 2,
+          'cancel_policy': 'limited_free',
+          'free_cancel_until': '18:00',
+          'commission_rate': 0.05,
+        },
+      ]);
+      expect(find.text('已确认 · 9/20 入住'), findsOneWidget);
+      expect(find.text('2 晚 · 离店才收 5% · 9/20 18:00 前可免费取消'),
+          findsOneWidget);
     });
   });
 
@@ -326,8 +419,10 @@ void main() {
           size: const Size(320, 640),
           textScale: 1.4);
       expect(tester.takeException(), isNull);
-      for (final n in ['接单', '出餐', '取餐', '配送', '送达']) {
-        expect(find.text(n), findsOneWidget, reason: '缺了进度节点「$n」');
+      // 节点名是状态(设计稿 3b):骑手取了餐就是在路上,「已取餐」点亮、「配送中」是当前
+      // 「配送中」右上角的状态也会写一次(没有 ETA 时就是这三个字)
+      for (final n in ['已接单', '已取餐', '配送中', '送达']) {
+        expect(find.text(n), findsWidgets, reason: '缺了进度节点「$n」');
       }
     });
   });

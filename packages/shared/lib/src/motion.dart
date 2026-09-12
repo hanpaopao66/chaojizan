@@ -684,6 +684,7 @@ class SzProgressRail extends StatefulWidget {
     required this.step,
     this.dots = true,
     this.fontSize = kFontMicro,
+    this.leadColor,
   });
 
   /// 节点名,如「已接单 / 已取餐 / 配送中 / 送达」
@@ -693,6 +694,10 @@ class SzProgressRail extends StatefulWidget {
   final int step;
   final bool dots;
   final double fontSize;
+
+  /// 走进当前格的那一段线用什么色。不给 = 和走过的一样(earn);
+  /// 用户端订单卡给 clay(设计稿 3b:「已取餐 ——(橙)—— 配送中」,正在走的那一段)
+  final Color? leadColor;
 
   @override
   State<SzProgressRail> createState() => _SzProgressRailState();
@@ -772,7 +777,10 @@ class _SzProgressRailState extends State<SzProgressRail>
                 alignment: Alignment.centerLeft,
                 child: FractionallySizedBox(
                   widthFactor: fill,
-                  child: Container(color: sz.earn),
+                  child: Container(
+                      color: i == step - 1 && widget.leadColor != null
+                          ? widget.leadColor
+                          : sz.earn),
                 ),
               ),
             ));
