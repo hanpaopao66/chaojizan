@@ -15,7 +15,7 @@ import OpenCityMapFilm from './films/OpenCityMapFilm.jsx'
  *   这个仓库里的真实文件;
  * - 稿子写「任何一次改动都要经过公开评审,生效日期提前 14 天公示」。
  *   这两件事都没有:代码里有的是**规则内容一变,系统自动记一版**
- *   (/rules/{customer|merchant|rider}/revisions,带内容哈希和逐条增删),
+ *   (/rules/{customer|merchant|rider|developer}/revisions,带内容哈希和逐条增删),
  *   派单算法另有带日期的改动记录(/transparency/dispatch 的 changelog)。
  *   接口自己的注释也写着:这里回答「改过什么、什么时候改的」,不是公示期;
  * - 稿子的时间线是示例数据,这里是接口里的真记录;只有第一版时照实说。
@@ -31,12 +31,16 @@ const PATHS = [
   { icon: 'shield', name: 'services/ledger.py · witness/', desc: '公开账本锚点 + 见证节点脚本，可本地复算', href: `${REPO}/tree/main/witness` },
   { icon: 'phone', name: 'apps/', desc: '用户端 / 商家端 / 骑手端 · Flutter', href: `${REPO}/tree/main/apps` },
   { icon: 'doc', name: 'docs/LEDGER-SPEC.md', desc: '账本格式与复算方法；其余规格也在 docs/', href: `${REPO}/blob/main/docs/LEDGER-SPEC.md` },
+  // 小程序开放平台:目录排序的纯函数在 services/miniapp_catalog.py,文档在 docs/miniapp/ —— 这一条进站内的开发者中心
+  { icon: 'repo', name: 'docs/miniapp/ · miniapps/', desc: '小程序开发者文档、官方小程序源码 → 开发者中心', href: '/developers', internal: true },
 ]
 
 const AUD = [
   { key: 'customer', label: '用户', rules: '用户规则', tag: 'info' },
   { key: 'merchant', label: '商家', rules: '商家规则', tag: 'warn' },
   { key: 'rider', label: '骑手', rules: '骑手规则', tag: 'ok' },
+  // 开发者不是交易三方之一,规则单独生成(services/miniapp_rules.py),但一样改了就记一版
+  { key: 'developer', label: '开发者', rules: '开发者规则', tag: 'clay' },
 ]
 
 /* 一条增删 → 一句话。规则条目里带 markdown 的 ** 和全角缩进,去掉 */
@@ -55,9 +59,10 @@ function useTimeline() {
   const c = useJson('/rules/customer/revisions?limit=20')
   const m = useJson('/rules/merchant/revisions?limit=20')
   const r = useJson('/rules/rider/revisions?limit=20')
+  const dev = useJson('/rules/developer/revisions?limit=20')
   const dispatch = useJson('/transparency/dispatch')
-  const byAud = { customer: c, merchant: m, rider: r }
-  const loaded = !!(c || m || r)
+  const byAud = { customer: c, merchant: m, rider: r, developer: dev }
+  const loaded = !!(c || m || r || dev)
   const entries = []
   const firsts = []
   for (const a of AUD) {
@@ -97,7 +102,7 @@ export default function OpenSourcePage() {
       <div className="sz-page">
         <div className="sz-eyebrow">开源仓</div>
         <h1 className="sz-h1 os-h1">规矩写在代码里，<br />改了就有记录。</h1>
-        <p className="sz-lede os-lede">费率、分账、排序、核账，全部在同一个仓库，AGPL-3.0 开源。三端规则的内容一变，系统就自动记一版；派单算法另有带日期的改动记录。</p>
+        <p className="sz-lede os-lede">费率、分账、排序、核账，全部在同一个仓库，AGPL-3.0 开源。三端规则和小程序开发者规则的内容一变，系统就自动记一版；派单算法另有带日期的改动记录。</p>
         <a className="os-repo" href={REPO} target="_blank" rel="noreferrer">
           <Icon name="repo" size={18} /> github.com/hanpaopao66/chaojizan
         </a>
@@ -109,7 +114,8 @@ export default function OpenSourcePage() {
             <h2 className="sz-h2">规矩在哪几个文件里</h2>
             <div className="os-paths">
               {PATHS.map((p, i) => (
-                <a key={p.name} className="sz-card os-path sz-enter" style={{ '--i': i }} href={p.href} target="_blank" rel="noreferrer">
+                <a key={p.name} className="sz-card os-path sz-enter" style={{ '--i': i }} href={p.href}
+                  {...(p.internal ? {} : { target: '_blank', rel: 'noreferrer' })}>
                   <Icon name={p.icon} size={20} color="#6B6862" />
                   <div className="tx"><div className="mono nm">{p.name}</div><div className="muted ds">{p.desc}</div></div>
                   <Icon name="arrow" size={18} color="#9A968C" />

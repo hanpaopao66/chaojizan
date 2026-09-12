@@ -25,6 +25,9 @@ const JoinMerchant = React.lazy(
   () => import('./JoinPages.jsx').then(m => ({ default: m.JoinMerchant })))
 const JoinRider = React.lazy(
   () => import('./JoinPages.jsx').then(m => ({ default: m.JoinRider })))
+// 小程序:公开目录 /miniapps、直达链接兜底页 /m/<appid>、开发者中心与文档站 /developers
+const MiniAppsPage = React.lazy(() => import('./miniapps/MiniAppsPage.jsx'))
+const DevelopersPage = React.lazy(() => import('./developers/DevelopersPage.jsx'))
 
 export default function App() {
   // 极简路由:官网只有几条路径,不值得为此引一个路由库。
@@ -47,6 +50,11 @@ export default function App() {
     const key = decodeURIComponent(path.split('/')[2] || '')
     return lazyPage(<ChannelPage channelKey={key} />)
   }
+  if (path === '/miniapps' || path === '/miniapps/') return lazyPage(<MiniAppsPage />)
+  if (path.startsWith('/m/')) {
+    return lazyPage(<MiniAppsPage appid={decodeURIComponent(path.split('/')[2] || '')} />)
+  }
+  if (path === '/developers' || path.startsWith('/developers/')) return lazyPage(<DevelopersPage />)
   if (path.startsWith('/screen')) return lazyPage(<ScreenPage />)
   if (path.startsWith('/transparency') || path.startsWith('/status')) {
     return lazyPage(<TransparencyPage />)

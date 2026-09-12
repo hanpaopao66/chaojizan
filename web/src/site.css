@@ -51,6 +51,8 @@ html.h3-root, html.h3-root body { background: #F0EEE6; }
 .h3 .note { color: var(--ink-muted); font-size: 13px; margin: 14px 0 0; }
 .h3 .note a, .h3 a.lnk, .h3 .lnk a { color: var(--link); }
 .h3 .note a:hover, .h3 a.lnk:hover { color: var(--clay); }
+/* 只给读屏看的文字(搜索框的名字这类) */
+.h3 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* 按钮:8 圆角矩形,不是胶囊;一屏一个实底。
    前缀带 .h3 是为了压过上面的 `.h3 a { color: inherit }` */
@@ -135,6 +137,7 @@ html.h3-root, html.h3-root body { background: #F0EEE6; }
 .sz-tag.info { background: rgba(43,95,122,.12); color: #2B5F7A; }
 .sz-tag.warn { background: rgba(166,118,62,.14); color: #A6763E; }
 .sz-tag.plain { background: var(--surface-alt); color: var(--ink-muted); }
+.sz-tag.clay { background: rgba(193,95,60,.12); color: #A34E2F; }
 
 /* 状态小点(核账通过 / 见证节点在线) */
 .sz-led { width: 7px; height: 7px; border-radius: 50%; background: var(--earn); display: inline-block; flex: none; }

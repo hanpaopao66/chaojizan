@@ -36,6 +36,25 @@ export function useJson(url, every) {
   return data
 }
 
+/** 复制一段文字,成功回 true。先用 Clipboard API;拿不到(老的微信内核、非安全上下文、
+ *  页面没焦点)就退回隐藏 textarea + execCommand */
+export function copyText(text) {
+  const legacy = () => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0'
+    document.body.appendChild(ta)
+    ta.select()
+    let ok = false
+    try { ok = document.execCommand('copy') } catch { ok = false }
+    ta.remove()
+    return ok
+  }
+  if (!navigator.clipboard?.writeText) return Promise.resolve(legacy())
+  return navigator.clipboard.writeText(text).then(() => true, () => legacy())
+}
+
 // ---------- 频道注册表 ----------
 
 /* 与 packages/shared/lib/src/channels.dart 对齐。颜色是设计定稿的频道色
@@ -286,7 +305,7 @@ export function SiteFooter({ note }) {
         {ver && <>线上版本 {ver}（与 <a href="https://github.com/hanpaopao66/chaojizan" target="_blank" rel="noreferrer">开源仓</a> tag 对应）</>}
       </div>
       <div className="muted">运营主体：陕西爱卡斯科技有限公司 · <a href="tel:15231109698">15231109698</a> · <a href="mailto:support@chaojizan.cc">support@chaojizan.cc</a></div>
-      <div className="muted"><a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a> · <a href="/legal/terms">用户协议</a> · <a href="/legal/privacy">隐私政策</a> · <a href="/brand">品牌物料</a></div>
+      <div className="muted"><a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a> · <a href="/legal/terms">用户协议</a> · <a href="/legal/privacy">隐私政策</a> · <a href="/brand">品牌物料</a> · <a href="/miniapps">小程序</a> · <a href="/developers">开发者</a></div>
     </footer>
   )
 }

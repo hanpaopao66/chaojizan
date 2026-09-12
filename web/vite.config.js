@@ -1,10 +1,15 @@
+import { fileURLToPath } from 'node:url'
+
 import react from '@vitejs/plugin-react'
 import autoprefixer from 'autoprefixer'
 import { defineConfig } from 'vite'
 
+import { miniappDocs } from './scripts/miniapp-docs.mjs'
+
 // 构建产物直接进 server/static/site,由 FastAPI 托管(生产机无需 node)
 export default defineConfig({
-  plugins: [react()],
+  // miniappDocs:仓库根的 docs/miniapp/*.md 构建时转成 /developers 的页面数据(virtual:miniapp-docs)
+  plugins: [react(), miniappDocs(fileURLToPath(new URL('..', import.meta.url)))],
   base: '/site/',
   css: {
     postcss: { plugins: [autoprefixer()] },
@@ -40,6 +45,10 @@ export default defineConfig({
       '/transparency/dispatch': 'http://127.0.0.1:8010',
       '/transparency/governance': 'http://127.0.0.1:8010',
       '/transparency/liability': 'http://127.0.0.1:8010',
+      // 小程序:公开目录、详情(/mini-apps/catalog、/mini-apps/<appid>)、透明中心那一栏、托管的图标截图
+      '/mini-apps': 'http://127.0.0.1:8010',
+      '/transparency/miniapps': 'http://127.0.0.1:8010',
+      '/img': 'http://127.0.0.1:8010',
     },
   },
 })

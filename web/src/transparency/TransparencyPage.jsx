@@ -304,7 +304,7 @@ function EpochNotice() {
 const TOC = [
   ['audit', '核账日历'], ['funds', '钱去哪了'], ['fairness', '分账公平'], ['rider', '骑手收入'],
   ['compensation', '赔付记录'], ['reviews', '评价'], ['reports', '月度财报'], ['dispatch', '派单算法'],
-  ['liability', '判责分摊'], ['governance', '治理公开'], ['support', '客服'], ['status', '系统状态'],
+  ['liability', '判责分摊'], ['governance', '治理公开'], ['miniapps', '小程序'], ['support', '客服'], ['status', '系统状态'],
   ['changelog', '最近更新'],
 ]
 
@@ -331,6 +331,7 @@ export default function TransparencyPage() {
   const gov = useJson('/transparency/governance')
   const dispatch = useJson('/transparency/dispatch')
   const liability = useJson('/transparency/liability')
+  const mini = useJson('/transparency/miniapps')
   // /status 直达系统状态区。上面各栏的数据是陆续到的,每到一份页面就变长一截,
   // 只在 uptime 到的那一刻滚一次的话,后到的栏目会把状态区往下顶。所以每到一份
   // 就重新对齐一次 —— 直到用户自己动了滚轮 / 手指 / 键盘为止
@@ -347,7 +348,7 @@ export default function TransparencyPage() {
       if (!userMoved.current) document.getElementById('status')?.scrollIntoView({ behavior: 'auto' })
     }, 60)
     return () => clearTimeout(t)
-  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability])
+  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, mini])
 
   const latest = audit?.latest
   const per = fair?.per100
@@ -739,6 +740,83 @@ export default function TransparencyPage() {
               </div>
             </div>
           ) : <p className="tp-note">处置留痕自上线起记录，暂无记录。</p>}
+        </Sec>
+
+        <Sec id="miniapps" eyebrow="小程序">
+          <h2>小程序怎么审、下架了谁，都公示</h2>
+          <p className="tp-lede">
+            小程序由第三方开发者提交，平台审核、托管。目录不卖位置：精选在前（人工挑选，理由写在下面），其余按首次上架时间从新到旧——排序是一段公开的纯函数（<a href="https://github.com/hanpaopao66/chaojizan/blob/main/server/app/services/miniapp_catalog.py">services/miniapp_catalog.py</a>），打开次数、评分、付费都不进这个函数。审核不承诺时限，时长的中位数照实写在这里。平台规则见<a href="/developers/rules">开发者规则</a>，全部小程序见<a href="/miniapps">公开目录</a>。
+          </p>
+          <div className="tp-cards four">
+            <div className="tp-card">
+              <div className="num v">{mini?.verified_developers ?? '–'}</div>
+              <div className="k">已认证开发者（个人实名或企业认证）</div>
+            </div>
+            <div className="tp-card">
+              <div className="num v">{mini ? mini.online_apps.app + mini.online_apps.game : '–'}</div>
+              <div className="k">在线{mini ? `：${mini.online_apps.app} 个应用、${mini.online_apps.game} 个小游戏` : ''}</div>
+            </div>
+            <div className="tp-card">
+              <div className="num v">{mini?.month.submitted ?? '–'}</div>
+              <div className="k">{mini ? `${mini.month.label} 提交审核，通过 ${mini.month.approved}、驳回 ${mini.month.rejected}` : '本月提交审核'}</div>
+              {mini && <div className="m">此刻审核中 {mini.reviewing_now} 个版本</div>}
+            </div>
+            <div className="tp-card">
+              <div className="num v">{mini?.month.median_review_hours ?? '–'}<small> 小时</small></div>
+              <div className="k">{mini && mini.month.median_review_hours == null ? '本月还没有审核结论' : '本月审核时长中位数（提交到结论）'}</div>
+            </div>
+          </div>
+          {mini && Object.keys(mini.month.reject_by_category || {}).length > 0 && (
+            <p className="tp-note">本月驳回按原因类别：{Object.entries(mini.month.reject_by_category).map(([k, n]) => `${k} ${n} 个`).join('、')}。原因代码逐条解释见<a href="/developers/review#原因代码">审核规范</a>。</p>
+          )}
+
+          <h3 className="tp-sub">下架记录</h3>
+          <p className="tp-lede">平台作出的暂停、移除、紧急隔离逐条列出（开发者自己下架不算处罚，不列）。每条都有原因代码；开发者 7 天内可以申诉一次，由另一名审核员复核。</p>
+          {(mini?.takedowns?.length ?? 0) > 0 ? (
+            <div className="sz-table-wrap">
+              <div className="sz-table-scroll">
+                <table className="sz-table tp-wide">
+                  <thead><tr><th>日期</th><th>应用</th><th>处置</th><th>原因</th><th>申诉</th></tr></thead>
+                  <tbody>
+                    {mini.takedowns.slice(0, 30).map((t, i) => (
+                      <tr key={i}>
+                        <td className="num nowrap">{t.date}</td>
+                        <td>{t.app_name}</td>
+                        <td className="nowrap">{t.action}</td>
+                        <td>{t.reason_category}<span className="tp-reason">{t.reason_code}{t.reason_label ? ` ${t.reason_label}` : ''}</span></td>
+                        <td className="nowrap">{t.appealed ? `已申诉 · ${t.appeal_result ?? '处理中'}` : '未申诉'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : <p className="tp-note">{mini ? '还没有下架记录。' : '读取中…'}</p>}
+
+          <h3 className="tp-sub">精选名单</h3>
+          <p className="tp-lede">精选是人工挑的，位置有限，排在目录最前面。每次进出都写理由，记在下面。</p>
+          {(mini?.curation?.length ?? 0) > 0 ? (
+            <div className="tp-log">
+              {mini.curation.map(c => (
+                <div className="row" key={c.appid}>
+                  <span className="sz-tag warn">第 {c.position} 位</span>
+                  <span className="msg"><a className="lnk" href={`/m/${c.appid}`}>{c.name}</a>{c.reason && <span className="tp-reason">（理由：{c.reason}）</span>}</span>
+                </div>
+              ))}
+            </div>
+          ) : <p className="tp-note">{mini ? '目前没有精选。' : '读取中…'}</p>}
+          {(mini?.curation_changes?.length ?? 0) > 0 && (
+            <div className="tp-log">
+              {mini.curation_changes.slice(0, 12).map((c, i) => (
+                <div className="row" key={i}>
+                  <span className={`sz-tag ${c.action === '进入精选' ? 'ok' : 'plain'}`}>{c.action}</span>
+                  <span className="msg">{c.app_name}{c.reason && <span className="tp-reason">（理由：{c.reason}）</span>}</span>
+                  <span className="num date">{c.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {mini?.not_public && <p className="tp-note">不公开：{mini.not_public.join('、')}。</p>}
         </Sec>
 
         <Sec id="support" eyebrow="客服">
