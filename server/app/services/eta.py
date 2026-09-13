@@ -172,10 +172,14 @@ def _estimate_remaining_minutes(order, merchant, rider_pos, now) -> int:
 
 async def recompute_eta(db: AsyncSession, order: Order, merchant: Merchant,
                         rider_pos=None, delay: bool = False) -> bool:
-    """动态重估 eta_at。仅在偏差 >5 分钟时写库并推送(克制)。
+    """动态重估 eta_at。**只往后挪、不往前收**,而且延后满 5 分钟才写库并推送(克制)。
 
-    自取/追加/预约单不刷新(它们没有动态承诺)。延后才主动推,提前送到是惊喜
-    不特意打扰。刷新后的 eta_at 直接成为超时赔付的新基准(compensate 读 eta_at)。
+    为什么不往前收:透明中心公开承诺「预计送达时间只会因路况、天气变宽,不会因为你跑得快而变紧」。
+    刷新后的 eta_at 直接成为超时赔付的新基准(compensate 读 eta_at),重估出来更早的话
+    (骑手接单快、出餐快)照旧用原来的时限 —— 提前送到是惊喜,不是新的考核线。
+    以前偏差满 5 分钟就双向改写,和那条承诺对不上。
+
+    自取/追加/预约单不刷新(它们没有动态承诺)。
     调用方负责 commit;本函数只改 order.eta_at + 内联推送(非资金关键)。
     """
     from ..state_machine import OrderStatus
@@ -189,21 +193,18 @@ async def recompute_eta(db: AsyncSession, order: Order, merchant: Merchant,
     new_eta = now + timedelta(minutes=remaining)
     old_eta = order.eta_at if order.eta_at.tzinfo else \
         order.eta_at.replace(tzinfo=timezone.utc)
-    if abs((new_eta - old_eta).total_seconds()) < \
-            ETA_REFRESH_THRESHOLD_MIN * 60:
+    if (new_eta - old_eta).total_seconds() < ETA_REFRESH_THRESHOLD_MIN * 60:
         return False
-    later = new_eta > old_eta
     order.eta_at = new_eta
-    if later or delay:
-        hhmm = (new_eta + timedelta(hours=8)).strftime("%H:%M")
-        msg = (f"商家出餐较慢,预计送达延后到 {hhmm}" if delay
-               else f"预计送达时间已更新为 {hhmm}")
-        try:
-            from .push import push_to_user
-            await push_to_user(order.customer_id, "预计送达时间更新", msg,
-                               {"type": "order", "order_no": order.order_no})
-        except Exception:
-            logger.exception("ETA 刷新推送失败")
+    hhmm = (new_eta + timedelta(hours=8)).strftime("%H:%M")
+    msg = (f"商家出餐较慢,预计送达延后到 {hhmm}" if delay
+           else f"预计送达时间已更新为 {hhmm}")
+    try:
+        from .push import push_to_user
+        await push_to_user(order.customer_id, "预计送达时间更新", msg,
+                           {"type": "order", "order_no": order.order_no})
+    except Exception:
+        logger.exception("ETA 刷新推送失败")
     return True
 
 

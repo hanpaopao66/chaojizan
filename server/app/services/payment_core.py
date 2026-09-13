@@ -39,7 +39,10 @@ async def mark_order_paid(
     # 用带路线级余量的版本(#268):市区多红灯的路线拿到更宽的时限。
     # 路径服务不可用时它自动退回常量口径,不会拦住支付
     from .eta import compute_eta_async
-    order.eta_at = await compute_eta_async(order, merchant)
+    # 这一单收了恶劣天气加价,时限就按恶劣天气放宽 —— 透明中心公开承诺
+    # 「恶劣天气加价的同时一定放宽时限,只加价不放宽等于用钱买你冒险」。以前这里从没传过
+    order.eta_at = await compute_eta_async(
+        order, merchant, severe_weather=bool((order.fee_parts or {}).get("weather")))
     # 结算口径快照:商家分账就绪(特约商户号+接收方)才走 profit_sharing
     from .profit_sharing import settle_mode_for
     order.settle_mode = settle_mode_for(merchant)

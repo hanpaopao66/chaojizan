@@ -1997,9 +1997,10 @@ async def preview_delivery_fee(
     # 和 create_order 一样把 naive 当 UTC,别让 is_night 拿系统时区去猜
     if scheduled_at is not None and scheduled_at.tzinfo is None:
         scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+    weather_on = await weather_surcharge_on(db, merchant.lat, merchant.lng)
     parts = delivery_fee_parts(
         distance,
-        weather_on=await weather_surcharge_on(db, merchant.lat, merchant.lng),
+        weather_on=weather_on,
         when=scheduled_at,
         floor=floor, has_elevator=has_elevator, to_door=to_door,
         hardship_cents=_hard)
@@ -2030,7 +2031,8 @@ async def preview_delivery_fee(
         probe = SimpleNamespace(
             pickup=False, parent_order_no="", scheduled_at=None,
             lat=lat, lng=lng, floor=floor, has_elevator=has_elevator)
-        eta_at = await compute_eta_async(probe, merchant)
+        eta_at = await compute_eta_async(probe, merchant,
+                                         severe_weather=bool(parts.get("weather")))
         if eta_at is not None:
             eta_minutes = max(1, round(
                 (eta_at - datetime.now(timezone.utc)).total_seconds() / 60))

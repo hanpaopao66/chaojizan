@@ -1,4 +1,9 @@
-"""ETA 动态刷新(清单#59):骑手接单/取餐按位置重估、出餐超时顺延、克制(<5分钟不刷)。"""
+"""ETA 动态刷新(清单#59):骑手接单/取餐按位置重估、出餐超时顺延、克制(<5分钟不刷)。
+
+**只往后放宽,不往前收紧。** 透明中心公开承诺「预计送达时间只会因路况、天气变宽,
+不会因为你跑得快而变紧」,而刷新后的 eta_at 是超时赔付的新基准 —— 所以骑手接单快、
+离得近时照旧用原来的时限(以前这里会把 +90 分钟收紧到二十来分钟,和那条承诺对不上)。
+"""
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
@@ -65,26 +70,27 @@ def sweep():
 
 now = datetime.now(timezone.utc)
 
-# ---- 骑手接单按位置重估:eta 强设很远,骑手在店附近接单 → eta 变近 ----
+# ---- 骑手接单按位置重估:只放宽不收紧 —— eta 设得很远,骑手在店附近接单,照旧用原来的时限 ----
 no = new_order()
 call("POST", f"/orders/{no}/transition", merchant, {"to_status": "accepted"})
 call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
-db_set(no, eta_at=now + timedelta(minutes=90))  # 人为设一个离谱的远 ETA
+far = now + timedelta(minutes=90)
+db_set(no, eta_at=far)
 call("POST", "/riders/location", rider, {"lat": 30.6598, "lng": 104.0810})  # 店附近
 call("POST", f"/riders/grab/{no}", rider)
 eta_after_grab = get_eta(no)
-assert eta_after_grab < now + timedelta(minutes=60), \
-    f"接单后应按骑手位置重估到更近,实际 {eta_after_grab}"
-print(f"✓ 骑手接单按位置重估:ETA 从 +90min 收紧到 {eta_after_grab.astimezone():%H:%M}")
+assert abs((eta_after_grab - far).total_seconds()) < 2, \
+    f"骑手接单快、离得近,时限不许往前收:从 {far} 变成了 {eta_after_grab}"
+print("✓ 骑手接单按位置重估:离得近也不收紧(公开承诺:不会因为你跑得快而变紧)")
 
-# ---- 取餐节点重估:骑手到收货点附近取餐 → eta 进一步收紧 ----
-db_set(no, eta_at=now + timedelta(minutes=90))  # 再设远,验证取餐会重估
-call("POST", "/riders/location", rider, {"lat": DROP[0] + 0.002, "lng": DROP[1]})
+# ---- 取餐节点重估:原来的时限已经来不及了 → 往后放宽 ----
+db_set(no, eta_at=now + timedelta(minutes=1))  # 设成一分钟后,骑手还在 3 公里外
+call("POST", "/riders/location", rider, {"lat": DROP[0] + 0.03, "lng": DROP[1]})
 call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
 eta_after_pickup = get_eta(no)
-assert eta_after_pickup < now + timedelta(minutes=30), \
-    f"取餐后骑手已近收货点,ETA 应很近,实际 {eta_after_pickup}"
-print(f"✓ 取餐节点按位置重估:ETA 收紧到 {eta_after_pickup.astimezone():%H:%M}")
+assert eta_after_pickup > now + timedelta(minutes=5), \
+    f"取餐时离收货点还远,ETA 应往后放宽,实际 {eta_after_pickup}"
+print(f"✓ 取餐节点按位置重估:来不及就往后放宽到 {eta_after_pickup.astimezone():%H:%M}")
 
 # ---- 克制:偏差<5分钟不刷新 ----
 no2 = new_order()
