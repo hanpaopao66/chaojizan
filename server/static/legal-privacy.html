@@ -51,7 +51,7 @@
 <h2>二、第三方 SDK 与第三方服务信息公示</h2>
 <p>为实现推送、支付、地图等功能,我们接入了以下第三方 SDK 与服务。我们只在实现功能所必需的范围内向其提供信息,并要求其依法保护你的信息。</p>
 
-<h3>(一)App 内嵌第三方 SDK(三端通用,都在你同意本政策之后才初始化)</h3>
+<h3>(一)App 内嵌第三方 SDK(极光推送、腾讯地图 SDK 三端都有,都在你同意本政策之后才初始化;Google ML Kit 只在商家端 Android 版里)</h3>
 <div class="tablewrap">
 <table>
   <tr><th>SDK 名称</th><th>第三方主体</th><th>涉及个人信息</th><th>使用目的与场景</th><th>隐私政策</th></tr>
@@ -68,6 +68,13 @@
     <td>网络类型、设备型号、屏幕密度与尺寸、操作系统及版本、IP 地址;Android 另有 OAID;iOS 另有 IDFV、位置信息(可选)</td>
     <td>在 App 内显示地图:订单页的骑手位置与配送路线、在地图上选收货地址和聊天里要发送的位置</td>
     <td><a href="https://privacy.qq.com/document/preview/a10a8634f237464da9a95f4f07e73e40" target="_blank" rel="noreferrer">查看</a></td>
+  </tr>
+  <tr>
+    <td>Google ML Kit 条码扫描(仅商家端 Android 版;iOS 版扫码用系统自带的 Vision 框架,不含此 SDK)</td>
+    <td>Google LLC</td>
+    <td>设备信息(厂商、型号、系统版本、可用的机器学习硬件加速器)、应用信息(包名与版本)、不用于识别具体用户或设备的安装标识、识别耗时等性能指标、图像格式与分辨率等接口配置、事件类型与错误码。相机画面只在手机上识别,画面和识别结果都不发给 Google</td>
+    <td>商家扫码核销团购券时识别券码;上述信息由 Google 用于这项功能的诊断和使用统计</td>
+    <td><a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">查看</a></td>
   </tr>
 </table>
 </div>

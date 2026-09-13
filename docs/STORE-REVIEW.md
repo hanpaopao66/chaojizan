@@ -95,8 +95,10 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArnOaFr2IxaDGX9eyukdO/oOQeLec3mCmrj0Q
 | 蓝牙(商家端) | 连接小票打印机时 | 打印订单小票 |
 
 - 所有权限均"先应用内说明目的、用户同意后再调系统弹窗",拒绝不影响其他功能;
-- 内嵌的第三方 SDK 两个:极光推送(JPush)、腾讯地图 SDK(2026-07-31 起地图改用腾讯官方 Flutter SDK),
-  都在同意隐私政策后才初始化,已在隐私政策第二节公示(含主体/信息/目的/链接;2026-09-13 起补上腾讯地图 SDK);
+- 内嵌的第三方 SDK:三端都有的两个 —— 极光推送(JPush)、腾讯地图 SDK(2026-07-31 起地图改用腾讯官方 Flutter SDK),
+  都在同意隐私政策后才初始化;商家端 Android 版还有扫码核销用的 Google ML Kit 条码扫描(mobile_scanner 默认打包的
+  `com.google.mlkit:barcode-scanning`,识别在手机上做,但会把机型、版本、安装标识等使用统计发给 Google;iOS 版扫码用系统 Vision,不含)。
+  三个都已在隐私政策第二节公示(含主体/信息/目的/链接;2026-09-13 起补上腾讯地图 SDK 和 ML Kit);
 - 微信支付为服务端接口方式,App 未内嵌支付 SDK;审核期间支付走模拟支付,
   不产生真实扣款;
 - 无广告、无诱导分享、无自动续费。
