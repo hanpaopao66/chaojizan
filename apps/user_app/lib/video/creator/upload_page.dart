@@ -25,7 +25,7 @@ const _fallbackZones = <(String, String)>[
 /// 投稿 / 编辑稿件(#358)。[vid] 为空 = 新投稿;有 = 编辑已有的稿件。
 ///
 /// 新投稿的顺序是「先选视频、马上建草稿、边传边填」:
-/// - 选完视频就建草稿 —— 没实名(D11)、今天投满了、投稿没开放,在传 1GB 之前就知道;
+/// - 没实名(D11)在打开相册之前就说;选完视频就建草稿 —— 今天投满了、投稿没开放,在传 1GB 之前就知道;
 /// - 原片交给全局的上传任务([VideoUploads]),离开这一页也接着传,传完自动挂到这个草稿上;
 /// - 表单按差量保存(只送改了的字段),已发布的稿件改内容进待审,线上一个字不动。
 class VideoUploadPage extends StatefulWidget {
@@ -217,9 +217,19 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
     }
   }
 
-  /// 新投稿:选视频 → 建草稿 → 开始传。
+  /// 新投稿:看实名 → 选视频 → 建草稿 → 开始传。
   Future<void> _pickFirst() async {
     if (!await ensureLoggedIn(context)) return;
+    // 没实名先说,别让人从相册里挑完一个视频才被拦下。判据和服务端建稿时一样(有没有实名记录);
+    // 查不到状态就放过去,由建稿那一步兜底
+    try {
+      final st = await rootApi.identityStatus();
+      if (st['verified'] == false) {
+        if (mounted) await _needRealname('发视频要先完成实名认证(我的 → 设置 → 实名认证)');
+        return;
+      }
+    } catch (_) {}
+    if (!mounted) return;
     final x = await _pickVideo();
     if (x == null) return;
     final size = await x.length();
@@ -236,11 +246,13 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
       if (!mounted) return;
       _vid = v.vid;
       _adopt(v, reset: true);
-      // 预填标题:文件名去掉扩展名(和 B 站一样);算作一处改动,离开时会问要不要存
-      if (_form.title.isEmpty) {
+      // 预填标题:文件名去掉扩展名(和 B 站一样);算作一处改动,离开时会问要不要存。
+      // 相册给的是机器编的名字(安卓照片选择器是个编号)就不预填
+      final guess = titleFromFileName(x.name);
+      if (_form.title.isEmpty && guess.isNotEmpty) {
         setState(() {
-          _form.title = titleFromFileName(x.name);
-          _title.text = _form.title;
+          _form.title = guess;
+          _title.text = guess;
         });
       }
     } catch (e) {

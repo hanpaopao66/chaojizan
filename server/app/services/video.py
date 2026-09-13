@@ -61,6 +61,17 @@ REASON_CODES: dict[str, str] = {
 
 TITLE_MAX = 80
 DESC_MAX = 2000
+
+#: 手机相册选择器给的常常不是原文件名:安卓照片选择器给媒体库编号(「24.mp4」)、老版本 image_picker
+#: 给一串 UUID。这种当分 P 名没有意义 —— 退回「P1」。客户端预填稿件标题用同一个判据(upload_form.dart)
+_MACHINE_NAME = re.compile(
+    r"^(\d+|image_picker[\w-]*|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", re.I)
+
+
+def title_from_file_name(name: str | None) -> str:
+    """文件名去掉扩展名当默认的分 P 名;机器生成的名字(见上)给空串。"""
+    stem = " ".join((name or "").rsplit(".", 1)[0].split())
+    return "" if _MACHINE_NAME.match(stem) else stem[:TITLE_MAX]
 TAGS_MAX = 10
 TAG_MAX = 20
 #: 单个视频最多 10 P(D8)
@@ -761,8 +772,7 @@ async def add_part(db: AsyncSession, user: User, v: Video, media_id: int, title:
     parts = await parts_of(db, v)
     if len(version_parts(v, parts)) >= PARTS_MAX:
         raise HTTPException(422, f"一个视频最多 {PARTS_MAX} P")
-    title = " ".join((title or "").split())[:TITLE_MAX] or \
-        (mf.name.rsplit(".", 1)[0][:TITLE_MAX] if mf.name else "")
+    title = " ".join((title or "").split())[:TITLE_MAX] or title_from_file_name(mf.name)
     p = VideoPart(video_id=v.id, idx=(max((x.idx for x in parts), default=-1) + 1),
                   title=title or f"P{len(parts) + 1}", source_media_id=mf.id,
                   status="processing", error="", renditions=[], cover_media_ids=[], live=False,

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
-/// 实名认证页:按需触发(购买酒类等受限品类时要求),不是注册门槛。
+/// 实名认证页:按需触发(买酒类等受限商品、投稿视频、把群或频道设成公开时要求),不是注册门槛。
 /// 证号加密落库、明文不出接口;这里只展示 verified 与打码姓名。
 class IdentityPage extends StatefulWidget {
   const IdentityPage({super.key, required this.api});
@@ -85,8 +85,8 @@ class _IdentityPageState extends State<IdentityPage> {
                                   style: theme.textTheme.bodyMedium),
                               const SizedBox(height: 12),
                               Text(
-                                '实名信息用于酒类等受限商品的年龄核验。'
-                                '身份证号已加密存储,不会展示、不会提供给商家或骑手;'
+                                '实名信息用于酒类等受限商品的年龄核验,以及投稿视频、公开群组的实名要求。'
+                                '身份证号已加密存储,不会展示、不会提供给商家、骑手或其他用户;'
                                 '注销账号时实名数据一并删除。',
                                 textAlign: TextAlign.center,
                                 style: theme.textTheme.bodySmall?.copyWith(
@@ -104,9 +104,10 @@ class _IdentityPageState extends State<IdentityPage> {
                               ?.copyWith(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 6),
                       Text(
-                        '依法向未成年人禁售酒类。购买酒类等受限商品前,'
-                        '需完成一次实名认证核验年龄——只做一次,全程有效。\n'
-                        '身份证号加密存储、明文不出接口,不会提供给商家或骑手;'
+                        '这几件事要先实名:买酒类等受限商品(依法向未成年人禁售,要核验年龄)、'
+                        '投稿视频、把群或频道设成公开。聊天、评论、弹幕不用实名。'
+                        '只做一次,全程有效。\n'
+                        '身份证号加密存储、明文不出接口,不会提供给商家、骑手或其他用户;'
                         '注销账号时实名数据一并删除。',
                         style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.outline, height: 1.6),

@@ -270,6 +270,10 @@ void main() {
     test('文件名当默认标题:去扩展名、下划线当空格、超长截到 80', () {
       expect(titleFromFileName('my_trip.final.mp4'), 'my trip.final');
       expect(titleFromFileName('VID20260912'), 'VID20260912');
+      // 安卓照片选择器给的是媒体库编号、老版本 image_picker 是 UUID:不预填
+      for (final machine in ['24.mp4', '1000000024', 'image_picker_5F3A9C.mp4', '3F2504E0-4F89-11D3-9A0C-0305E82C3301.mp4']) {
+        expect(titleFromFileName(machine), '', reason: machine);
+      }
       expect(titleFromFileName('${'长' * 100}.mov').runes.length, 80);
     });
   });

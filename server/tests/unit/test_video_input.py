@@ -147,3 +147,17 @@ def test_reason_codes_match_the_doc():
         vsvc.reason_ok("Z000", "说明写得很清楚")
     vsvc.reason_ok("X999", "写清楚了原因")
     vsvc.reason_ok("V202", "")
+
+
+def test_default_part_title_skips_machine_names():
+    """安卓照片选择器给的文件名是媒体库编号(「24.mp4」),老版本 image_picker 是 UUID:不能当分 P 名。"""
+    t = vsvc.title_from_file_name
+    assert t("我的旅行 vlog.mp4") == "我的旅行 vlog"
+    assert t("my trip.final.mov") == "my trip.final", "只去最后一个扩展名"
+    assert t("VID20260912.mp4") == "VID20260912", "相机起的名字带字母,留着"
+    assert t("  两头  空白 .mp4") == "两头 空白"
+    assert t("长" * 100 + ".mp4") == "长" * vsvc.TITLE_MAX
+    for machine in ("24.mp4", "1000000024", "image_picker_5F3A9C.mp4", "image_picker-ab12.mov",
+                    "3F2504E0-4F89-11D3-9A0C-0305E82C3301.mp4"):
+        assert t(machine) == "", machine
+    assert t("") == "" and t(None) == ""

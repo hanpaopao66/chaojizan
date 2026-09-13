@@ -364,9 +364,16 @@ UploadForm rebaseForm(UploadForm oldBase, UploadForm cur, UploadForm fresh) {
   );
 }
 
+/// 手机相册选择器给的常常不是原文件名:安卓照片选择器给媒体库编号(「24.mp4」)、老版本 image_picker 给一串 UUID。
+/// 和服务端给分 P 起默认名的判据一样(services/video.py 的 `_MACHINE_NAME`)
+final _machineName = RegExp(r'^(\d+|image_picker[\w-]*|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$',
+    caseSensitive: false);
+
 /// 文件名去掉扩展名,当第一 P 的默认标题 / 稿件的默认标题(B 站也是这么预填的)。
+/// 机器生成的名字(见上)给空串:预填一个「24」还不如空着让人自己填
 String titleFromFileName(String name) {
   final base = name.contains('.') ? name.substring(0, name.lastIndexOf('.')) : name;
+  if (_machineName.hasMatch(base.trim())) return '';
   final t = normalizeTitle(base.replaceAll('_', ' '));
   final runes = t.runes.toList();
   return runes.length > kTitleMax ? String.fromCharCodes(runes.take(kTitleMax)) : t;
