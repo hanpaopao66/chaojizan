@@ -17,7 +17,9 @@ import { Caption, Ease, Film, MONO, P, SERIF, clamp, tween, useFilm, useWidth } 
  *   (flutter_tencent_map → tencent-map-vector-sdk / Tencent-MapSDK)。原稿照的是
  *   STORE-REVIEW 第四节,那一节写在换地图之前。改成右栏一条「第三方 SDK:极光推送、腾讯地图」,
  *   两个都等同意隐私政策之后才启动(三端 PrivacyGate.onAgreed 里才 init);左栏换成
- *   「没有第三方统计和广告」(埋点自建,analytics.dart);
+ *   「没有第三方统计 SDK 和广告」(埋点自建,analytics.dart)。后来又查出商家端安卓扫码核销的
+ *   mobile_scanner 默认打包 Google ML Kit:识别在手机上做,但按 ML Kit 条款会把机型、版本、
+ *   安装标识这类使用统计发给 Google,所以右栏那条写成三个,出处指隐私政策的 SDK 表;
  * - 「没有诱导分享」删:有「邀请好友完成首单,你俩各得券」,算不算诱导分享不由我们说;
  * - 「相册 / 相机 / 通知 / 蓝牙 …… 每一个都先用中文说清楚再调系统弹窗」:消息模块加了麦克风、
  *   相机,这两个是直接调系统授权的;通知的申请时机也没法一概说成「用到时」。改成
@@ -50,7 +52,7 @@ const REPO = 'https://github.com/hanpaopao66/chaojizan/blob/main/'
 const NONE = [
   ['不上传你的通讯录', '三端都不申请通讯录权限。找人只做完整手机号精确匹配，这一条还能在隐私设置里关掉', 'DEV-PROMPTS-40 · D2', 'docs/DEV-PROMPTS-40.md'],
   ['小程序拿不到你的手机号、定位、通讯录', '定位、扫码、剪贴板、手机号不在可申请清单里 —— 宿主和 SDK 里根本没有这几个方法。安全审计里「定位能直接申请」就算红', 'MINIAPP-SECURITY-AUDIT · I7', 'docs/MINIAPP-SECURITY-AUDIT.md'],
-  ['没有第三方统计和广告', '埋点是自建的，只在登录后记页面浏览、搜索和分享，不采集设备指纹。没有开屏广告、摇一摇跳转，也没有自动续费', 'analytics.dart', 'packages/shared/lib/src/analytics.dart'],
+  ['没有第三方统计 SDK 和广告', '埋点是自建的，只在登录后记页面浏览、搜索和分享，不采集设备指纹。没有开屏广告、摇一摇跳转，也没有自动续费', 'analytics.dart', 'packages/shared/lib/src/analytics.dart'],
   ['骑手热力图不上传骑手位置', '请求里只有星期几、几点、看几周，没有你的坐标 —— 它只看这座城过去几周哪儿出单', 'riders.py · /heatmap', 'server/app/routers/riders.py'],
   ['见证节点不收集、不上传关于你的任何信息', '上报的是随机节点 ID、校验到哪天、链哈希和结论，跟位置沾边的只有一个时区，没有坐标。也因为这句话，连 IP 定位兜底都没做', 'witness/README', 'witness/README.md'],
 ]
@@ -59,7 +61,7 @@ const YES = [
   ['骑手端：后台定位，有', '上线接单期间一直在定位，锁屏也定位：大厅按离你多远排单，配送中的轨迹要给顾客看。安卓是前台服务 + 一条常驻通知「超级赞接单中」，iOS 是屏幕顶上那条蓝条 —— 你随时看得见它在跑；下线就停', 'location_service.dart', 'apps/rider_app/lib/location_service.dart'],
   ['用户端：位置', '看附近商家、选收货地址、在聊天里发位置时才要；只在前台用，不申请后台定位。拒绝了就展示演示区域，App 照样能用', 'AndroidManifest.xml', 'apps/user_app/android/app/src/main/AndroidManifest.xml'],
   ['相机 / 麦克风 / 蓝牙', '用到时才申请：聊天里拍照、按住说话；商家端扫券核销、骑手端拍送达凭证；商家端连小票打印机。选图片走系统的选择器，只拿你选中的那几张', 'AndroidManifest.xml', 'apps/user_app/android/app/src/main/AndroidManifest.xml'],
-  ['第三方 SDK：极光推送、腾讯地图', '推送要读设备标识（Registration ID、机型、系统版本），地图加载时会连腾讯的服务器；两个都等你同意隐私政策之后才启动', 'map_boot.dart', 'packages/shared/lib/src/map_boot.dart'],
+  ['第三方 SDK：极光推送、腾讯地图、Google ML Kit', '推送读设备标识（Registration ID、机型、系统版本），地图 SDK 收机型、系统版本、网络类型和 IP，这两个都等你同意隐私政策之后才启动。商家端安卓版扫码核销用 ML Kit：画面只在手机上识别，机型、版本这类使用统计会发给 Google', 'legal.dart · SDK 公示表', 'packages/shared/lib/src/legal.dart'],
   ['不登录也能逛', '不登录能看完整内容，只有下单、聊天这类动作才引导登录', 'STORE-REVIEW · 五 #2', 'docs/STORE-REVIEW.md'],
 ]
 
