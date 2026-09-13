@@ -6,7 +6,9 @@
 所有函数只改库、登记事件和提交后的任务,**不提交**;提交由调用方(路由)做 ——
 这样一个请求里的多步操作要么全成、要么全不成,事件也跟着同进同退。
 """
+import hashlib
 import random
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -26,6 +28,7 @@ from .chat_view import (GROUP_READ_RECEIPTS_MAX, is_active, member_of, message_p
                         now_utc, poll_results_public, private_peer_id, visible_floor)
 from .entities import (EntityError, auto_entities, mask_spoilers, mentioned_user_ids,
                        mentioned_usernames, urls, validate_entities)
+from .moderation import guard_text
 from .rt_events import after_commit, append_chat_event, append_user_event
 from .social import (SOCIAL_ROLES, allowed, blocked_between, display_name, ensure_profile,
                      new_public_id, validate_username)
@@ -155,6 +158,7 @@ async def create_chat(db: AsyncSession, me: User, type_: str, title: str, about:
     title = title.strip()
     if not 1 <= len(title) <= 128:
         raise _err(422, "名称 1–128 个字")
+    await guard_text(db, f"{title}\n{about}", "名称或简介")
     await check_daily_limit("chat_create", str(me.id), CHATS_CREATED_PER_DAY,
                             "每天最多建 10 个群或频道")
     if type_ == "group" and not [i for i in member_ids if i != me.id]:
@@ -403,11 +407,13 @@ async def update_chat_info(db: AsyncSession, chat: Chat, actor: User, patch: dic
         t = str(patch["title"]).strip()
         if not 1 <= len(t) <= 128:
             raise _err(422, "名称 1–128 个字")
+        await guard_text(db, t, "名称")
         if t != chat.title:
             chat.title = t
             changed["title"] = t
             await send_service(db, chat, actor.id, "title_change", title=t)
     if "about" in patch and patch["about"] is not None:
+        await guard_text(db, str(patch["about"]), "简介")
         chat.about = str(patch["about"]).strip()[:255]
         changed["about"] = chat.about
     if "photo" in patch and patch["photo"] is not None:
@@ -453,6 +459,7 @@ async def _set_chat_username(db: AsyncSession, chat: Chat, actor: User, name: st
     problem = validate_username(name)
     if problem:
         raise _err(422, problem)
+    await guard_text(db, name, "链接名")
     res = await db.execute(insert(Username).values(
         username_lc=name.lower(), owner_type="chat", owner_id=chat.id
     ).on_conflict_do_nothing(index_elements=["username_lc"]))
@@ -673,6 +680,39 @@ def media_json(mf: MediaFile) -> dict:
     return d
 
 
+#: 同样的文字 24 小时内发给多少个不同的私聊就算群发垃圾(#369)
+SPAM_SAME_TEXT_CHATS = 20
+SPAM_PAUSE_SECONDS = 3600
+
+
+async def _spam_guard(user_id: int, chat_id: int, text: str, kind: str) -> None:
+    """同一段话 24 小时内发给 20 个以上私聊 → 暂停发私聊 1 小时。
+
+    只看文字消息、只数不同的会话(和同一个人来回聊天不算);短于 8 个字的不管 ——
+    「在吗」「好的」谁都会发给很多人。Redis 不可用时放行(和限流一样)。
+    """
+    from ..redis_client import get_redis
+    try:
+        r = get_redis()
+        if await r.exists(f"chat:spam_pause:{user_id}"):
+            ttl = await r.ttl(f"chat:spam_pause:{user_id}")
+            raise _err(429, f"同样的内容发给了太多人,{max(1, (ttl + 59) // 60)} 分钟后才能继续发私聊")
+        norm = re.sub(r"\s+", " ", text.strip().lower())
+        if kind != "text" or len(norm) < 8:
+            return
+        digest = hashlib.sha1(norm.encode()).hexdigest()[:16]
+        key = f"chat:spam:{user_id}:{digest}"
+        await r.sadd(key, chat_id)
+        await r.expire(key, 86400)
+        if await r.scard(key) > SPAM_SAME_TEXT_CHATS:
+            await r.set(f"chat:spam_pause:{user_id}", "1", ex=SPAM_PAUSE_SECONDS)
+            raise _err(429, "同样的内容发给了太多人,1 小时后才能继续发私聊")
+    except HTTPException:
+        raise
+    except Exception:
+        return
+
+
 async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[ChatMessage, bool]:
     """发一条消息。返回 (消息, 是否新建);同一个 random_id 重发返回原来那条(§5.4)。"""
     random_id = _parse_int(body.get("random_id"))
@@ -707,7 +747,12 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
         need = "send_messages"
     if not p.send_messages or not getattr(p, need):
         raise _err(403, "你在这个会话里没有发这类消息的权限")
-    # 慢速模式
+    grouped = _parse_int(body.get("grouped_id"))
+    # 同样的话群发给一堆私聊 = 垃圾消息(#369):24 小时内发给 20 个以上私聊就停 1 小时
+    if chat.type == "private":
+        await _spam_guard(me.id, chat.id, str(body.get("text") or ""), kind)
+    # 慢速模式(先于「每秒 1 条」判:它的提示说得清还要等几秒)。
+    # 一个相册算一条:同一个 grouped_id 的后几张不再挡
     slow = chat_settings(chat.settings)["slow_mode"] if chat.type == "group" else 0
     if slow and not p.slow_mode_exempt:
         from ..redis_client import get_redis
@@ -716,12 +761,19 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
             r = get_redis()
             ttl = await r.ttl(key)
             if ttl and ttl > 0:
-                raise _err(429, f"慢速模式:{ttl} 秒后才能再发")
-            await r.set(key, "1", ex=slow)
+                held = await r.get(key)
+                held = held.decode() if isinstance(held, bytes) else held
+                if grouped is None or held != str(grouped):
+                    raise _err(429, f"慢速模式:{ttl} 秒后才能再发")
+            else:
+                await r.set(key, str(grouped or 0), ex=slow)
         except HTTPException:
             raise
         except Exception:
             pass
+    # 同一群每人每秒 1 条(§5.7);相册的几张是一次发出的,不按条算
+    if chat.type == "group" and grouped is None:
+        await check_rate_limit_seconds(f"chat_send_g{chat.id}", str(me.id), 1)
     text = str(body.get("text") or "")
     media: list[dict] = []
     extra: dict = {}
@@ -782,6 +834,9 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
         text = ""
     else:
         raise _err(422, f"不支持的消息类型:{kind}")
+    # 屏蔽词(#369):文字和说明都过一遍;命中就不发,告诉他为什么
+    if text:
+        await guard_text(db, text, "消息")
     # 实体
     try:
         ents = validate_entities(text, body.get("entities"))
@@ -799,7 +854,6 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
             ChatMessage.seq > floor, ChatMessage.deleted_at.is_(None)))
         if target is None:
             reply_to = None     # 被回复的那条已经删了:照发,只是不带引用(和 TG 一样)
-    grouped = _parse_int(body.get("grouped_id"))
     msg = await insert_message(
         db, chat, sender_id=me.id, kind=kind, text=text, entities=ents, media=media,
         reply_to_seq=reply_to, grouped_id=grouped, poll_id=poll_id, extra=extra,
@@ -863,6 +917,7 @@ async def _create_poll(db: AsyncSession, chat: Chat, me: User, body: dict) -> in
         raise _err(422, "选项 2–10 个,每个最多 100 字")
     if len(set(opts)) != len(opts):
         raise _err(422, "选项不能重复")
+    await guard_text(db, "\n".join([q, *opts, str(body.get("explanation") or "")]), "投票")
     quiz = bool(body.get("quiz"))
     correct = body.get("correct")
     if quiz and (not isinstance(correct, int) or not 0 <= correct < len(opts)):
@@ -909,6 +964,8 @@ async def edit(db: AsyncSession, chat: Chat, me: User, seq: int, text: str,
     limit = TEXT_MAX if msg.kind == "text" else CAPTION_MAX
     if len(text) > limit:
         raise _err(422, f"最多 {limit} 字")
+    if text:
+        await guard_text(db, text, "消息")
     try:
         ents = validate_entities(text, entities)
     except EntityError as e:

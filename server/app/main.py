@@ -52,6 +52,7 @@ from .routers import (
 from .routers import chat as chat_router
 from .routers import media as media_router
 from .routers import social as social_router
+from .routers import stickers as stickers_router
 from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
 from .realtime import gateway as rt_gateway
 from .services import rt_events  # noqa: F401  注册提交后分发实时事件的钩子
@@ -532,6 +533,7 @@ app.include_router(ws.router)
 # 消息与视频(DEV-PROMPTS-40)
 app.include_router(social_router.router)
 app.include_router(chat_router.router)
+app.include_router(stickers_router.router)
 app.include_router(media_router.router)
 app.include_router(rt_gateway.router)
 

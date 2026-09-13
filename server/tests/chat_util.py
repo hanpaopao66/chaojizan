@@ -41,10 +41,12 @@ class Person:
         return self.post("/chat/v1/chats/private", {"user_id": other.id})
 
     def send(self, chat_id: int, text: str = "", *, expect_error: bool = False,
-             **extra) -> dict:
+             retry_429: bool = True, **extra) -> dict:
+        """[retry_429] 测限流 / 慢速模式时传 False,不然 call() 会等窗口翻转重试,429 就看不见了。"""
         body = {"random_id": str(random.getrandbits(62)), "kind": extra.pop("kind", "text"),
                 "text": text, **extra}
-        return self.post(f"/chat/v1/chats/{chat_id}/messages", body, expect_error=expect_error)
+        return self.post(f"/chat/v1/chats/{chat_id}/messages", body, expect_error=expect_error,
+                         retry_429=retry_429)
 
 
 def person(prefix: str = "139") -> Person:

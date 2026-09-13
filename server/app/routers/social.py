@@ -16,6 +16,7 @@ from ..models import (PRIVACY_VALUES, SocialBlock, SocialContact, SocialProfile,
                       UserRole, Username)
 from ..ratelimit import check_daily_limit, check_rate_limit
 from ..security import get_current_user
+from ..services.moderation import find_banned, guard_text
 from ..services.social import (SOCIAL_ROLES, allowed, display_name, ensure_profile,
                                notify_of, privacy_of, user_card, user_cards,
                                validate_username)
@@ -71,6 +72,7 @@ async def patch_me(body: MePatch, user: User = Depends(social_user),
                    db: AsyncSession = Depends(get_db)):
     p = await ensure_profile(db, user.id)
     if body.bio is not None:
+        await guard_text(db, body.bio, "签名")
         p.bio = body.bio.strip()
     if body.privacy is not None:
         cur = privacy_of(p)
@@ -103,6 +105,9 @@ async def _username_problem(db: AsyncSession, name: str, owner_type: str,
     problem = validate_username(name)
     if problem:
         return problem
+    if await find_banned(db, name):
+        return "这个用户名包含不允许使用的内容"
+
     row = await db.get(Username, name.lower())
     if row is not None and not (row.owner_type == owner_type and row.owner_id == owner_id):
         return "这个用户名已经被占用了"
