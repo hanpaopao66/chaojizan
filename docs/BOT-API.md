@@ -53,6 +53,7 @@ HTTP 状态码 = `error_code`。`description` 照 Telegram 的写法以 `Bad Req
 
 路径里带 token(和 Telegram 一样),而路径是日志里最常出现的东西。服务端在进应用的第一层就把路径换成
 `/bot/<token 前 6 位>***/<method>`,之后所有日志(包括 uvicorn 的访问日志、异常留痕)只看得到前 6 位;
+生产 nginx 的访问日志用同样的打码格式(`deploy/nginx/conf.d/superz.conf` 的 `superz_masked`);
 开发者后台也只显示前 6 位(`token_prefix`)。
 
 ---
