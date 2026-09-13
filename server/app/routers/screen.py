@@ -29,6 +29,22 @@ _VALID = "status NOT IN ('pending_payment','cancelled')"
 _TODAY_SH = ("date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')"
              " AT TIME ZONE 'Asia/Shanghai'")
 
+# 跑腿服务主体不是商家。
+#
+# 跑腿单挂在本城一个 biz_type='errand' 的 Merchant 上(services/errand.service_merchant:
+# merchant_id 非空、上百处依赖它,见 docs/DESIGN-errand.md)。那个主体是平台自己建的
+# 占位:状态直接是 approved、坐标是 (0, 0)、名字叫「某某市跑腿服务」。
+#
+# 于是这里原来有三处被它带偏,都不报错:
+# - 「商家入驻数」「服务 N 商家」把它当成一家店数进去,每开一城跑腿就多一家;
+# - 城市坐标取「该城订单所挂商家的坐标均值」,跑腿单越多,城市点越往 (0, 0) 拽
+#   —— 地图上那个点会从城里挪出去;
+# - 播报里跑腿单显示成「在「西安市跑腿服务」下单」,落点涟漪画在经纬度 (0, 0)。
+_NOT_ERRAND = "biz_type <> 'errand'"
+_ERRAND_KINDS = "('errand_send', 'errand_buy')"
+#: 播报里跑腿单的「店名」位,和透明中心逐单的频道名同一套叫法
+_ERRAND_LABEL = {"errand_send": "帮我送", "errand_buy": "帮我买"}
+
 # 进程内小缓存:公开接口谁都能刷,数据库只按 TTL 频率被打
 _cache: dict[str, tuple[float, dict]] = {}
 
@@ -69,6 +85,45 @@ def _mask_phone(phone: str) -> str:
     return "****"
 
 
+def _coord(v) -> float | None:
+    return None if v is None else round(v, 2)
+
+
+def city_row(r, show_gmv: bool) -> dict:
+    """城市 TOP10 的一行:(city, 单量, 实付合计, 坐标均值 lat, lng)。
+
+    坐标可以是 None —— 这座城只有跑腿单时,能取坐标的商家一家都没有。
+    给 None 而不是 0:前端拿到 None 就不画点,拿到 0 会把点画到几内亚湾去。
+    """
+    return {"city": r[0], "orders": r[1],
+            "gmv_cents": r[2] if show_gmv else None,
+            "lat": _coord(r[3]), "lng": _coord(r[4])}
+
+
+def ticker_item(r, show_gmv: bool) -> dict:
+    """播报一条:(id, 单号, 状态, 实付, 下单时刻, 店名, 城市, lat, lng, 手机号, 订单类型)。
+
+    跑腿单没有店:店名位写频道名(帮我送 / 帮我买),坐标给 None —— 它挂的服务主体
+    坐标是 (0, 0) 占位。**不拿取件点坐标顶上**:那是用户自己填的地址,
+    不是商家那种公开的营业地点,两位小数也还精确到一公里上下。
+    """
+    errand = _ERRAND_LABEL.get(r[10] or "")
+    return {
+        "id": r[0],
+        # 订单号只露尾巴,防止拿全号去碰其他接口
+        "order_no_tail": r[1][-6:],
+        "status": r[2],
+        "status_label": STATUS_LABELS[OrderStatus(r[2])],
+        "amount_cents": r[3] if show_gmv else None,
+        "created_at": r[4].astimezone(timezone.utc).isoformat(),
+        "merchant": errand or r[5],
+        "city": r[6] or "",
+        "lat": None if errand else _coord(r[7]),
+        "lng": None if errand else _coord(r[8]),
+        "phone": _mask_phone(r[9]),
+    }
+
+
 # ---------- 演示模式:确定性模拟增量(响应里 demo=true,前端明示) ----------
 
 _DEMO_EPOCH = 1735689600  # 2025-01-01,增量随时间缓慢上涨,大屏看着是"活"的
@@ -90,7 +145,8 @@ _DEMO_SHOPS = ["张记面馆", "老碗牛肉面", "巷口麻辣烫", "川香冒�
 
 @router.get("/stats")
 async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
-    """大屏汇总:注册规模 / 累计订单 / 趋势 / 城市分布 / 状态分布 / 配送效率。"""
+    """大屏汇总:注册规模 / 累计订单 / 趋势 / 城市分布 / 状态分布 / 配送效率 /
+    住宿、团购、跑腿的今日数。"""
     await _guard(request)
     if (hit := _cache_get("stats")) is not None:
         return hit
@@ -110,15 +166,17 @@ async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
     mer = (await db.execute(sa_text(f"""
         SELECT count(*),
                count(*) FILTER (WHERE created_at >= {_TODAY_SH})
-        FROM merchants WHERE status = 'approved'
+        FROM merchants WHERE status = 'approved' AND {_NOT_ERRAND}
     """))).one()
 
-    # 累计/今日订单与 GMV(用户实付口径)
+    # 累计/今日订单与 GMV(用户实付口径);今日跑腿单是今日订单里的一部分
     totals = (await db.execute(sa_text(f"""
         SELECT count(*), coalesce(sum(total_cents), 0),
                count(*) FILTER (WHERE created_at >= {_TODAY_SH}),
                coalesce(sum(total_cents) FILTER (
-                   WHERE created_at >= {_TODAY_SH}), 0)
+                   WHERE created_at >= {_TODAY_SH}), 0),
+               count(*) FILTER (WHERE created_at >= {_TODAY_SH}
+                                AND order_kind IN {_ERRAND_KINDS})
         FROM orders WHERE {_VALID}
     """))).one()
 
@@ -154,13 +212,12 @@ async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
     for is_today, hour, n in hourly_rows:
         (hourly_today if is_today else hourly_yesterday)[hour] = n
 
-    # 城市累计订单 TOP10(订单挂商家城市;坐标取该城商家均值,城市级聚合)
-    cities = [{"city": r[0], "orders": r[1],
-               "gmv_cents": r[2] if show_gmv else None,
-               "lat": round(r[3], 2), "lng": round(r[4], 2)}
-              for r in (await db.execute(sa_text(f"""
+    # 城市累计订单 TOP10(订单挂商家城市;坐标取该城商家均值,城市级聚合)。
+    # 跑腿单照样算进这座城的单量,但它挂的服务主体坐标是 (0, 0),不参与取坐标
+    cities = [city_row(r, show_gmv) for r in (await db.execute(sa_text(f"""
         SELECT m.city, count(*), coalesce(sum(o.total_cents), 0),
-               avg(m.lat), avg(m.lng)
+               avg(m.lat) FILTER (WHERE m.{_NOT_ERRAND}),
+               avg(m.lng) FILTER (WHERE m.{_NOT_ERRAND})
         FROM orders o JOIN merchants m ON m.id = o.merchant_id
         WHERE o.{_VALID} AND m.city <> ''
         GROUP BY m.city ORDER BY 2 DESC LIMIT 10
@@ -196,9 +253,9 @@ async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
         covered_cities = len([c for c in open_cities_flag.value.split(",")
                               if c.strip()])
     else:
-        covered_cities = await db.scalar(sa_text("""
+        covered_cities = await db.scalar(sa_text(f"""
             SELECT count(DISTINCT city) FROM merchants
-            WHERE status = 'approved' AND city <> ''
+            WHERE status = 'approved' AND city <> '' AND {_NOT_ERRAND}
         """))
 
     # 帮商家省钱账:行业总负担普遍约 20%(佣金+履约+推广)对比我们实收佣金。
@@ -252,6 +309,13 @@ async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
         "SELECT coalesce(sum(rooms_qty), 0) FROM stay_orders "
         "WHERE status = 'checked_in'"))
 
+    # 团购:今日核销张数。按核销时刻取 —— 券的钱在核销那一刻才分(平台 2% 也是
+    # 那时才收),和透明中心逐单、公开账本取的是同一列
+    vouchers_today = await db.scalar(sa_text(f"""
+        SELECT count(*) FROM voucher_purchases
+        WHERE status = 'redeemed' AND redeemed_at >= {_TODAY_SH}
+    """))
+
     data = {
         "registrations": {
             "users": {"total": reg[0], "today": reg[1]},
@@ -289,6 +353,9 @@ async def screen_stats(request: Request, db: AsyncSession = Depends(get_db)):
             "gmv_cents": stay_row[2] if show_gmv else None,
             "today_gmv_cents": stay_row[3] if show_gmv else None,
         },
+        # 只出张数/单数,不出金额 —— 金额口径随 show_gmv 开关走,这两个数不受它管
+        "vouchers": {"today_redeemed": vouchers_today},
+        "errands": {"today_orders": totals[4]},
         "show_gmv": show_gmv,
         "demo": settings.screen_demo,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -313,26 +380,14 @@ async def screen_latest_orders(
     show_gmv = await _show_gmv(db)
     rows = (await db.execute(sa_text(f"""
         SELECT o.id, o.order_no, o.status, o.total_cents, o.created_at,
-               m.name, m.city, m.lat, m.lng, u.phone
+               m.name, m.city, m.lat, m.lng, u.phone, o.order_kind
         FROM orders o
         JOIN merchants m ON m.id = o.merchant_id
         JOIN users u ON u.id = o.customer_id
         WHERE o.{_VALID}
         ORDER BY o.id DESC LIMIT :limit
     """), {"limit": limit})).all()
-    items = [{
-        "id": r[0],
-        # 订单号只露尾巴,防止拿全号去碰其他接口
-        "order_no_tail": r[1][-6:],
-        "status": r[2],
-        "status_label": STATUS_LABELS[OrderStatus(r[2])],
-        "amount_cents": r[3] if show_gmv else None,
-        "created_at": r[4].astimezone(timezone.utc).isoformat(),
-        "merchant": r[5],
-        "city": r[6] or "",
-        "lat": round(r[7], 2), "lng": round(r[8], 2),
-        "phone": _mask_phone(r[9]),
-    } for r in rows]
+    items = [ticker_item(r, show_gmv) for r in rows]
     data = {"items": items, "show_gmv": show_gmv, "demo": settings.screen_demo}
     if settings.screen_demo and len(items) < limit:
         data["items"] = items + _demo_orders(limit - len(items), show_gmv)

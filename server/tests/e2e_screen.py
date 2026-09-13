@@ -27,7 +27,10 @@ assert latest["items"], "开发库应有订单流水"
 for o in latest["items"]:
     assert "****" in o["phone"], f"手机号必须打码: {o['phone']}"
     assert len(o["order_no_tail"]) == 6
-    assert round(o["lat"], 2) == o["lat"] and round(o["lng"], 2) == o["lng"]
+    # 跑腿单没有店,坐标是 None(不拿用户填的取件点顶上)
+    if o["lat"] is not None:
+        assert round(o["lat"], 2) == o["lat"] and round(o["lng"], 2) == o["lng"]
+    assert "跑腿服务" not in o["merchant"], "跑腿服务主体不是店,播报里写频道名"
     assert o["status"] not in ("pending_payment", "cancelled")
 print(f"✓ 订单播报 {len(latest['items'])} 条,手机号打码/坐标城市级")
 
@@ -41,6 +44,8 @@ assert len(stats["delivery"]["duration_buckets"]) == 4
 assert all(b >= 0 for b in stats["delivery"]["duration_buckets"])
 ratio = stats["delivery"]["ready_late_ratio"]
 assert ratio is None or 0 <= ratio <= 1
+assert stats["vouchers"]["today_redeemed"] >= 0
+assert 0 <= stats["errands"]["today_orders"] <= stats["orders"]["today"]
 print(f"✓ 运营拓展:覆盖 {stats['coverage']['cities']} 城,为商家省下"
       f" {sav['saved_cents']} 分,环保单 {stats['eco']['no_tableware_orders']},"
       f" 时长分布 {stats['delivery']['duration_buckets']}")
