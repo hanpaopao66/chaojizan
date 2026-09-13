@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import (ACTIVE_ROLES, Chat, ChatMember, ChatMessage, MessageHide,
                       MessageReaction, Poll, PollVote, SocialProfile, User)
 from .chat_perms import chat_settings, perms_for
+from .entities import mask_spoilers
 from .social import display_name, privacy_of, user_cards
+
+#: 这个人数以内的群才有已读回执(广播「谁读到哪」、双勾、已读名单);和 chat_store.read 一致
+GROUP_READ_RECEIPTS_MAX = 100
 
 KIND_LABELS = {
     "photo": "图片", "video": "视频", "file": "文件", "voice": "语音", "video_note": "视频消息",
@@ -137,11 +141,12 @@ def message_out(m: ChatMessage, *, sender: dict | None, chat: Chat | None = None
 
 
 def preview_text(m: ChatMessage) -> str:
+    text = mask_spoilers(m.text or "", m.entities)
     if m.kind == "text":
-        return (m.text or "")[:80]
+        return text[:80]
     label = KIND_LABELS.get(m.kind, "")
-    if m.text:
-        return f"[{label}] {m.text[:60]}" if label else m.text[:80]
+    if text:
+        return f"[{label}] {text[:60]}" if label else text[:80]
     return f"[{label}]" if label else ""
 
 
@@ -344,6 +349,13 @@ async def chat_card(db: AsyncSession, viewer_id: int, chat: Chat,
             out["peer_read_seq"] = pm.last_read_seq if pm else 0
     elif chat.type == "saved":
         out["title"] = "收藏夹"
+    elif chat.type == "group" and (chat.member_count or 0) <= GROUP_READ_RECEIPTS_MAX:
+        # 群里「有人读了」就是双勾(和 Telegram 一样):别人读到的最远那条。
+        # 只靠实时事件的话,事件发生时我不在线,打开时就一直是单勾
+        out["peer_read_seq"] = int(await db.scalar(
+            select(func.coalesce(func.max(ChatMember.last_read_seq), 0)).where(
+                ChatMember.chat_id == chat.id, ChatMember.user_id != viewer_id,
+                ChatMember.role.in_(ACTIVE_ROLES))) or 0)
     return out
 
 
@@ -417,6 +429,14 @@ async def dialogs(db: AsyncSession, viewer_id: int, limit: int = 1000) -> list[d
         for pm in await db.scalars(select(ChatMember).where(
                 ChatMember.chat_id.in_(list(peer_of)), ChatMember.user_id != viewer_id)):
             peer_reads[pm.chat_id] = pm.last_read_seq
+    small_groups = [c.id for c in chats.values()
+                    if c.type == "group" and (c.member_count or 0) <= GROUP_READ_RECEIPTS_MAX]
+    if small_groups:
+        for cid, mx in (await db.execute(
+                select(ChatMember.chat_id, func.max(ChatMember.last_read_seq)).where(
+                    ChatMember.chat_id.in_(small_groups), ChatMember.user_id != viewer_id,
+                    ChatMember.role.in_(ACTIVE_ROLES)).group_by(ChatMember.chat_id))).all():
+            peer_reads[cid] = int(mx or 0)
     out = []
     for r in rows:
         chat = chats.get(r.chat_id)

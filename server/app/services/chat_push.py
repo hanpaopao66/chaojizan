@@ -19,16 +19,18 @@ from ..db import SessionLocal
 from ..models import (ACTIVE_ROLES, Chat, ChatMember, ChatMessage, MessageMention,
                       SocialProfile, User)
 from .chat_view import KIND_LABELS
+from .entities import mask_spoilers
 from .social import display_name, notify_of
 
 logger = logging.getLogger("superz.chat")
 
 
 def _preview(m: ChatMessage) -> str:
+    text = mask_spoilers(m.text or "", m.entities)
     if m.kind == "text":
-        return (m.text or "")[:60]
+        return text[:60]
     label = KIND_LABELS.get(m.kind, "消息")
-    return f"[{label}]" + (f" {m.text[:40]}" if m.text else "")
+    return f"[{label}]" + (f" {text[:40]}" if text else "")
 
 
 async def notify_message(chat_id: int, seq: int) -> int:

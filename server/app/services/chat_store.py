@@ -22,10 +22,10 @@ from ..ratelimit import check_daily_limit, check_rate_limit, check_rate_limit_se
 from .chat_perms import (DEFAULT_ADMIN_RIGHTS, GROUP_MAX_MEMBERS, SLOW_MODES, ADMIN_RIGHTS,
                          MEMBER_PERMS, Perms, can_delete_for_all, can_edit_message,
                          chat_settings, perms_for, reaction_allowed)
-from .chat_view import (is_active, member_of, message_payload, now_utc,
-                        poll_results_public, private_peer_id, visible_floor)
-from .entities import (EntityError, auto_entities, mentioned_user_ids, mentioned_usernames,
-                       urls, validate_entities)
+from .chat_view import (GROUP_READ_RECEIPTS_MAX, is_active, member_of, message_payload,
+                        now_utc, poll_results_public, private_peer_id, visible_floor)
+from .entities import (EntityError, auto_entities, mask_spoilers, mentioned_user_ids,
+                       mentioned_usernames, urls, validate_entities)
 from .rt_events import after_commit, append_chat_event, append_user_event
 from .social import (SOCIAL_ROLES, allowed, blocked_between, display_name, ensure_profile,
                      new_public_id, validate_username)
@@ -1036,7 +1036,8 @@ async def read(db: AsyncSession, chat: Chat, me: User, seq: int) -> ChatMember:
     if not changed:
         return member
     # 私聊和 ≤100 人的群广播「谁读到哪」(双勾、已读名单);大群和频道不广播
-    if chat.type == "private" or (chat.type == "group" and (chat.member_count or 0) <= 100):
+    if chat.type == "private" or (chat.type == "group"
+                                  and (chat.member_count or 0) <= GROUP_READ_RECEIPTS_MAX):
         await append_chat_event(db, chat.id, "read", {"user_id": me.id,
                                                       "seq": member.last_read_seq})
     await append_user_event(db, me.id, "dialog", {"chat_id": chat.id,
@@ -1083,7 +1084,8 @@ async def pin(db: AsyncSession, chat: Chat, me: User, seq: int | None, pinned: b
         msg.pinned_at = now_utc() if pinned else None
         seqs = [seq]
         if pinned and notify:
-            await send_service(db, chat, me.id, "pin", seq=seq, preview=msg.text[:40])
+            await send_service(db, chat, me.id, "pin", seq=seq,
+                               preview=mask_spoilers(msg.text or "", msg.entities)[:40])
     await append_chat_event(db, chat.id, "pin", {"seqs": seqs, "pinned": pinned})
     return seqs
 

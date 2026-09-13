@@ -113,6 +113,23 @@ def slice_utf16(text: str, offset: int, length: int) -> str:
     return text[start:end]
 
 
+def mask_spoilers(text: str, entities: list[dict] | None) -> str:
+    """剧透那几段换成「▒」,给预览用(推送、引用、置顶提示)。
+
+    剧透的意思就是「点开才看」—— 推送横幅、会话列表、回复引用里直接露出来就白标了。
+    """
+    spans = [(e["offset"], e["offset"] + e["length"]) for e in entities or ()
+             if e.get("type") == "spoiler"]
+    if not spans or not text:
+        return text or ""
+    offs = utf16_offsets(text)
+    out = []
+    for i, ch in enumerate(text):
+        a = offs[i]
+        out.append("▒" if any(s <= a < e for s, e in spans) and not ch.isspace() else ch)
+    return "".join(out)
+
+
 def mentioned_usernames(text: str, entities: list[dict]) -> set[str]:
     return {slice_utf16(text, e["offset"], e["length"]).lstrip("@").lower()
             for e in entities if e.get("type") == "mention"}
