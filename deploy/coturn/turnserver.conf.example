@@ -1,0 +1,58 @@
+# coturn 配置样例(DEV-PROMPTS-40 #354 / #375):语音 / 视频通话的中继。
+#
+# **跑在有公网 IP 的那台云服务器上(frps 那台),不跑在部署机的 compose 里** ——
+# 部署机在内网、经 TCP 隧道对外,而 TURN 要的是一段 UDP 端口直接暴露在公网。
+#
+# 用法(云服务器上):
+#   cp turnserver.conf.example /etc/coturn/turnserver.conf,把下面 <> 里的换掉;
+#   docker run -d --name coturn --restart unless-stopped --network host \
+#     -v /etc/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro coturn/coturn
+#   云厂商安全组放行:3478/udp、3478/tcp、49160-49200/udp(下面 min/max-port)
+#
+# 部署机 .env.prod 对应三行(TURN_SECRET 和下面 static-auth-secret 一模一样,openssl rand -hex 32 生成):
+#   TURN_URLS=turn:<公网 IP>:3478?transport=udp,turn:<公网 IP>:3478?transport=tcp
+#   STUN_URLS=stun:<公网 IP>:3478
+#   TURN_SECRET=<同一个密钥>
+# api 按 REST 共享密钥方案发 1 小时有效的临时用户名密码(services/calls.ice_servers),
+# 客户端每次打电话前取一次 —— 密钥本身从不下发。
+
+listening-port=3478
+# 云服务器的内网地址 / 公网地址(NAT 后面的云主机两个都要写)
+listening-ip=<内网 IP>
+external-ip=<公网 IP>/<内网 IP>
+relay-ip=<内网 IP>
+
+# 中继端口段:一通电话占两个。起步期同时几十通足够,段越大安全组开得越大
+min-port=49160
+max-port=49200
+
+use-auth-secret
+static-auth-secret=<TURN_SECRET>
+realm=chaojizan.cc
+
+# 只做中继,不许借我们的 TURN 去打内网(TURN 被当成跳板打内网是这类服务最常见的事故)
+no-multicast-peers
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.0.0.0-192.0.0.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=198.18.0.0-198.19.255.255
+denied-peer-ip=::1
+denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+
+# 单个用户的配额:防一个号把带宽占满
+user-quota=4
+total-quota=200
+max-bps=3000000
+
+# 不开 TLS 端口(5349):起步期用 udp/tcp 3478 足够;要开就挂同一张证书
+no-tls
+no-dtls
+no-cli
+fingerprint
+log-file=stdout

@@ -92,6 +92,11 @@ services:
       # 承载"只跑一份"的地方(它天然想横向扩)
       RUN_MIGRATIONS_ON_STARTUP: "false"
       AUTO_FLOW_ENABLED: "false"
+      # 消息与视频(DEV-PROMPTS-40 #375):转码交给下面的 media-worker(不占 api 的事件循环);
+      # 私密媒体、视频由 nginx 从 MinIO 直出 —— api 判完权回 X-Accel-Redirect,大文件不经过 Python。
+      # 直出靠 nginx 里的 /_minio_internal/,两边一起改。127.0.0.1:8010 直连调试时拿不到文件内容,正常
+      MEDIA_WORKER: external
+      MEDIA_ACCEL: "true"
     # 127.0.0.1:8010 仅本机运维调试;公网流量走本栈 nginx 转发
     ports:
       - "127.0.0.1:8010:8000"
@@ -139,11 +144,52 @@ services:
       # 清扫进程**就是**那唯一一份 auto_flow;迁移仍然只归 migrate 容器
       AUTO_FLOW_ENABLED: "true"
       RUN_MIGRATIONS_ON_STARTUP: "false"
+      # 清扫也会排转码任务(定时发布、失败重试),要进同一个队列,不能自己在进程里转
+      MEDIA_WORKER: external
     command: python -m app.sweeper
     volumes:
       # 清扫要碰上传目录(明厨亮灶抽帧、证照到期扫描)和商户密钥(自动退款)
       - uploads:/srv/uploads
       - ./wxpay-certs:/srv/certs:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  # 转码 worker(DEV-PROMPTS-40 #342 #375):视频投稿、聊天视频 / GIF / 语音的转码都在这儿跑。
+  #
+  # 为什么单拎一个容器:ffmpeg 一跑就是几个核、上 G 内存,放在 api 进程里,
+  # 一个 1GB 投稿转码的那几分钟里全站的请求都跟着慢。队列在 Redis(任务不丢:
+  # BLMOVE 挪到「进行中」,做完才删,容器被杀了重启先挪回去),见 server/app/workers/media.py。
+  # 急停:后台开关 media_transcode=off 时只排队不执行(发不了视频,但机器不会被压垮)。
+  #
+  # mem_limit / cpus:这台 4 核 / 可用内存 4.4G 的机器上还压着库和对象存储,
+  # 转码最多吃两个核、1.5G;同时只转一个(worker 本来就是串行取任务)
+  media-worker:
+    logging: *default-logging
+    build: ../server
+    container_name: superz-media-worker
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://superz:${POSTGRES_PASSWORD}@db:5432/superz
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:?set in .env.prod}
+      MEDIA_WORKER: external
+      AUTO_FLOW_ENABLED: "false"
+      RUN_MIGRATIONS_ON_STARTUP: "false"
+    command: python -m app.workers.media
+    volumes:
+      # 转码的临时目录在上传卷的私密区下(_media_tmp),和 api 同一个卷
+      - uploads:/srv/uploads
+    mem_limit: 1500m
+    cpus: 2.0
     depends_on:
       db:
         condition: service_healthy
