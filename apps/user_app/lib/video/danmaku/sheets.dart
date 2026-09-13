@@ -172,7 +172,8 @@ class _SenderSheetState extends State<_SenderSheet> {
   }
 }
 
-/// 详情页播放器下面那一条:弹幕开关、「点我发弹幕」、弹幕设置。UP 主关了弹幕时显示「UP 主关闭了弹幕」,点了没反应。
+/// 详情页底部那一条输入框样子的「发个弹幕…」(设计稿 E:放在页面最底下,像聊天的输入条)。
+/// 弹幕开关在播放器的控制条上,弹幕设置收进页签那一行的「⋯」;UP 主关了弹幕时写「UP 主关闭了弹幕」,点了没反应。
 class DanmakuSendBar extends StatelessWidget {
   const DanmakuSendBar({super.key, required this.controller});
 
@@ -187,42 +188,31 @@ class DanmakuSendBar extends StatelessWidget {
         final d = controller.danmaku;
         final allow = d.allowDanmaku;
         final on = d.settings.enabled;
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Row(children: [
-            IconButton(
-              tooltip: on ? '关闭弹幕' : '打开弹幕',
-              onPressed: allow ? () => d.setEnabled(!on) : null,
-              icon: Icon(allow && on ? Icons.subtitles_outlined : Icons.subtitles_off_outlined,
-                  color: allow && on ? sz.clay : sz.inkMuted),
-            ),
-            Expanded(
-              child: Material(
-                color: sz.surfaceAlt,
-                borderRadius: BorderRadius.circular(18),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: allow ? () => showDanmakuSender(context, controller) : null,
-                  child: Container(
-                    height: 36,
-                    alignment: Alignment.centerLeft,
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Text(
-                      allow ? (on ? '点我发弹幕' : '弹幕已关闭,点我发弹幕') : 'UP 主关闭了弹幕',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: kFontBody, color: sz.inkMuted),
-                    ),
+        final shape = RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18), side: BorderSide(color: sz.line));
+        return Material(
+          color: sz.surface,
+          shape: shape,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: allow ? () => showDanmakuSender(context, controller) : null,
+            child: Container(
+              height: 36,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: Row(children: [
+                Icon(allow && on ? Icons.subtitles_outlined : Icons.subtitles_off_outlined, size: 16, color: sz.inkFaint),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    allow ? (on ? '发个弹幕…' : '弹幕已关闭,点这里发弹幕') : 'UP 主关闭了弹幕',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: kFontBody, color: sz.inkMuted),
                   ),
                 ),
-              ),
+              ]),
             ),
-            IconButton(
-              tooltip: '弹幕设置',
-              onPressed: allow ? () => showDanmakuSettings(context, d) : null,
-              icon: Icon(Icons.tune, color: sz.inkMuted),
-            ),
-          ]),
+          ),
         );
       },
     );

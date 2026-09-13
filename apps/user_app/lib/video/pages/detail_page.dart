@@ -8,6 +8,7 @@ import '../../session.dart';
 import '../api.dart';
 import '../comments/comments_view.dart';
 import '../danmaku/sheets.dart';
+import '../me/coins_page.dart';
 import '../me/favorites_page.dart' show pickFavoriteFolders;
 import '../models.dart';
 import '../nav.dart';
@@ -18,10 +19,13 @@ import '../widgets/feed.dart';
 import '../widgets/follow_button.dart';
 import '../widgets/report.dart';
 import '../widgets/share.dart';
+import '../widgets/shop_card.dart';
+import '../widgets/triple_like_button.dart';
 
-/// 视频详情页(#361):播放器在上;下面「简介 / 评论」两个页签。
-/// 简介里:UP 主卡(关注)、标题、播放数、弹幕数、发布时间、三连(长按点赞 1.5 秒 = 三连)、分享、
-/// 简介展开、标签、分 P、挂的店铺(D16,有合作标「合作」)、相关视频;右上角举报、稍后再看。
+/// 视频详情页(#361,设计稿 E):播放器在上;下面「简介 / 评论」两个页签,页签那一行右边是「选集 N」和「⋯」。
+/// 简介里从上往下:标题和播放 / 弹幕 / 发布时间、三连那一排(长按点赞 1.5 秒 = 三连)、UP 主和关注、
+/// 硬币规则(原来藏在投币弹层里,只有已经想投币的人才看得到)、挂的店铺(D16,有合作标「合作」)、标签、相关视频。
+/// 最底下一条「发个弹幕…」+「评论」,只在简介页签出现 —— 评论页签有它自己的输入条。
 class VideoDetailPage extends StatefulWidget {
   const VideoDetailPage({super.key, required this.vid, this.commentId, this.rootCommentId, this.partIdx});
 
@@ -50,7 +54,13 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
   void initState() {
     super.initState();
     _part = widget.partIdx ?? 0;
+    // 底下那条「发个弹幕 / 评论」只在简介页签出现:换了页签要重画
+    _tabs.addListener(_onTab);
     _load();
+  }
+
+  void _onTab() {
+    if (!_tabs.indexIsChanging && mounted) setState(() {});
   }
 
   @override
@@ -168,7 +178,7 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
       return;
     }
     if (me.coinBalance <= 0) {
-      _toast('硬币不够了(每天第一次看视频可以领 1 枚)');
+      _toast('硬币不够了(每天第一次打开视频可以领 1 枚)');
       return;
     }
     // 缺省投得起的最多那档:余额只有 1 枚就别预选 2 枚
@@ -202,7 +212,7 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
                 title: const Text('同时点赞'),
                 controlAffinity: ListTileControlAffinity.leading,
               ),
-              Text('硬币只能投给视频:每天第一次看视频领 1 枚、投稿过审得 2 枚;不能充值、提现、兑换。',
+              Text('硬币只能投给视频:每天第一次打开视频领 1 枚、投稿过审得 2 枚;不能充值、提现、兑换。',
                   style: TextStyle(fontSize: kFontNote, color: Theme.of(ctx).sz.inkMuted)),
               const SizedBox(height: 12),
               SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('投币'))),
@@ -304,6 +314,7 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
       );
     }
     final player = _player;
+    final sz = Theme.of(context).sz;
     return Scaffold(
       body: Column(children: [
         Container(
@@ -324,33 +335,54 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
         ),
         Material(
           color: Theme.of(context).scaffoldBackgroundColor,
-          child: Row(children: [
-            TabBar(
-              controller: _tabs,
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              dividerColor: Colors.transparent,
-              tabs: [const Tab(text: '简介'), Tab(text: '评论 ${vCount(_commentCount)}')],
-            ),
-            // 「点我发弹幕」和弹幕开关放在页签这一行(B 站的位置),稍后再看、举报收进「⋯」
-            Expanded(child: player == null ? const SizedBox.shrink() : DanmakuSendBar(controller: player)),
-            PopupMenuButton<String>(
-              onSelected: (x) async {
-                if (x == 'later') {
-                  await _watchLater();
-                } else if (x == 'report') {
-                  if (!await _login()) return;
-                  if (context.mounted) await reportTarget(context, targetType: 'video', vid: v.vid);
-                }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(value: 'later', child: Text(v.me?.watchLater == true ? '从稍后再看移除' : '稍后再看')),
-                const PopupMenuItem(value: 'report', child: Text('举报')),
-              ],
-            ),
-          ]),
+          child: DecoratedBox(
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: sz.line))),
+            child: Row(children: [
+              TabBar(
+                controller: _tabs,
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                padding: const EdgeInsets.only(left: kPagePad - 12),
+                labelPadding: const EdgeInsets.symmetric(horizontal: 12),
+                indicator: SzTabUnderline(color: sz.clay, width: 24),
+                dividerColor: Colors.transparent,
+                tabs: [const Tab(text: '简介', height: 42), Tab(text: '评论 ${vCount(_commentCount)}', height: 42)],
+              ),
+              const Spacer(),
+              if (v.parts.length > 1)
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: sz.inkMuted,
+                    minimumSize: const Size(44, 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    textStyle: const TextStyle(fontSize: kFontNote),
+                  ),
+                  onPressed: () => _pickPart(v),
+                  child: Text('选集 ${v.parts.length}'),
+                ),
+              // 稍后再看、弹幕设置、举报收进「⋯」;弹幕开关在播放器的控制条上
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, color: sz.inkMuted),
+                onSelected: (x) async {
+                  if (x == 'later') {
+                    await _watchLater();
+                  } else if (x == 'danmaku') {
+                    if (player != null) await showDanmakuSettings(context, player.danmaku);
+                  } else if (x == 'report') {
+                    if (!await _login()) return;
+                    if (context.mounted) await reportTarget(context, targetType: 'video', vid: v.vid);
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'later', child: Text(v.me?.watchLater == true ? '从稍后再看移除' : '稍后再看')),
+                  if (player != null && player.danmaku.allowDanmaku)
+                    const PopupMenuItem(value: 'danmaku', child: Text('弹幕设置')),
+                  const PopupMenuItem(value: 'report', child: Text('举报')),
+                ],
+              ),
+            ]),
+          ),
         ),
-        const Divider(height: 1),
         Expanded(
           // 播放器那块已经让过状态栏;下面的评论列表别再按顶部安全区补一次(手机上「评论 N」上面会空一截)
           child: MediaQuery.removePadding(
@@ -371,35 +403,86 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
             ]),
           ),
         ),
+        if (_tabs.index == 0) _bottomBar(player),
       ]),
     );
+  }
+
+  /// 简介页签最底下:「发个弹幕…」和「评论」(点了去评论页签,那里有写评论的输入条)
+  Widget _bottomBar(SzVideoController? player) {
+    final sz = Theme.of(context).sz;
+    return Container(
+      decoration: BoxDecoration(color: sz.paper, border: Border(top: BorderSide(color: sz.line))),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+          child: Row(children: [
+            if (player != null) Expanded(child: DanmakuSendBar(controller: player)) else const Spacer(),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: sz.inkMuted,
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 15),
+                textStyle: const TextStyle(fontSize: kFontBody, fontWeight: FontWeight.w500),
+              ),
+              onPressed: () => _tabs.animateTo(1),
+              child: const Text('评论'),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// 「选集 N」:弹层里列出每一 P,正在放的那一 P 标出来
+  Future<void> _pickPart(VideoDetail v) async {
+    final pick = await szShowSheet<int>(
+      context: context,
+      builder: (ctx) {
+        final sz = Theme.of(ctx).sz;
+        return SafeArea(
+          child: ListView(shrinkWrap: true, children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 6),
+              child: Text('选集(${v.parts.length})', style: const TextStyle(fontSize: kFontTitle, fontWeight: FontWeight.w600)),
+            ),
+            for (var i = 0; i < v.parts.length; i++)
+              ListTile(
+                selected: _part == i,
+                selectedColor: sz.clay,
+                leading: Text('P${i + 1}', style: szTabular(fontSize: kFontBodyLg, fontWeight: FontWeight.w600)),
+                title: Text(v.parts[i].title.isEmpty ? '第 ${i + 1} P' : v.parts[i].title,
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                trailing: _part == i ? Icon(Icons.equalizer, color: sz.clay) : null,
+                onTap: () => Navigator.pop(ctx, i),
+              ),
+          ]),
+        );
+      },
+    );
+    if (pick != null && pick != _part) _switchPart(pick);
   }
 
   Widget _intro(VideoDetail v) {
     final sz = Theme.of(context).sz;
     final up = v.uploader;
     final me = v.me;
-    return ListView(padding: const EdgeInsets.only(bottom: 24), children: [
-      if (up != null)
-        ListTile(
-          leading: GestureDetector(
-            onTap: () => openUpSpace(context, up.id),
-            child: ChatAvatar(name: up.name, url: up.avatar, size: 42),
-          ),
-          title: Text(up.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text('${vCount(up.fans)} 粉丝', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-          onTap: () => openUpSpace(context, up.id),
-          trailing: v.isOwner
-              ? null
-              : FollowButton(
-                  person: up,
-                  dense: true,
-                  onChanged: (p) => setState(() => v.card.uploader = p),
-                ),
-        ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 0),
-        child: GestureDetector(
+    Widget pad(Widget w, {double top = 13}) =>
+        Padding(padding: EdgeInsets.fromLTRB(kPagePad, top, kPagePad, 0), child: w);
+    final ago = vAgo(v.card.publishedAt);
+    final stats = [
+      '${vCount(v.card.views)} 播放',
+      '${vCount(v.card.danmakuCount)} 弹幕',
+      // 「9-11 发布」日期后面空一格;「3 小时前发布」「昨天发布」不空
+      if (ago.isNotEmpty) '$ago${RegExp(r'\d$').hasMatch(ago) ? ' ' : ''}发布',
+    ].join(' · ');
+    return ListView(padding: const EdgeInsets.only(bottom: 20), children: [
+      pad(
+        top: 14,
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
           onTap: () => setState(() => _descOpen = !_descOpen),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -407,20 +490,22 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
                 child: Text(v.card.title,
                     maxLines: _descOpen ? 6 : 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: kFontTitle, fontWeight: FontWeight.w600, height: 1.35)),
+                    style: TextStyle(fontSize: kFontTitle, fontWeight: FontWeight.w600, height: 1.35, color: sz.ink)),
               ),
-              Icon(_descOpen ? Icons.expand_less : Icons.expand_more, color: sz.inkFaint),
+              Padding(
+                padding: const EdgeInsets.only(left: 6, top: 1),
+                child: Icon(_descOpen ? Icons.expand_less : Icons.expand_more, size: 20, color: sz.inkFaint),
+              ),
             ]),
-            const SizedBox(height: 6),
-            Wrap(spacing: 12, children: [
-              _Stat(icon: Icons.play_circle_outline, text: vCount(v.card.views)),
-              _Stat(icon: Icons.subtitles_outlined, text: vCount(v.card.danmakuCount)),
-              Text(vAgo(v.card.publishedAt), style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-              if (v.copyright == 'repost')
-                Text('转载', style: TextStyle(fontSize: kFontNote, color: sz.hold)),
-              if (v.status != 'published')
-                Text(v.statusLabel, style: TextStyle(fontSize: kFontNote, color: sz.hold)),
-            ]),
+            const SizedBox(height: 5),
+            Text.rich(
+              TextSpan(children: [
+                TextSpan(text: stats),
+                if (v.copyright == 'repost') TextSpan(text: ' · 转载', style: TextStyle(color: sz.hold)),
+                if (v.status != 'published') TextSpan(text: ' · ${v.statusLabel}', style: TextStyle(color: sz.hold)),
+              ]),
+              style: szTabular(fontSize: kFontNote, color: sz.inkMuted),
+            ),
             if (_descOpen) ...[
               const SizedBox(height: 8),
               SelectableText(v.description.isEmpty ? '(UP 主没写简介)' : v.description,
@@ -432,247 +517,149 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
                 ),
               Padding(
                 padding: const EdgeInsets.only(top: 6),
-                child: Text(v.vid, style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
+                child: Text(v.vid, style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
               ),
             ],
           ]),
         ),
       ),
-      if (v.card.tags.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(kPagePad, 10, kPagePad, 0),
-          child: Wrap(spacing: 8, runSpacing: 6, children: [
-            for (final t in v.card.tags)
-              ActionChip(
-                label: Text(t, style: const TextStyle(fontSize: kFontNote)),
-                visualDensity: VisualDensity.compact,
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => _TagPage(tag: t))),
+      // 三连那一排:上下两道发丝线夹着,下面一行小字说长按是三连
+      pad(
+        Container(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(border: Border.symmetric(horizontal: BorderSide(color: sz.line))),
+          child: Row(children: [
+            Expanded(
+              child: Center(
+                child: TripleLikeButton(liked: me?.liked ?? false, count: v.card.likes, onTap: _like, onTriple: _triple),
               ),
+            ),
+            Expanded(
+              child: Center(
+                child: VideoActionButton(
+                    icon: Icons.monetization_on_outlined,
+                    activeIcon: Icons.monetization_on,
+                    active: (me?.coins ?? 0) > 0,
+                    count: v.card.coins,
+                    semantic: '投币',
+                    onTap: _coin),
+              ),
+            ),
+            Expanded(
+              child: Center(
+                child: VideoActionButton(
+                    icon: Icons.star_border,
+                    activeIcon: Icons.star,
+                    active: me?.favorited ?? false,
+                    count: v.card.favorites,
+                    semantic: '收藏',
+                    onTap: _favorite),
+              ),
+            ),
+            Expanded(
+              child: Center(
+                child: VideoActionButton(
+                    icon: Icons.reply,
+                    activeIcon: Icons.reply,
+                    flip: true,
+                    active: false,
+                    count: v.card.shares,
+                    semantic: '分享',
+                    onTap: () async {
+                      await shareVideo(context, v.card);
+                      if (mounted) setState(() {});
+                    }),
+              ),
+            ),
           ]),
         ),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          _LikeButton(liked: me?.liked ?? false, count: v.card.likes, onTap: _like, onTriple: _triple),
-          _ActionButton(
-              icon: Icons.monetization_on_outlined,
-              activeIcon: Icons.monetization_on,
-              active: (me?.coins ?? 0) > 0,
-              label: vCount(v.card.coins),
-              semantic: '投币',
-              onTap: _coin),
-          _ActionButton(
-              icon: Icons.star_border,
-              activeIcon: Icons.star,
-              active: me?.favorited ?? false,
-              label: vCount(v.card.favorites),
-              semantic: '收藏',
-              onTap: _favorite),
-          _ActionButton(
-              icon: Icons.share_outlined,
-              activeIcon: Icons.share,
-              active: false,
-              label: vCount(v.card.shares),
-              semantic: '分享',
-              onTap: () async {
-                await shareVideo(context, v.card);
-                if (mounted) setState(() {});
-              }),
-        ]),
       ),
-      if (v.parts.length > 1) ...[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 6),
-          child: Text('选集(${v.parts.length})', style: const TextStyle(fontWeight: FontWeight.w600)),
+      Padding(
+        padding: const EdgeInsets.only(top: 5),
+        child: Center(
+          child: Text('长按点赞 = 三连(赞 + 投币 + 收藏)', style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
         ),
-        SizedBox(
-          height: 44,
-          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-            for (var i = 0; i < v.parts.length; i++)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: ChoiceChip(
-                  label: Text('P${i + 1} ${v.parts[i].title}'),
-                  selected: _part == i,
-                  onSelected: (_) => _switchPart(i),
+      ),
+      if (up != null)
+        pad(Row(children: [
+          GestureDetector(
+            onTap: () => openUpSpace(context, up.id),
+            child: ChatAvatar(name: up.name, url: up.avatar, size: 40),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => openUpSpace(context, up.id),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(up.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: kFontBodyLg, fontWeight: FontWeight.w600, color: sz.ink)),
+                Text('${vCount(up.fans)} 粉丝', style: szTabular(fontSize: kFontNote, color: sz.inkMuted)),
+              ]),
+            ),
+          ),
+          if (!v.isOwner)
+            FollowButton(person: up, outlined: true, onChanged: (p) => setState(() => v.card.uploader = p)),
+        ])),
+      pad(_coinRules(me)),
+      if (v.shop != null) pad(VideoShopCard(shop: v.shop!, collab: v.shopCollab == true || v.card.collab)),
+      if (v.card.tags.isNotEmpty)
+        pad(Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final t in v.card.tags)
+            Material(
+              color: Colors.transparent,
+              shape: StadiumBorder(side: BorderSide(color: sz.line)),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _TagPage(tag: t))),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  child: Text('#$t', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
                 ),
               ),
-          ]),
-        ),
-      ],
-      if (v.shop != null) _ShopCard(shop: v.shop!, collab: v.shopCollab == true),
+            ),
+        ])),
       if (_related.isNotEmpty) ...[
         Padding(
-          padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 2),
+          padding: const EdgeInsets.fromLTRB(kPagePad, 18, kPagePad, 2),
           child: Text('相关推荐', style: TextStyle(fontWeight: FontWeight.w600, color: sz.ink)),
         ),
         for (final c in _related) VideoRowTile(card: c, onTap: () => openVideo(context, c.vid)),
       ],
     ]);
   }
-}
 
-class _Stat extends StatelessWidget {
-  const _Stat({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
+  /// 硬币规则挪到明面上(设计稿 E):原来这段话只在投币弹层里,只有已经想投币的人才看得到。
+  /// 规则照代码写:每天第一次打开视频 +1,投稿过审 +2(每天最多 10 枚);不能充值、提现、兑换。
+  Widget _coinRules(VideoMe? me) {
     final sz = Theme.of(context).sz;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 14, color: sz.inkMuted),
-      const SizedBox(width: 3),
-      Text(text, style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-    ]);
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({required this.icon, required this.activeIcon, required this.active, required this.label,
-      required this.onTap, required this.semantic});
-
-  final IconData icon;
-  final IconData activeIcon;
-  final bool active;
-  final String label;
-  final VoidCallback onTap;
-  final String semantic;
-
-  @override
-  Widget build(BuildContext context) {
-    final sz = Theme.of(context).sz;
-    return Semantics(
-      button: true,
-      label: semantic,
-      child: InkResponse(
-        onTap: onTap,
-        radius: 32,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(active ? activeIcon : icon, size: 28, color: active ? sz.clay : sz.inkMuted),
-          const SizedBox(height: 2),
-          Text(label, style: TextStyle(fontSize: kFontNote, color: active ? sz.clay : sz.inkMuted)),
-        ]),
-      ),
-    );
-  }
-}
-
-/// 点赞按钮:点一下是赞 / 取消;按住 1.5 秒转一圈 = 三连(赞 + 投币 + 收藏),和 B 站一样。
-class _LikeButton extends StatefulWidget {
-  const _LikeButton({required this.liked, required this.count, required this.onTap, required this.onTriple});
-
-  final bool liked;
-  final int count;
-  final VoidCallback onTap;
-  final VoidCallback onTriple;
-
-  @override
-  State<_LikeButton> createState() => _LikeButtonState();
-}
-
-class _LikeButtonState extends State<_LikeButton> with SingleTickerProviderStateMixin {
-  late final AnimationController _hold = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))
-    ..addStatusListener((s) {
-      if (s == AnimationStatus.completed) {
-        widget.onTriple();
-        _hold.reset();
-      }
-    });
-
-  @override
-  void dispose() {
-    _hold.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final sz = Theme.of(context).sz;
-    return Semantics(
-      button: true,
-      label: '点赞,长按三连',
-      child: GestureDetector(
-        onTap: widget.onTap,
-        onLongPressStart: (_) => _hold.forward(from: 0),
-        onLongPressEnd: (_) {
-          if (_hold.isAnimating) _hold.reset();
-        },
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(
-            width: 40,
-            height: 32,
-            child: Stack(alignment: Alignment.center, children: [
-              AnimatedBuilder(
-                animation: _hold,
-                builder: (_, __) => _hold.value == 0
-                    ? const SizedBox.shrink()
-                    : SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(value: _hold.value, strokeWidth: 2.5, color: sz.clay),
-                      ),
-              ),
-              Icon(widget.liked ? Icons.thumb_up : Icons.thumb_up_outlined, size: 26,
-                  color: widget.liked ? sz.clay : sz.inkMuted),
-            ]),
-          ),
-          const SizedBox(height: 2),
-          Text(vCount(widget.count), style: TextStyle(fontSize: kFontNote, color: widget.liked ? sz.clay : sz.inkMuted)),
-        ]),
-      ),
-    );
-  }
-}
-
-/// 挂的店铺(D16):只能挂本平台的店;UP 主声明了「有合作」就标「合作」。平台不收推广费。
-class _ShopCard extends StatelessWidget {
-  const _ShopCard({required this.shop, required this.collab});
-
-  final Map<String, dynamic> shop;
-  final bool collab;
-
-  @override
-  Widget build(BuildContext context) {
-    final sz = Theme.of(context).sz;
-    final logo = '${shop['logo'] ?? ''}';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(color: sz.surfaceAlt, borderRadius: BorderRadius.circular(kRadiusMd)),
-        child: Row(children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(kRadiusSm),
-            child: SizedBox(
-              width: 44,
-              height: 44,
-              child: logo.isEmpty
-                  ? Icon(Icons.storefront_outlined, color: sz.clay)
-                  : Image(image: szNetImage(videoResolve(logo)), fit: BoxFit.cover),
-            ),
-          ),
-          const SizedBox(width: 10),
+    return SzCard(
+      padding: const EdgeInsets.fromLTRB(kCardPad, 13, kCardPad, 13),
+      onTap: rootApi.isLoggedIn
+          ? () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CoinsPage()))
+          : null,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
           Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Flexible(child: Text('${shop['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w600))),
-                if (collab)
-                  Container(
-                    margin: const EdgeInsets.only(left: 6),
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    decoration: BoxDecoration(color: sz.hold, borderRadius: BorderRadius.circular(4)),
-                    child: const Text('合作', style: TextStyle(color: Colors.white, fontSize: kFontMicro)),
-                  ),
-              ]),
-              Text(collab ? 'UP 主和这家店有合作' : 'UP 主声明和这家店没有合作',
-                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-            ]),
+            child: Text('硬币只能投给视频',
+                style: TextStyle(fontSize: kFontBodyLg, fontWeight: FontWeight.w600, color: sz.ink)),
           ),
+          if (me != null)
+            Text('你有 ${me.coinBalance} 枚',
+                style: szTabular(fontSize: kFigureSm, fontWeight: FontWeight.w600, color: sz.hold)),
         ]),
-      ),
+        const SizedBox(height: 5),
+        Text.rich(
+          TextSpan(children: [
+            const TextSpan(text: '每天第一次打开视频领 1 枚,投稿过审得 2 枚(每天最多 10 枚)。'),
+            TextSpan(text: '不能充值、不能提现、不能兑换', style: TextStyle(fontWeight: FontWeight.w600, color: sz.ink)),
+            const TextSpan(text: ' —— 它不是钱,是一句「这条值得」。'),
+          ]),
+          style: TextStyle(fontSize: kFontNote, color: sz.inkMuted, height: 1.6),
+        ),
+      ]),
     );
   }
 }
