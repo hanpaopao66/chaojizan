@@ -589,6 +589,10 @@ async def delete_account(
     # 互动消息一并处理;对象存储里的文件在提交之后删
     from ..services.video import purge_user as purge_video_user
     await purge_video_user(db, user.id)
+    # 消息(同一条 S5):他发的消息正文和媒体清空(seq 占位留着)、贴纸包、用户名、联系人、拉黑;
+    # 他是群主的群交给别人,收藏夹删掉。口径见 services/chat_purge.py
+    from ..services.chat_purge import purge_user as purge_chat_user
+    chat_purged = await purge_chat_user(db, user.id)
     # 店员名单:人都注销了还挂在名单上,店主看到的是 `del****9af0`。
     # 店主本人有店时上面已经 409 拒了,能走到这里的必然是店员或普通账号。
     await db.execute(
@@ -615,8 +619,8 @@ async def delete_account(
     # 清掉等于让"注销→再注册"绕过同设备多账号判定(见 services/coupons.py
     # 的 _device_has_other_account 与 services/risk.py 的 multi_account_device)。
     await db.commit()
-    logger.info("账号已注销并匿名化: user_id=%s 退券=%s",
-                user.id, refunded_vouchers)
+    logger.info("账号已注销并匿名化: user_id=%s 退券=%s 消息=%s",
+                user.id, refunded_vouchers, chat_purged)
     return {"deleted": True, "refunded_vouchers": refunded_vouchers}
 
 

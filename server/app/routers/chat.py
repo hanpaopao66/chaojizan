@@ -1003,6 +1003,22 @@ class ReportIn(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+# ---------------- 导出我的数据(S5) ----------------
+
+@router.get("/export")
+async def export_status(me: User = Depends(social_user), db: AsyncSession = Depends(get_db)):
+    """导出进度:none / running(带 progress)/ failed(带 error)/ ready(带下载地址);`last` 是上一份做好的。"""
+    from ..services import chat_export
+    return await chat_export.status(db, me.id)
+
+
+@router.post("/export")
+async def export_start(me: User = Depends(social_user), db: AsyncSession = Depends(get_db)):
+    """开始导出聊天记录(JSON + 媒体)和自己的投稿。后台打包,做好了发一条 `export` 用户事件。"""
+    from ..services import chat_export
+    return await chat_export.start(db, me)
+
+
 @router.post("/reports")
 async def report(body: ReportIn, me: User = Depends(social_user),
                  db: AsyncSession = Depends(get_db)):
