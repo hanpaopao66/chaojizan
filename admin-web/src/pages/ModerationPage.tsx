@@ -9,17 +9,13 @@ import {
 /** 内容审核:待审图片 + 敏感词表。两件事都在这一页,因为它们服务同一个目的。 */
 export default function ModerationPage() {
   const [reviews, setReviews] = useState<ContentReview[]>([])
-  const [words, setWords] = useState<ModerationWord[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const [word, setWord] = useState('')
-  const [cat, setCat] = useState('other')
 
   const load = useCallback(async () => {
     setLoading(true); setErr('')
     try {
-      const [r, w] = await Promise.all([listContentReviews(), listModerationWords()])
-      setReviews(r); setWords(w)
+      setReviews(await listContentReviews())
     } catch (e) { setErr(e instanceof ApiError ? e.message : String(e)) }
     finally { setLoading(false) }
   }, [])
@@ -68,45 +64,73 @@ export default function ModerationPage() {
           </Card>
         </Col>
         <Col xs={24} lg={10}>
-          <Card size="small" title={`敏感词 ${words.length}`} loading={loading}>
-            <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
-              <Input value={word} placeholder="新增敏感词" maxLength={30}
-                     onChange={(e) => setWord(e.target.value)} />
-              <Select value={cat} onChange={setCat} style={{ width: 110 }}
-                      options={[
-                        { value: 'porn', label: '色情' },
-                        { value: 'politics', label: '政治' },
-                        { value: 'ad', label: '广告' },
-                        { value: 'abuse', label: '辱骂' },
-                        { value: 'other', label: '其他' },
-                      ]} />
-              <Button type="primary" disabled={!word.trim()}
-                      onClick={() => act(async () => {
-                        await addModerationWord(word.trim(), cat)
-                        setWord('')
-                      }, '已加入')}>
-                加
-              </Button>
-            </Space.Compact>
-            <Table<ModerationWord>
-              rowKey="id" dataSource={words} size="small"
-              pagination={{ pageSize: 10, showSizeChanger: false }}
-              columns={[
-                { title: '词', dataIndex: 'word' },
-                { title: '分类', dataIndex: 'category', width: 80,
-                  render: (v: string) => <Tag>{v}</Tag> },
-                { title: '', width: 50,
-                  render: (_, w) => (
-                    <Popconfirm title="删掉这个词?"
-                                onConfirm={() => act(() => delModerationWord(w.id), '已删')}>
-                      <Button type="link" size="small" danger>删</Button>
-                    </Popconfirm>
-                  ) },
-              ]}
-            />
-          </Card>
+          <ModerationWordsCard />
         </Col>
       </Row>
     </>
+  )
+}
+
+/**
+ * 敏感词表(评价、昵称、聊天消息、群名、评论、弹幕、视频标题共用一张,services/moderation.guard_text)。
+ * 「内容审核」和「社区治理 → 屏蔽词」两处用的是同一个组件、同一份数据。
+ */
+export function ModerationWordsCard({ pageSize = 10 }: { pageSize?: number }) {
+  const [words, setWords] = useState<ModerationWord[]>([])
+  const [loading, setLoading] = useState(false)
+  const [word, setWord] = useState('')
+  const [cat, setCat] = useState('other')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try { setWords(await listModerationWords()) }
+    catch (e) { message.error(e instanceof ApiError ? e.message : String(e)) }
+    finally { setLoading(false) }
+  }, [])
+  useEffect(() => { void load() }, [load])
+
+  async function act(fn: () => Promise<unknown>, ok: string) {
+    try { await fn(); message.success(ok); await load() }
+    catch (e) { message.error(e instanceof ApiError ? e.message : String(e)) }
+  }
+
+  return (
+    <Card size="small" title={`敏感词 ${words.length}`} loading={loading}>
+      <Space.Compact style={{ width: '100%', marginBottom: 10 }}>
+        <Input value={word} placeholder="新增敏感词" maxLength={30}
+               onChange={(e) => setWord(e.target.value)} />
+        <Select value={cat} onChange={setCat} style={{ width: 110 }}
+                options={[
+                  { value: 'porn', label: '色情' },
+                  { value: 'politics', label: '政治' },
+                  { value: 'ad', label: '广告' },
+                  { value: 'abuse', label: '辱骂' },
+                  { value: 'other', label: '其他' },
+                ]} />
+        <Button type="primary" disabled={!word.trim()}
+                onClick={() => act(async () => {
+                  await addModerationWord(word.trim(), cat)
+                  setWord('')
+                }, '已加入')}>
+          加
+        </Button>
+      </Space.Compact>
+      <Table<ModerationWord>
+        rowKey="id" dataSource={words} size="small"
+        pagination={{ pageSize, showSizeChanger: false }}
+        columns={[
+          { title: '词', dataIndex: 'word' },
+          { title: '分类', dataIndex: 'category', width: 80,
+            render: (v: string) => <Tag>{v}</Tag> },
+          { title: '', width: 50,
+            render: (_, w) => (
+              <Popconfirm title="删掉这个词?"
+                          onConfirm={() => act(() => delModerationWord(w.id), '已删')}>
+                <Button type="link" size="small" danger>删</Button>
+              </Popconfirm>
+            ) },
+        ]}
+      />
+    </Card>
   )
 }

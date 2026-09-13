@@ -22,6 +22,7 @@ import {
   MenuOutlined,
   SafetyCertificateOutlined,
   ShopOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import { Button, Drawer, Layout, Menu, Tag } from 'antd'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -51,6 +52,12 @@ import MerchantsPage from '../pages/MerchantsPage'
 import MiniAppsPage from '../pages/MiniAppsPage'
 import RidersPage from '../pages/RidersPage'
 import WithdrawalsPage from '../pages/WithdrawalsPage'
+import CommunityAppealsPage from '../pages/community/AppealsPage'
+import CommunityReportsPage from '../pages/community/ReportsPage'
+import CommunityReviewPage from '../pages/community/ReviewPage'
+import CommunitySanctionsPage from '../pages/community/SanctionsPage'
+import CommunityStatsPage from '../pages/community/StatsPage'
+import CommunityWordsPage from '../pages/community/WordsPage'
 
 /**
  * 平台后台外壳。
@@ -75,6 +82,16 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     { key: '/issues', icon: <CarOutlined />, label: '配送异常' },
     { key: '/food-safety', icon: <MedicineBoxOutlined />, label: '食安投诉' },
     { key: '/moderation', icon: <EyeOutlined />, label: '内容审核' },
+    // 消息 / 视频的治理(DEV-PROMPTS-40 #370):先审后发的队列、举报(S8 看私聊留痕)、
+    // 处罚与申诉(S6 换人)是每天要处理的;屏蔽词和数据是事后看的
+    { key: 'community', icon: <TeamOutlined />, label: '社区治理', children: [
+      { key: '/community/review', label: '视频审核' },
+      { key: '/community/reports', label: '举报处理' },
+      { key: '/community/sanctions', label: '处置记录' },
+      { key: '/community/appeals', label: '申诉' },
+      { key: '/community/words', label: '屏蔽词' },
+      { key: '/community/stats', label: '数据' },
+    ] },
     { key: '/mini-apps', icon: <AppstoreOutlined />, label: '小程序' },
     { key: '/risk', icon: <WarningOutlined />, label: '风控' },
     { key: '/order-flags', icon: <FlagOutlined />, label: '异常标记' },
@@ -94,6 +111,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     <Menu
       mode="inline"
       selectedKeys={[location.pathname]}
+      defaultOpenKeys={location.pathname.startsWith('/community/') ? ['community'] : []}
       items={items}
       onClick={({ key }) => { nav(key); setDrawerOpen(false) }}
     />
@@ -153,6 +171,12 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/issues" element={<IssuesPage />} />
             <Route path="/food-safety" element={<FoodSafetyPage />} />
             <Route path="/moderation" element={<ModerationPage />} />
+            <Route path="/community/review" element={<CommunityReviewPage />} />
+            <Route path="/community/reports" element={<CommunityReportsPage />} />
+            <Route path="/community/sanctions" element={<CommunitySanctionsPage />} />
+            <Route path="/community/appeals" element={<CommunityAppealsPage />} />
+            <Route path="/community/words" element={<CommunityWordsPage />} />
+            <Route path="/community/stats" element={<CommunityStatsPage />} />
             <Route path="/mini-apps" element={<MiniAppsPage />} />
             <Route path="/risk" element={<RiskPage />} />
             <Route path="/order-flags" element={<OrderFlagsPage />} />
