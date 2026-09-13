@@ -6,7 +6,7 @@
 """
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func as sa_func
 from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -209,6 +209,29 @@ async def active_announcements(
         .order_by(Announcement.created_at.desc())
         .limit(3)
     )
+    return list(rows)
+
+
+@router.get("/announcements/history", response_model=list[AnnouncementOut])
+async def announcement_history(
+    audience: str = "user",
+    before_id: int | None = None,
+    limit: int = Query(20, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """用户端「消息」里「超级赞」服务号的记录:发出去过的公告,新的在前,按 id 往前翻。
+
+    和 /announcements 的区别:这里**包括已经到期的** —— 服务号是一条条消息,到期了也还在记录里,
+    像频道里的旧帖子;后台下线(is_active=false)的算撤回,不显示;还没到开始时间的不显示。"""
+    now = datetime.now(timezone.utc)
+    q = select(Announcement).where(
+        Announcement.is_active.is_(True),
+        Announcement.audience.in_([audience, "all"]),
+        or_(Announcement.starts_at.is_(None), Announcement.starts_at <= now),
+    )
+    if before_id is not None:
+        q = q.where(Announcement.id < before_id)
+    rows = await db.scalars(q.order_by(Announcement.id.desc()).limit(limit))
     return list(rows)
 
 

@@ -44,7 +44,25 @@ seen_after = [a["title"] for a in call("GET", "/announcements?audience=user")]
 assert ann_all["title"] not in seen_after, "下线的公告不应再出现"
 print("✓ 公告一键下线立即生效(发通知/撤通知都不用发版)")
 
+# 服务号的记录(用户端「消息」里的「超级赞」):到期的留着,下线的算撤回,未开始的不出现
+ann_old = call("POST", "/admin/announcements", admin, {
+    "audience": "user", "title": f"过期公告-{tag}", "content": "上个月的活动",
+    "starts_at": "2020-01-01T00:00:00Z", "ends_at": "2020-01-31T00:00:00Z"})
+assert ann_old["title"] not in [a["title"] for a in call("GET", "/announcements?audience=user")]
+hist = [a["title"] for a in call("GET", "/announcements/history?audience=user&limit=50")]
+assert ann_old["title"] in hist and ann_user["title"] in hist, "服务号里到期的公告也在记录里"
+assert ann_all["title"] not in hist, "后台下线的算撤回,服务号里也不显示"
+assert ann_future["title"] not in hist, "还没到时间的不显示"
+page1 = call("GET", "/announcements/history?audience=user&limit=1")
+page2 = call("GET", f"/announcements/history?audience=user&limit=1&before_id={page1[0]['id']}")
+assert page2 and page2[0]["id"] < page1[0]["id"], "按 id 往前翻"
+merchant_hist = [a["title"] for a in call("GET", "/announcements/history?audience=merchant&limit=50")]
+assert ann_user["title"] not in merchant_hist
+print("✓ 服务号记录:到期的留着、下线的撤回、未开始的不出现,按 id 往前翻")
+
 # 清理:全部下线,不污染后续测试与真机演示
+call("PATCH", f"/admin/announcements/{ann_old['id']}", admin,
+     {"is_active": False})
 call("PATCH", f"/admin/announcements/{ann_user['id']}", admin,
      {"is_active": False})
 call("PATCH", f"/admin/announcements/{ann_future['id']}", admin,

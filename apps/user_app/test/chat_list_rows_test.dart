@@ -41,7 +41,8 @@ void main() {
       httpClient: MockClient((req) async {
         final Object payload = switch (req.url.path) {
           '/auth/login' => {'token': 'tkn', 'user_id': 1, 'name': '周小满', 'role': 'customer'},
-          '/announcements' => [
+          // 服务号读的是 /announcements/history(到期的也在);老接口留着兜底
+          '/announcements' || '/announcements/history' => [
               {'id': 7, 'title': '「消息」「视频」两个新入口上线了', 'content': '底栏换了', 'created_at': ago(const Duration(minutes: 30))},
             ],
           '/orders/chat-threads' => {

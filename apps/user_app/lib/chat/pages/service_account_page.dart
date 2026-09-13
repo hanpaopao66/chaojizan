@@ -11,8 +11,9 @@ import '../ui/format.dart' show dayLabel, hm, sameDay;
 /// 「超级赞」平台服务号(设计稿 A「万物皆会话」):原来右上角铃铛里的消息中心,换成一个只读的会话。
 ///
 /// 一条公告 = 一条消息,最新的在最底下;打开前没看过的上面画「以下为新消息」。
-/// 服务号不收消息,所以没有输入框。内容就是现有的 `GET /announcements`:
-/// 服务端只给**当前生效**的公告、最多 3 条 —— 过期的公告不在这儿留档。
+/// 服务号不收消息,所以没有输入框。内容是 `GET /announcements/history`:发出去过的公告都在,
+/// 到期的也留着(像频道里的旧帖子),后台下线的算撤回、不显示;往上翻到头自动接着拉更早的。
+/// 订单的进度和对话不在这里,在各自的订单群里(列表里每一单一行)。
 class ServiceAccountPage extends StatefulWidget {
   const ServiceAccountPage({super.key});
 
@@ -82,6 +83,8 @@ class _ServiceAccountPageState extends State<ServiceAccountPage> {
                 final a = day(n), b = older == null ? null : day(older);
                 if (a != null && (b == null || !sameDay(a, b))) entries.add(_DayLabel(a));
               }
+              // 反着排,最后一项在最上面:滑到那儿就接着拉更早的公告
+              if (!_x.noticesExhausted) entries.add(const _OlderLoader());
               return ListView.builder(
                 reverse: true,
                 // 没有输入条托着:最底下那句说明自己让开手机底部的手势条
@@ -131,6 +134,28 @@ class _NoticeBubble extends StatelessWidget {
       ]),
     );
   }
+}
+
+/// 翻到最上面时出现:一出现就去拉更早的一页
+class _OlderLoader extends StatefulWidget {
+  const _OlderLoader();
+
+  @override
+  State<_OlderLoader> createState() => _OlderLoaderState();
+}
+
+class _OlderLoaderState extends State<_OlderLoader> {
+  @override
+  void initState() {
+    super.initState();
+    unawaited(ChatExtras.instance.loadOlderNotices());
+  }
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.all(12),
+        child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+      );
 }
 
 class _FootNote extends StatelessWidget {

@@ -15,7 +15,7 @@ import 'store.dart';
 /// 和聊天会话一样数「有未读的行」,不数条数;静音了的视频互动不算。
 final ValueNotifier<int> chatExtraBadge = ValueNotifier<int>(0);
 
-/// 平台服务号里的一条:就是一条平台公告(`GET /announcements`)。
+/// 平台服务号里的一条:就是一条平台公告(`GET /announcements/history`,到期的也在,下线的算撤回)。
 class ServiceNotice {
   const ServiceNotice({required this.id, required this.title, required this.content, this.createdAt});
 
@@ -25,7 +25,9 @@ class ServiceNotice {
       id: (m['id'] as num?)?.toInt() ?? 0,
       title: '${m['title'] ?? ''}',
       content: '${m['content'] ?? ''}',
-      createdAt: DateTime.tryParse('${m['created_at'] ?? ''}')?.toLocal(),
+      // 定时发的公告按开始时间算「发出」的时刻,没定时的按创建时间
+      createdAt: (DateTime.tryParse('${m['starts_at'] ?? ''}') ?? DateTime.tryParse('${m['created_at'] ?? ''}'))
+          ?.toLocal(),
     );
   }
 
@@ -126,6 +128,11 @@ class ChatExtras extends ChangeNotifier with WidgetsBindingObserver {
   List<ServiceNotice> notices = const [];
   int seenNoticeId = 0;
 
+  /// 服务号往前翻到头了(再早没有公告了)
+  bool noticesExhausted = false;
+  bool _loadingOlder = false;
+  static const _kNoticePage = 20;
+
   List<OrderThread> orderThreads = const [];
 
   /// 视频互动最近的一条(四类里最新的那条),给列表那一行做预览和排序
@@ -178,18 +185,43 @@ class ChatExtras extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> refresh() => Future.wait([refreshNotices(), refreshOrders(), refreshBot()]);
 
+  /// 服务号最新的一页。只拿最新一页、不把往前翻过的丢掉:翻过的更早的公告接在后面
   Future<void> refreshNotices() async {
     final api = _api;
     if (api == null) return;
     try {
-      final data = await api.requestJson('GET', '/announcements', query: {'audience': 'user'});
-      final list = [for (final x in (data is List ? data : const [])) ServiceNotice.fromJson(x)]
+      final data = await api.requestJson('GET', '/announcements/history',
+          query: {'audience': 'user', 'limit': '$_kNoticePage'});
+      final fresh = [for (final x in (data is List ? data : const [])) ServiceNotice.fromJson(x)];
+      final ids = {for (final n in fresh) n.id};
+      final minFresh = fresh.isEmpty ? 0 : fresh.map((n) => n.id).reduce((a, b) => a < b ? a : b);
+      notices = [...fresh, ...notices.where((n) => !ids.contains(n.id) && n.id < minFresh)]
         ..sort((a, b) => b.id.compareTo(a.id));
-      notices = list;
+      if (fresh.length < _kNoticePage) noticesExhausted = true;
       notifyListeners();
       _recount();
     } catch (_) {
       // 拉不到就先按上一次的显示
+    }
+  }
+
+  /// 服务号往前翻一页(比现在最旧的那条更早的)
+  Future<void> loadOlderNotices() async {
+    final api = _api;
+    if (api == null || _loadingOlder || noticesExhausted || notices.isEmpty) return;
+    _loadingOlder = true;
+    try {
+      final data = await api.requestJson('GET', '/announcements/history',
+          query: {'audience': 'user', 'limit': '$_kNoticePage', 'before_id': '${notices.last.id}'});
+      final older = [for (final x in (data is List ? data : const [])) ServiceNotice.fromJson(x)];
+      if (older.length < _kNoticePage) noticesExhausted = true;
+      final ids = {for (final n in notices) n.id};
+      notices = [...notices, ...older.where((n) => !ids.contains(n.id))];
+      notifyListeners();
+    } catch (_) {
+      // 这次没翻成,下次滑到头再试
+    } finally {
+      _loadingOlder = false;
     }
   }
 
@@ -272,6 +304,7 @@ class ChatExtras extends ChangeNotifier with WidgetsBindingObserver {
     _clearPersonal();
     notices = const [];
     seenNoticeId = 0;
+    noticesExhausted = false;
     botOff = false;
     _api = null;
     chatExtraBadge.value = 0;
