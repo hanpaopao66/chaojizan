@@ -558,10 +558,24 @@ class _HomePageState extends State<HomePage> {
     // 两种情况都包一层 Theme:只在竖屏时才包的话,根上的 widget 类型一变,
     // 整个 IndexedStack 连同四个 tab 的状态都会被销毁重建(首页重新定位、会话列表重拉)
     final immersive = _tab == 2 && videoImmersive.value;
-    return Theme(
-        data: immersive ? superZTheme(Brightness.dark) : Theme.of(context),
-        child: scaffold);
+    return Theme(data: immersive ? _immersiveTheme : Theme.of(context), child: scaffold);
   }
+
+  /// 竖屏子页用的深色主题,底栏再压成整条黑:选中白、没选中白 55%(设计稿 F「底栏跟着转黑」)。
+  /// 光换深色主题的话底栏是深色卡片底(#24231F)+ 浅 clay 选中,压在纯黑的视频下面还是一条亮边
+  static final ThemeData _immersiveTheme = () {
+    final t = superZTheme(Brightness.dark);
+    final dim = Colors.white.withValues(alpha: .55);
+    Color tone(Set<WidgetState> s) => s.contains(WidgetState.selected) ? Colors.white : dim;
+    return t.copyWith(
+      navigationBarTheme: t.navigationBarTheme.copyWith(
+        backgroundColor: Colors.black,
+        iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(size: 23, color: tone(s))),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+            (s) => t.navigationBarTheme.labelTextStyle?.resolve(s)?.copyWith(color: tone(s))),
+      ),
+    );
+  }();
 }
 
 /// 首页顶部的进行中订单条(DEV-PROMPTS-40 #339)。

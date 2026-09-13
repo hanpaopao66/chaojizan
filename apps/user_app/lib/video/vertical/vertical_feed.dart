@@ -18,6 +18,7 @@ import '../nav.dart';
 import '../widgets/feed.dart';
 import '../widgets/report.dart';
 import '../widgets/share.dart';
+import '../widgets/shop_card.dart';
 
 /// 竖屏短视频流(#363,对标抖音):上下滑一条一条看。
 ///
@@ -695,6 +696,12 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
   }
 
   void _heart(Offset at) {
+    // 系统关了动态效果:不飘心,直接给终态(右侧栏的心变成 clay)
+    if (SzMotion.off(context)) {
+      HapticFeedback.lightImpact();
+      widget.onDoubleTapLike();
+      return;
+    }
     final a = AnimationController(vsync: this, duration: const Duration(milliseconds: 700));
     final entry = (at: at, anim: a);
     setState(() => _hearts.add(entry));
@@ -719,6 +726,9 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
     final pos = ready ? c.value.position : Duration.zero;
     final progress = dur.inMilliseconds > 0 ? (pos.inMilliseconds / dur.inMilliseconds).clamp(0.0, 1.0) : 0.0;
     final up = d?.uploader ?? card.uploader;
+    // 点赞原来是抖音的粉红、收藏是亮金 —— 换成 clay 和 hold,黑底上照样跳得出来,和全站一个调(设计稿 F)
+    final sz = Theme.of(context).sz;
+    final shade = [Shadow(offset: const Offset(0, 1), blurRadius: 4, color: Colors.black.withValues(alpha: .6))];
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onTogglePlay,
@@ -743,16 +753,16 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
         if (paused) const Center(child: Icon(Icons.play_arrow_rounded, size: 84, color: Colors.white70)),
         if (widget.webMuted && ready)
           Positioned(
-            top: 12,
-            left: 12,
+            top: 14,
+            left: 14,
             child: GestureDetector(
               onTap: widget.onUnmute,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
                 decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(16)),
                 child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.volume_off, color: Colors.white, size: 16),
-                  SizedBox(width: 4),
+                  Icon(Icons.volume_off_outlined, color: Colors.white, size: 15),
+                  SizedBox(width: 5),
                   Text('点一下开声音', style: TextStyle(color: Colors.white, fontSize: kFontNote)),
                 ]),
               ),
@@ -770,16 +780,16 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
                   opacity: (1 - t).clamp(0.0, 1.0),
                   child: Transform.scale(
                       scale: .8 + .6 * Curves.easeOut.transform(t),
-                      child: const Icon(Icons.favorite, color: Color(0xFFFF4D6D), size: 80)),
+                      child: Icon(Icons.favorite, color: sz.clay, size: 80)),
                 ),
               );
             },
           ),
         if (!widget.clear) ...[
-          // 右侧栏
+          // 右侧栏:头像(没关注时底下一个 clay 小加号)/ 赞 / 评论 / 收藏 / 分享
           Positioned(
-            right: 8,
-            bottom: 90,
+            right: 10,
+            bottom: 96,
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               GestureDetector(
                 onTap: widget.onOpenSpace,
@@ -794,27 +804,30 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
                       bottom: -9,
                       child: GestureDetector(
                         onTap: widget.onFollow,
-                        child: const CircleAvatar(
+                        child: CircleAvatar(
                             radius: 10,
-                            backgroundColor: Color(0xFFFF4D6D),
-                            child: Icon(Icons.add, size: 14, color: Colors.white)),
+                            backgroundColor: sz.clay,
+                            child: const Icon(Icons.add, size: 14, color: Colors.white)),
                       ),
                     ),
                 ]),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 20),
               _RailButton(
                 icon: Icons.favorite,
-                color: (d?.me?.liked ?? false) ? const Color(0xFFFF4D6D) : Colors.white,
+                color: (d?.me?.liked ?? false) ? sz.clay : Colors.white,
                 label: vCount(card.likes),
                 semantic: '点赞',
                 onTap: widget.onLike,
               ),
               _RailButton(
-                  icon: Icons.chat_bubble, label: vCount(card.commentCount), semantic: '评论', onTap: widget.onComments),
+                  icon: Icons.chat_bubble_outline,
+                  label: vCount(card.commentCount),
+                  semantic: '评论',
+                  onTap: widget.onComments),
               _RailButton(
-                icon: Icons.star,
-                color: (d?.me?.favorited ?? false) ? const Color(0xFFFFC53D) : Colors.white,
+                icon: (d?.me?.favorited ?? false) ? Icons.star : Icons.star_border,
+                color: (d?.me?.favorited ?? false) ? sz.hold : Colors.white,
                 label: vCount(card.favorites),
                 semantic: '收藏',
                 onTap: widget.onFavorite,
@@ -823,36 +836,39 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
                   icon: Icons.reply, flip: true, label: vCount(card.shares), semantic: '分享', onTap: widget.onShare),
             ]),
           ),
-          // 底部:@UP 主、标题、话题
+          // 底部:@UP 主、标题、话题;挂了店的再加一行店名(有合作标「合作」,D16)
           Positioned(
-            left: 12,
-            right: 80,
-            bottom: 26,
+            left: 14,
+            right: 84,
+            bottom: 30,
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
               GestureDetector(
                 onTap: widget.onOpenSpace,
                 child: Text('@${up?.name ?? ''}',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: kFontBodyLg,
-                        shadows: [Shadow(blurRadius: 4)])),
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600, fontSize: kFontTitle, shadows: shade)),
               ),
               const SizedBox(height: 6),
               Text(card.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontSize: kFontBody, shadows: [Shadow(blurRadius: 4)])),
+                  style: TextStyle(color: Colors.white, fontSize: kFontBodyLg, height: 1.45, shadows: shade)),
               if (card.tags.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Wrap(spacing: 8, children: [
+                const SizedBox(height: 6),
+                Wrap(spacing: 10, children: [
                   for (final t in card.tags.take(4))
                     GestureDetector(
                       onTap: () =>
                           Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => _TagSearch(tag: t))),
-                      child: Text('#$t', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      child: Text('#$t',
+                          style: TextStyle(
+                              color: Colors.white, fontSize: kFontBodyLg, fontWeight: FontWeight.w600, shadows: shade)),
                     ),
                 ]),
+              ],
+              if (d?.shop != null) ...[
+                const SizedBox(height: 8),
+                VideoShopChip(shop: d!.shop!, collab: d.shopCollab == true || card.collab),
               ],
             ]),
           ),
@@ -881,15 +897,15 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
               child: Column(mainAxisAlignment: MainAxisAlignment.end, children: [
                 if (_dragging)
                   Text('${vDuration((dur.inMilliseconds * _dragValue).round())} / ${vDuration(dur.inMilliseconds)}',
-                      style: const TextStyle(
+                      style: szTabular(
                           color: Colors.white,
                           fontSize: kFontTitle,
                           fontWeight: FontWeight.w600,
-                          shadows: [Shadow(blurRadius: 6)])),
+                          shadows: const [Shadow(blurRadius: 6)])),
                 LinearProgressIndicator(
                   value: _dragging ? _dragValue : progress,
-                  minHeight: _dragging ? 6 : 2,
-                  backgroundColor: Colors.white24,
+                  minHeight: _dragging ? 6 : 2.5,
+                  backgroundColor: Colors.white.withValues(alpha: .22),
                   color: Colors.white,
                 ),
               ]),
@@ -919,7 +935,8 @@ class _RailButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    Widget i = Icon(icon, color: color, size: 34, shadows: const [Shadow(blurRadius: 6)]);
+    // 线图标 30,下面一行等宽数字(设计稿 F);黑白两种画面上都靠一层阴影托着
+    Widget i = Icon(icon, color: color, size: 30, shadows: const [Shadow(blurRadius: 6)]);
     if (flip) i = Transform.flip(flipX: true, child: i);
     return Semantics(
       button: true,
@@ -927,12 +944,12 @@ class _RailButton extends StatelessWidget {
       child: InkResponse(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 7),
           child: Column(children: [
             i,
-            const SizedBox(height: 2),
+            const SizedBox(height: 3),
             Text(label,
-                style: const TextStyle(color: Colors.white, fontSize: kFontNote, shadows: [Shadow(blurRadius: 4)])),
+                style: szTabular(color: Colors.white, fontSize: kFontNote, shadows: const [Shadow(blurRadius: 4)])),
           ]),
         ),
       ),
