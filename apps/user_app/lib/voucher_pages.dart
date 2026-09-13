@@ -409,7 +409,7 @@ class _MyVouchersPageState extends State<MyVouchersPage> {
       body: tickets == null
           ? const Center(child: CircularProgressIndicator())
           : tickets.isEmpty
-              ? const Center(child: Text('还没有券,去「团购」逛逛'))
+              ? SzRefreshableEmpty(onRefresh: _load, child: const Text('还没有券,去「团购」逛逛'))
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.separated(

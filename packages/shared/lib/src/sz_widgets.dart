@@ -756,6 +756,34 @@ class SzEmpty extends StatelessWidget {
   }
 }
 
+/// 能下拉刷新的空状态:[child](通常是 [SzEmpty])撑满一屏居中,外面套下拉刷新。
+///
+/// 列表页常见的写法是「空了显示 SzEmpty,有数据才套 RefreshIndicator」—— 空着的时候就拉不动,
+/// 新数据进来只能退出重进。直接把 SzEmpty 塞进 RefreshIndicator 也不行:没有能滚的东西,
+/// 下拉收不到滚动通知。这里放进 ListView,高度撑满视口、内容照旧居中,看起来和原来一样。
+/// (scripts/check_refresh_pullable.py 查的就是这两种写法。)
+class SzRefreshableEmpty extends StatelessWidget {
+  const SzRefreshableEmpty({super.key, required this.onRefresh, required this.child});
+
+  final Future<void> Function() onRefresh;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: LayoutBuilder(
+        builder: (context, box) => ListView(children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(minHeight: box.hasBoundedHeight ? box.maxHeight : 0),
+            child: Center(child: child),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 /// 分转元。与 models.dart 的 yuan() 同口径,这里再导一份是为了
 /// 让 design.dart 这个轻入口不必依赖 models(models 会带出网络层)。
 String yuanOf(int cents) => '¥${(cents / 100).toStringAsFixed(2)}';

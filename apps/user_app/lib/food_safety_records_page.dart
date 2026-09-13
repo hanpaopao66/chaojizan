@@ -62,7 +62,11 @@ class _FoodSafetyRecordsPageState extends State<FoodSafetyRecordsPage> {
             if (!snapshot.hasData) return const SkeletonList();
             final rows = snapshot.data!;
             if (rows.isEmpty) {
-              return const SzEmpty(text: '你还没有提交过食安投诉');
+              // 空着也要能下拉刷新:直接放 SzEmpty 的话没有能滚的东西,下拉收不到通知
+              return ListView(children: const [
+                SizedBox(height: 80),
+                SzEmpty(text: '你还没有提交过食安投诉'),
+              ]);
             }
             return ListView.separated(
               padding: const EdgeInsets.all(12),

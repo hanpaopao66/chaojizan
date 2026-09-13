@@ -138,8 +138,9 @@ class _VoucherManagePageState extends State<VoucherManagePage> {
               ? SzError(error: _error, onRetry: _load)
               : const Center(child: CircularProgressIndicator()))
           : deals.isEmpty
-              ? const Center(
-                  child: Text('还没发布团购券\n低价引流,核销才收 2% 服务费',
+              ? SzRefreshableEmpty(
+                  onRefresh: _load,
+                  child: const Text('还没发布团购券\n低价引流,核销才收 2% 服务费',
                       textAlign: TextAlign.center))
               : RefreshIndicator(
                   onRefresh: _load,

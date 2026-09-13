@@ -256,9 +256,11 @@ class _SupportPageState extends State<SupportPage> {
           : _tickets == null
               ? const SkeletonList(itemCount: 4)
               : _tickets!.isEmpty
-                  ? const EmptyState(
-                      icon: Icons.support_agent,
-                      text: '有任何问题都可以找平台\n我们承诺账目透明、有问必答')
+                  ? SzRefreshableEmpty(
+                      onRefresh: _load,
+                      child: const EmptyState(
+                          icon: Icons.support_agent,
+                          text: '有任何问题都可以找平台\n我们承诺账目透明、有问必答'))
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView.separated(

@@ -103,8 +103,9 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
           }
           final list = snapshot.data ?? const <StayAfterSale>[];
           if (list.isEmpty) {
-            return const SzEmpty(
-                art: BrandArt.receipt, text: '没有售后申请\n有申请会在这里提醒你');
+            return SzRefreshableEmpty(
+                onRefresh: _refresh,
+                child: const SzEmpty(art: BrandArt.receipt, text: '没有售后申请\n有申请会在这里提醒你'));
           }
           return RefreshIndicator(
             onRefresh: _refresh,

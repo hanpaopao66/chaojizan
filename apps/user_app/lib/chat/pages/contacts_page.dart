@@ -61,7 +61,8 @@ class _ContactsPageState extends State<ContactsPage> {
       body: items == null
           ? (_error != null ? SzError(error: _error, onRetry: _load) : const Center(child: CircularProgressIndicator()))
           : items.isEmpty
-              ? Center(
+              ? SzRefreshableEmpty(
+                  onRefresh: _load,
                   child: SzEmpty(
                     text: '还没有联系人\n用对方的用户名、手机号或名片二维码添加',
                     actionLabel: '添加联系人',

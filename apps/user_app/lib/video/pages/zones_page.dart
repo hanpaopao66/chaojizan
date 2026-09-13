@@ -198,7 +198,7 @@ class _RankPageState extends State<RankPage> {
           child: items == null
               ? (_error != null ? SzError(error: _error, onRetry: _load) : const Center(child: CircularProgressIndicator()))
               : items.isEmpty
-                  ? const Center(child: SzEmpty(text: '这个时间段还没有上榜的视频'))
+                  ? SzRefreshableEmpty(onRefresh: _load, child: const SzEmpty(text: '这个时间段还没有上榜的视频'))
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView.builder(

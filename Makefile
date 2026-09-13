@@ -48,6 +48,7 @@ analyze:
 	@python3 scripts/check_macos_entitlements.py && echo "== macOS 权限声明 ✓"
 	@bash scripts/check_wide_layout.sh
 	@python3 scripts/check_dialog_controller_dispose.py && echo "== 弹层里的输入框控制器跟着弹层销毁 ✓"
+	@python3 scripts/check_refresh_pullable.py && echo "== 列表空着、不满一屏也拉得动下拉刷新 ✓"
 	@python3 scripts/check_setstate_future.py && echo "== 没有把 Future 交给 setState ✓"
 # 先 pub get 再 analyze。只写 --no-pub 的话,包解析一过期
 # (在别的 app 里跑过 flutter test 就会)analyze 会喷出几千条

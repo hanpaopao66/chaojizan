@@ -288,8 +288,9 @@ class _HotelListPageState extends State<HotelListPage> {
                           onPressed: _search, child: const Text('重试')),
                     ]))
                   : _hotels.isEmpty
-                      ? const Center(
-                          child: Text('这个日期附近还没有可订的酒店\n换个日期或关键词试试',
+                      ? SzRefreshableEmpty(
+                          onRefresh: _search,
+                          child: const Text('这个日期附近还没有可订的酒店\n换个日期或关键词试试',
                               textAlign: TextAlign.center))
                       : RefreshIndicator(
                           onRefresh: _search,

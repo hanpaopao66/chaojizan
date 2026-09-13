@@ -43,7 +43,7 @@ class _CallsPageState extends State<CallsPage> {
       body: items == null
           ? (_error != null ? SzError(error: _error, onRetry: _load) : const Center(child: CircularProgressIndicator()))
           : items.isEmpty
-              ? const Center(child: SzEmpty(text: '还没有通话\n在私聊右上角点电话图标就能打'))
+              ? SzRefreshableEmpty(onRefresh: _load, child: const SzEmpty(text: '还没有通话\n在私聊右上角点电话图标就能打'))
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.builder(

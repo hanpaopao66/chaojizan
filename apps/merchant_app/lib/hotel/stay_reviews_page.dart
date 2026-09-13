@@ -70,8 +70,9 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
           }
           final reviews = snapshot.data ?? const <StayReview>[];
           if (reviews.isEmpty) {
-            return const SzEmpty(
-                art: BrandArt.receipt, text: '还没有住客点评\n客人离店后可以评价');
+            return SzRefreshableEmpty(
+                onRefresh: _refresh,
+                child: const SzEmpty(art: BrandArt.receipt, text: '还没有住客点评\n客人离店后可以评价'));
           }
           return RefreshIndicator(
             onRefresh: _refresh,
