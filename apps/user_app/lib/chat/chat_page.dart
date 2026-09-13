@@ -436,6 +436,10 @@ class _ChatPageState extends State<ChatPage> {
   late final BubbleActions _bubbleActions = BubbleActions(
     onCallBack: (m) {
       final c = chat;
+      if (!RemoteCopy.feature('calls')) {
+        _toast('通话功能暂未开放');
+        return;
+      }
       if (c != null && c.isPrivate && c.peer != null) _call(c, video: m.call?['video'] == true);
     },
     onLongPress: _longPress,
@@ -906,7 +910,8 @@ class _ChatPageState extends State<ChatPage> {
         ]),
       ),
       actions: [
-        if (c.isPrivate && c.peer != null && !c.peer!.isBot)
+        // 通话开关(/config 的 features.calls,生产缺省关:电信业务许可待定)关着时不出电话按钮
+        if (c.isPrivate && c.peer != null && !c.peer!.isBot && RemoteCopy.feature('calls'))
           IconButton(tooltip: '通话', icon: const Icon(Icons.call_outlined), onPressed: () => _call(c)),
         IconButton(tooltip: '搜索', icon: const Icon(Icons.search), onPressed: () => setState(() => _searching = true)),
         PopupMenuButton<String>(

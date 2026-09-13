@@ -183,6 +183,8 @@ class _PlayerFrameState extends State<_PlayerFrame> {
   SzVideoController get c => widget.controller;
   bool get fs => widget.fullscreen;
 
+  void Function()? _unlistenFs;
+
   @override
   void initState() {
     super.initState();
@@ -191,6 +193,46 @@ class _PlayerFrameState extends State<_PlayerFrame> {
     if (!c.initialized && c.error == null) unawaited(c.initialize());
     _watchResume();
     _kickHide();
+    HardwareKeyboard.instance.addHandler(_onKey);
+    // 网页版按 Esc 是浏览器自己退的全屏,页面收不到那个键:跟着把全屏页也退掉
+    if (fs) {
+      _unlistenFs = onBrowserFullscreenExit(() {
+        if (mounted && (ModalRoute.of(context)?.isCurrent ?? false)) widget.onFullscreen();
+      });
+    }
+  }
+
+  /// 电脑上的快捷键(和 B 站网页版一样):空格播放 / 暂停、← → 快退快进 5 秒、↑ ↓ 音量、F 全屏、D 弹幕开关。
+  /// 被别的页面盖着(小窗那一个在全屏页底下)、上面有弹层、正在打字的时候不接
+  bool _onKey(KeyEvent e) {
+    if (e is! KeyDownEvent && e is! KeyRepeatEvent) return false;
+    if (!mounted || !TickerMode.valuesOf(context).enabled) return false;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+    if (FocusManager.instance.primaryFocus?.context?.widget is EditableText) return false;
+    final k = e.logicalKey;
+    final down = e is KeyDownEvent;
+    if (k == LogicalKeyboardKey.space && down) {
+      unawaited(c.togglePlay());
+      _showControls();
+    } else if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.arrowLeft) {
+      final step = k == LogicalKeyboardKey.arrowRight ? 5000 : -5000;
+      final to = (c.position.inMilliseconds + step).clamp(0, max(0, c.duration.inMilliseconds - 500)).toInt();
+      unawaited(c.seekTo(Duration(milliseconds: to)));
+      _showControls();
+    } else if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown) {
+      final v = (c.volume + (k == LogicalKeyboardKey.arrowUp ? .1 : -.1)).clamp(0.0, 1.0);
+      unawaited(c.setVolume(v));
+      _showToast('音量 ${(v * 100).round()}%');
+    } else if (k == LogicalKeyboardKey.keyF && down) {
+      widget.onFullscreen();
+    } else if (k == LogicalKeyboardKey.keyD && down && c.danmaku.allowDanmaku) {
+      final on = !c.danmaku.settings.enabled;
+      unawaited(c.danmaku.setEnabled(on));
+      _showToast(on ? '弹幕已打开' : '弹幕已关闭');
+    } else {
+      return false;
+    }
+    return true;
   }
 
   @override
@@ -207,6 +249,8 @@ class _PlayerFrameState extends State<_PlayerFrame> {
   @override
   void dispose() {
     c.removeListener(_onController);
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    _unlistenFs?.call();
     _hideTimer?.cancel();
     _tapTimer?.cancel();
     _toastTimer?.cancel();
@@ -328,11 +372,19 @@ class _PlayerFrameState extends State<_PlayerFrame> {
     final now = _clock.elapsedMilliseconds;
     final p = d.localPosition;
     final g = _taps.up(now, p.dx, p.dy);
+    // 鼠标和手指是两套习惯(B 站网页版 / App 各是各的):鼠标单击 = 播放 / 暂停、双击 = 全屏,
+    // 控件靠悬停出来;手指单击 = 叫出 / 收起控件、双击 = 播放 / 暂停。
+    // 不分的话,鼠标一移过来控件就出来了,再一点反而把控件收了,看着像点了没反应
+    final mouse = d.kind == PointerDeviceKind.mouse;
     if (g == PlayerGesture.doubleTap) {
       _tapTimer?.cancel();
       _tapHit = null;
-      unawaited(c.togglePlay());
-      _showControls();
+      if (mouse) {
+        widget.onFullscreen();
+      } else {
+        unawaited(c.togglePlay());
+        _showControls();
+      }
       return;
     }
     // 点中哪条弹幕要在抬手这一刻判:等单击确认的 300ms 里弹幕已经飞出去十几像素了
@@ -345,6 +397,9 @@ class _PlayerFrameState extends State<_PlayerFrame> {
       _tapHit = null;
       if (hit != null) {
         unawaited(showDanmakuActions(context, c, hit));
+      } else if (mouse) {
+        unawaited(c.togglePlay());
+        _showControls();
       } else {
         _toggleControls();
       }

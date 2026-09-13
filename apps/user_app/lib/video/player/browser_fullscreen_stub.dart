@@ -2,3 +2,5 @@
 Future<void> enterBrowserFullscreen() async {}
 
 Future<void> exitBrowserFullscreen() async {}
+
+void Function() onBrowserFullscreenExit(void Function() cb) => () {};

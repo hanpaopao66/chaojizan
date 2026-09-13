@@ -78,7 +78,9 @@ class _SenderSheetState extends State<_SenderSheet> {
       return;
     }
     final c = widget.controller;
-    final dur = c.duration.inMilliseconds;
+    // 上限按服务端记的这一 P 时长(转码时量的),不按播放器量的:两边能差出几十毫秒,
+    // 播完停在最后一帧时发弹幕,按播放器的算会比服务端的长,被当成「超出视频长度」拒掉
+    final dur = c.part.durationMs > 0 ? c.part.durationMs : c.duration.inMilliseconds;
     var at = c.position.inMilliseconds;
     if (dur > 0 && at > dur) at = dur;
     setState(() => (_sending = true, _error = null));

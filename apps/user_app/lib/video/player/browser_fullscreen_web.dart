@@ -17,3 +17,13 @@ Future<void> exitBrowserFullscreen() async {
     await web.document.exitFullscreen().toDart;
   } catch (_) {}
 }
+
+/// 浏览器自己退出了全屏(用户按了 Esc、系统手势)时回调 —— 那一下浏览器不把按键交给页面,
+/// 不听这个的话全屏页还留着,要再点一次返回。返回值用来取消监听。
+void Function() onBrowserFullscreenExit(void Function() cb) {
+  final listener = ((web.Event _) {
+    if (web.document.fullscreenElement == null) cb();
+  }).toJS;
+  web.document.addEventListener('fullscreenchange', listener);
+  return () => web.document.removeEventListener('fullscreenchange', listener);
+}

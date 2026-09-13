@@ -8,8 +8,9 @@ import '../api.dart';
 import '../models.dart';
 import '../nav.dart';
 import '../widgets/cards.dart';
+import '../me/favorites_page.dart' show FolderPage;
+import '../me/follow_list_page.dart';
 import '../widgets/feed.dart';
-import 'space_lists.dart';
 
 /// UP 主空间(#366):头像、名字、签名、关注 / 粉丝 / 获赞、投稿(最新 / 最多播放)、公开收藏夹、
 /// 「发消息」进私聊、关注按钮。有拉黑关系时不能关注(can_follow=false)。
@@ -96,9 +97,9 @@ class _SpacePageState extends State<SpacePage> {
                     Expanded(
                       child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
                         _Num(label: '关注', value: vInt(stats['following']), onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(builder: (_) => PeopleListPage(userId: user.id, fans: false)))),
+                            MaterialPageRoute<void>(builder: (_) => FollowListPage(userId: user.id, fans: false)))),
                         _Num(label: '粉丝', value: vInt(stats['fans']), onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(builder: (_) => PeopleListPage(userId: user.id, fans: true)))),
+                            MaterialPageRoute<void>(builder: (_) => FollowListPage(userId: user.id, fans: true)))),
                         _Num(label: '获赞', value: vInt(stats['likes'])),
                       ]),
                     ),
@@ -168,7 +169,7 @@ class _SpacePageState extends State<SpacePage> {
                         title: Text(f.title),
                         subtitle: Text('${f.count} 个视频${f.isPublic ? '' : ' · 私密'}'),
                         onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                            builder: (_) => PublicFolderPage(folder: f))),
+                            builder: (_) => FolderPage(f.id, mine: isSelf))),
                       ),
                   ]),
           ]),

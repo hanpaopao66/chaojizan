@@ -50,6 +50,14 @@ import 'settings_page.dart';
 import 'stay_order_pages.dart';
 import 'transparency_page.dart';
 import 'trust_page.dart';
+import 'video/creator/creator_center_page.dart';
+import 'video/creator/upload_tasks.dart';
+import 'video/me/coins_page.dart';
+import 'video/me/favorites_page.dart' as vfav;
+import 'video/me/history_page.dart';
+import 'video/me/video_settings_page.dart';
+import 'video/me/watch_later_page.dart';
+import 'video/notify/notifications_page.dart';
 import 'video/video_tab.dart';
 import 'voucher_pages.dart';
 
@@ -270,6 +278,7 @@ class _HomePageState extends State<HomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) =>
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'user'));
     chatUnreadBadge.addListener(_onBadge);
+    videoNotifyUnread.addListener(_onBadge);
     videoImmersive.addListener(_onBadge);
     // 消息模块:登录了就连实时通道(底栏角标要一直准,不能等点进「消息」tab 才连);
     // 游客登录成功 / 退出登录都会 bump authTick
@@ -293,6 +302,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     chatUnreadBadge.removeListener(_onBadge);
+    videoNotifyUnread.removeListener(_onBadge);
     videoImmersive.removeListener(_onBadge);
     authTick.removeListener(_syncChat);
     _chatNotices?.cancel();
@@ -331,8 +341,13 @@ class _HomePageState extends State<HomePage> {
     final store = ChatStore.instance;
     if (widget.api.isLoggedIn) {
       unawaited(store.start(widget.api));
-    } else if (store.started) {
-      store.stop();
+      // 视频互动消息的角标(「消息」第三行):登录就开始盯,实时事件来了就刷新
+      startVideoNotifyWatcher();
+    } else {
+      if (store.started) store.stop();
+      stopVideoNotifyWatcher();
+      // 换号 / 退出:上一个人还在后台传的投稿不能挂到下一个人名下
+      VideoUploads.instance.clear();
     }
   }
 
@@ -378,7 +393,8 @@ class _HomePageState extends State<HomePage> {
             icon: Icons.chat_bubble_outline,
             selectedIcon: Icons.chat_bubble,
             label: '消息',
-            badgeCount: chatUnreadBadge.value),
+            // 数的是「有未读的行」:互动消息那一行有未读就算一行,不把 9 条赞全加进来
+            badgeCount: chatUnreadBadge.value + (videoNotifyUnread.value > 0 ? 1 : 0)),
         const SzNavItem(
             icon: Icons.smart_display_outlined,
             selectedIcon: Icons.smart_display,
@@ -7226,6 +7242,8 @@ class _ProfileViewState extends State<ProfileView> {
   UserProfile? _profile;
   // 营销总开关(服务端 /config):关着时邀请有礼等入口整体隐藏
   bool _marketingOn = false;
+  // 视频开关(/config 的 features.video):生产缺省关,关着时「视频」那块入口不出
+  bool _videoOn = RemoteCopy.feature('video');
 
   /// 订单四格的角标数据源:优先用 `/orders/counts` 的全量 count,
   /// 和订单页状态筛选上的「待评价 · 3」是同一个数。
@@ -7341,7 +7359,10 @@ class _ProfileViewState extends State<ProfileView> {
     try {
       final config = await configF;
       if (mounted) {
-        setState(() => _marketingOn = config['marketing'] == true);
+        setState(() {
+          _marketingOn = config['marketing'] == true;
+          _videoOn = (config['features'] as Map?)?['video'] != false;
+        });
       }
     } catch (_) {}
     if (ordersF != null) {
@@ -7578,6 +7599,12 @@ class _ProfileViewState extends State<ProfileView> {
         _gridCard(context),
         const SizedBox(height: 12),
         _entryList(context, marketing: marketing),
+        // 视频入口放在最后:往上放会把「长辈版」挤出首屏(找它的人正是看不清这一页的人)。
+        // 视频 tab 左上角的头像是它的主入口,这里是第二个
+        if (!guest && _videoOn) ...[
+          const SizedBox(height: 12),
+          _videoCard(context),
+        ],
       ],
     );
   }
@@ -7962,6 +7989,22 @@ class _ProfileViewState extends State<ProfileView> {
   /// (两组分在两张卡里,对不齐也看不出来),并成一张卡之后这个理由没了。
   /// 4 列在 320 屏上每格 70px,「我的食安投诉」六个字会折成两行 ——
   /// SzIconGrid 允许折行,字是全的(见它文档「标签必须能换行」)。
+  /// 视频(#366):历史、稍后再看、收藏、创作中心、硬币、视频设置。视频开关关着(生产缺省)时整块不出
+  Widget _videoCard(BuildContext context) {
+    Future<void> open(Widget page) =>
+        Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+    return Card(
+      child: SzIconGrid(columns: 3, items: [
+        SzIconGridItem(icon: Icons.history, label: '观看历史', onTap: () => open(const VideoHistoryPage())),
+        SzIconGridItem(icon: Icons.watch_later_outlined, label: '稍后再看', onTap: () => open(const WatchLaterPage())),
+        SzIconGridItem(icon: Icons.star_outline, label: '视频收藏', onTap: () => open(const vfav.FavoritesPage())),
+        SzIconGridItem(icon: Icons.video_camera_back_outlined, label: '创作中心', onTap: () => open(const CreatorCenterPage())),
+        SzIconGridItem(icon: Icons.monetization_on_outlined, label: '我的硬币', onTap: () => open(const CoinsPage())),
+        SzIconGridItem(icon: Icons.tune, label: '视频设置', onTap: () => open(const VideoSettingsPage())),
+      ]),
+    );
+  }
+
   Widget _gridCard(BuildContext context) {
     Future<void> guarded(Widget Function() page) async {
       if (!await ensureLoggedIn(context)) return;

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../chat/store.dart';
+import '../chat/ui/avatar.dart';
 import '../session.dart';
+import 'me/video_me_page.dart';
 import 'nav.dart';
 import 'pages/search_page.dart';
 import 'pages/upload_entry.dart';
@@ -75,6 +78,21 @@ class _VideoTabState extends State<VideoTab> with SingleTickerProviderStateMixin
           child: Padding(
             padding: const EdgeInsets.fromLTRB(kPagePad, 8, 4, 0),
             child: Row(children: [
+              // 左上角头像 = 「我的视频」(B 站首页的位置):历史、收藏、稍后再看、创作中心都在里面
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: Semantics(
+                  button: true,
+                  label: '我的视频',
+                  child: GestureDetector(
+                    onTap: () => openVideoMe(context),
+                    child: ChatAvatar(
+                        name: rootApi.userName ?? '我',
+                        url: ChatStore.instance.users[rootApi.userId]?.avatar ?? '',
+                        size: 32),
+                  ),
+                ),
+              ),
               Expanded(
                 child: Semantics(
                   button: true,

@@ -2,14 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
-import 'package:video_player/video_player.dart';
 
 import '../../chat/ui/avatar.dart';
 import '../../session.dart';
 import '../api.dart';
 import '../comments/comments_view.dart';
+import '../danmaku/sheets.dart';
+import '../me/favorites_page.dart' show pickFavoriteFolders;
 import '../models.dart';
 import '../nav.dart';
+import '../player/sz_video_controller.dart';
+import '../player/sz_video_view.dart';
 import '../widgets/cards.dart';
 import '../widgets/feed.dart';
 import '../widgets/follow_button.dart';
@@ -40,6 +43,9 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
   bool _descOpen = false;
   int _commentCount = 0;
 
+  /// 播放器(#359):详情拉回来之后建一次;刷新详情(点赞失败回滚之类)不重建,不然会从头播
+  SzVideoController? _player;
+
   @override
   void initState() {
     super.initState();
@@ -49,26 +55,74 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
 
   @override
   void dispose() {
+    _player?.removeListener(_onPlayer);
+    _player?.dispose();
     _tabs.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
+  /// 上面盖了一整页(点相关视频进了下一个详情、进了 UP 主空间)就暂停,回来接着播;
+  /// 进全屏也是盖一整页,但那是同一个播放器换个地方放,不能停
+  bool _onstage = true;
+  bool _resumeOnReturn = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final on = TickerMode.valuesOf(context).enabled;
+    if (on == _onstage) return;
+    _onstage = on;
+    final c = _player;
+    if (c == null || c.fullscreen) return;
+    if (!on) {
+      _resumeOnReturn = c.playing;
+      if (c.playing) unawaited(c.pause());
+    } else if (_resumeOnReturn) {
+      _resumeOnReturn = false;
+      unawaited(c.play());
+    }
+  }
+
+  void _onPlayer() {
+    final c = _player;
+    // 连播换到下一 P 时,下面的选集跟着走
+    if (c != null && mounted && c.partIndex != _part) setState(() => _part = c.partIndex);
+  }
+
+  Future<void> _load({bool refresh = false}) async {
     try {
       final v = await videoApi.detail(widget.vid);
       if (!mounted) return;
       setState(() {
         _v = v;
         _commentCount = v.card.commentCount;
-        if (widget.partIdx == null && v.me?.progress != null) _part = v.me!.progress!.partIdx;
-        if (_part >= v.parts.length) _part = 0;
+        if (!refresh) {
+          if (widget.partIdx == null && v.me?.progress != null) _part = v.me!.progress!.partIdx;
+          if (_part >= v.parts.length) _part = 0;
+        }
       });
+      if (refresh) return;
+      if (v.parts.isNotEmpty) {
+        final c = SzVideoController(video: v, partIndex: _part);
+        // 一 P 播完:有下一 P 就接着放(B 站的「自动连播」),最后一 P 停在结束画面
+        c.onPartEnded = (i) {
+          if (i + 1 < v.parts.length) unawaited(c.switchPart(i + 1));
+        };
+        c.addListener(_onPlayer);
+        _player = c;
+        unawaited(c.initialize());
+      }
       videoApi.related(widget.vid).then((r) {
         if (mounted) setState(() => _related = r);
       }).catchError((_) {});
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
+  }
+
+  void _switchPart(int i) {
+    setState(() => _part = i);
+    unawaited(_player?.switchPart(i));
   }
 
   void _toast(String s) {
@@ -96,7 +150,7 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
       });
     } on ApiException catch (e) {
       _toast(e.message);
-      await _load();
+      await _load(refresh: true);
     }
   }
 
@@ -175,18 +229,22 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
     }
   }
 
+  /// 点收藏:弹收藏夹选择(可以多选、可以新建;全不选 = 取消收藏),和 B 站一样
   Future<void> _favorite() async {
     final v = _v;
     if (v == null || !await _login()) return;
     final me = v.me ??= VideoMe();
+    if (!mounted) return;
+    final ids = await pickFavoriteFolders(context, current: me.folderIds);
+    if (ids == null) return;
     try {
-      final r = await videoApi.favorite(v.vid, folderIds: me.favorited ? const [] : null);
+      final r = await videoApi.favorite(v.vid, folderIds: ids);
       setState(() {
         me.favorited = r['favorited'] == true;
         me.folderIds = [for (final x in vList(r['folder_ids'])) vInt(x)];
         v.card.favorites = vInt(r['favorites']);
       });
-      _toast(me.favorited ? '已收藏到默认收藏夹' : '已取消收藏');
+      _toast(me.favorited ? '已收藏' : '已取消收藏');
     } on ApiException catch (e) {
       _toast(e.message);
     }
@@ -245,6 +303,7 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
             : const Center(child: CircularProgressIndicator()),
       );
     }
+    final player = _player;
     return Scaffold(
       body: Column(children: [
         Container(
@@ -253,17 +312,12 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
             bottom: false,
             child: AspectRatio(
               aspectRatio: 16 / 9,
-              child: v.parts.isEmpty
+              child: player == null
                   ? const Center(child: Text('这个视频还没有能播放的分 P', style: TextStyle(color: Colors.white70)))
-                  : _BasicPlayer(
-                      key: ValueKey('${v.vid}-$_part'),
-                      video: v,
-                      part: v.parts[_part],
-                      startMs: v.me?.progress?.partIdx == _part ? v.me?.progress?.positionMs : null,
+                  : SzVideoView(
+                      controller: player,
+                      title: v.card.title,
                       onBack: () => Navigator.of(context).maybePop(),
-                      onEnded: () {
-                        if (_part + 1 < v.parts.length) setState(() => _part += 1);
-                      },
                     ),
             ),
           ),
@@ -271,28 +325,28 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
         Material(
           color: Theme.of(context).scaffoldBackgroundColor,
           child: Row(children: [
-            Expanded(
-              child: TabBar(
-                controller: _tabs,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                dividerColor: Colors.transparent,
-                tabs: [const Tab(text: '简介'), Tab(text: '评论 ${vCount(_commentCount)}')],
-              ),
+            TabBar(
+              controller: _tabs,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              dividerColor: Colors.transparent,
+              tabs: [const Tab(text: '简介'), Tab(text: '评论 ${vCount(_commentCount)}')],
             ),
-            IconButton(
-              tooltip: v.me?.watchLater == true ? '从稍后再看移除' : '稍后再看',
-              icon: Icon(v.me?.watchLater == true ? Icons.watch_later : Icons.watch_later_outlined),
-              onPressed: _watchLater,
-            ),
+            // 「点我发弹幕」和弹幕开关放在页签这一行(B 站的位置),稍后再看、举报收进「⋯」
+            Expanded(child: player == null ? const SizedBox.shrink() : DanmakuSendBar(controller: player)),
             PopupMenuButton<String>(
               onSelected: (x) async {
-                if (x == 'report') {
+                if (x == 'later') {
+                  await _watchLater();
+                } else if (x == 'report') {
                   if (!await _login()) return;
                   if (context.mounted) await reportTarget(context, targetType: 'video', vid: v.vid);
                 }
               },
-              itemBuilder: (_) => [const PopupMenuItem(value: 'report', child: Text('举报'))],
+              itemBuilder: (_) => [
+                PopupMenuItem(value: 'later', child: Text(v.me?.watchLater == true ? '从稍后再看移除' : '稍后再看')),
+                const PopupMenuItem(value: 'report', child: Text('举报')),
+              ],
             ),
           ]),
         ),
@@ -436,7 +490,7 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
                 child: ChoiceChip(
                   label: Text('P${i + 1} ${v.parts[i].title}'),
                   selected: _part == i,
-                  onSelected: (_) => setState(() => _part = i),
+                  onSelected: (_) => _switchPart(i),
                 ),
               ),
           ]),
@@ -629,84 +683,5 @@ class _TagPage extends StatelessWidget {
       appBar: AppBar(title: Text('#$tag')),
       body: VideoFeed(load: (page, _) => videoApi.search(tag, page: page), emptyText: '没有带这个标签的视频'),
     );
-  }
-}
-
-/// 临时的简单播放器(完整的 B 站式播放器在 lib/video/player/,接上之后替换)。
-class _BasicPlayer extends StatefulWidget {
-  const _BasicPlayer({super.key, required this.video, required this.part, this.startMs, this.onBack, this.onEnded});
-
-  final VideoDetail video;
-  final VideoPart part;
-  final int? startMs;
-  final VoidCallback? onBack;
-  final VoidCallback? onEnded;
-
-  @override
-  State<_BasicPlayer> createState() => _BasicPlayerState();
-}
-
-class _BasicPlayerState extends State<_BasicPlayer> {
-  VideoPlayerController? _c;
-  bool _ended = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    final rs = [...widget.part.renditions]..sort((a, b) => b.q.compareTo(a.q));
-    if (rs.isEmpty) return;
-    final pick = rs.firstWhere((x) => x.q <= 720, orElse: () => rs.last);
-    final c = VideoPlayerController.networkUrl(Uri.parse(videoResolve(pick.url)));
-    _c = c;
-    await c.initialize();
-    if (!mounted) return;
-    if (widget.startMs != null) await c.seekTo(Duration(milliseconds: widget.startMs!));
-    c.addListener(() {
-      if (!mounted) return;
-      final v = c.value;
-      if (!_ended && v.isInitialized && v.duration > Duration.zero && v.position >= v.duration && !v.isPlaying) {
-        _ended = true;
-        widget.onEnded?.call();
-      }
-      setState(() {});
-    });
-    unawaited(c.play().catchError((Object _) async {
-      await c.setVolume(0);
-      await c.play();
-    }));
-    setState(() {});
-  }
-
-  @override
-  void dispose() {
-    _c?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = _c;
-    final ready = c != null && c.value.isInitialized;
-    return Stack(fit: StackFit.expand, children: [
-      if (ready) Center(child: AspectRatio(aspectRatio: c.value.aspectRatio, child: VideoPlayer(c)))
-      else const Center(child: CircularProgressIndicator(color: Colors.white54)),
-      if (ready)
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => c.value.isPlaying ? c.pause() : c.play(),
-          child: c.value.isPlaying ? const SizedBox.expand() : const Center(child: Icon(Icons.play_arrow, size: 64, color: Colors.white70)),
-        ),
-      Positioned(
-        left: 4,
-        top: 4,
-        child: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: widget.onBack),
-      ),
-      if (ready)
-        Positioned(left: 0, right: 0, bottom: 0, child: VideoProgressIndicator(c, allowScrubbing: true)),
-    ]);
   }
 }

@@ -3,6 +3,7 @@ import 'package:superz_shared/superz_shared.dart';
 
 import '../messages_page.dart';
 import '../session.dart';
+import '../video/notify/notifications_page.dart';
 import 'calls/calls_page.dart';
 import 'chat_page.dart';
 import 'models.dart';
@@ -26,7 +27,7 @@ final ValueNotifier<int> chatUnreadBadge = ValueNotifier<int>(0);
 /// 「消息」tab(DEV-PROMPTS-40 #348)。
 ///
 /// 顶部固定行(D24):「通知」是原来右上角铃铛里的消息中心,「订单消息」是进行中订单里
-/// 和商家、骑手的对话;有归档的会话时再多一行「归档」。下面是聊天会话:
+/// 和商家、骑手的对话,「互动消息」是视频那边的回复 / @ / 赞;有归档的会话时再多一行「归档」。下面是聊天会话:
 /// 置顶的在前,其余按最后一条消息的时间。
 class ChatTab extends StatefulWidget {
   const ChatTab({super.key, required this.api});
@@ -194,7 +195,7 @@ class _ChatTabState extends State<ChatTab> {
           onRefresh: _refresh,
           child: ListView.builder(
             // 没登录、或者列表为空时,分隔线下面多一格放提示(登录引导 / 转圈 / 空状态)
-            itemCount: (folder == null ? 2 : 0) + (archived.isNotEmpty ? 1 : 0) + 1 + chats.length +
+            itemCount: (folder == null ? 3 : 0) + (archived.isNotEmpty ? 1 : 0) + 1 + chats.length +
                 (chats.isEmpty ? 1 : 0),
             itemBuilder: (context, i) {
               var k = i;
@@ -207,7 +208,26 @@ class _ChatTabState extends State<ChatTab> {
                   return _PinnedRow(
                       icon: Icons.receipt_long_outlined, title: '订单消息', subtitle: '和商家、骑手的对话', onTap: _openOrderChats);
                 }
-                k -= 2;
+                if (k == 2) {
+                  // 视频的互动消息(D24 第三行,#367):回复我的、@我的、收到的赞、系统通知
+                  return ValueListenableBuilder<int>(
+                    valueListenable: videoNotifyUnread,
+                    builder: (context, n, _) => _PinnedRow(
+                      icon: Icons.favorite_border,
+                      title: '互动消息',
+                      subtitle: '视频的回复、@、赞和审核结果',
+                      badge: n,
+                      onTap: () async {
+                        if (!await ensureLoggedIn(context)) return;
+                        if (context.mounted) {
+                          await Navigator.of(context)
+                              .push(MaterialPageRoute<void>(builder: (_) => const VideoNotificationsPage()));
+                        }
+                      },
+                    ),
+                  );
+                }
+                k -= 3;
               }
               if (archived.isNotEmpty) {
                 if (k == 0) {
