@@ -677,11 +677,12 @@ async def pay_stay_mock(
 ):
     """模拟支付(与外卖/团购同语义;微信支付联调时替换为统一下单+回调)。幂等。
 
-    生产 MOCK_PAY_ENABLED=false 封死。外卖那条早就有这道闸门
-    (orders.py 的 mock_pay),住宿这条一直漏着 —— 真实收款上线后
-    这个口子等于白送房间。
+    和外卖同一道闸门(orders.py 的 mock_pay_allowed):**开发环境 + 开关**两个都要。
+    以前这里只看 MOCK_PAY_ENABLED(缺省 true),安全性靠「记得在生产设 false」——
+    忘了设就是白送房间。
     """
-    if not settings.mock_pay_enabled:
+    from .orders import mock_pay_allowed
+    if not mock_pay_allowed():
         raise HTTPException(403, "模拟支付已关闭,请使用微信支付")
     order = await _customer_order(db, user, order_no, lock=True)
     if order.status == StayOrderStatus.PAID:

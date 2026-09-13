@@ -65,6 +65,15 @@ class Test每个开发便利都挂在环境判据上:
             "/orders/{no}/pay/mock 没有判环境 —— 只靠 MOCK_PAY_ENABLED 的话,"
             "忘了在生产设 false 就是任何人白嫖下单")
 
+    def test_住宿团购的模拟支付走同一道闸门(self):
+        """外卖那条早就判了环境,住宿、团购的模拟支付却只看 MOCK_PAY_ENABLED(缺省 true)——
+        忘了在生产设 false 就是白送房间、白送券。三条必须是同一个判据。"""
+        from app.routers import stays, vouchers
+        for fn in (stays.pay_stay_mock, vouchers.pay_mock):
+            src = inspect.getsource(fn)
+            assert "mock_pay_allowed()" in src, f"{fn.__module__}.{fn.__name__} 没走 mock_pay_allowed"
+            assert "settings.mock_pay_enabled" not in src
+
     def test_管理员密码登录(self):
         from app.routers import auth
         src = inspect.getsource(auth.admin_password_login_allowed)
