@@ -176,7 +176,7 @@ test:
 	  && python -m tests.e2e_rider_growth \
 	  && python -m tests.e2e_drop_time \
 	  && python -m tests.e2e_wait_comp_audit \
-	  && python -m tests.e2e_errand_send \
+	  && python -m tests.e2e_errand_send && python -m tests.e2e_errand_same_shop \
 	  && python -m tests.e2e_errand_buy \
 	  && python -m tests.e2e_errand_no_rider \
 	  && python -m tests.e2e_errand_aftersale \

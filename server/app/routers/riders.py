@@ -1041,7 +1041,11 @@ async def available_orders(
 
     # 手头在途单 → 顺路判断基准(同商家取、收货点相近送)
     mine = await _my_in_flight(db, user.id)
-    my_shops = {o.merchant_id for o in mine}
+    from ..services.errand import is_errand
+    # 同店只算真的店。同城的跑腿单都挂在同一个「本城跑腿服务」主体上(services/errand),
+    # 按 merchant_id 算的话,手上有一张跑腿单时别的跑腿单全成了「同店」:排序拿同店加分、
+    # 还豁免接单半径 —— 可它们的取件点散在全城,根本不在一处
+    my_shops = {o.merchant_id for o in mine if not is_errand(o)}
     # 顺路的参照点:**还没取餐的单,下一站是那家店,不是送达点。**
     #
     # 原来一律用送达点。手上一个刚抢到还没取的单,绕路增量却按
@@ -1052,11 +1056,16 @@ async def available_orders(
         shop_pos = {mid: (lat, lng) for mid, lat, lng in (await db.execute(
             select(Merchant.id, Merchant.lat, Merchant.lng)
             .where(Merchant.id.in_(my_shops)))).all()}
-    my_drops = [
-        (o.lat, o.lng) if o.status == OrderStatus.PICKED_UP
-        else shop_pos.get(o.merchant_id, (o.lat, o.lng))
-        for o in mine
-    ]
+    def _next_stop(o) -> tuple[float, float]:
+        if o.status == OrderStatus.PICKED_UP:
+            return (o.lat, o.lng)
+        # 跑腿单的「店」是虚拟服务主体,坐标是 (0, 0);下一站是订单自带的取件点
+        if is_errand(o):
+            return ((o.pickup_lat, o.pickup_lng) if o.pickup_lat is not None
+                    and o.pickup_lng is not None else (o.lat, o.lng))
+        return shop_pos.get(o.merchant_id, (o.lat, o.lng))
+
+    my_drops = [_next_stop(o) for o in mine]
     # 收工单(#264):开着的时候,顺路的参照点换成「我要回的方向」。
     #
     # 为什么需要它:`same_way` 按手上单的送达点算绕路增量,而
@@ -1175,7 +1184,7 @@ async def available_orders(
     # 被骑手自己的偏好挡掉的单数。**必须回报** —— 见下方 with_meta
     filtered = 0
     for order, out in zip(orders, outs):
-        out.same_shop = order.merchant_id in my_shops
+        out.same_shop = order.merchant_id in my_shops and not is_errand(order)
         score_val = 0.0
         if rider_pos and out.merchant_lat is not None:
             # 到店距离用真实骑行路径(不可用时回退直线×1.2 并标明来源)——
