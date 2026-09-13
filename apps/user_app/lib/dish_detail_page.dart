@@ -278,9 +278,8 @@ class _DishDetailPageState extends State<DishDetailPage> {
   }
 
   Widget _group(SzColors sz, int i, OptionGroup g) {
-    final tag = g.required_
-        ? (g.multi ? '必选 · 可多选' : '必选')
-        : (g.multi ? '可多选' : '可不选');
+    final tag =
+        g.required_ ? (g.multi ? '必选 · 可多选' : '必选') : (g.multi ? '可多选' : '可不选');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -367,8 +366,7 @@ class _DishDetailPageState extends State<DishDetailPage> {
         children: [
           line(_qty > 1 ? '$what × $_qty' : what, _unitCents * _qty,
               strong: true),
-          if (dishPack > 0)
-            line('打包费 · 每份 ${yuan(dishPack)}', dishPack * _qty),
+          if (dishPack > 0) line('打包费 · 每份 ${yuan(dishPack)}', dishPack * _qty),
           if (notes.isNotEmpty)
             Container(
               width: double.infinity,

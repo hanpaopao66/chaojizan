@@ -132,7 +132,8 @@ class _ReviewsListState extends State<ReviewsList> {
     final avg = shop != null && shop.ratingCount > 0 && shop.ratingAvg != null
         ? shop.ratingAvg!
         : reviews.fold<int>(0, (a, r) => a + r.merchantRating) / loaded;
-    final count = shop != null && shop.ratingCount > 0 ? shop.ratingCount : loaded;
+    final count =
+        shop != null && shop.ratingCount > 0 ? shop.ratingCount : loaded;
     final dist = [
       for (var star = 5; star >= 1; star--)
         reviews.where((r) => r.merchantRating == star).length,
@@ -173,7 +174,9 @@ class _ReviewsListState extends State<ReviewsList> {
                       Padding(
                         padding: EdgeInsets.only(top: i == 0 ? 0 : 4),
                         child: Row(children: [
-                          SizedBox(width: 20, child: Text('${5 - i}★', style: label)),
+                          SizedBox(
+                              width: 20,
+                              child: Text('${5 - i}★', style: label)),
                           const SizedBox(width: 8),
                           Expanded(
                             child: _Bar(
@@ -260,7 +263,8 @@ class _Bar extends StatelessWidget {
         color: sz.line,
         alignment: Alignment.centerLeft,
         child: TweenAnimationBuilder<double>(
-          tween: Tween(begin: SzMotion.off(context) ? fraction : 0, end: fraction),
+          tween:
+              Tween(begin: SzMotion.off(context) ? fraction : 0, end: fraction),
           duration: SzMotion.of(context, SzMotion.base),
           curve: SzMotion.standard,
           builder: (context, v, _) => FractionallySizedBox(
@@ -307,7 +311,8 @@ class _ReviewTile extends StatelessWidget {
                 context: context,
                 builder: (_) => Dialog(
                   backgroundColor: Colors.transparent,
-                  child: InteractiveViewer(child: Image(image: szNetImage(url))),
+                  child:
+                      InteractiveViewer(child: Image(image: szNetImage(url))),
                 ),
               ),
               child: ClipRRect(
@@ -331,11 +336,13 @@ class _ReviewTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
     final r = review;
-    final quiet = TextStyle(fontSize: kFontNote, height: 1.55, color: sz.inkMuted);
+    final quiet =
+        TextStyle(fontSize: kFontNote, height: 1.55, color: sz.inkMuted);
     return Container(
       margin: const EdgeInsets.only(top: 9),
       padding: const EdgeInsets.only(top: 12),
-      decoration: BoxDecoration(border: Border(top: BorderSide(color: sz.line))),
+      decoration:
+          BoxDecoration(border: Border(top: BorderSide(color: sz.line))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

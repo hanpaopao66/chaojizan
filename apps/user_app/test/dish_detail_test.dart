@@ -114,8 +114,7 @@ void main() {
     expect(find.text('小份 + 不辣'), findsOneWidget);
   });
 
-  testWidgets('必选的多选组点空了:按钮变「请选择」且点不了,选回来才放行',
-      (t) async {
+  testWidgets('必选的多选组点空了:按钮变「请选择」且点不了,选回来才放行', (t) async {
     await open(t, dish(toppingRequired: true));
     // 必选组默认选了第一项「加卤蛋」,把它点掉
     await t.tap(find.text('加卤蛋 +¥2.50'));
@@ -180,8 +179,7 @@ void main() {
     expect(find.byType(FilledButton), findsNothing);
   });
 
-  testWidgets('没设每日回满的菜卖完了:不许说「今日还剩」、也不编恢复时间',
-      (t) async {
+  testWidgets('没设每日回满的菜卖完了:不许说「今日还剩」、也不编恢复时间', (t) async {
     await open(t, dish(stock: 0, dailyStock: null));
     expect(find.text('已售罄 · 等商家补货'), findsOneWidget);
     expect(find.textContaining('今日还剩'), findsNothing);

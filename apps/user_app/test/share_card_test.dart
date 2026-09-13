@@ -79,9 +79,9 @@ void main() {
     final segs = find.descendant(
         of: find.byType(RepaintBoundary).last,
         matching: find.byType(ColoredBox));
-    final sizes = [for (final e in segs.evaluate()) t.getSize(find.byWidget(e.widget))]
-        .where((s) => s.height == 8)
-        .toList();
+    final sizes = [
+      for (final e in segs.evaluate()) t.getSize(find.byWidget(e.widget))
+    ].where((s) => s.height == 8).toList();
     expect(sizes.length, 3, reason: '商家 / 骑手 / 平台 三段,0 元的段不画');
     // 商家 19.95 : 骑手 3 : 平台 1.05 —— 宽度比例跟金额走
     expect(sizes[0].width / sizes[2].width, closeTo(1995 / 105, 0.5));

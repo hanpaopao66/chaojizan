@@ -80,7 +80,8 @@ void main() {
     dishJson(3, '凉皮', price: 800, stock: 0, soldOut: true),
   ];
 
-  Future<void> pump(WidgetTester t, {String rate = '0.045', bool self = false}) async {
+  Future<void> pump(WidgetTester t,
+      {String rate = '0.045', bool self = false}) async {
     SharedPreferences.setMockInitialValues({});
     t.view
       ..devicePixelRatio = 3.0
@@ -111,7 +112,8 @@ void main() {
     await t.pumpWidget(MaterialApp(
       theme: brandTheme(Brightness.light),
       home: MenuPage(
-          api: api, merchant: Merchant.fromJson(shopJson(rate: rate, self: self))),
+          api: api,
+          merchant: Merchant.fromJson(shopJson(rate: rate, self: self))),
     ));
     await t.pumpAndSettle();
     addTearDown(Analytics.resetSession);

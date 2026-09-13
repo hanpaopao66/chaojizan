@@ -21,8 +21,8 @@ Future<void> showShareCard(BuildContext context, Widget card,
     szShowSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (context) => _ShareSheet(
-          card: (_) => card, event: event, props: props),
+      builder: (context) =>
+          _ShareSheet(card: (_) => card, event: event, props: props),
     );
 
 /// 晒单:卡片下面有「金额打码」开关,拨一下卡上的金额当场变 ¥**、比例条不动。
@@ -113,41 +113,47 @@ class _ShareSheetState extends State<_ShareSheet> {
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          RepaintBoundary(key: _key, child: widget.card(_mask)),
-          if (widget.maskInitial != null) ...[
-            const SizedBox(height: 12),
-            _maskSwitch(sz),
-          ],
-          const SizedBox(height: 14),
-          SizedBox(
-            width: kShareCardWidth,
-            child: Row(children: [
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 46),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+        // 底部弹层要撑满屏宽:里面都是定宽 320 的东西,不撑的话弹层按内容收窄、
+        // 两边露出一截遮罩。宽屏的对话框形态照旧按内容收
+        child: SizedBox(
+          width: isSheetBottom(context) ? double.infinity : null,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            RepaintBoundary(key: _key, child: widget.card(_mask)),
+            if (widget.maskInitial != null) ...[
+              const SizedBox(height: 12),
+              _maskSwitch(sz),
+            ],
+            const SizedBox(height: 14),
+            SizedBox(
+              width: kShareCardWidth,
+              child: Row(children: [
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 46),
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                  icon: const Icon(Icons.file_download_outlined, size: 17),
+                  label: const Text('存图'),
+                  onPressed: _busy ? null : _save,
                 ),
-                icon: const Icon(Icons.file_download_outlined, size: 17),
-                label: const Text('存图'),
-                onPressed: _busy ? null : _save,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(minimumSize: const Size(0, 46)),
-                  icon: const Icon(Icons.share_outlined, size: 18),
-                  label: const Text('分享'),
-                  onPressed: _busy ? null : _share,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    style:
+                        FilledButton.styleFrom(minimumSize: const Size(0, 46)),
+                    icon: const Icon(Icons.share_outlined, size: 18),
+                    label: const Text('分享'),
+                    onPressed: _busy ? null : _share,
+                  ),
                 ),
-              ),
-            ]),
-          ),
-          const SizedBox(height: 10),
-          // 卡上本来就没有这三样(店名、菜、分账都是公开信息),这句话把它说破
-          Text('图里不带你的手机号、地址和订单号',
-              style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
-        ]),
+              ]),
+            ),
+            const SizedBox(height: 10),
+            // 卡上本来就没有这三样(店名、菜、分账都是公开信息),这句话把它说破
+            Text('图里不带你的手机号、地址和订单号',
+                style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+          ]),
+        ),
       ),
     );
   }
@@ -240,7 +246,9 @@ Widget _footer(String pledge) => Row(
     );
 
 Widget _divider() => Container(
-    height: 1, margin: const EdgeInsets.symmetric(vertical: 16), color: _c.line);
+    height: 1,
+    margin: const EdgeInsets.symmetric(vertical: 16),
+    color: _c.line);
 
 /// 店铺卡上列的一道菜。[from] = 有规格,价格后面带「起」
 typedef ShareDish = ({String name, int priceCents, bool from});
@@ -302,7 +310,9 @@ Widget shopShareCard(Merchant m, {List<ShareDish>? dishes}) {
 /// 比例 → 「5」「4.5」(一位小数,去掉 .0)
 String _pct(num part, num whole) {
   final tenths = (part * 1000 / whole).round();
-  return tenths % 10 == 0 ? '${tenths ~/ 10}' : '${tenths ~/ 10}.${tenths % 10}';
+  return tenths % 10 == 0
+      ? '${tenths ~/ 10}'
+      : '${tenths ~/ 10}.${tenths % 10}';
 }
 
 /// 晒单分享卡(设计稿 F):钱去哪了三方分账条,金额可打码。
@@ -336,13 +346,13 @@ Widget orderShareCard(Order o, {required bool maskAmount}) {
           : '账目公开')
       : '商家只抽 ${gross > 0 ? _pct(o.commissionCents, gross) : '5'}%'
           '${o.selfDelivery ? '' : ' · 配送费全归骑手'} · 账目公开';
-  final shown = [for (final p in parts) if (p.cents > 0) p];
+  final shown = [
+    for (final p in parts)
+      if (p.cents > 0) p
+  ];
 
   return _cardShell(children: [
-    Text(
-        o.merchantName.isEmpty
-            ? '我在超级赞下了一单'
-            : '我在「${o.merchantName}」点了一单',
+    Text(o.merchantName.isEmpty ? '我在超级赞下了一单' : '我在「${o.merchantName}」点了一单',
         style: const TextStyle(
             fontSize: kFontTitle, fontWeight: FontWeight.w600, height: 1.4)),
     const SizedBox(height: 4),

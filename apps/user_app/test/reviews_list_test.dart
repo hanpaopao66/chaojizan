@@ -10,7 +10,10 @@ import 'package:user_app/reviews_page.dart';
 /// 店铺评价页(设计稿 B):评分概览、筛选、差评照实排在列表里。
 void main() {
   Map<String, dynamic> review(int id, int stars,
-          {String comment = '', bool photo = false, String append = '', String day = '10'}) =>
+          {String comment = '',
+          bool photo = false,
+          String append = '',
+          String day = '10'}) =>
       {
         'id': id,
         'merchant_rating': stars,
