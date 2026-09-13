@@ -18,6 +18,8 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'address_pages.dart';
 import 'append_order_page.dart';
 import 'category_page.dart';
+import 'chat/calls/call_controller.dart';
+import 'chat/calls/call_page.dart';
 import 'chat/chat_tab.dart';
 import 'chat/store.dart';
 import 'chat/ui/avatar.dart' show rootResolve;
@@ -280,9 +282,13 @@ class _HomePageState extends State<HomePage> {
     _chatNotices = ChatStore.instance.notices.stream.listen((s) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
     });
+    // 通话(#354):来电、开始呼叫时推出通话页;通话页收起时顶上挂一条「通话中」
+    CallController.instance.presenter = _presentCall;
+    CallController.instance.addListener(_onCall);
   }
 
   StreamSubscription<String>? _chatNotices;
+  OverlayEntry? _callPill;
 
   @override
   void dispose() {
@@ -290,7 +296,35 @@ class _HomePageState extends State<HomePage> {
     videoImmersive.removeListener(_onBadge);
     authTick.removeListener(_syncChat);
     _chatNotices?.cancel();
+    CallController.instance.removeListener(_onCall);
+    if (CallController.instance.presenter == _presentCall) CallController.instance.presenter = null;
+    _callPill?.remove();
+    _callPill = null;
     super.dispose();
+  }
+
+  void _presentCall() {
+    if (!mounted || CallController.instance.pageVisible) return;
+    Navigator.of(context, rootNavigator: true).push(MaterialPageRoute<void>(
+        fullscreenDialog: true, builder: (_) => const CallPage()));
+  }
+
+  void _onCall() {
+    // 通话页 dispose 的时候也会通知到这里,那时候不能改 Overlay:挪到这一帧画完
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final c = CallController.instance;
+      final show = c.busy && !c.pageVisible;
+      if (show && _callPill == null) {
+        _callPill = OverlayEntry(builder: (_) => CallPill(onTap: _presentCall));
+        Overlay.of(context, rootOverlay: true).insert(_callPill!);
+      } else if (!show && _callPill != null) {
+        _callPill!.remove();
+        _callPill = null;
+      } else {
+        _callPill?.markNeedsBuild();
+      }
+    });
   }
 
   void _syncChat() {

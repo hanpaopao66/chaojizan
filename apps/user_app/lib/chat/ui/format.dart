@@ -155,12 +155,23 @@ String previewOf(ChatMessage m) {
   return cap.isEmpty ? '[$label]' : '[$label] $cap';
 }
 
-String callLabel(Map<String, dynamic>? c) {
+/// 通话记录的一句话。[mine] 给了就按方向说(我打出去的 / 打给我的),不给就是中性的(列表预览)。
+String callLabel(Map<String, dynamic>? c, {bool? mine}) {
   if (c == null) return '[通话]';
   final video = c['video'] == true;
   final kind = video ? '视频通话' : '语音通话';
   final st = c['state'] ?? c['result'];
   final secs = (c['duration'] as num?)?.toInt() ?? 0;
+  if (mine != null) {
+    return switch (st) {
+      'ended' => '${mine ? '呼出' : '呼入'}的$kind ${duration(secs * 1000)}',
+      'missed' => mine ? '$kind · 对方未接听' : '未接$kind',
+      'declined' => mine ? '$kind · 对方已拒绝' : '$kind · 已拒绝',
+      'busy' => mine ? '$kind · 对方忙线' : '未接$kind',
+      'canceled' || 'cancelled' => mine ? '$kind · 已取消' : '未接$kind',
+      _ => kind,
+    };
+  }
   return switch (st) {
     'ended' => '[$kind] ${duration(secs * 1000)}',
     'missed' => '[$kind] 未接',

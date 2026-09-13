@@ -3,6 +3,7 @@ import 'package:superz_shared/superz_shared.dart';
 
 import '../messages_page.dart';
 import '../session.dart';
+import 'calls/calls_page.dart';
 import 'chat_page.dart';
 import 'models.dart';
 import 'order_chats_page.dart';
@@ -102,6 +103,7 @@ class _ChatTabState extends State<ChatTab> {
           ListTile(leading: const Icon(Icons.person_add_alt_1_outlined), title: const Text('添加联系人'), onTap: () => Navigator.pop(ctx, 'add')),
           ListTile(leading: const Icon(Icons.contacts_outlined), title: const Text('联系人'), onTap: () => Navigator.pop(ctx, 'contacts')),
           ListTile(leading: const Icon(Icons.bookmark_outline), title: const Text('收藏夹'), onTap: () => Navigator.pop(ctx, 'saved')),
+          ListTile(leading: const Icon(Icons.call_outlined), title: const Text('通话记录'), onTap: () => Navigator.pop(ctx, 'calls')),
           ListTile(leading: const Icon(Icons.folder_outlined), title: const Text('会话分组'), onTap: () => Navigator.pop(ctx, 'folders')),
           ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('消息设置'), onTap: () => Navigator.pop(ctx, 'settings')),
         ]),
@@ -130,6 +132,8 @@ class _ChatTabState extends State<ChatTab> {
         }
       case 'folders':
         await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const FoldersPage()));
+      case 'calls':
+        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CallsPage()));
       case 'settings':
         await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ChatSettingsPage()));
     }

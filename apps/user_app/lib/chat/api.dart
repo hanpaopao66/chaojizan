@@ -327,6 +327,19 @@ class ChatApi {
   Future<Map<String, dynamic>> completeUpload(String id, String kind) async =>
       (await _post('/media/v1/uploads/$id/complete', {'kind': kind}) as Map).cast();
 
+  // ---------------- 通话 ----------------
+
+  /// WebRTC 的 STUN / TURN(TURN 用户名密码是临时的,每次打电话前取)。
+  Future<List<Map<String, dynamic>>> iceServers() async {
+    final r = await _get('/chat/v1/calls/ice-servers') as Map;
+    return [for (final x in (r['ice_servers'] as List? ?? const [])) (x as Map).cast<String, dynamic>()];
+  }
+
+  Future<List<Map<String, dynamic>>> callHistory({int? beforeId}) async {
+    final r = await _get('/chat/v1/calls', {if (beforeId != null) 'before_id': '$beforeId'}) as Map;
+    return [for (final x in (r['items'] as List? ?? const [])) (x as Map).cast<String, dynamic>()];
+  }
+
   // ---------------- 贴纸 ----------------
 
   /// 贴纸面板用:官方包 + 我添加的包(带全部贴纸),另附我自己建的包(不带贴纸)。

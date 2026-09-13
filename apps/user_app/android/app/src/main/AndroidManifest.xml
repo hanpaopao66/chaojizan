@@ -12,6 +12,13 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- 消息(DEV-PROMPTS-40):按住说话录语音、语音 / 视频通话、聊天里拍照拍视频。
+         都是用到时才弹系统授权,不在启动时要 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
     <!-- 明文流量一律关闭(#193):隐私政策里向用户承诺过「传输全程 HTTPS 加密」
          (shared/legal.dart),这里再放开就是虚假公示。
          写死 false 而不是省略:三方 SDK 的清单里若带 usesCleartextTraffic="true",

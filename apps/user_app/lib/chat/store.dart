@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'api.dart';
+import 'calls/call_controller.dart';
 import 'chat_tab.dart' show chatUnreadBadge;
 import 'models.dart';
 import 'outbox.dart';
@@ -177,10 +178,12 @@ class ChatStore extends ChangeNotifier {
     await _loadCache();
     unawaited(refresh());
     realtime.start();
+    CallController.instance.attach();
     unawaited(outbox.restore());
   }
 
   void stop() {
+    CallController.instance.detach();
     realtime.stop();
     StickerCache.reset();
     chats.clear();

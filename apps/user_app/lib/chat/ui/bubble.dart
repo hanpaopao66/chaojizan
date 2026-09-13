@@ -28,6 +28,7 @@ class BubbleActions {
     this.onSwipeReply,
     this.onTapSelect,
     this.onMarkup,
+    this.onCallBack,
   });
 
   final void Function(ChatMessage m) onLongPress;
@@ -46,6 +47,9 @@ class BubbleActions {
 
   /// 机器人内联键盘按钮
   final void Function(ChatMessage m, Map<String, dynamic> button)? onMarkup;
+
+  /// 点通话记录回拨
+  final void Function(ChatMessage m)? onCallBack;
   final TextTapHandlers handlers;
 }
 
@@ -379,13 +383,21 @@ class _Bubble extends StatelessWidget {
           ));
         }
       case 'call':
-        children.add(Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(m.call?['video'] == true ? Icons.videocam_outlined : Icons.call_outlined, color: accent),
-            const SizedBox(width: 8),
-            Text(callLabel(m.call).replaceAll('[', '').replaceAll(']', ''), style: TextStyle(color: fg)),
-          ]),
+        final missedByMe = !mine && (m.call?['state'] == 'missed' || m.call?['state'] == 'busy' ||
+            m.call?['state'] == 'canceled');
+        children.add(InkWell(
+          // 点通话记录回拨(和 Telegram 一样)
+          onTap: actions.onCallBack == null ? null : () => actions.onCallBack!(m),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(m.call?['video'] == true ? Icons.videocam_outlined : Icons.call_outlined,
+                  color: missedByMe ? Theme.of(context).sz.danger : accent),
+              const SizedBox(width: 8),
+              Text(callLabel(m.call, mine: mine),
+                  style: TextStyle(color: missedByMe ? Theme.of(context).sz.danger : fg)),
+            ]),
+          ),
         ));
     }
 
@@ -500,7 +512,8 @@ class _Meta extends StatelessWidget {
     if (m.editedAt != null) {
       parts.add(Text('已编辑 ', style: TextStyle(fontSize: kFontMicro, color: c)));
     }
-    if (m.silent) {
+    // 通话记录的「静音」是服务端为了不响铃才标的,不是发的人选的,不画这个图标
+    if (m.silent && m.kind != 'call') {
       parts.add(Icon(Icons.notifications_off_outlined, size: 12, color: c));
     }
     parts.add(Text(hm(m.createdAt), style: TextStyle(fontSize: kFontMicro, color: c)));

@@ -39,6 +39,7 @@ dependencies:
   record: ^7.1.1             # 按住录语音(安卓 AAC,网页 opus,服务端统一转成 m4a)
   audioplayers: ^6.8.1       # 放语音消息(和商家端听单同一个库)
   path_provider: ^2.1.6      # 录音文件和下载的文件落应用私有目录
+  flutter_webrtc: ^1.2.0     # 1 对 1 语音 / 视频通话(安卓、iOS、网页同一套 WebRTC)
 
 flutter:
   uses-material-design: true

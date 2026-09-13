@@ -1,5 +1,8 @@
-// 消息模块的纯函数:Markdown 记号、实体平移、时间 / 大小 / 时长格式、大表情判定。
+// 消息模块的纯函数:Markdown 记号、实体平移、时间 / 大小 / 时长格式、大表情判定、通话。
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:user_app/chat/calls/ringtone.dart';
 import 'package:user_app/chat/models.dart';
 import 'package:user_app/chat/ui/entity_controller.dart';
 import 'package:user_app/chat/ui/format.dart';
@@ -124,6 +127,29 @@ void main() {
       expect(isBigEmoji('🇨🇳'), isTrue);
       expect(isBigEmoji('好😀'), isFalse);
       expect(isBigEmoji(''), isFalse);
+    });
+  });
+
+  group('通话', () {
+    test('callLabel 按方向说', () {
+      expect(callLabel({'video': false, 'state': 'ended', 'duration': 83}, mine: true), '呼出的语音通话 1:23');
+      expect(callLabel({'video': true, 'state': 'missed'}, mine: false), '未接视频通话');
+      expect(callLabel({'video': false, 'state': 'missed'}, mine: true), '语音通话 · 对方未接听');
+      expect(callLabel({'video': false, 'state': 'declined'}), '[语音通话] 已拒绝');
+    });
+    test('合成的铃声是合法的 16 位单声道 WAV', () {
+      for (final incoming in [true, false]) {
+        final b = synthRingtone(incoming: incoming);
+        expect(String.fromCharCodes(b.sublist(0, 4)), 'RIFF');
+        expect(String.fromCharCodes(b.sublist(8, 12)), 'WAVE');
+        final bd = b.buffer.asByteData();
+        expect(bd.getUint16(22, Endian.little), 1);
+        expect(bd.getUint32(24, Endian.little), 16000);
+        expect(bd.getUint32(40, Endian.little), b.length - 44);
+        // 来电 0.4 秒一轮 × 2 + 1.6 秒静音 ≈ 2.56 秒;回铃 3 秒
+        final secs = (b.length - 44) / 2 / 16000;
+        expect(secs, closeTo(incoming ? 2.56 : 3.0, 0.05));
+      }
     });
   });
 }

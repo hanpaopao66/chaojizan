@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'calls/call_controller.dart';
 import 'links.dart';
 import 'models.dart';
 import 'pages/chat_info_page.dart';
@@ -427,6 +428,10 @@ class _ChatPageState extends State<ChatPage> {
   // ---------------- 气泡上的动作 ----------------
 
   late final BubbleActions _bubbleActions = BubbleActions(
+    onCallBack: (m) {
+      final c = chat;
+      if (c != null && c.isPrivate && c.peer != null) _call(c, video: m.call?['video'] == true);
+    },
     onLongPress: _longPress,
     onTapReply: _jumpTo,
     onReact: _react,
@@ -470,6 +475,25 @@ class _ChatPageState extends State<ChatPage> {
       },
     ),
   );
+
+  /// 语音 / 视频通话(#354)。先选类型;已经在通话里就提示。
+  Future<void> _call(ChatInfo c, {bool? video}) async {
+    final peer = c.peer;
+    if (peer == null) return;
+    final v = video ??
+        await szShowSheet<bool>(
+          context: context,
+          builder: (ctx) => SafeArea(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ListTile(leading: const Icon(Icons.call_outlined), title: const Text('语音通话'), onTap: () => Navigator.pop(ctx, false)),
+              ListTile(leading: const Icon(Icons.videocam_outlined), title: const Text('视频通话'), onTap: () => Navigator.pop(ctx, true)),
+            ]),
+          ),
+        );
+    if (v == null || !mounted) return;
+    final ok = await CallController.instance.start(peer.id, peer.displayName, peer.avatar, video: v);
+    if (!ok) _toast('正在通话中,先挂掉这一通');
+  }
 
   Future<void> _openUrl(String url) async {
     final uri = Uri.tryParse(url.contains('://') ? url : 'https://$url');
@@ -837,6 +861,8 @@ class _ChatPageState extends State<ChatPage> {
         ]),
       ),
       actions: [
+        if (c.isPrivate && c.peer != null && !c.peer!.isBot)
+          IconButton(tooltip: '通话', icon: const Icon(Icons.call_outlined), onPressed: () => _call(c)),
         IconButton(tooltip: '搜索', icon: const Icon(Icons.search), onPressed: () => setState(() => _searching = true)),
         PopupMenuButton<String>(
           onSelected: (v) => _menu(c, v),
