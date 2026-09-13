@@ -185,6 +185,8 @@ test:
 	  && python -m tests.e2e_deposit && python -m tests.e2e_eta_dynamic \
 	  && python -m tests.e2e_food_safety && python -m tests.e2e_gift \
 	  && python -m tests.e2e_grab_radius && python -m tests.e2e_group_cart \
+	  && python -m tests.e2e_group_cart_options && python -m tests.e2e_review_overview \
+	  && python -m tests.e2e_min_order_floor \
 	  && python -m tests.e2e_holiday && python -m tests.e2e_identity \
 	  && python -m tests.e2e_invoice && python -m tests.e2e_marketing \
 	  && python -m tests.e2e_merchant_analytics && python -m tests.e2e_merchant_staff \

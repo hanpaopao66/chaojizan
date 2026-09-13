@@ -342,12 +342,16 @@ async def create_order(
     # 拼单:校验拼单码并原子关车(只有发起人、锁单后);
     # 订单归发起人,起送价/满减按合车总额天然生效
     group_members = 0
+    group_note = ""
     if payload.group_code:
-        from .group_cart import consume_cart_for_order
+        from .group_cart import consume_cart_for_order, order_note_for
         group_cart = await consume_cart_for_order(payload.group_code, user.id)
         if group_cart["merchant_id"] != merchant.id:
             raise HTTPException(422, "拼单车不是这家店的")
         group_members = len(group_cart["members"])
+        # 车里各道菜的备注(「牛肉面(大份):不要香菜」)并进订单备注。
+        # 从服务端的车里取,不信客户端转述
+        group_note = order_note_for(group_cart)
 
     # 酒类风控:购物车含酒 → 必须已实名且成年(#14);平台可配禁售时段。
     # 全部在扣库存之前拦截,不留副作用
@@ -553,7 +557,8 @@ async def create_order(
     # 起送价:商家自设,但不低于平台下限(小单佣金连支付通道费都不够,商业上不可持续)。
     # 注意先把值取出来再 rollback —— rollback 会使 ORM 对象过期,
     # 之后再访问属性会触发同步惰性刷新,在 async 会话里直接炸 MissingGreenlet
-    min_order = max(merchant.min_order_cents, settings.min_order_floor_cents)
+    # 实际起送价取模型上那一处(客户端显示的「¥15 起送」也是它),别在这里再算一遍
+    min_order = merchant.effective_min_order_cents
     if parent is not None:
         min_order = 0  # 追加单免起送价:凑单场景就是为了补一瓶可乐
     if food_cents < min_order:
@@ -869,7 +874,9 @@ async def create_order(
         contact_phone=(parent.contact_phone if parent is not None
                        else (payload.contact_phone or user.phone)),
         remark=(f"[追加到#{parent.order_no[-6:]}]{payload.remark}"
-                if parent is not None else payload.remark),
+                if parent is not None
+                else " ".join(x for x in (payload.remark.strip(), group_note)
+                              if x)[:200]),
         scheduled_at=(parent.scheduled_at if parent is not None
                       else scheduled_at),
         self_delivery=self_delivery,

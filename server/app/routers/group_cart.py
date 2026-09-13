@@ -6,6 +6,7 @@
 """
 import json
 import secrets
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -103,6 +104,21 @@ async def get_cart(
     return _view(cart, user.id)
 
 
+#: 拼单里一道菜的备注(「不要香菜」)最多几个字
+NOTE_MAX = 30
+
+#: 整车的备注拼成一句(order_note_for)最多几个字。下单时它接在用户自己写的订单备注
+#: 后面(App 里限 100 字),订单备注一共 200 —— 两边加起来不超,下单时就不会截掉谁的。
+#: 超了在**加菜那一下**就说,不等到下单时悄悄截断
+GROUP_NOTE_MAX = 99
+
+
+def line_key(uid: int, dish_id: int, choices: list, note: str) -> tuple:
+    """车里的一行 = 谁、哪道菜、选了哪些规格、写了什么备注。
+    规格按集合比(先后顺序不算不同),老车里的行没有这两个字段,按空的算。"""
+    return (uid, dish_id, tuple(sorted(choices or [])), (note or "").strip())
+
+
 @router.post("/{code}/items")
 async def set_item(
     code: str,
@@ -110,7 +126,13 @@ async def set_item(
     user: User = Depends(require_role("customer")),
     db: AsyncSession = Depends(get_db),
 ):
-    """改自己的菜:quantity 为绝对份数,0 = 移除。只能动自己点的。"""
+    """改自己的菜:quantity 为某一行的绝对份数,0 = 移除。只能动自己点的。
+
+    一行由(菜, 规格, 备注)确定:同一道菜选了不同规格、写了不同备注是不同的行。
+    规格和普通下单同一套校验(orders.resolve_options):必选组要选、单选组最多一项、
+    选项得是这道菜真有的;单价按限时折扣和选中的规格加价**在服务端重算**,
+    客户端传价无效。备注在下单时并进订单备注(orders.py),后厨看得到。
+    """
     cart = await _load_cart(code)
     if str(user.id) not in cart["members"]:
         raise HTTPException(403, "先输码加入这车拼单")
@@ -120,21 +142,61 @@ async def set_item(
     quantity = int(payload.get("quantity", 0))
     if not 0 <= quantity <= 99:
         raise HTTPException(422, "份数需在 0-99 之间")
+    choices = payload.get("choices") or []
+    if (not isinstance(choices, list) or len(choices) > 20
+            or not all(isinstance(c, str) and 0 < len(c) <= 20 for c in choices)):
+        raise HTTPException(422, "规格格式不对")
+    note = str(payload.get("note") or "").strip()
+    if len(note) > NOTE_MAX:
+        raise HTTPException(422, f"备注最多 {NOTE_MAX} 个字")
     dish = await db.scalar(select(Dish).where(
         Dish.id == dish_id, Dish.merchant_id == cart["merchant_id"]))
     if dish is None or not dish.is_on_sale:
         raise HTTPException(422, "菜品不存在或已下架")
-    cart["items"] = [i for i in cart["items"]
-                     if not (i["uid"] == user.id and i["dish_id"] == dish_id)]
+    key = line_key(user.id, dish_id, choices, note)
+    cart["items"] = [
+        i for i in cart["items"]
+        if line_key(i["uid"], i["dish_id"], i.get("choices"), i.get("note")) != key]
     if quantity > 0:
+        if dish.sold_out_today:
+            raise HTTPException(409, f"「{dish.name}」今日已售罄")
+        from .orders import resolve_options
+
+        price = dish.price_cents
+        if (dish.flash_price_cents is not None and dish.flash_until is not None
+                and dish.flash_until > datetime.now(timezone.utc)):
+            price = dish.flash_price_cents
+        try:
+            unit, display = resolve_options(
+                dish.name, price, dish.options or [], choices)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
         cart["items"].append({
             "uid": user.id, "by": cart["members"][str(user.id)],
-            "dish_id": dish_id, "name": dish.name,
-            "price_cents": dish.price_cents, "quantity": quantity,
+            "dish_id": dish_id,
+            # 展示名带规格「油泼扯面(大份+微辣)」,和订单快照同一个写法
+            "name": display,
+            "price_cents": unit, "quantity": quantity,
+            "choices": list(choices), "note": note,
         })
+        if note and len(order_note_for(cart)) > GROUP_NOTE_MAX:
+            raise HTTPException(
+                422, f"这车拼单的备注加起来超过 {GROUP_NOTE_MAX} 个字了,写短一点")
     await _save_cart(cart)
     await _broadcast(cart, "items")
     return _view(cart, user.id)
+
+
+def order_note_for(cart: dict) -> str:
+    """把车里各道菜的备注拼成一句,并进订单备注(订单只有一份备注,后厨看的就是它)。
+
+    只写菜(带规格)和备注,**不写是谁点的**:订单备注商家和骑手都看得到,
+    同伴的昵称原来只在这车人之间可见,不该因为写了句「不要香菜」就给到商家。
+    同一道菜两个人写了不同的备注,后厨照样分得清是两份。
+    """
+    parts = [f"{i['name']}:{i['note']}"
+             for i in cart.get("items", []) if (i.get("note") or "").strip()]
+    return ("拼单备注 " + ";".join(parts)) if parts else ""
 
 
 @router.post("/{code}/lock")

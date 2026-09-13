@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select, update
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import Merchant, Order, Review, User
-from ..schemas import ReplyIn, ReviewIn, ReviewOut
+from ..models import Dish, Merchant, Order, Review, User, rating_avg_of
+from ..schemas import (DishOrderReviewsOut, ReplyIn, ReviewIn, ReviewOut,
+                       ReviewOverviewOut)
 from ..security import require_role
 from ..state_machine import OrderStatus
 from ..services.staff import owned_shop
@@ -359,20 +360,136 @@ async def reply_review(
     return _to_out(review, customer.name if customer else "")
 
 
+#: 公开评价的筛选。好评 4–5 星、差评 1–2 星 —— 和用户端透明中心「差评占比(1–2 星)」
+#: 同一口径,3 星两边都不算;有图 = 首评或追评带了图;有追评 = 追评过(append_at 有值)。
+REVIEW_FILTERS = ("all", "photo", "good", "bad", "append")
+
+
+def _has_photo():
+    return or_(func.coalesce(func.jsonb_array_length(Review.image_urls), 0) > 0,
+               func.coalesce(func.jsonb_array_length(Review.append_images), 0) > 0)
+
+
+def review_filter_clause(kind: str):
+    """筛选名 → WHERE 条件;「全部」是 None。列表和概览的计数共用这一份,数对得上。"""
+    if kind == "photo":
+        return _has_photo()
+    if kind == "good":
+        return Review.merchant_rating >= 4
+    if kind == "bad":
+        return Review.merchant_rating <= 2
+    if kind == "append":
+        return Review.append_at.is_not(None)
+    return None
+
+
 @router.get("/merchants/{merchant_id}/reviews", response_model=list[ReviewOut])
 async def merchant_reviews(
     merchant_id: int,
+    kind: str = Query("all", alias="filter",
+                      pattern="^(all|photo|good|bad|append)$"),
+    before: int | None = None,
+    limit: int = Query(50, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
 ):
-    """店铺评价列表(公开,姓名脱敏)。"""
-    rows = await db.execute(
+    """店铺评价列表(公开,姓名脱敏),按时间倒序。
+
+    [filter] 见 REVIEW_FILTERS;[before] 游标:上一页最后一条的评价 id,
+    接着往更早的翻(和商家自查的评价列表同一个风格)。都不传 = 最新 50 条(老行为)。
+    **差评照实排在里面**:只按时间排,不折叠、不往后挪。
+    """
+    stmt = (
         select(Review, User.name)
         .join(User, User.id == Review.customer_id)
         .where(Review.merchant_id == merchant_id, Review.hidden.is_(False))
-        .order_by(Review.created_at.desc())
-        .limit(50)
     )
+    clause = review_filter_clause(kind)
+    if clause is not None:
+        stmt = stmt.where(clause)
+    if before is not None:
+        # 游标给的是 id,排序按 (created_at, id):导入 / 补录的评价 id 和时间
+        # 不一定同序,单按 id 翻页会和第一页的顺序对不上
+        anchor = await db.get(Review, before)
+        if anchor is None or anchor.merchant_id != merchant_id:
+            return []
+        stmt = stmt.where(tuple_(Review.created_at, Review.id)
+                          < tuple_(anchor.created_at, anchor.id))
+    rows = await db.execute(
+        stmt.order_by(Review.created_at.desc(), Review.id.desc()).limit(limit))
     return [_to_out(review, name) for review, name in rows]
+
+
+@router.get("/merchants/{merchant_id}/reviews/overview",
+            response_model=ReviewOverviewOut)
+async def merchant_review_overview(
+    merchant_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """店铺评价概览(公开):条数、均分、1–5 星各几条、五个筛选各几条。
+
+    **口径和店铺页的「4.8 分 · 268 条」是同一批评价**:这家店没被隐藏的评价
+    (申诉改判隐藏的不算)。商家表上的 rating_sum / rating_count 就是这批评价的
+    累加 —— 评价创建 +1、申诉隐藏 −1、恢复 +1(reviews.py / appeals.py),
+    均分和商家表走同一个取整函数 rating_avg_of。原来公开列表只给最近 50 条,
+    店铺页的分布只能按那 50 条算,和上面的「268 条」对不上。
+    """
+    row = (await db.execute(
+        select(
+            func.count(Review.id),
+            func.coalesce(func.sum(Review.merchant_rating), 0),
+            *[func.count(Review.id).filter(Review.merchant_rating == star)
+              for star in range(1, 6)],
+            *[func.count(Review.id).filter(review_filter_clause(k))
+              for k in REVIEW_FILTERS[1:]],
+        ).where(Review.merchant_id == merchant_id, Review.hidden.is_(False))
+    )).one()
+    count, total = int(row[0]), int(row[1])
+    stars = {str(star): int(n) for star, n in zip(range(1, 6), row[2:7])}
+    photo, good, bad, append = (int(n) for n in row[7:11])
+    return ReviewOverviewOut(
+        count=count, avg=rating_avg_of(total, count), stars=stars,
+        photo=photo, good=good, bad=bad, append=append)
+
+
+@router.get("/merchants/{merchant_id}/dishes/{dish_id}/order-reviews",
+            response_model=DishOrderReviewsOut)
+async def dish_order_reviews(
+    merchant_id: int,
+    dish_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """点过这道菜的订单的评价(公开):几单评了价、其中几单 4–5 星、最近 3 条写了字的。
+
+    **评价是按订单打的,不是按菜**:这里数的是「订单里有这道菜」的那些评价,
+    分数是给整单(和这家店)的,不是给这道菜的 —— 客户端文案照这个写,
+    不能叫「这道菜的评价」。赠品行(0 元)不算点过;被申诉隐藏的评价不算。
+    """
+    dish = await db.get(Dish, dish_id)
+    if dish is None or dish.merchant_id != merchant_id:
+        raise HTTPException(404, "菜品不存在")
+    # 订单快照里有这道菜、而且不是 0 元赠品行
+    has_dish = text(
+        "jsonb_path_exists(orders.items,"
+        " '$[*] ? (@.dish_id == $d && @.price_cents > 0)',"
+        " jsonb_build_object('d', CAST(:dish_id AS integer)))"
+    ).bindparams(dish_id=dish_id)
+    scope = (Review.merchant_id == merchant_id, Review.hidden.is_(False), has_dish)
+    count, good = (await db.execute(
+        select(func.count(Review.id),
+               func.count(Review.id).filter(Review.merchant_rating >= 4))
+        .select_from(Review).join(Order, Order.id == Review.order_id)
+        .where(*scope)
+    )).one()
+    rows = await db.execute(
+        select(Review, User.name)
+        .join(Order, Order.id == Review.order_id)
+        .join(User, User.id == Review.customer_id)
+        .where(*scope, Review.comment != "")
+        .order_by(Review.created_at.desc(), Review.id.desc())
+        .limit(3))
+    return DishOrderReviewsOut(
+        count=int(count), good=int(good),
+        recent=[_to_out(review, name) for review, name in rows])
 
 
 APPEND_WINDOW_DAYS = 7

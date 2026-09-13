@@ -189,6 +189,9 @@ class MerchantOut(BaseModel):
     announcement: str = ""
     logo_url: str = ""
     min_order_cents: int = 0
+    # 实际起送价 = max(商家自设, 平台起送下限),读 ORM 的 property。
+    # 下单按它拦(orders.py),客户端的「¥15 起送」「差 ¥X 起送」也照它 —— 一个数
+    effective_min_order_cents: int = 0
     packing_fee_cents: int = 0
     promo_rules: list = []
     gift_rules: list = []  # 满赠 [{threshold_cents, dish_id, name}]
@@ -1352,6 +1355,26 @@ class ReviewOut(BaseModel):
     hidden: bool = False  # 申诉改判后隐藏(商家自查可见状态,公开列表不出现)
     created_at: datetime
     customer_name: str = ""  # 已脱敏;匿名评价固定"匿名用户"
+
+
+class ReviewOverviewOut(BaseModel):
+    """店铺评价概览(公开)。全店没被隐藏的评价 —— 和店铺页「4.8 分 · 268 条」同一批。"""
+
+    count: int
+    avg: float | None  # 一位小数;没有评价是 null
+    stars: dict[str, int]  # "1".."5" → 条数
+    photo: int  # 有图(首评或追评带图)
+    good: int  # 好评 4–5 星
+    bad: int  # 差评 1–2 星
+    append: int  # 有追评
+
+
+class DishOrderReviewsOut(BaseModel):
+    """点过某道菜的订单的评价。分数是给整单的,不是给这道菜的。"""
+
+    count: int  # 这些订单里评了价的单数
+    good: int  # 其中 4–5 星的
+    recent: list[ReviewOut]  # 最近 3 条写了字的
 
 
 class ReplyIn(BaseModel):

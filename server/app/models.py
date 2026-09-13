@@ -540,9 +540,28 @@ class Merchant(Base):
 
     @property
     def rating_avg(self) -> float | None:
-        if self.rating_count == 0:
-            return None
-        return round(self.rating_sum / self.rating_count, 1)
+        return rating_avg_of(self.rating_sum, self.rating_count)
+
+    @property
+    def effective_min_order_cents(self) -> int:
+        """实际起送价 = max(商家自设的起送价, 平台起送下限)。
+
+        下单时就是按这个数拦的(orders.py)。原来客户端只拿到商家自设的那个数:
+        设成 0 的店页面上不写起送、甚至写「起送 ¥0」,凑了 ¥12 的单到结算才被拒。
+        **放在模型上**,MerchantOut 的每个出口(列表、详情、搜索、收藏)自动带上。
+        """
+        from .config import settings
+
+        return max(self.min_order_cents or 0, settings.min_order_floor_cents)
+
+
+def rating_avg_of(total: int, count: int) -> float | None:
+    """店铺均分,一位小数。**只此一处取整**:商家表上的 rating_avg(店铺页的
+    「4.8 分」)和评价概览接口都走它 —— 两边各写一遍 round,碰上 .x5 这种值
+    就可能一个 4.2 一个 4.3,同一个页面出两个分。"""
+    if not count:
+        return None
+    return round(total / count, 1)
 
 
 class Dish(Base):
