@@ -16,7 +16,6 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -285,21 +284,6 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
     _initCity();
   }
 
-  /// 当前位置。先要权限再取 —— 直接取会在没授权时静默失败,
-  /// 点了没反应用户只会以为卡了
-  Future<({double lat, double lng})?> _currentPosition() async {
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      return null;
-    }
-    final me = await Geolocator.getCurrentPosition();
-    return (lat: me.latitude, lng: me.longitude);
-  }
-
   Future<void> _initCity() async {
     // 商家端没装定位插件,只读记住的城市;没记过就留空让他自己选。
     // 老板开店时人多半就在店里,但"多半"不足以拿来猜一个城市填上
@@ -444,8 +428,9 @@ class _ApplyShopPageState extends State<ApplyShopPage> {
           city: _city,
           onCities: widget.api.openCities,
           onCityChanged: (c) => setState(() => _city = c),
-          // 老板填店址时多半就站在店里,一键定位比拖地图准得多
-          onLocate: _currentPosition,
+          // 不给「回到我的位置」:商家端不申请定位权限(安卓清单里裁掉了、iOS 没写用途说明,
+          // 隐私政策的权限附录里商家端也没有定位),这个按钮在手机上点了只会「定位失败」。
+          // 店址靠搜店名 + 拖地图选点
         ),
       ),
     );

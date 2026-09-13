@@ -31,6 +31,7 @@ import 'group_cart_page.dart';
 import 'help_page.dart';
 import 'hotel_pages.dart';
 import 'licenses_page.dart';
+import 'locate.dart';
 import 'mini_apps_panel.dart';
 import 'miniapp/container.dart';
 import 'miniapp/pages.dart';
@@ -108,10 +109,8 @@ Future<({double lat, double lng, bool real})> resolveMyLocation(
         permission == LocationPermission.deniedForever) {
       throw Exception();
     }
-    final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            timeLimit: Duration(seconds: 6)));
+    final position = await deviceCurrentPosition(
+        accuracy: LocationAccuracy.high, timeLimit: const Duration(seconds: 6));
     final gcj = wgs84ToGcj02(position.latitude, position.longitude);
     return (lat: gcj.lat, lng: gcj.lng, real: true);
   } catch (_) {
@@ -980,10 +979,9 @@ class _MerchantListViewState extends State<MerchantListView>
     }
     _lastHereCheck = now;
     try {
-      var p = await Geolocator.getLastKnownPosition();
-      p ??= await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-              accuracy: LocationAccuracy.low, timeLimit: Duration(seconds: 6)));
+      var p = await deviceLastKnownPosition();
+      p ??= await deviceCurrentPosition(
+          accuracy: LocationAccuracy.low, timeLimit: const Duration(seconds: 6));
       final gcj = wgs84ToGcj02(p.latitude, p.longitude);
       if (!mounted) return;
       // 人从「选地址那一刻所在的位置」挪开够远了 —— 现在提示才说得通

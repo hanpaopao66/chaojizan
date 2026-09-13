@@ -270,6 +270,10 @@ jobs:
       # 出错页排在最前面判断、拉成功时又不清 _error:点重试拉成功了界面也不动
       - name: 出错页拉成功了能回来
         run: python3 scripts/check_sticky_error.py
+      # 安卓取位置不经系统 LocationManager 的话,装了 Google Play 服务的手机会悄悄走融合定位 ——
+      # 那条路没列在隐私政策的第三方 SDK 表里。国内手机大多没有 Google Play 服务,平时测不出来
+      - name: 安卓取位置走系统 LocationManager
+        run: python3 scripts/check_location_manager.py
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"

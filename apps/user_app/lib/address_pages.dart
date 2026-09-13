@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import 'locate.dart';
+
 /// 地址簿排序的结果。[nearestId] 为 null 表示没定位/只有一个地址,
 /// 此时 [list] 保持服务端给的原顺序,也不打「距离最近」标签。
 typedef AddressOrder = ({List<Address> list, int? nearestId, double nearestM});
@@ -96,7 +98,7 @@ class _AddressBookPageState extends State<AddressBookPage> {
       var myLat = widget.myLat, myLng = widget.myLng;
       if (myLat == null || myLng == null) {
         try {
-          final last = await Geolocator.getLastKnownPosition();
+          final last = await deviceLastKnownPosition();
           if (last != null) {
             myLat = last.latitude;
             myLng = last.longitude;
@@ -298,7 +300,7 @@ class _AddressEditPageState extends State<AddressEditPage> {
         perm == LocationPermission.deniedForever) {
       return null;
     }
-    final me = await Geolocator.getCurrentPosition();
+    final me = await deviceCurrentPosition();
     return (lat: me.latitude, lng: me.longitude);
   }
 
@@ -307,7 +309,7 @@ class _AddressEditPageState extends State<AddressEditPage> {
       // 用**最后已知位置**:不弹权限、不等 GPS —— 解析城市这件事
       // 不值得为它卡住表单
       lastKnown: () async {
-        final me = await Geolocator.getLastKnownPosition();
+        final me = await deviceLastKnownPosition();
         return me == null ? null : (lat: me.latitude, lng: me.longitude);
       },
       // 服务端直接给结构化城市名,客户端不解析(以前抠 district 那串

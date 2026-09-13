@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'address_pages.dart';
 import 'identity_page.dart';
+import 'locate.dart';
 import 'main.dart' show OrderDetailPage;
 import 'payment_service.dart';
 
@@ -311,8 +311,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
     if (_walk != null || _walkLoading) return; // 同一家店只拉一次
     setState(() => _walkLoading = true);
     try {
-      final me = await Geolocator.getLastKnownPosition() ??
-          await Geolocator.getCurrentPosition();
+      final me = await deviceLastKnownPosition() ??
+          await deviceCurrentPosition();
       final gcj = wgs84ToGcj02(me.latitude, me.longitude);
       final r = await widget.api.geoRoute(
         fromLat: gcj.lat,

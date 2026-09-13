@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../../locate.dart';
 import '../chat_page.dart';
 import '../models.dart';
 import '../store.dart';
@@ -21,7 +22,7 @@ Future<({double lat, double lng, String title, String address})?> pickLocation(
   // 顶上的城市切换器能换 —— 原来这里没开搜索,只能拖图或者从周边列表里挑
   var city = await CityPref.resolve(
     lastKnown: () async {
-      final me = await Geolocator.getLastKnownPosition();
+      final me = await deviceLastKnownPosition();
       return me == null ? null : (lat: me.latitude, lng: me.longitude);
     },
     reverse: (lat, lng) async => (await api.geoReverse(lat, lng)).city,
@@ -44,7 +45,7 @@ Future<({double lat, double lng, String title, String address})?> pickLocation(
         var perm = await Geolocator.checkPermission();
         if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
         if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return null;
-        final me = await Geolocator.getCurrentPosition();
+        final me = await deviceCurrentPosition();
         return (lat: me.latitude, lng: me.longitude);
       },
     ),

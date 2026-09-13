@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import 'license_upload_field.dart';
@@ -547,8 +546,7 @@ class _NewShopPageState extends State<_NewShopPage> {
           city: _city,
           onCities: widget.api.openCities,
           onCityChanged: (c) => setState(() => _city = c),
-          // 开分店时人多半就站在新店里,一键定位比拖地图准
-          onLocate: _currentPosition,
+          // 不给「回到我的位置」:商家端不申请定位权限(见 onboarding.dart 同一处的说明)
         ),
       ),
     );
@@ -560,19 +558,6 @@ class _NewShopPageState extends State<_NewShopPage> {
       // 否则会出现「地址写着 A、坐标指着 B」而没人看得出来
       if (picked.name.isNotEmpty) _address.text = picked.name;
     });
-  }
-
-  Future<({double lat, double lng})?> _currentPosition() async {
-    var perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied) {
-      perm = await Geolocator.requestPermission();
-    }
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      return null;
-    }
-    final me = await Geolocator.getCurrentPosition();
-    return (lat: me.latitude, lng: me.longitude);
   }
 
   Future<void> _submit() async {

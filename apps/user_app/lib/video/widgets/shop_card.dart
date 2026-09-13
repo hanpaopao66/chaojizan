@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../../locate.dart';
 import '../../main.dart' show MenuPage;
 import '../../session.dart';
 import '../models.dart';
@@ -47,11 +48,10 @@ Future<({double lat, double lng})?> knownLocation() async {
     Position? pos;
     if (!kIsWeb) {
       try {
-        pos = await Geolocator.getLastKnownPosition();
+        pos = await deviceLastKnownPosition();
       } catch (_) {}
     }
-    pos ??= await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.low, timeLimit: Duration(seconds: 5)));
+    pos ??= await deviceCurrentPosition(accuracy: LocationAccuracy.low, timeLimit: const Duration(seconds: 5));
     final g = wgs84ToGcj02(pos.latitude, pos.longitude);
     _here = (lat: g.lat, lng: g.lng);
     _hereAt = DateTime.now();

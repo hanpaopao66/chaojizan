@@ -109,6 +109,10 @@ class LocationService {
       settings = AndroidSettings(
         accuracy: LocationAccuracy.high,
         distanceFilter: 10,
+        // 用系统的 LocationManager,不走 Google Play 服务的融合定位
+        // (那条路没列在隐私政策的第三方 SDK 表里;国内手机大多没有 Google Play 服务,
+        // 本来走的就是它)。scripts/check_location_manager.sh 会拦漏掉这一行的
+        forceLocationManager: true,
         foregroundNotificationConfig: const ForegroundNotificationConfig(
           notificationTitle: '超级赞接单中',
           notificationText: '正在持续定位,顾客可以看到你的配送进度',
