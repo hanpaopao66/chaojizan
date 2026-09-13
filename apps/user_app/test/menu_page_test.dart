@@ -97,7 +97,9 @@ void main() {
           body = dishes;
         } else if (p == '/cart/7') {
           body = {'items': []};
-        } else if (p.endsWith('/coupons') || p.endsWith('frequent-dishes')) {
+        } else if (p.endsWith('/coupons') ||
+            p.endsWith('frequent-dishes') ||
+            p.endsWith('/reviews')) {
           body = [];
         } else {
           body = {};
@@ -149,5 +151,20 @@ void main() {
     await pump(t, self: true);
     expect(find.textContaining('100% 归骑手'), findsNothing);
     expect(find.textContaining('这家店自己送'), findsOneWidget);
+  });
+
+  testWidgets('「商家」页签的承诺卡:费率写准,自己送的店不说配送费归骑手', (t) async {
+    await pump(t, self: true);
+    await t.tap(find.text('商家'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('本店仅被抽成 4.5%'), findsOneWidget);
+    expect(find.textContaining('这家店自己送,配送费归商家'), findsOneWidget);
+    expect(find.textContaining('小费全归骑手'), findsNothing,
+        reason: '自配送的店不收小费(orders.py 直接拒),配送费归商家(settlement.py)');
+    // 页尾的评价入口切回「评价」页签
+    await t.tap(find.textContaining('用户评价', findRichText: true));
+    await t.pumpAndSettle();
+    expect(find.text('全部 0'), findsNothing); // 没评价时不画筛选
+    expect(find.text('还没有评价,下单后来做第一个评价的人'), findsOneWidget);
   });
 }

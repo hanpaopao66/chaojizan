@@ -3842,9 +3842,17 @@ class _MenuPageState extends State<MenuPage>
                     ],
                   ),
                 ),
-                ReviewsList(api: widget.api, merchantId: widget.merchant.id),
+                ReviewsList(
+                    api: widget.api,
+                    merchantId: widget.merchant.id,
+                    shop: _detail ?? widget.merchant),
                 _ShopInfoTab(
-                    api: widget.api, shop: _detail ?? widget.merchant),
+                  api: widget.api,
+                  shop: _detail ?? widget.merchant,
+                  // 距离只有列表接口带(按定位算的),店铺详情接口不带
+                  distanceM: widget.merchant.distanceM,
+                  onOpenReviews: () => _tabController.animateTo(1),
+                ),
               ],
             ),
           ),
@@ -8703,12 +8711,24 @@ class _MoneyFlowCard extends StatelessWidget {
   }
 }
 
-/// 店铺页「商家」Tab:地址、营业时间、公告、平台承诺、证照标识。
+/// 店铺页「商家」Tab(设计稿 C):店头、地址与营业信息、证照、门店实拍、
+/// 平台承诺,页尾是评价入口。
 class _ShopInfoTab extends StatelessWidget {
-  const _ShopInfoTab({required this.api, required this.shop});
+  const _ShopInfoTab({
+    required this.api,
+    required this.shop,
+    this.distanceM,
+    this.onOpenReviews,
+  });
 
   final ApiClient api;
   final Merchant shop;
+
+  /// 到我的直线距离(列表接口按定位算的;店铺详情接口不带)。没有就不写
+  final double? distanceM;
+
+  /// 页尾「用户评价」那一行:切到评价页签
+  final VoidCallback? onOpenReviews;
 
   /// 全屏看图:左右滑切换,点一下关闭
   void _openPhotoViewer(BuildContext context, int initialIndex) {
@@ -8738,14 +8758,22 @@ class _ShopInfoTab extends StatelessWidget {
   }
 
   Widget _row(BuildContext context, IconData icon, String text) {
+    final sz = Theme.of(context).sz;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 18, color: sz.clay),
+          ),
           const SizedBox(width: 10),
-          Expanded(child: Text(text, style: const TextStyle(height: 1.4))),
+          Expanded(
+            child: Text(text,
+                style: TextStyle(
+                    fontSize: kFontBodyLg, height: 1.4, color: sz.ink)),
+          ),
         ],
       ),
     );
@@ -8753,10 +8781,11 @@ class _ShopInfoTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final sz = Theme.of(context).sz;
     final hours = shop.openTime.isNotEmpty && shop.closeTime.isNotEmpty
         ? '${shop.openTime} - ${shop.closeTime}'
         : '营业中(商家手动开关)';
+    final rated = shop.ratingCount > 0 && shop.ratingAvg != null;
     return ListView(
       // 底栏(购物车条)在 extendBody 下盖住页尾,补等高留白
       padding: EdgeInsets.fromLTRB(
@@ -8774,91 +8803,139 @@ class _ShopInfoTab extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(shop.name, style: theme.textTheme.titleLarge),
-                  Text('${shop.ratingLabel} · 月售 ${shop.monthlySales} 单',
-                      style: theme.textTheme.bodySmall),
+                  Text(shop.name,
+                      style: TextStyle(
+                          fontSize: kFontLead,
+                          fontWeight: FontWeight.w600,
+                          color: sz.ink)),
+                  const SizedBox(height: 1),
+                  Text(
+                      [
+                        rated ? '${shop.ratingAvg} 分' : '暂无评分',
+                        if (shop.monthlySales > 0) '月售 ${shop.monthlySales} 单',
+                        shop.isOpen ? '营业中' : '休息中',
+                      ].join(' · '),
+                      style:
+                          TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
                 ],
               ),
             ),
           ],
         ),
-        const Divider(height: 28),
-        _row(context, Icons.place_outlined, shop.address),
+        const SizedBox(height: 16),
+        Divider(height: 1, color: sz.line),
+        const SizedBox(height: 10),
+        _row(
+            context,
+            Icons.place_outlined,
+            distanceM == null
+                ? shop.address
+                : '${shop.address} · ${distanceLabel(distanceM!)}'),
         _row(context, Icons.schedule, '营业时间:$hours'),
         if (shop.description.isNotEmpty)
           _row(context, Icons.storefront_outlined, shop.description),
         if (shop.announcement.isNotEmpty)
           _row(context, Icons.campaign_outlined, '公告:${shop.announcement}'),
+        const SizedBox(height: 8),
         // 证照公示(亮照经营,电商法要求):从"一句话声明"升级为可查验的公示页
         InkWell(
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => ShopLicensesPage(
                   api: api, merchantId: shop.id, shopName: shop.name))),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              border: Border.symmetric(
+                  horizontal: BorderSide(color: sz.line)),
+            ),
             child: Row(children: [
-              Icon(Icons.verified_outlined,
-                  size: 18, color: Theme.of(context).sz.inkMuted),
+              Icon(Icons.verified_user_outlined, size: 18, color: sz.inkMuted),
               const SizedBox(width: 10),
-              const Expanded(child: Text('证照信息(平台人工审核)')),
-              Icon(Icons.chevron_right,
-                  size: 18, color: Theme.of(context).sz.inkMuted),
+              Expanded(
+                child: Text('证照信息(平台人工审核)',
+                    style: TextStyle(fontSize: kFontBodyLg, color: sz.ink)),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: sz.inkFaint),
             ]),
           ),
         ),
         // 门店相册:商家自传的环境/后厨实拍,点开大图
         if (shop.photoUrls.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Text('门店实拍(${shop.photoUrls.length})',
-              style: theme.textTheme.titleSmall),
+              style: TextStyle(
+                  fontSize: kFontBody,
+                  fontWeight: FontWeight.w600,
+                  color: sz.ink)),
           const SizedBox(height: 8),
           GridView.count(
             crossAxisCount: 3,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
+            // 不写 padding 的话 GridView 会自己补 MediaQuery 的底部留白 ——
+            // 这一页开着 extendBody,那一截就是购物车条的高度,相册底下凭空空出 80
+            padding: EdgeInsets.zero,
             mainAxisSpacing: 6,
             crossAxisSpacing: 6,
+            childAspectRatio: 4 / 3,
             children: [
               for (var i = 0; i < shop.photoUrls.length; i++)
                 InkWell(
                   onTap: () => _openPhotoViewer(context, i),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(kRadiusSm),
                     child: Image(image: szNetImage(api.resolveUrl(shop.photoUrls[i])),
                       fit: BoxFit.cover,
                       errorBuilder: (_, __, ___) => Container(
-                          color: theme.colorScheme.surfaceContainerHighest,
+                          color: sz.surfaceAlt,
                           child: Icon(Icons.broken_image_outlined,
-                              color: theme.colorScheme.outline)),
+                              color: sz.inkFaint)),
                     ),
                   ),
                 ),
             ],
           ),
         ],
-        const SizedBox(height: 12),
-        Card(
-          color: theme.colorScheme.tertiaryContainer,
+        const SizedBox(height: 14),
+        // 承诺是背景信息不是行动点:用品牌的 claySoft 淡底(PledgeCard),
+        // 不再是 Material 的 tertiaryContainer
+        PledgeCard(
+          title: '超级赞平台承诺',
+          body: [
+            '· 本店仅被抽成 ${shop.commissionPct}%,菜价里没有平台税',
+            // 商家自配送的单,配送费归商家(settlement.py:商家出运力);
+            // 这种店也不收小费(小费是给骑手的,orders.py 直接拒)
+            shop.selfDelivery
+                ? '· 这家店自己送,配送费归商家'
+                : '· 配送费 100% 归骑手,小费全归骑手',
+            '· 每笔订单的资金流向对你公开可查',
+          ].join('\n'),
+        ),
+        // 评价入口收在页尾
+        InkWell(
+          onTap: onOpenReviews,
           child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('超级赞平台承诺',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                        color: theme.colorScheme.onTertiaryContainer,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                Text(
-                  '· 本店仅被抽成 ${(shop.commissionRate * 100).toStringAsFixed(0)}%,菜价里没有平台税\n'
-                  '· 配送费 100% 归骑手\n'
-                  '· 每笔订单资金流向对你完全透明',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onTertiaryContainer,
-                      height: 1.7),
+            padding: const EdgeInsets.only(top: 10, bottom: 4),
+            child: Row(children: [
+              Expanded(
+                child: Text.rich(
+                  TextSpan(children: [
+                    const TextSpan(text: '用户评价 '),
+                    if (rated) ...[
+                      TextSpan(
+                          text: '${shop.ratingAvg}',
+                          style: szFigure(
+                              fontSize: kFontBodyLg,
+                              fontWeight: FontWeight.w600)),
+                      TextSpan(text: ' 分 · ${shop.ratingCount} 条'),
+                    ] else
+                      const TextSpan(text: '· 还没有'),
+                  ]),
+                  style: TextStyle(fontSize: kFontBodyLg, color: sz.ink),
                 ),
-              ],
-            ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: sz.inkFaint),
+            ]),
           ),
         ),
       ],
