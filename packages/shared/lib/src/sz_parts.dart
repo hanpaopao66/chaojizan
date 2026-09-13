@@ -125,6 +125,46 @@ class SzTextTabs extends StatelessWidget {
   }
 }
 
+/// 页签下面那道**定长**短线(TabBar 的 `indicator:`):视频 tab 的「关注 推荐 热门 竖屏」、
+/// 详情页的「简介 评论」。
+///
+/// Material 的下划线要么和整格一样宽、要么和文字一样宽 ——「评论 486」比「简介」长一截,
+/// 两个页签下面的线就一长一短;设计稿上是同一道 20 / 24 的短线居中。
+class SzTabUnderline extends Decoration {
+  const SzTabUnderline({required this.color, this.width = 20, this.thickness = 2});
+
+  final Color color;
+  final double width;
+  final double thickness;
+
+  @override
+  BoxPainter createBoxPainter([VoidCallback? onChanged]) => _TabUnderlinePainter(this);
+}
+
+class _TabUnderlinePainter extends BoxPainter {
+  _TabUnderlinePainter(this.d);
+
+  final SzTabUnderline d;
+
+  @override
+  void paint(Canvas canvas, Offset offset, ImageConfiguration configuration) {
+    final size = configuration.size;
+    if (size == null) return;
+    final rect = offset & size;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Rect.fromCenter(
+          center: Offset(rect.center.dx, rect.bottom - d.thickness / 2),
+          width: d.width,
+          height: d.thickness,
+        ),
+        Radius.circular(d.thickness / 2),
+      ),
+      Paint()..color = d.color,
+    );
+  }
+}
+
 /// 虚线框里的一句话:承诺类的脚注(「不想干了随时能走……」)。
 ///
 /// 虚线而不是卡片:它不是一个可以点的东西,也不是数据,是一句说在前面的话。

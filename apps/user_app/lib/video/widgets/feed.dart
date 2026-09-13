@@ -21,7 +21,7 @@ class VideoFeed extends StatefulWidget {
     this.emptyText = '还没有视频',
     this.header,
     this.showWhy = false,
-    this.padding = const EdgeInsets.fromLTRB(10, 8, 10, 24),
+    this.padding = const EdgeInsets.fromLTRB(10, 12, 10, 24),
     this.onPullRefresh,
     this.nested = false,
   });
@@ -188,14 +188,14 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
               padding: widget.padding,
               // 列数照「每列不超过 260」算(和 MaxCrossAxisExtent 同一个算法),格子高 = 封面 + 下面那块字
               sliver: SliverLayoutBuilder(builder: (context, constraints) {
-                const gap = 10.0;
+                const gap = 8.0; // 左右两列之间 8、上下两张之间 10(设计稿 D)
                 final w = constraints.crossAxisExtent;
                 final cols = math.max(1, (w / (260 + gap)).ceil());
                 final cardW = (w - gap * (cols - 1)) / cols;
                 return SliverGrid(
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: cols,
-                    mainAxisSpacing: gap,
+                    mainAxisSpacing: 10,
                     crossAxisSpacing: gap,
                     mainAxisExtent: cardW / VideoGridCard.coverAspect + VideoGridCard.textBlockHeight(context),
                   ),
@@ -266,15 +266,19 @@ Future<void> showWhySheet(BuildContext context, VideoCard c) {
   );
 }
 
+/// 今天那 1 枚硬币的结果:领没领到([granted],今天早先已经领过是 false)、现在余额多少。
+/// 还没问过服务端(没登录、没打开过视频 tab)是 null —— 「推荐」顶上那条就不出。
+final ValueNotifier<({bool granted, int coins})?> dailyCoin = ValueNotifier(null);
+
 /// 每天第一次打开视频 tab 领 1 枚硬币(D13;服务端按北京日期一天一次,这里只是触发)。
+///
+/// 原来领到了只弹一句 SnackBar,两秒就没了 —— 用户不知道自己有币、能投币。
+/// 现在结果放进 [dailyCoin],「推荐」顶上常驻一条(设计稿 D 的「每日硬币」)。
 Future<void> claimDailyCoin(BuildContext context) async {
   if (!rootApi.isLoggedIn) return;
   try {
     final r = await videoApi.claimDailyCoin();
-    if (r['granted'] == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('今天第一次看视频,硬币 +1(现在 ${r['coins']} 枚)')));
-    }
+    dailyCoin.value = (granted: r['granted'] == true, coins: vInt(r['coins']));
   } catch (_) {}
 }
 
@@ -282,7 +286,70 @@ Future<void> claimDailyCoin(BuildContext context) async {
 bool _dailyAsked = false;
 void claimDailyCoinOnce(BuildContext context) {
   // 游客打开不算:登录之后再打开要能领到
-  if (_dailyAsked || !rootApi.isLoggedIn) return;
+  if (!rootApi.isLoggedIn) {
+    // 退出登录了:上一个人的余额不能挂在「推荐」顶上
+    dailyCoin.value = null;
+    return;
+  }
+  if (_dailyAsked) return;
   _dailyAsked = true;
   unawaited(claimDailyCoin(context));
+}
+
+/// 「推荐」顶上的每日硬币条:「今天的 1 枚硬币已到账 · 余额 7」+「看规则」(进「我的硬币」)。
+/// 硬币只能投给视频,不能充值、提现、兑换 —— 规则在「我的硬币」和视频简介里都写着。
+class DailyCoinBar extends StatelessWidget {
+  const DailyCoinBar({super.key, required this.onRules});
+
+  final VoidCallback onRules;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<({bool granted, int coins})?>(
+      valueListenable: dailyCoin,
+      builder: (context, s, _) {
+        final sz = Theme.of(context).sz;
+        final num = szTabular(fontWeight: FontWeight.w600, color: sz.ink);
+        return AnimatedSize(
+          duration: SzMotion.of(context, SzMotion.base),
+          curve: SzMotion.standard,
+          alignment: Alignment.topCenter,
+          child: s == null
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(kPagePad, 6, kPagePad, 0),
+                  child: Material(
+                    color: sz.hold.withValues(alpha: .10),
+                    borderRadius: BorderRadius.circular(kRadiusSm),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(kRadiusSm),
+                      onTap: onRules,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                        child: Row(children: [
+                          Icon(Icons.monetization_on_outlined, size: 17, color: sz.hold),
+                          const SizedBox(width: 9),
+                          Expanded(
+                            child: Text.rich(
+                              TextSpan(children: [
+                                const TextSpan(text: '今天的 '),
+                                TextSpan(text: '1', style: num),
+                                const TextSpan(text: ' 枚硬币已到账 · 余额 '),
+                                TextSpan(text: '${s.coins}', style: num),
+                              ]),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: kFontNote, color: sz.ink),
+                            ),
+                          ),
+                          Text('看规则', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                        ]),
+                      ),
+                    ),
+                  ),
+                ),
+        );
+      },
+    );
+  }
 }

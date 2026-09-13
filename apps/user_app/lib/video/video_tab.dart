@@ -4,6 +4,7 @@ import 'package:superz_shared/superz_shared.dart';
 import '../chat/store.dart';
 import '../chat/ui/avatar.dart';
 import '../session.dart';
+import 'me/coins_page.dart';
 import 'me/video_me_page.dart';
 import 'nav.dart';
 import 'pages/search_page.dart';
@@ -103,12 +104,13 @@ class _VideoTabState extends State<VideoTab> with SingleTickerProviderStateMixin
                     child: Container(
                       height: 36,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
+                      // 骨白页底上压一块比它深的发丝线色(设计稿 D);竖屏黑底上是白 14%
                       decoration: BoxDecoration(
-                        color: immersive ? Colors.white.withValues(alpha: .14) : sz.surfaceAlt,
+                        color: immersive ? Colors.white.withValues(alpha: .14) : sz.line,
                         borderRadius: BorderRadius.circular(18),
                       ),
                       child: Row(children: [
-                        Icon(Icons.search, size: 18, color: immersive ? Colors.white70 : sz.inkMuted),
+                        Icon(Icons.search, size: 17, color: immersive ? Colors.white70 : sz.inkMuted),
                         const SizedBox(width: 6),
                         Text('搜索视频、UP 主',
                             style: TextStyle(fontSize: kFontBody, color: immersive ? Colors.white70 : sz.inkMuted)),
@@ -135,11 +137,15 @@ class _VideoTabState extends State<VideoTab> with SingleTickerProviderStateMixin
           controller: _tc,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
+          // 四个页签之间空 20,第一个和上面的头像对齐在页边 18
+          padding: const EdgeInsets.only(left: kPagePad - 10),
+          labelPadding: const EdgeInsets.symmetric(horizontal: 10),
           labelColor: fg,
-          unselectedLabelColor: immersive ? Colors.white60 : sz.inkMuted,
-          indicatorColor: immersive ? Colors.white : sz.clay,
+          unselectedLabelColor: immersive ? Colors.white.withValues(alpha: .65) : sz.inkMuted,
+          // 选中的下面一道 20 宽的短线:平时 clay,竖屏黑底上是白
+          indicator: SzTabUnderline(color: immersive ? Colors.white : sz.clay),
           dividerColor: Colors.transparent,
-          tabs: [for (final t in _tabs) Tab(text: t)],
+          tabs: [for (final t in _tabs) Tab(text: t, height: 40)],
         ),
         Expanded(
           // 顶上的 SafeArea 已经让过状态栏;下面的列表(空状态、关注页是 ListView)别再补一次
@@ -155,6 +161,11 @@ class _VideoTabState extends State<VideoTab> with SingleTickerProviderStateMixin
                 VideoFeed(
                   load: (page, _) => videoApi.recommend(page),
                   showWhy: true,
+                  // 每日硬币:今天那 1 枚到账了、现在有几枚(设计稿 D)。点开是「我的硬币」,规则写在那儿
+                  header: DailyCoinBar(
+                    onRules: () => Navigator.of(context)
+                        .push(MaterialPageRoute<void>(builder: (_) => const CoinsPage())),
+                  ),
                   emptyText: '还没有视频\n投第一个稿吧',
                 ),
                 VideoFeed(
