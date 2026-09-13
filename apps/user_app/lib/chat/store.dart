@@ -186,6 +186,7 @@ class ChatStore extends ChangeNotifier {
     CallController.instance.detach();
     realtime.stop();
     StickerCache.reset();
+    _bots.clear();
     chats.clear();
     timelines.clear();
     users.clear();
@@ -461,6 +462,29 @@ class ChatStore extends ChangeNotifier {
     if (c.isPrivate) return '$verb…';
     final names = [for (final x in t.take(2)) users[x.$1]?.displayName ?? '有人'];
     return t.length > 2 ? '${names.join('、')} 等 ${t.length} 人$verb…' : '${names.join('、')} $verb…';
+  }
+
+  // ---------------- 机器人(#355) ----------------
+
+  final Map<int, List<BotInfo>> _bots = {};
+  final Map<int, Future<List<BotInfo>>> _botsLoading = {};
+
+  /// 这个会话里的机器人(命令、菜单按钮、简介);还没拉过是空列表
+  List<BotInfo> botsOf(int chatId) => _bots[chatId] ?? const [];
+
+  /// 拉一次会话里的机器人。进会话时刷新一次就够 —— 群里加减机器人不常见,
+  /// 不值得为它在每条成员变动事件上都去问一遍
+  Future<List<BotInfo>> loadBots(int chatId, {bool refresh = false}) {
+    if (!refresh && _bots.containsKey(chatId)) return Future.value(_bots[chatId]!);
+    return _botsLoading[chatId] ??= api
+        .botInfo(chatId)
+        .then((v) {
+          _bots[chatId] = v;
+          notifyListeners();
+          return v;
+        })
+        .catchError((Object _) => _bots[chatId] ?? const <BotInfo>[])
+        .whenComplete(() => _botsLoading.remove(chatId));
   }
 
   // ---------------- 媒体地址 ----------------

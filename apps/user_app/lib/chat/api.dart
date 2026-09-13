@@ -307,6 +307,26 @@ class ChatApi {
 
   Future<void> report(Map<String, dynamic> body) => _post('/chat/v1/reports', body);
 
+  // ---------------- 导出我的数据(S5) ----------------
+
+  /// `{"state": none|running|failed|ready, "progress"?, "error"?, "url"?, "size"?, "summary"?, "last"?}`
+  Future<Map<String, dynamic>> exportStatus() async => (await _get('/chat/v1/export') as Map).cast();
+
+  Future<Map<String, dynamic>> startExport() async => (await _post('/chat/v1/export') as Map).cast();
+
+  // ---------------- 机器人(#355) ----------------
+
+  /// 会话里的机器人:命令、菜单按钮、简介。没有机器人就是空列表
+  Future<List<BotInfo>> botInfo(int chatId) async {
+    final r = (await _get('/chat/v1/chats/$chatId/bot-info') as Map).cast<String, dynamic>();
+    return [for (final b in (r['bots'] as List? ?? const [])) BotInfo.fromJson(b)];
+  }
+
+  /// 点内联键盘的回调按钮。服务端最多等机器人 10 秒:
+  /// `{"answered":true,"text":…,"show_alert":…,"url":…}`,没等到是 `{"answered":false}`
+  Future<Map<String, dynamic>> botCallback(int chatId, int seq, String data) async =>
+      (await _post('/chat/v1/chats/$chatId/messages/$seq/callback', {'data': data}) as Map).cast();
+
   Future<Map<String, Map<String, dynamic>>> signMedia(List<int> ids) async {
     final r = (await _post('/media/v1/sign', {'ids': ids})) as Map;
     return {

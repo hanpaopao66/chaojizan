@@ -53,9 +53,15 @@ class Composer extends StatefulWidget {
     required this.editing,
     required this.onCancelReply,
     required this.onCancelEdit,
+    this.bots = const [],
+    this.onOpenBotApp,
   });
 
   final ChatInfo chat;
+
+  /// 会话里的机器人:有命令就能输入 `/` 联想、左边出「菜单」;菜单按钮是小程序就出那个按钮
+  final List<BotInfo> bots;
+  final void Function(BotInfo bot)? onOpenBotApp;
   final ComposerActions actions;
   final ChatMessage? replyTo;
   final ChatMessage? editing;
@@ -156,6 +162,7 @@ class ComposerState extends State<Composer> {
       _store.realtime.typing(widget.chat.id);
     }
     _detectMention();
+    _detectCommand();
     if (widget.editing == null) {
       _draftTimer?.cancel();
       _draftTimer = Timer(const Duration(seconds: 2), _saveDraftNow);
@@ -172,6 +179,77 @@ class ComposerState extends State<Composer> {
         : {'text': t, 'entities': [for (final e in _text.outgoing()) e.toJson()]};
     widget.chat.my.draft = draft;
     unawaited(_store.api.patchDialog(widget.chat.id, {'draft': draft}).then((_) {}, onError: (_) {}));
+  }
+
+  // ---------------- 机器人命令 ----------------
+
+  /// 输入 `/` 开头、还没打空格时的命令联想
+  List<(BotInfo, BotCommand)> _cmdHits = [];
+
+  List<(BotInfo, BotCommand)> get _allCommands => [
+        for (final b in widget.bots)
+          for (final c in b.commands) (b, c),
+      ];
+
+  void _detectCommand() {
+    final t = _text.text;
+    final hits = widget.editing != null || !t.startsWith('/') || t.contains(RegExp(r'\s'))
+        ? const <(BotInfo, BotCommand)>[]
+        : [
+            for (final h in _allCommands)
+              if ('/${h.$2.command}'.startsWith(t.toLowerCase().split('@').first)) h,
+          ];
+    if (hits.length != _cmdHits.length || !hits.every(_cmdHits.contains)) setState(() => _cmdHits = hits);
+  }
+
+  /// 点一条命令就直接发(和 Telegram 一样);群里有不止一个机器人时带上 `@机器人`,免得几个一起答
+  Future<void> _sendCommand(BotInfo bot, BotCommand cmd) async {
+    final many = widget.bots.length > 1 && bot.username != null;
+    final text = many ? '/${cmd.command}@${bot.username}' : '/${cmd.command}';
+    _text.clearAll();
+    setState(() => _cmdHits = []);
+    await widget.actions.onSendText(text, const []);
+  }
+
+  Future<void> _commandMenu() async {
+    final all = _allCommands;
+    final pick = await szShowSheet<(BotInfo, BotCommand)>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * .6),
+          child: ListView(shrinkWrap: true, children: [
+            for (final h in all)
+              ListTile(
+                dense: true,
+                title: Text('/${h.$2.command}'),
+                subtitle: Text(widget.bots.length > 1 ? '${h.$2.description} · ${h.$1.name}' : h.$2.description),
+                onTap: () => Navigator.pop(ctx, h),
+              ),
+          ]),
+        ),
+      ),
+    );
+    if (pick != null && mounted) await _sendCommand(pick.$1, pick.$2);
+  }
+
+  /// 输入栏左边的「菜单」:机器人把菜单设成小程序就是那个按钮,否则有命令就列命令
+  Widget? _menuButton(SzColors sz) {
+    if (widget.editing != null) return null;
+    final app = widget.bots.where((b) => b.menuType == 'web_app' && b.menuAppId.isNotEmpty).firstOrNull;
+    if (app != null && widget.onOpenBotApp != null) {
+      final label = app.menuText.isNotEmpty ? app.menuText : (app.menuAppName.isNotEmpty ? app.menuAppName : '打开');
+      return Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 6),
+        child: FilledButton.tonal(
+          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 10)),
+          onPressed: () => widget.onOpenBotApp!(app),
+          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+    if (_allCommands.isEmpty) return null;
+    return IconButton(tooltip: '命令菜单', icon: Icon(Icons.menu, color: sz.clay), onPressed: _commandMenu);
   }
 
   // ---------------- @ 联想 ----------------
@@ -525,6 +603,7 @@ class ComposerState extends State<Composer> {
         top: false,
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           if (_mentionHits.isNotEmpty) _MentionList(hits: _mentionHits, onPick: _pickMention),
+          if (_cmdHits.isNotEmpty) _CommandList(hits: _cmdHits, many: widget.bots.length > 1, onPick: _sendCommand),
           if (widget.replyTo != null || widget.editing != null)
             _ContextBar(
               icon: widget.editing != null ? Icons.edit_outlined : Icons.reply,
@@ -549,6 +628,7 @@ class ComposerState extends State<Composer> {
                   ),
                 )
               else ...[
+                if (_menuButton(sz) case final menu?) menu,
                 IconButton(
                   tooltip: _emoji ? '键盘' : '表情',
                   icon: Icon(_emoji ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined, color: sz.inkMuted),
@@ -700,6 +780,32 @@ class _ContextBar extends StatelessWidget {
           ]),
         ),
         IconButton(icon: const Icon(Icons.close, size: 20), onPressed: onClose),
+      ]),
+    );
+  }
+}
+
+class _CommandList extends StatelessWidget {
+  const _CommandList({required this.hits, required this.many, required this.onPick});
+
+  final List<(BotInfo, BotCommand)> hits;
+  final bool many;
+  final void Function(BotInfo, BotCommand) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 220),
+      child: ListView(shrinkWrap: true, children: [
+        for (final h in hits)
+          ListTile(
+            dense: true,
+            title: Text('/${h.$2.command}', style: const TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text(many ? '${h.$2.description} · ${h.$1.name}' : h.$2.description,
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: sz.inkMuted)),
+            onTap: () => onPick(h.$1, h.$2),
+          ),
       ]),
     );
   }

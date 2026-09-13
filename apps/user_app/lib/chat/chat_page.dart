@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../miniapp/container.dart';
 import 'calls/call_controller.dart';
 import 'links.dart';
 import 'models.dart';
@@ -174,6 +175,11 @@ class _ChatPageState extends State<ChatPage> {
       }
       unawaited(_loadPins());
       _reportViews();
+      final c = chat;
+      // 机器人私聊、群:拉一次命令和菜单(频道里机器人只发帖,不接命令)
+      if (c != null && ((c.isPrivate && c.peer?.isBot == true) || c.isGroup)) {
+        unawaited(store.loadBots(widget.chatId, refresh: true));
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -457,6 +463,7 @@ class _ChatPageState extends State<ChatPage> {
       }
     },
     onShowVoters: (m) => showPollVoters(context, widget.chatId, m),
+    onMarkup: _onMarkup,
     onSwipeReply: (m) => setState(() {
       _editing = null;
       _replyTo = m;
@@ -493,6 +500,44 @@ class _ChatPageState extends State<ChatPage> {
     if (v == null || !mounted) return;
     final ok = await CallController.instance.start(peer.id, peer.displayName, peer.avatar, video: v);
     if (!ok) _toast('正在通话中,先挂掉这一通');
+  }
+
+  /// 机器人内联键盘(#355):链接按钮走 [_openUrl](问一句再用浏览器开),小程序按钮直接打开,
+  /// 回调按钮问机器人要回话 —— 服务端最多等 10 秒,等不到就什么都不提示(Telegram 也是这样)
+  Future<void> _onMarkup(ChatMessage m, Map<String, dynamic> b) async {
+    if (b['url'] != null) {
+      await _openUrl('${b['url']}');
+      return;
+    }
+    final app = b['web_app'];
+    if (app is Map && app['app_id'] != null) {
+      await openMiniApp(context, store.api.api, appid: '${app['app_id']}');
+      return;
+    }
+    final data = b['callback_data'];
+    if (data == null || m.seq <= 0) return;
+    try {
+      final r = await store.api.botCallback(widget.chatId, m.seq, '$data');
+      if (!mounted || r['answered'] != true) return;
+      final text = '${r['text'] ?? ''}';
+      if (text.isNotEmpty) {
+        if (r['show_alert'] == true) {
+          await showDialog<void>(
+            context: context,
+            builder: (ctx) => SzDialog(
+              content: Text(text, style: const TextStyle(fontSize: kFontBody)),
+              actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好'))],
+            ),
+          );
+        } else {
+          _toast(text);
+        }
+      }
+      final url = r['url'];
+      if (url is String && url.isNotEmpty && mounted) await _openUrl(url);
+    } on ApiException catch (e) {
+      _toast(e.message);
+    }
   }
 
   Future<void> _openUrl(String url) async {
@@ -984,6 +1029,8 @@ class _ChatPageState extends State<ChatPage> {
                 });
                 _load();
               })
+            else if (items.isEmpty && c.isPrivate && c.peer?.isBot == true)
+              _BotIntro(bot: store.botsOf(c.id).firstOrNull, name: c.peer!.displayName)
             else if (items.isEmpty)
               Center(
                 child: Padding(
@@ -1054,7 +1101,10 @@ class _ChatPageState extends State<ChatPage> {
               ),
           ]),
         ),
-        if (!_selecting && !_searching)
+        // 和机器人还没说过话:底下只有一个「开始」(发 /start),和 Telegram 一样
+        if (!_selecting && !_searching && items.isEmpty && !_loading && c.isPrivate && c.peer?.isBot == true)
+          _StartBar(onStart: () => _composerActions.onSendText('/start', const []))
+        else if (!_selecting && !_searching)
           Composer(
             key: _composer,
             chat: c,
@@ -1063,8 +1113,65 @@ class _ChatPageState extends State<ChatPage> {
             editing: _editing,
             onCancelReply: () => setState(() => _replyTo = null),
             onCancelEdit: () => setState(() => _editing = null),
+            bots: store.botsOf(c.id),
+            onOpenBotApp: (b) => openMiniApp(context, store.api.api, appid: b.menuAppId),
           ),
       ]),
+    );
+  }
+}
+
+/// 和机器人的空会话:中间讲这个机器人能做什么(开发者在后台写的「描述」)。
+class _BotIntro extends StatelessWidget {
+  const _BotIntro({required this.bot, required this.name});
+
+  final BotInfo? bot;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    final desc = bot?.description.isNotEmpty == true ? bot!.description : (bot?.about ?? '');
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 360),
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(color: sz.surface, borderRadius: BorderRadius.circular(kRadiusLg), border: Border.all(color: sz.line)),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ChatAvatar(name: name, url: bot?.avatar ?? '', size: 64),
+            const SizedBox(height: 10),
+            Text('这个机器人能做什么?', style: const TextStyle(fontSize: kFontTitle, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text(desc.isEmpty ? '点下面的「开始」和 $name 打个招呼。' : desc,
+                textAlign: TextAlign.center, style: TextStyle(color: sz.inkMuted, height: 1.5)),
+            const SizedBox(height: 8),
+            Text('机器人由第三方开发者提供,平台不替它背书。', textAlign: TextAlign.center,
+                style: TextStyle(fontSize: kFontNote, color: sz.inkFaint)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _StartBar extends StatelessWidget {
+  const _StartBar({required this.onStart});
+
+  final VoidCallback onStart;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 8),
+          child: SizedBox(width: double.infinity, child: FilledButton(onPressed: onStart, child: const Text('开始'))),
+        ),
+      ),
     );
   }
 }

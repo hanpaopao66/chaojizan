@@ -761,3 +761,67 @@ class StickerSetInfo {
     );
   }
 }
+
+/// 机器人的一条命令(输入 `/` 联想、菜单里列的就是这些)。
+class BotCommand {
+  const BotCommand(this.command, this.description);
+
+  final String command;
+  final String description;
+}
+
+/// 会话里的机器人(`GET /chat/v1/chats/{id}/bot-info`,#355):私聊里是对面那一个,群里是群里所有机器人。
+class BotInfo {
+  BotInfo({
+    required this.id,
+    required this.name,
+    this.username,
+    this.avatar = '',
+    this.about = '',
+    this.description = '',
+    this.commands = const [],
+    this.menuType,
+    this.menuText = '',
+    this.menuAppId = '',
+    this.menuAppName = '',
+  });
+
+  final int id;
+  final String name;
+  final String? username;
+  final String avatar;
+  final String about;
+
+  /// 空会话中间那段「这个机器人能做什么」
+  final String description;
+  final List<BotCommand> commands;
+
+  /// 输入栏左边的菜单按钮:null(没有)/ commands(列命令)/ web_app(打开小程序)
+  final String? menuType;
+  final String menuText;
+  final String menuAppId;
+  final String menuAppName;
+
+  factory BotInfo.fromJson(Object? j) {
+    final m = _map(j);
+    final menu = m['menu_button'] == null ? null : _map(m['menu_button']);
+    final app = menu == null || menu['app'] == null ? const <String, dynamic>{} : _map(menu['app']);
+    final type = menu == null ? null : _str(menu['type']);
+    return BotInfo(
+      id: _int(m['id']),
+      name: _str(m['name']),
+      username: m['username'] as String?,
+      avatar: _str(m['avatar']),
+      about: _str(m['about']),
+      description: _str(m['description']),
+      commands: [
+        for (final c in (m['commands'] as List? ?? const []))
+          BotCommand(_str(_map(c)['command']), _str(_map(c)['description'])),
+      ],
+      menuType: type == 'commands' || type == 'web_app' ? type : null,
+      menuText: _str(menu?['text']),
+      menuAppId: _str(menu?['app_id']),
+      menuAppName: _str(app['name']),
+    );
+  }
+}

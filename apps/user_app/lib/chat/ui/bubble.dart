@@ -45,8 +45,8 @@ class BubbleActions {
   /// 多选模式下点一下 = 选中 / 取消
   final void Function(ChatMessage m)? onTapSelect;
 
-  /// 机器人内联键盘按钮
-  final void Function(ChatMessage m, Map<String, dynamic> button)? onMarkup;
+  /// 机器人内联键盘按钮(回调按钮要等机器人回话,按钮上转圈直到这个 Future 结束)
+  final Future<void> Function(ChatMessage m, Map<String, dynamic> button)? onMarkup;
 
   /// 点通话记录回拨
   final void Function(ChatMessage m)? onCallBack;
@@ -122,6 +122,19 @@ class MessageRow extends StatelessWidget {
     );
     if (actions.onSwipeReply != null && !selecting && !m.isLocal) {
       bubble = _SwipeToReply(onReply: () => actions.onSwipeReply!(m), child: bubble);
+    }
+    // 内联键盘挂在气泡下面、和气泡一样宽(Telegram 的样子),不塞进气泡里
+    final keyboard = (m.markup?['inline_keyboard'] as List?) ?? const [];
+    if (keyboard.isNotEmpty && actions.onMarkup != null) {
+      bubble = ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxW),
+        child: IntrinsicWidth(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            bubble,
+            _InlineKeyboard(rows: keyboard, onTap: (b) => actions.onMarkup!(m, b)),
+          ]),
+        ),
+      );
     }
     final row = Row(
       mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
@@ -438,9 +451,6 @@ class _Bubble extends StatelessWidget {
         child: Text('— ${m.signature}', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
       ));
     }
-    if (m.markup != null && actions.onMarkup != null) {
-      children.add(_InlineKeyboard(message: m, onTap: (b) => actions.onMarkup!(m, b)));
-    }
     if (m.reactions.isNotEmpty) {
       children.add(Padding(
         padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
@@ -631,35 +641,72 @@ class _Reactions extends StatelessWidget {
   }
 }
 
-class _InlineKeyboard extends StatelessWidget {
-  const _InlineKeyboard({required this.message, required this.onTap});
+class _InlineKeyboard extends StatefulWidget {
+  const _InlineKeyboard({required this.rows, required this.onTap});
 
-  final ChatMessage message;
-  final void Function(Map<String, dynamic>) onTap;
+  final List rows;
+  final Future<void> Function(Map<String, dynamic>) onTap;
+
+  @override
+  State<_InlineKeyboard> createState() => _InlineKeyboardState();
+}
+
+class _InlineKeyboardState extends State<_InlineKeyboard> {
+  /// 正在等机器人回话的那个按钮(行, 列)
+  (int, int)? _busy;
+
+  Future<void> _press(int r, int c, Map<String, dynamic> b) async {
+    if (_busy != null) return;
+    setState(() => _busy = (r, c));
+    try {
+      await widget.onTap(b);
+    } finally {
+      if (mounted) setState(() => _busy = null);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final rows = (message.markup?['inline_keyboard'] as List? ?? const []);
     final sz = Theme.of(context).sz;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 0, 6, 6),
+      padding: const EdgeInsets.only(top: 2),
       child: Column(children: [
-        for (final row in rows)
+        for (var r = 0; r < widget.rows.length; r++)
           Row(children: [
-            for (final b in (row as List))
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact, side: BorderSide(color: sz.line)),
-                    onPressed: () => onTap((b as Map).cast<String, dynamic>()),
-                    child: Text('${b['text'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ),
-                ),
-              ),
+            for (var c = 0; c < (widget.rows[r] as List).length; c++)
+              Expanded(child: _button(sz, r, c, ((widget.rows[r] as List)[c] as Map).cast<String, dynamic>())),
           ]),
       ]),
+    );
+  }
+
+  Widget _button(SzColors sz, int r, int c, Map<String, dynamic> b) {
+    final busy = _busy == (r, c);
+    final icon = b['url'] != null ? Icons.north_east : (b['web_app'] != null ? Icons.apps : null);
+    return Padding(
+      padding: const EdgeInsets.all(2),
+      child: Material(
+        color: sz.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: sz.line)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _press(r, c, b),
+          child: Stack(children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              child: Center(
+                child: busy
+                    ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: sz.link))
+                    : Text('${b['text'] ?? ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: sz.link, fontWeight: FontWeight.w600, fontSize: kFontBody)),
+              ),
+            ),
+            if (icon != null) Positioned(right: 4, top: 4, child: Icon(icon, size: 11, color: sz.inkFaint)),
+          ]),
+        ),
+      ),
     );
   }
 }

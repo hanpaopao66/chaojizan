@@ -7,6 +7,7 @@ import '../models.dart';
 import '../store.dart';
 import '../ui/avatar.dart';
 import 'contacts_page.dart';
+import 'export_page.dart';
 import 'folders_page.dart';
 import 'user_profile_page.dart';
 
@@ -216,6 +217,12 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
             value: _store.folders.isEmpty ? null : '${_store.folders.length} 个',
             hint: '按私聊、群、频道分开看',
             onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const FoldersPage())),
+          ),
+          SzEntryTile(
+            title: '导出我的数据',
+            icon: Icons.download_outlined,
+            hint: '聊天记录(含图片文件)和投稿,打包成一个压缩包',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ExportPage())),
           ),
           SzEntryTile(
             title: '清除本机的聊天缓存',

@@ -94,6 +94,34 @@ class _UserProfilePageState extends State<UserProfilePage> {
     await store.refresh();
   }
 
+  /// 把机器人拉进一个我能邀请人的群
+  Future<void> _addBotToGroup(ChatUser bot) async {
+    final groups = [for (final c in store.sortedChats()) if (c.isGroup && c.can('invite_users')) c];
+    if (groups.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('你还没有能拉人进来的群')));
+      return;
+    }
+    final pick = await szShowSheet<ChatInfo>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(ctx).height * .6),
+          child: ListView(shrinkWrap: true, children: [
+            ListTile(title: Text('把 ${bot.displayName} 加到', style: const TextStyle(fontWeight: FontWeight.w600))),
+            for (final g in groups)
+              ListTile(
+                leading: ChatAvatar(name: g.title, url: g.photo, size: 36),
+                title: Text(g.title),
+                onTap: () => Navigator.pop(ctx, g),
+              ),
+          ]),
+        ),
+      ),
+    );
+    if (pick == null || !mounted) return;
+    await _act(() => store.api.addMembers(pick.id, [bot.id]), '已加到「${pick.title}」');
+  }
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
@@ -175,15 +203,18 @@ class _UserProfilePageState extends State<UserProfilePage> {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: _ActionButton(
-                  icon: u.isContact ? Icons.person_remove_outlined : Icons.person_add_alt_1_outlined,
-                  label: u.isContact ? '删除联系人' : '加为联系人',
-                  onTap: _busy
-                      ? null
-                      : () => _act(
-                          () => u.isContact ? store.api.removeContact(u.id) : store.api.addContact(u.id).then((_) {}),
-                          u.isContact ? '已从联系人删除' : '已加为联系人'),
-                ),
+                child: u.isBot
+                    // 机器人不进通讯录;它的第二个按钮是「添加到群组」(Telegram 的 Add to Group)
+                    ? _ActionButton(icon: Icons.group_add_outlined, label: '添加到群组', onTap: _busy ? null : () => _addBotToGroup(u))
+                    : _ActionButton(
+                        icon: u.isContact ? Icons.person_remove_outlined : Icons.person_add_alt_1_outlined,
+                        label: u.isContact ? '删除联系人' : '加为联系人',
+                        onTap: _busy
+                            ? null
+                            : () => _act(
+                                () => u.isContact ? store.api.removeContact(u.id) : store.api.addContact(u.id).then((_) {}),
+                                u.isContact ? '已从联系人删除' : '已加为联系人'),
+                      ),
               ),
             ]),
           ),
