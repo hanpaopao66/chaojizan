@@ -10,6 +10,7 @@ import 'chat_tab.dart' show chatUnreadBadge;
 import 'models.dart';
 import 'outbox.dart';
 import 'realtime.dart';
+import 'ui/stickers.dart' show StickerCache;
 
 /// 一个会话里已经拉到本地的一段消息(按 seq 升序;本地待发的排在最后,seq 为 0)。
 class ChatTimeline {
@@ -181,6 +182,7 @@ class ChatStore extends ChangeNotifier {
 
   void stop() {
     realtime.stop();
+    StickerCache.reset();
     chats.clear();
     timelines.clear();
     users.clear();

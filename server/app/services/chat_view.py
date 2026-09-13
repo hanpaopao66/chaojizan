@@ -75,7 +75,10 @@ def media_out(items: list | None, viewer_id: int | None = None) -> list[dict]:
         mid = it.get("id")
         d = {k: it.get(k) for k in ("id", "kind", "w", "h", "size", "mime", "name",
                                     "duration_ms", "waveform", "loop") if k in it}
-        if viewer_id:
+        if it.get("public_url"):
+            d["url"] = it["public_url"]
+            d["thumb"] = None
+        elif viewer_id:
             d["url"] = signed_url(mid, viewer_id)
             d["thumb"] = signed_url(mid, viewer_id, True) if it.get("has_thumb") else None
         else:

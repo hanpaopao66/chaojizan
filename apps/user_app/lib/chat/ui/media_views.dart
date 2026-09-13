@@ -277,8 +277,9 @@ class StickerView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 贴纸用原图不用缩略图:缩略图是 JPEG,透明底会变成一块白
     final r = resolvedMedia(media);
-    final url = r?.thumb ?? r?.url;
+    final url = r?.url;
     return SizedBox(
       width: size,
       height: size,

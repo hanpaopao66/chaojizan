@@ -225,6 +225,15 @@ class Outbox {
         for (final e in (it.body['entities'] as List? ?? const [])) MsgEntity.fromJson(e)
       ],
       media: [
+        // 贴纸:图是公开地址,本地这条直接画出来,不用等服务端确认
+        if (it.body['sticker_preview'] is Map)
+          MediaInfo(
+            id: ((it.body['sticker_preview'] as Map)['media_id'] as num?)?.toInt() ?? 0,
+            kind: 'sticker',
+            url: '${(it.body['sticker_preview'] as Map)['url'] ?? ''}',
+            w: 512,
+            h: 512,
+          ),
         for (final a in it.attachments)
           MediaInfo(
               id: 0,

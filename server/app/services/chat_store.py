@@ -673,6 +673,10 @@ async def _load_media(db: AsyncSession, me: User, ids: list[int], allowed_kinds:
 def media_json(mf: MediaFile) -> dict:
     d = {"id": mf.id, "kind": mf.kind, "w": mf.w, "h": mf.h, "size": mf.size, "mime": mf.mime,
          "name": mf.name, "duration_ms": mf.duration_ms, "has_thumb": bool(mf.thumb_key)}
+    if not mf.private and mf.key:
+        # 贴纸这类公开图:直接给公开地址,客户端不用再去换签名(也能吃到 CDN 长缓存)
+        from . import storage
+        d["public_url"] = storage.url_for(mf.key, False)
     if mf.waveform:
         d["waveform"] = mf.waveform
     if mf.kind == "gif":

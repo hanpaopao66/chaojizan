@@ -326,4 +326,36 @@ class ChatApi {
 
   Future<Map<String, dynamic>> completeUpload(String id, String kind) async =>
       (await _post('/media/v1/uploads/$id/complete', {'kind': kind}) as Map).cast();
+
+  // ---------------- 贴纸 ----------------
+
+  /// 贴纸面板用:官方包 + 我添加的包(带全部贴纸),另附我自己建的包(不带贴纸)。
+  Future<({List<StickerSetInfo> installed, List<StickerSetInfo> created})> stickerSets() async {
+    final r = await _get('/chat/v1/stickers/sets') as Map;
+    return (
+      installed: [for (final x in (r['installed'] as List? ?? const [])) StickerSetInfo.fromJson(x)],
+      created: [for (final x in (r['created'] as List? ?? const [])) StickerSetInfo.fromJson(x)],
+    );
+  }
+
+  Future<StickerSetInfo> stickerSet(int id) async =>
+      StickerSetInfo.fromJson(await _get('/chat/v1/stickers/sets/$id'));
+
+  Future<StickerSetInfo> createStickerSet(String title) async =>
+      StickerSetInfo.fromJson(await _post('/chat/v1/stickers/sets', {'title': title}));
+
+  Future<StickerSetInfo> renameStickerSet(int id, String title) async =>
+      StickerSetInfo.fromJson(await _patch('/chat/v1/stickers/sets/$id', {'title': title}));
+
+  Future<void> deleteStickerSet(int id) => _delete('/chat/v1/stickers/sets/$id');
+
+  Future<StickerItem> addSticker(int setId, int mediaId, String emoji) async => StickerItem.fromJson(
+      await _post('/chat/v1/stickers/sets/$setId/stickers', {'media_id': mediaId, 'emoji': emoji}));
+
+  Future<void> removeSticker(int setId, int stickerId) =>
+      _delete('/chat/v1/stickers/sets/$setId/stickers/$stickerId');
+
+  Future<void> installStickerSet(int id) => _post('/chat/v1/stickers/sets/$id/install');
+
+  Future<void> uninstallStickerSet(int id) => _delete('/chat/v1/stickers/sets/$id/install');
 }

@@ -159,7 +159,8 @@ class MediaInfo {
   final String? thumb;
   final bool loop;
 
-  bool get signed => url.contains('?u=') || url.contains('&u=');
+  /// 地址能直接用:带了签名,或者本来就是公开图(贴纸走公开桶 /img/…)
+  bool get signed => url.contains('?u=') || url.contains('&u=') || url.startsWith('/img/');
 
   factory MediaInfo.fromJson(Object? j) {
     final m = _map(j);
@@ -682,5 +683,81 @@ class ChatFolder {
       return true;
     }
     return false;
+  }
+}
+
+
+/// 一张贴纸(公开图,512px WebP,带透明)。
+class StickerItem {
+  const StickerItem({required this.id, required this.setId, required this.emoji, required this.url,
+      this.mediaId = 0, this.w = 512, this.h = 512});
+
+  final int id;
+  final int setId;
+  final String emoji;
+  final String url;
+  final int mediaId;
+  final int w;
+  final int h;
+
+  factory StickerItem.fromJson(Object? j) {
+    final m = _map(j);
+    final media = _map(m['media']);
+    return StickerItem(
+      id: _int(m['id']),
+      setId: _int(m['set_id']),
+      emoji: _str(m['emoji'], '🙂'),
+      url: _str(media['url']),
+      mediaId: _int(media['id']),
+      w: _int(media['w'], 512),
+      h: _int(media['h'], 512),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'set_id': setId,
+        'emoji': emoji,
+        'media': {'id': mediaId, 'url': url, 'w': w, 'h': h},
+      };
+}
+
+/// 一个贴纸包。
+class StickerSetInfo {
+  StickerSetInfo({
+    required this.id,
+    required this.shortName,
+    required this.title,
+    this.isOfficial = false,
+    this.isMine = false,
+    this.installed = false,
+    this.count = 0,
+    this.cover,
+    this.stickers = const [],
+  });
+
+  final int id;
+  final String shortName;
+  String title;
+  final bool isOfficial;
+  final bool isMine;
+  bool installed;
+  int count;
+  final StickerItem? cover;
+  List<StickerItem> stickers;
+
+  factory StickerSetInfo.fromJson(Object? j) {
+    final m = _map(j);
+    return StickerSetInfo(
+      id: _int(m['id']),
+      shortName: _str(m['short_name']),
+      title: _str(m['title']),
+      isOfficial: m['is_official'] == true,
+      isMine: m['is_mine'] == true,
+      installed: m['installed'] == true,
+      count: _int(m['count']),
+      cover: m['cover'] == null ? null : StickerItem.fromJson(m['cover']),
+      stickers: [for (final x in (m['stickers'] as List? ?? const [])) StickerItem.fromJson(x)],
+    );
   }
 }

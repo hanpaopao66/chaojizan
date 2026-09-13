@@ -9,6 +9,7 @@ import 'avatar.dart';
 import 'format.dart';
 import 'media_views.dart';
 import 'rich_text.dart';
+import 'stickers.dart';
 import 'voice.dart';
 
 /// 气泡要回调的动作(由聊天页实现)。
@@ -243,7 +244,14 @@ class _Bubble extends StatelessWidget {
       Widget content;
       switch (m.kind) {
         case 'sticker':
-          content = m.media.isEmpty ? const SizedBox.shrink() : StickerView(media: m.media.first);
+          final setId = (m.sticker?['set_id'] as num?)?.toInt();
+          content = m.media.isEmpty
+              ? const SizedBox(width: 128, height: 128)
+              : GestureDetector(
+                  // 点贴纸看整包(可以添加),和 Telegram 一样
+                  onTap: setId == null || m.isLocal ? null : () => showStickerSetSheet(context, setId),
+                  child: StickerView(media: m.media.first),
+                );
         case 'dice':
           content = DiceView(dice: m.dice ?? const {}, fg: fg);
         case 'video_note':

@@ -394,6 +394,12 @@ class _ChatPageState extends State<ChatPage> {
       await store.outbox.sendStructured(widget.chatId, 'dice', {'dice': {'emoji': e}}, replyTo: _takeReply());
       _afterSend();
     },
+    onSendSticker: (s) async {
+      // sticker_preview 只给本地「发送中」那条画图用,服务端不认这个字段
+      await store.outbox.sendStructured(widget.chatId, 'sticker',
+          {'sticker_id': s.id, 'sticker_preview': {'url': s.url, 'media_id': s.mediaId}}, replyTo: _takeReply());
+      _afterSend();
+    },
     onSchedule: (text, ents) async {
       final at = await pickScheduleTime(context);
       if (at == null) return;

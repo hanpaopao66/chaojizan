@@ -10,9 +10,9 @@ import 'package:superz_shared/superz_shared.dart';
 import '../models.dart';
 import '../outbox.dart';
 import '../store.dart';
-import 'emoji.dart';
 import 'entity_controller.dart';
 import 'format.dart';
+import 'stickers.dart';
 import 'voice.dart';
 
 /// 输入栏要做的事,聊天页实现。
@@ -27,6 +27,7 @@ class ComposerActions {
     required this.onCreatePoll,
     required this.onDice,
     required this.onSchedule,
+    required this.onSendSticker,
   });
 
   final Future<void> Function(String text, List<MsgEntity> entities, {bool silent}) onSendText;
@@ -39,6 +40,7 @@ class ComposerActions {
   final Future<void> Function() onCreatePoll;
   final Future<void> Function(String emoji) onDice;
   final Future<void> Function(String text, List<MsgEntity> entities) onSchedule;
+  final Future<void> Function(StickerItem sticker) onSendSticker;
 }
 
 /// 聊天页底部的输入栏。
@@ -632,7 +634,12 @@ class ComposerState extends State<Composer> {
             ]),
           ),
           if (_emoji && !_recording)
-            EmojiPanel(onPick: insert, onBackspace: _backspace),
+            ExpressionPanel(
+              onEmoji: insert,
+              onBackspace: _backspace,
+              onSticker: (s) => widget.actions.onSendSticker(s),
+              stickersAllowed: c.can('send_stickers'),
+            ),
         ]),
       ),
     );
