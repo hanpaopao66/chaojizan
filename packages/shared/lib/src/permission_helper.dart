@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'sz_widgets.dart';
 
-enum AppPermissionKind { location, locationRider, camera, photos, bluetooth, notification }
+enum AppPermissionKind { location, locationRider, camera, microphone, photos, bluetooth, notification }
 
 class PermissionRationale {
   PermissionRationale._();
@@ -34,6 +34,10 @@ class PermissionRationale {
             '需要使用相机权限',
             '用于拍摄照片并上传。\n拒绝不影响其他功能。'
           ),
+        AppPermissionKind.microphone => (
+            '需要使用麦克风权限',
+            '用于在聊天里录语音消息、打语音或视频电话。\n拒绝不影响其他功能。'
+          ),
         AppPermissionKind.photos => (
             '需要访问相册',
             '用于选取图片并上传。\n拒绝不影响其他功能。'
@@ -47,6 +51,10 @@ class PermissionRationale {
             '用于接收新订单与订单状态提醒。\n拒绝后无法收到提醒,可在 App 内查看。'
           ),
       };
+
+  /// 这一类权限的说明弹窗是不是已经同意过(同意过的 [ensure] 直接放行、不再弹)
+  static Future<bool> agreed(AppPermissionKind kind) async =>
+      (await SharedPreferences.getInstance()).getBool('$_prefsPrefix${kind.name}') == true;
 
   /// 先告知后申请:返回 true 表示可以继续调起系统权限/相应功能。
   ///
@@ -80,6 +88,13 @@ class PermissionRationale {
       return true;
     }
     return false;
+  }
+
+  /// 打电话 / 接电话前:麦克风一定要,视频通话再加相机。两个都先告知、后申请
+  static Future<bool> ensureCall(BuildContext context, {required bool video}) async {
+    if (!await ensure(context, AppPermissionKind.microphone)) return false;
+    if (!video || !context.mounted) return context.mounted;
+    return ensure(context, AppPermissionKind.camera, reason: '用于视频通话时让对方看到你。\n拒绝的话可以只开语音。');
   }
 
   /// 系统层已永久拒绝时的引导:弹窗解释并提供"去系统设置"。

@@ -82,6 +82,7 @@ class _CallsPageState extends State<CallsPage> {
                           onPressed: () async {
                             final id = (peer['id'] as num?)?.toInt();
                             if (id == null) return;
+                            if (!await PermissionRationale.ensureCall(context, video: video)) return;
                             final ok = await CallController.instance.start(id, name, '${peer['avatar'] ?? ''}', video: video);
                             if (!ok && context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在通话中,先挂掉这一通')));

@@ -140,12 +140,21 @@ class _CallPageState extends State<CallPage> {
       return Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
         _RoundButton(icon: Icons.call_end, label: '拒绝', color: const Color(0xFFE5484D), onTap: c.decline),
         if (c.video)
-          _RoundButton(icon: Icons.mic, label: '只开语音', color: Colors.white24, onTap: () => c.accept(withVideo: false)),
+          _RoundButton(
+              icon: Icons.mic,
+              label: '只开语音',
+              color: Colors.white24,
+              onTap: () async {
+                if (await PermissionRationale.ensureCall(context, video: false)) await c.accept(withVideo: false);
+              }),
         _RoundButton(
           icon: c.video ? Icons.videocam : Icons.call,
           label: '接听',
           color: const Color(0xFF30A46C),
-          onTap: () => c.accept(),
+          // 先告知后申请:第一次接视频电话时先弹麦克风、相机的中文说明,再调系统授权
+          onTap: () async {
+            if (await PermissionRationale.ensureCall(context, video: c.video)) await c.accept();
+          },
         ),
       ]);
     }

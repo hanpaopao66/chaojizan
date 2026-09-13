@@ -525,6 +525,7 @@ class _ChatPageState extends State<ChatPage> {
           ),
         );
     if (v == null || !mounted) return;
+    if (!await PermissionRationale.ensureCall(context, video: v)) return;
     final ok = await CallController.instance.start(peer.id, peer.displayName, peer.avatar, video: v);
     if (!ok) _toast('正在通话中,先挂掉这一通');
   }

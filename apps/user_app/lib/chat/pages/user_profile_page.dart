@@ -99,6 +99,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
 
   /// 把机器人拉进一个我能邀请人的群
   Future<void> _call(ChatUser u, {required bool video}) async {
+    if (!await PermissionRationale.ensureCall(context, video: video)) return;
     final ok = await CallController.instance.start(u.id, u.displayName, u.avatar, video: video);
     if (!ok && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在通话中,先挂掉这一通')));

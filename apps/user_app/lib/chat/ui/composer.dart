@@ -475,13 +475,20 @@ class ComposerState extends State<Composer> {
     );
     if (!mounted || pick == null) return;
     switch (pick) {
+      // 相册、相机都先告知后申请(和全站其他取图的地方一样走 PermissionRationale)
       case 'gallery':
+        if (!await PermissionRationale.ensure(context, AppPermissionKind.photos)) return;
         final files = await ImagePicker().pickMultipleMedia(limit: 10);
         if (files.isNotEmpty) await _sendPicked(files);
       case 'camera':
+        if (!await PermissionRationale.ensure(context, AppPermissionKind.camera)) return;
         final f = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 88);
         if (f != null) await _sendPicked([f]);
       case 'record':
+        if (!await PermissionRationale.ensure(context, AppPermissionKind.camera,
+            reason: '用于拍摄视频并发送。\n拒绝不影响其他功能。')) {
+          return;
+        }
         final f = await ImagePicker().pickVideo(source: ImageSource.camera, maxDuration: const Duration(minutes: 10));
         if (f != null) await _sendPicked([f], forceVideo: true);
       case 'file':
@@ -555,6 +562,18 @@ class ComposerState extends State<Composer> {
       _toast('这里不能发语音');
       return;
     }
+    // 先告知后申请(应用商店合规):第一次按住时先弹中文说明,同意之后再调系统的麦克风授权。
+    // 弹过说明的这一次不录:弹窗一出来,这次按住就算结束了(点「去授权」时手指早离开了麦克风),
+    // 接着录的话录音会停不下来。下次按住才调系统授权、开始录
+    if (!await PermissionRationale.agreed(AppPermissionKind.microphone)) {
+      _pressing = false;
+      if (!mounted) return;
+      if (await PermissionRationale.ensure(context, AppPermissionKind.microphone)) {
+        _toast('按住说话,松开发送');
+      }
+      return;
+    }
+    if (!mounted) return;
     HapticFeedback.mediumImpact();
     final ok = await _rec.start();
     if (!ok) {

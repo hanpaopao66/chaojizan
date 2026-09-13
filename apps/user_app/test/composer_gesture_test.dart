@@ -67,6 +67,19 @@ void main() {
     expect(find.text('这里不能发语音'), findsOneWidget, reason: '按住被文字提示吃掉了,录音入口没被调用');
   });
 
+  testWidgets('第一次按住麦克风:先弹中文说明,不直接调系统授权(应用商店合规)', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await pumpComposer(tester, media: true);
+    await tester.longPress(find.byKey(const ValueKey('mic')));
+    await tester.pumpAndSettle();
+    expect(find.text('需要使用麦克风权限'), findsOneWidget, reason: '没先告知就去要麦克风了');
+    await tester.tap(find.text('去授权'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('按住说话,松开发送'), findsOneWidget, reason: '同意说明之后这一次不录,提示再按住');
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getBool('perm_rationale_v1_microphone'), isTrue, reason: '同意过就不再弹');
+  });
+
   testWidgets('表情面板开着时按系统返回键:先收面板,页面还在;再按一次才退出', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final chat = ChatInfo.fromJson({
