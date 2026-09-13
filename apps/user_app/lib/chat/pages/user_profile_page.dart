@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../calls/call_controller.dart';
 import '../chat_page.dart';
 import '../models.dart';
 import '../store.dart';
@@ -97,6 +98,13 @@ class _UserProfilePageState extends State<UserProfilePage> {
   }
 
   /// 把机器人拉进一个我能邀请人的群
+  Future<void> _call(ChatUser u, {required bool video}) async {
+    final ok = await CallController.instance.start(u.id, u.displayName, u.avatar, video: video);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('正在通话中,先挂掉这一通')));
+    }
+  }
+
   Future<void> _addBotToGroup(ChatUser bot) async {
     final groups = [for (final c in store.sortedChats()) if (c.isGroup && c.can('invite_users')) c];
     if (groups.isEmpty) {
@@ -203,6 +211,13 @@ class _UserProfilePageState extends State<UserProfilePage> {
                         },
                 ),
               ),
+              // 语音 / 视频通话(Telegram 的资料页也能直接打);机器人、拉黑了、通话没开放时不出
+              if (!u.isBot && !u.blocked && RemoteCopy.feature('calls')) ...[
+                const SizedBox(width: 10),
+                Expanded(child: _ActionButton(icon: Icons.call_outlined, label: '语音', onTap: () => _call(u, video: false))),
+                const SizedBox(width: 10),
+                Expanded(child: _ActionButton(icon: Icons.videocam_outlined, label: '视频', onTap: () => _call(u, video: true))),
+              ],
               const SizedBox(width: 10),
               Expanded(
                 child: u.isBot
