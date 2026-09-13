@@ -447,16 +447,25 @@ class ComposerState extends State<Composer> {
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-          child: Wrap(spacing: 8, runSpacing: 8, children: [
-            if (can) _AttachTile(icon: Icons.photo_library_outlined, label: '相册', onTap: () => Navigator.pop(ctx, 'gallery')),
-            if (can) _AttachTile(icon: Icons.photo_camera_outlined, label: '拍照', onTap: () => Navigator.pop(ctx, 'camera')),
-            if (can) _AttachTile(icon: Icons.videocam_outlined, label: '拍视频', onTap: () => Navigator.pop(ctx, 'record')),
-            if (can) _AttachTile(icon: Icons.insert_drive_file_outlined, label: '文件', onTap: () => Navigator.pop(ctx, 'file')),
-            _AttachTile(icon: Icons.location_on_outlined, label: '位置', onTap: () => Navigator.pop(ctx, 'location')),
-            _AttachTile(icon: Icons.person_outline, label: '名片', onTap: () => Navigator.pop(ctx, 'contact')),
-            if (canPoll || widget.chat.isSaved)
-              _AttachTile(icon: Icons.poll_outlined, label: '投票', onTap: () => Navigator.pop(ctx, 'poll')),
-            _AttachTile(icon: Icons.casino_outlined, label: '骰子', onTap: () => Navigator.pop(ctx, 'dice')),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // 群里关了发媒体:相册、拍照、文件不出现,说一声为什么,免得以为功能坏了
+            if (!can)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
+                child: Text('管理员关闭了这个群的图片、视频和文件',
+                    style: TextStyle(fontSize: kFontNote, color: Theme.of(ctx).sz.inkMuted)),
+              ),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              if (can) _AttachTile(icon: Icons.photo_library_outlined, label: '相册', onTap: () => Navigator.pop(ctx, 'gallery')),
+              if (can) _AttachTile(icon: Icons.photo_camera_outlined, label: '拍照', onTap: () => Navigator.pop(ctx, 'camera')),
+              if (can) _AttachTile(icon: Icons.videocam_outlined, label: '拍视频', onTap: () => Navigator.pop(ctx, 'record')),
+              if (can) _AttachTile(icon: Icons.insert_drive_file_outlined, label: '文件', onTap: () => Navigator.pop(ctx, 'file')),
+              _AttachTile(icon: Icons.location_on_outlined, label: '位置', onTap: () => Navigator.pop(ctx, 'location')),
+              _AttachTile(icon: Icons.person_outline, label: '名片', onTap: () => Navigator.pop(ctx, 'contact')),
+              if (canPoll || widget.chat.isSaved)
+                _AttachTile(icon: Icons.poll_outlined, label: '投票', onTap: () => Navigator.pop(ctx, 'poll')),
+              _AttachTile(icon: Icons.casino_outlined, label: '骰子', onTap: () => Navigator.pop(ctx, 'dice')),
+            ]),
           ]),
         ),
       ),
