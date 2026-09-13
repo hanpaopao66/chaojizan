@@ -97,6 +97,7 @@ class SzChip extends StatelessWidget {
     this.onTap,
     this.color,
     this.dense = false,
+    this.textColor,
   });
 
   final String label;
@@ -107,10 +108,17 @@ class SzChip extends StatelessWidget {
   final Color? color;
   final bool dense;
 
+  /// 描边照旧是发丝线,只换字色(字重也轻一档)。给「月售 128」「今日售罄」
+  /// 「今日还剩 12 份」这类**陈述一个数 / 一个状态**的小签用 —— 和「招牌」
+  /// 这种商家自述的标签排在一行时,靠字色分主次,不再多一圈彩色描边。
+  /// 传了 [color] 时不起作用(语义色优先)。
+  final Color? textColor;
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    final fg = selected ? sz.paper : (color ?? sz.ink);
+    final quiet = color == null && textColor != null;
+    final fg = selected ? sz.paper : (color ?? textColor ?? sz.ink);
     final bg = selected ? sz.ink : Colors.transparent;
     final border = selected ? sz.ink : (color ?? sz.line);
     // 选中/取消 120ms 过渡(动效规范:按压、开关、chip 选中一律 fast)
@@ -137,7 +145,8 @@ class SzChip extends StatelessWidget {
               duration: d,
               style: szSans(
                   fontSize: dense ? 11 : 12.5,
-                  fontWeight: FontWeight.w500,
+                  fontWeight:
+                      quiet && !selected ? FontWeight.w400 : FontWeight.w500,
                   color: fg),
               child: Text(label),
             ),

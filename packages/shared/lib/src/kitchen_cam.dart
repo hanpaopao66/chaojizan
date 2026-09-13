@@ -49,39 +49,49 @@ class SzKitchenCamChip extends StatelessWidget {
     final sz = Theme.of(context).sz;
     final text = label ?? (has ? '有明厨亮灶' : '无明厨亮灶');
 
-    // 紧凑版(列表项):没装的店只留一行浅灰小字,不占彩色徽章的位置。
-    // 法规要求「无」也要标,但没要求标得一样显眼 ——
-    // 把「无」做成大红标签是在羞辱没装的商家,而法规对商家是「倡导」不是强制
-    if (compact && !has) {
-      return Text(text,
-          style: TextStyle(fontSize: 10.5, color: sz.inkMuted));
-    }
-
-    return GestureDetector(
-      onTap: has ? onTap : null,
-      child: Container(
-        padding: EdgeInsets.symmetric(
-            horizontal: compact ? 5 : 7, vertical: compact ? 1.5 : 3),
+    if (compact) {
+      final small =
+          TextStyle(fontSize: 10.5, color: has ? sz.earn : sz.inkMuted);
+      // 紧凑版(列表项):没装的店只留一行浅灰小字,不占彩色徽章的位置。
+      // 法规要求「无」也要标,但没要求标得一样显眼 ——
+      // 把「无」做成大红标签是在羞辱没装的商家,而法规对商家是「倡导」不是强制
+      if (!has) return Text(text, style: small);
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
         decoration: BoxDecoration(
-          color: has
-              ? sz.earn.withValues(alpha: .12)
-              : sz.inkFaint.withValues(alpha: .10),
+          color: sz.earn.withValues(alpha: .12),
           borderRadius: BorderRadius.circular(4),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(has ? Icons.videocam_outlined : Icons.videocam_off_outlined,
-              size: compact ? 11 : 13,
-              color: has ? sz.earn : sz.inkMuted),
+          Icon(Icons.videocam_outlined, size: 11, color: sz.earn),
           const SizedBox(width: 3),
-          Text(text,
-              style: TextStyle(
-                  fontSize: compact ? 10.5 : 12,
-                  color: has ? sz.earn : sz.inkMuted)),
-          if (has && onTap != null && !compact) ...[
-            const SizedBox(width: 2),
-            Icon(Icons.chevron_right, size: 13, color: sz.earn),
-          ],
+          Text(text, style: small),
         ]),
+      );
+    }
+
+    // 店铺页 / 直播页上的完整版:发丝描边胶囊(和 SzChip 同一种形状),
+    // 图标带语义色、字是墨色 —— 它是「主页面显著位置」的链接标识(第二十五条),
+    // 要读得出来,不是一块绿色。能点进直播的时候把「后厨直播中」说出来:
+    // 服务端只有探测在线(active)才给 has,所以这句话和点进去看到的是同一件事
+    final live = has && onTap != null;
+    return Material(
+      type: MaterialType.transparency,
+      shape: StadiumBorder(side: BorderSide(color: sz.line)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: live ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(has ? Icons.videocam_outlined : Icons.videocam_off_outlined,
+                size: 14, color: has ? sz.earn : sz.inkMuted),
+            const SizedBox(width: 6),
+            Text(live ? '$text · 后厨直播中' : text,
+                style: TextStyle(
+                    fontSize: kFontNote, color: has ? sz.ink : sz.inkMuted)),
+          ]),
+        ),
       ),
     );
   }

@@ -263,6 +263,18 @@ class Merchant {
   String get ratingLabel =>
       ratingCount == 0 ? '暂无评分' : '★ $ratingAvg · $ratingCount 条评价';
 
+  /// 抽成比例的文案数字:0.05 →「5」、0.045 →「4.5」(不带 % 号)。
+  ///
+  /// 不能写 `(commissionRate * 100).toStringAsFixed(0)`:阶梯降佣有 4.5% 这一档,
+  /// 0.045 * 100 在浮点里是 4.4999…,取整出来是「4」—— 把一家店的抽成
+  /// 少说了半个点,而店铺页上那句「只被抽 X%」是要让人拿去对账的。
+  String get commissionPct {
+    final tenths = (commissionRate * 1000).round();
+    return tenths % 10 == 0
+        ? '${tenths ~/ 10}'
+        : '${tenths ~/ 10}.${tenths % 10}';
+  }
+
   bool get isApproved => status == 'approved';
   bool get isPending => status == 'pending';
   bool get isRejected => status == 'rejected';

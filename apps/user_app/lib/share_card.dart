@@ -85,30 +85,41 @@ Widget _footer() => Row(children: [
           padding: EdgeInsets.zero),
     ]);
 
-/// 店铺分享卡
-Widget shopShareCard(Merchant m) => _cardShell(children: [
-      Text(m.name,
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-      const SizedBox(height: 4),
-      Row(children: [
-        if (m.ratingAvg != null) ...[
-          Icon(Icons.star, size: 14, color: SzColors.light.clay),
-          Text(' ${m.ratingAvg}  ',
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-        ],
-        if (m.monthlySales > 0)
-          Text('月售 ${m.monthlySales}',
-              style: TextStyle(fontSize: 12, color: SzColors.light.inkMuted)),
-      ]),
-      if (m.topDishes.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        for (final d in m.topDishes.take(3))
-          Text('· ${d.name}  ${yuan(d.priceCents)}',
-              style: const TextStyle(fontSize: 13)),
+/// 店铺卡上列的一道菜。[from] = 有规格,价格后面带「起」
+typedef ShareDish = ({String name, int priceCents, bool from});
+
+/// 店铺分享卡。[dishes] 由店铺页从菜单里挑(见 MenuPage._shareDishes);
+/// 不给就退回列表接口带的招牌菜
+Widget shopShareCard(Merchant m, {List<ShareDish>? dishes}) {
+  final list = dishes ??
+      [
+        for (final d in m.topDishes)
+          (name: d.name, priceCents: d.priceCents, from: false),
+      ];
+  return _cardShell(children: [
+    Text(m.name,
+        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+    const SizedBox(height: 4),
+    Row(children: [
+      if (m.ratingAvg != null) ...[
+        Icon(Icons.star, size: 14, color: SzColors.light.clay),
+        Text(' ${m.ratingAvg}  ',
+            style: const TextStyle(fontWeight: FontWeight.w700)),
       ],
-      const Divider(height: 20),
-      _footer(),
-    ]);
+      if (m.monthlySales > 0)
+        Text('月售 ${m.monthlySales}',
+            style: TextStyle(fontSize: 12, color: SzColors.light.inkMuted)),
+    ]),
+    if (list.isNotEmpty) ...[
+      const SizedBox(height: 8),
+      for (final d in list.take(3))
+        Text('· ${d.name}  ${yuan(d.priceCents)}${d.from ? ' 起' : ''}',
+            style: const TextStyle(fontSize: 13)),
+    ],
+    const Divider(height: 20),
+    _footer(),
+  ]);
+}
 
 /// 晒单分享卡:钱去哪了三方分账条(金额可打码)
 Widget orderShareCard(Order o, {required bool maskAmount}) {
