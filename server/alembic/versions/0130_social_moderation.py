@@ -10,14 +10,14 @@
   submitted_at 会被下一次提交覆盖。已有的结论留空,不参与计算(不编造)。
 
 Revision ID: 0130
-Revises: 0128(和 0129 并行开发,合并时接到 0129 后面)
+Revises: 0129(和机器人的 0129 并行开发,合并时接在它后面)
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = '0130'
-down_revision = '0128'
+down_revision = '0129'
 branch_labels = None
 depends_on = None
 
