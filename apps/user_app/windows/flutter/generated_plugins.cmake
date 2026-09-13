@@ -3,8 +3,10 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  audioplayers_windows
   file_selector_windows
   geolocator_windows
+  record_windows
   share_plus
   url_launcher_windows
 )

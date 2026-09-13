@@ -19,6 +19,8 @@ import 'address_pages.dart';
 import 'append_order_page.dart';
 import 'category_page.dart';
 import 'chat/chat_tab.dart';
+import 'chat/store.dart';
+import 'chat/ui/avatar.dart' show rootResolve;
 import 'checkout_page.dart';
 import 'coupons_page.dart';
 import 'group_cart_page.dart';
@@ -267,13 +269,37 @@ class _HomePageState extends State<HomePage> {
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'user'));
     chatUnreadBadge.addListener(_onBadge);
     videoImmersive.addListener(_onBadge);
+    // 消息模块:登录了就连实时通道(底栏角标要一直准,不能等点进「消息」tab 才连);
+    // 游客登录成功 / 退出登录都会 bump authTick
+    rootResolve = widget.api.resolveUrl;
+    ChatStore.installSessionHook();
+    _syncChat();
+    authTick.addListener(_syncChat);
+    // 消息模块的一次性提示(被移出群、定时消息没发出去、慢速模式……)在哪一页都要看得到,
+    // 所以挂在首页这一层;挂在聊天页的话,不在那个会话里就错过了
+    _chatNotices = ChatStore.instance.notices.stream.listen((s) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
+    });
   }
+
+  StreamSubscription<String>? _chatNotices;
 
   @override
   void dispose() {
     chatUnreadBadge.removeListener(_onBadge);
     videoImmersive.removeListener(_onBadge);
+    authTick.removeListener(_syncChat);
+    _chatNotices?.cancel();
     super.dispose();
+  }
+
+  void _syncChat() {
+    final store = ChatStore.instance;
+    if (widget.api.isLoggedIn) {
+      unawaited(store.start(widget.api));
+    } else if (store.started) {
+      store.stop();
+    }
   }
 
   void _onBadge() {

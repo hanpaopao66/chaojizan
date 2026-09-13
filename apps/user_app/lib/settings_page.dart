@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'chat/pages/chat_settings_page.dart';
 import 'miniapp/pages.dart';
 import 'session.dart';
 
@@ -103,6 +104,15 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
         if (widget.api.isLoggedIn) ...[
+          const Divider(height: 1),
+          // 「消息」的资料、隐私、通知、拉黑名单(DEV-PROMPTS-40 #340)。
+          // 「消息」tab 的新建菜单里也有一份 —— 聊着天想改隐私的人不用绕回「我的」
+          SzEntryTile(
+            icon: Icons.lock_outline,
+            title: '消息与隐私',
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const ChatSettingsPage())),
+          ),
           const Divider(height: 1),
           // 每个用过的小程序:授权项、云存储用量、导出、清空、移除(DEV-PROMPTS-39 I8)
           SzEntryTile(

@@ -31,3 +31,10 @@ ImageProvider szAuthedImage(String url, {String? token}) {
         : null,
   );
 }
+
+/// 带固定缓存键的网络图片。
+///
+/// 聊天里的图片地址带签名和到期时间(DEV-PROMPTS-40 #341),每次换签名地址就变 ——
+/// 按地址缓存的话同一张图会被反复重下。用媒体 id 当缓存键,换了签名也命中缓存。
+ImageProvider szNetImageKeyed(String url, String cacheKey) =>
+    CachedNetworkImageProvider(url, cacheKey: cacheKey);

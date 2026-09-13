@@ -34,6 +34,11 @@ dependencies:
   # 浏览器不许父页面往跨域 iframe 注入 JS,所以页面要自己引
   # /mini-app-bridge.js —— 和 Telegram 要求引 telegram-web-app.js 同理
   web: ^1.1.0
+  # 消息(DEV-PROMPTS-40):发文件、录语音、放语音
+  file_picker: ^11.0.3       # 选任意文件发出去
+  record: ^7.1.1             # 按住录语音(安卓 AAC,网页 opus,服务端统一转成 m4a)
+  audioplayers: ^6.8.1       # 放语音消息(和商家端听单同一个库)
+  path_provider: ^2.1.6      # 录音文件和下载的文件落应用私有目录
 
 flutter:
   uses-material-design: true

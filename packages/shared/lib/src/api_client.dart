@@ -2106,6 +2106,64 @@ class ApiClient {
     return Dish.fromJson(data as Map<String, dynamic>);
   }
 
+  /// 通用请求:消息、视频模块(DEV-PROMPTS-40)的接口很多,不在这里逐个包一层,
+  /// 它们各自的 API 类用这个。错误处理和其他接口完全一样(中文 detail、401 回登录页)。
+  Future<dynamic> requestJson(String method, String path,
+          {Object? body, Map<String, dynamic>? query}) =>
+      _request(method, path, body: body, query: query);
+
+  /// 上传一个文件到 `/media/v1/upload`(multipart,≤ 20MB)。返回媒体对象。
+  Future<Map<String, dynamic>> uploadMediaBytes(List<int> bytes, String filename,
+      {required String kind,
+      String purpose = 'chat',
+      Duration timeout = const Duration(minutes: 3)}) async {
+    try {
+      final request =
+          http.MultipartRequest('POST', Uri.parse('$baseUrl/media/v1/upload'));
+      if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+      request.fields['kind'] = kind;
+      request.fields['purpose'] = purpose;
+      request.files
+          .add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+      final response =
+          await http.Response.fromStream(await request.send().timeout(timeout));
+      return _decodeUpload(response);
+    } catch (e) {
+      throw _asFriendly(e);
+    }
+  }
+
+  /// 分片上传的一片:`PUT` 原始字节。
+  Future<Map<String, dynamic>> putMediaChunk(
+      String uploadId, int index, List<int> bytes,
+      {Duration timeout = const Duration(minutes: 2)}) async {
+    try {
+      final req = http.Request(
+          'PUT', Uri.parse('$baseUrl/media/v1/uploads/$uploadId/chunks/$index'));
+      if (_token != null) req.headers['Authorization'] = 'Bearer $_token';
+      req.headers['Content-Type'] = 'application/octet-stream';
+      req.bodyBytes = bytes;
+      final response =
+          await http.Response.fromStream(await _http.send(req).timeout(timeout));
+      return _decodeUpload(response);
+    } catch (e) {
+      throw _asFriendly(e);
+    }
+  }
+
+  Map<String, dynamic> _decodeUpload(http.Response response) {
+    final text = utf8.decode(response.bodyBytes);
+    if (response.statusCode >= 400) {
+      String message = '上传失败(${response.statusCode})';
+      try {
+        final detail = (jsonDecode(text) as Map)['detail'];
+        if (detail is String) message = detail;
+      } catch (_) {}
+      throw ApiException(response.statusCode, message);
+    }
+    return (jsonDecode(text) as Map).cast<String, dynamic>();
+  }
+
   /// 上传图片(菜品图/门头照),返回相对路径,展示时用 resolveUrl 拼全
   /// 上传图片。[purpose] **必填**,决定这张图进公开桶还是私密桶(#124):
   /// 公开 dish/shop/gallery/room/splash/avatar/review;
