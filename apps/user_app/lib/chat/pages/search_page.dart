@@ -98,6 +98,17 @@ class _ChatSearchPageState extends State<ChatSearchPage> {
         ),
         actions: [
           if (_loading) const Padding(padding: EdgeInsets.all(16), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
+          // 一键清空,接着搜别的(手机上删一长串字很费事)
+          if (!_loading && _q.text.isNotEmpty)
+            IconButton(
+              tooltip: '清空',
+              icon: const Icon(Icons.close),
+              onPressed: () {
+                _q.clear();
+                setState(() {});
+                _onChanged('');
+              },
+            ),
         ],
       ),
       body: ListView(children: [

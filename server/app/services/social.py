@@ -231,6 +231,13 @@ async def user_cards(db: AsyncSession, viewer_id: int, ids: Iterable[int]) -> di
     i_blocked = {b for a, b in blocks if a == viewer_id}
     blocked_me = {a for a, b in blocks if b == viewer_id}
     online = await online_map(ids)
+    # 机器人的简介存在 bots 表里(开发者后台填的 about),它没有自己的社交签名:资料页拿它当签名显示
+    bot_ids = [uid for uid in ids if (x := users.get(uid)) is not None and x.role == UserRole.bot]
+    bot_about: dict[int, str] = {}
+    if bot_ids:
+        from ..models import Bot
+        bot_about = {uid: about or "" for uid, about in (await db.execute(
+            select(Bot.user_id, Bot.about).where(Bot.user_id.in_(bot_ids)))).all()}
     viewer_profile = profiles.get(viewer_id) or await db.get(SocialProfile, viewer_id)
     # 互惠(和 Telegram 一样):我自己把最后上线设成「没有人」,我也看不到别人的精确时间
     viewer_hides = privacy_of(viewer_profile)["last_seen"] == "nobody"
@@ -258,7 +265,7 @@ async def user_cards(db: AsyncSession, viewer_id: int, ids: Iterable[int]) -> di
             "name": display_name(u),
             "username": p.username if p else None,
             "avatar": (u.avatar_url or "") if avatar_ok else "",
-            "bio": (p.bio if p else "") or "",
+            "bio": (p.bio if p else "") or bot_about.get(uid, ""),
             "public_id": p.public_id if p else None,
             "last_seen": last_seen_view(p.last_seen_at if p else None,
                                         online.get(uid, False) and uid not in blocked_me,

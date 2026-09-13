@@ -242,7 +242,8 @@ class _UserProfilePageState extends State<UserProfilePage> {
             },
           ),
         if (u.bio.isNotEmpty)
-          ListTile(leading: const Icon(Icons.info_outline), title: Text(u.bio), subtitle: const Text('签名')),
+          // 机器人的这一行是开发者填的简介
+          ListTile(leading: const Icon(Icons.info_outline), title: Text(u.bio), subtitle: Text(u.isBot ? '简介' : '签名')),
         if (chat != null)
           ListTile(
             leading: const Icon(Icons.perm_media_outlined),

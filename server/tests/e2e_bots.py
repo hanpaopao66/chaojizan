@@ -404,6 +404,9 @@ def main():
              {"about": "帮你点外卖", "description": "发 /menu 看今天的菜"})
     got = a.get(f"/chat/v1/chats/{cid}/bot-info")["bots"][0]
     assert got["about"] == "帮你点外卖" and got["description"] == "发 /menu 看今天的菜"
+    # 资料页(用户卡片)上也要有简介:机器人没有自己的社交签名,拿 about 当签名
+    card = a.get(f"/social/v1/users/{bot.id}")
+    assert card["is_bot"] is True and card["bio"] == "帮你点外卖", card
     print("  ✓ setMyCommands → bot-info 里有;菜单按钮:命令列表 / 未上架小程序 400 / 任意网址 400 / "
           "自己已上架的小程序(带名字和图标);简介、描述从后台改")
 
