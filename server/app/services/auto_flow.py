@@ -1275,6 +1275,16 @@ async def sweep_miniapp_retention() -> dict[str, int]:
 
 async def auto_flow_loop() -> None:
     logger.info("auto_flow loop started, interval=%ss", settings.sweep_interval_seconds)
+    # 消息与视频的清扫(定时消息 5 秒一轮、过期分片上传)另起一条循环,跟着这里只跑一份
+    from .social_sweep import social_tick_loop
+    social = asyncio.create_task(social_tick_loop())
+    try:
+        await _auto_flow_forever()
+    finally:
+        social.cancel()
+
+
+async def _auto_flow_forever() -> None:
     while True:
         try:
             await sweep_once()
