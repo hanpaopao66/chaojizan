@@ -37,7 +37,7 @@ export default function FeaturesPage() {
         <div className="sz-eyebrow">消息与视频 · 用户端底部的两个 tab</div>
         <h1 className="sz-h1">消息和视频，<br />和点外卖在同一个 App 里。</h1>
         <p className="sz-lede ft-lede">
-          用户端底部是「首页 / 消息 / 视频 / 我的」。消息里一单一个群，你、商家、骑手在一起说；视频可以挂上视频里那家店，点一下就进店{videoOpen ? '' : '（视频要等许可证，暂未开放）'}。
+          用户端底部是「首页 / 视频 / 消息 / 我的」。消息里一单一个群，你、商家、骑手在一起说；视频可以挂上视频里那家店，点一下就进店{videoOpen ? '' : '（视频要等许可证，暂未开放）'}。
           这两块都不收钱：没有打赏、会员、付费消息，也没有推广费。
         </p>
         <nav className="ft-toc" aria-label="这一页的两节">
