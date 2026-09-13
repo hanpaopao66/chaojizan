@@ -124,8 +124,13 @@ class ChatRealtime with WidgetsBindingObserver {
     _retry?.cancel();
     final secs = min(30, 1 << min(_attempt, 5));
     _attempt++;
-    _retry = Timer(Duration(seconds: secs), _connect);
+    // 退避加抖动(0.5–1.5 倍):服务端一重启,所有人同一秒断线;不抖的话大家又在同一秒一起重连,
+    // 一波一波砸在 1、2、4、8 秒上(压测里 2000 条同时重连有 5% 握手超时)
+    final ms = (secs * 1000 * (0.5 + _jitter.nextDouble())).round();
+    _retry = Timer(Duration(milliseconds: ms), _connect);
   }
+
+  static final _jitter = Random();
 
   /// 网络恢复、回到前台时立刻重连,不等退避计时器
   void reconnectNow() {

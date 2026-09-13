@@ -68,7 +68,7 @@ def pair_chats(api: str, tokens: list[str]) -> list[tuple[str, int]]:
 
 # ---------------------------------------------------------------- 连接进程
 
-async def _hold(api: str, tokens: list[str], seconds: float, q) -> None:
+async def _hold(api: str, tokens: list[str], seconds: float, q, ramp_ms: float = 5) -> None:
     from websockets.asyncio.client import connect
 
     ws_base = api.replace("https://", "wss://").replace("http://", "ws://")
@@ -101,15 +101,15 @@ async def _hold(api: str, tokens: list[str], seconds: float, q) -> None:
     tasks = []
     for t in tokens:
         tasks.append(asyncio.create_task(one(t)))
-        await asyncio.sleep(0.005)          # 别在同一毫秒里全涌过去(那是在压 accept 队列,不是在压服务)
+        await asyncio.sleep(ramp_ms / 1000)   # 别在同一毫秒里全涌过去(那是在压 accept 队列,不是在压服务)
     await asyncio.sleep(3)
     q.put(("connected", ok))
     await asyncio.gather(*tasks)
     q.put(("conn_done", {"frames": frames, "errors": errors, "ok": ok}))
 
 
-def conn_worker(api: str, tokens: list[str], seconds: float, q) -> None:
-    asyncio.run(_hold(api, tokens, seconds, q))
+def conn_worker(api: str, tokens: list[str], seconds: float, q, ramp_ms: float = 5) -> None:
+    asyncio.run(_hold(api, tokens, seconds, q, ramp_ms))
 
 
 # ---------------------------------------------------------------- 发消息进程
@@ -232,6 +232,8 @@ def main():
     ap.add_argument("--rate", type=float, default=20, help="背景流量:每秒发几条消息")
     ap.add_argument("--duration", type=float, default=60)
     ap.add_argument("--procs", type=int, default=8, help="连接进程数")
+    ap.add_argument("--ramp-ms", type=float, default=5,
+                    help="每个连接进程两次建连之间隔多少毫秒;5 ≈ 重启后全员同时重连的冲击,20 ≈ 平时陆续上线")
     ap.add_argument("--tokens", help="现成的 token 列表(JSON 文件);不给就在开发环境自动注册")
     ap.add_argument("--save-tokens", help="注册完把 token 存到这个文件,下次用 --tokens 复用")
     args = ap.parse_args()
@@ -248,9 +250,9 @@ def main():
     conn_tokens = [tokens[i % len(tokens)] for i in range(args.conns)]
     chunks = [conn_tokens[i::args.procs] for i in range(args.procs)]
     q = mp.Queue()
-    hold = args.duration + 30
+    hold = args.duration + 30 + len(conn_tokens) / args.procs * args.ramp_ms / 1000
     print(f"== 起 {args.conns} 条连接({args.procs} 个进程),保持 {hold:.0f}s ==", flush=True)
-    procs = [mp.Process(target=conn_worker, args=(args.api, c, hold, q)) for c in chunks]
+    procs = [mp.Process(target=conn_worker, args=(args.api, c, hold, q, args.ramp_ms)) for c in chunks]
     for p in procs:
         p.start()
     connected = 0
