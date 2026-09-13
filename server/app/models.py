@@ -3670,3 +3670,10 @@ from .models_chat import (ACTIVE_ROLES, CHAT_TYPES, MEMBER_ROLES,  # noqa: E402,
                           PollVote, ScheduledMessage, Sticker, StickerSet, UserEvent,
                           UserStickerSet)
 from .models_media import MEDIA_KINDS, MediaFile, Upload  # noqa: E402,F401
+from .models_video import (NOTIFY_KINDS, VIDEO_MODELS, VIDEO_STATUSES,  # noqa: E402,F401
+                           VISIBILITIES, CoinLedger, CommentVote, Danmaku, FavFolder, FavItem,
+                           Follow, SearchTerm, SearchTermUser, SocialNotification, Video,
+                           VideoComment, VideoCoin, VideoDecision, VideoLike,
+                           VideoNotInterested, VideoPart, VideoReport, VideoShare,
+                           VideoStatDay, VideoUserSetting, VideoViewDay, WatchHistory,
+                           WatchLater)
