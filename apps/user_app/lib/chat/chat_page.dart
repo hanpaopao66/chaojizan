@@ -459,7 +459,15 @@ class _ChatPageState extends State<ChatPage> {
     onTapReply: _jumpTo,
     onReact: _react,
     onRetry: _retryMenu,
-    onOpenMedia: (m, album) => openMediaViewer(context, m, album.isEmpty ? [m] : album),
+    // 左右滑能看遍这个会话里加载了的图片和视频(Telegram 也是这样),不只是同一组
+    onOpenMedia: (m, album) {
+      final all = [
+        for (final x in store.timeline(widget.chatId).messages)
+          if (x.seq > 0 && x.media.isNotEmpty && const {'photo', 'video', 'gif'}.contains(x.media.first.kind)) x,
+      ];
+      openMediaViewer(context, m, all.any((x) => x.seq == m.seq) ? all : (album.isEmpty ? [m] : album),
+          canSave: chat?.settings['protected'] != true);
+    },
     onOpenUser: (uid) => openUserProfile(context, uid),
     onVote: (m, opts) async {
       try {

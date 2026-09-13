@@ -8,24 +8,26 @@ import '../ui/format.dart';
 import '../ui/media_save.dart';
 import '../ui/media_views.dart';
 
-/// 全屏看图 / 视频:左右滑切同一组(相册、共享媒体),双指缩放,保存。
-Future<void> openMediaViewer(BuildContext context, ChatMessage start, List<ChatMessage> items) {
+/// 全屏看图 / 视频:左右滑切这一串(会话里加载了的图片视频、共享媒体),双指缩放,保存。
+/// [canSave] 为假(会话开了「禁止保存」)时不给保存按钮 —— 和长按菜单里藏掉复制 / 转发 / 收藏同一个口径
+Future<void> openMediaViewer(BuildContext context, ChatMessage start, List<ChatMessage> items, {bool canSave = true}) {
   final list = items.where((m) => m.media.isNotEmpty && m.seq > 0).toList();
   if (list.isEmpty) return Future.value();
   final i = list.indexWhere((m) => m.seq == start.seq);
   return Navigator.of(context).push(PageRouteBuilder<void>(
     opaque: false,
     barrierColor: Colors.black,
-    pageBuilder: (_, __, ___) => _Viewer(items: list, initial: i < 0 ? 0 : i),
+    pageBuilder: (_, __, ___) => _Viewer(items: list, initial: i < 0 ? 0 : i, canSave: canSave),
     transitionsBuilder: (_, a, __, child) => FadeTransition(opacity: a, child: child),
   ));
 }
 
 class _Viewer extends StatefulWidget {
-  const _Viewer({required this.items, required this.initial});
+  const _Viewer({required this.items, required this.initial, required this.canSave});
 
   final List<ChatMessage> items;
   final int initial;
+  final bool canSave;
 
   @override
   State<_Viewer> createState() => _ViewerState();
@@ -86,10 +88,11 @@ class _ViewerState extends State<_Viewer> {
                   ),
                   if (widget.items.length > 1)
                     Text('${_index + 1}/${widget.items.length}', style: const TextStyle(color: Colors.white70)),
-                  IconButton(
-                      tooltip: '保存',
-                      icon: const Icon(Icons.download_outlined, color: Colors.white),
-                      onPressed: () => _save(m)),
+                  if (widget.canSave)
+                    IconButton(
+                        tooltip: '保存',
+                        icon: const Icon(Icons.download_outlined, color: Colors.white),
+                        onPressed: () => _save(m)),
                 ]),
               ),
             ),

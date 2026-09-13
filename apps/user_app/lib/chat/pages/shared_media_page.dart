@@ -6,6 +6,7 @@ import '../chat_page.dart';
 import '../models.dart';
 import '../store.dart';
 import '../ui/format.dart';
+import '../ui/media_save.dart';
 import '../ui/media_views.dart';
 import '../ui/voice.dart';
 import 'media_viewer.dart';
@@ -124,7 +125,8 @@ class _MediaTabState extends State<_MediaTab> with AutomaticKeepAliveClientMixin
               maxWidth: c.maxWidth,
               fixed: Size(c.maxWidth, c.maxHeight),
               radius: 0,
-              onTap: () => openMediaViewer(context, m, _items.where((x) => x.media.isNotEmpty).toList()),
+              onTap: () => openMediaViewer(context, m, _items.where((x) => x.media.isNotEmpty).toList(),
+                  canSave: ChatStore.instance.chats[widget.chatId]?.settings['protected'] != true),
             ),
           );
         },
@@ -145,7 +147,9 @@ class _MediaTabState extends State<_MediaTab> with AutomaticKeepAliveClientMixin
               leading: const Icon(Icons.insert_drive_file_outlined),
               title: Text(f?.name ?? '文件', maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text('${fileSize(f?.size ?? 0)} · $sub'),
-              onTap: () => openChat(context, widget.chatId, jumpTo: m.seq),
+              // 点一下打开文件(和聊天里点文件一样,Telegram 的共享媒体也是这样);长按回到聊天里那条
+              onTap: f == null ? null : () => openChatFile(context, f),
+              onLongPress: () => openChat(context, widget.chatId, jumpTo: m.seq),
             );
           case 'voice':
             return Padding(
