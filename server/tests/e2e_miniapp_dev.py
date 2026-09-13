@@ -1,6 +1,6 @@
 """开发者入驻与开发者接口(#329、#330、#331)。
 
-- 注册闸门:邀请制下没被邀请的手机号注册不了 developer;开放后可以;
+- 注册闸门:默认开放,没收到邀请也能注册 developer;临时收紧成「仅限邀请」/ 暂停时挡新号,已有开发者照常登录;
 - 个人认证:证号只存密文、接口只回尾号;未满 18 岁拒;企业认证走人工(通过/驳回/重新提交);
 - 未认证能建应用、传版本、加体验者、用模拟器,**不能提交审核**;规则没接受也不能提交;
 - IDOR:A 开发者操作 B 的应用、版本、密钥、体验者 → 一律 404;
@@ -15,24 +15,27 @@ from tests.util import call, fresh_phone
 
 adm = admin_token()
 
-# ---- 注册闸门 ----
-call("PUT", "/admin/mini-apps/signup-mode", adm, {"mode": "invite"})
+# ---- 注册闸门:默认开放;「仅限邀请」「暂停注册」只是临时收紧用的闸 ----
+call("PUT", "/admin/mini-apps/signup-mode", adm, {"mode": "open"})
 stranger = fresh_phone("139")
-r = sms_login(stranger, "developer", expect_error=True)
-assert r["_error"] == 403 and "邀请" in r["detail"], r
-invite(stranger)
-tok = sms_login(stranger, "developer")["token"]
+tok = sms_login(stranger, "developer")["token"]          # 没收到邀请也能注册
 me = call("GET", "/dev/v1/me", tok)
 assert me["status"] == "unverified" and me["phone_tail"] == stranger[-4:]
+call("PUT", "/admin/mini-apps/signup-mode", adm, {"mode": "invite"})
+outsider = fresh_phone("139")
+r = sms_login(outsider, "developer", expect_error=True)
+assert r["_error"] == 403 and "邀请" in r["detail"], r
+invite(outsider)
+assert sms_login(outsider, "developer")["token"]
 invites = call("GET", "/admin/mini-apps/invites", adm)["items"]
-assert any(i["phone_tail"] == stranger[-4:] and i["used_at"] for i in invites)
-assert stranger not in str(invites), "邀请名单不存明文手机号"
+assert any(i["phone_tail"] == outsider[-4:] and i["used_at"] for i in invites)
+assert outsider not in str(invites), "邀请名单不存明文手机号"
 call("PUT", "/admin/mini-apps/signup-mode", adm, {"mode": "closed"})
 r = sms_login(fresh_phone("139"), "developer", expect_error=True)
 assert r["_error"] == 403 and "关闭" in r["detail"]
 assert sms_login(stranger, "developer")["token"], "关掉注册不影响已有开发者登录"
-call("PUT", "/admin/mini-apps/signup-mode", adm, {"mode": "invite"})
-print("✓ 注册闸门:邀请制 / 关闭;已有开发者照常登录;名单只存假名")
+call("PUT", "/admin/mini-apps/signup-mode", adm, {"mode": "open"})
+print("✓ 注册闸门:默认开放、没邀请也能注册;收紧成仅限邀请 / 暂停时挡新号;已有开发者照常登录;名单只存假名")
 
 # ---- 个人认证 ----
 r = call("POST", "/dev/v1/me/verify/individual", tok,

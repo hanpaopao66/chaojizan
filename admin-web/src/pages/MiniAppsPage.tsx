@@ -380,7 +380,8 @@ function Curation() {
 }
 
 function Signup() {
-  const [mode, setMode] = useState('invite')
+  // 注册默认对所有人开放;「仅限邀请」「暂停注册」是出问题时临时收紧用的闸
+  const [mode, setMode] = useState('open')
   const [rows, setRows] = useState<any[]>([])
   const [phone, setPhone] = useState('')
   const load = () => get<{ items: any[]; mode: string }>('/admin/mini-apps/invites').then((r) => { setRows(r.items); setMode(r.mode) }).catch(fail)
@@ -391,8 +392,11 @@ function Signup() {
         <span>开发者注册:</span>
         <Radio.Group value={mode} optionType="button"
           onChange={(e) => put('/admin/mini-apps/signup-mode', { mode: e.target.value }).then(load).catch(fail)}
-          options={[{ value: 'invite', label: '邀请制' }, { value: 'open', label: '开放注册' }, { value: 'closed', label: '暂停注册' }]} />
+          options={[{ value: 'open', label: '开放注册(默认)' }, { value: 'invite', label: '仅限邀请' }, { value: 'closed', label: '暂停注册' }]} />
       </Space>
+      <Typography.Text type="secondary">
+        小程序、小游戏的开发者谁都可以注册。下面的邀请名单只在临时切到「仅限邀请」时起作用;已有开发者不受开关影响。
+      </Typography.Text>
       <Space.Compact>
         <Input placeholder="邀请的手机号" value={phone} onChange={(e) => setPhone(e.target.value)} />
         <Button onClick={() => post('/admin/mini-apps/invites', { phone: phone.trim() }).then(() => { setPhone(''); load() }).catch(fail)}>邀请</Button>

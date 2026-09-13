@@ -6,7 +6,8 @@ import { ApiError, sendCode, smsLogin } from '../api'
 
 /**
  * 开发者登录 / 注册:手机号 + 短信验证码(和三端同一套 /auth,role=developer)。
- * 注册现在是邀请制(D5):没被邀请的手机号会被告知「目前是邀请制」。
+ * 注册对所有人开放:没注册过的手机号登录一次就是注册。平台临时收紧或暂停注册时,
+ * 服务端会回 403 并说明原因,照原样显示。
  */
 export default function LoginPage({ onAuthed }: { onAuthed: () => void }) {
   const nav = useNavigate()

@@ -32,7 +32,7 @@ class UserRole(str, enum.Enum):
     rider = "rider"
     admin = "admin"  # 平台管理员,只能由 seed/运维创建,不开放注册
     # 小程序开发者(#329)。和三端一样按 (手机号, 角色) 独立成号;
-    # 开关是邀请制时只有 developer_invites 里的手机号能注册
+    # 注册默认对所有人开放,开关临时收紧成「仅限邀请」时只有 developer_invites 里的手机号能注册
     developer = "developer"
     # 聊天机器人(DEV-PROMPTS-40 #355)。没有手机号、不能登录,只能用 Bot API 的 token 说话;
     # 由开发者在 /dev/ 创建。角色列是 VARCHAR 非原生枚举,加值不用改库
@@ -3123,7 +3123,7 @@ class Developer(Base):
 
 
 class DeveloperInvite(Base):
-    """开发者邀请制(D5):开关是 invite 时,只有这里有的手机号能注册开发者账号。
+    """开发者邀请名单(D5):注册默认开放;开关临时收紧成 invite 时,只有这里有的手机号能注册开发者账号。
     不存明文手机号,用 crypto.pseudonym 匹配。"""
 
     __tablename__ = "developer_invites"

@@ -683,7 +683,7 @@ async def remove_curation(appid: str = AppId, reason: str = Query(min_length=4, 
 
 
 # =====================================================================
-# 开发者注册:邀请制开关(D5)与邀请名单(闸门本身在 services/developer_signup.py)
+# 开发者注册:默认开放;开关(开放 / 仅限邀请 / 暂停)与邀请名单(闸门本身在 services/developer_signup.py)
 # =====================================================================
 
 @router.put("/signup-mode")

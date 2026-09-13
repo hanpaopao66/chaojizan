@@ -57,7 +57,9 @@ def invite(phone: str) -> None:
 
 
 def developer(*, verified: bool = True, accept_rules: bool = True) -> tuple[str, str]:
-    """邀请 → 短信登录注册 developer →(可选)个人实名 → 接受开发者规则。"""
+    """短信登录注册 developer →(可选)个人实名 → 接受开发者规则。
+
+    注册默认开放;先把号加进邀请名单,是为了库里的开关被别的用例临时切成「仅限邀请」时也建得出号。"""
     phone = fresh_phone("139")
     invite(phone)
     token = sms_login(phone, "developer")["token"]

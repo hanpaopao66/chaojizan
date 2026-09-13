@@ -1,6 +1,8 @@
 """开发者注册闸门(#329,D5)。
 
-开关走 PlatformFlag `developer_signup`:invite(默认,邀请制)/ open / closed。
+小程序、小游戏的开发者注册**对所有人开放**:用手机号登录开发者后台就是注册,不用邀请。
+开关走 PlatformFlag `developer_signup`:open(默认,开放注册)/ invite(临时收紧,只放邀请名单里的号)/
+closed(暂停注册)。后两个是出问题时的闸,不是常态 —— 没有这一行时一律按 open。
 邀请名单存手机号的假名,不存明文。/auth/register 和 /auth/sms-login 在**新建** developer
 账号时都过这里;已有账号登录不受影响(关掉注册不等于把已有开发者踢出去)。
 """
@@ -13,7 +15,7 @@ from .crypto import pseudonym
 from .miniapp_platform import now
 
 FLAG = "developer_signup"
-MODES = {"invite": "邀请制", "open": "开放注册", "closed": "暂停注册"}
+MODES = {"open": "开放注册", "invite": "仅限邀请", "closed": "暂停注册"}
 
 
 def invite_key(phone: str) -> str:
@@ -22,7 +24,7 @@ def invite_key(phone: str) -> str:
 
 async def signup_mode(db: AsyncSession) -> str:
     flag = await db.get(PlatformFlag, FLAG)
-    return flag.value if flag is not None and flag.value in MODES else "invite"
+    return flag.value if flag is not None and flag.value in MODES else "open"
 
 
 async def gate(db: AsyncSession, phone: str) -> DeveloperInvite | None:
@@ -33,7 +35,7 @@ async def gate(db: AsyncSession, phone: str) -> DeveloperInvite | None:
         inv = await db.scalar(select(DeveloperInvite).where(
             DeveloperInvite.phone_pseudonym == invite_key(phone)))
         if inv is None:
-            raise HTTPException(403, "开发者注册目前是邀请制,这个手机号还没有收到邀请")
+            raise HTTPException(403, "开发者注册暂时只对收到邀请的手机号开放,这个手机号还没有收到邀请")
         return inv
     return None
 

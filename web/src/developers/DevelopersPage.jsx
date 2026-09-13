@@ -78,7 +78,7 @@ export default function DevelopersPage() {
 // ---------------------------------------------------------------- 开发者中心首页
 
 const STEPS = [
-  { t: '注册，建应用', d: '用手机号登录开发者后台就是注册（目前是邀请制）。建一个应用，拿到 AppID 和只显示一次的 AppSecret。', href: '/developers/quickstart#1-注册' },
+  { t: '注册，建应用', d: '谁都可以注册，不用邀请：用手机号登录开发者后台就是注册。建一个应用，拿到 AppID 和只显示一次的 AppSecret。', href: '/developers/quickstart#1-注册' },
   { t: '用模板跑通', d: '下载最小模板，打包上传开发版。后台模拟器里的 initData 是真签名，可以直接拿去你的后端验签。', href: '/developers/quickstart#3-下载模板' },
   { t: '认证，送审，发布', d: '个人实名或企业认证后提交审核，按清单逐项过。通过后一键发布，出了问题一键回滚到任一版本。', href: '/developers/quickstart#8-提交审核' },
 ]
