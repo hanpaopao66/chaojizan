@@ -304,7 +304,7 @@ function EpochNotice() {
 const TOC = [
   ['audit', '核账日历'], ['funds', '钱去哪了'], ['fairness', '分账公平'], ['rider', '骑手收入'],
   ['compensation', '赔付记录'], ['reviews', '评价'], ['reports', '月度财报'], ['dispatch', '派单算法'],
-  ['liability', '判责分摊'], ['governance', '治理公开'], ['miniapps', '小程序'], ['support', '客服'], ['status', '系统状态'],
+  ['liability', '判责分摊'], ['governance', '治理公开'], ['miniapps', '小程序'], ['community', '社区'], ['support', '客服'], ['status', '系统状态'],
   ['changelog', '最近更新'],
 ]
 
@@ -316,6 +316,119 @@ function Sec({ id, eyebrow, children }) {
       {eyebrow && <div className="sec">{eyebrow}</div>}
       {children}
     </section>
+  )
+}
+
+/* 社区栏(#371):视频审核、对人和群的处置、管理员查看私聊的次数(S8)、推荐公式。
+ * 数据来自 /transparency/community,只有类型、原因代码、时长、申诉结果和计数 ——
+ * 谁被处罚、群名、消息内容接口里根本没有(服务端取数就不读那些列)。 */
+const TARGET_TYPE = { user: '账号', chat: '群 / 频道', video: '视频' }
+const hrs = h => (h == null ? '–' : h < 1 ? `${Math.round(h * 60)} 分钟` : `${h.toFixed(1)} 小时`)
+
+function CommunitySection({ c }) {
+  const r30 = c?.video_review?.last_30d
+  const views = c?.admin_chat_views
+  return (
+    <Sec id="community" eyebrow="社区">
+      <h2>消息和视频怎么管，处置和查看都公示</h2>
+      <p className="tp-lede">
+        视频先审后发；对账号、群和频道的每一次处罚都带原因代码，当事人能申诉一次，由另一名审核员复核，申诉成立立即解除。平台技术上能读到消息（服务端存储，不做端到端加密），所以把规矩写死：管理员只能在处理举报时查看举报单里的那几条和前后各 5 条，不带举报单一律拒绝，每次查看都留痕，次数按月公示在这里。
+      </p>
+      <div className="tp-cards four">
+        <div className="tp-card">
+          <div className="num v">{r30 ? r30.reviewed : '–'}</div>
+          <div className="k">近 30 天审核的稿件{r30 ? `：通过 ${r30.approved}、驳回 ${r30.rejected}` : ''}</div>
+        </div>
+        <div className="tp-card">
+          <div className="num v">{r30 && r30.reject_rate != null ? `${(r30.reject_rate * 100).toFixed(1)}%` : '–'}</div>
+          <div className="k">{r30 && r30.reviewed === 0 ? '近 30 天还没有审核结论' : '近 30 天驳回率'}</div>
+        </div>
+        <div className="tp-card">
+          <div className="num v">{r30 ? hrs(r30.median_review_hours) : '–'}</div>
+          <div className="k">审核时长中位数（提交到结论，含转码）</div>
+        </div>
+        <div className="tp-card hold">
+          <div className="num v">{views ? views.last_30d : '–'}<small> 次</small></div>
+          <div className="k">近 30 天管理员查看被举报的消息</div>
+          {views && <div className="m">累计 {views.total} 次</div>}
+        </div>
+      </div>
+
+      {(c?.video_review?.monthly?.length ?? 0) > 0 && (
+        <div className="sz-table-wrap">
+          <div className="sz-table-scroll">
+            <table className="sz-table tp-wide">
+              <thead><tr><th>月份</th><th className="r">审核</th><th className="r">通过</th><th className="r">驳回</th>
+                <th className="r">驳回率</th><th className="r">审核时长中位数</th></tr></thead>
+              <tbody>
+                {c.video_review.monthly.map(m => (
+                  <tr key={m.month}>
+                    <td className="num">{m.month}</td><td className="num r">{m.reviewed}</td>
+                    <td className="num r">{m.approved}</td><td className="num r">{m.rejected}</td>
+                    <td className="num r">{m.reject_rate == null ? '–' : `${(m.reject_rate * 100).toFixed(1)}%`}</td>
+                    <td className="num r">{hrs(m.median_review_hours)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <h3 className="tp-sub">处置记录</h3>
+      <p className="tp-lede">
+        删消息、禁言、封群 / 频道、封号、警告和视频下架逐条列出：处置了什么、多久、因为什么（原因代码）、申诉结果。
+        {c ? `近 30 天共 ${c.sanctions.last_30d.total} 次：` : ''}
+        {c && c.sanctions.last_30d.by_action.filter(a => a.count > 0).map(a => `${a.label} ${a.count}`).join('、')}
+        {c && c.sanctions.last_30d.total === 0 ? '没有处置。' : '。'}
+        近 30 天申诉 {c ? c.appeals.last_30d.filed : '–'} 次，维持 {c ? c.appeals.last_30d.upheld : '–'}、撤销 {c ? c.appeals.last_30d.overturned : '–'}。
+      </p>
+      {(c?.sanctions?.records?.length ?? 0) > 0 ? (
+        <div className="sz-table-wrap">
+          <div className="sz-table-scroll">
+            <table className="sz-table tp-wide">
+              <thead><tr><th>日期</th><th>对象</th><th>处置</th><th>原因</th><th>申诉</th></tr></thead>
+              <tbody>
+                {c.sanctions.records.slice(0, 50).map((x, i) => (
+                  <tr key={i}>
+                    <td className="num nowrap">{x.date}</td>
+                    <td className="nowrap">{TARGET_TYPE[x.target_type] ?? x.target_type}</td>
+                    <td className="nowrap">{x.action_label}{x.duration && <span className="tp-reason">{x.duration}</span>}
+                      {x.revoked && <span className="tp-reason">已撤销</span>}</td>
+                    <td>{x.reason_code}<span className="tp-reason">{x.reason_label}</span></td>
+                    <td className="nowrap">{x.appeal ? x.appeal_label : '未申诉'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : <p className="tp-note">{c ? '还没有处置记录。' : '读取中…'}</p>}
+
+      <h3 className="tp-sub">管理员查看私聊，按月</h3>
+      <p className="tp-lede">{views?.rule ?? '管理员只能在处理举报时查看举报单里的那几条和前后各 5 条。'}</p>
+      {(views?.monthly?.length ?? 0) > 0 ? (
+        <div className="tp-log">
+          {views.monthly.map(m => (
+            <div className="row" key={m.month}>
+              <span className="sz-tag plain">{m.month}</span>
+              <span className="msg">查看被举报的消息 <b className="num">{m.views}</b> 次</span>
+            </div>
+          ))}
+        </div>
+      ) : <p className="tp-note">{c ? '还没有管理员查看过。' : '读取中…'}</p>}
+
+      <h3 className="tp-sub">推荐和热门怎么排</h3>
+      <p className="tp-lede">
+        推荐、热门、排行榜、竖屏流是同一段公开的纯函数（<a href={c?.formula?.source_url ?? 'https://github.com/hanpaopao66/chaojizan/blob/main/server/app/services/video_rank.py'}>services/video_rank.py</a>），输入只有公开的互动计数、发布时间、关注关系和常看分区；没有付费、商家、运营加权。个性化推荐可以在 App 里一键关掉，关掉之后和没登录的人看到的完全一样。
+      </p>
+      {c?.formula?.text && (
+        <div className="tp-formula" style={{ whiteSpace: 'pre', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 13 }}>
+          {c.formula.text}
+        </div>
+      )}
+      {c?.not_public && <p className="tp-note">不公开：{c.not_public.join('、')}。</p>}
+    </Sec>
   )
 }
 
@@ -332,6 +445,7 @@ export default function TransparencyPage() {
   const dispatch = useJson('/transparency/dispatch')
   const liability = useJson('/transparency/liability')
   const mini = useJson('/transparency/miniapps')
+  const comm = useJson('/transparency/community')
   // /status 直达系统状态区。上面各栏的数据是陆续到的,每到一份页面就变长一截,
   // 只在 uptime 到的那一刻滚一次的话,后到的栏目会把状态区往下顶。所以每到一份
   // 就重新对齐一次 —— 直到用户自己动了滚轮 / 手指 / 键盘为止
@@ -348,7 +462,7 @@ export default function TransparencyPage() {
       if (!userMoved.current) document.getElementById('status')?.scrollIntoView({ behavior: 'auto' })
     }, 60)
     return () => clearTimeout(t)
-  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, mini])
+  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, mini, comm])
 
   const latest = audit?.latest
   const per = fair?.per100
@@ -818,6 +932,8 @@ export default function TransparencyPage() {
           )}
           {mini?.not_public && <p className="tp-note">不公开：{mini.not_public.join('、')}。</p>}
         </Sec>
+
+        <CommunitySection c={comm} />
 
         <Sec id="support" eyebrow="客服">
           <h2>客服回得快不快</h2>
