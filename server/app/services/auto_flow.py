@@ -1311,6 +1311,12 @@ async def auto_flow_loop() -> None:
             # **不含 order_events** —— 那是三年法定留存,见函数注释
             await sweep_log_retention()
             await sweep_miniapp_retention()
+            # 视频(DEV-PROMPTS-40 §5.8):定时发布到点公开、删除满 30 天的清媒体
+            try:
+                from .video import sweep_videos
+                await sweep_videos()
+            except Exception:
+                logger.exception("auto_flow: 视频清扫失败(不影响其他清扫)")
             # 公开账本锚点补到昨天(幂等,通常零工作量;见 services/ledger.py)
             from .ledger import backfill_epoch_start, build_missing_anchors
             async with SessionLocal() as db:

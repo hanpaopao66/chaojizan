@@ -46,6 +46,17 @@ def _check_purpose(purpose: str, kind: str) -> None:
         raise HTTPException(422, "上传用途和类型对不上")
 
 
+async def _video_upload_gate(db: AsyncSession, purpose: str) -> None:
+    """视频投稿的原片、封面也受「视频投稿」开关管(#375):关着的时候连传都不让传,
+    免得生产上开关关着、存储却被一个个 1GB 的原片占满。"""
+    if purpose != "video":
+        return
+    from ..services.flags import video_flag_on
+    if not (await video_flag_on(db, "video_enabled")
+            and await video_flag_on(db, "video_upload_enabled")):
+        raise HTTPException(503, "视频投稿暂未开放")
+
+
 async def _save_upload_file(f: UploadFile, dst, cap: int) -> int:
     size = 0
     with open(dst, "wb") as out:
@@ -67,6 +78,7 @@ async def upload(file: UploadFile = File(...), kind: str = Form("auto"),
     """整块上传(≤ 20MB)。返回媒体对象;视频要转码的 status=processing,做完推 `media` 用户事件。"""
     await check_rate_limit("media_upload", str(me.id), 60)
     _check_purpose(purpose, kind)
+    await _video_upload_gate(db, purpose)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     tmp = TMP_DIR / f"up-{uuid.uuid4().hex}"
     try:
@@ -102,6 +114,7 @@ async def create_upload(body: UploadIn, me: User = Depends(social_user),
     """建分片上传。每片 4MB,`PUT …/chunks/<n>` 传原始字节,断了之后 GET 看收到了哪些片接着传。"""
     await check_rate_limit("media_upload", str(me.id), 60)
     _check_purpose(body.purpose, body.kind)
+    await _video_upload_gate(db, body.purpose)
     cap = LIMITS.get(body.kind, LIMITS["file"])
     if body.size > cap:
         raise HTTPException(413, f"这类文件最大 {cap // 1024 // 1024}MB")

@@ -584,6 +584,11 @@ async def delete_account(
     for model in (MiniAppKV, MiniAppKVUsage, MiniAppGrant, MiniAppUserPref,
                   MiniAppDailyUser, MiniAppOpenId):
         await db.execute(sa_delete(model).where(model.user_id == user.id))
+    # 视频(DEV-PROMPTS-40 S5「注销账号级联删除投稿、弹幕、评论」):投稿删除并立即清媒体
+    # (播放地址、封面地址当场失效,不等 30 天),弹幕、评论正文、赞、币、收藏、历史、关注、
+    # 互动消息一并处理;对象存储里的文件在提交之后删
+    from ..services.video import purge_user as purge_video_user
+    await purge_video_user(db, user.id)
     # 店员名单:人都注销了还挂在名单上,店主看到的是 `del****9af0`。
     # 店主本人有店时上面已经 409 拒了,能走到这里的必然是店员或普通账号。
     await db.execute(

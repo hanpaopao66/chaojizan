@@ -155,6 +155,30 @@ async def health_cert_cities(db: AsyncSession) -> list[str]:
     return [c.strip() for c in flag.value.split(",") if c.strip()]
 
 
+#: 视频的两道闸(DEV-PROMPTS-40 #375):整个视频功能、视频投稿。
+VIDEO_FLAGS = {"video_enabled": "视频功能", "video_upload_enabled": "视频投稿"}
+
+
+def video_flag_default() -> str:
+    """没写过这两个开关时的缺省值:**开发 / CI 开,生产关**。
+
+    上线视频要先拿到《信息网络传播视听节目许可证》(#374 合规清单),在那之前生产上
+    谁也不能不经意地把它打开 —— 所以缺省站在「关」这一边,判据是 settings.is_dev
+    (拼错、留空、写成 staging 都按生产算)。本地和 CI 显式 APP_ENV=dev,e2e 不用额外开闸。
+    """
+    from ..config import settings
+
+    return "on" if settings.is_dev else "off"
+
+
+async def video_flag_on(db: AsyncSession, key: str) -> bool:
+    """视频开关开着没有。每次现查、不缓存 —— 拉闸要立刻生效。"""
+    assert key in VIDEO_FLAGS, key
+    flag = await db.get(PlatformFlag, key)
+    value = flag.value if flag is not None else video_flag_default()
+    return value == "on"
+
+
 #: 频道开关的 flag 键。值是逗号分隔的 key 列表,如 "food,voucher"。
 CHANNELS_FLAG = "channels_enabled"
 

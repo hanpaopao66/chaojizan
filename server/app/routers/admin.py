@@ -1359,6 +1359,10 @@ _KNOWN_FLAGS = {
     "miniapp_hosted",       # 托管小程序:关了托管应用打不开、文件 404、从目录消失
     "miniapp_catalog",      # 小程序目录:关了只列官方小程序
     "miniapp_profile",      # 小程序读昵称头像:关了 requestProfile 一律 4001
+    # 视频(DEV-PROMPTS-40 #375):缺省 开发 / CI 开、生产关 —— 上线视频要先拿到
+    # 《信息网络传播视听节目许可证》,见 services/flags.video_flag_default
+    "video_enabled",        # 整个视频功能:关了 /video/v1 全部回 503「视频功能暂未开放」
+    "video_upload_enabled", # 视频投稿:关了建稿、加分 P、提交、上传原片回 503
 }
 
 
@@ -1369,8 +1373,9 @@ async def list_flags(
 ):
     rows = (await db.scalars(select(PlatformFlag))).all()
     current = {r.key: r.value for r in rows}
-    from ..services.flags import CHANNELS_FALLBACK
-    defaults = {"night_curfew_hours": "01:00-06:00",
+    from ..services.flags import CHANNELS_FALLBACK, VIDEO_FLAGS, video_flag_default
+    defaults = {**{k: video_flag_default() for k in VIDEO_FLAGS},
+                "night_curfew_hours": "01:00-06:00",
                 "screen_show_gmv": "on",  # 大屏金额缺省展示,与 /screen 口径一致
                 # 小程序急停闸缺省是开(miniapp_platform.switch_on:没写过 = 开)
                 "miniapp_hosted": "on", "miniapp_catalog": "on", "miniapp_profile": "on",

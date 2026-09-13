@@ -51,9 +51,12 @@ from .routers import (
 )
 from .routers import chat as chat_router
 from .routers import media as media_router
+from .routers import notifications as notifications_router
 from .routers import social as social_router
 from .routers import stickers as stickers_router
 from .routers import calls as calls_router
+from .routers import video as video_router
+from .routers import video_admin as video_admin_router
 from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
 from .realtime import gateway as rt_gateway
 from .services import rt_events  # noqa: F401  注册提交后分发实时事件的钩子
@@ -538,6 +541,9 @@ app.include_router(stickers_router.router)
 app.include_router(calls_router.router)
 app.include_router(media_router.router)
 app.include_router(rt_gateway.router)
+app.include_router(video_router.router)
+app.include_router(video_admin_router.router)
+app.include_router(notifications_router.router)
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 PRIVATE_DIR.mkdir(exist_ok=True)

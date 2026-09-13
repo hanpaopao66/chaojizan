@@ -141,7 +141,7 @@ def test_rank_inputs_are_only_public_fields():
                                                                   "top_zone"]
 
 
-@pytest.mark.parametrize("mod", ["video_rank"])
+@pytest.mark.parametrize("mod", ["video_rank", "video_feed"])
 def test_ranking_code_mentions_nothing_sellable(mod):
     src = (ROOT / f"server/app/services/{mod}.py").read_text(encoding="utf-8")
     code = "\n".join(line for line in src.splitlines() if not line.strip().startswith("#"))
