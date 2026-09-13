@@ -411,7 +411,7 @@ class DialogRow extends StatelessWidget {
         case 'mute':
           final until = c.my.muted ? null : await pickMuteUntil(context);
           if (!c.my.muted && until == null) return;
-          final n = await store.api.patchDialog(c.id, {'muted_until': until?.toUtc().toIso8601String()});
+          final n = await store.api.patchDialog(c.id, {'muted_until': muteParam(until)});
           store.putChat(n);
         case 'archive':
           final n = await store.api.patchDialog(c.id, {'archived': !c.my.archived});

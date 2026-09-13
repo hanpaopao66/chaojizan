@@ -969,7 +969,7 @@ class _ChatPageState extends State<ChatPage> {
       case 'mute':
         final until = c.my.muted ? null : await pickMuteUntil(context);
         if (!c.my.muted && until == null) return;
-        final n = await store.api.patchDialog(c.id, {'muted_until': until?.toUtc().toIso8601String()});
+        final n = await store.api.patchDialog(c.id, {'muted_until': muteParam(until)});
         store.putChat(n);
       case 'media':
         await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SharedMediaPage(chatId: c.id)));

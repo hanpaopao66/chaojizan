@@ -9,6 +9,7 @@ import 'package:superz_shared/superz_shared.dart';
 
 import '../models.dart';
 import '../outbox.dart';
+import '../pages/pickers.dart' show muteParam;
 import '../store.dart';
 import 'entity_controller.dart';
 import 'format.dart';
@@ -953,7 +954,7 @@ class _Blocked extends StatelessWidget {
             onPressed: () async {
               final until = muted ? null : DateTime.now().add(const Duration(days: 3650));
               final n = await store.api.patchDialog(chat.id, {
-                'muted_until': until?.toUtc().toIso8601String(),
+                'muted_until': muteParam(until),
               });
               store.putChat(n);
             },

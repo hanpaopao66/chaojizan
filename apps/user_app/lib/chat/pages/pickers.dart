@@ -276,6 +276,19 @@ Future<DateTime?> pickMuteUntil(BuildContext context) async {
   return pick == null ? null : DateTime.now().add(pick);
 }
 
+/// 免打扰到期时刻 → `PATCH /chat/v1/dialogs/{id}` 的 `muted_until`。
+///
+/// 服务端收的是**从现在起多少秒**,或者 `"forever"`(chat_store.update_dialog;e2e 也是这么传的),
+/// 不收时间戳。这里原来传 ISO 时间,每一次点「免打扰」都被 422「免打扰时长不对」挡回来 ——
+/// 列表长按、聊天页菜单、资料页、群资料、频道底部的「静音」五个地方都是。null = 取消免打扰。
+Object? muteParam(DateTime? until, [DateTime? now]) {
+  if (until == null) return null;
+  final secs = until.difference(now ?? DateTime.now()).inSeconds;
+  // 「永久」是 3650 天:差个几秒也算永久
+  if (secs >= const Duration(days: 3650).inSeconds - 60) return 'forever';
+  return secs < 1 ? 1 : secs;
+}
+
 /// 清空聊天记录:私聊可以选同时为对方清空。返回 revoke;取消返回 null。
 Future<bool?> confirmClear(BuildContext context, ChatInfo c) {
   var revoke = false;

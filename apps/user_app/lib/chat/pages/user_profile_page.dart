@@ -276,7 +276,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
               onChanged: (on) async {
                 final until = on ? null : await pickMuteUntil(context);
                 if (!on && until == null) return;
-                final n = await store.api.patchDialog(chat.id, {'muted_until': until?.toUtc().toIso8601String()});
+                final n = await store.api.patchDialog(chat.id, {'muted_until': muteParam(until)});
                 store.putChat(n);
                 if (mounted) setState(() {});
               },
