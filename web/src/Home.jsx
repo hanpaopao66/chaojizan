@@ -2,18 +2,23 @@ import React from 'react'
 
 import FlowFilm from './FlowFilm.jsx'
 import {
-  CHANNELS, Glyph, STATE_LABEL, SiteFooter, SiteNav, useChannelState, useCountUp, useJson,
+  CHANNELS, Glyph, STATE_LABEL, SiteFooter, SiteNav, useChannelState, useCountUp, useFeatures, useJson,
 } from './SiteChrome.jsx'
 
-/* 下载段那支「一笔单,三端各看到什么」在页面底部,单独成 chunk,不拖首屏 */
+/* 官网动画集的片子各自成 chunk,不拖首屏:首屏之下那支「一个 App 干完这些事」,
+ * 下载段那支「一笔单,三端各看到什么」和紧跟下载段的隐私清单 */
+const SuperAppFilm = React.lazy(() => import('./films/SuperAppFilm.jsx'))
 const ThreeAppsFilm = React.lazy(() => import('./films/ThreeAppsFilm.jsx'))
+const PrivacyListFilm = React.lazy(() => import('./films/PrivacyListFilm.jsx'))
 
 /* 官网首页 v3(设计稿 1g):讲「聚合平台」,不讲「外卖」。
  *
  * 首屏左边一句话 + 右边就是 App 里的服务台(频道),
+ * 首屏之下先是「一个 App 干完这些事」(films/SuperAppFilm.jsx:先说清这是个什么东西),
  * 接着一段 30 秒的流程动画(一笔 ¥26 的外卖单,钱怎么走 —— FlowFilm.jsx),
  * 然后一张费率表把每个频道「抽多少、什么时候抽」说完,
- * 再往下是实时账目、下载。三原则不再单独成卡 —— 它们已经是表里的行。
+ * 再往下是实时账目、下载、隐私清单(films/PrivacyListFilm.jsx)。
+ * 三原则不再单独成卡 —— 它们已经是表里的行。
  *
  * 颜色取 brand.dart 产品层,令牌在 site.css 的 .h3 上;顶栏、页脚在 SiteChrome.jsx,
  * 和其他子页共用一份。
@@ -85,6 +90,7 @@ export default function Home() {
   const stats = useJson('/stats/overview', 60000)
   const audit = useJson('/transparency/audit')
   const { loaded, stateOf } = useChannelState()
+  const features = useFeatures()
   const rows = CHANNELS.map(ch => ({ ...ch, ...COPY[ch.key], state: stateOf(ch.key) }))
   const openCount = rows.filter(r => r.state === 'open').length
 
@@ -125,6 +131,18 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {/* 首屏之下的第一支:先说清「这是个什么东西」,再往下是流程片、费率和账本 */}
+      <section className="h3-sec h3-super-sec" id="superapp">
+        <div className="sec">超级聚合 · 一个 App 干完这些事</div>
+        <h2>聚合不是把图标堆在一起，<br />是底下只有一份账。</h2>
+        <div className="h3-super-film">
+          <React.Suspense fallback={<div className="h3-film-hold" />}>
+            <SuperAppFilm stateOf={stateOf} features={features} />
+          </React.Suspense>
+        </div>
+        <p className="note">消息、视频这两个 tab 怎么用，见<a href="/features">消息与视频</a>；每个频道抽多少，往下看费率表。</p>
+      </section>
 
       <section className="h3-sec h3-film-sec" aria-label="示例：一笔外卖单的钱怎么走">
         <div className="sec">示例 · 一单的钱怎么走</div>
@@ -194,7 +212,18 @@ export default function Home() {
           <div className="dlcard"><b>商家端</b><p>入驻免费，总负担 5% 封顶，每日对账 · <a href="/merchant">网页版后台</a></p><a className="h3-btn ghost" href="/appdist/chaojizan-merchant-arm64.apk">下载 APK</a></div>
           <div className="dlcard"><b>骑手端</b><p>配送费 100% 归你，提现零手续费</p><a className="h3-btn ghost" href="/appdist/chaojizan-rider-arm64.apk">下载 APK</a></div>
         </div>
-        <p className="note">iOS 与 H5 版在路上。手机上打开 <a href="/download">chaojizan.cc/download</a> 也能下载。</p>
+        <p className="note">iOS 与 H5 版在路上。手机上打开 <a href="/download">chaojizan.cc/download</a> 也能下载。装之前想知道 App 收集什么，<a href="#privacy">往下看隐私清单</a>。</p>
+      </section>
+
+      {/* 隐私清单:稿子标的位置是「下载页三张卡的上方」。三张卡上方已经是三端片,
+          两支叠在一起下载按钮要往下翻两屏,所以接在下载段后面,单独一段 */}
+      <section className="h3-sec" id="privacy">
+        <div className="sec">隐私</div>
+        <h2>不收集什么，<br />和确实收集了什么。</h2>
+        <p className="h3-sec-lede">只列「不收集」的那半边是宣传，两边都写出来才是交代。所以骑手端的后台定位明写着有，末尾那块是我们自己查出来的缺陷。每条都点得到源码或文档。</p>
+        <div className="h3-privacy-film">
+          <React.Suspense fallback={null}><PrivacyListFilm /></React.Suspense>
+        </div>
       </section>
 
       {/* 应用商店整改反馈第 ⑩ 条要求的版块(公司简介 / 电话 / 邮箱),

@@ -32,8 +32,14 @@
 .h3-sec .h3-cta { margin-top: 22px; }
 .h3-sec .rates { margin-top: 28px; }
 
-/* 流程动画那一段:紧跟首屏,不要再空一整段 */
+/* 首屏之下的「超级聚合」那一段(films/SuperAppFilm.jsx)紧跟首屏,不要再空一整段;
+   流程动画那一段接在它后面 */
+.h3 .h3-super-sec { padding-top: 8px; }
+.h3-super-film { margin-top: 24px; }
+/* 片子是懒加载的:到之前先占住高度,下面的流程片不往上跳 */
+.h3-film-hold { min-height: 640px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .h3 .h3-film-sec { padding-top: 8px; }
+.h3 .h3-super-sec + .h3-film-sec { padding-top: 64px; }
 .h3 .h3-film-sec + .h3-sec { padding-top: 64px; }
 
 /* ---------- 流程动画(FlowFilm.jsx) ----------
@@ -75,13 +81,18 @@
 .dlcard p a { color: var(--link); }
 .h3 .dlcard .h3-btn { align-self: flex-start; padding: 9px 16px; font-size: 14px; }
 
+/* 隐私清单(films/PrivacyListFilm.jsx),接在下载段后面 */
+.h3-sec-lede { max-width: 36em; margin: 14px 0 0; color: var(--ink-muted); font-size: 15px; }
+.h3-privacy-film { margin-top: 24px; }
+
 /* 关于我们 */
 .h3-about { max-width: 42em; margin: 16px 0 0; color: var(--ink-muted); font-size: 15px; }
 
 @media (max-width: 900px) {
   .h3-hero { grid-template-columns: 1fr; padding: 48px 20px 40px; gap: 32px; }
   .h3-sec { padding: 56px 20px 16px; }
-  .h3 .h3-film-sec + .h3-sec { padding-top: 48px; }
+  .h3 .h3-film-sec + .h3-sec, .h3 .h3-super-sec + .h3-film-sec { padding-top: 48px; }
+  .h3-film-hold { min-height: 1100px; }
   .ledger { padding: 20px; }
   .ledger .nums, .dl { grid-template-columns: 1fr 1fr; }
 }

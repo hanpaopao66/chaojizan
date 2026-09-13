@@ -120,6 +120,21 @@ a.cp-shop:hover { border-color: #CFCABD; }
 .cp-shop .fee { font-size: 12px; margin-top: 2px; }
 .cp-sample > .body { padding: 18px 20px; }
 
+/* ---------- 消息与视频(/features) ----------
+   两节各一支片子(films/ChatOneGroupFilm、VideoToOrderFilm),写法同开源仓页底的开城那一节 */
+.h3 .ft-lede { max-width: 34em; }
+.ft-toc { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 24px; font-size: 13px; }
+.h3 .ft-toc a { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink); line-height: 1.5; transition: border-color 120ms var(--std); }
+.h3 .ft-toc a:hover { border-color: #CFCABD; }
+/* 「暂未开放」小标签:同费率表里的 .h3-tag */
+.ft-toc .st, .ft-tag { font-size: 11px; line-height: 1.6; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-faint); white-space: nowrap; letter-spacing: 0; }
+.ft-tag { margin-left: 10px; }
+.ft-sec { margin-top: 72px; }
+.h3 .ft-sec h2 { margin-top: 10px; }
+.h3 .ft-p { font-size: 15px; margin-top: 16px; max-width: 36em; }
+.ft-sec .cp-closed { max-width: 42em; }
+.h3 .ft-cta { margin-top: 56px; }
+
 /* ---------- 品牌物料 ---------- */
 .h3 .br-lede { max-width: 40em; }
 .br-lede b { color: var(--ink); font-weight: 600; }
@@ -153,7 +168,7 @@ a.cp-shop:hover { border-color: #CFCABD; }
   .cp-pills-wrap { padding: 28px 20px 0; }
   .h3 .cp-page { padding-top: 28px; }
   .h3 .os-h1 { font-size: clamp(30px, 7.4vw, 40px); }
-  .jm-more { margin-top: 56px; }
+  .jm-more, .ft-sec { margin-top: 56px; }
   .h3 .os-cols { margin-top: 40px; }
   .os-city { margin-top: 56px; }
 }

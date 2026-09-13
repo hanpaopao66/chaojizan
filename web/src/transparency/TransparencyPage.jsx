@@ -4,6 +4,7 @@ import {
   SitePage, SplitBar, bjDay, bjParts, kw, mdOf, money, useCountUp, useJson,
 } from '../SiteChrome.jsx'
 import AuditLampFilm from '../films/AuditLampFilm.jsx'
+import DispatchOpenFilm from '../films/DispatchOpenFilm.jsx'
 import './transparency.css'
 
 /* 透明中心(/transparency,/status 直达系统状态区)。
@@ -23,7 +24,9 @@ import './transparency.css'
  * - 单号那一列是单号指纹(sha256 前 6 位,和账本锚点同一个算法),不是单号。
  *
  * 核账那一栏的开场是「差一分钱都亮红灯」那支示例片(films/AuditLampFilm.jsx,
- * 官网动画集第二批),真的数和 90 格紧跟在它下面。 */
+ * 官网动画集第二批),真的数和 90 格紧跟在它下面。派单算法那一栏(第 8 节)同理:
+ * 开场是「谁排在前面,凭什么」那支示例片(films/DispatchOpenFilm.jsx,第三批),
+ * 把三张候选单按旧公式、新公式各排一遍,真的公式和权重表紧跟其后。 */
 
 const CH_COLOR = {
   food: '#943F2F', retail: '#01756C', errand_send: '#2B5F7A', errand_buy: '#2B5F7A',
@@ -693,6 +696,7 @@ export default function TransparencyPage() {
           <p className="tp-lede">
             派单算法对骑手的意义，等同于账目对商家的意义——它决定骑手今天挣多少。别家的算法是黑箱，骑手只能猜“为什么好单不给我”。下面这些数字就是代码里正在跑的那几个：接口从排序代码的常量直接读，不是另写一份说明，改了会立刻反映在这里。
           </p>
+          <div className="tp-film"><DispatchOpenFilm /></div>
           {dispatch ? (
             <>
               <div className="tp-formula">{dispatch.formula}</div>

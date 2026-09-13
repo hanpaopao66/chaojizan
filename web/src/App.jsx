@@ -21,6 +21,8 @@ const BrandPage = React.lazy(() => import('./BrandPage.jsx'))
 const RatesPage = React.lazy(() => import('./RatesPage.jsx'))
 const OpenSourcePage = React.lazy(() => import('./OpenSourcePage.jsx'))
 const ChannelPage = React.lazy(() => import('./ChannelPage.jsx'))
+// 消息与视频:用户端底部新加的两个 tab 的功能介绍(官网动画集第 10、11 支在这一页)
+const FeaturesPage = React.lazy(() => import('./FeaturesPage.jsx'))
 const JoinMerchant = React.lazy(
   () => import('./JoinPages.jsx').then(m => ({ default: m.JoinMerchant })))
 const JoinRider = React.lazy(
@@ -45,6 +47,7 @@ export default function App() {
   if (path.startsWith('/brand')) return lazyPage(<BrandPage />)
   if (path.startsWith('/rates')) return lazyPage(<RatesPage />)
   if (path.startsWith('/opensource')) return lazyPage(<OpenSourcePage />)
+  if (path === '/features' || path === '/features/') return lazyPage(<FeaturesPage />)
   if (path.startsWith('/channel')) {
     // /channel/stay → stay;认不出的 key 由 ChannelPage 回退到「点外卖」
     const key = decodeURIComponent(path.split('/')[2] || '')

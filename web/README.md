@@ -4,7 +4,8 @@
 流程动画(`src/FlowFilm.jsx`)+ 一张费率表 + 实时账目(/stats/overview、
 /transparency/audit,与公开账本同源)。
 费率(`/rates`)、透明中心(`/transparency`)、商家入驻 / 骑手加入(`/join/*`)、
-开源仓(`/opensource`)、频道页(`/channel/{key}`)、品牌页、大屏是同一个包里的子路由。
+开源仓(`/opensource`)、频道页(`/channel/{key}`)、消息与视频(`/features`)、品牌页、大屏是同一个包里的子路由。
+新加子路由时服务端 `server/app/main.py` 也要登记一行(官网页是按路径白名单交给 index.html 的),否则生产上是 404。
 
 ## 开发
 
