@@ -118,6 +118,7 @@
 | [LEDGER-SPEC.md](LEDGER-SPEC.md) | 公开账本哈希链协议规格:第三方不读代码即可实现独立验证器 |
 | [DEV-PROMPTS-39.md](DEV-PROMPTS-39.md) | #320–338 小程序开放平台(技术对标 Telegram Mini Apps)+ 首批官方记事本、2048。initData v2 用 HMAC + Ed25519,**第三方只拿按应用隔离的 open_id**;平台托管的版本不可变;**目录不卖位置写成代码里的不变量**。开工前有 12 条待拍板 |
 | [DEV-PROMPTS-40.md](DEV-PROMPTS-40.md) | #339–376 底部「订单」换成「消息」和「视频」:消息对标 Telegram(私聊 / 群 / 频道、全消息类型、实时同步、通话、机器人),视频对标 B 站(投稿转码、先审后发、弹幕、评论、三连、竖屏流)。**推荐排序是公开公式、可关闭个性化;不收钱、硬币纯积分**;订单入口搬进「我的」和首页状态条 |
+| [VIDEO-API.md](VIDEO-API.md) | #357–368 视频接口参考(给客户端照着写):每个接口的真实响应形状、分页、限流、错误码、播放地址签名、实时事件。排序中间量随每条推荐下发,任何人可按 §5.9 复算 |
 | [miniapp/](miniapp/README.md) | 小程序开发者文档(官网 `/developers` 由它构建时生成):快速开始、核心概念、SDK 参考、服务端验签(五种语言 + 测试向量)、云存储、审核与运营规范。SDK 导出与参考页、验签示例与测试向量由 `scripts/check_sdk_docs.mjs` 在 CI 里对 |
 | [MINIAPP-SECURITY-AUDIT.md](MINIAPP-SECURITY-AUDIT.md) | #335 安全审计 16 项 + §3 八条不变量,每项都把保护弄坏一次确认检查会红。审计中补上了网页版的导航逃逸防护(ping/pong) |
 | [MINIAPP-ROLLOUT.md](MINIAPP-ROLLOUT.md) | #337 上线手册:先修空抽屉(要征得同意的 seed)、托管域名与 nginx、签名密钥离线备份、急停闸、回滚 |
