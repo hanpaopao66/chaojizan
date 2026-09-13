@@ -774,10 +774,13 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
     # 会话被封:成员不能发言(在判完「你在不在这个会话里」之后,免得外人借此知道这个群被封了)
     await sanctions.check_chat(db, chat, me.id, "speak")
     kind = body.get("kind") or "text"
+    to_bot = False
     if chat.type == "private":
         peer = await private_peer_id(db, chat, me.id)
         if peer is not None and await blocked_between(db, me.id, peer):
             raise _err(403, "你们之间有一方把对方拉黑了,消息发不出去")
+        peer_user = await db.get(User, peer) if peer is not None else None
+        to_bot = peer_user is not None and peer_user.role == UserRole.bot
     as_chat = False
     if chat.type == "channel":
         if not p.send_messages:
@@ -795,8 +798,9 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
     if not p.send_messages or not getattr(p, need):
         raise _err(403, "你在这个会话里没有发这类消息的权限")
     grouped = _parse_int(body.get("grouped_id"))
-    # 同样的话群发给一堆私聊 = 垃圾消息(#369):24 小时内发给 20 个以上私聊就停 1 小时
-    if chat.type == "private":
+    # 同样的话群发给一堆私聊 = 垃圾消息(#369):24 小时内发给 20 个以上私聊就停 1 小时。
+    # 发给机器人的不算(#355):给一串机器人发同一句「/start 帮我查一下」骚扰不到任何人
+    if chat.type == "private" and not to_bot:
         await _spam_guard(me.id, chat.id, str(body.get("text") or ""), kind)
     # 慢速模式(先于「每秒 1 条」判:它的提示说得清还要等几秒)。
     # 一个相册算一条:同一个 grouped_id 的后几张不再挡

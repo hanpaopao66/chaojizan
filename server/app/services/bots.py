@@ -31,6 +31,7 @@
 第一层(main.BotTokenPathMiddleware)就换成 `前 6 位***`,之后谁打日志(包括 uvicorn 的访问日志)拿到的
 都是打过码的路径。
 """
+import asyncio
 import hashlib
 import hmac
 import ipaddress
@@ -992,8 +993,6 @@ BLPOP_SLICE = 4.0
 
 async def blpop_until(key: str, timeout: float) -> str | None:
     """在 key 上等一个元素,最多 timeout 秒;等到了返回它,超时返回 None。Redis 出错抛异常。"""
-    import asyncio
-
     from ..redis_client import get_redis
 
     loop = asyncio.get_running_loop()
@@ -1104,8 +1103,6 @@ async def check_webhook_url(url: str) -> None:
 
     设置时判一次,每次投递前再判一次:域名今天指向公网、明天改指 127.0.0.1 是最经典的绕法。
     """
-    import asyncio
-
     check_webhook_url_shape(url)
     if dev_local_url(url):
         return
@@ -1347,9 +1344,9 @@ async def create_bot(db: AsyncSession, owner: User, name: str, username: str) ->
         raise HTTPException(409, f"每个开发者最多 {MAX_BOTS_PER_DEVELOPER} 个机器人")
     if await db.get(Username, uname.lower()) is not None:
         raise HTTPException(409, "这个用户名已经被占用了")
-    user = User(phone=f"bot{secrets.token_hex(7)}", role=UserRole.bot, name=name,
-                # 一个谁都不知道的密码:机器人只能用 token 说话,不能登录
-                password_hash=hash_password(secrets.token_urlsafe(32)))
+    # 一个谁都不知道的密码:机器人只能用 token 说话,不能登录。bcrypt 要算两百多毫秒,放线程里别卡住事件循环
+    pw = await asyncio.to_thread(hash_password, secrets.token_urlsafe(32))
+    user = User(phone=f"bot{secrets.token_hex(7)}", role=UserRole.bot, name=name, password_hash=pw)
     db.add(user)
     await db.flush()
     res = await db.execute(insert(Username).values(
@@ -1398,6 +1395,6 @@ async def delete_bot(db: AsyncSession, bot: Bot) -> dict:
         user.phone = f"del{bot_id}_{secrets.token_hex(3)}"
         user.name = "已删除的机器人"
         user.avatar_url = ""
-        user.password_hash = hash_password(secrets.token_hex(16))
+        user.password_hash = await asyncio.to_thread(hash_password, secrets.token_hex(16))
     logger.info("删了机器人 %s:%s", bot_id, out)
     return out
