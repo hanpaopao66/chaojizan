@@ -42,7 +42,13 @@ class _RiderExamPageState extends State<RiderExamPage> {
   Future<void> _load() async {
     try {
       final t = await widget.api.riderTraining();
-      if (mounted) setState(() => _training = t);
+      // 成功要把上次的错清掉:出错页排在最前面判断,不清的话点「重试」拉成功了也回不来
+      if (mounted) {
+        setState(() {
+          _training = t;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }

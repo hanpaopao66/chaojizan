@@ -267,6 +267,9 @@ jobs:
       # 箭头 setState 把 Future 当返回值交出去:debug 包断言失败,release 包碰巧能用
       - name: 没有把 Future 交给 setState
         run: python3 scripts/check_setstate_future.py
+      # 出错页排在最前面判断、拉成功时又不清 _error:点重试拉成功了界面也不动
+      - name: 出错页拉成功了能回来
+        run: python3 scripts/check_sticky_error.py
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"

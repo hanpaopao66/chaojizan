@@ -33,7 +33,13 @@ class _DispatchSpecPageState extends State<DispatchSpecPage> {
   Future<void> _load() async {
     try {
       final d = await widget.api.dispatchSpec();
-      if (mounted) setState(() => _spec = d);
+      // 成功要把上次的错清掉:出错页排在最前面判断,不清的话点「重试」拉成功了也回不来
+      if (mounted) {
+        setState(() {
+          _spec = d;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -45,10 +51,13 @@ class _DispatchSpecPageState extends State<DispatchSpecPage> {
     return SzPageScaffold(
       appBar: AppBar(title: const Text('抢单怎么排的')),
       body: _error != null
-          ? Center(
+          // 出错页没有重试按钮,只能靠下拉
+          ? SzRefreshableEmpty(
+              onRefresh: _load,
               child: Padding(
                 padding: const EdgeInsets.all(kPagePad),
-                child: Text('拿不到算法说明:$_error',
+                child: Text('拿不到算法说明:$_error\n下拉重试',
+                    textAlign: TextAlign.center,
                     style: TextStyle(color: sz.inkMuted)),
               ),
             )

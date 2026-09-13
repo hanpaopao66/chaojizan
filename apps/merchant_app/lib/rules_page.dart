@@ -28,7 +28,13 @@ class _MerchantRulesPageState extends State<MerchantRulesPage> {
   Future<void> _load() async {
     try {
       final r = await widget.api.merchantRules();
-      if (mounted) setState(() => _rules = r);
+      // 成功要把上次的错清掉:出错页排在最前面判断,不清的话点「重试」拉成功了也回不来
+      if (mounted) {
+        setState(() {
+          _rules = r;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() => _error = e is ApiException ? e.message : '$e');

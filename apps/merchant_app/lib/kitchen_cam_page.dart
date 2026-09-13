@@ -51,6 +51,8 @@ class _KitchenCamSetupPageState extends State<KitchenCamSetupPage> {
       if (!mounted) return;
       setState(() {
         _data = d;
+        // 成功要把上次的错清掉:出错页排在最前面判断,不清的话点「重试」拉成功了也回不来
+        _error = null;
         if (_url.text.isEmpty) _url.text = '${d['url'] ?? ''}';
         _vendor = '${d['vendor'] ?? ''}';
         _notified = d['notified'] == true;

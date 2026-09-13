@@ -40,7 +40,13 @@ class _TrustPageState extends State<TrustPage> {
   Future<void> _load() async {
     try {
       final stats = await widget.api.statsOverview();
-      if (mounted) setState(() => _stats = stats);
+      // 成功要把上次的错清掉:不清的话出错页一直挂着,点重试、下拉都回不来
+      if (mounted) {
+        setState(() {
+          _stats = stats;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -85,11 +91,14 @@ class _TrustPageState extends State<TrustPage> {
     return SzPageScaffold(
       appBar: AppBar(title: const Text('账目透明')),
       body: _error != null
-          ? EmptyState(
-              icon: Icons.cloud_off_outlined,
-              text: '暂时打不开,下拉重试\n$_error',
-              actionLabel: '重试',
-              onAction: _load)
+          ? SzRefreshableEmpty(
+              // 字上写着「下拉重试」,就得真能往下拉
+              onRefresh: _load,
+              child: EmptyState(
+                  icon: Icons.cloud_off_outlined,
+                  text: '暂时打不开,下拉重试\n$_error',
+                  actionLabel: '重试',
+                  onAction: _load))
           : s == null
               ? const Center(child: CircularProgressIndicator())
               : RefreshIndicator(

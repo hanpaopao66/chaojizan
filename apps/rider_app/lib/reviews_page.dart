@@ -41,7 +41,13 @@ class _RiderReviewsPageState extends State<RiderReviewsPage> {
   Future<void> _load() async {
     try {
       final d = await widget.api.riderReviews();
-      if (mounted) setState(() => _data = d);
+      // 成功要把上次的错清掉,不然出错页一直挂着,下拉拉成功了也回不来
+      if (mounted) {
+        setState(() {
+          _data = d;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -53,10 +59,13 @@ class _RiderReviewsPageState extends State<RiderReviewsPage> {
     return SzPageScaffold(
       appBar: AppBar(title: const Text('顾客评价')),
       body: _error != null
-          ? Center(
+          // 出错页没有重试按钮,只能靠下拉:所以它也得在下拉刷新里
+          ? SzRefreshableEmpty(
+              onRefresh: _load,
               child: Padding(
                 padding: const EdgeInsets.all(kPagePad),
-                child: Text('拿不到评价:$_error',
+                child: Text('拿不到评价:$_error\n下拉重试',
+                    textAlign: TextAlign.center,
                     style: TextStyle(color: sz.inkMuted)),
               ),
             )

@@ -129,7 +129,13 @@ class _KitchenCamPageState extends State<KitchenCamPage> {
   Future<void> _load() async {
     try {
       final d = await widget.load();
-      if (mounted) setState(() => _data = d);
+      // 成功要把上次的错清掉:出错页排在最前面判断,不清的话点「重试」拉成功了也回不来
+      if (mounted) {
+        setState(() {
+          _data = d;
+          _error = null;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = e);
     }
