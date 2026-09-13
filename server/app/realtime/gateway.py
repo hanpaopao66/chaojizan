@@ -35,6 +35,8 @@ TYPING_ACTIONS = {"typing", "record_voice", "upload_photo", "upload_video",
 
 #: 客户端帧类型 → 处理函数(conn, frame)。通话、机器人等模块自己注册
 HANDLERS: dict[str, Callable[[Conn, dict], Awaitable[None]]] = {}
+#: 一个人的最后一条连接断开时调用(user_id)。通话用它判断「对方掉线了」
+DISCONNECT_HOOKS: list[Callable[[int], Awaitable[None]]] = []
 
 
 async def user_from_token(token: str) -> User | None:
@@ -101,6 +103,12 @@ async def ws_v2(ws: WebSocket):
     finally:
         writer.cancel()
         await hub.unregister(conn)
+        if not hub.is_connected(user.id):
+            for hook in DISCONNECT_HOOKS:
+                try:
+                    await hook(user.id)
+                except Exception:
+                    logger.warning("断线回调失败", exc_info=True)
         try:
             await ws.close()
         except Exception:
