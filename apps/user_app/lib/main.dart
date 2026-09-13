@@ -6151,39 +6151,9 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.ios_share, size: 18),
                         label: const Text('晒一晒(钱去哪了,一目了然)'),
-                        onPressed: () async {
-                          var mask = true;
-                          final go = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => StatefulBuilder(
-                              builder: (context, setState) => SzDialog(
-                                title: const Text('晒单设置'),
-                                content: SwitchListTile(
-                                  title: const Text('金额打码'),
-                                  subtitle: const Text('关闭则显示真实金额'),
-                                  value: mask,
-                                  onChanged: (v) =>
-                                      setState(() => mask = v),
-                                ),
-                                actions: [
-                                  TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, false),
-                                      child: const Text('取消')),
-                                  FilledButton(
-                                      onPressed: () =>
-                                          Navigator.pop(context, true),
-                                      child: const Text('生成分享图')),
-                                ],
-                              ),
-                            ),
-                          );
-                          if (go != true || !context.mounted) return;
-                          showShareCard(context,
-                              orderShareCard(order, maskAmount: mask),
-                              event: 'share_order',
-                              props: {'order_no': order.orderNo});
-                        },
+                        // 打码开关在分享卡底下(设计稿 F),拨了当场看到效果;
+                        // 不再先弹一个「晒单设置」对话框让人对着空气选
+                        onPressed: () => showOrderShareCard(context, order),
                       ),
                     ),
                   ),
