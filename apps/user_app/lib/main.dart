@@ -22,6 +22,7 @@ import 'category_page.dart';
 import 'chat/calls/call_controller.dart';
 import 'chat/calls/call_page.dart';
 import 'chat/chat_tab.dart';
+import 'chat/extras.dart' show ChatExtras, chatExtraBadge;
 import 'chat/store.dart';
 import 'chat/ui/avatar.dart' show rootResolve;
 import 'checkout_page.dart';
@@ -285,7 +286,7 @@ class _HomePageState extends State<HomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) =>
         checkForUpdate(context, baseUrl: widget.api.baseUrl, app: 'user'));
     chatUnreadBadge.addListener(_onBadge);
-    videoNotifyUnread.addListener(_onBadge);
+    chatExtraBadge.addListener(_onBadge);
     videoImmersive.addListener(_onBadge);
     // 消息模块:登录了就连实时通道(底栏角标要一直准,不能等点进「消息」tab 才连);
     // 游客登录成功 / 退出登录都会 bump authTick
@@ -323,7 +324,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     chatUnreadBadge.removeListener(_onBadge);
-    videoNotifyUnread.removeListener(_onBadge);
+    chatExtraBadge.removeListener(_onBadge);
     videoImmersive.removeListener(_onBadge);
     authTick.removeListener(_syncChat);
     _chatNotices?.cancel();
@@ -363,14 +364,17 @@ class _HomePageState extends State<HomePage> {
     final store = ChatStore.instance;
     if (widget.api.isLoggedIn) {
       unawaited(store.start(widget.api));
-      // 视频互动消息的角标(「消息」第三行):登录就开始盯,实时事件来了就刷新
+      // 视频互动的角标:登录就开始盯,实时事件来了就刷新
       startVideoNotifyWatcher();
     } else {
       if (store.started) store.stop();
       stopVideoNotifyWatcher();
+      ChatExtras.instance.stop();
       // 换号 / 退出:上一个人还在后台传的投稿不能挂到下一个人名下
       VideoUploads.instance.clear();
     }
+    // 「消息」里服务号、订单群那几行也进底栏角标,不能等点进「消息」才拉(平台公告不用登录)
+    unawaited(ChatExtras.instance.start(widget.api));
   }
 
   void _onBadge() {
@@ -415,8 +419,9 @@ class _HomePageState extends State<HomePage> {
             icon: Icons.chat_bubble_outline,
             selectedIcon: Icons.chat_bubble,
             label: '消息',
-            // 数的是「有未读的行」:互动消息那一行有未读就算一行,不把 9 条赞全加进来
-            badgeCount: chatUnreadBadge.value + (videoNotifyUnread.value > 0 ? 1 : 0)),
+            // 数的是「有未读的行」(设计稿 A:数会话不数消息),服务号、订单群、视频互动各算一行,
+            // 不把 9 条赞全加进来;免打扰的会话、静音的视频互动不算
+            badgeCount: chatUnreadBadge.value + chatExtraBadge.value),
         const SzNavItem(
             icon: Icons.smart_display_outlined,
             selectedIcon: Icons.smart_display,
@@ -473,7 +478,7 @@ class _HomePageState extends State<HomePage> {
               )
             : const Text('我的'),
         actions: [
-          // 右上角原来的铃铛(消息中心)挪进了「消息」tab 顶部的「通知」一行
+          // 右上角原来的铃铛(消息中心)挪进了「消息」列表,是置顶的平台服务号「超级赞」
           // (DEV-PROMPTS-40 D24):两个地方都有未读的话,用户不知道该看哪。
           // 券包跟着订单页走了(OrdersPage 顶栏)。
           //

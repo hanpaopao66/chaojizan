@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
-import '../messages_page.dart';
+import '../main.dart' show OrderDetailPage;
 import '../session.dart';
 import '../video/notify/notifications_page.dart';
+import '../video/notify/notify_format.dart' show notifyHeadline, notifyTime;
+import '../video/notify/notify_prefs.dart';
 import 'calls/calls_page.dart';
 import 'chat_page.dart';
+import 'extras.dart';
 import 'models.dart';
-import 'order_chats_page.dart';
 import 'pages/chat_admin.dart' show pickContactsMulti;
 import 'pages/chat_settings_page.dart';
 import 'pages/contacts_page.dart';
@@ -15,20 +19,25 @@ import 'pages/folders_page.dart';
 import 'pages/new_chat_page.dart';
 import 'pages/pickers.dart';
 import 'pages/search_page.dart';
+import 'pages/service_account_page.dart';
 import 'store.dart';
 import 'ui/avatar.dart';
+import 'ui/conv_row.dart';
 import 'ui/format.dart';
 
 /// 底部「消息」tab 的角标:有未读的会话数。**免打扰的会话不计** ——
 /// 静音的群不该在底栏上一直喊你(Telegram 也是这么算的)。
-/// 会话列表每次拉到数据、每收到一个事件都会更新它
+/// 会话列表每次拉到数据、每收到一个事件都会更新它。
+/// 平台服务号、订单群、视频互动那几行另算,见 [chatExtraBadge]
 final ValueNotifier<int> chatUnreadBadge = ValueNotifier<int>(0);
 
-/// 「消息」tab(DEV-PROMPTS-40 #348)。
+/// 「消息」tab(DEV-PROMPTS-40 #348,设计稿 A)。
 ///
-/// 顶部固定行(D24):「通知」是原来右上角铃铛里的消息中心,「订单消息」是进行中订单里
-/// 和商家、骑手的对话,「互动消息」是视频那边的回复 / @ / 赞;有归档的会话时再多一行「归档」。下面是聊天会话:
-/// 置顶的在前,其余按最后一条消息的时间。
+/// **万物皆会话**:原来列表顶上的三条固定入口(通知 / 订单消息 / 互动消息)取消了,
+/// 它们和聊天一样是会话行 —— 平台通知是带认证标的服务号「超级赞」,每一单是一个订单群
+/// (你、商家、骑手),视频的回复 / @ / 赞是「视频互动」机器人。
+/// 排法照 Telegram:置顶的在前(服务号、还在送的订单群、自己置顶的会话),其余按最后一条消息的时间;
+/// 有归档的会话时最上面多一行「归档」。
 class ChatTab extends StatefulWidget {
   const ChatTab({super.key, required this.api});
 
@@ -39,26 +48,31 @@ class ChatTab extends StatefulWidget {
 }
 
 class _ChatTabState extends State<ChatTab> {
-  /// 有新公告(和原来铃铛红点同一个判据:最新公告 id 比本地看过的新)
-  bool _noticeUnread = false;
-
-  /// 选中的分组;null = 全部
+  /// 选中的分组;-1 = 全部
   int _folder = -1;
 
   ChatStore get store => ChatStore.instance;
+  ChatExtras get extras => ChatExtras.instance;
 
   @override
   void initState() {
     super.initState();
     authTick.addListener(_onAuth);
-    store.addListener(_onStore);
-    _refreshNotice();
+    store.addListener(_on);
+    extras.addListener(_on);
+    videoNotifyUnreadKinds.addListener(_on);
+    VideoNotifyPrefs.instance.addListener(_on);
+    // 首页已经把服务号、订单群拉过一次(底栏角标要用);这里再刷一遍,顺带拉视频互动的最近一条
+    unawaited(extras.start(widget.api).then((_) => extras.refreshBot()));
   }
 
   @override
   void dispose() {
     authTick.removeListener(_onAuth);
-    store.removeListener(_onStore);
+    store.removeListener(_on);
+    extras.removeListener(_on);
+    videoNotifyUnreadKinds.removeListener(_on);
+    VideoNotifyPrefs.instance.removeListener(_on);
     super.dispose();
   }
 
@@ -66,30 +80,37 @@ class _ChatTabState extends State<ChatTab> {
     if (mounted) setState(() {});
   }
 
-  void _onStore() {
+  void _on() {
     if (mounted) setState(() {});
   }
 
-  Future<void> _refreshNotice() async {
-    final v = await MessageCenterPage.hasUnread(widget.api);
-    if (mounted && v != _noticeUnread) setState(() => _noticeUnread = v);
-  }
-
   Future<void> _refresh() async {
-    await Future.wait([_refreshNotice(), if (store.started) store.refresh()]);
+    await Future.wait([extras.refresh(), if (store.started) store.refresh()]);
   }
 
-  Future<void> _openNotice() async {
-    setState(() => _noticeUnread = false); // 打开即已读(和原铃铛一样)
+  Future<void> _openService() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ServiceAccountPage()));
+  }
+
+  /// 一单一个群:点进去就是这一单的群;群头置顶条上的「看订单」进订单详情
+  Future<void> _openOrder(OrderThread t) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => MessageCenterPage(api: widget.api)));
+        builder: (ctx) => OrderChatPage(
+            api: widget.api,
+            orderNo: t.orderNo,
+            title: t.title,
+            quickReplies: kCustomerQuickReplies,
+            onOpenOrder: () => Navigator.of(ctx).push(MaterialPageRoute<void>(
+                builder: (_) => OrderDetailPage(api: widget.api, orderNo: t.orderNo))))));
+    // 进去看过,未读就清了;回来刷一下这一行
+    unawaited(extras.refreshOrders());
   }
 
-  Future<void> _openOrderChats() async {
+  Future<void> _openBot() async {
     if (!await ensureLoggedIn(context)) return;
     if (!mounted) return;
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => OrderChatsPage(api: widget.api)));
+    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const VideoNotificationsPage()));
+    unawaited(extras.refreshBot());
   }
 
   Future<void> _compose() async {
@@ -149,6 +170,34 @@ class _ChatTabState extends State<ChatTab> {
     };
   }
 
+  /// 「全部」下的整张列表:置顶段(服务号、在送的订单群、自己置顶的会话)+ 其余按时间。
+  List<Widget> _rows(List<ChatInfo> chats, bool loggedIn) {
+    final pinnedChats = chats.where((c) => c.my.pinnedRank != null).toList();
+    final restChats = chats.where((c) => c.my.pinnedRank == null);
+    final threads = loggedIn ? extras.orderThreads : const <OrderThread>[];
+    final live = threads.where((t) => t.active).toList()..sort((a, b) => b.time.compareTo(a.time));
+    final showBot = loggedIn && !extras.botOff;
+
+    // 置顶段之外的行按时间排:聊天、送完了的订单群、视频互动
+    final timed = <(DateTime, Widget)>[
+      for (final c in restChats) (c.sortTime, DialogRow(key: ValueKey('c${c.id}'), chat: c)),
+      for (final t in threads.where((t) => !t.active))
+        (t.time, _OrderRow(key: ValueKey('o${t.orderNo}'), thread: t, onTap: () => _openOrder(t))),
+      if (showBot)
+        (
+          extras.botLast == null ? DateTime.fromMillisecondsSinceEpoch(0) : notifyTime(extras.botLast!),
+          _BotRow(key: const ValueKey('bot'), onTap: _openBot),
+        ),
+    ]..sort((a, b) => b.$1.compareTo(a.$1));
+
+    return [
+      _ServiceRow(key: const ValueKey('svc'), onTap: _openService),
+      for (final t in live) _OrderRow(key: ValueKey('o${t.orderNo}'), thread: t, onTap: () => _openOrder(t)),
+      for (final c in pinnedChats) DialogRow(key: ValueKey('c${c.id}'), chat: c),
+      for (final (_, w) in timed) w,
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
@@ -156,12 +205,61 @@ class _ChatTabState extends State<ChatTab> {
     final folders = store.folders;
     ChatFolder? folder;
     if (_folder >= 0 && _folder < folders.length) folder = folders[_folder];
-    final chats = loggedIn ? store.sortedChats(folder: folder) : const <ChatInfo>[];
-    final archived = loggedIn && folder == null ? store.sortedChats(archived: true) : const <ChatInfo>[];
+    final chatOn = RemoteCopy.feature('chat');
+    final chats = loggedIn && chatOn ? store.sortedChats(folder: folder) : const <ChatInfo>[];
+    final archived = loggedIn && chatOn && folder == null ? store.sortedChats(archived: true) : const <ChatInfo>[];
     final archivedUnread = archived.fold<int>(0, (n, c) => n + (c.my.muted ? 0 : store.unreadOf(c)));
+
+    final rows = <Widget>[
+      if (archived.isNotEmpty)
+        ConvRow(
+          avatar: const IconAvatar(icon: Icons.archive_outlined),
+          title: '归档',
+          preview: Text(archived.take(3).map((c) => c.title).join('、')),
+          trailing: archivedUnread > 0 ? UnreadBadge(count: archivedUnread, muted: true) : null,
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ArchivedPage())),
+        ),
+      if (folder == null) ..._rows(chats, loggedIn) else for (final c in chats) DialogRow(key: ValueKey('c${c.id}'), chat: c),
+    ];
+
+    // 聊天那一段的状态:没登录、急停闸、还在拉、拉不到、空着
+    Widget? state;
+    if (!chatOn) {
+      // 平台拉了「消息」的急停闸(/config 的 features.chat):服务号、订单群照常,聊天这块说清楚在停着
+      state = const SzEmpty(text: '消息功能暂停中,稍后再试\n平台公告、订单群不受影响');
+    } else if (!loggedIn) {
+      state = SzEmpty(
+        text: '登录后和朋友聊天、建群、订阅频道',
+        actionLabel: '登录 / 注册',
+        onAction: () => ensureLoggedIn(context),
+      );
+    } else if (chats.isEmpty) {
+      if (!store.loaded && store.loadError == null) {
+        state = const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
+      } else if (store.loadError != null && store.chats.isEmpty) {
+        state = SzError(error: store.loadError, onRetry: store.refresh);
+      } else if (folder != null) {
+        state = const SzEmpty(text: '这个分组里还没有会话');
+      } else {
+        state = SzEmpty(
+          text: '还没有聊天\n加个联系人,或者建一个群',
+          actionLabel: '添加联系人',
+          onAction: () =>
+              Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AddContactPage())),
+        );
+      }
+    }
+    if (state != null) rows.add(Padding(padding: const EdgeInsets.only(top: 24), child: state));
+
     return Column(children: [
       AppBar(
-        title: Text(_title()),
+        toolbarHeight: 52,
+        titleSpacing: kPagePad,
+        title: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Text(_title(), style: TextStyle(fontSize: kFontLead, fontWeight: FontWeight.w600, color: sz.ink)),
+          if (store.started && store.conn != ConnState.online)
+            const Padding(padding: EdgeInsets.only(left: 8), child: ConnDot()),
+        ]),
         actions: [
           IconButton(
             tooltip: '搜索',
@@ -173,121 +271,41 @@ class _ChatTabState extends State<ChatTab> {
               }
             },
           ),
-          IconButton(tooltip: '新建', icon: const Icon(Icons.edit_square), onPressed: _compose),
+          IconButton(tooltip: '新建', icon: const Icon(Icons.border_color_outlined), onPressed: _compose),
+          const SizedBox(width: 4),
         ],
       ),
-      if (loggedIn && folders.isNotEmpty)
+      if (loggedIn && chatOn && folders.isNotEmpty)
         SizedBox(
-          height: 44,
-          child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 12), children: [
-            _FolderChip(label: '全部', selected: _folder < 0, onTap: () => setState(() => _folder = -1)),
-            for (var i = 0; i < folders.length; i++)
-              _FolderChip(
-                label: folders[i].title,
-                badge: store.sortedChats(folder: folders[i]).where((c) => !c.my.muted && store.unreadOf(c) > 0).length,
-                selected: _folder == i,
-                onTap: () => setState(() => _folder = i),
-              ),
-          ]),
+          height: 40,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 8),
+            itemCount: folders.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              if (i == 0) return Center(child: SzChip('全部', selected: _folder < 0, onTap: () => setState(() => _folder = -1)));
+              final f = folders[i - 1];
+              final n = store.sortedChats(folder: f).where((c) => !c.my.muted && store.unreadOf(c) > 0).length;
+              return Center(
+                child: SzChip(n > 0 ? '${f.title} $n' : f.title,
+                    selected: _folder == i - 1, onTap: () => setState(() => _folder = i - 1)),
+              );
+            },
+          ),
         ),
       Expanded(
         // 标题栏已经让过状态栏了,列表别再按顶部安全区补一次 —— 不去掉的话
-        // 安卓上「通知」那一行上面会空出一截状态栏高(网页版没有状态栏,看不出来)
+        // 安卓上第一行上面会空出一截状态栏高(网页版没有状态栏,看不出来)
         child: MediaQuery.removePadding(
           context: context,
           removeTop: true,
           child: RefreshIndicator(
             onRefresh: _refresh,
             child: ListView.builder(
-              // 没登录、或者列表为空时,分隔线下面多一格放提示(登录引导 / 转圈 / 空状态)
-              itemCount: (folder == null ? 3 : 0) + (archived.isNotEmpty ? 1 : 0) + 1 + chats.length +
-                  (chats.isEmpty ? 1 : 0),
-              itemBuilder: (context, i) {
-                var k = i;
-                if (folder == null) {
-                  if (k == 0) {
-                    return _PinnedRow(
-                        icon: Icons.campaign_outlined, title: '通知', subtitle: '平台公告和订单状态', dot: _noticeUnread, onTap: _openNotice);
-                  }
-                  if (k == 1) {
-                    return _PinnedRow(
-                        icon: Icons.receipt_long_outlined, title: '订单消息', subtitle: '和商家、骑手的对话', onTap: _openOrderChats);
-                  }
-                  if (k == 2) {
-                    // 视频的互动消息(D24 第三行,#367):回复我的、@我的、收到的赞、系统通知
-                    return ValueListenableBuilder<int>(
-                      valueListenable: videoNotifyUnread,
-                      builder: (context, n, _) => _PinnedRow(
-                        icon: Icons.favorite_border,
-                        title: '互动消息',
-                        subtitle: '视频的回复、@、赞和审核结果',
-                        badge: n,
-                        onTap: () async {
-                          if (!await ensureLoggedIn(context)) return;
-                          if (context.mounted) {
-                            await Navigator.of(context)
-                                .push(MaterialPageRoute<void>(builder: (_) => const VideoNotificationsPage()));
-                          }
-                        },
-                      ),
-                    );
-                  }
-                  k -= 3;
-                }
-                if (archived.isNotEmpty) {
-                  if (k == 0) {
-                    return _PinnedRow(
-                      icon: Icons.archive_outlined,
-                      title: '归档',
-                      subtitle: archived.take(3).map((c) => c.title).join('、'),
-                      badge: archivedUnread,
-                      onTap: () => Navigator.of(context)
-                          .push(MaterialPageRoute<void>(builder: (_) => const ArchivedPage())),
-                    );
-                  }
-                  k -= 1;
-                }
-                if (k == 0) return Divider(height: 1, color: sz.line);
-                k -= 1;
-                // 平台拉了「消息」的急停闸(/config 的 features.chat):通知、订单消息照常,聊天这块说清楚在停着
-                if (!RemoteCopy.feature('chat')) {
-                  if (k > 0) return const SizedBox.shrink();
-                  return const Padding(
-                    padding: EdgeInsets.only(top: 48),
-                    child: SzEmpty(text: '消息功能暂停中,稍后再试\n通知和订单消息不受影响'),
-                  );
-                }
-                if (!loggedIn) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 48),
-                    child: SzEmpty(
-                      text: '登录后和朋友聊天、建群、订阅频道',
-                      actionLabel: '登录 / 注册',
-                      onAction: () => ensureLoggedIn(context),
-                    ),
-                  );
-                }
-                if (chats.isEmpty) {
-                  if (!store.loaded && store.loadError == null) {
-                    return const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
-                  }
-                  if (store.loadError != null && store.chats.isEmpty) {
-                    return SzError(error: store.loadError, onRetry: store.refresh);
-                  }
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 40),
-                    child: SzEmpty(
-                      text: folder == null ? '还没有聊天\n加个联系人,或者建一个群' : '这个分组里还没有会话',
-                      actionLabel: folder == null ? '添加联系人' : null,
-                      onAction: folder == null
-                          ? () => Navigator.of(context)
-                              .push(MaterialPageRoute<void>(builder: (_) => const AddContactPage()))
-                          : null,
-                    ),
-                  );
-                }
-                return DialogRow(chat: chats[k]);
-              },
+              padding: const EdgeInsets.only(top: 2, bottom: 8),
+              itemCount: rows.length,
+              itemBuilder: (context, i) => rows[i],
             ),
           ),
         ),
@@ -296,65 +314,95 @@ class _ChatTabState extends State<ChatTab> {
   }
 }
 
-class _FolderChip extends StatelessWidget {
-  const _FolderChip({required this.label, required this.selected, required this.onTap, this.badge = 0});
+/// 平台服务号「超级赞」:带认证标,置顶。内容是平台公告,点进去是只读的会话。
+class _ServiceRow extends StatelessWidget {
+  const _ServiceRow({super.key, required this.onTap});
 
-  final String label;
-  final bool selected;
   final VoidCallback onTap;
-  final int badge;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-      child: ChoiceChip(
-        label: Text(badge > 0 ? '$label $badge' : label),
-        selected: selected,
-        onSelected: (_) => onTap(),
-        visualDensity: VisualDensity.compact,
-      ),
+    final x = ChatExtras.instance;
+    final latest = x.notices.isEmpty ? null : x.notices.first;
+    final unread = x.noticeUnread;
+    final at = latest?.createdAt;
+    return ConvRow(
+      pinned: true,
+      avatar: const IconAvatar(soft: true, child: BrandMark(size: 26)),
+      title: '超级赞',
+      titleSuffix: const [VerifiedMark()],
+      time: at == null ? '' : listTime(at),
+      preview: Text(latest == null ? '平台公告' : (latest.title.isNotEmpty ? latest.title : latest.content)),
+      trailing: unread > 0 ? UnreadBadge(count: unread) : null,
+      onTap: onTap,
     );
   }
 }
 
-/// 列表顶部固定的一行:圆形图标 + 标题 + 一句说明 + 红点 / 数字。
-class _PinnedRow extends StatelessWidget {
-  const _PinnedRow({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-    this.dot = false,
-    this.badge = 0,
-  });
+/// 一单一个群:「订单 #xxxxxx · 张记面馆」、群图标、「配送中 · 骑手:到楼下了……」、未读数。
+/// 还在送的置顶;送完的和别的会话一起按时间排。
+class _OrderRow extends StatelessWidget {
+  const _OrderRow({super.key, required this.thread, required this.onTap});
 
-  final IconData icon;
-  final String title;
-  final String subtitle;
+  final OrderThread thread;
   final VoidCallback onTap;
-  final bool dot;
-  final int badge;
 
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return ListTile(
-      leading: Badge(
-        isLabelVisible: dot,
-        smallSize: 9,
-        child: CircleAvatar(
-          radius: 24,
-          backgroundColor: sz.claySoft,
-          child: Icon(icon, color: sz.clay),
-        ),
-      ),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(subtitle,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-      trailing: badge > 0 ? Badge(label: Text(badgeText(badge))) : Icon(Icons.chevron_right, color: sz.inkFaint),
+    final t = thread;
+    final last = t.last;
+    final content = last == null ? '' : (last.kind == 'image' ? '[图片]' : last.content.replaceAll('\n', ' '));
+    final who = last == null ? '' : (last.from == 'customer' ? '我' : last.senderName);
+    return ConvRow(
+      pinned: t.active,
+      avatar: const IconAvatar(soft: true, icon: Icons.receipt_long_outlined),
+      title: t.title,
+      titlePrefix: Icons.group_outlined,
+      time: listTime(t.time),
+      preview: Text.rich(TextSpan(children: [
+        if (t.statusLabel.isNotEmpty)
+          TextSpan(text: '${t.statusLabel} · ', style: TextStyle(color: t.active ? sz.earn : sz.inkMuted)),
+        if (last == null)
+          const TextSpan(text: '还没有消息')
+        else ...[
+          if (who.isNotEmpty) TextSpan(text: '$who: ', style: TextStyle(color: sz.ink)),
+          TextSpan(text: content),
+        ],
+      ])),
+      trailing: t.unread > 0 ? UnreadBadge(count: t.unread) : null,
+      onTap: onTap,
+    );
+  }
+}
+
+/// 「视频互动」机器人:视频的回复 / @ / 赞 / 投稿审核结果。静音了角标变灰、不进底栏。
+class _BotRow extends StatelessWidget {
+  const _BotRow({super.key, required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    final last = ChatExtras.instance.botLast;
+    final muted = VideoNotifyPrefs.instance.muted;
+    final n = videoNotifyBadge();
+    String preview = '回复、@、赞和投稿审核结果';
+    if (last != null) {
+      final head = notifyHeadline(last);
+      preview = (last.kind == 'reply' || last.kind == 'at') && last.text.isNotEmpty ? '$head:${last.text}' : head;
+    }
+    return ConvRow(
+      avatar: const IconAvatar(icon: Icons.smart_toy_outlined),
+      title: '视频互动',
+      titleSuffix: [
+        const BotTag(),
+        if (muted) Icon(Icons.notifications_off, size: 13, color: sz.inkFaint),
+      ],
+      time: last == null ? '' : listTime(notifyTime(last)),
+      preview: Text(preview.replaceAll('\n', ' ')),
+      trailing: n > 0 ? UnreadBadge(count: n, muted: muted) : null,
       onTap: onTap,
     );
   }
@@ -444,17 +492,12 @@ class DialogRow extends StatelessWidget {
     final online = c.isPrivate && (c.peer?.lastSeen.online ?? false);
     Widget preview;
     if (typing != null) {
-      preview = Text(typing, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: sz.clay));
+      preview = Text(typing, style: TextStyle(color: sz.clay));
     } else if (draft.isNotEmpty && store.viewing != c.id) {
-      preview = Text.rich(
-        TextSpan(children: [
-          TextSpan(text: '草稿:', style: TextStyle(color: sz.danger)),
-          TextSpan(text: draft.replaceAll('\n', ' ')),
-        ]),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: sz.inkMuted),
-      );
+      preview = Text.rich(TextSpan(children: [
+        TextSpan(text: '草稿:', style: TextStyle(color: sz.danger)),
+        TextSpan(text: draft.replaceAll('\n', ' ')),
+      ]));
     } else if (last != null) {
       final who = last.isService || c.isPrivate || c.isChannel || c.isSaved
           ? ''
@@ -465,80 +508,55 @@ class DialogRow extends StatelessWidget {
               meId: store.meId,
               channel: c.isChannel)
           : previewOf(last);
-      preview = Text.rich(
-        TextSpan(children: [
-          if (who.isNotEmpty) TextSpan(text: who, style: TextStyle(color: sz.ink)),
-          TextSpan(text: text),
-        ]),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: sz.inkMuted),
-      );
+      preview = Text.rich(TextSpan(children: [
+        if (who.isNotEmpty) TextSpan(text: who, style: TextStyle(color: sz.ink)),
+        TextSpan(text: text),
+      ]));
     } else {
-      preview = Text(c.isSaved ? '转发到这里的消息只有你看得到' : '', style: TextStyle(color: sz.inkMuted));
+      preview = Text(c.isSaved ? '转发到这里的消息只有你看得到' : '');
     }
-    return InkWell(
+    // 没头像的收藏夹、频道画一个图标:收藏夹是书签,频道是喇叭(设计稿里「开城公告」那一行)
+    final Widget avatar = c.isSaved
+        ? const IconAvatar(icon: Icons.bookmark_outline)
+        : (c.isChannel && c.photo.isEmpty
+            ? const IconAvatar(icon: Icons.campaign_outlined)
+            : ChatAvatar(name: c.title, url: c.photo, size: 50, online: online));
+    final badges = <Widget>[
+      if (c.unreadMentions > 0)
+        Container(
+          width: 18,
+          height: 18,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: sz.clay, shape: BoxShape.circle),
+          child: Text('@', style: TextStyle(color: sz.surface, fontSize: kFontMicro, fontWeight: FontWeight.w600, height: 1)),
+        ),
+      if (unread > 0)
+        UnreadBadge(count: unread, muted: c.my.muted, marked: c.my.markedUnread && c.unread == 0)
+      else if (c.my.pinnedRank != null)
+        Icon(Icons.push_pin, size: 15, color: sz.inkFaint),
+    ];
+    return ConvRow(
+      pinned: c.my.pinnedRank != null,
+      avatar: avatar,
+      title: c.title,
+      titlePrefix: c.isGroup ? Icons.group_outlined : null,
+      titleSuffix: [
+        if (c.peer?.isBot == true) const BotTag(),
+        if (c.my.muted) Icon(Icons.notifications_off, size: 13, color: sz.inkFaint),
+      ],
+      timeLead: mineLast && !c.isChannel && !c.isSaved
+          ? Icon(last.seq <= c.peerReadSeq ? Icons.done_all : Icons.done,
+              size: 15, color: last.seq <= c.peerReadSeq ? sz.clay : sz.inkMuted)
+          : null,
+      time: last == null ? '' : listTime(last.createdAt),
+      preview: preview,
+      trailing: badges.isEmpty
+          ? null
+          : Row(mainAxisSize: MainAxisSize.min, children: [
+              for (var i = 0; i < badges.length; i++) ...[if (i > 0) const SizedBox(width: 4), badges[i]],
+            ]),
       onTap: () => openChat(context, c.id),
       onLongPress: () => _menu(context),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(children: [
-          ChatAvatar(name: c.title, url: c.photo, size: 52, online: online, saved: c.isSaved),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                if (c.isGroup) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(Icons.group, size: 15, color: sz.inkMuted)),
-                if (c.isChannel) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(Icons.campaign, size: 15, color: sz.inkMuted)),
-                if (c.peer?.isBot == true)
-                  Padding(padding: const EdgeInsets.only(right: 4), child: Icon(Icons.smart_toy_outlined, size: 15, color: sz.inkMuted)),
-                Flexible(
-                  child: Text(c.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: kFontBodyLg, fontWeight: FontWeight.w600)),
-                ),
-                if (c.my.muted)
-                  Padding(padding: const EdgeInsets.only(left: 4), child: Icon(Icons.notifications_off, size: 14, color: sz.inkFaint)),
-                const Spacer(),
-                if (mineLast && !c.isChannel && !c.isSaved)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 3),
-                    child: Icon(last.seq <= c.peerReadSeq ? Icons.done_all : Icons.done,
-                        size: 15, color: last.seq <= c.peerReadSeq ? sz.clay : sz.inkMuted),
-                  ),
-                Text(last == null ? '' : listTime(last.createdAt),
-                    style: TextStyle(fontSize: kFontNote, color: unread > 0 && !c.my.muted ? sz.clay : sz.inkMuted)),
-              ]),
-              const SizedBox(height: 3),
-              Row(children: [
-                Expanded(child: preview),
-                if (c.unreadMentions > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: CircleAvatar(radius: 10, backgroundColor: sz.clay,
-                        child: const Text('@', style: TextStyle(color: Colors.white, fontSize: kFontNote))),
-                  ),
-                if (unread > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 20),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                      decoration: BoxDecoration(
-                          color: c.my.muted ? sz.inkFaint : sz.clay, borderRadius: BorderRadius.circular(10)),
-                      child: Text(c.my.markedUnread && c.unread == 0 ? '' : badgeText(unread),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: Colors.white, fontSize: kFontNote, fontWeight: FontWeight.w600)),
-                    ),
-                  )
-                else if (c.my.pinnedRank != null)
-                  Padding(padding: const EdgeInsets.only(left: 4), child: Icon(Icons.push_pin, size: 15, color: sz.inkFaint)),
-              ]),
-            ]),
-          ),
-        ]),
-      ),
     );
   }
 }

@@ -28,9 +28,9 @@ void main() {
       );
 
   // 「消息」tab 自己画标题栏(外壳不给),标题栏已经让过状态栏;下面的列表原来又按顶部安全区补了一次,
-  // 手机上「通知」那一行上面空出一截状态栏高。网页没有状态栏(顶部安全区是 0),所以网页上看不出来
-  testWidgets('消息 tab:有状态栏时「通知」和没状态栏时一样紧贴标题栏', (tester) async {
-    // 「通知」离标题栏底边多远:有状态栏和没状态栏(网页)应当一样
+  // 手机上第一行(现在是置顶的平台服务号「超级赞」)上面空出一截状态栏高。网页没有状态栏(顶部安全区是 0),所以网页上看不出来
+  testWidgets('消息 tab:有状态栏时第一行和没状态栏时一样紧贴标题栏', (tester) async {
+    // 第一行离标题栏底边多远:有状态栏和没状态栏(网页)应当一样
     Future<double> gapUnderBar(double statusBar) async {
       await tester.pumpWidget(MaterialApp(
         key: ValueKey(statusBar),
@@ -49,7 +49,7 @@ void main() {
       await tester.pump();
       final barBottom = tester.getBottomLeft(find.byType(AppBar)).dy;
       expect(barBottom, greaterThanOrEqualTo(statusBar), reason: '标题栏自己要让开状态栏');
-      return tester.getTopLeft(find.text('通知')).dy - barBottom;
+      return tester.getTopLeft(find.text('超级赞')).dy - barBottom;
     }
 
     final web = await gapUnderBar(0);
