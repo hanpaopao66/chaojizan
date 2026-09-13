@@ -290,6 +290,9 @@
 | 评论 | 每人每 5 秒 1 条、每天 500 条;≤ 1,000 字 |
 | 点赞 / 投币 / 收藏 | 每人每秒 5 次 |
 | 找人(按手机号) | 每人每天 20 次(防撞库) |
+| 机器人发消息(Bot API 的 sendMessage / sendPhoto / sendDocument) | 每个机器人全局每秒 30 条;同一会话每秒 1 条(允许突发 3);同一群每分钟 20 条;超了 429 + `parameters.retry_after`(见 docs/BOT-API.md 第 6 节) |
+| 点机器人消息上的回调按钮 | 每人每秒 3 次 |
+| 机器人数量 | 每个开发者最多 20 个 |
 
 ### 5.8 视频状态机(服务端强制,非法迁移抛错,照 `state_machine.py` 的写法)
 
@@ -369,6 +372,7 @@ TURN 凭据:`GET /chat/v1/calls/ice-servers` 返回 coturn 的临时用户名密
 更新类型:`message` `edited_message` `callback_query` `my_chat_member`。
 机器人只能收到:私聊里用户发给它的消息、群里 `/命令`、@它的消息、回复它的消息(隐私模式默认开)。
 webhook 调用带 `X-Superz-Bot-Api-Secret-Token`;失败按 1 / 2 / 4 … 分钟重试,24 小时后丢弃。
+逐个方法的参数、对象、错误、限流和给客户端的接口见 [BOT-API.md](BOT-API.md)(和实现、测试逐字一致)。
 
 ---
 
