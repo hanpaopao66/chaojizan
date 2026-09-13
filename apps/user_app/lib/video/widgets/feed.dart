@@ -23,7 +23,12 @@ class VideoFeed extends StatefulWidget {
     this.showWhy = false,
     this.padding = const EdgeInsets.fromLTRB(10, 8, 10, 24),
     this.onPullRefresh,
+    this.nested = false,
   });
+
+  /// 放在 NestedScrollView 里(空间页的「投稿」):滚动交给外层协调,列表往上滑时头部跟着收起。
+  /// 原来这里有自己的滚动控制器,外层协调不了,头部一直占着上半屏,列表只能在下面那一截里滚
+  final bool nested;
 
   /// 下拉刷新时顺带刷新的东西(空间页头部的关注 / 粉丝 / 获赞):下拉的是整页,不能只刷下面这串卡片
   final Future<void> Function()? onPullRefresh;
@@ -49,7 +54,6 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
   bool _loading = false;
   Object? _error;
   bool _off = false;
-  final ScrollController _scroll = ScrollController();
 
   @override
   bool get wantKeepAlive => true;
@@ -57,16 +61,14 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(() {
-      if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 600) _loadMore();
-    });
     refresh();
   }
 
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
+  /// 离底部不到 600 就去拿下一页。听通知不挂控制器(嵌在 NestedScrollView 里时控制器归外层);
+  /// 布局完成的 ScrollMetricsNotification 也听:一页没铺满屏幕时根本滑不动,不听它下一页永远不来
+  bool _nearEnd(ScrollMetrics m, int depth) {
+    if (depth == 0 && m.axis == Axis.vertical && m.extentAfter < 600) _loadMore();
+    return false;
   }
 
   Future<void> _pullRefresh() => Future.wait([refresh(), if (widget.onPullRefresh != null) widget.onPullRefresh!()]);
@@ -174,41 +176,48 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
     return RefreshIndicator(
       onRefresh: _pullRefresh,
       // 只有一两条也能下拉刷新(比如空间页只有一个投稿):不满一屏时默认滚不动,下拉刷新收不到通知
-      child: CustomScrollView(controller: _scroll, physics: const AlwaysScrollableScrollPhysics(), slivers: [
-        if (widget.header != null) SliverToBoxAdapter(child: widget.header),
-        SliverPadding(
-          padding: widget.padding,
-          // 列数照「每列不超过 260」算(和 MaxCrossAxisExtent 同一个算法),格子高 = 封面 + 下面那块字
-          sliver: SliverLayoutBuilder(builder: (context, constraints) {
-            const gap = 10.0;
-            final w = constraints.crossAxisExtent;
-            final cols = math.max(1, (w / (260 + gap)).ceil());
-            final cardW = (w - gap * (cols - 1)) / cols;
-            return SliverGrid(
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: cols,
-                mainAxisSpacing: gap,
-                crossAxisSpacing: gap,
-                mainAxisExtent: cardW / VideoGridCard.coverAspect + VideoGridCard.textBlockHeight(context),
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, i) => VideoGridCard(card: _items[i], onLongPress: () => _menu(_items[i])),
-                childCount: _items.length,
-              ),
-            );
-          }),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 24),
-            child: Center(
-              child: _loading
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Text(_more ? '' : '没有更多了', style: TextStyle(color: sz.inkFaint, fontSize: kFontNote)),
+      child: NotificationListener<ScrollMetricsNotification>(
+        onNotification: (n) => _nearEnd(n.metrics, n.depth),
+        child: NotificationListener<ScrollNotification>(
+          onNotification: (n) => _nearEnd(n.metrics, n.depth),
+          child: CustomScrollView(
+              primary: widget.nested, physics: const AlwaysScrollableScrollPhysics(), slivers: [
+            if (widget.header != null) SliverToBoxAdapter(child: widget.header),
+            SliverPadding(
+              padding: widget.padding,
+              // 列数照「每列不超过 260」算(和 MaxCrossAxisExtent 同一个算法),格子高 = 封面 + 下面那块字
+              sliver: SliverLayoutBuilder(builder: (context, constraints) {
+                const gap = 10.0;
+                final w = constraints.crossAxisExtent;
+                final cols = math.max(1, (w / (260 + gap)).ceil());
+                final cardW = (w - gap * (cols - 1)) / cols;
+                return SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: cols,
+                    mainAxisSpacing: gap,
+                    crossAxisSpacing: gap,
+                    mainAxisExtent: cardW / VideoGridCard.coverAspect + VideoGridCard.textBlockHeight(context),
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, i) => VideoGridCard(card: _items[i], onLongPress: () => _menu(_items[i])),
+                    childCount: _items.length,
+                  ),
+                );
+              }),
             ),
-          ),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 24),
+                child: Center(
+                  child: _loading
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : Text(_more ? '' : '没有更多了', style: TextStyle(color: sz.inkFaint, fontSize: kFontNote)),
+                ),
+              ),
+            ),
+          ]),
         ),
-      ]),
+      ),
     );
   }
 }
