@@ -30,6 +30,12 @@ class RemoteCopy {
   /// 内容版本号(服务端算的内容哈希),便于排查"我改了怎么没生效"
   static String rev = '';
 
+  /// 服务端功能开关(`/config` 的 features:video、video_upload、calls……)。
+  /// 只用来收起入口 —— 关着的功能服务端照样回 503;拉不到就当开着,别因为断网把入口全藏了
+  static Map<String, bool> features = const {};
+
+  static bool feature(String key) => features[key] ?? true;
+
   /// 取一条文案。[fallback] 是客户端自带的完整默认值,不能省。
   static String text(String key, String fallback) => _copy[key] ?? fallback;
 
@@ -73,6 +79,11 @@ class RemoteCopy {
           .map((e) => FaqItem.fromJson(e as Map<String, dynamic>))
           .toList();
       rev = data['rev'] as String? ?? '';
+      if (data['features'] is Map) {
+        features = {
+          for (final e in (data['features'] as Map).entries) '${e.key}': e.value == true,
+        };
+      }
       if (copy.isEmpty && faq.isEmpty) return; // 空响应不覆盖已有缓存
       _copy = copy;
       _faq = faq;

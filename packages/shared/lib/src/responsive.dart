@@ -84,8 +84,11 @@ class SzContentWidth extends StatelessWidget {
   final Widget child;
   final double maxWidth;
 
+  // heightFactor: 1 —— 高度跟着内容走。不写的话放进 Scaffold.bottomNavigationBar 这种
+  // 只给「最多多高」的位置时,Center 会把自己撑满整屏,宽屏上正文被底栏挤没(投稿页踩过)
   @override
   Widget build(BuildContext context) => Center(
+        heightFactor: 1,
         child: ConstrainedBox(
           constraints: BoxConstraints(maxWidth: maxWidth),
           child: child,
@@ -130,7 +133,7 @@ class SzNavItem {
 ///
 /// 不同页面的内容形态不同(设置页 720、卡片流 1080、看板 1440),
 /// 所以宽度由调用方按当前页传进来,而不是在这里写死。
-class SzNavScaffold extends StatelessWidget {
+class SzNavScaffold extends StatefulWidget {
   const SzNavScaffold({
     super.key,
     required this.items,
@@ -164,9 +167,28 @@ class SzNavScaffold extends StatelessWidget {
   final double contentMaxWidth;
 
   @override
+  State<SzNavScaffold> createState() => _SzNavScaffoldState();
+}
+
+class _SzNavScaffoldState extends State<SzNavScaffold> {
+  /// 正文的 GlobalKey:窗口宽度跨过断点(拖宽窗口、网页进浏览器全屏、平板转屏)时
+  /// 底部导航和侧栏两套布局互换,正文挂到了另一棵树下。没有这把钥匙,正文整个被销毁重建 ——
+  /// 首页重新定位、会话列表重拉、正在播的视频停掉;有了它 Flutter 把原来那棵子树原样挪过去
+  final GlobalKey _bodyKey = GlobalKey(debugLabel: 'sz-nav-body');
+
+  List<SzNavItem> get items => widget.items;
+  int get selectedIndex => widget.selectedIndex;
+  ValueChanged<int> get onSelected => widget.onSelected;
+  PreferredSizeWidget? get appBar => widget.appBar;
+  Widget? get floatingActionButton => widget.floatingActionButton;
+  Widget? get leading => widget.leading;
+  double get contentMaxWidth => widget.contentMaxWidth;
+
+  @override
   Widget build(BuildContext context) {
     final w = szWidthOf(context);
     final sz = Theme.of(context).sz;
+    final body = KeyedSubtree(key: _bodyKey, child: widget.body);
 
     if (!w.hasSideNav) {
       return Scaffold(
@@ -413,7 +435,7 @@ class _WideAppBar extends StatelessWidget {
 /// 把 `Scaffold(` 换成 `SzPageScaffold(` 就行,参数同名。
 /// 默认限到 [kContentMaxWidth](720)—— 子页几乎都是单列表单和信息。
 /// 要放表格图表的传 [kWideMaxWidth]。
-class SzPageScaffold extends StatelessWidget {
+class SzPageScaffold extends StatefulWidget {
   const SzPageScaffold({
     super.key,
     required this.body,
@@ -444,7 +466,25 @@ class SzPageScaffold extends StatelessWidget {
   final double contentMaxWidth;
 
   @override
+  State<SzPageScaffold> createState() => _SzPageScaffoldState();
+}
+
+class _SzPageScaffoldState extends State<SzPageScaffold> {
+  /// 同 [SzNavScaffold] 的正文钥匙:宽窄两套布局互换时把正文原样挪过去,
+  /// 不然输入框里写了一半的字、滚到的位置、正在播的视频都会被重建掉
+  final GlobalKey _bodyKey = GlobalKey(debugLabel: 'sz-page-body');
+
+  PreferredSizeWidget? get appBar => widget.appBar;
+  Color? get backgroundColor => widget.backgroundColor;
+  Widget? get floatingActionButton => widget.floatingActionButton;
+  Widget? get bottomNavigationBar => widget.bottomNavigationBar;
+  bool? get resizeToAvoidBottomInset => widget.resizeToAvoidBottomInset;
+  bool get extendBody => widget.extendBody;
+  double get contentMaxWidth => widget.contentMaxWidth;
+
+  @override
   Widget build(BuildContext context) {
+    final body = KeyedSubtree(key: _bodyKey, child: widget.body);
     if (!szWidthOf(context).hasSideNav) {
       return Scaffold(
         appBar: appBar,
