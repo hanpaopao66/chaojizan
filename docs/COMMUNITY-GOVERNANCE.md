@@ -50,8 +50,9 @@ DEV-PROMPTS-40 #368(聊天部分)、#370、#371,不变量 **S6**(每个处罚都
 | `join` | chat_store.join_by_invite、join_public、add_members、decide_join_request(同意)、邀请链接预览 `GET /chat/v1/join/{code}` |
 
 **封号在 `social_user` 统一挡**:社交写接口(`/chat/v1`、`/social/v1`、`/video/v1`、`/media/v1`、`/chat/v1/stickers`
-下所有 POST / PUT / PATCH / DELETE)都挂着这个依赖,被封号的人发来的写请求**默认全拒**,只放行下面这张表里的
-(新加的写接口忘了处理封号,也不会漏过去):
+下所有 POST / PUT / PATCH / DELETE;唯一的例外是不用登录的播放心跳 `POST /video/v1/videos/{vid}/view`)都挂着这个依赖,
+被封号的人发来的写请求**默认全拒**,只放行下面这张表里的(新加的写接口忘了处理封号,也不会漏过去;
+单测扫全部路由,没挂 `social_user` 的社交写接口会让它红):
 
 | 方法 | 路径 | 为什么放行 |
 |---|---|---|
