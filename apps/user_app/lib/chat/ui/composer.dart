@@ -677,13 +677,20 @@ class ComposerState extends State<Composer> {
                   IconButton(tooltip: '附件', icon: Icon(Icons.attach_file, color: sz.inkMuted), onPressed: _attach),
               ],
               if (!_recording && (hasText || widget.editing != null))
+                // 长按(桌面上右键)出「静音发送 / 定时发送」。文字提示只给鼠标悬停(manual):
+                // IconButton 自带的提示在手机上也吃长按,手势竞技场里它在里层先到点,
+                // 这里的长按就永远轮不到 —— 手机上菜单一直出不来,网页上用鼠标测不出来
                 GestureDetector(
                   key: const ValueKey('send'),
                   onLongPress: _sendMenu,
-                  child: IconButton(
-                    tooltip: widget.editing != null ? '保存' : '发送',
-                    icon: Icon(widget.editing != null ? Icons.check_circle : Icons.send, color: sz.clay),
-                    onPressed: () => _send(),
+                  onSecondaryTap: _sendMenu,
+                  child: Tooltip(
+                    message: widget.editing != null ? '保存' : '发送',
+                    triggerMode: TooltipTriggerMode.manual,
+                    child: IconButton(
+                      icon: Icon(widget.editing != null ? Icons.check_circle : Icons.send, color: sz.clay),
+                      onPressed: () => _send(),
+                    ),
                   ),
                 )
               else if (_recording && _locked)
@@ -696,6 +703,8 @@ class ComposerState extends State<Composer> {
               else
                 GestureDetector(
                   key: const ValueKey('mic'),
+                  // 点一下只说怎么用,按住才录
+                  onTap: () => _toast('按住说话,松开发送;上滑锁定,左滑取消'),
                   onLongPressStart: (_) => _startRecording(),
                   onLongPressMoveUpdate: (d) {
                     if (!_recording || _locked) return;
@@ -713,7 +722,9 @@ class ComposerState extends State<Composer> {
                   child: _recording
                       ? Padding(padding: const EdgeInsets.all(12), child: Icon(Icons.mic, color: sz.danger))
                       : Tooltip(
+                          // 同上:提示不能在手机上吃长按,不然按住说话根本开始不了录音
                           message: '按住说话',
+                          triggerMode: TooltipTriggerMode.manual,
                           child: Padding(
                             padding: const EdgeInsets.all(12),
                             child: Icon(Icons.mic_none, color: sz.inkMuted),
