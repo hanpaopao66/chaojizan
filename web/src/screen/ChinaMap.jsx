@@ -9,7 +9,8 @@ import { geo, project, provinceAt, shortCity } from './geo.js'
  *
  * 和稿子不一样的地方:
  * - 稿子自带的省界(sz-anim/sz-china-geo.js)少了上海、澳门,也没有南海诸岛。
- *   这里用仓库里的 films/chinaGeo.js:34 个省级行政区,岛礁画进右下角附图;
+ *   这里用仓库里的 films/chinaGeo.js:34 个省级行政区,岛礁画进右下角附图,
+ *   南海断续线十段全在附图里、落在主图画幅里的三段主图也画;
  * - 稿子在前三座城上一直循环涟漪。这里**一单一圈**:只在轮询拿到新订单时,
  *   在那一单的城市泛一次 —— 没有新单,地图就是静的。循环的涟漪看着像单子
  *   一直在进来,那是拿动画替运营数据说话;
@@ -26,7 +27,7 @@ function topLabel(dots) {
     y: d.y + 5.5, anchor: right ? 'start' : 'end' }
 }
 
-/* 南海诸岛附图:同一个投影缩小,贴右下角;岛礁太小,画成点 */
+/* 南海诸岛附图:同一个投影缩小,贴右下角;岛礁太小,画成点;南海断续线十段全画 */
 const Inset = React.memo(function Inset() {
   const { x, y, w, h, k, ox, oy } = geo.inset
   return (
@@ -39,6 +40,7 @@ const Inset = React.memo(function Inset() {
         <g transform={`translate(${x} ${y}) scale(${k}) translate(${-ox} ${-oy})`}>
           {geo.provinces.map(p => <path key={p.n} d={p.d} />)}
           {geo.islands.map(([cx, cy]) => <circle key={`${cx},${cy}`} cx={cx} cy={cy} r="2.4" />)}
+          {geo.dashes.map(d => <path key={d} className="dash" d={d} />)}
         </g>
       </g>
       <text x={x + w - 8} y={y + h - 10} textAnchor="end">南海诸岛</text>
@@ -95,6 +97,10 @@ export default function ChinaMap({ cities, pulses }) {
       <svg viewBox={geo.viewBox} role="img"
         aria-label="全国订单分布示意图:城市点按累计订单数定大小,新订单进来时在所在城市泛一圈涟漪">
         {provinces}
+        {/* 南海断续线在主图画幅里的那几段(台湾以东、巴士海峡、东沙以东);十段全在附图里 */}
+        <g className="sc-dashline" aria-hidden="true">
+          {geo.dashMain.map(i => <path key={i} d={geo.dashes[i]} />)}
+        </g>
         <Inset />
         <g className="sc-dots">
           {dots.map(d => <circle key={d.city} cx={d.x} cy={d.y} r={d.r} />)}

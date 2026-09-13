@@ -8,7 +8,7 @@
 //  1. 投影:china.json 里 34 个省的标注点(经纬度)用 src/screen/geo.js 的投影算一遍,
 //     和 films/chinaGeo.js 里生成好的 cp 逐个比 —— 城市点和省界是不是同一个坐标系;
 //  2. 省界:34 个省级行政区一个不少(上海、澳门、香港、台湾、海南点名查),
-//     南海诸岛附图在,岛礁点在;
+//     南海诸岛附图在,岛礁点在,南海断续线附图十段、主图该画的几段都在;
 //  3. 城市点:有坐标的城市画点,没坐标的(只有跑腿单的城市)不画;
 //  4. 悬停:陕西浮层列出 TOP10 里的西安,新疆浮层说 TOP10 里没有;
 //  5. 新单涟漪:第二轮轮询多出来的单,在它的城市泛一圈;跑腿单没坐标,按城市名落到那座城;
@@ -123,6 +123,10 @@ try {
   const islands = await page.$$eval('.sc-inset circle', cs => cs.length)
   const insetText = await page.$eval('.sc-inset text', t => t.textContent).catch(() => '')
   check(islands > 100 && insetText === '南海诸岛', `南海诸岛附图:${islands} 个岛礁点,标注「${insetText}」`)
+  const insetDash = await page.$$eval('.sc-inset path.dash', ps => ps.length)
+  const mainDash = await page.$$eval('.sc-dashline path', ps => ps.length)
+  check(insetDash === 10 && mainDash === chinaGeo.dashMain.length && mainDash > 0,
+    `南海断续线:附图 ${insetDash} 段(应 10),主图 ${mainDash} 段(应 ${chinaGeo.dashMain.length})`)
 
   // ---------- 3. 城市点 ----------
   const dots = await page.$$eval('.sc-dots circle', cs => cs.map(c => [+c.getAttribute('cx'), +c.getAttribute('cy')]))

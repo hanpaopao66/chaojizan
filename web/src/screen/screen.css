@@ -166,6 +166,10 @@
 .sc-inset .frame { fill: var(--sc-paper); stroke: var(--sc-dim); stroke-width: 1; }
 .sc-inset path { fill: var(--sc-surface-alt); stroke: var(--sc-dim); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .sc-inset circle { fill: var(--sc-ink-faint); }
+/* 南海断续线:一段是个细长的多边形,附图缩小后比一像素还细,靠不随缩放的描边画出线宽 */
+.sc-inset path.dash, .sc-dashline path { fill: var(--sc-ink-muted); stroke: var(--sc-ink-muted);
+  stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.sc-dashline { pointer-events: none; }
 .sc-inset text { font-size: 13px; fill: var(--sc-ink-faint); }
 .sc-dots, .sc-ripples, .sc-city-name { pointer-events: none; }
 .sc-dots circle { fill: var(--sc-food); opacity: .85; }

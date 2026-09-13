@@ -14,7 +14,8 @@ import { Caption, Ease, Film, MONO, P, SANS, SERIF, clamp, enter, tween, useFilm
  *
  * 和原稿不一样:
  * - 原稿的省界数据少了上海和澳门,也没有南海诸岛。这里 34 个省级行政区一个不少,
- *   北纬 17.5° 以南的岛礁画在右下角「南海诸岛」附图里;
+ *   北纬 17.5° 以南的岛礁画在右下角「南海诸岛」附图里;原稿也没有南海断续线,
+ *   这里十段全画在附图里,落在主图画幅里的三段主图也画(数据见 scripts/gen_site_geo.py);
  * - 原稿在陕西标「第一座城」。仓库里查不到「第一座城在哪」的记录,
  *   查得到的是运营主体在陕西(页脚、备案号)—— 标成「官方实例」;
  * - 手册自己写着「截至 2026-08 还没有第三方照着走通过」,这句也放进来。 */
@@ -89,6 +90,10 @@ export default function OpenCityMapFilm() {
           {geo.islands.map(([x, y]) => (
             <circle key={`${x},${y}`} cx={x} cy={y} r={2.4 * u * u} fill={P.ink3} />
           ))}
+          {/* 南海断续线十段:细长多边形缩小后不到一像素,靠不随缩放的描边画出线宽 */}
+          {geo.dashes.map(d => (
+            <path key={d} d={d} fill={P.ink2} stroke={P.ink2} strokeWidth={1.2 * u} vectorEffect="non-scaling-stroke" />
+          ))}
         </g>
       </g>
       <text x={geo.inset.x + geo.inset.w - 8} y={geo.inset.y + geo.inset.h - 10} textAnchor="end"
@@ -120,7 +125,13 @@ export default function OpenCityMapFilm() {
                 <path key={p.n} d={p.d} fill={P.alt} stroke={P.line} strokeWidth="1.4" strokeLinejoin="round"
                   style={{ opacity: tween(T, { start: CUE.draw + i * 0.06, end: CUE.draw + i * 0.06 + 0.4 }) }} />
               ))}
-              {/* 南海诸岛附图:同一个投影缩小,岛礁太小,画成点 */}
+              {/* 南海断续线在主图画幅里的那几段(台湾以东、巴士海峡、东沙以东),和省界一起出来 */}
+              <g style={{ opacity: tween(T, { start: drawEnd - 0.4, end: drawEnd }) }}>
+                {geo.dashMain.map(i => (
+                  <path key={i} d={geo.dashes[i]} fill={P.ink2} stroke={P.ink2} strokeWidth={1.2 * u} vectorEffect="non-scaling-stroke" />
+                ))}
+              </g>
+              {/* 南海诸岛附图:同一个投影缩小,岛礁太小,画成点;断续线十段全在这里 */}
               <g style={{ opacity: tween(T, { start: drawEnd - 0.4, end: drawEnd }) }}>{inset}</g>
               {/* 其余省份的点:一个个脉冲亮起,又落回虚态 */}
               {ORDER.map((name, i) => {
