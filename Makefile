@@ -225,7 +225,8 @@ test:
 	  && python -m tests.e2e_chat_scheduled \
 	  && python -m tests.e2e_video_upload && python -m tests.e2e_video_feed \
 	  && python -m tests.e2e_danmaku && python -m tests.e2e_video_comments \
-	  && python -m tests.e2e_video_me
+	  && python -m tests.e2e_video_me \
+	  && python -m tests.e2e_social_moderation
 
 # 需要特殊环境或已知不稳定的用例,**故意不放进 make test**:
 #   e2e_privacy_phone_strict —— 要对着 PRIVACY_PHONE_STRICT=true 启动的实例跑
