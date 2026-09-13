@@ -29,12 +29,20 @@ PRIVACY_DEFAULTS: dict[str, str] = {
 }
 PRIVACY_VALUES = ("everyone", "contacts", "nobody")
 
-#: 通知缺省(D20):推送里显示「发送人:内容」;三类会话默认都提醒
+#: 通知缺省(D20):推送里显示「发送人:内容」;三类会话默认都提醒。
+#: interactions*:「视频互动」机器人会话底部的「静音」「提醒设置」(设计稿 C)。互动提醒本来就不发系统推送,
+#: 只亮 App 里的角标 —— interactions=false 是静音(角标变灰、不进底栏),其余四个是哪几类算未读。
+#: 存在这里而不是手机上:换手机、网页版看到的是同一份设置
 NOTIFY_DEFAULTS: dict[str, object] = {
     "preview": True,
     "private": True,
     "group": True,
     "channel": True,
+    "interactions": True,
+    "interactions_reply": True,
+    "interactions_at": True,
+    "interactions_like": True,
+    "interactions_system": True,
 }
 
 

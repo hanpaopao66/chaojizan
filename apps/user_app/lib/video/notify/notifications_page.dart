@@ -44,6 +44,11 @@ int _watchSeq = 0;
 void startVideoNotifyWatcher() {
   unawaited(VideoNotifyPrefs.instance.load());
   _watchSub ??= ChatStore.instance.userEvents.stream.listen((e) {
+    // 我在别的设备上改了「静音 / 提醒设置」:服务端推 settings,这里当场跟着变
+    if (e.type == 'settings') {
+      VideoNotifyPrefs.instance.applyServer(e.data['notify']);
+      return;
+    }
     if (e.type != 'notify') return;
     final u = e.data['unread'];
     if (u is Map && u['total'] != null) {
@@ -81,7 +86,7 @@ void stopVideoNotifyWatcher() {
 /// 一条互动 = 一条消息,按时间往下排,最新的在最底下;赞是服务端合并好的一条(「小王等 8 人赞了你的评论」),
 /// 不一条条炸;回复的气泡里用引用块放**我的原话**(隔两天谁记得在回复谁),下面挂「回复 / 看视频」两个按钮。
 /// 打开时没读的那几条上面画「以下为新消息」,然后整个会话标成已读 —— 没有「全部已读」按钮,也没有页签。
-/// 机器人不收消息,所以没有输入框,底下只有「静音」和「提醒设置」(都只存在这台设备上,见 [VideoNotifyPrefs])。
+/// 机器人不收消息,所以没有输入框,底下只有「静音」和「提醒设置」(存在服务端、各设备同步,见 [VideoNotifyPrefs])。
 class VideoNotificationsPage extends StatefulWidget {
   const VideoNotificationsPage({super.key});
 
@@ -210,7 +215,12 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
 
   Future<void> _toggleMute() async {
     final next = !_prefs.muted;
-    await _prefs.setMuted(next);
+    try {
+      await _prefs.setMuted(next);
+    } catch (e) {
+      if (mounted) vToast(context, '没改成:${videoErrorText(e)}');
+      return;
+    }
     if (mounted) vToast(context, next ? '已静音:这个会话的未读不再算进底栏' : '已取消静音');
   }
 
@@ -235,7 +245,9 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
                   for (final (kind, label) in notifyKinds)
                     SwitchListTile(
                       value: _prefs.kinds.contains(kind),
-                      onChanged: (v) => _prefs.setKind(kind, v),
+                      onChanged: (v) => _prefs.setKind(kind, v).catchError((Object e) {
+                        if (ctx.mounted) vToast(ctx, '没改成:${videoErrorText(e)}');
+                      }),
                       title: Text(label),
                       subtitle: Text(switch (kind) {
                         'reply' => '评论了你的视频、回复了你的评论',
@@ -246,7 +258,7 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
                     ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(kPagePad, 6, kPagePad, 0),
-                    child: Text('互动提醒只在 App 里提示,不发系统推送;这里的设置只存在这台设备上。',
+                    child: Text('互动提醒只在 App 里提示,不发系统推送;这里的设置跟着账号走,换手机也一样。',
                         style: TextStyle(fontSize: kFontNote, color: sz.inkMuted, height: 1.5)),
                   ),
                 ]),

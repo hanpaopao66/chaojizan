@@ -70,6 +70,25 @@ def main():
     b.patch("/social/v1/me", {"privacy": {"last_seen": "everyone"}})
     print("  ✓ 最后上线:所有人 / 联系人 / 互惠,隐藏时只给「最近」")
 
+    # ---- 视频互动的「静音」「提醒设置」存在服务端(设计稿 C):换手机、网页版是同一份 ----
+    from tests.chat_util import WS, uev
+    n = a.get("/social/v1/me")["notify"]
+    kinds = ("reply", "at", "like", "system")
+    assert n["interactions"] is True and all(n[f"interactions_{k}"] is True for k in kinds), n
+    w = WS(a.token)
+    w.wait_for(lambda f: f.get("t") == "ready")
+    a.patch("/social/v1/me", {"notify": {"interactions": False, "interactions_like": False}})
+    f = w.wait_for(uev("settings"))
+    assert f["data"]["notify"]["interactions"] is False, "改了设置要推给我的其他设备"
+    w.close()
+    n = a.get("/social/v1/me")["notify"]
+    assert n["interactions"] is False and n["interactions_like"] is False, n
+    assert n["interactions_reply"] is True and n["private"] is True, "只改了传的那几项"
+    r = a.patch("/social/v1/me", {"notify": {"interactions_foo": True}}, expect_error=True)
+    assert r.get("_error") == 422, r
+    a.patch("/social/v1/me", {"notify": {"interactions": True, "interactions_like": True}})
+    print("  ✓ 视频互动的静音、提醒设置存在服务端,改了推给其他设备")
+
     # ---- 联系人 ----
     cs = a.get("/social/v1/contacts")["items"]
     assert [c["id"] for c in cs] == [b.id] and cs[0]["contact_alias"] == "老B", cs

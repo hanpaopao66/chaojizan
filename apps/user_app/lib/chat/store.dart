@@ -118,6 +118,9 @@ class ChatStore extends ChangeNotifier {
   ApiClient? _client;
   ChatApi? _api;
   ChatApi get api => _api!;
+
+  /// 还没登录 / 已经登出时是 null(和账号走的设置在这时只改本机)
+  ChatApi? get apiOrNull => _api;
   ApiClient get client => _client!;
   bool get started => _api != null;
 

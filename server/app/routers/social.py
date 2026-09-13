@@ -109,6 +109,9 @@ async def patch_me(body: MePatch, user: User = Depends(social_user),
                 raise HTTPException(422, f"没有这个通知项:{k}")
             cur_n[k] = bool(v)
         p.notify = cur_n
+        # 我的其他设备跟着变(比如在网页版上把「视频互动」静音了,手机上的角标当场变灰)
+        from ..services.rt_events import append_user_event
+        await append_user_event(db, user.id, "settings", {"notify": cur_n})
     if body.personalize_video is not None:
         p.personalize_video = body.personalize_video
     await db.commit()
