@@ -20,7 +20,9 @@ import { Amount, Caption, Ease, FILL, Film, P, enter, pop, tween, useFilm, useWi
  *   只留查得到的:应用内更新先校验 SHA-256 再装。
  *
  * 第三批(2026-09-13)补:下单后才出来的订单卡、「这 ¥26 去了哪」、骑手钱包卡原来是到点才插进来,
- * 手机上三台竖排,片子在一个循环里长高 80 多像素、下面的下载卡跟着往下跳;改成一开始就占着位置。 */
+ * 手机上三台竖排,片子在一个循环里长高 80 多像素、下面的下载卡跟着往下跳;改成一开始就占着位置。
+ * 新稿底下那行改成「…· 不上传通讯录 · 第三方 SDK 只有极光推送一个」:前半句照搬(三端清单和
+ * Info.plist 里都没有通讯录权限);后半句不对 —— 三端从 2026-07-31 起还内嵌了腾讯地图 SDK,不写。 */
 
 // @serif-cjk-begin
 // 字幕大字(衬线显示,这个圈里的字才会进官网的衬线子集)
@@ -212,7 +214,7 @@ export default function ThreeAppsFilm() {
       </div>
 
       <Caption titles={TITLES} details={DETAILS} index={capIdx} narrow={narrow} minDetail={22} detailColor={P.ink2}>
-        <div style={{ fontSize: 12, color: P.ink3, marginTop: 8 }}>Android arm64 · 内置更新检查 · 应用内更新先校验 SHA-256 再安装</div>
+        <div style={{ fontSize: 12, color: P.ink3, marginTop: 8 }}>Android arm64 · 内置更新检查 · 应用内更新先校验 SHA-256 再安装 · 不上传通讯录</div>
       </Caption>
     </Film>
   )
