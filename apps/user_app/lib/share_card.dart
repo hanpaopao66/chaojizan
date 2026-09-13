@@ -112,7 +112,8 @@ class _ShareSheetState extends State<_ShareSheet> {
     final sz = Theme.of(context).sz;
     return SafeArea(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 22),
+        // 底部弹层顶上有拖拽条垫着;宽屏的对话框没有,自己留一截
+        padding: EdgeInsets.fromLTRB(16, isSheetBottom(context) ? 0 : 20, 16, 22),
         // 底部弹层要撑满屏宽:里面都是定宽 320 的东西,不撑的话弹层按内容收窄、
         // 两边露出一截遮罩。宽屏的对话框形态照旧按内容收
         child: SizedBox(

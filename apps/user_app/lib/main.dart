@@ -2702,20 +2702,25 @@ class _MenuPageState extends State<MenuPage>
           // 把平台主张落到这一家店:抽象的「5% 封顶」在这里变成
           // 「你这一单便宜在哪」——这是店铺页唯一该讲平台的地方
           const SizedBox(height: 11),
-          SzCard(
-            padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
-            child: Text.rich(
-              TextSpan(children: [
-                const TextSpan(text: '这家店在超级赞只被抽 '),
-                TextSpan(
-                    text: '$rate%',
-                    style: szFigure(
-                        fontSize: kFontBody,
-                        fontWeight: FontWeight.w600,
-                        color: sz.clay)),
-                const TextSpan(text: ',省下的抽成让在了菜价上——菜价里没有平台税。'),
-              ]),
-              style: TextStyle(fontSize: kFontNote, height: 1.55, color: sz.ink),
+          // 通栏:宽屏上一行写得下,不撑的话卡片按字宽收窄,和下面几条提示对不齐
+          SizedBox(
+            width: double.infinity,
+            child: SzCard(
+              padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
+              child: Text.rich(
+                TextSpan(children: [
+                  const TextSpan(text: '这家店在超级赞只被抽 '),
+                  TextSpan(
+                      text: '$rate%',
+                      style: szFigure(
+                          fontSize: kFontBody,
+                          fontWeight: FontWeight.w600,
+                          color: sz.clay)),
+                  const TextSpan(text: ',省下的抽成让在了菜价上——菜价里没有平台税。'),
+                ]),
+                style:
+                    TextStyle(fontSize: kFontNote, height: 1.55, color: sz.ink),
+              ),
             ),
           ),
           if (shop.foodSeal)
