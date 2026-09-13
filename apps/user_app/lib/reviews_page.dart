@@ -177,6 +177,10 @@ class _ReviewsListState extends State<ReviewsList> {
       return const SzEmpty(text: '还没有评价,下单后来做第一个评价的人');
     }
     return ListView.builder(
+      // 挂外面给的 PrimaryScrollController:在店铺页里是 NestedScrollView 的内层
+      // 控制器,往上滑时店头跟着收起。别给它另挂控制器 —— 内外就联动不起来了
+      // (primary 和 controller 同时给,构造时就会断言失败)
+      primary: true,
       // 店铺页把这个列表放在开了 extendBody 的 Scaffold 里,
       // 购物车条会盖住页尾。独立的评价页没有底栏,这里读到 0,
       // 所以两处都对

@@ -2198,8 +2198,8 @@ class _MenuPageState extends State<MenuPage>
   List<Dish> _frequent = []; // 我常买
   List<Map<String, dynamic>> _claimable = []; // 可领店铺券
 
-  /// 店头的店铺券默认只露一张:店头不跟着滚,一张一行地全摆出来,
-  /// 券多的店(五六张)会把下面的菜单挤得只剩一条缝
+  /// 店头的店铺券默认只露一张:一张一行地全摆出来,券多的店(五六张)
+  /// 光店头就占满一屏,进店先得滑过一屏券才看得见页签和菜单
   bool _couponsExpanded = false;
   Map<String, dynamic>? _queue;       // 这家店的排队现状(没开就是 null)
   Map<String, dynamic>? _myTicket;    // 我在这家店的号
@@ -2756,8 +2756,8 @@ class _MenuPageState extends State<MenuPage>
                 color: sz.inkMuted, textColor: sz.ink, fill: sz.surfaceAlt),
           if (_queue?['enabled'] == true) _queueCard(),
           // 领完一张,那一行收起来(可领的列表里就没有它了),高度跟着过渡。
-          // 稿子 A 只有一行券;店头是固定的、不跟着菜单滚,券多的店全摆出来
-          // 会把菜单挤没,所以默认只露第一张,其余的点「还有 N 张」再展开
+          // 稿子 A 只有一行券;券多的店全摆出来,店头能占满一屏,
+          // 所以默认只露第一张,其余的点「还有 N 张」再展开
           AnimatedSize(
             duration: SzMotion.of(context, SzMotion.base),
             curve: SzMotion.standard,
@@ -2847,6 +2847,11 @@ class _MenuPageState extends State<MenuPage>
       width: 84,
       color: sz.surfaceAlt,
       child: ListView(
+        // 分类栏自己滚,**不接** NestedScrollView 的内层控制器。
+        // 那个控制器在 body 里对所有平台都会被竖向列表自动继承;分类栏和菜品列表
+        // 同时挂上去的话,外层协调器把同一段位移加给两个 —— 滑菜品,分类栏跟着跑。
+        // 分类少、不满一屏时它不接拖动,在它上面拖照样收店头
+        primary: false,
         children: [
           for (final c in _categories)
             InkWell(
@@ -3565,6 +3570,12 @@ class _MenuPageState extends State<MenuPage>
         _categories.isNotEmpty &&
         _category == _categories.first;
     return ListView.builder(
+      // 换分类就换一个列表,新分类从它的第一道菜看起。不换的话滚动位置留着:
+      // 在上一类滑到第 20 道再点下一类,落在新分类的半中腰。
+      // 店头收没收起是外层的事,换分类不动它
+      key: ValueKey('dishes-$_category'),
+      // 挂 NestedScrollView 的内层控制器:往上滑先把店头推走,再滚菜单
+      primary: true,
       // 留白加在**视口内部**:列表照样铺到底栏底下(菜品从玻璃后面滚过),
       // 只是最后一道菜能滑到底栏上方,不被永久盖住
       padding: EdgeInsets.only(top: 4, bottom: bottomInset),
@@ -3868,56 +3879,71 @@ class _MenuPageState extends State<MenuPage>
             _load();
           });
     } else {
-      body = Column(
-        children: [
-          _header(),
-          // 三个页签字数一样,指示条用定长的 28×2 短线(稿子 A/B/C),
-          // 下面一道通栏发丝线把页签和内容分开
-          TabBar(
-            controller: _tabController,
-            indicator: _TabDash(Theme.of(context).sz.clay),
-            indicatorSize: TabBarIndicatorSize.tab,
-            dividerColor: Theme.of(context).sz.line,
-            dividerHeight: 1,
-            unselectedLabelStyle: Theme.of(context)
-                .tabBarTheme
-                .unselectedLabelStyle
-                ?.copyWith(fontWeight: FontWeight.w400),
-            tabs: const [
-              Tab(height: 42, text: '点餐'),
-              Tab(height: 42, text: '评价'),
-              Tab(height: 42, text: '商家'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
+      // 店头跟着往上滚走,页签条留在顶上(稿子 A/B/C)。原来店头钉着不动:
+      // 一家有排队卡、公告、店铺券的店,390×844 上页签条被推到 y≈600,
+      // 三个页签的内容都只剩购物车条上面一两百像素。
+      //
+      // 三个页签里的竖向列表都挂 NestedScrollView 给的内层控制器
+      // (primary: true):往上滑先把店头推走再滚列表,滑回顶再把店头拉回来。
+      // 列表挂自己的控制器的话,内外两层各滚各的,店头就又钉住了
+      body = NestedScrollView(
+        headerSliverBuilder: (context, _) => [
+          SliverToBoxAdapter(child: _header()),
+        ],
+        // 页签条是 body 的第一行,不做成吸顶的 SliverPersistentHeader:
+        // 外层能滚的距离正好是店头的高度,店头滚完 body 刚好铺满,页签条自然停在顶上。
+        // 做成 pinned 的 sliver,外层会连它的 42 一起滚掉,body 顶上那截被它盖住,
+        // 得在三个页签里各塞一个 SliverOverlapInjector 才让得开
+        body: Column(
+          children: [
+            // 三个页签字数一样,指示条用定长的 28×2 短线(稿子 A/B/C),
+            // 下面一道通栏发丝线把页签和内容分开
+            TabBar(
               controller: _tabController,
-              children: [
-                Builder(
-                  // 这层 Builder 就是为了拿到 Scaffold **底下**的 MediaQuery
-                  builder: (context) => Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _categoryRail(),
-                      Expanded(
-                        child:
-                            _dishList(MediaQuery.of(context).padding.bottom),
-                      ),
-                    ],
-                  ),
-                ),
-                ReviewsList(api: widget.api, merchantId: widget.merchant.id),
-                _ShopInfoTab(
-                  api: widget.api,
-                  shop: _detail ?? widget.merchant,
-                  // 距离只有列表接口带(按定位算的),店铺详情接口不带
-                  distanceM: widget.merchant.distanceM,
-                  onOpenReviews: () => _tabController.animateTo(1),
-                ),
+              indicator: _TabDash(Theme.of(context).sz.clay),
+              indicatorSize: TabBarIndicatorSize.tab,
+              dividerColor: Theme.of(context).sz.line,
+              dividerHeight: 1,
+              unselectedLabelStyle: Theme.of(context)
+                  .tabBarTheme
+                  .unselectedLabelStyle
+                  ?.copyWith(fontWeight: FontWeight.w400),
+              tabs: const [
+                Tab(height: 42, text: '点餐'),
+                Tab(height: 42, text: '评价'),
+                Tab(height: 42, text: '商家'),
               ],
             ),
-          ),
-        ],
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  Builder(
+                    // 这层 Builder 就是为了拿到 Scaffold **底下**的 MediaQuery
+                    builder: (context) => Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _categoryRail(),
+                        Expanded(
+                          child:
+                              _dishList(MediaQuery.of(context).padding.bottom),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ReviewsList(api: widget.api, merchantId: widget.merchant.id),
+                  _ShopInfoTab(
+                    api: widget.api,
+                    shop: _detail ?? widget.merchant,
+                    // 距离只有列表接口带(按定位算的),店铺详情接口不带
+                    distanceM: widget.merchant.distanceM,
+                    onOpenReviews: () => _tabController.animateTo(1),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       );
     }
 
@@ -8811,6 +8837,8 @@ class _ShopInfoTab extends StatelessWidget {
         : '营业中(商家手动开关)';
     final rated = shop.ratingCount > 0 && shop.ratingAvg != null;
     return ListView(
+      // 挂店铺页 NestedScrollView 的内层控制器:往上滑时店头跟着收起
+      primary: true,
       // 底栏(购物车条)在 extendBody 下盖住页尾,补等高留白
       padding: EdgeInsets.fromLTRB(
           16, 16, 16, 16 + MediaQuery.of(context).padding.bottom),

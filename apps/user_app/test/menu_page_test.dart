@@ -212,7 +212,7 @@ void main() {
   });
 
   testWidgets('店铺券多于一张:店头只露第一张,其余点「还有 N 张」再展开', (t) async {
-    // 店头不跟着菜单滚:六张券一张一行全摆出来,菜单就被挤得只剩一条缝
+    // 六张券一张一行全摆出来,光店头就占满一屏,进店要先滑过一屏券才看得见菜单
     Map<String, dynamic> coupon(int id, int off, int threshold) => {
           'id': id,
           'off_cents': off,
