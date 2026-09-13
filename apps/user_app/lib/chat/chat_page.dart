@@ -1011,131 +1011,147 @@ class _ChatPageState extends State<ChatPage> {
     final items = _items(c);
     final t = store.timeline(widget.chatId);
     final pin = !_pinsHidden && _pins.isNotEmpty ? _pins[_pinIndex % _pins.length] : null;
-    return SzPageScaffold(
-      appBar: _appBar(c),
-      body: Column(children: [
-        if (pin != null)
-          _PinnedBar(
-            message: pin,
-            index: _pinIndex,
-            total: _pins.length,
-            onTap: () {
-              _jumpTo(pin.seq);
-              setState(() => _pinIndex = (_pinIndex + 1) % _pins.length);
-            },
-            onClose: () async {
-              if (c.can('pin_messages') || c.isPrivate) {
-                try {
-                  await store.api.pin(c.id, pin.seq, pinned: false);
-                  await _loadPins();
-                } on ApiException catch (e) {
-                  _toast(e.message);
-                }
-              } else {
-                setState(() => _pinsHidden = true);
-              }
-            },
-          ),
-        Expanded(
-          child: Stack(children: [
-            if (_loading && t.messages.isEmpty)
-              const Center(child: CircularProgressIndicator())
-            else if (_error != null && t.messages.isEmpty)
-              SzError(error: _error, onRetry: () {
-                setState(() {
-                  _error = null;
-                  _loading = true;
-                });
-                _load();
-              })
-            else if (items.isEmpty && c.isPrivate && c.peer?.isBot == true)
-              _BotIntro(bot: store.botsOf(c.id).firstOrNull, name: c.peer!.displayName)
-            else if (items.isEmpty)
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Text(
-                      c.isSaved ? '把消息转发到这里,或者直接写给自己' : '还没有消息,说点什么吧',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: sz.inkMuted)),
-                ),
-              )
-            else
-              ListView.builder(
-                controller: _scroll,
-                reverse: true,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: items.length + (t.loadingOlder ? 1 : 0),
-                itemBuilder: (context, i) {
-                  if (i >= items.length) {
-                    return const Padding(
-                        padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+    // 系统返回键先退出多选 / 会话内搜索,再退出聊天(和 Telegram 一样)
+    return PopScope(
+      canPop: !_selecting && !_searching,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        setState(() {
+          if (_selecting) {
+            _selecting = false;
+          } else {
+            _searching = false;
+            _hits = [];
+          }
+        });
+      },
+      child: SzPageScaffold(
+        appBar: _appBar(c),
+        body: Column(children: [
+          if (pin != null)
+            _PinnedBar(
+              message: pin,
+              index: _pinIndex,
+              total: _pins.length,
+              onTap: () {
+                _jumpTo(pin.seq);
+                setState(() => _pinIndex = (_pinIndex + 1) % _pins.length);
+              },
+              onClose: () async {
+                if (c.can('pin_messages') || c.isPrivate) {
+                  try {
+                    await store.api.pin(c.id, pin.seq, pinned: false);
+                    await _loadPins();
+                  } on ApiException catch (e) {
+                    _toast(e.message);
                   }
-                  final it = items[i];
-                  if (it.day != null) return _DayChip(day: it.day!);
-                  if (it.unreadDivider) return const _UnreadDivider();
-                  final m = it.message!;
-                  final key = _keys.putIfAbsent(it.key, GlobalKey.new);
-                  final selKey = m.seq > 0 ? 's${m.seq}' : 'r${m.randomId}';
-                  return KeyedSubtree(
-                    key: key,
-                    child: MessageRow(
-                      message: m,
-                      chat: c,
-                      meId: store.meId,
-                      actions: _bubbleActions,
-                      album: it.album,
-                      run: it.run,
-                      selecting: _selecting,
-                      selected: _selected.contains(selKey),
-                      highlighted: _highlight != null && (m.seq == _highlight || it.album.any((x) => x.seq == _highlight)),
-                    ),
-                  );
-                },
-              ),
-            if (!_atBottom || t.hasNewer)
-              Positioned(
-                right: 12,
-                bottom: 12,
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  if (c.unreadMentions > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: FloatingActionButton.small(
-                        heroTag: 'mention',
-                        onPressed: _toBottom,
-                        child: Badge(label: Text('${c.unreadMentions}'), child: const Text('@')),
+                } else {
+                  setState(() => _pinsHidden = true);
+                }
+              },
+            ),
+          Expanded(
+            child: Stack(children: [
+              if (_loading && t.messages.isEmpty)
+                const Center(child: CircularProgressIndicator())
+              else if (_error != null && t.messages.isEmpty)
+                SzError(error: _error, onRetry: () {
+                  setState(() {
+                    _error = null;
+                    _loading = true;
+                  });
+                  _load();
+                })
+              else if (items.isEmpty && c.isPrivate && c.peer?.isBot == true)
+                _BotIntro(bot: store.botsOf(c.id).firstOrNull, name: c.peer!.displayName)
+              else if (items.isEmpty)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Text(
+                        c.isSaved ? '把消息转发到这里,或者直接写给自己' : '还没有消息,说点什么吧',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: sz.inkMuted)),
+                  ),
+                )
+              else
+                ListView.builder(
+                  controller: _scroll,
+                  reverse: true,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: items.length + (t.loadingOlder ? 1 : 0),
+                  itemBuilder: (context, i) {
+                    if (i >= items.length) {
+                      return const Padding(
+                          padding: EdgeInsets.all(12), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+                    }
+                    final it = items[i];
+                    if (it.day != null) return _DayChip(day: it.day!);
+                    if (it.unreadDivider) return const _UnreadDivider();
+                    final m = it.message!;
+                    final key = _keys.putIfAbsent(it.key, GlobalKey.new);
+                    final selKey = m.seq > 0 ? 's${m.seq}' : 'r${m.randomId}';
+                    return KeyedSubtree(
+                      key: key,
+                      child: MessageRow(
+                        message: m,
+                        chat: c,
+                        meId: store.meId,
+                        actions: _bubbleActions,
+                        album: it.album,
+                        run: it.run,
+                        selecting: _selecting,
+                        // 退出多选的路径有好几条(叉、转发完、删除完、返回键)都不清集合:高亮只在多选中才算
+                        selected: _selecting && _selected.contains(selKey),
+                        highlighted: _highlight != null && (m.seq == _highlight || it.album.any((x) => x.seq == _highlight)),
+                      ),
+                    );
+                  },
+                ),
+              if (!_atBottom || t.hasNewer)
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    if (c.unreadMentions > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: FloatingActionButton.small(
+                          heroTag: 'mention',
+                          onPressed: _toBottom,
+                          child: Badge(label: Text('${c.unreadMentions}'), child: const Text('@')),
+                        ),
+                      ),
+                    FloatingActionButton.small(
+                      heroTag: 'bottom',
+                      onPressed: _toBottom,
+                      child: Badge(
+                        isLabelVisible: c.unread > 0,
+                        label: Text(badgeText(c.unread)),
+                        child: const Icon(Icons.keyboard_arrow_down),
                       ),
                     ),
-                  FloatingActionButton.small(
-                    heroTag: 'bottom',
-                    onPressed: _toBottom,
-                    child: Badge(
-                      isLabelVisible: c.unread > 0,
-                      label: Text(badgeText(c.unread)),
-                      child: const Icon(Icons.keyboard_arrow_down),
-                    ),
-                  ),
-                ]),
-              ),
-          ]),
-        ),
-        // 和机器人还没说过话:底下只有一个「开始」(发 /start),和 Telegram 一样
-        if (!_selecting && !_searching && items.isEmpty && !_loading && c.isPrivate && c.peer?.isBot == true)
-          _StartBar(onStart: () => _composerActions.onSendText('/start', const []))
-        else if (!_selecting && !_searching)
-          Composer(
-            key: _composer,
-            chat: c,
-            actions: _composerActions,
-            replyTo: _replyTo,
-            editing: _editing,
-            onCancelReply: () => setState(() => _replyTo = null),
-            onCancelEdit: () => setState(() => _editing = null),
-            bots: store.botsOf(c.id),
-            onOpenBotApp: (b) => openMiniApp(context, store.api.api, appid: b.menuAppId),
+                  ]),
+                ),
+            ]),
           ),
-      ]),
+          // 和机器人还没说过话:底下只有一个「开始」(发 /start),和 Telegram 一样
+          if (!_selecting && !_searching && items.isEmpty && !_loading && c.isPrivate && c.peer?.isBot == true)
+            _StartBar(onStart: () => _composerActions.onSendText('/start', const []))
+          else if (!_selecting && !_searching)
+            Composer(
+              key: _composer,
+              chat: c,
+              actions: _composerActions,
+              replyTo: _replyTo,
+              editing: _editing,
+              onCancelReply: () => setState(() => _replyTo = null),
+              onCancelEdit: () => setState(() => _editing = null),
+              bots: store.botsOf(c.id),
+              onOpenBotApp: (b) => openMiniApp(context, store.api.api, appid: b.menuAppId),
+            ),
+        ]),
+      ),
     );
   }
 }

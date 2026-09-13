@@ -608,141 +608,153 @@ class ComposerState extends State<Composer> {
       return _Blocked(chat: c);
     }
     final hasText = _text.text.trim().isNotEmpty;
-    return Material(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: SafeArea(
-        top: false,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (_mentionHits.isNotEmpty) _MentionList(hits: _mentionHits, onPick: _pickMention),
-          if (_cmdHits.isNotEmpty) _CommandList(hits: _cmdHits, many: widget.bots.length > 1, onPick: _sendCommand),
-          if (widget.replyTo != null || widget.editing != null)
-            _ContextBar(
-              icon: widget.editing != null ? Icons.edit_outlined : Icons.reply,
-              title: widget.editing != null ? '编辑消息' : '回复 ${_store.nameOf(widget.replyTo!.sender)}',
-              text: previewOf(widget.editing ?? widget.replyTo!),
-              onClose: widget.editing != null ? widget.onCancelEdit : widget.onCancelReply,
-            ),
-          Divider(height: 1, color: sz.line),
-          // 录音和打字共用这一行,而且**按住说话的那个按钮始终是同一个元素**(ValueKey('mic')):
-          // 录音一开始界面就变了,要是把按钮换掉,按住它的那个手势就跟着没了 ——
-          // 松手收不到,录音停不下来(之前就是这样卡在「0:06 录音中」)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              if (_recording)
-                Expanded(
-                  child: _RecordingBar(
-                    rec: _rec,
-                    locked: _locked,
-                    dragX: _dragX,
-                    onCancel: () => _finishRecording(cancel: true),
+    // 系统返回键:表情面板开着先收面板,正在录音先取消录音,都没有才退出聊天(和 Telegram、微信一样)
+    return PopScope(
+      canPop: !_emoji && !_recording,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_recording) {
+          _finishRecording(cancel: true);
+        } else if (_emoji) {
+          setState(() => _emoji = false);
+        }
+      },
+      child: Material(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        child: SafeArea(
+          top: false,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (_mentionHits.isNotEmpty) _MentionList(hits: _mentionHits, onPick: _pickMention),
+            if (_cmdHits.isNotEmpty) _CommandList(hits: _cmdHits, many: widget.bots.length > 1, onPick: _sendCommand),
+            if (widget.replyTo != null || widget.editing != null)
+              _ContextBar(
+                icon: widget.editing != null ? Icons.edit_outlined : Icons.reply,
+                title: widget.editing != null ? '编辑消息' : '回复 ${_store.nameOf(widget.replyTo!.sender)}',
+                text: previewOf(widget.editing ?? widget.replyTo!),
+                onClose: widget.editing != null ? widget.onCancelEdit : widget.onCancelReply,
+              ),
+            Divider(height: 1, color: sz.line),
+            // 录音和打字共用这一行,而且**按住说话的那个按钮始终是同一个元素**(ValueKey('mic')):
+            // 录音一开始界面就变了,要是把按钮换掉,按住它的那个手势就跟着没了 ——
+            // 松手收不到,录音停不下来(之前就是这样卡在「0:06 录音中」)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                if (_recording)
+                  Expanded(
+                    child: _RecordingBar(
+                      rec: _rec,
+                      locked: _locked,
+                      dragX: _dragX,
+                      onCancel: () => _finishRecording(cancel: true),
+                    ),
+                  )
+                else ...[
+                  if (_menuButton(sz) case final menu?) menu,
+                  IconButton(
+                    tooltip: _emoji ? '键盘' : '表情',
+                    icon: Icon(_emoji ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined, color: sz.inkMuted),
+                    onPressed: () {
+                      setState(() => _emoji = !_emoji);
+                      if (_emoji) {
+                        _focus.unfocus();
+                      } else {
+                        _focus.requestFocus();
+                      }
+                    },
                   ),
-                )
-              else ...[
-                if (_menuButton(sz) case final menu?) menu,
-                IconButton(
-                  tooltip: _emoji ? '键盘' : '表情',
-                  icon: Icon(_emoji ? Icons.keyboard_outlined : Icons.emoji_emotions_outlined, color: sz.inkMuted),
-                  onPressed: () {
-                    setState(() => _emoji = !_emoji);
-                    if (_emoji) {
-                      _focus.unfocus();
-                    } else {
-                      _focus.requestFocus();
-                    }
-                  },
-                ),
-                Expanded(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 140),
-                    child: TextField(
-                      controller: _text,
-                      focusNode: _focus,
-                      minLines: 1,
-                      maxLines: 6,
-                      textInputAction: TextInputAction.newline,
-                      keyboardType: TextInputType.multiline,
-                      contextMenuBuilder: _contextMenu,
-                      onTap: () {
-                        if (_emoji) setState(() => _emoji = false);
-                      },
-                      decoration: InputDecoration(
-                        hintText: c.isChannel ? '发布到频道' : '发消息',
-                        isDense: true,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 140),
+                      child: TextField(
+                        controller: _text,
+                        focusNode: _focus,
+                        minLines: 1,
+                        maxLines: 6,
+                        textInputAction: TextInputAction.newline,
+                        keyboardType: TextInputType.multiline,
+                        contextMenuBuilder: _contextMenu,
+                        onTap: () {
+                          if (_emoji) setState(() => _emoji = false);
+                        },
+                        decoration: InputDecoration(
+                          hintText: c.isChannel ? '发布到频道' : '发消息',
+                          isDense: true,
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+                        ),
                       ),
                     ),
                   ),
-                ),
-                if (!hasText && widget.editing == null)
-                  IconButton(tooltip: '附件', icon: Icon(Icons.attach_file, color: sz.inkMuted), onPressed: _attach),
-              ],
-              if (!_recording && (hasText || widget.editing != null))
-                // 长按(桌面上右键)出「静音发送 / 定时发送」。文字提示只给鼠标悬停(manual):
-                // IconButton 自带的提示在手机上也吃长按,手势竞技场里它在里层先到点,
-                // 这里的长按就永远轮不到 —— 手机上菜单一直出不来,网页上用鼠标测不出来
-                GestureDetector(
-                  key: const ValueKey('send'),
-                  onLongPress: _sendMenu,
-                  onSecondaryTap: _sendMenu,
-                  child: Tooltip(
-                    message: widget.editing != null ? '保存' : '发送',
-                    triggerMode: TooltipTriggerMode.manual,
-                    child: IconButton(
-                      icon: Icon(widget.editing != null ? Icons.check_circle : Icons.send, color: sz.clay),
-                      onPressed: () => _send(),
+                  if (!hasText && widget.editing == null)
+                    IconButton(tooltip: '附件', icon: Icon(Icons.attach_file, color: sz.inkMuted), onPressed: _attach),
+                ],
+                if (!_recording && (hasText || widget.editing != null))
+                  // 长按(桌面上右键)出「静音发送 / 定时发送」。文字提示只给鼠标悬停(manual):
+                  // IconButton 自带的提示在手机上也吃长按,手势竞技场里它在里层先到点,
+                  // 这里的长按就永远轮不到 —— 手机上菜单一直出不来,网页上用鼠标测不出来
+                  GestureDetector(
+                    key: const ValueKey('send'),
+                    onLongPress: _sendMenu,
+                    onSecondaryTap: _sendMenu,
+                    child: Tooltip(
+                      message: widget.editing != null ? '保存' : '发送',
+                      triggerMode: TooltipTriggerMode.manual,
+                      child: IconButton(
+                        icon: Icon(widget.editing != null ? Icons.check_circle : Icons.send, color: sz.clay),
+                        onPressed: () => _send(),
+                      ),
                     ),
-                  ),
-                )
-              else if (_recording && _locked)
-                IconButton(
-                  key: const ValueKey('voice-send'),
-                  tooltip: '发送语音',
-                  icon: Icon(Icons.send, color: sz.clay),
-                  onPressed: () => _finishRecording(),
-                )
-              else
-                GestureDetector(
-                  key: const ValueKey('mic'),
-                  // 点一下只说怎么用,按住才录
-                  onTap: () => _toast('按住说话,松开发送;上滑锁定,左滑取消'),
-                  onLongPressStart: (_) => _startRecording(),
-                  onLongPressMoveUpdate: (d) {
-                    if (!_recording || _locked) return;
-                    setState(() {
-                      _dragX = d.offsetFromOrigin.dx;
-                      _dragY = d.offsetFromOrigin.dy;
-                    });
-                    if (_dragY < -70) setState(() => _locked = true); // 上滑锁定,松手也不停
-                    if (_dragX < -120) _finishRecording(cancel: true); // 左滑取消
-                  },
-                  onLongPressEnd: (_) {
-                    _pressing = false;
-                    if (_recording && !_locked) _finishRecording();
-                  },
-                  child: _recording
-                      ? Padding(padding: const EdgeInsets.all(12), child: Icon(Icons.mic, color: sz.danger))
-                      : Tooltip(
-                          // 同上:提示不能在手机上吃长按,不然按住说话根本开始不了录音
-                          message: '按住说话',
-                          triggerMode: TooltipTriggerMode.manual,
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Icon(Icons.mic_none, color: sz.inkMuted),
+                  )
+                else if (_recording && _locked)
+                  IconButton(
+                    key: const ValueKey('voice-send'),
+                    tooltip: '发送语音',
+                    icon: Icon(Icons.send, color: sz.clay),
+                    onPressed: () => _finishRecording(),
+                  )
+                else
+                  GestureDetector(
+                    key: const ValueKey('mic'),
+                    // 点一下只说怎么用,按住才录
+                    onTap: () => _toast('按住说话,松开发送;上滑锁定,左滑取消'),
+                    onLongPressStart: (_) => _startRecording(),
+                    onLongPressMoveUpdate: (d) {
+                      if (!_recording || _locked) return;
+                      setState(() {
+                        _dragX = d.offsetFromOrigin.dx;
+                        _dragY = d.offsetFromOrigin.dy;
+                      });
+                      if (_dragY < -70) setState(() => _locked = true); // 上滑锁定,松手也不停
+                      if (_dragX < -120) _finishRecording(cancel: true); // 左滑取消
+                    },
+                    onLongPressEnd: (_) {
+                      _pressing = false;
+                      if (_recording && !_locked) _finishRecording();
+                    },
+                    child: _recording
+                        ? Padding(padding: const EdgeInsets.all(12), child: Icon(Icons.mic, color: sz.danger))
+                        : Tooltip(
+                            // 同上:提示不能在手机上吃长按,不然按住说话根本开始不了录音
+                            message: '按住说话',
+                            triggerMode: TooltipTriggerMode.manual,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Icon(Icons.mic_none, color: sz.inkMuted),
+                            ),
                           ),
-                        ),
-                ),
-            ]),
-          ),
-          if (_emoji && !_recording)
-            ExpressionPanel(
-              onEmoji: insert,
-              onBackspace: _backspace,
-              onSticker: (s) => widget.actions.onSendSticker(s),
-              stickersAllowed: c.can('send_stickers'),
+                  ),
+              ]),
             ),
-        ]),
+            if (_emoji && !_recording)
+              ExpressionPanel(
+                onEmoji: insert,
+                onBackspace: _backspace,
+                onSticker: (s) => widget.actions.onSendSticker(s),
+                stickersAllowed: c.can('send_stickers'),
+              ),
+          ]),
+        ),
       ),
     );
   }

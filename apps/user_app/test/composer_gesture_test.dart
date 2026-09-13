@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:user_app/chat/models.dart';
 import 'package:user_app/chat/ui/composer.dart';
 import 'package:user_app/main.dart' show superZTheme;
@@ -64,6 +65,57 @@ void main() {
     await tester.longPress(find.byKey(const ValueKey('mic')));
     await tester.pump();
     expect(find.text('这里不能发语音'), findsOneWidget, reason: '按住被文字提示吃掉了,录音入口没被调用');
+  });
+
+  testWidgets('表情面板开着时按系统返回键:先收面板,页面还在;再按一次才退出', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final chat = ChatInfo.fromJson({
+      'id': 1,
+      'type': 'group',
+      'title': '测试群',
+      'perms': {'send_messages': true, 'send_media': true, 'send_stickers': true, 'send_polls': true},
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: superZTheme(Brightness.light),
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => Scaffold(
+                  body: Column(children: [
+                    const Spacer(),
+                    Composer(
+                      chat: chat,
+                      actions: actions(),
+                      replyTo: null,
+                      editing: null,
+                      onCancelReply: () {},
+                      onCancelEdit: () {},
+                    ),
+                  ]),
+                ),
+              )),
+              child: const Text('进聊天'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('进聊天'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('表情'));
+    await tester.pump();
+    expect(find.byTooltip('键盘'), findsOneWidget, reason: '表情面板没打开');
+
+    await tester.binding.handlePopRoute(); // 安卓的系统返回键
+    await tester.pumpAndSettle();
+    expect(find.byType(Composer), findsOneWidget, reason: '返回键直接退出了聊天,面板没先收起来');
+    expect(find.byTooltip('表情'), findsOneWidget, reason: '面板还开着');
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byType(Composer), findsNothing, reason: '面板收起之后,返回键应当退出聊天');
   });
 
   testWidgets('点一下麦克风:说怎么用', (tester) async {
