@@ -6,6 +6,7 @@
   <url><loc>https://chaojizan.cc/transparency</loc><changefreq>daily</changefreq><priority>0.8</priority></url>
   <url><loc>https://chaojizan.cc/join/merchant</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
   <url><loc>https://chaojizan.cc/join/rider</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://chaojizan.cc/features</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://chaojizan.cc/channel/food</loc><changefreq>monthly</changefreq><priority>0.7</priority></url>
   <url><loc>https://chaojizan.cc/opensource</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>
   <url><loc>https://chaojizan.cc/miniapps</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>

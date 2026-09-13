@@ -764,9 +764,10 @@ async def transparency_page():
 
 @app.get("/rates", include_in_schema=False)
 @app.get("/opensource", include_in_schema=False)
+@app.get("/features", include_in_schema=False)
 @app.get("/channel/{key}", include_in_schema=False)
 async def site_subpages(key: str = ""):
-    """官网子页(前端路由,同一份 index.html):费率 / 开源仓与规则留痕 / 频道页。
+    """官网子页(前端路由,同一份 index.html):费率 / 开源仓与规则留痕 / 消息与视频 / 频道页。
 
     频道 key 不在这里校验 —— 前端认不出的 key 会回退到「点外卖」那一页,
     服务端再维护一份频道表只会和前端分叉。
