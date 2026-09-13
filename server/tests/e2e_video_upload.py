@@ -30,7 +30,7 @@ def gone(url: str, timeout: float = 5) -> bool:
     return False
 
 
-def find_in_feed(path: str, vid: str, token: str | None = None, pages: int = 5) -> dict | None:
+def find_in_feed(path: str, vid: str, token: str | None = None, pages: int = 60) -> dict | None:
     for page in range(pages):
         out = call("GET", f"{path}?page={page}", token)
         hit = next((x for x in out["items"] if x["vid"] == vid), None)

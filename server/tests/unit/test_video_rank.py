@@ -81,7 +81,9 @@ def test_screens_cap_two_per_uploader_and_keep_order():
     # 按分数排好的 12 条:UP 主 1 有 5 条排在最前
     items = [(i, 1) for i in range(5)] + [(i, 2) for i in range(5, 8)] + \
         [(i, u) for i, u in zip(range(8, 12), (3, 4, 5, 6))]
-    screens = rank.paginate_screens(items, lambda x: x[1], size=20, per_uploader=2)
+    # 不传 size / per_uploader:测的是线上真在用的缺省值(传了参数的话改坏常量这里也照样绿,
+    # 第一版就是这么空转的,弄坏一次才发现)
+    screens = rank.paginate_screens(items, lambda x: x[1])
     for s in screens:
         per = {}
         for _, up in s:

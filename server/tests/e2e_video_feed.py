@@ -54,7 +54,7 @@ def check_page(out: dict, key: str) -> None:
         prev = cur
 
 
-def all_pages(path: str, token: str | None = None, max_pages: int = 10) -> list[dict]:
+def all_pages(path: str, token: str | None = None, max_pages: int = 30) -> list[dict]:
     out, page = [], 0
     while page < max_pages:
         r = call("GET", f"{path}{'&' if '?' in path else '?'}page={page}", token)
@@ -217,10 +217,14 @@ def main():
     assert call("GET", "/video/v1/rank?days=2", expect_error=True).get("_error") == 422
     rel = call("GET", f"/video/v1/videos/{v1[0]['vid']}/related")
     rel_vids = {x["vid"] for x in rel["items"]}
-    assert {v["vid"] for v in v1[1:]} <= rel_vids and v1[0]["vid"] not in rel_vids
+    assert v1[0]["vid"] not in rel_vids and v1[1]["vid"] in rel_vids, "同 UP 主互动最多的那个在里面"
+    for x in rel["items"]:
+        assert x["uploader"]["id"] == u1.id or x["zone"] == "tech" or \
+            {"科技", token} & set(x["tags"]), f"相关视频只取同 UP 主 / 同分区 / 同标签:{x['vid']}"
+    check_page({"items": rel["items"], "ranked_at": rel["ranked_at"]}, "recommend")
     formula = call("GET", "/video/v1/rank/formula")
     assert formula["weights"] == W and "互动分 ÷ (发布后的小时数 + 2) ^ 1.5" in formula["formula"]
-    print("  ✓ 分区(计数、只含本分区)、排行榜(互动分从高到低、名次、分区筛选、窗口只能 1/3/7)、相关(同 UP 主优先)、公式原文")
+    print("  ✓ 分区(计数、只含本分区)、排行榜(互动分从高到低、名次、分区筛选、窗口只能 1/3/7)、相关(只取同 UP 主 / 同分区 / 同标签,按推荐分排)、公式原文")
 
     # ---- 搜索:标题 / 标签 / 简介 / UP 主名;四种排序;时长、分区筛选 ----
     s = call("GET", f"/video/v1/search?q={token}")
