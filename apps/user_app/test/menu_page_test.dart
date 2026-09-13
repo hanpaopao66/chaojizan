@@ -91,7 +91,8 @@ void main() {
       {String rate = '0.045',
       bool self = false,
       int min = 2000,
-      int? effective}) async {
+      int? effective,
+      List<Map<String, dynamic>> coupons = const []}) async {
     final shop =
         shopJson(rate: rate, self: self, min: min, effective: effective);
     SharedPreferences.setMockInitialValues({});
@@ -110,6 +111,8 @@ void main() {
           body = dishes;
         } else if (p == '/cart/7') {
           body = {'items': []};
+        } else if (p == '/merchants/7/coupons') {
+          body = coupons;
         } else if (p.endsWith('/coupons') ||
             p.endsWith('frequent-dishes') ||
             p.endsWith('/reviews')) {
@@ -206,5 +209,37 @@ void main() {
     await t.tap(addOf('牛肉面'));
     await t.pumpAndSettle();
     expect(checkoutButton(t, '去结算').onPressed, isNotNull);
+  });
+
+  testWidgets('店铺券多于一张:店头只露第一张,其余点「还有 N 张」再展开', (t) async {
+    // 店头不跟着菜单滚:六张券一张一行全摆出来,菜单就被挤得只剩一条缝
+    Map<String, dynamic> coupon(int id, int off, int threshold) => {
+          'id': id,
+          'off_cents': off,
+          'threshold_cents': threshold,
+          'can_claim': true,
+        };
+    await pump(t, coupons: [
+      coupon(1, 500, 0),
+      coupon(2, 800, 4000),
+      coupon(3, 1000, 3000),
+    ]);
+    expect(find.text('店铺券 · 无门槛 · 商家自己出的钱'), findsOneWidget);
+    expect(find.text('店铺券 · 满 40 可用 · 商家自己出的钱'), findsNothing);
+    expect(find.text('还有 2 张店铺券'), findsOneWidget);
+
+    await t.tap(find.text('还有 2 张店铺券'));
+    await t.pumpAndSettle();
+    expect(find.text('店铺券 · 满 40 可用 · 商家自己出的钱'), findsOneWidget);
+    expect(find.text('店铺券 · 满 30 可用 · 商家自己出的钱'), findsOneWidget);
+    expect(find.text('收起店铺券'), findsOneWidget);
+  });
+
+  testWidgets('只有一张店铺券:不出「还有 N 张」', (t) async {
+    await pump(t, coupons: [
+      {'id': 1, 'off_cents': 500, 'threshold_cents': 3000, 'can_claim': true},
+    ]);
+    expect(find.text('店铺券 · 满 30 可用 · 商家自己出的钱'), findsOneWidget);
+    expect(find.textContaining('张店铺券'), findsNothing);
   });
 }

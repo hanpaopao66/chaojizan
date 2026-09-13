@@ -2199,6 +2199,10 @@ class _MenuPageState extends State<MenuPage>
   Timer? _cartSaveTimer;
   List<Dish> _frequent = []; // 我常买
   List<Map<String, dynamic>> _claimable = []; // 可领店铺券
+
+  /// 店头的店铺券默认只露一张:店头不跟着滚,一张一行地全摆出来,
+  /// 券多的店(五六张)会把下面的菜单挤得只剩一条缝
+  bool _couponsExpanded = false;
   Map<String, dynamic>? _queue;       // 这家店的排队现状(没开就是 null)
   Map<String, dynamic>? _myTicket;    // 我在这家店的号
   Timer? _queuePoll;                  // 持号期间的状态轮询
@@ -2753,13 +2757,22 @@ class _MenuPageState extends State<MenuPage>
             _noticeBar(Icons.campaign_outlined, shop.announcement,
                 color: sz.inkMuted, textColor: sz.ink, fill: sz.surfaceAlt),
           if (_queue?['enabled'] == true) _queueCard(),
-          // 领完一张,那一行收起来(可领的列表里就没有它了),高度跟着过渡
+          // 领完一张,那一行收起来(可领的列表里就没有它了),高度跟着过渡。
+          // 稿子 A 只有一行券;店头是固定的、不跟着菜单滚,券多的店全摆出来
+          // 会把菜单挤没,所以默认只露第一张,其余的点「还有 N 张」再展开
           AnimatedSize(
             duration: SzMotion.of(context, SzMotion.base),
             curve: SzMotion.standard,
             alignment: Alignment.topCenter,
             child: Column(
-              children: [for (final b in _claimable) _couponRow(b)],
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final b in _couponsExpanded
+                    ? _claimable
+                    : _claimable.take(1))
+                  _couponRow(b),
+                if (_claimable.length > 1) _moreCouponsToggle(),
+              ],
             ),
           ),
         ],
@@ -3372,6 +3385,26 @@ class _MenuPageState extends State<MenuPage>
   ///
   /// 「商家自己出的钱」是事实:店铺券 funder=merchant,抵扣从商家实收里扣
   /// (orders.py 店铺券那一支),平台不贴钱
+  /// 「还有 N 张店铺券」/「收起」:店铺券多于一张时,在第一张底下
+  Widget _moreCouponsToggle() {
+    final sz = Theme.of(context).sz;
+    final more = _claimable.length - 1;
+    return InkWell(
+      onTap: () => setState(() => _couponsExpanded = !_couponsExpanded),
+      borderRadius: BorderRadius.circular(kRadiusSm),
+      child: Padding(
+        // 上下多留几像素:这一行字小,手指要点得中
+        padding: const EdgeInsets.fromLTRB(2, 8, 8, 4),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(_couponsExpanded ? '收起店铺券' : '还有 $more 张店铺券',
+              style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+          Icon(_couponsExpanded ? Icons.expand_less : Icons.expand_more,
+              size: 16, color: sz.inkMuted),
+        ]),
+      ),
+    );
+  }
+
   Widget _couponRow(Map<String, dynamic> b) {
     final sz = Theme.of(context).sz;
     final off = b['off_cents'] as int? ?? 0;
