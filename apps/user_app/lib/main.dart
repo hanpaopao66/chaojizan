@@ -8208,7 +8208,7 @@ class _ProfileViewState extends State<ProfileView> {
           SzEntryTile(
             icon: Icons.verified_user_outlined,
             title: '实名认证',
-            hint: '购买酒类等受限商品需先实名',
+            hint: '买酒、投稿视频、公开群组前需要',
             onTap: _openIdentity,
           ),
         const Divider(height: 1),
