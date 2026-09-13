@@ -10,6 +10,7 @@
   /dispatch       派单算法:完整公式、每个权重的取值与理由、承诺不做的事
   /liability      判责与分摊:一单出问题钱怎么分、平台承担哪些、三方怎么申诉
   /uptime         90 天可用率(auto_flow 自记探针,缺档按不可用计,只低不虚高)
+  /community      社区:视频审核量与时长、处置记录(不带人)、推荐公式、管理员查看私聊次数(S8)
 
 缓存与限流复用大屏(routers/screen.py)的进程内小缓存 + 按 IP 限流。
 每个数字都要经得起复算:口径写在字段名和注释里,前端原样展示口径说明。
@@ -963,4 +964,22 @@ async def miniapps_public(request: Request, db: AsyncSession = Depends(get_db)):
 
     data = await public_section(db)
     _cache_put("tp:miniapps", data, 300)
+    return data
+
+
+@router.get("/community")
+async def community_public(request: Request, db: AsyncSession = Depends(get_db)):
+    """社区栏(#371):视频审核量 / 驳回率 / 审核中位时长(近 30 天 + 按月)、处置记录
+    (对象类型 + 原因代码 + 申诉结果)、推荐与热门的公式原文、管理员查看私聊的次数(按月,S8)。
+
+    **不含任何个人信息、会话名、消息内容**:处罚说明、内部备注、被处罚的是谁、谁处理的一概不读
+    (services/community_stats.py);e2e 把手机号、用户名、会话标题、消息正文喂进去再扫这份响应。
+    """
+    await _guard(request)
+    if (hit := _cache_get("tp:community")) is not None:
+        return hit
+    from ..services.community_stats import public_section as community_section
+
+    data = await community_section(db)
+    _cache_put("tp:community", data, 300)
     return data

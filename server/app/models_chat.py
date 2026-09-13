@@ -386,7 +386,16 @@ class BotUpdate(Base):
 
 
 class ChatReport(Base):
-    """举报:会话、消息、用户。处置走 #368。"""
+    """举报:会话、消息、用户。处置走 #368(services/chat_moderation.py)。
+
+    `seqs` 是举报人**当时看得到的**那几条(提交时校验过),管理员按 S8 只能看这几条和前后各 5 条;
+    `context_floor` 是举报人当时的可见下限(清空记录、入群前的历史),上下文不会越过它 ——
+    举报人自己都看不到的消息,不能借举报单被管理员看到。
+
+    `subject_*` 是「被举报的是谁」:消息的发送人、被举报的用户,或者会话本身(举报整个会话、
+    频道帖子)。「7 天内 3 个不同的人举报同一个对象」按它数 —— 一个人给十个陌生人发骚扰私信,
+    十个私聊各是一张举报单,对象都是他。
+    """
 
     __tablename__ = "chat_reports"
 
@@ -400,22 +409,35 @@ class ChatReport(Base):
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     reason_code: Mapped[str] = mapped_column(String(8))
     note: Mapped[str] = mapped_column(String(500), default="")
-    #: open / reviewing / actioned / dismissed
+    #: open / escalated(7 天内 3 个不同的人举报同一个对象,优先处理)/ actioned / dismissed
     status: Mapped[str] = mapped_column(String(10), default="open")
     decision: Mapped[dict] = mapped_column(JSONB, default=dict)
     handled_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    #: user / chat —— 被举报的对象(见类注释)
+    subject_type: Mapped[str] = mapped_column(String(8), default="", server_default="")
+    subject_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: 举报人提交时的可见下限:S8 的上下文不越过它
+    context_floor: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
     created_at: Mapped[datetime] = _now_col()
+
+    __table_args__ = (Index("ix_chat_reports_subject", "subject_type", "subject_id",
+                            "created_at"),
+                      Index("ix_chat_reports_status", "status", "id"))
 
 
 class AdminChatView(Base):
-    """管理员查看被举报的私聊消息:每次一行审计(S8),次数在透明中心公示。"""
+    """管理员查看被举报的会话消息:每次一行审计(S8),次数在透明中心公示。
+
+    `report_id` 在举报单被删时置空而不是跟着删 —— 留痕和公示的次数不能因为别的表的级联变少。
+    """
 
     __tablename__ = "admin_chat_views"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     admin_id: Mapped[int] = mapped_column(Integer, index=True)
-    report_id: Mapped[int] = mapped_column(ForeignKey("chat_reports.id", ondelete="CASCADE"))
+    report_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_reports.id", ondelete="SET NULL"), nullable=True)
     chat_id: Mapped[int] = mapped_column(Integer)
     seqs: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = _now_col()

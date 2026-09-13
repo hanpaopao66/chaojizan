@@ -28,6 +28,7 @@ from .chat_view import (GROUP_READ_RECEIPTS_MAX, is_active, member_of, message_p
                         now_utc, poll_results_public, private_peer_id, visible_floor)
 from .entities import (EntityError, auto_entities, mask_spoilers, mentioned_user_ids,
                        mentioned_usernames, urls, validate_entities)
+from . import sanctions
 from .moderation import guard_text
 from .rt_events import after_commit, append_chat_event, append_user_event
 from .social import (SOCIAL_ROLES, allowed, blocked_between, display_name, ensure_profile,
@@ -111,6 +112,8 @@ async def private_chat(db: AsyncSession, me: User, other_id: int) -> tuple[Chat,
     chat = await db.scalar(select(Chat).where(Chat.pair_key == key))
     if chat is not None:
         return chat, False
+    # 封号期间不能发起新的会话(已有的私聊照样能打开看)
+    await sanctions.check_user(db, me.id, "create_chat")
     if await blocked_between(db, me.id, other_id):
         raise _err(403, "你们之间有一方把对方拉黑了,不能发起私聊")
     created = me.created_at
@@ -155,6 +158,7 @@ async def create_chat(db: AsyncSession, me: User, type_: str, title: str, about:
     """建群 / 频道。返回 (会话, 因为隐私没能直接拉进来的人)。"""
     if type_ not in ("group", "channel"):
         raise _err(422, "只能建群组或频道")
+    await sanctions.check_user(db, me.id, "create_chat")
     title = title.strip()
     if not 1 <= len(title) <= 128:
         raise _err(422, "名称 1–128 个字")
@@ -223,6 +227,8 @@ async def add_members(db: AsyncSession, chat: Chat, actor: User, user_ids: list[
     me_m, p = await require_member(db, chat, actor.id)
     if not p.invite_users:
         raise _err(403, "你没有邀请成员的权限")
+    # 被平台封禁的群 / 频道不能再进人(拉人、邀请链接、公开加入、审批入群申请都挡)
+    await sanctions.check_chat(db, chat, actor.id, "join")
     added, skipped = [], []
     for uid in dict.fromkeys(user_ids):
         if uid == actor.id:
@@ -402,6 +408,8 @@ async def update_chat_info(db: AsyncSession, chat: Chat, actor: User, patch: dic
     am, p = await require_member(db, chat, actor.id)
     if not p.change_info:
         raise _err(403, "你没有修改资料的权限")
+    # 被封的群改名、改简介、挂公开链接都是在群里「说话」(还会发服务消息、重新进搜索),一起挡
+    await sanctions.check_chat(db, chat, actor.id, "speak")
     changed = {}
     if "title" in patch and patch["title"] is not None:
         t = str(patch["title"]).strip()
@@ -540,6 +548,8 @@ async def join_by_invite(db: AsyncSession, me: User, code: str, about: str = "")
         return {"status": "member", "chat_id": chat.id}
     if m is not None and m.role == "banned":
         raise _err(403, "你已被这个会话封禁")
+    await sanctions.check_user(db, me.id, "join")
+    await sanctions.check_chat(db, chat, me.id, "join")
     if link.requires_approval or chat_settings(chat.settings)["join_by_request"]:
         await db.execute(insert(JoinRequest).values(
             chat_id=chat.id, user_id=me.id, invite_code=code, about=about[:140]
@@ -571,6 +581,8 @@ async def join_public(db: AsyncSession, me: User, chat: Chat) -> dict:
         return {"status": "member", "chat_id": chat.id}
     if m is not None and m.role == "banned":
         raise _err(403, "你已被这个会话封禁")
+    await sanctions.check_user(db, me.id, "join")
+    await sanctions.check_chat(db, chat, me.id, "join")
     if chat_settings(chat.settings)["join_by_request"] and chat.type == "group":
         await db.execute(insert(JoinRequest).values(chat_id=chat.id, user_id=me.id)
                          .on_conflict_do_nothing(index_elements=["chat_id", "user_id"]))
@@ -592,6 +604,8 @@ async def decide_join_request(db: AsyncSession, chat: Chat, actor: User, user_id
     req = await db.get(JoinRequest, (chat.id, user_id))
     if req is None:
         raise _err(404, "没有这个申请")
+    if approve:
+        await sanctions.check_chat(db, chat, actor.id, "join")
     await db.delete(req)
     if approve:
         m = await member_of(db, chat.id, user_id)
@@ -726,10 +740,14 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
             ChatMessage.random_id == random_id))
         if dup is not None:
             return dup, False
+    # 平台处罚先于限流判:被禁言的人不该再占着限流的额度,提示也要说清楚是处罚不是太快
+    await sanctions.check_user(db, me.id, "message")
     await check_rate_limit_seconds("chat_send", str(me.id), 5)
     await check_rate_limit("chat_send_min", str(me.id), 60)
     chat = await lock_chat(db, chat.id)
     member, p = await require_member(db, chat, me.id)
+    # 会话被封:成员不能发言(在判完「你在不在这个会话里」之后,免得外人借此知道这个群被封了)
+    await sanctions.check_chat(db, chat, me.id, "speak")
     kind = body.get("kind") or "text"
     if chat.type == "private":
         peer = await private_peer_id(db, chat, me.id)
@@ -958,6 +976,9 @@ async def _message(db: AsyncSession, chat: Chat, seq: int, member: ChatMember | 
 async def edit(db: AsyncSession, chat: Chat, me: User, seq: int, text: str,
                entities: list | None) -> ChatMessage:
     member, p = await require_member(db, chat, me.id)
+    # 改消息等于重新说一遍:禁言、封号、会话被封时一样挡
+    await sanctions.check_user(db, me.id, "message")
+    await sanctions.check_chat(db, chat, me.id, "speak")
     msg = await _message(db, chat, seq, member, lock=True)
     mine = msg.sender_id == me.id
     age = (now_utc() - msg.created_at).total_seconds() / 3600 if msg.created_at else 0
@@ -1033,6 +1054,34 @@ async def delete_messages(db: AsyncSession, chat: Chat, me: User, seqs: list[int
         await db.execute(delete(MessageMention).where(MessageMention.chat_id == chat.id,
                                                       MessageMention.seq.in_(done)))
         await append_chat_event(db, chat.id, "del", {"seqs": done, "by": me.id})
+    return done
+
+
+async def wipe_as_platform(db: AsyncSession, chat: Chat, seqs: list[int]) -> list[tuple[int, int | None, bool]]:
+    """平台处置举报时删消息(#368):和「为所有人删除」同一个效果(正文、媒体清空,seq 占位,
+    发 del 事件),但不看会话里的权限。调用方必须已经锁住会话行。
+
+    返回真删掉的 [(seq, 发送人, 是不是以会话名义发的)] —— 处罚记在发送人头上。
+    删除事件里不带是谁删的(`by` 为空):群里的人只需要知道「这条没了」。
+    """
+    seqs = sorted({int(s) for s in seqs})[:FORWARD_MAX]
+    if not seqs:
+        return []
+    msgs = list(await db.scalars(select(ChatMessage).where(
+        ChatMessage.chat_id == chat.id, ChatMessage.seq.in_(seqs),
+        ChatMessage.deleted_at.is_(None), ChatMessage.kind != "service")
+        .with_for_update().execution_options(populate_existing=True)))
+    done = [(m.seq, m.sender_id, bool(m.as_chat)) for m in msgs]
+    for m in msgs:
+        _wipe(m)
+    if done:
+        gone = [s for s, _, _ in done]
+        await db.execute(delete(MessageReaction).where(MessageReaction.chat_id == chat.id,
+                                                       MessageReaction.seq.in_(gone)))
+        await db.execute(delete(MessageMention).where(MessageMention.chat_id == chat.id,
+                                                      MessageMention.seq.in_(gone)))
+        await append_chat_event(db, chat.id, "del", {"seqs": gone, "by": None,
+                                                     "by_platform": True})
     return done
 
 
@@ -1159,6 +1208,8 @@ async def forward(db: AsyncSession, me: User, from_chat: Chat, seqs: list[int],
     ok, src_member = await can_read_chat(db, from_chat, me.id)
     if not ok:
         raise _err(403, "你看不到这些消息")
+    # 转发 = 在目标会话里发消息(目标会话被封的,在 _forward_one 里挡)
+    await sanctions.check_user(db, me.id, "message")
     if chat_settings(from_chat.settings)["protected"]:
         raise _err(403, "这个会话禁止转发")
     seqs = sorted({int(s) for s in seqs})
@@ -1216,6 +1267,7 @@ async def _forward_one(db: AsyncSession, target: Chat, me: User, src: ChatMessag
                        fwd: dict, grouped_id: int | None) -> ChatMessage:
     target = await lock_chat(db, target.id)
     member, p = await require_member(db, target, me.id)
+    await sanctions.check_chat(db, target, me.id, "speak")
     if target.type == "private":
         peer = await private_peer_id(db, target, me.id)
         if peer is not None and await blocked_between(db, me.id, peer):

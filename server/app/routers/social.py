@@ -5,7 +5,7 @@
 """
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -30,10 +30,26 @@ FIND_BY_PHONE_PER_DAY = 20
 PUBLIC_BASE = "https://chaojizan.cc"
 
 
-async def social_user(user: User = Depends(get_current_user)) -> User:
-    """「消息」「视频」只对用户端账号开放(D1)。商家、骑手、开发者账号调这些接口回 403。"""
+_READ_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+async def social_user(request: Request, user: User = Depends(get_current_user),
+                      db: AsyncSession = Depends(get_db)) -> User:
+    """「消息」「视频」只对用户端账号开放(D1)。商家、骑手、开发者账号调这些接口回 403。
+
+    **封号在这里统一挡**(#368):社交相关的写接口都挂着这个依赖,被封号的人发来的写请求
+    除了 services/sanctions.ACCOUNT_BAN_ALLOWED 里那几个(申诉、读、只有自己看得见的设置、
+    拉黑、退群……)一律 403。默认是挡 —— 以后新加的写接口忘了处理封号,也不会漏过去。
+    禁言、封群这些「只挡某几件事」的,在各自的写路径上判(见 services/sanctions.py 的表)。
+    """
     if user.role not in SOCIAL_ROLES:
         raise HTTPException(403, "消息和视频只在用户端开放")
+    if request.method not in _READ_METHODS:
+        from ..services import sanctions
+        route = request.scope.get("route")
+        path = getattr(route, "path", None) or request.url.path
+        if (request.method, path) not in sanctions.ACCOUNT_BAN_ALLOWED:
+            await sanctions.check_user(db, user.id, "social_write")
     return user
 
 
@@ -72,6 +88,9 @@ async def patch_me(body: MePatch, user: User = Depends(social_user),
                    db: AsyncSession = Depends(get_db)):
     p = await ensure_profile(db, user.id)
     if body.bio is not None:
+        # 封号期间这个接口放行(改隐私、通知是自我保护),但签名是给别人看的文字,照样挡
+        from ..services.sanctions import check_user
+        await check_user(db, user.id, "social_write")
         await guard_text(db, body.bio, "签名")
         p.bio = body.bio.strip()
     if body.privacy is not None:

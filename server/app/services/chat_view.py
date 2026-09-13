@@ -10,9 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (ACTIVE_ROLES, Chat, ChatMember, ChatMessage, MessageHide,
                       MessageReaction, Poll, PollVote, SocialProfile, User)
+from . import sanctions
 from .chat_perms import chat_settings, perms_for
 from .entities import mask_spoilers
 from .social import display_name, privacy_of, user_cards
+
+_UNSET = object()
 
 #: 这个人数以内的群才有已读回执(广播「谁读到哪」、双勾、已读名单);和 chat_store.read 一致
 GROUP_READ_RECEIPTS_MAX = 100
@@ -60,7 +63,9 @@ async def can_read_chat(db: AsyncSession, chat: Chat, user_id: int) -> tuple[boo
     if m is not None and m.role == "banned":
         return False, m
     if chat.type in ("channel", "group") and chat.username and chat.deleted_at is None:
-        return True, None
+        # 被平台封禁的公开群 / 频道,外人的预览也关掉(「公开发现里消失」);成员照样能看历史
+        if await sanctions.chat_ban(db, chat.id) is None:
+            return True, None
     return False, m
 
 
@@ -328,11 +333,22 @@ def chat_base(chat: Chat) -> dict:
 
 
 async def chat_card(db: AsyncSession, viewer_id: int, chat: Chat,
-                    member: ChatMember | None = None, *, peer_card: dict | None = None) -> dict:
-    """某人看到的一个会话(会话资料 + 他自己的设置 + 他此刻的权限)。"""
+                    member: ChatMember | None = None, *, peer_card: dict | None = None,
+                    ban=_UNSET) -> dict:
+    """某人看到的一个会话(会话资料 + 他自己的设置 + 他此刻的权限)。
+
+    `platform_ban`:这个群 / 频道此刻被平台封禁时的提示(客户端在输入栏位置显示);
+    会话列表一次查完所有会话的封禁再传进来(`ban`),不在这里一个个查。
+    """
     if member is None:
         member = await member_of(db, chat.id, viewer_id)
     out = chat_base(chat)
+    if chat.type in ("group", "channel"):
+        if ban is _UNSET:
+            ban = await sanctions.chat_ban(db, chat.id)
+        out["platform_ban"] = sanctions.ban_brief(ban, chat.type)
+    else:
+        out["platform_ban"] = None
     out["my"] = my_state(member)
     out["perms"] = perms_for(chat.type, chat.settings, member.role if member else None,
                              member.rights if member else None,
@@ -366,6 +382,9 @@ async def public_chat_card(db: AsyncSession, viewer, chat_id: int) -> dict | Non
     """公开群 / 频道的名片(用 @用户名或链接找到时)。"""
     chat = await db.get(Chat, chat_id)
     if chat is None or chat.deleted_at is not None or not chat.username:
+        return None
+    # 被平台封禁的:搜索、@链接都找不到(「公开发现里消失」)
+    if await sanctions.chat_ban(db, chat.id) is not None:
         return None
     m = await member_of(db, chat.id, viewer.id)
     out = chat_base(chat)
@@ -440,13 +459,16 @@ async def dialogs(db: AsyncSession, viewer_id: int, limit: int = 1000) -> list[d
                     ChatMember.chat_id.in_(small_groups), ChatMember.user_id != viewer_id,
                     ChatMember.role.in_(ACTIVE_ROLES)).group_by(ChatMember.chat_id))).all():
             peer_reads[cid] = int(mx or 0)
+    bans = await sanctions.banned_chat_ids(
+        db, [c.id for c in chats.values() if c.type in ("group", "channel")])
     out = []
     for r in rows:
         chat = chats.get(r.chat_id)
         if chat is None:
             continue
         card = await chat_card(db, viewer_id, chat, members.get(chat.id),
-                               peer_card=cards.get(peer_of.get(chat.id)))
+                               peer_card=cards.get(peer_of.get(chat.id)),
+                               ban=bans.get(chat.id))
         if chat.id in peer_reads:
             card["peer_read_seq"] = peer_reads[chat.id]
         last = lasts.get(r.last_id) if r.last_id else None

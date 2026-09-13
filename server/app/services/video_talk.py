@@ -95,6 +95,8 @@ def _talkable(v: Video) -> None:
 
 async def post_danmaku(db: AsyncSession, user: User, v: Video, part: VideoPart, *, text: str,
                        time_ms: int, mode: int, color: int, size: int) -> Danmaku:
+    from .sanctions import check_user
+    await check_user(db, user.id, "danmaku")   # 禁言、封号(#368)
     _talkable(v)
     if not v.allow_danmaku:
         raise HTTPException(403, "UP 主关闭了这个视频的弹幕")
@@ -212,6 +214,8 @@ async def get_comment(db: AsyncSession, comment_id: int, *, lock: bool = False) 
 
 async def post_comment(db: AsyncSession, user: User, v: Video, text: str,
                        parent_id: int | None) -> VideoComment:
+    from .sanctions import check_user
+    await check_user(db, user.id, "comment")   # 禁言、封号(#368)
     _talkable(v)
     if not v.allow_comments:
         raise HTTPException(403, "UP 主关闭了这个视频的评论")

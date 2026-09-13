@@ -306,15 +306,26 @@ def file_response(request: Request, key: str, private: bool, size: int, mime: st
 @router.get("/files/{media_id}")
 async def get_file(media_id: int, request: Request, thumb: int = 0, download: int = 0,
                    u: int | None = None, e: int | None = None, s: str = "",
+                   r: int | None = None,
                    me: User | None = Depends(get_current_user_optional),
                    db: AsyncSession = Depends(get_db)):
+    report_grant = False
     if me is None and u and e and s:
+        if r:
+            # 管理员按举报单看被举报的媒体(S8):签名绑定管理员 + 举报单,再按那张单的范围判一次
+            from ..models import UserRole
+            from ..services.chat_moderation import media_in_window
+            from ..services.media import check_report_url_sig
+            if check_report_url_sig(media_id, u, r, e, s, bool(thumb)):
+                adm = await db.get(User, u)
+                report_grant = (adm is not None and adm.role == UserRole.admin
+                                and await media_in_window(db, r, media_id))
         # 带签名的地址:签名绑定用户,下面照样按这个用户判权
-        if check_url_sig(media_id, u, e, s, bool(thumb)):
+        elif check_url_sig(media_id, u, e, s, bool(thumb)):
             me = await db.get(User, u)
     mf = await db.get(MediaFile, media_id)
     # 没有、没权限、还没转完 —— 一律 404,不告诉你「有这个文件但你看不了」
-    if mf is None or not await can_read(db, me, mf):
+    if mf is None or not (report_grant or await can_read(db, me, mf)):
         raise HTTPException(404, "没有这个文件")
     if thumb:
         if not mf.thumb_key:

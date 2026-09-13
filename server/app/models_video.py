@@ -460,6 +460,9 @@ class VideoDecision(Base):
     actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"),
                                                  nullable=True)
     appeal_of: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    #: 审核结论(通过 / 驳回)对应的那次提交是什么时候 —— 稿件行上的 submitted_at 会被下一次提交覆盖,
+    #: 「审核时长中位数」(后台数据、透明中心)只能从这里算。这一列上线之前的结论为空,不参与计算
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                  server_default=func.now(), index=True)
 

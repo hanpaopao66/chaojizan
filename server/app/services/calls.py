@@ -216,6 +216,17 @@ async def _invite(conn: Conn, call_id: str, frame: dict) -> None:
             return
         if await db.scalar(select(Call.id).where(Call.call_id == call_id)):
             return   # 同一个 call_id 重发:当作重复,不处理
+        # 封号期间不能发起通话(#368)。信令走 WebSocket,没有 HTTP 403,把同一份说明放进错误帧
+        from fastapi import HTTPException
+
+        from .sanctions import check_user
+        try:
+            await check_user(db, me, "call")
+        except HTTPException as e:
+            detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+            conn.send({"t": "call", "a": "error", "call_id": call_id, "reason": "sanctioned",
+                       "message": detail.get("message", ""), "sanction": detail})
+            return
         blocked = await blocked_between(db, me, to)
         prof = await db.get(SocialProfile, to)
         privacy_ok = blocked or await allowed(db, prof, to, me, "calls")

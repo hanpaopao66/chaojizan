@@ -889,6 +889,8 @@ def _check_submittable(fields: dict, parts: list[VideoPart]) -> None:
 
 async def submit(db: AsyncSession, user: User, v: Video) -> None:
     """提交审核。转码没完的先进 processing,全部就绪自动进 reviewing(§5.8)。"""
+    from .sanctions import check_user
+    await check_user(db, user.id, "video_submit")   # 封号期间不能投稿(#368)
     now = utcnow()
     parts = await parts_of(db, v)
     if is_live(v):
@@ -1048,14 +1050,26 @@ async def _apply_pending(db: AsyncSession, v: Video, role: str) -> None:
 
 async def _record(db: AsyncSession, v: Video, action: str, actor: User | None, *,
                   reason_code: str = "", note: str = "", note_internal: str = "",
-                  appeal_of: int | None = None) -> VideoDecision:
+                  appeal_of: int | None = None,
+                  submitted_at: datetime | None = None) -> VideoDecision:
     d = VideoDecision(video_id=v.id, action=action, reason_code=reason_code,
                       note=(note or "").strip()[:500], note_internal=(note_internal or "")[:500],
                       actor_id=actor.id if actor else None, appeal_of=appeal_of,
-                      created_at=utcnow())
+                      submitted_at=submitted_at, created_at=utcnow())
     db.add(d)
     await db.flush()
     return d
+
+
+def _submitted_at(v: Video, kind: str) -> datetime | None:
+    """这次审核对应的那次提交(审核时长 = 结论时间 − 它)。改动的提交时间记在 pending_changes 里。"""
+    if kind == "first":
+        return v.submitted_at
+    raw = (v.pending_changes or {}).get("submitted_at")
+    try:
+        return datetime.fromisoformat(raw) if raw else v.submitted_at
+    except (TypeError, ValueError):
+        return v.submitted_at
 
 
 async def decide(db: AsyncSession, v: Video, admin: User, *, approve: bool,
@@ -1066,10 +1080,12 @@ async def decide(db: AsyncSession, v: Video, admin: User, *, approve: bool,
         raise HTTPException(409, "这个稿件不在审核中")
     if not approve:
         reason_ok(reason_code, note)
+    sub = _submitted_at(v, kind)
     if kind == "first":
         if approve:
             await _publish_first(db, v, "admin")
-            d = await _record(db, v, "approve", admin, note=note, note_internal=note_internal)
+            d = await _record(db, v, "approve", admin, note=note, note_internal=note_internal,
+                              submitted_at=sub)
             coins = await grant_approval_coins(db, v)
             await _notify_system(db, v, "视频审核通过",
                                  f"你的视频《{v.title}》审核通过了" +
@@ -1080,7 +1096,7 @@ async def decide(db: AsyncSession, v: Video, admin: User, *, approve: bool,
             _transition(v, "rejected", "admin")
             v.reject_code, v.reject_note = reason_code, (note or "").strip()[:500]
             d = await _record(db, v, "reject", admin, reason_code=reason_code, note=note,
-                              note_internal=note_internal)
+                              note_internal=note_internal, submitted_at=sub)
             await _notify_system(db, v, "视频未通过审核",
                                  f"你的视频《{v.title}》未通过审核:{REASON_CODES[reason_code]}"
                                  + (f"。{v.reject_note}" if v.reject_note else "")
@@ -1089,14 +1105,14 @@ async def decide(db: AsyncSession, v: Video, admin: User, *, approve: bool,
         if approve:
             await _apply_pending(db, v, "admin")
             d = await _record(db, v, "approve_changes", admin, note=note,
-                              note_internal=note_internal)
+                              note_internal=note_internal, submitted_at=sub)
             await _notify_system(db, v, "视频改动审核通过",
                                  f"你对《{v.title}》的修改审核通过,已经更新到线上", "approve_changes")
         else:
             _pending(v, "rejected", "admin", reject_code=reason_code,
                      reject_note=(note or "").strip()[:500])
             d = await _record(db, v, "reject_changes", admin, reason_code=reason_code, note=note,
-                              note_internal=note_internal)
+                              note_internal=note_internal, submitted_at=sub)
             await _notify_system(db, v, "视频改动未通过审核",
                                  f"你对《{v.title}》的修改未通过审核:{REASON_CODES[reason_code]}"
                                  + (f"。{note.strip()}" if (note or "").strip() else "")

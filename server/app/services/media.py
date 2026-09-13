@@ -18,7 +18,7 @@ from io import BytesIO
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import and_, exists, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import ACTIVE_ROLES, Chat, ChatMember, ChatMessage, MediaFile, MessageHide, User
@@ -323,6 +323,38 @@ def check_url_sig(media_id: int, user_id: int, exp: int, sig: str, thumb: bool) 
     return hmac.compare_digest(url_sig(media_id, user_id, exp, thumb), sig or "")
 
 
+# ---- 管理员按举报单看媒体(S8)----
+#
+# 管理员不在被举报的会话里,普通判权(can_read)给不了他;而被举报的恰恰常是图片、视频。
+# 给他的是**绑定这张举报单**的地址:签名里有举报单号,1 小时失效;下载时再按那张单的
+# S8 范围(被举报的几条 ± 5 条)重新判一次 —— 地址被转出去也看不到范围之外的东西。
+# 签名的明文带 "r:" 前缀,和普通地址的签名不会互相冒用。
+
+def report_url_sig(media_id: int, admin_id: int, report_id: int, exp: int, thumb: bool) -> str:
+    import hmac
+    msg = f"r:{report_id}:{media_id}:{admin_id}:{exp}:{1 if thumb else 0}".encode()
+    return hmac.new(_url_key(), msg, hashlib.sha256).hexdigest()[:32]
+
+
+def report_signed_url(media_id: int, admin_id: int, report_id: int, thumb: bool = False) -> str:
+    import time
+    from .chat_moderation import MEDIA_GRANT_SECONDS
+    exp = int(time.time()) + MEDIA_GRANT_SECONDS
+    sig = report_url_sig(media_id, admin_id, report_id, exp, thumb)
+    return (f"/media/v1/files/{media_id}?u={admin_id}&r={report_id}&e={exp}&s={sig}"
+            + ("&thumb=1" if thumb else ""))
+
+
+def check_report_url_sig(media_id: int, admin_id: int, report_id: int, exp: int, sig: str,
+                         thumb: bool) -> bool:
+    import hmac
+    import time
+    if exp < time.time():
+        return False
+    return hmac.compare_digest(report_url_sig(media_id, admin_id, report_id, exp, thumb),
+                               sig or "")
+
+
 def media_out(mf: MediaFile, viewer_id: int | None = None) -> dict:
     return {"id": mf.id, "kind": mf.kind, "status": mf.status, "error": mf.error,
             "w": mf.w, "h": mf.h, "size": mf.size, "mime": mf.mime, "name": mf.name,
@@ -347,10 +379,16 @@ async def can_read(db: AsyncSession, user: User | None, mf: MediaFile) -> bool:
         member_ok = exists().where(and_(
             ChatMember.chat_id == ChatMessage.chat_id, ChatMember.user_id == user.id,
             ChatMember.role.in_(ACTIVE_ROLES), ChatMessage.seq > ChatMember.cleared_seq))
+        # 被平台封禁的公开群 / 频道:外人的预览关了,里面的媒体也跟着关(#368「公开发现里消失」)
+        from ..models import SocialSanction
+        banned = exists().where(and_(
+            SocialSanction.target_type == "chat", SocialSanction.target_id == Chat.id,
+            SocialSanction.action == "ban_chat", SocialSanction.revoked_at.is_(None),
+            or_(SocialSanction.until.is_(None), SocialSanction.until > func.now())))
         public_ok = exists().where(and_(Chat.id == ChatMessage.chat_id,
                                         Chat.username.is_not(None),
                                         Chat.type.in_(("group", "channel")),
-                                        Chat.deleted_at.is_(None)))
+                                        Chat.deleted_at.is_(None), ~banned))
         hidden = exists().where(and_(MessageHide.chat_id == ChatMessage.chat_id,
                                      MessageHide.seq == ChatMessage.seq,
                                      MessageHide.user_id == user.id))

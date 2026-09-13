@@ -57,6 +57,8 @@ from .routers import stickers as stickers_router
 from .routers import calls as calls_router
 from .routers import video as video_router
 from .routers import video_admin as video_admin_router
+from .routers import social_admin as social_admin_router
+from .routers import social_sanctions as social_sanctions_router
 from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
 from .realtime import gateway as rt_gateway
 from .services import rt_events  # noqa: F401  注册提交后分发实时事件的钩子
@@ -543,6 +545,8 @@ app.include_router(media_router.router)
 app.include_router(rt_gateway.router)
 app.include_router(video_router.router)
 app.include_router(video_admin_router.router)
+app.include_router(social_admin_router.router)
+app.include_router(social_sanctions_router.router)
 app.include_router(notifications_router.router)
 
 UPLOAD_DIR.mkdir(exist_ok=True)

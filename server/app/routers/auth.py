@@ -601,6 +601,9 @@ async def delete_account(
     # 风控标记跟着「手机号+角色」的假名走,不跟着这一行走。
     # 手机号马上就要被释放,标记留在旧行上等于自助洗白,见 RiskCarryover。
     await _park_risk_marks(db, user)
+    # 社交处罚(禁言、封号)同一个道理:注销再注册不能把封号洗掉(services/sanctions)
+    from ..services.sanctions import park_for_carryover
+    await park_for_carryover(db, user)
 
     user.deleted_at = sa_func.now()      # ← 唯一的墓碑判据
     user.phone = f"del{user.id}_{secrets.token_hex(3)}"  # 释放手机号,可重新注册
@@ -665,7 +668,10 @@ async def apply_risk_carryover(db: AsyncSession, user: User) -> None:
     """
     from ..models import RiskCarryover
     from ..services.crypto import pseudonym
+    from ..services.sanctions import restore_carried
 
+    # 注销前还没到期的禁言 / 封号也跟回来(和下面的风控标记互不相干,各查各的)
+    await restore_carried(db, user)
     key = pseudonym(user.phone, user.role.value)
     row = await db.scalar(
         select(RiskCarryover).where(RiskCarryover.phone_key == key))

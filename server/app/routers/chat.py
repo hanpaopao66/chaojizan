@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import (ACTIVE_ROLES, Chat, ChatEvent, ChatFolder, ChatMember, ChatMessage,
-                      ChatReport, InviteLink, JoinRequest, MessageHide, MessageReaction,
+                      InviteLink, JoinRequest, MessageHide, MessageReaction,
                       ScheduledMessage, SocialProfile, User, UserEvent, Username)
 from ..ratelimit import check_rate_limit
 from ..services import chat_store as store
@@ -584,9 +584,13 @@ async def revoke_invite(chat_id: int, code: str, me: User = Depends(social_user)
 @router.get("/join/{code}")
 async def invite_preview(code: str, me: User = Depends(social_user),
                          db: AsyncSession = Depends(get_db)):
-    """点邀请链接时先看一眼:群名、头像、人数、我是不是已经在里面。"""
+    """点邀请链接时先看一眼:群名、头像、人数、我是不是已经在里面。
+    被平台封禁的群 / 频道:进不去,预览也直接回 403 和原因(不让人对着一个进不去的群点「加入」)。"""
     link, chat = await store.resolve_invite(db, code)
     m = await member_of(db, chat.id, me.id)
+    if not is_active(m):
+        from ..services.sanctions import check_chat
+        await check_chat(db, chat, me.id, "join")
     return {"chat": {"id": chat.id, "type": chat.type, "title": chat.title,
                      "about": chat.about, "photo": chat.photo_url,
                      "member_count": chat.member_count, "username": chat.username},
@@ -927,11 +931,14 @@ async def send_due_scheduled(limit: int = 50) -> int:
                 sent += 1
             except HTTPException as e:
                 await db.rollback()
+                # 被禁言 / 封号时 detail 是带原因的对象(见 services/sanctions),取它的那句话
+                reason = e.detail.get("message", "") if isinstance(e.detail, dict) \
+                    else str(e.detail)
                 async with SessionLocal() as db2:
                     await db2.execute(ScheduledMessage.__table__.delete()
                                       .where(ScheduledMessage.id == sid))
                     await append_user_event(db2, sender_id, "scheduled_failed",
-                                            {"chat_id": chat_id, "reason": str(e.detail)})
+                                            {"chat_id": chat_id, "reason": reason})
                     await db2.commit()
     return sent
 
@@ -1029,23 +1036,21 @@ async def export_start(me: User = Depends(social_user), db: AsyncSession = Depen
 @router.post("/reports")
 async def report(body: ReportIn, me: User = Depends(social_user),
                  db: AsyncSession = Depends(get_db)):
-    """举报会话、消息、用户(#368 处理)。举报人对被举报的一方永远匿名。"""
+    """举报会话、消息、用户(#368 处理)。举报人对被举报的一方永远匿名。
+
+    只收举报人**自己看得到**的消息(管理员按 S8 只能看这几条和前后各 5 条);
+    7 天内第 3 个不同的人举报同一个对象时,返回的 status 是 `escalated`。
+    """
+    from ..services.chat_moderation import file_report
     await check_rate_limit("chat_report", str(me.id), 10)
     if body.reason_code not in REPORT_REASONS:
         raise HTTPException(422, "请选择举报原因")
     if body.reason_code == "X999" and len(body.note.strip()) < 5:
         raise HTTPException(422, "选「其他」要写明原因(至少 5 个字)")
-    if body.target_type in ("chat", "message"):
-        if body.chat_id is None:
-            raise HTTPException(422, "缺少会话")
-        chat, _ = await _readable(db, body.chat_id, me)
-        if body.target_type == "message" and not body.seqs:
-            raise HTTPException(422, "要举报哪几条消息?")
-    elif body.user_id is None:
-        raise HTTPException(422, "缺少用户")
-    row = ChatReport(reporter_id=me.id, target_type=body.target_type, chat_id=body.chat_id,
-                     seqs=sorted(set(body.seqs)), user_id=body.user_id,
-                     reason_code=body.reason_code, note=body.note.strip())
-    db.add(row)
+    if body.target_type == "message" and not body.seqs:
+        raise HTTPException(422, "要举报哪几条消息?")
+    row = await file_report(db, me, target_type=body.target_type, chat_id=body.chat_id,
+                            seqs=body.seqs, user_id=body.user_id, reason_code=body.reason_code,
+                            note=body.note)
     await db.commit()
     return {"id": row.id, "status": row.status}

@@ -3677,3 +3677,5 @@ from .models_video import (NOTIFY_KINDS, VIDEO_MODELS, VIDEO_STATUSES,  # noqa: 
                            VideoNotInterested, VideoPart, VideoReport, VideoShare,
                            VideoStatDay, VideoUserSetting, VideoViewDay, WatchHistory,
                            WatchLater)
+from .models_moderation import (MODERATION_MODELS, RESTRICTIVE_ACTIONS,  # noqa: E402,F401
+                                SANCTION_ACTIONS, SocialSanction)
