@@ -28,7 +28,7 @@ class PermissionRationale {
           ),
         AppPermissionKind.locationRider => (
             '需要使用定位权限',
-            '接单配送期间记录配送轨迹,用于订单展示与配送费计算;下线后不收集位置。\n拒绝后无法接单配送。'
+            '上线期间持续获取位置(包括后台和锁屏时),用于抢单大厅按距离排序、配送轨迹展示与配送费计算;下线后停止。\n拒绝后无法接单配送。'
           ),
         AppPermissionKind.camera => (
             '需要使用相机权限',
