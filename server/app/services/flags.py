@@ -179,6 +179,19 @@ async def video_flag_on(db: AsyncSession, key: str) -> bool:
     return value == "on"
 
 
+#: 消息里要等合规结论才能在生产打开的功能(#374 / #375):通话涉及的电信业务许可还没定。
+#: 缺省和视频一样站在「关」这一边:开发 / CI 开、生产关
+SOCIAL_FLAGS = {"calls_enabled": "语音 / 视频通话"}
+
+
+async def social_flag_on(db: AsyncSession, key: str) -> bool:
+    """消息功能开关开着没有。每次现查、不缓存 —— 拉闸要立刻生效。"""
+    assert key in SOCIAL_FLAGS, key
+    flag = await db.get(PlatformFlag, key)
+    value = flag.value if flag is not None else video_flag_default()
+    return value == "on"
+
+
 #: 频道开关的 flag 键。值是逗号分隔的 key 列表,如 "food,voucher"。
 CHANNELS_FLAG = "channels_enabled"
 

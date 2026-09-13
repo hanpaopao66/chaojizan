@@ -1,5 +1,5 @@
 """通话接口 `/chat/v1/calls`(DEV-PROMPTS-40 §5.12,#354)。信令本身在 `/ws/v2`(services/calls.py)。"""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +13,11 @@ router = APIRouter(prefix="/chat/v1/calls", tags=["聊天"])
 
 
 @router.get("/ice-servers")
-async def ice_servers(me: User = Depends(social_user)):
+async def ice_servers(me: User = Depends(social_user), db: AsyncSession = Depends(get_db)):
     """WebRTC 用的 STUN / TURN。TURN 的用户名密码是临时的(1 小时),每次打电话前取一次。"""
+    from ..services.flags import social_flag_on
+    if not await social_flag_on(db, "calls_enabled"):
+        raise HTTPException(503, "通话功能暂未开放")
     return call_service.ice_servers(me.id)
 
 

@@ -204,6 +204,11 @@ async def _invite(conn: Conn, call_id: str, frame: dict) -> None:
         return
     video = bool(frame.get("video"))
     async with SessionLocal() as db:
+        from .flags import social_flag_on
+        if not await social_flag_on(db, "calls_enabled"):
+            conn.send({"t": "call", "a": "error", "call_id": call_id, "reason": "disabled",
+                       "message": "通话功能暂未开放"})
+            return
         callee = await db.get(User, to)
         if callee is None or callee.role not in SOCIAL_ROLES or callee.deleted_at is not None:
             conn.send({"t": "call", "a": "error", "call_id": call_id, "reason": "not_found",

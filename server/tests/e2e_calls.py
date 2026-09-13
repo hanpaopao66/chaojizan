@@ -139,6 +139,24 @@ def main():
     assert last_call_message(b, c)["call"]["state"] == "ended"
     print("  ✓ 掉线:一方所有连接都断了,20 秒没回来就判通话结束,对方收到 hangup")
 
+    # ---- 开关(#375):关着时呼叫直接回「暂未开放」,ice-servers 503,/config 告诉客户端收起电话按钮 ----
+    from tests.util import call as http
+    from tests.video_util import set_flag
+    try:
+        set_flag("calls_enabled", "off")
+        assert http("GET", "/config")["features"]["calls"] is False
+        wx = ready(WS(a.token))  # 前面的连接挂了一分多钟,可能已经被服务端按心跳超时收掉了
+        cid = invite(wx, d.id)
+        err = wx.wait_for(cf("error", cid))
+        wx.close()
+        assert err["reason"] == "disabled" and err["message"] == "通话功能暂未开放", err
+        r = a.get("/chat/v1/calls/ice-servers", expect_error=True)
+        assert r.get("_error") == 503, r
+    finally:
+        set_flag("calls_enabled", None)
+    assert http("GET", "/config")["features"]["calls"] is True, "开发环境缺省开"
+    print("  ✓ 开关:关掉通话后呼叫回「通话功能暂未开放」、ice-servers 503、/config 里 calls=false")
+
     for w in (wa, wb, wb2, wd):
         w.close()
     print("e2e_calls 全部通过 ✅")

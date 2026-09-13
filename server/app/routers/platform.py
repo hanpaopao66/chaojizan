@@ -427,7 +427,7 @@ async def public_config(db: AsyncSession = Depends(get_db)):
     import hashlib
     import json
 
-    from ..services.flags import marketing_on
+    from ..services.flags import marketing_on, social_flag_on, video_flag_on
 
     rows = (await db.scalars(select(PlatformCopy))).all()
     copy = {r.key: r.text for r in rows if not r.key.startswith(PLEDGE_PREFIX)}
@@ -440,6 +440,10 @@ async def public_config(db: AsyncSession = Depends(get_db)):
 
     payload = {
         "marketing": await marketing_on(db),
+        # 功能开关:客户端据此收起入口(关着的功能服务端照样回 503,这里只是别让人点进去才知道)
+        "features": {"video": await video_flag_on(db, "video_enabled"),
+                     "video_upload": await video_flag_on(db, "video_upload_enabled"),
+                     "calls": await social_flag_on(db, "calls_enabled")},
         "copy": copy,
         "faq": [{"audience": f.audience, "q": f.question, "a": f.answer}
                 for f in faqs],
