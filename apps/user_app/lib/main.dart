@@ -5203,6 +5203,9 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     } catch (_) {
       return;
     }
+    // 连不上时错误也会走 ready:重连靠下面的 onDone,ready 这边接住就行,
+    // 不然断网时每 5 秒一条「未处理的异常」
+    unawaited(_ws!.ready.then((_) {}, onError: (Object _) {}));
     _ws!.stream.listen(
       (message) {
         final data = jsonDecode(message as String) as Map<String, dynamic>;

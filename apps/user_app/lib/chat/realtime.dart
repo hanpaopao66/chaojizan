@@ -78,6 +78,9 @@ class ChatRealtime with WidgetsBindingObserver {
       _scheduleRetry();
       return;
     }
+    // 握手失败时错误同时走 ready 和 stream:重连靠下面 stream 的 onError / onDone;
+    // ready 这边也得接住,不然断网时每次重连失败都是一条「未处理的异常」
+    unawaited(_ch!.ready.then((_) {}, onError: (Object _) {}));
     _ch!.sink.add(jsonEncode({
       't': 'auth',
       'token': token,
