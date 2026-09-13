@@ -163,7 +163,7 @@ class _CreatorVideoPageState extends State<CreatorVideoPage> {
     final tags = creatorTags(v);
     final uploading = VideoUploads.instance.progressOf(v.vid);
     final cover = VideoCard.fromJson({...v.raw, 'cover': v.card.cover.isNotEmpty ? v.card.cover : v.coverPreview});
-    return ListView(padding: const EdgeInsets.only(bottom: 32), children: [
+    return ListView(physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.only(bottom: 32), children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 0),
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

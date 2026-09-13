@@ -199,6 +199,8 @@ class _ChatTabState extends State<ChatTab> {
           child: RefreshIndicator(
             onRefresh: _refresh,
             child: ListView.builder(
+              // 会话不满一屏也要能下拉刷新(安卓默认的物理效果不满一屏就拉不动)
+              physics: const AlwaysScrollableScrollPhysics(),
               // 没登录、或者列表为空时,分隔线下面多一格放提示(登录引导 / 转圈 / 空状态)
               itemCount: (folder == null ? 3 : 0) + (archived.isNotEmpty ? 1 : 0) + 1 + chats.length +
                   (chats.isEmpty ? 1 : 0),

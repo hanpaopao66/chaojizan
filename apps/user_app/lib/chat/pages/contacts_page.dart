@@ -73,6 +73,7 @@ class _ContactsPageState extends State<ContactsPage> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: items.length,
                     separatorBuilder: (_, __) => Divider(height: 1, indent: 72, color: sz.line),
                     itemBuilder: (context, i) {

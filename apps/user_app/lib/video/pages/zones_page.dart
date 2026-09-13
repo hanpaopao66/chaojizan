@@ -202,6 +202,7 @@ class _RankPageState extends State<RankPage> {
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
                         itemCount: items.length,
                         itemBuilder: (context, i) {
                           final c = items[i];
