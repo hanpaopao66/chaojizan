@@ -104,6 +104,7 @@ class SzNavItem {
     required this.selectedIcon,
     required this.label,
     this.badgeCount = 0,
+    this.badgeColor,
   });
 
   final IconData icon;
@@ -112,6 +113,10 @@ class SzNavItem {
 
   /// 角标数字。0 = 不显示。
   final int badgeCount;
+
+  /// 角标底色。不给就是主题的红 —— 待办(商家端待接单这种)用红;
+  /// 用户端「消息」数的是有未读的会话、不是待办,按设计稿用 clay 底、衬线数字
+  final Color? badgeColor;
 }
 
 /// 自适应导航外壳:窄屏底部导航,宽屏左侧栏。
@@ -256,9 +261,17 @@ class _SzNavScaffoldState extends State<SzNavScaffold> {
     );
   }
 
-  Widget _badged(SzNavItem it, Widget child) => it.badgeCount > 0
-      ? Badge(label: Text('${it.badgeCount}'), child: child)
-      : child;
+  Widget _badged(SzNavItem it, Widget child) {
+    if (it.badgeCount <= 0) return child;
+    final color = it.badgeColor;
+    return Badge(
+      backgroundColor: color,
+      textColor: color == null ? null : Theme.of(context).sz.surface,
+      textStyle: color == null ? null : szMoney(fontSize: kFontMicro),
+      label: Text('${it.badgeCount}'),
+      child: child,
+    );
+  }
 }
 
 /// 自适应弹层:窄屏底部弹出,宽屏居中对话框。

@@ -250,11 +250,18 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
+/// 底栏四个 tab 的位置。设计稿(消息与视频 A / D / F)是「首页 / 视频 / 消息 / 我的」。
+/// 下标只在这里定一次,别处一律用名字 —— 顺序再调时不会漏改哪一处
+const int _kTabHome = 0;
+const int _kTabVideo = 1;
+const int _kTabChat = 2;
+const int _kTabMe = 3;
+
 class _HomePageState extends State<HomePage> {
-  int _tab = 0;
+  int _tab = _kTabHome;
 
   /// 已经访问过的 tab。IndexedStack 保活的前提是别一上来就把三个都建起来
-  final Set<int> _visited = {0};
+  final Set<int> _visited = {_kTabHome};
 
   /// 顶部地址栏选中的收货地址;null = 用当前定位
   Address? _deliveryAddress;
@@ -405,7 +412,7 @@ class _HomePageState extends State<HomePage> {
       //
       // 各 tab 不同宽,因为**内容形态不同**:首页、视频是卡片流(可以宽一点),
       // 消息和「我的」是单列(要短行才好读)。统一限死会把卡片流也压成 720
-      contentMaxWidth: _tab == 0 || _tab == 2 ? kFeedMaxWidth : kContentMaxWidth,
+      contentMaxWidth: _tab == _kTabHome || _tab == _kTabVideo ? kFeedMaxWidth : kContentMaxWidth,
       onSelected: (i) => setState(() {
         _tab = i;
         _visited.add(i);
@@ -415,17 +422,18 @@ class _HomePageState extends State<HomePage> {
             icon: Icons.storefront_outlined,
             selectedIcon: Icons.storefront,
             label: '首页'),
+        const SzNavItem(
+            icon: Icons.smart_display_outlined,
+            selectedIcon: Icons.smart_display,
+            label: '视频'),
         SzNavItem(
             icon: Icons.chat_bubble_outline,
             selectedIcon: Icons.chat_bubble,
             label: '消息',
             // 数的是「有未读的行」(设计稿 A:数会话不数消息),服务号、订单群、视频互动各算一行,
             // 不把 9 条赞全加进来;免打扰的会话、静音的视频互动不算
-            badgeCount: chatUnreadBadge.value + chatExtraBadge.value),
-        const SzNavItem(
-            icon: Icons.smart_display_outlined,
-            selectedIcon: Icons.smart_display,
-            label: '视频'),
+            badgeCount: chatUnreadBadge.value + chatExtraBadge.value,
+            badgeColor: Theme.of(context).sz.clay),
         const SzNavItem(
             icon: Icons.person_outline,
             selectedIcon: Icons.person,
@@ -433,8 +441,8 @@ class _HomePageState extends State<HomePage> {
       ],
       // 「消息」「视频」两个 tab 自己画顶部(消息要放分组条,视频要放搜索框和子页签,
       // 竖屏子页还要整块变黑),外壳这里不给标题栏
-      appBar: _tab == 1 || _tab == 2 ? null : AppBar(
-        title: _tab == 0
+      appBar: _tab == _kTabChat || _tab == _kTabVideo ? null : AppBar(
+        title: _tab == _kTabHome
             // 商业平台标配:顶部地址栏,让用户知道「附近」是哪儿附近。
             // 地址与送达时间同行——打开外卖 App 第一秒只关心这两件事。
             ? InkWell(
@@ -490,7 +498,7 @@ class _HomePageState extends State<HomePage> {
           //
           // 收货地址在「我的」页的卡券网格里有一份,这里让位不丢入口;
           // 首页/订单 tab 保持原样(那两个 tab 的地址是下单上下文)
-          if (_tab == 3) ...[
+          if (_tab == _kTabMe) ...[
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
               tooltip: '联系平台客服',
@@ -513,7 +521,7 @@ class _HomePageState extends State<HomePage> {
           // 「我的」页网格里也有一份 —— 两个入口够了,第三个只是图标堆积
         ],
       ),
-      // 底部 tab 只放功能(首页/消息/视频/我的),业务一律走金刚区——
+      // 底部 tab 只放功能(首页/视频/消息/我的),业务一律走金刚区——
       // 业务会持续增加(团购/住宿/打车…),金刚区横向扩展,tab 保持稳定。
       //
       // 用 IndexedStack 保活,不再用 AnimatedSwitcher:后者三个 tab 各带一个 key,
@@ -524,7 +532,7 @@ class _HomePageState extends State<HomePage> {
       body: IndexedStack(
         index: _tab,
         children: [
-          _visited.contains(0)
+          _visited.contains(_kTabHome)
               ? MerchantListView(
                   api: widget.api,
                   deliveryAddress: _deliveryAddress,
@@ -542,13 +550,14 @@ class _HomePageState extends State<HomePage> {
                     setState(() => _deliveryAddress = null);
                   })
               : const SizedBox.shrink(),
-          _visited.contains(1)
-              ? ChatTab(api: widget.api)
-              : const SizedBox.shrink(),
-          _visited.contains(2)
+          // 顺序和底栏一致:_kTabHome / _kTabVideo / _kTabChat / _kTabMe
+          _visited.contains(_kTabVideo)
               ? VideoTab(api: widget.api)
               : const SizedBox.shrink(),
-          _visited.contains(3)
+          _visited.contains(_kTabChat)
+              ? ChatTab(api: widget.api)
+              : const SizedBox.shrink(),
+          _visited.contains(_kTabMe)
               ? ProfileView(api: widget.api, onOpenOrders: _openOrders)
               : const SizedBox.shrink(),
         ],
@@ -557,7 +566,7 @@ class _HomePageState extends State<HomePage> {
     // 视频 tab 的「竖屏」子页:整页黑底,导航条跟着换深色主题。
     // 两种情况都包一层 Theme:只在竖屏时才包的话,根上的 widget 类型一变,
     // 整个 IndexedStack 连同四个 tab 的状态都会被销毁重建(首页重新定位、会话列表重拉)
-    final immersive = _tab == 2 && videoImmersive.value;
+    final immersive = _tab == _kTabVideo && videoImmersive.value;
     return Theme(data: immersive ? _immersiveTheme : Theme.of(context), child: scaffold);
   }
 
