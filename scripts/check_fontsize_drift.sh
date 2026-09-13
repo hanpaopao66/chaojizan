@@ -34,7 +34,9 @@ cd "$(dirname "$0")/.."
 #  少一处,照它写成 631,CI 上就红了)
 # 632 → 619:用户端小程序容器重写(DEV-PROMPTS-39 #324),老的弹层、桥、面板里
 # 写死的字号随文件删掉,新写的一律用字号档位。
-BASELINE=618
+# 618 → 586:2026-09-13 按设计稿对齐订单群、会话列表 / 视频、店铺页,重写的地方一律用字号档位
+# (订单群 OrderChatPage、店铺页点餐 / 评价 / 商家页签、菜品详情、分享卡、拼单页)。
+BASELINE=586
 
 count=$(grep -rhoE 'fontSize: *[0-9.]+' \
   packages/shared/lib apps/user_app/lib apps/merchant_app/lib apps/rider_app/lib \

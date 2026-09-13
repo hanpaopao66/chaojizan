@@ -17,7 +17,7 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于选取头像、评价与售后凭证图片并上传。拒绝不影响其他功能。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>把聊天里的图片、视频保存到相册时需要。拒绝不影响其他功能。</string>
+	<string>把聊天里的图片、视频,或者店铺分享卡、晒单卡「存图」保存到相册时需要。拒绝不影响其他功能。</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
