@@ -142,3 +142,93 @@ bool systemActionBad(String action) =>
 
 /// 角标上的数:超过 99 写 99+
 String unreadBadge(int n) => n > 99 ? '99+' : '$n';
+
+/// 「视频互动」会话的未读数:只数「提醒设置」里勾上的那几类([kinds])。
+/// [unread] 是服务端的 `{reply, at, like, system, total}`,这里不用 total —— total 把四类都加上了。
+int notifyBadgeCount(Map<String, int> unread, Set<String> kinds) {
+  var n = 0;
+  for (final (k, _) in notifyKinds) {
+    if (kinds.contains(k)) n += unread[k] ?? 0;
+  }
+  return n;
+}
+
+/// 一条互动在时间线上的时刻:赞合并后新来的赞会把它刷到最新(服务端也按 updated_at 排)。
+DateTime notifyTime(NotifyItem n) => n.updatedAt ?? n.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+
+int _newerFirst(NotifyItem a, NotifyItem b) {
+  final c = notifyTime(b).compareTo(notifyTime(a));
+  return c != 0 ? c : b.id.compareTo(a.id);
+}
+
+/// 把四类互动合成一条时间线(设计稿 C:一条互动 = 一条消息,没有页签)。
+///
+/// 服务端只能按类拉(`kind` 必填),每类各自按时间倒序、各有各的游标。合的时候有个坑:
+/// 某一类拉到的最旧那条之后,别的类里可能还有更旧、但还没拉到的 —— 直接把手里的四串排一排,
+/// 翻到下一页时会有条目「插」回已经显示过的位置。所以只显示到**水位**为止:
+/// 还有下一页的那几类里,「已拉到的最旧那条」最新的那个时刻;再往下等拉了下一页才确定。
+class NotifyMerge {
+  final Map<String, List<NotifyItem>> _items = {};
+  final Map<String, String?> _cursor = {};
+  final Map<String, bool> _more = {};
+
+  bool get loaded => _more.length == notifyKinds.length;
+
+  /// 放进某一类的一页,和手里已有的合并;同一个 id 出现两次(新的赞把那条刷到了最前)时留新拉到的那份。
+  ///
+  /// [older] 是往上翻拉到的下一页:游标跟着往后走。否则是第一页(打开时、来了新提醒时重拉):
+  /// 这一类以前没拉过才记它的游标 —— 已经往上翻过几页的话,游标还停在翻到的地方,不退回去。
+  void put(String kind, List<NotifyItem> items, {String? next, bool older = false}) {
+    final known = _more.containsKey(kind);
+    final list = [...?_items[kind]];
+    final ids = {for (final n in items) n.id};
+    list.removeWhere((n) => ids.contains(n.id));
+    list.addAll(items);
+    list.sort(_newerFirst);
+    _items[kind] = list;
+    if (older || !known) {
+      _cursor[kind] = next;
+      _more[kind] = next != null;
+    }
+  }
+
+  DateTime? get _watermark {
+    DateTime? w;
+    for (final (k, _) in notifyKinds) {
+      if (_more[k] != true) continue;
+      final list = _items[k] ?? const <NotifyItem>[];
+      if (list.isEmpty) continue;
+      final t = notifyTime(list.last);
+      if (w == null || t.isAfter(w)) w = t;
+    }
+    return w;
+  }
+
+  /// 现在能确定顺序的那些,从新到旧。
+  List<NotifyItem> visible() {
+    final all = [for (final l in _items.values) ...l]..sort(_newerFirst);
+    final w = _watermark;
+    if (w == null) return all;
+    return [for (final n in all) if (!notifyTime(n).isBefore(w)) n];
+  }
+
+  /// 往上翻该拉哪一类(水位就卡在它身上);null = 全拉完了。
+  String? nextKind() {
+    String? pick;
+    DateTime? best;
+    for (final (k, _) in notifyKinds) {
+      if (_more[k] != true) continue;
+      final list = _items[k] ?? const <NotifyItem>[];
+      final t = list.isEmpty ? null : notifyTime(list.last);
+      if (pick == null || (t != null && (best == null || t.isAfter(best)))) {
+        pick = k;
+        best = t;
+      }
+    }
+    return pick;
+  }
+
+  String? cursorOf(String kind) => _cursor[kind];
+
+  bool get hasMore => nextKind() != null;
+}

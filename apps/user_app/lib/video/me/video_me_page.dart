@@ -17,7 +17,7 @@ import 'video_settings_page.dart';
 import 'watch_later_page.dart';
 
 /// 视频里的「我的」(B 站首页左上角那个头像点进来的地方):
-/// 我的空间和关注 / 粉丝 / 获赞,下面是历史、稍后再看、收藏、硬币,再下面是投稿、创作中心、互动消息、设置。
+/// 我的空间和关注 / 粉丝 / 获赞,下面是历史、稍后再看、收藏、硬币,再下面是投稿、创作中心、视频互动、设置。
 class VideoMePage extends StatefulWidget {
   const VideoMePage({super.key});
 
@@ -118,16 +118,20 @@ class _VideoMePageState extends State<VideoMePage> {
             hint: '稿件状态、数据、审核结果和申诉',
             onTap: () => _open(const CreatorCenterPage()),
           ),
-          ValueListenableBuilder<int>(
-            valueListenable: videoNotifyUnread,
-            builder: (context, n, _) => SzEntryTile(
-              icon: Icons.favorite_border,
-              title: '互动消息',
-              value: n > 0 ? '$n 条未读' : null,
-              valueTone: n > 0 ? sz.hold : null,
-              hint: '回复我的、@我的、收到的赞',
-              onTap: () => _open(const VideoNotificationsPage()),
-            ),
+          // 和「消息」列表里那一行是同一个会话(视频互动机器人),未读也按「提醒设置」数
+          ValueListenableBuilder<Map<String, int>>(
+            valueListenable: videoNotifyUnreadKinds,
+            builder: (context, _, __) {
+              final n = videoNotifyBadge();
+              return SzEntryTile(
+                icon: Icons.smart_toy_outlined,
+                title: '视频互动',
+                value: n > 0 ? '$n 条未读' : null,
+                valueTone: n > 0 ? sz.hold : null,
+                hint: '回复、@、赞和投稿审核结果',
+                onTap: () => _open(const VideoNotificationsPage()),
+              );
+            },
           ),
           SzEntryTile(
             icon: Icons.tune,

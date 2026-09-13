@@ -478,6 +478,32 @@ TextStyle szMoney({
       ],
     );
 
+/// 不是钱、但也要对齐的数字:时刻、角标里的未读数、播放数 / 弹幕数 / 点赞数这类计数。
+///
+/// 和 [szMoney] 同一套字形(衬线、等宽、现代数字),只是默认常规字重 ——
+/// 会话列表右上角的「12:02」、底栏角标的「4」如果用 [szFigure] 的旧式数字,
+/// 数字高低起伏,一列时间对不齐;用 szMoney 又默认半粗,抢了标题的层级。
+TextStyle szTabular({
+  double? fontSize,
+  FontWeight fontWeight = FontWeight.w400,
+  Color? color,
+  double? height,
+  List<Shadow>? shadows,
+}) =>
+    TextStyle(
+      fontFamily: kSerifFamily,
+      fontFamilyFallback: _cjkFallback,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      height: height,
+      shadows: shadows,
+      fontFeatures: const [
+        FontFeature.tabularFigures(),
+        FontFeature.liningFigures(),
+      ],
+    );
+
 /// 缺图占位的底色/字色对。
 ///
 /// 不是彩虹色板——六组都在骨白纸底的同一色域里(泥土色系低饱和),
@@ -1161,6 +1187,60 @@ class _LogoPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _LogoPainter old) =>
       old.radiusRatio != radiusRatio;
+}
+
+/// 单色品牌记号:只有大拇指的剪影(袖口 + 拇指 + 手掌),没有渐变底和账本线。
+///
+/// 放在小圆底里当「超级赞」服务号的头像 —— 26px 上画完整 Logo,三条账本线糊成一块;
+/// 渐变底放进骨白的会话列表又太抢。几何与 [BrandLogo] 同一份(viewBox 512)。
+class BrandMark extends StatelessWidget {
+  const BrandMark({super.key, this.size = 24, this.color});
+
+  final double size;
+
+  /// 不给就用 clay
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _MarkPainter(color ?? Theme.of(context).sz.clay),
+    );
+  }
+}
+
+class _MarkPainter extends CustomPainter {
+  _MarkPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width;
+    double u(double v) => v / 512 * s;
+    final fill = Paint()..color = color;
+    RRect rr(double x, double y, double w, double h, double r) =>
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(u(x), u(y), u(w), u(h)), Radius.circular(u(r)));
+    canvas.drawRRect(rr(108, 246, 64, 168, 22), fill);
+    canvas.drawPath(
+      Path()
+        ..moveTo(u(244), u(300))
+        ..cubicTo(u(239), u(258), u(237), u(234), u(233), u(212))
+        ..cubicTo(u(229), u(190), u(224), u(174), u(215), u(154)),
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = u(68)
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round,
+    );
+    canvas.drawRRect(rr(190, 246, 204, 168, 36), fill);
+  }
+
+  @override
+  bool shouldRepaint(covariant _MarkPainter old) => old.color != color;
 }
 
 /// 相对时间:近的说"多久前",远的给日期。

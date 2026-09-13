@@ -20,6 +20,7 @@ import 'store.dart';
 import 'ui/avatar.dart';
 import 'ui/bubble.dart';
 import 'ui/composer.dart';
+import 'ui/conv_row.dart' show UnreadDivider;
 import 'ui/emoji.dart';
 import 'ui/format.dart';
 import 'ui/rich_text.dart';
@@ -1095,7 +1096,7 @@ class _ChatPageState extends State<ChatPage> {
                     }
                     final it = items[i];
                     if (it.day != null) return _DayChip(day: it.day!);
-                    if (it.unreadDivider) return const _UnreadDivider();
+                    if (it.unreadDivider) return const UnreadDivider();
                     final m = it.message!;
                     final key = _keys.putIfAbsent(it.key, GlobalKey.new);
                     final selKey = m.seq > 0 ? 's${m.seq}' : 'r${m.randomId}';
@@ -1236,22 +1237,6 @@ class _DayChip extends StatelessWidget {
           child: Text(dayLabel(day), style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
         ),
       ),
-    );
-  }
-}
-
-class _UnreadDivider extends StatelessWidget {
-  const _UnreadDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    final sz = Theme.of(context).sz;
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      color: sz.clay.withValues(alpha: .08),
-      alignment: Alignment.center,
-      child: Text('以下为新消息', style: TextStyle(fontSize: kFontNote, color: sz.clay)),
     );
   }
 }
