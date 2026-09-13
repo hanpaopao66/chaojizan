@@ -67,12 +67,14 @@ MUTE_MAX_HOURS = 720
 BAN_MAX_DAYS = 3650
 APPEAL_MIN, APPEAL_MAX = 5, 500
 
-#: 封号期间**还能用**的写接口(默认全拒,只放行这几个):申诉、读(断线补齐 / 已读 / 换媒体地址)、
-#: 只有自己看得见的设置、自我保护(拉黑、退群)、删自己的观看历史。
+#: 封号期间**还能用**的写接口(默认全拒,只放行这几个):申诉、导出自己的数据、读(断线补齐 / 已读 /
+#: 换媒体地址)、只有自己看得见的设置、自我保护(拉黑、退群)、删自己的观看历史。
 #: 新加的社交写接口不在这里就会被封号挡住 —— 默认值站在「挡」这一边。
 ACCOUNT_BAN_ALLOWED: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/social/v1/sanctions/{sanction_id}/appeal"),
     ("POST", "/video/v1/videos/{vid}/appeal"),
+    # 导出自己的数据(S5):封号不能拿走用户对自己数据的权利
+    ("POST", "/chat/v1/export"),
     ("POST", "/chat/v1/sync"),
     ("POST", "/chat/v1/dialogs/{chat_id}/read"),
     ("POST", "/social/v1/notifications/read"),

@@ -58,6 +58,7 @@ DEV-PROMPTS-40 #368(聊天部分)、#370、#371,不变量 **S6**(每个处罚都
 |---|---|---|
 | POST | /social/v1/sanctions/{sanction_id}/appeal | 申诉处罚 |
 | POST | /video/v1/videos/{vid}/appeal | 申诉视频驳回 / 下架 |
+| POST | /chat/v1/export | 导出自己的数据(S5,下载走 `GET /media/v1/files/{id}`,本来就是读) |
 | POST | /chat/v1/sync | 读:断线补齐 |
 | POST | /chat/v1/dialogs/{chat_id}/read | 读:已读位置 |
 | POST | /social/v1/notifications/read | 读:通知已读 |
@@ -73,7 +74,8 @@ DEV-PROMPTS-40 #368(聊天部分)、#370、#371,不变量 **S6**(每个处罚都
 | DELETE | /video/v1/me/history | 自己的观看历史 |
 | DELETE | /video/v1/me/history/{vid} | 自己的观看历史 |
 
-注销账号是 `DELETE /auth/me`,不挂 `social_user`,封号期间照样能注销(见 §8)。
+注销账号是 `DELETE /auth/me`,不挂 `social_user`,封号期间照样能注销(见 §8);
+导出进度 `GET /chat/v1/export` 是读,不受影响。
 定时消息到点由清扫任务发出时同样过 `chat_store.send`,发的人那时被禁言 / 封号就发不出去,
 他收到一个 `scheduled_failed` 用户事件,`reason` 是下面 `message` 那句话。
 
