@@ -8,6 +8,7 @@ import '../store.dart';
 import '../ui/avatar.dart';
 import 'contacts_page.dart';
 import 'export_page.dart';
+import 'sanctions_page.dart';
 import 'folders_page.dart';
 import 'user_profile_page.dart';
 
@@ -217,6 +218,12 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
             value: _store.folders.isEmpty ? null : '${_store.folders.length} 个',
             hint: '按私聊、群、频道分开看',
             onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const FoldersPage())),
+          ),
+          SzEntryTile(
+            title: '处罚与申诉',
+            icon: Icons.gavel_outlined,
+            hint: '平台对你的处罚、原因和申诉进度',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const SanctionsPage())),
           ),
           SzEntryTile(
             title: '导出我的数据',

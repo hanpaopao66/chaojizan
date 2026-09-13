@@ -50,6 +50,7 @@ import 'settings_page.dart';
 import 'stay_order_pages.dart';
 import 'transparency_page.dart';
 import 'trust_page.dart';
+import 'chat/pages/sanctions_page.dart';
 import 'video/creator/creator_center_page.dart';
 import 'video/creator/upload_tasks.dart';
 import 'video/me/coins_page.dart';
@@ -291,12 +292,26 @@ class _HomePageState extends State<HomePage> {
     _chatNotices = ChatStore.instance.notices.stream.listen((s) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
     });
+    _sanctioned = ChatStore.instance.sanctioned.stream.listen((d) {
+      if (!mounted) return;
+      final id = (d['sanction_id'] as num?)?.toInt();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(seconds: 8),
+        content: Text('${d['message'] ?? '你被平台限制了'}'),
+        action: SnackBarAction(
+          label: d['can_appeal'] == true ? '申诉' : '查看',
+          onPressed: () => Navigator.of(context)
+              .push(MaterialPageRoute<void>(builder: (_) => SanctionsPage(focusId: id))),
+        ),
+      ));
+    });
     // 通话(#354):来电、开始呼叫时推出通话页;通话页收起时顶上挂一条「通话中」
     CallController.instance.presenter = _presentCall;
     CallController.instance.addListener(_onCall);
   }
 
   StreamSubscription<String>? _chatNotices;
+  StreamSubscription<Map<String, dynamic>>? _sanctioned;
   OverlayEntry? _callPill;
 
   @override
@@ -306,6 +321,7 @@ class _HomePageState extends State<HomePage> {
     videoImmersive.removeListener(_onBadge);
     authTick.removeListener(_syncChat);
     _chatNotices?.cancel();
+    _sanctioned?.cancel();
     CallController.instance.removeListener(_onCall);
     if (CallController.instance.presenter == _presentCall) CallController.instance.presenter = null;
     _callPill?.remove();

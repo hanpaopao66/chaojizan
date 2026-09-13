@@ -307,6 +307,14 @@ class ChatApi {
 
   Future<void> report(Map<String, dynamic> body) => _post('/chat/v1/reports', body);
 
+  // ---------------- 处罚与申诉(S6) ----------------
+
+  /// `{"active": [SanctionOut…], "history": [SanctionOut…]}`(形状见 docs/COMMUNITY-GOVERNANCE.md §4.1)
+  Future<Map<String, dynamic>> mySanctions() async => (await _get('/social/v1/me/sanctions') as Map).cast();
+
+  Future<Map<String, dynamic>> appealSanction(int id, String text) async =>
+      (await _post('/social/v1/sanctions/$id/appeal', {'text': text}) as Map).cast();
+
   // ---------------- 导出我的数据(S5) ----------------
 
   /// `{"state": none|running|failed|ready, "progress"?, "error"?, "url"?, "size"?, "summary"?, "last"?}`

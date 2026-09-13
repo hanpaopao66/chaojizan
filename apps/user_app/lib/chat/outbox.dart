@@ -332,6 +332,7 @@ class Outbox {
           await Future<void>.delayed(Duration(seconds: secs + 1));
           continue;
         }
+        if (e.sanctioned) store.sanctioned.add(e.detail!);
         final retriable = e.isNetwork || e.statusCode >= 500 || e.statusCode == 429 ||
             (e.statusCode == 409 && e.message.contains('处理中'));
         it.attempts++;

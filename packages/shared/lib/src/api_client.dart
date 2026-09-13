@@ -12,10 +12,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
-  ApiException(this.statusCode, this.message, {this.code});
+  ApiException(this.statusCode, this.message, {this.code, this.detail});
 
   final int statusCode;
   final String message;
+
+  /// 服务端 detail 是一个对象时的原样内容。社区治理的处罚(403)带着处罚编号、到期时间、
+  /// 能不能申诉(`{"error": "sanctioned", "sanction_id": …, "can_appeal": …}`),页面据此给「去申诉」
+  final Map<String, dynamic>? detail;
+
+  /// 被平台处罚挡住了(禁言、封号、封群)
+  bool get sanctioned => detail?['error'] == 'sanctioned';
 
   /// 小程序桥错误码(DEV-PROMPTS-39 §5.4,如 4007 版本冲突、4009 已暂停)。
   /// 服务端的 detail 是 `{code, message}` 时才有;宿主原样转给页面
@@ -315,12 +322,14 @@ class ApiClient {
     if (response.statusCode >= 400) {
       String message = '请求失败(${response.statusCode})';
       int? code;
+      Map<String, dynamic>? detailMap;
       try {
         final detail = (jsonDecode(text) as Map)['detail'];
         if (detail is String) {
           message = detail;
         } else if (detail is Map) {
-          // 小程序接口的错误体:{code: 4007, message: "…"}
+          // 小程序接口的错误体:{code: 4007, message: "…"};处罚:{error: sanctioned, message: "…", …}
+          detailMap = detail.cast<String, dynamic>();
           if (detail['message'] is String) message = detail['message'] as String;
           if (detail['code'] is int) code = detail['code'] as int;
         }
@@ -331,7 +340,7 @@ class ApiClient {
         await clearSession();
         onUnauthorized?.call();
       }
-      throw ApiException(response.statusCode, message, code: code);
+      throw ApiException(response.statusCode, message, code: code, detail: detailMap);
     }
     return text.isEmpty ? null : jsonDecode(text);
   }
@@ -2155,11 +2164,18 @@ class ApiClient {
     final text = utf8.decode(response.bodyBytes);
     if (response.statusCode >= 400) {
       String message = '上传失败(${response.statusCode})';
+      Map<String, dynamic>? detailMap;
       try {
         final detail = (jsonDecode(text) as Map)['detail'];
-        if (detail is String) message = detail;
+        if (detail is String) {
+          message = detail;
+        } else if (detail is Map) {
+          // 封号时上传也被挡,detail 是处罚对象:取它的 message,不然只看得到「上传失败(403)」
+          detailMap = detail.cast<String, dynamic>();
+          if (detail['message'] is String) message = detail['message'] as String;
+        }
       } catch (_) {}
-      throw ApiException(response.statusCode, message);
+      throw ApiException(response.statusCode, message, detail: detailMap);
     }
     return (jsonDecode(text) as Map).cast<String, dynamic>();
   }

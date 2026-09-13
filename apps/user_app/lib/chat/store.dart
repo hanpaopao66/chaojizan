@@ -168,6 +168,10 @@ class ChatStore extends ChangeNotifier {
   /// 给页面弹提示用的一次性消息(被踢出群、定时消息发不出去……)
   final StreamController<String> notices = StreamController<String>.broadcast();
 
+  /// 发消息被平台处罚挡住(禁言、封号、群被封):原样把服务端的处罚说明转出去,
+  /// 首页弹一条带「查看 / 申诉」的提示(S6:每个处罚都能申诉)
+  final StreamController<Map<String, dynamic>> sanctioned = StreamController<Map<String, dynamic>>.broadcast();
+
   /// 同一个人切换账号时要清干净
   Future<void> start(ApiClient client) async {
     if (_client == client && started && client.userId == meId) return;
