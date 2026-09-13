@@ -92,12 +92,14 @@ DEV_DEFAULT_FILTER='(POSTGRES_PASSWORD[": =]+((superz)|(drill)))|(change-me-in-p
 # 它断言 validate_url 会拒掉 169.254 元数据服务、127.0.0.1、10.x、192.168.x。
 # 那些地址必须写在那儿,删了这条防护就没人守了。
 #
-# ⚠️ 豁免的是**这一个文件**,不是整个 tests/ 目录:测试里照样可能不小心
+# test_link_preview_ssrf.py 同理:链接预览的 SSRF 单测,那串内网地址就是被测对象。
+#
+# ⚠️ 豁免的是**这两个文件**,不是整个 tests/ 目录:测试里照样可能不小心
 # 粘进真的内网地址或密钥,那种必须拦。
 EXCLUDES=(
   ':!*.png' ':!*.jpg' ':!*.m4a' ':!*.jar' ':!*.lock' ':!pubspec.lock'
   ':!scripts/security_scan.sh' ':!scripts/export_public_repo.sh'
-  ':!server/tests/e2e_printers.py'
+  ':!server/tests/e2e_printers.py' ':!server/tests/unit/test_link_preview_ssrf.py'
 )
 
 found=0
@@ -115,7 +117,7 @@ for pattern in "${PATTERNS[@]}"; do
       --exclude='*.png' --exclude='*.jpg' --exclude='*.m4a' \
       --exclude='*.jar' --exclude='*.lock' \
       --exclude='security_scan.sh' --exclude='export_public_repo.sh' \
-      --exclude='e2e_printers.py' \
+      --exclude='e2e_printers.py' --exclude='test_link_preview_ssrf.py' \
       2>/dev/null | grep -vE "$DEV_DEFAULT_FILTER")
   fi
   if [ -n "$hits" ]; then

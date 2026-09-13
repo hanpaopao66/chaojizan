@@ -141,11 +141,16 @@ def _image_process(src: Path, kind: str) -> tuple[bytes, bytes, int, int, str, s
             import pillow_heif
             pillow_heif.register_heif_opener()
             im = Image.open(BytesIO(data))
+    except Exception as e:
+        raise HTTPException(422, "图片打不开,可能已损坏") from e
+    # 分辨率要在**解码之前**判:open 只读文件头,尺寸是白拿的;下面的 exif_transpose 会把整张图解出来 ——
+    # 一张 1.7 亿像素的小文件(纯色 PNG 压得很小)解开要半个 G 内存,几个并发就能把机器打满
+    if im.width * im.height > 80_000_000:
+        raise HTTPException(422, "图片分辨率太大了")
+    try:
         im = ImageOps.exif_transpose(im)
     except Exception as e:
         raise HTTPException(422, "图片打不开,可能已损坏") from e
-    if im.width * im.height > 80_000_000:
-        raise HTTPException(422, "图片分辨率太大了")
     has_alpha = im.mode in ("RGBA", "LA", "P") and kind in ("sticker",)
     edge = 512 if kind == "sticker" else PHOTO_EDGE
     if max(im.size) > edge:
@@ -235,6 +240,8 @@ async def ingest(db: AsyncSession, owner: User, src: Path, *, declared: str, nam
             p = await transcode.probe(src)
             if not p.has_video:
                 raise HTTPException(422, "这个文件里没有视频画面")
+            if transcode.video_too_large(p):
+                raise HTTPException(422, "视频分辨率太大了(最高 8K)")
             mf.w, mf.h, mf.duration_ms = p.display_w, p.display_h, p.duration_ms
             if kind == "video_source" and p.duration_ms > 30 * 60 * 1000:
                 raise HTTPException(422, "单个分 P 最长 30 分钟")

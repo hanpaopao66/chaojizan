@@ -207,7 +207,8 @@ async def attach_preview(chat_id: int, seq: int) -> None:
             return
         url = found[0]
     try:
-        info = await build_preview(url)
+        # 单次读有 5 秒超时,但一个每 4 秒吐一个字节的网站能把一次预览拖好几分钟:整体再封个顶
+        info = await asyncio.wait_for(build_preview(url), timeout=TIMEOUT * 3)
     except Exception:
         logger.info("链接预览失败:%s", url, exc_info=True)
         return

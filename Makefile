@@ -221,6 +221,7 @@ test:
 	  && python -m tests.e2e_media && python -m tests.e2e_chat_groups \
 	  && python -m tests.e2e_calls \
 	  && python -m tests.e2e_chat_export \
+	  && python -m tests.e2e_social_idor \
 	  && python -m tests.e2e_video_upload && python -m tests.e2e_video_feed \
 	  && python -m tests.e2e_danmaku && python -m tests.e2e_video_comments \
 	  && python -m tests.e2e_video_me

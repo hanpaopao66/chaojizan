@@ -181,6 +181,17 @@ def waveform_from_pcm(pcm: bytes, buckets: int = 64) -> list[int]:
     return [min(31, round(pk * 31 / top)) for pk in peaks]
 
 
+#: 视频 / GIF 的分辨率上限:8K(长边 8192、总像素 3600 万)。再大的「视频」只可能是冲着解码内存来的 ——
+#: 一帧 16K×16K 解开就是几百 MB,ffmpeg 还要缓几帧
+VIDEO_MAX_SIDE = 8192
+VIDEO_MAX_PIXELS = 36_000_000
+
+
+def video_too_large(p: Probe) -> bool:
+    w, h = p.display_w, p.display_h
+    return max(w, h) > VIDEO_MAX_SIDE or w * h > VIDEO_MAX_PIXELS
+
+
 def chat_video_needs_transcode(p: Probe) -> bool:
     if p.vcodec != "h264":
         return True
