@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../danmaku/engine.dart' show danmakuDensityWorthShowing;
 import '../models.dart';
 import 'player_logic.dart';
 import 'sz_video_controller.dart';
@@ -136,7 +137,8 @@ class _PlayerProgressBarState extends State<PlayerProgressBar> {
     final dur = _durMs;
     final pos = _c.position.inMilliseconds;
     final value = _drag ?? (dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0.0);
-    final levels = _c.danmaku.showing ? _c.danmaku.densityLevels : const <double>[];
+    final dm = _c.danmaku;
+    final levels = dm.showing && danmakuDensityWorthShowing(dm.density) ? dm.densityLevels : const <double>[];
     return LayoutBuilder(builder: (context, box) {
       final w = box.maxWidth;
       return Semantics(

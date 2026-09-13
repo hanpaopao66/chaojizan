@@ -396,5 +396,33 @@ void main() {
       expect(danmakuDensityLevels([0, 0, 0]), [0, 0, 0]);
       expect(danmakuDensityLevels([]), isEmpty);
     });
+
+    test('太短、太少不画:8 秒的视频两桶一平滑就是一整条平的色块', () {
+      expect(danmakuDensityLevels([0, 1]), [1, 1], reason: '这就是那条平色块');
+      expect(danmakuDensityWorthShowing([0, 1]), isFalse, reason: '不到 30 秒');
+      expect(danmakuDensityWorthShowing([0, 0, 1, 0, 0, 0]), isFalse, reason: '弹幕不到 10 条');
+      expect(danmakuDensityWorthShowing([0, 3, 4, 0, 2, 1]), isTrue);
+      expect(danmakuDensityWorthShowing(const []), isFalse);
+    });
+  });
+
+  group('发弹幕记在哪一刻', () {
+    test('播放中:就是当前位置', () {
+      expect(danmakuSendTimeMs(3200, 8000), 3200);
+      expect(danmakuSendTimeMs(0, 8000), 0);
+      expect(danmakuSendTimeMs(-40, 8000), 0);
+    });
+
+    test('最后一秒以内(含播完停在最后一帧)记在倒数第 1 秒,重播时才看得到', () {
+      expect(danmakuSendTimeMs(8000, 8000), 7000);
+      expect(danmakuSendTimeMs(8033, 8000), 7000, reason: '播放器量的比服务端记的长');
+      expect(danmakuSendTimeMs(7500, 8000), 7000);
+      expect(danmakuSendTimeMs(6999, 8000), 6999);
+      expect(danmakuSendTimeMs(400, 600), 0, reason: '不到 1 秒的视频');
+    });
+
+    test('时长不知道(0)就不封顶', () {
+      expect(danmakuSendTimeMs(5000, 0), 5000);
+    });
   });
 }

@@ -363,6 +363,22 @@ class DanmakuEngine {
 ///
 /// 先做三桶滑动平均再按最大值归一:原始计数一桶一个样,画出来是锯齿;
 /// 平均一下才是「这一段弹幕多」的起伏,和 B 站那条曲线一个意思。全是 0 就全是 0(不画)。
+/// 高能进度条值不值得画。太短的视频(不到 6 桶 = 30 秒)两三桶一平滑就成了一整条平的色块,
+/// 看着像花屏;弹幕太少(不到 10 条)画出来的曲线也只是噪声 —— 这两种都不画(B 站也是弹幕多了才出)
+bool danmakuDensityWorthShowing(List<int> counts) =>
+    counts.length >= 6 && counts.fold<int>(0, (s, c) => s + max(0, c)) >= 10;
+
+/// 发弹幕记在哪一刻。上限按服务端记的这一 P 时长 [durationMs](转码时量的,不按播放器量的:两边能差出几十毫秒,
+/// 按播放器的算会比服务端的长,被当成「超出视频长度」拒掉)。
+///
+/// 最后一秒以内(包括播完停在最后一帧)发的记在倒数第 1 秒:播放器停下时报的位置常常到不了时长那一刻,
+/// 记在最后一刻的弹幕重播时永远等不到它上屏
+int danmakuSendTimeMs(int positionMs, int durationMs) {
+  var at = max(0, positionMs);
+  if (durationMs > 0 && at > durationMs - 1000) at = max(0, durationMs - 1000);
+  return at;
+}
+
 List<double> danmakuDensityLevels(List<int> counts) {
   if (counts.isEmpty) return const [];
   final n = counts.length;
