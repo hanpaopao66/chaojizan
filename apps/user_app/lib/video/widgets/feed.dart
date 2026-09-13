@@ -22,7 +22,11 @@ class VideoFeed extends StatefulWidget {
     this.header,
     this.showWhy = false,
     this.padding = const EdgeInsets.fromLTRB(10, 8, 10, 24),
+    this.onPullRefresh,
   });
+
+  /// 下拉刷新时顺带刷新的东西(空间页头部的关注 / 粉丝 / 获赞):下拉的是整页,不能只刷下面这串卡片
+  final Future<void> Function()? onPullRefresh;
 
   final Future<VPage<VideoCard>> Function(int page, String? cursor) load;
   final String emptyText;
@@ -64,6 +68,8 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
     _scroll.dispose();
     super.dispose();
   }
+
+  Future<void> _pullRefresh() => Future.wait([refresh(), if (widget.onPullRefresh != null) widget.onPullRefresh!()]);
 
   Future<void> refresh() async {
     _page = 0;
@@ -157,16 +163,18 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
         body = SzEmpty(text: widget.emptyText);
       }
       return RefreshIndicator(
-        onRefresh: refresh,
-        child: ListView(children: [
+        onRefresh: _pullRefresh,
+        // 空着也能下拉刷新(不满一屏的列表默认滚不动,拖动不出滚动通知,下拉刷新就不会触发)
+        child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [
           if (widget.header != null) widget.header!,
           SizedBox(height: 360, child: Center(child: body)),
         ]),
       );
     }
     return RefreshIndicator(
-      onRefresh: refresh,
-      child: CustomScrollView(controller: _scroll, slivers: [
+      onRefresh: _pullRefresh,
+      // 只有一两条也能下拉刷新(比如空间页只有一个投稿):不满一屏时默认滚不动,下拉刷新收不到通知
+      child: CustomScrollView(controller: _scroll, physics: const AlwaysScrollableScrollPhysics(), slivers: [
         if (widget.header != null) SliverToBoxAdapter(child: widget.header),
         SliverPadding(
           padding: widget.padding,

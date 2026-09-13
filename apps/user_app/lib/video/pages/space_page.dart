@@ -143,6 +143,8 @@ class _SpacePageState extends State<SpacePage> {
             VideoFeed(
               key: ValueKey(_order),
               load: (page, _) => videoApi.userVideos(user.id, order: _order, page: page),
+              // 下拉刷新连头部一起:别人刚关注了你、刚点了赞,数字要跟着变
+              onPullRefresh: _load,
               emptyText: isSelf ? '还没有投稿' : 'TA 还没有公开的视频',
               header: Padding(
                 padding: const EdgeInsets.fromLTRB(10, 6, 10, 0),
