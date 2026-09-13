@@ -257,6 +257,10 @@ jobs:
       # 而这**不报错** —— 功能全对、测试全绿,只是难用。
       - name: 宽屏布局走自适应外壳
         run: bash scripts/check_wide_layout.sh
+      # 弹层里的输入框控制器不能在 await 弹层回来之后马上销毁:弹层那时还在退场,
+      # 手机上键盘一收、输入框一重建就用到销毁的控制器(debug 整屏红)。网页上测不出来
+      - name: 弹层里的输入框控制器跟着弹层销毁
+        run: python3 scripts/check_dialog_controller_dispose.py
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"

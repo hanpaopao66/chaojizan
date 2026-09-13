@@ -78,17 +78,19 @@ class _UserProfilePageState extends State<UserProfilePage> {
     final c = TextEditingController(text: u.contactAlias);
     final r = await showDialog<String>(
       context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('备注名'),
-        content: TextField(controller: c, maxLength: 40, autofocus: true,
-            decoration: InputDecoration(hintText: u.name)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('保存')),
-        ],
+      builder: (ctx) => SzDisposeWith(
+        controllers: [c],
+        child: SzDialog(
+          title: const Text('备注名'),
+          content: TextField(controller: c, maxLength: 40, autofocus: true,
+              decoration: InputDecoration(hintText: u.name)),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('保存')),
+          ],
+        ),
       ),
     );
-    c.dispose();
     if (r == null) return;
     await _act(() => store.api.addContact(u.id, alias: r), '');
     await store.refresh();

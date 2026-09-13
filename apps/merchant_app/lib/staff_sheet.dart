@@ -95,13 +95,16 @@ Future<void> showStaffSheet(BuildContext context, ApiClient api) async {
   );
 }
 
-Future<bool?> _addStaffDialog(BuildContext context, ApiClient api) async {
+Future<bool?> _addStaffDialog(BuildContext context, ApiClient api) {
   final phone = TextEditingController();
   final name = TextEditingController();
-  try {
-    return await showDialog<bool>(
-      context: context,
-      builder: (context) => SzDialog(
+  // 两个控制器跟着对话框卸载时销毁(SzDisposeWith)。原来在 finally 里销毁:pop 那一刻对话框
+  // 还在退场,手机上键盘一收、输入框一重建就用到了销毁的控制器
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => SzDisposeWith(
+      controllers: [phone, name],
+      child: SzDialog(
         title: const Text('添加店员'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(
@@ -132,10 +135,6 @@ Future<bool?> _addStaffDialog(BuildContext context, ApiClient api) async {
           ),
         ],
       ),
-    );
-  } finally {
-    // 原来这两个 controller 没人 dispose,每开一次对话框漏一对
-    phone.dispose();
-    name.dispose();
-  }
+    ),
+  );
 }

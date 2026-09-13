@@ -544,6 +544,48 @@ class SzDialog extends StatelessWidget {
       );
 }
 
+/// 弹层(对话框、底部弹层)里用的输入框控制器,跟着弹层一起销毁。
+///
+/// 不能在 `await showDialog(...)` 回来之后马上 `c.dispose()`:pop 那一刻 future 就回来了,
+/// 弹层还在退场动画里,输入框还挂着。手机上键盘同时在收(viewInsets 变了),弹层跟着重建,
+/// 输入框一重建就去用已经销毁的控制器 —— debug 包整屏红,release 包是在用一个销毁了的对象。
+/// 网页上没有软键盘收起这一步,测不出来。
+///
+/// 用法:把弹层内容包一层 `SzDisposeWith(controllers: [c], child: ...)`,后面不再手动 dispose;
+/// 弹层真正卸载(退场动画走完)时这里才销毁。
+class SzDisposeWith extends StatefulWidget {
+  const SzDisposeWith({super.key, required this.controllers, required this.child});
+
+  /// TextEditingController、FocusNode 这类
+  final List<ChangeNotifier> controllers;
+  final Widget child;
+
+  @override
+  State<SzDisposeWith> createState() => _SzDisposeWithState();
+}
+
+class _SzDisposeWithState extends State<SzDisposeWith> {
+  // 以第一次拿到的为准:builder 每次重建都会传进来同一批
+  late final List<ChangeNotifier> _owned;
+
+  @override
+  void initState() {
+    super.initState();
+    _owned = [...widget.controllers];
+  }
+
+  @override
+  void dispose() {
+    for (final c in _owned) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 /// 时间线节点状态。
 enum SzStepState { done, now, todo }
 

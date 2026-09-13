@@ -452,30 +452,35 @@ List<InlineSpan> mentionSpans(String text, List<Map<String, dynamic>> mentions, 
 /// 底部弹出的评论输入框(≤1000 字)。返回写好的文字,取消返回 null。
 Future<String?> showCommentInput(BuildContext context, {String hint = '发一条友善的评论', int maxLength = 1000}) {
   final c = TextEditingController();
+  // 控制器跟着弹层卸载时再销毁(见 SzDisposeWith):原来 whenComplete 里销毁,
+  // 手机上点「发布」键盘一收,退场中的输入框重建就用到了销毁的控制器,整屏红
   return szShowSheet<String>(
     context: context,
-    builder: (ctx) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-      child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Expanded(
-              child: TextField(
-                controller: c,
-                autofocus: true,
-                minLines: 1,
-                maxLines: 5,
-                maxLength: maxLength,
-                decoration: InputDecoration(hintText: hint, counterText: ''),
+    builder: (ctx) => SzDisposeWith(
+      controllers: [c],
+      child: Padding(
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              Expanded(
+                child: TextField(
+                  controller: c,
+                  autofocus: true,
+                  minLines: 1,
+                  maxLines: 5,
+                  maxLength: maxLength,
+                  decoration: InputDecoration(hintText: hint, counterText: ''),
+                ),
               ),
-            ),
-            TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('发布')),
-          ]),
+              TextButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('发布')),
+            ]),
+          ),
         ),
       ),
     ),
-  ).whenComplete(c.dispose);
+  );
 }
 
 /// 一楼的全部回复。

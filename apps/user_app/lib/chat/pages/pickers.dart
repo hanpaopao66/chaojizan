@@ -367,16 +367,18 @@ Future<void> _report(BuildContext context, Map<String, dynamic> body) async {
     final c = TextEditingController();
     final r = await showDialog<String>(
       context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('写明原因'),
-        content: TextField(controller: c, maxLength: 500, maxLines: 3, autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('提交')),
-        ],
+      builder: (ctx) => SzDisposeWith(
+        controllers: [c],
+        child: SzDialog(
+          title: const Text('写明原因'),
+          content: TextField(controller: c, maxLength: 500, maxLines: 3, autofocus: true),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('提交')),
+          ],
+        ),
       ),
     );
-    c.dispose();
     if (r == null) return;
     note = r;
   }

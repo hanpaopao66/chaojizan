@@ -156,37 +156,39 @@ Future<String?> vPrompt(BuildContext context,
     String? Function(String text)? validate}) async {
   final c = TextEditingController(text: initial);
   String? err;
-  final r = await showDialog<String>(
+  // 控制器跟着对话框卸载时再销毁(SzDisposeWith):pop 之后对话框还在退场,不能马上 dispose
+  return showDialog<String>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setLocal) => SzDialog(
-        title: Text(title),
-        content: TextField(
-          controller: c,
-          autofocus: true,
-          maxLength: maxLength,
-          maxLines: maxLines,
-          decoration: InputDecoration(hintText: hint, errorText: err),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
-            onPressed: () {
-              final e = validate?.call(c.text);
-              if (e != null) {
-                setLocal(() => err = e);
-                return;
-              }
-              Navigator.pop(ctx, c.text);
-            },
-            child: Text(ok),
+    builder: (ctx) => SzDisposeWith(
+      controllers: [c],
+      child: StatefulBuilder(
+        builder: (ctx, setLocal) => SzDialog(
+          title: Text(title),
+          content: TextField(
+            controller: c,
+            autofocus: true,
+            maxLength: maxLength,
+            maxLines: maxLines,
+            decoration: InputDecoration(hintText: hint, errorText: err),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(
+              onPressed: () {
+                final e = validate?.call(c.text);
+                if (e != null) {
+                  setLocal(() => err = e);
+                  return;
+                }
+                Navigator.pop(ctx, c.text);
+              },
+              child: Text(ok),
+            ),
+          ],
+        ),
       ),
     ),
   );
-  c.dispose();
-  return r;
 }
 
 /// 按游标翻页的列表:下拉刷新、滑到底自动加载下一页、空状态、错误态、尾巴上的「没有更多了」。

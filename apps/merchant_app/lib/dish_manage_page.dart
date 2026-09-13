@@ -460,10 +460,12 @@ class _DishManagePageState extends State<DishManagePage> {
 
   Future<void> _batchCategory() async {
     final controller = TextEditingController();
-    try {
-      final category = await showDialog<String>(
-        context: context,
-        builder: (dialog) => SzDialog(
+    // 控制器跟着对话框卸载时销毁(SzDisposeWith),不在 pop 回来之后马上销毁:对话框那时还在退场
+    final category = await showDialog<String>(
+      context: context,
+      builder: (dialog) => SzDisposeWith(
+        controllers: [controller],
+        child: SzDialog(
           title: Text('把 ${_selected.length} 道菜改到新分类'),
           content: TextField(
             controller: controller,
@@ -483,13 +485,11 @@ class _DishManagePageState extends State<DishManagePage> {
                 child: const Text('确认')),
           ],
         ),
-      );
-      if (category == null || category.isEmpty) return;
-      await _batch('改分类',
-          (id) => widget.api.updateDish(id, {'category': category}));
-    } finally {
-      controller.dispose();
-    }
+      ),
+    );
+    if (category == null || category.isEmpty) return;
+    await _batch('改分类',
+        (id) => widget.api.updateDish(id, {'category': category}));
   }
 
   /// 缩略图。缺图的压一个角标在右下角(#33 4.2)。

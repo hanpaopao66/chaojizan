@@ -69,22 +69,24 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
     final c = TextEditingController(text: '${_me?['bio'] ?? ''}');
     final r = await showDialog<String>(
       context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('签名'),
-        content: TextField(
-          controller: c,
-          autofocus: true,
-          maxLength: 140,
-          maxLines: 3,
-          decoration: const InputDecoration(hintText: '一句话介绍自己,资料页上所有人都看得到'),
+      builder: (ctx) => SzDisposeWith(
+        controllers: [c],
+        child: SzDialog(
+          title: const Text('签名'),
+          content: TextField(
+            controller: c,
+            autofocus: true,
+            maxLength: 140,
+            maxLines: 3,
+            decoration: const InputDecoration(hintText: '一句话介绍自己,资料页上所有人都看得到'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('保存')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text), child: const Text('保存')),
-        ],
       ),
     );
-    c.dispose();
     if (r != null) await _patch({'bio': r.trim()});
   }
 

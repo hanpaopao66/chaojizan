@@ -418,16 +418,18 @@ class ComposerState extends State<Composer> {
     final c = TextEditingController(text: 'https://');
     final r = await showDialog<String>(
       context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('添加链接'),
-        content: TextField(controller: c, autofocus: true, keyboardType: TextInputType.url),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
-        ],
+      builder: (ctx) => SzDisposeWith(
+        controllers: [c],
+        child: SzDialog(
+          title: const Text('添加链接'),
+          content: TextField(controller: c, autofocus: true, keyboardType: TextInputType.url),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('确定')),
+          ],
+        ),
       ),
     );
-    c.dispose();
     if (r == null) return null;
     final ok = RegExp(r'^https?://[^\s]+\.[^\s]+').hasMatch(r);
     if (!ok && mounted) {

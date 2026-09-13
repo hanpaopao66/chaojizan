@@ -26,42 +26,44 @@ Future<({String title, bool public})?> _askNewFolder(BuildContext context) async
   String? err;
   final r = await showDialog<({String title, bool public})>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setLocal) => SzDialog(
-        title: const Text('新建收藏夹'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            controller: c,
-            autofocus: true,
-            maxLength: _folderTitleMax,
-            decoration: InputDecoration(hintText: '比如「学做菜」', errorText: err),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('公开'),
-            subtitle: const Text('公开的收藏夹会出现在你的空间里'),
-            value: public,
-            onChanged: (v) => setLocal(() => public = v),
-          ),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
-            onPressed: () {
-              final e = _checkFolderTitle(c.text);
-              if (e != null) {
-                setLocal(() => err = e);
-                return;
-              }
-              Navigator.pop(ctx, (title: c.text.trim(), public: public));
-            },
-            child: const Text('建好了'),
-          ),
-        ],
+    builder: (ctx) => SzDisposeWith(
+      controllers: [c],
+      child: StatefulBuilder(
+        builder: (ctx, setLocal) => SzDialog(
+          title: const Text('新建收藏夹'),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: c,
+              autofocus: true,
+              maxLength: _folderTitleMax,
+              decoration: InputDecoration(hintText: '比如「学做菜」', errorText: err),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('公开'),
+              subtitle: const Text('公开的收藏夹会出现在你的空间里'),
+              value: public,
+              onChanged: (v) => setLocal(() => public = v),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(
+              onPressed: () {
+                final e = _checkFolderTitle(c.text);
+                if (e != null) {
+                  setLocal(() => err = e);
+                  return;
+                }
+                Navigator.pop(ctx, (title: c.text.trim(), public: public));
+              },
+              child: const Text('建好了'),
+            ),
+          ],
+        ),
       ),
     ),
   );
-  c.dispose();
   return r;
 }
 

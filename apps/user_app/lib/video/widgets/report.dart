@@ -48,16 +48,18 @@ Future<void> reportTarget(BuildContext context, {required String targetType, int
     final c = TextEditingController();
     final r = await showDialog<String>(
       context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('说明一下'),
-        content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: const InputDecoration(hintText: '至少 5 个字')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('提交')),
-        ],
+      builder: (ctx) => SzDisposeWith(
+        controllers: [c],
+        child: SzDialog(
+          title: const Text('说明一下'),
+          content: TextField(controller: c, autofocus: true, maxLength: 200, decoration: const InputDecoration(hintText: '至少 5 个字')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('提交')),
+          ],
+        ),
       ),
     );
-    c.dispose();
     if (r == null || !context.mounted) return;
     note = r;
   }

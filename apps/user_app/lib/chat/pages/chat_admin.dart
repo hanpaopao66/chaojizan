@@ -562,50 +562,52 @@ class _InviteLinksPageState extends State<InviteLinksPage> {
     var approval = false;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, set) => SzDialog(
-          scrollable: true,
-          title: const Text('新建邀请链接'),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            TextField(controller: title, maxLength: 32, decoration: const InputDecoration(labelText: '名称(可选)')),
-            DropdownButtonFormField<Duration?>(
-              initialValue: expire,
-              decoration: const InputDecoration(labelText: '有效期'),
-              items: const [
-                DropdownMenuItem(value: null, child: Text('不过期')),
-                DropdownMenuItem(value: Duration(hours: 1), child: Text('1 小时')),
-                DropdownMenuItem(value: Duration(days: 1), child: Text('1 天')),
-                DropdownMenuItem(value: Duration(days: 7), child: Text('7 天')),
-              ],
-              onChanged: (v) => set(() => expire = v),
-            ),
-            DropdownButtonFormField<int?>(
-              initialValue: limit,
-              decoration: const InputDecoration(labelText: '可用次数'),
-              items: const [
-                DropdownMenuItem(value: null, child: Text('不限')),
-                DropdownMenuItem(value: 1, child: Text('1 次')),
-                DropdownMenuItem(value: 10, child: Text('10 次')),
-                DropdownMenuItem(value: 100, child: Text('100 次')),
-              ],
-              onChanged: (v) => set(() => limit = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: approval,
-              onChanged: (v) => set(() => approval = v),
-              title: const Text('要管理员审批'),
-            ),
-          ]),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('创建')),
-          ],
+      builder: (ctx) => SzDisposeWith(
+        controllers: [title],
+        child: StatefulBuilder(
+          builder: (ctx, set) => SzDialog(
+            scrollable: true,
+            title: const Text('新建邀请链接'),
+            content: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextField(controller: title, maxLength: 32, decoration: const InputDecoration(labelText: '名称(可选)')),
+              DropdownButtonFormField<Duration?>(
+                initialValue: expire,
+                decoration: const InputDecoration(labelText: '有效期'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('不过期')),
+                  DropdownMenuItem(value: Duration(hours: 1), child: Text('1 小时')),
+                  DropdownMenuItem(value: Duration(days: 1), child: Text('1 天')),
+                  DropdownMenuItem(value: Duration(days: 7), child: Text('7 天')),
+                ],
+                onChanged: (v) => set(() => expire = v),
+              ),
+              DropdownButtonFormField<int?>(
+                initialValue: limit,
+                decoration: const InputDecoration(labelText: '可用次数'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('不限')),
+                  DropdownMenuItem(value: 1, child: Text('1 次')),
+                  DropdownMenuItem(value: 10, child: Text('10 次')),
+                  DropdownMenuItem(value: 100, child: Text('100 次')),
+                ],
+                onChanged: (v) => set(() => limit = v),
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: approval,
+                onChanged: (v) => set(() => approval = v),
+                title: const Text('要管理员审批'),
+              ),
+            ]),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('创建')),
+            ],
+          ),
         ),
       ),
     );
     final t = title.text.trim();
-    title.dispose();
     if (ok != true) return;
     try {
       await ChatStore.instance.api.createInvite(widget.chatId,

@@ -402,16 +402,18 @@ class _StickerSetsPageState extends State<StickerSetsPage> {
     final c = TextEditingController();
     final title = await showDialog<String>(
       context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('新建贴纸包'),
-        content: TextField(controller: c, autofocus: true, maxLength: 64, decoration: const InputDecoration(hintText: '起个名字')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('建')),
-        ],
+      builder: (ctx) => SzDisposeWith(
+        controllers: [c],
+        child: SzDialog(
+          title: const Text('新建贴纸包'),
+          content: TextField(controller: c, autofocus: true, maxLength: 64, decoration: const InputDecoration(hintText: '起个名字')),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('建')),
+          ],
+        ),
       ),
     );
-    c.dispose();
     if (title == null || title.isEmpty || !mounted) return;
     try {
       final s = await ChatStore.instance.api.createStickerSet(title);
@@ -578,16 +580,18 @@ class _StickerSetEditPageState extends State<StickerSetEditPage> {
     final c = TextEditingController(text: s.title);
     final t = await showDialog<String>(
       context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('改名'),
-        content: TextField(controller: c, autofocus: true, maxLength: 64),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('保存')),
-        ],
+      builder: (ctx) => SzDisposeWith(
+        controllers: [c],
+        child: SzDialog(
+          title: const Text('改名'),
+          content: TextField(controller: c, autofocus: true, maxLength: 64),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('保存')),
+          ],
+        ),
       ),
     );
-    c.dispose();
     if (t == null || t.isEmpty) return;
     try {
       final n = await _store.api.renameStickerSet(s.id, t);

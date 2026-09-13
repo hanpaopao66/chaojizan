@@ -47,6 +47,7 @@ analyze:
 	@bash scripts/check_fontsize_drift.sh
 	@python3 scripts/check_macos_entitlements.py && echo "== macOS 权限声明 ✓"
 	@bash scripts/check_wide_layout.sh
+	@python3 scripts/check_dialog_controller_dispose.py && echo "== 弹层里的输入框控制器跟着弹层销毁 ✓"
 # 先 pub get 再 analyze。只写 --no-pub 的话,包解析一过期
 # (在别的 app 里跑过 flutter test 就会)analyze 会喷出几千条
 # "package:flutter/material.dart 不存在" —— 全是假的。
