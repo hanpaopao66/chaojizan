@@ -131,7 +131,7 @@ export default function RiderPayFilm() {
         </div>
       </div>
 
-      <Caption title={CAPS[capIdx]} narrow={narrow} minDetail={0} detailColor={P.ink2}
+      <Caption titles={CAPS} index={capIdx} narrow={narrow} minDetail={0} detailColor={P.ink2}
         detail={<span style={{ opacity: tween(T, { start: CUE.close + 0.3, end: CUE.close + 0.9 }) }}>抢单不派单，不接不扣分。每一单在透明中心的「今日逐单」里都有一行（脱敏）。</span>} />
     </Film>
   )

@@ -139,7 +139,7 @@ export default function MerchantSplitFilm() {
         </span>
       </div>
 
-      <Caption title={CAPS[capIdx]} narrow={narrow} minDetail={0}
+      <Caption titles={CAPS} index={capIdx} narrow={narrow} minDetail={0}
         detail={<span style={{ opacity: tween(T, { start: CUE.close + 0.3, end: CUE.close + 0.9 }) }}>5% 是上限，不是目标。哪天 3% 能活，就降到 3%。</span>}
         detailColor={P.ink2} />
     </Film>

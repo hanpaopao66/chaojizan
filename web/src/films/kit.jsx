@@ -15,7 +15,11 @@ import { Icon, reducedMotion, useReducedMotion } from '../SiteChrome.jsx'
  * - 缓动用动效规范的三条真曲线。原稿拿 easeOutBack 近似 spring,
  *   回弹的过冲比 App 里大一截,和 SzMicroKit 那格「spring」对不上;
  * - 画面整块是 role="img" + 一句完整的话。字幕几秒换一次,读屏软件读到的
- *   应该是整件事,不是某一帧碰巧停在屏上的那几个字。 */
+ *   应该是整件事,不是某一帧碰巧停在屏上的那几个字。
+ *
+ * 第三批(2026-09-13,又加了五支)补了一条:片子在一个循环里高度不能变。手机上实测
+ * 十几支里有一半会随字幕换段忽高忽低 25–40 像素,下面的页面跟着跳 —— 字幕改成整组
+ * 叠在同一格里(Caption 的 titles / details),到点才出现的块一开始就占着位置。 */
 
 // ---------- 色板(= site.css 的 .h3 令牌 + 账本深台面) ----------
 
@@ -217,17 +221,34 @@ export function Film({ film, label, loop, summary, dark = false, gap = 18, style
   )
 }
 
-/** 字幕:一句衬线大字 + 一行说明,随段落切换。高度先占住,换字时下面不跳 */
-export function Caption({ title, detail, narrow, color, detailColor, minDetail = 44, children }) {
+/** 几段字叠在同一个格子里,只显示第 index 段:格子的高度是最高那一段的高度 */
+function Stack({ list, index, style }) {
+  return (
+    <div style={{ display: 'grid', ...style }}>
+      {list.map((x, i) => (
+        <div key={i} style={{ gridArea: '1 / 1', minWidth: 0, visibility: i === index ? 'visible' : 'hidden' }}>{x}</div>
+      ))}
+    </div>
+  )
+}
+
+/** 字幕:一句衬线大字 + 一行说明,随段落切换。高度先占住,换字时下面不跳。
+ *
+ *  两种给法:title / detail 只给当前这一段(高度靠 minHeight 占);
+ *  或者 titles / details 整组给、index 指当前段 —— 每一段都叠在同一个格子里,
+ *  格子按最长那段撑开。窄屏上说明会折成三四行,只靠 minHeight 的话换段时片子会
+ *  忽高忽低,下面的页面跟着跳 */
+export function Caption({ title, detail, titles, details, index = 0, narrow, color, detailColor, minDetail = 44, children }) {
+  const titleStyle = {
+    fontFamily: SERIF, fontWeight: 600, fontSize: narrow ? 19 : 23, lineHeight: 1.35,
+    minHeight: narrow ? 26 : 32, color,
+  }
+  const detailStyle = { fontSize: 13, color: detailColor, marginTop: 6, minHeight: minDetail, lineHeight: 1.7 }
   return (
     <div className="sz-film-cap">
-      <div style={{
-        fontFamily: SERIF, fontWeight: 600, fontSize: narrow ? 19 : 23, lineHeight: 1.35,
-        minHeight: narrow ? 26 : 32, color,
-      }}>{title}</div>
-      {detail != null && (
-        <div style={{ fontSize: 13, color: detailColor, marginTop: 6, minHeight: minDetail, lineHeight: 1.7 }}>{detail}</div>
-      )}
+      {titles ? <Stack list={titles} index={index} style={titleStyle} /> : <div style={titleStyle}>{title}</div>}
+      {details ? <Stack list={details} index={index} style={detailStyle} />
+        : detail != null && <div style={detailStyle}>{detail}</div>}
       {children}
     </div>
   )

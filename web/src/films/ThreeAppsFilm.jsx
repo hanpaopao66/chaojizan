@@ -17,7 +17,10 @@ import { Amount, Caption, Ease, FILL, Film, P, enter, pop, tween, useFilm, useWi
  * - 底部原稿有三个「下载 APK」字样的块,不是链接,又正好压在真的三张下载卡上面,删了;
  * - 原稿底下那行「不收集后台定位 / 设备识别码 / 装机列表」不对:骑手端接单期间
  *   锁屏也在定位(前台服务),极光推送会读设备标识(隐私政策的第三方 SDK 表里写着)。
- *   只留查得到的:应用内更新先校验 SHA-256 再装。 */
+ *   只留查得到的:应用内更新先校验 SHA-256 再装。
+ *
+ * 第三批(2026-09-13)补:下单后才出来的订单卡、「这 ¥26 去了哪」、骑手钱包卡原来是到点才插进来,
+ * 手机上三台竖排,片子在一个循环里长高 80 多像素、下面的下载卡跟着往下跳;改成一开始就占着位置。 */
 
 // @serif-cjk-begin
 // 字幕大字(衬线显示,这个圈里的字才会进官网的衬线子集)
@@ -130,40 +133,38 @@ export default function ThreeAppsFilm() {
             <Btn bg={P.clay} style={{ ...FILL, opacity: ordered ? 0 : 1, transform: press(T, CUE.order + 0.2) }}>下单 · ¥26.00</Btn>
             <Btn bg={P.earn} style={{ ...FILL, ...pop(T, CUE.order + 0.5), visibility: ordered ? 'visible' : 'hidden' }}>已下单 · ¥26.00</Btn>
           </div>
-          {ordered && (
-            <Card bar={P.bowl} style={enter(T, CUE.order + 0.7)}>
-              <div style={{ display: 'flex', fontSize: 11.5, alignItems: 'center' }}>
-                <span style={{ flex: 1, fontWeight: 600 }}>订单 #44</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: delivered ? P.earn : P.clay }}>{state}</span>
-              </div>
-              {/* 状态推进:线 220ms → 点 spring(动效规范 04) */}
-              <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 4 }}>
-                {[CUE.accept, CUE.grab, CUE.deliver].map((at, i) => (
-                  <React.Fragment key={at}>
-                    <span style={{
-                      width: 6, height: 6, borderRadius: 3, flex: 'none', background: T >= at ? P.earn : P.line,
-                      transform: `scale(${1 + 0.3 * tween(T, { start: at, end: at + 0.3, ease: Ease.spring })})`,
-                    }} />
-                    <span style={{ flex: 1, height: 2, background: P.line, position: 'relative', overflow: 'hidden' }}>
-                      <span style={{
-                        ...FILL, background: P.earn, transformOrigin: 'left',
-                        transform: `scaleX(${tween(T, { start: at, end: at + 0.4 })})`,
-                      }} />
-                    </span>
-                  </React.Fragment>
-                ))}
-                <span style={{ width: 6, height: 6, borderRadius: 3, background: delivered ? P.earn : P.line, flex: 'none' }} />
-              </div>
-            </Card>
-          )}
-          {split && (
-            <div style={{ background: P.ledger, borderRadius: 10, padding: '9px 11px', ...enter(T, CUE.split) }}>
-              <div style={{ fontSize: 9.5, letterSpacing: 0.8, color: P.dmute }}>这 ¥26 去了哪</div>
-              <Row k="商家" v="¥19.95" size={10.5} color={P.dearn} style={{ color: P.dtext, marginTop: 5 }} />
-              <Row k="骑手" v="¥5.00" size={10.5} color={P.dearn} style={{ color: P.dtext, marginTop: 3 }} />
-              <Row k="平台" v="¥1.05" size={10.5} color={P.dgold} style={{ color: P.dtext, marginTop: 3 }} />
+          {/* 下单后才出来的两张卡:一开始就占着位置(透明)。手机上三台竖排,
+              到点才插进来的话片子长高一截,下面的下载卡跟着往下跳 */}
+          <Card bar={P.bowl} style={enter(T, CUE.order + 0.7)}>
+            <div style={{ display: 'flex', fontSize: 11.5, alignItems: 'center' }}>
+              <span style={{ flex: 1, fontWeight: 600 }}>订单 #44</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: delivered ? P.earn : P.clay }}>{state}</span>
             </div>
-          )}
+            {/* 状态推进:线 220ms → 点 spring(动效规范 04) */}
+            <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', gap: 4 }}>
+              {[CUE.accept, CUE.grab, CUE.deliver].map((at, i) => (
+                <React.Fragment key={at}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: 3, flex: 'none', background: T >= at ? P.earn : P.line,
+                    transform: `scale(${1 + 0.3 * tween(T, { start: at, end: at + 0.3, ease: Ease.spring })})`,
+                  }} />
+                  <span style={{ flex: 1, height: 2, background: P.line, position: 'relative', overflow: 'hidden' }}>
+                    <span style={{
+                      ...FILL, background: P.earn, transformOrigin: 'left',
+                      transform: `scaleX(${tween(T, { start: at, end: at + 0.4 })})`,
+                    }} />
+                  </span>
+                </React.Fragment>
+              ))}
+              <span style={{ width: 6, height: 6, borderRadius: 3, background: delivered ? P.earn : P.line, flex: 'none' }} />
+            </div>
+          </Card>
+          <div style={{ background: P.ledger, borderRadius: 10, padding: '9px 11px', ...enter(T, CUE.split) }}>
+            <div style={{ fontSize: 9.5, letterSpacing: 0.8, color: P.dmute }}>这 ¥26 去了哪</div>
+            <Row k="商家" v="¥19.95" size={10.5} color={P.dearn} style={{ color: P.dtext, marginTop: 5 }} />
+            <Row k="骑手" v="¥5.00" size={10.5} color={P.dearn} style={{ color: P.dtext, marginTop: 3 }} />
+            <Row k="平台" v="¥1.05" size={10.5} color={P.dgold} style={{ color: P.dtext, marginTop: 3 }} />
+          </div>
         </Phone>
 
         {/* 商家端 */}
@@ -200,19 +201,17 @@ export default function ThreeAppsFilm() {
           <Btn bg={grabbed ? P.earn : P.run} style={{ opacity: T >= CUE.hall ? 1 : 0.35, transform: press(T, CUE.grab) }}>
             {grabbed ? (delivered ? '已送达' : '去取餐') : '抢单'}
           </Btn>
-          {grabbed && (
-            <div style={{ background: P.ledger, borderRadius: 10, padding: '10px 12px', ...enter(T, CUE.grab + 0.2) }}>
-              <div style={{ fontSize: 9.5, letterSpacing: 0.8, color: P.dmute }}>钱包 · 这一单</div>
-              {delivered
-                ? <Amount v={`+${yuan(tween(T, { to: 5, start: CUE.deliver, end: CUE.deliver + 0.9 }))}`} size={20} color={P.dearn} />
-                : <Amount v="¥5.00" size={20} color={P.dmute} weight={400} />}
-              <div style={{ fontSize: 10, color: P.dmute, marginTop: 3 }}>{delivered ? '平台抽成 ¥0 · 订单完成即入账' : '订单完成后入账 · 平台抽成 ¥0'}</div>
-            </div>
-          )}
+          <div style={{ background: P.ledger, borderRadius: 10, padding: '10px 12px', ...enter(T, CUE.grab + 0.2) }}>
+            <div style={{ fontSize: 9.5, letterSpacing: 0.8, color: P.dmute }}>钱包 · 这一单</div>
+            {delivered
+              ? <Amount v={`+${yuan(tween(T, { to: 5, start: CUE.deliver, end: CUE.deliver + 0.9 }))}`} size={20} color={P.dearn} />
+              : <Amount v="¥5.00" size={20} color={P.dmute} weight={400} />}
+            <div style={{ fontSize: 10, color: P.dmute, marginTop: 3 }}>{delivered ? '平台抽成 ¥0 · 订单完成即入账' : '订单完成后入账 · 平台抽成 ¥0'}</div>
+          </div>
         </Phone>
       </div>
 
-      <Caption title={TITLES[capIdx]} detail={DETAILS[capIdx]} narrow={narrow} minDetail={22} detailColor={P.ink2}>
+      <Caption titles={TITLES} details={DETAILS} index={capIdx} narrow={narrow} minDetail={22} detailColor={P.ink2}>
         <div style={{ fontSize: 12, color: P.ink3, marginTop: 8 }}>Android arm64 · 内置更新检查 · 应用内更新先校验 SHA-256 再安装</div>
       </Caption>
     </Film>

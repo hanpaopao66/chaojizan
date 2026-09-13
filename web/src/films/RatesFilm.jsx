@@ -126,7 +126,7 @@ export default function RatesFilm({ stateOf }) {
         <span><span style={{ display: 'inline-block', width: 14, height: 8, borderRadius: 2, background: BAND, marginRight: 6 }} />行业区间（普遍口径，非某一家实数）</span>
       </div>
 
-      <Caption title={TITLES[capIdx]} detail={DETAILS[capIdx]} narrow={narrow} detailColor={P.ink2} />
+      <Caption titles={TITLES} details={DETAILS} index={capIdx} narrow={narrow} detailColor={P.ink2} />
     </Film>
   )
 }

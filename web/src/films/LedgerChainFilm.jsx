@@ -162,15 +162,14 @@ export default function LedgerChainFilm() {
             </span>
           )
         })}
-        {T >= CUE.flag && (
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', padding: '5px 11px', borderRadius: 999,
-            background: 'rgba(224,107,107,.14)', color: P.dbad, fontSize: 12, ...pop(T, CUE.flag),
-          }}>节点页上公开挂着「对不上」· 谁都查得到是哪一天</span>
-        )}
+        {/* 一开始就占着位置(透明):手机上它会折到下一行,到点才插进来片子就长高一截 */}
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', padding: '5px 11px', borderRadius: 999,
+          background: 'rgba(224,107,107,.14)', color: P.dbad, fontSize: 12, ...pop(T, CUE.flag),
+        }}>节点页上公开挂着「对不上」· 谁都查得到是哪一天</span>
       </div>
 
-      <Caption title={TITLES[capIdx]} detail={DETAILS[capIdx]} narrow={narrow}
+      <Caption titles={TITLES} details={DETAILS} index={capIdx} narrow={narrow}
         color={capIdx === 3 ? P.dgold : P.dtext} detailColor={P.dmute}>
         <div style={{ fontFamily: MONO, fontSize: 12, color: P.dfaint, marginTop: 6 }}>
           server/app/services/ledger.py · witness/ · docs/LEDGER-SPEC.md

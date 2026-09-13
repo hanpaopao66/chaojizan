@@ -145,15 +145,19 @@ export default function AuditLampFilm() {
                 <span style={{ fontSize: 14, fontWeight: 600 }}>{c[0]}</span>
               </div>
               <div style={{ fontSize: 12.5, color: P.ink2, marginTop: 4 }}>{c[1]}</div>
-              {failed && (
-                <div style={{ fontSize: 12, color: P.danger, marginTop: 6, ...pop(T, CUE.problem + 0.2) }}>1 笔差 ¥0.01 · 已挂公示</div>
+              {/* 标红的是第三条:这一行一开始就占着位置,标红时卡片不长高
+                  (手机上三张卡竖排,长高一截下面的页面就跟着跳) */}
+              {i === 2 && (
+                <div style={{ fontSize: 12, color: P.danger, marginTop: 6, visibility: failed ? 'visible' : 'hidden', ...pop(T, CUE.problem + 0.2) }}>
+                  1 笔差 ¥0.01 · 已挂公示
+                </div>
               )}
             </div>
           )
         })}
       </div>
 
-      <Caption title={TITLES[capIdx]} detail={DETAILS[capIdx]} narrow={narrow}
+      <Caption titles={TITLES} details={DETAILS} index={capIdx} narrow={narrow}
         color={capIdx === 2 ? P.danger : P.ink} detailColor={P.ink2}>
         <div style={{ fontFamily: MONO, fontSize: 12, color: P.ink3, marginTop: 4 }}>server/app/services/audit.py</div>
       </Caption>

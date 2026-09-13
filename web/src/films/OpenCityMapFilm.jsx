@@ -201,7 +201,7 @@ export default function OpenCityMapFilm() {
         </div>
       </div>
 
-      <Caption title={TITLES[capIdx]} detail={DETAILS[capIdx]} narrow={narrow} detailColor={P.ink2}>
+      <Caption titles={TITLES} details={DETAILS} index={capIdx} narrow={narrow} detailColor={P.ink2}>
         <div style={{ fontFamily: MONO, fontSize: 12, color: P.ink3, marginTop: 4 }}>docs/OPEN-A-CITY.md · web/public/geo/china.json</div>
       </Caption>
     </Film>
