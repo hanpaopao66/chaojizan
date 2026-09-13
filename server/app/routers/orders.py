@@ -2470,13 +2470,14 @@ async def rider_location(
 # 以前是两条私聊(用户↔商家、用户↔骑手):出餐和配送本来是同一件事,用户却要在两个窗口里
 # 来回复述,商家和骑手之间也说不上话。现在一单一个群,三方都在:
 # - 号码互相看不到:聊天里不出现任何电话,要打电话走订单详情里的隐私号;
-# - 订单终结 24 小时后归档:还能翻,不能再发;7 天后当事人看不到(留档供仲裁,管理后台照常能查);
+# - 送达 24 小时后归档:还能翻,不能再发(取消的单从取消那一刻算);7 天后当事人看不到
+#   (留档供仲裁,管理后台照常能查);
 # - 跑腿单没有商家(取件点只是个地址),商家自配送、还没骑手接单时群里没有骑手。
 #
 # 兼容老版本客户端:老用户端发消息总带 to=merchant/rider、拉消息带 peer —— 带了对端的
 # 仍按私聊存、按私聊给,只有那两方看得到;新客户端不带 to(或 to=group)就是群消息。
 
-_CHAT_READONLY_HOURS = 24  # 订单终结后归档:能翻不能发
+_CHAT_READONLY_HOURS = 24  # 送达(或取消)后归档:能翻不能发
 _CHAT_HIDE_DAYS = 7        # 之后当事人不可见(留档供仲裁)
 _TERMINAL = (OrderStatus.COMPLETED, OrderStatus.CANCELLED)
 _CHAT_LIST_DAYS = 3        # 会话列表里列多久内下的单(和用户端 orderChatListed 同口径)
@@ -2527,23 +2528,31 @@ async def _chat_context(db, order_no: str, user: User):
     return order, role, members
 
 
+def _chat_archive_base(order: Order) -> datetime | None:
+    """群从哪一刻起算归档:送达的单从送达那一刻(设计稿「送达 24 小时后自动归档」),
+    取消的单从取消那一刻;还在进行中返回 None。
+
+    不从「订单完成」起算:确认收货最晚在送达 24 小时后才自动发生,那样群要多开一整天,
+    和群里写的「送达 24 小时后」对不上。"""
+    base = order.delivered_at
+    if base is None:
+        if order.status not in _TERMINAL:
+            return None
+        base = order.updated_at or order.created_at   # 取消的单;老数据没有 delivered_at 的完成单
+    return base if base.tzinfo else base.replace(tzinfo=timezone.utc)
+
+
 def _chat_age_hours(order: Order) -> float | None:
-    """订单终结后经过的小时数;未终结返回 None。"""
-    if order.status not in _TERMINAL:
+    """从送达(或取消)起经过的小时数;还在进行中返回 None。"""
+    base = _chat_archive_base(order)
+    if base is None:
         return None
-    updated = order.updated_at or order.created_at
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - updated).total_seconds() / 3600
+    return (datetime.now(timezone.utc) - base).total_seconds() / 3600
 
 
 def _chat_archive_at(order: Order) -> datetime | None:
-    if order.status not in _TERMINAL:
-        return None
-    updated = order.updated_at or order.created_at
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
-    return updated + timedelta(hours=_CHAT_READONLY_HOURS)
+    base = _chat_archive_base(order)
+    return None if base is None else base + timedelta(hours=_CHAT_READONLY_HOURS)
 
 
 def _chat_title(order: Order, merchant: Merchant | None) -> str:
@@ -2612,7 +2621,7 @@ async def send_message(
     age = _chat_age_hours(order)
     if age is not None and age >= _CHAT_READONLY_HOURS:
         raise HTTPException(
-            409, "这一单的群已归档(订单结束 24 小时后只读);有问题请走售后或客服工单")
+            409, "这一单的群已归档(送达 24 小时后只读);有问题请走售后或客服工单")
     kind = str(payload.get("kind", "text"))
     if kind not in ("text", "image", "quick"):
         raise HTTPException(422, "kind 只支持 text / image / quick")

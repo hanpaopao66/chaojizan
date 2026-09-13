@@ -2143,9 +2143,10 @@ class Coupon(Base):
 
 
 class Message(Base):
-    """订单内聊天(用户↔骑手 / 用户↔商家)。
+    """订单群:一单一个群(用户 + 商家 + 骑手),见 routers/orders.py「订单群」一节。
 
-    支付后开启,订单终结 2 小时后只读,7 天后当事人不可见
+    receiver_role = 'group' 是群消息,三方都看得到;customer / merchant / rider 是老版本客户端的
+    私聊,只给那两方。支付后开启,送达(或取消)24 小时后只读,7 天后当事人不可见
     (留档供仲裁);文本过敏感词;电话(隐私号)仍是兜底。
     """
     __tablename__ = "messages"

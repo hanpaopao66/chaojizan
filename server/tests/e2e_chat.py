@@ -4,7 +4,7 @@
 - 顾客对商家、骑手只显示「顾客」,自己是「你」;群头给群里有谁、置顶的订单条;
 - 老版本用户端带 to / peer 的私聊照旧只有那两方看得到,第三方看不到;
 - 未读数:群消息给除自己外的每个人 +1,读取清零;会话列表 /orders/chat-threads 一次给齐;
-- 敏感词 422、非当事人 403;终结 24 小时后归档(能翻不能发)、7 天后当事人不可见,admin 始终可查。
+- 敏感词 422、非当事人 403;送达 24 小时后归档(能翻不能发)、7 天后当事人不可见,admin 始终可查。
 
 在 server/ 目录下运行:python -m tests.e2e_chat
 """
@@ -117,23 +117,23 @@ async def main():
     assert err["_error"] == 403, err
     print("✓ 敏感词 422,非当事人 403")
 
-    # 6) 走完订单;终结 24 小时后归档(能翻不能发),7 天后当事人不可见;admin 始终可查
+    # 6) 走完订单;送达 24 小时后归档(能翻不能发),7 天后当事人不可见;admin 始终可查
     call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
     call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
     call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
     call("POST", f"/orders/{no}/transition", customer, {"to_status": "completed"})
     async with SessionLocal() as db:
         await db.execute(text(
-            "UPDATE orders SET updated_at = now() - interval '3 hours' "
-            "WHERE order_no = :no"), {"no": no})
+            "UPDATE orders SET delivered_at = now() - interval '3 hours', "
+            "updated_at = now() - interval '3 hours' WHERE order_no = :no"), {"no": no})
         await db.commit()
     call("POST", f"/orders/{no}/messages", customer, {"content": "味道不错"})  # 24 小时内还能发
     view = call("GET", f"/orders/{no}/messages", customer)
     assert not view["readonly"] and view["archive_at"], view
     async with SessionLocal() as db:
         await db.execute(text(
-            "UPDATE orders SET updated_at = now() - interval '25 hours' "
-            "WHERE order_no = :no"), {"no": no})
+            "UPDATE orders SET delivered_at = now() - interval '25 hours', "
+            "updated_at = now() - interval '25 hours' WHERE order_no = :no"), {"no": no})
         await db.commit()
     err = call("POST", f"/orders/{no}/messages", customer, {"content": "还在吗"},
                expect_error=True)
@@ -142,15 +142,15 @@ async def main():
     assert view["readonly"] is True and "味道不错" in texts(view), "归档后还能翻"
     async with SessionLocal() as db:
         await db.execute(text(
-            "UPDATE orders SET updated_at = now() - interval '8 days' "
-            "WHERE order_no = :no"), {"no": no})
+            "UPDATE orders SET delivered_at = now() - interval '8 days', "
+            "updated_at = now() - interval '8 days' WHERE order_no = :no"), {"no": no})
         await db.commit()
     err = call("GET", f"/orders/{no}/messages", customer, expect_error=True)
     assert err["_error"] == 403 and "归档" in err["detail"], err
     logs = call("GET", f"/admin/orders/{no}/messages", admin)
     assert len(logs) == 6 and logs[0]["content"] == "不要香菜"
     assert sum(1 for m in logs if m["to"] == "group") == 5   # 只有老客户端那条是私聊
-    print("✓ 终结 24 小时后归档能翻不能发,7 天后当事人不可见,admin 仲裁可查全量")
+    print("✓ 送达 24 小时后归档能翻不能发,7 天后当事人不可见,admin 仲裁可查全量")
 
     print("\ne2e_chat 全部通过 ✅")
 

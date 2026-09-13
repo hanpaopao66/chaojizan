@@ -14,7 +14,7 @@ import 'sz_widgets.dart' show yuanOf;
 /// 商家和骑手之间也说不上话。现在照 Telegram 的群来:顶上一条置顶的订单条(左侧竖线 + 一行摘要 + 看订单),
 /// 发言人名字按角色带色,服务消息是灰药丸,底下四个快捷回复 —— 骑手在电动车上、用户单手拿手机,都不该打字。
 ///
-/// 群里不出现任何手机号;订单结束 24 小时后归档:还能翻,不能再发(服务端 `_CHAT_READONLY_HOURS`)。
+/// 群里不出现任何手机号;送达 24 小时后归档:还能翻,不能再发(服务端 `_CHAT_READONLY_HOURS`,取消的单从取消算)。
 /// 3 秒轮询兜底。老版本客户端发的私聊(带 to 的)服务端只给那两方,这里标一句「只有你们两个看得到」。
 class OrderChatPage extends StatefulWidget {
   const OrderChatPage({
@@ -172,7 +172,7 @@ class _OrderChatPageState extends State<OrderChatPage> {
                   ),
                   const SizedBox(width: 7),
                   Expanded(
-                    child: Text('群里不出现手机号;订单结束 24 小时后自动归档,还能翻,不能再发。',
+                    child: Text('群里不出现手机号;送达 24 小时后自动归档,还能翻,不能再发。',
                         style: TextStyle(fontSize: kFontMicro, height: 1.6, color: sz.inkFaint)),
                   ),
                 ]),
