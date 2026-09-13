@@ -215,24 +215,56 @@ async def lock_cart(
     return _view(cart, user.id)
 
 
-async def consume_cart_for_order(code: str, user_id: int) -> dict:
-    """下单时原子关车(GETDEL):返回车内容;校验发起人与锁定态。"""
-    redis = get_redis()
-    raw = await redis.getdel(_KEY.format(code=code))
+# 车还是下单前看到的那一份才删,返回删之前剩下的毫秒数(落库失败时照原样放回去);
+# 车没了返回 -1,车被改过返回 -2(不删)
+_CLAIM_LUA = """
+local cur = redis.call('GET', KEYS[1])
+if not cur then return -1 end
+if cur ~= ARGV[1] then return -2 end
+local ttl = redis.call('PTTL', KEYS[1])
+redis.call('DEL', KEYS[1])
+return ttl
+"""
+
+
+async def peek_cart_for_order(code: str, user_id: int) -> tuple[dict, str]:
+    """下单前看车:校验发起人与锁定态,**不动车**。返回 (车, 原文)。
+
+    真正关车在订单落库前一刻(claim_cart_for_order)。原来一上来就 GETDEL,
+    后面售罄、超出配送范围、券用不了……任何一步没过,车就没了,同伴那边也当成
+    已下单退出了拼单页;现在中途没过车还在,改完接着结算。"""
+    raw = await get_redis().get(_KEY.format(code=code))
     if raw is None:
         raise HTTPException(404, "拼单码不存在或已过期")
+    raw = raw if isinstance(raw, str) else raw.decode()
     cart = json.loads(raw)
     if cart["owner_id"] != user_id:
-        # 不是发起人,车放回去
-        await redis.set(_KEY.format(code=code),
-                        raw if isinstance(raw, str) else raw.decode(),
-                        ex=TTL_SECONDS)
         raise HTTPException(403, "只有发起人能用拼单车下单")
     if not cart["locked"]:
-        await redis.set(_KEY.format(code=code),
-                        raw if isinstance(raw, str) else raw.decode(),
-                        ex=TTL_SECONDS)
         raise HTTPException(409, "请先锁单再去结算(锁后同伴不能再改菜)")
-    await manager.broadcast(f"cart:{code}",
+    return cart, raw
+
+
+async def claim_cart_for_order(code: str, raw: str) -> int:
+    """订单落库前一刻原子关车:车还是 peek 时那一份才删(比对原文,Lua 里一步做完)。
+
+    两台设备同时拿这车下单,只有一单关得上车,另一单 409、整单回滚;
+    发起人在别处解锁改过菜,也 409,车原样留着。返回车删之前剩下的毫秒数。"""
+    ttl = int(await get_redis().eval(_CLAIM_LUA, 1, _KEY.format(code=code), raw))
+    if ttl == -1:
+        raise HTTPException(409, "这车拼单已经下过单或过期了")
+    if ttl == -2:
+        raise HTTPException(409, "拼单车刚被改过,回拼单页看一眼再结算")
+    return ttl
+
+
+async def restore_cart(code: str, raw: str, ttl_ms: int) -> None:
+    """关车之后订单没落上库:车照原样放回去,有效期接着算"""
+    await get_redis().set(_KEY.format(code=code), raw,
+                          px=ttl_ms if ttl_ms > 0 else TTL_SECONDS * 1000)
+
+
+async def announce_ordered(cart: dict) -> None:
+    """订单落库之后才告诉同伴「已下单」"""
+    await manager.broadcast(f"cart:{cart['code']}",
                             {"type": "cart", "event": "ordered", "cart": cart})
-    return cart

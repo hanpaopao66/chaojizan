@@ -65,6 +65,17 @@ async def main():
             "address": "拼单测试地址", "lat": 30.66, "lng": 104.08,
             "group_code": code}, expect_error=True)
         assert err["_error"] == 403, err
+        # 下单中途没过(这里用一张不存在的券):车还在、还锁着,同伴也没被当成已下单。
+        # 原来一上来就把车删了,后面任何一步失败车都跟着没了
+        err = call("POST", "/orders", owner, {
+            "merchant_id": sid,
+            "items": [{"dish_id": dish["id"], "quantity": 2}],
+            "address": "拼单测试地址", "lat": 30.66, "lng": 104.08,
+            "group_code": code, "coupon_id": 2_000_000_000}, expect_error=True)
+        assert err["_error"] == 422 and "优惠券" in err["detail"], err
+        still = call("GET", f"/group-carts/{code}", buddy)
+        assert still["locked"] and still["total_cents"] == 5000, still
+        print("✓ 下单中途失败,拼单车原样留着")
         order = call("POST", "/orders", owner, {
             "merchant_id": sid,
             "items": [{"dish_id": dish["id"], "quantity": 2}],

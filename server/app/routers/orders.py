@@ -339,13 +339,14 @@ async def create_order(
     ):
         raise HTTPException(409, "商家不存在或已打烊")
 
-    # 拼单:校验拼单码并原子关车(只有发起人、锁单后);
+    # 拼单:校验拼单码(只有发起人、锁单后);车在订单落库前一刻才关(见 commit 前)。
     # 订单归发起人,起送价/满减按合车总额天然生效
     group_members = 0
     group_note = ""
+    group_cart = group_raw = None
     if payload.group_code:
-        from .group_cart import consume_cart_for_order, order_note_for
-        group_cart = await consume_cart_for_order(payload.group_code, user.id)
+        from .group_cart import order_note_for, peek_cart_for_order
+        group_cart, group_raw = await peek_cart_for_order(payload.group_code, user.id)
         if group_cart["merchant_id"] != merchant.id:
             raise HTTPException(422, "拼单车不是这家店的")
         group_members = len(group_cart["members"])
@@ -894,7 +895,26 @@ async def create_order(
     if coupon is not None and coupon_applied:
         coupon.used_order_no = order.order_no  # 锁定;全额退款/关单时释放
     await _record_event(db, order, "", OrderStatus.PENDING_PAYMENT.value, user)
-    await db.commit()
+    # 拼单车到这里才关:前面任何一步没过(售罄、超出配送范围、券用不了……)车都还在。
+    # 关车是原子的,两台设备同时拿这车下单只有一单关得上,另一单 409、整单回滚
+    cart_ttl_ms = 0
+    if group_raw is not None:
+        from .group_cart import claim_cart_for_order
+        try:
+            cart_ttl_ms = await claim_cart_for_order(payload.group_code, group_raw)
+        except HTTPException:
+            await db.rollback()
+            raise
+    try:
+        await db.commit()
+    except Exception:
+        if group_raw is not None:
+            from .group_cart import restore_cart
+            await restore_cart(payload.group_code, group_raw, cart_ttl_ms)
+        raise
+    if group_cart is not None:
+        from .group_cart import announce_ordered
+        await announce_ordered(group_cart)
     await db.refresh(order)
     # 风控异步评估(只标记不拦截,失败不影响下单)
     from ..services.risk import assess_order_async
