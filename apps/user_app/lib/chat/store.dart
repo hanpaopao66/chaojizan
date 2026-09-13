@@ -504,6 +504,24 @@ class ChatStore extends ChangeNotifier {
     return null;
   }
 
+  /// 马上要用(保存、打开文件)的时候:换过就直接给,没换过当场换一个,不等 80ms 那一批。
+  /// 文件消息没有缩略图,不会被预先换签名 —— 原来刚收到 / 刚发出的文件第一次点下去什么都不发生
+  Future<({String url, String? thumb})?> signMediaNow(MediaInfo m) async {
+    if (m.signed) return (url: m.url, thumb: m.thumb);
+    final s = _signed[m.id];
+    if (s != null) return s;
+    try {
+      final r = await api.signMedia([m.id]);
+      final e = r['${m.id}'];
+      if (e == null) return null;
+      final v = (url: '${e['url']}', thumb: e['thumb'] as String?);
+      _signed[m.id] = v;
+      return v;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _flushSigning() async {
     _signTimer = null;
     final ids = _signing.toList();

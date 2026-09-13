@@ -44,6 +44,11 @@ dependencies:
   audioplayers: ^6.8.1       # 放语音消息(和商家端听单同一个库)
   path_provider: ^2.1.6      # 录音文件和下载的文件落应用私有目录
   flutter_webrtc: ^1.2.0     # 1 对 1 语音 / 视频通话(安卓、iOS、网页同一套 WebRTC)
+  # 聊天里的「保存」和「打开文件」(chat/ui/media_save_io.dart):App 内下载到私有目录,
+  # 图片视频存相册(安卓 10 起不用存储权限),文件交给系统应用打开。原来是跳外部浏览器下载
+  http: ^1.2.0
+  gal: ^2.3.3
+  open_filex: ^4.7.0
 
 flutter:
   uses-material-design: true
@@ -53,9 +58,6 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
-  # 只给测试用:MockClient 把 ApiClient 的传输层换掉,
-  # 「我的」页才能在没有后端的情况下按真机口径量密度
-  http: ^1.2.0
 
 # App 图标(生成:dart run flutter_launcher_icons)
 flutter_launcher_icons:

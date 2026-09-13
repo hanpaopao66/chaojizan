@@ -16,6 +16,8 @@
 	<string>在聊天里拍照、拍视频发送,视频通话时需要使用相机</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>用于选取头像、评价与售后凭证图片并上传。拒绝不影响其他功能。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>把聊天里的图片、视频保存到相册时需要。拒绝不影响其他功能。</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models.dart';
 import '../store.dart';
 import '../ui/format.dart';
+import '../ui/media_save.dart';
 import '../ui/media_views.dart';
 
 /// 全屏看图 / 视频:左右滑切同一组(相册、共享媒体),双指缩放,保存。
@@ -42,12 +42,7 @@ class _ViewerState extends State<_Viewer> {
     super.dispose();
   }
 
-  Future<void> _save(ChatMessage m) async {
-    final r = resolvedMedia(m.media.first);
-    if (r == null) return;
-    final sep = r.url.contains('?') ? '&' : '?';
-    await launchUrl(Uri.parse('${r.url}${sep}download=1'), mode: LaunchMode.externalApplication);
-  }
+  Future<void> _save(ChatMessage m) => saveChatMedia(context, m.media.first);
 
   @override
   Widget build(BuildContext context) {

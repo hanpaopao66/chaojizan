@@ -2,16 +2,24 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
 import '../store.dart';
 import 'avatar.dart';
 import 'format.dart';
+import 'media_save.dart';
 
 /// 媒体的完整地址(签名过的);还没换到签名时返回 null,调用方先画占位。
 ({String url, String? thumb})? resolvedMedia(MediaInfo m) {
   final s = ChatStore.instance.signedMedia(m);
+  if (s == null) return null;
+  final c = ChatStore.instance.client;
+  return (url: c.resolveUrl(s.url), thumb: s.thumb == null ? null : c.resolveUrl(s.thumb!));
+}
+
+/// 同上,但没换过签名就当场换(保存、打开文件这种点了就要用的);换不到返回 null。
+Future<({String url, String? thumb})?> resolveMediaNow(MediaInfo m) async {
+  final s = await ChatStore.instance.signMediaNow(m);
   if (s == null) return null;
   final c = ChatStore.instance.client;
   return (url: c.resolveUrl(s.url), thumb: s.thumb == null ? null : c.resolveUrl(s.thumb!));
@@ -217,18 +225,12 @@ class FileView extends StatelessWidget {
     return Icons.insert_drive_file_outlined;
   }
 
-  Future<void> _open() async {
-    final r = resolvedMedia(media);
-    if (r == null) return;
-    final sep = r.url.contains('?') ? '&' : '?';
-    await launchUrl(Uri.parse('${r.url}${sep}download=1'), mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context) {
     final progress = message.isLocal ? message.progress : null;
     return InkWell(
-      onTap: media.id == 0 ? null : _open,
+      // 手机上在 App 里下载、交给系统应用打开;网页上交给浏览器(见 media_save.dart)
+      onTap: media.id == 0 ? null : () => openChatFile(context, media),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
