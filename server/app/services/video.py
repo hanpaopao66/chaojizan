@@ -347,12 +347,19 @@ def visible_parts(v: Video, parts: list[VideoPart], user: User | None) -> list[V
 
 
 async def shop_card(db: AsyncSession, shop_id: int | None) -> dict | None:
+    """视频挂的那家店(D16):点「去点单」直接进这家的店铺页。
+
+    坐标给客户端算「离你多远」(店址本来就是公开的);抽成比例照这家店的真实费率给,
+    卡上写「只被抽 5%」读的就是它,不写死。"""
     if not shop_id:
         return None
     m = await db.get(Merchant, shop_id)
     if m is None:
         return None
-    return {"id": m.id, "name": m.name, "logo": m.logo_url or ""}
+    return {"id": m.id, "name": m.name, "logo": m.logo_url or "",
+            "biz_type": m.biz_type, "is_open": bool(m.is_open),
+            "lat": m.lat, "lng": m.lng,
+            "commission_rate": float(m.commission_rate)}
 
 
 async def follow_counts(db: AsyncSession, user_id: int) -> tuple[int, int]:
