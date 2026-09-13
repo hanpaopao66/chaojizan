@@ -801,8 +801,14 @@ class ChatStore extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 所有用户事件(实时来的和补齐来的)原样转一份出去:视频模块听 `notify`(互动消息角标)、
+  /// `video`(我的稿件状态变了),不用各自再连一条 WebSocket
+  final StreamController<({String type, Map<String, dynamic> data})> userEvents =
+      StreamController.broadcast();
+
   void _applyUser(int pts, String type, Map<String, dynamic> d) {
     if (pts > userPts) userPts = pts;
+    userEvents.add((type: type, data: d));
     switch (type) {
       case 'chat_join':
         final chat = _asMap(d['chat']);
