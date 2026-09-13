@@ -50,13 +50,22 @@ class _CallPageState extends State<CallPage> {
       child: Scaffold(
         backgroundColor: const Color(0xFF1B1E24),
         body: Stack(children: [
+          // 画面的 key 跟着「渲染器初始化好了没有」变:网页版的 RTCVideoView 只在创建时找一次 <video> 元素,
+          // 找不到就一直空着。来电时这一页已经建好了,渲染器要等点了接听才初始化(那时才有元素)——
+          // 不换 key 的话,App 打开后第一通来电的网页端永远看不到对方的画面
           if (showRemoteVideo)
             Positioned.fill(
-              child: RTCVideoView(c.remoteRenderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
+              child: RTCVideoView(c.remoteRenderer,
+                  key: ValueKey('remote-${c.renderersReady}'), objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
             )
           else
             // 纯语音 / 对方关了摄像头:也要把对方的声音放出来 —— 网页上声音跟着这个渲染器走
-            Positioned(left: 0, top: 0, width: 1, height: 1, child: RTCVideoView(c.remoteRenderer)),
+            Positioned(
+                left: 0,
+                top: 0,
+                width: 1,
+                height: 1,
+                child: RTCVideoView(c.remoteRenderer, key: ValueKey('remote-${c.renderersReady}'))),
           SafeArea(
             child: Column(children: [
               Row(children: [
@@ -109,7 +118,9 @@ class _CallPageState extends State<CallPage> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
                 child: RTCVideoView(c.localRenderer,
-                    mirror: true, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
+                    key: ValueKey('local-${c.renderersReady}'),
+                    mirror: true,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
               ),
             ),
         ]),

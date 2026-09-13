@@ -315,11 +315,15 @@ class CallController extends ChangeNotifier {
 
   // ---------------- WebRTC ----------------
 
+  /// 两个渲染器初始化好了没有。通话页按它给画面换 key(见 call_page.dart)
+  bool get renderersReady => _renderers;
+
   Future<void> _ensureRenderers() async {
     if (_renderers) return;
     await localRenderer.initialize();
     await remoteRenderer.initialize();
     _renderers = true;
+    notifyListeners();
   }
 
   Future<void> _openPeer() async {
