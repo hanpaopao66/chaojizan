@@ -105,7 +105,7 @@ async def _hold(api: str, tokens: list[str], seconds: float, q) -> None:
     await asyncio.sleep(3)
     q.put(("connected", ok))
     await asyncio.gather(*tasks)
-    q.put(("conn_done", {"frames": frames, "errors": errors}))
+    q.put(("conn_done", {"frames": frames, "errors": errors, "ok": ok}))
 
 
 def conn_worker(api: str, tokens: list[str], seconds: float, q) -> None:
@@ -153,18 +153,41 @@ def probe_worker(api: str, a: str, b: str, chat_id: int, seconds: float, q) -> N
     from websockets.sync.client import connect
 
     ws_base = api.replace("https://", "wss://").replace("http://", "ws://")
-    lat = {"send": [], "dialogs": [], "feed": [], "deliver": []}
-    ws = connect(f"{ws_base}/ws/v2", open_timeout=20)
-    ws.send(json.dumps({"t": "auth", "token": b, "device": "probe", "foreground": True}))
+    lat = {"send": [], "dialogs": [], "feed": [], "deliver": [], "fail": []}
+
+    def open_ws():
+        w = connect(f"{ws_base}/ws/v2", open_timeout=20)
+        w.send(json.dumps({"t": "auth", "token": b, "device": "probe", "foreground": True}))
+        return w
+
+    try:
+        _probe_loop(api, a, chat_id, seconds, lat, open_ws)
+    except Exception as e:           # 探针自己挂了也要把已经量到的交回去,不能让主进程干等
+        lat["fail"].append(f"探针退出:{type(e).__name__}")
+    q.put(("probe", lat))
+
+
+def _probe_loop(api, a, chat_id, seconds, lat, open_ws) -> None:
+    from websockets.exceptions import ConnectionClosed
+
+    ws = open_ws()
+    last_ping = time.monotonic()
     end = time.monotonic() + seconds
     while time.monotonic() < end:
+        # 服务端 60 秒收不到客户端的帧就断(和 App 一样 25 秒一个 ping)
+        if time.monotonic() - last_ping > 20:
+            try:
+                ws.send(json.dumps({"t": "ping"}))
+            except ConnectionClosed:
+                ws = open_ws()
+            last_ping = time.monotonic()
         rid = str(random.getrandbits(62))
         t0 = time.perf_counter()
         try:
             http(api, "POST", f"/chat/v1/chats/{chat_id}/messages", a,
                  {"random_id": rid, "kind": "text", "text": "探针"})
         except Exception as e:
-            lat.setdefault("fail", []).append(type(e).__name__)
+            lat["fail"].append(type(e).__name__)
             time.sleep(1.1)
             continue
         lat["send"].append((time.perf_counter() - t0) * 1000)
@@ -174,6 +197,10 @@ def probe_worker(api: str, a: str, b: str, chat_id: int, seconds: float, q) -> N
             try:
                 f = json.loads(ws.recv(timeout=max(0.05, deadline - time.perf_counter())))
             except TimeoutError:
+                break
+            except ConnectionClosed:
+                lat["fail"].append("探针连接被断开,重连")
+                ws = open_ws()
                 break
             if f.get("t") == "ev" and f.get("type") == "msg" and str((f.get("data") or {}).get("random_id")) == rid:
                 lat["deliver"].append((time.perf_counter() - t0) * 1000)
@@ -188,7 +215,6 @@ def probe_worker(api: str, a: str, b: str, chat_id: int, seconds: float, q) -> N
         # 一秒一轮:发消息的限流是每人每分钟 60 条(§5.7),探针自己别撞上
         time.sleep(1.1)
     ws.close()
-    q.put(("probe", lat))
 
 
 def pct(xs: list[float], p: float) -> float:
@@ -207,10 +233,13 @@ def main():
     ap.add_argument("--duration", type=float, default=60)
     ap.add_argument("--procs", type=int, default=8, help="连接进程数")
     ap.add_argument("--tokens", help="现成的 token 列表(JSON 文件);不给就在开发环境自动注册")
+    ap.add_argument("--save-tokens", help="注册完把 token 存到这个文件,下次用 --tokens 复用")
     args = ap.parse_args()
 
     print(f"== 准备:{args.accounts} 个账号 ==", flush=True)
     tokens = json.load(open(args.tokens)) if args.tokens else make_accounts(args.api, args.accounts + 2)
+    if args.save_tokens:
+        json.dump(tokens, open(args.save_tokens, "w"))
     probe_a, probe_b, tokens = tokens[0], tokens[1], tokens[2:]
     pairs = pair_chats(args.api, tokens)
     me_b = http(args.api, "GET", "/social/v1/me", probe_b)
@@ -226,7 +255,7 @@ def main():
         p.start()
     connected = 0
     for _ in procs:            # 每个连接进程开完一批先报一次「连上几条」
-        kind, n = q.get()
+        kind, n = q.get(timeout=hold)
         assert kind == "connected", kind
         connected += n
     print(f"   连上 {connected} 条,开始发消息 {args.rate}/s 并启动探针", flush=True)
@@ -235,12 +264,17 @@ def main():
     sender.start()
     probe.start()
     got: dict = {}
-    frames, errs = 0, []
+    frames, errs, ok_total = 0, [], 0
     for _ in range(len(procs) + 2):
-        kind, v = q.get()
+        try:
+            kind, v = q.get(timeout=hold + 60)
+        except Exception:
+            print("  (有进程没交结果,按已收到的算)")
+            break
         if kind == "conn_done":
             frames += v["frames"]
             errs += v["errors"]
+            ok_total += v["ok"]
         else:
             got[kind] = v
     for p in (*procs, sender, probe):
@@ -249,7 +283,7 @@ def main():
     snd = got.get("sender", {"sent": 0, "errors": 0})
 
     print("\n== 结果 ==")
-    print(f"连接:目标 {args.conns},连上 {connected},失败 / 中途断开 {len(errs)}"
+    print(f"连接:目标 {args.conns},爬坡后 3 秒连上 {connected},最终连上过 {ok_total},失败 / 中途断开 {len(errs)}"
           + (f"({', '.join(sorted(set(errs)))})" if errs else ""))
     print(f"背景流量:{snd['sent']} 条成功 / {snd['errors']} 条失败,"
           f"平均 {snd['sent'] / args.duration:.1f} 条/秒;连接进程共收到 {frames} 帧")

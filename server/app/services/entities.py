@@ -15,7 +15,9 @@ MAX_ENTITIES = 100
 
 _URL_RE = re.compile(r"(?:https?://)[^\s<>\"'，。！？、）」』]+", re.IGNORECASE)
 _MENTION_RE = re.compile(r"(?<![A-Za-z0-9_@])@([A-Za-z][A-Za-z0-9_]{3,30}[A-Za-z0-9])")
-_HASHTAG_RE = re.compile(r"(?<![\w#])#([0-9A-Za-z_一-鿿]{1,64})")
+# 汉字区间写成转义:写成字面「一-鿿」的话,区间尾那个字(U+9FFF)会被显示字覆盖率检查当成界面文案,
+# 以为要进字体子集(scripts/gen_font_subset.py --check 会红)
+_HASHTAG_RE = re.compile(r"(?<![\w#])#([0-9A-Za-z_\u4e00-\u9fff]{1,64})")
 _LANG_RE = re.compile(r"^[a-z0-9+#.\-]{1,32}$")
 
 
