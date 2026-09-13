@@ -47,7 +47,6 @@ class _CallsPageState extends State<CallsPage> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: items.length,
                     itemBuilder: (context, i) {
                       final r = items[i];

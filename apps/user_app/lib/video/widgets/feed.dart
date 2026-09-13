@@ -166,8 +166,8 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
       }
       return RefreshIndicator(
         onRefresh: _pullRefresh,
-        // 空着也能下拉刷新(不满一屏的列表默认滚不动,拖动不出滚动通知,下拉刷新就不会触发)
-        child: ListView(physics: const AlwaysScrollableScrollPhysics(), children: [
+        // 空着、出错也放进 ListView:直接放 SzEmpty 没有能滚的东西,下拉收不到通知
+        child: ListView(children: [
           if (widget.header != null) widget.header!,
           SizedBox(height: 360, child: Center(child: body)),
         ]),
@@ -175,7 +175,8 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
     }
     return RefreshIndicator(
       onRefresh: _pullRefresh,
-      // 只有一两条也能下拉刷新(比如空间页只有一个投稿):不满一屏时默认滚不动,下拉刷新收不到通知
+      // physics 不能省:primary 写成了 false(不嵌在空间页里时),Flutter 就不再默认给 AlwaysScrollable,
+      // 只有一两条时拖不动,下拉刷新收不到通知
       child: NotificationListener<ScrollMetricsNotification>(
         onNotification: (n) => _nearEnd(n.metrics, n.depth),
         child: NotificationListener<ScrollNotification>(

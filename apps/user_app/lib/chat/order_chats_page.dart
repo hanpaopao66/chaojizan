@@ -103,7 +103,7 @@ class _OrderChatsPageState extends State<OrderChatsPage> {
           future: _future,
           builder: (context, snap) {
             if (snap.hasError) {
-              return ListView(physics: const AlwaysScrollableScrollPhysics(), children: [
+              return ListView(children: [
                 SzError(
                     error: snap.error,
                     onRetry: () => setState(() {
@@ -116,7 +116,7 @@ class _OrderChatsPageState extends State<OrderChatsPage> {
               return const Center(child: CircularProgressIndicator());
             }
             if (rows.isEmpty) {
-              return ListView(physics: const AlwaysScrollableScrollPhysics(), children: const [
+              return ListView(children: const [
                 Padding(
                   padding: EdgeInsets.only(top: 80),
                   child: SzEmpty(text: '没有进行中的订单\n下单后和商家、骑手的对话会出现在这里'),
@@ -124,7 +124,6 @@ class _OrderChatsPageState extends State<OrderChatsPage> {
               ]);
             }
             return ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
               itemCount: rows.length,
               separatorBuilder: (_, __) =>
                   Divider(height: 1, indent: 72, color: sz.line),
