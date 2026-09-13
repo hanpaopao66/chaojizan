@@ -511,11 +511,13 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
     );
-    // 视频 tab 的「竖屏」子页:整页黑底,导航条跟着换深色主题
-    if (_tab == 2 && videoImmersive.value) {
-      return Theme(data: superZTheme(Brightness.dark), child: scaffold);
-    }
-    return scaffold;
+    // 视频 tab 的「竖屏」子页:整页黑底,导航条跟着换深色主题。
+    // 两种情况都包一层 Theme:只在竖屏时才包的话,根上的 widget 类型一变,
+    // 整个 IndexedStack 连同四个 tab 的状态都会被销毁重建(首页重新定位、会话列表重拉)
+    final immersive = _tab == 2 && videoImmersive.value;
+    return Theme(
+        data: immersive ? superZTheme(Brightness.dark) : Theme.of(context),
+        child: scaffold);
   }
 }
 

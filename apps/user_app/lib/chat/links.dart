@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../video/nav.dart';
 import 'chat_page.dart';
 import 'pages/pickers.dart';
 import 'pages/user_profile_page.dart';
@@ -12,7 +13,8 @@ import 'ui/avatar.dart';
 /// - `chaojizan.cc/@用户名` → 这个人的资料 / 公开群、频道;
 /// - `chaojizan.cc/@频道名/123` → 打开频道并跳到第 123 条;
 /// - `chaojizan.cc/join/邀请码` → 邀请链接预览,可以加入;
-/// - `chaojizan.cc/u/名片编号` → 这个人的资料(没有用户名的人的名片链接)。
+/// - `chaojizan.cc/u/名片编号` → 这个人的资料(没有用户名的人的名片链接);
+/// - `chaojizan.cc/v/视频号` → 视频详情(`?p=2` 从第 2 P 开始)。
 ///
 /// 返回 true 表示认得、已经处理;false 交给调用方(一般是问一句再用浏览器打开)。
 Future<bool> openAppLink(BuildContext context, Uri uri) async {
@@ -20,6 +22,12 @@ Future<bool> openAppLink(BuildContext context, Uri uri) async {
   if (host != 'chaojizan.cc' && host != 'www.chaojizan.cc') return false;
   final seg = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (seg.isEmpty) return false;
+  // 视频不需要登录也能看,放在「消息没启动」的判断前面
+  if (seg[0] == 'v' && seg.length > 1 && RegExp(r'^sv[1-9A-HJ-NP-Za-km-z]{10}$').hasMatch(seg[1])) {
+    final p = int.tryParse(uri.queryParameters['p'] ?? '');
+    await openVideo(context, seg[1], partIdx: p != null && p > 0 ? p - 1 : null);
+    return true;
+  }
   final store = ChatStore.instance;
   if (!store.started) return false;
   try {

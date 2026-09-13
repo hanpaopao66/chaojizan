@@ -218,7 +218,8 @@ class _VideoPageState extends State<_VideoPage> {
     }
     final v = c.value;
     return Stack(alignment: Alignment.center, children: [
-      Center(child: AspectRatio(aspectRatio: v.aspectRatio, child: VideoPlayer(c))),
+      // 网页上 <video> 平台视图会抢走单击(外面点一下切换顶栏的手势就失灵),画面本身不接指针
+      Center(child: IgnorePointer(child: AspectRatio(aspectRatio: v.aspectRatio, child: VideoPlayer(c)))),
       if (!v.isPlaying)
         IconButton(
           iconSize: 64,

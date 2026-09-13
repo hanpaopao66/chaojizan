@@ -13,11 +13,12 @@ VideoApi? _api;
 /// `/img/…`、`/video/v1/vod/…` 这类相对地址补成完整的
 String videoResolve(String path) => rootApi.resolveUrl(path);
 
-/// 打开视频详情。[commentId] 给了就打开评论页签并定位到那条(互动消息跳过来)。
-Future<void> openVideo(BuildContext context, String vid, {int? commentId, int? partIdx}) =>
+/// 打开视频详情。[commentId] 给了就打开评论页签并定位到那条(互动消息跳过来);
+/// 那条是楼里的回复时要同时给 [rootCommentId](楼主那条),好直接打开那一楼。
+Future<void> openVideo(BuildContext context, String vid, {int? commentId, int? rootCommentId, int? partIdx}) =>
     Navigator.of(context).push(MaterialPageRoute<void>(
       settings: RouteSettings(name: '/v/$vid'),
-      builder: (_) => VideoDetailPage(vid: vid, commentId: commentId, partIdx: partIdx),
+      builder: (_) => VideoDetailPage(vid: vid, commentId: commentId, rootCommentId: rootCommentId, partIdx: partIdx),
     ));
 
 /// 打开 UP 主空间。
