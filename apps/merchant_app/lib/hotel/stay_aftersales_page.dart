@@ -18,8 +18,12 @@ class _StayAftersalesPageState extends State<StayAftersalesPage> {
       widget.api.merchantStayAftersales();
 
   Future<void> _refresh() async {
-    setState(() => _future = widget.api.merchantStayAftersales());
-    await _future;
+    // 同 stay_reviews_page:箭头 setState 会把 Future 交给 setState(debug 断言失败);拉失败由 FutureBuilder 显示
+    final f = widget.api.merchantStayAftersales();
+    setState(() {
+      _future = f;
+    });
+    await f.then((_) {}, onError: (_) {});
   }
 
   void _snack(String message) {

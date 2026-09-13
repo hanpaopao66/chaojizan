@@ -44,8 +44,10 @@ class _ReviewsListState extends State<ReviewsList> {
           if (snapshot.hasError) {
             return SzError(
                 error: snapshot.error,
-                onRetry: () => setState(() =>
-                    _future = api.merchantReviews(widget.merchantId)));
+                // 块写法:箭头会把 Future 交给 setState(debug 包断言失败)
+                onRetry: () => setState(() {
+                      _future = api.merchantReviews(widget.merchantId);
+                    }));
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());

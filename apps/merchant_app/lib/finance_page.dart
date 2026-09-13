@@ -900,8 +900,9 @@ class _DayOrdersPageState extends State<DayOrdersPage> {
           if (snapshot.hasError) {
             return SzError(
                 error: snapshot.error,
-                onRetry: () =>
-                    setState(() => _future = api.financeOrders(stat.day)));
+                onRetry: () => setState(() {
+                      _future = api.financeOrders(stat.day);
+                    }));
           }
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());

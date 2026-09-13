@@ -15,8 +15,13 @@ class _StayReviewsPageState extends State<StayReviewsPage> {
   late Future<List<StayReview>> _future = widget.api.merchantStayReviews();
 
   Future<void> _refresh() async {
-    setState(() => _future = widget.api.merchantStayReviews());
-    await _future;
+    // 不能写成箭头 setState(() => _future = …):箭头把 Future 当返回值交给 setState,debug 下断言失败。
+    // 圈转到真拉完为止;拉失败由 FutureBuilder 显示,这里不再抛
+    final f = widget.api.merchantStayReviews();
+    setState(() {
+      _future = f;
+    });
+    await f.then((_) {}, onError: (_) {});
   }
 
   Future<void> _reply(StayReview review) async {

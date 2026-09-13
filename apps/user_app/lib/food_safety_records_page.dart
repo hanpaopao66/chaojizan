@@ -40,16 +40,24 @@ class _FoodSafetyRecordsPageState extends State<FoodSafetyRecordsPage> {
     return SzPageScaffold(
       appBar: AppBar(title: const Text('我的食安投诉')),
       body: RefreshIndicator(
-        onRefresh: () async =>
-            setState(() => _future = widget.api.myFoodSafetyReports()),
+        // 不能写成箭头 setState(() => _future = …):箭头把 Future 当返回值交给 setState,debug 下断言失败;
+        // 也不能不等:圈要转到真拉完为止(拉失败由 FutureBuilder 显示)
+        onRefresh: () async {
+          final f = widget.api.myFoodSafetyReports();
+          setState(() {
+            _future = f;
+          });
+          await f.then((_) {}, onError: (_) {});
+        },
         child: FutureBuilder<List<Map<String, dynamic>>>(
           future: _future,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               return SzError(
                   error: snapshot.error,
-                  onRetry: () => setState(
-                      () => _future = widget.api.myFoodSafetyReports()));
+                  onRetry: () => setState(() {
+                        _future = widget.api.myFoodSafetyReports();
+                      }));
             }
             if (!snapshot.hasData) return const SkeletonList();
             final rows = snapshot.data!;
