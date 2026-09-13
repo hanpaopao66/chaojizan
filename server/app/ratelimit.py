@@ -1,4 +1,4 @@
-"""接口限流(Redis 固定窗口)。
+"""接口限流(Redis 固定窗口;「N 秒一次」的按冷却算,见 check_rate_limit_seconds)。
 
 目标是拦爆破和刷子,不是限制正常用户,所以阈值宽松(见 config.py)。
 Redis 不可用时放行——限流是防护,不能反过来变成单点故障。
@@ -80,18 +80,27 @@ async def check_daily_limit(scope: str, key: str, per_day: int,
 
 async def check_rate_limit_seconds(scope: str, key: str, limit: int, seconds: int = 1,
                                    message: str = "发得太快了,歇一下再发") -> None:
-    """同一 (scope, key) 每 seconds 秒最多 limit 次(聊天的「每秒 5 条」用它,§5.7)。"""
+    """同一 (scope, key) 每 seconds 秒最多 limit 次(聊天的「每秒 5 条」用它,§5.7)。
+
+    limit == 1(弹幕 3 秒一条、评论 5 秒一条、群里 1 秒一条)按冷却算:放过一次之后满 seconds 秒才放下一次。
+    固定窗口在这里不对 —— 两条只隔 0.1 秒,正好跨过窗口边界就都放过去了,和「3 秒一条」说的不一样
+    (e2e_danmaku 在全量回归里偶发失败就是这个)。limit > 1 仍是固定窗口,边界上最多多放一倍,够用。
+    """
     if not settings.rate_limit_enabled:
         return
-    window = int(time.time() // seconds)
-    redis_key = f"rls:{scope}:{key}:{seconds}:{window}"
     try:
         r = get_redis()
-        count = await r.incr(redis_key)
-        if count == 1:
-            await r.expire(redis_key, seconds + 5)
+        if limit == 1:
+            passed = bool(await r.set(f"rls:{scope}:{key}:{seconds}:cd", 1, nx=True, px=seconds * 1000))
+        else:
+            window = int(time.time() // seconds)
+            redis_key = f"rls:{scope}:{key}:{seconds}:{window}"
+            count = await r.incr(redis_key)
+            if count == 1:
+                await r.expire(redis_key, seconds + 5)
+            passed = count <= limit
     except Exception as exc:
         logger.warning("限流检查失败,放行: %s", exc)
         return
-    if count > limit:
+    if not passed:
         raise HTTPException(429, message)
