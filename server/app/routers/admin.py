@@ -1363,7 +1363,8 @@ _KNOWN_FLAGS = {
     # 《信息网络传播视听节目许可证》,见 services/flags.video_flag_default
     "video_enabled",        # 整个视频功能:关了 /video/v1 全部回 503「视频功能暂未开放」
     "video_upload_enabled", # 视频投稿:关了建稿、加分 P、提交、上传原片回 503
-    # 通话(#374 电信业务许可待定):缺省同视频,开发开、生产关
+    # 消息(#375):chat_enabled 缺省开(急停用);通话(#374 电信业务许可待定)缺省同视频,开发开、生产关
+    "chat_enabled",         # 整个「消息」:关了 /chat/v1 全部回 503「消息功能暂停中」
     "calls_enabled",        # 语音 / 视频通话:关了呼叫直接回「通话功能暂未开放」
 }
 
@@ -1375,8 +1376,10 @@ async def list_flags(
 ):
     rows = (await db.scalars(select(PlatformFlag))).all()
     current = {r.key: r.value for r in rows}
-    from ..services.flags import CHANNELS_FALLBACK, SOCIAL_FLAGS, VIDEO_FLAGS, video_flag_default
-    defaults = {**{k: video_flag_default() for k in (*VIDEO_FLAGS, *SOCIAL_FLAGS)},
+    from ..services.flags import (CHANNELS_FALLBACK, SOCIAL_FLAGS, VIDEO_FLAGS, social_flag_default,
+                                  video_flag_default)
+    defaults = {**{k: video_flag_default() for k in VIDEO_FLAGS},
+                **{k: social_flag_default(k) for k in SOCIAL_FLAGS},
                 "night_curfew_hours": "01:00-06:00",
                 "screen_show_gmv": "on",  # 大屏金额缺省展示,与 /screen 口径一致
                 # 小程序急停闸缺省是开(miniapp_platform.switch_on:没写过 = 开)

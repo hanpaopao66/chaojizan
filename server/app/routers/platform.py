@@ -443,6 +443,7 @@ async def public_config(db: AsyncSession = Depends(get_db)):
         # 功能开关:客户端据此收起入口(关着的功能服务端照样回 503,这里只是别让人点进去才知道)
         "features": {"video": await video_flag_on(db, "video_enabled"),
                      "video_upload": await video_flag_on(db, "video_upload_enabled"),
+                     "chat": await social_flag_on(db, "chat_enabled"),
                      "calls": await social_flag_on(db, "calls_enabled")},
         "copy": copy,
         "faq": [{"audience": f.audience, "q": f.question, "a": f.answer}

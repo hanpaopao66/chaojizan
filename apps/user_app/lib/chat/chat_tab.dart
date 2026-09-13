@@ -244,6 +244,14 @@ class _ChatTabState extends State<ChatTab> {
               }
               if (k == 0) return Divider(height: 1, color: sz.line);
               k -= 1;
+              // 平台拉了「消息」的急停闸(/config 的 features.chat):通知、订单消息照常,聊天这块说清楚在停着
+              if (!RemoteCopy.feature('chat')) {
+                if (k > 0) return const SizedBox.shrink();
+                return const Padding(
+                  padding: EdgeInsets.only(top: 48),
+                  child: SzEmpty(text: '消息功能暂停中,稍后再试\n通知和订单消息不受影响'),
+                );
+              }
               if (!loggedIn) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 48),

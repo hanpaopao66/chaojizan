@@ -21,8 +21,9 @@ from ..models import MediaFile, Sticker, StickerSet, User, UserStickerSet
 from ..services import storage
 from ..services.moderation import guard_text
 from .social import social_user
+from .chat import chat_on
 
-router = APIRouter(prefix="/chat/v1/stickers", tags=["聊天"])
+router = APIRouter(prefix="/chat/v1/stickers", tags=["聊天"], dependencies=[Depends(chat_on)])
 
 #: 一包最多几张(D17)
 SET_MAX_STICKERS = 120

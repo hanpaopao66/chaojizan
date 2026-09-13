@@ -24,7 +24,14 @@ from ..services.rt_events import append_user_event
 from ..services.social import user_cards
 from .social import social_user
 
-router = APIRouter(prefix="/chat/v1", tags=["聊天"])
+async def chat_on(db: AsyncSession = Depends(get_db)) -> None:
+    """「消息」急停闸(#375 chat_enabled):关掉时整个 /chat/v1 回 503。每次现查,拉闸立刻生效。"""
+    from ..services.flags import social_flag_on
+    if not await social_flag_on(db, "chat_enabled"):
+        raise HTTPException(503, "消息功能暂停中,稍后再试")
+
+
+router = APIRouter(prefix="/chat/v1", tags=["聊天"], dependencies=[Depends(chat_on)])
 
 #: 举报原因代码(§5.11,和后台、文档一张表)
 REPORT_REASONS = {"C101", "C102", "C103", "C104", "C105", "C106", "C107", "C108", "C109",

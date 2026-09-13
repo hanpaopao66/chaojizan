@@ -156,6 +156,16 @@ def main():
         set_flag("calls_enabled", None)
     assert http("GET", "/config")["features"]["calls"] is True, "开发环境缺省开"
     print("  ✓ 开关:关掉通话后呼叫回「通话功能暂未开放」、ice-servers 503、/config 里 calls=false")
+    try:
+        set_flag("chat_enabled", "off")
+        assert http("GET", "/config")["features"]["chat"] is False
+        for path in ("/chat/v1/dialogs", "/chat/v1/stickers/sets", "/chat/v1/calls"):
+            r = a.get(path, expect_error=True)
+            assert r.get("_error") == 503 and "消息功能暂停" in r["detail"], (path, r)
+    finally:
+        set_flag("chat_enabled", None)
+    assert a.get("/chat/v1/dialogs")["items"] is not None
+    print("  ✓ 急停:关掉「消息」后 /chat/v1 下会话、贴纸、通话记录全部 503;恢复后照常")
 
     for w in (wa, wb, wb2, wd):
         w.close()

@@ -179,16 +179,21 @@ async def video_flag_on(db: AsyncSession, key: str) -> bool:
     return value == "on"
 
 
-#: 消息里要等合规结论才能在生产打开的功能(#374 / #375):通话涉及的电信业务许可还没定。
-#: 缺省和视频一样站在「关」这一边:开发 / CI 开、生产关
-SOCIAL_FLAGS = {"calls_enabled": "语音 / 视频通话"}
+#: 消息这一半的闸(#375):
+#: - chat_enabled 整个「消息」(急停用):缺省**生产也开** —— 它是这一批的主体,没有合规前置;
+#: - calls_enabled 语音 / 视频通话:通话涉及的电信业务许可还没定,缺省和视频一样开发开、生产关
+SOCIAL_FLAGS = {"chat_enabled": "消息", "calls_enabled": "语音 / 视频通话"}
+
+
+def social_flag_default(key: str) -> str:
+    assert key in SOCIAL_FLAGS, key
+    return "on" if key == "chat_enabled" else video_flag_default()
 
 
 async def social_flag_on(db: AsyncSession, key: str) -> bool:
     """消息功能开关开着没有。每次现查、不缓存 —— 拉闸要立刻生效。"""
-    assert key in SOCIAL_FLAGS, key
     flag = await db.get(PlatformFlag, key)
-    value = flag.value if flag is not None else video_flag_default()
+    value = flag.value if flag is not None else social_flag_default(key)
     return value == "on"
 
 

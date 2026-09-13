@@ -7,9 +7,10 @@ from ..db import get_db
 from ..models import Call, User
 from ..services import calls as call_service
 from ..services.social import user_cards
+from .chat import chat_on
 from .social import social_user
 
-router = APIRouter(prefix="/chat/v1/calls", tags=["聊天"])
+router = APIRouter(prefix="/chat/v1/calls", tags=["聊天"], dependencies=[Depends(chat_on)])
 
 
 @router.get("/ice-servers")
