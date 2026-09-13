@@ -725,7 +725,7 @@ async def nodes_page():
 
 @app.get("/screen", include_in_schema=False)
 async def screen_page():
-    """经营大屏:优先 React+Three.js 版(web/ 构建产物,3D 中国地图+实时播报),
+    """经营大屏:优先 React 版(web/ 构建产物,平面中国地图 + 实时播报),
     没构建过就回退旧 ECharts 单页。数据与公开账本同源,店内电视/投屏用。"""
     site_index = SITE_DIR / "index.html"
     if site_index.exists():
@@ -825,7 +825,7 @@ async def maintenance_page():
 
 app.mount("/vendor", StaticFiles(directory=STATIC_DIR / "vendor"), name="vendor")
 
-# React+Three.js 官网(web/ 构建产物,见 web/README.md;生产机无需 node)
+# React 官网(web/ 构建产物,见 web/README.md;生产机无需 node)
 SITE_DIR = STATIC_DIR / "site"
 if SITE_DIR.exists():
     app.mount("/site", StaticFiles(directory=SITE_DIR), name="site")

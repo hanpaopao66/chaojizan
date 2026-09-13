@@ -1,29 +1,20 @@
-/* 全局底座:只剩重置和 /screen(深色大屏)要用的几条。
+/* 全局底座:只剩重置,和 /screen(深色大屏)首屏的底色。
  *
  * 这份文件原来是老官网的**全局无作用域**样式(.hero .brand .cta .btn .app .tag
  * 以及 section / h2 / footer 这类元素选择器),新页面的同名类会被它们漏进去
- * (Home.jsx 顶部注释记着实测现象)。2026-09 官网全部换成浅色版之后,
- * 除 /screen 以外没有页面再用这些类,于是删到只剩下面几条:
+ * (Home.jsx 顶部注释记着实测现象)。2026-09 官网全部换成浅色版之后删到只剩重置;
+ * 大屏照新稿子重做以后,它自己的令牌和样式都在 screen/screen.css(挂在 .screen-root 上),
+ * 最后一条 `.tag` 也没人用了。
  *
  * - `* / html / body / a`:重置与深色底。浅色页的底色由 index.html 给 <html>
- *   挂的 h3-root 盖掉(site.css),/screen 不挂,保持深色、首屏不闪白;
- * - `.tag`:大屏 KPI 卡里「打车 · 即将开通」那个小标签还叠着这一条
- *   (screen.css 的 `.sc-kpi .tag` 只覆盖了颜色边框,vertical-align 在这里)。
+ *   挂的 h3-root 盖掉(site.css),/screen 不挂,保持深色、首屏不闪白。
+ *   底色和字色取大屏的(brand.dart 深色态 ledger / ink),JS 包到之前那一下和大屏同色。
  *
- * 大屏自己的样式在 screen/screen.css,不在这里。新页面的样式写 site.css,
- * 不要往这份文件里加 —— 它对每一页都生效。 */
-:root {
-  --orange: #FF5A1F; --green: #2FBF8F; --amber: #FFB84D;
-  --bg: #0B0E14; --bg2: #0E1219; --card: #12161F; --line: #1E2430;
-  --text: #EAEEF6; --muted: #8B94A9;
-}
+ * 新页面的样式写 site.css,不要往这份文件里加 —— 它对每一页都生效。 */
 * { box-sizing: border-box; margin: 0; }
 html { scroll-behavior: smooth; }
 body {
-  background: var(--bg); color: var(--text); line-height: 1.8;
+  background: #100F0D; color: #F2F0E8; line-height: 1.8;
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 a { color: inherit; text-decoration: none; }
-
-.tag { font-size: .68rem; color: var(--muted); border: 1px solid var(--line);
-       padding: 2px 8px; border-radius: 999px; vertical-align: 2px; }

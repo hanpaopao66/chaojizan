@@ -2,7 +2,7 @@ import React from 'react'
 
 import Home from './Home.jsx'
 
-// 大屏/透明中心单独成 chunk:echarts + 地图数据不拖累官网首页
+// 大屏/透明中心单独成 chunk:省界数据和图表不拖累官网首页
 const ScreenPage = React.lazy(() => import('./screen/ScreenPage.jsx'))
 const TransparencyPage = React.lazy(
   () => import('./transparency/TransparencyPage.jsx'))
