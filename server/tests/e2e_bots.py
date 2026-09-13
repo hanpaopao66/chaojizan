@@ -614,10 +614,13 @@ def main():
         assert e["_error"] == 503, e
         e = a.get(f"/chat/v1/chats/{cid}/bot-info", expect_error=True)
         assert e["_error"] == 503, e
+        assert call("GET", "/config")["features"]["bots"] is False, "客户端要能据此收起入口"
     finally:
         set_flag("on")
     assert bot.ok("getMe")["id"] == bot.id
-    print("  ✓ bots_enabled=off:Bot API(token 对不对都是)、建机器人、回调、bot-info 全部 503;开回来恢复")
+    assert call("GET", "/config")["features"]["bots"] is True
+    print("  ✓ bots_enabled=off:Bot API(token 对不对都是)、建机器人、回调、bot-info 全部 503,"
+          "/config 的 features.bots=false;开回来恢复")
 
     # ---- 每个开发者最多 20 个 ----
     many_dev, _ = developer(verified=False, accept_rules=False)

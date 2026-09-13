@@ -321,7 +321,11 @@ HTTP 状态码 = `error_code`。`description` 照 Telegram 的写法以 `Bad Req
 - Bot API 一律 `503 {"ok":false,"error_code":503,"description":"机器人功能暂未开放"}`(token 对不对都是);
 - 开发者后台建机器人 `503 {"detail":"机器人功能暂未开放"}`;
 - 客户端的回调和 bot-info `503 {"detail":"机器人功能暂未开放"}`;
-- 不再给机器人生成新的更新,webhook 暂停投递。
+- 不再给机器人生成新的更新,webhook 暂停投递;
+- `GET /config` 的 `features.bots` 是 `false`,客户端据此收起机器人相关的入口。
+
+回调和 bot-info 挂在 `/chat/v1` 下,「消息」急停闸 `chat_enabled` 关着时它们和其余聊天接口一样回
+`503 {"detail":"消息功能暂停中,稍后再试"}`。
 
 ---
 

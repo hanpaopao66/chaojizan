@@ -18,7 +18,7 @@
 | `media_transcode` | 转码急停(关掉时任务只排队不执行) | 开 | 开 | 机器被转码压垮时临时关 |
 
 - 判「开发」的依据是 `APP_ENV=dev`;拼错、留空、写成 staging 一律按生产算(`services/flags.video_flag_default`);
-- `/config` 的 `features` 把 chat / calls / video / video_upload 下发给客户端,关着的入口直接收起(电话按钮、「我的」页视频块);
+- `/config` 的 `features` 把 chat / calls / video / video_upload / bots 下发给客户端,关着的入口直接收起(电话按钮、「我的」页视频块);
   服务端照样兜底回 503,客户端只是不让人点进去才知道。
 
 ## 2. 迁移
@@ -32,7 +32,10 @@
 - **新增 `media-worker`**:`python -m app.workers.media`,转码队列在 Redis(`media:jobs`,BLMOVE 到「进行中」,做完才删,重启先挪回),
   限 2 核 / 1.5G;api、sweeper 设 `MEDIA_WORKER=external` 只排队不转;
 - **api 开 `MEDIA_ACCEL=true`**:私密媒体和视频判完权回 `X-Accel-Redirect`,nginx 从 MinIO 直出(Range、拖进度条不经过 Python);
-- 只能有一份的循环一律在 sweeper:视频定时发布、定时消息(5 秒一轮)、过期分片上传清理、机器人 webhook 投递。
+- 只能有一份的循环一律在 sweeper:视频定时发布、定时消息(5 秒一轮)、过期分片上传清理;
+- **机器人 webhook 投递是例外,跟着 api 进程跑**(`services/bot_webhook.py`,#355):新更新提交之后当场推,不能等清扫的节奏,
+  而且 CI / 本地 `AUTO_FLOW_ENABLED=false` 时也得能投。多个 api 进程时同一个机器人靠 Redis 锁只有一处在投、按 update_id 顺序;
+  不想让某个进程投就给它设 `BOT_WEBHOOK_ENABLED=false`。
 
 ## 4. nginx(`deploy/nginx/conf.d/superz.conf`)
 

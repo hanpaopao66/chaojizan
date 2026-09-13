@@ -427,7 +427,7 @@ async def public_config(db: AsyncSession = Depends(get_db)):
     import hashlib
     import json
 
-    from ..services.flags import marketing_on, social_flag_on, video_flag_on
+    from ..services.flags import bots_on, marketing_on, social_flag_on, video_flag_on
 
     rows = (await db.scalars(select(PlatformCopy))).all()
     copy = {r.key: r.text for r in rows if not r.key.startswith(PLEDGE_PREFIX)}
@@ -444,7 +444,9 @@ async def public_config(db: AsyncSession = Depends(get_db)):
         "features": {"video": await video_flag_on(db, "video_enabled"),
                      "video_upload": await video_flag_on(db, "video_upload_enabled"),
                      "chat": await social_flag_on(db, "chat_enabled"),
-                     "calls": await social_flag_on(db, "calls_enabled")},
+                     "calls": await social_flag_on(db, "calls_enabled"),
+                     # 机器人(#355):关着时客户端收起「添加到群组」、菜单按钮这些入口
+                     "bots": await bots_on(db)},
         "copy": copy,
         "faq": [{"audience": f.audience, "q": f.question, "a": f.answer}
                 for f in faqs],
