@@ -5,6 +5,7 @@ import 'channel_config.dart';
 import 'agent_tokens_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
@@ -183,6 +184,11 @@ class UserApp extends StatelessWidget {
         theme: superZTheme(Brightness.light),
         darkTheme: superZTheme(Brightness.dark),
         themeMode: ThemeMode.system,
+        // 整个 App 只有中文:Material 自带的字(粘贴、返回、日期选择器)跟着用中文,
+        // 不跟系统语言走 —— 英文系统上一半中文一半英文更难用
+        locale: const Locale('zh', 'CN'),
+        supportedLocales: const [Locale('zh', 'CN')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
         // 长辈版:字号放大到 1.4×(封顶,避免溢出);关闭则尊重系统缩放
         builder: (context, child) {
           final mq = MediaQuery.of(context);

@@ -11,6 +11,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Material 自带的字(长按输入框的「粘贴」、返回按钮的提示、日期 / 时间选择器)用中文;
+  # 顺带让汉字按简体字形排(英文系统的手机上不设的话,有些字会用上日文字形)
+  flutter_localizations:
+    sdk: flutter
   superz_shared:
     path: ../../packages/shared
   web_socket_channel: ^3.0.0 # 订单状态实时推送
