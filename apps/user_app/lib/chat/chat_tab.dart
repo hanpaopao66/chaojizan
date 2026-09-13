@@ -191,98 +191,104 @@ class _ChatTabState extends State<ChatTab> {
           ]),
         ),
       Expanded(
-        child: RefreshIndicator(
-          onRefresh: _refresh,
-          child: ListView.builder(
-            // 没登录、或者列表为空时,分隔线下面多一格放提示(登录引导 / 转圈 / 空状态)
-            itemCount: (folder == null ? 3 : 0) + (archived.isNotEmpty ? 1 : 0) + 1 + chats.length +
-                (chats.isEmpty ? 1 : 0),
-            itemBuilder: (context, i) {
-              var k = i;
-              if (folder == null) {
-                if (k == 0) {
-                  return _PinnedRow(
-                      icon: Icons.campaign_outlined, title: '通知', subtitle: '平台公告和订单状态', dot: _noticeUnread, onTap: _openNotice);
+        // 标题栏已经让过状态栏了,列表别再按顶部安全区补一次 —— 不去掉的话
+        // 安卓上「通知」那一行上面会空出一截状态栏高(网页版没有状态栏,看不出来)
+        child: MediaQuery.removePadding(
+          context: context,
+          removeTop: true,
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView.builder(
+              // 没登录、或者列表为空时,分隔线下面多一格放提示(登录引导 / 转圈 / 空状态)
+              itemCount: (folder == null ? 3 : 0) + (archived.isNotEmpty ? 1 : 0) + 1 + chats.length +
+                  (chats.isEmpty ? 1 : 0),
+              itemBuilder: (context, i) {
+                var k = i;
+                if (folder == null) {
+                  if (k == 0) {
+                    return _PinnedRow(
+                        icon: Icons.campaign_outlined, title: '通知', subtitle: '平台公告和订单状态', dot: _noticeUnread, onTap: _openNotice);
+                  }
+                  if (k == 1) {
+                    return _PinnedRow(
+                        icon: Icons.receipt_long_outlined, title: '订单消息', subtitle: '和商家、骑手的对话', onTap: _openOrderChats);
+                  }
+                  if (k == 2) {
+                    // 视频的互动消息(D24 第三行,#367):回复我的、@我的、收到的赞、系统通知
+                    return ValueListenableBuilder<int>(
+                      valueListenable: videoNotifyUnread,
+                      builder: (context, n, _) => _PinnedRow(
+                        icon: Icons.favorite_border,
+                        title: '互动消息',
+                        subtitle: '视频的回复、@、赞和审核结果',
+                        badge: n,
+                        onTap: () async {
+                          if (!await ensureLoggedIn(context)) return;
+                          if (context.mounted) {
+                            await Navigator.of(context)
+                                .push(MaterialPageRoute<void>(builder: (_) => const VideoNotificationsPage()));
+                          }
+                        },
+                      ),
+                    );
+                  }
+                  k -= 3;
                 }
-                if (k == 1) {
-                  return _PinnedRow(
-                      icon: Icons.receipt_long_outlined, title: '订单消息', subtitle: '和商家、骑手的对话', onTap: _openOrderChats);
+                if (archived.isNotEmpty) {
+                  if (k == 0) {
+                    return _PinnedRow(
+                      icon: Icons.archive_outlined,
+                      title: '归档',
+                      subtitle: archived.take(3).map((c) => c.title).join('、'),
+                      badge: archivedUnread,
+                      onTap: () => Navigator.of(context)
+                          .push(MaterialPageRoute<void>(builder: (_) => const ArchivedPage())),
+                    );
+                  }
+                  k -= 1;
                 }
-                if (k == 2) {
-                  // 视频的互动消息(D24 第三行,#367):回复我的、@我的、收到的赞、系统通知
-                  return ValueListenableBuilder<int>(
-                    valueListenable: videoNotifyUnread,
-                    builder: (context, n, _) => _PinnedRow(
-                      icon: Icons.favorite_border,
-                      title: '互动消息',
-                      subtitle: '视频的回复、@、赞和审核结果',
-                      badge: n,
-                      onTap: () async {
-                        if (!await ensureLoggedIn(context)) return;
-                        if (context.mounted) {
-                          await Navigator.of(context)
-                              .push(MaterialPageRoute<void>(builder: (_) => const VideoNotificationsPage()));
-                        }
-                      },
+                if (k == 0) return Divider(height: 1, color: sz.line);
+                k -= 1;
+                // 平台拉了「消息」的急停闸(/config 的 features.chat):通知、订单消息照常,聊天这块说清楚在停着
+                if (!RemoteCopy.feature('chat')) {
+                  if (k > 0) return const SizedBox.shrink();
+                  return const Padding(
+                    padding: EdgeInsets.only(top: 48),
+                    child: SzEmpty(text: '消息功能暂停中,稍后再试\n通知和订单消息不受影响'),
+                  );
+                }
+                if (!loggedIn) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 48),
+                    child: SzEmpty(
+                      text: '登录后和朋友聊天、建群、订阅频道',
+                      actionLabel: '登录 / 注册',
+                      onAction: () => ensureLoggedIn(context),
                     ),
                   );
                 }
-                k -= 3;
-              }
-              if (archived.isNotEmpty) {
-                if (k == 0) {
-                  return _PinnedRow(
-                    icon: Icons.archive_outlined,
-                    title: '归档',
-                    subtitle: archived.take(3).map((c) => c.title).join('、'),
-                    badge: archivedUnread,
-                    onTap: () => Navigator.of(context)
-                        .push(MaterialPageRoute<void>(builder: (_) => const ArchivedPage())),
+                if (chats.isEmpty) {
+                  if (!store.loaded && store.loadError == null) {
+                    return const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
+                  }
+                  if (store.loadError != null && store.chats.isEmpty) {
+                    return SzError(error: store.loadError, onRetry: store.refresh);
+                  }
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 40),
+                    child: SzEmpty(
+                      text: folder == null ? '还没有聊天\n加个联系人,或者建一个群' : '这个分组里还没有会话',
+                      actionLabel: folder == null ? '添加联系人' : null,
+                      onAction: folder == null
+                          ? () => Navigator.of(context)
+                              .push(MaterialPageRoute<void>(builder: (_) => const AddContactPage()))
+                          : null,
+                    ),
                   );
                 }
-                k -= 1;
-              }
-              if (k == 0) return Divider(height: 1, color: sz.line);
-              k -= 1;
-              // 平台拉了「消息」的急停闸(/config 的 features.chat):通知、订单消息照常,聊天这块说清楚在停着
-              if (!RemoteCopy.feature('chat')) {
-                if (k > 0) return const SizedBox.shrink();
-                return const Padding(
-                  padding: EdgeInsets.only(top: 48),
-                  child: SzEmpty(text: '消息功能暂停中,稍后再试\n通知和订单消息不受影响'),
-                );
-              }
-              if (!loggedIn) {
-                return Padding(
-                  padding: const EdgeInsets.only(top: 48),
-                  child: SzEmpty(
-                    text: '登录后和朋友聊天、建群、订阅频道',
-                    actionLabel: '登录 / 注册',
-                    onAction: () => ensureLoggedIn(context),
-                  ),
-                );
-              }
-              if (chats.isEmpty) {
-                if (!store.loaded && store.loadError == null) {
-                  return const Padding(padding: EdgeInsets.all(32), child: Center(child: CircularProgressIndicator()));
-                }
-                if (store.loadError != null && store.chats.isEmpty) {
-                  return SzError(error: store.loadError, onRetry: store.refresh);
-                }
-                return Padding(
-                  padding: const EdgeInsets.only(top: 40),
-                  child: SzEmpty(
-                    text: folder == null ? '还没有聊天\n加个联系人,或者建一个群' : '这个分组里还没有会话',
-                    actionLabel: folder == null ? '添加联系人' : null,
-                    onAction: folder == null
-                        ? () => Navigator.of(context)
-                            .push(MaterialPageRoute<void>(builder: (_) => const AddContactPage()))
-                        : null,
-                  ),
-                );
-              }
-              return DialogRow(chat: chats[k]);
-            },
+                return DialogRow(chat: chats[k]);
+              },
+            ),
           ),
         ),
       ),

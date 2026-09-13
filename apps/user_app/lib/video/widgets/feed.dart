@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
@@ -169,18 +170,25 @@ class VideoFeedState extends State<VideoFeed> with AutomaticKeepAliveClientMixin
         if (widget.header != null) SliverToBoxAdapter(child: widget.header),
         SliverPadding(
           padding: widget.padding,
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 260,
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: .86,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, i) => VideoGridCard(card: _items[i], onLongPress: () => _menu(_items[i])),
-              childCount: _items.length,
-            ),
-          ),
+          // 列数照「每列不超过 260」算(和 MaxCrossAxisExtent 同一个算法),格子高 = 封面 + 下面那块字
+          sliver: SliverLayoutBuilder(builder: (context, constraints) {
+            const gap = 10.0;
+            final w = constraints.crossAxisExtent;
+            final cols = math.max(1, (w / (260 + gap)).ceil());
+            final cardW = (w - gap * (cols - 1)) / cols;
+            return SliverGrid(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: cols,
+                mainAxisSpacing: gap,
+                crossAxisSpacing: gap,
+                mainAxisExtent: cardW / VideoGridCard.coverAspect + VideoGridCard.textBlockHeight(context),
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, i) => VideoGridCard(card: _items[i], onLongPress: () => _menu(_items[i])),
+                childCount: _items.length,
+              ),
+            );
+          }),
         ),
         SliverToBoxAdapter(
           child: Padding(

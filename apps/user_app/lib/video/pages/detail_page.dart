@@ -352,19 +352,24 @@ class _VideoDetailPageState extends State<VideoDetailPage> with SingleTickerProv
         ),
         const Divider(height: 1),
         Expanded(
-          child: TabBarView(controller: _tabs, children: [
-            _intro(v),
-            VideoComments(
-              vid: v.vid,
-              uploaderId: v.uploader?.id ?? 0,
-              allowComments: v.allowComments,
-              focusCommentId: widget.commentId,
-              focusRootId: widget.rootCommentId,
-              onCount: (n) {
-                if (mounted && n != _commentCount) setState(() => _commentCount = n);
-              },
-            ),
-          ]),
+          // 播放器那块已经让过状态栏;下面的评论列表别再按顶部安全区补一次(手机上「评论 N」上面会空一截)
+          child: MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            child: TabBarView(controller: _tabs, children: [
+              _intro(v),
+              VideoComments(
+                vid: v.vid,
+                uploaderId: v.uploader?.id ?? 0,
+                allowComments: v.allowComments,
+                focusCommentId: widget.commentId,
+                focusRootId: widget.rootCommentId,
+                onCount: (n) {
+                  if (mounted && n != _commentCount) setState(() => _commentCount = n);
+                },
+              ),
+            ]),
+          ),
         ),
       ]),
     );

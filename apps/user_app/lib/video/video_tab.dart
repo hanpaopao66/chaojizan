@@ -142,24 +142,29 @@ class _VideoTabState extends State<VideoTab> with SingleTickerProviderStateMixin
           tabs: [for (final t in _tabs) Tab(text: t)],
         ),
         Expanded(
-          child: TabBarView(
-            controller: _tc,
-            // 竖屏页自己吃上下滑;左右滑切页签会和它的「左滑进 UP 主空间」打架,所以禁掉整体左右滑
-            physics: immersive ? const NeverScrollableScrollPhysics() : null,
-            children: [
-              _FollowingFeed(key: _followKey),
-              VideoFeed(
-                load: (page, _) => videoApi.recommend(page),
-                showWhy: true,
-                emptyText: '还没有视频\n投第一个稿吧',
-              ),
-              VideoFeed(
-                load: (page, _) => videoApi.hot(page),
-                header: _HotHeader(),
-                emptyText: '还没有热门视频',
-              ),
-              VerticalFeed(active: immersive, onGoHot: () => _tc.animateTo(2)),
-            ],
+          // 顶上的 SafeArea 已经让过状态栏;下面的列表(空状态、关注页是 ListView)别再补一次
+          child: MediaQuery.removePadding(
+            context: context,
+            removeTop: true,
+            child: TabBarView(
+              controller: _tc,
+              // 竖屏页自己吃上下滑;左右滑切页签会和它的「左滑进 UP 主空间」打架,所以禁掉整体左右滑
+              physics: immersive ? const NeverScrollableScrollPhysics() : null,
+              children: [
+                _FollowingFeed(key: _followKey),
+                VideoFeed(
+                  load: (page, _) => videoApi.recommend(page),
+                  showWhy: true,
+                  emptyText: '还没有视频\n投第一个稿吧',
+                ),
+                VideoFeed(
+                  load: (page, _) => videoApi.hot(page),
+                  header: _HotHeader(),
+                  emptyText: '还没有热门视频',
+                ),
+                VerticalFeed(active: immersive, onGoHot: () => _tc.animateTo(2)),
+              ],
+            ),
           ),
         ),
       ]),

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -78,6 +80,31 @@ class VideoGridCard extends StatelessWidget {
   final VoidCallback? onLongPress;
   final VoidCallback? onTap;
 
+  static const coverAspect = 16 / 10;
+  static const _titleStyle = TextStyle(fontSize: kFontBody, height: 1.3);
+  static const _upStyle = TextStyle(fontSize: kFontMicro);
+
+  /// 封面下面那块字的高度:两行标题 + UP 主一行 + 上下留白。网格按「封面 + 这块」定格子高,
+  /// 不用写死的宽高比 —— 写死的比例在窄屏上会在标题下面空出一大截,换了字号(长辈模式)又会不够
+  static double textBlockHeight(BuildContext context) {
+    final base = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
+    final scaler = MediaQuery.textScalerOf(context);
+    double measure(String s, TextStyle style) {
+      final tp = TextPainter(
+          text: TextSpan(text: s, style: base.merge(style)), textDirection: TextDirection.ltr, textScaler: scaler)
+        ..layout();
+      final h = tp.height;
+      tp.dispose();
+      return h;
+    }
+
+    // 样本要中英混排再带个表情:一行里混了几种字体时,行高取的是各字体上沿、下沿的最大值,
+    // 比「字号 × 行高」多出一两个像素(只量一个汉字,两行标题 + UP 主一行会差 3 像素)。
+    // 6 + 2:标题上下留白;8:UP 主那行下面
+    const sample = '国Ag9😀';
+    return 6 + measure('$sample\n$sample', _titleStyle) + 2 + math.max(13, measure(sample, _upStyle)) + 8;
+  }
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
@@ -89,11 +116,15 @@ class VideoGridCard extends StatelessWidget {
         onTap: onTap ?? () => openVideo(context, card.vid),
         onLongPress: onLongPress,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          AspectRatio(aspectRatio: 16 / 10, child: VideoCover(card: card, radius: 0)),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
-            child: Text(card.invalid ? '视频已失效' : card.title,
-                maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: kFontBody, height: 1.3)),
+          AspectRatio(aspectRatio: coverAspect, child: VideoCover(card: card, radius: 0)),
+          // 标题占满中间:只有一行时空出来的那行留在标题和 UP 主之间,UP 主贴底,同一排卡片底边对齐;
+          // 格子高万一量少了,标题底边被裁掉一两个像素,不会出溢出
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 2),
+              child: Text(card.invalid ? '视频已失效' : card.title,
+                  maxLines: 2, overflow: TextOverflow.ellipsis, style: _titleStyle),
+            ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
