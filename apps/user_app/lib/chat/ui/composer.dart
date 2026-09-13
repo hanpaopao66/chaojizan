@@ -1,7 +1,7 @@
 import 'dart:async';
 
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -393,14 +393,12 @@ class ComposerState extends State<Composer> {
         final f = await ImagePicker().pickVideo(source: ImageSource.camera, maxDuration: const Duration(minutes: 10));
         if (f != null) await _sendPicked([f], forceVideo: true);
       case 'file':
-        // 网页版拿不到文件路径,只能把内容读进来(PlatformFile.xFile 在网页上要 bytes);
-        // 手机上走路径,边读边传,不整个读进内存
-        final r = await FilePicker.pickFiles(allowMultiple: true, withData: kIsWeb);
-        if (r != null && r.files.isNotEmpty) {
+        // 官方 file_selector:手机上给路径、网页上给 blob 地址,都是 XFile,边读边传不整个读进内存
+        final files = await openFiles();
+        if (files.isNotEmpty) {
           final list = <LocalAttachment>[];
-          for (final pf in r.files) {
-            final x = pf.xFile;
-            list.add(LocalAttachment(file: x, kind: 'file', name: pf.name, size: pf.size));
+          for (final x in files) {
+            list.add(LocalAttachment(file: x, kind: 'file', name: x.name, size: await x.length()));
           }
           await widget.actions.onSendAttachments(list, '', const []);
         }
