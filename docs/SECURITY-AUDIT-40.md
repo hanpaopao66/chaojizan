@@ -64,9 +64,15 @@
 
 token 不许放 URL(会进访问日志);连上 5 秒内没有 auth 帧就 4401 断开;错 token 4401。守卫:`e2e_chat_private` 第一段。
 
-## 9. Bot token 泄漏
+## 9. 机器人(#355)
 
-见机器人平台合并时补的这一节(库里只存 sha256,日志和后台只出现前 6 位,有守卫断言日志里没有完整 token)。
+| 风险 | 做法 | 守卫与弄红 |
+|---|---|---|
+| token 泄漏 | 库里只存 sha256;最外层中间件把 `/bot/<token>/…` 打码成 `/bot/<前 6 位>***/…`,之后 uvicorn 访问日志、异常留痕拿到的都是打码后的路径;生产 nginx 访问日志同样打码 | `tests/unit/test_bots.py` + `e2e_bots` 末尾的日志检查。**弄红**:让 `mask_path` 原样返回 → 单测红在「日志里出现了 token 的密钥部分」,e2e 同一句红 |
+| 越权管别人的机器人 | 开发者后台 `/dev/v1/bots…` 一律按 `owner_id` 过滤,别人的回 404 | `e2e_bots`。**弄红**:去掉 `own_bot` 的属主条件 → 「别的开发者 GET 应当 404」红在 200 |
+| 机器人主动骚扰 | 私聊只能发给和它说过话的人;被拉黑 403;群里只能发到它是成员的群 | `e2e_bots`。**弄红**:跳过「说过话」检查 → 「sendMessage 期望 403」红在 200 |
+| webhook 当 SSRF 跳板 | 每次投递前重新解析、判公网,不跟随跳转;secret_token 加密存 | `tests/unit/test_bots.py` 的 webhook 地址判定 |
+| 回调伪造 | 回调的 data 必须真在那条机器人消息的键盘里,调用者必须是会话成员 | `e2e_bots`「伪造 callback_data 400」 |
 
 ## 10. S1–S10 的守卫
 
@@ -77,8 +83,8 @@ token 不许放 URL(会进访问日志);连上 5 秒内没有 auth 帧就 4401 �
 | S3 不卖流量 | `tests/unit/test_video_rank.py`(模型列名、排序函数的输入) |
 | S4 不收钱 | `tests/unit/test_video_invariants.py` 的 `test_s4_*`、硬币来源两条 |
 | S5 用户的数据用户说了算 | `e2e_chat_export`(导出只本人能下、注销后消息和媒体对别人消失;**本次弄红**:去掉注销时的清理那一步,「消息对方还看得见」红)、`e2e_video_upload` S5 段、`e2e_account_delete` |
-| S6 处罚有原因、能申诉、换人复核 | 视频:`e2e_video_upload` S6 段;消息侧处罚与申诉见社区治理合并时补的 `e2e_social_moderation` |
+| S6 处罚有原因、能申诉、换人复核 | 视频:`e2e_video_upload` S6 段;消息侧:`e2e_social_moderation`(**弄红**:关掉「处理人等于原处罚人」的判断 → 原处罚人把自己的封号撤销成功,红) |
 | S7 拉黑立即生效、双向隔离 | `e2e_social_profile`、`e2e_video_comments`、`e2e_danmaku`、`e2e_calls` |
-| S8 管理员看私聊要留痕 | 见社区治理合并时补的 `e2e_social_moderation` |
+| S8 管理员看私聊要留痕 | `e2e_social_moderation` + `tests/unit/test_sanctions.py`。**弄红**三处:去掉「不带举报单 403」→ 红在拿到 404;范围改成前后各 6 条 → 红在拿到 [4..16];注释掉写留痕 → 红在「每次查看都要留痕」。透明中心不含个人信息:SQL 多读一列 `note` 拼进原因名 → e2e 扫出三条说明、单测报「读了个人信息相关的列」 |
 | S9 个性化可以一键关闭 | `e2e_video_feed` |
 | S10 消息不丢、不重、有序 | `e2e_chat_private`(并发发送、重复 random_id、断线补齐与 reset) |
