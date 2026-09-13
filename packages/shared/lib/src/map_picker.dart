@@ -382,9 +382,10 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
+                      // 没有搜索框(调用方没注入 onSearch)时别叫人去「上方搜索」
                       kTencentMapKey.isEmpty
-                          ? '这个版本没有启用街道底图,\n请直接用上方搜索选地址'
-                          : '同意隐私政策后才能显示地图,\n也可以直接用上方搜索选地址',
+                          ? '这个版本没有启用街道底图,\n${widget.onSearch != null ? '请直接用上方搜索选地址' : '从下面的周边地点里选'}'
+                          : '同意隐私政策后才能显示地图,\n${widget.onSearch != null ? '也可以直接用上方搜索选地址' : '也可以从下面的周边地点里选'}',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 13, color: sz.inkMuted),
                     ),
@@ -487,56 +488,59 @@ class _MapPickerPageState extends State<MapPickerPage> {
       appBar: AppBar(title: const Text('在地图上选位置')),
       body: Column(children: [
         searchBar,
-        // 联想结果压在地图上方:选中一条把镜头移过去,再由用户微调。
-        // **不直接拿这条 POI 当结果** —— 搜出来的是地标,
-        // 用户还要拖到自己那栋楼,这正是选点页存在的理由
-        if (_tips.isNotEmpty)
-          ConstrainedBox(
-            constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(context).size.height * 0.34),
-            child: Material(
-              color: Theme.of(context).colorScheme.surface,
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: _tips.length,
-                separatorBuilder: (_, __) => Divider(height: 1, color: sz.line),
-                itemBuilder: (_, i) => ListTile(
-                  dense: true,
-                  leading: Icon(Icons.place_outlined, size: 18,
-                      color: sz.inkMuted),
-                  title: Text(_tips[i].name,
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: _tips[i].district.isEmpty
-                      ? null
-                      : Text(_tips[i].district,
-                          style: TextStyle(fontSize: 11, color: sz.inkMuted)),
-                  onTap: () => _gotoTip(_tips[i]),
+        // 地图、周边列表、联想结果都按**这块实际有多高**来分,不按整屏高 ——
+        // 原来地图固定整屏 38%、联想结果最多整屏 34%,手机上键盘一弹,可用高度只剩一半,
+        // 加上确认栏一起溢出好几百像素(黄黑条)。
+        Expanded(
+          child: LayoutBuilder(builder: (context, box) {
+            return Stack(children: [
+              Column(children: [
+                // 有周边列表时地图拿一半,下面让给列表 —— 用户主要靠读地名确认"这是不是我家",
+                // 地图是辅助。没有列表时地图占满:那时它是唯一的信息源
+                if (widget.onAround == null)
+                  Expanded(child: mapStack)
+                else ...[
+                  SizedBox(height: box.maxHeight * .5, child: mapStack),
+                  // ---- 下半屏:周边地点列表 ----
+                  //
+                  // 光给一个图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——
+                  // 反查给的往往是路名,而他要的是「XX 小区 10 号楼」。
+                  // 列一串周边地点带距离,**认地名比认坐标容易得多**。
+                  Expanded(child: _aroundList(sz)),
+                ],
+              ]),
+              // 联想结果盖在地图上面(地图不拆:拆了镜头位置就丢了):选中一条把镜头移过去,再由用户微调。
+              // **不直接拿这条 POI 当结果** —— 搜出来的是地标,用户还要拖到自己那栋楼,这正是选点页存在的理由
+              if (_tips.isNotEmpty)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: box.maxHeight),
+                    child: Material(
+                      color: Theme.of(context).colorScheme.surface,
+                      elevation: 2,
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _tips.length,
+                        separatorBuilder: (_, __) => Divider(height: 1, color: sz.line),
+                        itemBuilder: (_, i) => ListTile(
+                          dense: true,
+                          leading: Icon(Icons.place_outlined, size: 18, color: sz.inkMuted),
+                          title: Text(_tips[i].name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: _tips[i].district.isEmpty
+                              ? null
+                              : Text(_tips[i].district, style: TextStyle(fontSize: 11, color: sz.inkMuted)),
+                          onTap: () => _gotoTip(_tips[i]),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ),
-        // 有周边列表时地图给固定高度(约 38% 屏高),把下面让给列表 ——
-        // 用户主要靠读地名确认"这是不是我家",地图是辅助。
-        // 没有列表时地图占满剩余空间:那时它是唯一的信息源。
-        //
-        // **不能用 MediaQuery 的整屏高**:Column 里下面还有确认栏,
-        // 那样会溢出
-        if (widget.onAround == null)
-          Expanded(child: mapStack)
-        else
-          SizedBox(
-            height: MediaQuery.of(context).size.height * .38,
-            child: mapStack,
-          ),
-        // ---- 下半屏:周边地点列表 ----
-        //
-        // 光给一个图钉 + 反查出来的一行地址,用户很难确认"这就是我家" ——
-        // 反查给的往往是路名,而他要的是「XX 小区 10 号楼」。
-        // 列一串周边地点带距离,**认地名比认坐标容易得多**。
-        if (widget.onAround != null)
-          Expanded(child: _aroundList(sz))
-        else
-          const SizedBox.shrink(),
+            ]);
+          }),
+        ),
         SafeArea(
           top: false,
           child: Padding(

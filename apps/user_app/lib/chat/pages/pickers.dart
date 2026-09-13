@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import '../chat_page.dart';
@@ -13,17 +14,39 @@ void _toast(BuildContext context, String s) {
   if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s)));
 }
 
-/// 选一个位置发出去(复用收货地址那套地图选点:搜索、周边、拖图)。
+/// 选一个位置发出去(复用收货地址那套地图选点:搜索、周边、拖图、定位到我)。
 Future<({double lat, double lng, String title, String address})?> pickLocation(
     BuildContext context, ApiClient api) async {
+  // 搜索按**发的人自己**所在的城市搜(和收货地址同一套口径:定位 → 城市,拿不到用上次选的),
+  // 顶上的城市切换器能换 —— 原来这里没开搜索,只能拖图或者从周边列表里挑
+  var city = await CityPref.resolve(
+    lastKnown: () async {
+      final me = await Geolocator.getLastKnownPosition();
+      return me == null ? null : (lat: me.latitude, lng: me.longitude);
+    },
+    reverse: (lat, lng) async => (await api.geoReverse(lat, lng)).city,
+  );
+  if (!context.mounted) return null;
   final picked = await Navigator.of(context).push<PickedPlace>(MaterialPageRoute(
     builder: (_) => MapPickerPage(
       onReverse: (lat, lng) async {
         final t = await api.geoReverse(lat, lng);
         return (name: t.name, district: t.district);
       },
-      // 周边地点列表:认地名比认坐标容易。搜索要绑城市,发位置时不知道对方在哪个城市,先不开
+      // 周边地点列表:认地名比认坐标容易
       onAround: api.geoAround,
+      onSearch: (kw) => api.geoTips(kw, city: city),
+      city: city,
+      onCities: api.openCities,
+      onCityChanged: (c) => city = c,
+      onLocate: () async {
+        // 先要权限再取:没授权时直接取会静默失败,点了按钮没反应
+        var perm = await Geolocator.checkPermission();
+        if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
+        if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return null;
+        final me = await Geolocator.getCurrentPosition();
+        return (lat: me.latitude, lng: me.longitude);
+      },
     ),
   ));
   if (picked == null) return null;
