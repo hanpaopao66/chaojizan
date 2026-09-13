@@ -827,6 +827,7 @@ async def add_part(vid: str, body: PartIn, me: User = Depends(social_user),
     await vsvc.require_realname(db, me)
     v = await vsvc.own_video(db, vid, me)
     p = await vsvc.add_part(db, me, v, body.media_id, body.title)
+    await vsvc.emit_video_event(db, v)
     await db.commit()
     out = await vsvc.creator_detail(db, v, me)
     out["added_part_id"] = p.id
