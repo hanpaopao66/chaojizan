@@ -142,6 +142,7 @@ function GeneralCard({ shop, onChanged }: { shop: Merchant; onChanged: () => voi
 
 function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }) {
   const [minOrder, setMinOrder] = useState(shop.min_order_cents / 100)
+  const effectiveMin = shop.effective_min_order_cents ?? shop.min_order_cents
   const [packing, setPacking] = useState(shop.packing_fee_cents / 100)
   const [readyMinutes, setReadyMinutes] = useState(shop.promise_ready_minutes)
   const [selfDelivery, setSelfDelivery] = useState(shop.self_delivery)
@@ -170,7 +171,12 @@ function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }
   return (
     <Card size="small" title="外卖经营设置">
       <Space wrap size="large">
-        <Form.Item label="起送价(元,0=不限)">
+        {/* 平台有起送下限(小单的服务费连支付通道费都不够):填 0 或更低,顾客看到的和下单都按下限算。
+            原来写「0=不限」,商家填了 0 以为不限,顾客那边其实是 ¥15 起送 */}
+        <Form.Item label="起送价(元)"
+          extra={effectiveMin > shop.min_order_cents
+            ? `低于平台起送下限,顾客看到的是 ¥${effectiveMin / 100} 起送`
+            : '低于平台起送下限时按下限算'}>
           <InputNumber min={0} value={minOrder} onChange={(v) => setMinOrder(v ?? 0)} />
         </Form.Item>
         <Form.Item label="每单打包费(元)">

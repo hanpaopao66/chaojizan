@@ -193,6 +193,8 @@ export interface Merchant {
   open_time: string
   close_time: string
   min_order_cents: number
+  /** 实际起送价 = max(商家自设, 平台起送下限),顾客看到的和下单拦的都是它;老服务端不给 */
+  effective_min_order_cents?: number
   packing_fee_cents: number
   promise_ready_minutes: number
   self_delivery: boolean

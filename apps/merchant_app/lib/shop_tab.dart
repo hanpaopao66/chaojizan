@@ -759,8 +759,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
     if (saved != null && mounted) _load();
   }
 
-  /// 编辑金额类设置(起送价/打包费),输入以元为单位,存储为分。
-  Future<void> _editAmount(String label, int currentCents, String field) async {
+  /// 编辑金额类设置(起送价/打包费),输入以元为单位,存储为分。[hint] 写在输入框底下。
+  Future<void> _editAmount(String label, int currentCents, String field,
+      {String? hint}) async {
     final controller = TextEditingController(
         text: currentCents > 0 ? (currentCents / 100).toStringAsFixed(
             currentCents % 100 == 0 ? 0 : 2) : '');
@@ -772,8 +773,11 @@ class _ShopTabPageState extends State<ShopTabPage> {
           controller: controller,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-              prefixText: '¥ ', border: OutlineInputBorder()),
+          decoration: InputDecoration(
+              prefixText: '¥ ',
+              helperText: hint,
+              helperMaxLines: 2,
+              border: const OutlineInputBorder()),
         ),
         actions: [
           TextButton(
@@ -1637,9 +1641,19 @@ class _ShopTabPageState extends State<ShopTabPage> {
           SzEntryTile(
             icon: Icons.shopping_basket_outlined,
             title: '起送价',
-            value: shop.minOrderCents > 0 ? '¥${shop.minOrderCents ~/ 100}' : '不限',
+            // 顾客看到的起送价 = max(自设, 平台起送下限),下单也按它拦。
+            // 原来自设 0 时写「不限」,顾客那边其实是 ¥15 起送
+            value: shop.effectiveMinOrderCents == 0
+                ? '不限'
+                : shop.minOrderCents < shop.effectiveMinOrderCents
+                    ? '${yuanShort(shop.effectiveMinOrderCents)}(平台下限)'
+                    : yuanShort(shop.minOrderCents),
             onTap: () => _editAmount(
-                '起送价(元,0 为不限)', shop.minOrderCents, 'min_order_cents'),
+                '起送价(元)', shop.minOrderCents, 'min_order_cents',
+                hint: shop.minOrderCents < shop.effectiveMinOrderCents
+                    ? '低于平台起送下限,顾客看到的是 '
+                        '${yuanShort(shop.effectiveMinOrderCents)} 起送'
+                    : '低于平台起送下限时按下限算'),
           ),
           SzEntryTile(
             icon: Icons.inventory_outlined,
