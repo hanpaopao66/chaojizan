@@ -432,10 +432,11 @@ async def fairness_public(
         FROM merchant_earnings WHERE {_EARN} AND created_at >= :s
     """), {"s": since})).one()
     real_rate = (rate_row[0] / rate_row[1]) if rate_row[1] else None
+    # 跑腿服务主体(biz_type='errand')是平台给跑腿单建的占位,不是商家,不进档位
     tiers = [{"rate": float(r[0]), "merchants": r[1]}
              for r in (await db.execute(sa_text("""
         SELECT commission_rate, count(*) FROM merchants
-        WHERE status = 'approved' GROUP BY 1 ORDER BY 1
+        WHERE status = 'approved' AND biz_type <> 'errand' GROUP BY 1 ORDER BY 1
     """))).all()]
 
     # 2) 每 100 元用户实付去哪了。口径:近 30 天无退款的完成订单 + 正常入账行,
@@ -834,7 +835,7 @@ async def kitchen_cam_spec(db: AsyncSession = Depends(get_db)):
     # 带上真实的接入现状 —— 只给计数,绝无个案
     counts = dict((await db.execute(sa_text("""
         SELECT kitchen_cam_status, count(*) FROM merchants
-        WHERE status = 'approved' GROUP BY 1
+        WHERE status = 'approved' AND biz_type <> 'errand' GROUP BY 1
     """))).all())
     spec["current"] = {
         "active": counts.get("active", 0),

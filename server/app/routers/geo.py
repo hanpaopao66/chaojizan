@@ -268,7 +268,7 @@ async def open_city_list(db: AsyncSession = Depends(get_db)):
     allow = await open_cities(db)
     rows = (await db.execute(text("""
         SELECT city, count(*) AS n FROM merchants
-        WHERE status = 'approved' AND city <> ''
+        WHERE status = 'approved' AND city <> '' AND biz_type <> 'errand'
         GROUP BY city ORDER BY n DESC
     """))).all()
     have = [{"name": c, "merchants": n} for c, n in rows]

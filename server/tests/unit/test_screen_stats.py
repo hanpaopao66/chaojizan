@@ -224,3 +224,15 @@ class Test播报:
         assert [i["merchant"] for i in data["items"]] == ["张记面馆", "帮我买"]
         (s,) = [s for s in db.sql if "JOIN users u" in s]
         assert "o.order_kind" in s
+
+
+def test_其他公开计数也不把跑腿服务主体数成商家():
+    """同一类判据错还有三处:透明中心的佣金档位(各档多少家店)、明厨亮灶的接入现状、
+    城市选择器里每个城市「有几家店」—— 只有跑腿服务主体的城市会显示「1 家店」,切过去是空的。"""
+    import inspect
+
+    from app.routers import geo, transparency
+
+    for fn in (transparency.fairness_public, transparency.kitchen_cam_spec, geo.open_city_list):
+        src = inspect.getsource(fn)
+        assert "biz_type <> 'errand'" in src, f"{fn.__module__}.{fn.__name__} 还在数跑腿服务主体"
