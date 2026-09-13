@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # 转码在哪跑:inline = api 进程里的后台任务(开发 / CI,零配置能跑通);
     # external = 独立的 media-worker 容器(生产,重活不占 api 的事件循环)
     media_worker: str = "inline"
+    # 机器人 webhook 投递循环(#355)跟着 api 进程跑;多进程时同一个机器人靠 Redis 锁只投一份。
+    # 只在明确不想让某个进程投递时关掉(比如临时起的调试进程)
+    bot_webhook_enabled: bool = True
     # 生产上视频 / 大文件由 nginx 从对象存储直出(api 判权后回 X-Accel-Redirect);
     # 开发没有 nginx,api 自己按 Range 流式返回
     media_accel: bool = False

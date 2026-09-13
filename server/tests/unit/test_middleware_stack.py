@@ -34,9 +34,12 @@ class Test中间件顺序:
         """`user_middleware` 是外→内。异常留痕在门店选择外面 ——
         反过来的话门店选择自己抛的异常就没人记了。"""
         names = [m.cls.__name__ for m in app.user_middleware]
-        # 小程序托管域名分流在最外(#322):那些 Host 只许进 /v/ 和 /_sdk/,
+        # Bot API 路径里的 token 打码在最最外(#355):里面每一层(异常留痕、版本上报)和 uvicorn 的
+        # 访问日志读的都是同一个 scope,打码晚一层,那一层就可能把完整 token 写进日志。
+        # 小程序托管域名分流紧随其后(#322):那些 Host 只许进 /v/ 和 /_sdk/,
         # CORS、后台页面这些层对它们都没有意义
-        assert names == ["MiniHostMiddleware", "CORSMiddleware", "LogUnhandledErrorsMiddleware",
+        assert names == ["BotTokenPathMiddleware", "MiniHostMiddleware", "CORSMiddleware",
+                         "LogUnhandledErrorsMiddleware",
                          "ObserveAppBuildMiddleware", "SelectShopMiddleware",
                          "AdminConsoleMiddleware",
                          "RecordApiCallMiddleware"], \

@@ -1366,6 +1366,9 @@ _KNOWN_FLAGS = {
     # 消息(#375):chat_enabled 缺省开(急停用);通话(#374 电信业务许可待定)缺省同视频,开发开、生产关
     "chat_enabled",         # 整个「消息」:关了 /chat/v1 全部回 503「消息功能暂停中」
     "calls_enabled",        # 语音 / 视频通话:关了呼叫直接回「通话功能暂未开放」
+    # 机器人(#355):缺省同视频(开发开、生产关)。关了 Bot API 全部 503、不能建新机器人、
+    # 回调和 bot-info 503、不再生成更新、webhook 暂停,见 services/flags.bot_flag_default
+    "bots_enabled",
 }
 
 
@@ -1376,10 +1379,11 @@ async def list_flags(
 ):
     rows = (await db.scalars(select(PlatformFlag))).all()
     current = {r.key: r.value for r in rows}
-    from ..services.flags import (CHANNELS_FALLBACK, SOCIAL_FLAGS, VIDEO_FLAGS, social_flag_default,
-                                  video_flag_default)
+    from ..services.flags import (BOT_FLAGS, CHANNELS_FALLBACK, SOCIAL_FLAGS, VIDEO_FLAGS,
+                                  bot_flag_default, social_flag_default, video_flag_default)
     defaults = {**{k: video_flag_default() for k in VIDEO_FLAGS},
                 **{k: social_flag_default(k) for k in SOCIAL_FLAGS},
+                **{k: bot_flag_default() for k in BOT_FLAGS},
                 "night_curfew_hours": "01:00-06:00",
                 "screen_show_gmv": "on",  # 大屏金额缺省展示,与 /screen 口径一致
                 # 小程序急停闸缺省是开(miniapp_platform.switch_on:没写过 = 开)

@@ -350,7 +350,7 @@ class Call(Base):
 
 
 class Bot(Base):
-    """机器人:users 表里一行 role=bot 的账号 + 这张表的配置。token 只存哈希。"""
+    """机器人:users 表里一行 role=bot 的账号 + 这张表的配置。token 只存哈希(#355,见 services/bots.py)。"""
 
     __tablename__ = "bots"
 
@@ -365,14 +365,25 @@ class Bot(Base):
     description: Mapped[str] = mapped_column(String(512), default="")
     commands: Mapped[list] = mapped_column(JSONB, default=list)
     webhook_url: Mapped[str] = mapped_column(String(300), default="")
-    webhook_secret: Mapped[str] = mapped_column(String(64), default="")
+    #: webhook 的 secret_token,**密文**(services/crypto.encrypt);空串 = 没设
+    webhook_secret: Mapped[str] = mapped_column(Text, default="")
+    #: 最近一次投递失败的时间和原因(getWebhookInfo 的 last_error_*)
+    webhook_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                              nullable=True)
+    webhook_error: Mapped[str] = mapped_column(String(300), default="")
+    #: 菜单按钮:"" 没有 / commands 命令列表 / web_app 打开 menu_app_id 那个小程序
+    menu_type: Mapped[str] = mapped_column(String(10), default="")
+    menu_text: Mapped[str] = mapped_column(String(64), default="")
     menu_app_id: Mapped[str] = mapped_column(String(24), default="")
     privacy_mode: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: 下一个 update_id。分配时锁这一行,保证「提交顺序 = 编号顺序」(见 services/bots.py)
     next_update_id: Mapped[int] = mapped_column(BigInteger, default=1)
     created_at: Mapped[datetime] = _now_col()
 
 
 class BotUpdate(Base):
+    """给机器人的一条更新(Update 对象原样存在 payload 里),getUpdates 取、webhook 推。"""
+
     __tablename__ = "bot_updates"
 
     bot_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"),
@@ -383,6 +394,11 @@ class BotUpdate(Base):
     next_try_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = _now_col()
+
+    __table_args__ = (
+        Index("ix_bot_updates_due", "next_try_at", postgresql_where=sql_text("delivered_at IS NULL")),
+        Index("ix_bot_updates_created", "created_at"),
+    )
 
 
 class ChatReport(Base):

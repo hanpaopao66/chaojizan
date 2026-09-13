@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (ACTIVE_ROLES, Chat, ChatMember, ChatMessage, InviteLink,
                       JoinRequest, MediaFile, MessageHide, MessageMention, MessageReaction,
-                      Poll, PollVote, SocialProfile, Sticker, User, UserIdentity, Username)
+                      Poll, PollVote, SocialProfile, Sticker, User, UserIdentity, UserRole,
+                      Username)
 from ..ratelimit import check_daily_limit, check_rate_limit, check_rate_limit_seconds
 from .chat_perms import (DEFAULT_ADMIN_RIGHTS, GROUP_MAX_MEMBERS, SLOW_MODES, ADMIN_RIGHTS,
                          MEMBER_PERMS, Perms, can_delete_for_all, can_edit_message,
@@ -209,7 +210,8 @@ async def _upsert_member(db: AsyncSession, chat: Chat, user_id: int, *, role: st
 
 
 async def _member_changed(db: AsyncSession, chat: Chat, user_id: int, role: str,
-                          extra: dict | None = None) -> None:
+                          extra: dict | None = None, *, old_role: str | None = None,
+                          actor_id: int | None = None) -> None:
     await append_chat_event(db, chat.id, "member",
                             {"user_id": user_id, "role": role, **(extra or {})})
     if role in ACTIVE_ROLES:
@@ -217,6 +219,12 @@ async def _member_changed(db: AsyncSession, chat: Chat, user_id: int, role: str,
                                 {"chat": {"id": chat.id, "type": chat.type}})
     else:
         await append_user_event(db, user_id, "chat_leave", {"chat_id": chat.id, "role": role})
+    # 变的是机器人自己的身份:给它一条 my_chat_member(#355;不是机器人的话一次主键查询就走)
+    from .bots import on_member_changed
+    await on_member_changed(db, chat, user_id,
+                            old_role if old_role is not None else
+                            ("left" if role in ACTIVE_ROLES else "member"),
+                            role, actor_id, (extra or {}).get("rights"))
 
 
 async def add_members(db: AsyncSession, chat: Chat, actor: User, user_ids: list[int],
@@ -249,8 +257,10 @@ async def add_members(db: AsyncSession, chat: Chat, actor: User, user_ids: list[
             continue
         if chat.type == "group" and (chat.member_count or 0) >= GROUP_MAX_MEMBERS:
             raise _err(422, f"群最多 {GROUP_MAX_MEMBERS} 人")
+        old_role = m.role if m is not None else None
         await _upsert_member(db, chat, uid, invited_by=actor.id)
-        await _member_changed(db, chat, uid, "member", {"invited_by": actor.id})
+        await _member_changed(db, chat, uid, "member", {"invited_by": actor.id},
+                              old_role=old_role, actor_id=actor.id)
         added.append(uid)
     if added and announce and chat.type == "group":
         await send_service(db, chat, actor.id, "members_add", user_ids=added,
@@ -294,6 +304,7 @@ async def set_member(db: AsyncSession, chat: Chat, actor: User, target_id: int, 
         raise _err(404, "这个人不在会话里")
     if tm.role == "owner":
         raise _err(403, "不能对群主这么做")
+    old = {"old_role": tm.role, "actor_id": actor.id}
     if action in ("promote", "demote"):
         if not ap.add_admins:
             raise _err(403, "你没有任免管理员的权限")
@@ -323,7 +334,7 @@ async def set_member(db: AsyncSession, chat: Chat, actor: User, target_id: int, 
             tm.rights = {}
             tm.title = ""
         await _member_changed(db, chat, target_id, tm.role,
-                              {"rights": tm.rights, "title": tm.title})
+                              {"rights": tm.rights, "title": tm.title}, **old)
         return tm
     if not ap.ban_users:
         raise _err(403, "你没有管理成员的权限")
@@ -337,11 +348,11 @@ async def set_member(db: AsyncSession, chat: Chat, actor: User, target_id: int, 
         tm.rights = {}
         tm.restrictions = {"perms": want, "until": until.isoformat() if until else None}
         await _member_changed(db, chat, target_id, "restricted",
-                              {"restrictions": tm.restrictions})
+                              {"restrictions": tm.restrictions}, **old)
     elif action == "unrestrict":
         tm.role = "member" if is_active(tm) else tm.role
         tm.restrictions = {}
-        await _member_changed(db, chat, target_id, tm.role)
+        await _member_changed(db, chat, target_id, tm.role, **old)
     elif action in ("ban", "kick"):
         was_active = is_active(tm)
         tm.role = "banned" if action == "ban" else "left"
@@ -354,12 +365,12 @@ async def set_member(db: AsyncSession, chat: Chat, actor: User, target_id: int, 
             u = await db.get(User, target_id)
             await send_service(db, chat, actor.id, "member_kick",
                                user_id=target_id, name=display_name(u) if u else "")
-        await _member_changed(db, chat, target_id, tm.role)
+        await _member_changed(db, chat, target_id, tm.role, **old)
     elif action == "unban":
         if tm.role == "banned":
             tm.role = "left"
             tm.restrictions = {}
-            await _member_changed(db, chat, target_id, "left")
+            await _member_changed(db, chat, target_id, "left", **old)
     else:
         raise _err(422, "不认识的操作")
     return tm
@@ -372,14 +383,20 @@ async def transfer_owner(db: AsyncSession, chat: Chat, actor: User, target_id: i
     tm = await member_of(db, chat.id, target_id)
     if not is_active(tm) or tm is None:
         raise _err(422, "只能转让给会话里的人")
+    target = await db.get(User, target_id)
+    if target is not None and target.role == UserRole.bot:
+        # 群主要为群负责(群主责任,#374),机器人背不了;和 Telegram 一样不许
+        raise _err(422, "不能把群主转让给机器人")
+    target_old = tm.role
     tm.role = "owner"
     tm.rights = {}
     tm.restrictions = {}
     am.role = "admin"
     am.rights = {k: True for k in ADMIN_RIGHTS}
     chat.owner_id = target_id
-    await _member_changed(db, chat, target_id, "owner")
-    await _member_changed(db, chat, actor.id, "admin", {"rights": am.rights})
+    await _member_changed(db, chat, target_id, "owner", old_role=target_old, actor_id=actor.id)
+    await _member_changed(db, chat, actor.id, "admin", {"rights": am.rights},
+                          old_role="owner", actor_id=actor.id)
 
 
 async def delete_chat(db: AsyncSession, chat: Chat, actor: User) -> None:
@@ -398,6 +415,11 @@ async def delete_chat(db: AsyncSession, chat: Chat, actor: User) -> None:
     await append_chat_event(db, chat.id, "chat", {"deleted": True, "id": chat.id})
     for uid in members:
         await append_user_event(db, uid, "chat_leave", {"chat_id": chat.id, "role": "deleted"})
+    # 群里的机器人:告诉它自己不在这个群了(#355)。只查机器人成员,不按人头逐个查
+    from .bots import bots_in, on_member_changed
+    for bot_id, _, _ in await bots_in(db, chat):
+        bm = await member_of(db, chat.id, bot_id)
+        await on_member_changed(db, chat, bot_id, bm.role if bm else "member", "left", actor.id)
 
 
 # ---------------- 会话资料 ----------------
@@ -652,6 +674,9 @@ async def insert_message(db: AsyncSession, chat: Chat, *, sender_id: int | None,
             ChatMember.last_read_seq < seq).values(last_read_seq=seq, last_read_at=now_utc(),
                                                    marked_unread=False))
     await append_chat_event(db, chat.id, "msg", await message_payload(db, chat, msg))
+    # 会话里有机器人:按隐私模式的规则给它们各一条 message 更新,和消息同一个事务(#355)
+    from .bots import on_message
+    await on_message(db, chat, msg)
     return msg
 
 
@@ -1007,6 +1032,8 @@ async def edit(db: AsyncSession, chat: Chat, me: User, seq: int, text: str,
     msg.extra = extra
     await db.flush()
     await append_chat_event(db, chat.id, "edit", await message_payload(db, chat, msg))
+    from .bots import on_edit
+    await on_edit(db, chat, msg)
     return msg
 
 
@@ -1404,3 +1431,137 @@ async def update_dialog(db: AsyncSession, chat: Chat, me: User, patch: dict) -> 
     await db.flush()
     await append_user_event(db, me.id, "dialog", out)
     return member
+
+
+# ---------------- 机器人(#355)----------------
+#
+# 机器人经 Bot API 发、改、删消息走下面三个函数。「能不能往这个会话发」(和它说过话没有、被拉黑没有、
+# 是不是群成员)调用方已经用 services/bots.resolve_target 判过;这里是写消息这一层的兜底和规则。
+#
+# 和 [send] 分开写:真人那套「每人每秒 5 条」「新号限制」「同样的话群发判垃圾」「慢速模式」不适用于
+# 机器人(它有自己的限流,见 services/bots.check_send_rate),成员资格、群权限、屏蔽词、实体校验一样不少。
+# 只有 Bot API 调它们,所以错误文案照 Telegram 的写法(「Bad Request: …」「Forbidden: …」)。
+
+async def send_as_bot(db: AsyncSession, chat: Chat, bot: User, *, kind: str, text: str = "",
+                      entities: list | None = None, media: list | None = None,
+                      reply_to_seq: int | None = None, markup: dict | None = None,
+                      silent: bool = False) -> ChatMessage:
+    chat = await lock_chat(db, chat.id)
+    member, p = await require_member(db, chat, bot.id)
+    as_chat = False
+    if chat.type == "channel":
+        if not p.send_messages:
+            raise _err(403, "Forbidden: need administrator rights in the channel chat")
+        as_chat = True
+    elif chat.type == "private":
+        peer = await private_peer_id(db, chat, bot.id)
+        if peer is not None and await blocked_between(db, bot.id, peer):
+            raise _err(403, "Forbidden: bot was blocked by the user")
+    need = "send_messages" if kind == "text" else "send_media"
+    if not p.send_messages or not getattr(p, need):
+        what = "text messages" if kind == "text" else "media messages"
+        raise _err(403, f"Forbidden: not enough rights to send {what} to the chat")
+    if kind == "text" and not text.strip():
+        raise _err(400, "Bad Request: message text is empty")
+    if kind == "text" and len(text) > TEXT_MAX:
+        raise _err(400, "Bad Request: message is too long")
+    if kind != "text" and len(text) > CAPTION_MAX:
+        raise _err(400, "Bad Request: message caption is too long")
+    if text:
+        await guard_text(db, text, "消息")
+    try:
+        ents = validate_entities(text, entities)
+    except EntityError as e:
+        raise _err(400, f"Bad Request: can't parse entities: {e}")
+    ents = ents + auto_entities(text, ents)
+    ents.sort(key=lambda e: (e["offset"], -e["length"]))
+    extra: dict = {}
+    if chat.type == "channel" and chat_settings(chat.settings)["signatures"]:
+        extra["signature"] = display_name(bot)
+    if reply_to_seq is not None:
+        floor = visible_floor(chat, member)
+        target = await db.scalar(select(ChatMessage.seq).where(
+            ChatMessage.chat_id == chat.id, ChatMessage.seq == reply_to_seq,
+            ChatMessage.seq > floor, ChatMessage.deleted_at.is_(None)))
+        if target is None:
+            reply_to_seq = None     # 和真人一样:被回复的那条没了就不带引用,照发
+    msg = await insert_message(db, chat, sender_id=bot.id, kind=kind, text=text, entities=ents,
+                               media=media or [], reply_to_seq=reply_to_seq, extra=extra,
+                               markup=markup, silent=silent, as_chat=as_chat)
+    await _record_mentions(db, chat, msg, ents, text)
+    await _after_send(db, chat, msg, no_preview=not p.embed_links)
+    return msg
+
+
+_NOT_MODIFIED = ("Bad Request: message is not modified: specified new message content and "
+                 "reply markup are exactly the same as a current content and reply markup of "
+                 "the message")
+
+
+async def edit_as_bot(db: AsyncSession, chat: Chat, bot: User, seq: int, *, text: str | None,
+                      entities: list | None, markup: dict | None) -> ChatMessage:
+    """改机器人自己发的消息:text 为 None 时只换键盘(editMessageReplyMarkup)。
+
+    markup 就是改完之后的键盘,None = 去掉键盘(Telegram 的 editMessageText 不带 reply_markup 也会去掉)。
+    机器人改自己的消息不受 48 小时限制(和 Telegram 一样:按钮点下去之后改那条消息是机器人最常见的用法)。
+    只换键盘不算「已编辑」(不设 edited_at),但照样发 edit 事件让客户端换键盘。
+    """
+    await require_member(db, chat, bot.id)
+    msg = await db.scalar(select(ChatMessage).where(
+        ChatMessage.chat_id == chat.id, ChatMessage.seq == seq,
+        ChatMessage.deleted_at.is_(None)).with_for_update()
+        .execution_options(populate_existing=True))
+    if msg is None:
+        raise _err(400, "Bad Request: message to edit not found")
+    if msg.sender_id != bot.id:
+        raise _err(400, "Bad Request: message can't be edited")
+    changed = False
+    if text is not None:
+        if msg.kind != "text":
+            raise _err(400, "Bad Request: there is no text in the message to edit")
+        if not text.strip():
+            raise _err(400, "Bad Request: message text is empty")
+        if len(text) > TEXT_MAX:
+            raise _err(400, "Bad Request: message is too long")
+        await guard_text(db, text, "消息")
+        try:
+            ents = validate_entities(text, entities)
+        except EntityError as e:
+            raise _err(400, f"Bad Request: can't parse entities: {e}")
+        ents = ents + auto_entities(text, ents)
+        ents.sort(key=lambda e: (e["offset"], -e["length"]))
+        if text != msg.text or ents != (msg.entities or []):
+            msg.text = text
+            msg.entities = ents
+            msg.edited_at = now_utc()
+            extra = dict(msg.extra or {})
+            extra.pop("preview", None)
+            msg.extra = extra
+            changed = True
+    if (markup or None) != (msg.markup or None):
+        msg.markup = markup
+        changed = True
+    if not changed:
+        raise _err(400, _NOT_MODIFIED)
+    await db.flush()
+    await append_chat_event(db, chat.id, "edit", await message_payload(db, chat, msg))
+    return msg
+
+
+async def delete_as_bot(db: AsyncSession, chat: Chat, bot: User, seq: int) -> None:
+    """机器人删自己发的消息(为所有人删除:正文和媒体清空、seq 占位)。别人的一律不许删。"""
+    await require_member(db, chat, bot.id)
+    msg = await db.scalar(select(ChatMessage).where(
+        ChatMessage.chat_id == chat.id, ChatMessage.seq == seq,
+        ChatMessage.deleted_at.is_(None)).with_for_update()
+        .execution_options(populate_existing=True))
+    if msg is None:
+        raise _err(400, "Bad Request: message to delete not found")
+    if msg.sender_id != bot.id:
+        raise _err(400, "Bad Request: message can't be deleted")
+    _wipe(msg)
+    await db.execute(delete(MessageReaction).where(MessageReaction.chat_id == chat.id,
+                                                   MessageReaction.seq == seq))
+    await db.execute(delete(MessageMention).where(MessageMention.chat_id == chat.id,
+                                                  MessageMention.seq == seq))
+    await append_chat_event(db, chat.id, "del", {"seqs": [seq], "by": bot.id})

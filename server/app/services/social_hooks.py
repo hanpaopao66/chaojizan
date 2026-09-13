@@ -9,3 +9,6 @@
 async def on_block_changed(user_id: int, other_id: int, blocked: bool) -> None:
     from .rt_events import emit_user_event_now  # 实时网关(#343)
     await emit_user_event_now(user_id, "block", {"user_id": other_id, "blocked": blocked})
+    # 拉黑的是机器人:私聊里给它一条 my_chat_member(kicked / member),和 Telegram 一样(#355)
+    from .bots import on_block_changed as bot_block_changed
+    await bot_block_changed(user_id, other_id, blocked)

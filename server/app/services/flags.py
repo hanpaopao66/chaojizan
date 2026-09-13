@@ -197,6 +197,29 @@ async def social_flag_on(db: AsyncSession, key: str) -> bool:
     return value == "on"
 
 
+#: 机器人的闸(DEV-PROMPTS-40 #355 #375)。关着时:Bot API 一律 503、开发者后台不能建新机器人、
+#: 客户端的机器人接口(回调、bot-info)503、不再给机器人生成更新、webhook 暂停投递
+BOT_FLAGS = {"bots_enabled": "机器人"}
+
+
+def bot_flag_default() -> str:
+    """没写过这个开关时的缺省值:**开发 / CI 开,生产关**(和视频同一个判据)。
+
+    机器人是第三方开发者的代码直接对着用户说话,合规结论(#374「机器人:第三方开发者责任」)
+    出来之前生产上不能不经意地打开。判据是 settings.is_dev,拼错、留空都按生产算。
+    """
+    from ..config import settings
+
+    return "on" if settings.is_dev else "off"
+
+
+async def bots_on(db: AsyncSession) -> bool:
+    """机器人开关开着没有。每次现查、不缓存 —— 拉闸要立刻生效。"""
+    flag = await db.get(PlatformFlag, "bots_enabled")
+    value = flag.value if flag is not None else bot_flag_default()
+    return value == "on"
+
+
 #: 频道开关的 flag 键。值是逗号分隔的 key 列表,如 "food,voucher"。
 CHANNELS_FLAG = "channels_enabled"
 

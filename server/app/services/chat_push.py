@@ -17,7 +17,7 @@ from sqlalchemy import select
 
 from ..db import SessionLocal
 from ..models import (ACTIVE_ROLES, Chat, ChatMember, ChatMessage, MessageMention,
-                      SocialProfile, User)
+                      SocialProfile, User, UserRole)
 from .chat_view import KIND_LABELS
 from .entities import mask_spoilers
 from .social import display_name, notify_of
@@ -46,9 +46,11 @@ async def notify_message(chat_id: int, seq: int) -> int:
             return 0
         if msg.kind == "service" or msg.silent or chat.type == "saved":
             return 0
-        members = (await db.execute(select(ChatMember.user_id, ChatMember.muted_until).where(
+        # 机器人不推:它没有设备,消息经 Bot API 的更新送到(#355)
+        members = (await db.execute(select(ChatMember.user_id, ChatMember.muted_until)
+                                    .join(User, User.id == ChatMember.user_id).where(
             ChatMember.chat_id == chat_id, ChatMember.role.in_(ACTIVE_ROLES),
-            ChatMember.user_id != (msg.sender_id or 0)))).all()
+            ChatMember.user_id != (msg.sender_id or 0), User.role != UserRole.bot))).all()
         if not members:
             return 0
         mentioned = set(await db.scalars(select(MessageMention.user_id).where(

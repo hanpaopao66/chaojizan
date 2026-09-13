@@ -49,7 +49,10 @@ from .routers import (
     uploads,
     vouchers,
 )
+from .routers import bot_api as bot_api_router
 from .routers import chat as chat_router
+from .routers import chat_bots as chat_bots_router
+from .routers import dev_bots as dev_bots_router
 from .routers import media as media_router
 from .routers import notifications as notifications_router
 from .routers import social as social_router
@@ -97,11 +100,17 @@ async def lifespan(app: FastAPI):
     if settings.media_worker == "inline":
         from .workers.media import recover
         asyncio.create_task(recover())
+    # 机器人 webhook 投递(#355):和实时订阅一样每个 api 进程各一份(不交给 sweeper ——
+    # 新更新要秒级送到,不能等 30 秒一轮的清扫);同一个机器人靠 Redis 锁只有一个进程在投
+    from .services.bot_webhook import webhook_loop
+    bot_wh = asyncio.create_task(webhook_loop()) if settings.bot_webhook_enabled else None
     yield
     if sweeper is not None:
         sweeper.cancel()
     if rt_bus is not None:
         rt_bus.cancel()
+    if bot_wh is not None:
+        bot_wh.cancel()
     # 共享的推送 HTTP 客户端(连接池)随进程一起收掉
     from .services.push import aclose_push_client
     await aclose_push_client()
@@ -362,6 +371,36 @@ class LogUnhandledErrorsMiddleware:
             raise
 
 
+class BotTokenPathMiddleware:
+    """Bot API 的 token 在路径里(`/bot/<token>/<method>`,和 Telegram 一样,#355)。
+
+    路径是日志里最常出现的东西:uvicorn 的访问日志、下面的异常留痕、版本上报……任何一处把路径
+    原样写出去,token 就进了日志 —— 日志会被复制、转发、进备份,而 token 就是机器人的全部身份。
+
+    所以**在进应用的第一层就把它从路径里拿掉**:真 token 放进 scope 的一个私有键,
+    `scope["path"]` 换成 `/bot/<前 6 位>***/<method>`。之后所有层(包括 uvicorn 在响应开始时
+    读的那个 scope)看到的都是打过码的路径,不用指望每个打日志的地方都记得打码。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path.startswith("/bot/"):
+                from urllib.parse import quote
+
+                from .services.bots import SCOPE_KEY, mask_path
+
+                masked, token = mask_path(path)
+                if token is not None:
+                    scope[SCOPE_KEY] = token
+                    scope["path"] = masked
+                    scope["raw_path"] = quote(masked).encode()
+        await self.app(scope, receive, send)
+
+
 # 加入顺序 = 由内到外,和原先三个装饰器的嵌套顺序保持一致:
 # CORS → 异常留痕 → 版本上报 → 门店选择 → 路由
 class RecordApiCallMiddleware:
@@ -497,6 +536,9 @@ app.add_middleware(
 # 小程序托管域名(<appid>.<托管域名>)在最外层分流(#322):那些 Host 只许进 /v/ 和 /_sdk/,
 # 连 CORS、后台页面这些层都不该经过;主域名上的内部路径 /_mini-host/ 在生产也在这里挡掉
 app.add_middleware(mini_host.MiniHostMiddleware)
+# Bot API 路径里的 token 在比谁都早的地方打码(#355):里面每一层、包括 uvicorn 的访问日志,
+# 看到的都只是前 6 位
+app.add_middleware(BotTokenPathMiddleware)
 
 app.include_router(auth.router)
 app.include_router(merchants.router)
@@ -528,6 +570,7 @@ app.include_router(transparency.router)
 app.include_router(mini_apps.router)
 app.include_router(mini_host.router)
 app.include_router(dev_miniapps.router)
+app.include_router(dev_bots_router.router)
 app.include_router(admin_miniapps.router)
 from .routers import carts, group_cart, referrals
 app.include_router(queue.router)
@@ -539,6 +582,8 @@ app.include_router(ws.router)
 # 消息与视频(DEV-PROMPTS-40)
 app.include_router(social_router.router)
 app.include_router(chat_router.router)
+app.include_router(chat_bots_router.router)
+app.include_router(bot_api_router.router)
 app.include_router(stickers_router.router)
 app.include_router(calls_router.router)
 app.include_router(media_router.router)
