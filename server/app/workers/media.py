@@ -18,6 +18,8 @@ import shutil
 import uuid
 from pathlib import Path
 
+from redis.exceptions import TimeoutError as RedisTimeout
+
 from ..config import settings
 from ..redis_client import get_redis
 
@@ -25,6 +27,13 @@ logger = logging.getLogger("superz.media")
 
 QUEUE = "media:jobs"
 PROCESSING = "media:jobs:processing"
+
+#: 等任务时一次最多阻塞几秒。**必须小于 Redis 客户端的读超时**(redis-py 默认 5 秒,
+#: redis._defaults.DEFAULT_SOCKET_TIMEOUT):阻塞 5 秒的 BLMOVE 在第 5 秒被客户端当成读超时掐断,
+#: 队列一空 worker 就崩、被 compose 拉起、再崩 —— 2026-09-13 生产上第一次起独立 worker 就是这样,
+#: 聊天视频全停在「处理中」。CI 和本地测不出来:那里转码在 api 进程里跑,不走这个循环。
+#: 和 services/bots.py 的 BLPOP_SLICE(4 秒一段)同一个道理
+BLOCK_SECONDS = 4
 _inline_sem: asyncio.Semaphore | None = None
 
 
@@ -199,7 +208,12 @@ async def worker_main() -> None:
         pass
     logger.info("media-worker 启动,等任务")
     while True:
-        raw = await r.blmove(QUEUE, PROCESSING, 5, "LEFT", "RIGHT")
+        try:
+            raw = await r.blmove(QUEUE, PROCESSING, BLOCK_SECONDS, "LEFT", "RIGHT")
+        except RedisTimeout:
+            # 网络抖一下读超时:接着等,不为这个退出进程(退出就是 compose 的重启循环)
+            logger.warning("等任务时 Redis 读超时,接着等")
+            continue
         if raw is None:
             continue
         try:
