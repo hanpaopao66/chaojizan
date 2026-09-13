@@ -314,7 +314,7 @@ void main() {
 
       await t.tap(find.byIcon(Icons.more_horiz));
       await t.pumpAndSettle();
-      expect(find.text('和顾客说句话'), findsOneWidget);
+      expect(find.text('订单群'), findsOneWidget);
       expect(find.text('打印小票'), findsOneWidget);
       expect(find.text('缺货退款'), findsOneWidget,
           reason: '收进菜单 ≠ 删掉。三个操作一个都不能少');
@@ -358,7 +358,7 @@ void main() {
       await t.tap(find.byIcon(Icons.more_horiz).first);
       await t.pumpAndSettle();
       expect(find.text('标记异常'), findsOneWidget);
-      expect(find.text('和顾客说句话'), findsNothing,
+      expect(find.text('订单群'), findsNothing,
           reason: '历史列表要干净:标记异常借一格,别的不许跟着进来');
       expect(find.text('打印小票'), findsNothing);
       expect(find.text('缺货退款'), findsNothing);

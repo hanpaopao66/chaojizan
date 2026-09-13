@@ -6212,44 +6212,20 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                         ),
                       Row(
                       children: [
-                        if (order.riderId != null)
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.chat_bubble_outline,
-                                  size: 18),
-                              label: const Text('骑手'),
-                              onPressed: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                      builder: (_) => OrderChatPage(
-                                          api: widget.api,
-                                          orderNo: order.orderNo,
-                                          title: '和骑手说句话',
-                                          peer: 'rider',
-                                          quickReplies:
-                                              kCustomerQuickReplies))),
-                            ),
+                        // 一单一个群:你、商家、骑手都在里面(以前是「骑手」「商家」两个按钮、两条私聊)。
+                        // 跑腿单群里没有商家(「本城跑腿服务」那个虚拟主体那头没有人),服务端自己不拉它进群
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.forum_outlined, size: 18),
+                            label: const Text('订单群'),
+                            onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                    builder: (_) => OrderChatPage(
+                                        api: widget.api,
+                                        orderNo: order.orderNo,
+                                        quickReplies: kCustomerQuickReplies))),
                           ),
-                        if (order.riderId != null && !order.isErrand)
-                          const SizedBox(width: 8),
-                        // 跑腿单没有商家。这个按钮留着会把人引到
-                        // 「本城跑腿服务」那个虚拟主体的聊天窗 ——
-                        // 那头没有人,发出去的消息永远没有回音
-                        if (!order.isErrand)
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              icon: const Icon(Icons.storefront, size: 18),
-                              label: const Text('商家'),
-                              onPressed: () => Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                      builder: (_) => OrderChatPage(
-                                          api: widget.api,
-                                          orderNo: order.orderNo,
-                                          title: '和商家说句话',
-                                          peer: 'merchant',
-                                          quickReplies:
-                                              kCustomerQuickReplies))),
-                            ),
-                          ),
+                        ),
                         if (order.riderPhone.isNotEmpty) ...[
                           const SizedBox(width: 8),
                           IconButton.outlined(

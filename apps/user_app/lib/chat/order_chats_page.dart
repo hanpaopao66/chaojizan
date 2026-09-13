@@ -3,9 +3,9 @@ import 'package:superz_shared/superz_shared.dart';
 
 import '../main.dart' show OrderDetailPage;
 
-/// 「消息」列表顶部的「订单消息」:进行中和刚结束的订单里,和商家、骑手的对话。
+/// 「消息」列表里的订单群入口:进行中和刚结束的订单,每一单一个群(你、商家、骑手)。
 ///
-/// 订单聊天本身没动(三端共用的 [OrderChatPage],结单 2 小时后只读),
+/// 群本身是三端共用的 [OrderChatPage](订单结束 24 小时后归档,能翻不能发),
 /// 这一页只是把入口从订单详情里**再**露一份出来 —— 底部没有订单 tab 之后,
 /// 「骑手问我在哪」这种消息不能要人先进「我的」→ 订单 → 详情才看得到。
 class OrderChatsPage extends StatefulWidget {
@@ -41,43 +41,15 @@ class _OrderChatsPageState extends State<OrderChatsPage> {
     return [for (var i = 0; i < open.length; i++) (open[i], unread[i])];
   }
 
+  /// 一单一个群:点进去就是这一单的群(以前要先选「和商家 / 和骑手」),群头的「看订单」进详情
   Future<void> _open(Order o) async {
-    final peer = await szShowSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(
-            leading: const Icon(Icons.storefront_outlined),
-            title: Text('和商家说句话 · ${o.merchantName}'),
-            onTap: () => Navigator.pop(ctx, 'merchant'),
-          ),
-          if (o.riderId != null)
-            ListTile(
-              leading: const Icon(Icons.delivery_dining_outlined),
-              title: Text(o.riderName.isEmpty ? '和骑手说句话' : '和骑手说句话 · ${o.riderName}'),
-              onTap: () => Navigator.pop(ctx, 'rider'),
-            ),
-          ListTile(
-            leading: const Icon(Icons.receipt_long_outlined),
-            title: const Text('看订单详情'),
-            onTap: () => Navigator.pop(ctx, 'detail'),
-          ),
-        ]),
-      ),
-    );
-    if (peer == null || !mounted) return;
-    if (peer == 'detail') {
-      await Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => OrderDetailPage(api: widget.api, orderNo: o.orderNo)));
-    } else {
-      await Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => OrderChatPage(
-              api: widget.api,
-              orderNo: o.orderNo,
-              title: peer == 'rider' ? '和骑手说句话' : '和商家说句话',
-              peer: peer,
-              quickReplies: kCustomerQuickReplies)));
-    }
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (ctx) => OrderChatPage(
+            api: widget.api,
+            orderNo: o.orderNo,
+            quickReplies: kCustomerQuickReplies,
+            onOpenOrder: () => Navigator.of(ctx).push(MaterialPageRoute<void>(
+                builder: (_) => OrderDetailPage(api: widget.api, orderNo: o.orderNo))))));
     if (mounted) {
       final f = _load();
       setState(() {

@@ -378,7 +378,8 @@ class _TaskPanelState extends State<TaskPanel> {
                       Icon(Icons.chat_bubble_outline,
                           size: 15, color: unread > 0 ? sz.clay : sz.inkMuted),
                       const SizedBox(width: 4),
-                      Text(unread > 0 ? '用户 $unread 条' : '发消息',
+                      // 一单一个群:未读里可能是顾客也可能是商家,不写「用户」
+                      Text(unread > 0 ? '新消息 $unread 条' : '订单群',
                           style: TextStyle(
                               fontSize: kFontNote,
                               color: unread > 0 ? sz.clay : sz.inkMuted)),

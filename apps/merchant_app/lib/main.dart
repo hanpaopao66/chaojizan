@@ -1730,7 +1730,6 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                     builder: (_) => OrderChatPage(
                         api: widget.api,
                         orderNo: order.orderNo,
-                        title: '和顾客说句话',
                         quickReplies: kMerchantQuickReplies)));
               case 'print':
                 _printTicket(order);
@@ -1753,8 +1752,9 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                 child: ListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.chat_bubble_outline, size: 20),
-                  title: Text('和顾客说句话'),
+                  leading: Icon(Icons.forum_outlined, size: 20),
+                  // 一单一个群:顾客、骑手都在里面,出餐的事直接和骑手说
+                  title: Text('订单群'),
                 ),
               ),
             if (!canFlag)

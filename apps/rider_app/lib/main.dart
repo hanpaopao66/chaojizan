@@ -2086,7 +2086,6 @@ class _RiderHomePageState extends State<RiderHomePage>
             builder: (_) => OrderChatPage(
                 api: widget.api,
                 orderNo: order.orderNo,
-                title: '和顾客说句话',
                 quickReplies: kRiderQuickReplies)))
         .then((_) {
       _unreadAt = null; // 看完回来立刻刷一次未读数

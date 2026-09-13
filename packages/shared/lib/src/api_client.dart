@@ -1275,13 +1275,15 @@ class ApiClient {
       await _request('POST', '/orders/$orderNo/address-feedback',
           body: {'note': note});
 
-  // ---------- 订单内聊天 ----------
+  // ---------- 订单群(一单一个群:你 + 商家 + 骑手) ----------
+  /// 拉这一单的群。[peer] 只给老调用方留着(老版本「和商家 / 和骑手」),新代码不传
   Future<Map<String, dynamic>> orderMessages(String orderNo,
           {String peer = ''}) async =>
       await _request('GET',
               '/orders/$orderNo/messages${peer.isEmpty ? '' : '?peer=$peer'}')
           as Map<String, dynamic>;
 
+  /// 发到这一单的群里:[to] 传 'group'(或不传);带 merchant / rider / customer 的是老版本的私聊
   Future<void> sendOrderMessage(String orderNo, String content,
           {String to = '', String kind = 'text'}) async =>
       await _request('POST', '/orders/$orderNo/messages', body: {
@@ -1294,6 +1296,14 @@ class ApiClient {
       ((await _request('GET', '/orders/$orderNo/unread')
               as Map<String, dynamic>)['unread'] as num)
           .toInt();
+
+  /// 用户端「消息」列表里的订单群:每一单一行(标题、群里的人、最后一条、未读、归没归档),
+  /// 付了款、没取消、3 天内下的单,按最后一条消息倒序
+  Future<List<Map<String, dynamic>>> orderChatThreads({int limit = 20}) async =>
+      (((await _request('GET', '/orders/chat-threads?limit=$limit')
+                  as Map<String, dynamic>)['items'] as List?) ??
+              const [])
+          .cast<Map<String, dynamic>>();
 
   /// 我的券包(可用在前):超时安抚券等平台券
   Future<List<dynamic>> myCoupons() async =>

@@ -2282,6 +2282,68 @@ async def hardship_rules(user: User = Depends(get_current_user)):
     }
 
 
+@router.get("/chat-threads")
+async def chat_threads(
+    limit: int = Query(20, ge=1, le=50),
+    user: User = Depends(require_role("customer")),
+    db: AsyncSession = Depends(get_db),
+):
+    """用户端「消息」列表里的订单群:每一单一行(付了款、没取消、3 天内下的单)。
+
+    一次给齐这一行要画的东西 —— 标题、群里的人、最后一条消息、未读数、归没归档 ——
+    不用客户端一单一个请求去拼。按最后一条消息(没有就按下单时间)倒序。"""
+    from ..models import Message
+
+    since = datetime.now(timezone.utc) - timedelta(days=_CHAT_LIST_DAYS)
+    orders = (await db.scalars(
+        select(Order).where(
+            Order.customer_id == user.id,
+            Order.status.notin_([OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED]),
+            Order.created_at >= since)
+        .order_by(Order.created_at.desc()).limit(limit))).all()
+    if not orders:
+        return {"items": []}
+    ids = [o.id for o in orders]
+    last_rows = (await db.scalars(
+        select(Message).where(
+            Message.order_id.in_(ids),
+            or_(Message.receiver_role == "group", Message.sender_role == "customer",
+                Message.receiver_role == "customer"))
+        .order_by(Message.order_id, Message.created_at.desc(), Message.id.desc())
+        .distinct(Message.order_id))).all()
+    last = {m.order_id: m for m in last_rows}
+    merchants = {m.id: m for m in (await db.scalars(
+        select(Merchant).where(Merchant.id.in_({o.merchant_id for o in orders})))).all()}
+    rider_ids = {o.rider_id for o in orders if o.rider_id}
+    riders = {u.id: u for u in (await db.scalars(
+        select(User).where(User.id.in_(rider_ids)))).all()} if rider_ids else {}
+    unread = await get_redis().mget([f"chat:unread:{o.id}:{user.id}" for o in orders])
+    items = []
+    for o, n in zip(orders, unread):
+        merchant = merchants.get(o.merchant_id)
+        rider = riders.get(o.rider_id) if o.rider_id else None
+        names = _chat_names(o, merchant, rider, "customer")
+        m = last.get(o.id)
+        age = _chat_age_hours(o)
+        items.append({
+            "order_no": o.order_no,
+            "title": _chat_title(o, merchant),
+            "merchant_name": merchant.name if merchant else "",
+            "rider_name": names["rider"] if rider is not None else None,
+            "members": [{"role": r, "name": names[r]} for r in _chat_members(o)],
+            "status": o.status.value,
+            "status_label": STATUS_LABELS.get(o.status, ""),
+            "last": None if m is None else {
+                "from": m.sender_role, "sender_name": names.get(m.sender_role, ""),
+                "kind": m.kind, "content": m.content, "created_at": m.created_at.isoformat()},
+            "unread": int(n or 0),
+            "readonly": age is not None and age >= _CHAT_READONLY_HOURS,
+            "updated_at": (m.created_at if m is not None else o.created_at).isoformat(),
+        })
+    items.sort(key=lambda it: it["updated_at"], reverse=True)
+    return {"items": items}
+
+
 @router.get("/{order_no}", response_model=OrderOut)
 async def get_order(
     order_no: str,
@@ -2401,35 +2463,66 @@ async def rider_location(
     )
 
 
-# ---------- 订单内聊天(用户↔骑手 / 用户↔商家) ----------
+# ---------- 订单群:一单一个群(你 + 商家 + 骑手) ----------
+#
+# 以前是两条私聊(用户↔商家、用户↔骑手):出餐和配送本来是同一件事,用户却要在两个窗口里
+# 来回复述,商家和骑手之间也说不上话。现在一单一个群,三方都在:
+# - 号码互相看不到:聊天里不出现任何电话,要打电话走订单详情里的隐私号;
+# - 订单终结 24 小时后归档:还能翻,不能再发;7 天后当事人看不到(留档供仲裁,管理后台照常能查);
+# - 跑腿单没有商家(取件点只是个地址),商家自配送、还没骑手接单时群里没有骑手。
+#
+# 兼容老版本客户端:老用户端发消息总带 to=merchant/rider、拉消息带 peer —— 带了对端的
+# 仍按私聊存、按私聊给,只有那两方看得到;新客户端不带 to(或 to=group)就是群消息。
 
-_CHAT_READONLY_HOURS = 2   # 订单终结后只读
+_CHAT_READONLY_HOURS = 24  # 订单终结后归档:能翻不能发
 _CHAT_HIDE_DAYS = 7        # 之后当事人不可见(留档供仲裁)
 _TERMINAL = (OrderStatus.COMPLETED, OrderStatus.CANCELLED)
+_CHAT_LIST_DAYS = 3        # 会话列表里列多久内下的单(和用户端 orderChatListed 同口径)
+
+
+def _chat_members(order: Order) -> list[str]:
+    """这一单的群里有谁(按角色)。"""
+    from ..services.errand import is_errand
+    members = ["customer"]
+    if not is_errand(order):
+        members.append("merchant")
+    if order.rider_id:
+        members.append("rider")
+    return members
+
+
+def _legacy_peers(role: str, members: list[str]) -> set[str]:
+    """老客户端能指定的私聊对端:只有 用户↔商家、用户↔骑手 这两条线。"""
+    if role == "customer":
+        return {m for m in members if m != "customer"}
+    return {"customer"}
+
+
+def _chat_visible(m, role: str) -> bool:
+    """群消息三方都看得到;老客户端发的私聊只给那两方看。"""
+    return m.receiver_role == "group" or role in (m.sender_role, m.receiver_role)
 
 
 async def _chat_context(db, order_no: str, user: User):
-    """校验当事人身份,返回 (order, my_role, 可聊的对端集合)。"""
+    """校验是不是这一单群里的人,返回 (order, my_role, members)。"""
     order = await db.scalar(select(Order).where(Order.order_no == order_no))
     if order is None:
         raise HTTPException(404, "订单不存在")
+    members = _chat_members(order)
     role = user.role.value
     if role == "customer":
         if order.customer_id != user.id:
             raise HTTPException(403, "这不是你的订单")
-        peers = {"merchant"} | ({"rider"} if order.rider_id else set())
     elif role == "rider":
         if order.rider_id != user.id:
             raise HTTPException(403, "这不是你接的订单")
-        peers = {"customer"}
     elif role == "merchant":
         shop = await owned_shop(db, user)
-        if shop is None or order.merchant_id != shop.id:
+        if shop is None or order.merchant_id != shop.id or "merchant" not in members:
             raise HTTPException(403, "这不是你店里的订单")
-        peers = {"customer"}
     else:
         raise HTTPException(403, "客服查看请走管理后台")
-    return order, role, peers
+    return order, role, members
 
 
 def _chat_age_hours(order: Order) -> float | None:
@@ -2442,6 +2535,60 @@ def _chat_age_hours(order: Order) -> float | None:
     return (datetime.now(timezone.utc) - updated).total_seconds() / 3600
 
 
+def _chat_archive_at(order: Order) -> datetime | None:
+    if order.status not in _TERMINAL:
+        return None
+    updated = order.updated_at or order.created_at
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    return updated + timedelta(hours=_CHAT_READONLY_HOURS)
+
+
+def _chat_title(order: Order, merchant: Merchant | None) -> str:
+    from ..services.errand import KIND_LABELS, is_errand
+    name = (KIND_LABELS.get(order.order_kind, "跑腿") if is_errand(order)
+            else (merchant.name if merchant else "商家"))
+    return f"订单 #{order.order_no[-6:]} · {name}"
+
+
+def _chat_names(order: Order, merchant: Merchant | None, rider: User | None,
+                viewer_role: str) -> dict[str, str]:
+    """群里每个角色显示成什么。顾客对商家、骑手只显示「顾客」;自己显示「你」。"""
+    names = {
+        "customer": "顾客",
+        "merchant": merchant.name if merchant else "商家",
+        "rider": (rider.name if rider is not None and rider.name else "骑手"),
+    }
+    names[viewer_role] = "你"
+    return names
+
+
+def _items_summary(order: Order) -> str:
+    items = order.items or []
+    parts = [f"{it.get('name', '')} ×{int(it.get('quantity', 1))}" for it in items[:3]]
+    text_ = "、".join(p for p in parts if p.strip(" ×0123456789"))
+    if len(items) > 3:
+        text_ += f" 等 {len(items)} 样"
+    return text_
+
+
+async def _chat_people(db, order: Order):
+    merchant = await db.get(Merchant, order.merchant_id)
+    rider = await db.get(User, order.rider_id) if order.rider_id else None
+    return merchant, rider
+
+
+def _message_out(m, names: dict[str, str], user: User) -> dict:
+    return {
+        "id": m.id, "from": m.sender_role, "to": m.receiver_role,
+        "sender_name": names.get(m.sender_role, ""),
+        "kind": m.kind, "content": m.content, "mine": m.sender_id == user.id,
+        # 老客户端发的私聊:新客户端据此标一句「只有你们两个看得到」
+        "private": m.receiver_role != "group",
+        "created_at": m.created_at.isoformat(),
+    }
+
+
 @router.post("/{order_no}/messages")
 async def send_message(
     order_no: str,
@@ -2449,19 +2596,21 @@ async def send_message(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """发消息。text 过敏感词;quick 为预设快捷语;image 传图片 URL。"""
+    """往这一单的群里发消息。text 过敏感词;quick 为预设快捷语;image 传图片 URL。
+
+    不带 to(或 to=group)是群消息,三方都收得到;带 to=商家/骑手/顾客 的是老客户端的私聊。"""
     from ..models import Message
 
-    order, role, peers = await _chat_context(db, order_no, user)
-    to = str(payload.get("to", "")) or next(iter(peers))
-    if to not in peers:
-        raise HTTPException(422, "只能给这单的商家/骑手/顾客发消息")
+    order, role, members = await _chat_context(db, order_no, user)
+    to = str(payload.get("to", "") or "group")
+    if to != "group" and to not in _legacy_peers(role, members):
+        raise HTTPException(422, "只能发到这一单的群里")
     if order.status == OrderStatus.PENDING_PAYMENT:
         raise HTTPException(409, "订单支付后才能发起聊天")
     age = _chat_age_hours(order)
     if age is not None and age >= _CHAT_READONLY_HOURS:
         raise HTTPException(
-            409, "订单已结束,会话已转只读;有问题请走售后或客服工单")
+            409, "这一单的群已归档(订单结束 24 小时后只读);有问题请走售后或客服工单")
     kind = str(payload.get("kind", "text"))
     if kind not in ("text", "image", "quick"):
         raise HTTPException(422, "kind 只支持 text / image / quick")
@@ -2478,25 +2627,27 @@ async def send_message(
     await db.commit()
     await db.refresh(msg)
 
+    # 收件人:群消息是除自己以外的所有人,私聊是那一个对端
+    merchant, rider = await _chat_people(db, order)
+    ids = {"customer": order.customer_id, "rider": order.rider_id,
+           "merchant": merchant.owner_id if merchant else None}
+    receivers = [r for r in members if r != role] if to == "group" else [to]
+    receiver_ids = {ids[r] for r in receivers if ids.get(r) and ids[r] != user.id}
     # 未读数(Redis)+ WS 即达 + 离线推送
-    receiver_id = (order.customer_id if to == "customer"
-                   else order.rider_id if to == "rider" else None)
-    if to == "merchant":
-        shop = await db.get(Merchant, order.merchant_id)
-        receiver_id = shop.owner_id if shop else None
     redis = get_redis()
-    if receiver_id:
-        await redis.incr(f"chat:unread:{order.id}:{receiver_id}")
-        await redis.expire(f"chat:unread:{order.id}:{receiver_id}", 604800)
+    for rid in receiver_ids:
+        await redis.incr(f"chat:unread:{order.id}:{rid}")
+        await redis.expire(f"chat:unread:{order.id}:{rid}", 604800)
     await manager.broadcast(f"chat:{order.order_no}", {
         "type": "chat", "order_no": order.order_no, "id": msg.id,
         "from": role, "to": to, "kind": kind, "content": content,
     })
-    if receiver_id:
+    names = _chat_names(order, merchant, rider, "")
+    preview = "[图片]" if kind == "image" else content[:40]
+    for rid in receiver_ids:
         try:
-            preview = "[图片]" if kind == "image" else content[:40]
-            await push_to_user(receiver_id, "订单消息",
-                               f"订单#{order.order_no[-6:]}:{preview}",
+            await push_to_user(rid, "订单群",
+                               f"订单#{order.order_no[-6:]} · {names.get(role, '')}:{preview}",
                                {"type": "chat", "order_no": order.order_no})
         except Exception:
             pass
@@ -2510,29 +2661,46 @@ async def list_messages(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """拉会话(轮询兜底)。读取即清零自己的未读数。"""
+    """拉这一单的群(轮询兜底)。读取即清零自己的未读数。
+
+    顺带给群头要的东西:群里有谁、置顶的订单条(状态、菜、金额、预计送达)、什么时候归档。
+    带 peer 的是老用户端的「和商家 / 和骑手」:只给那条私聊 + 对方和自己发的群消息。"""
     from ..models import Message
 
-    order, role, peers = await _chat_context(db, order_no, user)
+    order, role, members = await _chat_context(db, order_no, user)
     age = _chat_age_hours(order)
     if age is not None and age >= _CHAT_HIDE_DAYS * 24:
         raise HTTPException(403, "会话已归档(超过 7 天);如需调取请联系客服")
-    peer = peer or next(iter(peers))
-    if peer not in peers:
+    if peer and peer not in _legacy_peers(role, members):
         raise HTTPException(422, "没有这条会话")
-    pair = {role, peer}
     rows = (await db.scalars(
         select(Message).where(Message.order_id == order.id)
-        .order_by(Message.created_at).limit(200))).all()
+        .order_by(Message.created_at, Message.id).limit(300))).all()
+    if peer:
+        pair = {role, peer}
+        rows = [m for m in rows
+                if {m.sender_role, m.receiver_role} == pair
+                or (m.receiver_role == "group" and m.sender_role in pair)]
+    else:
+        rows = [m for m in rows if _chat_visible(m, role)]
     await get_redis().delete(f"chat:unread:{order.id}:{user.id}")
+    merchant, rider = await _chat_people(db, order)
+    names = _chat_names(order, merchant, rider, role)
+    archive_at = _chat_archive_at(order)
     return {
         "readonly": age is not None and age >= _CHAT_READONLY_HOURS,
-        "messages": [{
-            "id": m.id, "from": m.sender_role, "kind": m.kind,
-            "content": m.content, "mine": m.sender_id == user.id,
-            "created_at": m.created_at.isoformat(),
-        } for m in rows
-            if {m.sender_role, m.receiver_role} == pair],
+        "archive_at": archive_at.isoformat() if archive_at else None,
+        "title": _chat_title(order, merchant),
+        "members": [{"role": r, "name": names[r]} for r in members],
+        "order": {
+            "order_no": order.order_no,
+            "status": order.status.value,
+            "status_label": STATUS_LABELS.get(order.status, ""),
+            "items_summary": _items_summary(order),
+            "total_cents": order.total_cents,
+            "eta_at": order.eta_at.isoformat() if order.eta_at else None,
+        },
+        "messages": [_message_out(m, names, user) for m in rows],
     }
 
 
