@@ -819,6 +819,22 @@ class _ContextBar extends StatelessWidget {
   }
 }
 
+/// @ 联想、/命令 联想的面板:和聊天背景同色的话看起来像飘在消息上,给一层面板底色和上边线
+class _SuggestPanel extends StatelessWidget {
+  const _SuggestPanel({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return DecoratedBox(
+      decoration: BoxDecoration(color: sz.surface, border: Border(top: BorderSide(color: sz.line))),
+      child: ConstrainedBox(constraints: const BoxConstraints(maxHeight: 220), child: child),
+    );
+  }
+}
+
 class _CommandList extends StatelessWidget {
   const _CommandList({required this.hits, required this.many, required this.onPick});
 
@@ -829,9 +845,8 @@ class _CommandList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 220),
-      child: ListView(shrinkWrap: true, children: [
+    return _SuggestPanel(
+      child: ListView(shrinkWrap: true, padding: EdgeInsets.zero, children: [
         for (final h in hits)
           ListTile(
             dense: true,
@@ -853,9 +868,8 @@ class _MentionList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 220),
-      child: ListView(shrinkWrap: true, children: [
+    return _SuggestPanel(
+      child: ListView(shrinkWrap: true, padding: EdgeInsets.zero, children: [
         for (final h in hits)
           ListTile(
             dense: true,
