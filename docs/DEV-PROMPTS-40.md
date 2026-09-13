@@ -789,6 +789,11 @@ UP 主空间(头像、名字、签名、关注 / 粉丝 / 获赞、投稿列表(
 「7 天内 3 个不同的人举报」自动进复审;处置:删消息、禁言(限时)、封群 / 频道、封号(限时 / 永久)、下架视频;
 申诉(S6);管理员查看被举报私聊消息(S8,只能看举报单里那几条和前后各 5 条上下文)。
 
+**接口**(聊天这一半;视频那一半见 VIDEO-API.md §11):处罚种类与执行点、被挡时 403 的 `detail`、
+`GET /social/v1/me/sanctions`、`POST /social/v1/sanctions/{id}/appeal`、`/admin/social/chat-reports…`、
+`/admin/social/chat-messages?report_id=`(S8 唯一的查看口子)、`/admin/social/sanctions…`、`/admin/social/social-appeals…`
+全部写在 [COMMUNITY-GOVERNANCE.md](COMMUNITY-GOVERNANCE.md) §1–§6(和实现、测试逐字一致,单测对着比)。
+
 ### #369 内容安全基础
 
 `services/moderation.py`:屏蔽词(本地词表 + 管理后台维护,命中 → 拒绝发送并告知「包含不允许的内容」;弹幕 / 评论 / 用户名 / 群名 / 视频标题都过)、
@@ -799,10 +804,14 @@ UP 主空间(头像、名字、签名、关注 / 粉丝 / 获赞、投稿列表(
 
 admin-web 加「社区治理」菜单:视频审核、举报处理、处置记录、屏蔽词、数据(每日消息数、活跃会话、投稿量、审核中位时长)。
 
+**接口**:`GET /admin/social/community-stats?days=30`,口径见 [COMMUNITY-GOVERNANCE.md](COMMUNITY-GOVERNANCE.md) §4.3、§7。
+
 ### #371 透明中心「社区」栏
 
 公示:视频审核量、驳回率、中位审核时长;处置记录(对象类型 + 原因代码 + 申诉结果,不含个人信息);推荐 / 热门公式原文(链接到 `services/video_rank.py`);
 管理员查看私聊的次数(按月,S8)。
+
+**接口**:`GET /transparency/community`,字段和「不公开」清单见 [COMMUNITY-GOVERNANCE.md](COMMUNITY-GOVERNANCE.md) §4.4、§7。
 
 ### #372 性能与容量
 
