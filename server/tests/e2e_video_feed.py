@@ -210,7 +210,11 @@ def main():
     assert scores == sorted(scores, reverse=True) and scores[0] > 0
     for x in lb["items"]:
         assert x["rank"]["interaction"] == sum(x["rank"]["counts"][k] * w for k, w in W.items())
-    assert lb["items"][0]["vid"] == v1[0]["vid"], "U1 的第一个视频互动最多"
+    # 只在这次造的视频里比:排行榜是全站的,库里之前跑剩的、手工点过的视频可能分更高
+    # (CI 是干净库不受影响;本机开发库里这条原来会被残留数据弄红)
+    ours = {v["vid"] for v in [*v1, *v2, v3v, v3h, *v4]}
+    ranked_ours = [x["vid"] for x in lb["items"] if x["vid"] in ours]
+    assert ranked_ours and ranked_ours[0] == v1[0]["vid"], "U1 的第一个视频互动最多"
     assert [x["position"] for x in lb["items"]] == list(range(1, len(lb["items"]) + 1))
     lg = call("GET", "/video/v1/rank?zone=game&days=7")
     assert lg["items"] and all(x["zone"] == "game" for x in lg["items"])
