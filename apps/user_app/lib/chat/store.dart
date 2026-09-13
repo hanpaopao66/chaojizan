@@ -933,22 +933,11 @@ class ChatStore extends ChangeNotifier {
           'last_read_seq': c.my.lastReadSeq,
         },
         'unread': c.unread,
-        'last_message': c.lastMessage == null ? null : _msgToCache(c.lastMessage!),
+        'last_message': c.lastMessage == null ? null : messageToCache(c.lastMessage!),
         if (c.peer != null)
           'peer': {'id': c.peer!.id, 'name': c.peer!.name, 'avatar': c.peer!.avatar,
                    'username': c.peer!.username, 'contact_alias': c.peer!.contactAlias,
                    'is_contact': c.peer!.isContact},
-      };
-
-  Map<String, dynamic> _msgToCache(ChatMessage m) => {
-        'chat_id': m.chatId,
-        'seq': m.seq,
-        'kind': m.kind,
-        'text': m.text,
-        'created_at': m.createdAt.toUtc().toIso8601String(),
-        if (m.sender != null) 'sender': {'id': m.sender!.id, 'name': m.sender!.name},
-        if (m.service != null) 'service': m.service,
-        'media': [for (final x in m.media) {'id': x.id, 'kind': x.kind, 'name': x.name}],
       };
 
   Future<void> _loadCache() async {
@@ -998,3 +987,29 @@ class ChatStore extends ChangeNotifier {
     } catch (_) {}
   }
 }
+
+
+/// 会话列表缓存里的「最后一条」:只存列表预览([previewOf])用得到的字段。
+///
+/// 少存一样,离线打开时预览就和在线时不一样:原来没存剧透实体,离线时剧透的字在列表里直接露出来;
+/// 没存通话详情和语音时长,显示成「[通话]」「[语音] 0:00」。守卫见 test/chat_cache_test.dart
+Map<String, dynamic> messageToCache(ChatMessage m) => {
+      'chat_id': m.chatId,
+      'seq': m.seq,
+      'kind': m.kind,
+      'text': m.text,
+      'created_at': m.createdAt.toUtc().toIso8601String(),
+      if (m.sender != null) 'sender': {'id': m.sender!.id, 'name': m.sender!.name},
+      if (m.service != null) 'service': m.service,
+      // 预览只看剧透那几段(要打码);别的样式不影响一行预览
+      'entities': [for (final e in m.entities) if (e.type == 'spoiler') e.toJson()],
+      'media': [
+        for (final x in m.media) {'id': x.id, 'kind': x.kind, 'name': x.name, 'duration_ms': x.durationMs},
+      ],
+      if (m.call != null) 'call': m.call,
+      if (m.poll != null) 'poll': {'id': m.poll!.id, 'question': m.poll!.question},
+      if (m.dice != null) 'dice': m.dice,
+      if (m.sticker != null) 'sticker': {'emoji': m.sticker!['emoji']},
+      if (m.location != null) 'location': {'title': m.location!['title']},
+      if (m.contact != null) 'contact': {'name': m.contact!['name']},
+    };
