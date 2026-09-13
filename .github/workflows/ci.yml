@@ -125,7 +125,8 @@ jobs:
               print("bucket", b, "ok")
           PY
 
-      # 消息与视频的转码 e2e(DEV-PROMPTS-40 #342)要用 ffmpeg / ffprobe。
+      # 消息与视频的转码 e2e(DEV-PROMPTS-40 #342;e2e_media、e2e_video_upload 现场用 ffmpeg
+      # 生成测试片、服务端转 360/480/720 档位和雪碧图)要用 ffmpeg / ffprobe。
       # 服务端镜像里本来就装了(server/Dockerfile),这里补上 runner 的,两边一致
       - name: 装 ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null && ffmpeg -version | head -1
