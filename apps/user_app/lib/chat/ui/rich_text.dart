@@ -6,12 +6,31 @@ import '../models.dart';
 
 /// 消息正文里可点的东西被点了。
 class TextTapHandlers {
-  const TextTapHandlers({this.onUrl, this.onMention, this.onUserId, this.onHashtag});
+  const TextTapHandlers({this.onUrl, this.onMention, this.onUserId, this.onHashtag, this.onBotCommand});
 
   final void Function(String url)? onUrl;
   final void Function(String username)? onMention;
   final void Function(int userId)? onUserId;
   final void Function(String tag)? onHashtag;
+
+  /// 有机器人的会话里,正文中的 `/命令` 点一下就发出去(Telegram 的样子)。不给就不认命令
+  final void Function(String command)? onBotCommand;
+}
+
+final _botCommand = RegExp(r'(?<![\w/@])/[A-Za-z0-9_]{1,32}(?:@[A-Za-z0-9_]{3,32})?(?![\w/])');
+
+/// 正文里的 `/命令`(不在代码、链接、@ 里的)补成 bot_command 实体。纯函数,单测直接调
+List<MsgEntity> withBotCommands(String text, List<MsgEntity> entities) {
+  if (!text.contains('/')) return entities;
+  final taken = [
+    for (final e in entities)
+      if (const {'code', 'pre', 'url', 'text_link', 'mention', 'text_mention'}.contains(e.type)) (e.offset, e.offset + e.length)
+  ];
+  final extra = [
+    for (final m in _botCommand.allMatches(text))
+      if (!taken.any((t) => m.start < t.$2 && m.end > t.$1)) MsgEntity('bot_command', m.start, m.end - m.start),
+  ];
+  return extra.isEmpty ? entities : [...entities, ...extra];
 }
 
 /// 按实体渲染的消息正文(DEV-PROMPTS-40 §5.2:偏移按 UTF-16 码元,和 Dart 字符串下标一致)。
@@ -102,8 +121,9 @@ List<InlineSpan> buildSpans(
   TapGestureRecognizer Function(VoidCallback)? tap,
   TextTapHandlers handlers = const TextTapHandlers(),
 }) {
+  final all = handlers.onBotCommand == null ? entities : withBotCommands(text, entities);
   final valid = [
-    for (final e in entities)
+    for (final e in all)
       if (e.offset >= 0 && e.length > 0 && e.offset + e.length <= text.length) e
   ];
   if (valid.isEmpty) return [TextSpan(text: text)];
@@ -171,6 +191,9 @@ List<InlineSpan> buildSpans(
         case 'hashtag':
           style = style.copyWith(color: linkColor);
           if (tap != null && handlers.onHashtag != null) rec = tap(() => handlers.onHashtag!(seg));
+        case 'bot_command':
+          style = style.copyWith(color: linkColor);
+          if (tap != null && handlers.onBotCommand != null) rec = tap(() => handlers.onBotCommand!(seg));
       }
     }
     if (spoiler) {

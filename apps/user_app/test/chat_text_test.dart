@@ -6,6 +6,7 @@ import 'package:user_app/chat/calls/ringtone.dart';
 import 'package:user_app/chat/models.dart';
 import 'package:user_app/chat/ui/entity_controller.dart';
 import 'package:user_app/chat/ui/format.dart';
+import 'package:user_app/chat/ui/rich_text.dart';
 
 String _dump(List<MsgEntity> es) =>
     es.map((e) => '${e.type}@${e.offset}+${e.length}${e.language != null ? '(${e.language})' : ''}').join(' ');
@@ -150,6 +151,29 @@ void main() {
         final secs = (b.length - 44) / 2 / 16000;
         expect(secs, closeTo(incoming ? 2.56 : 3.0, 0.05));
       }
+    });
+  });
+
+  group('机器人命令(#355):有机器人的会话里正文中的 /命令 可以点', () {
+    List<String> cmds(String text, [List<MsgEntity> ents = const []]) => [
+          for (final e in withBotCommands(text, ents))
+            if (e.type == 'bot_command') text.substring(e.offset, e.offset + e.length)
+        ];
+
+    test('行首、行中、带 @机器人', () {
+      expect(cmds('/start 打招呼\n再发 /help@szdemo_bot 看看'), ['/start', '/help@szdemo_bot']);
+    });
+    test('路径、分数、URL 里的斜杠不算', () {
+      expect(cmds('/usr/local 和 1/2 还有 a/b'), isEmpty);
+    });
+    test('代码和链接实体里的不算', () {
+      const text = '看 /code 和 https://x.cn/start';
+      final ents = [const MsgEntity('code', 2, 5), const MsgEntity('url', 10, 20)];
+      expect(cmds(text, ents), isEmpty);
+    });
+    test('没有斜杠就原样返回,不多分配', () {
+      final ents = [const MsgEntity('bold', 0, 2)];
+      expect(identical(withBotCommands('你好', ents), ents), isTrue);
     });
   });
 }

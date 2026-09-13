@@ -433,7 +433,20 @@ class _ChatPageState extends State<ChatPage> {
 
   // ---------------- 气泡上的动作 ----------------
 
-  late final BubbleActions _bubbleActions = BubbleActions(
+  /// 气泡动作按「这个会话有没有机器人」缓存一份:有机器人时正文里的 `/命令` 才认成可点的命令
+  BubbleActions? _actionsCache;
+  bool _actionsWithBots = false;
+
+  BubbleActions get _bubbleActions {
+    final bots = store.botsOf(widget.chatId).isNotEmpty;
+    if (_actionsCache == null || bots != _actionsWithBots) {
+      _actionsWithBots = bots;
+      _actionsCache = _makeActions(bots);
+    }
+    return _actionsCache!;
+  }
+
+  BubbleActions _makeActions(bool bots) => BubbleActions(
     onCallBack: (m) {
       final c = chat;
       if (!RemoteCopy.feature('calls')) {
@@ -484,6 +497,7 @@ class _ChatPageState extends State<ChatPage> {
         });
         _runSearch();
       },
+      onBotCommand: bots ? (cmd) => _composerActions.onSendText(cmd, const []) : null,
     ),
   );
 
