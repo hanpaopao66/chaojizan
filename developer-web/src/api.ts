@@ -252,6 +252,43 @@ export interface LaunchPayload {
   env: string
 }
 
+/** 机器人(#355,docs/BOT-API.md 第 8 节)。**不含 token**,只有前 6 位 */
+export interface BotCommand { command: string; description: string }
+
+export type BotMenu =
+  | { type: 'default' }
+  | { type: 'commands' }
+  | {
+    type: 'web_app'
+    text: string
+    app_id: string
+    app: { name: string; icon: string; status: string } | null
+    /** false = 小程序下架了,用户那边不显示这个按钮 */
+    available: boolean
+  }
+
+export interface BotDev {
+  id: number
+  name: string
+  username: string | null
+  link: string | null
+  avatar: string
+  about: string
+  description: string
+  commands: BotCommand[]
+  menu_button: BotMenu
+  privacy_mode: boolean
+  token_prefix: string
+  created_at: string | null
+  webhook: {
+    url: string
+    has_secret: boolean
+    pending_update_count: number
+    last_error_date: string | null
+    last_error_message: string
+  }
+}
+
 export const CATEGORIES: Record<string, string> = {
   tools: '工具', productivity: '效率', life: '生活', learning: '学习', casual: '休闲益智', puzzle: '益智解谜',
 }
@@ -321,6 +358,22 @@ export const api = {
     post<LaunchPayload>(`/dev/v1/apps/${appid}/sim/launch?version_id=${versionId}`, body),
   simStorage: (appid: string, op: string, body: unknown) => post<unknown>(`/dev/v1/apps/${appid}/sim/storage/${op}`, body),
   simProfile: (appid: string) => post<{ init_data: string }>(`/dev/v1/apps/${appid}/sim/profile`),
+
+  bots: () => get<{ items: BotDev[]; max: number; enabled: boolean }>('/dev/v1/bots'),
+  createBot: (b: { name: string; username: string }) =>
+    post<{ bot: BotDev; token: string; notice: string }>('/dev/v1/bots', b),
+  bot: (id: number) => get<BotDev>(`/dev/v1/bots/${id}`),
+  updateBot: (id: number, b: Partial<{ name: string; about: string; description: string; avatar: string; privacy_mode: boolean }>) =>
+    put<BotDev>(`/dev/v1/bots/${id}`, b),
+  setBotCommands: (id: number, commands: BotCommand[]) => put<BotDev>(`/dev/v1/bots/${id}/commands`, { commands }),
+  setBotMenu: (id: number, b: { type: 'default' | 'commands' | 'web_app'; text?: string; app_id?: string }) =>
+    put<BotDev>(`/dev/v1/bots/${id}/menu-button`, b),
+  setBotWebhook: (id: number, b: { url: string; secret_token?: string; drop_pending_updates?: boolean }) =>
+    put<BotDev>(`/dev/v1/bots/${id}/webhook`, b),
+  deleteBotWebhook: (id: number, dropPending: boolean) =>
+    del<BotDev>(`/dev/v1/bots/${id}/webhook?drop_pending_updates=${dropPending}`),
+  resetBotToken: (id: number) => post<{ bot: BotDev; token: string; notice: string }>(`/dev/v1/bots/${id}/token`),
+  deleteBot: (id: number) => del<{ deleted: boolean; messages: number; chats_left: number }>(`/dev/v1/bots/${id}`),
 
   uploadImage: async (file: File, purpose: string) => {
     const f = new FormData()

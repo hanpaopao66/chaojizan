@@ -1,4 +1,4 @@
-import { AppstoreOutlined, BellOutlined, BookOutlined, IdcardOutlined, LogoutOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, BellOutlined, BookOutlined, IdcardOutlined, LogoutOutlined, RobotOutlined } from '@ant-design/icons'
 import { Alert, Layout, Menu, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -7,6 +7,8 @@ import { Me, api, clearToken } from '../api'
 import AccountPage from '../pages/AccountPage'
 import AppDetailPage from '../pages/AppDetailPage'
 import AppsPage from '../pages/AppsPage'
+import BotDetailPage from '../pages/BotDetailPage'
+import BotsPage from '../pages/BotsPage'
 import MessagesPage from '../pages/MessagesPage'
 
 export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
@@ -17,7 +19,8 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
   useEffect(() => { reloadMe() }, [])
 
   const selected = loc.pathname.startsWith('/account') ? '/account'
-    : loc.pathname.startsWith('/messages') ? '/messages' : '/apps'
+    : loc.pathname.startsWith('/messages') ? '/messages'
+      : loc.pathname.startsWith('/bots') ? '/bots' : '/apps'
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Layout.Sider theme="light" width={184} breakpoint="md" collapsedWidth={0}>
@@ -28,6 +31,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
           onClick={({ key }) => (key === 'docs' ? window.open('/developers', '_blank') : nav(key))}
           items={[
             { key: '/apps', icon: <AppstoreOutlined />, label: '我的应用' },
+            { key: '/bots', icon: <RobotOutlined />, label: '机器人' },
             { key: '/account', icon: <IdcardOutlined />, label: '账号与认证' },
             { key: '/messages', icon: <BellOutlined />, label: '消息' },
             { key: 'docs', icon: <BookOutlined />, label: '开发者文档' },
@@ -58,6 +62,8 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
           <Routes>
             <Route path="/apps" element={<AppsPage me={me} />} />
             <Route path="/apps/:appid/*" element={<AppDetailPage me={me} />} />
+            <Route path="/bots" element={<BotsPage />} />
+            <Route path="/bots/:id" element={<BotDetailPage />} />
             <Route path="/account" element={<AccountPage me={me} onChanged={setMe} reload={reloadMe} />} />
             <Route path="/messages" element={<MessagesPage />} />
             <Route path="*" element={<Navigate to="/apps" replace />} />
