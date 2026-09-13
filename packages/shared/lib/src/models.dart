@@ -92,6 +92,10 @@ class Merchant {
             .map((e) => TopDish.fromJson(e as Map<String, dynamic>))
             .toList(),
         minOrderCents = json['min_order_cents'] as int? ?? 0,
+        // 老服务端不给这个字段时退回商家自设的起送价(和字段出现之前一样)
+        effectiveMinOrderCents = json['effective_min_order_cents'] as int? ??
+            json['min_order_cents'] as int? ??
+            0,
         packingFeeCents = json['packing_fee_cents'] as int? ?? 0,
         photoUrls =
             (json['photo_urls'] as List? ?? const []).cast<String>(),
@@ -168,7 +172,14 @@ class Merchant {
   /// 而用户会按它形成价位预期,点进去发现对不上。
   final int? avgSpendCents;
   final List<TopDish> topDishes;
+
+  /// 商家自设的起送价(0 = 商家没设)。**给用户看、拿来比的用 [effectiveMinOrderCents]**
   final int minOrderCents;
+
+  /// 实际起送价 = max(商家自设, 平台起送下限),服务端算好给的。
+  /// 下单就是按它拦的 —— 店铺页「¥15 起送」、购物车条「差 ¥3 起送」、结算页都照它。
+  /// 原来只看 [minOrderCents]:设成 0 的店页面上不写起送,凑了 ¥12 到结算才被拒
+  final int effectiveMinOrderCents;
   final int packingFeeCents;
   final String category; // 外卖品类 slug(清单见 merchant_categories.dart)
 
@@ -899,6 +910,56 @@ class Address {
   final String tag;
 
   String get fullAddress => detail.isEmpty ? address : '$address $detail';
+}
+
+/// 店铺评价概览(公开接口 /merchants/{id}/reviews/overview)。
+///
+/// 是全店没被隐藏的评价 —— 和店铺页「4.8 分 · 268 条」同一批,服务端保证两边一个数。
+/// 好评 4–5 星、差评 1–2 星(和透明中心「差评占比」同一口径)。
+class ReviewOverview {
+  ReviewOverview.fromJson(Map<String, dynamic> json)
+      : count = json['count'] as int? ?? 0,
+        avg = (json['avg'] as num?)?.toDouble(),
+        stars = {
+          for (var s = 1; s <= 5; s++)
+            s: ((json['stars'] as Map?)?['$s'] as int?) ?? 0,
+        },
+        photo = json['photo'] as int? ?? 0,
+        good = json['good'] as int? ?? 0,
+        bad = json['bad'] as int? ?? 0,
+        append = json['append'] as int? ?? 0;
+
+  final int count;
+  final double? avg;
+
+  /// 1..5 → 条数
+  final Map<int, int> stars;
+  final int photo;
+  final int good;
+  final int bad;
+  final int append;
+}
+
+/// 点过某道菜的订单的评价(/merchants/{id}/dishes/{dishId}/order-reviews)。
+///
+/// **评价是按订单打的,不是按菜**:分数是给整单的。界面上只能叫
+/// 「点过这道菜的订单」,不能叫「这道菜的评价」。
+class DishOrderReviews {
+  DishOrderReviews.fromJson(Map<String, dynamic> json)
+      : count = json['count'] as int? ?? 0,
+        good = json['good'] as int? ?? 0,
+        recent = ((json['recent'] as List?) ?? const [])
+            .map((e) => Review.fromJson(e as Map<String, dynamic>))
+            .toList();
+
+  /// 这些订单里评了价的单数
+  final int count;
+
+  /// 其中 4–5 星的
+  final int good;
+
+  /// 最近 3 条写了字的
+  final List<Review> recent;
 }
 
 class Review {

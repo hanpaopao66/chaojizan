@@ -1254,11 +1254,17 @@ class ApiClient {
   Future<Map<String, dynamic>> getGroupCart(String code) async =>
       await _request('GET', '/group-carts/$code') as Map<String, dynamic>;
 
+  /// 设拼单车里自己某一行的份数(绝对值,0 = 删掉这一行)。
+  /// 一行 = (菜, [choices] 规格, [note] 备注);规格按服务端同一套校验、单价服务端算
   Future<Map<String, dynamic>> setGroupCartItem(
-          String code, int dishId, int quantity) async =>
-      await _request('POST', '/group-carts/$code/items',
-              body: {'dish_id': dishId, 'quantity': quantity})
-          as Map<String, dynamic>;
+          String code, int dishId, int quantity,
+          {List<String> choices = const [], String note = ''}) async =>
+      await _request('POST', '/group-carts/$code/items', body: {
+        'dish_id': dishId,
+        'quantity': quantity,
+        if (choices.isNotEmpty) 'choices': choices,
+        if (note.isNotEmpty) 'note': note,
+      }) as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> lockGroupCart(String code,
           {bool locked = true}) async =>
@@ -1404,12 +1410,34 @@ class ApiClient {
     }
   }
 
-  Future<List<Review>> merchantReviews(int merchantId) async {
-    final data = await _request('GET', '/merchants/$merchantId/reviews');
+  /// 店铺评价(公开,按时间倒序)。[filter] 是 all / photo / good / bad / append;
+  /// [before] 游标:上一页最后一条的评价 id。都不传 = 最新 50 条(老行为)。
+  Future<List<Review>> merchantReviews(int merchantId,
+      {String filter = 'all', int? before, int? limit}) async {
+    final query = <String, String>{
+      if (filter != 'all') 'filter': filter,
+      if (before != null) 'before': '$before',
+      if (limit != null) 'limit': '$limit',
+    };
+    // 空 map 会让地址多出一个「?」,不带参数时照老样子发
+    final data = await _request('GET', '/merchants/$merchantId/reviews',
+        query: query.isEmpty ? null : query);
     return (data as List)
         .map((e) => Review.fromJson(e as Map<String, dynamic>))
         .toList();
   }
+
+  /// 店铺评价概览:条数、均分、1–5 星、五个筛选各几条(全店,和店铺页同一个数)
+  Future<ReviewOverview> merchantReviewOverview(int merchantId) async =>
+      ReviewOverview.fromJson(
+          await _request('GET', '/merchants/$merchantId/reviews/overview')
+              as Map<String, dynamic>);
+
+  /// 点过这道菜的订单的评价摘要(评价是给整单的,不是给这道菜的)
+  Future<DishOrderReviews> dishOrderReviews(int merchantId, int dishId) async =>
+      DishOrderReviews.fromJson(await _request(
+              'GET', '/merchants/$merchantId/dishes/$dishId/order-reviews')
+          as Map<String, dynamic>);
 
   /// 商家看自己店的评价。[maxRating] 只看 ≤N 星;[unreplied] 只看未回复;
   /// [before] 游标分页(上一页最后一条的 id)

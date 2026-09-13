@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
-/// 在菜品详情页里选好的:规格(按规格组的顺序)和份数。
-typedef DishPick = ({List<String> choices, int quantity});
+/// 在菜品详情页里选好的:规格(按规格组的顺序)、份数、备注(只有拼单里有)。
+typedef DishPick = ({List<String> choices, int quantity, String note});
 
 /// 菜品详情(设计稿 D):图、菜名与描述、标签、规格组、明细、底栏合计。
 ///
@@ -10,11 +10,11 @@ typedef DishPick = ({List<String> choices, int quantity});
 /// 原来描述、库存、打包费看得到的地方选不了规格,选规格的地方又看不到这些;
 /// 这一页把 [Dish] 已有的字段全摊开,底栏实时算合计。
 ///
-/// 加购不在这里直接改购物车:确认后 pop 一个 [DishPick],由店铺页并进购物车
-/// (同菜同规格合并一行)。这样购物车只有店铺页一个写入口。
+/// 加购不在这里直接改购物车:确认后 pop 一个 [DishPick],由店铺页(或拼单页)
+/// 并进购物车(同菜同规格合并一行)。这样购物车只有调用方一个写入口。
 ///
-/// ⚠️ 设计稿上的「这道菜的评价 4.9 分 · 31 条」没有做:评价挂在订单上,
-/// 不挂在菜上,服务端没有按菜聚合的数。要做得先加接口。
+/// 页尾的评价摘要是「点过这道菜的订单」的评价:评价是按订单打的,不是按菜,
+/// 分数是给整单的 —— 所以这一块不叫「这道菜的评价」,也不给菜打分。
 class DishDetailPage extends StatefulWidget {
   const DishDetailPage({
     super.key,
@@ -23,6 +23,7 @@ class DishDetailPage extends StatefulWidget {
     required this.dish,
     this.inCart = 0,
     this.onShare,
+    this.forGroupCart = false,
   });
 
   final ApiClient api;
@@ -34,6 +35,10 @@ class DishDetailPage extends StatefulWidget {
 
   /// 右上角的分享(店铺卡,这道菜排第一);不给就不画那个按钮
   final VoidCallback? onShare;
+
+  /// 从拼单页进来:多一个「备注」框(「不要香菜」,下单时并进订单备注),
+  /// 按钮叫「加进拼单」。普通购物车没有逐道菜的备注,整单备注在结算页写
+  final bool forGroupCart;
 
   @override
   State<DishDetailPage> createState() => _DishDetailPageState();
@@ -51,7 +56,29 @@ class _DishDetailPageState extends State<DishDetailPage> {
 
   int _qty = 1;
 
+  /// 拼单里这道菜的备注(控制器跟着这个页面走,页面销毁时一起销毁)
+  final _note = TextEditingController();
+
+  /// 点过这道菜的订单的评价摘要;没拉到 / 没有就不画那一块
+  DishOrderReviews? _orderReviews;
+
   Dish get _dish => widget.dish;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.api.dishOrderReviews(widget.shop.id, _dish.id).then((r) {
+      if (mounted) setState(() => _orderReviews = r);
+    }).catchError((_) {
+      // 摘要是加分项,拉不到就不显示,不挡着点菜
+    });
+  }
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
 
   /// 还能加几份
   int get _room => _dish.stock - widget.inCart;
@@ -121,9 +148,17 @@ class _DishDetailPageState extends State<DishDetailPage> {
                       _group(sz, i, g),
                     ],
                   ],
+                  if (widget.forGroupCart) ...[
+                    const SizedBox(height: 14),
+                    _noteField(sz),
+                  ],
                   if (_showBreakdown) ...[
                     const SizedBox(height: 14),
                     _breakdown(sz),
+                  ],
+                  if ((_orderReviews?.count ?? 0) > 0) ...[
+                    const SizedBox(height: 18),
+                    _orderReviewsBlock(sz, _orderReviews!),
                   ],
                 ],
               ),
@@ -383,6 +418,57 @@ class _DishDetailPageState extends State<DishDetailPage> {
     );
   }
 
+  /// 拼单里的备注:30 个字以内,下单时并进订单备注(服务端 group_cart.NOTE_MAX)
+  Widget _noteField(SzColors sz) => TextField(
+        controller: _note,
+        maxLength: 30,
+        decoration: InputDecoration(
+          hintText: '备注(选填):不要香菜、少放辣…',
+          helperText: '下单时并进订单备注,后厨看得到',
+          helperStyle: TextStyle(fontSize: kFontMicro, color: sz.inkMuted),
+        ),
+      );
+
+  /// 点过这道菜的订单的评价(设计稿 D 的「评价摘要」)。
+  ///
+  /// 稿子写的是「这道菜的评价 4.9 分 · 31 条」—— 评价是按订单打的,
+  /// 分数给的是整单,不是这道菜,所以这里只说「点过这道菜的订单」有几单评了价、
+  /// 几成是好评,摘最近几条带字的,并且写明评的是整单
+  Widget _orderReviewsBlock(SzColors sz, DishOrderReviews r) {
+    final goodPct = (r.good * 100 / r.count).round();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text('点过这道菜的订单',
+                style: TextStyle(
+                    fontSize: kFontBodyLg,
+                    fontWeight: FontWeight.w600,
+                    color: sz.ink)),
+            const SizedBox(width: 8),
+            Text('${r.count} 单评了价 · 好评 $goodPct%',
+                style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+          ],
+        ),
+        const SizedBox(height: 7),
+        for (final review in r.recent)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text('「${review.comment}」— ${review.customerName}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: kFontBody, height: 1.6, color: sz.inkMuted)),
+          ),
+        Text('评价是给整单打的,不一定只在说这道菜',
+            style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+      ],
+    );
+  }
+
   // ---------- 底栏 ----------
 
   String get _unavailableText {
@@ -427,13 +513,16 @@ class _DishDetailPageState extends State<DishDetailPage> {
             ),
             onPressed: missing != null || full
                 ? null
-                : () => Navigator.of(context)
-                    .pop<DishPick>((choices: _choices, quantity: _qty)),
+                : () => Navigator.of(context).pop<DishPick>((
+                      choices: _choices,
+                      quantity: _qty,
+                      note: _note.text.trim(),
+                    )),
             child: Text(missing != null
                 ? '请选择${missing.name}'
                 : full
-                    ? '库存都在购物车里了'
-                    : '加入购物车'),
+                    ? (widget.forGroupCart ? '库存不够了' : '库存都在购物车里了')
+                    : (widget.forGroupCart ? '加进拼单' : '加入购物车')),
           ),
         ],
       );

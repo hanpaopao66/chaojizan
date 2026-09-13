@@ -12,13 +12,13 @@ class ReviewsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return SzPageScaffold(
       appBar: AppBar(title: Text('${merchant.name} · 评价')),
-      body: ReviewsList(api: api, merchantId: merchant.id, shop: merchant),
+      body: ReviewsList(api: api, merchantId: merchant.id),
     );
   }
 }
 
-/// 评价筛选。好评 4–5 星、差评 1–2 星 —— 和透明中心「差评占比」同一口径
-/// (transparency_page:1–2 星占比),3 星两边都不算。
+/// 评价筛选。名字就是服务端 /reviews?filter= 的取值(reviews.py REVIEW_FILTERS)。
+/// 好评 4–5 星、差评 1–2 星 —— 和透明中心「差评占比」同一口径,3 星两边都不算。
 enum ReviewFilter {
   all('全部'),
   photo('有图'),
@@ -30,14 +30,13 @@ enum ReviewFilter {
 
   final String label;
 
-  bool test(Review r) => switch (this) {
-        ReviewFilter.all => true,
-        ReviewFilter.photo =>
-          r.imageUrls.isNotEmpty || r.appendImages.isNotEmpty,
-        ReviewFilter.good => r.merchantRating >= 4,
-        ReviewFilter.bad => r.merchantRating <= 2,
-        ReviewFilter.append =>
-          r.appendContent.isNotEmpty || r.appendImages.isNotEmpty,
+  /// 概览里这个筛选有几条(全店)
+  int countIn(ReviewOverview o) => switch (this) {
+        ReviewFilter.all => o.count,
+        ReviewFilter.photo => o.photo,
+        ReviewFilter.good => o.good,
+        ReviewFilter.bad => o.bad,
+        ReviewFilter.append => o.append,
       };
 }
 
@@ -46,173 +45,262 @@ enum ReviewFilter {
 /// 顶上是评分概览(大字评分 + 星级分布)和筛选,下面是一条条评价。
 /// **差评照实排在里面**:按时间排,不折叠、不往后挪。
 ///
-/// ⚠️ 公开的评价接口只给最近 50 条(reviews.py merchant_reviews),
-/// 没有分布和按条件筛的接口。所以大字评分和总条数取店铺的(全量),
-/// 星级分布、好评率、筛选的数只能按拿到的这些算 —— 拿到的少于总数时,
-/// 概览底下明说「按最近 N 条算」,不把 50 条的分布当成全店的写。
-/// 要全量的分布得先加接口。
+/// 概览、筛选的条数都来自服务端的全店概览(/reviews/overview),和店铺页顶上的
+/// 「4.8 分 · 268 条」是同一批评价;列表按筛选向服务端要,滑到底再翻下一页。
+/// 原来公开接口只给最近 50 条,分布和筛选只能按那 50 条算。
 class ReviewsList extends StatefulWidget {
-  const ReviewsList({
-    super.key,
-    required this.api,
-    required this.merchantId,
-    this.shop,
-  });
+  const ReviewsList({super.key, required this.api, required this.merchantId});
 
   final ApiClient api;
   final int merchantId;
-
-  /// 店铺(评分和总条数取它的);不给就按拿到的评价自己算
-  final Merchant? shop;
 
   @override
   State<ReviewsList> createState() => _ReviewsListState();
 }
 
 class _ReviewsListState extends State<ReviewsList> {
-  // 原来在 build 里直接发请求:每次 rebuild 重发一遍,失败也没有重试出口
-  late Future<List<Review>> _future =
-      widget.api.merchantReviews(widget.merchantId);
+  static const _pageSize = 20;
+
   ApiClient get api => widget.api;
 
+  ReviewOverview? _overview;
+  final List<Review> _items = [];
   ReviewFilter _filter = ReviewFilter.all;
+
+  /// 有一页正在路上
+  bool _loading = false;
+  bool _hasMore = true;
+
+  /// 第一次(概览 + 第一页)没拉到:整页出错页
+  String? _error;
+
+  /// 往后翻页没拉到:只在页尾说一声,点了再试
+  String? _moreError;
+
+  /// 换筛选之后,还在路上的旧请求回来了要丢掉
+  int _generation = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  /// 概览和第一页一起拉(并发);出错页点「重试」也走这里
+  Future<void> _reload() async {
+    final gen = ++_generation;
+    setState(() {
+      _loading = true;
+      _error = null;
+      _moreError = null;
+    });
+    try {
+      final results = await Future.wait<Object>([
+        api.merchantReviewOverview(widget.merchantId),
+        api.merchantReviews(widget.merchantId,
+            filter: _filter.name, limit: _pageSize),
+      ]);
+      if (!mounted || gen != _generation) return;
+      final page = results[1] as List<Review>;
+      // 拉成功要把上次的错清掉:出错页排在最前面判断,不清的话重试回不来
+      setState(() {
+        _overview = results[0] as ReviewOverview;
+        _items
+          ..clear()
+          ..addAll(page);
+        _hasMore = page.length == _pageSize;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted || gen != _generation) return;
+      setState(() {
+        _loading = false;
+        _error = '$e';
+      });
+    }
+  }
+
+  /// 换筛选:清掉列表从第一页拉起(概览不用重拉,它本来就是全店的)
+  void _setFilter(ReviewFilter f) {
+    if (f == _filter) return;
+    setState(() {
+      _filter = f;
+      _generation++;
+      _items.clear();
+      _hasMore = true;
+      _moreError = null;
+      // 旧筛选那一页若还在路上,回来会因为 generation 对不上被丢掉;
+      // 这里先把「在路上」放下,不然新筛选的第一页永远等不到开始
+      _loading = false;
+    });
+    _loadMore();
+  }
+
+  Future<void> _loadMore() async {
+    if (_loading || !_hasMore) return;
+    final gen = _generation;
+    setState(() {
+      _loading = true;
+      _moreError = null;
+    });
+    try {
+      final page = await api.merchantReviews(widget.merchantId,
+          filter: _filter.name,
+          before: _items.isEmpty ? null : _items.last.id,
+          limit: _pageSize);
+      if (!mounted || gen != _generation) return;
+      setState(() {
+        _items.addAll(page);
+        _hasMore = page.length == _pageSize;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted || gen != _generation) return;
+      setState(() {
+        _loading = false;
+        _moreError = '$e';
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return SzError(
-                error: snapshot.error,
-                // 块写法:箭头会把 Future 交给 setState(debug 包断言失败)
-                onRetry: () => setState(() {
-                      _future = api.merchantReviews(widget.merchantId);
-                    }));
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          final reviews = snapshot.data!;
-          if (reviews.isEmpty) {
-            return const SzEmpty(text: '还没有评价,下单后来做第一个评价的人');
-          }
-          final shown = reviews.where(_filter.test).toList();
-          return ListView.builder(
-            // 店铺页把这个列表放在开了 extendBody 的 Scaffold 里,
-            // 购物车条会盖住页尾。独立的评价页没有底栏,这里读到 0,
-            // 所以两处都对
-            padding: EdgeInsets.fromLTRB(kPagePad, 12, kPagePad,
-                12 + MediaQuery.of(context).padding.bottom),
-            itemCount: 2 + (shown.isEmpty ? 1 : shown.length),
-            itemBuilder: (context, i) {
-              if (i == 0) return _overview(context, reviews);
-              if (i == 1) return _filters(reviews);
-              if (shown.isEmpty) return _emptyFilter(context, reviews);
-              final r = shown[i - 2];
-              // 换筛选时换 key,入场错落重播一次;重试拉回来的是同一批 key,不重播
-              return SzEnter(
-                key: ValueKey('${_filter.name}-${r.id}'),
-                index: i - 2,
-                child: _ReviewTile(api: api, review: r),
-              );
-            },
-          );
-        });
+    final overview = _overview;
+    if (_error != null) {
+      return SzError(error: _error, onRetry: _reload);
+    }
+    if (overview == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (overview.count == 0) {
+      return const SzEmpty(text: '还没有评价,下单后来做第一个评价的人');
+    }
+    return ListView.builder(
+      // 店铺页把这个列表放在开了 extendBody 的 Scaffold 里,
+      // 购物车条会盖住页尾。独立的评价页没有底栏,这里读到 0,
+      // 所以两处都对
+      padding: EdgeInsets.fromLTRB(
+          kPagePad, 12, kPagePad, 12 + MediaQuery.of(context).padding.bottom),
+      itemCount: 3 + _items.length,
+      itemBuilder: (context, i) {
+        if (i == 0) return _overviewBlock(context, overview);
+        if (i == 1) return _filters(overview);
+        if (i == 2 + _items.length) return _footer(context);
+        final r = _items[i - 2];
+        // 换筛选时换 key,入场错落重播一次;翻页接上来的只在前 8 条里错落
+        return SzEnter(
+          key: ValueKey('${_filter.name}-${r.id}'),
+          index: i - 2,
+          child: _ReviewTile(api: api, review: r),
+        );
+      },
+    );
   }
 
-  /// 拿到的比店铺总数少:分布和筛选只按拿到的算
-  bool _partial(List<Review> reviews) =>
-      (widget.shop?.ratingCount ?? 0) > reviews.length;
-
-  Widget _overview(BuildContext context, List<Review> reviews) {
+  /// 页尾:还有就去拉下一页(滑到这里才拉),拉不到说一声,拉完了什么都不画
+  Widget _footer(BuildContext context) {
     final sz = Theme.of(context).sz;
-    final shop = widget.shop;
-    final loaded = reviews.length;
-    final avg = shop != null && shop.ratingCount > 0 && shop.ratingAvg != null
-        ? shop.ratingAvg!
-        : reviews.fold<int>(0, (a, r) => a + r.merchantRating) / loaded;
-    final count =
-        shop != null && shop.ratingCount > 0 ? shop.ratingCount : loaded;
-    final dist = [
-      for (var star = 5; star >= 1; star--)
-        reviews.where((r) => r.merchantRating == star).length,
-    ];
-    final goodPct = ((dist[0] + dist[1]) * 100 / loaded).round();
+    if (_moreError != null) {
+      return Center(
+        child: TextButton(
+          onPressed: _loadMore,
+          child: Text('没加载出来,点这里重试',
+              style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+        ),
+      );
+    }
+    if (_hasMore) {
+      if (!_loading) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _loadMore();
+        });
+      }
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+            child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    if (_items.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 36),
+        child: Center(
+          child: Text('还没有${_filter.label}的评价',
+              style: TextStyle(fontSize: kFontBody, color: sz.inkMuted)),
+        ),
+      );
+    }
+    return const SizedBox(height: 12);
+  }
+
+  Widget _overviewBlock(BuildContext context, ReviewOverview o) {
+    final sz = Theme.of(context).sz;
+    final avg = o.avg ?? 0;
+    final goodPct = (o.good * 100 / o.count).round();
     final label = TextStyle(fontSize: kFontMicro, color: sz.inkMuted);
     return Padding(
       padding: const EdgeInsets.only(bottom: 9),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(avg.toStringAsFixed(1),
-                      style: szMoney(
-                          fontSize: kFigureHero, height: 1.05, color: sz.ink)),
-                  const SizedBox(height: 3),
-                  Text(_stars(avg.round()),
-                      style: TextStyle(
-                          fontSize: kFontNote,
-                          letterSpacing: 1.5,
-                          color: sz.hold)),
-                  const SizedBox(height: 3),
-                  Text('$count 条 · $goodPct% 好评',
-                      style:
-                          TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-                ],
-              ),
-              const SizedBox(width: 18),
-              Expanded(
-                child: Column(
-                  children: [
-                    for (final (i, n) in dist.indexed)
-                      Padding(
-                        padding: EdgeInsets.only(top: i == 0 ? 0 : 4),
-                        child: Row(children: [
-                          SizedBox(
-                              width: 20,
-                              child: Text('${5 - i}★', style: label)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _Bar(
-                              fraction: n / loaded,
-                              // 4–5 星是琥珀,3 星及以下退成淡灰 ——
-                              // 不给差评上红色:它是事实,不是警报
-                              color: i < 2
-                                  ? sz.hold
-                                  : sz.inkFaint.withValues(alpha: .5),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 24,
-                            child: Text('$n',
-                                textAlign: TextAlign.right,
-                                style: szFigure(
-                                    fontSize: kFontMicro, color: sz.inkMuted)),
-                          ),
-                        ]),
-                      ),
-                  ],
-                ),
-              ),
+              Text(avg.toStringAsFixed(1),
+                  style: szMoney(
+                      fontSize: kFigureHero, height: 1.05, color: sz.ink)),
+              const SizedBox(height: 3),
+              Text(_stars(avg.round()),
+                  style: TextStyle(
+                      fontSize: kFontNote, letterSpacing: 1.5, color: sz.hold)),
+              const SizedBox(height: 3),
+              Text('${o.count} 条 · $goodPct% 好评',
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
             ],
           ),
-          if (_partial(reviews)) ...[
-            const SizedBox(height: 8),
-            Text('分布、好评率和下面的筛选按最近 $loaded 条算', style: label),
-          ],
+          const SizedBox(width: 18),
+          Expanded(
+            child: Column(
+              children: [
+                for (var star = 5; star >= 1; star--)
+                  Padding(
+                    padding: EdgeInsets.only(top: star == 5 ? 0 : 4),
+                    child: Row(children: [
+                      SizedBox(width: 20, child: Text('$star★', style: label)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _Bar(
+                          fraction: (o.stars[star] ?? 0) / o.count,
+                          // 4–5 星是琥珀,3 星及以下退成淡灰 ——
+                          // 不给差评上红色:它是事实,不是警报
+                          color: star >= 4
+                              ? sz.hold
+                              : sz.inkFaint.withValues(alpha: .5),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 28,
+                        child: Text('${o.stars[star] ?? 0}',
+                            textAlign: TextAlign.right,
+                            style: szFigure(
+                                fontSize: kFontMicro, color: sz.inkMuted)),
+                      ),
+                    ]),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _filters(List<Review> reviews) {
+  Widget _filters(ReviewOverview o) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 3),
       child: Wrap(
@@ -221,23 +309,11 @@ class _ReviewsListState extends State<ReviewsList> {
         children: [
           for (final f in ReviewFilter.values)
             SzChip(
-              '${f.label} ${reviews.where(f.test).length}',
+              '${f.label} ${f.countIn(o)}',
               selected: f == _filter,
-              onTap: () => setState(() => _filter = f),
+              onTap: () => _setFilter(f),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _emptyFilter(BuildContext context, List<Review> reviews) {
-    final sz = Theme.of(context).sz;
-    final where = _partial(reviews) ? '最近 ${reviews.length} 条里' : '';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 36),
-      child: Center(
-        child: Text('$where没有${_filter.label}的评价',
-            style: TextStyle(fontSize: kFontBody, color: sz.inkMuted)),
       ),
     );
   }

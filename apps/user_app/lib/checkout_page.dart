@@ -263,7 +263,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
     return hit;
   }
 
-  bool get _belowMinOrder => _foodCents < widget.merchant.minOrderCents;
+  /// 实际起送价 = max(商家自设, 平台下限),服务端给的,下单就按它拦。
+  /// 原来比的是商家自设的:设成 0 的店这里永远不拦,提交了才被 409 顶回来
+  int get _minOrder => widget.merchant.effectiveMinOrderCents;
+
+  bool get _belowMinOrder => _foodCents < _minOrder;
 
   /// 服务端算好的配送费与拆分。
   ///
@@ -867,7 +871,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   fraction:
                       (_foodCents + packing - merchantOff - commission) / total,
                   note: '菜品 + 打包 − ${shopCoupon ? '店铺券' : '满减'},只扣 '
-                      '${(widget.merchant.commissionRate * 100).toStringAsFixed(0)}% 服务费',
+                      '${widget.merchant.commissionPct}% 服务费',
                 ),
                 if (!_pickup)
                   SzFlowItem(
@@ -884,7 +888,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   fraction: commission / total,
                   note: '服务器、客服与赔付池 · 按商家侧口径 '
                       '${yuan(commission)} / ${yuan(_foodCents + packing - merchantOff)}'
-                      ' = ${(widget.merchant.commissionRate * 100).toStringAsFixed(0)}%',
+                      ' = ${widget.merchant.commissionPct}%',
                   isHold: true,
                 ),
               ]),
@@ -930,7 +934,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                       const SizedBox(height: 1),
                       Text(
                         _belowMinOrder
-                            ? '差 ${yuan(widget.merchant.minOrderCents - _foodCents)} 起送'
+                            ? '差 ${yuan(_minOrder - _foodCents)} 起送'
                             : total == null
                                 ? '请先选择地址'
                                 // 「已省」= 满减/店铺券 + 平台券,取的就是提交时
@@ -951,7 +955,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                     ? null
                     : _submit,
                 child: Text(_belowMinOrder
-                    ? '未达起送价'
+                    ? '${yuanShort(_minOrder)} 起送'
                     : _submitting
                         ? '下单中…'
                         : '提交订单'),

@@ -1878,7 +1878,8 @@ class _MerchantListViewState extends State<MerchantListView>
                     // 那正是 #295 花力气修掉的毛病,不能在这儿再造一个。
                     // 真要显示,得让列表接口把它一起算出来。
                     Row(children: [
-                      dim('起送 ${yuanShort(m.minOrderCents)}'),
+                      // 实际起送价(含平台下限):商家设 0 的店原来这里写「起送 ¥0」
+                      dim('起送 ${yuanShort(m.effectiveMinOrderCents)}'),
                       const Spacer(),
                       // 距离时长不许被挤掉:它是右栏的锚,
                       // 排不下时该让左边先让
@@ -2651,8 +2652,10 @@ class _MenuPageState extends State<MenuPage>
                         if (shop.monthlySales > 0) '月售 ${shop.monthlySales} 单',
                         // 服务端 delivery_base_fee_cents:2km 内 ¥3,往外按公里加
                         '配送费 ¥3 起',
-                        if (shop.minOrderCents > 0)
-                          '${yuanShort(shop.minOrderCents)} 起送',
+                        // 实际起送价 = max(商家自设, 平台下限),下单就按它拦。
+                        // 原来看商家自设的:设 0 的店这里不写,凑了 ¥12 到结算才被拒
+                        if (shop.effectiveMinOrderCents > 0)
+                          '${yuanShort(shop.effectiveMinOrderCents)} 起送',
                         ...shop.promoLabels,
                       ].join(' · '),
                       maxLines: 1,
@@ -2902,6 +2905,31 @@ class _MenuPageState extends State<MenuPage>
           : '已减 ${yuan(hit.last.offCents)} · 再点 ${yuan(gap)} 可减 $off';
     }
     return '已减 ${yuan(hit.last.offCents)} · 另计配送费';
+  }
+
+  /// 购物车条上的结算按钮。不够起送价时按钮上写差多少、点不了 ——
+  /// 和结算页、服务端拦的是同一个数(店铺接口的 effective_min_order_cents)。
+  /// 空车写「¥15 起送」,让人进店就知道要凑多少
+  Widget _checkoutButton() {
+    final sz = Theme.of(context).sz;
+    final min = (_detail ?? widget.merchant).effectiveMinOrderCents;
+    final gap = min - _totalCents;
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(0, 42),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        // 点不了的时候按钮上写着要凑多少,得读得清:
+        // 默认的禁用色(38% 的墨)压在玻璃上看不清
+        disabledBackgroundColor: sz.surfaceAlt,
+        disabledForegroundColor: _kInkMutedOnGlass,
+      ),
+      onPressed: _cart.isEmpty || gap > 0 ? null : _checkout,
+      child: Text(_cart.isEmpty && min > 0
+          ? '${yuanShort(min)} 起送'
+          : gap > 0
+              ? '差 ${yuanShort(gap)} 起送'
+              : '去结算'),
+    );
   }
 
   Widget _stepper(Dish dish, int quantity, void Function(Dish, int) change) {
@@ -3847,10 +3875,7 @@ class _MenuPageState extends State<MenuPage>
                     ],
                   ),
                 ),
-                ReviewsList(
-                    api: widget.api,
-                    merchantId: widget.merchant.id,
-                    shop: _detail ?? widget.merchant),
+                ReviewsList(api: widget.api, merchantId: widget.merchant.id),
                 _ShopInfoTab(
                   api: widget.api,
                   shop: _detail ?? widget.merchant,
@@ -4010,14 +4035,7 @@ class _MenuPageState extends State<MenuPage>
                       ),
                     ),
                     const SizedBox(width: 12),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size(0, 42),
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                      ),
-                      onPressed: _cart.isEmpty ? null : _checkout,
-                      child: const Text('去结算'),
-                    ),
+                    _checkoutButton(),
                   ],
                 ),
               ),

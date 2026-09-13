@@ -26,7 +26,12 @@ void main() {
     );
   });
 
-  Map<String, dynamic> shopJson({String rate = '0.045', bool self = false}) => {
+  Map<String, dynamic> shopJson(
+          {String rate = '0.045',
+          bool self = false,
+          int min = 2000,
+          int? effective}) =>
+      {
         'id': 7,
         'name': '张记面馆',
         'address': '高新路 128 号',
@@ -37,7 +42,8 @@ void main() {
         'rating_avg': 4.8,
         'rating_count': 268,
         'monthly_sales': 268,
-        'min_order_cents': 2000,
+        'min_order_cents': min,
+        if (effective != null) 'effective_min_order_cents': effective,
         'self_delivery': self,
         'promo_rules': const [],
         'kitchen_cam': false,
@@ -78,10 +84,16 @@ void main() {
       },
     ]),
     dishJson(3, '凉皮', price: 800, stock: 0, soldOut: true),
+    dishJson(4, '卤蛋', price: 250),
   ];
 
   Future<void> pump(WidgetTester t,
-      {String rate = '0.045', bool self = false}) async {
+      {String rate = '0.045',
+      bool self = false,
+      int min = 2000,
+      int? effective}) async {
+    final shop =
+        shopJson(rate: rate, self: self, min: min, effective: effective);
     SharedPreferences.setMockInitialValues({});
     t.view
       ..devicePixelRatio = 3.0
@@ -93,7 +105,7 @@ void main() {
         final p = req.url.path;
         Object? body;
         if (p == '/merchants/7') {
-          body = shopJson(rate: rate, self: self);
+          body = shop;
         } else if (p == '/merchants/7/dishes') {
           body = dishes;
         } else if (p == '/cart/7') {
@@ -111,9 +123,7 @@ void main() {
     );
     await t.pumpWidget(MaterialApp(
       theme: brandTheme(Brightness.light),
-      home: MenuPage(
-          api: api,
-          merchant: Merchant.fromJson(shopJson(rate: rate, self: self))),
+      home: MenuPage(api: api, merchant: Merchant.fromJson(shop)),
     ));
     await t.pumpAndSettle();
     addTearDown(Analytics.resetSession);
@@ -168,5 +178,33 @@ void main() {
     await t.pumpAndSettle();
     expect(find.text('全部 0'), findsNothing); // 没评价时不画筛选
     expect(find.text('还没有评价,下单后来做第一个评价的人'), findsOneWidget);
+  });
+
+  /// 菜单里某道菜那一行的「+」
+  Finder addOf(String name) => find.descendant(
+      of: find
+          .ancestor(of: find.text(name), matching: find.byType(InkWell))
+          .first,
+      matching: find.bySemanticsLabel('增加'));
+
+  FilledButton checkoutButton(WidgetTester t, String label) =>
+      t.widget<FilledButton>(find.ancestor(
+          of: find.text(label), matching: find.byType(FilledButton)));
+
+  testWidgets('起送价按实际的写(含平台下限):空车写「¥15 起送」,不够写差多少、点不了', (t) async {
+    // 商家自己没设起送价(0),平台下限 ¥15:服务端给的实际起送价是 15
+    await pump(t, min: 0, effective: 1500);
+    // 店铺头上那行原来只看商家自设的,设 0 就不写起送
+    expect(find.textContaining('配送费 ¥3 起 · ¥15 起送'), findsOneWidget);
+    expect(checkoutButton(t, '¥15 起送').onPressed, isNull);
+
+    await t.tap(addOf('卤蛋'));
+    await t.pumpAndSettle();
+    expect(checkoutButton(t, '差 ¥12.5 起送').onPressed, isNull,
+        reason: '¥2.50 的单到结算页也提交不了,服务端按 ¥15 拦');
+
+    await t.tap(addOf('牛肉面'));
+    await t.pumpAndSettle();
+    expect(checkoutButton(t, '去结算').onPressed, isNotNull);
   });
 }

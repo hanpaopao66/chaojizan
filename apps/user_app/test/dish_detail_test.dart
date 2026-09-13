@@ -1,5 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:user_app/dish_detail_page.dart';
 
@@ -9,7 +14,35 @@ import 'package:user_app/dish_detail_page.dart';
 /// 选项按规格组的顺序带回去。原来的规格弹层对「必选的多选组」不设防 ——
 /// 把默认选上的那一项点掉,照样能加进购物车,一直走到结算页才被服务端 422 顶回来。
 void main() {
-  final api = ApiClient(baseUrl: 'http://test.local');
+  /// 「点过这道菜的订单」接口的返回;默认一单都没有(那一块不画)
+  Map<String, dynamic> orderReviews = const {
+    'count': 0,
+    'good': 0,
+    'recent': []
+  };
+  final api = ApiClient(
+    baseUrl: 'http://test.local',
+    httpClient: MockClient((req) async => http.Response(
+        jsonEncode(req.url.path == '/merchants/1/dishes/3/order-reviews'
+            ? orderReviews
+            : {}),
+        200,
+        headers: {'content-type': 'application/json; charset=utf-8'})),
+  );
+  setUp(() => orderReviews = const {'count': 0, 'good': 0, 'recent': []});
+  // 同 shop_card_test:详情页一打开就去拉「点过这道菜的订单」,请求前
+  // ApiClient.loadAppBuild() 等 PackageInfo(测试环境里永远不返回,带 2 秒超时),
+  // 不 mock 的话用例结束时那个定时器还挂着
+  setUpAll(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    PackageInfo.setMockInitialValues(
+      appName: 'user_app',
+      packageName: 'com.chaojizan.user',
+      version: '0.1.0',
+      buildNumber: '1',
+      buildSignature: '',
+    );
+  });
   final shop = Merchant.fromJson(const {
     'id': 1,
     'name': '张记面馆',
@@ -70,7 +103,7 @@ void main() {
 
   /// 从一个空页面推进详情页,返回「pop 回来的结果」的读取器
   Future<DishPick? Function()> open(WidgetTester t, Dish d,
-      {int inCart = 0}) async {
+      {int inCart = 0, bool forGroupCart = false}) async {
     t.view
       ..devicePixelRatio = 3.0
       ..physicalSize = const Size(390, 844) * 3.0;
@@ -86,7 +119,11 @@ void main() {
                 result = await Navigator.of(context).push<DishPick>(
                     MaterialPageRoute(
                         builder: (_) => DishDetailPage(
-                            api: api, shop: shop, dish: d, inCart: inCart)));
+                            api: api,
+                            shop: shop,
+                            dish: d,
+                            inCart: inCart,
+                            forGroupCart: forGroupCart)));
               },
               child: const Text('open'),
             ),
@@ -148,6 +185,50 @@ void main() {
     expect(pick!.choices, ['大份', '加牛肉', '微辣'],
         reason: '服务端 resolve_options 按规格组的顺序认选项');
     expect(pick.quantity, 2);
+    expect(pick.note, '', reason: '普通购物车没有逐道菜的备注');
+    // 普通购物车没有备注框(整单备注在结算页写)
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('拼单里进来:多一个备注框,按钮叫「加进拼单」,备注跟着带回去', (t) async {
+    final result = await open(t, dish(), forGroupCart: true);
+    expect(find.text('加入购物车'), findsNothing);
+    await t.enterText(find.byType(TextField), '  不要香菜 ');
+    await t.pump();
+    await t.tap(find.text('加进拼单'));
+    await t.pumpAndSettle();
+    final pick = result();
+    expect(pick!.note, '不要香菜', reason: '前后空白去掉,服务端也是按去掉空白的比');
+    expect(pick.choices, ['小份', '不辣']);
+  });
+
+  testWidgets('点过这道菜的订单:照实叫「订单」,写明评的是整单', (t) async {
+    orderReviews = {
+      'count': 5,
+      'good': 4,
+      'recent': [
+        {
+          'id': 9,
+          'merchant_rating': 5,
+          'comment': '面很筋道',
+          'customer_name': '王**',
+          'created_at': '2026-09-10T04:00:00Z',
+        },
+      ],
+    };
+    await open(t, dish());
+    await t.scrollUntilVisible(find.text('点过这道菜的订单'), 200,
+        scrollable: find.byType(Scrollable).first);
+    expect(find.text('5 单评了价 · 好评 80%'), findsOneWidget);
+    expect(find.text('「面很筋道」— 王**'), findsOneWidget);
+    expect(find.text('评价是给整单打的,不一定只在说这道菜'), findsOneWidget);
+    // 不许说成这道菜自己的评价 / 评分
+    expect(find.textContaining('这道菜的评价'), findsNothing);
+  });
+
+  testWidgets('没人评过点了这道菜的订单:那一块不画', (t) async {
+    await open(t, dish());
+    expect(find.text('点过这道菜的订单', skipOffstage: false), findsNothing);
   });
 
   testWidgets('打包费分两笔写清:每份的和每单的,抽成比例照店铺的算', (t) async {
