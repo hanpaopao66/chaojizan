@@ -45,10 +45,14 @@ echo "== 同步代码(排除依赖与产物) =="
 # 前三个 exclude 保护部署机上仅存的运行数据(本地仓库没有这些目录,
 # 不加会被 --delete 清掉:.env.prod=生产密钥 / appdist=线上 APK / letsencrypt=证书)。
 # /webapp 同理:线上的用户端网页版(sync_release_to_appdist.sh 解压过去的),
-# 带开头的 / 只认顶层这一个,别把源码里哪天叫 webapp 的目录也一起排除了
+# 带开头的 / 只认顶层这一个,别把源码里哪天叫 webapp 的目录也一起排除了。
+#
+# /backups 是 deploy/backup.sh 的默认备份目录(crontab 每天 3:30 往里写,日志也写在里面)。
+# 2026-09-14 才发现它从没被排除:每次部署都被 --delete 整个删掉,之后 crontab 那行的日志重定向
+# 找不到目录、整条命令不执行 —— 生产库一份备份都没有。healthcheck.log 是 crontab 写的巡检日志,同理
 rsync -az --delete \
   --exclude 'deploy/.env.prod' --exclude 'appdist' --exclude 'deploy/letsencrypt' \
-  --exclude '/webapp' \
+  --exclude '/webapp' --exclude '/backups' --exclude 'deploy/healthcheck.log' \
   --exclude 'deploy/certs' --exclude 'deploy/tunnel' \
   --exclude 'deploy/wxpay-certs' --exclude 'server/certs' \
   --exclude 'deploy/certbot-www' --exclude 'deploy/renew.log' \
