@@ -751,12 +751,22 @@ async def sweep_once() -> dict[str, int]:
         # 异步回写 risk_flags 这种和订单流转毫无关系的写入。用它计时,
         # 一个已送达的单可能被无关写入一次次推迟自动确认,钱就一直压着
         # 不结算(接单超时那一条早就因为同样的原因改用 rider_pool_since 了)。
-        # coalesce 兜住 delivered_at 落库之前的历史单
+        # coalesce 兜住 delivered_at 落库之前的历史单。
+        #
+        # **后台「按送达处理」的单从那次裁决起算。** 它的送达时刻记的是骑手上报异常的那一刻
+        # (admin.resolve_delivery_issue,法定记录要如实),可顾客是裁决那一刻才知道这单被按送达
+        # 处理了 —— 完成时间照原来的口径,给他裁决之后完整的 24 小时;从上报起算的话,
+        # 裁决拖了一天的单裁完当场就自动完成、钱就结出去了
+        from ..models import DeliveryIssue
+        decided = (select(func.max(DeliveryIssue.resolved_at))
+                   .where(DeliveryIssue.order_id == Order.id,
+                          DeliveryIssue.resolution == "mark_delivered")
+                   .scalar_subquery())
         completed = await _transition_batch(
             db,
             OrderStatus.DELIVERED,
             OrderStatus.COMPLETED,
-            func.coalesce(Order.delivered_at, Order.updated_at),
+            func.coalesce(decided, Order.delivered_at, Order.updated_at),
             now - timedelta(hours=settings.auto_confirm_hours),
             "超时自动确认收货",
         )

@@ -702,7 +702,7 @@ async def resolve_delivery_issue(
 
     - continue_delivery 已协调,继续配送(只关工单)
     - mark_delivered    用户原因(联系不上/地址错)按送达处理,骑手配送费照拿,
-                        24 小时后自动完成结算
+                        送达时刻记骑手上报的那一刻;裁决 24 小时后自动完成结算
     - refund            订单立即完成结算、退款给顾客。判谁的责任按异常的种类定
                         (services/delivery_fault):
                         · 途中异常(餐损等)是**骑手责任**:商家净额保留、骑手配送费照拿
@@ -740,6 +740,12 @@ async def resolve_delivery_issue(
         if order.status != OrderStatus.PICKED_UP:
             raise HTTPException(409, "订单不在配送中,不能按送达处理")
         order.status = OrderStatus.DELIVERED
+        # 送达时刻当场落库,取**骑手上报这条异常的那一刻**:他就是那时候到了、联系不上人。
+        # 原来这里不写,要等 24 小时后自动完成才顺手写成那一刻 —— 法定记录的送达时间晚一天左右,
+        # 骑手当天的里程、按送达日汇总的统计、订单群「送达 24 小时后归档」都跟着歪。
+        # 完成时间照旧:自动确认收货的 24 小时从这次裁决起算(auto_flow.sweep_once),不从上报起算
+        if order.delivered_at is None:
+            order.delivered_at = issue.created_at
         db.add(OrderEvent(order_id=order.id,
                           from_status=OrderStatus.PICKED_UP.value,
                           to_status=OrderStatus.DELIVERED.value,

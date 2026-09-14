@@ -67,6 +67,49 @@ o1 = call("GET", f"/orders/{no1}", customer)
 assert o1["status"] == "delivered"
 print("✓ 按送达处理:订单转已送达,骑手配送费照常(24h 后自动完成结算)")
 
+
+def sweep():
+    """手动跑一次清扫(服务端 AUTO_FLOW_ENABLED=false)。跑完 dispose 引擎:
+    连接绑在创建它的事件循环上,两次 asyncio.run 共用会报错。"""
+    import asyncio
+
+    from app.db import engine
+    from app.services.auto_flow import sweep_once
+
+    async def go():
+        try:
+            await sweep_once()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(go())
+
+
+# 送达时刻当场写,取的是骑手上报那条异常的时刻(法定记录);完成时间照旧 ——
+# 自动确认收货的 24 小时从裁决起算,不从上报起算
+reported_at, delivered_at, completed_at = sql(
+    "SELECT di.created_at, o.delivered_at, o.completed_at FROM delivery_issues di "
+    "JOIN orders o ON o.id = di.order_id WHERE di.id = :i", {"i": mine["id"]}, fetch="all")[0]
+assert delivered_at == reported_at and completed_at is None, (reported_at, delivered_at, completed_at)
+sql("UPDATE delivery_issues SET created_at = created_at - interval '30 hours' WHERE id = :i",
+    {"i": mine["id"]})
+sql("UPDATE orders SET delivered_at = delivered_at - interval '30 hours' WHERE order_no = :n",
+    {"n": no1})
+sweep()
+assert call("GET", f"/orders/{no1}", customer)["status"] == "delivered", \
+    "上报在 30 小时前、裁决才刚刚:自动完成要从裁决起算 24 小时,不该现在就完成"
+sql("UPDATE delivery_issues SET resolved_at = resolved_at - interval '25 hours' WHERE id = :i",
+    {"i": mine["id"]})
+sweep()
+assert call("GET", f"/orders/{no1}", customer)["status"] == "completed", "裁决满 24 小时该自动完成了"
+reported2, delivered2, completed2 = sql(
+    "SELECT di.created_at, o.delivered_at, o.completed_at FROM delivery_issues di "
+    "JOIN orders o ON o.id = di.order_id WHERE di.id = :i", {"i": mine["id"]}, fetch="all")[0]
+assert delivered2 == reported2 and completed2 is not None and completed2 > delivered2, \
+    (reported2, delivered2, completed2)
+print("✓ 按送达处理:送达时刻当场写成骑手上报的那一刻;自动完成从裁决起算 24 小时,"
+      "完成后送达时刻不被改写")
+
 # 骑手责任先行赔付:用户全额退款,商家净额与骑手配送费都保留
 no2 = make_order()
 o2 = call("GET", f"/orders/{no2}", customer)
