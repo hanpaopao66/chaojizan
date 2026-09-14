@@ -107,6 +107,7 @@ def main() -> None:
     dev_token, _ = developer()
     t2 = call("POST", "/auth/agent-tokens", dev_token, {"name": "发布助手"})
     assert t2["scopes"] == ["miniapp"], t2                 # 开发者不勾 = 发布小程序
+    assert "付款" not in t2["note"] and "审核" in t2["note"], t2["note"]  # 提醒按权限说
     assert call("POST", "/auth/agent-tokens", dev_token, {"scopes": ["order"]},
                 expect_error=True)["_error"] == 422
     dagent = t2["token"]

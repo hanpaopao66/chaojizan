@@ -201,6 +201,18 @@ class AgentTokenIn(BaseModel):
     scopes: list[str] | None = Field(default=None, max_length=3)
 
 
+def _issue_note(scopes) -> str:
+    """签发时那句提醒:按勾了的权限说,开发者账号的令牌不该收到「下完单去 App 里付款」"""
+    parts = ["这串明文只显示这一次,请立刻复制到助手的配置里。"]
+    if "order" in scopes:
+        parts.append("点餐付不了款 —— 助手下完单,你在 App 里确认支付。")
+    if "video" in scopes:
+        parts.append("投稿要平台的人审过才会公开,助手删不了你的稿。")
+    if "miniapp" in scopes:
+        parts.append("没过审的版本发布不了,审核由平台的人做。")
+    return "".join(parts)
+
+
 def _scope_labels(scopes) -> list[str]:
     from ..security import AGENT_SCOPE_LABELS
 
@@ -271,8 +283,7 @@ async def create_agent_token(
         "expires_at": expires.isoformat(),
         "scopes": scopes,
         "scope_labels": _scope_labels(scopes),
-        "note": ("**这串明文只显示这一次**,请立刻复制到助手的配置里。"
-                 "它付不了款 —— 助手下完单,你在 App 里确认支付。"),
+        "note": _issue_note(scopes),
     }
 
 
