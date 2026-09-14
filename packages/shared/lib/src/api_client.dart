@@ -2630,8 +2630,8 @@ class ApiClient {
       stalePrefs: ((data['stale_prefs'] as List?) ?? const [])
           .map((e) => '$e')
           .toList(),
-      // 等餐补偿开没开(flags.wait_comp_on,当前默认关)。卡片上写着
-      // 「含等餐 15 分钟」,不说清楚骑手会以为那 15 分钟是计费的。
+      // 等餐补偿开没开。卡片上写着「含等餐 15 分钟」,不说清楚骑手会以为那 15 分钟是计费的。
+      // 2026-09-14 起停发(平台不出这笔钱),服务端恒为 false。
       // 老服务端没这个字段:那时开关还不存在、补偿一直是开的,按 true 处理
       waitCompOn: data['wait_comp_on'] as bool? ?? true,
     );

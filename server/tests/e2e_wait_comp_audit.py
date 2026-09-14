@@ -1,23 +1,19 @@
-"""等餐补偿进不进审计恒等式(潜伏 bug 的回归锁)。
+"""等餐超时补偿(#145)停发之后:等再久也不结补偿,等餐时长照旧记着(申诉的证据)。
 
-## 这个坑长什么样
+2026-09-14 拍板「平台没有钱,不做平台出钱的赔付」:等餐补偿原来是平台另付给骑手的钱
+(不进顾客付的配送费),现在停发 —— 不是「默认关」,后台开关一起下掉了,拨不回来。
+等餐时长照旧记录、照旧公示,也不向商家收钱(出餐时长君子协定)。之前结过的补偿不动,
+审计照历史口径认(fee_parts.wait,见 audit._rider_due)。
 
-等餐补偿由**平台承担**、不进 `delivery_fee_cents`(顾客不该为商家出餐慢
-买单),但它确实进了骑手入账。而审计的配送侧恒等式左边原本只算
-「配送费 + 小费」——只要有一单真的付了等餐补偿,每日账务自检就会报红:
-
-    配送侧恒等不平:Σ(配送费+小费) 800 ≠ Σ骑手入账 950
-
-发现它的时候库里一单都还没有(要骑手点过到店、等超 15 分钟、并且这单
-真的完成),所以它一直潜伏着。跑腿的 2% 服务费会踩同一个坑,
-所以恒等式左边改成**骑手应得**而不是**顾客付的配送费**。
-
-这条用例的作用是把这个口径锁死:以后谁再往骑手入账里加一笔平台承担的
-钱而忘了改审计,这里就红。
+1. 后台开关没了:POST /admin/flags/wait_comp → 404 未知开关;
+2. 骑手到店后等了远超正常出餐区间的时间:这单完成后骑手入账 == 配送费 + 小费,
+   订单的费用拆分里没有 wait;
+3. 等餐时长照旧在:骑手对这单申诉时,系统自动附上的证据里有等餐分钟数;
+4. 规则页、商家承诺页都不说「有补偿」,说清楚只记录;
+5. 账务自检照旧全绿(这一单不报)。
 """
 import asyncio
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -38,18 +34,14 @@ admin = login("13800000000")
 NEAR = {"lat": 30.6612, "lng": 104.0823}
 
 
-def set_wait_comp(value: str):
-    call("POST", "/admin/flags/wait_comp", admin, {"value": value})
-
-
-def run_order(free: int):
-    """下一单并做旧到店时刻,跑完整链,返回订单详情(骑手视角)。"""
+def run_order():
+    """下一单,骑手点到店,返回单号。"""
     dishes = call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
     dish = orderable_dish(dishes, min_stock=4)
     o = call("POST", "/orders", customer, {
         "merchant_id": DEMO_SHOP_ID,
         "items": [{"dish_id": dish["id"], "quantity": 1}],
-        "address": "等餐补偿测试地址", **NEAR})
+        "address": "等餐补偿停发测试地址", **NEAR})
     no = o["order_no"]
     call("POST", f"/orders/{no}/pay/mock", customer)
     call("POST", f"/orders/{no}/transition", merchant, {"to_status": "accepted"})
@@ -76,74 +68,49 @@ def finish(no: str):
 
 async def main():
     from app.config import settings
-    from app.services.pricing import wait_compensation_cents
 
-    # 先对函数下断言:等餐补偿本身要真的算得出钱来,
-    # 否则下面整条链路可能因为补偿恰好为 0 而"通过"
+    # ---- 1. 后台开关没了:拨不回来 ----
+    err = call("POST", "/admin/flags/wait_comp", admin, {"value": "on"}, expect_error=True)
+    assert err.get("_error") == 404, f"等餐补偿开关还在后台:{err}"
+    print("✓ 后台没有等餐补偿开关了(404 未知开关)—— 停发不是默认关")
+
+    # ---- 2. 等了远超正常出餐区间,也不结补偿 ----
     free = settings.delivery_wait_free_minutes
-    assert wait_compensation_cents(free) == 0, "免费区间内不补"
-    assert wait_compensation_cents(free + 10) > 0, "超出部分要补"
-    print(f"✓ 等餐补偿:前 {free} 分钟不补,超出按分钟计")
-
-    # ---- 默认态:开关关(平台现阶段没有这笔预算),等再久也不产生补偿 ----
-    set_wait_comp("off")
-    no_off = run_order(free)
-    await age_arrival(no_off, free + 20)
-    finish(no_off)
-    row_off = call("GET", f"/orders/{no_off}", rider)
-    assert not (row_off.get("fee_parts") or {}).get("wait"), \
-        f"开关关着还结了等餐补偿:{row_off.get('fee_parts')}"
+    no = run_order()
+    await age_arrival(no, free + 25)
+    finish(no)
+    row = call("GET", f"/orders/{no}", rider)
+    assert not (row.get("fee_parts") or {}).get("wait"), \
+        f"停发之后还结了等餐补偿:{row.get('fee_parts')}"
     async with SessionLocal() as db:
-        got_off = await db.scalar(text(
+        got = await db.scalar(text(
             "SELECT amount_cents FROM rider_earnings WHERE order_no = :n "
-            "AND kind = 'earning'"), {"n": no_off})
-    assert got_off == row_off["delivery_fee_cents"] + row_off["tip_cents"], \
-        (got_off, row_off["delivery_fee_cents"], row_off["tip_cents"])
-    rules = call("GET", "/merchants/me/rules", merchant)
-    assert "等餐超时有补偿" not in str(rules), \
-        "开关关着,承诺页还在说「有补偿」—— 公示了却不给,比不公示更坏"
-    print("✓ 开关默认关:不结补偿、承诺页不出现「有补偿」")
+            "AND kind = 'earning'"), {"n": no})
+    assert got == row["delivery_fee_cents"] + row["tip_cents"], \
+        (got, row["delivery_fee_cents"], row["tip_cents"])
+    print(f"✓ 到店等了 {free + 25} 分钟:骑手入账 {got} 分 = 配送费 + 小费,没有等餐补偿")
 
-    # ---- 打开开关:原有整条链照旧成立 ----
-    set_wait_comp("on")
-    try:
-        rules = call("GET", "/merchants/me/rules", merchant)
-        assert "等餐超时有补偿" in str(rules), "开了开关承诺页该说回来"
-        no = run_order(free)
-        await age_arrival(no, free + 20)
-        finish(no)
-        row = call("GET", f"/orders/{no}", rider)
-        wait_cents = (row.get("fee_parts") or {}).get("wait", 0)
-        assert wait_cents > 0, \
-            f"这一单应当产生等餐补偿:{row.get('fee_parts')}"
-        # 补偿**不进 delivery_fee_cents** —— 那是顾客付的钱
-        assert sum(v for k, v in row["fee_parts"].items() if k != "wait") \
-            == row["delivery_fee_cents"], row["fee_parts"]
-        print(f"✓ 产生等餐补偿 {wait_cents} 分,且不计入顾客付的配送费")
+    # ---- 3. 等餐时长照旧记着:申诉时系统自动附上 ----
+    ap = call("POST", "/riders/appeals", rider,
+              {"order_no": no, "kind": "late", "reason": "到店后商家一直没出餐,等了很久"})
+    wait = (ap.get("evidence") or {}).get("wait_minutes")
+    assert wait is not None and wait >= free + 20, f"证据里没有等餐时长:{ap.get('evidence')}"
+    print(f"✓ 等餐时长照旧记着:申诉证据里是 {wait} 分钟")
 
-        # 骑手实际入账 = 配送费 + 小费 + 等餐补偿
-        async with SessionLocal() as db:
-            got = await db.scalar(text(
-                "SELECT amount_cents FROM rider_earnings WHERE order_no = :n "
-                "AND kind = 'earning'"), {"n": no})
-        assert got == row["delivery_fee_cents"] + row["tip_cents"] \
-            + wait_cents, \
-            (got, row["delivery_fee_cents"], row["tip_cents"], wait_cents)
-        print(f"✓ 骑手入账 {got} 分 = 配送费 + 小费 + 等餐补偿")
+    # ---- 4. 规则页、承诺页都不说「有补偿」 ----
+    rider_rules = call("GET", "/rules/rider")
+    blob = str(rider_rules)
+    assert "等餐超时有补偿" not in blob and "等餐的时长照实记录" in blob, rider_rules
+    shop_rules = call("GET", "/merchants/me/rules", merchant)
+    assert "等餐超时有补偿" not in str(shop_rules), shop_rules
+    print("✓ 规则页、商家承诺页不说有补偿,写明等餐时长只记录、公示")
 
-        # ---- 关键:账务自检必须仍然全绿 ----
-        from app.services.audit import run_audit
-        problems = await run_audit()
-        # 断言范围要够宽:只查全局恒等的话,逐单的 rider_earning_mismatch
-        # 会漏网 —— 第一版就是这么漏的,日志里明明打了告警,用例还是绿的
-        bad = [p for p in problems
-               if "global_identity" in str(p.get("check"))
-               or no in str(p.get("detail", ""))]
-        assert not bad, f"这一单在账务自检里报了告警:{bad}"
-        print("✓ 账务自检仍全绿 —— 恒等式左边是「骑手应得」不是「顾客付的配送费」")
-    finally:
-        # 开关是全局状态,不还原会漏进后面的套件
-        set_wait_comp("off")
+    # ---- 5. 账务自检照旧全绿 ----
+    from app.services.audit import run_audit
+    problems = await run_audit()
+    bad = [p for p in problems if no in str(p.get("detail", ""))]
+    assert not bad, f"这一单在账务自检里报了告警:{bad}"
+    print("✓ 账务自检不报这一单")
 
     print("\ne2e_wait_comp_audit 全部通过 ✅")
 

@@ -205,7 +205,7 @@ class PrepStat:
 
 
 #: 「提前点出餐」的判据:骑手到店之后还要等这么久,就算一次可疑。
-#: 复用等餐补偿的免费额度 —— 那条线的含义本来就是「正常出餐区间」,
+#: 复用 config.delivery_wait_free_minutes —— 那条线的含义本来就是「正常出餐区间」,
 #: 超过它意味着骑手真的在白等,而商家早就把这一单标成「已出餐」了。
 EARLY_READY_WAIT_MINUTES = 15
 
@@ -228,11 +228,11 @@ async def early_ready_suspects(db: AsyncSession, *, days: int = 14,
 
     商家如实点出餐,骑手到店就能取走,等待接近 0;商家提前点,骑手到店
     只能干等。`picked_up_at − arrived_shop_at` 就是这个差,而它本来就在
-    算等餐补偿,不是新埋点。
+    记(等餐时长),不是新埋点。
 
     ## 为什么不自动处罚
 
-    与 `pricing.wait_compensation_cents` 同一条立场:**治理靠数据,
+    与等餐那条(liability.py「唯一的例外」)同一条立场:**治理靠数据,
     不靠罚钱**。罚下去商家会改成「等骑手快到了再点出餐」,数据一样失真,
     而平台连信号都没了。摆在管理端让人去看、去谈,比自动扣钱有用。
     """

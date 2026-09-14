@@ -20,21 +20,9 @@ async def credit_rider_for_order(db: AsyncSession, order: Order) -> None:
     )
     if existing:
         return
-    # 等餐补偿:骑手到店后餐没好的那段时间,他没有任何收入 ——
-    # 而这不是他的问题。**平台承担**,不进 delivery_fee_cents
-    # (那是顾客付的钱),而是单独加在骑手的入账里。
-    #
-    # 这个补偿的函数和配置项早就写好了,但**在 AL 落地之前没有数据可算**
-    # (没有到店时刻就没有等餐时长),所以一直是死代码。现在接上。
-    wait_cents = 0
-    from .flags import wait_comp_on
-    if (order.arrived_shop_at and order.picked_up_at
-            and await wait_comp_on(db)):
-        from .pricing import wait_compensation_cents
-        wait_minutes = max(
-            0.0,
-            (order.picked_up_at - order.arrived_shop_at).total_seconds() / 60)
-        wait_cents = wait_compensation_cents(wait_minutes)
+    # 等餐补偿(#145,平台出钱)2026-09-14 停发:平台没有钱,不做平台出钱的赔付。
+    # 等餐时长照旧记录(到店时刻、取餐时刻都在订单上)、照旧公示,也不向商家收钱
+    # (出餐时长君子协定)。之前已经结给骑手的补偿不动,审计照历史口径认(fee_parts.wait)
 
     # 帮买:商品款按**小票实付**结给骑手,平台一分不抽 ——
     # 那是他替用户垫付的钱(虽然钱从平台走),对它抽成没有任何道理。
@@ -58,18 +46,11 @@ async def credit_rider_for_order(db: AsyncSession, order: Order) -> None:
             rider_id=order.rider_id,
             order_id=order.id,
             order_no=order.order_no,
-            # 配送费 + 小费,一分不少全归骑手;再加平台承担的等餐补偿;
-            # 跑腿单扣掉平台服务费
+            # 配送费 + 小费,一分不少全归骑手;跑腿单扣掉平台服务费
             amount_cents=(order.delivery_fee_cents + order.tip_cents
-                          + wait_cents - fee_cut + goods),
+                          - fee_cut + goods),
         )
     )
-    if wait_cents:
-        # 记进订单的费用拆分,骑手在收入明细里看得到这笔是怎么来的。
-        # **不加进 delivery_fee_cents** —— 顾客不该为商家的慢买单
-        parts = dict(order.fee_parts or {})
-        parts["wait"] = wait_cents
-        order.fee_parts = parts
 
 
 async def credit_merchant_for_order(db: AsyncSession, order: Order) -> None:

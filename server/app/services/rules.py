@@ -111,14 +111,12 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
     from ..routers.admin import FS_AUTO_SUSPEND_COUNT
     from ..routers.after_sales import APPLY_WINDOW_DAYS
     from ..routers.appeals import APPEAL_WINDOW
-    from ..services.flags import wait_comp_on
     from ..services.labor_guard import (FATIGUE_REMIND_MINUTES,
                                         LABOR_PROMISES, RIDE_SPEED_KMH)
 
     appeal_hours = int(APPEAL_WINDOW.total_seconds() // 3600)
     tiers = settings.commission_tiers or [[0, "0.050"]]
     top_rate = max(float(r[1]) for r in tiers)
-    wait_on = await wait_comp_on(db)
 
     if audience == "merchant":
         sections = [
@@ -162,8 +160,10 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
                     "商家那份餐钱先由骑手保障金池出,池子不够的从你的收入里扣(余额不够的,"
                     f"之后的收入先抵)。{appeal_hours} 小时内可以申诉,成立的话扣的钱全部退回",
                     "恶劣天气加价的同时一定放宽时限",
-                    *(["到店等餐超时有补偿,平台出,不扣商家"]
-                      if wait_on else []),
+                    # 等餐超时补偿(平台出钱)2026-09-14 停发:这句不能再说。
+                    # 等餐时长照旧记录、照旧公示,是申诉超时的证据
+                    "到店等餐的时长照实记录、公示,是你申诉超时的证据;"
+                    "平台不再给等餐补偿,也不向商家收钱",
                     "提现户名必须和实名一致 —— 这条是保护你自己的钱",
                 ],
             },

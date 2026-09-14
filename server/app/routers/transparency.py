@@ -139,8 +139,8 @@ def split_order_row(r: dict) -> dict:
     - 商家自送,配送费归商家。
 
     和结算(services/settlement)是同一个分法,只是提前到支付那一刻看:
-    在途的单还没入账,但它**会**这么分。等餐补偿是平台另付给骑手的钱,
-    不是用户付的,这里不含。
+    在途的单还没入账,但它**会**这么分。(等餐补偿 2026-09-14 起停发;之前那几单是平台另付给
+    骑手的钱,不是用户付的,这里本来就不含。)
     """
     paid = r["total_cents"]
     platform = r["commission_cents"] - r["subsidy_cents"]

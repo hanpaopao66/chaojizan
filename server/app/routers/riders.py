@@ -1321,11 +1321,10 @@ async def available_orders(
     # 开关挡住了。攒在 Redis,每日汇总落库(services/rider_stats)
     from ..services.rider_stats import bump_filtered
     await bump_filtered(user.id, filtered)
-    # 等餐补偿现在开没开:卡片上写着「含等餐 15 分钟」,骑手会以为那
-    # 15 分钟是计费的。开关默认关(flags.wait_comp_on),这一条得摆出来
-    from ..services.flags import wait_comp_on
+    # 等餐补偿开没开:卡片上写着「含等餐 15 分钟」,骑手会以为那 15 分钟是计费的。
+    # 2026-09-14 起停发(平台不出这笔钱),恒为 false;字段留着给老版本 App
     return {"items": items, "filtered_by_prefs": filtered,
-            "wait_comp_on": await wait_comp_on(db),
+            "wait_comp_on": False,
             # 位置有没有:客户端据此决定要不要提示去开定位
             "has_location": rider_pos is not None,
             # 因为没定位而没生效的偏好键;空数组 = 一切正常

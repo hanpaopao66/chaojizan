@@ -199,9 +199,6 @@ class Settings(BaseSettings):
     # 但不保留强制关 —— 天气恶劣却关掉加价,没有正当理由
     delivery_weather_surcharge_cents: int = 200
 
-    # 等餐超时补偿(#145):骑手到店后餐没好的那段时间,原先完全没有收入。
-    # 平台承担,不转嫁商家或用户 —— 转嫁商家会让商家宁可晚点按「出餐」(数据失真),
-    # 转嫁用户则是让用户为商家的慢买单。这属于履约成本,不是营销补贴
     # 上门难度费(顾客付,全额归骑手)。**只对无电梯的高楼层收** ——
     # 等电梯的时间已经在 ETA 里补过,再收钱就是同一件事收两次。
     # 起收楼层取 5:骑手的原话是"爬 1–4 楼勉强能被派费覆盖,
@@ -210,9 +207,10 @@ class Settings(BaseSettings):
     door_fee_per_floor_cents: int = 100  # 超出部分每层 ¥1
     door_fee_max_cents: int = 500       # 封顶 ¥5
 
-    delivery_wait_free_minutes: int = 15    # 前 15 分钟不补(正常出餐区间)
-    delivery_wait_per_min_cents: int = 30   # 超出部分每分钟 ¥0.3
-    delivery_wait_max_cents: int = 600      # 封顶 ¥6
+    # 正常出餐区间(分钟):骑手到店后等这么久以内算正常。「提前点出餐」的嫌疑判据
+    # (services/prep_time)用它。等餐超时补偿(#145,平台出钱)2026-09-14 停发 ——
+    # 等餐时长照旧记录、照旧公示,不再折成钱给骑手,也不向商家收钱(出餐时长君子协定)
+    delivery_wait_free_minutes: int = 15
 
 
     # 平台起送价下限:低于它的购物车不接单(单太小,佣金连支付通道费都覆盖不了)。

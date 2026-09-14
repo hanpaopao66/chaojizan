@@ -179,15 +179,7 @@ class Test说法:
 
         from app.services import rules
 
-        async def flag(_db):
-            return False
-        import app.services.flags as flags
-        old = flags.wait_comp_on
-        flags.wait_comp_on = flag
-        try:
-            r = asyncio.run(rules.rules_for("rider", object()))
-        finally:
-            flags.wait_comp_on = old
+        r = asyncio.run(rules.rules_for("rider", object()))
         money = next(s for s in r["sections"] if s["title"] == "钱")["items"]
         assert any("保障金池" in i and "申诉" in i for i in money), money
 

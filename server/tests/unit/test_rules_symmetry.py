@@ -26,14 +26,11 @@ def _run(coro):
 
 
 class _FakeDB:
-    """规则页只用 db 查一个运行时开关(等餐补偿),不需要真库。"""
+    """规则页不查库(原来查的等餐补偿开关 2026-09-14 连同补偿一起停了)。"""
 
 
 @pytest.fixture()
-def three(monkeypatch):
-    async def fake_flag(_db):
-        return False
-    monkeypatch.setattr("app.services.flags.wait_comp_on", fake_flag)
+def three():
     return {a: _run(rules.rules_for(a, _FakeDB())) for a in rules.AUDIENCES}
 
 
@@ -148,20 +145,28 @@ class Test数字不许手写:
         assert "list(LABOR_PROMISES)" in src
 
 
-class Test等餐补偿关着时不许出现:
-    def test_开关关闭则骑手页不提补偿(self, three):
+class Test等餐补偿停了:
+    """2026-09-14:平台没有钱,不做平台出钱的赔付 —— 等餐超时补偿(#145)停发。
+    等餐时长照旧记录、公示(申诉超时的证据),不向商家收钱。"""
+
+    def test_骑手页不说有补偿_说清楚只记录(self, three):
         """公示了却不给,比不公示更坏(4c2d0d1 的原话)。"""
         text = "".join(
             i for s in three["rider"]["sections"] for i in s["items"])
         assert "等餐超时有补偿" not in text
+        assert "等餐的时长照实记录" in text and "不再给等餐补偿" in text
 
-    def test_开关打开则出现(self, monkeypatch):
-        async def on(_db):
-            return True
-        monkeypatch.setattr("app.services.flags.wait_comp_on", on)
-        r = _run(rules.rules_for("rider", _FakeDB()))
-        text = "".join(i for s in r["sections"] for i in s["items"])
-        assert "等餐超时有补偿" in text
+    def test_开关和算钱的函数都没了(self):
+        """停发不是「默认关」:后台拨不回来,结算里也没有这笔钱的算法。"""
+        import inspect
+
+        from app.routers import admin
+        from app.services import flags, pricing, settlement
+        assert not hasattr(flags, "wait_comp_on")
+        assert not hasattr(pricing, "wait_compensation_cents")
+        assert '"wait_comp",' not in inspect.getsource(admin), "后台开关白名单里还有 wait_comp"
+        src = inspect.getsource(settlement.credit_rider_for_order)
+        assert "wait_cents" not in src and 'parts["wait"]' not in src, "结算里还在算等餐补偿"
 
 
 class Test公开可读:

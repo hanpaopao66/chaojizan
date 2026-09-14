@@ -105,7 +105,7 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 骑手不会想到是定位的问题,只会觉得"这破筛选没用"。
   List<String> _stalePrefs = const [];
 
-  /// 等餐补偿开没开(服务端 flags.wait_comp_on,当前默认关)。
+  /// 等餐补偿开没开(2026-09-14 起停发,服务端恒为 false)。
   /// 关着的时候,卡片上的「含等餐 N 分钟」要标明不计费
   bool _waitCompOn = true;
   /// 其余接单偏好(单价下限 / 只看顺路 / 避开酒类)
