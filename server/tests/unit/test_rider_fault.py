@@ -44,8 +44,33 @@ class Test缺口怎么分:
                 assert f + r == gap and f <= max(pool, 0) and f >= 0 and r >= 0
 
     def test_没有封顶(self):
-        """拍板时没说封顶,不自己加:骑手出的部分可以很大(要不要封顶待定)。"""
+        """2026-09-15 定:骑手出的那部分不封顶(维持现状)—— 可以很大,所以公示里必须写清楚。"""
         assert rf.split_gap(1_000_000, 0) == (0, 1_000_000)
+
+    def test_不封顶_能申诉_池子先出_都写在给骑手看的地方(self):
+        """骑手出的钱不封顶,那「池子先出、不封顶、能申诉」三件事就得在他读得到的每个地方写明:
+        规则页、信用分公示、入职培训、App 的配送异常页和保障说明。"""
+        import asyncio
+        import json
+
+        from app.services import credit, rules
+
+        r = asyncio.run(rules.rules_for("rider", object()))
+        money = next(s for s in r["sections"] if s["title"] == "钱")["items"]
+        line = next(i for i in money if "保障金池" in i)
+        for part in ("不封顶", "申诉", "保障金池先", "退回"):
+            assert part in line.replace("**", "").replace("由骑手保障金池出", "保障金池先"), \
+                (part, line)
+        m = {x["key"]: x for x in credit.public_spec("rider")["minus"]}
+        for key in (credit.KIND_DELIVERY, credit.KIND_AFTER_SALE):
+            assert "不封顶" in m[key]["counts"] and "申诉" in m[key]["counts"], m[key]["counts"]
+        repo = Path(__file__).resolve().parents[3]
+        training = json.loads((repo / "server/app/data/rider_training.json").read_text("utf-8"))
+        blob = json.dumps(training, ensure_ascii=False)
+        assert "不封顶" in blob and training["version"] >= "2026-09-v4", "培训内容改了要升版本"
+        for rel in ("apps/rider_app/lib/issues_page.dart", "apps/rider_app/lib/onboarding_page.dart"):
+            text = (repo / rel).read_text(encoding="utf-8")
+            assert "不封顶" in text and "申诉" in text, rel
 
     def test_推送把几个数都照实说(self):
         s = rf.Split(income=600, merchant=2090, fund=920, rider=1170, fund_before=920)

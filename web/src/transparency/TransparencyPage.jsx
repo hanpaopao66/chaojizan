@@ -705,7 +705,7 @@ export default function TransparencyPage() {
             {comp?.rider_fund_payouts && (
               <div className="tp-card">
                 <div className="num v">{yuanF(comp.rider_fund_payouts.total.cents)}</div>
-                <div className="k">判骑手责任：商家那份餐钱由骑手保障金池垫（顾客全额退款，这单骑手收入不计，平台这单佣金不收）</div>
+                <div className="k">判骑手责任：商家那份餐钱先由骑手保障金池垫，池子不够的骑手出，不封顶、能申诉（顾客全额退款，这单骑手收入不计，平台这单佣金不收）</div>
                 <div className="m">累计 {comp.rider_fund_payouts.total.count} 笔 · 池子不够、骑手另出 {yuanF(comp.rider_fault_charges?.total.cents)}（{comp.rider_fault_charges?.total.count ?? 0} 笔）</div>
               </div>
             )}
