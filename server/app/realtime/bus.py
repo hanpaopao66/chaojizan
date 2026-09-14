@@ -14,7 +14,19 @@ from ..config import settings
 from ..redis_client import get_redis
 
 logger = logging.getLogger("superz.realtime")
-CHANNEL = "rt:frames"
+
+
+def channel() -> str:
+    """频道名带上 Redis 库号:`rt:frames:{库号}`。
+
+    **Redis 的发布订阅不分库号**,SELECT 哪个库都在同一个频道空间里。两套实例共用一台 Redis、
+    只靠库号隔开时(自部署常这么配,本地并行跑 e2e 也是),同一个频道名会把一套实例的聊天事件
+    推给另一套里 id 相同的人 —— 空库上 id 都从 1 数,撞上的概率很高。2026-09-13 本地 4 组并行跑
+    e2e 就撞见过:另一套里「82 号进了 2 号会话」的事件被这一套收到,这一套的 82 号(C)从此收到了
+    A、B 私聊的实时事件。库号不同,频道就不同。
+    """
+    db = get_redis().connection_pool.connection_kwargs.get("db", 0)
+    return f"rt:frames:{db}"
 
 
 async def publish(*, frames: list | None = None, direct: list | None = None,
@@ -33,7 +45,7 @@ async def publish(*, frames: list | None = None, direct: list | None = None,
     if presence:
         payload["presence"] = presence
     try:
-        await get_redis().publish(CHANNEL, json.dumps(payload, ensure_ascii=False, default=str))
+        await get_redis().publish(channel(), json.dumps(payload, ensure_ascii=False, default=str))
     except Exception:
         # Redis 挂了:本进程的连接照样收到(dispatch 先本地发、再转发),只是跨进程的丢了
         logger.warning("实时事件转发到 Redis 失败", exc_info=True)
@@ -47,7 +59,7 @@ async def listen_forever() -> None:
         pubsub = None
         try:
             pubsub = get_redis().pubsub()
-            await pubsub.subscribe(CHANNEL)
+            await pubsub.subscribe(channel())
             async for msg in pubsub.listen():
                 if msg.get("type") != "message":
                     continue
