@@ -31,6 +31,7 @@ import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
+import com.google.mlkit.common.MlKit
 import com.google.mlkit.vision.barcode.BarcodeScanner
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
@@ -62,6 +63,19 @@ class MobileScanner(
 
     init {
         configureCameraProcessProvider()
+    }
+
+    /**
+     * 超级赞的改动(vendor 版):ML Kit 在**真要扫码的这一刻**才初始化。
+     *
+     * ML Kit 自带一个 ContentProvider(MlKitInitProvider),App 一启动就初始化 SDK ——
+     * 比用户点「同意隐私政策」还早,应用商店的合规检测专门查这个。两个 App 的清单里把它
+     * 摘掉了(tools:node="remove"),这里补上初始化:开始扫码、识别相册图片之前各调一次。
+     * 能走到这里的人一定已经登录,而登录的前提是同意了隐私政策。
+     * MlKit.initialize 重复调用是安全的(已经初始化过就直接返回那一个)。
+     */
+    private fun ensureMlKit() {
+        MlKit.initialize(activity.applicationContext)
     }
 
     /// Internal variables
@@ -395,6 +409,7 @@ class MobileScanner(
         isPaused = false
 
         lastScanned = null
+        ensureMlKit()
         scanner = barcodeScannerFactory(barcodeScannerOptions)
 
         val cameraProviderFuture = ProcessCameraProvider.getInstance(activity)
@@ -637,6 +652,7 @@ class MobileScanner(
         }
 
         // Use a short lived scanner instance, which is closed when the analysis is done.
+        ensureMlKit()
         val barcodeScanner: BarcodeScanner = barcodeScannerFactory(scannerOptions)
 
         barcodeScanner.process(inputImage).addOnSuccessListener { barcodes ->

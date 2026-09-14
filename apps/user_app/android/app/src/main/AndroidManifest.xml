@@ -73,6 +73,12 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+            <!-- ML Kit 自带的这个 provider 会在 App 一启动时初始化 SDK,比用户同意隐私政策还早(合规检测专查)。
+             摘掉它,改在真要扫码时初始化(packages/mobile_scanner 的 MobileScanner.ensureMlKit) -->
+        <provider
+            android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            android:authorities="${applicationId}.mlkitinitprovider"
+            tools:node="remove" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
