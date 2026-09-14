@@ -505,12 +505,23 @@ jobs:
       # 故意不装 libpulse-dev:装了 flutter_webrtc 会链上 libpulse(只为录系统声音的屏幕共享,用不到),
       # 用户机器上就多一个启动依赖
       # 冒烟测试:xvfb + mesa(没有显示器也能起窗口)
+      #
+      # 构建机预装了 LLVM 的 libunwind-<版本>-dev(libc++ 要它),它的包信息写着 Breaks: libunwind-dev,
+      # 而 libgstreamer1.0-dev 依赖 libunwind-dev —— apt 不会为了隐式依赖去卸包,直接报
+      # 「held broken packages」(2026-09-14 头一次跑桌面版就撞上)。先卸掉它,再把 libunwind-dev
+      # 写进清单。我们用 clang + libstdc++ 构建,用不到 LLVM 那套 libunwind / libc++。
+      # 在 ubuntu:22.04 容器里先装 libunwind-14-dev 复现过原来的报错,也验证过这样装得上。
       - name: 装系统依赖
         run: |
           sudo apt-get update
+          for p in $(dpkg-query -W -f='${db:Status-Status} ${Package}\n' 'libunwind-*' 2>/dev/null \
+                       | awk '$1=="installed"{print $2}' | grep -E '^libunwind-[0-9]+-dev$'); do
+            echo "卸掉和 libunwind-dev 冲突的 $p"
+            sudo apt-get remove -y "$p"
+          done
           sudo apt-get install -y --no-install-recommends \
             clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libunwind-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             xvfb libgl1-mesa-dri xauth
 
       - uses: subosito/flutter-action@v2
