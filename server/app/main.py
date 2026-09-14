@@ -269,7 +269,12 @@ class AdminConsoleMiddleware:
         #    不是就原样放行给那 79 个管理接口
         if not self._is_navigation(scope.get("headers") or []):
             return await self.app(scope, receive, send)
-        return await FileResponse(index)(scope, receive, send)
+        # 页面这一份**不许进浏览器缓存**:页面和接口共用同一个地址(/admin/flags 既是开关页,
+        # 也是开关接口)。不写 Cache-Control 时浏览器按 Last-Modified 自己推算有效期 ——
+        # 直接打开或刷新 /admin/flags 之后,页面紧接着 fetch 同一个地址要数据,
+        # 拿到的是缓存里这份 HTML,页面顶上一条「不是合法的 JSON」。从侧栏点进去不会,所以一直没人发现
+        return await FileResponse(index, headers={
+            "Cache-Control": "no-store", "Vary": "Sec-Fetch-Dest, Accept"})(scope, receive, send)
 
 
 class SelectShopMiddleware:

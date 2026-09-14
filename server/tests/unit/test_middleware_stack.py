@@ -242,3 +242,36 @@ class Test调用日志必须在响应之前写:
         src = inspect.getsource(RecordApiCallMiddleware)
         assert 'if not done["recorded"]:' in src
 
+
+
+class Test后台页面不进浏览器缓存:
+    """/admin/flags 既是开关页也是开关接口。页面那份 HTML 要是能进浏览器缓存,
+    直接打开这个地址之后,页面 fetch 同一个地址拿到的就是缓存里的 HTML(「不是合法的 JSON」)。"""
+
+    def _go(self, dest):
+        seen = {}
+
+        async def inner(scope, receive, send):
+            seen["passed"] = True
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        scope = {"type": "http", "method": "GET", "path": "/admin/flags", "query_string": b"",
+                 "headers": [(b"sec-fetch-dest", dest.encode())]}
+
+        async def receive(): return {"type": "http.request", "body": b""}
+        async def send(msg): seen.setdefault("sent", []).append(msg)
+
+        asyncio.run(AdminConsoleMiddleware(inner)(scope, receive, send))
+        start = next(m for m in seen["sent"] if m["type"] == "http.response.start")
+        return seen, {k.decode().lower(): v.decode() for k, v in start["headers"]}
+
+    def test_打开页面给的HTML不许缓存(self):
+        seen, headers = self._go("document")
+        assert "passed" not in seen, "打开页面应该直接给 HTML,不该放行给接口"
+        assert headers.get("cache-control") == "no-store", headers
+        assert "Sec-Fetch-Dest" in headers.get("vary", ""), headers
+
+    def test_接口请求照样放行(self):
+        seen, _ = self._go("empty")
+        assert seen.get("passed"), "fetch 要放行给管理接口"
