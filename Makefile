@@ -101,6 +101,12 @@ unit:
 	python -m pytest mcp-server -q
 	@echo "—— 再按生产环境跑一遍(CI 的单测 job 没有 .env,APP_ENV 走默认的 prod)——"
 	cd server && APP_ENV=prod python -m pytest tests/unit -q
+# 见证节点另外两个实现(Go 绿色版、网页版)跑和 Python 见证同一份核账用例
+# (witness/testdata/verify_rows_cases.json);App 那份在 make analyze 的 Dart 单测里。
+# 四个实现口径分叉的话,平台在某一栏造假,只有一部分节点看得见。
+# -count=1:不用缓存的结果 —— 用例文件改了,go test 照样拿缓存的旧结果报绿(撞过)
+	cd witness/go && go test -count=1 ./...
+	node scripts/test_witness_web.mjs
 
 # 端到端测试(需要 API 已在运行,默认 http://127.0.0.1:8010,可用 SUPERZ_API 覆盖)
 #

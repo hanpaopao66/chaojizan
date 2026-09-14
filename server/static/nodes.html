@@ -618,8 +618,10 @@ async function load() {
 }
 
 /* ===== 网页见证节点:与 witness.py 同一套算法,在你的浏览器里独立复算 ===== */
+/* witness-verify:start —— 从这里到 witness-verify:end 是核账算法。scripts/test_witness_web.mjs
+   原样截出这一段,跑四个见证实现共用的用例 witness/testdata/verify_rows_cases.json */
 const GENESIS = '0'.repeat(64);
-const WW_VERSION = 'web-0.1.1';
+const WW_VERSION = 'web-0.1.2';
 
 /* 与服务端 canonical() 字节级一致:键排序、无空格、非 ASCII 原样 */
 function canonical(o) {
@@ -632,9 +634,23 @@ async function sha256(s) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
+/* 判责行的正负号(规格 §6.2b / §6.2c)。用 Map 不用普通对象:
+   普通对象查 'constructor' 这种种类会查到原型上的东西,没见过的种类就漏报了 */
+const RIDER_FAULT_SIGNS = new Map([['fault_reversal', -1], ['fault_charge', -1], ['fault_refund', 1]]);
+const MERCHANT_FAULT_SIGNS = new Map([['fault_charge', -1], ['fault_refund', 1]]);
+const sumOf = (rows, field, kind) =>
+  (rows || []).reduce((s, r) => (!kind || r.kind === kind ? s + r[field] : s), 0);
+/* 平台这一天为纠错(申诉改判成立)出的钱,规格 §6.5 */
+function platformCorrection(p) {
+  return sumOf(p.merchant_rows, 'net', 'adjustment')
+    + sumOf(p.merchant_fault_rows, 'amount', 'fault_refund')
+    + sumOf(p.rider_fault_rows, 'amount', 'fault_refund')
+    + sumOf(p.appeal_refund_rows, 'amount');
+}
 function verifyRows(p) {
   const problems = [];
   const rate = p.commission_rate_max ?? 0.06, vrate = p.voucher_rate ?? 0.03;
+  const srate = p.stay_rate ?? 0.05;
   for (const r of p.merchant_rows || []) {
     if (r.net !== r.food - r.commission) problems.push(`商家行 ${r.o}: 净额恒等式不成立`);
     if (Math.abs(r.commission) > Math.abs(r.food) * rate + 1)
@@ -649,8 +665,48 @@ function verifyRows(p) {
   for (const r of p.voucher_rows || [])
     if (r.fee !== Math.trunc(r.gross * vrate) || r.net !== r.gross - r.fee)
       problems.push(`团购行 ${r.p}: 服务费不是 ${vrate * 100}%`);
+  for (const r of p.stay_rows || []) {
+    if (r.kind === 'settle') {          // 离店结算:净额恒等 + 佣金不超上限(±1 分取整)
+      if (r.net !== r.gross - r.fee) problems.push(`住宿行 ${r.s}: 净额恒等式不成立`);
+      if (r.fee > r.gross * srate + 1) problems.push(`住宿行 ${r.s}: 佣金超过 ${srate * 100}%`);
+    } else if (r.kind === 'penalty') {  // 到店无房违约金:商家负行赔给用户,平台分文不取
+      if (r.fee !== 0 || !(-r.gross <= r.net && r.net < 0))
+        problems.push(`住宿行 ${r.s}: 违约金行越界`);
+    } else {                            // 取消扣款/未入住:平台分文不取,商家所得不超过房费
+      if (r.fee !== 0) problems.push(`住宿行 ${r.s}: 取消/未入住不应产生佣金`);
+      if (!(0 <= r.net && r.net <= r.gross)) problems.push(`住宿行 ${r.s}: 扣款超出房费`);
+    }
+  }
+  // 判骑手责任(§6.2b)、判商家责任(§6.2c):种类在白名单里、符号对。缺这些字段的老锚点跳过
+  for (const [key, signs, label] of [['rider_fault_rows', RIDER_FAULT_SIGNS, '骑手判责行'],
+                                     ['merchant_fault_rows', MERCHANT_FAULT_SIGNS, '商家判责行']])
+    for (const r of p[key] || []) {
+      if (!signs.has(r.kind)) problems.push(`${label} ${r.o}: 未知类型 ${r.kind}`);
+      else if (r.amount * signs.get(r.kind) < 0)
+        problems.push(`${label} ${r.o}: ${r.kind} 的金额 ${r.amount} 符号不对`);
+    }
+  for (const r of (p.rider_fund || {}).rows || [])
+    if ((r.kind !== 'payout' && r.kind !== 'return') || !(r.amount > 0))
+      problems.push(`保障金池行 ${r.o}: ${r.kind} ${r.amount} —— 只应有正数的支出(payout)和回池(return)`);
+  // 顾客申诉改判、平台原路退回的钱(§6.2d):只应是正数
+  for (const r of p.appeal_refund_rows || [])
+    if (!(r.amount > 0)) problems.push(`申诉改判退款行 ${r.o}: 金额 ${r.amount} 不是正数`);
+  // 合计交叉校验(§6.5)。骑手合计是必核的(缺了也算对不上),其余字段存在才核
+  const t = p.totals || {};
+  if (Object.keys(t).length) {
+    if (t.rider_amount !== sumOf(p.rider_rows, 'amount')) problems.push('骑手合计与逐行加总不一致');
+    for (const [key, want, msg] of [
+      ['stay_fee', sumOf(p.stay_rows, 'fee'), '住宿服务费合计与逐行加总不一致'],
+      ['rider_fault', sumOf(p.rider_fault_rows, 'amount'), '骑手判责合计与逐行加总不一致'],
+      ['merchant_fault', sumOf(p.merchant_fault_rows, 'amount'), '商家判责合计与逐行加总不一致'],
+      ['appeal_refund', sumOf(p.appeal_refund_rows, 'amount'), '申诉改判退款合计与逐行加总不一致'],
+      ['platform_correction', platformCorrection(p), '平台纠错(申诉改判)合计与逐行加总不一致'],
+    ])
+      if (key in t && t[key] !== want) problems.push(msg);
+  }
   return problems;
 }
+/* witness-verify:end */
 
 const wwState = {
   nodeId: localStorage.wwNodeId ||

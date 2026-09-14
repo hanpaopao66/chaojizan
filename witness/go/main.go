@@ -1,9 +1,12 @@
 // Super-Z 社区见证节点(绿色版):双击即运行,Windows/macOS/Linux 单文件零依赖。
 //
-// 与 witness.py / 网页版 / 手机版完全相同的校验算法:
+// 与 witness.py / 网页版 / 手机版完全相同的校验算法(四个实现跑同一份用例
+// witness/testdata/verify_rows_cases.json,见 main_test.go):
 //  1. 拉取平台公开账本(匿名化流水,无任何个人信息),逐日复算哈希链;
 //  2. 校验三原则:商家佣金 ≤承诺上限、净额恒等、配送费只进不冲、团购费 = 承诺费率
 //     (上限/费率内嵌在每日账本里,当前 5% / 2%;历史锚点按当天口径复算);
+//     住宿行三分支;2026-09 起的判责行(骑手/商家)种类和正负号、保障金池只有正数的
+//     支出和回池、申诉改判退款是正数;合计与逐行加总一致(含平台为纠错出的钱);
 //  3. 锚点留存在本程序旁边的 witness-state.json —— 平台改历史,你立刻知道。
 //
 // 绿色软件约定:不写注册表、不装服务、状态文件就在可执行文件旁边,删掉即卸载。
@@ -25,7 +28,7 @@ import (
 )
 
 const (
-	version          = "go-0.2.2"
+	version          = "go-0.2.3"
 	defaultAPI       = "https://chaojizan.cc"
 	heartbeatSeconds = 300
 	genesis          = "0000000000000000000000000000000000000000000000000000000000000000"
@@ -165,6 +168,46 @@ func num(v any) float64 {
 	return f
 }
 
+// riderFaultSigns 判骑手责任的骑手行(规格 §6.2b):**不在 rider_rows 里**,单独放在
+// rider_fault_rows。冲回这单收入、池子不够骑手另出的是负数,申诉改判退回的是正数
+var riderFaultSigns = map[string]float64{"fault_reversal": -1, "fault_charge": -1, "fault_refund": 1}
+
+// merchantFaultSigns 判商家责任的商家行(规格 §6.2c):**不在 merchant_rows 里**,单独放在
+// merchant_fault_rows。骑手那份配送费和小费商家另出的是负数,申诉改判退回的是正数
+var merchantFaultSigns = map[string]float64{"fault_charge": -1, "fault_refund": 1}
+
+// rowsOf 把 JSON 数组转成行;字段缺失(老锚点)就是空的
+func rowsOf(v any) []map[string]any {
+	arr, _ := v.([]any)
+	out := make([]map[string]any, 0, len(arr))
+	for _, ri := range arr {
+		if r, ok := ri.(map[string]any); ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// sumOf 逐行加总某个字段;kind 非空时只加这一种
+func sumOf(rows []map[string]any, field, kind string) float64 {
+	s := 0.0
+	for _, r := range rows {
+		if kind == "" || r["kind"] == kind {
+			s += num(r[field])
+		}
+	}
+	return s
+}
+
+// platformCorrection 平台这一天为纠错(申诉改判成立)出的钱,规格 §6.5:商家改判补回的净额
+// (merchant_rows 里的 adjustment)+ 退回商家另出的那行 + 退回骑手的 + 顾客改判平台退的
+func platformCorrection(p map[string]any) float64 {
+	return sumOf(rowsOf(p["merchant_rows"]), "net", "adjustment") +
+		sumOf(rowsOf(p["merchant_fault_rows"]), "amount", "fault_refund") +
+		sumOf(rowsOf(p["rider_fault_rows"]), "amount", "fault_refund") +
+		sumOf(rowsOf(p["appeal_refund_rows"]), "amount", "")
+}
+
 func verifyRows(p map[string]any) []string {
 	var problems []string
 	rate := 0.06
@@ -233,9 +276,67 @@ func verifyRows(p map[string]any) []string {
 				problems = append(problems, fmt.Sprintf("住宿行 %v: 违约金行越界", r["s"]))
 			}
 		} else {
-			// 取消扣款/未入住:平台分文不取,商家所得不超过房费
-			if fee != 0 || net < 0 || net > gross {
-				problems = append(problems, fmt.Sprintf("住宿行 %v: 取消/未入住资金越界", r["s"]))
+			// 取消扣款/未入住:平台分文不取,商家所得不超过房费(两条分开报,和 witness.py 一样)
+			if fee != 0 {
+				problems = append(problems, fmt.Sprintf("住宿行 %v: 取消/未入住不应产生佣金", r["s"]))
+			}
+			if net < 0 || net > gross {
+				problems = append(problems, fmt.Sprintf("住宿行 %v: 扣款超出房费", r["s"]))
+			}
+		}
+	}
+	// 判骑手责任(规格 §6.2b):种类在白名单里、符号对。缺这个字段的老锚点跳过
+	for _, r := range rowsOf(p["rider_fault_rows"]) {
+		kind, _ := r["kind"].(string)
+		if sign, known := riderFaultSigns[kind]; !known {
+			problems = append(problems, fmt.Sprintf("骑手判责行 %v: 未知类型 %s", r["o"], kind))
+		} else if num(r["amount"])*sign < 0 {
+			problems = append(problems, fmt.Sprintf(
+				"骑手判责行 %v: %s 的金额 %v 符号不对", r["o"], kind, r["amount"]))
+		}
+	}
+	fund, _ := p["rider_fund"].(map[string]any)
+	for _, r := range rowsOf(fund["rows"]) {
+		kind, _ := r["kind"].(string)
+		if (kind != "payout" && kind != "return") || num(r["amount"]) <= 0 {
+			problems = append(problems, fmt.Sprintf(
+				"保障金池行 %v: %s %v —— 只应有正数的支出(payout)和回池(return)", r["o"], kind, r["amount"]))
+		}
+	}
+	// 判商家责任(规格 §6.2c):种类在白名单里、符号对。缺这个字段的老锚点跳过
+	for _, r := range rowsOf(p["merchant_fault_rows"]) {
+		kind, _ := r["kind"].(string)
+		if sign, known := merchantFaultSigns[kind]; !known {
+			problems = append(problems, fmt.Sprintf("商家判责行 %v: 未知类型 %s", r["o"], kind))
+		} else if num(r["amount"])*sign < 0 {
+			problems = append(problems, fmt.Sprintf(
+				"商家判责行 %v: %s 的金额 %v 符号不对", r["o"], kind, r["amount"]))
+		}
+	}
+	// 顾客申诉改判、平台原路退回的钱(规格 §6.2d):只应是正数
+	for _, r := range rowsOf(p["appeal_refund_rows"]) {
+		if num(r["amount"]) <= 0 {
+			problems = append(problems, fmt.Sprintf("申诉改判退款行 %v: 金额 %v 不是正数", r["o"], r["amount"]))
+		}
+	}
+	// 合计交叉校验(规格 §6.5)。骑手合计是必核的(缺了也算对不上),其余字段存在才核
+	if t, _ := p["totals"].(map[string]any); len(t) > 0 {
+		if v, ok := t["rider_amount"]; !ok || num(v) != sumOf(rowsOf(p["rider_rows"]), "amount", "") {
+			problems = append(problems, "骑手合计与逐行加总不一致")
+		}
+		for _, c := range []struct {
+			key  string
+			want float64
+			msg  string
+		}{
+			{"stay_fee", sumOf(rowsOf(p["stay_rows"]), "fee", ""), "住宿服务费合计与逐行加总不一致"},
+			{"rider_fault", sumOf(rowsOf(p["rider_fault_rows"]), "amount", ""), "骑手判责合计与逐行加总不一致"},
+			{"merchant_fault", sumOf(rowsOf(p["merchant_fault_rows"]), "amount", ""), "商家判责合计与逐行加总不一致"},
+			{"appeal_refund", sumOf(rowsOf(p["appeal_refund_rows"]), "amount", ""), "申诉改判退款合计与逐行加总不一致"},
+			{"platform_correction", platformCorrection(p), "平台纠错(申诉改判)合计与逐行加总不一致"},
+		} {
+			if v, ok := t[c.key]; ok && num(v) != c.want {
+				problems = append(problems, c.msg)
 			}
 		}
 	}
@@ -394,6 +495,10 @@ func runCycle(api string, st *state) (ok bool, summary string) {
 			say(cGreen, "  %s 分账核对:商家净得 %s · 骑手所得 %s · 平台佣金 %s——全部吻合",
 				verifiedDay, yuan(mn), yuan(rc), yuan(pc))
 		}
+		if fix := num(lastTotals["platform_correction"]); fix > 0 {
+			say(cGreen, "  %s 平台判错了自己认:申诉改判补回 %s——与逐行加总吻合",
+				verifiedDay, yuan(fix))
+		}
 	}
 	var sum struct {
 		Online int `json:"online"`
@@ -432,10 +537,11 @@ func main() {
 		} else {
 			// 异常:红色横幅 + 蜂鸣,值得吵醒人
 			fmt.Print("\a\a\a")
-			say(cBold+cRed, strings.Repeat("!", 56))
+			// 横幅走 "%s":go vet(go test 自带的那一轮)不许拿非常量当格式串
+			say(cBold+cRed, "%s", strings.Repeat("!", 56))
 			say(cBold+cRed, "[%s] ✗ 发现问题,请截图本窗口并公开质询:", now.Format("15:04:05"))
 			say(cBold+cRed, "  %s", summary)
-			say(cBold+cRed, strings.Repeat("!", 56))
+			say(cBold+cRed, "%s", strings.Repeat("!", 56))
 		}
 		if once {
 			if ok {

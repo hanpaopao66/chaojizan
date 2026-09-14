@@ -46,28 +46,118 @@ class WitnessResult {
   final List<String> problems;
 }
 
-/// 三原则恒等式逐行核账(与 witness.py verify_rows 一致)
+/// 判骑手责任的骑手行(规格 §6.2b):**不在 rider_rows 里**,单独放在 rider_fault_rows。
+/// 冲回这单收入、池子不够骑手另出的是负数,申诉改判退回的是正数
+const _riderFaultSigns = {'fault_reversal': -1, 'fault_charge': -1, 'fault_refund': 1};
+
+/// 判商家责任的商家行(规格 §6.2c):**不在 merchant_rows 里**,单独放在 merchant_fault_rows。
+/// 骑手那份配送费和小费商家另出的是负数,申诉改判退回的是正数
+const _merchantFaultSigns = {'fault_charge': -1, 'fault_refund': 1};
+
+List<Map> _rows(dynamic v) => (v as List? ?? const []).whereType<Map>().toList();
+
+/// 逐行加总某个字段;[kind] 给了就只加这一种
+num _sum(dynamic rows, String field, [String? kind]) => _rows(rows)
+    .where((r) => kind == null || r['kind'] == kind)
+    .fold<num>(0, (s, r) => s + (r[field] as num));
+
+/// 平台这一天为纠错(申诉改判成立)出的钱,规格 §6.5:商家改判补回的净额(merchant_rows 里的
+/// adjustment)+ 退回商家另出的那行 + 退回骑手的 + 顾客改判平台退的
+num platformCorrection(Map p) =>
+    _sum(p['merchant_rows'], 'net', 'adjustment') +
+    _sum(p['merchant_fault_rows'], 'amount', 'fault_refund') +
+    _sum(p['rider_fault_rows'], 'amount', 'fault_refund') +
+    _sum(p['appeal_refund_rows'], 'amount');
+
+/// 三原则恒等式逐行核账(与 witness.py verify_rows 一致;四个见证实现跑同一份用例
+/// witness/testdata/verify_rows_cases.json,见 test/witness_verify_test.dart)
 List<String> verifyRows(Map payload) {
   final problems = <String>[];
   final rate = (payload['commission_rate_max'] as num?) ?? 0.06;
   final vrate = (payload['voucher_rate'] as num?) ?? 0.03;
-  for (final r in (payload['merchant_rows'] as List? ?? const [])) {
-    final food = r['food'] as int, fee = r['commission'] as int;
+  final srate = (payload['stay_rate'] as num?) ?? 0.05;
+  for (final r in _rows(payload['merchant_rows'])) {
+    final food = r['food'] as num, fee = r['commission'] as num;
     if (r['net'] != food - fee) problems.add('商家行 ${r['o']}: 净额恒等式不成立');
     if (fee.abs() > food.abs() * rate + 1) {
       problems.add('商家行 ${r['o']}: 佣金超过 ${(rate * 100).round()}%');
     }
   }
-  for (final r in (payload['rider_rows'] as List? ?? const [])) {
-    if (r['kind'] != 'earning' || (r['amount'] as int) < 0) {
-      problems.add('骑手行 ${r['o']}: 配送费被冲减');
+  // 「只进不冲」的实质是骑手的钱只增不减:负数即违规,不管挂什么 kind;
+  // kind 走白名单(earning / adjustment),将来多出一种会扣钱的立刻拦住
+  for (final r in _rows(payload['rider_rows'])) {
+    if ((r['amount'] as num) < 0) {
+      problems.add('骑手行 ${r['o']}: 配送费被冲回(${r['kind']})');
+    } else if (r['kind'] != 'earning' && r['kind'] != 'adjustment') {
+      problems.add('骑手行 ${r['o']}: 未知入账类型 ${r['kind']}');
     }
   }
-  for (final r in (payload['voucher_rows'] as List? ?? const [])) {
-    final gross = r['gross'] as int;
+  for (final r in _rows(payload['voucher_rows'])) {
+    final gross = r['gross'] as num;
     final expect = (gross * vrate).truncate();
-    if (r['fee'] != expect || r['net'] != gross - (r['fee'] as int)) {
+    if (r['fee'] != expect || r['net'] != gross - (r['fee'] as num)) {
       problems.add('团购行 ${r['p']}: 服务费不是 ${(vrate * 100).round()}%');
+    }
+  }
+  for (final r in _rows(payload['stay_rows'])) {
+    final gross = r['gross'] as num, fee = r['fee'] as num, net = r['net'] as num;
+    if (r['kind'] == 'settle') {
+      // 离店结算:净额恒等 + 佣金不超上限(±1 分取整)
+      if (net != gross - fee) problems.add('住宿行 ${r['s']}: 净额恒等式不成立');
+      if (fee > gross * srate + 1) {
+        problems.add('住宿行 ${r['s']}: 佣金超过 ${(srate * 100).round()}%');
+      }
+    } else if (r['kind'] == 'penalty') {
+      // 到店无房违约金:商家负行赔给用户,平台分文不取;赔付不超房费
+      if (fee != 0 || !(-gross <= net && net < 0)) {
+        problems.add('住宿行 ${r['s']}: 违约金行越界');
+      }
+    } else {
+      // 取消扣款/未入住:平台分文不取,商家所得不超过房费
+      if (fee != 0) problems.add('住宿行 ${r['s']}: 取消/未入住不应产生佣金');
+      if (!(0 <= net && net <= gross)) problems.add('住宿行 ${r['s']}: 扣款超出房费');
+    }
+  }
+  // 判骑手责任(§6.2b)、判商家责任(§6.2c):种类在白名单里、符号对。缺这些字段的老锚点跳过
+  for (final (key, signs, label) in [
+    ('rider_fault_rows', _riderFaultSigns, '骑手判责行'),
+    ('merchant_fault_rows', _merchantFaultSigns, '商家判责行'),
+  ]) {
+    for (final r in _rows(payload[key])) {
+      final sign = signs[r['kind']];
+      if (sign == null) {
+        problems.add('$label ${r['o']}: 未知类型 ${r['kind']}');
+      } else if ((r['amount'] as num) * sign < 0) {
+        problems.add('$label ${r['o']}: ${r['kind']} 的金额 ${r['amount']} 符号不对');
+      }
+    }
+  }
+  for (final r in _rows((payload['rider_fund'] as Map?)?['rows'])) {
+    if ((r['kind'] != 'payout' && r['kind'] != 'return') || (r['amount'] as num) <= 0) {
+      problems.add('保障金池行 ${r['o']}: ${r['kind']} ${r['amount']} —— '
+          '只应有正数的支出(payout)和回池(return)');
+    }
+  }
+  // 顾客申诉改判、平台原路退回的钱(§6.2d):只应是正数
+  for (final r in _rows(payload['appeal_refund_rows'])) {
+    if ((r['amount'] as num) <= 0) {
+      problems.add('申诉改判退款行 ${r['o']}: 金额 ${r['amount']} 不是正数');
+    }
+  }
+  // 合计交叉校验(§6.5)。骑手合计是必核的(缺了也算对不上),其余字段存在才核
+  final t = payload['totals'] as Map? ?? const {};
+  if (t.isNotEmpty) {
+    if (t['rider_amount'] != _sum(payload['rider_rows'], 'amount')) {
+      problems.add('骑手合计与逐行加总不一致');
+    }
+    for (final (key, want, msg) in [
+      ('stay_fee', _sum(payload['stay_rows'], 'fee'), '住宿服务费合计与逐行加总不一致'),
+      ('rider_fault', _sum(payload['rider_fault_rows'], 'amount'), '骑手判责合计与逐行加总不一致'),
+      ('merchant_fault', _sum(payload['merchant_fault_rows'], 'amount'), '商家判责合计与逐行加总不一致'),
+      ('appeal_refund', _sum(payload['appeal_refund_rows'], 'amount'), '申诉改判退款合计与逐行加总不一致'),
+      ('platform_correction', platformCorrection(payload), '平台纠错(申诉改判)合计与逐行加总不一致'),
+    ]) {
+      if (t.containsKey(key) && t[key] != want) problems.add(msg);
     }
   }
   return problems;
@@ -155,7 +245,7 @@ class PhoneWitness {
         'node_id': nodeId,
         'name': prefs.getString('witness_name') ?? '',
         'region': '手机节点',
-        'version': 'app-0.4',
+        'version': 'app-0.5',
         'verified_day': r.verifiedDay,
         'chain_hash': r.verifiedHash,
         'ok': r.ok,

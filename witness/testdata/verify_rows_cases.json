@@ -1,0 +1,2031 @@
+{
+ "_说明": [
+  "见证节点逐行核账的共用用例(docs/LEDGER-SPEC.md §6、§8)。",
+  "四个第一方实现 —— witness/superz_witness.py、witness/go/main.go、server/static/nodes.html、packages/shared/lib/src/witness_service.dart —— 的测试都跑这一份,口径不许分叉。",
+  "expect:应报出的问题,每条取问题文本第一个空格前的那个词(合计类的问题整句没有空格,就是整句);顺序不论,条数要对。第三方实现也可以拿来对。",
+  "hash_vectors:规格 §8 的向量 A(另两组是生产链上的数据,要联网取)。"
+ ],
+ "cases": [
+  {
+   "name": "向量 A · 空账日",
+   "payload": {
+    "schema": 1,
+    "day": "2026-08-16",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [],
+    "rider_rows": [],
+    "voucher_rows": [],
+    "stay_rows": [],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 0,
+     "accrued_cents": 0
+    },
+    "totals": {
+     "merchant_net": 0,
+     "platform_commission": 0,
+     "rider_amount": 0,
+     "voucher_fee": 0,
+     "stay_net": 0,
+     "stay_fee": 0,
+     "rider_fund": 0
+    }
+   },
+   "expect": []
+  },
+  {
+   "name": "干净的一天:每种行都有、合计全对",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 5200
+    }
+   },
+   "expect": []
+  },
+  {
+   "name": "老锚点:没有费率字段也没有 2026-09 的新字段(佣金按默认上限 6% 核)",
+   "payload": {
+    "schema": 1,
+    "day": "2026-07-16",
+    "merchant_rows": [
+     {
+      "o": "d1",
+      "food": 3000,
+      "commission": 180,
+      "net": 2820,
+      "kind": "earning"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "d1",
+      "amount": 500,
+      "kind": "earning"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "d2",
+      "gross": 1000,
+      "fee": 30,
+      "net": 970
+     }
+    ],
+    "totals": {
+     "merchant_net": 2820,
+     "platform_commission": 180,
+     "rider_amount": 500,
+     "voucher_fee": 30
+    }
+   },
+   "expect": []
+  },
+  {
+   "name": "不认识的新字段一律容忍",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 5200,
+     "future_total": -1
+    },
+    "future_rows": [
+     {
+      "o": "zz",
+      "amount": -1,
+      "kind": "later"
+     }
+    ]
+   },
+   "expect": []
+  },
+  {
+   "name": "商家行:净额造假",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "e1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2900,
+      "kind": "earning"
+     }
+    ]
+   },
+   "expect": [
+    "商家行"
+   ]
+  },
+  {
+   "name": "商家行:佣金超过承诺上限",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "e2",
+      "food": 3000,
+      "commission": 600,
+      "net": 2400,
+      "kind": "earning"
+     }
+    ]
+   },
+   "expect": [
+    "商家行"
+   ]
+  },
+  {
+   "name": "商家行:净额造假又超上限,两条都报",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "e3",
+      "food": 3000,
+      "commission": 600,
+      "net": 2500,
+      "kind": "earning"
+     }
+    ]
+   },
+   "expect": [
+    "商家行",
+    "商家行"
+   ]
+  },
+  {
+   "name": "骑手行:配送费被冲回(负数)",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "rider_rows": [
+     {
+      "o": "f1",
+      "amount": -500,
+      "kind": "earning"
+     }
+    ]
+   },
+   "expect": [
+    "骑手行"
+   ]
+  },
+  {
+   "name": "骑手行:没见过的类型(正数也报)",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "rider_rows": [
+     {
+      "o": "f2",
+      "amount": 500,
+      "kind": "reversal"
+     }
+    ]
+   },
+   "expect": [
+    "骑手行"
+   ]
+  },
+  {
+   "name": "骑手判责行:符号不对",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "rider_fault_rows": [
+     {
+      "o": "g1",
+      "amount": 600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "g1",
+      "amount": 200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "g2",
+      "amount": -800,
+      "kind": "fault_refund"
+     }
+    ]
+   },
+   "expect": [
+    "骑手判责行",
+    "骑手判责行",
+    "骑手判责行"
+   ]
+  },
+  {
+   "name": "骑手判责行:没见过的类型",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "rider_fault_rows": [
+     {
+      "o": "g3",
+      "amount": -100,
+      "kind": "fine"
+     },
+     {
+      "o": "g4",
+      "amount": -100,
+      "kind": "constructor"
+     }
+    ]
+   },
+   "expect": [
+    "骑手判责行",
+    "骑手判责行"
+   ]
+  },
+  {
+   "name": "保障金池行:负数、零和没见过的种类",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 0,
+     "accrued_cents": 0,
+     "rows": [
+      {
+       "o": "h1",
+       "amount": -1425,
+       "kind": "payout"
+      },
+      {
+       "o": "h2",
+       "amount": 0,
+       "kind": "return"
+      },
+      {
+       "o": "h3",
+       "amount": 100,
+       "kind": "borrow"
+      }
+     ]
+    }
+   },
+   "expect": [
+    "保障金池行",
+    "保障金池行",
+    "保障金池行"
+   ]
+  },
+  {
+   "name": "商家判责行:符号不对",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_fault_rows": [
+     {
+      "o": "i1",
+      "amount": 700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "i2",
+      "amount": -700,
+      "kind": "fault_refund"
+     }
+    ]
+   },
+   "expect": [
+    "商家判责行",
+    "商家判责行"
+   ]
+  },
+  {
+   "name": "商家判责行:没见过的类型",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_fault_rows": [
+     {
+      "o": "i3",
+      "amount": -700,
+      "kind": "reversal"
+     },
+     {
+      "o": "i4",
+      "amount": -700,
+      "kind": "__proto__"
+     }
+    ]
+   },
+   "expect": [
+    "商家判责行",
+    "商家判责行"
+   ]
+  },
+  {
+   "name": "申诉改判退款行:零和负数",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "appeal_refund_rows": [
+     {
+      "o": "j1",
+      "amount": 0
+     },
+     {
+      "o": "j2",
+      "amount": -100
+     }
+    ]
+   },
+   "expect": [
+    "申诉改判退款行",
+    "申诉改判退款行"
+   ]
+  },
+  {
+   "name": "团购行:服务费不是承诺费率",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "voucher_rows": [
+     {
+      "p": "k1",
+      "gross": 5000,
+      "fee": 150,
+      "net": 4850
+     }
+    ]
+   },
+   "expect": [
+    "团购行"
+   ]
+  },
+  {
+   "name": "住宿结算:净额不对、佣金超上限,两条都报",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "stay_rows": [
+     {
+      "s": "l1",
+      "gross": 20000,
+      "fee": 2000,
+      "net": 17000,
+      "kind": "settle"
+     }
+    ]
+   },
+   "expect": [
+    "住宿行",
+    "住宿行"
+   ]
+  },
+  {
+   "name": "住宿违约金:赔得比房费还多",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "stay_rows": [
+     {
+      "s": "l2",
+      "gross": 20000,
+      "fee": 0,
+      "net": -30000,
+      "kind": "penalty"
+     }
+    ]
+   },
+   "expect": [
+    "住宿行"
+   ]
+  },
+  {
+   "name": "住宿取消:收了佣金、扣款又超房费,两条都报",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "stay_rows": [
+     {
+      "s": "l3",
+      "gross": 20000,
+      "fee": 100,
+      "net": 25000,
+      "kind": "cancel"
+     }
+    ]
+   },
+   "expect": [
+    "住宿行",
+    "住宿行"
+   ]
+  },
+  {
+   "name": "合计:骑手合计对不上",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 901,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 5200
+    }
+   },
+   "expect": [
+    "骑手合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:缺了骑手合计也算对不上",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 5200
+    }
+   },
+   "expect": [
+    "骑手合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:住宿服务费合计对不上",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 999,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 5200
+    }
+   },
+   "expect": [
+    "住宿服务费合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:骑手判责合计对不上",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": -1,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 5200
+    }
+   },
+   "expect": [
+    "骑手判责合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:商家判责合计对不上",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": -700,
+     "appeal_refund": 1800,
+     "platform_correction": 5200
+    }
+   },
+   "expect": [
+    "商家判责合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:申诉改判退款合计对不上",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1700,
+     "platform_correction": 5200
+    }
+   },
+   "expect": [
+    "申诉改判退款合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:平台纠错合计漏了商家补回的净额",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 3300
+    }
+   },
+   "expect": [
+    "平台纠错(申诉改判)合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:平台纠错合计把商家另出的也算进去了",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 4500
+    }
+   },
+   "expect": [
+    "平台纠错(申诉改判)合计与逐行加总不一致"
+   ]
+  }
+ ],
+ "hash_vectors": [
+  {
+   "name": "向量 A · 空账日",
+   "payload": {
+    "schema": 1,
+    "day": "2026-08-16",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [],
+    "rider_rows": [],
+    "voucher_rows": [],
+    "stay_rows": [],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 0,
+     "accrued_cents": 0
+    },
+    "totals": {
+     "merchant_net": 0,
+     "platform_commission": 0,
+     "rider_amount": 0,
+     "voucher_fee": 0,
+     "stay_net": 0,
+     "stay_fee": 0,
+     "rider_fund": 0
+    }
+   },
+   "canonical": "{\"commission_rate_max\":0.05,\"day\":\"2026-08-16\",\"merchant_rows\":[],\"rider_fund\":{\"accrued_cents\":0,\"orders\":0,\"per_order_cents\":20},\"rider_rows\":[],\"schema\":1,\"stay_rate\":0.05,\"stay_rows\":[],\"totals\":{\"merchant_net\":0,\"platform_commission\":0,\"rider_amount\":0,\"rider_fund\":0,\"stay_fee\":0,\"stay_net\":0,\"voucher_fee\":0},\"voucher_rate\":0.02,\"voucher_rows\":[]}",
+   "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+   "payload_hash": "ca98e10445044893ab8c1ff89ae137cd6cbe3c9129ebabfe5914157ca5c847b6",
+   "chain_hash": "402919d8a34f92cddd6cab12fc29df5868b723ac41bb2f81bb15b1f934bbe3a2"
+  }
+ ]
+}

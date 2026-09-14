@@ -310,19 +310,24 @@ abs(commission) <= abs(food) × rate_max + 1     (佣金上限,±1 分取整容�
 ### 6.2 骑手行 —— 配送费只进不冲
 
 ```
-kind == "earning"  且  amount >= 0
+kind ∈ {"earning", "adjustment"}  且  amount >= 0
 ```
 
-就这两条,没有上限、没有比例 —— 配送费 100% 归骑手是平台原则,
-账本里出现任何 `reversal`/`adjustment` 的骑手行或负数金额,
-即为违规,**必须**示警。
+就这两条,没有上限、没有比例 —— 配送费 100% 归骑手是平台原则。
+「只进不冲」的实质是**骑手的钱只增不减**:`earning` 是配送费和小费,`adjustment` 是正向补偿
+(历史上的现场难度补贴等,2026-09-14 起不再发,老锚点里还有)。账本里出现任何负数金额的骑手行,
+或者 `reversal` 等别的种类(白名单,不是黑名单:将来多出一种会扣骑手钱的种类,照样拦住),
+即为违规,**必须**示警。判骑手责任的冲回不在这一栏,见 §6.2b。
+
+(2026-09-15 修订:这里原来写的是「只能是 `earning`」,和四个参考实现、和账本里真实存在的
+`adjustment` 行都对不上 —— 按原来那句写的第三方实现,会把合法的补偿行当成违规。)
 
 ### 6.2b 判骑手责任的行(2026-09 起的新字段)
 
 2026-09-14 平台定下「平台不出钱赔付」:判骑手责任时,顾客全额退款、商家净额照旧,
 这单骑手的收入冲回、平台这单佣金不收,商家那份餐钱先从骑手保障金池出,池子不够的部分从
 骑手收入里扣(不封顶);骑手申诉成立,扣的全部退回、池子出的回池。这些行按下面的规矩记,
-**验证器应当**校验(参考实现 Python 版已校验):
+**验证器应当**校验(四个参考实现都已校验):
 
 ```
 rider_fault_rows[].kind ∈ {"fault_reversal", "fault_charge", "fault_refund"}
@@ -341,7 +346,7 @@ rider_fund.rows[].kind ∈ {"payout", "return"} 且 amount > 0
 (`merchant_rows` 里照旧一条 `reversal`),骑手那份配送费和小费照归骑手、由商家**另出一行**,
 记在 `merchant_fault_rows`。商家申诉改判成立时平台自己认:冲回的净额补回(`merchant_rows`
 里一条 `adjustment`,和 2026-09-14 之前的改判同一个形状),另出的那行退回(`fault_refund`)。
-这些行按下面的规矩记,**验证器应当**校验(参考实现 Python 版已校验):
+这些行按下面的规矩记,**验证器应当**校验(四个参考实现都已校验):
 
 ```
 merchant_fault_rows[].kind ∈ {"fault_charge", "fault_refund"}
@@ -357,7 +362,7 @@ fault_charge 的 amount <= 0;fault_refund 的 amount >= 0
 2026-09-15 起:**平台判错了,平台自己认** —— 商家、骑手、顾客的申诉改判成立,钱都补回,由平台出。
 其中商家、骑手那几笔本来就在他们的账本行里(`merchant_rows` 的 `adjustment`、`merchant_fault_rows`
 与 `rider_fault_rows` 的 `fault_refund`);顾客改判那一笔是平台原路退回的钱,记在
-`appeal_refund_rows`。**验证器应当**校验:
+`appeal_refund_rows`。**验证器应当**校验(四个参考实现都已校验):
 
 ```
 appeal_refund_rows[].amount > 0
@@ -397,8 +402,8 @@ totals.stay_fee     == Σ stay_rows[].fee        (字段存在时)
 `totals` 其余字段(`merchant_net`、`platform_commission`、`voucher_fee`、
 `stay_net`、`rider_fund`,以及 2026-09 起的 `rider_fault`、`rider_fund_paid`、
 `rider_fund_returned`、`merchant_fault`、`appeal_refund`、`platform_correction`)以及 `rider_fund`
-对象为**信息性**(Python 参考实现另核了 `rider_fault`、`merchant_fault`、`appeal_refund`
-与逐行加总一致,`platform_correction` 与下式一致):
+对象为**信息性**(四个参考实现都另核了 `rider_fault`、`merchant_fault`、`appeal_refund`
+与逐行加总一致,`platform_correction` 与下式一致;这几项字段存在才核,老锚点没有就跳过):
 
 ```
 platform_correction == Σ merchant_rows[kind="adjustment"].net
@@ -480,16 +485,29 @@ chain_hash   = 8c4c06d249272623a5f531541c1a0a9e2c3efcc29b09306b2719ceba32d573c4
 
 (B、C 是生产账本,数字不会变 —— 变了就说明我们在毁账,请示警。)
 
+### 逐行核账的用例(信息性)
+
+[witness/testdata/verify_rows_cases.json](../witness/testdata/verify_rows_cases.json):
+每条用例给一份 payload 和应当报出的问题(按种类计:问题文本第一个空格前的那个词,
+合计类的问题整句没有空格就是整句;顺序不论、条数要对),覆盖 §6 的每一条和几种容易漏的边角
+(老锚点缺字段、不认识的新字段、名叫 `constructor` / `__proto__` 的种类)。
+四个参考实现的测试都跑这一份;你的实现报问题的措辞可以不同,报出的**条数和位置**对得上就行。
+
 ## 9. 参考实现与已知差异(信息性)
 
-第一方实现四个,规范化与哈希部分完全一致,校验覆盖有差异:
+第一方实现四个,规范化、哈希和 §6 的逐行核账(含 2026-09 起的新字段和 §6.5 的合计)
+完全一致 —— 四个的测试跑同一份用例(§8「逐行核账的用例」),口径分叉 CI 先红:
 
-| 实现 | 位置 | 已知欠账 |
-|---|---|---|
-| Python | [witness/superz_witness.py](../witness/superz_witness.py) | 覆盖最全,是 §6 的蓝本 |
-| Go(绿色版) | [witness/go/main.go](../witness/go/main.go) | 未做 §6.5 合计校验 |
-| 网页版 | server/static/nodes.html | 未做住宿行与合计校验 |
-| Flutter(App 内) | packages/shared/lib/src/witness_service.dart | 未做住宿行与合计校验 |
+| 实现 | 位置 | 心跳上报的版本 | 测试 |
+|---|---|---|---|
+| Python | [witness/superz_witness.py](../witness/superz_witness.py) | `0.1.4` | server/tests/unit/test_witness_parity.py |
+| Go(绿色版) | [witness/go/main.go](../witness/go/main.go) | `go-0.2.3` | witness/go/main_test.go |
+| 网页版 | server/static/nodes.html | `web-0.1.2` | scripts/test_witness_web.mjs |
+| Flutter(App 内) | packages/shared/lib/src/witness_service.dart | `app-0.5` | packages/shared/test/witness_verify_test.dart |
+
+更早的版本不认识 2026-09 起的新字段:判责行、保障金池、申诉改判退款在它们眼里不存在,
+那几栏被改了它们看不见(哈希链照样能抓住改历史)。App 内的 `app-0.4` 及更早还会把
+合法的骑手补偿行(`adjustment`)报成违规。
 
 第三方实现以**本规格**为准,不以任何参考实现为准;
 参考实现与规格冲突时,规格赢,并请给我们提 issue。

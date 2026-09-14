@@ -31,7 +31,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 #: 骑手侧允许的入账类型。**白名单,不是黑名单** ——
 #: 将来谁加了一种会扣骑手钱的类型,这里会立刻拦住,而不是默默放行。

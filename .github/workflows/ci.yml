@@ -205,6 +205,15 @@ jobs:
       - name: 安装依赖
         working-directory: server
         run: pip install -r requirements.txt pytest
+      # make unit 里还跑 Go 绿色版、网页版见证的核账用例(和 Python 见证同一份
+      # witness/testdata/verify_rows_cases.json)。Go 见证零依赖,没有 go.sum,不开缓存
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: witness/go/go.mod
+          cache: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       # 单测不连库不起服务,几秒内跑完 —— 慢了就没人跑
       - name: make unit
         run: make unit
