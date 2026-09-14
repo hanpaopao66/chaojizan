@@ -7,20 +7,24 @@ import hashlib
 import re
 import secrets
 from collections.abc import Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import (NOTIFY_DEFAULTS, PRIVACY_DEFAULTS, PRIVACY_VALUES, SocialBlock,
-                      SocialContact, SocialProfile, User, UserRole)
+                      SocialContact, SocialProfile, User, Username, UserRole)
+from ..models_social import UsernameHold
 from ..redis_client import get_redis
 
 #: 能参与「消息」「视频」的账号角色(D1:用户端的顾客账号;机器人由 #355 加)
 SOCIAL_ROLES = {UserRole.customer, UserRole.bot}
 
-# ---------------- 用户名 ----------------
+# ---------------- 用户名(界面上叫「超级赞号」) ----------------
+
+#: 长度范围。客户端「超级赞号」页的规则说明照这两个数写(tests/unit/test_custom_id.py 对着查)
+USERNAME_MIN, USERNAME_MAX = 5, 32
 
 #: 5–32 位;字母开头;只能有字母、数字、下划线;不能以下划线结尾;不能连续两个下划线
 _USERNAME_RE = re.compile(r"^[A-Za-z](?:[A-Za-z0-9]|_(?!_)){3,30}[A-Za-z0-9]$")
@@ -37,32 +41,162 @@ _RESERVED_PARTS = ("chaojizan", "superz", "super_z", "official", "admin", "kefu"
                    "guanfang")
 
 
-def validate_username(name: str, *, is_bot: bool = False) -> str | None:
-    """不合规时返回一句能直接给用户看的话;合规返回 None。"""
+def validate_username(name: str, *, is_bot: bool = False, noun: str = "用户名") -> str | None:
+    """不合规时返回一句能直接给用户看的话;合规返回 None。
+
+    [noun] 是话里怎么称呼它:人的叫「超级赞号」,群 / 频道的公开链接叫「链接名」,
+    机器人(开发者后台)照旧叫「用户名」。规则三者一样 —— 它们共用一个命名空间。
+    客户端「超级赞号」页上的规则说明是照这里写的,改规则要一起改。
+    """
     if not name:
-        return "用户名不能为空"
-    if len(name) < 5:
-        return "用户名至少 5 位"
-    if len(name) > 32:
-        return "用户名最多 32 位"
+        return f"{noun}不能为空"
+    if len(name) < USERNAME_MIN:
+        return f"{noun}至少 {USERNAME_MIN} 位"
+    if len(name) > USERNAME_MAX:
+        return f"{noun}最多 {USERNAME_MAX} 位"
     if not re.fullmatch(r"[A-Za-z0-9_]+", name):
-        return "用户名只能用字母、数字和下划线"
+        return f"{noun}只能用字母、数字和下划线"
     if not name[0].isalpha():
-        return "用户名要以字母开头"
+        return f"{noun}要以字母开头"
     if name.endswith("_"):
-        return "用户名不能以下划线结尾"
+        return f"{noun}不能以下划线结尾"
     if "__" in name:
-        return "用户名不能有连续两个下划线"
+        return f"{noun}不能有连续两个下划线"
     if not _USERNAME_RE.fullmatch(name):
-        return "用户名格式不对"
+        return f"{noun}格式不对"
     low = name.lower()
     if low in _RESERVED_EXACT or any(p in low for p in _RESERVED_PARTS):
-        return "这个用户名是保留的,换一个吧"
+        return f"这个{noun}是保留的,换一个吧"
     if is_bot and not low.endswith("bot"):
-        return "机器人的用户名必须以 bot 结尾"
+        return f"机器人的{noun}必须以 bot 结尾"
     if not is_bot and low.endswith("bot"):
-        return "以 bot 结尾的用户名只给机器人用"
+        return f"以 bot 结尾的{noun}只给机器人用"
     return None
+
+
+# ---------------- 超级赞号的改名规则(迁移 0133,2026-09 用户拍板) ----------------
+#
+# - 第一次设置随时能设;之后一年只能改一次,从上一次设置 / 修改那天算满 365 天;
+# - 改掉、清空、随注销释放的旧号冷冻 180 天,这期间谁都不能注册 —— 包括群 / 频道的公开链接;
+# - 原主人不受冷冻限制,但拿回来算一次修改,照样要等一年一次的名额(见 hold_blocks)。
+#
+# 机器人的号不走这套:它们必须以 bot 结尾、人的号不能以 bot 结尾(validate_username),
+# 两边永远撞不上,冷冻中的超级赞号不可能被机器人拿走;删机器人也不冷冻它的号(开发者删了重建是常事)。
+
+#: 一年只能改一次
+USERNAME_CHANGE_DAYS = 365
+#: 换下来的旧号冷冻多久
+USERNAME_HOLD_DAYS = 180
+
+_BJ = timezone(timedelta(hours=8))
+
+
+def username_next_change(set_at: datetime | None) -> datetime | None:
+    """下一次能改超级赞号的时刻;None = 没有限制(从没设过,或者是 0133 之前的存量号)。纯函数。
+
+    **按北京时间的日期算,不按时刻**:2026-09-13 晚上 11 点设的,2027-09-13 零点起就能改。
+    按时刻算的话,界面上写着「下次可修改:2027-09-13」,那天上午去改却被拒 —— 日期对不上说明。
+    """
+    if set_at is None:
+        return None
+    day = set_at.astimezone(_BJ).date() + timedelta(days=USERNAME_CHANGE_DAYS)
+    return datetime.combine(day, time.min, tzinfo=_BJ)
+
+
+def username_locked_until(set_at: datetime | None, now: datetime) -> datetime | None:
+    """现在改不了的话,返回什么时候能改;现在能改返回 None。纯函数。"""
+    nxt = username_next_change(set_at)
+    return nxt if nxt is not None and now < nxt else None
+
+
+def hold_blocks(frozen_until: datetime | None, released_by: int | None, owner_type: str,
+                owner_id: int, now: datetime) -> bool:
+    """冷冻中的旧号挡不挡这一次注册。纯函数。
+
+    **原主人不挡**:冷冻防的是别人拿这个号冒充原主人(老联系人、老链接、老二维码找过来,
+    找到的是另一个人),原主人自己拿回去不会让任何人认错人。挡他只会让「清空了又后悔」的人
+    多等半年,却什么也没保护。他拿回去照样算一次修改,一年一次的名额在 set_username 里另外判。
+    """
+    if frozen_until is None or frozen_until <= now:
+        return False
+    return not (owner_type == "user" and released_by == owner_id)
+
+
+def frozen_reason(noun: str = "超级赞号") -> str:
+    """冷冻中的号被人拿来注册时给的话。**不说解冻日期**:日期能倒推出原主人哪天换的号,
+    那是别人的事,不该告诉一个想注册这个号的陌生人。"""
+    if noun == "超级赞号":
+        return f"这个超级赞号刚被原主人换掉或清空,冷冻 {USERNAME_HOLD_DAYS} 天,这期间谁都不能注册"
+    return f"这个{noun}是别人刚换掉或清空的超级赞号,冷冻 {USERNAME_HOLD_DAYS} 天,这期间谁都不能用"
+
+
+async def hold_problem(db: AsyncSession, name: str, owner_type: str, owner_id: int, *,
+                       noun: str = "超级赞号", now: datetime | None = None) -> str | None:
+    """这个名字在冷冻期、来拿的又不是原主人:返回给人看的话;否则 None。"""
+    now = now or datetime.now(timezone.utc)
+    row = (await db.execute(select(UsernameHold.frozen_until, UsernameHold.released_by)
+                            .where(UsernameHold.username_lc == name.lower()))).first()
+    if row is not None and hold_blocks(row[0], row[1], owner_type, owner_id, now):
+        return frozen_reason(noun)
+    return None
+
+
+async def release_user_username(db: AsyncSession, user_id: int, name: str, *,
+                                now: datetime | None = None) -> None:
+    """一个人的超级赞号被换掉 / 清空 / 随注销释放:从命名空间里删掉,旧号冷冻 [USERNAME_HOLD_DAYS] 天。
+
+    删号和写冷冻在同一个事务里(调用方提交):别人要么还看得到号被占着,要么看得到冷冻,
+    中间没有「号空着、冷冻还没写」的一刻。
+    """
+    now = now or datetime.now(timezone.utc)
+    until = now + timedelta(days=USERNAME_HOLD_DAYS)
+    await db.execute(delete(Username).where(Username.owner_type == "user",
+                                            Username.owner_id == user_id))
+    await db.execute(insert(UsernameHold).values(
+        username_lc=name.lower(), released_by=user_id, frozen_until=until, created_at=now
+    ).on_conflict_do_update(index_elements=["username_lc"],
+                            set_={"released_by": user_id, "frozen_until": until,
+                                  "created_at": now}))
+
+
+async def claim_username(db: AsyncSession, name: str, owner_type: str, owner_id: int, *,
+                         noun: str = "超级赞号", now: datetime | None = None) -> str | None:
+    """占下一个名字(人的超级赞号、群 / 频道的公开链接都走这里)。返回 None = 占到了;
+    否则是给人看的话(被占了 / 在冷冻期),**这时调用方必须不提交**(抛异常回滚掉这次插入)。
+
+    主键兜并发:两个人同时抢,晚到的插不进去。冷冻在插入**之后**再看一次:检查和插入之间,
+    这个名字的原主人刚好把它换掉(删号 + 写冷冻,一个事务),我们的插入会等那个事务提交后成功,
+    而之前那次检查没看到冷冻 —— 插入之后这一次看得到。占到了就把这个名字的冷冻记录删掉
+    (那只能是已经过期的,或者是原主人自己拿回去)。
+    """
+    now = now or datetime.now(timezone.utc)
+    lc = name.lower()
+    res = await db.execute(insert(Username).values(
+        username_lc=lc, owner_type=owner_type, owner_id=owner_id
+    ).on_conflict_do_nothing(index_elements=["username_lc"]))
+    if res.rowcount != 1:
+        return f"这个{noun}已经被占用了"
+    problem = await hold_problem(db, name, owner_type, owner_id, noun=noun, now=now)
+    if problem:
+        return problem
+    await db.execute(delete(UsernameHold).where(UsernameHold.username_lc == lc))
+    return None
+
+
+def username_searchable(privacy_col):
+    """SQL:这个人允许别人按超级赞号找到他(隐私项 username_search 没关;没设过 = 允许)。
+    全局搜索、视频里搜 UP 主这些「输号找人」的地方,拿它挡掉关了开关的人。"""
+    return func.coalesce(privacy_col["username_search"].astext, "everyone") != "nobody"
+
+
+async def username_search_off(db: AsyncSession, ids: Iterable[int]) -> set[int]:
+    """这些人里关了「按超级赞号找到我」的。"""
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        return set()
+    return set(await db.scalars(select(SocialProfile.user_id).where(
+        SocialProfile.user_id.in_(ids),
+        SocialProfile.privacy["username_search"].astext == "nobody")))
 
 
 # ---------------- 资料 ----------------

@@ -1,9 +1,14 @@
-"""社交身份接口 `/social/v1`(DEV-PROMPTS-40 #340):资料、@用户名、找人、联系人、拉黑。
+"""社交身份接口 `/social/v1`(DEV-PROMPTS-40 #340):资料、@超级赞号、找人、联系人、拉黑。
+
+「超级赞号」是界面上的叫法(相当于微信号),代码和接口里沿用 username。
+加联系人和 Telegram 一样:直接加进自己的联系人,不用对方同意,也只加在自己这边。
 
 **所有响应都不含别人的手机号**(S2)。按手机号找人只返回找到的那个人的名片,
 找不到和「对方关了按手机号查找」回同一句话 —— 否则等于告诉你「这个号注册过」。
+按超级赞号找人同理(见 resolve)。
 """
 import re
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -17,9 +22,10 @@ from ..models import (PRIVACY_VALUES, SocialBlock, SocialContact, SocialProfile,
 from ..ratelimit import check_daily_limit, check_rate_limit
 from ..security import get_current_user
 from ..services.moderation import find_banned, guard_text
-from ..services.social import (SOCIAL_ROLES, allowed, display_name, ensure_profile,
-                               notify_of, privacy_of, user_card, user_cards,
-                               validate_username)
+from ..services.social import (SOCIAL_ROLES, allowed, claim_username, display_name,
+                               ensure_profile, hold_problem, notify_of, privacy_of,
+                               release_user_username, user_card, user_cards,
+                               username_locked_until, validate_username)
 
 router = APIRouter(prefix="/social/v1", tags=["社交"])
 
@@ -28,6 +34,24 @@ FIND_BY_PHONE_PER_DAY = 20
 
 #: 名片二维码 / 分享链接的前缀(§5.1)
 PUBLIC_BASE = "https://chaojizan.cc"
+
+#: 界面上是开关的隐私项:只有「所有人」「没有人」两档。给它「联系人」没有意义
+#: (能按号找到我的联系人,本来就在他的联系人里了),还会让开关显示不出状态
+SWITCH_PRIVACY = {"username_search": "按超级赞号找到我"}
+
+#: 按超级赞号没找到,和「对方关了按超级赞号找到我」回同一句话
+_NOT_FOUND_BY_USERNAME = "没有找到。可能是超级赞号输错了,或者对方关闭了「按超级赞号找到我」"
+
+
+def card_link(p: SocialProfile) -> str:
+    """名片二维码 / 分享链接。
+
+    有超级赞号、而且允许按号找到 → `/@号`;没有号,或者关了「按超级赞号找到我」→ `/u/<public_id>`。
+    关了开关还用 `/@号` 的话,名片码自己就打不开了(resolve 对别人回 404,见那里的注释)。
+    """
+    if p.username and privacy_of(p)["username_search"] != "nobody":
+        return f"{PUBLIC_BASE}/@{p.username}"
+    return f"{PUBLIC_BASE}/u/{p.public_id}"
 
 
 _READ_METHODS = ("GET", "HEAD", "OPTIONS")
@@ -54,10 +78,14 @@ async def social_user(request: Request, user: User = Depends(get_current_user),
 
 
 def _me_out(user: User, p: SocialProfile) -> dict:
+    locked = username_locked_until(p.username_set_at, datetime.now(timezone.utc))
     return {
         "id": user.id,
         "name": display_name(user),
         "username": p.username,
+        # 超级赞号现在改不了的话,什么时候能改(客户端显示「下次可修改:yyyy-mm-dd」);
+        # null = 现在就能设 / 改。清空了号的人也看这个:清空之后再设一个算一次修改
+        "username_next_change_at": locked.isoformat() if locked else None,
         "bio": p.bio or "",
         "avatar": user.avatar_url or "",
         "public_id": p.public_id,
@@ -65,7 +93,7 @@ def _me_out(user: User, p: SocialProfile) -> dict:
         "notify": notify_of(p),
         "personalize_video": p.personalize_video,
         "coins": p.coins,
-        "link": f"{PUBLIC_BASE}/@{p.username}" if p.username else f"{PUBLIC_BASE}/u/{p.public_id}",
+        "link": card_link(p),
     }
 
 
@@ -100,6 +128,8 @@ async def patch_me(body: MePatch, user: User = Depends(social_user),
                 raise HTTPException(422, f"没有这个隐私项:{k}")
             if v not in PRIVACY_VALUES:
                 raise HTTPException(422, "隐私只能设成 所有人 / 联系人 / 没有人")
+            if k in SWITCH_PRIVACY and v == "contacts":
+                raise HTTPException(422, f"「{SWITCH_PRIVACY[k]}」只能开或关")
             cur[k] = v
         p.privacy = cur
     if body.notify is not None:
@@ -124,50 +154,91 @@ class UsernameIn(BaseModel):
 
 async def _username_problem(db: AsyncSession, name: str, owner_type: str,
                             owner_id: int) -> str | None:
-    problem = validate_username(name)
+    """这个号能不能归我:格式、屏蔽词、被占、冷冻,各有一句明确的话。
+
+    先查占用、再查冷冻,顺序不能反:原主人换号是「删号 + 写冷冻」一个事务,
+    先看到号没了的人,接着一定看得到冷冻;反过来查的话,可能冷冻还没看到、号已经没了。
+    """
+    problem = validate_username(name, noun="超级赞号")
     if problem:
         return problem
     if await find_banned(db, name):
-        return "这个用户名包含不允许使用的内容"
+        return "这个超级赞号包含不允许使用的内容"
 
     row = await db.get(Username, name.lower())
     if row is not None and not (row.owner_type == owner_type and row.owner_id == owner_id):
-        return "这个用户名已经被占用了"
-    return None
+        return "这个超级赞号已经被占用了"
+    return await hold_problem(db, name, owner_type, owner_id)
+
+
+def _status_of(problem: str) -> int:
+    """被占、冷冻是 409(号本身没毛病,只是现在归不了你);格式、保留字、屏蔽词是 422。"""
+    return 409 if ("占用" in problem or "冷冻" in problem) else 422
 
 
 @router.get("/username-check")
 async def username_check(u: str, user: User = Depends(social_user),
                          db: AsyncSession = Depends(get_db)):
-    """输入时实时检查(占用、保留字、格式各有一句明确的话)。"""
-    problem = await _username_problem(db, u, "user", user.id)
+    """输入时实时检查(占用、冷冻、保留字、格式各有一句明确的话)。
+
+    只看这个号能不能归我;我自己现在能不能改(一年一次)看 /me 的 username_next_change_at。
+    """
+    problem = await _username_problem(db, u.strip().lstrip("@"), "user", user.id)
     return {"ok": problem is None, "reason": problem or ""}
 
 
 @router.put("/me/username")
 async def set_username(body: UsernameIn, user: User = Depends(social_user),
                        db: AsyncSession = Depends(get_db)):
-    """设置 / 修改 / 清空(传空串)用户名。旧名字立即释放。"""
+    """设置 / 修改 / 清空(传空串)超级赞号。规则(迁移 0133,2026-09 用户拍板):
+
+    - 第一次设置随时能设;之后一年只能改一次,从上一次设置 / 修改那天算满 365 天
+      (username_next_change)。存量号(0133 之前设的,username_set_at 为空)下一次不用等;
+    - **清空随时能清**,不看一年的名额:不想再被人按号找到,不能被「一年只能改一次」卡住。
+      清空不重新计时,但清空之后再设一个算一次修改 —— 否则「清空 → 马上设新号」就把一年一次绕过去了;
+    - 换掉、清空的旧号冷冻 180 天,谁都不能注册;原主人自己拿回来不受冷冻限制,但算一次修改
+      (services/social.hold_blocks 里写了为什么);
+    - 只改大小写不算修改:号不区分大小写,链接、按号找人都照旧,谁也不会因此认错人。
+    """
     await check_rate_limit("social_username", str(user.id), 10)
     p = await ensure_profile(db, user.id)
     name = body.username.strip().lstrip("@")
-    if p.username:
-        await db.execute(delete(Username).where(Username.owner_type == "user",
-                                                Username.owner_id == user.id))
+    old = p.username
+    now = datetime.now(timezone.utc)
     if not name:
-        p.username = None
+        if old:
+            await release_user_username(db, user.id, old, now=now)
+            p.username = None
         await db.commit()
         return _me_out(user, p)
+    if old and old.lower() == name.lower():
+        if old != name:
+            # 照样过一遍格式:str.lower() 会把个别非 ASCII 字符(比如开尔文符号 K)变成 k,
+            # 不查的话能借「只改大小写」塞进一个长得像字母的怪字符
+            problem = validate_username(name, noun="超级赞号")
+            if problem:
+                raise HTTPException(422, problem)
+            p.username = name
+            await db.commit()
+        return _me_out(user, p)
+    locked = username_locked_until(p.username_set_at, now)
+    if locked is not None:
+        raise HTTPException(409, {
+            "error": "username_cooldown",
+            "message": f"超级赞号一年只能改一次,下次可修改:{locked:%Y-%m-%d}",
+            "next_change_at": locked.isoformat(),
+        })
     problem = await _username_problem(db, name, "user", user.id)
     if problem:
-        raise HTTPException(409 if "占用" in problem else 422, problem)
-    res = await db.execute(insert(Username).values(
-        username_lc=name.lower(), owner_type="user", owner_id=user.id
-    ).on_conflict_do_nothing(index_elements=["username_lc"]))
-    if res.rowcount != 1:
-        # 两个人同时抢同一个名字:主键兜底,晚到的那个在这里拿到明确的话
-        raise HTTPException(409, "这个用户名已经被占用了")
+        raise HTTPException(_status_of(problem), problem)
+    if old:
+        await release_user_username(db, user.id, old, now=now)
+    # 两个人同时抢同一个号:主键兜底,晚到的那个在这里拿到明确的话(不提交,换下来的旧号也跟着回滚)
+    problem = await claim_username(db, name, "user", user.id, now=now)
+    if problem:
+        raise HTTPException(_status_of(problem), problem)
     p.username = name
+    p.username_set_at = now
     await db.commit()
     return _me_out(user, p)
 
@@ -190,23 +261,38 @@ async def get_user(user_id: int, user: User = Depends(social_user),
 @router.get("/resolve/{username}")
 async def resolve(username: str, user: User = Depends(social_user),
                   db: AsyncSession = Depends(get_db)):
-    """@用户名 → 人或者公开群 / 频道。"""
+    """@超级赞号 → 人,或者公开群 / 频道(添加联系人按号找、点开 `chaojizan.cc/@号` 链接都走这里)。
+
+    **对方关了「按超级赞号找到我」**(隐私项 username_search = nobody):对别人回和「没有这个号」
+    一模一样的 404,不然等于告诉你「这个号有人用,只是不让你找」。拉黑了的两个人之间也找不到
+    (和按手机号找人一样,都走 services/social.allowed)。
+
+    **那名片链接为什么照样能打开**:`chaojizan.cc/@号` 和在输入框里输号是一回事 —— 知道号就能拼出
+    这个链接,所以它跟着开关走,关了之后以前发出去的 @ 链接也打不开。本人的名片二维码 / 分享链接
+    这时改用 `chaojizan.cc/u/<public_id>`(card_link),走 /resolve-id,不看这个开关:public_id
+    是 12 位随机串,猜不出来,拿得到它就说明是他本人给出去的(或者看过他名片的人转给你的,
+    和转发名片一样),不是「知道号就能找」。所以关了开关,本人分享出去的名片码照样能加他。
+    """
     row = await db.get(Username, username.strip().lstrip("@").lower())
     if row is None:
-        raise HTTPException(404, "没有找到这个用户名")
+        raise HTTPException(404, _NOT_FOUND_BY_USERNAME)
     if row.owner_type == "user":
+        p = await db.get(SocialProfile, row.owner_id)
+        if not await allowed(db, p, row.owner_id, user.id, "username_search"):
+            raise HTTPException(404, _NOT_FOUND_BY_USERNAME)
         return {"type": "user", "user": await _card_or_404(db, user, row.owner_id)}
     from ..services.chat_view import public_chat_card  # 聊天模块(#344)提供
     card = await public_chat_card(db, user, row.owner_id)
     if card is None:
-        raise HTTPException(404, "没有找到这个用户名")
+        raise HTTPException(404, _NOT_FOUND_BY_USERNAME)
     return {"type": "chat", "chat": card}
 
 
 @router.get("/resolve-id/{public_id}")
 async def resolve_public_id(public_id: str, user: User = Depends(social_user),
                             db: AsyncSession = Depends(get_db)):
-    """没设用户名的人,名片二维码是 `/u/<public_id>`。"""
+    """名片码 `/u/<public_id>`:没设超级赞号、或者关了「按超级赞号找到我」的人用它。
+    不看 username_search 开关,为什么见 resolve 的注释。"""
     uid = await db.scalar(select(SocialProfile.user_id)
                           .where(SocialProfile.public_id == public_id))
     if uid is None:

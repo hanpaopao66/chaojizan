@@ -11,7 +11,8 @@
 - 群主 / 频道主注销:交给资历最老的管理员,没有管理员给最早进来的成员,一个人都不剩就解散;
   其他群 / 频道里是正常的「退出」;
 - 收藏夹整个删;私聊留着(对面那一方的会话还在,只是对面显示「已注销用户」、他说过的话没了);
-- @用户名释放,签名、隐私、通知设置清空;联系人、拉黑两个方向都删。
+- @超级赞号释放(顾客账号的号冷冻 180 天,和换号一样,见 services/social.release_user_username),
+  签名、隐私、通知设置清空;联系人、拉黑两个方向都删。
 """
 from collections import defaultdict
 
@@ -21,9 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import (ACTIVE_ROLES, Chat, ChatFolder, ChatMember, ChatMessage, InviteLink,
                       JoinRequest, MediaFile, MessageHide, MessageMention, MessageReaction,
                       Poll, PollVote, ScheduledMessage, SocialBlock, SocialContact,
-                      SocialProfile, StickerSet, UserEvent, UserStickerSet, Username)
+                      SocialProfile, StickerSet, User, UserEvent, UserRole, UserStickerSet,
+                      Username)
 from .chat_view import now_utc
 from .rt_events import append_chat_event, append_user_event
+from .social import release_user_username
 from .video import _media_objects, remove_objects_after_commit
 
 #: 一条 del 事件里最多带多少个 seq(事件太大客户端解析、推送都吃力)
@@ -120,9 +123,15 @@ async def purge_user(db: AsyncSession, user_id: int) -> dict:
         (SocialContact.owner_id == user_id) | (SocialContact.contact_id == user_id)))
     await db.execute(delete(SocialBlock).where(
         (SocialBlock.user_id == user_id) | (SocialBlock.blocked_id == user_id)))
+    prof = await db.get(SocialProfile, user_id)
+    owner = await db.get(User, user_id)
+    if prof is not None and prof.username and owner is not None \
+            and owner.role == UserRole.customer:
+        # 超级赞号和换号、清空一样冷冻 180 天(迁移 0133):注销后马上被别人注册的话,拿着老链接、
+        # 老二维码、记着这个号的人找到的是另一个人。机器人(删机器人也走这里)的号不冷冻
+        await release_user_username(db, user_id, prof.username)
     await db.execute(delete(Username).where(Username.owner_type == "user",
                                             Username.owner_id == user_id))
-    prof = await db.get(SocialProfile, user_id)
     if prof is not None:
         prof.username = None
         prof.bio = ""

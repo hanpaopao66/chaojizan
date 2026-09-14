@@ -12,7 +12,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, or_, select, tuple_
+from sqlalchemy import and_, case, func, or_, select, tuple_
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from ..models import (Follow, SearchTerm, SearchTermUser, SocialProfile, User, U
                       VideoNotInterested, WatchHistory)
 from . import video as vsvc
 from . import video_rank as rank
-from .social import ensure_profile
+from .social import ensure_profile, username_searchable
 
 PAGE = rank.SCREEN_SIZE
 #: 热搜门槛:24 小时内至少 5 个不同的人搜过(§2.2,防刷)
@@ -321,8 +321,10 @@ async def search_videos(db: AsyncSession, viewer: User | None, q: str, *, order:
     title_hit = Video.title.ilike(like, escape="\\")
     tag_hit = func.array_to_string(Video.tags, " ").ilike(like, escape="\\")
     desc_hit = Video.description.ilike(like, escape="\\")
+    # UP 主的超级赞号只在他没关「按超级赞号找到我」时参与匹配(和 /social/v1/resolve 一个口径)
     up_hit = or_(uploader.c.name.ilike(like, escape="\\"),
-                 func.coalesce(prof.c.username, "").ilike(like, escape="\\"))
+                 and_(func.coalesce(prof.c.username, "").ilike(like, escape="\\"),
+                      username_searchable(prof.c.privacy)))
     conds = [*_listed_filter(zone=zone), or_(title_hit, tag_hit, desc_hit, up_hit)]
     if duration in DURATION_FILTERS:
         lo, hi = DURATION_FILTERS[duration]
@@ -380,7 +382,8 @@ async def hot_terms(db: AsyncSession) -> list[dict]:
 
 
 async def search_users(db: AsyncSession, viewer: User | None, q: str, page: int = 0) -> dict:
-    """用户搜索:名字或 @用户名 包含关键词的用户端账号。按粉丝数排。"""
+    """用户搜索:名字或超级赞号包含关键词的用户端账号。按粉丝数排。
+    按超级赞号匹配只算没关「按超级赞号找到我」的人。"""
     like = _like(" ".join(q.split()))
     fans = (select(func.count()).select_from(Follow).where(Follow.followee_id == User.id)
             .correlate(User).scalar_subquery())
@@ -389,7 +392,8 @@ async def search_users(db: AsyncSession, viewer: User | None, q: str, page: int 
                                                      SocialProfile.user_id == User.id)
         .where(User.role == UserRole.customer, User.deleted_at.is_(None),
                or_(User.name.ilike(like, escape="\\"),
-                   func.coalesce(SocialProfile.username, "").ilike(like, escape="\\")))
+                   and_(func.coalesce(SocialProfile.username, "").ilike(like, escape="\\"),
+                        username_searchable(SocialProfile.privacy))))
         .order_by(fans.desc(), User.id).offset(page * PAGE).limit(PAGE + 1))).all()
     more = len(rows) > PAGE
     rows = rows[:PAGE]

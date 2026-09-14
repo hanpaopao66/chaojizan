@@ -22,6 +22,9 @@ from .db import Base
 PRIVACY_DEFAULTS: dict[str, str] = {
     "last_seen": "everyone",     # 最后上线时间
     "phone_search": "everyone",  # 谁能按完整手机号找到我
+    # 别人输入我的超级赞号(@号)能不能找到我。界面上是开关,只有 everyone / nobody 两档
+    # (routers/social.SWITCH_PRIVACY);关了之后名片码改用 /u/<public_id>,见 routers/social.resolve
+    "username_search": "everyone",
     "group_invite": "everyone",  # 谁能直接把我拉进群(不允许时对方只能发邀请链接)
     "calls": "everyone",         # 谁能给我打电话
     "forwards": "everyone",      # 我的消息被转发时,是否附带指向我的链接
@@ -55,7 +58,12 @@ class SocialProfile(Base):
                                          primary_key=True)
     #: 对外的随机编号:没设用户名时名片二维码用 `/u/<public_id>`,不暴露自增 id
     public_id: Mapped[str] = mapped_column(String(16), unique=True)
+    #: 超级赞号(界面上的叫法,相当于微信号;代码和接口里沿用 username)
     username: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    #: 上一次设置 / 修改超级赞号的时间:一年只能改一次,从这天算(services/social.username_next_change)。
+    #: 空 = 从没设过,或者是迁移 0133 之前就设好的存量号 —— 这两种下一次都不用等
+    username_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),
+                                                             nullable=True)
     bio: Mapped[str] = mapped_column(String(140), default="")
     privacy: Mapped[dict] = mapped_column(JSONB, default=dict)
     notify: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -85,6 +93,29 @@ class Username(Base):
     username_lc: Mapped[str] = mapped_column(String(32), primary_key=True)
     owner_type: Mapped[str] = mapped_column(String(8))  # user / chat
     owner_id: Mapped[int] = mapped_column(Integer, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now())
+
+
+class UsernameHold(Base):
+    """被换掉、清空、随注销释放的超级赞号,冷冻期内谁都不能注册(迁移 0133)。
+
+    冷冻是为了认得这个号的人:老联系人、发出去的名片链接和二维码。号一放出来就被别人注册的话,
+    他们找到的就是另一个人 —— 冒充的门就开了。所以群 / 频道的公开链接也不能用冷冻中的号
+    (共用 usernames 这个命名空间);**原主人不受冷冻限制**,他拿回去不会让任何人认错人,
+    但拿回去算一次修改,照样要等一年一次的名额(services/social.hold_blocks)。
+
+    和 usernames 分开放:冷冻中的号不属于任何人,放进 usernames 的话,按号找人、@ 提及、
+    全局搜索这些读 usernames 的地方都得记着跳过它,漏一处就是把号解析到原主人身上。
+    """
+
+    __tablename__ = "username_holds"
+
+    username_lc: Mapped[str] = mapped_column(String(32), primary_key=True)
+    #: 谁放出来的(原主人)。他自己拿回去不受冷冻限制
+    released_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    frozen_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                  server_default=func.now())
 

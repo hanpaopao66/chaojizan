@@ -190,6 +190,7 @@ e2e_refund_channels
 e2e_soldout_gate
 e2e_stays_noshow_release
 e2e_social_profile
+e2e_custom_id
 e2e_chat_private
 e2e_media
 e2e_chat_groups

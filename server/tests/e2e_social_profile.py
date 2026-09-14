@@ -32,11 +32,14 @@ def main():
     assert r.get("_error") == 409 and "占用" in r["detail"], r
     chk = b.get(f"/social/v1/username-check?u={name.upper()}")
     assert chk["ok"] is False and "占用" in chk["reason"], chk
-    # 改名:旧名字立即释放
+    # 改名:一年一次、旧号冷冻 180 天(迁移 0133),细节在 e2e_custom_id。
+    # 这里把 A 当成 0133 之前的存量号(username_set_at 为空,下一次修改不用等),换一次号
     new_name = name + "x"
+    sql("UPDATE social_profiles SET username_set_at = NULL WHERE user_id = :u", {"u": a.id})
     a.put("/social/v1/me/username", {"username": new_name})
-    assert b.get(f"/social/v1/username-check?u={name}")["ok"] is True
-    print("  ✓ 用户名:8 种不合规各有明确的话,大小写不敏感唯一,改名后旧名释放")
+    chk = b.get(f"/social/v1/username-check?u={name}")
+    assert chk["ok"] is False and "冷冻" in chk["reason"], f"换下来的旧号冷冻,别人拿不到:{chk}"
+    print("  ✓ 超级赞号:8 种不合规各有明确的话,大小写不敏感唯一,换号后旧号冷冻")
 
     # ---- 找人 ----
     card = b.get(f"/social/v1/resolve/{new_name}")

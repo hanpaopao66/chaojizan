@@ -32,8 +32,8 @@ from .entities import (EntityError, auto_entities, mask_spoilers, mentioned_user
 from . import sanctions
 from .moderation import guard_text
 from .rt_events import after_commit, append_chat_event, append_user_event
-from .social import (SOCIAL_ROLES, allowed, blocked_between, display_name, ensure_profile,
-                     new_public_id, validate_username)
+from .social import (SOCIAL_ROLES, allowed, blocked_between, claim_username, display_name,
+                     ensure_profile, new_public_id, validate_username)
 
 TEXT_MAX = 4096
 CAPTION_MAX = 1024
@@ -486,15 +486,14 @@ async def _set_chat_username(db: AsyncSession, chat: Chat, actor: User, name: st
         return
     if not await has_identity(db, actor.id):
         raise _err(403, "设公开链接(公开群 / 频道)要先完成实名认证")
-    problem = validate_username(name)
+    problem = validate_username(name, noun="链接名")
     if problem:
         raise _err(422, problem)
     await guard_text(db, name, "链接名")
-    res = await db.execute(insert(Username).values(
-        username_lc=name.lower(), owner_type="chat", owner_id=chat.id
-    ).on_conflict_do_nothing(index_elements=["username_lc"]))
-    if res.rowcount != 1:
-        raise _err(409, "这个链接名已经被占用了")
+    # 和超级赞号共用一个命名空间:被占了、是别人刚换下来还在冷冻的超级赞号,都拿不到(迁移 0133)
+    problem = await claim_username(db, name, "chat", chat.id, noun="链接名")
+    if problem:
+        raise _err(409, problem)
     chat.username = name
 
 

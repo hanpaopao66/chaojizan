@@ -21,7 +21,7 @@ from ..services.chat_view import (can_read_chat, chat_card, dialogs, enrich_mess
                                   is_active, member_of, messages_page, now_utc,
                                   public_chat_card, visible_floor)
 from ..services.rt_events import append_user_event
-from ..services.social import user_cards
+from ..services.social import user_cards, username_search_off
 from .social import social_user
 
 async def chat_on(db: AsyncSession = Depends(get_db)) -> None:
@@ -718,13 +718,15 @@ async def search(q: str = Query(min_length=1, max_length=64), me: User = Depends
         ChatMember.chat_id.in_(select(ChatMember.chat_id).where(
             ChatMember.user_id == me.id, ChatMember.role.in_(ACTIVE_ROLES))),
         User.id != me.id, User.name.ilike(like)).limit(20)))
-    # 公开的:用户名前缀匹配
+    # 公开的:超级赞号 / 公开链接前缀匹配。关了「按超级赞号找到我」的人不出(和 /social/v1/resolve 一个口径)
     uname = term.lstrip("@").lower()
     public_users, public_chats = [], []
     if len(uname) >= 3:
         rows = (await db.execute(select(Username.owner_type, Username.owner_id).where(
             Username.username_lc.like(f"{uname}%")).limit(20))).all()
-        public_users = [oid for t, oid in rows if t == "user" and oid != me.id]
+        hidden = await username_search_off(db, [oid for t, oid in rows if t == "user"])
+        public_users = [oid for t, oid in rows if t == "user" and oid != me.id
+                        and oid not in hidden]
         for t, oid in rows:
             if t == "chat":
                 card = await public_chat_card(db, me, oid)
