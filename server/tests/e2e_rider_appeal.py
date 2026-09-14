@@ -13,7 +13,8 @@
 
 另外守两条口径:
 - **等餐时长只记录不判罚**(有了它很容易顺手加"扣商家分",不做);
-- **申诉成立不加分不补钱** —— 平台没有骑手评分体系,所以没有分可加。
+- **申诉成立不加分不补钱** —— 超时、差评本来就不进骑手信用分(那里只算平台判定成立的事),
+  所以没有分可加。
 """
 import asyncio
 import random
@@ -210,7 +211,7 @@ async def main():
 
     mine = call("GET", "/riders/appeals", rider)
     assert len(mine["items"]) == 1 and mine["items"][0]["status"] == "pending"
-    assert "没有骑手服务分" in mine["note"], mine["note"]
+    assert "本来就不扣信用分" in mine["note"] and "我的信用分" in mine["note"], mine["note"]
     print("✓ 申诉列表可查进度,口径一致")
 
     # ---- admin 核定:驳回路径必须真的能走到 ----

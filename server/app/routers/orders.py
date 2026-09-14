@@ -1235,9 +1235,9 @@ async def transition(
     await db.commit()
     await db.refresh(order)
     if payload.to_status == OrderStatus.COMPLETED:
-        # 完成一单 = 顾客信用分的加分项变了。提交之后再打缓存(见 customer_credit.invalidate)
-        from ..services import customer_credit
-        await customer_credit.invalidate(order.customer_id)
+        # 完成一单 = 顾客、店主、骑手三方信用分的加分项都变了。提交之后再打缓存(见 credit.invalidate)
+        from ..services import credit
+        await credit.invalidate_order(db, order)
     # 送达超时判赔(平台承担,独立事务,失败不影响送达)
     if payload.to_status == OrderStatus.DELIVERED:
         try:
@@ -1816,9 +1816,9 @@ async def pickup_verify(
                         OrderStatus.COMPLETED.value, user)
     await db.commit()
     await db.refresh(order)
-    # 完成一单:顾客信用分的加分项变了
-    from ..services import customer_credit
-    await customer_credit.invalidate(order.customer_id)
+    # 完成一单:顾客、店主(骑手,如果有)信用分的加分项变了
+    from ..services import credit
+    await credit.invalidate_order(db, order)
     await _notify(order)
     # 完成也走 fanout(#302):骑手跑完一单、钱这一刻进账,
     # 在此之前他没有任何回音,要自己翻钱包页去看
@@ -2162,10 +2162,10 @@ async def my_orders(
             ))
     orders = list(await db.scalars(query))
     outs = await orders_out(db, orders, user)
-    # 顾客信用分:**只给接了单的商家、接到单的骑手**,待接单的看不到(见 customer_credit.attach)。
+    # 交易对方的信用分:**接单之后、只给这一单的交易对方**,待接单的看不到(见 credit.attach)。
     # 这里是它进响应体的两个口子之一,另一个是下面的订单详情
-    from ..services import customer_credit
-    await customer_credit.attach(db, outs, orders, user)
+    from ..services import credit
+    await credit.attach(db, outs, orders, user)
     return outs
 
 
@@ -2418,9 +2418,9 @@ async def get_order(
         owner = await db.get(User, merchant.owner_id)
         if owner:
             out.merchant_phone = owner.dial_phone
-    # 顾客信用分:商家接单之后、这一单的骑手才有(归属已由 visible_order_or_404 核过)
-    from ..services import customer_credit
-    await customer_credit.attach(db, [out], [order], user)
+    # 交易对方的信用分:接单之后、这一单的当事人才有(归属已由 visible_order_or_404 核过)
+    from ..services import credit
+    await credit.attach(db, [out], [order], user)
     return out
 
 

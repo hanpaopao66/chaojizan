@@ -106,6 +106,29 @@ class Test申诉那一节三端一字不差:
             assert f"{hours} 小时" in "".join(self._appeal(r)["items"]), a
 
 
+class Test信用分那两节三端都有:
+    """顾客、商家、骑手三种角色同一套信用分机制(services/credit.py):三端都有「信用分」
+    (自己的分怎么算)和「交易对方的信用分」(接单之后能看到谁的)两节,顺序一样、条数一样。"""
+
+    TITLES = ("信用分", "交易对方的信用分")
+
+    def test_三端都有两节_顺序和条数一样(self, three):
+        shapes = {}
+        for a, r in three.items():
+            titles = [s["title"] for s in r["sections"]]
+            assert all(t in titles for t in self.TITLES), (a, titles)
+            i, j = (titles.index(t) for t in self.TITLES)
+            assert j == i + 1, f"{a}:两节该挨着"
+            shapes[a] = tuple(len(r["sections"][k]["items"]) for k in (i, j))
+        assert len(set(shapes.values())) == 1, shapes
+
+    def test_都写明接单之后才看得到_不进排序派单(self, three):
+        for a, r in three.items():
+            sec = {s["title"]: "".join(s["items"]) for s in r["sections"]}
+            assert "之后" in sec["信用分"] and "看不到明细" in sec["信用分"], a
+            assert "看不到明细" in sec["交易对方的信用分"], a
+
+
 class Test数字不许手写:
     def test_没有裸的中文数字规则(self, three):
         """公示 30 天 3 起、代码里写 5 起,这种事只要可能发生就会发生。

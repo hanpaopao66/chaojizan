@@ -136,7 +136,9 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         if user.role.value != "merchant":
             raise HTTPException(403, "售后判责只有商家可以申诉")
         a = await db.get(AfterSale, payload.target_id)
-        shop = await owned_shop(db, user)
+        # 显式传这条售后的门店:不传的话走 X-Shop-Id /「我唯一的那家店」,连锁店主在
+        # 「我的信用分」里申诉另一家门店的售后判责会被判成 404(权限照样完整校验)
+        shop = await owned_shop(db, user, a.merchant_id) if a is not None else None
         if a is None or shop is None or a.merchant_id != shop.id:
             raise HTTPException(404, "售后记录不存在")
         if a.status.value != "accepted" or a.fault == "rider":
@@ -615,6 +617,20 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
             {"type": "review_hidden", "review_id": review.id})
 
 
+#: 结论会改信用分扣分项的那几类申诉(services/credit.py 的 ORIGINAL_CHANNEL,
+#: 加上顾客的「售后被拒」—— 它改判成立就是店主的一条扣分)
+_CREDIT_TARGETS = ("delivery_issue", "after_sale", "after_sale_rejected")
+
+
+async def _target_order(db: AsyncSession, appeal: Appeal) -> Order | None:
+    """被申诉的那条配送异常 / 售后记录是哪一单。"""
+    if appeal.target_type == "delivery_issue":
+        issue = await db.get(DeliveryIssue, appeal.target_id)
+        return await db.get(Order, issue.order_id) if issue else None
+    a = await db.get(AfterSale, appeal.target_id)
+    return await db.get(Order, a.order_id) if a else None
+
+
 @router.post("/admin/appeals/{appeal_id}/resolve", response_model=AdminAppealOut)
 async def resolve_appeal(
     appeal_id: int,
@@ -640,11 +656,13 @@ async def resolve_appeal(
     appeal.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(appeal)
-    if appeal.role == "customer":
-        # 顾客的申诉有结论了:配送异常改判的那一条不再扣信用分;维持原判的,
-        # 明细页上那条的申诉状态也变了。提交之后再打缓存
-        from ..services import customer_credit
-        await customer_credit.invalidate(appeal.user_id)
+    if appeal.target_type in _CREDIT_TARGETS:
+        # 配送异常、售后判责的申诉有结论了:改判的那一条不再扣信用分(判顾客原因的、判骑手
+        # 责任的、判商家责任的都走这里);「售后被拒」改判成立反过来是店主多了一条扣分。
+        # 这一单三方的缓存都打掉,提交之后再打(见 services/credit.py)
+        from ..services import credit
+        await credit.invalidate(appeal.user_id)
+        await credit.invalidate_order(db, await _target_order(db, appeal))
     applicant = await db.get(User, appeal.user_id)
     out = AdminAppealOut.model_validate(appeal)
     out.role, out.name, out.phone = appeal.role, applicant.name, applicant.phone

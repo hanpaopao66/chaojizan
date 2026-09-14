@@ -1060,8 +1060,9 @@ class OrderCreateIn(BaseModel):
     salutation: str = Field(default="", max_length=12)
 
 
-class CustomerCreditOut(BaseModel):
-    """交易对方看到的顾客信用分:分数和等级,**没有明细**(见 services/customer_credit.py)。"""
+class CreditBriefOut(BaseModel):
+    """交易对方看到的信用分:分数和等级,**没有明细**(见 services/credit.py 的 brief_of)。
+    顾客、商家、骑手三种角色同一个形状。"""
     score: int
     level: str
     level_label: str
@@ -1213,10 +1214,13 @@ class OrderOut(BaseModel):
     rider_name: str = ""
     rider_phone: str = ""
     merchant_phone: str = ""
-    #: 顾客信用分(只有分数和等级)。**只给接了这一单的商家、接到这一单的骑手**,
-    #: 只由 orders.my_orders / get_order 经 customer_credit.attach 填;其余一律为空 ——
-    #: 抢单池、新单提醒、开放接口里没有它。不用来拒单、排单、定价
-    customer_credit: CustomerCreditOut | None = None
+    #: 交易对方的信用分,每个都只有分数和等级(见 services/credit.py)。**只在接单之后、
+    #: 只给这一单的交易对方**:顾客的给接了单的商家和接到单的骑手;商家的给顾客和骑手;
+    #: 骑手的给顾客和商家。只由 orders.my_orders / get_order 经 credit.attach 填,其余一律为空 ——
+    #: 抢单池、新单提醒、店铺页、搜索、开放接口里都没有。不用来拒单、挑单、排序、定价
+    customer_credit: CreditBriefOut | None = None
+    merchant_credit: CreditBriefOut | None = None
+    rider_credit: CreditBriefOut | None = None
 
 
 class OrderEventOut(BaseModel):
@@ -1628,8 +1632,8 @@ class TicketOut(BaseModel):
 
 class AdminTicketOut(TicketOut):
     user_phone: str = ""
-    #: 这张工单是信用分申诉时带上(见 customer_credit.ticket_appeal_summaries):
-    #: {id, kind, record_id, user_id, status, resolve_note}。后台据此给出「申诉成立 / 维持」
+    #: 这张工单是信用分申诉时带上(见 credit.ticket_appeal_summaries):{id, kind, record_id,
+    #: user_id, status, resolve_note, role, role_label, kind_label}。后台据此给出「申诉成立 / 维持」
     credit_appeal: dict | None = None
 
 

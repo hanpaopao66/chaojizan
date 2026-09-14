@@ -64,7 +64,7 @@ from .routers import video as video_router
 from .routers import video_admin as video_admin_router
 from .routers import social_admin as social_admin_router
 from .routers import social_sanctions as social_sanctions_router
-from .routers import customer_credit as customer_credit_router
+from .routers import credit as credit_router
 from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
 from .realtime import gateway as rt_gateway
 from .services import rt_events  # noqa: F401  注册提交后分发实时事件的钩子
@@ -572,8 +572,8 @@ app.include_router(vouchers.router)
 app.include_router(stays.router)
 app.include_router(payout.router)
 app.include_router(appeals.router)
-# 顾客信用分:本人明细、走工单的申诉、后台复核(公式在 /transparency/credit)
-app.include_router(customer_credit_router.router)
+# 信用分(顾客、商家、骑手):本人明细、走工单的申诉、后台复核(公式在 /transparency/credit)
+app.include_router(credit_router.router)
 app.include_router(invoices.router)
 app.include_router(tax.router)
 app.include_router(platform.router)

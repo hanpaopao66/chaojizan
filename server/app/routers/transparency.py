@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -755,16 +755,19 @@ async def liability_spec():
 
 
 @router.get("/credit")
-async def credit_spec():
-    """顾客信用分怎么算(公开无鉴权):公式、每项权重、看多少天、谁能看到、
-    不能用来做什么、怎么申诉。
+async def credit_spec(role: str = "customer"):
+    """信用分怎么算(公开无鉴权):公式、每项权重、看多少天、谁能看到、
+    不能用来做什么、怎么申诉。`role` 是 customer(默认)/ merchant / rider ——
+    三种角色同一套机制,只有「什么算扣分」「什么不扣分」「谁看得到」按角色不同。
 
-    每个数字**从 services/customer_credit.py 的常量直接读**,不另抄一份 ——
-    本人明细页、规则页、算分用的都是那几个常量(tests/unit/test_customer_credit.py 钉着)。
+    每个数字**从 services/credit.py 的常量直接读**,不另抄一份 ——
+    本人明细页、规则页、算分用的都是那几个常量(tests/unit/test_credit.py 钉着)。
     """
-    from ..services import customer_credit as cc
+    from ..services import credit
 
-    return cc.public_spec()
+    if role not in credit.ROLES:
+        raise HTTPException(422, "role 只能是 customer / merchant / rider")
+    return credit.public_spec(role)
 
 
 @router.get("/queue")

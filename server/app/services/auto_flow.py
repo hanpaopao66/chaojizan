@@ -796,11 +796,11 @@ async def sweep_once() -> dict[str, int]:
         from .profit_sharing import sweep_pending as _ps_sweep
         await _ps_sweep(db)
         await db.commit()
-        # 自动完成的单:顾客信用分的加分项变了。提交之后再打缓存
-        # (自取超时没来取的那种不加分,但缓存照样要刷,口径由 customer_credit 自己判)
+        # 自动完成的单:顾客、店主、骑手三方信用分的加分项变了。提交之后再打缓存
+        # (自取超时没来取的那种顾客不加分,但缓存照样要刷,口径由 services/credit 自己判)
         if completed or pickup_done:
-            from .customer_credit import invalidate
-            await invalidate(*{o.customer_id for o in [*completed, *pickup_done]})
+            from .credit import invalidate_orders
+            await invalidate_orders(db, [*completed, *pickup_done])
         # 超时赔付兜底补发:送达时判赔失败/进程重启漏掉的,清扫补上
         # (compensate_if_late 自带幂等与豁免判断,独立事务)
         try:

@@ -767,9 +767,11 @@ async def resolve_delivery_issue(
     issue.resolve_note = payload.note.strip()
     issue.resolved_at = datetime.now(timezone.utc)
     await db.commit()
-    # 顾客信用分:判为顾客原因是扣分项,先行赔付是订单完成 —— 两种都要刷新
-    from ..services import customer_credit
-    await customer_credit.invalidate(order.customer_id)
+    # 信用分:判为顾客原因是顾客的扣分项,先行赔付是骑手的扣分项、也是订单完成
+    # (店主那边多一单)—— 三方都要刷新。骑手按上报的那个人算(和 appeals 的申诉资格同一个口径)
+    from ..services import credit
+    await credit.invalidate_order(db, order)
+    await credit.invalidate(issue.rider_id)
 
     await manager.broadcast(
         f"order:{order.order_no}",
@@ -789,7 +791,9 @@ async def resolve_delivery_issue(
                            f"退款 ¥{refunded / 100:.2f} 将原路返回。给您添麻烦了。",
                            {"order_no": order.order_no})
         await push_to_user(issue.rider_id, "异常已处理(平台先行赔付)",
-                           "用户已获赔付;按平台原则不扣你的工资,注意配送安全",
+                           "用户已获赔付;按平台原则不扣你的工资,注意配送安全。"
+                           f"这次记为骑手责任(信用分 −{credit.FAULT_POINTS}),"
+                           "不认同可以在 72 小时内申诉",
                            {"order_no": order.order_no})
 
     out = DeliveryIssueOut.model_validate(issue)
@@ -1307,11 +1311,22 @@ async def after_sale_rider_fault(
     # refund_cents 由 request_refund 自己累计(提前加会让通道反推出 2T)
     await request_refund(db, order, refund_amount, "骑手责任,平台先行赔付")
     await db.commit()
+    # 判骑手责任是骑手信用分的扣分项(services/credit.py)。提交之后再打缓存
+    from ..services import credit
+    await credit.invalidate_order(db, order)
     await push_to_user(
         a.customer_id, "售后已通过(平台先行赔付)",
         f"退款 ¥{refund_amount / 100:.2f} 将原路返回,含配送费。给您添麻烦了。",
         {"order_no": order.order_no},
     )
+    # 骑手原来收不到任何消息 —— 这一条要扣他的信用分,判了他就得知道,也得知道能申诉
+    if order.rider_id:
+        await push_to_user(
+            order.rider_id, "一笔售后判为骑手责任",
+            f"订单 {order.order_no[-6:]} 的售后平台仲裁为配送责任,已由平台先行赔付,"
+            f"不扣你的钱;这次记为骑手责任(信用分 −{credit.FAULT_POINTS}),"
+            "不认同可以在「我的信用分」里申诉",
+            {"order_no": order.order_no}, record_skip=True)
     return {"refunded_cents": refund_amount, "fault": "rider"}
 
 
@@ -2597,9 +2612,9 @@ async def risk_verdict(
         raise HTTPException(404, "订单不存在或无风控标记")
     order.risk_flags = {**order.risk_flags, "status": verdict}
     await db.commit()
-    # 确认刷单的单不算顾客信用分里的「完成一单」,结论变了要刷新
-    from ..services import customer_credit
-    await customer_credit.invalidate(order.customer_id)
+    # 确认刷单的单不算信用分里的「完成一单」(顾客、店主、骑手都是),结论变了要刷新
+    from ..services import credit
+    await credit.invalidate_order(db, order)
     return {"ok": True, "status": verdict}
 
 
@@ -2685,9 +2700,9 @@ async def record_violation(
         # 同一单同一类的唯一索引:重复判定不该报错,当成幂等
         raise HTTPException(409, "这一单的这类问题已经判定过了")
     await db.refresh(target)
-    # 顾客的违规成立是信用分的扣分项(商家、骑手没有信用分,打一下也无妨)
-    from ..services import customer_credit
-    await customer_credit.invalidate(target.id)
+    # 违规成立是信用分的扣分项(顾客、商家、骑手都是)
+    from ..services import credit
+    await credit.invalidate(target.id)
     logger.info("违规判定 subject=%s kind=%s by admin=%s", subject_id,
                 kind, admin.id)
     return {"ok": True, "level": await level_for(target, db)}
@@ -2722,9 +2737,9 @@ async def overturn_violation(
     v.overturned_at = datetime.now(timezone.utc)
     v.overturn_note = str(payload.get("note") or "").strip()[:300]
     await db.commit()
-    # 推翻的那一条不再扣顾客信用分
-    from ..services import customer_credit
-    await customer_credit.invalidate(v.subject_id)
+    # 推翻的那一条不再扣信用分
+    from ..services import credit
+    await credit.invalidate(v.subject_id)
     target = await db.get(User, v.subject_id)
     logger.info("违规推翻 id=%s subject=%s by admin=%s", violation_id,
                 v.subject_id, admin.id)

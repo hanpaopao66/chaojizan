@@ -53,6 +53,7 @@ def _risk_section(audience: str) -> dict:
 
     只有「什么行为会触发」按端不同,因为三端能做的坏事本来就不一样。
     """
+    from .credit import ORDER_CAP
     from .enforcement import LEVEL_LABELS, SEVERITY, public_table
 
     rows = public_table(audience)
@@ -66,7 +67,8 @@ def _risk_section(audience: str) -> dict:
         "title": "什么会被处置",
         "items": [
             "**慢不算坏。** 出餐慢、送得晚、单量少,都是能力和条件的问题,"
-            "平台不处置,也不折算成任何分数",
+            "平台不处置;慢和晚也不折算成任何分数(信用分里单量最多只加 "
+            f"{ORDER_CAP} 分,一单没有也在最高一档)",
             "处置只针对**故意破坏规则**,按行为分类计次 —— "
             "**不同类不累加**,各看各的:",
             *[f"　· {r['label']}:{r['when']} → {r['level_label']}"
@@ -144,6 +146,7 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
                     "用户端排序只用真实评分、销量、距离 —— 没有可以买的位置",
                     "**评分会影响你的曝光**:这不是处罚机制,是用户在选店 ——"
                     "但它确实决定谁被看见",
+                    "信用分不参与排序、曝光和搜索:店铺页、列表、搜索里根本没有它",
                     "出餐时长不参与任何排序与筛选:只给你自己看、"
                     "让骑手知道大概等多久、给用户更准的送达时间",
                 ],
@@ -180,7 +183,9 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
             {
                 "title": "不考核你什么",
                 "items": [
-                    "没有服务分、派单分、等级、段位这类东西",
+                    "没有服务分、派单分、段位、骑手等级这类影响接单的东西 —— "
+                    "信用分只算平台判定成立、能申诉的事,只在接单之后给这一单的顾客、商家看,"
+                    "不进派单",
                     "接单率、转单次数、异常上报次数**都只统计不考核** ——"
                     "车坏了、身体不适本来就该能转单",
                     "在线时长、跑单里程只是记录,不进派单、限流、封禁的判据",
@@ -218,14 +223,13 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
             },
         ]
 
-    # 顾客信用分(2026-09 拍板)。顾客那一份讲怎么算、谁能看到;商家和骑手那一份讲
-    # 接单之后能看到什么、不许拿它做什么 —— 两份都从 customer_credit 的常量生成。
-    # 它**不是处置**:不限制下单、接单、营业,所以不并进下面「什么会被处置」那一节
-    from .customer_credit import rules_lines
-    sections.append({
-        "title": "信用分" if audience == "customer" else "顾客信用分",
-        "items": rules_lines(audience),
-    })
+    # 信用分(2026-09 拍板,三种角色同一套机制)。两节**三端结构一样**:「信用分」讲你自己的分
+    # 怎么算、谁能看到;「交易对方的信用分」讲接单之后能看到谁的、不许拿它做什么 ——
+    # 都从 services/credit 的常量生成。它**不是处置**:不限制下单、接单、营业,
+    # 所以不并进下面「什么会被处置」那一节
+    from .credit import counterpart_lines, rules_lines
+    sections.append({"title": "信用分", "items": rules_lines(audience)})
+    sections.append({"title": "交易对方的信用分", "items": counterpart_lines(audience)})
 
     # 三端共用的两节放在最后,**顺序和措辞都一样** —— 这是对称性的体现,
     # 不是重复代码:任何一端单独改了,就是不公平的开始

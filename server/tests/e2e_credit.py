@@ -1,4 +1,4 @@
-"""顾客信用分(services/customer_credit.py)端到端。
+"""顾客信用分(services/credit.py 里的顾客那一份)端到端。商家、骑手的见 e2e_credit_roles。
 
 账号和数据都现造:一个管理员(注册后直连库改角色)、一家店、两个骑手、两个顾客,
 不碰演示号 —— 演示号的历史订单会让分数的每一个断言都变成「在测库里攒下来的东西」。
@@ -16,7 +16,7 @@
    维持原判的不回来、不能再申诉;工单申诉没下结论前工单关不掉;
 7. 配送异常过了 72 小时:原通道接不上、工单申诉成立后不再计分;
 8. 满 180 天的扣分自动不算;加分封顶、追加单和刷单确认的单不算;
-9. 规则页三端都有这一节,商家端规则中心也有。
+9. 规则页三端都有「信用分」「交易对方的信用分」两节,商家端规则中心也有。
 
 在 server/ 目录下运行:python -m tests.e2e_credit
 """
@@ -399,14 +399,16 @@ def main() -> None:
     rc = call("GET", "/rules/customer")
     sec = next(s for s in rc["sections"] if s["title"] == "信用分")
     assert any(str(SPEC["base"]) in i for i in sec["items"]), sec
-    rm = next(s for s in call("GET", "/rules/merchant")["sections"] if s["title"] == "顾客信用分")
-    rr = next(s for s in call("GET", "/rules/rider")["sections"] if s["title"] == "顾客信用分")
-    assert rm["items"] == rr["items"], "商家和骑手读到的顾客信用分规则不一样"
+    for aud in ("merchant", "rider"):
+        other = next(s for s in call("GET", f"/rules/{aud}")["sections"]
+                     if s["title"] == "交易对方的信用分")
+        assert any("顾客" in i and "看不到明细" in i for i in other["items"]), (aud, other)
     mine_rules = call("GET", "/merchants/me/rules", boss)
-    assert any(s["title"] == "顾客信用分" for s in mine_rules["sections"]), mine_rules
+    assert any(s["title"] == "交易对方的信用分" for s in mine_rules["sections"]), mine_rules
     never = "".join(SPEC["never_used_for"])
     assert all(w in never for w in ("拒单", "派单", "价格")), never
-    print("✓ 规则页:顾客一节讲怎么算,商家、骑手一节一字不差讲能看到什么、不许拿它做什么")
+    print("✓ 规则页:顾客那一节讲怎么算;商家、骑手的「交易对方的信用分」讲接单之后能看到什么、"
+          "不许拿它做什么")
 
     print("\ne2e_credit 全部通过 ✅")
 
