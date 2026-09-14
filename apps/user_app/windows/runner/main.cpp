@@ -27,7 +27,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"user_app", origin, size)) {
+  // Window title = the app name in Chinese, spelled as universal character names on purpose.
+  // Keep this file pure ASCII (comments included): without /utf-8, MSVC reads
+  // sources in the system code page, non-ASCII bytes raise C4819, and the
+  // template builds with /WX, so one Hanzi here fails the whole Windows build.
+  if (!window.Create(L"\u8D85\u7EA7\u8D5E", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

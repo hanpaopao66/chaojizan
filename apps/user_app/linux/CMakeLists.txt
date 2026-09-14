@@ -4,7 +4,8 @@ project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "user_app")
+# 官网发的 chaojizan-linux-x64.tar.gz / .deb 里就是 chaojizan(release.yml 打包时按这个名字找)
+set(BINARY_NAME "chaojizan")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
 set(APPLICATION_ID "com.chaojizan.user_app")

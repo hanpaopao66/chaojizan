@@ -32,5 +32,9 @@
 	<string>按住说话发语音消息、语音通话时需要使用麦克风</string>
 	<key>NSCameraUsageDescription</key>
 	<string>视频通话时需要使用摄像头</string>
+	<key>NSLocationUsageDescription</key>
+	<string>用于展示附近商家、计算配送费。拒绝后将展示演示区域内容,你仍可手动选择收货地址。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于展示附近商家、计算配送费。拒绝后将展示演示区域内容,你仍可手动选择收货地址。</string>
 </dict>
 </plist>

@@ -4,7 +4,8 @@ project(user_app LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "user_app")
+# 官网发的 chaojizan-windows-x64.zip 里就是 chaojizan.exe(release.yml 打包时按这个名字找)
+set(BINARY_NAME "chaojizan")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

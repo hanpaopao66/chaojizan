@@ -3,6 +3,7 @@
 用法:cd server && source .venv/bin/activate && python ../scripts/gen_brand_assets.py
 输出:assets/brand/icon.png(launcher 全图)与 icon_fg.png(自适应前景,
 带安全区缩放)——flutter_launcher_icons 的输入。
+加 --desktop 只从现成的 icon.png 切用户端桌面版的 macOS / Windows 图标(见 build_desktop_icons)。
 几何参数与 marketing/brand/icon_A.svg(viewBox 512)一致;
 App 内矢量版是 packages/shared/lib/src/brand.dart 的 CustomPaint,改造型两边同步。
 """
@@ -97,12 +98,43 @@ def build_foreground() -> Image.Image:
     return img.resize((SIZE, SIZE), Image.LANCZOS)
 
 
+def build_desktop_icons():
+    """用户端桌面版的图标(官网发 Windows / macOS / Ubuntu 三个包),从已有的 icon.png 切。
+
+    - macOS:按系统图标的网格,圆角方占 824/1024、四周留透明边 ——
+      直接铺满的话在程序坞里比别的 App 大一圈;
+    - Windows:.ico 里放 16~256 七个尺寸,铺满(Windows 图标不留边);
+    - Ubuntu:.deb 里的图标在 release.yml 打包时直接拷 icon.png,这里不用出。
+
+    只读 icon.png、不重画,所以跑它不会改动手机端已有的图标。
+    """
+    root = OUT.parent.parent / "apps" / "user_app"
+    src = Image.open(OUT / "icon.png").convert("RGBA")
+
+    body = src.resize((824, 824), Image.LANCZOS)
+    mac = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    mac.paste(body, (100, 100), body)
+    iconset = root / "macos/Runner/Assets.xcassets/AppIcon.appiconset"
+    for px in (16, 32, 64, 128, 256, 512, 1024):
+        mac.resize((px, px), Image.LANCZOS).save(iconset / f"app_icon_{px}.png")
+
+    ico = root / "windows/runner/resources/app_icon.ico"
+    src.save(ico, sizes=[(n, n) for n in (16, 24, 32, 48, 64, 128, 256)])
+    print(f"✓ 桌面版图标已生成: {iconset.relative_to(OUT.parent.parent)}, "
+          f"{ico.relative_to(OUT.parent.parent)}")
+
+
 def main():
+    import sys
+    if "--desktop" in sys.argv:
+        build_desktop_icons()
+        return
     OUT.mkdir(parents=True, exist_ok=True)
     build_icon().save(OUT / "icon.png")
     build_foreground().save(OUT / "icon_fg.png")
     print(f"✓ 品牌图标已生成: {OUT}/icon.png, icon_fg.png")
-    print("  下一步:各 App 目录里 dart run flutter_launcher_icons")
+    print("  下一步:各 App 目录里 dart run flutter_launcher_icons;"
+          "用户端桌面版图标另跑 --desktop")
 
 
 if __name__ == "__main__":

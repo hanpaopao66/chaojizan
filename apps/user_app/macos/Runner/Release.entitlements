@@ -9,6 +9,12 @@
   
   而 debug 版是好的(它带 network.server 供热重载),所以本地调试完全正常,
   打了 release 包才炸 —— 这个坑必须写在这里。
+
+  桌面版对外发之后补的三条(和 DebugProfile 一致):
+  - network.server:语音 / 视频通话走 WebRTC,UDP 要收对端发来的包,沙箱里只有出网权限收不到;
+  - files.user-selected.read-write:选图、发文件(file_selector / image_picker)和「存图」的
+    存储对话框都靠它,没有的话 release 包点「相册」「文件」弹不出选择框;
+  - personal-information.location:找附近商家(geolocator);Info.plist 里配了用途说明。
 -->
 <plist version="1.0">
 <dict>
@@ -16,9 +22,15 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<key>com.apple.security.network.server</key>
+	<true/>
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
 	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<key>com.apple.security.personal-information.location</key>
 	<true/>
 </dict>
 </plist>

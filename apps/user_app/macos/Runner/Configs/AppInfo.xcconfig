@@ -5,7 +5,15 @@
 // 'flutter create' template.
 
 // The application's name. By default this is also the title of the Flutter window.
-PRODUCT_NAME = user_app
+// 桌面版对外发(官网下载页的 chaojizan-macos.dmg):访达、程序坞、菜单栏上显示的都是它
+//
+// 最低系统版本在 project.pbxproj 的 MACOSX_DEPLOYMENT_TARGET(13.0),两个来源取大的:
+// - gal(存相册)的 Swift 包要求 macOS 11,低于它整个 macOS 包编不过(10.15 时实测编不过);
+// - Flutter 3.44 把 native assets 一律按 macOS 13 编(flutter_tools 里写死的 targetMacOSVersion),
+//   path_provider_foundation 靠它(objective_c.framework 的 minos 是 13.0),低版本系统上
+//   能不能加载没法保证 —— 干脆让系统在 12 及以下直接拦住,别装上了才坏。
+// 官网下载页写的「macOS 13 及以上」就是这个数,改这里要一起改那边
+PRODUCT_NAME = 超级赞
 
 // The application's bundle identifier
 PRODUCT_BUNDLE_IDENTIFIER = com.chaojizan.userApp
