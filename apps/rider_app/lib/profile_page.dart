@@ -23,6 +23,10 @@ import 'witness_page.dart';
 /// never_do 里公开承诺过「不按骑手评分或等级差别对待」。
 /// 三个数里的「用户评价」是**顾客打的分的平均**,不参与任何排序和派单。
 ///
+/// 信用分(2026-09-14 拍板,server/app/services/credit.py)**不上首屏**:它只算平台判定
+/// 成立、能申诉的事,只在接单之后给这一单的顾客和商家看,不进派单 —— 但首屏放一个分数,
+/// 看起来就像竞品那一排分。所以它是「规则与申诉」那一组里的一个入口,和申诉放在一起。
+///
 /// ## 稿子上有、代码里没有的
 ///
 /// - 健康证「2026-11-02 到期 · 提前 30 天提醒」:骑手的健康证只存了一张照片,
@@ -76,6 +80,9 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
   int _ratingCount = 0;
   int _unread = 0;
 
+  /// 我的信用分(分数和等级),「我的信用分」那一行的状态值。拉不到就不挂数字
+  CreditBrief? _credit;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +106,7 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
         _rating = _ratingCount == 0 ? null : (r['average'] as num?)?.toDouble();
       }),
       _loadUnread(),
+      _try(() async => _credit = await widget.api.myCreditBrief()),
     ]);
     if (mounted) setState(() {});
   }
@@ -247,6 +255,16 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
                 icon: Icons.policy_outlined,
                 title: '违规申诉',
                 onTap: () => _push(RiderAppealPage(api: widget.api)),
+              ),
+              // 我的信用分:每一项加减分、对应的记录、申诉入口和公式。和申诉放在一组 ——
+              // 扣分的每一条都能在里面申诉
+              SzEntryTile(
+                icon: Icons.verified_outlined,
+                title: '我的信用分',
+                value: _credit == null
+                    ? null
+                    : '${_credit!.score} 分 · ${_credit!.levelLabel}',
+                onTap: () => _pushThenReload(CreditPage(api: widget.api)),
               ),
               SzEntryTile(
                 icon: Icons.school_outlined,

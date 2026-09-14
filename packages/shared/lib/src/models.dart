@@ -694,7 +694,9 @@ class Order {
             .map((k, v) => MapEntry('$k', v as int)),
         feePartLabels = ((json['fee_part_labels'] as Map?) ?? const {})
             .map((k, v) => MapEntry('$k', '$v')),
-        customerCredit = CustomerCredit.tryParse(json['customer_credit']),
+        customerCredit = CreditBrief.tryParse(json['customer_credit']),
+        merchantCredit = CreditBrief.tryParse(json['merchant_credit']),
+        riderCredit = CreditBrief.tryParse(json['rider_credit']),
         createdAt = json['created_at'] as String;
 
   final String orderNo;
@@ -829,10 +831,13 @@ class Order {
   final Map<String, int> feeParts;
   final Map<String, String> feePartLabels;
 
-  /// 顾客信用分(只有分数和等级)。**只有接了这一单的商家、接到这一单的骑手拿得到**,
-  /// 其余一律为 null(待接单、抢单大厅、顾客自己看都没有)。显示前再过一道
-  /// [customerCreditVisible] —— 见 customer_credit.dart
-  final CustomerCredit? customerCredit;
+  /// 交易对方的信用分(每个都只有分数和等级)。**只在接单之后、只给这一单的交易对方**:
+  /// 顾客的给接了单的商家和接到单的骑手,商家的给顾客和骑手,骑手的给顾客和商家;
+  /// 其余一律为 null(待接单、抢单大厅、看自己的都没有)。显示前再过一道
+  /// [creditVisible] —— 见 credit.dart
+  final CreditBrief? customerCredit;
+  final CreditBrief? merchantCredit;
+  final CreditBrief? riderCredit;
   final String createdAt;
 
   String get summary =>
@@ -878,18 +883,18 @@ class Order {
   }
 }
 
-/// 交易对方看到的顾客信用分:分数和等级,**没有明细**
-/// (server/app/services/customer_credit.py 的 brief_of)。
-class CustomerCredit {
-  CustomerCredit.fromJson(Map<String, dynamic> json)
+/// 交易对方看到的信用分:分数和等级,**没有明细**(server/app/services/credit.py 的 brief_of)。
+/// 顾客、商家、骑手三种角色同一个形状;「我的」那一行用的也是它。
+class CreditBrief {
+  CreditBrief.fromJson(Map<String, dynamic> json)
       : score = (json['score'] as num?)?.toInt() ?? 0,
         level = json['level'] as String? ?? '',
         levelLabel = json['level_label'] as String? ?? '';
 
   /// 没有分数的响应(老服务端、别的形状)给 null,**不当成 0 分** —— 显示一个 0 分比不显示糟得多
-  static CustomerCredit? tryParse(Object? json) =>
+  static CreditBrief? tryParse(Object? json) =>
       json is Map && json['score'] is num
-          ? CustomerCredit.fromJson(json.cast<String, dynamic>())
+          ? CreditBrief.fromJson(json.cast<String, dynamic>())
           : null;
 
   final int score;

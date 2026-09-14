@@ -75,6 +75,7 @@ void main() {
     '抢单怎么排的': DispatchSpecPage,
     '配送异常与申诉': RiderIssuesPage,
     '违规申诉': RiderAppealPage,
+    '我的信用分': CreditPage,
     '上岗培训': RiderExamPage,
     '给平台提意见': RiderFeedbackPage,
     '联系平台客服': SupportPage,

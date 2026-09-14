@@ -14,7 +14,7 @@ export 'src/entry_tile.dart';
 export 'src/icon_grid.dart';
 export 'src/chat_page.dart';
 export 'src/city_picker.dart';
-export 'src/customer_credit.dart';
+export 'src/credit.dart';
 export 'src/coord_utils.dart';
 export 'src/delivery_map.dart';
 export 'src/merchant_categories.dart';

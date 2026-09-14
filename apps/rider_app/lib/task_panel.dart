@@ -345,15 +345,22 @@ class _TaskPanelState extends State<TaskPanel> {
               const SizedBox(height: 10),
               _block(context,
                   pickup: false, title: dropTo, sub: dropSub, current: picked),
-              // 顾客信用分:**接到这一单之后**才有,抢单大厅里没有(服务端只给这一单的骑手带)。
-              // 只有分数和等级,看不到是因为什么扣的。派单和排序里都没有它;点开是公式说明
-              if (customerCreditVisible(order))
+              // 顾客、商家的信用分:**接到这一单之后**才有,抢单大厅里没有(服务端只给这一单的
+              // 骑手带)。只有分数和等级,看不到是因为什么扣的。派单和排序里都没有它 ——
+              // 接单之前看得到的话,它就会被拿来挑顾客、挑店。点开是公式说明
+              if (customerCreditVisible(order) || merchantCreditVisible(order))
                 Padding(
                   padding: const EdgeInsets.only(left: 20, top: 6),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: CustomerCreditChip(
-                        order: order, api: widget.api, viewer: '骑手'),
+                    child: Wrap(spacing: 8, runSpacing: 6, children: [
+                      if (customerCreditVisible(order))
+                        CustomerCreditChip(
+                            order: order, api: widget.api, viewer: '骑手'),
+                      if (merchantCreditVisible(order))
+                        MerchantCreditChip(
+                            order: order, api: widget.api, viewer: '骑手'),
+                    ]),
                   ),
                 ),
               for (final a in widget.alertsFor(order)) ...[

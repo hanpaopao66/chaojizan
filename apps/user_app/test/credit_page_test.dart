@@ -7,7 +7,6 @@ import 'package:http/testing.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
-import 'package:user_app/credit_page.dart';
 import 'package:user_app/main.dart';
 
 /// 「我的信用分」:分数、每一项加减分和对应的记录、每条扣分旁边的申诉。

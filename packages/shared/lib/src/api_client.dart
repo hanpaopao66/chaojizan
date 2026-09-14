@@ -1738,19 +1738,20 @@ class ApiClient {
     return data as Map<String, dynamic>;
   }
 
-  // ---------- 顾客信用分(server/app/services/customer_credit.py) ----------
+  // ---------- 信用分(server/app/services/credit.py,顾客、商家、骑手同一组接口) ----------
 
   /// 本人看的完整明细:分数、每一项加减分和对应的记录、到哪天不再计分、
-  /// 每条扣分旁边的申诉入口、`rules`(和 /transparency/credit 同一份公式)。
+  /// 每条扣分旁边的申诉入口、`rules`(和 /transparency/credit?role= 同一份公式)。
+  /// 按登录的角色算自己那一份;商家是店主本人,店员、品牌经理 404
   Future<Map<String, dynamic>> myCredit() async =>
       await _request('GET', '/credit/me') as Map<String, dynamic>;
 
-  /// 「我的」页那一行:分数和等级。响应里没有分数(老服务端)时给 null
-  Future<CustomerCredit?> myCreditBrief() async =>
-      CustomerCredit.tryParse(await _request('GET', '/credit/me/brief'));
+  /// 「我的」「店铺」页那一行:分数和等级。响应里没有分数(老服务端)时给 null
+  Future<CreditBrief?> myCreditBrief() async =>
+      CreditBrief.tryParse(await _request('GET', '/credit/me/brief'));
 
-  /// 原来的申诉通道接不上时(配送异常过了 72 小时、违规记录),走客服工单申诉一条扣分。
-  /// [kind]:delivery_fault / violation。申诉成立后这一条不再计分
+  /// 原来的申诉通道接不上时(过了 72 小时、违规记录、骑手的售后判责),走客服工单申诉一条扣分。
+  /// [kind]:delivery_fault / after_sale_fault / violation。申诉成立后这一条不再计分
   Future<Map<String, dynamic>> submitCreditAppeal({
     required String kind,
     required int recordId,
@@ -1762,8 +1763,11 @@ class ApiClient {
         'reason': reason,
       }) as Map<String, dynamic>;
 
-  /// 信用分怎么算(公开无鉴权)。商家端、骑手端点开信用分小签时的说明也读它
-  Future<Map<String, dynamic>> creditSpec() => _transparency('credit');
+  /// 信用分怎么算(公开无鉴权)。[role]:customer / merchant / rider ——
+  /// 点开订单上的信用分小签时,读的是**被看的那一方**那一份
+  Future<Map<String, dynamic>> creditSpec({String role = 'customer'}) async =>
+      await _request('GET', '/transparency/credit', query: {'role': role})
+          as Map<String, dynamic>;
 
   // ---------- 透明中心(全部无需鉴权,数字难看也照实下发) ----------
   Future<Map<String, dynamic>> _transparency(String path) async =>
@@ -1993,7 +1997,7 @@ class ApiClient {
   ///
   /// 等餐时长 = 取餐时刻 − 到店时刻,是**申诉超时时的证据** ——
   /// 在店里干等二十分钟不该算到骑手头上,而现在他没有办法证明这件事。
-  /// **只记录不判罚**:不会因此扣商家分(平台不做违规积分)。
+  /// **只记录不判罚**:不会因此扣商家分(等餐不进商家信用分,也不进处置)。
   Future<Order> markArrivedShop(String orderNo,
       {double? lat, double? lng}) async {
     final data = await _request(

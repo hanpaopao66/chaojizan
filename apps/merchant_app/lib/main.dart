@@ -2097,6 +2097,9 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       // 平台的排序、派单、价格里都没有它,点开是公式说明
       if (customerCreditVisible(order))
         CustomerCreditChip(order: order, api: widget.api),
+      // 骑手信用分:**骑手接到这一单之后**才有;自配送、自取的单没有骑手也就没有它
+      if (riderCreditVisible(order))
+        RiderCreditChip(order: order, api: widget.api, viewer: '商家'),
     ];
     final actions = _actionsFor(order);
     final showMoney = order.status != OrderStatus.cancelled;

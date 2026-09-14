@@ -168,6 +168,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
   /// 结算卡(提现打款去哪)。只有店主本人拉得到
   PayoutAccount? _payout;
 
+  /// 我的信用分(分数和等级),「我的信用分」那一行的状态值。只有店主本人拉得到,拉不到就不挂数字
+  CreditBrief? _credit;
+
   /// 非空 = 店铺信息没拉到
   String _error = '';
   bool _savingAnnouncement = false;
@@ -270,6 +273,10 @@ class _ShopTabPageState extends State<ShopTabPage> {
     final payoutF = _shop == null || _isOwner(_shop!)
         ? widget.api.payoutAccount()
         : null;
+    // 信用分记在店主名下:店员、品牌经理拉不到(404),知道不是店主之后就不再拉
+    final creditF = _shop == null || _shop!.viewerIsOwner
+        ? widget.api.myCreditBrief()
+        : null;
 
     final g = SzGather();
     final shop = await g.take(shopF);
@@ -283,6 +290,9 @@ class _ShopTabPageState extends State<ShopTabPage> {
     final payout = payoutF == null
         ? null
         : await g.soft<PayoutAccount?>(payoutF, _payout);
+    final credit = creditF == null
+        ? null
+        : await g.soft<CreditBrief?>(creditF, _credit);
     // 蓝牙小票机记在本机(printer_service.dart),不在服务端
     final bt = await g.soft(BtPrinter.savedDevice(), null);
 
@@ -304,6 +314,7 @@ class _ShopTabPageState extends State<ShopTabPage> {
       _todos = todos;
       _tier = tier;
       _payout = payout;
+      _credit = credit;
       _printerCount = cloud == null ? null : cloud + (bt == null ? 0 : 1);
       if (_announcement.text.isEmpty) {
         _announcement.text = shop?.announcement ?? '';
@@ -1468,10 +1479,11 @@ class _ShopTabPageState extends State<ShopTabPage> {
     ]);
   }
 
-  /// 顾客看得到的店铺资料:公告 + 评价。
+  /// 顾客看得到的店铺资料:公告 + 评价 + 信用分(店主本人才有这一行)。
   ///
-  /// 原来这两条和门头照、店名一起在身份卡里;身份那一行搬到了页顶,
-  /// 这两条留在一组 —— 它们都是「顾客看到的你」。
+  /// 原来前两条和门头照、店名一起在身份卡里;身份那一行搬到了页顶,
+  /// 这几条留在一组 —— 它们都是「顾客看到的你」。信用分顾客要在你接单之后、
+  /// 在那一单上才看得到,店铺页上没有它。
   Widget _profileGroup(Merchant shop) {
     return SzEntryGroup(children: [
       // 公告收成一条带状态值的入口。**value 显示的是顾客此刻真正看到的
@@ -1489,6 +1501,21 @@ class _ShopTabPageState extends State<ShopTabPage> {
         onTap: _editAnnouncement,
       ),
       _reviewsTile(),
+      // 我的信用分:分数和等级是状态值;点进去是每一项加减分、对应的记录、申诉入口和公式。
+      // 分数记在店主名下(和处置同一个主体),店员、品牌经理没有这一行
+      if (shop.viewerIsOwner)
+        SzEntryTile(
+          icon: Icons.verified_outlined,
+          title: '我的信用分',
+          value: _credit == null
+              ? null
+              : '${_credit!.score} 分 · ${_credit!.levelLabel}',
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute<void>(
+                  builder: (_) => CreditPage(api: widget.api)))
+              // 在里面申诉成立的话分数会变:回来重拉
+              .then((_) => _load()),
+        ),
     ]);
   }
 

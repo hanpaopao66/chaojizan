@@ -27,7 +27,6 @@ import 'chat/store.dart';
 import 'chat/ui/avatar.dart' show rootResolve;
 import 'checkout_page.dart';
 import 'coupons_page.dart';
-import 'credit_page.dart';
 import 'group_cart_page.dart';
 import 'help_page.dart';
 import 'hotel_pages.dart';
@@ -6365,6 +6364,22 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: Column(children: [
+                      // 交易对方的信用分:商家接单之后看得到商家的,骑手接到这一单之后看得到
+                      // 骑手的(服务端只在那之后带,小签按订单状态再兜一道)。只有分数和等级,
+                      // 点开是公式说明;店铺页、搜索、排序里都没有它 —— 下单之前挑店用不上它
+                      if (merchantCreditVisible(order) || riderCreditVisible(order))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Wrap(spacing: 8, runSpacing: 6, children: [
+                              if (merchantCreditVisible(order))
+                                MerchantCreditChip(order: order, api: widget.api),
+                              if (riderCreditVisible(order))
+                                RiderCreditChip(order: order, api: widget.api),
+                            ]),
+                          ),
+                        ),
                       // 未读提醒。以前骑手/商家发消息用户这边一点动静都没有,
                       // 只能靠自己想起来点进去看
                       if (_unread > 0)
@@ -7434,7 +7449,7 @@ class _ProfileViewState extends State<ProfileView> {
   OrderCounts? _counts;
 
   /// 我的信用分(分数和等级),「我的信用分」那一行的状态值。拉不到就不挂数字
-  CustomerCredit? _credit;
+  CreditBrief? _credit;
 
   /// 手里还能用的优惠券 / 团购券张数(网格上 hold 色的角标,设计稿 3e)
   /// 和团购券一共买过几张(订单卡头上的频道足迹),都跟 [_counts] 一起来。

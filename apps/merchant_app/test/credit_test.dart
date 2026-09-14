@@ -9,13 +9,14 @@ import 'package:superz_shared/superz_shared.dart';
 import 'order_fake_api.dart';
 import 'shop_fake_api.dart';
 
-/// 商家端订单卡上的顾客信用分。
+/// 商家端订单卡上的顾客信用分、骑手信用分。
 ///
 /// 商家端没有订单详情页,卡片就是全部 —— 所以「已接单的订单详情里看得到」
 /// 落在进行中 / 历史栏的卡上;「接单之前看不到」落在待接单栏的卡和点开的新单详情上。
 ///
-/// 服务端只给接过的单带分数(customer_credit.counterpart_may_see);这里的待接单用例
-/// 故意让假服务端**漏带**一次,守的是客户端那一道兜底:接单之前看得到,就会被拿来挑顾客。
+/// 服务端只给接过的单带顾客的分、只在骑手接到这一单之后带骑手的分(credit.visible_parties);
+/// 这里的待接单、没骑手的用例故意让假服务端**漏带**一次,守的是客户端那一道兜底:
+/// 接单之前看得到,就会被拿来挑人。
 void main() {
   setUpAll(() {
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -90,7 +91,8 @@ void main() {
 
   testWidgets('待接单的卡和新单详情里没有 —— 服务端漏带了也不显示', (t) async {
     final api = orderFakeApi(pages: [
-      {...orderJson(no: 'SZPAID1'), 'customer_credit': credit},
+      {...orderJson(no: 'SZPAID1'), 'customer_credit': credit,
+       'rider_credit': const {'score': 83, 'level': 'fair', 'level_label': '一般'}},
     ], todos: {'pending_orders': 1});
     await pumpOrders(t, api);
     expect(find.text('接单 · 15 分出餐'), findsOneWidget, reason: '待接单卡没渲染出来,下面的断言是空的');
@@ -100,6 +102,7 @@ void main() {
     await t.pumpAndSettle();
     expect(find.byType(NewOrderPage), findsOneWidget);
     expect(find.textContaining('顾客信用'), findsNothing);
+    expect(find.textContaining('骑手信用'), findsNothing);
     await teardown(t);
   });
 
@@ -113,6 +116,32 @@ void main() {
     await segment(t, '历史');
     expect(find.textContaining('取消原因'), findsOneWidget, reason: '历史卡没渲染出来');
     expect(find.textContaining('顾客信用'), findsNothing);
+    await teardown(t);
+  });
+
+  const riderCredit = {'score': 83, 'level': 'fair', 'level_label': '一般'};
+
+  testWidgets('骑手接到这一单之后,卡上有骑手信用分', (t) async {
+    final api = orderFakeApi(pages: [
+      {...orderJson(no: 'SZRID1', status: 'ready', accepted: acceptedAt, riderId: 42),
+       'customer_credit': credit, 'rider_credit': riderCredit},
+    ], todos: {'pending_orders': 0});
+    await pumpOrders(t, api);
+    await segment(t, '进行中');
+    expect(find.text('顾客信用 76 · 一般'), findsOneWidget);
+    expect(find.text('骑手信用 83 · 一般'), findsOneWidget);
+    await teardown(t);
+  });
+
+  testWidgets('还没有骑手接单:服务端漏带了骑手的分也不显示', (t) async {
+    final api = orderFakeApi(pages: [
+      {...orderJson(no: 'SZRID2', status: 'accepted', accepted: acceptedAt),
+       'customer_credit': credit, 'rider_credit': riderCredit},
+    ], todos: {'pending_orders': 0});
+    await pumpOrders(t, api);
+    await segment(t, '进行中');
+    expect(find.text('顾客信用 76 · 一般'), findsOneWidget, reason: '进行中卡没渲染出来');
+    expect(find.textContaining('骑手信用'), findsNothing);
     await teardown(t);
   });
 

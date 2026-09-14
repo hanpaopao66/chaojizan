@@ -198,6 +198,7 @@ ApiClient shopFakeApi({
   void Function(String path)? onRequest,
   Map<String, dynamic>? printers,
   Map<String, dynamic>? payout,
+  Map<String, dynamic>? credit,
 }) {
   return ApiClient(
     baseUrl: 'http://test.local',
@@ -240,6 +241,9 @@ ApiClient shopFakeApi({
           payload = printers ?? <String, dynamic>{};
         case '/payout-account':
           payload = payout ?? <String, dynamic>{};
+        // 「我的信用分」那一行的分数和等级(只有店主本人拉得到)
+        case '/credit/me/brief':
+          payload = credit ?? <String, dynamic>{};
         default:
           payload = <String, dynamic>{};
       }

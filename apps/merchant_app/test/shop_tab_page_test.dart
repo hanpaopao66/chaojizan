@@ -144,6 +144,7 @@ void main() {
     void Function(String path)? onRequest,
     Map<String, dynamic>? printers,
     Map<String, dynamic>? payout,
+    Map<String, dynamic>? credit,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final api = shopFakeApi(
@@ -156,6 +157,7 @@ void main() {
       onRequest: onRequest,
       printers: printers,
       payout: payout,
+      credit: credit,
     );
     await api.login('13800000009', 'pw');
     return api;
@@ -746,6 +748,36 @@ void main() {
           reason: '那是一份目录,目的页自己会答');
       expect(find.textContaining('不设就按平台默认估算'), findsNothing,
           reason: '它下面 103px 的实测块才是这一条真正的说明');
+    });
+  });
+
+  group('我的信用分只给店主本人', () {
+    // 分数记在店主名下(和处置同一个主体,见 server/app/services/credit.py);
+    // 店员、品牌经理看的是店主的店,不是自己的分
+    testWidgets('店主:在「顾客看到的你」那一组,挂分数和等级,点进去是明细页', (t) async {
+      final api = await loggedIn(
+          credit: {'score': 92, 'level': 'good', 'level_label': '良好'});
+      await pumpShopFull(t, api);
+      expect(find.text('我的信用分'), findsOneWidget);
+      expect(find.text('92 分 · 良好'), findsOneWidget);
+      await t.tap(find.text('我的信用分'));
+      await t.pumpAndSettle();
+      expect(find.byType(CreditPage), findsOneWidget);
+    });
+
+    testWidgets('店员:没有这一行', (t) async {
+      final api = await loggedIn(
+          shop: shopJson(viewerIsStaff: true, viewerIsOwner: false),
+          credit: {'score': 92, 'level': 'good', 'level_label': '良好'});
+      await pumpShopFull(t, api);
+      expect(find.text('顾客评价'), findsOneWidget, reason: '那一组没渲染出来,下面的断言是空的');
+      expect(find.text('我的信用分'), findsNothing);
+    });
+
+    testWidgets('拉不到分数不挂 0 分', (t) async {
+      await pumpShopFull(t, await loggedIn());
+      expect(find.text('我的信用分'), findsOneWidget);
+      expect(find.textContaining('0 分'), findsNothing);
     });
   });
 
