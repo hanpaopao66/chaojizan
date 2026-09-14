@@ -551,6 +551,20 @@ void main() {
       await unmount(tester, c);
     });
 
+    // 判单双击的计时要跟着模拟时间走。原来用 Stopwatch(真实时间):测试机一忙,两下之间的
+    // 真实间隔超过 300 毫秒,上面那条「双击暂停」就偶发失败。这里故意让两下之间真实时间过 400 毫秒、
+    // 模拟时间只过 40 毫秒 —— 计时换回真实时间的话这条每次都红
+    testWidgets('双击判定看模拟时间:两下之间真实时间过了 400 毫秒,照样算双击', (tester) async {
+      final c = await mount(tester, videoJson());
+      await tester.tapAt(center(tester));
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 400)));
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.tapAt(center(tester));
+      await tester.pump();
+      expect(c.playing, isFalse, reason: '模拟时间里两下只隔 40 毫秒,是双击');
+      await unmount(tester, c);
+    });
+
     testWidgets('长按 3 倍速,松手回到原来的倍速', (tester) async {
       final c = await mount(tester, videoJson());
       await c.setSpeed(1.25);

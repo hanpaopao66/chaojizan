@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -152,7 +153,9 @@ class _PlayerFrameState extends State<_PlayerFrame> {
 
   final _layerKey = GlobalKey<DanmakuLayerState>();
   final _taps = TapSequence();
-  final _clock = Stopwatch()..start();
+  // 判单双击的计时。用 package:clock 的而不是 Stopwatch():线上一样是真实时间,
+  // widget 测试里跟着模拟时间走 —— Stopwatch 量的是真实时间,测试机一忙就把双击判成两次单击
+  final _clock = clock.stopwatch()..start();
 
   bool _controls = true;
   Timer? _hideTimer;
