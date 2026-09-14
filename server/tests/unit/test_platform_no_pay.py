@@ -1,6 +1,6 @@
 """平台出钱的安抚和营销全部停掉(2026-09-14 拍板「平台没有钱」)。
 
-1. 送达超时:默认只致歉不发券;晚了多少按送达那一刻算,不按现在;
+1. 送达超时:只致歉不发券,开关和发券代码 2026-09-15 删了(拨不回来);晚了多少按送达那一刻算;
 2. 平台券:平台批次一张不发,后台建批次、定向发券 410,平台批次不能再启用;
 3. 邀请有礼:填码 410,结算不再发奖励,商家不能再建新客推荐券批次;
 4. 地址难度反馈:不当场补钱(不写调整入账),规则写明以后的单顾客付;
@@ -26,7 +26,7 @@ REPO = Path(__file__).resolve().parents[3]
 
 
 class _FakeDB:
-    """compensate_if_late 用到的那几个方法:查询一律「没有」,写入记下来。"""
+    """apologize_if_late 用到的那几个方法:查询一律「没有」,写入记下来。"""
 
     def __init__(self):
         self.added = []
@@ -80,14 +80,29 @@ def quiet_eta(monkeypatch):
 
 
 class Test送达超时只致歉:
-    def test_默认关(self):
-        assert Settings().eta_compensation_enabled is False
+    def test_开关和发券代码都删了_拨不回来(self):
+        """跟等餐补偿一样:停了就不留一个能拨回来的开关(2026-09-15 定)"""
+        from app.services import eta
+        assert not hasattr(Settings(), "eta_compensation_enabled")
+        assert not hasattr(eta, "compensate_if_late")
+        for gone in ("COMP_AMOUNT_CENTS", "COMP_VALID_DAYS"):
+            assert not hasattr(eta, gone), gone
+        src = inspect.getsource(eta.apologize_if_late)
+        code = "\n".join(ln.split("#", 1)[0] for ln in src.splitlines())
+        assert "Coupon(" not in code and "settings." not in code, "超时又能发券了"
+
+    def test_停发之前的平台券照旧能抵扣(self):
+        """发券删了,抵扣那一支不能跟着删:平台券(funder 不是 merchant)照旧走 subsidy"""
+        from app.routers import orders
+        src = inspect.getsource(orders.create_order)
+        assert 'coupon.funder == "merchant"' in src and "subsidy += coupon_off" in src
+        assert orders._coupon_label("eta:T123") == "超时安抚券"
 
     def test_超时了只记一条致歉_一张券都不发(self, quiet_eta):
         from app.models import Coupon, OrderEvent
         from app.services import eta
         db = _FakeDB()
-        assert asyncio.run(eta.compensate_if_late(db, _order())) is True
+        assert asyncio.run(eta.apologize_if_late(db, _order())) is True
         events = [o for o in db.added if isinstance(o, OrderEvent)]
         assert [e.to_status for e in events] == [eta.APOLOGY_EVENT], db.added
         assert not [o for o in db.added if isinstance(o, Coupon)], "超时了还在发券"
@@ -102,7 +117,7 @@ class Test送达超时只致歉:
         db = _FakeDB()
         order = _order(eta_at=now - timedelta(minutes=50),
                        delivered_at=now - timedelta(minutes=60))
-        assert asyncio.run(eta.compensate_if_late(db, order)) is False
+        assert asyncio.run(eta.apologize_if_late(db, order)) is False
         assert db.added == [] and quiet_eta == []
 
     def test_豁免的单不回滚(self, quiet_eta, monkeypatch):
@@ -115,7 +130,7 @@ class Test送达超时只致歉:
 
         monkeypatch.setattr(eta, "_weather_exempt", _in_weather)
         db = _FakeDB()
-        assert asyncio.run(eta.compensate_if_late(db, _order())) is False
+        assert asyncio.run(eta.apologize_if_late(db, _order())) is False
         assert db.added == [] and db.committed and not db.rolled_back
 
     def test_兜底清扫只扫送达那一刻就晚了的单(self):

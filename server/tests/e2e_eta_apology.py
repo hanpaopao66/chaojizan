@@ -1,7 +1,8 @@
-"""送达超时:2026-09-14 起只致歉、不发券(services/eta.compensate_if_late)。
+"""送达超时:2026-09-14 起只致歉、不发券(services/eta.apologize_if_late)。
 
 原来是「准时宝-lite」—— 超时 15 分钟自动发 3 元无门槛安抚券、平台出钱;拍板「平台没有钱,
-不做平台出钱的安抚和营销」之后 eta_compensation_enabled 默认关。
+不做平台出钱的安抚和营销」之后先默认关,2026-09-15 连开关(eta_compensation_enabled)
+带发券代码一起删了。
 
 1. 支付生成 ETA;没超时送达:不致歉;
 2. 超时 20 分钟送达:这一单记一条致歉事件,**一张券都不发**;清扫重跑不重复致歉;
@@ -80,7 +81,7 @@ async def late_state(no):
 
 async def main():
     from app.config import settings
-    assert settings.eta_compensation_enabled is False, "超时安抚券默认该是关的"
+    assert not hasattr(settings, "eta_compensation_enabled"), "超时安抚券的开关该删掉了"
 
     await drain_order_pool()
     audit_before = await audit_snapshot()  # 见 util.audit_new_problems
@@ -122,10 +123,10 @@ async def main():
             "eta_at = now() - interval '50 minutes' WHERE order_no = :no"), {"no": no3})
         await db.commit()
     await sweep_once()
-    from app.services.eta import compensate_if_late
+    from app.services.eta import apologize_if_late
     async with SessionLocal() as db:
         order3 = await db.scalar(select(Order).where(Order.order_no == no3))
-        handled = await compensate_if_late(db, order3)
+        handled = await apologize_if_late(db, order3)
     assert handled is False and await late_state(no3) == (0, False), \
         "准时送到的单被当成超时了(晚了多少要按送达那一刻算,不按现在)"
     print("✓ 准时送到、顾客还没确认的单:清扫和判定都不当成超时")

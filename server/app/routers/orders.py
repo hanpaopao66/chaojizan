@@ -1241,8 +1241,8 @@ async def transition(
     # 送达超时致歉(2026-09-14 起只致歉不发券;独立事务,失败不影响送达)
     if payload.to_status == OrderStatus.DELIVERED:
         try:
-            from ..services.eta import compensate_if_late
-            await compensate_if_late(db, order)
+            from ..services.eta import apologize_if_late
+            await apologize_if_late(db, order)
         except Exception:
             logger.exception("超时致歉检查失败 %s", order.order_no)
     await _notify(order)

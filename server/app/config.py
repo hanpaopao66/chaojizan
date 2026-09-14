@@ -311,10 +311,9 @@ class Settings(BaseSettings):
     # 已经到账的不动;还没完成首单的邀请不再发奖励。原来的两个配置
     # (referral_reward_cents / referral_monthly_cap)一起删了 —— 停了就不留一个能拨回来的开关
 
-    # 订单超时安抚券(#34,平台出钱)。2026-09-14 拍板「平台没有钱,不做平台出钱的赔付」:
-    # **默认关**,超时只致歉不发券(services/eta.compensate_if_late)。已经发出去、
-    # 没用的券照旧能用
-    eta_compensation_enabled: bool = False
+    # 订单超时安抚券(#34,平台出钱)2026-09-14 停发,超时只致歉(services/eta.apologize_if_late)。
+    # 原来的开关 eta_compensation_enabled 2026-09-15 连同发券那段代码一起删了 —— 跟等餐补偿一样,
+    # 停了就不留一个能拨回来的开关。已经发出去、没用的券照旧能用(下单抵扣走 subsidy 口径)
 
     # 平台拉新:首单立减(分),0=关闭。成本平台承担,订单上记 subsidy_cents,
     # 审计恒等式和透明账单都能看到这笔钱从平台流向了用户。**保持 0**:平台不出钱做营销

@@ -2108,7 +2108,7 @@ async def resolve_rider_appeal(
     """核定申诉。accept=true 判为非骑手责任。
 
     **成立不加分也不补钱** —— 平台没有骑手评分体系,所以没有分可加;
-    超时本来就不动骑手的钱(超时只向顾客致歉,不发券不罚款,见 eta.compensate_if_late)。
+    超时本来就不动骑手的钱(超时只向顾客致歉,不发券不罚款,见 eta.apologize_if_late)。
     成立的意义是这条记录上写着不怪他,以及平台据此去看商家出餐这一环。
     """
     from ..models import RiderAppeal

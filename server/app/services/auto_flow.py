@@ -807,15 +807,16 @@ async def sweep_once() -> dict[str, int]:
             from .credit import invalidate_orders
             await invalidate_orders(db, [*completed, *pickup_done])
         # 超时致歉兜底:送达时判超时失败/进程重启漏掉的,清扫补上
-        # (compensate_if_late 自带幂等与豁免判断,独立事务;2026-09-14 起只致歉不发券)。
+        # (apologize_if_late 自带幂等与豁免判断,独立事务;只致歉不发券)。
         # 只扫**送达那一刻**就晚了的单(原来按「现在」扫,准时送到、顾客还没确认的单也被当成超时),
         # 处理过的、改过地址的不再扫 —— 不然 50 个名额永远被同一批单占着
         try:
-            from .eta import APOLOGY_EVENT, LATE_GRACE_MINUTES, compensate_if_late
+            from .eta import (APOLOGY_EVENT, LATE_GRACE_MINUTES, LEGACY_COMP_EVENT,
+                              apologize_if_late)
             skip = select(OrderEvent.id).where(
                 OrderEvent.order_id == Order.id,
                 OrderEvent.to_status.in_(
-                    (APOLOGY_EVENT, "eta_compensated", "address_changed")))
+                    (APOLOGY_EVENT, LEGACY_COMP_EVENT, "address_changed")))
             late_delivered = (await db.scalars(
                 select(Order).where(
                     Order.status == OrderStatus.DELIVERED,
@@ -826,7 +827,7 @@ async def sweep_once() -> dict[str, int]:
                     ~skip.exists(),
                 ).limit(50))).all()
             for order in late_delivered:
-                await compensate_if_late(db, order)
+                await apologize_if_late(db, order)
         except Exception:
             logger.exception("超时致歉兜底失败")
 
