@@ -10,6 +10,7 @@ import 'export_page.dart';
 import 'my_card_page.dart';
 import 'sanctions_page.dart';
 import 'folders_page.dart';
+import 'tags_badges_page.dart';
 import 'user_profile_page.dart';
 
 /// 「消息」的设置:我的资料(超级赞号、签名、名片)、隐私、通知、拉黑名单、会话分组、本地缓存。
@@ -165,6 +166,12 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
             value: bio.isEmpty ? null : (bio.length > 12 ? '${bio.substring(0, 12)}…' : bio),
             hint: '一句话介绍自己',
             onTap: _editBio,
+          ),
+          SzEntryTile(
+            title: '标签和勋章',
+            icon: Icons.sell_outlined,
+            hint: '资料页上别人看得到,每一项都能隐藏',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const TagsBadgesPage())),
           ),
           SzEntryTile(
             title: '我的名片',

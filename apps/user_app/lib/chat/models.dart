@@ -59,6 +59,7 @@ class ChatUser {
     this.username,
     this.avatar = '',
     this.bio = '',
+    this.tagsBadges = const TagsBadges(),
     this.publicId,
     this.lastSeen = const LastSeen(),
     this.isContact = false,
@@ -73,6 +74,9 @@ class ChatUser {
   final String? username;
   final String avatar;
   final String bio;
+
+  /// 标签和勋章。只有单人资料卡(`/social/v1/users/{id}` 那类)带,列表里的名片是空的
+  final TagsBadges tagsBadges;
   final String? publicId;
   LastSeen lastSeen;
   final bool isContact;
@@ -91,6 +95,7 @@ class ChatUser {
       username: m['username'] as String?,
       avatar: _str(m['avatar']),
       bio: _str(m['bio']),
+      tagsBadges: TagsBadges.fromJson(m),
       publicId: m['public_id'] as String?,
       lastSeen: LastSeen.fromJson(m['last_seen']),
       isContact: _bool(m['is_contact']),
@@ -98,6 +103,73 @@ class ChatUser {
       blocked: _bool(m['blocked']),
       isBot: _bool(m['is_bot']),
       isSelf: _bool(m['is_self']),
+    );
+  }
+}
+
+/// 名片上的标签和勋章(服务端 services/badges.py)。已经按「我」的视角过滤过:
+/// 别人隐藏了的这里就没有,和「没有」长得一样;自己看自己时隐藏了的也在,[tagsHidden] / [ProfileBadge.hidden] 标着。
+class TagsBadges {
+  const TagsBadges({this.tags = const [], this.tagsHidden = false, this.badges = const []});
+
+  /// 用户自己写的标签
+  final List<String> tags;
+
+  /// 整组标签对别人隐藏了(只有自己看自己时才会是 true)
+  final bool tagsHidden;
+
+  /// 平台按公开条件发的勋章
+  final List<ProfileBadge> badges;
+
+  bool get isEmpty => tags.isEmpty && badges.isEmpty;
+
+  /// 从资料卡、UP 主空间的 `user`(tags / tags_hidden / badges 三个字段)读
+  factory TagsBadges.fromJson(Object? j) {
+    final m = _map(j);
+    return TagsBadges(
+      tags: [for (final t in _list(m['tags'])) if (t is String && t.isNotEmpty) t],
+      tagsHidden: _bool(m['tags_hidden']),
+      badges: [
+        for (final b in _list(m['badges']))
+          if (_map(b)['key'] is String) ProfileBadge.fromJson(b),
+      ],
+    );
+  }
+}
+
+/// 一枚勋章。[condition] 是平台发它的公开条件,和透明中心「勋章」那一栏一字不差。
+class ProfileBadge {
+  const ProfileBadge({
+    required this.key,
+    required this.name,
+    required this.icon,
+    this.condition = '',
+    this.hidden = false,
+    this.earned = true,
+  });
+
+  final String key;
+  final String name;
+
+  /// 一个汉字,画在小方块里
+  final String icon;
+  final String condition;
+
+  /// 对别人隐藏了(只有自己看自己时才会是 true)
+  final bool hidden;
+
+  /// 拿到了没有。只有「标签和勋章」设置页会列出没拿到的,资料卡上的都是拿到了的
+  final bool earned;
+
+  factory ProfileBadge.fromJson(Object? j) {
+    final m = _map(j);
+    return ProfileBadge(
+      key: _str(m['key']),
+      name: _str(m['name']),
+      icon: _str(m['icon']),
+      condition: _str(m['condition']),
+      hidden: _bool(m['hidden']),
+      earned: _bool(m['earned'], true),
     );
   }
 }

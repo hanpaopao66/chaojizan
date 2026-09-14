@@ -207,6 +207,10 @@ class ChatStore extends ChangeNotifier {
     chats.clear();
   }
 
+  /// 测试用:同 [debugAttach](页面级 widget 测试喂假的 HTTP)。收尾照样调 [stop]
+  @visibleForTesting
+  void debugUseClient(ApiClient client) => debugAttach(client);
+
   void stop() {
     CallController.instance.detach();
     realtime.stop();

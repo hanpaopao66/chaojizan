@@ -8,8 +8,10 @@ import '../chat_page.dart';
 import '../models.dart';
 import '../store.dart';
 import '../ui/avatar.dart';
+import '../ui/tags_badges.dart';
 import 'pickers.dart';
 import 'shared_media_page.dart';
+import 'tags_badges_page.dart';
 
 /// 打开某人的资料页。
 Future<void> openUserProfile(BuildContext context, int userId, {bool fromChat = false}) =>
@@ -196,6 +198,22 @@ class _UserProfilePageState extends State<UserProfilePage> {
           child: Text(u.isBot ? '机器人' : u.lastSeen.label(),
               style: TextStyle(color: u.lastSeen.online ? sz.clay : sz.inkMuted, fontSize: kFontNote)),
         ),
+        // 勋章和标签(别人隐藏了的服务端就不给;自己看自己时隐藏的也在,标着「已隐藏」)
+        if (!u.tagsBadges.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(kPagePad, 10, kPagePad, 0),
+            child: TagsBadgesView(
+              data: u.tagsBadges,
+              center: true,
+              onEditTags: u.isSelf
+                  ? () async {
+                      await Navigator.of(context)
+                          .push(MaterialPageRoute<void>(builder: (_) => const TagsBadgesPage()));
+                      await _load();
+                    }
+                  : null,
+            ),
+          ),
         const SizedBox(height: 16),
         if (!u.isSelf)
           Padding(

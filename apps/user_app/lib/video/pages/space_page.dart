@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import '../../chat/chat_page.dart';
+import '../../chat/models.dart' show TagsBadges;
+import '../../chat/pages/tags_badges_page.dart';
 import '../../chat/ui/avatar.dart';
+import '../../chat/ui/tags_badges.dart';
 import '../../session.dart';
 import '../api.dart';
 import '../models.dart';
@@ -77,6 +80,8 @@ class _SpacePageState extends State<SpacePage> {
       );
     }
     final user = VPerson.fromJson(s['user']);
+    // 标签和勋章:和资料页同一个口径(服务端已按「我」的视角过滤过)
+    final marks = TagsBadges.fromJson(s['user']);
     final stats = vMap(s['stats']);
     final isSelf = s['is_self'] == true;
     final followed = s['followed'] == true;
@@ -110,6 +115,20 @@ class _SpacePageState extends State<SpacePage> {
                     Text('@${user.username}', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
                   if (user.bio.isNotEmpty)
                     Padding(padding: const EdgeInsets.only(top: 6), child: Text(user.bio)),
+                  if (!marks.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: TagsBadgesView(
+                        data: marks,
+                        onEditTags: isSelf
+                            ? () async {
+                                await Navigator.of(context)
+                                    .push(MaterialPageRoute<void>(builder: (_) => const TagsBadgesPage()));
+                                await _load();
+                              }
+                            : null,
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   if (!isSelf)
                     Row(children: [
