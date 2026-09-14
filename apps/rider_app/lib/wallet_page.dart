@@ -4,6 +4,13 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'weekly_page.dart';
 
+/// 判骑手责任的三种账本行(服务端 EarningKind 的 fault_*)在流水里的说法
+const Map<String, String> _kFaultKinds = {
+  'fault_reversal': '骑手责任 · 这单收入不计',
+  'fault_charge': '骑手责任 · 商家那份餐钱(保障金池不够的部分)',
+  'fault_refund': '申诉成立 · 扣的钱退回',
+};
+
 /// 骑手账本(设计稿 5g):深台面 + 逐单。
 ///
 /// 台面答「这一段挣了多少、平台拿走多少」,逐单答「是哪几单」。
@@ -18,8 +25,9 @@ import 'weekly_page.dart';
 ///   跑腿费的 2%** —— 这个数由服务端按这一段的跑腿单算好(worklog 的
 ///   `*_platform_cut_cents`),是多少写多少,没接跑腿单就是真的 ¥0。
 ///
-/// 「罚款 ¥0」照写:平台没有任何罚款项(结算里骑手入账只有 earning /
-/// reversal / adjustment 三种,且骑手行从不冲减)。
+/// 「罚款 ¥0」照写:平台没有任何罚款项。判为骑手责任的那一单另算(服务端
+/// services/rider_fault:这单收入不计,商家那份餐钱先由保障金池出、不够的从收入里扣)——
+/// 那是赔商家那份餐钱,不是罚款,逐单里单独一行写明([_kFaultKinds]),不混进台面的「罚款」。
 class WalletPage extends StatefulWidget {
   const WalletPage({super.key, required this.api, this.period = 0});
 
@@ -319,6 +327,13 @@ class _WalletPageState extends State<WalletPage> {
           const SizedBox(height: 14),
           Container(height: 1, color: s.line),
           const SizedBox(height: 12),
+          // 判骑手责任扣过钱、余额是负的:之后的收入先抵,抵完才能提现(服务端按余额挡)
+          if (wallet.balanceCents < 0) ...[
+            Text('待抵扣 ${szYuanText(-wallet.balanceCents)}:判为骑手责任的那几单扣的钱,'
+                '之后的收入先抵,抵完才能提现',
+                style: TextStyle(fontSize: kFontMicro, color: s.hold)),
+            const SizedBox(height: 8),
+          ],
           Row(children: [
             Container(
               width: 7,
@@ -414,6 +429,8 @@ class _WalletPageState extends State<WalletPage> {
       if (e.isErrand && e.platformCutCents > 0)
         '${yuan(e.feeCents)} − 2%',
       if (e.kind == 'adjustment') '调整',
+      // 判骑手责任(服务端 services/rider_fault):这单收入冲回、保障金池不够的部分另扣、申诉成立退回
+      if (_kFaultKinds[e.kind] != null) _kFaultKinds[e.kind]!,
     ].join(' · ');
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
@@ -448,7 +465,9 @@ class _WalletPageState extends State<WalletPage> {
         ),
         const SizedBox(width: 8),
         Text(szYuanText(e.amountCents),
-            style: szMoney(fontSize: kFontBodyLg, color: sz.earn)),
+            style: szMoney(
+                fontSize: kFontBodyLg,
+                color: e.amountCents < 0 ? sz.hold : sz.earn)),
       ]),
     );
   }

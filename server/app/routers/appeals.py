@@ -4,14 +4,15 @@
 - after_sale       商家申诉「商家责任」售后判责(含配送异常「到店未出餐」「餐品不齐」判商家责任
                    时记的那条售后 —— services/delivery_fault)
 - after_sale_rider 骑手申诉「骑手责任」售后判责(admin.after_sale_rider_fault)—— 和商家那条对齐
-- delivery_issue   骑手申诉「骑手责任先行赔付」裁决
+- delivery_issue   骑手申诉「判骑手责任」的配送异常裁决(用户申诉判用户原因的)
 - review           商家申诉恶意差评
 
-改判的钱怎么走(平台认亏,不追用户款——用户拿到的退款不倒找):
+改判的钱怎么走(用户拿到的退款不倒找):
 - after_sale 改判  → merchant_earnings 补一条 adjustment 正向行,恢复被冲净额
                      (账本 net == food - 0 恒等式成立,witness 可验)
 - after_sale_rider / delivery_issue 改判 → 对应 AfterSale.fault: rider → platform
-                     (骑手消责正名,审计规则 6 的先行赔付豁免口径同步认 platform)
+                     (骑手消责正名,审计规则 6 的免冲账口径同步认 platform);判责时从骑手
+                     扣的加回去、保障金池出的回池(services/rider_fault)—— 错判由平台认
 - review 改判      → 差评 hidden,评分聚合同步扣减
 """
 from datetime import datetime, timedelta, timezone
@@ -164,13 +165,13 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         via_issue = await db.scalar(select(DeliveryIssue.id).where(
             DeliveryIssue.order_id == a.order_id, DeliveryIssue.resolution == "refund").limit(1))
         if via_issue is not None:
-            # 配送异常先行赔付时顺手补的那条售后:判责记在配送异常上(信用分也记在那儿),
+            # 配送异常裁成退款时顺手补的那条售后:判责记在配送异常上(信用分也记在那儿),
             # 在那条上申诉 —— 两条都开的话同一次判决能申诉两遍
             raise HTTPException(409, "这一单的判责记在配送异常上,请在那条配送异常上申诉")
         if not _within_window(a.processed_at):
             raise HTTPException(422, "已超过 72 小时申诉时限")
     elif payload.target_type == "delivery_issue":
-        # 骑手申诉判他责的(先行赔付),用户申诉判**用户**责的(按送达处理)。
+        # 骑手申诉判他责的(裁成退款),用户申诉判**用户**责的(按送达处理)。
         #
         # 用户这一侧以前是空的,而那恰恰是最不公平的一格:骑手报「联系不上
         # 顾客」、平台判 mark_delivered,于是用户付了全款、一口没吃到,
@@ -185,7 +186,7 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
             if issue.rider_id != user.id:
                 raise HTTPException(404, "异常记录不存在")
             if issue.resolution != "refund":
-                raise HTTPException(409, "只有判骑手责任(先行赔付)的裁决才需要申诉")
+                raise HTTPException(409, "只有判骑手责任的退款裁决才需要申诉")
             from ..services.delivery_fault import refund_fault
             if refund_fault(issue.kind) != "rider":
                 # 到店未出餐、餐品不齐裁成退款判的是商家责任(商家在售后判责那条通道申诉)
@@ -444,6 +445,18 @@ async def list_appeals(
     return out
 
 
+async def _undo_rider_fault(db: AsyncSession, order_id: int, why: str) -> str:
+    """骑手责任改判成立:判责时从骑手扣的加回去、保障金池出的回池(services/rider_fault)。
+    返回推送里接在后面的那一句(没扣过钱的老裁决返回空串)。"""
+    from ..services import rider_fault
+    order = await db.get(Order, order_id, with_for_update=True)
+    back = await rider_fault.undo(db, order, why=why) if order is not None else None
+    if back is None:
+        return ""
+    return (f";判责时扣的 ¥{back.rider_total / 100:.2f} 已退回你的收入"
+            if back.rider_total else "")
+
+
 async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
                     admin_id: int | None = None) -> None:
     """改判动作。平台认亏:用户已得的退款不追回。
@@ -478,13 +491,15 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
                            {"type": "appeal"})
     elif appeal.target_type == "after_sale_rider":
         # 和配送异常判骑手责任改判同一个写法:判责从骑手转走(骑手消责正名),信用分那一条
-        # 跟着不再计分。骑手这边原本就没被扣钱(先行赔付),所以没有钱要补
+        # 跟着不再计分;判责时从骑手扣的那部分加回去、保障金池出的那部分回池(services/rider_fault)
         a = await db.get(AfterSale, appeal.target_id, with_for_update=True)
         a.fault = "platform"
         a.reply = (f"{a.reply};骑手申诉改判:非骑手责任"
                    if a.reply else "骑手申诉改判:非骑手责任")[:300]
+        back = await _undo_rider_fault(db, a.order_id, "售后判骑手责任申诉成立")
         await push_to_user(appeal.user_id, "申诉成立(已为你正名)",
-                           "复核认定这笔售后不是你的责任,责任记录已消除,信用分那一条不再计分",
+                           "复核认定这笔售后不是你的责任,责任记录已消除,信用分那一条不再计分"
+                           + back,
                            {"type": "appeal"})
     elif appeal.target_type == "delivery_issue":
         issue = await db.get(DeliveryIssue, appeal.target_id, with_for_update=True)
@@ -514,8 +529,9 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
                 if borne > 0 else "复核认定这一单不是你的责任",
                 {"type": "appeal"})
         else:
+            back = await _undo_rider_fault(db, issue.order_id, "配送异常判骑手责任申诉成立")
             await push_to_user(appeal.user_id, "申诉成立(已为你正名)",
-                               "复核认定该次配送异常非你的责任,责任记录已消除",
+                               "复核认定该次配送异常非你的责任,责任记录已消除" + back,
                                {"type": "appeal"})
     elif appeal.target_type == "risk_flag":
         # 改判 = 平台认定这次限制不成立,当场解除。

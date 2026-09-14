@@ -6,11 +6,12 @@ import { AfterSale, ApiError, listAfterSales, riderFault, yuan } from '../api'
 /**
  * 售后仲裁。
  *
- * ## 判骑手责任是**赔钱**动作
+ * ## 判骑手责任是**动钱**的动作
  *
- * 点下去会全额退用户(含配送费),商家和骑手的收入都不动 ——
- * 差额由骑手保障金承担;这一单记为骑手责任,是骑手信用分的扣分项
- * (server/app/services/credit.py)。所以确认框里要把金额和后果写清楚,
+ * 点下去会全额退用户(含配送费),商家无责、净额不动;这单骑手收入冲回、平台这单佣金不收,
+ * 商家那份餐钱先从骑手保障金池出,池子不够的从骑手收入里扣(server/app/services/rider_fault.py,
+ * 平台不出钱)。这一单记为骑手责任,是骑手信用分的扣分项(server/app/services/credit.py),
+ * 骑手 72 小时内可以申诉,成立的话扣的钱退回。所以确认框里要把金额和后果写清楚,
  * 不是弹一个「确定吗」。
  */
 export default function AftersalesPage() {
@@ -37,8 +38,10 @@ export default function AftersalesPage() {
         <>
           <Alert type="warning" showIcon style={{ margin: '8px 0' }}
                  message={`将全额退用户 ${yuan(a.total_cents)}(含配送费)`}
-                 description={'商家与骑手收入不受影响,差额由骑手保障金承担。'
-                   + '这一单记为骑手责任,扣骑手信用分(骑手会收到通知,可以申诉)。'} />
+                 description={'商家无责,净额不动。这单骑手的收入不计、平台这单佣金不收;'
+                   + '商家那份餐钱先由骑手保障金池出,池子不够的从骑手收入里扣(平台不出钱)。'
+                   + '这一单记为骑手责任,扣骑手信用分;骑手会收到通知,72 小时内可以申诉,'
+                   + '成立的话扣的钱退回。'} />
           <Input.TextArea rows={2} maxLength={200} placeholder="判责理由"
                           onChange={(e) => { reason = e.target.value }} />
         </>
@@ -54,7 +57,8 @@ export default function AftersalesPage() {
         setActing(true)
         try {
           const r = await riderFault(a.id, reason.trim())
-          message.success(`已赔付 ${yuan(r.refunded_cents)}`)
+          message.success(`已退顾客 ${yuan(r.refunded_cents)};保障金池出 ${yuan(r.fund_cents ?? 0)},`
+            + `骑手另出 ${yuan(r.rider_charge_cents ?? 0)}`)
           await load()
         } catch (e) {
           message.error(e instanceof ApiError ? e.message : String(e))

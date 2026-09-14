@@ -1,4 +1,7 @@
-/// 我的配送异常与申诉:上报记录列表;判骑手责任(先行赔付)的裁决可在 72 小时内申诉。
+/// 我的配送异常与申诉:上报记录列表;判骑手责任的裁决可在 72 小时内申诉。
+///
+/// 判骑手责任的钱(服务端 services/rider_fault):顾客全额退款,这单配送费不计,
+/// 商家那份餐钱先由骑手保障金池出、不够的从骑手收入里扣;申诉成立扣的钱退回。
 ///
 /// 裁成「退款」判的是谁,**以服务端给的 fault 为准**(services/delivery_fault):
 /// 到店未出餐、餐品不齐判的是商家责任,不算骑手的,也就没有申诉按钮。
@@ -18,7 +21,7 @@ const _kindLabels = {
 const _resolutionLabels = {
   'continue_delivery': '已协调,继续配送',
   'mark_delivered': '按送达处理(用户原因)',
-  'refund': '判骑手责任,平台先行赔付',
+  'refund': '判骑手责任(这单配送费不计,商家那份餐钱先由保障金池出,不够的从收入里扣)',
 };
 
 /// 老服务端不带 fault 时的兜底:和服务端 delivery_fault.MERCHANT_KINDS 同一组
@@ -99,7 +102,7 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('说明为什么这不是你的责任,平台会人工复核;'
-                '申诉成立会为你消除责任记录(用户已得退款由平台承担)。',
+                '申诉成立会为你消除责任记录,判责时扣的钱退回你的收入。',
                 style: TextStyle(fontSize: 13)),
             const SizedBox(height: 12),
             TextField(

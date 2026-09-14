@@ -79,20 +79,24 @@ rejected = call("POST", f"/after-sales/{mine['id']}/reject", merchant,
 assert rejected["status"] == "rejected"
 print("✓ 商家可见举证图;拒绝带回复")
 
-# ---- 骑手责任:商家拒绝后,客服仲裁判骑手责 → 平台先行赔付全额(含配送费) ----
+# ---- 骑手责任:商家拒绝后,客服仲裁判骑手责 → 顾客全额退(含配送费),平台不出钱 ----
+# 钱怎么走见 services/rider_fault(e2e_rider_fault 逐项核):这单骑手收入冲回,
+# 商家那份餐钱先保障金池、不够的骑手出
 admin_list = call("GET", "/admin/after-sales?days=7", admin)
 target = next(x for x in admin_list if x["order_no"] == no1)
 assert target["images"] == EVIDENCE
 r = call("POST", f"/admin/after-sales/{target['id']}/rider-fault", admin,
          {"reason": "举证属实,配送途中餐品受损"})
-assert r["refunded_cents"] == total1, "骑手责任应全额赔付(含配送费)"
+assert r["refunded_cents"] == total1, "骑手责任应全额退(含配送费)"
 order1 = call("GET", f"/orders/{no1}", customer)
 assert order1["refund_cents"] == total1
-assert "平台先行赔付" in order1["refund_note"]
+assert "骑手责任" in order1["refund_note"], order1["refund_note"]
+assert r["fund_cents"] + r["rider_charge_cents"] == r["merchant_cents"], r
 seen = call("GET", f"/orders/{no1}/after-sale", customer)
 assert seen["fault"] == "rider" and seen["status"] == "accepted"
-print(f"✓ 判骑手责:平台先行赔付全额 ¥{total1/100:.2f}(含配送费 ¥{fee1/100:.2f}),"
-      "商家净额与骑手收入不受影响")
+print(f"✓ 判骑手责:顾客全额退 ¥{total1/100:.2f}(含配送费 ¥{fee1/100:.2f});"
+      f"商家那份 ¥{r['merchant_cents']/100:.2f} 池子出 ¥{r['fund_cents']/100:.2f}、"
+      f"骑手另出 ¥{r['rider_charge_cents']/100:.2f}")
 
 # 审计不应对这单报错(商家不冲账是骑手责任单的合法状态)
 problems = call("POST", "/admin/audit/run", admin)["detail"]

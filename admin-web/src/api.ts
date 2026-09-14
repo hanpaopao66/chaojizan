@@ -355,9 +355,12 @@ export interface AfterSale {
 
 export const listAfterSales = (days = 7) =>
   get<AfterSale[]>(`/admin/after-sales?days=${days}`)
-/** 判骑手责任:全额退用户(含配送费),商家骑手收入不动,损失走骑手保障金 */
+/** 判骑手责任:全额退用户(含配送费),商家净额不动;这单骑手收入冲回,商家那份餐钱先从
+ *  骑手保障金池出、不够的从骑手收入里扣(server/app/services/rider_fault.py,平台不出钱) */
 export const riderFault = (id: number, reason: string) =>
-  post<{ refunded_cents: number }>(`/admin/after-sales/${id}/rider-fault`, { reason })
+  post<{ refunded_cents: number; rider_income_cents?: number; merchant_cents?: number;
+         fund_cents?: number; rider_charge_cents?: number }>(
+    `/admin/after-sales/${id}/rider-fault`, { reason })
 
 // ---------- 配送异常 ----------
 
@@ -387,7 +390,8 @@ export const listDeliveryIssues = (status = 'open') =>
  *  - continue_delivery 让骑手继续送(不判谁的责任)
  *  - mark_delivered 判为顾客原因,按送达处理(顾客信用分的扣分项)
  *  - refund 判谁的责任看异常种类(refund_fault):到店未出餐、餐品不齐判商家责任、
- *    商家承担退款(商家信用分的扣分项);其余判骑手责任、平台先行赔付(骑手信用分的扣分项) */
+ *    商家承担退款(商家信用分的扣分项);其余判骑手责任 —— 顾客全额退款,这单骑手收入冲回,
+ *    商家那份餐钱先保障金池、不够的骑手出(骑手信用分的扣分项) */
 export type IssueAction = 'continue_delivery' | 'mark_delivered' | 'refund'
 
 export const resolveDeliveryIssue = (

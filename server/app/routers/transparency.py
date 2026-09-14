@@ -305,8 +305,16 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
         SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings
         WHERE kind = 'adjustment'
     """)))
+    # 骑手保障金池:按公开账本算的计提、支出(判骑手责任时垫商家那份餐钱)、回池(申诉改判)、余额。
+    # 池子是从佣金里计提的专项钱,单列一栏 —— 支出一笔一笔都在公开账本的 rider_fund.rows 里
+    from ..services.rider_fault import fund_balance
+    fund = await fund_balance(db)
+    # 骑手责任申诉改判成立时退回骑手的钱(fault_refund):那一单的错判由平台认
+    fault_back = await db.scalar(sa_text(
+        "SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings "
+        "WHERE kind = 'fault_refund'"))
     income = commission + voucher_fee
-    spend = subsidy + meal_comp + adjustments
+    spend = subsidy + meal_comp + adjustments + fault_back
     data = {
         "income": {"commission_cents": commission,
                    "voucher_fee_cents": voucher_fee,
@@ -314,7 +322,9 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
         "spend": {"subsidy_cents": subsidy,
                   "meal_compensation_cents": meal_comp,
                   "adjustment_cents": adjustments,
+                  "rider_fault_refund_cents": fault_back,
                   "total_cents": spend},
+        "rider_fund": fund,
         # 留存要养:支付通道/服务器/短信/地图/审核客服(见月度财报成本侧)
         "retained_cents": income - spend,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -327,7 +337,8 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
 async def compensation_public(
     request: Request, db: AsyncSession = Depends(get_db),
 ):
-    """平台赔钱记录(本月/累计):超时安抚券、餐损赔付、退款。
+    """赔付记录(本月/累计):超时安抚券(历史)、餐损赔付、退款,以及判骑手责任时
+    保障金池垫的、骑手另出的商家那份餐钱。
 
     没有平台愿意亮自己的赔付账——我们把它当承诺兑现的凭据。
     """
@@ -361,6 +372,16 @@ async def compensation_public(
         "refunds": await _pair("""
             SELECT count(*), coalesce(sum(amount_cents), 0) FROM refunds
             WHERE status = 'success'
+        """),
+        # 判骑手责任时,商家那份餐钱:保障金池出的(payout),和池子不够、骑手另出的
+        # (fault_charge,记正数)。平台自己这一单一分不出(services/rider_fault)
+        "rider_fund_payouts": await _pair("""
+            SELECT count(*), coalesce(sum(amount_cents), 0) FROM rider_fund_movements
+            WHERE kind = 'payout'
+        """),
+        "rider_fault_charges": await _pair("""
+            SELECT count(*), coalesce(-sum(amount_cents), 0) FROM rider_earnings
+            WHERE kind = 'fault_charge'
         """),
         "month_since": month_start.date().isoformat(),
     }

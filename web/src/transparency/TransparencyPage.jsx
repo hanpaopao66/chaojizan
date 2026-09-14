@@ -574,9 +574,26 @@ export default function TransparencyPage() {
                 <span className="num">{yuanF(funds?.spend.meal_compensation_cents)}</span></div>
               <div className="row"><span>申诉改判调整（误伤的账，平台认亏）</span>
                 <span className="num">{yuanF(funds?.spend.adjustment_cents)}</span></div>
+              {funds?.spend.rider_fault_refund_cents != null && (
+                <div className="row"><span>骑手责任改判成立，退回骑手（错判由平台认）</span>
+                  <span className="num">{yuanF(funds?.spend.rider_fault_refund_cents)}</span></div>
+              )}
               <div className="row total"><span>合计</span>
                 <span className="num">{yuanF(funds?.spend.total_cents)}</span></div>
             </div>
+            {funds?.rider_fund && (
+              <div className="col" style={{ gridColumn: '1 / -1' }}>
+                <h4>骑手保障金池（按公开账本算）</h4>
+                <div className="row"><span>计提（每笔配送入账从佣金里拨 {yuanF(funds.rider_fund.per_order_cents)}）</span>
+                  <span className="num">{yuanF(funds.rider_fund.accrued_cents)}</span></div>
+                <div className="row"><span>支出（判骑手责任时先垫商家那份餐钱，不够的骑手出）</span>
+                  <span className="num">{yuanF(funds.rider_fund.paid_cents)}</span></div>
+                <div className="row"><span>回池（骑手申诉改判成立）</span>
+                  <span className="num">{yuanF(funds.rider_fund.returned_cents)}</span></div>
+                <div className="row total"><span>余额</span>
+                  <span className="num">{yuanF(funds.rider_fund.balance_cents)}</span></div>
+              </div>
+            )}
             <div className="tp-retained">
               留存 <b className="num">{yuanF(funds?.retained_cents)}</b>——用来付“电费”（支付通道 / 服务器 / 短信 / 地图 / 审核客服），盈余不分红：降费率、补骑手、扶小店。
             </div>
@@ -673,6 +690,13 @@ export default function TransparencyPage() {
               <div className="k">退款（缺货部分退 / 整单退 / 售后退，渠道确认成功口径）</div>
               <div className="m">累计 {comp?.refunds.total.count ?? '–'} 笔 · 本月 {comp?.refunds.month.count ?? '–'} 笔</div>
             </div>
+            {comp?.rider_fund_payouts && (
+              <div className="tp-card">
+                <div className="num v">{yuanF(comp.rider_fund_payouts.total.cents)}</div>
+                <div className="k">判骑手责任：商家那份餐钱由骑手保障金池垫（顾客全额退款，这单骑手收入不计，平台这单佣金不收）</div>
+                <div className="m">累计 {comp.rider_fund_payouts.total.count} 笔 · 池子不够、骑手另出 {yuanF(comp.rider_fault_charges?.total.cents)}（{comp.rider_fault_charges?.total.count ?? 0} 笔）</div>
+              </div>
+            )}
           </div>
         </Sec>
 

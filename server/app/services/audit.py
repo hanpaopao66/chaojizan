@@ -90,6 +90,10 @@ STAY_PAID_STUCK_HOURS = 24
 #: 各写各的字符串的话,改一处就会让另外两处静默失效(一个漏报、一个少算)。
 NO_RIDER_COMP_NOTE = "无骑手接单取消,平台赔付餐损"
 
+#: 判骑手责任的三种骑手行(services/rider_fault.FAULT_KINDS):这单收入冲回、池子不够骑手出、改判退回
+_RIDER_FAULT_KINDS = (EarningKind.fault_reversal, EarningKind.fault_charge,
+                      EarningKind.fault_refund)
+
 
 def _rider_due(order) -> int:
     """骑手这一单应得多少。
@@ -183,6 +187,68 @@ async def _reversal_due_ids(db, order_ids) -> set[int]:
     return due - exempt
 
 
+async def _rider_fault_problems(db, since) -> list[dict]:
+    """判骑手责任的恒等式(规则 4c)。和 services/rider_fault.apply / undo 逐项对着写。"""
+    from ..models import RiderFundMovement
+    from .rider_fault import PAYOUT, RETURN, fund_balance
+
+    out: list[dict] = []
+    touched = set(await db.scalars(
+        select(RiderEarning.order_id).where(RiderEarning.kind.in_(_RIDER_FAULT_KINDS),
+                                            RiderEarning.created_at >= since)))
+    touched |= set(await db.scalars(
+        select(RiderFundMovement.order_id).where(RiderFundMovement.created_at >= since)))
+    if touched:
+        rider_rows: dict[int, dict] = {}
+        for oid, kind, amt in (await db.execute(
+                select(RiderEarning.order_id, RiderEarning.kind, RiderEarning.amount_cents)
+                .where(RiderEarning.order_id.in_(touched)))).all():
+            rider_rows.setdefault(oid, {})[kind] = amt
+        fund_rows: dict[int, dict] = {}
+        for oid, kind, amt in (await db.execute(
+                select(RiderFundMovement.order_id, RiderFundMovement.kind,
+                       RiderFundMovement.amount_cents)
+                .where(RiderFundMovement.order_id.in_(touched)))).all():
+            fund_rows.setdefault(oid, {})[kind] = amt
+        merchant_net = dict((await db.execute(
+            select(MerchantEarning.order_id, MerchantEarning.net_cents)
+            .where(MerchantEarning.order_id.in_(touched),
+                   MerchantEarning.kind == EarningKind.earning))).all())
+        order_nos = dict((await db.execute(
+            select(Order.id, Order.order_no).where(Order.id.in_(touched)))).all())
+        for oid in sorted(touched):
+            r, f = rider_rows.get(oid, {}), fund_rows.get(oid, {})
+            income = r.get(EarningKind.earning, 0)
+            rev = r.get(EarningKind.fault_reversal, 0)
+            charge = -r.get(EarningKind.fault_charge, 0)
+            payout = f.get(PAYOUT, 0)
+            no = order_nos.get(oid, f"#{oid}")
+            if rev and rev != -income:
+                out.append({"check": "rider_fault_split",
+                            "detail": f"订单 {no} 判骑手责任冲回 {rev} 分,这单骑手入账是 "
+                                      f"{income} 分 —— 冲多了或冲少了"})
+            gap = max(merchant_net.get(oid, 0), 0)
+            if payout + charge != gap:
+                out.append({"check": "rider_fault_split",
+                            "detail": f"订单 {no} 判骑手责任:保障金池出 {payout} + 骑手另扣 "
+                                      f"{charge} ≠ 商家留着的净额 {gap} 分 —— 差额成了平台出的钱"
+                                      f"或者多扣了骑手"})
+            if EarningKind.fault_refund in r or RETURN in f:
+                back = r.get(EarningKind.fault_refund, 0)
+                if back != -(rev - charge) or f.get(RETURN, 0) != payout:
+                    out.append({"check": "rider_fault_split",
+                                "detail": f"订单 {no} 骑手责任改判:退回骑手 {back}(应 "
+                                          f"{-(rev - charge)})、回池 {f.get(RETURN, 0)}(应 "
+                                          f"{payout})对不上"})
+    bal = await fund_balance(db)
+    if bal["balance_cents"] < 0:
+        out.append({"check": "rider_fund_negative",
+                    "detail": f"骑手保障金池余额为负:计提 {bal['accrued_cents']} − 支出 "
+                              f"{bal['paid_cents']} + 回池 {bal['returned_cents']} = "
+                              f"{bal['balance_cents']} 分 —— 池子不够时该骑手出,不该透支"})
+    return out
+
+
 async def _refund_sums(db, biz_type: str, id_subquery) -> dict[int, int]:
     """{业务 id: 真的退出去了多少分}。失败流水不算 —— 钱没动就不能算已退。
 
@@ -257,6 +323,20 @@ async def run_audit() -> list[dict]:
                 )
             )
         }
+        # 判骑手责任的骑手行(services/rider_fault):{order_id: (这一单判责行合计, 还在生效?)}。
+        # 生效 = 扣过、还没因为改判退回
+        fault_sum: dict[int, int] = {}
+        fault_taken: set[int] = set()
+        fault_back: set[int] = set()
+        for oid, kind, amt in (await db.execute(
+                select(RiderEarning.order_id, RiderEarning.kind, RiderEarning.amount_cents)
+                .where(RiderEarning.order_id.in_(completed_ids),
+                       RiderEarning.kind.in_(_RIDER_FAULT_KINDS)))).all():
+            fault_sum[oid] = fault_sum.get(oid, 0) + amt
+            (fault_back if kind == EarningKind.fault_refund else fault_taken).add(oid)
+        r_faults = {oid: (total, oid in fault_taken and oid not in fault_back)
+                    for oid, total in fault_sum.items()}
+
         def order_gross(o: Order) -> int:
             """商家应收口径 = 菜品 + 打包费 - 商家满减;
             自配送单配送费归商家,一并计入(与结算同口径)。"""
@@ -303,8 +383,14 @@ async def run_audit() -> list[dict]:
                 fee = service_fee_cents(order.delivery_fee_cents)
                 if re is not None and order.rider_id is not None:
                     # 帮买按小票实付结算,和预估不一致时差额已原路退/补收,
-                    # 所以拿 refund_cents 校平
-                    lhs = re.amount_cents + fee + order.refund_cents
+                    # 所以拿 refund_cents 校平。
+                    #
+                    # 判骑手责任的单(services/rider_fault):骑手这单收入冲回、平台这 2%
+                    # 也不收(用来退顾客),所以把骑手这一单的判责行加进来、服务费按 0 算;
+                    # 改判成立的那种判责方变成 platform,落到下面「平台认赔」那一支
+                    fault_sum, fault_active = r_faults.get(order.id, (0, False))
+                    lhs = (re.amount_cents + fault_sum + (0 if fault_active else fee)
+                           + order.refund_cents)
                     if lhs != order.total_cents:
                         # 平台认赔的那些**不报警,聚合成日志**(#33 已拍板:
                         # 关灯,不是记账)。
@@ -418,14 +504,26 @@ async def run_audit() -> list[dict]:
                           f"-补贴 {order.subsidy_cents}",
             })
 
-        # 4) 骑手余额不得为负
+        # 4) 骑手提现不得超过挣到的钱。
+        #
+        # 判骑手责任之后(services/rider_fault),骑手的余额**可以是负的**:这单收入冲回、
+        # 保障金池不够的部分从他收入里扣,余额不够就挂负数,之后的收入先抵、提现按余额挡住。
+        # 所以这条不再是「余额不得为负」,而是它原本要守的那件事:**提走的钱不超过挣到的钱**
+        # (判责那几行不算「挣到」)。余额为负的人单独记一行日志,不当错账报
         riders = (
             await db.scalars(select(User).where(User.role == UserRole.rider))
         ).all()
+        owed_n, owed_cents = 0, 0
         for rider in riders:
             earned = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(RiderEarning.amount_cents), 0))
-                .where(RiderEarning.rider_id == rider.id)
+                .where(RiderEarning.rider_id == rider.id,
+                       RiderEarning.kind.notin_(_RIDER_FAULT_KINDS))
+            )
+            faults = await db.scalar(
+                select(sa_func.coalesce(sa_func.sum(RiderEarning.amount_cents), 0))
+                .where(RiderEarning.rider_id == rider.id,
+                       RiderEarning.kind.in_(_RIDER_FAULT_KINDS))
             )
             out = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(Withdrawal.amount_cents), 0))
@@ -439,8 +537,20 @@ async def run_audit() -> list[dict]:
             if earned - out < 0:
                 problems.append({
                     "check": "rider_balance_negative",
-                    "detail": f"骑手 {rider.phone} 余额为负:{earned - out} 分",
+                    "detail": f"骑手 {rider.phone} 提走的比挣到的多:{earned - out} 分"
+                              f"(不含判骑手责任扣的钱)",
                 })
+            elif earned + faults - out < 0:
+                owed_n += 1
+                owed_cents += out - earned - faults
+        if owed_n:
+            logger.info("判骑手责任后余额为负、等后续收入抵扣的骑手 %s 人,共欠 %s 分",
+                        owed_n, owed_cents)
+
+        # 4c) 判骑手责任的钱对不对(services/rider_fault):冲回的收入 == 这单入账,
+        #     保障金池出的 + 骑手另扣的 == 商家留着的这单净额;改判成立的,扣的全退、池子的全回。
+        #     还有池子本身不许支成负数(余额按公开账本算:计提 − 支出 + 回池)
+        problems.extend(await _rider_fault_problems(db, since))
 
         # 4b) 商家余额不得为负。
         #

@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import func as sa_func
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 sys.path.insert(0, ".")
 
@@ -76,13 +76,17 @@ async def build(ym: str) -> str:
             select(sa_func.count(VoucherPurchase.id)).where(
                 VoucherPurchase.status == VoucherPurchaseStatus.redeemed,
                 in_month(VoucherPurchase.redeemed_at)))
-        # 售后中平台承担的配送费(全额退款单的配送费损失,见 after_sales.py)
+        # 售后中平台承担的配送费(全额退款单的配送费损失,见 after_sales.py)。
+        # 判骑手责任的单不算:骑手这单收入冲回了(services/rider_fault),平台没有贴这笔配送费
+        fault_reversed = exists().where(RiderEarning.order_id == Order.id,
+                                        RiderEarning.kind == EarningKind.fault_reversal)
         aftersale_fee_loss = await db.scalar(
             select(sa_func.coalesce(
                 sa_func.sum(Order.delivery_fee_cents), 0)).where(
                 Order.status == OrderStatus.COMPLETED,
                 Order.refund_cents >= Order.total_cents,
                 Order.total_cents > 0,
+                ~fault_reversed,
                 in_month(Order.created_at)))
 
     def y(cents):
@@ -110,7 +114,7 @@ async def build(ym: str) -> str:
 | 推送 | 待填 | 极光 |
 | 域名/证书 | 待填 | |
 | 平台补贴(首单立减) | {y(subsidies)} | 自动聚合 |
-| 售后承担的配送费 | {y(aftersale_fee_loss)} | 全额退款单,骑手照常拿钱 |
+| 售后承担的配送费 | {y(aftersale_fee_loss)} | 全额退款单,骑手照常拿钱(判骑手责任的单骑手这单收入冲回,不在此列) |
 | **成本合计** | 待填 | |
 
 ## 结余

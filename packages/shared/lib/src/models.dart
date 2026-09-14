@@ -1089,7 +1089,8 @@ class AfterSale {
   /// 举证照片(相对路径,展示用 api.resolveUrl 拼全)
   final List<String> images;
 
-  /// ""=未判 / merchant=商家责任 / rider=骑手责任(平台先行赔付)
+  /// ""=未判 / merchant=商家责任 / rider=骑手责任(这单配送费不计,商家那份餐钱先保障金池、
+  /// 不够的骑手出,见服务端 services/rider_fault)
   final String fault;
 
   /// pending / accepted / rejected

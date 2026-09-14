@@ -112,10 +112,13 @@ async def resolve_credit_appeal(appeal_id: int, payload: CreditAppealResolveIn,
     await db.commit()
     await credit.invalidate(appeal.user_id)
     won = appeal.status == "overturned"
+    back = getattr(appeal, "money_back", 0) or 0
     await push_to_user(
         appeal.user_id, "信用分申诉有结果了",
         ("申诉成立,这一条不再计入信用分,分数已经重算。" if won
-         else "复核后维持原判,这一条继续计分。") + appeal.resolve_note,
+         else "复核后维持原判,这一条继续计分。")
+        + (f"判责时扣的 ¥{back / 100:.2f} 已退回你的收入。" if back else "")
+        + appeal.resolve_note,
         {"type": "credit"}, record_skip=True)
     return _appeal_out(appeal, _role_of(await db.get(User, appeal.user_id)))
 

@@ -454,8 +454,11 @@ async def my_worklog(
                                    - timedelta(days=1)))).all()
 
     async def stats(since):
+        # 单数只数配送入账行;金额是这一段账本上的全部(判骑手责任冲回、扣的也在里面 ——
+        # 台面上的「挣了多少」要和逐单加起来对得上)
         row = (await db.execute(
-            select(func.count(RiderEarning.id),
+            select(func.count(RiderEarning.id).filter(
+                       RiderEarning.kind == EarningKind.earning),
                    func.coalesce(func.sum(RiderEarning.amount_cents), 0))
             .where(RiderEarning.rider_id == user.id,
                    RiderEarning.created_at > since))).first()
@@ -1844,8 +1847,10 @@ async def _novice_window(db: AsyncSession, rider_id: int) -> bool:
     if datetime.now(timezone.utc) - created > timedelta(
             days=settings.rider_novice_days):
         return False
+    # 只数配送入账行:调整、判骑手责任的那几行不是「送了一单」
     done = await db.scalar(select(func.count(RiderEarning.id)).where(
-        RiderEarning.rider_id == rider_id)) or 0
+        RiderEarning.rider_id == rider_id,
+        RiderEarning.kind == EarningKind.earning)) or 0
     return done < settings.rider_novice_orders
 
 

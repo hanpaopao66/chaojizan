@@ -38,6 +38,12 @@ VERSION = "0.1.3"
 #: earning=配送费+小费+等餐补偿;adjustment=正向补偿(申诉改判、现场难度补贴)
 RIDER_KINDS = {"earning", "adjustment"}
 
+#: 判骑手责任的骑手行(2026-09 起,规格 §6.2b):**不在 rider_rows 里**,单独放在
+#: rider_fault_rows。冲回这单收入、池子不够骑手另出的是负数,申诉改判退回的是正数
+RIDER_FAULT_SIGNS = {"fault_reversal": -1, "fault_charge": -1, "fault_refund": 1}
+#: 骑手保障金池的进出(rider_fund.rows):金额恒为正,方向看 kind
+FUND_ROW_KINDS = {"payout", "return"}
+
 
 def local_utc_offset() -> str:
     """本机 UTC 偏移(如 UTC+08:00)。仅用于 /nodes 世界地图粗定位,可用
@@ -112,6 +118,18 @@ def verify_rows(payload: dict) -> list[str]:
             problems.append(f"骑手行 {r['o']}: 未知入账类型 {r['kind']} —— "
                             f"骑手侧只应有入账与正向补偿")
 
+    # 判骑手责任(规格 §6.2b):种类在白名单里、符号对。缺这两个字段的老锚点跳过
+    for r in payload.get("rider_fault_rows", []):
+        sign = RIDER_FAULT_SIGNS.get(r["kind"])
+        if sign is None:
+            problems.append(f"骑手判责行 {r['o']}: 未知类型 {r['kind']}")
+        elif r["amount"] * sign < 0:
+            problems.append(f"骑手判责行 {r['o']}: {r['kind']} 的金额 {r['amount']} 符号不对")
+    for r in (payload.get("rider_fund") or {}).get("rows", []):
+        if r["kind"] not in FUND_ROW_KINDS or r["amount"] <= 0:
+            problems.append(f"保障金池行 {r['o']}: {r['kind']} {r['amount']} —— "
+                            f"只应有正数的支出(payout)和回池(return)")
+
     for r in payload.get("voucher_rows", []):
         expect_fee = int(r["gross"] * voucher_rate)
         if r["fee"] != expect_fee or r["net"] != r["gross"] - r["fee"]:
@@ -143,6 +161,9 @@ def verify_rows(payload: dict) -> list[str]:
     if t and "stay_fee" in t and t.get("stay_fee") != sum(
             r["fee"] for r in payload.get("stay_rows", [])):
         problems.append("住宿服务费合计与逐行加总不一致")
+    if t and "rider_fault" in t and t.get("rider_fault") != sum(
+            r["amount"] for r in payload.get("rider_fault_rows", [])):
+        problems.append("骑手判责合计与逐行加总不一致")
     return problems
 
 

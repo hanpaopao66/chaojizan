@@ -575,8 +575,9 @@ class _RiderInsurancePageState extends State<RiderInsurancePage> {
               padding: const EdgeInsets.all(14),
               child: Text(
                 '每天首次上线自动登记当日保障,无需操作。\n'
-                '「保障金池」= 平台从每单佣金计提的专项资金(公开账本可查),'
-                '接入保险公司前由它先行赔付;出事故先上报,医疗票据实报实销。',
+                '「保障金池」= 平台从每单佣金计提的专项资金(公开账本可查,每一笔支出也在),'
+                '接入保险公司前出事故由它先行赔付医疗费;出事故先上报,医疗票据实报实销。'
+                '判为骑手责任(洒餐、丢餐)的单,商家那份餐钱也先由它垫,池子不够的才从你的收入里扣。',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),

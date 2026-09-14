@@ -19,9 +19,14 @@ print(f"✓ 核账公示:{latest['day']} 核 {latest['checked_orders']} 笔,"
 funds = call("GET", "/transparency/funds")
 inc, sp = funds["income"], funds["spend"]
 assert inc["total_cents"] == inc["commission_cents"] + inc["voucher_fee_cents"]
-assert sp["total_cents"] == (sp["subsidy_cents"] + sp["meal_compensation_cents"]
-                             + sp["adjustment_cents"])
+# 支出合计 == 各项之和(按字段加,新加一项支出不用改这里;漏加进合计就红)
+assert sp["total_cents"] == sum(v for k, v in sp.items() if k != "total_cents"), sp
 assert funds["retained_cents"] == inc["total_cents"] - sp["total_cents"]
+# 骑手保障金池:余额 == 计提 − 支出 + 回池(按公开账本算,services/rider_fault.fund_balance)
+fund = funds["rider_fund"]
+assert fund["balance_cents"] == (fund["accrued_cents"] - fund["paid_cents"]
+                                 + fund["returned_cents"]), fund
+assert fund["balance_cents"] >= 0, f"保障金池被支成负数:{fund}"
 print(f"✓ 佣金去向:收入 {inc['total_cents']} = 支出 {sp['total_cents']}"
       f" + 留存 {funds['retained_cents']}(恒等)")
 

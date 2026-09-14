@@ -1321,7 +1321,7 @@ class AfterSaleOut(BaseModel):
     id: int
     reason: str
     images: list[str] = []
-    fault: str = ""          # ""=未判 / merchant=商家责任 / rider=骑手责任(平台先行赔付)
+    fault: str = ""          # ""=未判 / merchant=商家责任 / rider=骑手责任(见 services/rider_fault)
     status: AfterSaleStatus
     reply: str
     created_at: datetime

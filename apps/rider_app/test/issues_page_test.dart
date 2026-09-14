@@ -64,7 +64,7 @@ void main() {
     ]);
     expect(find.textContaining('到店未出餐'), findsOneWidget);
     expect(find.textContaining('判商家责任,商家承担退款'), findsOneWidget);
-    expect(find.textContaining('判骑手责任,平台先行赔付'), findsOneWidget);
+    expect(find.textContaining('判骑手责任(这单配送费不计'), findsOneWidget);
     expect(appealButton, findsOneWidget);
   });
 

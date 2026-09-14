@@ -16,7 +16,10 @@
 **能抓**:
 - 平台改写或删除任何历史账目(哪怕一分钱)—— 链哈希断裂,所有留存过锚点的节点立刻发现;
 - 任何一天的实收佣金超过该天账本自己声明的上限;
-- 骑手配送费被冲账(协议规定骑手行只进不出);
+- 骑手配送费被冲账(协议规定 `rider_rows` 只进不出)。**2026-09 起的唯一例外**:平台判定
+  骑手责任(洒餐、丢餐)的那一单,骑手这单的收入冲回、骑手保障金池不够的部分由骑手另出,
+  这几笔**不在 `rider_rows` 里**,单独逐笔记在 `rider_fault_rows`(§2.2、§6.2b)——
+  例外是公开的,不是藏起来的;
 - 团购/住宿服务费偏离承诺费率。
 
 **不能抓**:
@@ -108,8 +111,9 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 | `rider_rows` | array | 骑手账行 |
 | `voucher_rows` | array | 团购核销行 |
 | `stay_rows` | array | 住宿账行 |
-| `rider_fund` | object | 骑手保障金池:`{per_order_cents, orders, accrued_cents}` |
-| `totals` | object | 七项合计,见 §6.5 |
+| `rider_fault_rows` | array | 判骑手责任的骑手行(2026-09 起的新字段,§2.2、§6.2b) |
+| `rider_fund` | object | 骑手保障金池:`{per_order_cents, orders, accrued_cents}`;2026-09 起加了 `paid_cents`、`returned_cents`、`rows`(每一笔支出和回池) |
+| `totals` | object | 合计,见 §6.5(2026-09 起多了三项) |
 
 三个费率字段是**该日口径的冻结值**:降费率只影响之后的新锚点,
 历史锚点里的旧费率永久不变,验证器按锚点自带的费率复算(§8)。
@@ -125,6 +129,15 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 
 // rider_rows 每行
 {"o": "<24位hex>", "amount": 500, "kind": "earning"}
+
+// rider_fault_rows 每行(2026-09 起):判骑手责任时骑手账本上追加的行
+{"o": "<24位hex>", "amount": -500, "kind": "fault_reversal"}
+// kind ∈ {"fault_reversal"(这单收入冲回,≤0), "fault_charge"(保障金池不够、骑手另出,≤0),
+//         "fault_refund"(申诉改判成立退回,≥0)}
+
+// rider_fund.rows 每行(2026-09 起):保障金池的每一笔支出和回池,金额恒为正
+{"o": "<24位hex>", "amount": 1425, "kind": "payout"}
+// kind ∈ {"payout"(判骑手责任时垫商家那份餐钱), "return"(申诉改判成立回池)}
 
 // voucher_rows 每行(只含已核销)
 {"p": "<24位hex>", "gross": 5000, "fee": 100, "net": 4900}
@@ -294,6 +307,23 @@ kind == "earning"  且  amount >= 0
 账本里出现任何 `reversal`/`adjustment` 的骑手行或负数金额,
 即为违规,**必须**示警。
 
+### 6.2b 判骑手责任的行(2026-09 起的新字段)
+
+2026-09-14 平台定下「平台不出钱赔付」:判骑手责任时,顾客全额退款、商家净额照旧,
+这单骑手的收入冲回、平台这单佣金不收,商家那份餐钱先从骑手保障金池出,池子不够的部分从
+骑手收入里扣;骑手申诉成立,扣的全部退回、池子出的回池。这些行按下面的规矩记,
+**验证器应当**校验(参考实现 Python 版已校验):
+
+```
+rider_fault_rows[].kind ∈ {"fault_reversal", "fault_charge", "fault_refund"}
+fault_reversal、fault_charge 的 amount <= 0;fault_refund 的 amount >= 0
+rider_fund.rows[].kind ∈ {"payout", "return"} 且 amount > 0
+```
+
+一单的冲回、另扣、池子支出通常落在同一天,但改判退回可能落在之后的某一天 ——
+跨天的一致性(退回 == 当初扣的、回池 == 当初支出)由平台每日核账(规则 4c)守着,
+验证器只能逐日看符号和种类。
+
 ### 6.3 团购行
 
 ```
@@ -323,7 +353,9 @@ totals.stay_fee     == Σ stay_rows[].fee        (字段存在时)
 ```
 
 `totals` 其余字段(`merchant_net`、`platform_commission`、`voucher_fee`、
-`stay_net`、`rider_fund`)以及 `rider_fund` 对象为**信息性**:
+`stay_net`、`rider_fund`,以及 2026-09 起的 `rider_fault`、`rider_fund_paid`、
+`rider_fund_returned`)以及 `rider_fund` 对象为**信息性**(Python 参考实现另核了
+`rider_fault` 与逐行加总一致):
 它们参与哈希(改了必被抓),但当前无实现校验其与逐行加总的一致性。
 第三方实现多校验几条当然欢迎 —— 校验出不一致同样值得示警。
 

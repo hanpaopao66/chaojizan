@@ -988,6 +988,13 @@ class EarningKind(str, enum.Enum):
     earning = "earning"        # 正常入账
     reversal = "reversal"      # 售后冲账(负数行,与入账行相加归零)
     adjustment = "adjustment"  # 申诉改判等正向调整(恢复被冲的净额,平台认亏)
+    # ---- 以下三种只在骑手账本上出现:判骑手责任的钱(services/rider_fault.py)----
+    #: 这单骑手的收入冲回(负数,等于这单入账行的相反数):没送到就不计收入
+    fault_reversal = "fault_reversal"
+    #: 商家那份餐钱保障金池不够的部分,从骑手收入里扣(负数)
+    fault_charge = "fault_charge"
+    #: 申诉改判成立,上面两行加回去(正数)
+    fault_refund = "fault_refund"
 
 
 class RiderEarning(Base):
@@ -1008,6 +1015,31 @@ class RiderEarning(Base):
     note: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class RiderFundMovement(Base):
+    """骑手保障金池的**支出和回池**(计提不在这里:每笔配送入账计提固定额,公开账本逐日记着)。
+
+    池子余额 = 公开账本逐日计提 − 支出(payout)+ 回池(return),见 services/rider_fault.py。
+    判骑手责任时商家那份餐钱先从池子出(payout);申诉改判成立,池子出的那部分回池(return)。
+    每一笔都进公开账本的 rider_fund.rows(和计提同样可查),一单一种一条、只追加。
+    """
+
+    __tablename__ = "rider_fund_movements"
+    __table_args__ = (
+        UniqueConstraint("order_id", "kind", name="uq_rider_fund_movements_order_kind"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"))
+    order_no: Mapped[str] = mapped_column(String(32))
+    #: payout 从池子支出 / return 改判回池
+    kind: Mapped[str] = mapped_column(String(12))
+    #: 恒为正数;方向看 kind
+    amount_cents: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
     )
 
 
@@ -1357,7 +1389,9 @@ class AfterSale(Base):
     reason: Mapped[str] = mapped_column(String(500))
     # 举证照片(必传):完成单售后要有图,客服/商家看图判断,恶意售后无所遁形
     images: Mapped[list] = mapped_column(JSONB, default=list)
-    # 判责方:merchant=商家责任(商家承担) / rider=骑手责任(平台先行赔付,保障金覆盖)
+    # 判责方:merchant=商家责任(商家承担) / rider=骑手责任(这单骑手收入冲回,商家那份餐钱
+    # 先保障金池、不够的骑手出,见 services/rider_fault) / platform=平台(历史:食安垫付、
+    # 跑腿认赔、改判认亏)
     fault: Mapped[str] = mapped_column(String(12), default="")
     status: Mapped[AfterSaleStatus] = mapped_column(
         _enum_column(AfterSaleStatus, "after_sale_status"),
@@ -1375,7 +1409,8 @@ class AfterSale(Base):
 
 class DeliveryIssue(Base):
     """配送异常工单:骑手在配送途中上报(联系不上/地址错误/餐损/其他),
-    平台仲裁三选一:协调后继续送 / 用户责任按送达处理 / 骑手责任平台先行赔付。
+    平台仲裁三选一:协调后继续送 / 用户责任按送达处理 / 退款结单(判骑手或商家责任,
+    见 services/delivery_fault;骑手责任的钱见 services/rider_fault)。
     kind/resolution 用 varchar 存枚举值,取值见 schemas 的 Literal。"""
 
     __tablename__ = "delivery_issues"
@@ -1389,7 +1424,7 @@ class DeliveryIssue(Base):
     note: Mapped[str] = mapped_column(String(300), default="")
     photo_url: Mapped[str] = mapped_column(String(300), default="")  # 餐损必传
     status: Mapped[str] = mapped_column(String(12), default="open", index=True)
-    # continue_delivery 协调继续送 / mark_delivered 按送达处理 / refund 平台先行赔付
+    # continue_delivery 协调继续送 / mark_delivered 按送达处理 / refund 退款结单
     resolution: Mapped[str] = mapped_column(String(20), default="")
     resolve_note: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime] = mapped_column(

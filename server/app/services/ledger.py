@@ -21,7 +21,13 @@ logger = logging.getLogger("superz.ledger")
 
 GENESIS = "0" * 64
 #: payload 版本。见 docs/LEDGER-SPEC.md。
+#: 2026-09 新加的 rider_fault_rows、rider_fund 里的支出/回池、totals 里的三项都是**新字段**
+#: (规格 §7:新字段只加不改,验证器必须容忍未知字段),不升版本
 SCHEMA = 1
+
+#: 判骑手责任的三种骑手行(services/rider_fault.FAULT_KINDS)。它们**不进 rider_rows** ——
+#: 那一栏的规矩是「配送费只进不冲」,见证节点按它核;单独进 rider_fault_rows,同样逐行公开
+RIDER_FAULT_KINDS = ("fault_reversal", "fault_charge", "fault_refund")
 # 首次上线时不回补无穷多的空日子:最多回补到最早一条流水那天(再早没有意义)
 MAX_BACKFILL_DAYS = 400
 
@@ -55,11 +61,28 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"SELECT order_no, food_cents, commission_cents, net_cents, kind "
             f"FROM merchant_earnings WHERE {where} ORDER BY id"), span)
     ]
+    faults = ", ".join(f"'{k}'" for k in RIDER_FAULT_KINDS)
     rider_rows = [
         {"o": hash_no(r[0]), "amount": r[1], "kind": r[2]}
         for r in await db.execute(text(
             f"SELECT order_no, amount_cents, kind "
-            f"FROM rider_earnings WHERE {where} ORDER BY id"), span)
+            f"FROM rider_earnings WHERE {where} AND kind NOT IN ({faults}) ORDER BY id"), span)
+    ]
+    # 判骑手责任:这单收入冲回(fault_reversal,负)、保障金池不够的部分骑手出(fault_charge,负)、
+    # 申诉改判加回去(fault_refund,正)。见 services/rider_fault.py
+    rider_fault_rows = [
+        {"o": hash_no(r[0]), "amount": r[1], "kind": r[2]}
+        for r in await db.execute(text(
+            f"SELECT order_no, amount_cents, kind "
+            f"FROM rider_earnings WHERE {where} AND kind IN ({faults}) ORDER BY id"), span)
+    ]
+    # 骑手保障金池的支出(payout:判骑手责任时商家那份餐钱)和回池(return:申诉改判),
+    # 和计提一样逐笔公开。金额恒为正,方向看 kind
+    fund_rows = [
+        {"o": hash_no(r[0]), "amount": r[1], "kind": r[2]}
+        for r in await db.execute(text(
+            f"SELECT order_no, amount_cents, kind "
+            f"FROM rider_fund_movements WHERE {where} ORDER BY id"), span)
     ]
     voucher_where = where.replace("created_at", "redeemed_at")
     voucher_rows = [
@@ -89,9 +112,11 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"  AND net_cents != 0 AND {stay_cancelled} "
             f"ORDER BY 1"), span)
     ]
-    # 骑手保障金计提:每笔配送入账计提固定额,从平台佣金中拨出,
-    # 用于骑手意外险与骑手责任先行赔付(不扣骑手工资的资金来源,公开可验)
+    # 骑手保障金计提:每笔配送入账计提固定额,从平台佣金中拨出。
+    # 用途:骑手意外险;判骑手责任时先垫商家那份餐钱(不够的骑手出,见 services/rider_fault)
     fund_orders = sum(1 for r in rider_rows if r["kind"] == "earning")
+    fund_paid = sum(r["amount"] for r in fund_rows if r["kind"] == "payout")
+    fund_returned = sum(r["amount"] for r in fund_rows if r["kind"] == "return")
     return {
         "schema": SCHEMA,
         "day": day,
@@ -102,10 +127,14 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
         "rider_rows": rider_rows,
         "voucher_rows": voucher_rows,
         "stay_rows": stay_rows,
+        "rider_fault_rows": rider_fault_rows,
         "rider_fund": {
             "per_order_cents": settings.rider_fund_per_order_cents,
             "orders": fund_orders,
             "accrued_cents": fund_orders * settings.rider_fund_per_order_cents,
+            "paid_cents": fund_paid,
+            "returned_cents": fund_returned,
+            "rows": fund_rows,
         },
         "totals": {
             "merchant_net": sum(r["net"] for r in merchant_rows),
@@ -115,6 +144,9 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             "stay_net": sum(r["net"] for r in stay_rows),
             "stay_fee": sum(r["fee"] for r in stay_rows),
             "rider_fund": fund_orders * settings.rider_fund_per_order_cents,
+            "rider_fault": sum(r["amount"] for r in rider_fault_rows),
+            "rider_fund_paid": fund_paid,
+            "rider_fund_returned": fund_returned,
         },
     }
 

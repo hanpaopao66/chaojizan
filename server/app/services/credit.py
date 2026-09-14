@@ -42,10 +42,10 @@ services/enforcement.py 的抬头写了处置为什么不做分数:分数没法�
   违规成立(violations.audience = merchant)。
   商家自己点「同意售后」的那种 fault 也写成 merchant(after_sales.accept_after_sale:「同意即认责」),
   但那是商家自己的决定,不是平台判的 —— **不算**。
-- **骑手**:配送异常裁决「先行赔付」判骑手责任 —— delivery_issues.resolution = refund 而且不是
+- **骑手**:配送异常裁成退款、判骑手责任 —— delivery_issues.resolution = refund 而且不是
   「到店未出餐」「餐品不齐」(那两类判的是商家),admin 那一支写明「骑手责任」,骑手在 appeals 里
-  正是按「判骑手责任(先行赔付)」申诉的;售后仲裁判骑手责任 ——
-  admin.after_sale_rider_fault 写的 after_sales.fault = rider(配送异常先行赔付时顺手补的那条
+  正是按「判骑手责任」申诉的(钱怎么走见 services/rider_fault);售后仲裁判骑手责任 ——
+  admin.after_sale_rider_fault 写的 after_sales.fault = rider(配送异常裁成退款时顺手补的那条
   售后记录不重复计);违规成立(violations.audience = rider)。
 
 违规按 enforcement.CATALOG 的严重程度扣(严重 / 一般两档,见 [VIOLATION_POINTS]);
@@ -99,7 +99,7 @@ services/enforcement.py 的抬头写了处置为什么不做分数:分数没法�
 **事实变了就打掉,而且在提交之后打**,调用点:
 
 - 订单完成(顾客、店主、骑手三方的加分都变):orders.transition、orders.pickup_verify、
-  admin.resolve_delivery_issue(先行赔付直接完成)、auto_flow.sweep_once(自动确认收货、自取超时);
+  admin.resolve_delivery_issue(裁成退款直接完成)、auto_flow.sweep_once(自动确认收货、自取超时);
 - 判定改变:admin.resolve_delivery_issue、admin.after_sale_rider_fault、admin.record_violation、
   admin.overturn_violation、admin.risk_verdict(刷单确认的单不算完成一单);
 - 申诉改判:appeals.resolve_appeal(原来的申诉通道,三种角色都走它)、本模块的
@@ -174,7 +174,7 @@ LEVELS = (
 )
 
 KIND_ORDER = "order_completed"
-#: delivery_issues.id。顾客:判为顾客原因(按送达处理);骑手:判为骑手责任(先行赔付)。
+#: delivery_issues.id。顾客:判为顾客原因(按送达处理);骑手:裁成退款、判为骑手责任。
 #: 一条配送异常只有一个裁决,所以同一个 id 不会既算顾客的又算骑手的
 KIND_DELIVERY = "delivery_fault"
 #: after_sales.id。商家:平台复核改判为商家责任;骑手:平台仲裁判为骑手责任。
@@ -204,8 +204,8 @@ ORIGINAL_CHANNEL = {
 #: 原通道改判会发生什么 —— 申诉框里原样告诉申诉的人,对着 appeals._overturn 各支写的
 _ORIGINAL_AFTER = {
     ("customer", KIND_DELIVERY): "改判的话,这一条不再计分,钱也会原路退回",
-    ("rider", KIND_DELIVERY): "改判的话,这一条不再计分,记录上写明不是你的责任",
-    ("rider", KIND_AFTER_SALE): "改判的话,这一条不再计分,记录上写明不是你的责任",
+    ("rider", KIND_DELIVERY): "改判的话,这一条不再计分,记录上写明不是你的责任,判责时扣的钱退回",
+    ("rider", KIND_AFTER_SALE): "改判的话,这一条不再计分,记录上写明不是你的责任,判责时扣的钱退回",
     ("merchant", KIND_AFTER_SALE): "改判的话,这一条不再计分,被冲掉的那笔净额补回来",
 }
 
@@ -545,11 +545,11 @@ def _issue_title(kind: str) -> str:
 
 
 def _rider_issue_title(kind: str) -> str:
-    return f"配送异常「{_RIDER_ISSUE_LABELS.get(kind, '其他')}」,平台判为骑手责任(先行赔付)"
+    return f"配送异常「{_RIDER_ISSUE_LABELS.get(kind, '其他')}」,平台判为骑手责任"
 
 
 _MERCHANT_AFTER_SALE_TITLE = "你拒绝的售后,顾客申诉后平台复核判为商家责任"
-_RIDER_AFTER_SALE_TITLE = "顾客售后,平台仲裁判为骑手责任(洒餐、丢餐等,平台先行赔付)"
+_RIDER_AFTER_SALE_TITLE = "顾客售后,平台仲裁判为骑手责任(洒餐、丢餐等)"
 
 
 def _merchant_after_sale_title(issue_kind: str | None) -> str:
@@ -561,7 +561,7 @@ def _merchant_after_sale_title(issue_kind: str | None) -> str:
 
 
 def _delivery_query(role: str, ids: list[int], floor: datetime):
-    """配送异常:顾客看「按送达处理」的,骑手看判为骑手责任的「先行赔付」。
+    """配送异常:顾客看「按送达处理」的,骑手看裁成退款、判为骑手责任的。
     列:(uid, id, order_no, kind, at, note)。
 
     到店未出餐、餐品不齐裁成退款判的是**商家**责任(services/delivery_fault),不算骑手的 ——
@@ -597,7 +597,7 @@ def _after_sale_query(role: str, ids: list[int], *, still_at_fault: bool = True)
          issue_kind 就是它的种类,note 是裁决说明)—— services/delivery_fault;
       而且现在判责方还是商家(fault = merchant)。商家自己同意的也是 fault = merchant,
       但哪一条都接不上 —— 不算;商家对它申诉成立后 fault 变成 platform,自然掉出来;
-    - 骑手:after_sales.fault = rider,骑手是这一单的骑手。配送异常先行赔付时顺手补的那条
+    - 骑手:after_sales.fault = rider,骑手是这一单的骑手。配送异常裁成退款时顺手补的那条
       售后(同一单有 resolution = refund 的配送异常)不在这里重复计 —— 那一次记在配送异常上。
       issue_kind 恒为空。
 
@@ -891,11 +891,15 @@ async def _excluded(db: AsyncSession, role: str, uid: int, now: datetime) -> lis
         original_won = exists().where(own.target_type == channel,
                                       own.target_id == AfterSale.id,
                                       own.status == "overturned")
-        ticket_won = _ticket_won(KIND_AFTER_SALE, AfterSale.id)
-        # 骑手:工单成立的那条判责方还是骑手 —— 按判责方卡住,别把同一单上别人名下的
-        # 售后(比如商家的)算成骑手申诉赢了
-        won_q = or_(original_won, ticket_won if role == "merchant"
-                    else and_(AfterSale.fault == "rider", ticket_won))
+        # 工单那条只认**这个人自己**提的:同一条售后记录上别人(比如商家)工单申诉赢了,
+        # 不能算成他赢了。骑手工单改判成立时判责方会变成 platform(和原通道一样,
+        # services/rider_fault),所以这里不能再按判责方卡
+        from ..models import CreditAppeal
+        ticket_won = exists().where(CreditAppeal.kind == KIND_AFTER_SALE,
+                                    CreditAppeal.record_id == AfterSale.id,
+                                    CreditAppeal.status == "overturned",
+                                    CreditAppeal.user_id == uid)
+        won_q = or_(original_won, ticket_won)
         q = (_after_sale_query(role, [uid], still_at_fault=False)
              .where(AfterSale.status == AfterSaleStatus.accepted,
                     AfterSale.processed_at.is_not(None),
@@ -1084,12 +1088,16 @@ async def resolve_ticket_appeal(db: AsyncSession, admin, appeal_id: int, result:
                                 note: str):
     """客服给工单申诉下结论。改判 = 这一条不再计分(违规记录同时推翻,处置级别跟着重算)。
 
-    配送异常、售后判责走工单改判时**只改信用分**(credit_appeals 记成立),不动那条裁决本身的
-    钱和判责方 —— 动钱的是原来那条申诉通道(appeals),工单这条路只在它接不上时兜底。
+    配送异常、售后判责走工单改判时,顾客、商家的**只改信用分**(credit_appeals 记成立),不动那条
+    裁决本身的钱和判责方 —— 动钱的是原来那条申诉通道(appeals),工单这条路只在它接不上时兜底。
+
+    **骑手的例外**(2026-09-14 拍板):判骑手责任要从骑手收入里扣钱(services/rider_fault),
+    骑手的申诉「原通道 72 小时 + 工单」两条路都算数 —— 工单改判成立,和原通道一样:扣的加回去、
+    保障金池出的回池、判责从骑手转走。返回的 appeal 上挂着 `money_back`(退回骑手多少分),推送用。
 
     **只改库不提交**,调用方提交后再调 [invalidate] 和推送 —— 和 appeals.resolve_appeal 同一个顺序。
     """
-    from ..models import CreditAppeal, Ticket, TicketStatus, Violation
+    from ..models import CreditAppeal, Ticket, TicketStatus, User, Violation
     from .admin_audit import log_admin_action
 
     if result not in ("upheld", "overturned"):
@@ -1112,6 +1120,11 @@ async def resolve_ticket_appeal(db: AsyncSession, admin, appeal_id: int, result:
         if v is not None and v.overturned_at is None:
             v.overturned_at = now
             v.overturn_note = f"信用分申诉成立:{note}"[:300]
+    appeal.money_back = 0
+    if result == "overturned" and appeal.kind in (KIND_DELIVERY, KIND_AFTER_SALE):
+        who = await db.get(User, appeal.user_id)
+        if who is not None and getattr(who.role, "value", who.role) == "rider":
+            appeal.money_back = await _undo_rider_fault(db, appeal.kind, appeal.record_id, note)
     appeal.status = result
     appeal.resolve_note = note[:300]
     appeal.admin_id = admin.id
@@ -1128,6 +1141,36 @@ async def resolve_ticket_appeal(db: AsyncSession, admin, appeal_id: int, result:
                            detail={"user_id": appeal.user_id, "kind": appeal.kind,
                                    "record_id": appeal.record_id})
     return appeal
+
+
+async def _undo_rider_fault(db: AsyncSession, kind: str, record_id: int, note: str) -> int:
+    """骑手走工单申诉判骑手责任成立:扣的钱退回、保障金池回池、判责从骑手转走
+    (和 appeals._overturn 那两支同一个写法)。返回退回骑手多少分。"""
+    from ..models import AfterSale, DeliveryIssue, Order
+    from . import rider_fault
+
+    if kind == KIND_DELIVERY:
+        issue = await db.get(DeliveryIssue, record_id, with_for_update=True)
+        if issue is None:
+            return 0
+        order_id = issue.order_id
+        issue.resolve_note = (f"{issue.resolve_note};工单申诉改判:非骑手责任"
+                              if issue.resolve_note else "工单申诉改判:非骑手责任")[:300]
+        a = await db.scalar(select(AfterSale).where(
+            AfterSale.order_id == order_id, AfterSale.fault == "rider").with_for_update())
+    else:
+        a = await db.get(AfterSale, record_id, with_for_update=True)
+        if a is None:
+            return 0
+        order_id = a.order_id
+    if a is not None and a.fault == "rider":
+        a.fault = "platform"
+        a.reply = (f"{a.reply};工单申诉改判:非骑手责任"
+                   if a.reply else "工单申诉改判:非骑手责任")[:300]
+    order = await db.get(Order, order_id, with_for_update=True)
+    back = await rider_fault.undo(db, order, why=f"信用分工单申诉成立:{note}") \
+        if order is not None else None
+    return back.rider_total if back else 0
 
 
 async def ticket_appeal_summaries(db: AsyncSession, ticket_ids: list[int]) -> dict[int, dict]:
@@ -1229,23 +1272,25 @@ def _minus_spec(role: str) -> list[dict]:
         items = [{
             **common,
             "key": KIND_DELIVERY,
-            "label": "配送异常,平台裁决为骑手责任(先行赔付)",
-            "counts": "你上报的配送异常,平台裁决「先行赔付」(判为骑手责任)的,"
-                      f"每次 −{FAULT_POINTS}。平台照样全额赔顾客,不扣你的钱。"
+            "label": "配送异常,平台裁决为骑手责任",
+            "counts": "你上报的配送异常(餐损、丢餐这类),平台裁决退款、判为骑手责任的,"
+                      f"每次 −{FAULT_POINTS}。钱另外算:顾客全额退款,这单配送费不计,商家那份餐钱"
+                      "先由骑手保障金池出、不够的从你的收入里扣。"
                       "「到店未出餐」「餐品不齐」判的是商家责任,不算你的",
-            "source": "配送异常工单 delivery_issues:裁决 resolution = 先行赔付,"
-                      "时间按裁决时刻 resolved_at",
-            "appeal": f"裁决后 {hours} 小时内申诉(改判的话记录上写明不是你的责任);"
+            "source": "配送异常工单 delivery_issues:裁决 resolution = 退款,而且不是到店未出餐、"
+                      "餐品不齐,时间按裁决时刻 resolved_at",
+            "appeal": f"裁决后 {hours} 小时内申诉(改判的话记录上写明不是你的责任,扣的钱退回);"
                       f"过了 {hours} 小时走客服工单",
         }, {
             **common,
             "key": KIND_AFTER_SALE,
             "label": "顾客售后,平台仲裁判为骑手责任(洒餐、丢餐等)",
-            "counts": "顾客申请售后、平台仲裁判为骑手责任的(平台先行赔付,不扣你的钱),"
-                      f"每次 −{FAULT_POINTS}。配送异常先行赔付时顺带补的那条售后不重复计",
+            "counts": "顾客申请售后、平台仲裁判为骑手责任的,"
+                      f"每次 −{FAULT_POINTS}。钱和配送异常判骑手责任一样算(这单配送费不计,商家那份"
+                      "餐钱先由保障金池出、不够的从你的收入里扣)。配送异常裁决时顺带补的那条售后不重复计",
             "source": "售后记录 after_sales:判责 fault = 骑手,这一单是你送的,"
                       "时间按仲裁时刻 processed_at",
-            "appeal": f"仲裁后 {hours} 小时内申诉(改判的话记录上写明不是你的责任);"
+            "appeal": f"仲裁后 {hours} 小时内申诉(改判的话记录上写明不是你的责任,扣的钱退回);"
                       f"过了 {hours} 小时走客服工单",
         }]
     items.append({

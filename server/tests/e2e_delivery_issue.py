@@ -110,7 +110,8 @@ assert delivered2 == reported2 and completed2 is not None and completed2 > deliv
 print("✓ 按送达处理:送达时刻当场写成骑手上报的那一刻;自动完成从裁决起算 24 小时,"
       "完成后送达时刻不被改写")
 
-# 骑手责任先行赔付:用户全额退款,商家净额与骑手配送费都保留
+# 骑手责任:用户全额退款,商家净额保留;这单骑手收入冲回,商家那份餐钱先保障金池、
+# 不够的骑手出(services/rider_fault,平台不出钱;逐项核在 e2e_rider_fault)
 no2 = make_order()
 o2 = call("GET", f"/orders/{no2}", customer)
 issue2 = call("POST", "/riders/issues", rider,
@@ -118,8 +119,9 @@ issue2 = call("POST", "/riders/issues", rider,
                "note": "颠簸洒了", "photo_url": "/uploads/demo.jpg"})
 mw0 = call("GET", "/merchants/me/wallet", merchant)
 rw0 = call("GET", "/riders/wallet", rider)
+fund0 = call("GET", "/transparency/funds")["rider_fund"]
 done2 = call("POST", f"/admin/delivery-issues/{issue2['id']}/resolve", admin,
-             {"action": "refund", "note": "餐洒,先行赔付"})
+             {"action": "refund", "note": "餐洒,判骑手责任"})
 assert done2["resolution"] == "refund"
 o2b = call("GET", f"/orders/{no2}", customer)
 assert o2b["status"] == "completed"
@@ -131,13 +133,17 @@ rw1 = call("GET", "/riders/wallet", rider)
 net = (o2["food_cents"] + o2["packing_fee_cents"]
        - o2["discount_cents"] - o2b["commission_cents"])
 assert mw1["total_earned_cents"] == mw0["total_earned_cents"] + net
-assert rw1["total_earned_cents"] == rw0["total_earned_cents"] + o2["delivery_fee_cents"]
+# 池子按裁决那一刻的余额出(结算那一刻这单配送入账也计提了一笔),不够的骑手出
+fund_paid = min(fund0["balance_cents"] + fund0["per_order_cents"], net)
+assert rw1["balance_cents"] == rw0["balance_cents"] - (net - fund_paid), \
+    "骑手这单收入冲回、池子不够的部分另扣,余额应当只少了另扣的那一截"
 # 完成时刻落库(法定记录,和其它完成路径一样;原来先行赔付只改了状态);餐没送到,送达时刻照实留空
 done_at, delivered_at = sql("SELECT completed_at, delivered_at FROM orders WHERE order_no = :n",
                             {"n": no2}, fetch="all")[0]
 assert done_at is not None and delivered_at is None, (done_at, delivered_at)
-print(f"✓ 先行赔付:用户退 {o2b['refund_cents']/100:.2f} 元(平台承担),"
-      f"商家净额 +{net/100:.2f}、骑手配送费 +{o2['delivery_fee_cents']/100:.2f} 都保留;写下完成时刻")
+print(f"✓ 骑手责任:用户全额退 {o2b['refund_cents']/100:.2f} 元,商家净额 +{net/100:.2f} 保留;"
+      f"骑手这单收入不计,商家那份池子出 {fund_paid/100:.2f}、骑手另出 {(net - fund_paid)/100:.2f};"
+      "写下完成时刻")
 
 # 餐品不齐 → 判商家责任:退款由商家承担(这单的净额冲回,佣金一起冲),骑手配送费照拿,
 # 顾客拿回的是他为餐付的那部分;不算骑手的,骑手没有申诉的必要,商家走售后判责的原通道
