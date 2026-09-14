@@ -13,7 +13,8 @@ import { ApiError, listRiskOrders, RiskOrder, riskVerdict, setRiskLevel, yuan } 
  * 因为它确实会被读到。
  */
 const LEVELS: { value: string; label: string; danger?: boolean }[] = [
-  { value: 'limited', label: '限制', danger: true },
+  // 值要和服务端一致:enforcement.LEVEL_LIMIT = "limit"。原来写成 'limited',这个按钮一按就 422
+  { value: 'limit', label: '限制', danger: true },
   { value: 'frozen', label: '冻结', danger: true },
   { value: '', label: '解除' },
 ]
