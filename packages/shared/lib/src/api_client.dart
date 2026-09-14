@@ -284,10 +284,16 @@ class ApiClient {
   /// analytics.dart 已经 import 本文件,反向再 import 就成了环
   static void Function()? onSessionCleared;
 
+  /// [headers] 这一次额外带的请求头;[timeout] 这一次的时间预算(不给就是构造时的那个)。
+  /// 目前只有扫码登录的长轮询用到这两个:它要带 X-QR-Secret,而且服务端会挂着等最多 25 秒。
   Future<dynamic> _request(String method, String path,
-      {Object? body, Map<String, dynamic>? query}) async {
+      {Object? body,
+      Map<String, dynamic>? query,
+      Map<String, String>? headers,
+      Duration? timeout}) async {
     try {
-      return await _rawRequest(method, path, body: body, query: query);
+      return await _rawRequest(method, path,
+          body: body, query: query, headers: headers, timeout: timeout);
     } catch (e) {
       // 出口只放两种东西:服务端的业务错误(中文)、翻好的网络提示。
       // 底层异常原文一律不许出去(见 _asFriendly 的注释)
@@ -307,7 +313,10 @@ class ApiClient {
   final Duration _timeout;
 
   Future<dynamic> _rawRequest(String method, String path,
-      {Object? body, Map<String, dynamic>? query}) async {
+      {Object? body,
+      Map<String, dynamic>? query,
+      Map<String, String>? headers,
+      Duration? timeout}) async {
     if (path != '/auth/refresh') await _maybeRefreshToken();
     await loadAppBuild();
     // query 的值是 dynamic 而不是 String:`Uri.replace` 本来就接受
@@ -315,9 +324,11 @@ class ApiClient {
     // 按 id 批量取商品要用到它(见 menu 的 ids)
     final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
     final request = http.Request(method, uri)..headers.addAll(_headers);
+    if (headers != null) request.headers.addAll(headers);
     if (body != null) request.body = jsonEncode(body);
-    final streamed = await _http.send(request).timeout(_timeout);
-    final response = await _readBody(streamed);
+    final budget = timeout ?? _timeout;
+    final streamed = await _http.send(request).timeout(budget);
+    final response = await _readBody(streamed, budget);
     final text = utf8.decode(response.bodyBytes);
     if (response.statusCode >= 400) {
       String message = '请求失败(${response.statusCode})';
@@ -351,15 +362,17 @@ class ApiClient {
   /// 但那条 socket 还挂在客户端的连接池里等一个永远不来的字节 ——
   /// 弱网下反复几次就把池子占满,接下来的请求连发都发不出去。
   /// 所以这里自己拿着订阅,超时的时候 cancel。
-  Future<http.Response> _readBody(http.StreamedResponse streamed) {
+  Future<http.Response> _readBody(http.StreamedResponse streamed,
+      [Duration? budget]) {
     final completer = Completer<http.Response>();
     final bytes = BytesBuilder(copy: false);
     late StreamSubscription<List<int>> sub;
+    final limit = budget ?? _timeout;
 
-    final timer = Timer(_timeout, () {
+    final timer = Timer(limit, () {
       if (completer.isCompleted) return;
       sub.cancel();
-      completer.completeError(TimeoutException('读取响应内容超时', _timeout));
+      completer.completeError(TimeoutException('读取响应内容超时', limit));
     });
 
     sub = streamed.stream.listen(
@@ -553,6 +566,83 @@ class ApiClient {
   /// 滑块验证挑战(发码被 409 captcha_required 拒绝时调用)
   Future<Map<String, dynamic>> sliderChallenge() async {
     return await _request('GET', '/auth/slider') as Map<String, dynamic>;
+  }
+
+  // ---------- 扫码登录 / 一键登录(用户端网页版、桌面版) ----------
+  //
+  // 流程和几条安全规矩见服务端 services/qr_login.py。客户端要守的两件事:
+  // - secret 只在这台设备自己手里:不进二维码、不进 URL,轮询时放请求头;
+  // - device_key 自己登不了录,它只能让服务端去问一次手机,手机上点了确认才签 token。
+
+  /// 网页 / 电脑建一个登录会话。带 [deviceKey] 就是一键登录(服务端给手机发确认请求);
+  /// 扫码登录时带上这台设备原来那把 key([prevDeviceKey]),同一个人扫的话沿用原来那条设备记录。
+  Future<Map<String, dynamic>> createQrLogin({
+    required String client,
+    String platform = '',
+    String deviceKey = '',
+    String prevDeviceKey = '',
+  }) async {
+    return await _request('POST', '/auth/qr/sessions', body: {
+      'client': client,
+      if (platform.isNotEmpty) 'platform': platform,
+      if (deviceKey.isNotEmpty) 'device_key': deviceKey,
+      if (prevDeviceKey.isNotEmpty) 'prev_device_key': prevDeviceKey,
+    }) as Map<String, dynamic>;
+  }
+
+  /// 长轮询:状态还是 [state] 就在服务端挂着等,最多 [wait] 秒;变了立刻回来。
+  /// confirmed 那一次的回包里有 token 和 device_key,**只给这一次**。
+  Future<Map<String, dynamic>> pollQrLogin(String sid, String secret,
+      {String state = '', int wait = 25}) async {
+    return await _request('GET', '/auth/qr/sessions/$sid',
+        query: {'state': state, 'wait': '$wait'},
+        headers: {'X-QR-Secret': secret},
+        // 服务端最多挂 [wait] 秒。用默认的 15 秒超时的话,每一次正常的等待都会被当成断网
+        timeout: Duration(seconds: wait + 10)) as Map<String, dynamic>;
+  }
+
+  /// 手机扫到了登录码。返回确认页要摆出来的:设备、打过码的 IP、是不是同一个网络、时间
+  Future<Map<String, dynamic>> scanQrLogin(String sid) async {
+    return await _request('POST', '/auth/qr/sessions/$sid/scan')
+        as Map<String, dynamic>;
+  }
+
+  Future<void> confirmQrLogin(String sid) =>
+      _request('POST', '/auth/qr/sessions/$sid/confirm');
+
+  Future<void> cancelQrLogin(String sid) =>
+      _request('POST', '/auth/qr/sessions/$sid/cancel');
+
+  /// 我有没有待确认的一键登录(App 从推送点进来、回到前台时查)
+  Future<List<Map<String, dynamic>>> pendingQrLogins() async {
+    final data = await _request('GET', '/auth/qr/pending') as Map<String, dynamic>;
+    return (data['items'] as List? ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// 已登录的网页和电脑:`{items: [...], idle_days: 多少天没用自动失效}`
+  Future<Map<String, dynamic>> loginDevices() async {
+    return await _request('GET', '/auth/login-devices') as Map<String, dynamic>;
+  }
+
+  /// 移除一台:它立刻退出登录,也不能再一键登录
+  Future<void> removeLoginDevice(int id) =>
+      _request('DELETE', '/auth/login-devices/$id');
+
+  /// 扫码 / 一键登录拿到的登录态接成当前会话,和验证码登录成功之后一样落盘。
+  /// 回包里没有手机号,接好之后问一次 /auth/me 补上 —— 问不到也不影响登录。
+  Future<void> adoptQrLogin(Map<String, dynamic> data) async {
+    _token = data['token'] as String;
+    _tokenIssuedAt = DateTime.now();
+    userId = (data['user_id'] as num).toInt();
+    userName = data['name'] as String? ?? '';
+    userRole = data['role'] as String?;
+    userPhone = null;
+    try {
+      final me = await _request('GET', '/auth/me') as Map<String, dynamic>;
+      userName = me['name'] as String? ?? userName;
+      userPhone = me['phone'] as String?;
+    } catch (_) {}
+    await _persistSession();
   }
 
   /// 首页金刚区显示哪些频道。**不需要登录**(首页在登录前就要画出来)。

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import '../main.dart' show OrderDetailPage;
+import '../qr_login/qr_login.dart' show canScanHere;
+import '../qr_login/qr_scan_page.dart' show openQrScanner;
 import '../session.dart';
 import '../video/notify/notifications_page.dart';
 import '../video/notify/notify_format.dart' show notifyHeadline, notifyTime;
@@ -120,6 +122,9 @@ class _ChatTabState extends State<ChatTab> {
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // 扫一扫(和微信「+」菜单里那个一样):扫网页版、电脑版的登录二维码。只有手机上有
+          if (canScanHere)
+            ListTile(leading: const Icon(Icons.qr_code_scanner), title: const Text('扫一扫'), onTap: () => Navigator.pop(ctx, 'scan')),
           ListTile(leading: const Icon(Icons.group_add_outlined), title: const Text('新建群组'), onTap: () => Navigator.pop(ctx, 'group')),
           ListTile(leading: const Icon(Icons.campaign_outlined), title: const Text('新建频道'), onTap: () => Navigator.pop(ctx, 'channel')),
           ListTile(leading: const Icon(Icons.person_add_alt_1_outlined), title: const Text('添加联系人'), onTap: () => Navigator.pop(ctx, 'add')),
@@ -133,6 +138,8 @@ class _ChatTabState extends State<ChatTab> {
     );
     if (!mounted || pick == null) return;
     switch (pick) {
+      case 'scan':
+        await openQrScanner(context, widget.api);
       case 'group':
         final ids = await pickContactsMulti(context, title: '选择群成员');
         if (ids == null || !mounted) return;

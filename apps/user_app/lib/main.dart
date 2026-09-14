@@ -47,6 +47,8 @@ import 'delivery_map_page.dart';
 import 'dish_detail_page.dart';
 import 'errand_page.dart';
 import 'payment_service.dart';
+import 'qr_login/qr_confirm_page.dart';
+import 'qr_login/qr_login.dart' show QrLoginWatcher;
 import 'reviews_page.dart';
 import 'search_page.dart';
 import 'session.dart';
@@ -322,6 +324,26 @@ class _HomePageState extends State<HomePage> {
     // 通话(#354):来电、开始呼叫时推出通话页;通话页收起时顶上挂一条「通话中」
     CallController.instance.presenter = _presentCall;
     CallController.instance.addListener(_onCall);
+    // 扫码登录:网页版、电脑版发来的一键登录请求,在手机上当场弹确认页(App 不在前台时服务端推送,
+    // 点开 / 回到前台再查一次);网页、电脑这边被手机移除时当场退出。都挂在首页这一层,哪一页都接得住
+    QrLoginWatcher.instance
+      ..presenter = _presentQrConfirm
+      ..onSignedOut = _onQrSignedOut
+      ..start(widget.api, ChatStore.instance.userEvents.stream);
+  }
+
+  Future<void> _presentQrConfirm(Map<String, dynamic> request) async {
+    if (!mounted) return;
+    await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute<void>(
+        builder: (_) => QrConfirmPage(api: widget.api, request: request)));
+  }
+
+  void _onQrSignedOut() {
+    authTick.value++; // 各 tab 切回游客态
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('这台设备已在手机上退出登录')));
   }
 
   StreamSubscription<String>? _chatNotices;
@@ -338,6 +360,12 @@ class _HomePageState extends State<HomePage> {
     _sanctioned?.cancel();
     CallController.instance.removeListener(_onCall);
     if (CallController.instance.presenter == _presentCall) CallController.instance.presenter = null;
+    if (QrLoginWatcher.instance.presenter == _presentQrConfirm) {
+      QrLoginWatcher.instance
+        ..presenter = null
+        ..onSignedOut = null
+        ..stop();
+    }
     _callPill?.remove();
     _callPill = null;
     super.dispose();
@@ -373,6 +401,8 @@ class _HomePageState extends State<HomePage> {
       unawaited(store.start(widget.api));
       // 视频互动的角标:登录就开始盯,实时事件来了就刷新
       startVideoNotifyWatcher();
+      // 刚登录上:有没有待确认的一键登录(只在手机上查)
+      unawaited(QrLoginWatcher.instance.check());
     } else {
       if (store.started) store.stop();
       stopVideoNotifyWatcher();

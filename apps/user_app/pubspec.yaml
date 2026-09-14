@@ -21,7 +21,12 @@ dependencies:
   geolocator: ^14.0.0        # 附近商家用真实定位
   url_launcher: ^6.3.2       # 一键拨号联系骑手/商家
   image_picker: ^1.1.0       # 头像上传
-  qr_flutter: ^4.1.0
+  qr_flutter: ^4.1.0         # 网页版、桌面版登录页的二维码
+  # 「扫一扫」扫网页版、电脑版的登录码。vendor 版,适配 AGP 9(见 packages/mobile_scanner,商家端核销同一个)。
+  # 安卓上夹带 Google ML Kit 条码识别(会向 Google 发使用统计),iOS 用系统自带的 Vision ——
+  # 隐私政策第三方 SDK 表里有这一行(packages/shared/lib/src/legal.dart)
+  mobile_scanner:
+    path: ../../packages/mobile_scanner
   package_info_plus: ^8.0.0  # 关于页展示版本号
   shared_preferences: ^2.5.5
   share_plus: ^12.0.2

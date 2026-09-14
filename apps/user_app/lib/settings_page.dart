@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'chat/pages/chat_settings_page.dart';
 import 'miniapp/pages.dart';
+import 'qr_login/login_devices_page.dart';
 import 'session.dart';
 
 /// 设置页:通知开关(本地记忆)/清除缓存/检查更新/关于我们。
@@ -148,6 +149,13 @@ class _SettingsPageState extends State<SettingsPage> {
           SzEntryGroup(
             title: '账号',
             children: [
+              // 扫码登录过的网页版、电脑版:看得见、随时能移除(移除 = 那台马上退出)
+              SzEntryTile(
+                icon: Icons.devices_outlined,
+                title: '已登录的网页和电脑',
+                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => LoginDevicesPage(api: widget.api))),
+              ),
               SzEntryTile(
                 icon: Icons.logout,
                 title: '退出登录',

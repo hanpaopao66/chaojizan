@@ -73,6 +73,17 @@ class _AuthGateState extends State<AuthGate> {
   }
 }
 
+/// 手机号之外的另一种登录方式(见 [SmsLoginPage.altLogin])拿到的两个回调。
+class SzAltLoginHost {
+  const SzAltLoginHost({required this.usePhone, required this.loggedIn});
+
+  /// 切到手机号登录
+  final VoidCallback usePhone;
+
+  /// 登录成功了(ApiClient 已经接好会话),交给登录页收尾
+  final VoidCallback loggedIn;
+}
+
 /// 验证码登录页(三端唯一登录方式)。
 /// 短信服务未配置时,服务端返回开发模式验证码并自动填入。
 class SmsLoginPage extends StatefulWidget {
@@ -82,12 +93,24 @@ class SmsLoginPage extends StatefulWidget {
     required this.onLoggedIn,
     this.role = 'customer',
     this.api,
+    this.altLogin,
+    this.altLoginLabel = '扫码登录',
   });
 
   final String title;
   final String role;
   final ApiClient? api;
   final void Function(BuildContext context, ApiClient api) onLoggedIn;
+
+  /// 手机号之外的另一种登录方式。给了就**先显示它**,下面一个「用手机号登录」切过去;
+  /// 手机号那一屏底下再给一个 [altLoginLabel] 切回来。
+  ///
+  /// 用户端的网页版、桌面版传扫码登录面板;手机上、商家端、骑手端都不传,和原来一模一样。
+  /// 这里只管摆在哪、怎么切,**不知道里面是什么** —— 共享包里不写死「这是用户端」的判断。
+  final Widget Function(BuildContext context, SzAltLoginHost host)? altLogin;
+
+  /// 手机号那一屏底下切回 [altLogin] 的那行字
+  final String altLoginLabel;
 
   @override
   State<SmsLoginPage> createState() => _SmsLoginPageState();
@@ -104,6 +127,16 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
   int _countdown = 0;
   bool _busy = false;
   late final ApiClient _api = widget.api ?? ApiClient();
+
+  /// 正显示着 [SmsLoginPage.altLogin](有的话默认先显示它)
+  late bool _alt = widget.altLogin != null;
+
+  void _altLoggedIn() {
+    if (!mounted) return;
+    final uid = _api.userId;
+    if (uid != null) PushService.onLogin(uid); // 绑定推送别名,失败静默(网页、电脑上本来就不绑)
+    widget.onLoggedIn(context, _api);
+  }
 
   @override
   void dispose() {
@@ -277,6 +310,29 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 24),
+                if (_alt) ...[
+                  widget.altLogin!(
+                      context,
+                      SzAltLoginHost(
+                          usePhone: () => setState(() => _alt = false),
+                          loggedIn: _altLoggedIn)),
+                  const SizedBox(height: 8),
+                  TextButton(
+                      onPressed: () => setState(() => _alt = false),
+                      child: const Text('用手机号登录')),
+                ] else
+                  ..._phoneForm(context),
+                const IcpFooter(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 手机号 + 验证码那一屏
+  List<Widget> _phoneForm(BuildContext context) => [
                 // 显式的登录/注册双入口(商店审核要求);同一验证码流程
                 SegmentedButton<int>(
                   segments: const [
@@ -342,14 +398,13 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                       ? (_mode == 0 ? '登录中…' : '注册中…')
                       : (_mode == 0 ? '登录' : '注册')),
                 ),
-                const IcpFooter(),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+                if (widget.altLogin != null) ...[
+                  const SizedBox(height: 8),
+                  TextButton(
+                      onPressed: () => setState(() => _alt = true),
+                      child: Text(widget.altLoginLabel)),
+                ],
+              ];
 }
 
 /// ICP 备案号(工信部要求 App 内展示)。构建时注入:

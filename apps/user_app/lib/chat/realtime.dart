@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -84,7 +85,10 @@ class ChatRealtime with WidgetsBindingObserver {
     _ch!.sink.add(jsonEncode({
       't': 'auth',
       'token': token,
-      'device': 'user-app',
+      // 网页版、桌面版报成另外两种:服务端判断「手机 App 在不在前台」时不算它们 ——
+      // 一键登录的确认请求 App 在前台就当场弹、不在前台才推送(server services/qr_login.py),
+      // 电脑上开着网页不代表手机拿在手上
+      'device': kIsWeb ? 'user-web' : (_desktop ? 'user-desktop' : 'user-app'),
       'app': 'user',
       'foreground': _foreground,
     }));
@@ -134,6 +138,11 @@ class ChatRealtime with WidgetsBindingObserver {
   }
 
   static final _jitter = Random();
+
+  static bool get _desktop =>
+      defaultTargetPlatform == TargetPlatform.macOS ||
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux;
 
   /// 网络恢复、回到前台时立刻重连,不等退避计时器
   void reconnectNow() {
