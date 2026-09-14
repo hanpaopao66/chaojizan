@@ -2,7 +2,7 @@ import { Alert, Button, Descriptions, Image, Input, Modal, Radio, Table, Tag, me
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, DeliveryIssue, IssueAction, listDeliveryIssues, resolveDeliveryIssue,
+  ApiError, DeliveryIssue, IssueAction, listDeliveryIssues, resolveDeliveryIssue, yuan,
 } from '../api'
 
 /**
@@ -19,11 +19,9 @@ import {
  * 不自己按种类另猜一份。以前这里写的是「判定已送达」「退款」,看不出在判谁 —— 服务端却一直
  * 按判责记(appeals 里判谁的责任谁申诉),所以名字和后果都写明白。
  */
-const yuan = (cents?: number) => (cents == null ? '' : `¥${(cents / 100).toFixed(2)}`)
-
 function actionsFor(issue: DeliveryIssue): { value: IssueAction; label: string; effect: string }[] {
   const merchantFault = issue.refund_fault === 'merchant'
-  const amount = yuan(issue.refund_preview_cents)
+  const amount = issue.refund_preview_cents == null ? '' : yuan(issue.refund_preview_cents)
   return [
     { value: 'continue_delivery', label: '让骑手继续送',
       effect: '订单回到配送中,骑手接着送。地址补充清楚了、商家出了餐或补齐了用这个。不判谁的责任' },

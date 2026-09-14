@@ -191,10 +191,13 @@ APPEALABLE_KINDS = {
 }
 
 #: 原来就有的申诉通道(appeals 表的 target_type,72 小时)。接得上就走它 —— 那边改判时
-#: 钱和记录一起改;不在这里的(违规记录、骑手的售后判责)本来就没有结构化入口,走客服工单
+#: 钱和记录一起改;不在这里的(违规记录)本来就没有结构化入口,走客服工单。
+#: 骑手的售后判责原来也没有,只能走工单;商家的售后判责却有 72 小时的原通道 —— 一方能走、
+#: 另一方不能,2026-09-14 补上了 after_sale_rider,和商家那条对齐
 ORIGINAL_CHANNEL = {
     ("customer", KIND_DELIVERY): "delivery_issue",
     ("rider", KIND_DELIVERY): "delivery_issue",
+    ("rider", KIND_AFTER_SALE): "after_sale_rider",
     ("merchant", KIND_AFTER_SALE): "after_sale",
 }
 
@@ -202,6 +205,7 @@ ORIGINAL_CHANNEL = {
 _ORIGINAL_AFTER = {
     ("customer", KIND_DELIVERY): "改判的话,这一条不再计分,钱也会原路退回",
     ("rider", KIND_DELIVERY): "改判的话,这一条不再计分,记录上写明不是你的责任",
+    ("rider", KIND_AFTER_SALE): "改判的话,这一条不再计分,记录上写明不是你的责任",
     ("merchant", KIND_AFTER_SALE): "改判的话,这一条不再计分,被冲掉的那笔净额补回来",
 }
 
@@ -410,7 +414,7 @@ def appeal_state(role: str, fact: Fact, *, original: str | None, ticket: str | N
             # 原通道维持原判:有新证据还能走一次工单(维持原判的推送里就是这么说的)
             return {**base, "via": "ticket", "state": "upheld", "note": original_note,
                     "label": "维持原判;有新证据可以提客服工单", "confirm": by_ticket}
-    # 违规记录、骑手的售后判责没有结构化的申诉入口;原通道过了 72 小时也接不上 —— 走工单
+    # 违规记录没有结构化的申诉入口;原通道过了 72 小时也接不上 —— 走工单
     return {**base, "via": "ticket", "label": "申诉(客服工单)", "confirm": by_ticket}
 
 
@@ -878,17 +882,21 @@ async def _excluded(db: AsyncSession, role: str, uid: int, now: datetime) -> lis
             out.append({"kind": KIND_DELIVERY, "record_id": iid, "title": title(kind),
                         "order_no": no or "", "at": _utc(at).isoformat(), "why": won})
     if role in ("merchant", "rider"):
-        # 商家:对改判再申诉成立(原通道 after_sale 改判,fault 变成 platform),或者走工单成立;
-        # 骑手:只有工单这一条路(fault 不动,credit_appeals 记着成立)
-        won_q = _ticket_won(KIND_AFTER_SALE, AfterSale.id)
-        if role == "merchant":
-            # 外层已经 join 了顾客那条 after_sale_rejected 申诉,商家自己这条要另起别名,
-            # 不然子查询会被自动关联到外层那张 appeals 上
-            own = aliased(Appeal)
-            won_q = or_(won_q, exists().where(own.target_type == "after_sale",
-                                              own.target_id == AfterSale.id,
-                                              own.status == "overturned"))
-        q = (_after_sale_query(role, [uid], still_at_fault=role == "rider")
+        # 两条路赢的:原通道改判(商家 after_sale、骑手 after_sale_rider,fault 变成 platform),
+        # 或者走工单成立(fault 不动,credit_appeals 记着成立)。
+        # 自己这条申诉要另起别名:商家那一侧外层已经连了顾客那条 after_sale_rejected 申诉,
+        # 不另起的话子查询会被自动关联到外层那张 appeals 上
+        own = aliased(Appeal)
+        channel = ORIGINAL_CHANNEL[(role, KIND_AFTER_SALE)]
+        original_won = exists().where(own.target_type == channel,
+                                      own.target_id == AfterSale.id,
+                                      own.status == "overturned")
+        ticket_won = _ticket_won(KIND_AFTER_SALE, AfterSale.id)
+        # 骑手:工单成立的那条判责方还是骑手 —— 按判责方卡住,别把同一单上别人名下的
+        # 售后(比如商家的)算成骑手申诉赢了
+        won_q = or_(original_won, ticket_won if role == "merchant"
+                    else and_(AfterSale.fault == "rider", ticket_won))
+        q = (_after_sale_query(role, [uid], still_at_fault=False)
              .where(AfterSale.status == AfterSaleStatus.accepted,
                     AfterSale.processed_at.is_not(None),
                     AfterSale.processed_at >= since, won_q))
@@ -1237,7 +1245,8 @@ def _minus_spec(role: str) -> list[dict]:
                       f"每次 −{FAULT_POINTS}。配送异常先行赔付时顺带补的那条售后不重复计",
             "source": "售后记录 after_sales:判责 fault = 骑手,这一单是你送的,"
                       "时间按仲裁时刻 processed_at",
-            "appeal": "走客服工单",
+            "appeal": f"仲裁后 {hours} 小时内申诉(改判的话记录上写明不是你的责任);"
+                      f"过了 {hours} 小时走客服工单",
         }]
     items.append({
         "key": KIND_VIOLATION,

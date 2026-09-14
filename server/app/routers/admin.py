@@ -1377,7 +1377,7 @@ async def after_sale_rider_fault(
             order.rider_id, "一笔售后判为骑手责任",
             f"订单 {order.order_no[-6:]} 的售后平台仲裁为配送责任,已由平台先行赔付,"
             f"不扣你的钱;这次记为骑手责任(信用分 −{credit.FAULT_POINTS}),"
-            "不认同可以在「我的信用分」里申诉",
+            "不认同可以在 72 小时内申诉(「我的信用分」里这一条旁边)",
             {"order_no": order.order_no}, record_skip=True)
     return {"refunded_cents": refund_amount, "fault": "rider"}
 

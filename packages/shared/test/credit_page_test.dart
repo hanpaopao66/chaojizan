@@ -14,8 +14,9 @@ import 'package:superz_shared/superz_shared.dart';
 ///
 /// - 头上「谁看得到」那一句是服务端给的(商家的和顾客的不一样),不是写死的顾客那句;
 /// - 申诉框里「改判会怎样」那一句是服务端给的(商家原通道改判是补回净额,不是退钱给你);
-/// - 商家的售后判责原通道打的是 `/appeals` 的 after_sale;骑手的售后判责没有原通道,
-///   打 `/credit/me/appeals`,带着种类 after_sale_fault。
+/// - 商家的售后判责原通道打的是 `/appeals` 的 after_sale,骑手的打 after_sale_rider
+///   (2026-09-14 起和商家对齐);过了 72 小时接不上原通道的,打 `/credit/me/appeals`,
+///   带着种类 after_sale_fault。
 void main() {
   setUpAll(() => PackageInfo.setMockInitialValues(
       appName: 'shared', packageName: 'com.superz.shared', version: '0.1.0',
@@ -92,6 +93,23 @@ void main() {
         ],
       };
 
+  /// 骑手的售后判责还在 72 小时里:服务端给的是原通道 after_sale_rider
+  Map<String, dynamic> riderFresh() => {
+        ...rider(),
+        'deductions': [
+          {
+            ...(rider()['deductions'] as List).first as Map<String, dynamic>,
+            'record_id': 53,
+            'appeal': {
+              'via': 'appeal', 'target_type': 'after_sale_rider', 'target_id': 53,
+              'deadline': '2026-09-15T12:00:00+00:00', 'state': '', 'label': '申诉',
+              'note': '', 'after': after,
+              'confirm': '平台会重新复核这次判定。改判的话,这一条不再计分,记录上写明不是你的责任。',
+            },
+          },
+        ],
+      };
+
   final calls = <(String, String, Map<String, dynamic>)>[];
 
   ApiClient fakeApi(Map<String, dynamic> Function() me) => ApiClient(
@@ -161,7 +179,22 @@ void main() {
     expect(calls.where((c) => c.$2 == '/credit/me/appeals'), isEmpty);
   });
 
-  testWidgets('骑手:售后判责没有原通道,走工单,带着种类和记录', (t) async {
+  testWidgets('骑手:售后判责 72 小时内走原通道 after_sale_rider,和商家对齐', (t) async {
+    await pumpPage(t, fakeApi(riderFresh));
+    await t.tap(find.widgetWithText(TextButton, '申诉'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('记录上写明不是你的责任'), findsOneWidget);
+    await t.enterText(find.byType(TextField), '取餐时餐盒已经裂了,我拍了照');
+    await t.tap(find.widgetWithText(FilledButton, '提交申诉'));
+    await t.pumpAndSettle();
+    final post = calls.where((c) => c.$1 == 'POST' && c.$2 == '/appeals').toList();
+    expect(post, hasLength(1));
+    expect(post.first.$3['target_type'], 'after_sale_rider');
+    expect(post.first.$3['target_id'], 53);
+    expect(calls.where((c) => c.$2 == '/credit/me/appeals'), isEmpty);
+  });
+
+  testWidgets('骑手:售后判责过了 72 小时走工单,带着种类和记录', (t) async {
     await pumpPage(t, fakeApi(rider));
     expect(hasText('抢单大厅里没有它'), isTrue);
     await t.tap(find.widgetWithText(TextButton, '申诉(客服工单)'));

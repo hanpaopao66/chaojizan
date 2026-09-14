@@ -1,16 +1,17 @@
 """判责申诉:骑手/商家对平台单方裁决的复核通道。
 
-可申诉的三类目标(72 小时内、每个目标一次):
-- after_sale     商家申诉「商家责任」售后判责(含配送异常「到店未出餐」「餐品不齐」判商家责任
-                 时记的那条售后 —— services/delivery_fault)
-- delivery_issue 骑手申诉「骑手责任先行赔付」裁决
-- review         商家申诉恶意差评
+可申诉的目标(72 小时内、每个目标一次;完整的表见 [AppealIn]):
+- after_sale       商家申诉「商家责任」售后判责(含配送异常「到店未出餐」「餐品不齐」判商家责任
+                   时记的那条售后 —— services/delivery_fault)
+- after_sale_rider 骑手申诉「骑手责任」售后判责(admin.after_sale_rider_fault)—— 和商家那条对齐
+- delivery_issue   骑手申诉「骑手责任先行赔付」裁决
+- review           商家申诉恶意差评
 
 改判的钱怎么走(平台认亏,不追用户款——用户拿到的退款不倒找):
 - after_sale 改判  → merchant_earnings 补一条 adjustment 正向行,恢复被冲净额
                      (账本 net == food - 0 恒等式成立,witness 可验)
-- delivery_issue 改判 → 对应 AfterSale.fault: rider → platform(骑手消责正名,
-                        审计规则 6 的先行赔付豁免口径同步认 platform)
+- after_sale_rider / delivery_issue 改判 → 对应 AfterSale.fault: rider → platform
+                     (骑手消责正名,审计规则 6 的先行赔付豁免口径同步认 platform)
 - review 改判      → 差评 hidden,评分聚合同步扣减
 """
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,7 @@ APPEAL_REFUND_NOTE = "申诉改判:平台承担,原路退回"
 
 _TYPE_LABELS = {
     "after_sale": "售后判责",
+    "after_sale_rider": "售后判骑手责任",
     "delivery_issue": "配送异常裁决",
     "review": "差评",
     "cancel_split": "取消订单的判责分摊",
@@ -66,7 +68,7 @@ _TYPE_LABELS = {
 
 
 class AppealIn(BaseModel):
-    target_type: Literal["after_sale", "delivery_issue", "review",
+    target_type: Literal["after_sale", "after_sale_rider", "delivery_issue", "review",
                          "cancel_split", "review_hidden",
                          "after_sale_rejected", "risk_flag", "queue_pass"]
     target_id: int
@@ -93,6 +95,7 @@ class AdminAppealOut(AppealOut):
     name: str = ""
     phone: str = ""
     target_summary: str = ""   # 被申诉裁决的现场信息,复核不用翻库
+    target_label: str = ""     # 申诉的是哪一类裁决(_TYPE_LABELS),后台照着显示,不另写一份
 
 
 class AppealResolveIn(BaseModel):
@@ -144,6 +147,26 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
             raise HTTPException(404, "售后记录不存在")
         if a.status.value != "accepted" or a.fault == "rider":
             raise HTTPException(409, "只有判商家责任的已退款售后才需要申诉")
+        if not _within_window(a.processed_at):
+            raise HTTPException(422, "已超过 72 小时申诉时限")
+    elif payload.target_type == "after_sale_rider":
+        # 售后仲裁判骑手责任(admin.after_sale_rider_fault)。以前骑手只有信用分工单一条路,
+        # 商家那边的售后判责却有这条 72 小时的原通道 —— 同一种判决,一方能走原通道、另一方
+        # 不能,就是不对称。这条和商家的 after_sale 对齐:同一个时限、同一个一次、同一个复核
+        if user.role.value != "rider":
+            raise HTTPException(403, "售后判骑手责任只有这一单的骑手可以申诉")
+        a = await db.get(AfterSale, payload.target_id)
+        order = await db.get(Order, a.order_id) if a is not None else None
+        if a is None or order is None or order.rider_id != user.id:
+            raise HTTPException(404, "售后记录不存在")
+        if a.status != AfterSaleStatus.accepted or a.fault != "rider":
+            raise HTTPException(409, "只有判骑手责任的售后才需要申诉")
+        via_issue = await db.scalar(select(DeliveryIssue.id).where(
+            DeliveryIssue.order_id == a.order_id, DeliveryIssue.resolution == "refund").limit(1))
+        if via_issue is not None:
+            # 配送异常先行赔付时顺手补的那条售后:判责记在配送异常上(信用分也记在那儿),
+            # 在那条上申诉 —— 两条都开的话同一次判决能申诉两遍
+            raise HTTPException(409, "这一单的判责记在配送异常上,请在那条配送异常上申诉")
         if not _within_window(a.processed_at):
             raise HTTPException(422, "已超过 72 小时申诉时限")
     elif payload.target_type == "delivery_issue":
@@ -336,12 +359,14 @@ async def my_appeals(
 # ---------- 管理端复核 ----------
 
 async def _target_summary(db: AsyncSession, appeal: Appeal) -> str:
-    if appeal.target_type == "after_sale":
+    if appeal.target_type in ("after_sale", "after_sale_rider", "after_sale_rejected"):
         a = await db.get(AfterSale, appeal.target_id)
         if a is None:
             return "(记录不存在)"
         order = await db.get(Order, a.order_id)
-        return (f"售后判商家责 订单#{order.order_no[-6:]} "
+        head = {"after_sale": "售后判商家责", "after_sale_rider": "售后判骑手责",
+                "after_sale_rejected": "售后被商家拒绝"}[appeal.target_type]
+        return (f"{head} 订单#{order.order_no[-6:]} "
                 f"退款 ¥{order.refund_cents / 100:.2f}:{a.reason[:40]}")
     if appeal.target_type == "delivery_issue":
         issue = await db.get(DeliveryIssue, appeal.target_id)
@@ -414,6 +439,7 @@ async def list_appeals(
         o = AdminAppealOut.model_validate(appeal)
         o.role, o.name, o.phone = appeal.role, applicant.name, applicant.phone
         o.target_summary = await _target_summary(db, appeal)
+        o.target_label = _TYPE_LABELS.get(appeal.target_type, appeal.target_type)
         out.append(o)
     return out
 
@@ -449,6 +475,16 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
         a.reply = (f"{a.reply};申诉改判:商家无责" if a.reply else "申诉改判:商家无责")[:300]
         await push_to_user(appeal.user_id, "申诉成立",
                            f"售后判责已改判,净额 ¥{earning.net_cents / 100:.2f} 已恢复入账",
+                           {"type": "appeal"})
+    elif appeal.target_type == "after_sale_rider":
+        # 和配送异常判骑手责任改判同一个写法:判责从骑手转走(骑手消责正名),信用分那一条
+        # 跟着不再计分。骑手这边原本就没被扣钱(先行赔付),所以没有钱要补
+        a = await db.get(AfterSale, appeal.target_id, with_for_update=True)
+        a.fault = "platform"
+        a.reply = (f"{a.reply};骑手申诉改判:非骑手责任"
+                   if a.reply else "骑手申诉改判:非骑手责任")[:300]
+        await push_to_user(appeal.user_id, "申诉成立(已为你正名)",
+                           "复核认定这笔售后不是你的责任,责任记录已消除,信用分那一条不再计分",
                            {"type": "appeal"})
     elif appeal.target_type == "delivery_issue":
         issue = await db.get(DeliveryIssue, appeal.target_id, with_for_update=True)
@@ -627,7 +663,7 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
 
 #: 结论会改信用分扣分项的那几类申诉(services/credit.py 的 ORIGINAL_CHANNEL,
 #: 加上顾客的「售后被拒」—— 它改判成立就是店主的一条扣分)
-_CREDIT_TARGETS = ("delivery_issue", "after_sale", "after_sale_rejected")
+_CREDIT_TARGETS = ("delivery_issue", "after_sale", "after_sale_rider", "after_sale_rejected")
 
 
 async def _target_order(db: AsyncSession, appeal: Appeal) -> Order | None:
@@ -675,4 +711,5 @@ async def resolve_appeal(
     out = AdminAppealOut.model_validate(appeal)
     out.role, out.name, out.phone = appeal.role, applicant.name, applicant.phone
     out.target_summary = await _target_summary(db, appeal)
+    out.target_label = _TYPE_LABELS.get(appeal.target_type, appeal.target_type)
     return out

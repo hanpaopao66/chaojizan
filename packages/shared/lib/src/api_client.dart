@@ -3019,9 +3019,9 @@ class ApiClient {
       ((await _request('GET', '/appeals/mine')) as List)
           .cast<Map<String, dynamic>>();
 
-  /// targetType: after_sale / delivery_issue / review
+  /// targetType: after_sale / after_sale_rider / delivery_issue / review / …(服务端 AppealIn)
   /// 申诉平台的判责结果。**三端共用**:商家(售后判责/差评)、
-  /// 骑手(被判先行赔付的配送异常)、用户(取消分摊 / 被判用户责任的配送异常)。
+  /// 骑手(被判先行赔付的配送异常、售后判骑手责任)、用户(取消分摊 / 被判用户责任的配送异常)。
   /// 72 小时内、每个目标一次;改判平台认亏,不向已经把活干完的人追款。
   Future<void> submitAppeal({
     required String targetType,

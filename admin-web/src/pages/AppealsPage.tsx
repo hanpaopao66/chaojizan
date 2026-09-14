@@ -3,11 +3,20 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { Appeal, ApiError, listAppeals, resolveAppeal } from '../api'
 
-/** 申诉对象类型。实测取值:review / after_sale / delivery_issue */
+/** 申诉对象类型的兜底名字。**以服务端给的 target_label 为准**(appeals._TYPE_LABELS),
+ *  这里只给老服务端没带那个字段时用 */
 const TARGETS: Record<string, string> = {
   review: '差评',
   after_sale: '售后判责',
+  after_sale_rider: '售后判骑手责任',
   delivery_issue: '配送异常判责',
+}
+
+/** 谁提的申诉:三种角色都能提(顾客申诉按送达处理、售后被拒、取消分摊……) */
+const ROLE_TAGS: Record<string, [string, string]> = {
+  merchant: ['商家', 'orange'],
+  rider: ['骑手', 'blue'],
+  customer: ['顾客', 'green'],
 }
 
 /**
@@ -79,8 +88,8 @@ export default function AppealsPage() {
           { title: '申诉人', width: 170,
             render: (_, a) => (
               <>
-                <Tag color={a.role === 'merchant' ? 'orange' : 'blue'}>
-                  {a.role === 'merchant' ? '商家' : '骑手'}
+                <Tag color={ROLE_TAGS[a.role]?.[1] ?? 'default'}>
+                  {ROLE_TAGS[a.role]?.[0] ?? a.role}
                 </Tag>
                 {a.name} {a.phone}
               </>
@@ -89,7 +98,7 @@ export default function AppealsPage() {
             render: (_, a) => (
               <>
                 <div style={{ fontSize: 12, color: 'var(--sz-ink-muted)' }}>
-                  {TARGETS[a.target_type] ?? a.target_type}
+                  {a.target_label || TARGETS[a.target_type] || a.target_type}
                 </div>
                 {a.target_summary}
               </>

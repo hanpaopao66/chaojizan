@@ -369,7 +369,7 @@ def main() -> None:  # noqa: C901 —— 一条用例从头走到尾,拆开了�
     assert excluded(got, "delivery_fault", issue["id"]), got["excluded"]
     print("✓ 72 小时内不收工单;原通道改判后分数回来,那一条列在「不再计分」里")
 
-    # ============ 5. 售后判为骑手责任 ============
+    # ============ 5. 售后判为骑手责任:和商家一样有原通道 ============
     c = completed()
     m_orders += 1
     r_orders += 1
@@ -380,21 +380,73 @@ def main() -> None:  # noqa: C901 —— 一条用例从头走到尾,拆开了�
         "售后判骑手责任之后商家看到的还是旧分 —— 判责时缓存没失效"
     got = expect(rider, "rider", r_orders, [fp], "售后判为骑手责任")
     row = ded(got, "after_sale_fault", as_c)
-    assert row and row["order_no"] == c and row["appeal"]["via"] == "ticket", got["deductions"]
+    assert row and row["order_no"] == c, got["deductions"]
+    assert row["appeal"]["via"] == "appeal" and \
+        row["appeal"]["target_type"] == "after_sale_rider" and \
+        row["appeal"]["target_id"] == as_c and row["appeal"]["deadline"], row["appeal"]
+    err = call("POST", "/credit/me/appeals", rider,
+               {"kind": "after_sale_fault", "record_id": as_c,
+                "reason": "取餐时盒子就是裂的,我拍了照"}, expect_error=True)
+    assert err["_error"] == 409 and "72 小时" in err["detail"], \
+        f"原通道还在申诉期里,工单不该收:{err}"
+    for who in (boss, cust):   # 别人不能替骑手申诉这一条
+        other = call("POST", "/appeals", who, {"target_type": "after_sale_rider",
+                                               "target_id": as_c, "reason": "我替骑手申诉一下"},
+                     expect_error=True)
+        assert other["_error"] == 403, other
+    ap = call("POST", "/appeals", rider, {"target_type": "after_sale_rider", "target_id": as_c,
+                                          "reason": "取餐时盒子就是裂的,我拍了照"})
+    assert ded(call("GET", "/credit/me", rider), "after_sale_fault",
+               as_c)["appeal"]["state"] == "open"
+    dup = call("POST", "/appeals", rider, {"target_type": "after_sale_rider", "target_id": as_c,
+                                           "reason": "再申诉一次试试"}, expect_error=True)
+    assert dup["_error"] == 409, dup
+    listed = next(x for x in call("GET", "/admin/appeals?status=open", admin) if x["id"] == ap["id"])
+    assert listed["role"] == "rider" and listed["target_label"] == "售后判骑手责任" and \
+        "售后判骑手责" in listed["target_summary"], listed
+    call("POST", f"/admin/appeals/{ap['id']}/resolve", admin,
+         {"result": "overturned", "note": "复核:取餐照片显示餐盒出店前已破"})
+    # 先看交易对方(本人的明细页会顺手刷新缓存)
+    assert view(boss, c)["rider_credit"]["score"] == by_spec("rider", r_orders, []), \
+        "原通道改判之后商家看到的还是骑手的旧分 —— 改判时骑手的缓存没失效"
+    assert view(cust, c)["rider_credit"]["score"] == by_spec("rider", r_orders, [])
+    got = expect(rider, "rider", r_orders, [], "售后判骑手责任原通道改判")
+    assert excluded(got, "after_sale_fault", as_c), got["excluded"]
+    a_row = next(x for x in call("GET", "/admin/after-sales?days=7", admin) if x["id"] == as_c)
+    assert a_row["fault"] != "rider" and "非骑手责任" in a_row["reply"], a_row
+    print("✓ 售后判骑手责任扣分、交易对方同时看到;72 小时内走原通道(工单 409、别人不能替他申诉、"
+          "不能申诉两次),改判后判责撤掉、三方看到的分同时回来")
+
+    # 过了 72 小时:原通道 422,走工单。换一个顾客下单:同一个顾客 30 天 3 次成功售后之后
+    # 再申请要走客服(售后风控),会挡住后面几段
+    cust3, _ = register_user("customer", name="三方信用分顾客三")
+    c2 = completed(cust3)
+    m_orders += 1
+    r_orders += 1
+    as_c2 = after_sale(cust3, c2)
+    call("POST", f"/admin/after-sales/{as_c2}/rider-fault", admin,
+         {"reason": "袋子被压扁,配送责任"})
+    sql("UPDATE after_sales SET processed_at = now() - interval '4 days' WHERE id = :i",
+        {"i": as_c2})
+    got = expect(rider, "rider", r_orders, [fp], "又一笔售后判骑手责任(4 天前)")
+    assert ded(got, "after_sale_fault", as_c2)["appeal"]["via"] == "ticket"
+    late = call("POST", "/appeals", rider, {"target_type": "after_sale_rider",
+                                            "target_id": as_c2, "reason": "我当时拍了照片"},
+                expect_error=True)
+    assert late["_error"] == 422, late
     r = call("POST", "/credit/me/appeals", rider,
-             {"kind": "after_sale_fault", "record_id": as_c,
-              "reason": "取餐时盒子就是裂的,我拍了照"})
+             {"kind": "after_sale_fault", "record_id": as_c2,
+              "reason": "取餐时袋子就是扁的,我拍了照"})
     t_admin = next(t for t in call("GET", "/admin/tickets", admin) if t["id"] == r["ticket_id"])
     ca = t_admin["credit_appeal"]
-    assert ca["role"] == "rider" and ca["record_id"] == as_c and "骑手" in ca["kind_label"], ca
+    assert ca["role"] == "rider" and ca["record_id"] == as_c2 and "骑手" in ca["kind_label"], ca
     assert t_admin["content"].startswith("【信用分申诉】骑手"), t_admin["content"]
-    ticket_resolve(r["id"], "overturned", "取餐照片显示餐盒出店前已破")
+    ticket_resolve(r["id"], "overturned", "取餐照片显示袋子出店前已压扁")
     got = expect(rider, "rider", r_orders, [], "售后判责工单申诉成立")
-    assert excluded(got, "after_sale_fault", as_c), got["excluded"]
+    assert excluded(got, "after_sale_fault", as_c2), got["excluded"]
     tk = next(t for t in call("GET", "/tickets/mine", rider) if t["id"] == r["ticket_id"])
     assert tk["reply"].startswith("申诉成立"), tk
-    print("✓ 售后判骑手责任扣分、交易对方同时看到;没有原通道就走工单,后台看得出是骑手的哪一条;"
-          "成立后回来")
+    print("✓ 过了 72 小时:原通道 422,走工单,后台看得出是骑手的哪一条;成立后回来")
 
     # ============ 6. 商家:拒绝的售后被改判为商家责任 ============
     d2 = completed(cust2)

@@ -394,6 +394,7 @@ class Test申诉入口:
     @pytest.mark.parametrize("role,kind,channel", [
         ("customer", cc.KIND_DELIVERY, "delivery_issue"),
         ("rider", cc.KIND_DELIVERY, "delivery_issue"),
+        ("rider", cc.KIND_AFTER_SALE, "after_sale_rider"),
         ("merchant", cc.KIND_AFTER_SALE, "after_sale"),
     ])
     def test_72小时内走原通道(self, role, kind, channel):
@@ -405,16 +406,38 @@ class Test申诉入口:
 
     @pytest.mark.parametrize("role,kind", [
         ("customer", cc.KIND_DELIVERY), ("rider", cc.KIND_DELIVERY),
-        ("merchant", cc.KIND_AFTER_SALE)])
+        ("rider", cc.KIND_AFTER_SALE), ("merchant", cc.KIND_AFTER_SALE)])
     def test_过了72小时走工单(self, role, kind):
         a = cc.appeal_state(role, fault(7, days_ago=4, kind=kind), original=None, ticket=None,
                             now=NOW)
         assert a["via"] == "ticket"
 
-    def test_骑手的售后判责没有原通道_直接走工单(self):
+    def test_售后判责商家骑手都有原通道(self):
+        """「一方能做另一方不能做」:售后判责商家有 72 小时的原通道,骑手原来只有工单。
+        判给谁的售后判责,谁就有同样的原通道。"""
+        for role in ("merchant", "rider"):
+            assert (role, cc.KIND_AFTER_SALE) in cc.ORIGINAL_CHANNEL, role
+            assert (role, cc.KIND_AFTER_SALE) in cc._ORIGINAL_AFTER, role
         a = cc.appeal_state("rider", fault(7, kind=cc.KIND_AFTER_SALE), original=None,
                             ticket=None, now=NOW)
-        assert a["via"] == "ticket" and a["target_type"] == ""
+        assert a["via"] == "appeal" and a["target_type"] == "after_sale_rider"
+        assert "不是你的责任" in a["confirm"]
+
+    def test_原通道改判都会刷新信用分缓存(self):
+        """原通道的每一种申诉改判,appeals.resolve_appeal 都得打掉三方的缓存。"""
+        from app.routers import appeals
+        assert set(cc.ORIGINAL_CHANNEL.values()) <= set(appeals._CREDIT_TARGETS)
+
+    def test_原通道改判真的做了点什么(self):
+        """声称有的通道必须真的存在:每一种原通道在 appeals._overturn 里都有一支。"""
+        from app.routers import appeals
+        src = _src(appeals, "_overturn")
+        for channel in set(cc.ORIGINAL_CHANNEL.values()):
+            assert f'"{channel}"' in src, channel
+
+    def test_明细页认得出原通道赢了的(self):
+        """申诉成立的列在「不再计分」里:按角色取原通道,骑手的售后判责不能只认工单。"""
+        assert "ORIGINAL_CHANNEL[(role, KIND_AFTER_SALE)]" in _src(cc, "_excluded")
 
     def test_原通道申诉中不给第二个入口(self):
         a = cc.appeal_state("rider", fault(7), original="open", ticket=None, now=NOW)

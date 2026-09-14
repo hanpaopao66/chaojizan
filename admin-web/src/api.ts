@@ -479,6 +479,8 @@ export interface Appeal {
   phone: string
   reason: string
   target_type: string
+  /** 申诉的是哪一类裁决(服务端 appeals._TYPE_LABELS 给的名字)。老服务端没有这个字段 */
+  target_label?: string
   target_summary: string
   images: string[]
   created_at: string
