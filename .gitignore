@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 server/.env
 server/uploads/
+# 本地存储时的私密文件(身份证照、营业执照……,见 services/storage.PRIVATE_DIR),绝不入库
+server/private_uploads/
 # 微信支付商户私钥/证书(绝不入库)
 server/certs/
 

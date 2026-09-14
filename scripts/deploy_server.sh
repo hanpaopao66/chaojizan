@@ -59,7 +59,8 @@ rsync -az --delete \
   --exclude 'deploy/nginx/conf.d/legacy*' --exclude 'deploy/.domains.local' \
   --exclude '.git' --exclude '.venv' --exclude '__pycache__' \
   --exclude 'node_modules' --exclude 'build' --exclude '.dart_tool' \
-  --exclude 'server/.env' --exclude 'server/uploads' --exclude 'server/appdist' \
+  --exclude 'server/.env' --exclude 'server/uploads' --exclude 'server/private_uploads' \
+  --exclude 'server/appdist' \
   --exclude 'marketing' --exclude '.claude' \
   -e "$RSYNC_RSH" ./ "$DEPLOY:$DEST/"
 
