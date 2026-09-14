@@ -65,6 +65,7 @@ DEV-PROMPTS-40 #368(聊天部分)、#370、#371,不变量 **S6**(每个处罚都
 | POST | /media/v1/sign | 读:换媒体下载地址 |
 | PATCH | /chat/v1/dialogs/{chat_id} | 只有自己看得见的会话设置(置顶、归档、免打扰、草稿) |
 | PATCH | /social/v1/me | 隐私和通知设置(签名除外:改签名照样 403) |
+| PATCH | /social/v1/me/tags-badges | 隐藏标签、勋章是自我保护(改标签除外:改标签照样 403) |
 | PATCH | /video/v1/me/settings | 个性化推荐开关(S9 任何时候都能关) |
 | POST | /social/v1/blocks | 拉黑是自我保护 |
 | DELETE | /social/v1/blocks/{user_id} | 解除拉黑 |

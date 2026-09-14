@@ -138,6 +138,10 @@ async def purge_user(db: AsyncSession, user_id: int) -> dict:
         prof.privacy = {}
         prof.notify = {}
         prof.last_seen_at = None
+        # 标签是他自己写给别人看的字,和签名一起清;隐藏设置跟着回到缺省
+        prof.tags = []
+        prof.tags_hidden = False
+        prof.badges_hidden = []
     return out
 
 

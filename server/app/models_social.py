@@ -69,6 +69,14 @@ class SocialProfile(Base):
     notify: Mapped[dict] = mapped_column(JSONB, default=dict)
     #: 视频推荐个性化(S9):关掉之后推荐和未登录的人看到的一样
     personalize_video: Mapped[bool] = mapped_column(Boolean, default=True)
+    #: 标签:用户自己写的,最多 5 个、每个 1–8 个字(校验见 services/badges.normalize_tags)。
+    #: 和昵称、签名同一级别的公开信息
+    tags: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    #: 整组标签对别人隐藏(自己照样看得到)
+    tags_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    #: 对别人隐藏的勋章(勋章的 key)。**勋章本身不存** —— 每次按公开条件现算(services/badges.py),
+    #: 这里只存「我不想让别人看到哪几枚」
+    badges_hidden: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     #: 硬币余额(D13,纯积分:不能充值、提现、兑换)
     coins: Mapped[int] = mapped_column(Integer, default=0)
     #: 上次领每日硬币的北京日期

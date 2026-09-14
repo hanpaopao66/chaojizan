@@ -81,6 +81,7 @@ ACCOUNT_BAN_ALLOWED: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/media/v1/sign"),
     ("PATCH", "/chat/v1/dialogs/{chat_id}"),
     ("PATCH", "/social/v1/me"),
+    ("PATCH", "/social/v1/me/tags-badges"),
     ("PATCH", "/video/v1/me/settings"),
     ("POST", "/social/v1/blocks"),
     ("DELETE", "/social/v1/blocks/{user_id}"),

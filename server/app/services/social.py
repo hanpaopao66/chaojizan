@@ -414,4 +414,9 @@ async def user_cards(db: AsyncSession, viewer_id: int, ids: Iterable[int]) -> di
 
 
 async def user_card(db: AsyncSession, viewer_id: int, user_id: int) -> dict | None:
-    return (await user_cards(db, viewer_id, [user_id])).get(user_id)
+    """一个人的名片,比 [user_cards] 多带标签和勋章(资料页要显示;批量的名片不带,见 services/badges.py)。"""
+    card = (await user_cards(db, viewer_id, [user_id])).get(user_id)
+    if card is not None:
+        from .badges import tags_badges_for
+        card.update(await tags_badges_for(db, user_id, viewer_id))
+    return card

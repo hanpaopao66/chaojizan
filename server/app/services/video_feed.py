@@ -441,8 +441,11 @@ async def space(db: AsyncSession, viewer: User | None, target: User) -> dict:
     if viewer_id and viewer_id != target.id:
         from .social import blocked_between
         blocked = await blocked_between(db, viewer_id, target.id)
+    # 标签和勋章:和资料页同一个口径(隐藏了的别人看不到,本人看得到并标着),没登录的人按「别人」算
+    from .badges import tags_badges_for
+    marks = await tags_badges_for(db, target.id, viewer_id)
     return {
-        "user": {**card, "bio": (prof.bio if prof else "") or ""},
+        "user": {**card, "bio": (prof.bio if prof else "") or "", **marks},
         "is_self": viewer_id == target.id,
         "followed": followed,
         "can_follow": bool(viewer_id) and viewer_id != target.id and not blocked,

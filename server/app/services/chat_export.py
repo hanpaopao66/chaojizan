@@ -169,6 +169,7 @@ async def _build(db: AsyncSession, uid: int, tmp: Path, zip_path: Path) -> dict:
         zf.writestr("profile.json", json.dumps({
             "id": uid, "name": me.name if me else "", "username": prof.username if prof else None,
             "bio": prof.bio if prof else "", "privacy": prof.privacy if prof else {},
+            "tags": list(prof.tags or []) if prof else [],
             "contacts": [{"user_id": c, "alias": a, "name": n} for c, a, n in contacts],
             "blocked_user_ids": blocks, "exported_at": now_utc().isoformat(),
         }, ensure_ascii=False, indent=1))

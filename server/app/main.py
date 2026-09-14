@@ -50,6 +50,7 @@ from .routers import (
     uploads,
     vouchers,
 )
+from .routers import badges as badges_router
 from .routers import bot_api as bot_api_router
 from .routers import chat as chat_router
 from .routers import chat_bots as chat_bots_router
@@ -590,6 +591,7 @@ app.include_router(admin.router)
 app.include_router(ws.router)
 # 消息与视频(DEV-PROMPTS-40)
 app.include_router(social_router.router)
+app.include_router(badges_router.router)  # 标签和勋章(含公开的 /transparency/badges)
 app.include_router(chat_router.router)
 app.include_router(chat_bots_router.router)
 app.include_router(bot_api_router.router)

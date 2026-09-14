@@ -1406,7 +1406,8 @@ class Review(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), unique=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # 索引是迁移 0134 加的(CONCURRENTLY):「带图评价达人」按人数评价(services/badges.py)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     merchant_id: Mapped[int] = mapped_column(ForeignKey("merchants.id"), index=True)
     rider_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     merchant_rating: Mapped[int] = mapped_column(Integer)  # 1-5
