@@ -532,11 +532,14 @@ jobs:
         run: |
           B=apps/user_app/build/linux/x64/release/bundle
           test -x "$B/chaojizan" || { echo "::error::找不到 chaojizan(linux/CMakeLists.txt 的 BINARY_NAME 改过?)"; exit 1; }
+          # 查的是**系统**库缺没缺:包里自带的(lib/ 下)运行时一定在,用 LD_LIBRARY_PATH 让 ldd 也看得见 ——
+          # 插件库单拿出来 ldd 时找不到同目录的 libflutter_linux_gtk.so,那不是真缺。
           # libdartjni 是 jni 插件在桌面上顺手编的(只有安卓的 path_provider 用它),桌面上从不加载,
-          # 它要的 libjvm 缺着没关系;其余的缺一个就是用户机器上启动不了
+          # 它要的 libjvm 缺着没关系;其余的缺一个就是用户机器上启动不了。
+          # grep 没匹配到(正常情况)时返回 1,加 || true,不然 set -e 会把「一个都不缺」当成失败
           missing=$(for f in "$B/chaojizan" "$B"/lib/*.so; do
-                      case "$f" in *libdartjni*) continue;; esac
-                      ldd "$f" | grep 'not found' | sed "s#^#$(basename "$f"): #"
+                      if [[ "$f" == *libdartjni* ]]; then continue; fi
+                      LD_LIBRARY_PATH="$B/lib" ldd "$f" | grep 'not found' | sed "s#^#$(basename "$f"): #" || true
                     done)
           if [ -n "$missing" ]; then echo "::error::缺动态库:"; echo "$missing"; exit 1; fi
           echo "动态库齐全 ✓"
