@@ -46,6 +46,15 @@ def _check_purpose(purpose: str, kind: str) -> None:
         raise HTTPException(422, "上传用途和类型对不上")
 
 
+def _agent_purpose_guard(request: Request, purpose: str) -> None:
+    """AI 助手令牌只能传投稿用的原片和封面。
+
+    这两个上传接口靠 purpose 区分用途,「发视频」权限放行的是接口路径 —— 不在这里再卡一道的话,
+    同一个令牌也能传聊天用的图片文件(虽然它发不了消息)。权限说的是「投稿」,就只让传投稿的东西。"""
+    if getattr(request.state, "agent_token", None) is not None and purpose != "video":
+        raise HTTPException(403, "AI 助手令牌只能上传投稿用的视频和封面")
+
+
 async def _video_upload_gate(db: AsyncSession, purpose: str) -> None:
     """视频投稿的原片、封面也受「视频投稿」开关管(#375):关着的时候连传都不让传,
     免得生产上开关关着、存储却被一个个 1GB 的原片占满。"""
@@ -72,10 +81,11 @@ async def _save_upload_file(f: UploadFile, dst, cap: int) -> int:
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...), kind: str = Form("auto"),
+async def upload(request: Request, file: UploadFile = File(...), kind: str = Form("auto"),
                  purpose: str = Form("chat"), me: User = Depends(social_user),
                  db: AsyncSession = Depends(get_db)):
     """整块上传(≤ 20MB)。返回媒体对象;视频要转码的 status=processing,做完推 `media` 用户事件。"""
+    _agent_purpose_guard(request, purpose)
     await check_rate_limit("media_upload", str(me.id), 60)
     _check_purpose(purpose, kind)
     await _video_upload_gate(db, purpose)
@@ -109,9 +119,10 @@ def _upload_out(u: Upload) -> dict:
 
 
 @router.post("/uploads")
-async def create_upload(body: UploadIn, me: User = Depends(social_user),
+async def create_upload(body: UploadIn, request: Request, me: User = Depends(social_user),
                         db: AsyncSession = Depends(get_db)):
     """建分片上传。每片 4MB,`PUT …/chunks/<n>` 传原始字节,断了之后 GET 看收到了哪些片接着传。"""
+    _agent_purpose_guard(request, body.purpose)
     await check_rate_limit("media_upload", str(me.id), 60)
     _check_purpose(body.purpose, body.kind)
     await _video_upload_gate(db, body.purpose)

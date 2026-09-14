@@ -97,6 +97,8 @@ def main() -> None:
     denied(agent, "POST", f"/video/v1/videos/{vid}/like")
     denied(agent, "DELETE", f"/video/v1/videos/{vid}")
     denied(agent, "GET", "/social/v1/me")
+    denied(agent, "POST", "/media/v1/uploads",                            # 只能传投稿的东西
+           {"size": 10, "name": "a.jpg", "purpose": "chat", "kind": "photo"})
     denied(agent, "POST", "/auth/agent-tokens", {"scopes": ["video"]})   # 不能给自己再签
     denied(plain["token"], "POST", "/video/v1/uploads/videos", {"title": "点餐令牌来投稿"})
     print("✓ 发视频令牌下不了单、点不了赞、删不了稿;点餐令牌投不了稿;拒绝的话说清能做什么")
