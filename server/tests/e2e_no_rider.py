@@ -1,5 +1,8 @@
-"""无人接单兜底验证:提醒线(标记+不动单)、取消线(全额退款)、
-已出餐取消的商家餐损赔付(佣金不收)。
+"""无人接单兜底验证:提醒线(标记+不动单,提醒商家出餐前等骑手接单)、取消线(全额退款)。
+
+2026-09-15 起已出餐取消的**不再赔商家餐损**(原来平台按应收全额赔、佣金不收 —— 平台没有钱):
+取消后商家这单没有任何入账行,钱包一分不动;推给店主的那条照实说餐损不赔、以后怎么避免;
+账务自检不报错。
 
 手法同 e2e_auto_flow:直连数据库把时间戳改到过去,手动调 sweep_once,
 以最终 API 状态断言(后台清扫并行跑也不影响结果)。
@@ -12,7 +15,7 @@ from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.services.auto_flow import sweep_once
-from tests.util import demo_shop, call, login
+from tests.util import audit_new_problems, audit_snapshot, call, demo_shop, login
 
 customer = login("13800000001")
 merchant = login("13800000002")
@@ -55,6 +58,21 @@ async def alerted_at(order_no):
             {"no": order_no})
 
 
+async def merchant_rows(order_no):
+    async with SessionLocal() as db:
+        return (await db.execute(
+            text("SELECT kind, net_cents FROM merchant_earnings WHERE order_no = :no"),
+            {"no": order_no})).all()
+
+
+async def last_push(user_id, title):
+    """推给这个人的、标题是 [title] 的最近一条(未配 JPush 时 record_skip 的推送也留痕)"""
+    async with SessionLocal() as db:
+        return await db.scalar(
+            text("SELECT content FROM push_logs WHERE user_id = :u AND title = :t "
+                 "ORDER BY id DESC LIMIT 1"), {"u": user_id, "t": title})
+
+
 async def main():
     # 1) 提醒线:超过提醒阈值但未到取消线 → 打标记,订单不动
     no1 = make_order()
@@ -78,19 +96,25 @@ async def main():
     assert sum(f["amount_cents"] for f in flows) == o2["refund_cents"]
     print("✓ 取消线(未出餐):全额退款,退款流水与订单一致")
 
-    # 3) 取消线(已出餐):用户全额退款 + 商家按应收赔付(佣金不收)
+    # 3) 取消线(已出餐):用户全额退款;商家餐损**不赔**(2026-09-15 起,平台没有钱)
+    audit_before = await audit_snapshot()
     no3 = make_order(to_status="ready")
-    o3_before = call("GET", f"/orders/{no3}", customer)
-    comp = (o3_before["food_cents"] + o3_before["packing_fee_cents"]
-            - o3_before["discount_cents"])
     await backdate(no3, "35 minutes")
     await sweep_once()
     o3 = call("GET", f"/orders/{no3}", customer)
     assert o3["status"] == "cancelled"
     assert o3["refund_cents"] == o3["total_cents"]
+    assert await merchant_rows(no3) == [], "没人接单取消的,平台不该再给商家记赔付入账"
     w1 = call("GET", "/merchants/me/wallet", merchant)
-    assert w1["total_earned_cents"] == w0["total_earned_cents"] + comp, (w0, w1, comp)
-    print(f"✓ 取消线(已出餐):用户全额退款,平台赔付商家餐损 ¥{comp / 100:.2f}(佣金不收)")
+    assert w1["total_earned_cents"] == w0["total_earned_cents"], \
+        f"商家钱包变了(平台在赔餐损):{w0['total_earned_cents']} → {w1['total_earned_cents']}"
+    owner_id = call("GET", "/auth/me", merchant)["id"]
+    body = await last_push(owner_id, "订单已取消")
+    assert body and "餐损平台不赔" in body and "建议骑手接单后再出餐,或改为自己配送" in body, body
+    problems = await audit_new_problems(audit_before, no2, no3)
+    assert not problems, problems
+    print("✓ 取消线(已出餐):用户全额退款;商家餐损不赔、钱包一分不动;推送照实说、"
+          "提醒以后等骑手接单再出餐;账务自检不报错")
 
     call("PATCH", f"/merchants/me/dishes/{dish['id']}", merchant, {"is_on_sale": False})
     print("\n无人接单兜底验证通过 🎉")

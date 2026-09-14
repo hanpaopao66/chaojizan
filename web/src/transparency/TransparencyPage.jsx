@@ -570,7 +570,7 @@ export default function TransparencyPage() {
               <h4>支出去向（累计）</h4>
               <div className="row"><span>补贴（首单立减，现在是 0；停发之前发的超时安抚券被抵扣、难度反馈当场补给骑手的钱）</span>
                 <span className="num">{yuanF(funds?.spend.subsidy_cents)}</span></div>
-              <div className="row"><span>商家餐损赔付（无人接单，平台背锅）</span>
+              <div className="row"><span>商家餐损赔付（历史：无人接单取消时平台赔的；2026-09-15 起不再赔）</span>
                 <span className="num">{yuanF(funds?.spend.meal_compensation_cents)}</span></div>
               <div className="row"><span>申诉改判（平台判错了，平台自己认；每一笔都在公开账本里）</span>
                 <span className="num">{yuanF(funds?.spend.adjustment_cents)}</span></div>
@@ -684,7 +684,7 @@ export default function TransparencyPage() {
         <Sec id="compensation" eyebrow="赔付记录">
           <h2>平台的赔钱记录</h2>
           <p className="tp-lede">
-            没有平台愿意亮自己的赔付账，我们把它当承诺兑现的凭据：该退的钱一分不少、运力不足取消了替商家兜餐损。2026-09-14 起平台不再出钱发超时安抚券——超时只致歉；停发之前发出去的券照旧能用，也照旧列在这里。
+            没有平台愿意亮自己的赔付账，我们把它当承诺兑现的凭据：该退的钱一分不少，平台判错了平台自己认。平台没有钱，不出钱赔付：2026-09-14 起超时只致歉、不发安抚券（停发之前发出去的券照旧能用，也照旧列在这里）；2026-09-15 起没人接单取消的，已出餐的餐损不再赔，商家端改成出餐前提醒「建议骑手接单后再出餐，或改为自己配送」。
           </p>
           <div className="tp-cards">
             <div className="tp-card hold">
@@ -694,7 +694,7 @@ export default function TransparencyPage() {
             </div>
             <div className="tp-card">
               <div className="num v">{yuanF(comp?.meal_compensation.total.cents)}</div>
-              <div className="k">商家餐损赔付（无人接单取消，已出餐按应收全额赔，佣金不收）</div>
+              <div className="k">商家餐损赔付（历史：无人接单取消时已出餐按应收赔；2026-09-15 起不再赔）</div>
               <div className="m">累计 {comp?.meal_compensation.total.count ?? '–'} 笔 · 本月 {comp?.meal_compensation.month.count ?? '–'} 笔</div>
             </div>
             <div className="tp-card">

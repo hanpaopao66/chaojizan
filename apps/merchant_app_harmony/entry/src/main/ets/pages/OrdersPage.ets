@@ -12,6 +12,13 @@ import { ArrayDataSource } from '../common/DataSource';
 import { MerchantOrder, OrderItem, OrderStatus, Shop } from '../model/Models';
 
 /**
+ * 出餐之前还没骑手接单时,订单卡上那句提醒。和服务端 auto_flow.NO_RIDER_COOK_HINT、安卓商家端、
+ * 商家网页工作台同一句话。2026-09-15 起没人接单、到点被取消的单,已出餐的餐损平台不赔(平台没有钱);
+ * 「改为自己配送」目前只有店铺设置里的自配送开关(只管之后的新单),这一单改不了 —— 所以只提醒。
+ */
+const NO_RIDER_COOK_HINT: string = '还没有骑手接单:建议骑手接单后再出餐,或改为自己配送';
+
+/**
  * 接单主流程。**商家端最不能出事的一屏。**
  *
  * ## 三条从安卓端搬过来的教训
@@ -208,6 +215,12 @@ export struct OrdersPage {
   }
 
   /** 读屏用的订单指代:「尾号 3721,48.00 元」 */
+  /** 该不该提醒:已接单还没出餐、平台配送、还没骑手接、不是追加单(追加单随原单,原单上已经提醒过) */
+  private noRiderCookHint(o: MerchantOrder): boolean {
+    return o.status === OrderStatus.ACCEPTED && o.pickup !== true && o.self_delivery !== true &&
+      (o.rider_id === undefined || o.rider_id === null) && (o.parent_order_no ?? '').length === 0;
+  }
+
   private speech(o: MerchantOrder): string {
     const no: string = o.order_no;
     const tail: string = no.length > 4 ? no.substring(no.length - 4) : no;
@@ -323,6 +336,13 @@ export struct OrdersPage {
             .fontSize(11).fontColor($r('app.color.hold'));
         }
         .width('100%');
+      }
+
+      // 出餐之前还没骑手接单:提醒一句 —— 没人接单到点被取消的,已出餐的餐损平台不赔
+      if (this.noRiderCookHint(o)) {
+        Text(NO_RIDER_COOK_HINT)
+          .fontSize(12).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.hold')).width('100%');
       }
 
       this.actions(o);

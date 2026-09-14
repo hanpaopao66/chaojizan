@@ -252,6 +252,16 @@ export struct OrderDetailPage {
       .scrollBar(BarState.Off);
 
       // ---- 底部动作 ----
+      // 出餐之前还没骑手接单:提醒一句(和订单列表卡上、安卓商家端同一句)。2026-09-15 起没人接单
+      // 到点被取消的,已出餐的餐损平台不赔;这一单改不了配送方式,所以只提醒
+      if (this.current.status === OrderStatus.ACCEPTED && this.current.pickup !== true &&
+        this.current.self_delivery !== true &&
+        (this.current.rider_id === undefined || this.current.rider_id === null) &&
+        (this.current.parent_order_no ?? '').length === 0) {
+        Text('还没有骑手接单:建议骑手接单后再出餐,或改为自己配送')
+          .fontSize(12).fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.hold')).width('100%');
+      }
       if (OrderStatus.isActive(this.current.status)) {
         Row({ space: 10 }) {
           if (this.current.status === OrderStatus.PAID) {

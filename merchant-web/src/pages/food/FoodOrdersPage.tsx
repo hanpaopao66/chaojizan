@@ -6,9 +6,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
-  ApiError, FOOD_STATUS_LABELS, FoodOrder, Merchant, customerNote,
+  ApiError, FOOD_STATUS_LABELS, FoodOrder, Merchant, NO_RIDER_COOK_HINT, customerNote,
   flagOrder, foodPickupVerify, foodRefundItem, foodReprint, foodTransition,
-  foodUrgeReply, myFoodOrders, saveCustomerNote, yuan,
+  foodUrgeReply, myFoodOrders, saveCustomerNote, showNoRiderCookHint, yuan,
 } from '../../api'
 import { useMerchantAlerts } from '../../hooks/useMerchantAlerts'
 
@@ -387,6 +387,12 @@ function OrderCard({ order, urged, onChanged }: {
           color: order.ready_late ? 'var(--sz-danger)' : 'var(--sz-earn)',
         }}>
           {order.ready_late ? `⚠ 出餐超时 · 已备餐 ${prepMinutes} 分钟` : `备餐中 · 已 ${prepMinutes} 分钟`}
+        </div>
+      )}
+      {/* 出餐之前还没骑手接单:提醒一句 —— 没人接单到点被取消的,已出餐的餐损平台不赔 */}
+      {showNoRiderCookHint(order) && (
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--sz-hold)' }}>
+          {NO_RIDER_COOK_HINT}
         </div>
       )}
       <div style={{ fontSize: 13, color: 'var(--sz-ink-muted)' }}>

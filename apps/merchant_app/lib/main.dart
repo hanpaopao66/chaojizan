@@ -2186,6 +2186,26 @@ class _MerchantHomePageState extends State<MerchantHomePage>
                             '已退款 ${yuan(order.refundCents)}(${order.refundNote})',
                             style: small.copyWith(color: sz.danger)),
                       ),
+                    // 出餐之前还没骑手接单:提醒一句。2026-09-15 起没人接单被取消的,
+                    // 已出餐的餐损平台不赔(服务端 auto_flow._sweep_no_rider)—— 事前说,别事后才知道
+                    if (showNoRiderCookHint(order))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline, size: 15, color: sz.hold),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(kNoRiderCookHint,
+                                  style: TextStyle(
+                                      fontSize: kFontNote,
+                                      fontWeight: FontWeight.w600,
+                                      color: sz.hold)),
+                            ),
+                          ],
+                        ),
+                      ),
                     if (showMoney || actions.isNotEmpty) ...[
                       // 按钮的点击区比看得见的那块高 16(上下各 8),
                       // 这里少留一点,看上去才是稿子上那 10px

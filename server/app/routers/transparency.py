@@ -298,7 +298,7 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
     hardship = await db.scalar(sa_text(
         "SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings WHERE kind = 'adjustment'"))
     subsidy = order_subsidy + hardship
-    # 无骑手接单取消的餐损赔付:佣金不收,商家应收全额平台承担
+    # 无骑手接单取消的餐损赔付(历史):2026-09-15 起不再赔,之前赔出去的照算
     meal_comp = (await db.scalar(sa_text("""
         SELECT coalesce(sum(net_cents), 0) FROM merchant_earnings
         WHERE note LIKE '无骑手接单取消,平台赔付餐损%'
@@ -396,7 +396,7 @@ async def compensation_public(
             SELECT count(*), 0 FROM order_events
             WHERE to_status = 'eta_late_apology'
         """),
-        # 无骑手接单取消:已出餐商家按应收全额赔付,佣金不收
+        # 无骑手接单取消的餐损赔付(历史):2026-09-15 起不再赔,这里只剩之前赔出去的
         "meal_compensation": await _pair("""
             SELECT count(*), coalesce(sum(net_cents), 0) FROM merchant_earnings
             WHERE note LIKE '无骑手接单取消,平台赔付餐损%'

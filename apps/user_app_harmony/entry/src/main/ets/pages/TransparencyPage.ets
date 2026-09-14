@@ -183,7 +183,8 @@ export struct TransparencyPage {
       this.line('收入合计', yuan(this.nested(d, 'income', 'total_cents')), false);
       Divider().margin({ top: 6, bottom: 6 });
       this.line('平台补贴支出', yuan(this.nested(d, 'spend', 'subsidy_cents')), false);
-      this.line('餐损赔付', yuan(this.nested(d, 'spend', 'meal_compensation_cents')), false);
+      // 无人接单取消的餐损赔付 2026-09-15 起不再赔,这一行只剩之前赔出去的
+      this.line('餐损赔付(历史)', yuan(this.nested(d, 'spend', 'meal_compensation_cents')), false);
       // 平台判错了,平台自己认:三方申诉改判成立补回的钱(原来这里漏了这一项,支出合计对不上分项)
       this.line('申诉改判', yuan(this.nested(d, 'spend', 'adjustment_cents')), false);
       this.line('支出合计', yuan(this.nested(d, 'spend', 'total_cents')), false);
@@ -206,7 +207,7 @@ export struct TransparencyPage {
       // 接口每一项是 {total: {count, cents}, month: {...}};原来按一层取,一直显示 0
       this.line('超时安抚券(停发之前,累计)',
         yuan(this.totalCents(d, 'eta_coupons')), false);
-      this.line('餐损赔付(累计)',
+      this.line('餐损赔付(历史,累计)',
         yuan(this.totalCents(d, 'meal_compensation')), false);
       this.line('申诉改判(平台判错了,平台自己认,累计)',
         yuan(this.totalCents(d, 'appeal_corrections')), false);

@@ -105,6 +105,23 @@ def _appeal_section(hours: int) -> dict:
     }
 
 
+def _no_rider_section(cancel_minutes: int) -> dict:
+    """商家:还没有骑手接单的单。规则页、商家规则中心都用这一份(services/auto_flow._sweep_no_rider)。
+
+    2026-09-15 起没人接单被取消的,已出餐的餐损平台**不再赔**(平台没有钱),改成事前提醒 ——
+    所以这一节要把「会取消、不赔、怎么避免」三件事一起说清。"""
+    from .auto_flow import NO_RIDER_COOK_HINT
+    return {
+        "title": "还没有骑手接单的单",
+        "items": [
+            f"骑手接单之前,单子在抢单池里;{cancel_minutes} 分钟还没人接(预约单到点还没人接,"
+            "极端天气停运时 15 分钟),平台自动取消、顾客全额退款,佣金不收",
+            "已经出了餐的,餐损平台不赔 —— 平台没有钱",
+            f"所以还没有骑手接单时,{NO_RIDER_COOK_HINT};接单台的出餐按钮上会提醒",
+        ],
+    }
+
+
 async def rules_for(audience: str, db: AsyncSession) -> dict:
     """某一端的规则页。**公开可读,不需要登录。**"""
     if audience not in AUDIENCES:
@@ -156,6 +173,7 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
                     "收入,钱由平台出(平台判错了,平台自己认),顾客拿到的退款不追回",
                 ],
             },
+            _no_rider_section(settings.no_rider_cancel_minutes),
             {
                 "title": "排序怎么来的",
                 "items": [
@@ -240,6 +258,8 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
                     "再往后按**成本实际发生到哪一步**分摊 —— "
                     "餐做了、骑手空跑了一趟,那些是真实发生且收不回的",
                     f"送达后 {APPLY_WINDOW_DAYS} 天内可以申请售后",
+                    f"一直没有骑手接单的,{settings.no_rider_cancel_minutes} 分钟后平台自动取消"
+                    "(预约单到点),全额退款",
                     # 2026-09-15 定:商家有责任,顾客拿回全款(services/merchant_fault)
                     "售后成立(商家同意,或者平台判为商家、骑手的责任),全额退款,含配送费和小费;"
                     "钱由有责任的一方出,不由平台出",

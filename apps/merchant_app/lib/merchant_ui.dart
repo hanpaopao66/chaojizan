@@ -66,6 +66,23 @@ int orderNetCents(Order o) =>
 String orderItemsLine(Order o) =>
     o.items.map((i) => '${i.name} ×${i.quantity}').join('、');
 
+/// 出餐之前还没骑手接单时,订单卡上那句提醒。和服务端 auto_flow.NO_RIDER_COOK_HINT、
+/// 商家网页工作台同一句话。
+///
+/// 为什么要提醒:2026-09-15 起没人接单、到点被取消的单,**已出餐的餐损平台不赔**(平台没有钱)。
+/// 「改为自己配送」目前只有店铺设置里的自配送开关(只管之后的新单),这一单改不了配送方式 ——
+/// 所以这里只提醒,不放一个点了也没用的按钮。
+const kNoRiderCookHint = '还没有骑手接单:建议骑手接单后再出餐,或改为自己配送';
+
+/// 这一单该不该提醒:已接单还没出餐、平台配送(不是自取、不是自己送)、还没骑手接、不是追加单
+/// (追加单随原单走,原单上已经提醒过)。
+bool showNoRiderCookHint(Order o) =>
+    o.status == OrderStatus.accepted &&
+    !o.pickup &&
+    !o.selfDelivery &&
+    o.riderId == null &&
+    o.parentOrderNo.isEmpty;
+
 /// 顾客等了多久。1 分钟内先说「刚刚」,满 3 分钟算急(和旧版一个口径)。
 ({String text, bool urgent}) waitLabel(DateTime created, DateTime now) {
   final d = now.difference(created);

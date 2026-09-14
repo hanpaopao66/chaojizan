@@ -502,6 +502,22 @@ export interface FoodOrder {
   created_at: string
   accepted_at: string | null
   scheduled_at?: string | null
+  /** 接单的骑手;还没骑手接为 null。服务端 OrderOut 一直有这个字段,这里只是把类型补上 */
+  rider_id?: number | null
+  /** 非空 = 追加单,随原单一起配送 */
+  parent_order_no?: string
+}
+
+/** 出餐之前还没骑手接单时,接单台上那句提醒。和服务端 auto_flow.NO_RIDER_COOK_HINT、商家 App 同一句。
+ *
+ *  2026-09-15 起没人接单、到点被取消的单,已出餐的餐损平台不赔(平台没有钱)。
+ *  「改为自己配送」目前只有店铺设置里的自配送开关(只管之后的新单),这一单改不了 —— 所以只提醒 */
+export const NO_RIDER_COOK_HINT = '还没有骑手接单:建议骑手接单后再出餐,或改为自己配送'
+
+/** 这一单该不该提醒:已接单还没出餐、平台配送、还没骑手接、不是追加单 */
+export function showNoRiderCookHint(o: FoodOrder): boolean {
+  return o.status === 'accepted' && !o.pickup && !o.self_delivery
+    && o.rider_id == null && !o.parent_order_no
 }
 
 export const FOOD_STATUS_LABELS: Record<string, string> = {

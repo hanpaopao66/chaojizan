@@ -4678,6 +4678,11 @@ def _credit_sections_for_merchant() -> list[dict]:
             {"title": "交易对方的信用分", "items": counterpart_lines("merchant")}]
 
 
+def _no_rider_rules_section() -> dict:
+    from ..services.rules import _no_rider_section
+    return _no_rider_section(settings.no_rider_cancel_minutes)
+
+
 @router.get("/me/rules")
 async def my_rules(
     user: User = Depends(require_role("merchant")),
@@ -4734,6 +4739,8 @@ async def my_rules(
                     "你自己配送的单,配送费本来就在你的入账里,冲回净额就一起退了,不另扣",
                 ],
             },
+            # 没人接单被取消的餐损不赔(2026-09-15 起),和规则页同一份(services/rules)
+            _no_rider_rules_section(),
             {
                 "title": "申诉",
                 "items": [

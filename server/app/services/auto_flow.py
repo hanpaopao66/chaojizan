@@ -5,8 +5,8 @@
   2. 已支付商家超时未接单                → 自动取消 = 全额退款(回补库存)
   3. 已送达超过 auto_confirm_hours 未确认 → 自动完成(结算触发点)
   4. 无人接单兜底(抢单模式的红线,见 _sweep_no_rider):
-     提醒线 → 推送在线骑手催抢单 + 告知商家,每单一次;
-     取消线 → 全额退款,商家已出餐的平台按应收赔付餐损(不让商家背锅)
+     提醒线 → 推送在线骑手催抢单 + 告知商家(还没出餐的,建议等骑手接单再出餐,或改自己配送),每单一次;
+     取消线 → 顾客全额退款;商家已出餐的餐损**不再赔**(2026-09-15 起,平台没有钱)
 
 判定用 updated_at(每次状态流转都会刷新),待支付用 created_at。
 所有变更照常写 OrderEvent(actor=system),和人工操作走同一套审计。
@@ -24,9 +24,7 @@ from ..db import SessionLocal
 from ..models import (
     NOT_APPEND_ORDER,
     Dish,
-    EarningKind,
     Merchant,
-    MerchantEarning,
     MerchantStatus,
     Order,
     OrderEvent,
@@ -497,17 +495,16 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
     """无人接单兜底。即时单从下单时间起算;预约单以预约时间为基准
     (提前 30 分钟还没人接就提醒,到点仍没人接就取消)。
 
-    取消的钱怎么算:用户全额退款;商家已出餐(READY)的,平台按商家应收口径
-    (菜品+打包-满减)全额赔付、佣金一分不收——运力不足是平台的问题,
-    不能让做了餐的商家背锅。赔付走 merchant_earnings 正常入账行,
-    公开账本里 net == food - 0 恒等式照样成立,社区可验证。
+    取消的钱怎么算:顾客全额退款(抵扣过的券放回券包),佣金不收。**商家已出餐的餐损不赔**:
+    2026-09-15 起停了 —— 原来平台按商家应收(菜品+打包-满减)全额赔、写一条 merchant_earnings
+    入账行(note 前缀 audit.NO_RIDER_COMP_NOTE),那是平台出的钱,而平台没有钱。
+    商家那边改成**事前提醒**:订单还没骑手接单时,商家端(App、网页工作台)在出餐按钮上提醒
+    「建议骑手接单后再出餐,或改为自己配送」;提醒线的推送、取消时的推送也照实说餐损不赔。
+    之前已经赔出去的行照旧留着,核账(规则 12)、透明中心按历史照认。
 
-    ⚠️ 跑腿单不赔:它支付后**直接进 READY**(语义是"可以取件了",
-    不是"商家出餐完成"),而它的 merchant_id 指向的是每城一个的虚拟服务主体——
-    没有经营者、没做任何东西。帮买单更严重:那笔 food_cents 装的是用户预付的
-    商品款,赔出去等于同一笔钱付两遍(用户已全额退款)。
+    跑腿单本来就不赔:它支付后**直接进 READY**(语义是"可以取件了",
+    不是"商家出餐完成"),merchant_id 指向的是每城一个的虚拟服务主体。
     """
-    from .errand import is_errand
     from .wechat_pay import request_refund
 
     waiting = [
@@ -541,7 +538,6 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
             .limit(100)
         )
     ).all()
-    compensated: dict[int, int] = {}  # order_id -> 赔付金额
     for order in cancel_orders:
         from_status = order.status
         refund_amount = order.total_cents
@@ -558,24 +554,7 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
         # 无骑手取消没收,是这条漏洞里最说不过去的一种
         from .eta import release_coupon
         await release_coupon(db, order.order_no)
-        if from_status == OrderStatus.READY and not is_errand(order):
-            comp = (order.food_cents + order.packing_fee_cents
-                    - order.discount_cents)
-            if comp > 0:
-                # note 前缀走常量:账务自检靠它认出"这是合规兜底赔付、
-                # 不是挂在取消单上的野账",透明中心 /funds 靠它公示赔付支出
-                from .audit import NO_RIDER_COMP_NOTE
-                db.add(MerchantEarning(
-                    merchant_id=order.merchant_id,
-                    order_id=order.id,
-                    order_no=order.order_no,
-                    food_cents=comp,
-                    commission_cents=0,
-                    net_cents=comp,
-                    kind=EarningKind.earning,
-                    note=f"{NO_RIDER_COMP_NOTE}(佣金不收)",
-                ))
-                compensated[order.id] = comp
+        # 已出餐的餐损不赔(2026-09-15 起,见上面的说明):这里不写任何商家入账行
         db.add(OrderEvent(
             order_id=order.id,
             from_status=from_status.value,
@@ -583,8 +562,8 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
             actor_role="system",
             actor_id=None,
         ))
-        logger.info("auto_flow: %s 无骑手接单自动取消(已出餐赔付=%s 分)",
-                    order.order_no, compensated.get(order.id, 0))
+        logger.info("auto_flow: %s 无骑手接单自动取消(取消前状态 %s,餐损不赔)",
+                    order.order_no, from_status.value)
 
     alert_orders = (
         await db.scalars(
@@ -603,10 +582,15 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
     for order in alert_orders:
         order.no_rider_alerted_at = now
         logger.info("auto_flow: %s 无骑手接单,提醒在线骑手与商家", order.order_no)
-    return alert_orders, cancel_orders, compensated
+    return alert_orders, cancel_orders
 
 
-async def _notify_no_rider(alert_orders, cancel_orders, compensated) -> None:
+#: 没有骑手接单时给商家的那句建议。提醒线推送、取消推送、商家端出餐按钮上的提醒说的是同一句
+#: (商家端 App、网页工作台各自写死一份,文案对着这里)
+NO_RIDER_COOK_HINT = "建议骑手接单后再出餐,或改为自己配送"
+
+
+async def _notify_no_rider(alert_orders, cancel_orders) -> None:
     """无人接单的推送(commit 之后发,推送失败不影响账)。
 
     跑腿单只推给用户,不推商家侧:那个 merchant_id 是虚拟服务主体,
@@ -616,7 +600,15 @@ async def _notify_no_rider(alert_orders, cancel_orders, compensated) -> None:
 
     if not alert_orders and not cancel_orders:
         return
+    # 取消前已经出了餐的单(推送里要说餐损不赔)。取消单这时已经是 CANCELLED,状态看事件
+    cooked_ids: set[int] = set()
     async with SessionLocal() as db:
+        if cancel_orders:
+            cooked_ids = set(await db.scalars(
+                select(OrderEvent.order_id).where(
+                    OrderEvent.order_id.in_([o.id for o in cancel_orders]),
+                    OrderEvent.from_status == OrderStatus.READY.value,
+                    OrderEvent.to_status == OrderStatus.CANCELLED.value)))
         merchant_ids = {o.merchant_id for o in [*alert_orders, *cancel_orders]
                         if not is_errand(o)}
         owners = {
@@ -639,16 +631,19 @@ async def _notify_no_rider(alert_orders, cancel_orders, compensated) -> None:
                            {"type": "order", "order_no": order.order_no})
         owner = owners.get(order.merchant_id)
         if owner:
-            comp = compensated.get(order.id, 0)
-            body = (f"订单无骑手接单已自动取消,已出餐部分平台赔付 ¥{comp / 100:.2f}(佣金不收)"
-                    if comp else "订单无骑手接单已自动取消,用户已全额退款")
+            # 已出餐的餐损平台不赔了(2026-09-15 起):取消时照实说,也说以后怎么避免。留痕(record_skip)
+            cooked = order.id in cooked_ids
+            body = ("订单长时间没有骑手接单,已自动取消、顾客全额退款。"
+                    + ("已经出的餐,餐损平台不赔(平台没有钱);" if cooked else "")
+                    + f"以后还没有骑手接单时,{NO_RIDER_COOK_HINT}")
             await push_to_user(owner, "订单已取消", body,
-                               {"type": "order", "order_no": order.order_no})
+                               {"type": "order", "order_no": order.order_no}, record_skip=True)
     for order in alert_orders:
         owner = owners.get(order.merchant_id)
         if owner:
             await push_to_user(owner, "订单还没有骑手接单",
-                               "已提醒附近在线骑手;若长时间无人接单,平台会自动取消并退款",
+                               f"已提醒附近在线骑手。还没出餐的话,{NO_RIDER_COOK_HINT} —— "
+                               "长时间没人接,平台会自动取消、顾客全额退款,已出餐的餐损平台不赔",
                                {"type": "order", "order_no": order.order_no})
     for rider_id in online_riders:
         await push_to_user(rider_id, "有订单等待接单",
@@ -783,7 +778,7 @@ async def sweep_once() -> dict[str, int]:
         # 自动确认同样触发结算(骑手 + 商家;自取单无骑手行)
         for order in [*completed, *pickup_done]:
             await settle_order(db, order)
-        alerted, no_rider_cancelled, compensated = await _sweep_no_rider(db, now)
+        alerted, no_rider_cancelled = await _sweep_no_rider(db, now)
         ready_stage1, ready_stage2 = await _sweep_ready_timeout(db, now)
         orphan_appends = await _sweep_orphan_appends(db, now)
         unbound = await _sweep_privacy_unbind(db, now)
@@ -836,7 +831,7 @@ async def sweep_once() -> dict[str, int]:
             logger.exception("超时致歉兜底失败")
 
     try:
-        await _notify_no_rider(alerted, no_rider_cancelled, compensated)
+        await _notify_no_rider(alerted, no_rider_cancelled)
         await _notify_ready_timeout(ready_stage1, ready_stage2)
     except Exception:  # 推送永远不能拖垮清扫主流程
         logger.exception("无人接单/出餐超时推送失败")

@@ -387,7 +387,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                 note: '首单立减(现在是 0)、停发之前发的超时安抚券被抵扣、'
                     '停发之前难度反馈当场补给骑手的钱'),
             _kv(sz, '餐损赔付', _yuan(_int(spend['meal_compensation_cents'])),
-                note: '无骑手接单被取消时,已出餐的商家按应收全额赔,佣金不收'),
+                note: '历史:无骑手接单被取消时,已出餐的商家按应收赔;2026-09-15 起不再赔'),
             _kv(sz, '申诉改判', _yuan(_int(spend['adjustment_cents'])),
                 note: '平台判错了,平台自己认:商家改判补回的净额和另出的配送费小费、'
                     '骑手改判退回的、顾客申诉改判原路退的 —— 每一笔都在公开账本里'),
@@ -483,7 +483,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
                 '停发之前发出去的(送达超时 15 分钟自动发)。2026-09-14 起超时只致歉、不发券,'
                 '没用的券照旧能用'),
             _compRow(sz, '餐损赔付', meal,
-                '没有骑手接单被取消时,已出餐的商家按应收全额赔付'),
+                '历史:没有骑手接单被取消时,已出餐的商家按应收赔付;2026-09-15 起不再赔'),
             _compRow(sz, '申诉改判', corrections,
                 '平台判错了,平台自己认:商家改判补回的净额和另出的配送费小费、'
                 '骑手改判退回的、顾客申诉改判原路退的'),
