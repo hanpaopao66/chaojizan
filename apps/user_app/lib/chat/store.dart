@@ -189,6 +189,24 @@ class ChatStore extends ChangeNotifier {
     unawaited(outbox.restore());
   }
 
+  /// 测试用:只接上接口,不连实时通道、不读缓存、不接通话。资料页、添加联系人这些页面
+  /// 只用 [api] 拉数据,测它们不需要把整个消息模块跑起来
+  @visibleForTesting
+  void debugAttach(ApiClient client) {
+    _client = client;
+    _api = ChatApi(client);
+    meId = client.userId ?? 0;
+  }
+
+  @visibleForTesting
+  void debugDetach() {
+    _api = null;
+    _client = null;
+    meId = 0;
+    users.clear();
+    chats.clear();
+  }
+
   void stop() {
     CallController.instance.detach();
     realtime.stop();

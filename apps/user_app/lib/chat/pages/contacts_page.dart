@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:qr_flutter/qr_flutter.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../../qr_login/qr_login.dart' show canScanHere;
+import '../../qr_login/qr_scan_page.dart' show openQrScanner;
 import '../chat_page.dart';
 import '../links.dart';
 import '../models.dart';
 import '../store.dart';
 import '../ui/avatar.dart';
+import 'my_card_page.dart';
 import 'pickers.dart';
 import 'user_profile_page.dart';
 
@@ -64,7 +64,7 @@ class _ContactsPageState extends State<ContactsPage> {
               ? SzRefreshableEmpty(
                   onRefresh: _load,
                   child: SzEmpty(
-                    text: '还没有联系人\n用对方的用户名、手机号或名片二维码添加',
+                    text: '还没有联系人\n用对方的超级赞号、手机号或名片二维码添加',
                     actionLabel: '添加联系人',
                     onAction: () => Navigator.of(context)
                         .push(MaterialPageRoute<void>(builder: (_) => const AddContactPage()))
@@ -93,7 +93,46 @@ class _ContactsPageState extends State<ContactsPage> {
   }
 }
 
-/// 添加联系人:@用户名、完整手机号、我的名片二维码(D2)。
+/// 添加联系人的输入框里是什么、按什么找。
+enum ContactQueryKind { phone, username, publicId, link, invalid }
+
+class ContactQuery {
+  const ContactQuery(this.kind, this.value);
+
+  final ContactQueryKind kind;
+
+  /// phone:11 位号码;username:超级赞号(不带 @);publicId:名片编号;link:本站别的链接(邀请、视频);
+  /// invalid:给人看的说明
+  final String value;
+}
+
+/// 输 11 位手机号按手机号找,别的按超级赞号找;贴进来的本站名片链接当成号 / 名片编号。
+/// 纯数字又不是 11 位的、不像超级赞号的,不发请求,直接说哪儿不对。
+ContactQuery contactQueryOf(String raw) {
+  final s = raw.trim();
+  final compact = s.replaceAll(RegExp(r'[\s-]'), '');
+  final phone = compact.startsWith('+86') ? compact.substring(3) : compact;
+  if (RegExp(r'^1\d{10}$').hasMatch(phone)) return ContactQuery(ContactQueryKind.phone, phone);
+  if (RegExp(r'^\+?\d+$').hasMatch(compact)) {
+    return const ContactQuery(ContactQueryKind.invalid, '手机号要输完整的 11 位。超级赞号以字母开头,不会是纯数字');
+  }
+  if (s.contains('chaojizan.cc/')) {
+    final url = s.startsWith('http') ? s : 'https://$s';
+    final card = cardRefOf(url);
+    if (card?.username != null) return ContactQuery(ContactQueryKind.username, card!.username!);
+    if (card?.publicId != null) return ContactQuery(ContactQueryKind.publicId, card!.publicId!);
+    return ContactQuery(ContactQueryKind.link, url);
+  }
+  final name = s.startsWith('@') ? s.substring(1) : s;
+  if (RegExp(r'^[A-Za-z][A-Za-z0-9_]{4,31}$').hasMatch(name)) {
+    return ContactQuery(ContactQueryKind.username, name);
+  }
+  return const ContactQuery(ContactQueryKind.invalid, '超级赞号是 5–32 位的英文字母、数字或下划线,以字母开头');
+}
+
+/// 添加联系人(D2):一个输入框,11 位手机号按手机号找(照旧受对方「按手机号找到我」约束),
+/// 别的按超级赞号找(受对方「按超级赞号找到我」约束)。找到了在这一页摆出名片,点「添加到联系人」;
+/// 找不到照实说为什么。和 Telegram 一样**直接加,不用对方同意**,也只加在自己这边。
 class AddContactPage extends StatefulWidget {
   const AddContactPage({super.key});
 
@@ -104,19 +143,23 @@ class AddContactPage extends StatefulWidget {
 class _AddContactPageState extends State<AddContactPage> {
   final _q = TextEditingController();
   bool _busy = false;
-  String? _myLink;
-  String? _myName;
+
+  /// 找到的人 / 公开群、频道 / 没找到时的说明,三者最多一个
+  ChatUser? _user;
+  Map<String, dynamic>? _chat;
+  String? _miss;
+
+  /// 没找到(404)时多给一句当面怎么加
+  bool _missTip = false;
+  String? _myUsername;
+
+  ChatStore get _store => ChatStore.instance;
 
   @override
   void initState() {
     super.initState();
-    ChatStore.instance.api.me().then((m) {
-      if (mounted) {
-        setState(() {
-          _myLink = '${m['link'] ?? ''}';
-          _myName = '${m['name'] ?? ''}';
-        });
-      }
+    _store.api.me().then((m) {
+      if (mounted) setState(() => _myUsername = m['username'] as String?);
     }).catchError((_) {});
   }
 
@@ -126,25 +169,71 @@ class _AddContactPageState extends State<AddContactPage> {
     super.dispose();
   }
 
+  void _clear() {
+    _user = null;
+    _chat = null;
+    _miss = null;
+    _missTip = false;
+  }
+
   Future<void> _find() async {
     final raw = _q.text.trim();
-    if (raw.isEmpty) return;
+    if (raw.isEmpty || _busy) return;
+    final q = contactQueryOf(raw);
+    setState(_clear);
+    switch (q.kind) {
+      case ContactQueryKind.invalid:
+        setState(() => _miss = q.value);
+        return;
+      case ContactQueryKind.link:
+        // 邀请链接、视频这些站内链接照旧在 App 里打开
+        final ok = await openAppLink(context, Uri.parse(q.value));
+        if (!ok && mounted) setState(() => _miss = '认不出这个链接');
+        return;
+      case ContactQueryKind.phone:
+      case ContactQueryKind.username:
+      case ContactQueryKind.publicId:
+        break;
+    }
     setState(() => _busy = true);
-    final store = ChatStore.instance;
     try {
-      final digits = raw.replaceAll(RegExp(r'[\s-]'), '');
-      if (RegExp(r'^1\d{10}$').hasMatch(digits)) {
-        final u = await store.api.findByPhone(digits);
-        if (mounted) await _show(u);
-      } else if (raw.contains('chaojizan.cc/')) {
-        // 站内链接:名片、@用户名、邀请链接都认
-        final uri = Uri.tryParse(raw.startsWith('http') ? raw : 'https://$raw');
-        if (uri != null && mounted && !await openAppLink(context, uri) && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('认不出这个链接')));
-        }
+      if (q.kind == ContactQueryKind.phone) {
+        final u = await _store.api.findByPhone(q.value);
+        if (mounted) setState(() => _user = u);
+      } else if (q.kind == ContactQueryKind.publicId) {
+        final u = await _store.api.resolvePublicId(q.value);
+        if (mounted) setState(() => _user = u);
       } else {
-        if (mounted) await openUsername(context, raw.replaceFirst('@', ''));
+        final r = await _store.api.resolve(q.value);
+        if (!mounted) return;
+        setState(() {
+          if (r['type'] == 'user') {
+            _user = ChatUser.fromJson(r['user']);
+          } else {
+            _chat = (r['chat'] as Map).cast<String, dynamic>();
+          }
+        });
       }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _miss = e.message;
+          _missTip = e.statusCode == 404;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _add(ChatUser u) async {
+    setState(() => _busy = true);
+    try {
+      final n = await _store.api.addContact(u.id);
+      _store.users[n.id] = n;
+      if (!mounted) return;
+      setState(() => _user = n);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已添加到联系人')));
     } on ApiException catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     } finally {
@@ -152,7 +241,88 @@ class _AddContactPageState extends State<AddContactPage> {
     }
   }
 
-  Future<void> _show(ChatUser u) => openUserProfile(context, u.id);
+  BoxDecoration _cardBox(SzColors sz) => BoxDecoration(
+      color: sz.surface, border: Border.all(color: sz.line), borderRadius: BorderRadius.circular(kRadiusMd));
+
+  Widget _userCard(ChatUser u) {
+    final sz = Theme.of(context).sz;
+    final Widget action;
+    if (u.isSelf) {
+      action = Text('这是你自己', textAlign: TextAlign.center, style: TextStyle(fontSize: kFontNote, color: sz.inkMuted));
+    } else if (u.isBot) {
+      // 机器人不进通讯录(和资料页一样),点进去再说
+      action = OutlinedButton(onPressed: () => openUserProfile(context, u.id), child: const Text('查看机器人'));
+    } else if (u.isContact) {
+      action = Row(children: [
+        Expanded(
+          child: Text('已在你的联系人里', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+        ),
+        FilledButton(onPressed: () => openPrivateWith(context, u.id), child: const Text('发消息')),
+      ]);
+    } else {
+      action = FilledButton(onPressed: _busy ? null : () => _add(u), child: const Text('添加到联系人'));
+    }
+    return Container(
+      padding: const EdgeInsets.all(kCardPad),
+      decoration: _cardBox(sz),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        InkWell(
+          onTap: () => openUserProfile(context, u.id),
+          child: Row(children: [
+            ChatAvatar(name: u.displayName, url: u.avatar, size: 52),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(u.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: kFontBodyLg, fontWeight: FontWeight.w600, color: sz.ink)),
+                const SizedBox(height: 2),
+                Text(u.username != null ? '超级赞号:@${u.username}' : '没有设超级赞号',
+                    style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                if (u.bio.isNotEmpty)
+                  Text(u.bio,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+              ]),
+            ),
+            Icon(Icons.chevron_right, size: 18, color: sz.inkFaint),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        action,
+      ]),
+    );
+  }
+
+  Widget _chatCard(Map<String, dynamic> c) {
+    final sz = Theme.of(context).sz;
+    final channel = c['type'] == 'channel';
+    return Container(
+      padding: const EdgeInsets.all(kCardPad),
+      decoration: _cardBox(sz),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          ChatAvatar(name: '${c['title'] ?? ''}', url: '${c['photo'] ?? ''}', size: 52),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${c['title'] ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: kFontBodyLg, fontWeight: FontWeight.w600, color: sz.ink)),
+              const SizedBox(height: 2),
+              Text('${channel ? '公开频道' : '公开群'} · ${c['member_count'] ?? 0} 人',
+                  style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 12),
+        FilledButton(onPressed: () => openPublicChat(context, c), child: const Text('查看')),
+      ]),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -165,51 +335,59 @@ class _AddContactPageState extends State<AddContactPage> {
           autofocus: true,
           textInputAction: TextInputAction.search,
           onSubmitted: (_) => _find(),
+          // 改了输入,上一次的结果就不对应了
+          onChanged: (_) {
+            if (_user != null || _chat != null || _miss != null) setState(_clear);
+          },
           decoration: InputDecoration(
-            labelText: '用户名、手机号或名片链接',
-            hintText: '@xiaowang 或 13800000000',
+            labelText: '超级赞号或手机号',
+            hintText: '比如 xiaowang_01 或 13800000000',
             suffixIcon: IconButton(
+              tooltip: '查找',
               icon: _busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.search),
               onPressed: _busy ? null : _find,
             ),
           ),
         ),
         const SizedBox(height: 8),
-        Text('按手机号只能精确找完整号码,每天 20 次;对方可以在隐私设置里关掉。我们不会上传你的通讯录。',
-            style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
-        const SizedBox(height: 28),
-        if (_myLink != null && _myLink!.isNotEmpty) ...[
-          Center(child: Text('我的名片', style: TextStyle(color: sz.inkMuted))),
-          const SizedBox(height: 10),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(kRadiusMd)),
-              child: QrImageView(data: _myLink!, size: 180),
+        Text(
+            '输入 11 位手机号按手机号找(每天 20 次),别的按超级赞号找;对方可以在隐私设置里关掉这两种找法。'
+            '加联系人不用对方同意,只加在你这边。我们不会上传你的通讯录。',
+            style: TextStyle(fontSize: kFontNote, color: sz.inkMuted, height: 1.5)),
+        const SizedBox(height: 16),
+        if (_user != null) _userCard(_user!),
+        if (_chat != null) _chatCard(_chat!),
+        if (_miss != null)
+          Container(
+            padding: const EdgeInsets.all(kCardPad),
+            decoration: BoxDecoration(color: sz.surfaceAlt, borderRadius: BorderRadius.circular(kRadiusMd)),
+            child: Text(
+              !_missTip
+                  ? _miss!
+                  // 网页版、电脑版没有「扫一扫」(只有手机 App 有),别让人去找一个不存在的按钮
+                  : canScanHere
+                      ? '$_miss\n当面加的话,请对方打开「消息设置 → 我的名片」,你用「扫一扫」扫他的码。'
+                      : '$_miss\n也可以请对方打开「消息设置 → 我的名片」,把名片链接发给你。',
+              style: TextStyle(fontSize: kFontBody, color: sz.ink, height: 1.6),
             ),
           ),
-          const SizedBox(height: 8),
-          Center(child: Text(_myName ?? '', style: const TextStyle(fontWeight: FontWeight.w600))),
-          Center(child: SelectableText(_myLink!, style: TextStyle(color: sz.link, fontSize: kFontNote))),
-          const SizedBox(height: 8),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            TextButton.icon(
-              icon: const Icon(Icons.copy, size: 18),
-              label: const Text('复制链接'),
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: _myLink!));
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制')));
-                }
-              },
+        const SizedBox(height: 16),
+        SzEntryGroup(children: [
+          if (canScanHere)
+            SzEntryTile(
+              title: '扫一扫',
+              icon: Icons.qr_code_scanner,
+              hint: '扫对方的名片二维码',
+              onTap: () => openQrScanner(context, _store.client),
             ),
-            TextButton.icon(
-              icon: const Icon(Icons.share_outlined, size: 18),
-              label: const Text('分享'),
-              onPressed: () => SharePlus.instance.share(ShareParams(text: '在超级赞上加我:$_myLink')),
-            ),
-          ]),
-        ],
+          SzEntryTile(
+            title: '我的名片',
+            icon: Icons.qr_code_2,
+            value: _myUsername != null ? '@$_myUsername' : null,
+            hint: '二维码和链接,发给别人加你',
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MyCardPage())),
+          ),
+        ]),
       ]),
     );
   }

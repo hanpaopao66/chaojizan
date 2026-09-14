@@ -8,18 +8,49 @@ import 'pages/user_profile_page.dart';
 import 'store.dart';
 import 'ui/avatar.dart';
 
+/// 本站的域名。名片码、站内链接只认这两个
+const _ownHosts = {'chaojizan.cc', 'www.chaojizan.cc'};
+
+/// 这是不是本站的**名片链接**:`https://chaojizan.cc/@超级赞号`,或者 `https://chaojizan.cc/u/名片编号`
+/// (没有超级赞号、或者关了「按超级赞号找到我」的人,名片码是后一种)。是就返回号或编号,不是返回 null。
+///
+/// **只认本站域名**:`chaojizan.cc.evil.example/@xxx`、`evil.example/@xxx` 这种长得一样的都不算 ——
+/// 「扫一扫」扫到名片码会直接打开对方的资料页,别的链接得摆出来让人自己决定,不能扫一下就替人点了。
+/// `/@频道名/123`(频道里的一条)、`/join/…`(邀请链接)不是名片,也返回 null。
+({String? username, String? publicId})? cardRefOf(String raw) {
+  final uri = Uri.tryParse(raw.trim());
+  if (uri == null || (uri.scheme != 'https' && uri.scheme != 'http')) return null;
+  if (!_ownHosts.contains(uri.host.toLowerCase())) return null;
+  // `https://chaojizan.cc@evil.example/…` 的 host 是 evil.example,上面已经挡了;
+  // 带用户名密码、带非默认端口的本站链接我们自己从来不发,也不认
+  if (uri.userInfo.isNotEmpty || (uri.hasPort && uri.port != (uri.scheme == 'https' ? 443 : 80))) {
+    return null;
+  }
+  final seg = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+  if (seg.length == 1 && seg[0].startsWith('@')) {
+    final name = seg[0].substring(1);
+    // 和服务端 validate_username 的格式一样:5–32 位,字母开头,字母数字下划线,不以下划线结尾
+    return RegExp(r'^[A-Za-z](?:[A-Za-z0-9]|_(?!_)){3,30}[A-Za-z0-9]$').hasMatch(name)
+        ? (username: name, publicId: null)
+        : null;
+  }
+  if (seg.length == 2 && seg[0] == 'u' && RegExp(r'^[1-9A-HJ-NP-Za-km-z]{8,16}$').hasMatch(seg[1])) {
+    return (username: null, publicId: seg[1]);
+  }
+  return null;
+}
+
 /// 站内链接(和 Telegram 的 t.me 一样):在 App 里直接打开,不跳浏览器。
 ///
-/// - `chaojizan.cc/@用户名` → 这个人的资料 / 公开群、频道;
+/// - `chaojizan.cc/@超级赞号` → 这个人的资料 / 公开群、频道;
 /// - `chaojizan.cc/@频道名/123` → 打开频道并跳到第 123 条;
 /// - `chaojizan.cc/join/邀请码` → 邀请链接预览,可以加入;
-/// - `chaojizan.cc/u/名片编号` → 这个人的资料(没有用户名的人的名片链接);
+/// - `chaojizan.cc/u/名片编号` → 这个人的资料(没有超级赞号、或者关了按号找到的人的名片链接);
 /// - `chaojizan.cc/v/视频号` → 视频详情(`?p=2` 从第 2 P 开始)。
 ///
 /// 返回 true 表示认得、已经处理;false 交给调用方(一般是问一句再用浏览器打开)。
 Future<bool> openAppLink(BuildContext context, Uri uri) async {
-  final host = uri.host.toLowerCase();
-  if (host != 'chaojizan.cc' && host != 'www.chaojizan.cc') return false;
+  if (!_ownHosts.contains(uri.host.toLowerCase())) return false;
   final seg = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (seg.isEmpty) return false;
   // 视频不需要登录也能看,放在「消息没启动」的判断前面

@@ -16,7 +16,7 @@ Future<void> openUserProfile(BuildContext context, int userId, {bool fromChat = 
     Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => UserProfilePage(userId: userId, fromChat: fromChat)));
 
-/// 一个人的资料(Telegram 的用户资料页):头像、名字、@用户名、签名、最后上线;
+/// 一个人的资料(Telegram 的用户资料页):头像、名字、@超级赞号、签名、最后上线;
 /// 发消息 / 加联系人 / 拉黑 / 举报;和他的共享媒体。**没有手机号**(S2)。
 class UserProfilePage extends StatefulWidget {
   const UserProfilePage({super.key, required this.userId, this.fromChat = false});
@@ -149,7 +149,11 @@ class _UserProfilePageState extends State<UserProfilePage> {
       );
     }
     final chat = _privateChat;
-    final link = u.username != null ? 'https://chaojizan.cc/@${u.username}' : null;
+    // 分享别人的名片用名片编号(/u/…),不用 @超级赞号:对方关了「按超级赞号找到我」时 @ 链接打不开,
+    // 而且超级赞号一年能改一次、换下来的号冷冻期过后会归别人,编号链接一直指着这个人
+    final link = u.publicId != null
+        ? 'https://chaojizan.cc/u/${u.publicId}'
+        : (u.username != null ? 'https://chaojizan.cc/@${u.username}' : null);
     return SzPageScaffold(
       appBar: AppBar(
         actions: [
@@ -249,7 +253,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
           ListTile(
             leading: const Icon(Icons.alternate_email),
             title: Text('@${u.username}'),
-            subtitle: const Text('用户名'),
+            subtitle: const Text('超级赞号'),
             onTap: () async {
               await Clipboard.setData(ClipboardData(text: '@${u.username}'));
               if (context.mounted) {

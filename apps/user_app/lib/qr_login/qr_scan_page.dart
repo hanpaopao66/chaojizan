@@ -4,14 +4,18 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../chat/links.dart' show openAppLink;
+import '../chat/api.dart' show ChatApi;
+import '../chat/links.dart' show cardRefOf, openAppLink;
+import '../chat/models.dart' show ChatUser;
+import '../chat/pages/pickers.dart' show openPublicChat;
+import '../chat/pages/user_profile_page.dart' show UserProfilePage;
 import 'qr_confirm_page.dart';
 import 'qr_login.dart';
 
 /// 「扫一扫」入口:先说明为什么要相机(商店合规:先告知、后申请),同意了才打开扫码页。
 Future<void> openQrScanner(BuildContext context, ApiClient api) async {
   if (!await PermissionRationale.ensure(context, AppPermissionKind.camera,
-      reason: '用于「扫一扫」:扫网页版、电脑版上的二维码登录。\n拒绝不影响其他功能。')) {
+      reason: '用于「扫一扫」:扫网页版、电脑版上的登录二维码,或者别人的名片二维码。\n拒绝不影响其他功能。')) {
     return;
   }
   if (!context.mounted) return;
@@ -19,7 +23,9 @@ Future<void> openQrScanner(BuildContext context, ApiClient api) async {
       .push(MaterialPageRoute<void>(builder: (_) => QrScanPage(api: api)));
 }
 
-/// 扫一扫(手机 App)。扫到超级赞的登录码 → 确认页;扫到别的 → 把内容摆出来,**不自动打开**,让人自己决定。
+/// 扫一扫(手机 App)。扫到超级赞的登录码 → 确认页;扫到本站的名片码(`chaojizan.cc/@超级赞号`、
+/// `chaojizan.cc/u/名片编号`,**只认本站域名**,见 [cardRefOf])→ 直接打开对方的资料页,页上有「加为联系人」;
+/// 扫到别的 → 把内容摆出来,**不自动打开**,让人自己决定。
 ///
 /// 取景用仓库里 vendor 的 mobile_scanner(和商家端核销团购券同一个):
 /// 安卓上是 Google ML Kit 条码识别,iOS 上是系统自带的 Vision。画面只在手机上识别,不上传。
@@ -55,21 +61,55 @@ class _QrScanPageState extends State<QrScanPage> {
         return;
       } on ApiException catch (e) {
         if (!mounted) return;
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => SzDialog(
-            title: const Text('登录不了'),
-            content: Text(e.message),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('继续扫')),
-            ],
-          ),
-        );
+        await _cannot('登录不了', e.message);
       }
+    } else if (cardRefOf(value) case final card?) {
+      if (await _openCard(card)) return;
     } else {
       await showScannedContent(context, value);
     }
     if (mounted) setState(() => _handling = false);
+  }
+
+  Future<void> _cannot(String title, String message) => showDialog<void>(
+        context: context,
+        builder: (ctx) => SzDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('继续扫')),
+          ],
+        ),
+      );
+
+  /// 名片码:问服务端这是谁,打开他的资料页(扫码页换成资料页,返回就回到打开扫一扫之前的地方)。
+  /// 返回 true = 已经离开扫码页。
+  ///
+  /// `/@号` 也可能是公开群 / 频道的链接:那就先给看群资料,进不进自己点(不自动加入)。
+  /// 对方关了「按超级赞号找到我」时 `/@号` 找不到人 —— 照实说,他本人现在给出去的名片码是 `/u/…`,扫那个能打开。
+  Future<bool> _openCard(({String? username, String? publicId}) card) async {
+    final chatApi = ChatApi(widget.api);
+    try {
+      if (card.publicId != null) {
+        final u = await chatApi.resolvePublicId(card.publicId!);
+        return await _showProfile(u.id);
+      }
+      final r = await chatApi.resolve(card.username!);
+      if (r['type'] == 'user') return await _showProfile(ChatUser.fromJson(r['user']).id);
+      if (!mounted) return true;
+      await openPublicChat(context, (r['chat'] as Map).cast<String, dynamic>());
+      return false;
+    } on ApiException catch (e) {
+      if (mounted) await _cannot('打不开这张名片', e.message);
+      return false;
+    }
+  }
+
+  Future<bool> _showProfile(int userId) async {
+    if (!mounted) return true;
+    await Navigator.of(context)
+        .pushReplacement(MaterialPageRoute<void>(builder: (_) => UserProfilePage(userId: userId)));
+    return true;
   }
 
   Widget _scanner(BuildContext context) {
@@ -139,7 +179,7 @@ class _QrScanPageState extends State<QrScanPage> {
             const Spacer(),
             const Padding(
               padding: EdgeInsets.fromLTRB(24, 0, 24, 32),
-              child: Text('对准网页版、电脑版上的登录二维码。\n只扫你自己面前那台电脑上的码,别人发来的不要扫',
+              child: Text('对准登录二维码或名片二维码。\n登录码只扫你自己面前那台电脑上的,别人发来的不要扫',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: kFontNote, color: Colors.white, height: 1.6)),
             ),
@@ -151,7 +191,7 @@ class _QrScanPageState extends State<QrScanPage> {
   }
 }
 
-/// 扫到的不是登录码:把内容摆出来,复制、打开都由人自己点。**不自动打开任何链接** ——
+/// 扫到的不是登录码、也不是本站的名片码:把内容摆出来,复制、打开都由人自己点。**不自动打开任何链接** ——
 /// 二维码里可以是任何网址,扫一下就跳过去等于替别人点了链接。
 Future<void> showScannedContent(BuildContext context, String raw) async {
   final uri = Uri.tryParse(raw);
@@ -173,7 +213,7 @@ Future<void> showScannedContent(BuildContext context, String raw) async {
                   style: TextStyle(
                       fontSize: kFontTitle, fontWeight: FontWeight.w600, color: sz.ink)),
               const SizedBox(height: 4),
-              Text(isLink ? '这不是超级赞的登录码,是一个链接。要不要打开,你自己决定' : '这不是超级赞的登录码',
+              Text(isLink ? '这不是超级赞的登录码或名片码,是一个链接。要不要打开,你自己决定' : '这不是超级赞的登录码或名片码',
                   style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
               const SizedBox(height: 12),
               Container(

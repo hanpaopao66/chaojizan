@@ -6,13 +6,13 @@ import 'package:superz_shared/superz_shared.dart';
 import '../models.dart';
 import '../store.dart';
 import '../ui/avatar.dart';
-import 'contacts_page.dart';
 import 'export_page.dart';
+import 'my_card_page.dart';
 import 'sanctions_page.dart';
 import 'folders_page.dart';
 import 'user_profile_page.dart';
 
-/// 「消息」的设置:我的资料(@用户名、签名、名片)、隐私、通知、拉黑名单、会话分组、本地缓存。
+/// 「消息」的设置:我的资料(超级赞号、签名、名片)、隐私、通知、拉黑名单、会话分组、本地缓存。
 class ChatSettingsPage extends StatefulWidget {
   const ChatSettingsPage({super.key});
 
@@ -136,6 +136,7 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
     final privacy = (me['privacy'] as Map? ?? const {}).cast<String, dynamic>();
     final notify = (me['notify'] as Map? ?? const {}).cast<String, dynamic>();
     final username = me['username'] as String?;
+    final nextChange = DateTime.tryParse('${me['username_next_change_at'] ?? ''}');
     final bio = '${me['bio'] ?? ''}';
     return SzPageScaffold(
       appBar: AppBar(title: const Text('消息设置')),
@@ -143,18 +144,18 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
         ListTile(
           leading: ChatAvatar(name: '${me['name'] ?? ''}', url: '${me['avatar'] ?? ''}', size: 56),
           title: Text('${me['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text(username != null ? '@$username' : '还没有用户名', style: TextStyle(color: sz.inkMuted)),
+          subtitle: Text(username != null ? '超级赞号:@$username' : '还没有超级赞号', style: TextStyle(color: sz.inkMuted)),
           onTap: () => openUserProfile(context, (me['id'] as num).toInt()),
         ),
         SzEntryGroup(title: '我的资料', children: [
           SzEntryTile(
-            title: '用户名',
+            title: '超级赞号',
             icon: Icons.alternate_email,
             value: username != null ? '@$username' : null,
-            hint: '设了之后,别人用 @用户名 就能找到你',
+            hint: '相当于微信号,别人输入它就能找到你',
             onTap: () async {
-              final r = await Navigator.of(context)
-                  .push<Map<String, dynamic>>(MaterialPageRoute(builder: (_) => UsernamePage(current: username)));
+              final r = await Navigator.of(context).push<Map<String, dynamic>>(MaterialPageRoute(
+                  builder: (_) => UsernamePage(current: username, nextChangeAt: nextChange)));
               if (r != null && mounted) setState(() => _me = r);
             },
           ),
@@ -169,7 +170,7 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
             title: '我的名片',
             icon: Icons.qr_code_2,
             hint: '二维码和链接,发给别人加你',
-            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AddContactPage())),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MyCardPage())),
           ),
         ]),
         SzEntryGroup(
@@ -177,13 +178,27 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
           footnote: '消息存在平台的服务器上(没有端到端加密)。平台只在处理举报时查看被举报的那几条,'
               '每次查看都留记录,次数在透明中心按月公示。',
           children: [
-            for (final k in privacyLabels.keys)
+            for (final k in privacyLabels.keys) ...[
               SzEntryTile(
                 title: privacyLabels[k]!,
                 value: privacyValueLabels['${privacy[k] ?? 'everyone'}'],
                 dense: true,
                 onTap: () => _pickPrivacy(k),
               ),
+              // 按号找和按手机号找挨着放。它只有开 / 关两档(服务端不收「联系人」):
+              // 能按号找到我的联系人,本来就已经在他的联系人里了
+              if (k == 'phone_search')
+                SzEntryTile(
+                  title: '按超级赞号找到我',
+                  dense: true,
+                  trailing: Switch(
+                    value: privacy['username_search'] != 'nobody',
+                    onChanged: (v) => _patch({
+                      'privacy': {'username_search': v ? 'everyone' : 'nobody'}
+                    }),
+                  ),
+                ),
+            ],
             SzEntryTile(
               title: '已拉黑的人',
               dense: true,
@@ -249,11 +264,31 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
   }
 }
 
-/// 设置 / 修改 / 清空 @用户名,边输边检查。
+/// 超级赞号的规则说明。**照服务端写的**(services/social.py 的 validate_username 和改名规则),
+/// 那边改了这里要一起改 —— server/tests/unit/test_custom_id.py 对着查位数和天数。
+const usernameRulesText = '超级赞号相当于微信号:别人输入它就能找到你、加你为联系人,不用知道你的手机号。\n'
+    '· 5–32 位,以英文字母开头,只能用英文字母、数字和下划线;下划线不能放在最后,也不能两个连着\n'
+    '· 不区分大小写;不能以 bot 结尾(留给机器人);带 admin、kefu、official、chaojizan 这类字样的,'
+    '和 support、help 这类保留词不能用\n'
+    '· 第一次设置随时能设;之后一年只能改一次,从上次设置或修改那天算,满 365 天才能再改;只改大小写不算\n'
+    '· 改掉或清空的旧号冷冻 180 天,这期间别人不能注册;你自己想用回来也算一次修改\n'
+    '· 不想被人按号找到:消息设置 → 隐私 →「按超级赞号找到我」';
+
+/// 按北京时间写日期。服务端的「下次可修改」按北京时间的日期算(那天零点起能改),拒绝时的提示也写北京日期;
+/// 手机时区不是北京的话按本地时间写,会差出一天,和服务端那句话对不上
+String _ymd(DateTime t) {
+  final b = t.toUtc().add(const Duration(hours: 8));
+  return '${b.year}-${b.month.toString().padLeft(2, '0')}-${b.day.toString().padLeft(2, '0')}';
+}
+
+/// 设置 / 修改 / 清空超级赞号,边输边检查。一年只能改一次:改不了的时候写明下次哪天能改。
 class UsernamePage extends StatefulWidget {
-  const UsernamePage({super.key, this.current});
+  const UsernamePage({super.key, this.current, this.nextChangeAt});
 
   final String? current;
+
+  /// 现在改不了的话,哪天能改(/social/v1/me 的 username_next_change_at);null = 现在就能设 / 改
+  final DateTime? nextChangeAt;
 
   @override
   State<UsernamePage> createState() => _UsernamePageState();
@@ -266,6 +301,12 @@ class _UsernamePageState extends State<UsernamePage> {
   bool _ok = false;
   bool _checking = false;
   bool _saving = false;
+
+  /// 一年一次的名额还没到(只改大小写不受这个限制)
+  bool get _locked => widget.nextChangeAt != null && DateTime.now().isBefore(widget.nextChangeAt!);
+
+  bool _sameIgnoringCase(String name) =>
+      widget.current != null && name.toLowerCase() == widget.current!.toLowerCase();
 
   @override
   void initState() {
@@ -291,6 +332,23 @@ class _UsernamePageState extends State<UsernamePage> {
       });
       return;
     }
+    if (_sameIgnoringCase(name)) {
+      // 只改大小写:号还是这个号,不算修改,不用问服务端占没占
+      setState(() {
+        _reason = '只改大小写,不算修改';
+        _ok = true;
+        _checking = false;
+      });
+      return;
+    }
+    if (_locked) {
+      setState(() {
+        _reason = '一年只能改一次,下次可修改:${_ymd(widget.nextChangeAt!)}';
+        _ok = false;
+        _checking = false;
+      });
+      return;
+    }
     setState(() => _checking = true);
     _t = Timer(const Duration(milliseconds: 350), () async {
       try {
@@ -307,15 +365,58 @@ class _UsernamePageState extends State<UsernamePage> {
     });
   }
 
+  /// 改号、清空号都不能随手撤回(一年一次、旧号冷冻),先把后果说清楚再动
+  Future<bool> _confirm({required String title, required String body, required String ok}) async {
+    final r = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => SzDialog(
+        title: Text(title),
+        content: Text(body, style: const TextStyle(height: 1.6)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ok)),
+        ],
+      ),
+    );
+    return r == true;
+  }
+
   Future<void> _save({bool clear = false}) async {
     final name = clear ? '' : _c.text.trim().replaceFirst('@', '');
+    final current = widget.current;
+    if (clear && current != null) {
+      final go = await _confirm(
+        title: '不用超级赞号了?',
+        body: '清空之后,别人输入 @$current 找不到你,你的名片码改用一串随机编号。\n'
+            '@$current 会冷冻 180 天,这期间别人不能注册它。\n'
+            '${_locked ? '再设超级赞号算一次修改,要等到 ${_ymd(widget.nextChangeAt!)}。' : '以后再设超级赞号算一次修改,设好后 365 天内不能再改。'}',
+        ok: '清空',
+      );
+      if (!go) return;
+    } else if (!clear && !_sameIgnoringCase(name)) {
+      final go = await _confirm(
+        title: '用 @$name 作超级赞号?',
+        body: [
+          '保存后 365 天内不能再改(只改大小写不算)。',
+          if (current != null) '原来的 @$current 会冷冻 180 天,这期间别人不能注册它。',
+        ].join('\n'),
+        ok: '保存',
+      );
+      if (!go) return;
+    }
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
       final me = await ChatStore.instance.api.setUsername(name);
       ChatStore.instance.myUsername = me['username'] as String?;
       if (mounted) Navigator.pop(context, me);
     } on ApiException catch (e) {
-      if (mounted) setState(() => _reason = e.message);
+      if (mounted) {
+        setState(() {
+          _reason = e.message;
+          _ok = false;
+        });
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -328,18 +429,18 @@ class _UsernamePageState extends State<UsernamePage> {
     final canSave = !_saving && !_checking && name.isNotEmpty && _ok && name != widget.current;
     return SzPageScaffold(
       appBar: AppBar(
-        title: const Text('用户名'),
+        title: const Text('超级赞号'),
         actions: [TextButton(onPressed: canSave ? _save : null, child: const Text('保存'))],
       ),
       body: ListView(padding: const EdgeInsets.all(kPagePad), children: [
         TextField(
           controller: _c,
-          autofocus: true,
+          autofocus: !_locked,
           maxLength: 32,
           onChanged: _onChanged,
           decoration: InputDecoration(
             prefixText: '@',
-            labelText: '用户名',
+            labelText: '超级赞号',
             suffixIcon: _checking
                 ? const Padding(padding: EdgeInsets.all(14), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)))
                 : null,
@@ -347,21 +448,16 @@ class _UsernamePageState extends State<UsernamePage> {
         ),
         if (_reason.isNotEmpty)
           Text(_reason, style: TextStyle(fontSize: kFontNote, color: _ok ? sz.clay : sz.danger)),
+        // 改不了的时候一进来就说清楚,不用等人输了再被拒
+        if (_locked && _reason.isEmpty)
+          Text('下次可修改:${_ymd(widget.nextChangeAt!)}', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
         const SizedBox(height: 12),
-        Text(
-          '别人可以用 @用户名 找到你、给你发消息,不用知道你的手机号。\n'
-          '5–32 位,字母开头,只能用字母、数字和下划线;不区分大小写。',
-          style: TextStyle(fontSize: kFontNote, color: sz.inkMuted),
-        ),
-        if (name.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text('你的链接:https://chaojizan.cc/@$name', style: TextStyle(fontSize: kFontNote, color: sz.link)),
-        ],
+        Text(usernameRulesText, style: TextStyle(fontSize: kFontNote, color: sz.inkMuted, height: 1.6)),
         if ((widget.current ?? '').isNotEmpty) ...[
           const SizedBox(height: 28),
           OutlinedButton(
             onPressed: _saving ? null : () => _save(clear: true),
-            child: const Text('不用用户名了'),
+            child: const Text('不用超级赞号了'),
           ),
         ],
       ]),

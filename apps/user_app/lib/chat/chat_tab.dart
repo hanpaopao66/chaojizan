@@ -122,7 +122,7 @@ class _ChatTabState extends State<ChatTab> {
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // 扫一扫(和微信「+」菜单里那个一样):扫网页版、电脑版的登录二维码。只有手机上有
+          // 扫一扫(和微信「+」菜单里那个一样):扫网页版、电脑版的登录二维码,扫别人的名片码加联系人。只有手机上有
           if (canScanHere)
             ListTile(leading: const Icon(Icons.qr_code_scanner), title: const Text('扫一扫'), onTap: () => Navigator.pop(ctx, 'scan')),
           ListTile(leading: const Icon(Icons.group_add_outlined), title: const Text('新建群组'), onTap: () => Navigator.pop(ctx, 'group')),

@@ -94,7 +94,7 @@ class _ChatSearchPageState extends State<ChatSearchPage> {
             setState(() {});
             _onChanged(v);
           },
-          decoration: const InputDecoration(hintText: '搜索会话、联系人、@用户名、消息', border: InputBorder.none),
+          decoration: const InputDecoration(hintText: '搜索会话、联系人、超级赞号、消息', border: InputBorder.none),
         ),
         actions: [
           if (_loading) const Padding(padding: EdgeInsets.all(16), child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))),
