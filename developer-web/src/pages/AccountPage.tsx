@@ -67,7 +67,7 @@ export default function AccountPage({ me, onChanged, reload }: { me: Me | null; 
         {canVerify && (
           <>
             <Typography.Paragraph type="secondary">
-              没认证也能建应用、传开发版、加体验者、用模拟器;**认证通过才能提交审核**。
+              没认证也能建应用、传开发版、加体验者、用模拟器;<b>认证通过才能提交审核</b>。
             </Typography.Paragraph>
             <Radio.Group value={kind} onChange={(e) => setKind(e.target.value)} style={{ marginBottom: 12 }}>
               <Radio.Button value="individual">个人</Radio.Button>
@@ -148,7 +148,7 @@ function mcpConfig(token: string) {
     mcpServers: {
       superz: {
         command: 'python3',
-        args: ['/绝对路径/mcp-server/server.py'],
+        args: ['/绝对路径/server.py'],
         env: { SUPERZ_API: location.origin, SUPERZ_AGENT_TOKEN: token },
       },
     },
