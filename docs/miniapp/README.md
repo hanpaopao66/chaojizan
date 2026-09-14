@@ -40,19 +40,20 @@
 ## 目录
 
 1. [快速开始](quickstart.md) —— 十分钟从注册到上线
-2. [核心概念](concepts.md) —— AppID、AppSecret、open_id、initData、托管、版本、能力、配额
-3. [SDK 参考](sdk-reference.md) —— 每个方法、事件、CSS 变量、错误码
-4. [服务端](server.md) —— initData 验签(两种方法、五种语言、测试向量)、密钥轮换
-5. [云存储](storage.md) —— 模型、配额、rev 并发、数据删除
-6. [设计规范](design.md) —— 主题变量、安全区、主按钮、深浅色、无障碍、动效
-7. [小游戏](games.md) —— 全屏、方向、性能、存档、为什么没有排行榜
-8. [审核规范](review.md) —— 允许与禁止、隐私要求、原因代码逐条解释、流程、申诉
-9. [运营规范](operations.md) —— 排序规则、精选、下架与处罚、投诉处理、公示
-10. [开发者协议与隐私政策模板](agreement.md) —— 草案:协议要点、隐私政策模板
-11. [更新日志与兼容表](changelog.md) —— SDK 和宿主各版本改了什么、哪个版本支持哪个能力
-12. [故障排查](troubleshooting.md) —— 白屏、CSP 拦截、验签失败、时钟偏差、4001 / 4007
-13. [示例导读](examples.md) —— 记事本、2048 源码逐段讲
-14. [从 Telegram Mini Apps 迁移](telegram.md) —— API 对照表、不一样的地方
+2. [用 AI 助手发布](ai-publish.md) —— 把开发者账号接进 Claude 等 AI 助手,一句话传包、提审、发布上线
+3. [核心概念](concepts.md) —— AppID、AppSecret、open_id、initData、托管、版本、能力、配额
+4. [SDK 参考](sdk-reference.md) —— 每个方法、事件、CSS 变量、错误码
+5. [服务端](server.md) —— initData 验签(两种方法、五种语言、测试向量)、密钥轮换
+6. [云存储](storage.md) —— 模型、配额、rev 并发、数据删除
+7. [设计规范](design.md) —— 主题变量、安全区、主按钮、深浅色、无障碍、动效
+8. [小游戏](games.md) —— 全屏、方向、性能、存档、为什么没有排行榜
+9. [审核规范](review.md) —— 允许与禁止、隐私要求、原因代码逐条解释、流程、申诉
+10. [运营规范](operations.md) —— 排序规则、精选、下架与处罚、投诉处理、公示
+11. [开发者协议与隐私政策模板](agreement.md) —— 草案:协议要点、隐私政策模板
+12. [更新日志与兼容表](changelog.md) —— SDK 和宿主各版本改了什么、哪个版本支持哪个能力
+13. [故障排查](troubleshooting.md) —— 白屏、CSP 拦截、验签失败、时钟偏差、4001 / 4007
+14. [示例导读](examples.md) —— 记事本、2048 源码逐段讲
+15. [从 Telegram Mini Apps 迁移](telegram.md) —— API 对照表、不一样的地方
 
 入口:开发者后台 [`/dev/`](/dev/) · 示例源码 [`miniapps/`](https://github.com/hanpaopao66/chaojizan/tree/main/miniapps) ·
 最小模板 [`miniapps/_template/`](https://github.com/hanpaopao66/chaojizan/tree/main/miniapps/_template) ·
