@@ -135,7 +135,8 @@ Future<void> showBadgeCondition(BuildContext context, ProfileBadge b) => szShowS
                   style: TextStyle(fontSize: kFontNote, height: 1.5, color: sz.inkMuted)),
               if (b.hidden) ...[
                 const SizedBox(height: 8),
-                Text('你把它设成了对别人隐藏,现在只有你自己看得到。',
+                // 不说「你把它设成了隐藏」:实名认证默认就不显示,没动过设置的人也是隐藏的
+                Text('现在对别人隐藏,只有你自己看得到;在「标签和勋章」里可以打开。',
                     style: TextStyle(fontSize: kFontNote, height: 1.5, color: sz.inkMuted)),
               ],
             ]),

@@ -142,6 +142,7 @@ async def purge_user(db: AsyncSession, user_id: int) -> dict:
         prof.tags = []
         prof.tags_hidden = False
         prof.badges_hidden = []
+        prof.badges_shown = []
     return out
 
 

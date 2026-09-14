@@ -146,6 +146,7 @@ class ProfileBadge {
     this.condition = '',
     this.hidden = false,
     this.earned = true,
+    this.defaultHidden = false,
   });
 
   final String key;
@@ -161,6 +162,9 @@ class ProfileBadge {
   /// 拿到了没有。只有「标签和勋章」设置页会列出没拿到的,资料卡上的都是拿到了的
   final bool earned;
 
+  /// 这一枚默认不显示(现在只有「实名认证」),本人没选过时别人看不到。只有设置页给这个字段
+  final bool defaultHidden;
+
   factory ProfileBadge.fromJson(Object? j) {
     final m = _map(j);
     return ProfileBadge(
@@ -170,6 +174,7 @@ class ProfileBadge {
       condition: _str(m['condition']),
       hidden: _bool(m['hidden']),
       earned: _bool(m['earned'], true),
+      defaultHidden: _bool(m['default_hidden']),
     );
   }
 }

@@ -5,6 +5,8 @@
 - 透明中心的条件和发放判据是同一份:公示里的门槛拿来造数据,正好卡在得与不得的分界上;
 - 数数的 SQL 用的也是这几个常量,而且除了 :ids 没有别的绑定参数;
 - 别人看:隐藏了的和「没有」长得一样;自己看:都在,标着「已隐藏」;
+- 显不显示:选过的按本人选的,没选过的按每一枚的缺省 ——「实名认证」默认不显示,别的默认显示;
+  公示(透明中心、隐私政策)里说的默认不显示的是哪几枚,和代码里的是同一份;
 - 标签的条数、字数、重复、冒充平台标志;
 - 缓存:上限压在 PUBLIC_CACHE_MAX_SECONDS 下面,本人看总是现算,Redis 挂了照样算;
 - 勋章不能买、不能手动发:库里没有存「谁得了哪枚」的地方,也没有发勋章的接口。
@@ -18,9 +20,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import badges as bd
-from app.services.badges import (BADGE_KEYS, BADGES, COMPLETED_ORDERS_MIN, EARLY_BEFORE,
-                                 PHOTO_REVIEWS_MIN, TAG_MAX_LEN, TAGS_MAX, Facts, card_view,
-                                 earned_keys, normalize_tags, public_spec)
+from app.services.badges import (BADGE_KEYS, BADGES, COMPLETED_ORDERS_MIN, DEFAULT_HIDDEN,
+                                 EARLY_BEFORE, PHOTO_REVIEWS_MIN, TAG_MAX_LEN, TAGS_MAX, Facts,
+                                 card_view, earned_keys, hidden_keys, normalize_tags, public_spec)
 
 UTC = timezone.utc
 BEFORE = EARLY_BEFORE - timedelta(days=30)
@@ -136,8 +138,9 @@ def test_tags_rejected(raw, needle):
     assert got == [] and problem and needle in problem, (raw, problem)
 
 
-def _prof(tags=(), tags_hidden=False, hidden=()):
-    return SimpleNamespace(tags=list(tags), tags_hidden=tags_hidden, badges_hidden=list(hidden))
+def _prof(tags=(), tags_hidden=False, hidden=(), shown=()):
+    return SimpleNamespace(tags=list(tags), tags_hidden=tags_hidden, badges_hidden=list(hidden),
+                           badges_shown=list(shown))
 
 
 def test_others_cannot_tell_hidden_from_missing():
@@ -160,10 +163,63 @@ def test_self_sees_everything_marked():
     assert b["condition"] == bd._BY_KEY["real_name"].condition
 
 
-def test_no_profile_row_means_nothing_hidden():
-    v = card_view(None, ["early"], is_self=False)
+def test_no_profile_row_means_never_chose_so_defaults_apply():
+    v = card_view(None, ["real_name", "early"], is_self=False)
     assert v == {"tags": [], "tags_hidden": False,
-                 "badges": [bd.badge_out(bd._BY_KEY["early"], hidden=False)]}
+                 "badges": [bd.badge_out(bd._BY_KEY["early"], hidden=False)]}, "实名认证默认不显示"
+    mine = card_view(None, ["real_name", "early"], is_self=True)
+    assert [(b["key"], b["hidden"]) for b in mine["badges"]] == [("real_name", True), ("early", False)]
+
+
+def test_only_real_name_is_hidden_by_default():
+    assert DEFAULT_HIDDEN == ("real_name",)
+    assert [b.key for b in BADGES if b.default_hidden] == ["real_name"]
+
+
+def test_chosen_follows_the_choice_never_chosen_follows_the_default():
+    """「没选过的人按默认,选过的按他选的」的真值表。"""
+    assert hidden_keys(None, None) == {"real_name"}, "谁都没选过:只有实名认证不显示"
+    assert hidden_keys([], []) == {"real_name"}
+    assert hidden_keys([], ["real_name"]) == set(), "本人打开了实名认证:别人看得到"
+    assert hidden_keys(["early"], []) == {"early", "real_name"}, "选了隐藏早期用户,实名认证仍按缺省"
+    assert hidden_keys(["real_name"], []) == {"real_name"}, "选了隐藏,和缺省一样是隐藏"
+    assert hidden_keys([], ["early", "real_name"]) == set(), "选了显示一枚本来就显示的,照旧显示"
+    assert hidden_keys(["real_name"], ["real_name"]) == {"real_name"}, \
+        "两份名单都有同一枚(正常写不出来):按隐藏算,站在少露的一边"
+    assert hidden_keys(["vip", 3], ["no_such"]) == {"real_name"}, "不认识的 key 丢掉"
+    # 表里每一枚:没选过 = 缺省,选了隐藏 = 隐藏,选了显示 = 显示
+    for b in BADGES:
+        assert (b.key in hidden_keys([], [])) is b.default_hidden, b.key
+        assert b.key in hidden_keys([b.key], []), b.key
+        assert b.key not in hidden_keys([], [b.key]), b.key
+
+
+def test_card_view_uses_the_choices():
+    turned_on = _prof(shown=["real_name"])
+    assert [b["key"] for b in card_view(turned_on, ["real_name", "early"], is_self=False)["badges"]] \
+        == ["real_name", "early"], "本人打开了:别人看得到实名认证"
+    untouched = _prof()
+    assert [b["key"] for b in card_view(untouched, ["real_name", "early"], is_self=False)["badges"]] \
+        == ["early"], "没选过:别人看不到实名认证,和没有一样"
+
+
+def test_what_is_hidden_by_default_is_said_publicly_from_the_same_list():
+    """透明中心和隐私政策里说「默认不显示」的,就是代码里 default_hidden 的那几枚。"""
+    from pathlib import Path
+    spec = public_spec()
+    assert {b["key"]: b["default_hidden"] for b in spec["badges"]} == \
+        {b.key: b.default_hidden for b in BADGES}
+    root = Path(__file__).resolve().parents[3]
+    policies = [(root / "server/static/legal-privacy.html").read_text(encoding="utf-8"),
+                (root / "packages/shared/lib/src/legal.dart").read_text(encoding="utf-8")]
+    for key in DEFAULT_HIDDEN:
+        name = bd._BY_KEY[key].name
+        assert f"「{name}」" in spec["visibility"] and "默认不显示" in spec["visibility"], spec["visibility"]
+        for text in policies:
+            assert f"{name}这一枚默认不显示,你可以自己打开" in text, f"隐私政策没写 {name} 默认不显示"
+    item17 = [next(line for line in text.splitlines() if line.startswith("17. 标签与勋章"))
+              for text in policies]
+    assert item17[0].removesuffix("<br>") == item17[1], "两份隐私政策第 17 条要一字不差"
 
 
 def test_cache_ttl_is_capped_by_public_cache_setting(monkeypatch):
@@ -251,14 +307,15 @@ def _leaf_routes(routes):
 
 
 def test_nothing_stores_who_got_which_badge():
-    """勋章每次现算:库里除了「我想隐藏哪几枚」,没有任何和勋章有关的表或列。"""
+    """勋章每次现算:库里除了「我选了隐藏 / 显示哪几枚」,没有任何和勋章有关的表或列。"""
     from app.db import Base
     import app.models  # noqa: F401  所有表注册进 Base.metadata
     tables = [t for t in Base.metadata.tables if "badge" in t]
     cols = sorted(f"{t.name}.{c.name}" for t in Base.metadata.tables.values() for c in t.columns
                   if "badge" in c.name)
     # dishes.badges 是菜品角标(新品 / 招牌,商家自己勾的),和人的勋章无关
-    assert tables == [] and cols == ["dishes.badges", "social_profiles.badges_hidden"], (tables, cols)
+    assert tables == [] and cols == ["dishes.badges", "social_profiles.badges_hidden",
+                                     "social_profiles.badges_shown"], (tables, cols)
 
 
 def test_no_route_can_sell_or_grant_a_badge():

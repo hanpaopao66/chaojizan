@@ -4,7 +4,7 @@
 2. 每一枚勋章满足条件就有、不满足就没有。**门槛从透明中心的公示里读**,正好造到「门槛减一」(没有)
    和「门槛」(有),再把公示里写的「不算的」各造一条,确认它确实不算 —— 公示和判据是同一份;
 3. 隐藏:整组标签、单枚勋章。隐藏后别人(登录的、没登录的、UP 主空间)看不到,和「没有」一样;
-   自己看得到,标着已隐藏;
+   自己看得到,标着已隐藏。「实名认证」默认就是隐藏的(公示里的 default_hidden),本人打开别人才看得到;
 4. 封号期间改标签被挡、隐藏照常能用;注销之后标签清掉,资料卡上什么都没有。
 
 全部自己造:顾客、商家(开店申请就行,不用过审)、第二名管理员(加屏蔽词、驳回评价图、封号),不碰演示账号。
@@ -104,6 +104,8 @@ def main():
     spec = call("GET", "/transparency/badges")
     by = {b["key"]: b for b in spec["badges"]}
     assert list(by) == ["real_name", "early", "uploader", "photo_reviewer", "regular"], list(by)
+    assert [k for k in by if by[k]["default_hidden"]] == ["real_name"], "默认不显示的只有实名认证"
+    assert "「实名认证」这一枚默认不显示" in spec["visibility"], spec["visibility"]
     n_photo = by["photo_reviewer"]["min_count"]
     n_orders = by["regular"]["min_count"]
     early_before = datetime.fromisoformat(by["early"]["before"])
@@ -170,13 +172,23 @@ def main():
     assert keys(card_of(b, c.id)) == []
     print(f"  ✓ 早期用户:{early_before.isoformat()} 前一秒注册的有,那一刻注册的没有")
 
-    # 实名认证:走真接口(开发环境没配二要素核验时,校验位对的证号算过)
+    # 实名认证:走真接口(开发环境没配二要素核验时,校验位对的证号算过)。
+    # 这一枚默认不显示(公示里的 default_hidden):没选过的人,别人看到的和没有一样,
+    # 自己看得到、标着已隐藏;本人打开之后别人才看得到
     assert keys(card_of(b, a.id)) == []
     realname(a)
+    assert keys(card_of(b, a.id)) == [] and keys(space_of(None, a.id)) == [], "默认不显示"
+    assert [(x["key"], x["hidden"]) for x in card_of(a, a.id)["badges"]] == [("real_name", True)], \
+        "自己看得到,标着已隐藏"
+    rn = next(x for x in a.get("/social/v1/me/tags-badges")["badges"] if x["key"] == "real_name")
+    assert (rn["earned"], rn["hidden"], rn["default_hidden"]) == (True, True, True), rn
+    a.patch("/social/v1/me/tags-badges", {"hidden_badges": {"real_name": False}})
     got = card_of(b, a.id)
-    assert keys(got) == ["real_name"], got
+    assert keys(got) == ["real_name"] and keys(space_of(None, a.id)) == ["real_name"], got
     assert got["badges"][0]["condition"] == by["real_name"]["condition"], "资料卡上的条件就是公示的那一句"
-    print("  ✓ 实名认证:核验通过就有")
+    assert sql("SELECT badges_shown @> '[\"real_name\"]'::jsonb FROM social_profiles WHERE user_id = :u",
+               {"u": a.id}, fetch="scalar") is True, "打开这件事存下来了:以后按他选的"
+    print("  ✓ 实名认证:核验通过就有;默认不显示(别人看不到,自己看得到标着已隐藏),本人打开之后别人看得到")
 
     # UP 主:已发布 + 公开 + 没删除,和 UP 主空间「投稿」数的是同一批
     vid = fixture_video(a.id)["id"]
@@ -295,15 +307,18 @@ def main():
         call("POST", f"/admin/social/sanctions/{s['id']}/revoke", admin, {"note": "测试完撤掉"})
     a.patch("/social/v1/me/tags-badges", {"hidden_badges": {"uploader": False}})
     e = person()
-    e.patch("/social/v1/me/tags-badges", {"tags": ["要注销了"]})
+    # 还没实名就先把实名认证打开(没拿到的也能先设):实名之后别人马上看得到
+    e.patch("/social/v1/me/tags-badges", {"tags": ["要注销了"], "hidden_badges": {"real_name": False}})
     realname(e)
-    assert card_of(b, e.id)["tags"] == ["要注销了"]
+    before = card_of(b, e.id)
+    assert before["tags"] == ["要注销了"] and "real_name" in keys(before), before
     call("DELETE", "/auth/me", e.token)
     gone = card_of(b, e.id)
     assert gone["tags"] == [] and gone["badges"] == [], gone
-    assert sql("SELECT jsonb_array_length(tags) FROM social_profiles WHERE user_id = :u",
-               {"u": e.id}, fetch="scalar") == 0, "注销时标签从库里清掉,不只是不显示"
-    print("  ✓ 封号期间改标签 403、隐藏照常能用;注销后标签清掉,资料卡上什么都没有")
+    assert sql("SELECT jsonb_array_length(tags) + jsonb_array_length(badges_shown) "
+               "FROM social_profiles WHERE user_id = :u", {"u": e.id}, fetch="scalar") == 0, \
+        "注销时标签和显示设置从库里清掉,不只是不显示"
+    print("  ✓ 封号期间改标签 403、隐藏照常能用;注销后标签和显示设置清掉,资料卡上什么都没有")
 
     # ------------------------------------------------------------------ 5. 公示
     for x in (card_of(b, a.id)["badges"] + card_of(b, d.id)["badges"]):

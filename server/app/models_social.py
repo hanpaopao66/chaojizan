@@ -74,9 +74,12 @@ class SocialProfile(Base):
     tags: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     #: 整组标签对别人隐藏(自己照样看得到)
     tags_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    #: 对别人隐藏的勋章(勋章的 key)。**勋章本身不存** —— 每次按公开条件现算(services/badges.py),
+    #: 本人选了对别人隐藏的勋章(勋章的 key)。**勋章本身不存** —— 每次按公开条件现算(services/badges.py),
     #: 这里只存「我不想让别人看到哪几枚」
     badges_hidden: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
+    #: 本人选了让别人看到的勋章(迁移 0137)。和上一列合起来才分得开「没选过」和「选了显示」:
+    #: 没选过的按每一枚的缺省(「实名认证」默认不显示),见 services/badges.hidden_keys
+    badges_shown: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]")
     #: 硬币余额(D13,纯积分:不能充值、提现、兑换)
     coins: Mapped[int] = mapped_column(Integer, default=0)
     #: 上次领每日硬币的北京日期

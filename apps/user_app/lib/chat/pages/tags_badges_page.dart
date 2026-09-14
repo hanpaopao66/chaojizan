@@ -125,6 +125,8 @@ class _TagsBadgesPageState extends State<TagsBadgesPage> {
     final tags = _tags;
     final tagsHidden = d['tags_hidden'] == true;
     final badges = [for (final b in (d['badges'] as List? ?? const [])) ProfileBadge.fromJson(b)];
+    // 默认不显示的是哪几枚照服务端给的 default_hidden 写(现在只有「实名认证」),这里不另抄一份名单
+    final offByDefault = [for (final b in badges) if (b.defaultHidden) '「${b.name}」'];
     return SzPageScaffold(
       appBar: AppBar(title: const Text('标签和勋章')),
       body: ListView(padding: const EdgeInsets.symmetric(horizontal: kPagePad, vertical: 8), children: [
@@ -181,7 +183,9 @@ class _TagsBadgesPageState extends State<TagsBadgesPage> {
         SzEntryGroup(
           title: '勋章',
           footnote: '平台按公开的条件自动发,不能买、不能申请;条件不再满足就不再显示。'
-              '开关打开的,别人在你的资料页和 UP 主空间里看得到。',
+              '开关打开的,别人在你的资料页和 UP 主空间里看得到。'
+              '${offByDefault.isEmpty ? '' : '${offByDefault.join('、')}${offByDefault.length == 1 ? '这一枚' : '这几枚'}'
+                  '默认不显示,你可以自己打开。'}',
           children: [
             for (final b in badges)
               _BadgeRow(

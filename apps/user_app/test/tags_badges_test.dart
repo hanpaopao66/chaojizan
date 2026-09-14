@@ -20,13 +20,16 @@ import 'package:user_app/main.dart' show superZTheme;
 /// - 资料页照服务端给的显示:别人的只有没隐藏的(服务端已经滤掉),自己的隐藏项标「已隐藏」;
 /// - 点一枚勋章看得到它的发放条件(服务端给的那一句,不是客户端写的);
 /// - 设置页:加标签发出去的是整组新标签,重复的本地就挡、不发请求;服务端不收时原样提示它的话;
-///   删标签、隐藏整组标签、隐藏单枚勋章各发一个 PATCH,方向对(开关打开 = 别人看得到)。
+///   删标签、隐藏整组标签、隐藏单枚勋章各发一个 PATCH,方向对(开关打开 = 别人看得到);
+/// - 「实名认证」默认不显示(服务端给 default_hidden):开关一进来是关的、页上写着默认不显示;
+///   本人打开之后,别人的资料页上才有这一枚。
 const _condRealName = '完成了实名认证(姓名和身份证号经过核验)';
+const _condEarly = '在 2026 年 12 月 31 日(北京时间)及以前注册';
 const _condUploader = '有至少 1 个审核通过、正在公开发布的视频';
 const _condRegular = '完成过至少 10 单外卖或跑腿';
 
 Map<String, dynamic> _badge(String key, String name, String icon, String cond,
-        {bool? hidden, bool? earned}) =>
+        {bool? hidden, bool? earned, bool? defaultHidden}) =>
     {
       'key': key,
       'name': name,
@@ -34,6 +37,7 @@ Map<String, dynamic> _badge(String key, String name, String icon, String cond,
       'condition': cond,
       if (hidden != null) 'hidden': hidden,
       if (earned != null) 'earned': earned,
+      if (defaultHidden != null) 'default_hidden': defaultHidden,
     };
 
 /// 别人看:服务端已经把隐藏了的滤掉,hidden 一律 false
@@ -77,18 +81,28 @@ class _Server {
   final patches = <Map<String, dynamic>>[];
   var gets = 0;
 
+  /// 一个还没动过显示设置的人:实名认证按缺省是隐藏的(真服务端就这么回)
   final me = <String, dynamic>{
     'tags': ['川菜', '夜猫子'],
     'tags_hidden': false,
     'tags_max': 5,
     'tag_max_len': 8,
     'badges': [
-      _badge('real_name', '实名认证', '实', _condRealName, earned: true, hidden: false),
-      _badge('early', '早期用户', '早', '在 2026 年 12 月 31 日(北京时间)及以前注册', earned: true, hidden: false),
-      _badge('uploader', 'UP 主', '投', _condUploader, earned: false, hidden: false),
-      _badge('regular', '老顾客', '老', _condRegular, earned: false, hidden: false),
+      _badge('real_name', '实名认证', '实', _condRealName, earned: true, hidden: true, defaultHidden: true),
+      _badge('early', '早期用户', '早', _condEarly, earned: true, hidden: false, defaultHidden: false),
+      _badge('uploader', 'UP 主', '投', _condUploader, earned: false, hidden: false, defaultHidden: false),
+      _badge('regular', '老顾客', '老', _condRegular, earned: false, hidden: false, defaultHidden: false),
     ],
   };
+
+  /// 照真服务端的口径,别人看我的资料时有哪几枚:拿到了、没隐藏的(hidden 一律 false,不带设置页的字段)
+  List<Map<String, dynamic>> othersSee() => [
+        for (final b in (me['badges'] as List).cast<Map<String, dynamic>>())
+          if (b['earned'] == true && b['hidden'] != true)
+            ({...b, 'hidden': false}
+              ..remove('earned')
+              ..remove('default_hidden')),
+      ];
 
   http.Response _json(Object body, [int code = 200]) => http.Response(jsonEncode(body), code,
       headers: {'content-type': 'application/json; charset=utf-8'});
@@ -149,6 +163,9 @@ void main() {
       expect(listCard.tagsBadges.isEmpty, isTrue);
       expect(TagsBadges.fromJson({'tags': ['a', 3, ''], 'badges': [{'name': '没有 key'}]}).tags, ['a'],
           reason: '宽松读:不认识的丢掉,不崩');
+      expect(ProfileBadge.fromJson(_badge('real_name', '实名认证', '实', _condRealName, defaultHidden: true)).defaultHidden,
+          isTrue);
+      expect(u.tagsBadges.badges.first.defaultHidden, isFalse, reason: '资料卡上不带这个字段,读成 false');
     });
   });
 
@@ -185,6 +202,12 @@ void main() {
       expect(find.text('标签已隐藏,只有你自己看得到'), findsOneWidget);
       expect(tester.widget<SzChip>(find.widgetWithText(SzChip, '川菜')).onTap, isNotNull,
           reason: '自己的标签点进去改');
+
+      // 实名认证默认就是隐藏的:点开不能说成「你把它设成了隐藏」,告诉他在哪儿打开
+      await tester.tap(find.text('实名认证 · 已隐藏'));
+      await tester.pumpAndSettle();
+      expect(find.text('现在对别人隐藏,只有你自己看得到;在「标签和勋章」里可以打开。'), findsOneWidget);
+      expect(find.textContaining('你把它设成了'), findsNothing);
     });
 
     testWidgets('没有标签也没有勋章:什么都不画', (tester) async {
@@ -261,18 +284,55 @@ void main() {
       expect(s.patches.last, {'tags_hidden': true});
       expect(find.text('已隐藏,只有你自己看得到'), findsOneWidget);
 
-      final realName = find.ancestor(of: find.text(_condRealName), matching: find.byType(InkWell)).first;
-      expect(tester.widget<Switch>(switchIn(realName)).value, isTrue);
-      await tester.tap(switchIn(realName));
+      final early = find.ancestor(of: find.text(_condEarly), matching: find.byType(InkWell)).first;
+      expect(tester.widget<Switch>(switchIn(early)).value, isTrue);
+      await tester.tap(switchIn(early));
       await tester.pumpAndSettle();
-      expect(s.patches.last, {'hidden_badges': {'real_name': true}});
+      expect(s.patches.last, {'hidden_badges': {'early': true}});
+      expect(find.text('早期用户 · 已隐藏'), findsOneWidget);
+      expect(tester.widget<Switch>(switchIn(early)).value, isFalse);
+
+      await tester.tap(switchIn(early));
+      await tester.pumpAndSettle();
+      expect(s.patches.last, {'hidden_badges': {'early': false}}, reason: '再打开就是取消隐藏');
+      expect(find.text('早期用户'), findsOneWidget);
+    });
+
+    testWidgets('实名认证默认不显示:开关一进来是关的、写着默认不显示;本人打开之后别人的资料页上才有', (tester) async {
+      final s = _Server();
+      await pump(tester, TagsBadgesPage(client: s.api));
+
+      Finder switchIn(Finder row) => find.descendant(of: row, matching: find.byType(Switch));
+      expect(find.textContaining('「实名认证」这一枚默认不显示,你可以自己打开'), findsOneWidget,
+          reason: '哪一枚默认不显示照服务端的 default_hidden 写');
+      final realName = find.ancestor(of: find.text(_condRealName), matching: find.byType(InkWell)).first;
+      expect(tester.widget<Switch>(switchIn(realName)).value, isFalse, reason: '没选过:按缺省关着');
       expect(find.text('实名认证 · 已隐藏'), findsOneWidget);
-      expect(tester.widget<Switch>(switchIn(realName)).value, isFalse);
+      expect([for (final b in s.othersSee()) b['key']], ['early'], reason: '这时别人看不到实名认证');
 
       await tester.tap(switchIn(realName));
       await tester.pumpAndSettle();
-      expect(s.patches.last, {'hidden_badges': {'real_name': false}}, reason: '再打开就是取消隐藏');
+      expect(s.patches.last, {'hidden_badges': {'real_name': false}}, reason: '打开 = 选了让别人看得到');
+      expect(tester.widget<Switch>(switchIn(realName)).value, isTrue);
       expect(find.text('实名认证'), findsOneWidget);
+      expect(find.text('实名认证 · 已隐藏'), findsNothing);
+
+      // 别人再打开我的资料页:实名认证出来了,和别的勋章一样,没有「已隐藏」
+      final other = _Server(card: {..._othersCard(), 'badges': s.othersSee()});
+      ChatStore.instance.debugUseClient(other.api);
+      await pump(tester, const UserProfilePage(userId: 42));
+      expect(find.widgetWithText(BadgeChip, '实名认证'), findsOneWidget);
+      expect(find.widgetWithText(BadgeChip, '早期用户'), findsOneWidget);
+      expect(find.textContaining('已隐藏'), findsNothing);
+    });
+
+    testWidgets('服务端没有默认不显示的勋章时,不多那一句', (tester) async {
+      final s = _Server();
+      for (final b in (s.me['badges'] as List).cast<Map<String, dynamic>>()) {
+        b['default_hidden'] = false;
+      }
+      await pump(tester, TagsBadgesPage(client: s.api));
+      expect(find.textContaining('默认不显示'), findsNothing);
     });
   });
 }

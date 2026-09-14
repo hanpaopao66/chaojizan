@@ -3,6 +3,9 @@
 - **标签**:用户自己写,最多 5 个、每个 1–8 个字,过屏蔽词,不能重复。和昵称、签名同一级别的公开信息;
 - **勋章**:平台按写在明处的条件自动发。条件只用库里本来就有的记录算(下面每一枚都写了按哪份记录算);
 - **隐藏**:整组标签、每一枚勋章都能对别人隐藏。隐藏之后别人看不到,自己看得到(标「已隐藏」)。
+  每一枚有自己的缺省([Badge.default_hidden]):「实名认证」默认不显示(2026-09-14 用户拍板),别的默认显示。
+  **没选过的按缺省,选过的按他选的**:选择存成两份名单(social_profiles.badges_hidden / badges_shown,
+  迁移 0137),见 [hidden_keys]。
 
 ## 勋章是现算的,库里不存「谁得了哪枚」
 
@@ -99,6 +102,9 @@ class Badge:
     #: 机器可读的门槛(透明中心原样给出,e2e 按它造数据)
     min_count: int | None = None
     before: datetime | None = None
+    #: 本人没选过「别人看不看得到」时,别人看不看得到:True = 默认不显示,要本人自己打开。
+    #: 选过的按他选的([hidden_keys]),以后改这里的缺省也不会改掉任何人已经做过的选择
+    default_hidden: bool = False
 
 
 BADGES: tuple[Badge, ...] = (
@@ -107,7 +113,9 @@ BADGES: tuple[Badge, ...] = (
         condition="完成了实名认证(姓名和身份证号经过核验)",
         counts="实名认证记录:核验通过才会有这一条",
         excludes="资料页上只显示这个标记,不显示姓名和证号",
-        test=lambda f: f.real_name),
+        test=lambda f: f.real_name,
+        # 实名没实名,默认不对别人亮出来(2026-09-14 用户拍板),本人可以自己打开
+        default_hidden=True),
     Badge(
         key="early", name="早期用户", icon="早",
         condition=f"在 {EARLY_TEXT}(北京时间)及以前注册",
@@ -137,6 +145,8 @@ BADGES: tuple[Badge, ...] = (
 )
 BADGE_KEYS: tuple[str, ...] = tuple(b.key for b in BADGES)
 _BY_KEY = {b.key: b for b in BADGES}
+#: 默认不显示的那几枚(现在只有「实名认证」)
+DEFAULT_HIDDEN: tuple[str, ...] = tuple(b.key for b in BADGES if b.default_hidden)
 
 
 def earned_keys(f: Facts) -> list[str]:
@@ -239,8 +249,24 @@ def _tags_of(p: SocialProfile | None) -> list[str]:
     return [t for t in (p.tags if p is not None else None) or [] if isinstance(t, str) and t]
 
 
+def hidden_keys(chose_hidden: Iterable[str] | None, chose_shown: Iterable[str] | None) -> set[str]:
+    """别人看不到的那几枚(纯函数)。**选过的按他选的,没选过的按这一枚的缺省**([Badge.default_hidden])。
+
+    选择存成两份名单:badges_hidden(本人点过「隐藏」)、badges_shown(本人点过「显示」)。
+    只存一份「隐藏名单」的话,「没选过」和「选了显示」分不开 —— 缺省是隐藏的那一枚,
+    本人打开之后就没处记。两份都有同一枚(正常写不出来)按隐藏算:拿不准的时候站在少露的一边。
+    """
+    hide = {k for k in chose_hidden or () if k in _BY_KEY}
+    show = {k for k in chose_shown or () if k in _BY_KEY}
+    return {b.key for b in BADGES
+            if b.key in hide or (b.default_hidden and b.key not in show)}
+
+
 def _hidden_of(p: SocialProfile | None) -> set[str]:
-    return {k for k in (p.badges_hidden if p is not None else None) or [] if k in _BY_KEY}
+    """没有资料行的人(从没进过消息、视频)什么都没选过:全按缺省。"""
+    if p is None:
+        return hidden_keys(None, None)
+    return hidden_keys(p.badges_hidden, p.badges_shown)
 
 
 def empty_view() -> dict:
@@ -281,7 +307,10 @@ async def tags_badges_for(db: AsyncSession, user_id: int, viewer_id: int | None)
 
 
 async def settings_view(db: AsyncSession, user: User, p: SocialProfile) -> dict:
-    """「标签和勋章」设置页:全部勋章都列出来(拿没拿到、隐没隐藏),条件一起给。总是现算。"""
+    """「标签和勋章」设置页:全部勋章都列出来(拿没拿到、隐没隐藏),条件一起给。总是现算。
+
+    `default_hidden`:这一枚默认不显示(客户端据此写「默认不显示,可以自己打开」,不自己抄一份名单)。
+    """
     earned = set(await earned_for(db, user.id, fresh=True))
     hidden = _hidden_of(p)
     return {
@@ -289,7 +318,8 @@ async def settings_view(db: AsyncSession, user: User, p: SocialProfile) -> dict:
         "tags_hidden": bool(p.tags_hidden),
         "tags_max": TAGS_MAX,
         "tag_max_len": TAG_MAX_LEN,
-        "badges": [badge_out(b, earned=b.key in earned, hidden=b.key in hidden) for b in BADGES],
+        "badges": [badge_out(b, earned=b.key in earned, hidden=b.key in hidden,
+                             default_hidden=b.default_hidden) for b in BADGES],
     }
 
 
@@ -344,6 +374,16 @@ def normalize_tags(raw: object) -> tuple[list[str], str | None]:
 
 # ---------------- 公示 ----------------
 
+def visibility_text() -> str:
+    """透明中心「隐藏」那一段。默认不显示的是哪几枚,从 BADGES 里读,不另写一份。"""
+    lead = "标签和勋章跟昵称、签名一样,别人在你的资料页和 UP 主空间里都看得到"
+    if DEFAULT_HIDDEN:
+        names = "、".join(f"「{_BY_KEY[k].name}」" for k in DEFAULT_HIDDEN)
+        lead += f";只有{names}{'这一枚' if len(DEFAULT_HIDDEN) == 1 else '这几枚'}默认不显示,你可以自己打开"
+    return (lead + "。整组标签、每一枚勋章都能在「消息设置 → 标签和勋章」里隐藏,隐藏之后只有你自己看得到;"
+            "别人看到的和「没有」一样,看不出你藏了什么。")
+
+
 def public_spec() -> dict:
     """透明中心「勋章」那一栏。**直接读 BADGES 和上面的常量,不另写一份。**"""
     return {
@@ -352,6 +392,7 @@ def public_spec() -> dict:
             "counts": b.counts, "excludes": b.excludes,
             "min_count": b.min_count,
             "before": b.before.isoformat() if b.before else None,
+            "default_hidden": b.default_hidden,
         } for b in BADGES],
         "tags": {
             "max": TAGS_MAX,
@@ -361,9 +402,7 @@ def public_spec() -> dict:
                 "要过平台的屏蔽词;不能用「官方」「认证」「客服」这类容易被当成平台标志的词,也不能和勋章同名",
             ],
         },
-        "visibility": ("标签和勋章跟昵称、签名一样,别人在你的资料页和 UP 主空间里都看得到。"
-                       "整组标签、每一枚勋章都能在「消息设置 → 标签和勋章」里隐藏,隐藏之后只有你自己看得到;"
-                       "别人看到的和「没有」一样,看不出你藏了什么。"),
+        "visibility": visibility_text(),
         "how": (f"系统里不存「谁得了哪枚」:有人打开资料页时,按上面的条件从订单、评价、稿件、实名记录现数,"
                 f"结果最多缓存 {CACHE_SECONDS // 60} 分钟;本人打开自己的资料时总是现数。"
                 "条件不再满足(视频下架、评价被隐藏、钱全部退回),勋章就不再显示。"),

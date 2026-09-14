@@ -43,7 +43,8 @@ class TagsBadgesPatch(BaseModel):
     #: 整组替换。条数、字数、重复、屏蔽词在下面逐条判,这里只挡离谱的大包
     tags: list[str] | None = Field(default=None, max_length=50)
     tags_hidden: bool | None = None
-    #: {勋章 key: 是否对别人隐藏}。只改传了的那几枚;还没拿到的也能先设成隐藏
+    #: {勋章 key: 是否对别人隐藏}。只改传了的那几枚;还没拿到的也能先设。
+    #: 传了的就算「选过了」,以后按他选的;没传过的按这一枚的缺省(实名认证默认隐藏,见 services/badges)
     hidden_badges: dict[str, bool] | None = None
 
 
@@ -72,13 +73,17 @@ async def patch_tags_badges(body: TagsBadgesPatch, user: User = Depends(social_u
     if body.tags_hidden is not None:
         p.tags_hidden = body.tags_hidden
     if body.hidden_badges:
-        want = set(p.badges_hidden or [])
+        # 选了隐藏的进 badges_hidden、选了显示的进 badges_shown,同一枚只在一边(services/badges.hidden_keys)
+        hide, show = set(p.badges_hidden or []), set(p.badges_shown or [])
         for k, v in body.hidden_badges.items():
             if v:
-                want.add(k)
+                hide.add(k)
+                show.discard(k)
             else:
-                want.discard(k)
+                show.add(k)
+                hide.discard(k)
         # 整个换掉:JSONB 列原地改了 SQLAlchemy 看不出来
-        p.badges_hidden = [k for k in badges.BADGE_KEYS if k in want]
+        p.badges_hidden = [k for k in badges.BADGE_KEYS if k in hide]
+        p.badges_shown = [k for k in badges.BADGE_KEYS if k in show]
     await db.commit()
     return await badges.settings_view(db, user, p)
