@@ -95,6 +95,7 @@ class SmsLoginPage extends StatefulWidget {
     this.api,
     this.altLogin,
     this.altLoginLabel = '扫码登录',
+    this.altLoginFirst = true,
   });
 
   final String title;
@@ -112,6 +113,10 @@ class SmsLoginPage extends StatefulWidget {
   /// 手机号那一屏底下切回 [altLogin] 的那行字
   final String altLoginLabel;
 
+  /// 给了 [altLogin] 时是不是**先显示它**(默认是)。false:先显示手机号,底下一行 [altLoginLabel]
+  /// 切过去 —— 用户端在手机浏览器里打开网页版时这么传(自己没法扫自己的屏幕)
+  final bool altLoginFirst;
+
   @override
   State<SmsLoginPage> createState() => _SmsLoginPageState();
 }
@@ -128,8 +133,8 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
   bool _busy = false;
   late final ApiClient _api = widget.api ?? ApiClient();
 
-  /// 正显示着 [SmsLoginPage.altLogin](有的话默认先显示它)
-  late bool _alt = widget.altLogin != null;
+  /// 正显示着 [SmsLoginPage.altLogin](有的话,按 [SmsLoginPage.altLoginFirst] 决定先显示哪个)
+  late bool _alt = widget.altLogin != null && widget.altLoginFirst;
 
   void _altLoggedIn() {
     if (!mounted) return;

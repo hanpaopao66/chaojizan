@@ -10,16 +10,28 @@ import 'package:superz_shared/superz_shared.dart';
 ///
 /// 共享包只管摆在哪、怎么切,不知道里面是什么 —— 所以这里塞一个假的面板就够。
 void main() {
-  Widget page({Widget Function(BuildContext, SzAltLoginHost)? alt, VoidCallback? onDone}) =>
+  Widget page({Widget Function(BuildContext, SzAltLoginHost)? alt, VoidCallback? onDone,
+          bool altFirst = true}) =>
       MaterialApp(
         theme: brandTheme(Brightness.light),
         home: SmsLoginPage(
           title: '登录后继续',
           api: ApiClient(baseUrl: 'http://test.local'),
           altLogin: alt,
+          altLoginFirst: altFirst,
           onLoggedIn: (_, __) => onDone?.call(),
         ),
       );
+
+  testWidgets('altLoginFirst=false(手机浏览器):先显示手机号,底下能切到扫码', (tester) async {
+    await tester.pumpWidget(page(alt: (_, __) => const Text('假的扫码面板'), altFirst: false));
+    expect(find.text('手机号'), findsOneWidget);
+    expect(find.text('假的扫码面板'), findsNothing);
+    await tester.ensureVisible(find.text('扫码登录'));
+    await tester.tap(find.text('扫码登录'));
+    await tester.pump();
+    expect(find.text('假的扫码面板'), findsOneWidget);
+  });
 
   testWidgets('不传:只有手机号登录,没有扫码的入口', (tester) async {
     await tester.pumpWidget(page());

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -29,6 +30,9 @@ Future<bool> ensureLoggedIn(BuildContext context) async {
             altLogin: qrLoginHere
                 ? (context, host) => QrLoginPanel(api: rootApi, host: host)
                 : null,
+            // 手机浏览器里打开网页版:自己没法扫自己的屏幕,先给手机号,底下能切到扫码 / 一键登录。
+            // 宽窄按可用宽度判(三端响应式的口径),和 qrLoginHere 按平台判的是两件事
+            altLoginFirst: !kIsWeb || MediaQuery.sizeOf(context).width >= 600,
             onLoggedIn: (context, _) => Navigator.of(context).pop(true),
           )));
   if (ok == true) authTick.value++;
