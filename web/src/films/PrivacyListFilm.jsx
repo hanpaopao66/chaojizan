@@ -61,7 +61,7 @@ const YES = [
   ['骑手端：后台定位，有', '上线接单期间一直在定位，锁屏也定位：大厅按离你多远排单，配送中的轨迹要给顾客看。安卓是前台服务 + 一条常驻通知「超级赞接单中」，iOS 是屏幕顶上那条蓝条 —— 你随时看得见它在跑；下线就停', 'location_service.dart', 'apps/rider_app/lib/location_service.dart'],
   ['用户端：位置', '看附近商家、选收货地址、在聊天里发位置时才要；只在前台用，不申请后台定位。拒绝了就展示演示区域，App 照样能用', 'AndroidManifest.xml', 'apps/user_app/android/app/src/main/AndroidManifest.xml'],
   ['相机 / 麦克风 / 蓝牙', '用到时才申请：聊天里拍照、按住说话；商家端扫券核销、骑手端拍送达凭证；商家端连小票打印机。选图片走系统的选择器，只拿你选中的那几张', 'AndroidManifest.xml', 'apps/user_app/android/app/src/main/AndroidManifest.xml'],
-  ['第三方 SDK：极光推送、腾讯地图、Google ML Kit', '推送读设备标识（Registration ID、机型、系统版本），地图 SDK 收机型、系统版本、网络类型和 IP，这两个都等你同意隐私政策之后才启动。安卓上扫码（商家端核销团购券、用户端「扫一扫」登录网页版和电脑版）用 ML Kit：画面只在手机上识别，机型、版本这类使用统计会发给 Google', 'legal.dart · SDK 公示表', 'packages/shared/lib/src/legal.dart'],
+  ['第三方 SDK：极光推送、腾讯地图、Google ML Kit', '推送读设备标识（Registration ID、机型、系统版本），地图 SDK 收机型、系统版本、网络类型和 IP，这两个都等你同意隐私政策之后才启动。安卓上扫码（商家端核销团购券、用户端「扫一扫」登录网页版和电脑版、扫别人的名片码）用 ML Kit：画面只在手机上识别，机型、版本这类使用统计会发给 Google', 'legal.dart · SDK 公示表', 'packages/shared/lib/src/legal.dart'],
   ['不登录也能逛', '不登录能看完整内容，只有下单、聊天这类动作才引导登录', 'STORE-REVIEW · 五 #2', 'docs/STORE-REVIEW.md'],
 ]
 
