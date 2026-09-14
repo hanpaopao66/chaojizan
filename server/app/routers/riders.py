@@ -1463,14 +1463,14 @@ async def submit_appeal(
     from ..models import RiderAppeal
     from ..services.moderation import guard_text
 
-    order_no = str(payload.get("order_no", "")).strip()[:32]
+    order_no = str(payload.get("order_no") or "").strip()[:32]
     order = await db.scalar(select(Order).where(Order.order_no == order_no))
     if order is None or order.rider_id != user.id:
         raise HTTPException(404, "这不是你的单")
     kind = str(payload.get("kind") or "late")
     if kind not in ("late", "review", "other"):
         raise HTTPException(422, "类型只支持:超时非我责任 / 差评非我责任 / 其他")
-    reason = str(payload.get("reason", "")).strip()[:300]
+    reason = str(payload.get("reason") or "").strip()[:300]
     if len(reason) < 5:
         raise HTTPException(422, "说明一下当时的情况(至少 5 个字),"
                                  "平台要靠这段话去核实")
@@ -1483,7 +1483,7 @@ async def submit_appeal(
 
     row = RiderAppeal(
         rider_id=user.id, order_no=order_no, kind=kind, reason=reason,
-        photo_url=str(payload.get("photo_url", "")).strip()[:300],
+        photo_url=str(payload.get("photo_url") or "").strip()[:300],
         evidence=await _appeal_evidence(db, order))
     db.add(row)
     await db.commit()
@@ -2384,7 +2384,7 @@ async def request_gear(
 ):
     """申领装备(头盔/餐箱/雨衣)。同件装备有未发放的申请不能重复领。"""
     from ..models import RiderGear
-    item = str(payload.get("item", ""))
+    item = str(payload.get("item") or "")
     if item not in ("helmet", "box", "raincoat"):
         raise HTTPException(422, "装备只支持 helmet / box / raincoat")
     existing = await db.scalar(
@@ -2432,7 +2432,7 @@ async def report_accident(
     from ..services.insurance import _today_bj
     from ..services.push import push_to_user
 
-    severity = str(payload.get("severity", ""))
+    severity = str(payload.get("severity") or "")
     if severity not in ("minor", "injury", "serious"):
         raise HTTPException(422, "severity 只支持 minor / injury / serious")
     now = datetime.now(timezone.utc)
@@ -2440,7 +2440,7 @@ async def report_accident(
         rider_id=user.id,
         lat=payload.get("lat"), lng=payload.get("lng"),
         severity=severity,
-        description=str(payload.get("description", ""))[:500],
+        description=str(payload.get("description") or "")[:500],
         photos=[u for u in (payload.get("photos") or []) if str(u).strip()][:6],
     )
     db.add(accident)
@@ -2576,8 +2576,8 @@ async def set_emergency_contacts(
         raise HTTPException(422, "紧急联系人最多 2 人")
     cleaned = []
     for c in contacts:
-        name = str(c.get("name", "")).strip()[:20]
-        phone = str(c.get("phone", "")).strip()
+        name = str(c.get("name") or "").strip()[:20]
+        phone = str(c.get("phone") or "").strip()
         if not name or not re.fullmatch(r"1\d{10}", phone):
             raise HTTPException(422, "请填写姓名和正确的手机号")
         cleaned.append({"name": name, "phone": phone})
@@ -2618,7 +2618,7 @@ async def trigger_sos(
             lat = lng = None
     sos = RiderEmergency(
         rider_id=user.id, lat=lat, lng=lng,
-        note=str(payload.get("note", "")).strip()[:200])
+        note=str(payload.get("note") or "").strip()[:200])
     db.add(sos)
     in_flight = len(await _my_in_flight(db, user.id))
     await db.commit()

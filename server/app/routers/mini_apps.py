@@ -586,7 +586,7 @@ async def grant(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    scope = str(body.get("scope", ""))
+    scope = str(body.get("scope") or "")
     if scope != "profile":
         raise HTTPException(422, "目前只有 profile(昵称和头像)需要授权")
     app = await app_by_appid(db, appid)

@@ -1454,7 +1454,7 @@ async def set_flag(
 ):
     if key not in _KNOWN_FLAGS:
         raise HTTPException(404, "未知开关")
-    value = str(payload.get("value", "")).strip()
+    value = str(payload.get("value") or "").strip()
     if key in ("open_cities", "health_cert_cities"):
         # 逗号分隔城市清单(空=不限制);顺手归一化中文逗号与空白
         value = ",".join(
@@ -1503,7 +1503,7 @@ async def set_flag(
     from ..models import FlagHistory
     db.add(FlagHistory(
         key=key, old_value=old_value, new_value=value,
-        reason=str(payload.get("reason", "")).strip()[:200]))
+        reason=str(payload.get("reason") or "").strip()[:200]))
 
     # FlagHistory 是**对外公示**用的,里面没有"谁改的" —— 那是故意的,
     # 公开侧不下发管理员身份。内部问责另记一条
@@ -1511,7 +1511,7 @@ async def set_flag(
                            target_type="flag", target_id=key,
                            detail={"from": old_value, "to": value,
                                    "reason": str(
-                                       payload.get("reason", "")).strip()[:200]})
+                                       payload.get("reason") or "").strip()[:200]})
 
     # 停运开关联动:自动挂/撤三端横幅公告 + 提醒在线骑手注意安全
     if key == "weather_shutdown":
@@ -2197,7 +2197,7 @@ async def reject_content(
     from ..models import Dish, Review
     from ..services.push import push_to_user
 
-    note = str(payload.get("note", "")).strip()
+    note = str(payload.get("note") or "").strip()
     if len(note) < 2:
         raise HTTPException(422, "驳回必须填写原因(会通知发布者)")
     r = await _cr_get_pending(db, review_id)
@@ -2252,7 +2252,7 @@ async def add_moderation_word(
     from ..models import ModerationWord
     from ..services.moderation import invalidate_cache
 
-    word = str(payload.get("word", "")).strip()
+    word = str(payload.get("word") or "").strip()
     if not (1 <= len(word) <= 50):
         raise HTTPException(422, "词长需在 1-50 字符")
     existing = await db.scalar(
@@ -2260,7 +2260,7 @@ async def add_moderation_word(
     if existing:
         raise HTTPException(409, "该词已在库中")
     db.add(ModerationWord(
-        word=word, category=str(payload.get("category", "other"))[:20]))
+        word=word, category=str(payload.get("category") or "other")[:20]))
     await db.commit()
     invalidate_cache()
     return {"ok": True}
@@ -2589,7 +2589,7 @@ async def risk_verdict(
     """复核结论:confirmed=确认刷单(剔出月售/排行) / cleared=误报解除。
     不动资金、不封号——刷单的商业惩罚是失去销量口碑,不是没收真钱。"""
     from ..models import Order as OrderModel
-    verdict = str(payload.get("verdict", ""))
+    verdict = str(payload.get("verdict") or "")
     if verdict not in ("confirmed", "cleared"):
         raise HTTPException(422, "verdict 只能是 confirmed / cleared")
     order = await db.get(OrderModel, order_id, with_for_update=True)
@@ -2615,8 +2615,8 @@ async def set_user_risk_level(
     绝不静默:reason 会展示给用户,用户可申诉。不没收真钱、不封下单——
     误伤优先放行,惩罚只落在营销权益上(与刷单商业惩罚一致的克制)。
     """
-    level = str(payload.get("level", ""))
-    reason = str(payload.get("reason", "")).strip()[:200]
+    level = str(payload.get("level") or "")
+    reason = str(payload.get("reason") or "").strip()[:200]
     if level not in ("", "limit", "frozen"):
         raise HTTPException(422, "level 只能是 空/limit/frozen")
     target = await db.get(User, user_id, with_for_update=True)
@@ -2653,10 +2653,13 @@ async def record_violation(
     from ..models import Violation
     from ..services.enforcement import CATALOG, level_for
 
-    kind = str(payload.get("kind", "")).strip()
+    kind = str(payload.get("kind") or "").strip()
     subject_id = payload.get("subject_id")
-    note = str(payload.get("note", "")).strip()[:300]
-    order_no = (str(payload.get("order_no", "")).strip() or None)
+    note = str(payload.get("note") or "").strip()[:300]
+    # 不挂订单:不传、传 null、传空串都存 NULL。原来写的 str(payload.get("order_no", "")),
+    # null 会变成字面的 "None" 存进去 —— 于是同一类违规再记一条不挂单的,就撞上
+    # (kind, order_no) 那条唯一索引(它只放过 NULL),回「这一单的这类问题已经判定过了」
+    order_no = str(payload.get("order_no") or "").strip() or None
 
     rule = next((r for r in CATALOG if r.kind == kind), None)
     if rule is None:
@@ -2717,7 +2720,7 @@ async def overturn_violation(
     if v.overturned_at is not None:
         return {"ok": True, "already": True}
     v.overturned_at = datetime.now(timezone.utc)
-    v.overturn_note = str(payload.get("note", "")).strip()[:300]
+    v.overturn_note = str(payload.get("note") or "").strip()[:300]
     await db.commit()
     # 推翻的那一条不再扣顾客信用分
     from ..services import customer_credit
@@ -3033,7 +3036,7 @@ async def issue_rider_gear(
     if g.status != "requested":
         raise HTTPException(409, "该申领已处理过")
     g.status = "issued"
-    g.note = str(payload.get("note", ""))[:200]
+    g.note = str(payload.get("note") or "")[:200]
     g.issued_at = datetime.now(timezone.utc)
     await db.commit()
     await push_to_user(g.rider_id, "装备已发放",
@@ -3076,8 +3079,8 @@ async def update_rider_accident(
 ):
     """跟进/结案(SOP 见 docs/RIDER_SOP.md),处置留痕。"""
     from ..models import RiderAccident
-    status = str(payload.get("status", ""))
-    note = str(payload.get("note", "")).strip()
+    status = str(payload.get("status") or "")
+    note = str(payload.get("note") or "").strip()
     if status not in ("following", "closed"):
         raise HTTPException(422, "status 只支持 following / closed")
     if len(note) < 2:
@@ -3147,7 +3150,7 @@ async def set_merchant_city(
     shop = await db.get(Merchant, merchant_id)
     if shop is None:
         raise HTTPException(404, "商家不存在")
-    shop.city = str(payload.get("city", "")).strip()[:20]
+    shop.city = str(payload.get("city") or "").strip()[:20]
     await db.commit()
     return {"id": merchant_id, "city": shop.city}
 
@@ -3162,7 +3165,7 @@ async def set_merchant_category(
     """人工改商家品类(商家错归类时纠错,白名单见 categories.py)。"""
     from ..categories import categories_of
 
-    category = str(payload.get("category", ""))
+    category = str(payload.get("category") or "")
     shop = await db.get(Merchant, merchant_id)
     if shop is None:
         raise HTTPException(404, "商家不存在")
@@ -3190,7 +3193,7 @@ async def set_rider_city(
     rider = await db.get(User, rider_id)
     if rider is None or rider.role != UserRole.rider:
         raise HTTPException(404, "骑手不存在")
-    rider.city = str(payload.get("city", "")).strip()[:20]
+    rider.city = str(payload.get("city") or "").strip()[:20]
     await db.commit()
     return {"id": rider_id, "city": rider.city}
 
@@ -3230,7 +3233,7 @@ async def set_sub_mchid(
     shop = await db.get(Merchant, merchant_id)
     if shop is None:
         raise HTTPException(404, "商家不存在")
-    sub_mchid = str(payload.get("sub_mchid", "")).strip()[:32]
+    sub_mchid = str(payload.get("sub_mchid") or "").strip()[:32]
     ready = bool(payload.get("ready", False))
     if ready and not sub_mchid:
         raise HTTPException(422, "先填特约商户号才能打开分账就绪")
@@ -3294,8 +3297,8 @@ async def update_rider_emergency(
 ):
     """跟进/结案(SOP:5 分钟回电,确认安全前每 10 分钟跟进),处置留痕。"""
     from ..models import RiderEmergency
-    status = str(payload.get("status", ""))
-    note = str(payload.get("note", "")).strip()
+    status = str(payload.get("status") or "")
+    note = str(payload.get("note") or "").strip()
     if status not in ("following", "closed"):
         raise HTTPException(422, "status 只支持 following / closed")
     if len(note) < 2:
@@ -3328,8 +3331,8 @@ async def create_coupon_batch(
     存量的平台批次跑完即止,不受影响。
     """
     from ..models import CouponBatch
-    name = str(payload.get("name", "")).strip()[:50]
-    trigger = str(payload.get("trigger", "manual"))
+    name = str(payload.get("name") or "").strip()[:50]
+    trigger = str(payload.get("trigger") or "manual")
     try:
         amount = int(payload.get("amount_cents", 0))
         min_spend = int(payload.get("min_spend_cents", 0))
@@ -3410,7 +3413,7 @@ async def issue_coupon_directed(
     from ..models import CouponBatch, UserRole
     from ..services.coupons import issue_from_batch
     from ..services.push import push_to_user
-    phone = str(payload.get("phone", "")).strip()
+    phone = str(payload.get("phone") or "").strip()
     batch = await db.get(CouponBatch, int(payload.get("batch_id", 0)))
     if batch is None:
         raise HTTPException(404, "批次不存在")
@@ -3421,7 +3424,7 @@ async def issue_coupon_directed(
         raise HTTPException(404, "该手机号没有注册过用户端")
     coupon = await issue_from_batch(
         db, batch, target.id,
-        note=str(payload.get("note", "")).strip()[:60] or batch.name)
+        note=str(payload.get("note") or "").strip()[:60] or batch.name)
     if coupon is None:
         raise HTTPException(409, "没发出去:已领过/批次停用/预算发完")
     await db.commit()

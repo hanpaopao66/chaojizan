@@ -1309,8 +1309,8 @@ async def add_staff(
     shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(403, "只有店主可以管理子账号")
-    phone = str(payload.get("phone", "")).strip()
-    name = str(payload.get("name", "")).strip()[:50]
+    phone = str(payload.get("phone") or "").strip()
+    name = str(payload.get("name") or "").strip()[:50]
     # 账号按角色分立:店员用的是对方的商家端账号(商家端 App 登录即自动注册)
     target = await db.scalar(select(User).where(
         User.phone == phone, User.role == UserRole.merchant))
@@ -2292,7 +2292,7 @@ async def add_dish_schedule(
 
     row = DishSchedule(merchant_id=shop.id, dish_id=dish.id, action=action,
                        price_cents=price, run_at=run_at,
-                       note=str(payload.get("note", "")).strip()[:100])
+                       note=str(payload.get("note") or "").strip()[:100])
     db.add(row)
     await db.commit()
     await db.refresh(row)
@@ -2357,7 +2357,7 @@ async def set_customer_note(
     if ordered is None:
         raise HTTPException(404, "这位顾客没在本店下过单")
 
-    note = str(payload.get("note", "")).strip()[:200]
+    note = str(payload.get("note") or "").strip()[:200]
     if note:
         await guard_text(db, note, "顾客备注")
     tags = [str(t).strip()[:10] for t in (payload.get("tags") or [])][:8]
@@ -2489,7 +2489,7 @@ async def flag_order(
     kind = str(payload.get("kind") or "other")
     if kind not in ("claim", "review", "other"):
         raise HTTPException(422, "类型只支持:疑似职业索赔 / 疑似恶意差评 / 其他")
-    reason = str(payload.get("reason", "")).strip()[:300]
+    reason = str(payload.get("reason") or "").strip()[:300]
     if len(reason) < 5:
         raise HTTPException(422, "请写清楚为什么可疑(至少 5 个字),"
                                  "平台要靠这段话去核查")
@@ -2688,7 +2688,7 @@ async def dish_import_commit(
     for it in items:
         if it.get("action") not in ("create", "update"):
             continue
-        name = str(it.get("name", "")).strip()[:60]
+        name = str(it.get("name") or "").strip()[:60]
         if not name or not it.get("price_cents"):
             continue
         await guard_text(db, name, "菜品名称")
@@ -2782,7 +2782,7 @@ async def add_webhook(
     from .open_api import hash_key
 
     shop = await _money_shop_or_403(db, user)   # 对外通道属于经营者本人
-    url = str(payload.get("url", "")).strip()[:300]
+    url = str(payload.get("url") or "").strip()[:300]
     try:
         validate_url(url)
     except UnsafeUrl as exc:
@@ -2909,14 +2909,14 @@ async def add_printer(
     if not settings.feie_configured:
         raise HTTPException(503, _FEIE_DISABLED)
     shop = await _my_shop_or_404(db, user)
-    sn = str(payload.get("sn", "")).strip()[:32]
-    key = str(payload.get("key", "")).strip()[:32]
+    sn = str(payload.get("sn") or "").strip()[:32]
+    key = str(payload.get("key") or "").strip()[:32]
     if not sn or not key:
         raise HTTPException(422, "请填写机身贴纸上的 SN 与 KEY")
     purpose = str(payload.get("purpose") or "front")
     if purpose not in _PURPOSES:
         raise HTTPException(422, "用途只支持:前厅小票 / 后厨备餐单 / 标签")
-    name = str(payload.get("name", "")).strip()[:30] or _PURPOSES[purpose]
+    name = str(payload.get("name") or "").strip()[:30] or _PURPOSES[purpose]
     await guard_text(db, name, "打印机名称")
 
     n = await db.scalar(select(func.count(MerchantPrinter.id)).where(
@@ -3992,11 +3992,11 @@ async def add_purchase(
     from ..services.moderation import guard_text
 
     shop = await _my_shop_or_404(db, user)
-    name = str(payload.get("name", "")).strip()[:60]
+    name = str(payload.get("name") or "").strip()[:60]
     if len(name) < 1:
         raise HTTPException(422, "请填写食材名称")
     await guard_text(db, name, "食材名称")
-    supplier = str(payload.get("supplier_name", "")).strip()[:60]
+    supplier = str(payload.get("supplier_name") or "").strip()[:60]
     if supplier:
         await guard_text(db, supplier, "供货商名称")
 
@@ -4014,20 +4014,20 @@ async def add_purchase(
     rec = PurchaseRecord(
         merchant_id=shop.id,
         name=name,
-        spec=str(payload.get("spec", "")).strip()[:40],
-        qty=str(payload.get("qty", "")).strip()[:30],
+        spec=str(payload.get("spec") or "").strip()[:40],
+        qty=str(payload.get("qty") or "").strip()[:30],
         produced_on=_date("produced_on"),
-        batch_no=str(payload.get("batch_no", "")).strip()[:40],
+        batch_no=str(payload.get("batch_no") or "").strip()[:40],
         shelf_life_end=_date("shelf_life_end"),
         purchased_on=_date("purchased_on", required=True),
         supplier_name=supplier,
         supplier_address=str(
-            payload.get("supplier_address", "")).strip()[:120],
-        supplier_phone=str(payload.get("supplier_phone", "")).strip()[:20],
+            payload.get("supplier_address") or "").strip()[:120],
+        supplier_phone=str(payload.get("supplier_phone") or "").strip()[:20],
         supplier_license_url=str(
-            payload.get("supplier_license_url", "")).strip()[:300],
-        receipt_url=str(payload.get("receipt_url", "")).strip()[:300],
-        note=str(payload.get("note", "")).strip()[:200],
+            payload.get("supplier_license_url") or "").strip()[:300],
+        receipt_url=str(payload.get("receipt_url") or "").strip()[:300],
+        note=str(payload.get("note") or "").strip()[:200],
     )
     db.add(rec)
     await db.commit()
@@ -4143,11 +4143,11 @@ async def add_health_cert(
     from ..services.moderation import guard_text
 
     shop = await _my_shop_or_404(db, user)
-    name = str(payload.get("name", "")).strip()[:30]
+    name = str(payload.get("name") or "").strip()[:30]
     if len(name) < 2:
         raise HTTPException(422, "请填写姓名")
     await guard_text(db, name, "姓名")
-    role = str(payload.get("role", "")).strip()[:20]
+    role = str(payload.get("role") or "").strip()[:20]
     if role:
         await guard_text(db, role, "岗位")
     raw_exp = payload.get("expires_at")
@@ -4171,8 +4171,8 @@ async def add_health_cert(
         StaffHealthCert.archived.is_(False)))
     cert = existing or StaffHealthCert(merchant_id=shop.id, name=name,
                                        role=role)
-    cert.cert_no = str(payload.get("cert_no", "")).strip()[:40]
-    cert.photo_url = str(payload.get("photo_url", "")).strip()[:300]
+    cert.cert_no = str(payload.get("cert_no") or "").strip()[:40]
+    cert.photo_url = str(payload.get("photo_url") or "").strip()[:300]
     cert.expires_at = exp
     cert.issued_at = issued
     if existing is None:
@@ -4244,8 +4244,8 @@ async def submit_license_renewal(
     from ..services.moderation import guard_text
 
     shop = await _money_shop_or_403(db, user)   # 资质是经营者本人的事
-    no = str(payload.get("license_no", "")).strip()[:50]
-    img = str(payload.get("license_image_url", "")).strip()[:300]
+    no = str(payload.get("license_no") or "").strip()[:50]
+    img = str(payload.get("license_image_url") or "").strip()[:300]
     if not no or not img:
         raise HTTPException(422, "请填写新证的编号并上传照片")
     raw_exp = payload.get("license_expires_at")
@@ -4258,7 +4258,7 @@ async def submit_license_renewal(
     if exp <= date.today():
         # 交一张已经过期的证是没有意义的,当场拦掉比让人等三天核验强
         raise HTTPException(422, "新证的有效期不能是今天或更早")
-    subject = str(payload.get("license_subject", "")).strip()[:100]
+    subject = str(payload.get("license_subject") or "").strip()[:100]
     if subject:
         await guard_text(db, subject, "证照主体名称")
 
@@ -4272,7 +4272,7 @@ async def submit_license_renewal(
         merchant_id=shop.id, submitted_by=user.id,
         license_no=no, license_image_url=img, license_expires_at=exp,
         business_license_no=str(
-            payload.get("business_license_no", "")).strip()[:50],
+            payload.get("business_license_no") or "").strip()[:50],
         license_subject=subject))
     await db.commit()
     return {"ok": True,

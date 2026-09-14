@@ -93,8 +93,8 @@ class DevAppUpdateIn(BaseModel):
     @classmethod
     def declaration_shape(cls, v):
         for item in v or []:
-            if not isinstance(item, dict) or not str(item.get("field", "")).strip() \
-                    or not str(item.get("purpose", "")).strip():
+            if not isinstance(item, dict) or not str(item.get("field") or "").strip() \
+                    or not str(item.get("purpose") or "").strip():
                 raise ValueError("数据声明每一项都要写 field(收集什么)和 purpose(为什么)")
         return v
 

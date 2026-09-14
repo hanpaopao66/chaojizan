@@ -160,11 +160,9 @@ def customer_fault(no: str) -> int:
 
 
 def violation(kind: str, order_no: str | None, note: str) -> int:
-    # 没有订单号就**别传这个键**:后台接口按 str(payload.get("order_no", "")) 取,
-    # 传 null 会被存成字面的 "None"
-    body = {"kind": kind, "subject_id": cid, "note": note}
-    if order_no:
-        body["order_no"] = order_no
+    # 没有订单号时照样带上这个键、值是 null:后台接口原来按 str(payload.get("order_no", "")) 取,
+    # null 被存成字面的 "None"(已修)。下面按 order_no 找回这一条,存成 "None" 就找不到
+    body = {"kind": kind, "subject_id": cid, "note": note, "order_no": order_no}
     call("POST", "/admin/violations", admin, body)
     rows = call("GET", f"/admin/violations?subject_id={cid}", admin)["items"]
     return next(v["id"] for v in rows if v["kind"] == kind and v["order_no"] == order_no)

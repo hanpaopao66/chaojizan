@@ -78,7 +78,7 @@ async def claim_referral(
     # 具体发多少由商家批次定——平台不再决定金额,也就不该对外播报金额
     if settings.referral_reward_cents <= 0 or not await marketing_on(db):
         raise HTTPException(409, "邀请活动暂未开启")
-    code = str(payload.get("code", "")).strip()
+    code = str(payload.get("code") or "").strip()
     # deleted_at 过滤是必须的:注销时才刚开始清 ref_code,存量墓碑行
     # 的邀请码还在库里,不加这条就会继续给一个注销掉的账号发券
     inviter = await db.scalar(select(User).where(

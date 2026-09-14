@@ -2671,10 +2671,10 @@ async def send_message(
     if age is not None and age >= _CHAT_READONLY_HOURS:
         raise HTTPException(
             409, "这一单的群已归档(送达 24 小时后只读);有问题请走售后或客服工单")
-    kind = str(payload.get("kind", "text"))
+    kind = str(payload.get("kind") or "text")
     if kind not in ("text", "image", "quick"):
         raise HTTPException(422, "kind 只支持 text / image / quick")
-    content = str(payload.get("content", "")).strip()[:500]
+    content = str(payload.get("content") or "").strip()[:500]
     if not content:
         raise HTTPException(422, "消息不能为空")
     if kind in ("text", "quick"):
@@ -2826,7 +2826,7 @@ async def address_feedback(
     db.add(AddressFeedback(
         customer_id=order.customer_id, address=order.address,
         order_no=order_no, rider_id=user.id,
-        note=str(payload.get("note", "")).strip()[:200]))
+        note=str(payload.get("note") or "").strip()[:200]))
     await db.commit()
     return {"ok": True}
 

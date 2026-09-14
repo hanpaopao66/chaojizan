@@ -511,7 +511,7 @@ async def upsert_copy(
         raise HTTPException(
             422, "承诺类文案由服务端按真实费率生成,不能手工改 —— "
                  "改费率请改平台配置,文案会自动跟着变")
-    text_value = str(payload.get("text", "")).strip()
+    text_value = str(payload.get("text") or "").strip()
     if not text_value:
         raise HTTPException(422, "文案不能为空")
     if len(text_value) > 1000:
@@ -561,12 +561,12 @@ async def replace_faq(
         raise HTTPException(422, "帮助中心最多 50 条,再多用户读不完")
     rows = []
     for i, it in enumerate(items):
-        q = str(it.get("q", "")).strip()
-        a = str(it.get("a", "")).strip()
+        q = str(it.get("q") or "").strip()
+        a = str(it.get("a") or "").strip()
         if not q or not a:
             raise HTTPException(422, f"第 {i + 1} 条的问题或答案是空的")
         rows.append(PlatformFaq(
-            audience=str(it.get("audience", "user"))[:12],
+            audience=str(it.get("audience") or "user")[:12],
             question=q[:120], answer=a[:1000], sort_order=i, is_active=True))
     await db.execute(text("DELETE FROM platform_faq"))
     for r in rows:

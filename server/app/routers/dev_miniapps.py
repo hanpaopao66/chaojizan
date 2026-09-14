@@ -466,7 +466,7 @@ async def remove_app(body: dict, appid: str = AppId, c: Ctx = Depends(ctx),
                      db: AsyncSession = Depends(get_db)):
     """永久移除(终态)。要把应用名称原样再输一遍。用户数据保留 30 天供导出。"""
     app = await own_app(db, c, appid, for_update=True)
-    if str(body.get("confirm_name", "")).strip() != app.name:
+    if str(body.get("confirm_name") or "").strip() != app.name:
         raise HTTPException(422, "请输入应用名称确认")
     _transition("app", app.status, "removed")
     app.status = "removed"

@@ -228,7 +228,7 @@ async def restore_developer(developer_id: int, body: dict,
     _transition("developer", d.status, "verified")
     d.status = "verified"
     await record_decision(db, target_type="developer", target_id=d.id, action="developer_restore",
-                          developer_id=d.id, note_public=str(body.get("note", ""))[:500],
+                          developer_id=d.id, note_public=str(body.get("note") or "")[:500],
                           actor=admin)
     await log_admin_action(db, admin, "miniapp.developer.restore", target_type="developer",
                            target_id=d.id)
@@ -359,7 +359,7 @@ async def restore_app(body: dict, appid: str = AppId,
                       admin: User = Depends(require_role("admin")),
                       db: AsyncSession = Depends(get_db)):
     """整改后复审通过:暂停 → 在线。要写明依据(比如哪个版本复审通过了)。"""
-    note = str(body.get("note", "")).strip()
+    note = str(body.get("note") or "").strip()
     if len(note) < 4:
         raise HTTPException(422, "恢复要写明依据(开发者和透明中心看得到)")
     app = await app_by_appid(db, appid, for_update=True)
@@ -424,7 +424,7 @@ async def quarantine_version(version_id: int, body: PunishIn,
 async def unquarantine_version(version_id: int, body: dict,
                                admin: User = Depends(require_role("admin")),
                                db: AsyncSession = Depends(get_db)):
-    note = str(body.get("note", "")).strip()
+    note = str(body.get("note") or "").strip()
     if len(note) < 4:
         raise HTTPException(422, "解除隔离要写明依据")
     v, app = await _version(db, version_id)
@@ -689,7 +689,7 @@ async def remove_curation(appid: str = AppId, reason: str = Query(min_length=4, 
 @router.put("/signup-mode")
 async def set_signup_mode(body: dict, admin: User = Depends(require_role("admin")),
                           db: AsyncSession = Depends(get_db)):
-    mode = str(body.get("mode", ""))
+    mode = str(body.get("mode") or "")
     if mode not in SIGNUP_MODES:
         raise HTTPException(422, f"mode 只能是 {' / '.join(SIGNUP_MODES)}")
     flag = await db.get(PlatformFlag, SIGNUP_FLAG)

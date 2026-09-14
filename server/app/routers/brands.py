@@ -54,7 +54,7 @@ async def create_brand(
     """
     from ..services.moderation import guard_text
 
-    name = str(payload.get("name", "")).strip()[:50]
+    name = str(payload.get("name") or "").strip()[:50]
     if len(name) < 2:
         raise HTTPException(422, "品牌名至少 2 个字")
     await guard_text(db, name, "品牌名")
@@ -74,7 +74,7 @@ async def create_brand(
     if shop is None:
         raise HTTPException(404, "先有一家店才能建品牌")
     brand = Brand(name=name, owner_id=user.id,
-                  logo_url=str(payload.get("logo_url", ""))[:300])
+                  logo_url=str(payload.get("logo_url") or "")[:300])
     db.add(brand)
     await db.flush()
     shop.brand_id = brand.id
@@ -146,7 +146,7 @@ async def add_member(
     brand = await _my_brand(db, user)
     if brand is None or brand.owner_id != user.id:
         raise HTTPException(403, "只有品牌所有者能加成员")
-    phone = str(payload.get("phone", "")).strip()
+    phone = str(payload.get("phone") or "").strip()
     target = await db.scalar(select(User).where(
         User.phone == phone, User.role == UserRole.merchant))
     if target is None:
@@ -417,7 +417,7 @@ async def sync_coupons(
     if len(targets) != len(set(target_ids)):
         raise HTTPException(422, "目标门店必须都是本品牌的店")
 
-    name = str(payload.get("name", "")).strip()[:50]
+    name = str(payload.get("name") or "").strip()[:50]
     if len(name) < 2:
         raise HTTPException(422, "券名称至少 2 个字")
     await guard_text(db, name, "券名称")

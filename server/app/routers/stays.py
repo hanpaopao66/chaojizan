@@ -1001,7 +1001,7 @@ async def append_stay_review(
         raise HTTPException(409, "已经追评过了")
     if datetime.now(_tz.utc) - review.created_at > _rtd(days=APPEND_WINDOW_DAYS):
         raise HTTPException(409, f"首评超过 {APPEND_WINDOW_DAYS} 天,不能再追评")
-    content = str(payload.get("content", "")).strip()[:500]
+    content = str(payload.get("content") or "").strip()[:500]
     if not content:
         raise HTTPException(422, "追评内容不能为空")
     from ..services.moderation import guard_text
@@ -1056,7 +1056,7 @@ async def reply_stay_review(
     review = await db.get(StayReview, review_id)
     if review is None or review.merchant_id != shop.id:
         raise HTTPException(404, "评价不存在")
-    reply = str(payload.get("reply", "")).strip()[:300]
+    reply = str(payload.get("reply") or "").strip()[:300]
     if not reply:
         raise HTTPException(422, "回复内容不能为空")
     from ..services.moderation import guard_text
@@ -1326,7 +1326,7 @@ async def update_hotel_profile(
         raise HTTPException(404, "酒店资料不存在")
     hhmm = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
     if "front_desk_phone" in payload:
-        hp.front_desk_phone = str(payload["front_desk_phone"]).strip()[:20]
+        hp.front_desk_phone = str(payload["front_desk_phone"] or "").strip()[:20]
     if "checkin_from" in payload:
         value = str(payload["checkin_from"])
         if not hhmm.match(value):

@@ -515,7 +515,7 @@ async def append_review(
     if datetime.now(timezone.utc) - created > timedelta(
             days=APPEND_WINDOW_DAYS):
         raise HTTPException(409, f"首评超过 {APPEND_WINDOW_DAYS} 天,追评通道已关闭")
-    content = str(payload.get("content", "")).strip()[:500]
+    content = str(payload.get("content") or "").strip()[:500]
     images = [str(u).strip() for u in (payload.get("images") or [])
               if str(u).strip()][:6]
     if not content and not images:
