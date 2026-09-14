@@ -21,6 +21,12 @@ inc, sp = funds["income"], funds["spend"]
 assert inc["total_cents"] == inc["commission_cents"] + inc["voucher_fee_cents"]
 # 支出合计 == 各项之和(按字段加,新加一项支出不用改这里;漏加进合计就红)
 assert sp["total_cents"] == sum(v for k, v in sp.items() if k != "total_cents"), sp
+# 已经发版的 App 在客户端按「补贴 + 餐损 + 改判 == 合计」再核一遍:spend 里只许有这三项,
+# 新的支出要么并进其中一项(明细放 spend_detail),要么等老版本退场 —— 不然老 App 报「对不上」
+assert set(sp) == {"subsidy_cents", "meal_compensation_cents", "adjustment_cents",
+                   "total_cents"}, f"spend 多了老版本 App 不认的项:{sorted(sp)}"
+detail = funds["spend_detail"]
+assert 0 <= detail["rider_fault_refund_cents"] <= sp["adjustment_cents"], (detail, sp)
 assert funds["retained_cents"] == inc["total_cents"] - sp["total_cents"]
 # 骑手保障金池:余额 == 计提 − 支出 + 回池(按公开账本算,services/rider_fault.fund_balance)
 fund = funds["rider_fund"]
@@ -31,9 +37,10 @@ print(f"✓ 佣金去向:收入 {inc['total_cents']} = 支出 {sp['total_cents']
       f" + 留存 {funds['retained_cents']}(恒等)")
 
 comp = call("GET", "/transparency/compensation")
-for key in ("eta_coupons", "meal_compensation", "refunds"):
+for key in ("eta_coupons", "eta_apologies", "meal_compensation", "refunds"):
     assert comp[key]["month"]["count"] <= comp[key]["total"]["count"], key
     assert comp[key]["month"]["cents"] <= comp[key]["total"]["cents"], key
+assert comp["eta_apologies"]["total"]["cents"] == 0, "超时致歉不该有钱"
 print(f"✓ 赔付记录:安抚券 {comp['eta_coupons']['total']['count']} 张 /"
       f" 餐损 {comp['meal_compensation']['total']['count']} 笔 /"
       f" 退款 {comp['refunds']['total']['count']} 笔(本月≤累计)")

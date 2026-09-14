@@ -118,15 +118,12 @@ test:
 
 # 需要特殊环境或已知不稳定的用例,**故意不放进 make test**:
 #   e2e_privacy_phone_strict —— 要对着 PRIVACY_PHONE_STRICT=true 启动的实例跑
-#     (用例自己的 docstring 就写了这个前置条件);
-#   e2e_eta_compensation —— 在长期共享的开发库上依赖"这一单发了几张券"的
-#     精确判定,而库里同时存在别的超时单;干净库(CI)上正常。留红在主回归里
-#     会让所有人习惯"红了也没关系",所以单列出来。
+#     (用例自己的 docstring 就写了这个前置条件)。
+# 原来这里还有 e2e_eta_compensation(按总数数券,脏库上假红);2026-09-14 超时改成
+# 只致歉不发券,它改写成按单号断言的 e2e_eta_apology,进了全量清单。
 test-special:
 	cd server && PRIVACY_PHONE_STRICT=true python -m tests.e2e_privacy_phone_strict
 	@echo "提示:上面这条需要服务端也以 PRIVACY_PHONE_STRICT=true 启动"
-	cd server && python -m tests.e2e_eta_compensation || \
-	  echo "(eta_compensation 在脏库上易失败,见 Makefile 注释)"
 
 logs:
 	docker compose logs -f api

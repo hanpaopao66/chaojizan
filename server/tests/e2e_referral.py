@@ -1,26 +1,31 @@
-"""邀请有礼验证:填码(自邀/重复/同设备/过期/月上限)、
-首单完成双发券且只发一次、取消单不触发、admin 漏斗。
+"""邀请有礼停了之后(2026-09-14 拍板「平台没有钱,不做平台出钱的安抚和营销」):
+
+1. 「我的邀请」:enabled=false、stopped=true,不给邀请码,战绩照报,说明照实;
+2. 填码一律 410,说清楚停了;
+3. 停之前填了码、还没完成首单的邀请(写库造一条 pending 关系):被邀请人完成首单,
+   关系还是 pending,双方一张券都不发 —— 即使首单那家店开着「新客推荐券」批次;
+4. 已经到账的券照旧能用(写库造一张停之前发的邀请有礼券,下单能抵);
+5. 后台漏斗照旧能看历史。
+
+商家那一侧(不许再建新客推荐券批次)在 e2e_referral_funding。
 
 在 server/ 目录下运行:python -m tests.e2e_referral
 """
 import asyncio
 import random
 import time
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import text
+from sqlalchemy import select
 
 from app.db import SessionLocal
-from tests.util import demo_shop, call, login, register_fresh_rider, unique_spot
+from app.models import Coupon, CouponBatch, Referral, User, UserRole
+from tests.util import (call, demo_shop, login, orderable_dish, register_fresh_rider,
+                        unique_spot)
 
 admin = login("13800000000")
 merchant = login("13800000002")
 ts = int(time.time())
-# 独占坐标:避开 #44 风控的同址高频标记(命中会挂起奖励,设计如此)。
-# 原先是 ts % 20——只有 20 个点且每 20 秒循环,一天里反复跑必然撞格子。
-#
-# **每单换一格**,不是全用同一个:风控规则是「同格 24h 内 ≥4 单且多账号」,
-# 而本用例有多个被邀请人各下一单 —— 全挤在一格等于用例自己在制造风控命中,
-# 表现为"邀请奖励偶发不发",查半天才发现是自己撞的
 
 
 def fresh(device=""):
@@ -35,111 +40,110 @@ def referral_coupons(token):
             if c["note"] == "邀请有礼"]
 
 
-def _disable_referral_batches():
-    """本用例断言的是「商家没建新客推荐券批次时不发券」,
-    所以先关掉本店启用中的 referral 批次——否则会被
-    e2e_referral_funding 留下的批次污染,断言随跑序时好时坏。"""
-    for b in call("GET", "/merchants/me/coupon-batches", merchant):
-        if b.get("trigger") == "referral" and b.get("active"):
-            call("POST", f"/merchants/me/coupon-batches/{b['id']}/toggle",
-                 merchant)
+async def uid_of(phone: str) -> int:
+    async with SessionLocal() as db:
+        return await db.scalar(select(User.id).where(
+            User.phone == phone, User.role == UserRole.customer))
 
 
 async def main():
-    # 营销总开关默认关(没有预算一张不发);本测试临时打开,结尾恢复
+    # 营销总开关打开:证明不发是因为活动停了,不是因为总开关关着
     call("POST", "/admin/flags/marketing", admin, {"value": "on"})
-    _disable_referral_batches()
+    try:
+        await run()
+    finally:
+        call("POST", "/admin/flags/marketing", admin, {"value": "off"})
 
-    inviter, _ = fresh(device=f"invdev{ts}")
-    code = call("GET", "/referrals/me", inviter)["code"]
-    assert len(code) == 6
 
-    # 1) 校验:自邀 422、同设备 422、不存在 404
-    err = call("POST", "/referrals/claim", inviter, {"code": code},
-               expect_error=True)
-    assert err["_error"] == 422
-    same_dev, _ = fresh(device=f"invdev{ts}")
-    err = call("POST", "/referrals/claim", same_dev, {"code": code},
-               expect_error=True)
-    assert err["_error"] == 422 and "同一台设备" in err["detail"]
-    err = call("POST", "/referrals/claim", same_dev, {"code": "000001"},
-               expect_error=True)
-    assert err["_error"] in (404, 422)
-    print("✓ 自邀/同设备/不存在的码全被拦")
+async def run():
+    inviter, inviter_phone = fresh(device=f"invdev{ts}")
 
-    # 2) 正常填码;重复 409;过期(backdate 注册时间)409
-    invitee, invitee_phone = fresh(device=f"okdev{ts}")
-    r = call("POST", "/referrals/claim", invitee, {"code": code})
-    assert "首单" in r["hint"]
-    err = call("POST", "/referrals/claim", invitee, {"code": code},
-               expect_error=True)
-    assert err["_error"] == 409
-    late, late_phone = fresh()
-    async with SessionLocal() as db:
-        await db.execute(text(
-            "UPDATE users SET created_at = now() - interval '25 hours' "
-            "WHERE phone = :p"), {"p": late_phone})
-        await db.commit()
-    err = call("POST", "/referrals/claim", late, {"code": code},
-               expect_error=True)
-    assert err["_error"] == 409 and "24 小时" in err["detail"]
-    print("✓ 填码成功;重复 409;注册超 24 小时 409")
-
-    # 3) 首单完成 → 双方发券且只发一次;取消单不触发
-    shops = call("GET", "/merchants?lat=30.6612&lng=104.0823")
-    sid = demo_shop()["id"]
-    dish = call("POST", "/merchants/me/dishes", merchant,
-                {"name": f"邀请测试菜-{ts}", "price_cents": 2000,
-                 "stock": 30})
-    rider = await register_fresh_rider("邀请测试骑手")
-
-    def run_order(token, cancel=False):
-        # band=1:独占带。本用例验的是"邀请奖励发不发",而被风控标记的单
-        # 不触发奖励 —— 落在默认网格里就是把成败押在别的用例用了哪几格上
-        lat, lng = unique_spot(band=1)
-        order = call("POST", "/orders", token, {
-            "merchant_id": sid,
-            "items": [{"dish_id": dish["id"], "quantity": 1}],
-            "address": f"邀请测试地址{ts}", "lat": lat, "lng": lng})
-        no = order["order_no"]
-        call("POST", f"/orders/{no}/pay/mock", token)
-        if cancel:
-            call("POST", f"/orders/{no}/transition", token,
-                 {"to_status": "cancelled", "reason": "不要了"})
-            return no
-        call("POST", f"/orders/{no}/transition", merchant,
-             {"to_status": "accepted"})
-        call("POST", f"/riders/grab/{no}", rider)
-        call("POST", f"/orders/{no}/transition", merchant,
-             {"to_status": "ready"})
-        call("POST", f"/orders/{no}/transition", rider,
-             {"to_status": "picked_up"})
-        call("POST", f"/orders/{no}/transition", rider,
-             {"to_status": "delivered"})
-        call("POST", f"/orders/{no}/transition", token,
-             {"to_status": "completed"})
-        return no
-
-    run_order(invitee, cancel=True)  # 取消单:不该触发奖励
-    assert not referral_coupons(invitee) and not referral_coupons(inviter)
-
-    # #115:券由商家出。商家没建「新客推荐券」批次时不发券,
-    # 只把邀请关系记成 rewarded——平台不再兜底掏这笔钱
-    run_order(invitee)
-    assert not referral_coupons(invitee), "商家没建批次却发了券(平台又在补贴)"
-    assert not referral_coupons(inviter)
+    # ---- 1) 我的邀请:停了,不给码 ----
     me = call("GET", "/referrals/me", inviter)
-    assert me["invited"] == 1 and me["rewarded"] == 1, me
-    print("✓ 商家没建批次:关系记成 rewarded,但一张券都不发")
+    assert me["enabled"] is False and me["stopped"] is True, me
+    assert me["code"] == "" and me["can_claim"] is False, me
+    assert "停了" in me["note"] and "照旧能用" in me["note"], me
+    print("✓ 我的邀请:活动已停,不再给邀请码,说明里写清楚到账的券照旧能用")
 
-    # 商家建了批次之后的双发路径由 e2e_referral_funding 覆盖
+    # ---- 2) 填码 410 ----
+    invitee, invitee_phone = fresh(device=f"okdev{ts}")
+    err = call("POST", "/referrals/claim", invitee, {"code": "123456"},
+               expect_error=True)
+    assert err["_error"] == 410 and "停了" in err["detail"], err
+    print("✓ 填邀请码:410,说清楚停了")
 
-    # 4) admin 漏斗:关系仍要记全(发不发券是另一回事)
+    # ---- 3) 停之前留下的 pending 邀请:首单完成也不发 ----
+    shop = demo_shop()
+    inviter_id, invitee_id = await uid_of(inviter_phone), await uid_of(invitee_phone)
+    async with SessionLocal() as db:
+        db.add(Referral(inviter_id=inviter_id, invitee_id=invitee_id, status="pending"))
+        # 店里开着一个「新客推荐券」批次(停之前建的):停了之后它也不许再发
+        batch = CouponBatch(name=f"停前的新客推荐券{ts}", trigger="referral",
+                            merchant_id=shop["id"], amount_cents=300,
+                            min_spend_cents=0, valid_days=7, total=10, active=True)
+        db.add(batch)
+        await db.commit()
+        batch_id = batch.id
+
+    rider = await register_fresh_rider("邀请停发测试骑手")
+    dish = orderable_dish(call("GET", f"/merchants/{shop['id']}/dishes"), min_stock=2)
+    lat, lng = unique_spot(band=1)
+    order = call("POST", "/orders", invitee, {
+        "merchant_id": shop["id"],
+        "items": [{"dish_id": dish["id"], "quantity": 1}],
+        "address": f"邀请停发测试地址{ts}", "lat": lat, "lng": lng})
+    no = order["order_no"]
+    call("POST", f"/orders/{no}/pay/mock", invitee)
+    call("POST", f"/orders/{no}/transition", merchant, {"to_status": "accepted"})
+    call("POST", f"/riders/grab/{no}", rider)
+    call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
+    call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
+    call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
+    call("POST", f"/orders/{no}/transition", invitee, {"to_status": "completed"})
+
+    assert not referral_coupons(invitee), "邀请有礼停了,被邀请人首单完成还是发了券"
+    assert not referral_coupons(inviter), "邀请有礼停了,邀请人还是拿到了券"
+    async with SessionLocal() as db:
+        status = await db.scalar(select(Referral.status).where(
+            Referral.invitee_id == invitee_id))
+        issued = await db.scalar(select(CouponBatch.issued).where(
+            CouponBatch.id == batch_id))
+        # 收摊:这个批次是本用例造的,关掉不留给后面的用例
+        await db.execute(CouponBatch.__table__.update()
+                         .where(CouponBatch.id == batch_id).values(active=False))
+        await db.commit()
+    assert status == "pending", f"停了之后 pending 的邀请变成了 {status}"
+    assert issued == 0, f"停了之后新客推荐券批次还发出去 {issued} 张"
+    me = call("GET", "/referrals/me", inviter)
+    assert me["invited"] == 1 and me["rewarded"] == 0, me
+    print("✓ 停之前填了码、首单在停之后完成:关系照旧 pending,双方一张券都不发")
+
+    # ---- 4) 已经到账的券照旧能用 ----
+    async with SessionLocal() as db:
+        # 面额给大一点:演示店有满减,店铺券和满减二选一取优,小额券会被「满减更优」拒掉
+        c = Coupon(user_id=inviter_id, amount_cents=1500, min_spend_cents=0,
+                   expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+                   source=f"batch:{batch_id}:{inviter_id}", batch_id=batch_id,
+                   note="邀请有礼", funder="merchant", merchant_id=shop["id"])
+        db.add(c)
+        await db.commit()
+        cid = c.id
+    held = next(x for x in referral_coupons(inviter) if x["id"] == cid)
+    assert held["usable"] is True, held
+    o2 = call("POST", "/orders", inviter, {
+        "merchant_id": shop["id"],
+        "items": [{"dish_id": dish["id"], "quantity": 1}],
+        "address": f"邀请停发测试地址{ts}B", "lat": lat, "lng": lng,
+        "coupon_id": cid})
+    assert "店铺券" in o2["promo_note"], o2["promo_note"]
+    call("POST", f"/orders/{o2['order_no']}/transition", inviter,
+         {"to_status": "cancelled", "reason": "测试清场"})
+    print("✓ 停之前已经到账的邀请有礼券照旧能用")
+
+    # ---- 5) 后台漏斗照旧能看历史 ----
     funnel = call("GET", "/admin/referrals", admin)["funnel"]
-    assert funnel["claimed"] >= 1 and funnel["rewarded"] >= 1
-    print("✓ admin 漏斗数字正确")
-
-    call("POST", "/admin/flags/marketing", admin, {"value": "off"})
+    assert funnel["claimed"] >= 1, funnel
+    print("✓ 后台漏斗照旧能看历史")
     print("\ne2e_referral 全部通过 ✅")
 
 

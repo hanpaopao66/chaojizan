@@ -53,6 +53,8 @@ e2e_stays_aftersale
 e2e_orders_paging
 e2e_order_counts
 e2e_referral_funding
+e2e_eta_apology
+e2e_hardship_no_pay
 e2e_favorites_paging
 e2e_cancel_split
 e2e_cancel_appeal

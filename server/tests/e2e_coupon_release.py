@@ -8,10 +8,13 @@
 **两条后台清扫路径漏了**:
 
   - 无骑手兜底取消(auto_flow `_sweep_no_rider`)——最讽刺的一条:
-    超时赔付券本身就是平台赔给用户的,转头被下一单的无骑手取消吃掉;
+    超时安抚券(停发之前发的)本身就是平台赔给用户的,转头被下一单的无骑手取消吃掉;
   - 孤儿追加单级联取消(auto_flow `_sweep_orphan_appends`)。
 
 两条都是**平台侧的原因**取消的单,吃掉用户的券尤其说不过去。
+
+2026-09-14 起平台不再出钱发券,接口上造不出平台券了;这里用的是写库造的
+「停发之前发出去的平台券」—— 那些券照旧能用,也照旧要回券包。
 """
 import asyncio
 import time
@@ -21,9 +24,8 @@ from sqlalchemy import text
 from app.db import SessionLocal
 from app.services.auto_flow import sweep_once
 
-from .util import ADMIN, MERCHANT, call, demo_shop, login
+from .util import MERCHANT, call, demo_shop, grant_legacy_platform_coupon, login
 
-admin = login(ADMIN)
 merchant = login(MERCHANT)
 SHOP = demo_shop()
 TAG = str(int(time.time()))
@@ -38,16 +40,10 @@ def new_customer(suffix):
     return phone, token
 
 
-def grant(phone, amount=500):
-    """建一个 manual 批次并定向发一张券,返回 coupon_id。
-    一个批次每人只发一张,所以每张券单独建批次。"""
-    batch = call("POST", "/admin/coupon-batches", admin, {
-        "name": f"券释放测试-{TAG}-{phone[-4:]}", "trigger": "manual",
-        "amount_cents": amount, "min_spend_cents": 0,
-        "valid_days": 7, "total": 5})
-    return call("POST", "/admin/coupons/issue", admin,
-                {"phone": phone, "batch_id": batch["id"],
-                 "note": "券释放测试"})["coupon_id"]
+async def grant(phone, amount=500):
+    """给这个用户一张停发之前发出去的平台券,返回 coupon_id。"""
+    return await grant_legacy_platform_coupon(
+        phone, amount, source=f"release-test:{TAG}:{phone}", note="券释放测试")
 
 
 def coupon_state(token, coupon_id):
@@ -72,7 +68,7 @@ async def main():
 
     # ---- 1) 无骑手兜底取消:券必须回券包 ----
     phone, cust = new_customer(1)
-    cid = grant(phone)
+    cid = await grant(phone)
     assert coupon_state(cust, cid)["usable"] is True
 
     o = call("POST", "/orders", cust, {
@@ -116,7 +112,7 @@ async def main():
 
     # ---- 2) 孤儿追加单级联取消:券同样要回券包 ----
     phone3, cust3 = new_customer(2)
-    cid3 = grant(phone3, 300)
+    cid3 = await grant(phone3, 300)
     parent = call("POST", "/orders", cust3, {
         "merchant_id": SHOP["id"],
         "items": [{"dish_id": dish["id"], "quantity": 1}],

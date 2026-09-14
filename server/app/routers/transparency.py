@@ -3,7 +3,7 @@
 各组接口全部平台级聚合、无任何个人/单店信息:
   /audit          每日核账运行记录 + 连续无差错天数(账本的守夜人,公开值守)
   /funds          佣金收入 vs 支出去向(与公开账本同一套 ledger 口径)
-  /compensation   平台"赔钱记录":安抚券/餐损赔付/退款——主动亮赔付
+  /compensation   平台"赔钱记录":安抚券(停发之前的)/超时致歉/餐损赔付/退款/保障金池——主动亮赔付
   /reports        月度财报(收入侧自动聚合,口径与 scripts/finance_report.py 一致)
   /fairness       分账公平证据:真实佣金率/每100元去向/骑手收入/评价不删
   /changelog      最近更新(GitHub 同源)+ 线上运行版本——代码即承诺
@@ -287,7 +287,7 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
         SELECT coalesce(sum(commission_cents), 0) FROM voucher_purchases
         WHERE status = 'redeemed'
     """)))
-    # 平台补贴:首单立减 + 安抚券抵扣,同走订单 subsidy 审计通道
+    # 平台补贴:首单立减(现在是 0)+ 停发之前发出去的安抚券被抵扣,同走订单 subsidy 审计通道
     subsidy = (await db.scalar(sa_text("""
         SELECT coalesce(sum(subsidy_cents), 0) FROM orders
         WHERE status NOT IN ('pending_payment','cancelled')
@@ -309,12 +309,16 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
     # 池子是从佣金里计提的专项钱,单列一栏 —— 支出一笔一笔都在公开账本的 rider_fund.rows 里
     from ..services.rider_fault import fund_balance
     fund = await fund_balance(db)
-    # 骑手责任申诉改判成立时退回骑手的钱(fault_refund):那一单的错判由平台认
+    # 骑手责任申诉改判成立时退回骑手的钱(fault_refund):那一单的错判由平台认。
+    # **算进申诉改判那一项,不单列成 spend 的新一项** —— 已经发版的 App 在客户端按
+    # 「补贴 + 餐损 + 改判 == 支出合计」把这组数再核一遍(user_app transparency_page),
+    # spend 里多一项它就报「收支明细与合计对不上」。明细放在 spend_detail 里另给
     fault_back = await db.scalar(sa_text(
         "SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings "
         "WHERE kind = 'fault_refund'"))
+    adjustments += fault_back
     income = commission + voucher_fee
-    spend = subsidy + meal_comp + adjustments + fault_back
+    spend = subsidy + meal_comp + adjustments
     data = {
         "income": {"commission_cents": commission,
                    "voucher_fee_cents": voucher_fee,
@@ -322,8 +326,9 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
         "spend": {"subsidy_cents": subsidy,
                   "meal_compensation_cents": meal_comp,
                   "adjustment_cents": adjustments,
-                  "rider_fault_refund_cents": fault_back,
                   "total_cents": spend},
+        # 上面几项里的「其中」,不另算进合计
+        "spend_detail": {"rider_fault_refund_cents": fault_back},
         "rider_fund": fund,
         # 留存要养:支付通道/服务器/短信/地图/审核客服(见月度财报成本侧)
         "retained_cents": income - spend,
@@ -337,8 +342,8 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
 async def compensation_public(
     request: Request, db: AsyncSession = Depends(get_db),
 ):
-    """赔付记录(本月/累计):超时安抚券(历史)、餐损赔付、退款,以及判骑手责任时
-    保障金池垫的、骑手另出的商家那份餐钱。
+    """赔付记录(本月/累计):超时安抚券(停发之前的)和停发之后的超时致歉次数、
+    餐损赔付、退款,以及判骑手责任时保障金池垫的、骑手另出的商家那份餐钱。
 
     没有平台愿意亮自己的赔付账——我们把它当承诺兑现的凭据。
     """
@@ -356,10 +361,16 @@ async def compensation_public(
                 "month": {"count": month[0], "cents": month[1]}}
 
     data = {
-        # 送达超时 15 分钟自动发的安抚券(平台承担,规则见 services/eta.py)
+        # 送达超时 15 分钟自动发的安抚券 —— 2026-09-14 起停发(平台不出这笔钱),
+        # 这里只剩停发之前发出去的;已经发出去、没用的照旧能用(services/eta.py)
         "eta_coupons": await _pair("""
             SELECT count(*), coalesce(sum(amount_cents), 0) FROM coupons
             WHERE source LIKE 'eta:%' AND funder = 'platform'
+        """),
+        # 停发之后:送达超时 15 分钟以上只推一条致歉,一分钱不出。只有笔数
+        "eta_apologies": await _pair("""
+            SELECT count(*), 0 FROM order_events
+            WHERE to_status = 'eta_late_apology'
         """),
         # 无骑手接单取消:已出餐商家按应收全额赔付,佣金不收
         "meal_compensation": await _pair("""

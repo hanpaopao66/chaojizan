@@ -6,7 +6,10 @@
 
 平台立场是不靠补贴换增长(用户端「我们承诺不做的事」印着这句),所以
 营销类发券(邀请有礼/生日/复购召回)一律要求商家批次——见 #115。
-留 platform 分支是为了超时赔付那类**平台该赔的钱**,那不是营销。
+
+**2026-09-14 起平台批次一张都不发**(拍板「平台没有钱,不做平台出钱的安抚和营销」):
+[issue_from_batch] 遇到没挂商家的批次直接不发 —— 新客券、客服定向补偿券都停了,
+后台也不再能建平台批次(admin.create_coupon_batch)。已经发出去、没用的平台券照旧能用。
 
 防超发/防重发:
 - 批次总量:条件 UPDATE issued < total(预算封顶,发完自动停);
@@ -26,9 +29,13 @@ logger = logging.getLogger("superz.coupons")
 
 async def issue_from_batch(db: AsyncSession, batch: CouponBatch,
                            user_id: int, note: str = "") -> Coupon | None:
-    """从批次给用户发一张券。返回 None = 没发(重复/停用/发完)。
+    """从批次给用户发一张券。返回 None = 没发(重复/停用/发完/平台批次)。
     不单独 commit,随调用方事务提交。"""
     if not batch.active:
+        return None
+    if batch.merchant_id is None:
+        # 平台批次 = 平台出钱发券。2026-09-14 起停发(见模块抬头):存量批次留着看历史,
+        # 一张都不再发
         return None
     source = f"batch:{batch.id}:{user_id}"
     existing = await db.scalar(select(Coupon.id).where(
@@ -86,6 +93,9 @@ async def _device_has_other_account(db: AsyncSession, user: User) -> bool:
 
 async def issue_newcomer(db: AsyncSession, user: User) -> None:
     """注册钩子:给新用户发所有启用中的新客券批次(通常一个)。
+
+    新客券批次都是平台批次(平台出钱),2026-09-14 起 [issue_from_batch] 一张都不发 ——
+    这个钩子留着只是为了以后要是有商家出钱的新客券,不用再改注册流程。
 
     自带 try/except,发券失败绝不影响注册。调用方无需 commit
     (本函数自行 commit——注册已提交,这里是追加动作)。

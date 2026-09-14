@@ -16,8 +16,12 @@ import 'package:superz_shared/superz_shared.dart';
 /// - 「要步行进小区 300 米」「车进不去」「门禁要等保安」
 ///   根本没有字段。
 ///
-/// 所以第一屏就把**能拿多少钱**摆出来。不给出金额的补贴等于施舍,
-/// 而施舍是不会有人认真填的。
+/// 所以第一屏就把**这里以后的单会加多少**摆出来 —— 攒够两个人说过之后,
+/// 这个地址的新单下单时就把难度费算进配送费(顾客付、下单前看得到,全归骑手)。
+/// 不给出金额的等于施舍,而施舍是不会有人认真填的。
+///
+/// 2026-09-14 起反馈的这一单**不当场补钱**:平台不出这笔钱(原来是当场补、平台出),
+/// 也不向这一单的顾客和商家追收。第一句就要照实说,不能让他以为填了就有钱。
 ///
 /// ## 可以直接关掉
 ///
@@ -73,7 +77,7 @@ class _HardshipSheetState extends State<HardshipSheet> {
       if (mounted) setState(() => _rules = r);
     } catch (_) {
       // 拉不到规则就只显示选项、不显示金额。**不拦着他填** ——
-      // 服务端照样会补钱,金额只是让他判断值不值得填
+      // 服务端照样记下,金额只是让他判断值不值得填
       if (mounted) setState(() => _rules = null);
     }
   }
@@ -128,11 +132,12 @@ class _HardshipSheetState extends State<HardshipSheet> {
                 style: theme.textTheme.titleMedium
                     ?.copyWith(fontWeight: FontWeight.w600)),
             const SizedBox(height: 4),
-            // 第一句就说清楚这不是投诉、也不是考核,是补钱
+            // 第一句就说清楚这不是投诉、也不是考核;钱是以后的单加进配送费,
+            // 这一单不当场补(平台不出这笔钱)—— 照实说,不让他以为填了就有钱
             Text(
               '平台不知道哪栋楼没电梯、哪个小区车进不去 —— 你知道。\n'
-              '说了这一单当场补钱(平台出,不从顾客和商家身上要);'
-              '同一个地方两个人说过之后,后来的单一开始就按真实情况算。',
+              '同一个地方两个人说过之后,以后的单下单时就把难度费算进配送费,'
+              '钱归骑手,顾客下单前看得到。这一单不当场补钱。',
               style: TextStyle(fontSize: kFontNote, color: sz.inkMuted),
             ),
             const SizedBox(height: 12),
@@ -146,15 +151,15 @@ class _HardshipSheetState extends State<HardshipSheet> {
                     ? _picked.add('${item['kind']}')
                     : _picked.remove('${item['kind']}')),
                 title: Text('${item['name']}'),
-                // 金额和规则直接写在选项下面 ——
-                // 不给出金额的补贴等于施舍,而施舍没人会认真填
+                // 金额和规则直接写在选项下面(以后这里的单加多少)——
+                // 不给出金额的等于施舍,而施舍没人会认真填
                 subtitle: Text('${item['desc']} · ${item['rule']}',
                     style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
               ),
             if (_items.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Text('规则没拉到,先勾也行 —— 补贴照算',
+                child: Text('规则没拉到,先勾也行 —— 照样记下',
                     style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
               ),
             if (needFloors)

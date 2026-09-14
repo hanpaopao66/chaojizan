@@ -1370,8 +1370,8 @@ def effective_max_active(rider_max_active: int | None) -> int:
     `rider_max_active` 为空 = 没设过,用平台默认。设过就取**较小值** ——
     平台常数是硬上限,骑手只能往下调。
 
-    往上调不给,不是不信任骑手:同时 8 单必然有人超时,而超时的
-    赔付平台出、差评他背。往下调随便,那纯粹是他自己的节奏。
+    往上调不给,不是不信任骑手:同时 8 单必然有人超时,而超时了
+    顾客在等、差评他背。往下调随便,那纯粹是他自己的节奏。
     """
     hard = settings.rider_max_active_orders
     if rider_max_active is None:
@@ -1742,7 +1742,7 @@ async def grab_order(
     # 并发上限:手头在途太多影响履约,先送完再接(追加单不占额度)。
     #
     # 取骑手自设值和平台硬上限里**小的那个**:他可以往下调不能往上。
-    # 理由不是不信任他 —— 同时 8 单必然有人超时,而超时的赔付平台出、
+    # 理由不是不信任他 —— 同时 8 单必然有人超时,而超时了顾客在等、
     # 差评他背。
     active = len(await _my_in_flight(db, user.id))
     limit = effective_max_active(user.rider_max_active)

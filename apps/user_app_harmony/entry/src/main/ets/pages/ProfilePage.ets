@@ -92,8 +92,7 @@ export struct ProfilePage {
         this.entry('我的券包', '到店团购券', () => { this.needLogin('myVouchers'); });
         this.entry('到店团购', '核销才收 2%,未用全额退',
           () => { this.onOpenRoute('voucherDeals'); });
-        this.entry('邀请好友', '奖励由商家出,不是平台补贴',
-          () => { this.needLogin('invite'); });
+        // 「邀请好友」2026-09-14 下线:奖励停发,服务端 /referrals 也停了
         this.entry('实名认证', '只为买酒核验年龄',
           () => { this.needLogin('identity'); });
         this.entry('我的食安投诉', '处理进度与平台回复',

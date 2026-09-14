@@ -334,6 +334,34 @@ def demo_shop():
     return call("GET", f"/merchants/{DEMO_SHOP_ID}")
 
 
+async def grant_legacy_platform_coupon(phone: str, amount: int = 500, *,
+                                       source: str, note: str = "停发之前发的平台券",
+                                       batch_id: int | None = None) -> int:
+    """直接写一张**停发之前发出去的**平台券(funder=platform),返回 coupon_id。
+
+    2026-09-14 起平台不再出钱发券(新客券、客服定向补偿、超时安抚券都停了),接口上
+    已经造不出平台券;而「已经发出去、没用的照旧能用」是要守的承诺,只能写库造一张来测。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import Coupon, User, UserRole
+
+    async with SessionLocal() as db:
+        uid = await db.scalar(select(User.id).where(
+            User.phone == phone, User.role == UserRole.customer))
+        assert uid is not None, f"没有这个用户端账号:{phone}"
+        coupon = Coupon(user_id=uid, amount_cents=amount, min_spend_cents=0,
+                        expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+                        source=source, note=note, funder="platform",
+                        batch_id=batch_id)
+        db.add(coupon)
+        await db.commit()
+        return coupon.id
+
+
 # ---------- 账务自检:按"本次运行新增了什么"断言 ----------
 #
 # **只按订单号过滤是漏的。** 聚合类检查(profit_sharing_stuck /

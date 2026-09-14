@@ -112,9 +112,11 @@ async def open_cities(db: AsyncSession) -> list[str] | None:
 
 
 async def marketing_on(db: AsyncSession) -> bool:
-    """营销总开关(默认关):新客券/邀请有礼/生日券/复购提醒/上新推送
-    全部受控。没有补贴预算时保持关闭,代码与后台配置原样保留,
-    开预算后 POST /admin/flags/marketing on 即可整体启用。"""
+    """营销总开关(默认关):生日券/复购提醒/上新推送(都是商家自己出钱的)全部受控。
+    开了之后 POST /admin/flags/marketing on 即可整体启用。
+
+    新客券(平台批次)和邀请有礼 2026-09-14 停了:这个开关打开也不会再发
+    (services/coupons.issue_from_batch 不发平台批次,routers/referrals 停了)。"""
     flag = await db.get(PlatformFlag, "marketing")
     return flag is not None and flag.value == "on"
 

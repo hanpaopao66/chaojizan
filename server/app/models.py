@@ -106,7 +106,7 @@ class User(Base):
     # 骑手自设的同时接单上限(空 = 用平台默认 rider_max_active_orders)。
     #
     # **只能往下调,不能往上**:平台常数留作硬上限。理由不是不信任他 ——
-    # 同时 8 单必然有人超时,而超时的赔付平台出、差评他背。
+    # 同时 8 单必然有人超时,而超时了顾客在等、差评他背。
     # 但 3 单对新手会超时、对老手嫌少,这个数只影响他自己,
     # 没道理由平台替他定死一个。
     rider_max_active: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -130,7 +130,8 @@ class User(Base):
     # 骑手所在城市(上线时按定位逆地理解析一次,管理后台可改)。
     # 只看/只抢本城订单;空 = 未标注,不参与隔离(存量宽限)
     city: Mapped[str] = mapped_column(String(20), default="")
-    # 邀请码(6 位,懒生成):邀请有礼用,奖励挂被邀请人完成首单
+    # 邀请码(6 位,懒生成):邀请有礼用,奖励挂被邀请人完成首单。
+    # 邀请有礼 2026-09-14 停了,不再生成新码;老码留着,注销时照旧清(routers/auth)
     ref_code: Mapped[str | None] = mapped_column(
         String(6), nullable=True, unique=True)
     # 生日 MM-DD(选填,年不收集——最小化原则):生日当天发券
@@ -815,7 +816,7 @@ class Order(Base):
     scheduled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     # 预计送达时间(支付时按距离朴素公式生成;预约单=预约时间)。
-    # 实际送达超过它 15 分钟自动发安抚券(平台承担,见 services/eta.py)
+    # 实际送达超过它 15 分钟推一条致歉(2026-09-14 起不发安抚券,见 services/eta.py)
     eta_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     cancel_reason: Mapped[str] = mapped_column(String(200), default="")  # 取消/拒单原因
@@ -2169,7 +2170,8 @@ class PlatformFlag(Base):
 
 
 class Coupon(Base):
-    """最小平台券:目前只有超时赔付安抚券(无门槛,平台承担)。
+    """券。平台券(超时安抚券、新客券)2026-09-14 起停发,存量照旧能用;
+    新发的只有商家自己出钱的券(funder=merchant)。
 
     下单抵扣走 subsidy_cents 口径(与首单立减同一条审计通道);
     source 唯一约束保证同一来源(如 eta:订单号)最多发一张。
@@ -2333,13 +2335,14 @@ class RiderHardship(Base):
 
     平台不可能知道每栋楼的情况。**跑过的人知道。**
 
-    ## 一条反馈做两件事
+    ## 一条反馈做的事
 
-    1. **这一单当场补钱**,平台承担 —— 不向用户追收(会让顾客觉得被坑,
-       更要命的是会让骑手不敢反馈),也不向商家追收(与商家无关);
-    2. **按地址沉淀**,攒够一致反馈后转正,后来的单在下单时就按真实
-       难度计价 —— 用户下单前看得到并可以改选送到楼下,
-       骑手接单前也看得到,不用骑到楼下才发现是六楼没电梯。
+    **按地址沉淀**,攒够一致反馈后转正,后来的单在下单时就按真实难度计价(算进配送费,
+    顾客付、归骑手)—— 用户下单前看得到并可以改选送到楼下,骑手接单前也看得到,
+    不用骑到楼下才发现是六楼没电梯。
+
+    原来还有一件:这一单当场补钱、平台出。2026-09-14 起停了(平台不出这笔钱),
+    之后的行 comp_cents 都是 0;之前补过的照旧留着。
 
     ## 这张表里没有的东西
 
@@ -2362,7 +2365,7 @@ class RiderHardship(Base):
     floors: Mapped[int | None] = mapped_column(Integer, nullable=True)
     walk_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     note: Mapped[str] = mapped_column(String(200), default="")
-    #: 这一单实际补给骑手多少(分)
+    #: 这一单实际补给骑手多少(分)。2026-09-14 起不当场补钱,新行都是 0
     comp_cents: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
@@ -2397,6 +2400,9 @@ class CouponBatch(Base):
 
 class Referral(Base):
     """邀请关系:被邀请人 24 小时内填码建立;完成首单后双方发券。
+
+    **2026-09-14 邀请有礼停了**:不再建新关系、不再发奖励;还没完成首单的(pending)
+    原样留着、不会变成 rewarded(routers/referrals.py)。下面是停之前的规则。
 
     防刷:同设备不建立、邀请人月上限、风控命中的完成单不触发(留待
     下一笔干净的单)。invitee 唯一——一个新用户只能被邀请一次。

@@ -4,7 +4,7 @@
   2. 有进行中订单的用户被拒(409),完结后可注销
   3. 商家账号有店铺 → 引导走客服工单(409)
   4. **实名信息真的删了**:注销页写着"实名信息一并删除",这条钉住它
-  5. 墓碑行不再参与业务:ref_code / is_online 清零
+  5. 墓碑行不再参与业务:ref_code / is_online 清零(ref_code 是停之前生成的老码)
   6. 风控标记跟着手机号走:注销再注册不等于洗白
   7. **未核销的团购券自动全额退款**(那是用户的钱,不是作废)
 在 server/ 目录下运行:python -m tests.e2e_account_delete
@@ -115,15 +115,34 @@ assert after.deleted_at is not None, "deleted_at 应被写上(墓碑判据)"
 assert after.is_online is False, "is_online 未重置,会被算进在线骑手/派单广播"
 print("✓ 骑手墓碑行:deleted_at 已写、is_online 已归零")
 
-# 用户侧:邀请码 / 地址簿 / 生日。邀请码是懒生成的,先让它真的生成出来,
-# 否则"注销后 ref_code 为空"那条断言测的是"它本来就是空"
+# 用户侧:邀请码 / 地址簿 / 生日。
+#
+# 邀请有礼 2026-09-14 停了,/referrals/me 不再生成邀请码;但停之前生成过码的老账号
+# 身上还留着 ref_code,注销时照样要清 —— 写库给它一个码,不然「注销后 ref_code 为空」
+# 测的是「它本来就是空」
 cphone = "136" + tag[-8:]
 cust_tok = call("POST", "/auth/register", body={
     "phone": cphone, "password": "123456", "name": "注销用户",
     "role": "customer"})["token"]
 cust_id = call("GET", "/auth/me", cust_tok)["id"]
-code = call("GET", "/referrals/me", cust_tok)["code"]
-assert code and len(code) == 6, f"邀请码没生成出来:{code!r}"
+code = "D" + tag[-5:]
+
+
+def _set_ref_code(uid, value):
+    async def _go():
+        from sqlalchemy import text as _text
+
+        from app.db import SessionLocal as _S
+        from app.db import engine as _e
+        async with _S() as db:
+            await db.execute(_text("UPDATE users SET ref_code = :c WHERE id = :i"),
+                             {"c": value, "i": uid})
+            await db.commit()
+        await _e.dispose()
+    asyncio.run(_go())
+
+
+_set_ref_code(cust_id, code)
 call("PATCH", "/auth/me", cust_tok, {"birthday": "01-02"})
 call("POST", "/addresses", cust_tok, {
     "contact_name": "注销用户", "contact_phone": cphone,
@@ -139,24 +158,14 @@ assert cafter.ref_code is None, f"邀请码未清空:{cafter.ref_code!r}"
 assert cafter.birthday == "", f"生日未清空:{cafter.birthday!r}"
 assert cafter_n["addresses"] == 0, f"地址簿仍有 {cafter_n['addresses']} 行"
 print("✓ 用户墓碑行:ref_code / 生日 / 地址簿都清干净了")
-# 墓碑上的邀请码不能还被解析出来。两个坑都得躲开:
-#   ① 拿注销掉的号去填只会撞 401 —— 那是在测别的东西,所以另开活账号;
-#   ② 营销总开关默认是关的,关着的时候 claim 一律 409「活动暂未开启」,
-#      根本走不到查 ref_code 那一步 —— 断言会永远绿。所以先开、断言、再还原。
+# 填码接口 2026-09-14 起一律 410(邀请有礼停了),墓碑上的码也就没有地方能被解析了
 admin = login("13800000000")
-_orig_marketing = call("GET", "/admin/flags", admin).get("marketing", "off")
-call("POST", "/admin/flags/marketing", admin, {"value": "on"})
-try:
-    newbie = call("POST", "/auth/register", body={
-        "phone": "135" + tag[-8:], "password": "123456", "name": "新人",
-        "role": "customer"})["token"]
-    err = call("POST", "/referrals/claim", newbie, {"code": code},
-               expect_error=True)
-    assert err["_error"] == 404 and "不存在" in err.get("detail", ""), (
-        f"已注销账号的邀请码仍被解析:{err}")
-finally:
-    call("POST", "/admin/flags/marketing", admin, {"value": _orig_marketing})
-print(f"✓ 已注销账号的邀请码不再被解析(404 {err['detail']})")
+newbie = call("POST", "/auth/register", body={
+    "phone": "135" + tag[-8:], "password": "123456", "name": "新人",
+    "role": "customer"})["token"]
+err = call("POST", "/referrals/claim", newbie, {"code": code}, expect_error=True)
+assert err["_error"] == 410, f"邀请有礼停了,填码却没有回 410:{err}"
+print("✓ 填码接口已停(410),已注销账号的邀请码没有地方能被解析")
 
 # ---- 6. 风控标记跟着手机号走:注销 ≠ 洗白 ----
 #

@@ -271,7 +271,8 @@ void main() {
       await pumpProfile(t, api);
       final n = visibleEntries(t);
       // 18:两轮网格化之后的实测值(帮助/反馈/食安投诉一组,
-      // 实名/邀请/生日推送一组)。门槛跟着实测往上抬 —— 只抬不降,
+      // 实名/邀请/生日推送一组;邀请有礼 2026-09-14 下线后实测仍是 18)。
+      // 门槛跟着实测往上抬 —— 只抬不降,
       // 不然下次有人把网格改回列表条这里照样绿。
       //
       // 注意首屏数不是唯一收益:第二轮压的是首屏**以下**的长度,
@@ -560,12 +561,12 @@ void main() {
       expect(find.textContaining('营销权益暂被限制'), findsOneWidget);
     });
 
-    testWidgets('营销权益被限制时不给「邀请有礼」', (t) async {
+    testWidgets('营销权益被限制时不给营销入口(生日券那一格)', (t) async {
       final api = await loggedIn(riskLevel: 'limit', orders: [order()]);
       await pumpProfile(t, api);
       await t.pumpAndSettle();
-      expect(find.text('邀请有礼'), findsNothing,
-          reason: '账号营销权益已被限制,却还能点进邀请有礼 —— '
+      expect(find.text('生日与推送'), findsNothing,
+          reason: '账号营销权益已被限制,却还能点进营销入口 —— '
               '要么处置是假的,要么点进去才发现是死路');
     });
 
@@ -575,6 +576,18 @@ void main() {
       final n = visibleEntries(t);
       expect(n, greaterThanOrEqualTo(12),
           reason: '风控横幅 88px 不缩,但也不该把整页挤没(当前 $n)');
+    });
+  });
+
+  group('邀请有礼下线(2026-09-14,平台不出钱做营销)', () {
+    testWidgets('营销开着、账号没受限,也没有「邀请有礼」入口和「各得券」的说法', (t) async {
+      final api = await loggedIn(orders: [order()]);
+      await pumpProfile(t, api);
+      await t.pumpAndSettle();
+      expect(find.text('生日与推送'), findsOneWidget, reason: '营销开着,前提得成立');
+      expect(find.text('邀请有礼'), findsNothing,
+          reason: '邀请有礼停了(服务端填码 410),入口还在就是一条死路');
+      expect(find.textContaining('各得券'), findsNothing);
     });
   });
 

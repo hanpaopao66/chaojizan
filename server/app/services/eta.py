@@ -1,10 +1,14 @@
-"""预计送达时间(ETA)与超时安抚赔付(准时宝-lite)。
+"""预计送达时间(ETA)与超时致歉。
 
-口径(平台立场):赔付成本平台承担,不扣骑手不扣商家。
+**2026-09-14 起超时只致歉、不发券**(拍板「平台没有钱,不做平台出钱的安抚和营销」)。
+原来的「准时宝-lite」—— 送达超时 15 分钟自动发 3 元无门槛安抚券、平台承担 —— 默认关了
+(settings.eta_compensation_enabled = False)。已经发出去、没用的安抚券照旧能用
+(下单抵扣照旧走 subsidy 口径,审计照认),历史不动。
+
 - 支付时按朴素公式生成 eta_at:备餐 20 分钟 + 每公里 5 分钟,最少 30 分钟;
   预约单 = 预约时间。只对主配送单生成(自取/追加单没有独立送达承诺)。
-- 实际送达超过 eta 15 分钟:自动发无门槛 3 元安抚券(7 天有效)+ 致歉推送,
-  每单最多一次(coupons.source 唯一约束兜底幂等)。
+- **送达那一刻**(delivered_at)比 eta 晚 15 分钟以上:推一条致歉,订单上记一条
+  eta_late_apology 事件(超时分钟 + 归因),每单最多一次。
 - 超时归因只统计不追责(商家出餐超时/配送耗时长/接单等待久,后台可见)。
 - 豁免:极端天气停运开关开启期间及其前后 1 小时;用户改过地址的单。
 """
@@ -27,8 +31,11 @@ ETA_PREP_MINUTES = 20        # 备餐兜底时长(商家无实测样本时用)
 ETA_MINUTES_PER_KM = 5
 ETA_MIN_MINUTES = 30         # 最短承诺(别把话说太满)
 LATE_GRACE_MINUTES = 15      # 超过 ETA 这么久才算超时
+# 下面两个是**停发之前**的安抚券口径(eta_compensation_enabled 打开时才用;默认关)
 COMP_AMOUNT_CENTS = 300      # 安抚券面额(无门槛)
 COMP_VALID_DAYS = 7
+#: 超时致歉在订单事件里的记号。每单最多一条(见 compensate_if_late)
+APOLOGY_EVENT = "eta_late_apology"
 WEATHER_EXEMPT_SECONDS = 3600  # 停运开关切换前后 1 小时豁免
 
 # 极端天气停运开关最近一次切换时刻(admin set_flag 时写入)
@@ -223,31 +230,67 @@ async def _weather_exempt(db: AsyncSession, at: datetime) -> bool:
     return abs((at - toggled).total_seconds()) <= WEATHER_EXEMPT_SECONDS
 
 
+def _utc(at: datetime) -> datetime:
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+async def _release(db: AsyncSession, order: Order, order_no: str, *,
+                   failed: bool = False) -> None:
+    """结束查重那把锁所在的事务,**不让调用方手里的 order 过期**。
+
+    没写东西时用 commit 结束事务:会话里没有待写的改动,commit 什么都不写,只放锁。
+    rollback 会把会话里所有对象标成过期 —— 送达接口紧接着要拿这单推实时消息,
+    过期的对象在异步里一碰就是 MissingGreenlet(500)。写失败才 rollback,再把这单读回来。
+    """
+    if not failed:
+        await db.commit()
+        return
+    await db.rollback()
+    try:
+        await db.refresh(order)
+    except Exception:
+        logger.exception("超时判定回滚后重读订单失败 %s", order_no)
+
+
 async def compensate_if_late(db: AsyncSession, order: Order) -> bool:
-    """送达时判超时并发券。独立事务,失败绝不影响送达主流程。"""
+    """送达时判超时:推一条致歉(默认);开关打开时按停发之前的口径发安抚券。
+
+    独立事务,失败绝不影响送达主流程。返回 True = 这次致歉了 / 发了券。
+
+    晚了多少按**送达那一刻**(delivered_at)算,不按「现在」:兜底清扫扫的是「送达了、
+    顾客还没确认」的单,按现在算的话,准时送到、只是顾客过了一阵还没点确认的单也会被
+    当成超时(停发之前就是这样多发了券)。
+    """
+    from sqlalchemy import text
+
     from ..config import settings
-    if not settings.eta_compensation_enabled:
-        return False  # 预算紧张时可关(.env ETA_COMPENSATION_ENABLED=false)
-    now = datetime.now(timezone.utc)
     if (order.pickup or order.parent_order_no or order.eta_at is None
             or order.total_cents <= 0):
         return False
-    eta = order.eta_at
-    if eta.tzinfo is None:
-        eta = eta.replace(tzinfo=timezone.utc)
-    late_minutes = int((now - eta).total_seconds() // 60)
+    now = datetime.now(timezone.utc)
+    order_no = order.order_no
+    delivered = _utc(order.delivered_at) if order.delivered_at else now
+    late_minutes = int((delivered - _utc(order.eta_at)).total_seconds() // 60)
     if late_minutes < LATE_GRACE_MINUTES:
         return False
-    # 每单最多一次(查一遍 + source 唯一约束双保险)
+    # 同一单的两路(送达那一刻 + 兜底清扫)可能同时到:按单号串行,查重和写入在同一把锁里
+    await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                     {"k": f"eta_late:{order.order_no}"})
+    # 每单最多一次:道过歉的、停发之前发过券的,都不再处理
     source = f"eta:{order.order_no}"
-    if await db.scalar(select(Coupon.id).where(Coupon.source == source)):
+    handled = await db.scalar(select(OrderEvent.id).where(
+        OrderEvent.order_id == order.id,
+        OrderEvent.to_status.in_((APOLOGY_EVENT, "eta_compensated"))).limit(1))
+    if handled or await db.scalar(select(Coupon.id).where(Coupon.source == source)):
+        await _release(db, order, order_no)
         return False
     # 豁免:改过地址 / 极端天气窗口
     addr_changed = await db.scalar(
         select(OrderEvent.id).where(
             OrderEvent.order_id == order.id,
             OrderEvent.to_status == "address_changed").limit(1))
-    if addr_changed or await _weather_exempt(db, now):
+    if addr_changed or await _weather_exempt(db, delivered):
+        await _release(db, order, order_no)
         return False
 
     # 归因(只统计不追责):出餐超时定格 > 配送在途偏长 > 接单等待久/综合
@@ -259,12 +302,35 @@ async def compensate_if_late(db: AsyncSession, order: Order) -> bool:
     picked_at = events.get("picked_up")
     if order.ready_late:
         cause = "商家出餐超时"
-    elif picked_at is not None and (now - picked_at) > timedelta(
+    elif picked_at is not None and (delivered - _utc(picked_at)) > timedelta(
             minutes=LATE_GRACE_MINUTES + ETA_MINUTES_PER_KM * 4):
         cause = "配送在途偏长"
     else:
         cause = "接单等待久/综合"
 
+    if not settings.eta_compensation_enabled:
+        # 默认:只致歉、不发券。事件留着给后台看归因(只统计不追责)
+        db.add(OrderEvent(
+            order_id=order.id, from_status=order.status.value,
+            to_status=APOLOGY_EVENT, actor_role="system", actor_id=None,
+            note=f"超时{late_minutes}分钟,推送致歉(不发券);归因:{cause}"))
+        try:
+            await db.commit()
+        except Exception:
+            await _release(db, order, order_no, failed=True)
+            return False
+        try:
+            from .push import push_to_user
+            await push_to_user(
+                order.customer_id, "这单送晚了,抱歉",
+                f"比预计晚了 {late_minutes} 分钟,让你久等了。"
+                "晚在哪一段我们照实记着,用来改进出餐和配送的时间估计",
+                {"type": "order", "order_no": order.order_no}, record_skip=True)
+        except Exception:
+            logger.exception("超时致歉推送失败")
+        return True
+
+    # 开关打开(停发之前的口径):发一张无门槛安抚券。默认关,见模块抬头
     coupon = Coupon(
         user_id=order.customer_id,
         amount_cents=COMP_AMOUNT_CENTS,
@@ -277,24 +343,23 @@ async def compensate_if_late(db: AsyncSession, order: Order) -> bool:
     db.add(OrderEvent(
         order_id=order.id, from_status=order.status.value,
         to_status="eta_compensated", actor_role="system", actor_id=None,
-        note=f"超时{late_minutes}分钟,自动发{COMP_AMOUNT_CENTS / 100:g}元安抚券"
-             f"(平台承担);归因:{cause}",
+        note=f"超时{late_minutes}分钟,自动发{COMP_AMOUNT_CENTS / 100:g}元安抚券;"
+             f"归因:{cause}",
     ))
     try:
         await db.commit()
     except Exception:  # 并发下 source 唯一约束兜底
-        await db.rollback()
+        await _release(db, order, order_no, failed=True)
         return False
     try:
         from .push import push_to_user
         await push_to_user(
             order.customer_id, "这单送晚了,抱歉",
             f"比预计晚了 {late_minutes} 分钟,已放入 "
-            f"{COMP_AMOUNT_CENTS / 100:g} 元无门槛安抚券(7 天内有效),"
-            "成本由平台承担,不扣骑手不扣商家",
+            f"{COMP_AMOUNT_CENTS / 100:g} 元无门槛安抚券(7 天内有效)",
             {"type": "coupon"}, record_skip=True)
     except Exception:
-        logger.exception("超时赔付推送失败")
+        logger.exception("超时安抚券推送失败")
     return True
 
 

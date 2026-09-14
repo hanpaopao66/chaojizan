@@ -37,7 +37,6 @@ import 'miniapp/container.dart';
 import 'miniapp/pages.dart';
 import 'money_flow_page.dart';
 import 'order_filter.dart';
-import 'invite_page.dart';
 import 'share_card.dart';
 import 'food_safety_records_page.dart';
 import 'identity_page.dart';
@@ -5809,7 +5808,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
         OrderStatus.ready, OrderStatus.pickedUp];
     if (!active.contains(order.status)) return null;
     if (order.scheduledLabel != null) return '⏰ ${order.scheduledLabel}';
-    // 服务端 ETA(支付时生成,超时 15 分钟平台自动赔安抚券)优先;
+    // 服务端 ETA(支付时生成;送达超时 15 分钟推一条致歉,2026-09-14 起不发券)优先;
     // 老订单没有 eta_at 时退回本地估算
     DateTime? expect =
         order.etaAt == null ? null : DateTime.tryParse(order.etaAt!)?.toLocal();
@@ -5826,7 +5825,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     final hhmm = '${expect.hour.toString().padLeft(2, '0')}:'
         '${expect.minute.toString().padLeft(2, '0')}';
     if (left >= 0) return '预计 $hhmm 前送达 · 还有约 $left 分钟';
-    return '抱歉,比预计($hhmm)晚了一些;超 15 分钟平台自动赔安抚券';
+    return '抱歉,比预计($hhmm)晚了一些';
   }
 
   Future<void> _submitReview(int merchantRating, int? riderRating,
@@ -7429,7 +7428,7 @@ class ProfileView extends StatefulWidget {
 
 class _ProfileViewState extends State<ProfileView> {
   UserProfile? _profile;
-  // 营销总开关(服务端 /config):关着时邀请有礼等入口整体隐藏
+  // 营销总开关(服务端 /config):关着时生日券推送等营销入口整体隐藏
   bool _marketingOn = false;
   // 视频开关(/config 的 features.video):生产缺省关,关着时「视频」那块入口不出
   bool _videoOn = RemoteCopy.feature('video');
@@ -7762,7 +7761,7 @@ class _ProfileViewState extends State<ProfileView> {
     final profile = _profile;
     final guest = !widget.api.isLoggedIn;
     // 营销入口的闸门:总开关开着、已登录、**而且账号没被风控限制**。
-    // 少最后一条的话,「营销权益暂被限制」的账号照样能点进邀请有礼 ——
+    // 少最后一条的话,「营销权益暂被限制」的账号照样能点进生日券那些营销入口 ——
     // 要么那个处置是假的,要么用户点进去才发现是死路。
     //
     // 要求 profile 非空是为了别闪:加载中先显示、拿到 risk_level 再收回去,
@@ -8376,12 +8375,8 @@ class _ProfileViewState extends State<ProfileView> {
               label: '实名认证',
               onTap: _openIdentity,
             ),
-            SzIconGridItem(
-              icon: Icons.card_giftcard_outlined,
-              label: '邀请有礼',
-              onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => InvitePage(api: widget.api))),
-            ),
+            // 「邀请有礼」2026-09-14 下线(奖励停发,服务端 /referrals 也停了):
+            // 已经到账的券照旧在「我的优惠券」里
             SzIconGridItem(
               icon: Icons.cake_outlined,
               label: '生日与推送',
@@ -8391,7 +8386,7 @@ class _ProfileViewState extends State<ProfileView> {
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
             child: Text(
-              '实名后才能买酒类等受限商品;邀请好友完成首单,你俩各得券;'
+              '实名后才能买酒类等受限商品;'
               '生日当天送券,营销推送可随时关掉(订单通知不受影响)。',
               style: TextStyle(
                   fontSize: kFontMicro, color: Theme.of(context).sz.inkMuted),

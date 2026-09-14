@@ -35,7 +35,7 @@ async def mark_order_paid(
         await bind_order(order)
         # 进入无骑手状态的时刻:无人接单兜底从这里起算(骑手转单时会刷新)
         order.rider_pool_since = datetime.now(timezone.utc)
-    # 预计送达时间(超时 15 分钟自动赔安抚券,平台承担;见 services/eta.py)
+    # 预计送达时间(送达超时 15 分钟推一条致歉,不发券;见 services/eta.py)
     # 用带路线级余量的版本(#268):市区多红灯的路线拿到更宽的时限。
     # 路径服务不可用时它自动退回常量口径,不会拦住支付
     from .eta import compute_eta_async

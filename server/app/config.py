@@ -306,16 +306,17 @@ class Settings(BaseSettings):
     # 骑手提现
     min_withdrawal_cents: int = 1000  # 最低提现 ¥10
 
-    # 邀请有礼:被邀请人完成首单后双方各得券(分);0=关闭活动。
-    # 奖励挂完成单不挂注册(刷号无利可图);邀请人每自然月上限 N 人
-    referral_reward_cents: int = 300
-    referral_monthly_cap: int = 10
+    # 邀请有礼 2026-09-14 停了:奖励停发、三端入口下线(routers/referrals.py)。
+    # 已经到账的不动;还没完成首单的邀请不再发奖励。原来的两个配置
+    # (referral_reward_cents / referral_monthly_cap)一起删了 —— 停了就不留一个能拨回来的开关
 
-    # 订单超时安抚券(#34,平台承担):没有预算时可关(false=超时只致歉不发券)
-    eta_compensation_enabled: bool = True
+    # 订单超时安抚券(#34,平台出钱)。2026-09-14 拍板「平台没有钱,不做平台出钱的赔付」:
+    # **默认关**,超时只致歉不发券(services/eta.compensate_if_late)。已经发出去、
+    # 没用的券照旧能用
+    eta_compensation_enabled: bool = False
 
     # 平台拉新:首单立减(分),0=关闭。成本平台承担,订单上记 subsidy_cents,
-    # 审计恒等式和透明账单都能看到这笔钱从平台流向了用户
+    # 审计恒等式和透明账单都能看到这笔钱从平台流向了用户。**保持 0**:平台不出钱做营销
     first_order_discount_cents: int = 0
 
     # 团购券核销服务费率(只在核销时收;券未使用平台分文不取)

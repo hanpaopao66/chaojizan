@@ -189,7 +189,8 @@ export struct TransparencyPage {
   @Builder
   private compensationBody(d: Record<string, Object> | null) {
     Column() {
-      this.line('超时安抚券(累计)',
+      // 2026-09-14 起超时只致歉不发券,这一行只剩停发之前发出去的
+      this.line('超时安抚券(停发之前,累计)',
         yuan(this.nested(d, 'eta_coupons', 'cents')), false);
       this.line('餐损赔付(累计)',
         yuan(this.nested(d, 'meal_compensation', 'cents')), false);

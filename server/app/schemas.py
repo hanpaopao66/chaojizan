@@ -903,11 +903,12 @@ class ShopCouponBatchIn(BaseModel):
 
     trigger 决定什么时候发到用户手里:
     - shop      顾客在店铺页主动领(默认,老行为)
-    - referral  有人通过邀请码带来的新客在本店完成首单,双方各得一张(#115)
+    - referral  有人通过邀请码带来的新客在本店完成首单,双方各得一张(#115)。
+                **2026-09-14 随邀请有礼一起停了**:新建回 410,存量批次不再发
     - birthday  本店老客生日当天
     - winback   本店 30 天没来的老客
 
-    后三种是平台原先掏钱做的营销,现在归位给商家——平台只提供触达机制。
+    后几种是平台原先掏钱做的营销,#115 起归位给商家——平台只提供触达机制。
     """
 
     name: str = Field(min_length=2, max_length=50)
@@ -1068,7 +1069,7 @@ class OrderCreateIn(BaseModel):
     scheduled_at: datetime | None = None  # 预约送达/预约自取(空 = 尽快)
     # 小费(分):100% 归骑手,平台不抽不计佣;自取单不收
     tip_cents: int = Field(default=0, ge=0, le=5000)
-    # 平台券抵扣(超时安抚券等):平台承担,走 subsidy 口径
+    # 平台券抵扣(停发之前发出去的超时安抚券等):走 subsidy 口径
     coupon_id: int | None = None
     # 拼单码:发起人锁单后用它下单,服务端校验并原子关车
     group_code: str = Field(default="", max_length=32)
@@ -1110,7 +1111,7 @@ class OrderOut(BaseModel):
     total_cents: int
     commission_cents: int
     scheduled_at: datetime | None = None
-    # 预计送达时间(支付时生成;超过 15 分钟自动发安抚券,平台承担)
+    # 预计送达时间(支付时生成;送达超过它 15 分钟推一条致歉,2026-09-14 起不发券)
     eta_at: datetime | None = None
     # 骑手到店时刻:骑手端据此决定还要不要显示「我到店了」按钮
     arrived_shop_at: datetime | None = None

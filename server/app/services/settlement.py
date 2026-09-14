@@ -166,13 +166,8 @@ async def settle_order(db: AsyncSession, order: Order) -> None:
     # 分账口径的单:落分账台账并尝试请求(幂等;失败留 pending 清扫兜底)
     from .profit_sharing import ensure_record
     await ensure_record(db, order)
-    # 邀请有礼:被邀请人的首个完成单触发双方发券(风控命中的单不触发)
-    try:
-        from ..routers.referrals import reward_referral_if_first_order
-        await reward_referral_if_first_order(db, order)
-    except Exception:
-        import logging
-        logging.getLogger("superz.settlement").exception("邀请奖励失败")
+    # 邀请有礼(被邀请人首单触发双方发券)2026-09-14 停了:这里不再发任何奖励,
+    # 还没完成首单的邀请也不发(routers/referrals.py)
 
 
 async def reverse_merchant_earning(db: AsyncSession, order: Order, note: str) -> bool:

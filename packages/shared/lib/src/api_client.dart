@@ -1156,7 +1156,7 @@ class ApiClient {
     String remark = '',
     DateTime? scheduledAt,
     int tipCents = 0, // 小费,100% 归骑手
-    int? couponId, // 平台券抵扣(超时安抚券等,平台承担)
+    int? couponId, // 券抵扣:店铺券走商家、停发之前发的平台券走平台补贴
     String groupCode = '', // 拼单码(发起人结算,原子关车)
     /// 送上门 / 送到楼下。**顾客自己选** —— 选楼下就不收上门难度费,
     /// 骑手也没有义务上楼。默认送上门(与此前行为一致)
@@ -1333,13 +1333,7 @@ class ApiClient {
   Future<Map<String, dynamic>> platformConfig() async =>
       await _request('GET', '/config') as Map<String, dynamic>;
 
-  // ---------- 邀请有礼 ----------
-  Future<Map<String, dynamic>> myReferral() async =>
-      await _request('GET', '/referrals/me') as Map<String, dynamic>;
-
-  Future<Map<String, dynamic>> claimReferral(String code) async =>
-      await _request('POST', '/referrals/claim', body: {'code': code})
-          as Map<String, dynamic>;
+  // ---------- 邀请有礼:2026-09-14 下线(奖励停发,入口和接口调用一起删了) ----------
 
   // ---------- 拼单(共享购物车) ----------
   Future<Map<String, dynamic>> openGroupCart(int merchantId) async =>
@@ -1410,7 +1404,7 @@ class ApiClient {
               const [])
           .cast<Map<String, dynamic>>();
 
-  /// 我的券包(可用在前):超时安抚券等平台券
+  /// 我的券包(可用在前):店铺券,和停发之前发的平台券(超时安抚券等)
   Future<List<dynamic>> myCoupons() async =>
       await _request('GET', '/orders/coupons/mine') as List<dynamic>;
 
@@ -1675,17 +1669,19 @@ class ApiClient {
     );
   }
 
-  /// 难度补贴的完整口径(#301):每一项是什么、加多少钱、几条转正。
+  /// 难度费的完整口径(#301):每一项是什么、加多少钱、几条转正。
   ///
-  /// 骑手端在弹反馈之前先拉这个 —— **不给出金额的补贴等于施舍**,
-  /// 他得知道勾一项能拿多少,才谈得上判断值不值得花那十秒钟。
+  /// 骑手端在弹反馈之前先拉这个 —— **不给出金额的等于施舍**,
+  /// 他得知道勾一项以后这里的单能多拿多少,才谈得上判断值不值得花那十秒钟。
+  /// 2026-09-14 起反馈的这一单不当场补钱(`paid_now: false`),钱只进以后的配送费。
   Future<Map<String, dynamic>> hardshipRules() async =>
       await _request('GET', '/orders/hardship-rules')
           as Map<String, dynamic>;
 
   /// 反馈这一单实际有多难送(#301)。送达后才能提。
   ///
-  /// 返回 `comp_cents` 补了多少、`lines` 明细、`duplicate` 是否同址重复。
+  /// 返回 `message` 给他看的回执、`lines` 以后这里的单加多少、`duplicate` 是否同址重复。
+  /// `comp_cents` 恒为 0(2026-09-14 起不当场补钱)。
   Future<Map<String, dynamic>> reportHardship(
     String orderNo, {
     required List<String> kinds,
@@ -1779,7 +1775,7 @@ class ApiClient {
   /// 佣金收进来多少、花到哪去了、平台留存多少。
   Future<Map<String, dynamic>> fundsPublic() => _transparency('funds');
 
-  /// 平台自己赔出去的钱(超时券/餐损/退款)。
+  /// 平台自己赔出去的钱(停发之前的超时券/餐损/退款/保障金池)。
   Future<Map<String, dynamic>> compensationPublic() =>
       _transparency('compensation');
 

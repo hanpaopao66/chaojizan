@@ -713,7 +713,7 @@ export class UserApi {
     return this.transparency('funds');
   }
 
-  /** 平台自己赔出去的钱(超时券/餐损/退款) */
+  /** 平台自己赔出去的钱(停发之前的超时券/餐损/退款) */
   compensationPublic(): Promise<Record<string, Object>> {
     return this.transparency('compensation');
   }

@@ -1462,7 +1462,7 @@ _KNOWN_FLAGS = {
     # 四川已明确取消),只有查证过本地有规章的城市才加进来。
     # 判据是"查到了本地条文",不是"别的平台都要"
     "health_cert_cities",
-    "marketing",            # 营销总开关(默认关):新客券/邀请/生日/复购/上新
+    "marketing",            # 营销总开关(默认关):生日/复购/上新(新客券、邀请 2026-09-14 停了)
     "screen_show_gmv",      # 公开大屏是否展示交易额(缺省=展示,off=接口不下发金额)
     # 小程序急停闸(缺省=开,off=关;语义见 services/miniapp_platform.SWITCHES)
     "miniapp_hosted",       # 托管小程序:关了托管应用打不开、文件 404、从目录消失
@@ -1622,7 +1622,7 @@ async def set_flag(
         from ..models import Announcement, UserRole
         from ..services.push import push_to_user
 
-        # 记录切换时刻:停运前后 1 小时的送达超时不赔(services/eta.py)
+        # 记录切换时刻:停运前后 1 小时的送达超时不算超时(services/eta.py)
         from ..redis_client import get_redis
         from ..services.eta import WEATHER_TOGGLE_KEY
         await get_redis().set(
@@ -2048,7 +2048,7 @@ async def resolve_rider_appeal(
     """核定申诉。accept=true 判为非骑手责任。
 
     **成立不加分也不补钱** —— 平台没有骑手评分体系,所以没有分可加;
-    补偿是另一条线(超时判赔已经由平台自动承担,见 eta.compensate_if_late)。
+    超时本来就不动骑手的钱(超时只向顾客致歉,不发券不罚款,见 eta.compensate_if_late)。
     成立的意义是这条记录上写着不怪他,以及平台据此去看商家出餐这一环。
     """
     from ..models import RiderAppeal
@@ -3201,27 +3201,44 @@ async def update_rider_accident(
     return {"ok": True}
 
 
-# ---------- 超时赔付统计(只统计不追责,供改进) ----------
+# ---------- 超时统计(只统计不追责,供改进) ----------
 
 @router.get("/eta-compensations")
 async def list_eta_compensations(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """近 100 笔超时安抚券:note 里带超时分钟与归因(商家出餐慢/配送慢/等待久)。"""
-    from ..models import Coupon
-    rows = (await db.execute(
+    """近 100 笔超时:note 里带超时分钟与归因(商家出餐慢/配送慢/等待久)。
+
+    2026-09-14 起超时只致歉不发券(services/eta):新的超时是 kind=apology、金额 0;
+    停发之前发的安抚券照旧列着(kind=coupon),看得到用没用掉。
+    """
+    from ..models import Coupon, Order, OrderEvent
+    from ..services.eta import APOLOGY_EVENT
+    coupons = (await db.execute(
         select(Coupon, User.phone)
         .join(User, User.id == Coupon.user_id)
         .where(Coupon.source.like("eta:%"))
         .order_by(Coupon.created_at.desc()).limit(100))).all()
-    return [{
-        "id": c.id, "user_phone": phone,
+    apologies = (await db.execute(
+        select(OrderEvent, Order.order_no, User.phone)
+        .join(Order, Order.id == OrderEvent.order_id)
+        .join(User, User.id == Order.customer_id)
+        .where(OrderEvent.to_status == APOLOGY_EVENT)
+        .order_by(OrderEvent.created_at.desc()).limit(100))).all()
+    rows = [{
+        "id": c.id, "kind": "coupon", "user_phone": phone,
         "order_no": c.source.removeprefix("eta:"),
         "amount_cents": c.amount_cents, "note": c.note,
         "used": bool(c.used_order_no),
         "created_at": c.created_at.isoformat(),
-    } for c, phone in rows]
+    } for c, phone in coupons] + [{
+        "id": e.id, "kind": "apology", "user_phone": phone,
+        "order_no": no, "amount_cents": 0, "note": e.note, "used": False,
+        "created_at": e.created_at.isoformat(),
+    } for e, no, phone in apologies]
+    rows.sort(key=lambda r: r["created_at"], reverse=True)
+    return rows[:100]
 
 
 # ---------- 多城市运营 ----------
@@ -3427,44 +3444,15 @@ async def create_coupon_batch(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """创建券批次。trigger:newcomer 注册自动发 / manual 定向补偿发。
+    """创建平台券批次 —— **2026-09-14 起不再建**,一律 410。
 
-    **birthday / winback / referral 已移出平台侧**(#115):那三个是营销,
-    营销的钱该商家出——平台立场是不靠补贴换增长。商家在自己的店铺
-    设置里建同名批次即可(POST /merchants/me/coupon-batches)。
-    存量的平台批次跑完即止,不受影响。
+    平台批次就是平台出钱发券(新客券、客服定向补偿券);拍板「平台没有钱,不做平台出钱的
+    安抚和营销」之后停了。存量批次留在列表里看历史、可以停用,一张都不再发
+    (services/coupons.issue_from_batch)。商家自己出钱的券(店铺券、收藏券、生日券……)
+    在商家那边建,不受影响。
     """
-    from ..models import CouponBatch
-    name = str(payload.get("name") or "").strip()[:50]
-    trigger = str(payload.get("trigger") or "manual")
-    try:
-        amount = int(payload.get("amount_cents", 0))
-        min_spend = int(payload.get("min_spend_cents", 0))
-        valid_days = int(payload.get("valid_days", 7))
-        total = int(payload.get("total", 0))
-    except (TypeError, ValueError):
-        raise HTTPException(422, "金额/天数/总量需为整数")
-    if not name:
-        raise HTTPException(422, "请填写批次名称")
-    if trigger in ("birthday", "winback", "referral"):
-        raise HTTPException(
-            422, "生日券/复购券/新客推荐券由商家自建(成本商家承担),"
-                 "平台不再建这三类批次")
-    if trigger not in ("newcomer", "manual"):
-        raise HTTPException(422, "trigger 不合法")
-    if not 1 <= amount <= 5000:
-        raise HTTPException(422, "面额需在 0.01-50 元之间(补贴要克制)")
-    if not 1 <= total <= 100000:
-        raise HTTPException(422, "总量需在 1-100000 之间")
-    if not 1 <= valid_days <= 90 or min_spend < 0:
-        raise HTTPException(422, "有效期 1-90 天,门槛不能为负")
-    batch = CouponBatch(name=name, trigger=trigger, amount_cents=amount,
-                        min_spend_cents=min_spend, valid_days=valid_days,
-                        total=total)
-    db.add(batch)
-    await db.commit()
-    await db.refresh(batch)
-    return {"id": batch.id}
+    raise HTTPException(410, "平台不再出钱发券(2026-09-14):新客券、客服补偿券都停了;"
+                             "商家自己出钱的券在商家后台建")
 
 
 @router.get("/coupon-batches")
@@ -3487,6 +3475,8 @@ async def list_coupon_batches(
         "amount_cents": b.amount_cents, "min_spend_cents": b.min_spend_cents,
         "valid_days": b.valid_days, "total": b.total, "issued": b.issued,
         "used": used_map.get(b.id, 0), "active": b.active,
+        # None = 平台批次(平台出钱,2026-09-14 起停发);有值 = 那家店自己出钱
+        "merchant_id": b.merchant_id,
         "created_at": b.created_at.isoformat(),
     } for b in batches]
 
@@ -3502,7 +3492,12 @@ async def toggle_coupon_batch(
     batch = await db.get(CouponBatch, batch_id)
     if batch is None:
         raise HTTPException(404, "批次不存在")
-    batch.active = bool(payload.get("active", not batch.active))
+    active = bool(payload.get("active", not batch.active))
+    if active and batch.merchant_id is None:
+        # 平台批次只能停不能开:开了也一张都发不出去(coupons.issue_from_batch),
+        # 列表上却写着「启用」,那是在骗看后台的人
+        raise HTTPException(410, "平台批次停发了(2026-09-14),不能再启用")
+    batch.active = active
     await db.commit()
     return {"id": batch_id, "active": batch.active}
 
@@ -3513,30 +3508,11 @@ async def issue_coupon_directed(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """按手机号定向发券(客服补偿场景)。每人每批次一张。"""
-    from ..models import CouponBatch, UserRole
-    from ..services.coupons import issue_from_batch
-    from ..services.push import push_to_user
-    phone = str(payload.get("phone") or "").strip()
-    batch = await db.get(CouponBatch, int(payload.get("batch_id", 0)))
-    if batch is None:
-        raise HTTPException(404, "批次不存在")
-    # 券只发用户端账号(同手机号可能另有商家/骑手账号)
-    target = await db.scalar(select(User).where(
-        User.phone == phone, User.role == UserRole.customer))
-    if target is None:
-        raise HTTPException(404, "该手机号没有注册过用户端")
-    coupon = await issue_from_batch(
-        db, batch, target.id,
-        note=str(payload.get("note") or "").strip()[:60] or batch.name)
-    if coupon is None:
-        raise HTTPException(409, "没发出去:已领过/批次停用/预算发完")
-    await db.commit()
-    await push_to_user(target.id, "收到一张优惠券",
-                       f"{batch.name}:{batch.amount_cents / 100:g} 元,"
-                       f"{batch.valid_days} 天内有效,下单自动可选",
-                       {"type": "coupon"}, record_skip=True)
-    return {"ok": True, "coupon_id": coupon.id}
+    """按手机号定向发券(客服补偿)—— **2026-09-14 起停了**,一律 410。
+
+    发的是平台券(平台出钱);用商家的批次替商家发也不行 —— 那是拿商家的预算做平台的补偿。
+    """
+    raise HTTPException(410, "客服定向补偿发券停了(2026-09-14):平台不出钱发券")
 
 
 @router.get("/referrals")

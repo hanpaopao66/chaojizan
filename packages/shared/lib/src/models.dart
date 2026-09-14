@@ -750,7 +750,7 @@ class Order {
   /// 没配推送的部署里这是催单能到骑手眼前的唯一通道
   final int urgeCount;
   final String? scheduledAt; // 预约送达时间(空 = 尽快送)
-  final String? etaAt;       // 预计送达时间(超时 15 分钟平台自动赔安抚券)
+  final String? etaAt;       // 预计送达时间(送达超时 15 分钟推一条致歉,不发券)
   /// 骑手到店时刻(空 = 还没标记)。等餐时长 = 取餐 − 到店,申诉的证据
   final String arrivedShopAt;
   final bool selfDelivery;   // 商家自送(不走骑手,配送费归商家)

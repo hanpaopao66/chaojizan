@@ -568,15 +568,15 @@ export default function TransparencyPage() {
             </div>
             <div className="col">
               <h4>支出去向（累计）</h4>
-              <div className="row"><span>用户补贴（首单立减 + 超时安抚券抵扣）</span>
+              <div className="row"><span>用户补贴（首单立减，现在是 0；停发之前发的超时安抚券被抵扣）</span>
                 <span className="num">{yuanF(funds?.spend.subsidy_cents)}</span></div>
               <div className="row"><span>商家餐损赔付（无人接单，平台背锅）</span>
                 <span className="num">{yuanF(funds?.spend.meal_compensation_cents)}</span></div>
               <div className="row"><span>申诉改判调整（误伤的账，平台认亏）</span>
                 <span className="num">{yuanF(funds?.spend.adjustment_cents)}</span></div>
-              {funds?.spend.rider_fault_refund_cents != null && (
-                <div className="row"><span>骑手责任改判成立，退回骑手（错判由平台认）</span>
-                  <span className="num">{yuanF(funds?.spend.rider_fault_refund_cents)}</span></div>
+              {funds?.spend_detail?.rider_fault_refund_cents != null && (
+                <div className="row"><span>　其中：骑手责任改判成立，退回骑手（错判由平台认）</span>
+                  <span className="num">{yuanF(funds.spend_detail.rider_fault_refund_cents)}</span></div>
               )}
               <div className="row total"><span>合计</span>
                 <span className="num">{yuanF(funds?.spend.total_cents)}</span></div>
@@ -672,13 +672,13 @@ export default function TransparencyPage() {
         <Sec id="compensation" eyebrow="赔付记录">
           <h2>平台的赔钱记录</h2>
           <p className="tp-lede">
-            没有平台愿意亮自己的赔付账，我们把它当承诺兑现的凭据：超时了就赔、运力不足取消了就替商家兜餐损、该退的钱一分不少。
+            没有平台愿意亮自己的赔付账，我们把它当承诺兑现的凭据：该退的钱一分不少、运力不足取消了替商家兜餐损。2026-09-14 起平台不再出钱发超时安抚券——超时只致歉；停发之前发出去的券照旧能用，也照旧列在这里。
           </p>
           <div className="tp-cards">
             <div className="tp-card hold">
               <div className="num v">{comp?.eta_coupons.total.count ?? '–'}<small> 张</small></div>
-              <div className="k">超时安抚券（送达超 ETA 15 分钟自动发，平台承担）</div>
-              <div className="m">累计 {yuanF(comp?.eta_coupons.total.cents)} · 本月 {comp?.eta_coupons.month.count ?? '–'} 张</div>
+              <div className="k">超时安抚券（停发之前：送达超 ETA 15 分钟自动发，平台出的钱；2026-09-14 起超时只致歉不发券）</div>
+              <div className="m">累计 {yuanF(comp?.eta_coupons.total.cents)} · 本月 {comp?.eta_coupons.month.count ?? '–'} 张{comp?.eta_apologies && <> · 停发之后超时致歉 {comp.eta_apologies.total.count} 次（本月 {comp.eta_apologies.month.count} 次）</>}</div>
             </div>
             <div className="tp-card">
               <div className="num v">{yuanF(comp?.meal_compensation.total.cents)}</div>

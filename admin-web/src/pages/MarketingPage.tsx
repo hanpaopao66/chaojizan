@@ -1,29 +1,30 @@
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Switch, Table, Tag, message } from 'antd'
+import { Alert, Card, Switch, Table, Tag, message } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  ApiError, CouponBatch, createCouponBatch, issueCoupon, listCouponBatches,
+  ApiError, CouponBatch, listCouponBatches,
   listSplash, Splash, toggleSplash, toggleCouponBatch, yuan,
 } from '../api'
 
 /**
- * 营销:优惠券批次。
+ * 营销:优惠券批次(只看、只能停)。
  *
- * ⚠️ **平台不做补贴** —— 这些券的成本口径在「平台开关」的 marketing 总开关
- * 之下,发之前先确认那个开关是开的,否则建了也不会发出去。
+ * ⚠️ **平台不出钱发券**(2026-09-14 拍板「平台没有钱,不做平台出钱的安抚和营销」):
+ * 新建平台批次、按手机号定向发券两个入口都下了,服务端也回 410;存量的平台批次
+ * 一张都不再发(services/coupons.issue_from_batch),已经发出去的照旧能用。
+ * 商家自己出钱的批次(店铺券、收藏即送、生日、复购……)在商家那边建,这里只列出来看。
  */
+// 键跟服务端 CouponBatch.trigger 走(原来这张表写的是另一套键,一个都对不上)
 const TRIGGERS: Record<string, string> = {
-  new_user: '新客', invite: '邀请', birthday: '生日',
-  repurchase: '复购', new_dish: '上新', manual: '手动发放',
+  newcomer: '新客', manual: '手动发放', shop: '店铺领取', favorite: '收藏即送',
+  referral: '新客推荐(已停)', birthday: '生日', winback: '复购',
 }
 
 export default function MarketingPage() {
   const [rows, setRows] = useState<CouponBatch[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
-  const [open, setOpen] = useState(false)
   const [splash, setSplash] = useState<Splash[]>([])
-  const [form] = Form.useForm()
 
   const load = useCallback(async () => {
     setLoading(true); setErr('')
@@ -45,16 +46,19 @@ export default function MarketingPage() {
     <>
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
       <Alert type="info" showIcon style={{ marginBottom: 12 }}
-             message="营销总开关在「平台开关」页。总开关关着的话,这里建的批次不会发出去。" />
-      <Card size="small" title="优惠券批次"
-            extra={<Button type="primary" size="small"
-                           onClick={() => setOpen(true)}>新建批次</Button>}>
+             message="平台不再出钱发券(2026-09-14 起)"
+             description="新建平台批次、定向发券都停了;平台批次一张都不再发,已经发出去的券照旧能用。商家自己出钱的券在商家后台建,这里只列出来看、必要时可以停用。" />
+      <Card size="small" title="优惠券批次">
         <Table<CouponBatch>
           rowKey="id" loading={loading} dataSource={rows} size="middle"
           scroll={{ x: 'max-content' }}
           pagination={{ pageSize: 20, showSizeChanger: false }}
           columns={[
             { title: '名称', dataIndex: 'name', width: 160 },
+            { title: '谁出钱', width: 110,
+              render: (_, b) => b.merchant_id
+                ? <Tag color="blue">商家 #{b.merchant_id}</Tag>
+                : <Tag>平台(已停发)</Tag> },
             { title: '触发', dataIndex: 'trigger', width: 100,
               render: (v: string) => <Tag>{TRIGGERS[v] ?? v}</Tag> },
             { title: '面额', dataIndex: 'amount_cents', width: 90, align: 'right',
@@ -68,28 +72,11 @@ export default function MarketingPage() {
             { title: '已核销', dataIndex: 'used', width: 90 },
             { title: '启用', width: 80,
               render: (_, b) => (
+                // 平台批次只能停不能开(服务端也拦):开了也一张都发不出去
                 <Switch size="small" checked={b.active}
+                        disabled={!b.merchant_id && !b.active}
                         onChange={() => act(() => toggleCouponBatch(b.id),
                           b.active ? '已停用' : '已启用')} />
-              ) },
-            // 定向发券:给某个手机号补发一张。客服补偿用的最多
-            { title: '定向发', width: 90, fixed: 'right',
-              render: (_, b) => (
-                <Button type="link" size="small" onClick={() => {
-                  let phone = ''
-                  Modal.confirm({
-                    title: `定向发放「${b.name}」`,
-                    content: <Input placeholder="收券人手机号" maxLength={11}
-                                    onChange={(e) => { phone = e.target.value }} />,
-                    okText: '发放', cancelText: '取消',
-                    onOk: () => {
-                      if (!/^1\d{10}$/.test(phone.trim())) {
-                        message.warning('手机号不对'); throw new Error('bad')
-                      }
-                      return act(() => issueCoupon(phone.trim(), b.id), '已发放')
-                    },
-                  })
-                }}>发一张</Button>
               ) },
           ]}
         />
@@ -118,46 +105,6 @@ export default function MarketingPage() {
           ]}
         />
       </Card>
-      <Modal
-        open={open} title="新建优惠券批次" okText="创建" cancelText="取消"
-        onCancel={() => setOpen(false)}
-        onOk={() => form.submit()}
-      >
-        <Form form={form} layout="vertical" onFinish={(v) => act(async () => {
-          await createCouponBatch({
-            name: v.name,
-            trigger: v.trigger,
-            amount_cents: Math.round(v.amount * 100),
-            min_spend_cents: Math.round((v.min_spend || 0) * 100),
-            valid_days: v.valid_days,
-            total: v.total || 0,
-          })
-          setOpen(false); form.resetFields()
-        }, '已创建')}>
-          <Form.Item name="name" label="批次名称" rules={[{ required: true }]}>
-            <Input maxLength={30} placeholder="如:新客立减" />
-          </Form.Item>
-          <Form.Item name="trigger" label="触发方式" rules={[{ required: true }]}
-                     initialValue="new_user">
-            <Select options={Object.entries(TRIGGERS)
-              .map(([v, l]) => ({ value: v, label: l }))} />
-          </Form.Item>
-          <Form.Item name="amount" label="面额(元)" rules={[{ required: true }]}>
-            <InputNumber min={0.01} step={1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="min_spend" label="使用门槛(元,0 = 无门槛)"
-                     initialValue={0}>
-            <InputNumber min={0} step={1} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="valid_days" label="有效天数" initialValue={7}
-                     rules={[{ required: true }]}>
-            <InputNumber min={1} max={365} style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="total" label="总量(0 = 不限)" initialValue={0}>
-            <InputNumber min={0} style={{ width: '100%' }} />
-          </Form.Item>
-        </Form>
-      </Modal>
     </>
   )
 }

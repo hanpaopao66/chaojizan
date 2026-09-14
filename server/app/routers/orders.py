@@ -1238,13 +1238,13 @@ async def transition(
         # 完成一单 = 顾客、店主、骑手三方信用分的加分项都变了。提交之后再打缓存(见 credit.invalidate)
         from ..services import credit
         await credit.invalidate_order(db, order)
-    # 送达超时判赔(平台承担,独立事务,失败不影响送达)
+    # 送达超时致歉(2026-09-14 起只致歉不发券;独立事务,失败不影响送达)
     if payload.to_status == OrderStatus.DELIVERED:
         try:
             from ..services.eta import compensate_if_late
             await compensate_if_late(db, order)
         except Exception:
-            logger.exception("超时赔付检查失败 %s", order.order_no)
+            logger.exception("超时致歉检查失败 %s", order.order_no)
     await _notify(order)
     # 商家接单 = 这单进抢单池,推给附近在线骑手(#114)。
     # 只在 ACCEPTED 这一次推:READY 时单子早就在池里了,再推一遍是骚扰。
@@ -2284,11 +2284,14 @@ async def my_order_counts(
 # 放在后面的话 "hardship-rules" 会被当成一个订单号,回「订单不存在」
 @router.get("/hardship-rules")
 async def hardship_rules(user: User = Depends(get_current_user)):
-    """难度补贴的**完整口径**:每一项是什么、加多少钱、几条转正。
+    """难度费的**完整口径**:每一项是什么、加多少钱、几条转正。
 
-    公开这个接口是这套机制成立的前提。**不给出金额的补贴等于施舍** ——
-    骑手不知道勾一项能拿多少,就无从判断值不值得花那十秒钟填;
+    公开这个接口是这套机制成立的前提。**不给出金额的等于施舍** ——
+    骑手不知道勾一项以后能多拿多少,就无从判断值不值得花那十秒钟填;
     顾客不知道那两块钱怎么来的,只会觉得平台在乱收费。
+
+    2026-09-14 起反馈的这一单不当场补钱(平台不出这笔钱),金额只用于以后的单
+    —— 攒够共识后算进这个地址的配送费,顾客付、下单前看得到(services/hardship 第 3 条)。
 
     写死在代码里,不做后台可调 —— 可调就意味着某天可以悄悄调低。
     """
@@ -2313,18 +2316,22 @@ async def hardship_rules(user: User = Depends(get_current_user)):
                             f"封顶 ¥{hs.WALK_IN_MAX_CENTS / 100:g}",
                  "no_vehicle": f"固定 ¥{hs.NO_VEHICLE_CENTS / 100:g}",
                  "gate_hard": f"固定 ¥{hs.GATE_HARD_CENTS / 100:g}",
-                 "other": "不自动给钱,平台人工看",
+                 "other": "只记下、不算进配送费,平台人工看",
              }[k]}
             for k, (n, d) in hs.HARDSHIP_LABELS.items()
         ],
         "max_cents": hs.MAX_COMP_CENTS,
         "consensus_min": hs.CONSENSUS_MIN,
-        "funder": "platform",
+        # 这笔钱以后由下单的顾客付(算进配送费,下单前看得到),平台不出
+        "funder": "customer",
+        "paid_now": False,
         "notes": [
-            "这笔钱由平台出,不向顾客或商家追收",
+            f"同一个地址攒够 {hs.CONSENSUS_MIN} 个骑手一致反馈后,"
+            "以后的单在下单时就把这几项算进配送费,全归骑手;顾客下单前看得到,"
+            "可以改选送到楼下",
+            "反馈的这一单不当场补钱:平台不出这笔钱,也不向这一单的顾客、商家追收"
+            "(2026-09-14 起)",
             "反馈不影响你的评分、派单和接单资格",
-            f"同一个地址攒够 {hs.CONSENSUS_MIN} 条一致反馈后,"
-            "后来的单在下单时就按真实难度算,顾客也看得到",
             "同一个地址你只需要反馈一次",
         ],
     }
@@ -2838,17 +2845,18 @@ async def report_hardship(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    """骑手反馈这一单实际有多难送 —— 当场补钱 + 按地址沉淀(#301)。
+    """骑手反馈这一单实际有多难送 —— 按地址沉淀,以后的单按真实难度计价(#301)。
 
     ## 为什么在送达之后才能提
 
     送达前弹这个是在他赶时间的时候加手续。**先把餐送到,再说钱的事。**
 
-    ## 这笔钱由平台出
+    ## 这一单不当场补钱(2026-09-14 起)
 
-    不向顾客追收(顾客会觉得被坑,更要命的是会让骑手不敢反馈 ——
-    他知道这钱是从顾客身上要的),也不向商家追收(与商家无关)。
-    走 `adjustment` 入账,和申诉改判同一条通道:平台认亏。
+    原来这一单当场补钱、平台出(走 `adjustment` 入账)。拍板「平台没有钱,不做平台出钱的
+    安抚和营销」之后停了:反馈照收照记,`comp_cents` 记 0,不写入账行。也不向这一单的
+    顾客追收(他下单时没看到这笔钱,事后追收就是加价),不向商家追收(与商家无关)。
+    以前补过的钱不动。
 
     ## 沉淀怎么用
 
@@ -2879,31 +2887,27 @@ async def report_hardship(
     # 说一次就够了,再说三次也不会变得更难
     dup = await db.scalar(select(RiderHardship.id).where(
         RiderHardship.rider_id == user.id, RiderHardship.addr_key == key))
-    comp = 0 if dup else hs.comp_cents(kinds, payload.floors, payload.walk_m)
 
+    # comp_cents 记 0:2026-09-14 起不当场补钱(见 docstring),这张表只留反馈本身
     row = RiderHardship(
         order_id=order.id, order_no=order_no, rider_id=user.id,
         addr_key=key, kinds=kinds, floors=payload.floors,
         walk_m=payload.walk_m, note=payload.note.strip()[:200],
-        comp_cents=comp,
+        comp_cents=0,
     )
     db.add(row)
-    if comp:
-        from ..models import EarningKind, RiderEarning
-        db.add(RiderEarning(
-            rider_id=user.id, order_id=order.id, order_no=order_no,
-            kind=EarningKind.adjustment, amount_cents=comp,
-        ))
     await db.commit()
 
+    # lines 是「以后这里的单会加多少」,不是这一单补了多少
     lines = hs.explain(kinds, payload.floors, payload.walk_m)
     return {
-        "comp_cents": comp,
+        "comp_cents": 0,
+        "paid_now": False,
         "lines": lines,
         "duplicate": bool(dup),
         "message": (
-            f"谢谢,已补 ¥{comp / 100:.2f} 到你的收入"
-            if comp else
-            ("这个地址你反馈过了,已经记下 —— 不重复补钱,但会算进共识"
-             if dup else "已记下;这几项不自动补钱,平台会人工看")),
+            "这个地址你反馈过了,已经记下,会算进共识"
+            if dup else
+            f"谢谢,已记下。这一单不当场补钱;同一个地方攒够 {hs.CONSENSUS_MIN} 个骑手"
+            "说过之后,以后的单下单时就按真实难度算进配送费,钱归骑手"),
     }

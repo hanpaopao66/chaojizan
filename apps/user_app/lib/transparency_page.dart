@@ -384,7 +384,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
             const SzSectionTitle('赔出去 / 贴出去'),
             const SizedBox(height: 6),
             _kv(sz, '平台补贴', _yuan(_int(spend['subsidy_cents'])),
-                note: '首单立减、安抚券抵扣,平台承担'),
+                note: '首单立减(现在是 0)、停发之前发的超时安抚券被抵扣'),
             _kv(sz, '餐损赔付', _yuan(_int(spend['meal_compensation_cents'])),
                 note: '无骑手接单被取消时,已出餐的商家按应收全额赔,佣金不收'),
             _kv(sz, '申诉改判', _yuan(_int(spend['adjustment_cents'])),
@@ -474,7 +474,8 @@ class _TransparencyPageState extends State<TransparencyPage> {
                 '一个从不赔钱的平台,要么从不出错,要么赔的规则形同虚设。'),
             const SizedBox(height: 12),
             _compRow(sz, '超时安抚券', eta,
-                '送达超时 15 分钟自动发券,平台承担,不摊给商家和骑手'),
+                '停发之前发出去的(送达超时 15 分钟自动发)。2026-09-14 起超时只致歉、不发券,'
+                '没用的券照旧能用'),
             _compRow(sz, '餐损赔付', meal,
                 '没有骑手接单被取消时,已出餐的商家按应收全额赔付'),
             _compRow(sz, '成功退款', refund,

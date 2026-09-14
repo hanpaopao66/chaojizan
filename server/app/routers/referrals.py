@@ -1,41 +1,30 @@
-"""邀请有礼:邀请码 → 新用户 24 小时内填码 → 完成首单双方发券。
+"""邀请有礼 —— **2026-09-14 停了**:奖励停发、三端入口下线。
 
-奖励挂"完成单"不挂注册,刷号无利可图;防刷三道:同设备不建立关系、
-邀请人每自然月上限、风控命中的完成单不触发(留待下一笔干净的单)。
-**券由商家出,平台不出钱**(#115):被邀请人首单落在哪家店,就由那家店的
-「新客推荐券」批次(trigger=referral)发两张,限该店可用;商家没建批次就
-不发券,只把邀请关系记成 rewarded。平台立场是不靠补贴换增长,
-用户端「我们承诺不做的事」印着这句,发钱的口子不能开在这里。
+拍板「平台没有钱,不做平台出钱的安抚和营销」时一起停的。原来的形态:邀请码 → 新用户
+24 小时内填码 → 完成首单双方发券(券由首单那家店的「新客推荐券」批次出,#115)。
+
+停了之后:
+
+- **已经到账的不动** —— 发出去的券照旧能用,邀请关系、战绩都留着;
+- **还没完成首单的邀请不再发奖励** —— 结算里那个钩子删了(services/settlement),
+  pending 的邀请关系原样留着、不会变成 rewarded;
+- 填邀请码的接口回 410,说清楚停了;「我的邀请」只剩战绩和一句照实的说明,
+  客户端据此下线入口(老版本 App 点进来看到的也是这句话);
+- 原来的两个配置(奖励开关、月上限)一起删了,不留一个能拨回来的开关。
 """
-import secrets
-from datetime import datetime, timedelta, timezone
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import settings
 from ..db import get_db
 from ..models import Referral, User
 from ..security import require_role
 
 router = APIRouter(prefix="/referrals", tags=["邀请有礼"])
 
-CLAIM_WINDOW_HOURS = 24
-
-
-async def ensure_ref_code(db: AsyncSession, user: User) -> str:
-    """懒生成 6 位邀请码(唯一,重试防碰撞)。"""
-    if user.ref_code:
-        return user.ref_code
-    for _ in range(10):
-        code = f"{secrets.randbelow(10**6):06d}"
-        exists = await db.scalar(select(User.id).where(User.ref_code == code))
-        if not exists:
-            user.ref_code = code
-            await db.commit()
-            return code
-    raise HTTPException(500, "邀请码生成失败,请重试")
+#: 停了之后给人看的那一句(我的邀请、填码被拒、规则页都用它)
+STOPPED_NOTE = ("邀请有礼已经停了(2026-09-14):已经到账的券照旧能用;"
+                "还没完成首单的邀请不再发奖励")
 
 
 @router.get("/me")
@@ -43,26 +32,20 @@ async def my_referral(
     user: User = Depends(require_role("customer")),
     db: AsyncSession = Depends(get_db),
 ):
-    """我的邀请码与战绩;新用户(24 小时内)另返回可填码标记。"""
-    code = await ensure_ref_code(db, user)
+    """我的邀请战绩。活动停了:不再给邀请码、不再能填码,只报历史和一句说明。"""
     invited = await db.scalar(select(func.count(Referral.id)).where(
         Referral.inviter_id == user.id))
     rewarded = await db.scalar(select(func.count(Referral.id)).where(
         Referral.inviter_id == user.id, Referral.status == "rewarded"))
-    claimed = await db.scalar(select(Referral.id).where(
-        Referral.invitee_id == user.id))
-    created = user.created_at
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    in_window = (datetime.now(timezone.utc) - created
-                 <= timedelta(hours=CLAIM_WINDOW_HOURS))
-    from ..services.flags import marketing_on
     return {
-        "enabled": await marketing_on(db),
-        "code": code,
-        "invited": invited,
-        "rewarded": rewarded,
-        "can_claim": bool(in_window and not claimed),
+        "enabled": False,
+        "stopped": True,
+        "note": STOPPED_NOTE,
+        # 老版本 App 读 code 显示邀请码:给空串,它显示不出一个还能用的码
+        "code": "",
+        "invited": invited or 0,
+        "rewarded": rewarded or 0,
+        "can_claim": False,
     }
 
 
@@ -70,96 +53,6 @@ async def my_referral(
 async def claim_referral(
     payload: dict,
     user: User = Depends(require_role("customer")),
-    db: AsyncSession = Depends(get_db),
 ):
-    """新用户填邀请码(注册后 24 小时内,过期不候)。"""
-    from ..services.flags import marketing_on
-    # referral_reward_cents 现在只当总开关用(<=0 = 关掉邀请功能),
-    # 具体发多少由商家批次定——平台不再决定金额,也就不该对外播报金额
-    if settings.referral_reward_cents <= 0 or not await marketing_on(db):
-        raise HTTPException(409, "邀请活动暂未开启")
-    code = str(payload.get("code") or "").strip()
-    # deleted_at 过滤是必须的:注销时才刚开始清 ref_code,存量墓碑行
-    # 的邀请码还在库里,不加这条就会继续给一个注销掉的账号发券
-    inviter = await db.scalar(select(User).where(
-        User.ref_code == code, User.deleted_at.is_(None)))
-    if inviter is None or len(code) != 6:
-        raise HTTPException(404, "邀请码不存在")
-    if inviter.id == user.id:
-        raise HTTPException(422, "不能填自己的邀请码")
-    created = user.created_at
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    if datetime.now(timezone.utc) - created > timedelta(
-            hours=CLAIM_WINDOW_HOURS):
-        raise HTTPException(409, "注册超过 24 小时,填码通道已关闭")
-    existing = await db.scalar(select(Referral.id).where(
-        Referral.invitee_id == user.id))
-    if existing:
-        raise HTTPException(409, "你已经填过邀请码了")
-    # 防刷一:同设备不建立关系
-    if user.device_id and inviter.device_id == user.device_id:
-        raise HTTPException(422, "同一台设备上的账号不能互相邀请")
-    # 防刷二:邀请人月上限(按填码时间算)
-    month_start = datetime.now(timezone.utc).replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0)
-    month_count = await db.scalar(select(func.count(Referral.id)).where(
-        Referral.inviter_id == inviter.id,
-        Referral.created_at >= month_start))
-    if month_count >= settings.referral_monthly_cap:
-        raise HTTPException(
-            409, f"这位邀请人本月邀请已达 {settings.referral_monthly_cap} 人上限")
-    db.add(Referral(inviter_id=inviter.id, invitee_id=user.id))
-    await db.commit()
-    return {"ok": True,
-            "hint": "完成首单后,如果那家店参与了新客推荐,"
-                    "你和好友各得一张该店的券"}
-
-
-async def reward_referral_if_first_order(db: AsyncSession, order) -> None:
-    """完成单钩子(settle_order 内调用):被邀请人的首个完成单触发双发券。
-
-    风控命中(multi_account_device 等)的单不触发,关系保留待下一笔干净单。
-    不单独 commit,随调用方事务提交;失败不影响结算。
-    """
-    from ..services.flags import marketing_on
-    if settings.referral_reward_cents <= 0 or not await marketing_on(db):
-        return
-    referral = await db.scalar(
-        select(Referral).where(Referral.invitee_id == order.customer_id,
-                               Referral.status == "pending")
-        .with_for_update(skip_locked=True))
-    if referral is None:
-        return
-    if order.risk_flags and order.risk_flags.get("hits"):
-        return  # 防刷三:风控命中的单不算数
-    from datetime import datetime as _dt
-
-    from ..models import CouponBatch
-    from ..services.coupons import issue_from_batch
-    from ..services.push import push_to_user
-
-    # 首单落在哪家店,就由那家店的新客推荐券批次出券;没建批次就不发。
-    # 平台不再兜底出钱——那正是「不靠补贴换增长」这句承诺的落点。
-    batch = await db.scalar(
-        select(CouponBatch)
-        .where(CouponBatch.merchant_id == order.merchant_id,
-               CouponBatch.trigger == "referral",
-               CouponBatch.active.is_(True))
-        .with_for_update(skip_locked=True))
-    issued = 0
-    amount = batch.amount_cents if batch else 0
-    if batch is not None:
-        for uid in (referral.invitee_id, referral.inviter_id):
-            if await issue_from_batch(db, batch, uid, note="邀请有礼") is not None:
-                issued += 1
-    referral.status = "rewarded"
-    referral.rewarded_at = _dt.now(timezone.utc)
-    try:
-        # 有券就说券,没券就只报喜——不许暗示有奖励却不给
-        body = (f"你邀请的好友完成了首单,{amount / 100:g} 元券已放进你的券包"
-                if issued else "你邀请的好友已经在超级赞下单了,谢谢你带他来")
-        await push_to_user(referral.inviter_id, "邀请有礼", body,
-                           {"type": "coupon"}, record_skip=True)
-    except Exception:
-        pass
+    """填邀请码 —— 活动停了,一律 410,说清楚为什么。"""
+    raise HTTPException(410, STOPPED_NOTE)

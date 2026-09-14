@@ -554,7 +554,7 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
         await request_refund(db, order, refund_amount, "无骑手接单自动取消")
         # 全额退款 = 抵扣过的券放回券包(与人工取消同一口径)。
         # 少了这一句,用户拿回的只是打完折的实付,券却被这条**平台侧原因**的
-        # 取消吃掉了 —— 而超时赔付券本身就是平台赔给他的,转头被下一单的
+        # 取消吃掉了 —— 而超时安抚券(停发之前发的)本身就是平台赔给他的,转头被下一单的
         # 无骑手取消没收,是这条漏洞里最说不过去的一种
         from .eta import release_coupon
         await release_coupon(db, order.order_no)
@@ -811,21 +811,29 @@ async def sweep_once() -> dict[str, int]:
         if completed or pickup_done:
             from .credit import invalidate_orders
             await invalidate_orders(db, [*completed, *pickup_done])
-        # 超时赔付兜底补发:送达时判赔失败/进程重启漏掉的,清扫补上
-        # (compensate_if_late 自带幂等与豁免判断,独立事务)
+        # 超时致歉兜底:送达时判超时失败/进程重启漏掉的,清扫补上
+        # (compensate_if_late 自带幂等与豁免判断,独立事务;2026-09-14 起只致歉不发券)。
+        # 只扫**送达那一刻**就晚了的单(原来按「现在」扫,准时送到、顾客还没确认的单也被当成超时),
+        # 处理过的、改过地址的不再扫 —— 不然 50 个名额永远被同一批单占着
         try:
-            from .eta import LATE_GRACE_MINUTES, compensate_if_late
+            from .eta import APOLOGY_EVENT, LATE_GRACE_MINUTES, compensate_if_late
+            skip = select(OrderEvent.id).where(
+                OrderEvent.order_id == Order.id,
+                OrderEvent.to_status.in_(
+                    (APOLOGY_EVENT, "eta_compensated", "address_changed")))
             late_delivered = (await db.scalars(
                 select(Order).where(
                     Order.status == OrderStatus.DELIVERED,
                     Order.eta_at.isnot(None),
-                    Order.eta_at
-                    < now - timedelta(minutes=LATE_GRACE_MINUTES),
+                    Order.delivered_at.isnot(None),
+                    Order.delivered_at
+                    > Order.eta_at + timedelta(minutes=LATE_GRACE_MINUTES),
+                    ~skip.exists(),
                 ).limit(50))).all()
             for order in late_delivered:
                 await compensate_if_late(db, order)
         except Exception:
-            logger.exception("超时赔付兜底补发失败")
+            logger.exception("超时致歉兜底失败")
 
     try:
         await _notify_no_rider(alerted, no_rider_cancelled, compensated)

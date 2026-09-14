@@ -9,7 +9,7 @@ from tests import run_e2e
 
 TESTS = Path(run_e2e.__file__).resolve().parent
 #: 要特殊环境、故意不进全量的(见 Makefile 的 test-special)
-SPECIAL = {"e2e_eta_compensation", "e2e_privacy_phone_strict"}
+SPECIAL = {"e2e_privacy_phone_strict"}
 
 
 def test_every_e2e_file_is_listed_or_special():

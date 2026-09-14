@@ -45,7 +45,7 @@ class _CouponsPageState extends State<CouponsPage> {
                   ? ListView(children: const [
                       Padding(
                         padding: EdgeInsets.all(48),
-                        child: Center(child: Text('还没有券;超时赔付、新客活动都会发到这里')),
+                        child: Center(child: Text('还没有券;店铺券、收藏店铺送的券都会放到这里')),
                       ),
                     ])
                   : ListView.builder(

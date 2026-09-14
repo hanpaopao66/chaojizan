@@ -564,15 +564,14 @@ export interface CouponBatch {
   issued: number
   used: number
   active: boolean
+  /** null = 平台批次(平台出钱,2026-09-14 起停发);有值 = 那家店自己出钱的批次 */
+  merchant_id?: number | null
 }
 
 export const listCouponBatches = () => get<CouponBatch[]>('/admin/coupon-batches')
 export const toggleCouponBatch = (id: number) =>
   post(`/admin/coupon-batches/${id}/toggle`)
-export const createCouponBatch = (b: {
-  name: string; trigger: string; amount_cents: number
-  min_spend_cents: number; valid_days: number; total: number
-}) => post('/admin/coupon-batches', b)
+// 新建平台批次、定向发券两个接口 2026-09-14 起停了(服务端回 410):平台不出钱发券
 
 // ---------- 开票 ----------
 
@@ -666,10 +665,6 @@ export const setMerchantCity = (id: number, city: string) =>
 /** 二清收口:回填微信特约商户号。ready=true 之后新订单货款走分账。 */
 export const setSubMchid = (id: number, subMchid: string, ready: boolean) =>
   post(`/admin/merchants/${id}/sub-mchid`, { sub_mchid: subMchid, ready })
-
-/** 定向发券:给指定手机号发某个批次的券。 */
-export const issueCoupon = (phone: string, batchId: number) =>
-  post('/admin/coupons/issue', { phone, batch_id: batchId })
 
 /** T+1 批量打款:昨天及更早申请的 pending 一键打完。 */
 export const t1BatchPaid = () => post<{ done: number }>('/admin/withdrawals/t1-batch-paid')

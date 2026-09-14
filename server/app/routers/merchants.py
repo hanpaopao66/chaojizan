@@ -1371,13 +1371,18 @@ async def create_shop_coupon_batch(
     """商家自建券批次。成本 100% 商家承担(下单走满减同口径),
     平台佣金按券后实收计——你让利,平台跟着少收,与满减一致。
 
-    trigger=shop 是顾客主动领;referral/birthday/winback 是系统按条件自动发,
-    这三类原先由平台掏钱,#115 起归位给商家。同一家店同一 trigger
+    trigger=shop 是顾客主动领;birthday/winback 是系统按条件自动发,
+    原先由平台掏钱,#115 起归位给商家。同一家店同一 trigger
     只保留一个启用中的批次(建新的会停掉旧的),免得两个批次互相打架。
+
+    referral(新客推荐)2026-09-14 随邀请有礼一起停了:建了也不会发,所以不让建(410)。
     """
     shop = await owned_shop(db, user)
     if shop is None:
         raise HTTPException(404, "还没开店")
+    if payload.trigger == "referral":
+        from .referrals import STOPPED_NOTE
+        raise HTTPException(410, STOPPED_NOTE)
     if payload.trigger != "shop":
         # 自动发放类:同店同类型只留一个启用中的
         await db.execute(
@@ -1905,7 +1910,7 @@ async def my_trend(
     if late:
         causes.append({"key": "late", "name": "出餐超时",
                        "orders": int(late), "estimated": False,
-                       "hint": "超时的安抚券由平台承担,但顾客的体验损失在你这边"})
+                       "hint": "超时了顾客等得久,体验损失在你这边"})
     if sold_out:
         causes.append({"key": "sold_out", "name": "菜品下架/售罄",
                        "dishes": int(sold_out), "estimated": True,
@@ -1931,11 +1936,10 @@ async def my_prep_time(
     ## 为什么必须有这个
 
     在此之前链路是断的:商家在店铺设置里**自己填**「承诺出餐时长」、没人核;
-    骑手抢单看到的等待预期已经用上**实测 P80**;超时赔付**由平台承担**;
-    而商家**零反馈** —— 他不知道自己实际比承诺慢多少,
-    更不知道这让平台掏了多少钱。
+    骑手抢单看到的等待预期已经用上**实测 P80**;超时(当时是平台掏钱发安抚券,
+    2026-09-14 起只致歉不发券);而商家**零反馈** —— 他不知道自己实际比承诺慢多少。
 
-    **平台掏钱、商家无感、问题不改。** 这个闭环不通,治理就无从谈起。
+    **顾客在等、骑手在等、商家无感、问题不改。** 这个闭环不通,治理就无从谈起。
 
     ## 红线(承接 #144)
 
@@ -4731,7 +4735,7 @@ async def my_rules(
                     "但**星级是用户给的**:配送不好导致的低星仍会计入店铺评分。"
                     "遇到这种,72 小时内申诉,系统会自动附上这单的"
                     "接单/出餐/送达时间线供审核 —— 出餐正常而配送晚了,证据替你说话",
-                    "超时安抚券由平台承担,不扣你也不扣骑手",
+                    "送达超时只向顾客致歉,不发券,不扣你也不扣骑手",
                     # 等餐补偿(平台出钱)2026-09-14 停发。等餐时长照旧记录、公示,
                     # 但不向你收钱(出餐时长君子协定)
                     "骑手到店等餐的时长照实记录、公示;平台不向你收这笔钱,也不给骑手补",
