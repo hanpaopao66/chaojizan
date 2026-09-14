@@ -15,9 +15,16 @@ concurrency:
 
 jobs:
   server:
-    name: 服务端 e2e
+    # 全量 e2e 分 4 组并行(tests/run_e2e.py 按实测耗时均衡分组,组内顺序不变),每组自己一套
+    # db / redis / MinIO、从种子数据起跑。串着跑要 22 分钟,分组后每组 5 分钟上下。
+    # fail-fast 关掉:一组红了别的组照样跑完,一次看全
+    name: 服务端 e2e(第 ${{ matrix.shard }}/4 组)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     services:
       db:
@@ -73,6 +80,12 @@ jobs:
       # 注意**只调这个数,不是关掉这条规则** —— e2e_queue 仍然验
       # 「叫号当场标过号被拒」和「过了宽限期才能过号」两头。
       QUEUE_CALL_GRACE_SECONDS: "2"
+      # 同一个道理的三条:短信重发冷却(生产 60 秒)、来电没人接算未接(生产 45 秒)、
+      # 通话中一方掉线判中断(生产 20 秒)。e2e 照样验「冷却内被拒、过了能发」「没人接两边都收到
+      # missed」「掉线判结束」,只是不真等 —— 真等的话光这三条就给每次 CI 加 4 分钟
+      SMS_RESEND_SECONDS: "3"
+      CALL_RING_SECONDS: "5"
+      CALL_DROP_GRACE_SECONDS: "3"
 
     steps:
       - uses: actions/checkout@v4
@@ -162,9 +175,10 @@ jobs:
         # 只有进程内才拦得住真实的支付渠道调用。那时候测试进程自己要能
         # 验开服务端签发的 token,两边 secret 不一致就是一句
         # 「登录已过期,请重新登录」,而 token 明明是几秒前刚拿的。
+        working-directory: server
         run: |
           export JWT_SECRET=ci-$GITHUB_RUN_ID
-          make test
+          python -m tests.run_e2e --shard ${{ matrix.shard }}/4
 
       - name: 失败时贴上服务端日志
         if: failure()

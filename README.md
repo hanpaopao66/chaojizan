@@ -220,7 +220,7 @@ cd apps/user_app && flutter run
 ```bash
 make unit          # 纯函数单测,秒级
 make analyze       # Dart 静态检查 + merchant-web tsc
-make test          # 130 套 e2e,跑在真实 HTTP 接口上(需要服务已启动)
+make test          # 190 套 e2e,跑在真实 HTTP 接口上(需要服务已启动);清单在 server/tests/e2e_suites.txt
 ```
 
 `make analyze` 必须带上 `packages/shared`——在 app 目录里跑 `flutter analyze`
@@ -228,7 +228,10 @@ make test          # 130 套 e2e,跑在真实 HTTP 接口上(需要服务已启�
 曾因此漏掉一个重复定义的方法:analyze 全绿、e2e 全绿,直到打 release 包才编译失败。
 
 `make test` 的三个前置条件写在 Makefile 注释里(服务端要用
-`AUTO_FLOW_ENABLED=false` 启动等),少一个都跑不完。
+`AUTO_FLOW_ENABLED=false` 启动等),少一个都跑不完。它跑完全部再汇总,
+不在第一个失败处停;新写的 e2e 要加进 `server/tests/e2e_suites.txt`(漏加了单测会拦)。
+CI 把这份清单按实测耗时分成 4 组并行跑(`python -m tests.run_e2e --shard k/4`),
+每组各自一个干净库,所以套件之间不能靠前一个套件留下的数据。
 
 CI 对每个 PR 跑同样的三件事(服务端 e2e 起真 PostGIS/Redis/MinIO,
 和生产同一条代码路径),外加工作区与全历史两层密钥扫描 ——
@@ -275,7 +278,7 @@ CI 对每个 PR 跑同样的三件事(服务端 e2e 起真 PostGIS/Redis/MinIO,
   "这里确实快"和"我们还不知道"是两件事,混在一起就是在编
   —— [drop_time.py#L39](server/app/services/drop_time.py#L39) `MIN_SAMPLE = 20`,
   热力图每格带 `enough` 标记 [riders.py#L586](server/app/routers/riders.py#L586) `order_heatmap()`
-- **e2e 全链路回归**:`make test` 130 套端到端测试,跑在真实 HTTP 接口上
+- **e2e 全链路回归**:`make test` 190 套端到端测试,跑在真实 HTTP 接口上
 
 ## 参与
 
