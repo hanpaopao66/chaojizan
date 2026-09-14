@@ -208,7 +208,8 @@ _ORIGINAL_AFTER = {
     ("rider", KIND_DELIVERY): "改判的话,这一条不再计分,记录上写明不是你的责任,判责时扣的钱退回",
     ("rider", KIND_AFTER_SALE): "改判的话,这一条不再计分,记录上写明不是你的责任,判责时扣的钱退回",
     ("merchant", KIND_AFTER_SALE): "改判的话,这一条不再计分,记录上写明商家无责;"
-                                   "被冲掉的那笔净额不补回(顾客拿到的退款不追回,平台也不出这笔钱)",
+                                   "这单冲掉的净额和另出的配送费、小费都补回你的收入,钱由平台出"
+                                   "(平台判错了,平台自己认),顾客拿到的退款不追回",
 }
 
 #: 交易对方能看到分数的订单状态:接单之后、没取消。
@@ -607,7 +608,7 @@ def _after_sale_query(role: str, ids: list[int], *, still_at_fault: bool = True)
       ③ 食安投诉核实成立(接上那条成立的投诉,issue_kind 记 food_safety,note 是售后上的说明)——
          同一单另记了「食品安全事故」违规的不算这一条(那条违规扣得更多,不重复扣);
       而且现在判责方还是商家(fault = merchant)。商家自己同意的也是 fault = merchant,
-      但哪一条都接不上 —— 不算;商家对它申诉成立后 fault 变成 cleared,自然掉出来;
+      但哪一条都接不上 —— 不算;商家对它申诉成立后 fault 变成 platform(平台补回钱),自然掉出来;
     - 骑手:after_sales.fault = rider,骑手是这一单的骑手。配送异常裁成退款时顺手补的那条
       售后(同一单有 resolution = refund 的配送异常)不在这里重复计 —— 那一次记在配送异常上。
       issue_kind 恒为空。
@@ -1290,8 +1291,8 @@ def _minus_spec(role: str) -> list[dict]:
                       "的申诉改判成立(appeals 里 after_sale_rejected),② 配送异常(到店未出餐、"
                       "餐品不齐)裁决退款时记的那条,③ 食安投诉成立(food_safety_reports.status = "
                       "confirmed)时记的那条;时间按判责时刻 processed_at",
-            "appeal": f"判责后 {hours} 小时内申诉售后判责(改判的话这一条不再计分,被冲掉的净额"
-                      f"不补回);过了 {hours} 小时走客服工单",
+            "appeal": f"判责后 {hours} 小时内申诉售后判责(改判的话这一条不再计分,冲掉的净额和"
+                      f"另出的配送费、小费由平台补回);过了 {hours} 小时走客服工单",
         }]
     else:
         items = [{

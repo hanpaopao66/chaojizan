@@ -112,6 +112,17 @@ export struct TransparencyPage {
     return typeof v === 'number' ? v : 0;
   }
 
+  /** /transparency/compensation 的一项:{total: {count, cents}, month: {...}} 里的累计金额 */
+  private totalCents(d: Record<string, Object> | null, key: string): number {
+    if (d === null) {
+      return 0;
+    }
+    const item: Record<string, Object> = (d[key] ?? {}) as Record<string, Object>;
+    const total: Record<string, Object> = (item['total'] ?? {}) as Record<string, Object>;
+    const v: Object = total['cents'] ?? 0;
+    return typeof v === 'number' ? v : 0;
+  }
+
   @Builder
   private line(label: string, value: string, warn: boolean) {
     Row() {
@@ -173,6 +184,8 @@ export struct TransparencyPage {
       Divider().margin({ top: 6, bottom: 6 });
       this.line('平台补贴支出', yuan(this.nested(d, 'spend', 'subsidy_cents')), false);
       this.line('餐损赔付', yuan(this.nested(d, 'spend', 'meal_compensation_cents')), false);
+      // 平台判错了,平台自己认:三方申诉改判成立补回的钱(原来这里漏了这一项,支出合计对不上分项)
+      this.line('申诉改判', yuan(this.nested(d, 'spend', 'adjustment_cents')), false);
       this.line('支出合计', yuan(this.nested(d, 'spend', 'total_cents')), false);
       Divider().margin({ top: 6, bottom: 6 });
       this.line('平台留存', yuan(this.num(d, 'retained_cents')),
@@ -190,11 +203,14 @@ export struct TransparencyPage {
   private compensationBody(d: Record<string, Object> | null) {
     Column() {
       // 2026-09-14 起超时只致歉不发券,这一行只剩停发之前发出去的
+      // 接口每一项是 {total: {count, cents}, month: {...}};原来按一层取,一直显示 0
       this.line('超时安抚券(停发之前,累计)',
-        yuan(this.nested(d, 'eta_coupons', 'cents')), false);
+        yuan(this.totalCents(d, 'eta_coupons')), false);
       this.line('餐损赔付(累计)',
-        yuan(this.nested(d, 'meal_compensation', 'cents')), false);
-      this.line('退款(累计)', yuan(this.nested(d, 'refunds', 'cents')), false);
+        yuan(this.totalCents(d, 'meal_compensation')), false);
+      this.line('申诉改判(平台判错了,平台自己认,累计)',
+        yuan(this.totalCents(d, 'appeal_corrections')), false);
+      this.line('退款(累计)', yuan(this.totalCents(d, 'refunds')), false);
       Text('这些是平台赔出去的钱。列在这里不是为了显得大方,' +
         '是为了让你知道出了问题平台确实在赔。')
         .fontSize(11).fontColor($r('app.color.ink_muted')).width('100%');

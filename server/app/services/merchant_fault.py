@@ -146,6 +146,44 @@ async def apply(db: AsyncSession, order: Order, *, why: str,
                  charge=max(-int(rows.get(EarningKind.fault_charge) or 0), 0))
 
 
+async def undo(db: AsyncSession, order: Order, *, why: str) -> Split | None:
+    """商家申诉改判成立:**平台判错了,平台自己认**。**只改库不提交。**
+
+    - 冲回的净额补回:追加一行 adjustment(正数,和 2026-09-14 之前改判补的调整行同一个形状:
+      food == net、佣金 0 —— 佣金那一截冲掉了就是冲掉了,平台不再收);
+    - 另出的骑手那份退回:追加一行 fault_refund(正数,等于当初另出的);
+    - 钱由平台出:顾客已经拿到的退款不追回,骑手照拿的配送费和小费也不动 —— 平台为这一单
+      一共出「补回的净额 + 退回的那行」,进透明中心「申诉改判」和公开账本(merchant_rows 的
+      adjustment、merchant_fault_rows 的 fault_refund);
+    - 幂等:补过的不再补。这一单没冲过也没另出过(比如改判之前的老单)返回 None。
+
+    判责方怎么改(platform)由调用方做 —— 和骑手责任改判同一个写法。
+    """
+    rows = await _rows(db, order.id)
+    reversed_net = max(-int(rows.get(EarningKind.reversal) or 0), 0)
+    charge = max(-int(rows.get(EarningKind.fault_charge) or 0), 0)
+    if reversed_net <= 0 and charge <= 0:
+        return None
+    note = why[:150]
+    if reversed_net > 0 and EarningKind.adjustment not in rows:
+        db.add(MerchantEarning(
+            merchant_id=order.merchant_id, order_id=order.id, order_no=order.order_no,
+            food_cents=reversed_net, commission_cents=0, net_cents=reversed_net,
+            # 平台补给商家的钱,走平台代收口径(分账单冲回时是渠道退回的,补回只能从平台侧给)
+            settle_mode="platform",
+            kind=EarningKind.adjustment,
+            note=f"申诉改判,平台判错了,补回这单净额:{note}"[:200]))
+    if charge > 0 and EarningKind.fault_refund not in rows:
+        db.add(MerchantEarning(
+            merchant_id=order.merchant_id, order_id=order.id, order_no=order.order_no,
+            food_cents=charge, commission_cents=0, net_cents=charge,
+            settle_mode="platform",
+            kind=EarningKind.fault_refund,
+            note=f"申诉改判,平台判错了,退回另出的配送费和小费:{note}"[:200]))
+    await db.flush()
+    return Split(reversed_net=reversed_net, charge=charge)
+
+
 def merchant_push_text(split: Split, refunded: int) -> str:
     """推给店主的那一句:退了顾客多少、这单净额冲回多少、骑手那份另出多少 —— 几个数都照实说。"""
     parts = [f"顾客全额退款 ¥{refunded / 100:.2f}"] if refunded else []

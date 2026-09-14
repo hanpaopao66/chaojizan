@@ -12,7 +12,10 @@
 4. 食安投诉核实成立;
 5. 用了停发之前的平台券:退的是顾客真付的钱,券那截不退现金、回平台;
 6. 商家自配送:配送费本来就在商家入账里,冲回净额就一起退了,不另出;
-7. 商家余额因此为负:可提现 0、提现被挡;审计不当错账报(提走的没超过挣到的)。
+7. 商家余额因此为负:可提现 0、提现被挡;审计不当错账报(提走的没超过挣到的);
+8. 商家对第 3 段那一单申诉、改判成立:平台判错了,平台自己认 —— 冲回的净额和另出的那行都补回,
+   顾客的退款不追回、骑手照拿;进透明中心「申诉改判」和公开账本 platform_correction;
+9. 顾客对「按送达处理」申诉、改判成立:平台原路退,进公开账本 appeal_refund_rows。
 
 在 server/ 目录下运行:python -m tests.e2e_merchant_fault
 """
@@ -304,6 +307,77 @@ def main() -> None:
     audit_clean(f, "余额为负")
     print(f"✓ 商家余额 ¥{w['balance_cents'] / 100:.2f}(这几单另出的 ¥{owed / 100:.2f}):"
           "可提现 0、提现被挡;之后的收入先抵;审计不当错账报")
+
+    # ============ 8. 商家申诉改判成立:平台判错了,平台自己认 ============
+    # 第 3 段那一单(到店未出餐判商家责任):冲回的净额和另出的骑手那份都补回,钱由平台出;
+    # 顾客的退款不追回、骑手照拿;进透明中心「申诉改判」和当天公开账本的 platform_correction
+    as_c = after_sale_id(c)
+    funds0 = call("GET", "/transparency/funds")
+    corr0 = call("GET", "/transparency/compensation")["appeal_corrections"]["total"]
+    ledger0 = today_payload()["totals"]["platform_correction"]
+    oc0 = call("GET", f"/orders/{c}", c3)
+    ap = call("POST", "/appeals", boss, {"target_type": "after_sale", "target_id": as_c,
+                                         "reason": "出餐记录显示按时出了餐,骑手来早了"})
+    call("POST", f"/admin/appeals/{ap['id']}/resolve", admin,
+         {"result": "overturned", "note": "出餐记录可证按时出餐"})
+    back = r3["net"] + r3["share"]
+    m = merchant_rows(c)
+    assert m.get("adjustment") == r3["net"] and m.get("fault_refund") == r3["share"], m
+    assert call("GET", "/merchants/me/wallet", boss)["balance_cents"] == w["balance_cents"] + back
+    oc1 = call("GET", f"/orders/{c}", c3)
+    assert oc1["refund_cents"] == oc0["refund_cents"] == oc0["total_cents"], "顾客的退款不追回"
+    assert rider_rows(c) == {"earning": r3["share"]}, "骑手照拿配送费和小费"
+    a_c = next(a for a in call("GET", "/merchants/me/after-sales", boss) if a["id"] == as_c)
+    assert a_c["fault"] == "platform", a_c
+    funds1 = call("GET", "/transparency/funds")
+    assert funds1["spend"]["adjustment_cents"] - funds0["spend"]["adjustment_cents"] == back
+    d1 = funds1["spend_detail"]
+    d0 = funds0["spend_detail"]
+    assert d1["merchant_restore_cents"] - d0["merchant_restore_cents"] == r3["net"], (d0, d1)
+    assert d1["merchant_fault_refund_cents"] - d0["merchant_fault_refund_cents"] == r3["share"]
+    corr1 = call("GET", "/transparency/compensation")["appeal_corrections"]["total"]
+    assert corr1["cents"] - corr0["cents"] == back and corr1["count"] - corr0["count"] == 2, \
+        (corr0, corr1)
+    p = today_payload()
+    assert p["totals"]["platform_correction"] - ledger0 == back, "平台纠错的钱要进公开账本"
+    assert verify_rows(p) == [], verify_rows(p)
+    audit_clean(c, "商家申诉改判")
+    print(f"✓ 商家申诉改判成立:补回净额 ¥{r3['net'] / 100:.2f} + 另出的 ¥{r3['share'] / 100:.2f},"
+          "钱由平台出;顾客退款不追回、骑手照拿;进「申诉改判」和公开账本,审计、见证都过")
+
+    # ============ 9. 顾客申诉改判(按送达处理)成立:平台原路退,进公开账本 ============
+    c9, _ = new_customer()
+    g = place(c9)
+    go(boss, g, "accepted")
+    call("POST", f"/riders/grab/{g}", rider)
+    go(boss, g, "ready")
+    go(rider, g, "picked_up")
+    issue9 = call("POST", "/riders/issues", rider,
+                  {"order_no": g, "kind": "cannot_contact", "note": "电话一直不接"})
+    call("POST", f"/admin/delivery-issues/{issue9['id']}/resolve", admin,
+         {"action": "mark_delivered", "note": "联系不上,按送达处理"})
+    funds0 = call("GET", "/transparency/funds")
+    ledger0 = today_payload()["totals"]
+    ap9 = call("POST", "/appeals", c9, {"target_type": "delivery_issue", "target_id": issue9["id"],
+                                        "reason": "我一直在家,电话没响过,有通话记录"})
+    call("POST", f"/admin/appeals/{ap9['id']}/resolve", admin,
+         {"result": "overturned", "note": "通话记录可证,非顾客原因"})
+    og = call("GET", f"/orders/{g}", c9)
+    goods = og["total_cents"] - og["delivery_fee_cents"] - og["tip_cents"]
+    assert og["refund_cents"] == goods > 0, og
+    flows = call("GET", f"/orders/{g}/refunds", c9)
+    assert any("平台判错了" in f["reason"] for f in flows), flows
+    funds1 = call("GET", "/transparency/funds")
+    assert funds1["spend_detail"]["appeal_refund_cents"] \
+        - funds0["spend_detail"]["appeal_refund_cents"] == goods
+    from app.services.ledger import hash_no
+    p = today_payload()
+    assert {"o": hash_no(g), "amount": goods} in p["appeal_refund_rows"], p["appeal_refund_rows"]
+    assert p["totals"]["appeal_refund"] - ledger0["appeal_refund"] == goods
+    assert p["totals"]["platform_correction"] - ledger0["platform_correction"] == goods
+    assert verify_rows(p) == [], verify_rows(p)
+    print(f"✓ 顾客「按送达处理」申诉改判成立:平台原路退 ¥{goods / 100:.2f}(退款原因写着平台判错了),"
+          "进「申诉改判」和公开账本 appeal_refund_rows")
 
     print("\ne2e_merchant_fault 全部通过 ✅")
 

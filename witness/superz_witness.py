@@ -139,6 +139,10 @@ def verify_rows(payload: dict) -> list[str]:
             problems.append(f"商家判责行 {r['o']}: 未知类型 {r['kind']}")
         elif r["amount"] * sign < 0:
             problems.append(f"商家判责行 {r['o']}: {r['kind']} 的金额 {r['amount']} 符号不对")
+    # 顾客申诉改判、平台原路退回的钱(规格 §6.2d):只应是正数
+    for r in payload.get("appeal_refund_rows", []):
+        if r["amount"] <= 0:
+            problems.append(f"申诉改判退款行 {r['o']}: 金额 {r['amount']} 不是正数")
 
     for r in payload.get("voucher_rows", []):
         expect_fee = int(r["gross"] * voucher_rate)
@@ -177,7 +181,23 @@ def verify_rows(payload: dict) -> list[str]:
     if t and "merchant_fault" in t and t.get("merchant_fault") != sum(
             r["amount"] for r in payload.get("merchant_fault_rows", [])):
         problems.append("商家判责合计与逐行加总不一致")
+    if t and "appeal_refund" in t and t.get("appeal_refund") != sum(
+            r["amount"] for r in payload.get("appeal_refund_rows", [])):
+        problems.append("申诉改判退款合计与逐行加总不一致")
+    if t and "platform_correction" in t and t.get("platform_correction") != platform_correction(payload):
+        problems.append("平台纠错(申诉改判)合计与逐行加总不一致")
     return problems
+
+
+def platform_correction(payload: dict) -> int:
+    """平台这一天为纠错(申诉改判成立)出的钱,规格 §6.5:商家改判补回的净额(merchant_rows 里的
+    adjustment)+ 退回商家另出的那行 + 退回骑手的 + 顾客改判平台退的。"""
+    return (sum(r["net"] for r in payload.get("merchant_rows", []) if r["kind"] == "adjustment")
+            + sum(r["amount"] for r in payload.get("merchant_fault_rows", [])
+                  if r["kind"] == "fault_refund")
+            + sum(r["amount"] for r in payload.get("rider_fault_rows", [])
+                  if r["kind"] == "fault_refund")
+            + sum(r["amount"] for r in payload.get("appeal_refund_rows", [])))
 
 
 def _epoch_fingerprint(e: dict) -> str:

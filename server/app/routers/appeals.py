@@ -7,11 +7,13 @@
 - delivery_issue   骑手申诉「判骑手责任」的配送异常裁决(用户申诉判用户原因的)
 - review           商家申诉恶意差评
 
-改判的钱怎么走(用户拿到的退款不倒找):
-- after_sale 改判  → **只撤销判责**:AfterSale.fault merchant → cleared(models.AFTER_SALE_FAULT_CLEARED),
-                     信用分那一条不再计分;**被冲的净额不补回**(2026-09-14 拍板「平台没有钱」:
-                     原来补一条 adjustment 正向行、平台认亏,停了;顾客拿到的退款也不追回,
-                     所以这笔钱照旧是商家出的)。食安投诉成立记的那条同样(admin.confirm_food_safety)
+改判的钱怎么走(用户拿到的退款不倒找)。2026-09-15 定:**平台判错了,平台自己认** ——
+三方改判成立,钱都补回,由平台出;每一笔进透明中心「申诉改判」和公开账本:
+- after_sale 改判  → AfterSale.fault merchant → platform,信用分那一条不再计分;这单冲回的净额
+                     (merchant_earnings 补一条 adjustment)和判商家责任时另出的骑手那份
+                     (fault_refund)都补回(services/merchant_fault.undo)。食安投诉成立记的那条
+                     同样(admin.confirm_food_safety)。2026-09-14 那一版「只撤判责、不补钱」
+                     (判责方记 cleared)没上过线,推翻了
 - after_sale_rider / delivery_issue 改判 → 对应 AfterSale.fault: rider → platform
                      (骑手消责正名,审计规则 6 的免冲账口径同步认 platform);判责时从骑手
                      扣的加回去、保障金池出的回池(services/rider_fault)—— 错判由平台认
@@ -54,11 +56,14 @@ router = APIRouter(tags=["判责申诉"])
 
 APPEAL_WINDOW = timedelta(hours=72)
 
-#: 申诉改判退款的备注前缀。**审计靠它认出"这笔多退的钱是平台认亏"** ——
-#: 分摊单本来是"商家 + 骑手 + 退款 == 用户实付",平台补退之后这个等式
-#: 会多出一块,不认得它的话审计每次改判都报一条假红灯。
-#: 定义在这里,services/audit.py 从这儿读,不另抄一份。
-APPEAL_REFUND_NOTE = "申诉改判:平台承担,原路退回"
+#: 顾客申诉改判(取消分摊、按送达处理)平台原路退回那笔钱的退款原因。**审计靠它认出
+#: "这笔多退的钱是平台判错了自己出的"** —— 分摊单本来是"商家 + 骑手 + 退款 == 用户实付",
+#: 平台补退之后这个等式会多出一块,不认得它的话审计每次改判都报一条假红灯;透明中心「申诉改判」、
+#: 公开账本 appeal_refund_rows 也按它取数。顾客在订单的退款进度里看得到这句话。
+#: 定义在这里,services/audit.py、ledger.py、routers/transparency.py 从这儿读,不另抄一份。
+APPEAL_REFUND_NOTE = "申诉改判:平台判错了,平台自己认,原路退回"
+#: 读的时候认这几个:2026-09-15 之前写的是「申诉改判:平台承担,原路退回」,历史流水照认
+APPEAL_REFUND_NOTES = (APPEAL_REFUND_NOTE, "申诉改判:平台承担,原路退回")
 
 _TYPE_LABELS = {
     "after_sale": "售后判责",
@@ -476,19 +481,32 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
     那一步会改动队列,谁批的必须记下来才能复核。
     """
     if appeal.target_type == "after_sale":
-        # 2026-09-14 起:改判只撤销判责、信用分那一条不再计分,**被冲的净额不补回**
-        # (平台没有钱;顾客拿到的退款也不追回)。原来这里补一条 adjustment 正向行、平台认亏
-        from ..models import AFTER_SALE_FAULT_CLEARED
+        # 2026-09-15 定:平台判错了,平台自己认。判责撤销、信用分那一条不再计分;这单冲回的净额
+        # 和另出的骑手那份(配送费 + 小费)都补回,**钱由平台出**(services/merchant_fault.undo);
+        # 顾客拿到的退款不追回。判责方记 platform —— 和骑手责任改判同一个写法。
+        # (2026-09-14 那一版只撤判责、不补钱,判责方记 cleared;那一版没上过线,cleared 不再有)
+        from ..services import merchant_fault
         a = await db.get(AfterSale, appeal.target_id, with_for_update=True)
         if a.fault != "merchant":
             raise HTTPException(409, "这笔售后现在不是商家责任,没有可以撤销的判责")
-        a.fault = AFTER_SALE_FAULT_CLEARED
-        a.reply = (f"{a.reply};申诉改判:商家无责(钱不动)"
-                   if a.reply else "申诉改判:商家无责(钱不动)")[:300]
+        order = await db.get(Order, a.order_id, with_for_update=True)
+        back = await merchant_fault.undo(
+            db, order, why=f"售后判责申诉成立:{note or '复核认定商家无责'}")
+        a.fault = "platform"
+        a.reply = (f"{a.reply};申诉改判:商家无责,钱由平台补回"
+                   if a.reply else "申诉改判:商家无责,钱由平台补回")[:300]
         await _note_food_safety_overturn(db, a.order_id, note)
+        money = ""
+        if back is not None and back.merchant_total:
+            parts = []
+            if back.reversed_net:
+                parts.append(f"这单冲回的净额 ¥{back.reversed_net / 100:.2f}")
+            if back.charge:
+                parts.append(f"另出的配送费和小费 ¥{back.charge / 100:.2f}")
+            money = f"{'和'.join(parts)}已补回你的收入 —— 平台判错了,钱由平台出。"
         await push_to_user(appeal.user_id, "申诉成立",
-                           "售后判责已改判为商家无责,信用分那一条不再计分。这笔退款的钱不补回:"
-                           "顾客拿到的不追回,平台也不出这笔钱",
+                           "售后判责已改判为商家无责,信用分那一条不再计分。" + money
+                           + "顾客拿到的退款不追回",
                            {"type": "appeal"})
     elif appeal.target_type == "after_sale_rider":
         # 和配送异常判骑手责任改判同一个写法:判责从骑手转走(骑手消责正名),信用分那一条
@@ -517,7 +535,8 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
             # 用户申诉的是「按送达处理」那类裁决:他付了全款、一口没吃到。
             # 改判就得把钱退回去,只说一句"记录消除"对他毫无意义。
             order = await db.get(Order, issue.order_id, with_for_update=True)
-            # 退顾客为餐付的钱(services/refund_calc,配送费和小费照归骑手)
+            # 退顾客为餐付的钱(services/refund_calc,配送费和小费照归骑手 —— 他确实跑到了)。
+            # 这一支不是商家责任,是平台当初判错了顾客:钱由平台出(2026-09-15 定,维持)
             from ..services.refund_calc import goods_unrefunded_cents
             borne = await goods_unrefunded_cents(db, order)
             if borne > 0:
@@ -528,6 +547,7 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
             await push_to_user(
                 appeal.user_id, "申诉成立",
                 f"复核认定这一单不是你的责任,¥{borne / 100:.2f} 已原路退回"
+                "(平台判错了,这笔钱平台自己出)"
                 if borne > 0 else "复核认定这一单不是你的责任",
                 {"type": "appeal"})
         else:
@@ -652,8 +672,8 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
         # 把已经发出去的钱要回来,等于让他们为平台的一次判断失误买单。
         # 所以这笔由平台掏,走退款通道原路退给用户。
         #
-        # ⚠️ 2026-09-14「平台没有钱」拍板时,这一支(和顾客「按送达处理」改判那一支)
-        # 没在要改的清单里,照旧是平台出钱 —— 要不要改、改成谁出,还没定。
+        # 2026-09-15 定:这一支(和顾客「按送达处理」改判那一支)维持平台出钱 ——
+        # 平台判错了,平台自己认;每一笔进透明中心「申诉改判」和公开账本(appeal_refund_rows)。
         #
         # 若复核认定确属**商家**责任,那是另一条路径(售后冲账),
         # 不在这里混着做 —— 一个动作只做一件事,账才查得清。
@@ -667,10 +687,11 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
         from ..services.wechat_pay import request_refund
         await request_refund(db, order, borne, APPEAL_REFUND_NOTE)
         order.cancel_reason = (f"{order.cancel_reason};申诉改判:非用户责任,"
-                               f"平台承担")[:200]
+                               f"平台判错了,平台自己认")[:200]
         await push_to_user(
             appeal.user_id, "申诉成立",
-            f"复核认定这一单不该由你承担,¥{borne / 100:.2f} 已原路退回",
+            f"复核认定这一单不该由你承担,¥{borne / 100:.2f} 已原路退回"
+            "(平台判错了,这笔钱平台自己出)",
             {"type": "appeal"})
     else:  # review
         review = await db.get(Review, appeal.target_id, with_for_update=True)
@@ -700,7 +721,7 @@ async def _note_food_safety_overturn(db: AsyncSession, order_id: int, note: str)
     """食安投诉成立记的那条售后判责被商家申诉改判:在投诉的处置留痕里记一笔。
 
     投诉本身照旧是「成立」(顾客那边拿到的退款不追回),自动停业的 30 天计数不再算它
-    (admin.confirm_food_safety 按判责方 cleared 排除)。"""
+    (admin.confirm_food_safety 按「这条售后判责的申诉改判成立」排除)。"""
     from ..models import FoodSafetyReport
     report = await db.scalar(select(FoodSafetyReport).where(
         FoodSafetyReport.order_id == order_id, FoodSafetyReport.status == "confirmed")
@@ -709,7 +730,7 @@ async def _note_food_safety_overturn(db: AsyncSession, order_id: int, note: str)
         return
     report.actions = [*(report.actions or []), {
         "action": "appeal_overturned",
-        "note": f"商家申诉改判:商家无责(钱不动){(':' + note) if note else ''}"[:300],
+        "note": f"商家申诉改判:商家无责,冲掉的钱由平台补回{(':' + note) if note else ''}"[:300],
         "admin_id": None,
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }]

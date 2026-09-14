@@ -3,7 +3,7 @@
 各组接口全部平台级聚合、无任何个人/单店信息:
   /audit          每日核账运行记录 + 连续无差错天数(账本的守夜人,公开值守)
   /funds          佣金收入 vs 支出去向(与公开账本同一套 ledger 口径)
-  /compensation   平台"赔钱记录":安抚券(停发之前的)/超时致歉/餐损赔付/退款/保障金池——主动亮赔付
+  /compensation   平台"赔钱记录":安抚券(停发之前的)/超时致歉/餐损赔付/退款/保障金池/申诉改判——主动亮赔付
   /reports        月度财报(收入侧自动聚合,口径与 scripts/finance_report.py 一致)
   /fairness       分账公平证据:真实佣金率/每100元去向/骑手收入/评价不删
   /changelog      最近更新(GitHub 同源)+ 线上运行版本——代码即承诺
@@ -288,41 +288,46 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
         WHERE status = 'redeemed'
     """)))
     # 平台补贴:首单立减(现在是 0)+ 停发之前发出去的安抚券被抵扣,同走订单 subsidy 审计通道
-    subsidy = (await db.scalar(sa_text("""
+    order_subsidy = (await db.scalar(sa_text("""
         SELECT coalesce(sum(subsidy_cents), 0) FROM orders
         WHERE status NOT IN ('pending_payment','cancelled')
     """)))
+    # 骑手难度反馈当场补的钱(骑手账本 kind = adjustment,2026-09-14 起停了,历史照算)。
+    # 这是补贴,不是改判:原来并在「申诉改判」里,2026-09-15 挪进「补贴」——「申诉改判」只放
+    # 平台为纠错出的钱,和其它支出分开
+    hardship = await db.scalar(sa_text(
+        "SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings WHERE kind = 'adjustment'"))
+    subsidy = order_subsidy + hardship
     # 无骑手接单取消的餐损赔付:佣金不收,商家应收全额平台承担
     meal_comp = (await db.scalar(sa_text("""
         SELECT coalesce(sum(net_cents), 0) FROM merchant_earnings
         WHERE note LIKE '无骑手接单取消,平台赔付餐损%'
     """)))
-    # 申诉改判正向调整:恢复被冲的净额、现场难度当场补的钱,平台认亏(2026-09-14 起都不再产生,历史照算)
-    adjustments = (await db.scalar(sa_text("""
-        SELECT coalesce(sum(net_cents), 0) FROM merchant_earnings
-        WHERE kind = 'adjustment'
-    """))) + (await db.scalar(sa_text("""
-        SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings
-        WHERE kind = 'adjustment'
-    """)))
+    # ---- 申诉改判:平台判错了,平台自己认。四项,每一笔都在公开账本里(totals.platform_correction)----
     # 骑手保障金池:按公开账本算的计提、支出(判骑手责任时垫商家那份餐钱)、回池(申诉改判)、余额。
     # 池子是从佣金里计提的专项钱,单列一栏 —— 支出一笔一笔都在公开账本的 rider_fund.rows 里
     from ..services.rider_fault import fund_balance
     fund = await fund_balance(db)
-    # 骑手责任申诉改判成立时退回骑手的钱(fault_refund):那一单的错判由平台认。
-    # **算进申诉改判那一项,不单列成 spend 的新一项** —— 已经发版的 App 在客户端按
-    # 「补贴 + 餐损 + 改判 == 支出合计」把这组数再核一遍(user_app transparency_page),
-    # spend 里多一项它就报「收支明细与合计对不上」。明细放在 spend_detail 里另给
+    # ① 商家售后判责改判成立,补回这单冲回的净额(商家账本 adjustment;2026-09-14 之前的改判补的也是它)
+    merchant_restore = await db.scalar(sa_text(
+        "SELECT coalesce(sum(net_cents), 0) FROM merchant_earnings WHERE kind = 'adjustment'"))
+    # ② 商家售后判责改判成立,退回判商家责任时另出的骑手那份(商家账本 fault_refund)
+    merchant_fault_back = await db.scalar(sa_text(
+        "SELECT coalesce(sum(net_cents), 0) FROM merchant_earnings WHERE kind = 'fault_refund'"))
+    # ③ 骑手责任改判成立,退回骑手的钱(骑手账本 fault_refund)
     fault_back = await db.scalar(sa_text(
         "SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings "
         "WHERE kind = 'fault_refund'"))
-    # 顾客的申诉改判(取消分摊、「按送达处理」)平台原路退回的钱(appeals.APPEAL_REFUND_NOTE):
-    # 平台真金白银退出去的,原来哪一项都没算,留存因此多报了。同样并进「申诉改判」
-    from .appeals import APPEAL_REFUND_NOTE
+    # ④ 顾客的申诉改判(取消分摊、「按送达处理」)平台原路退回的钱(appeals.APPEAL_REFUND_NOTES)。
+    #    按平台发起退款算(渠道拒了的不算),和公开账本 appeal_refund_rows 同一个口径
+    from .appeals import APPEAL_REFUND_NOTES
     appeal_refunds = await db.scalar(sa_text(
         "SELECT coalesce(sum(amount_cents), 0) FROM refunds "
-        "WHERE reason = :r AND status = 'success'"), {"r": APPEAL_REFUND_NOTE})
-    adjustments += fault_back + appeal_refunds
+        "WHERE reason = ANY(:r) AND status <> 'failed'"), {"r": list(APPEAL_REFUND_NOTES)})
+    # **四项都算进「申诉改判」一项,不在 spend 里另开新项** —— 已经发版的 App 在客户端按
+    # 「补贴 + 餐损 + 改判 == 支出合计」把这组数再核一遍(user_app transparency_page),
+    # spend 里多一项它就报「收支明细与合计对不上」。明细放在 spend_detail 里另给
+    adjustments = merchant_restore + merchant_fault_back + fault_back + appeal_refunds
     income = commission + voucher_fee
     spend = subsidy + meal_comp + adjustments
     data = {
@@ -333,9 +338,12 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
                   "meal_compensation_cents": meal_comp,
                   "adjustment_cents": adjustments,
                   "total_cents": spend},
-        # 上面几项里的「其中」,不另算进合计
-        "spend_detail": {"rider_fault_refund_cents": fault_back,
-                         "appeal_refund_cents": appeal_refunds},
+        # 上面几项里的「其中」,不另算进合计:「申诉改判」的四项,和「补贴」里的难度反馈(历史)
+        "spend_detail": {"merchant_restore_cents": merchant_restore,
+                         "merchant_fault_refund_cents": merchant_fault_back,
+                         "rider_fault_refund_cents": fault_back,
+                         "appeal_refund_cents": appeal_refunds,
+                         "rider_hardship_cents": hardship},
         "rider_fund": fund,
         # 留存要养:支付通道/服务器/短信/地图/审核客服(见月度财报成本侧)
         "retained_cents": income - spend,
@@ -345,13 +353,21 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
     return data
 
 
+def _appeal_reasons_sql() -> str:
+    """顾客申诉改判那笔退款的原因(appeals.APPEAL_REFUND_NOTES),写成 SQL 的字面量列表。
+    常量是代码里写死的中文句子(不含引号),不是外部输入 —— 拼进 SQL 是安全的;
+    单引号照 SQL 规矩双写,防将来有人改文案时埋雷。"""
+    from .appeals import APPEAL_REFUND_NOTES
+    return ", ".join("'" + r.replace("'", "''") + "'" for r in APPEAL_REFUND_NOTES)
+
+
 @router.get("/compensation")
 async def compensation_public(
     request: Request, db: AsyncSession = Depends(get_db),
 ):
     """赔付记录(本月/累计):超时安抚券(停发之前的)和停发之后的超时致歉次数、
     餐损赔付、退款,判骑手责任时保障金池垫的、骑手另出的商家那份餐钱,
-    以及判商家责任时商家另出的骑手那份配送费和小费。
+    判商家责任时商家另出的骑手那份配送费和小费,以及申诉改判时平台为纠错出的钱。
 
     没有平台愿意亮自己的赔付账——我们把它当承诺兑现的凭据。
     """
@@ -408,6 +424,20 @@ async def compensation_public(
         "merchant_fault_charges": await _pair("""
             SELECT count(*), coalesce(-sum(net_cents), 0) FROM merchant_earnings
             WHERE kind = 'fault_charge'
+        """),
+        # 申诉改判:平台判错了,平台自己认 —— 平台为纠错出的每一笔(和 /funds 的「申诉改判」
+        # 同四项、同一个口径,和公开账本 totals.platform_correction 逐日对得上):
+        # 商家改判补回的净额、退回商家另出的那行、退回骑手的、顾客改判平台退的
+        "appeal_corrections": await _pair(f"""
+            SELECT count(*), coalesce(sum(c), 0) FROM (
+                SELECT net_cents AS c, created_at FROM merchant_earnings
+                WHERE kind IN ('adjustment', 'fault_refund')
+                UNION ALL
+                SELECT amount_cents, created_at FROM rider_earnings WHERE kind = 'fault_refund'
+                UNION ALL
+                SELECT amount_cents, created_at FROM refunds
+                WHERE reason IN ({_appeal_reasons_sql()}) AND status <> 'failed'
+            ) t WHERE true
         """),
         "month_since": month_start.date().isoformat(),
     }

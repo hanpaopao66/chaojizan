@@ -384,11 +384,13 @@ class _TransparencyPageState extends State<TransparencyPage> {
             const SzSectionTitle('赔出去 / 贴出去'),
             const SizedBox(height: 6),
             _kv(sz, '平台补贴', _yuan(_int(spend['subsidy_cents'])),
-                note: '首单立减(现在是 0)、停发之前发的超时安抚券被抵扣'),
+                note: '首单立减(现在是 0)、停发之前发的超时安抚券被抵扣、'
+                    '停发之前难度反馈当场补给骑手的钱'),
             _kv(sz, '餐损赔付', _yuan(_int(spend['meal_compensation_cents'])),
                 note: '无骑手接单被取消时,已出餐的商家按应收全额赔,佣金不收'),
             _kv(sz, '申诉改判', _yuan(_int(spend['adjustment_cents'])),
-                note: '判错了改回来、平台认的钱:骑手责任改判退回的、顾客申诉改判退的,和停发之前的调整'),
+                note: '平台判错了,平台自己认:商家改判补回的净额和另出的配送费小费、'
+                    '骑手改判退回的、顾客申诉改判原路退的 —— 每一笔都在公开账本里'),
             _kv(sz, '合计', _yuan(spendTotal), strong: true),
             const SizedBox(height: 12),
             SzLedgerCard(
@@ -440,13 +442,17 @@ class _TransparencyPageState extends State<TransparencyPage> {
     final eta = _map(d?['eta_coupons']);
     final meal = _map(d?['meal_compensation']);
     final refund = _map(d?['refunds']);
+    // 申诉改判:平台判错了,平台自己认(老服务端没有这一项,当 0)
+    final corrections = _map(d?['appeal_corrections']);
     int cents(Map<String, dynamic> m, String scope) =>
         _int(_map(m[scope])['cents']);
 
-    // 平台净掏的只有前两项:退款是把用户自己的钱原路退回,不算平台赔付。
+    // 平台净掏的是安抚券、餐损、申诉改判三项:退款是把用户自己的钱原路退回,不算平台赔付。
     // 这个区别必须写清楚,否则等于用退款额给赔付额充数
-    final platformPaid = cents(eta, 'total') + cents(meal, 'total');
-    final platformPaidMonth = cents(eta, 'month') + cents(meal, 'month');
+    final platformPaid =
+        cents(eta, 'total') + cents(meal, 'total') + cents(corrections, 'total');
+    final platformPaidMonth =
+        cents(eta, 'month') + cents(meal, 'month') + cents(corrections, 'month');
 
     return _Section(
       icon: Icons.volunteer_activism_outlined,
@@ -478,12 +484,15 @@ class _TransparencyPageState extends State<TransparencyPage> {
                 '没用的券照旧能用'),
             _compRow(sz, '餐损赔付', meal,
                 '没有骑手接单被取消时,已出餐的商家按应收全额赔付'),
+            _compRow(sz, '申诉改判', corrections,
+                '平台判错了,平台自己认:商家改判补回的净额和另出的配送费小费、'
+                '骑手改判退回的、顾客申诉改判原路退的'),
             _compRow(sz, '成功退款', refund,
                 '缺货部分退 / 整单退 / 售后退,渠道确认到账才算数'),
             const SizedBox(height: 10),
             _plain(sz,
                 '注意口径:退款是把你付的钱原路退回,不是平台的损失;'
-                '真正由平台掏腰包的是前两项,累计 ${_yuan(platformPaid)}。'
+                '真正由平台掏腰包的是前三项,累计 ${_yuan(platformPaid)}。'
                 '把退款额算进「平台赔了多少」是行业常见的话术,我们不这么算。'),
             if (d?['month_since'] != null) ...[
               const SizedBox(height: 8),

@@ -26,8 +26,15 @@ assert sp["total_cents"] == sum(v for k, v in sp.items() if k != "total_cents"),
 assert set(sp) == {"subsidy_cents", "meal_compensation_cents", "adjustment_cents",
                    "total_cents"}, f"spend 多了老版本 App 不认的项:{sorted(sp)}"
 detail = funds["spend_detail"]
-assert 0 <= detail["rider_fault_refund_cents"] + detail["appeal_refund_cents"] \
-    <= sp["adjustment_cents"], (detail, sp)
+# 「申诉改判」只放平台为纠错出的钱(平台判错了,平台自己认),四项加起来正好是它;
+# 难度反馈当场补的钱(历史)是补贴,在「补贴」里,不许混进来
+assert (detail["merchant_restore_cents"] + detail["merchant_fault_refund_cents"]
+        + detail["rider_fault_refund_cents"] + detail["appeal_refund_cents"]
+        == sp["adjustment_cents"]), (detail, sp)
+assert 0 <= detail["rider_hardship_cents"] <= sp["subsidy_cents"], (detail, sp)
+comp_corr = call("GET", "/transparency/compensation")["appeal_corrections"]
+assert comp_corr["total"]["cents"] == sp["adjustment_cents"], \
+    f"赔付记录的「申诉改判」和钱去哪了的对不上:{comp_corr} {sp}"
 assert funds["retained_cents"] == inc["total_cents"] - sp["total_cents"]
 # 骑手保障金池:余额 == 计提 − 支出 + 回池(按公开账本算,services/rider_fault.fund_balance)
 fund = funds["rider_fund"]

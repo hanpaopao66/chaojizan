@@ -170,10 +170,9 @@ async def _reversal_due_ids(db, order_ids) -> set[int]:
        (库里约两成)退回用入账行时间兜底。
 
     fault 判 rider/platform 的单除外,商家无责、净额保留不冲账:rider = 骑手责任
-    (钱见 services/rider_fault);platform = 历史上平台认赔的(食安垫付、跑腿认赔、
-    商家售后改判认亏 —— 2026-09-14 起都不再产生)。
-    **cleared 不豁免**:商家售后判责申诉改判成立只撤销判责、钱不动,那一单冲过账,
-    照旧按商家责任核(models.AFTER_SALE_FAULT_CLEARED)。食安投诉成立现在记 merchant,也照冲账核。
+    (钱见 services/rider_fault);platform = 平台认的 —— 商家申诉改判成立(冲过的账由平台补回,
+    services/merchant_fault.undo,补回的对不对由规则 4d 核)、骑手申诉改判成立,和历史上的
+    食安垫付、跑腿认赔。食安投诉成立现在记 merchant,照冲账核。
     """
     from ..models import AfterSale, AfterSaleStatus
 
@@ -1202,7 +1201,7 @@ async def run_audit() -> list[dict]:
         # 用户已付按和 liability 同一个口径算(商家应收钳 0 之后再加配送费
         # 和小费),不直接用 total_cents —— 那一列是**剩余应付**不是累计实付,
         # 规则 5b 的长注释解释过为什么。
-        from ..routers.appeals import APPEAL_REFUND_NOTE
+        from ..routers.appeals import APPEAL_REFUND_NOTES
         from .liability import SPLIT_EARNING_NOTE
 
         # 申诉改判会让平台**额外**退一笔给用户,于是「商家 + 骑手 + 退款」
@@ -1211,7 +1210,7 @@ async def run_audit() -> list[dict]:
         appeal_paid = {
             oid: amt for oid, amt in (await db.execute(
                 select(Refund.order_id, sa_func.sum(Refund.amount_cents))
-                .where(Refund.reason == APPEAL_REFUND_NOTE,
+                .where(Refund.reason.in_(APPEAL_REFUND_NOTES),
                        Refund.status == RefundStatus.success,
                        Refund.order_id.is_not(None))
                 .group_by(Refund.order_id))).all()

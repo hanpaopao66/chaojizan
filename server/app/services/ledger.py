@@ -21,8 +21,8 @@ logger = logging.getLogger("superz.ledger")
 
 GENESIS = "0" * 64
 #: payload 版本。见 docs/LEDGER-SPEC.md。
-#: 2026-09 新加的 rider_fault_rows、merchant_fault_rows、rider_fund 里的支出/回池、totals 里的
-#: 四项都是**新字段**(规格 §7:新字段只加不改,验证器必须容忍未知字段),不升版本。
+#: 2026-09 新加的 rider_fault_rows、merchant_fault_rows、appeal_refund_rows、rider_fund 里的
+#: 支出/回池、totals 里的六项都是**新字段**(规格 §7:新字段只加不改,验证器必须容忍未知字段),不升版本。
 #: merchant_rows 里不再出现 fault_charge / fault_refund 两种行 —— 它们在 2026-09-15 之前根本不存在,
 #: 历史锚点不受影响
 SCHEMA = 1
@@ -100,6 +100,18 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"SELECT order_no, amount_cents, kind "
             f"FROM rider_fund_movements WHERE {where} ORDER BY id"), span)
     ]
+    # 顾客申诉改判(取消分摊、按送达处理)平台原路退回的钱:平台判错了,平台自己认。
+    # 按平台发起退款的那一天记,渠道拒了的(failed)不算 —— 微信退款要等回调才转成功,
+    # 按「成功」取数的话,锚点建好时还在路上的那几笔就永远进不了账本
+    from ..routers.appeals import APPEAL_REFUND_NOTES
+    appeal_refund_rows = [
+        {"o": hash_no(r[0]), "amount": r[1]}
+        for r in await db.execute(text(
+            f"SELECT order_no, amount_cents FROM refunds "
+            f"WHERE {where} AND reason = ANY(:reasons) AND status <> 'failed' "
+            f"AND order_no IS NOT NULL ORDER BY id"),
+            {**span, "reasons": list(APPEAL_REFUND_NOTES)})
+    ]
     voucher_where = where.replace("created_at", "redeemed_at")
     voucher_rows = [
         {"p": hash_no(r[0]), "gross": r[1], "fee": r[2], "net": r[3]}
@@ -145,6 +157,7 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
         "stay_rows": stay_rows,
         "rider_fault_rows": rider_fault_rows,
         "merchant_fault_rows": merchant_fault_rows,
+        "appeal_refund_rows": appeal_refund_rows,
         "rider_fund": {
             "per_order_cents": settings.rider_fund_per_order_cents,
             "orders": fund_orders,
@@ -165,8 +178,22 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             "rider_fund_paid": fund_paid,
             "rider_fund_returned": fund_returned,
             "merchant_fault": sum(r["amount"] for r in merchant_fault_rows),
+            "appeal_refund": sum(r["amount"] for r in appeal_refund_rows),
+            # 平台为纠错出的钱(透明中心「申诉改判」):商家改判补回的净额(merchant_rows 的 adjustment)
+            # + 退回商家另出的那行 + 退回骑手的 + 顾客改判平台退的。见证节点能从逐行加出来
+            "platform_correction": platform_correction(
+                merchant_rows, merchant_fault_rows, rider_fault_rows, appeal_refund_rows),
         },
     }
+
+
+def platform_correction(merchant_rows, merchant_fault_rows, rider_fault_rows,
+                        appeal_refund_rows) -> int:
+    """平台这一天为纠错(申诉改判成立)出的钱。见证节点(witness/*)按同一个式子复算。"""
+    return (sum(r["net"] for r in merchant_rows if r["kind"] == "adjustment")
+            + sum(r["amount"] for r in merchant_fault_rows if r["kind"] == "fault_refund")
+            + sum(r["amount"] for r in rider_fault_rows if r["kind"] == "fault_refund")
+            + sum(r["amount"] for r in appeal_refund_rows))
 
 
 def _today_beijing() -> date:

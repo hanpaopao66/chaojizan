@@ -568,14 +568,22 @@ export default function TransparencyPage() {
             </div>
             <div className="col">
               <h4>支出去向（累计）</h4>
-              <div className="row"><span>用户补贴（首单立减，现在是 0；停发之前发的超时安抚券被抵扣）</span>
+              <div className="row"><span>补贴（首单立减，现在是 0；停发之前发的超时安抚券被抵扣、难度反馈当场补给骑手的钱）</span>
                 <span className="num">{yuanF(funds?.spend.subsidy_cents)}</span></div>
               <div className="row"><span>商家餐损赔付（无人接单，平台背锅）</span>
                 <span className="num">{yuanF(funds?.spend.meal_compensation_cents)}</span></div>
-              <div className="row"><span>申诉改判调整（误伤的账，平台认的钱；2026-09-14 起商家售后判责改判不再补钱）</span>
+              <div className="row"><span>申诉改判（平台判错了，平台自己认；每一笔都在公开账本里）</span>
                 <span className="num">{yuanF(funds?.spend.adjustment_cents)}</span></div>
+              {funds?.spend_detail?.merchant_restore_cents != null && (
+                <div className="row"><span>　其中：商家售后判责改判成立，补回冲掉的净额</span>
+                  <span className="num">{yuanF(funds.spend_detail.merchant_restore_cents)}</span></div>
+              )}
+              {funds?.spend_detail?.merchant_fault_refund_cents != null && (
+                <div className="row"><span>　其中：商家售后判责改判成立，退回另出的配送费和小费</span>
+                  <span className="num">{yuanF(funds.spend_detail.merchant_fault_refund_cents)}</span></div>
+              )}
               {funds?.spend_detail?.rider_fault_refund_cents != null && (
-                <div className="row"><span>　其中：骑手责任改判成立，退回骑手（错判由平台认）</span>
+                <div className="row"><span>　其中：骑手责任改判成立，退回骑手</span>
                   <span className="num">{yuanF(funds.spend_detail.rider_fault_refund_cents)}</span></div>
               )}
               {funds?.spend_detail?.appeal_refund_cents != null && (
@@ -699,6 +707,13 @@ export default function TransparencyPage() {
                 <div className="num v">{yuanF(comp.rider_fund_payouts.total.cents)}</div>
                 <div className="k">判骑手责任：商家那份餐钱由骑手保障金池垫（顾客全额退款，这单骑手收入不计，平台这单佣金不收）</div>
                 <div className="m">累计 {comp.rider_fund_payouts.total.count} 笔 · 池子不够、骑手另出 {yuanF(comp.rider_fault_charges?.total.cents)}（{comp.rider_fault_charges?.total.count ?? 0} 笔）</div>
+              </div>
+            )}
+            {comp?.appeal_corrections && (
+              <div className="tp-card hold">
+                <div className="num v">{yuanF(comp.appeal_corrections.total.cents)}</div>
+                <div className="k">申诉改判：平台判错了，平台自己认（商家改判补回的净额和另出的配送费小费、骑手改判退回的、顾客改判平台原路退的）</div>
+                <div className="m">累计 {comp.appeal_corrections.total.count} 笔 · 本月 {yuanF(comp.appeal_corrections.month.cents)}（{comp.appeal_corrections.month.count} 笔）</div>
               </div>
             )}
             {comp?.merchant_fault_charges && (

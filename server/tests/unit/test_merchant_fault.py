@@ -199,3 +199,93 @@ class Test对账单认得这几种行:
         assert "kind_label(e.kind)" in inspect.getsource(merchants.finance_statement_csv)
         for kind in mf.FAULT_KINDS:
             assert kind in tax._KIND_LABELS, kind
+
+
+class Test改判平台补回:
+    """2026-09-15 定:平台判错了,平台自己认 —— 商家售后判责改判成立,冲回的净额和另出的那行都补回。"""
+
+    def test_补回两行_形状和冲账对称(self):
+        src = inspect.getsource(mf.undo)
+        assert "food_cents=reversed_net, commission_cents=0, net_cents=reversed_net" in src, \
+            "补回净额的调整行:food == net、佣金 0(和 2026-09-14 之前改判补的同一个形状)"
+        assert "kind=EarningKind.adjustment" in src and "kind=EarningKind.fault_refund" in src
+        assert "EarningKind.adjustment not in rows" in src \
+            and "EarningKind.fault_refund not in rows" in src, "补过的不许再补"
+        assert src.count('settle_mode="platform"') == 2, "平台补给商家的钱走平台侧余额"
+
+    def test_申诉改判那一支用它_判责记platform(self):
+        from app.routers import appeals
+        branch = inspect.getsource(appeals._overturn).split(
+            'elif appeal.target_type == "after_sale_rider"')[0]
+        assert "merchant_fault.undo(" in branch and 'a.fault = "platform"' in branch
+        assert "平台判错了" in branch
+
+
+def _ledger_payload():
+    return {
+        "merchant_rows": [{"o": "a", "food": 2090, "commission": 0, "net": 2090,
+                           "kind": "adjustment"},
+                          {"o": "b", "food": 900, "commission": 45, "net": 855,
+                           "kind": "earning"}],
+        "merchant_fault_rows": [{"o": "a", "amount": 800, "kind": "fault_refund"},
+                                {"o": "c", "amount": -500, "kind": "fault_charge"}],
+        "rider_fault_rows": [{"o": "d", "amount": 1770, "kind": "fault_refund"},
+                             {"o": "e", "amount": -600, "kind": "fault_reversal"}],
+        "appeal_refund_rows": [{"o": "f", "amount": 1800}],
+    }
+
+
+class Test平台纠错的钱进公开账本:
+    def test_合计的式子服务端和见证节点一样(self):
+        from app.services import ledger
+        p = _ledger_payload()
+        expect = 2090 + 800 + 1770 + 1800
+        assert ledger.platform_correction(p["merchant_rows"], p["merchant_fault_rows"],
+                                          p["rider_fault_rows"], p["appeal_refund_rows"]) == expect
+        assert w.platform_correction(p) == expect
+
+    def test_见证节点核合计和顾客改判退款行(self):
+        extra = _ledger_payload()
+        p = _payload(merchant_fault_rows=extra["merchant_fault_rows"],
+                     rider_fault_rows=extra["rider_fault_rows"],
+                     appeal_refund_rows=extra["appeal_refund_rows"])
+        p["merchant_rows"] = p["merchant_rows"] + [extra["merchant_rows"][0]]
+        p["totals"].update(merchant_fault=300, rider_fault=1170, appeal_refund=1800,
+                           platform_correction=2090 + 800 + 1770 + 1800)
+        assert w.verify_rows(p) == [], w.verify_rows(p)
+        p["totals"]["platform_correction"] -= 1
+        assert any("平台纠错" in x for x in w.verify_rows(p))
+        p = _payload(appeal_refund_rows=[{"o": "f", "amount": 0}])
+        assert any("申诉改判退款行" in x for x in w.verify_rows(p))
+
+    def test_账本里有顾客改判退款行和合计(self):
+        from app.services import ledger
+        src = inspect.getsource(ledger.build_day_payload)
+        assert '"appeal_refund_rows": appeal_refund_rows' in src
+        assert "APPEAL_REFUND_NOTES" in src and "status <> 'failed'" in src, \
+            "按平台发起的那一天记、渠道拒了的不算(微信要等回调才转成功,按成功取数会漏)"
+        assert '"platform_correction": platform_correction(' in src
+
+
+class Test透明中心的申诉改判只放纠错的钱:
+    def test_四项进申诉改判_难度反馈进补贴(self):
+        from app.routers import transparency
+        src = inspect.getsource(transparency.funds_public)
+        assert "adjustments = merchant_restore + merchant_fault_back + fault_back + appeal_refunds" \
+            in src
+        assert "subsidy = order_subsidy + hardship" in src
+        for key in ("merchant_restore_cents", "merchant_fault_refund_cents",
+                    "rider_fault_refund_cents", "appeal_refund_cents", "rider_hardship_cents"):
+            assert f'"{key}"' in src, key
+
+    def test_赔付记录有申诉改判(self):
+        from app.routers import transparency
+        src = inspect.getsource(transparency.compensation_public)
+        assert '"appeal_corrections"' in src
+        assert "kind IN ('adjustment', 'fault_refund')" in src
+
+    def test_顾客改判退款的原因新老两种都认(self):
+        from app.routers import appeals
+        assert appeals.APPEAL_REFUND_NOTE in appeals.APPEAL_REFUND_NOTES
+        assert "平台判错了,平台自己认" in appeals.APPEAL_REFUND_NOTE
+        assert "申诉改判:平台承担,原路退回" in appeals.APPEAL_REFUND_NOTES, "历史流水照认"

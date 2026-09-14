@@ -105,8 +105,8 @@ export struct AppealPage {
         .fontColor($r('app.color.ink')).width('100%');
       Text(this.formTitle)
         .fontSize(13).fontColor($r('app.color.ink_muted')).width('100%');
-      Text('申诉成立的话:售后会恢复被冲的净额(平台认亏,不追用户款);' +
-        '差评会隐藏并回调评分。写具体一点,比如出餐监控、聊天记录能对上什么。')
+      Text('申诉成立的话:售后恢复你的净额和另出的配送费、小费(平台判错了,平台自己出;' +
+        '顾客拿到的退款不追回);差评会隐藏并回调评分。写具体一点,比如出餐监控、聊天记录能对上什么。')
         .fontSize(12).lineHeight(18)
         .fontColor($r('app.color.ink_muted')).width('100%');
       TextArea({ placeholder: '为什么不该判你责任', text: this.reason })

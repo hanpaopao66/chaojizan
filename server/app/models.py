@@ -988,15 +988,18 @@ class RiderProfile(Base):
 class EarningKind(str, enum.Enum):
     earning = "earning"        # 正常入账
     reversal = "reversal"      # 售后冲账(负数行,与入账行相加归零)
-    # 申诉改判等正向调整(恢复被冲的净额,平台认亏)。**2026-09-14 起不再产生**:商家售后判责
-    # 改判只撤销判责(AFTER_SALE_FAULT_CLEARED),难度反馈不当场补钱;历史行照旧留着
+    # 正向调整。商家账本上:售后判责申诉改判成立,补回这单冲回的净额 —— 平台判错了,平台自己认
+    # (services/merchant_fault.undo;2026-09-14 到 15 那一版不补,没上过线)。骑手账本上:难度反馈
+    # 当场补的钱,2026-09-14 起不再产生,历史行照旧留着
     adjustment = "adjustment"
-    # ---- 以下三种只在骑手账本上出现:判骑手责任的钱(services/rider_fault.py)----
-    #: 这单骑手的收入冲回(负数,等于这单入账行的相反数):没送到就不计收入
+    # ---- 判责的钱:骑手账本(services/rider_fault.py)三种都有,商家账本(services/merchant_fault.py)
+    #      只有后两种 ----
+    #: 骑手:这单收入冲回(负数,等于这单入账行的相反数):没送到就不计收入
     fault_reversal = "fault_reversal"
-    #: 商家那份餐钱保障金池不够的部分,从骑手收入里扣(负数)
+    #: 骑手:商家那份餐钱保障金池不够的部分,从骑手收入里扣(负数)。
+    #: 商家:判商家责任时骑手那份(配送费 + 小费)由商家另出(负数)
     fault_charge = "fault_charge"
-    #: 申诉改判成立,上面两行加回去(正数)
+    #: 申诉改判成立,另出 / 扣掉的加回去(正数)
     fault_refund = "fault_refund"
 
 
@@ -1392,10 +1395,10 @@ class AfterSale(Base):
     reason: Mapped[str] = mapped_column(String(500))
     # 举证照片(必传):完成单售后要有图,客服/商家看图判断,恶意售后无所遁形
     images: Mapped[list] = mapped_column(JSONB, default=list)
-    # 判责方:merchant=商家责任(商家承担,食安投诉成立也是它) / rider=骑手责任(这单骑手收入冲回,
-    # 商家那份餐钱先保障金池、不够的骑手出,见 services/rider_fault;骑手申诉改判成立后变 platform,
-    # 扣的钱退回) / cleared=商家申诉改判成立:判责撤销、钱不动(见 AFTER_SALE_FAULT_CLEARED) /
-    # platform=平台(历史:食安垫付、跑腿认赔、商家改判认亏,2026-09-14 起都不再产生)
+    # 判责方:merchant=商家责任(顾客拿回全款,商家这单净额冲回、骑手那份另出,见 services/merchant_fault;
+    # 食安投诉成立也是它) / rider=骑手责任(这单骑手收入冲回,商家那份餐钱先保障金池、不够的骑手出,
+    # 见 services/rider_fault) / platform=平台认的:商家或骑手申诉改判成立后变成它,扣的、冲的钱由平台补回
+    # (平台判错了,平台自己认);历史上的食安垫付、跑腿认赔也记它
     fault: Mapped[str] = mapped_column(String(12), default="")
     status: Mapped[AfterSaleStatus] = mapped_column(
         _enum_column(AfterSaleStatus, "after_sale_status"),
@@ -1410,14 +1413,6 @@ class AfterSale(Base):
         DateTime(timezone=True), nullable=True
     )
 
-
-#: 商家对「售后判商家责任」申诉、改判成立之后的判责方:**判责撤销、钱不动**。
-#:
-#: 2026-09-14 拍板「平台没有钱」:改判不再补回商家被冲的净额(原来补一条 adjustment、平台认亏,
-#: 判责记成 platform)。顾客拿到的退款也不追回 —— 于是这笔钱照旧是商家出的,只是不再算他的责任、
-#: 不再扣信用分。不能再记成 platform:那表示「平台出的钱」,而平台这一单一分没出。
-#: 审计规则 6 照旧要求这单冲过账(它确实冲了),自动停业的食安计数不算它(admin.confirm_food_safety)
-AFTER_SALE_FAULT_CLEARED = "cleared"
 
 
 class DeliveryIssue(Base):

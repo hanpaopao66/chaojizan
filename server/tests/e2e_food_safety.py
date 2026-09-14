@@ -3,8 +3,8 @@
 
 2026-09-14 起投诉成立**由商家承担退款**(原来平台先垫全额、不冲商家账);2026-09-15 起退全款
 (含配送费和小费):这单商家净额冲回,骑手那份配送费和小费照归骑手、由商家另出;
-记一条售后判商家责任、扣店主信用分;商家 72 小时内可以申诉,改判成立只撤销判责、钱不动,
-这一起也不再计入自动停业的计数。还没确认收货的单先按完成结算再冲。账务自检全绿。
+记一条售后判商家责任、扣店主信用分;商家 72 小时内可以申诉,改判成立撤销判责、冲掉的钱由平台
+补回(平台判错了,平台自己认),这一起也不再计入自动停业的计数。还没确认收货的单先按完成结算再冲。账务自检全绿。
 
 在 server/ 目录下运行:python -m tests.e2e_food_safety
 """
@@ -126,7 +126,7 @@ def main():
     print(f"✓ 成立:全额退 {o1['total_cents']} 分(含配送费和小费),商家承担(结算后冲回,"
           f"骑手那份 {share} 分另出),记商家责任;账务自检全绿")
 
-    # 店主信用分记一条「食安投诉成立」;商家可以申诉,改判只撤销判责、钱不动
+    # 店主信用分记一条「食安投诉成立」;商家可以申诉,改判成立撤销判责、钱由平台补回
     got = call("GET", "/credit/me", merchant)
     row = next((d for d in got["deductions"]
                 if d["kind"] == "after_sale_fault" and d["record_id"] == a1["id"]), None)
@@ -138,14 +138,17 @@ def main():
     call("POST", f"/admin/appeals/{ap['id']}/resolve", admin,
          {"result": "overturned", "note": "复核:监控可证出餐无异物"})
     w2 = call("GET", "/merchants/me/wallet", merchant)
-    assert w2["total_earned_cents"] == w1["total_earned_cents"], "改判又补回了净额(平台出钱)"
+    net1 = o1["food_cents"] + o1["packing_fee_cents"] - o1["discount_cents"] - o1["commission_cents"]
+    assert w2["total_earned_cents"] == w1["total_earned_cents"] + net1 + share, \
+        (f"改判成立,冲掉的净额 {net1} 和另出的 {share} 该由平台补回:"
+         f"{w1['total_earned_cents']} → {w2['total_earned_cents']}")
     a1b = next(a for a in call("GET", "/merchants/me/after-sales", merchant)
                if a["order_no"] == no1)
-    assert a1b["fault"] == "cleared", a1b
+    assert a1b["fault"] == "platform", a1b
     got = call("GET", "/credit/me", merchant)
     assert not any(d["kind"] == "after_sale_fault" and d["record_id"] == a1["id"]
                    for d in got["deductions"]), "改判成立了还在扣分"
-    print("✓ 店主信用分记了这一条;商家申诉改判成立:判责撤销、不再扣分,净额不补回")
+    print("✓ 店主信用分记了这一条;商家申诉改判成立:判责撤销、不再扣分,冲掉的钱由平台补回")
 
     # 3) 下架涉事菜品 + 暂停营业(留痕)
     call("POST", f"/admin/food-safety/{fs['id']}/take-down-dish", admin,

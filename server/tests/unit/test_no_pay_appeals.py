@@ -1,12 +1,13 @@
-"""改判、跑腿售后、食安投诉:平台不出钱(2026-09-14 拍板「平台没有钱」)。
+"""改判、跑腿售后、食安投诉(2026-09-14 拍板「平台没有钱」,2026-09-15 定「平台判错了,平台自己认」)。
 
-1. 商家售后判责改判成立:只撤销判责和信用分那一条,**不补回被冲的净额**(不再写 adjustment 行,
-   判责方记 cleared 而不是 platform —— 平台这一单一分没出);
+1. 商家售后判责改判成立:撤销判责和信用分那一条,**冲回的净额和另出的骑手那份都补回,钱由平台出**
+   (services/merchant_fault.undo:adjustment + fault_refund 两行;判责方记 platform)。
+   2026-09-14 那一版「只撤判责、不补钱、判责方记 cleared」没上过线,推翻了;
 2. 跑腿单的售后:平台不再「同意 = 认赔」,是骑手的问题判骑手责任、不是就驳回;
    「售后被拒」改判成立判的也是骑手责任;
 3. 食安投诉成立:商家承担全额退款(冲这单净额、另出骑手那份)、记商家责任、扣店主信用分、商家可以申诉;
-4. 公示照实说:规则页、信用分公示、判责公示不再说「改判的钱平台认亏」「被冲的净额补回来」
-   「先行赔付由平台垫付」。
+4. 公示照实说:规则页、信用分公示、判责公示写明改判时平台补回、「平台判错了,平台自己认」;
+   不再说「被冲的净额不补回」「钱不动」「先行赔付由平台垫付」。
 
 这类退化不报错(平台悄悄又开始出钱),一半按源码守,行为由 e2e_appeal / e2e_errand_aftersale /
 e2e_food_safety 核。
@@ -26,19 +27,19 @@ def _code(fn) -> str:
     return "\n".join(ln.split("#", 1)[0] for ln in src.splitlines())
 
 
-class Test商家改判不补钱:
-    def test_不写调整行_判责记cleared(self):
-        from app.models import AFTER_SALE_FAULT_CLEARED
+class Test商家改判平台补回:
+    def test_补回净额和另出的那行_判责记platform(self):
+        import app.models as models
         from app.routers import appeals
         code = _code(appeals._overturn)
         after_sale_branch = code.split('elif appeal.target_type == "after_sale_rider"')[0]
-        assert "MerchantEarning(" not in after_sale_branch and "adjustment" not in after_sale_branch, \
-            "商家售后判责改判又开始补净额(平台出钱)"
-        assert "AFTER_SALE_FAULT_CLEARED" in after_sale_branch
-        assert AFTER_SALE_FAULT_CLEARED not in ("platform", "merchant", "rider", "")
+        assert "merchant_fault.undo(" in after_sale_branch, "商家售后判责改判成立却没补回钱"
+        assert 'a.fault = "platform"' in after_sale_branch
+        assert not hasattr(models, "AFTER_SALE_FAULT_CLEARED"), "「改判不补钱」的 cleared 又回来了"
 
-    def test_没有任何代码路径再写正向调整行(self):
-        """adjustment 行 = 平台认亏补的钱。商家改判、难度反馈停了之后,不该再有代码写它。"""
+    def test_只有改判补回写正向调整行(self):
+        """adjustment 行 = 平台补给商家的钱。只许商家售后判责改判成立那一处写(merchant_fault.undo);
+        难度反馈当场补钱停了,别处不许再写。"""
         hits = []
         for p in (REPO / "server/app").rglob("*.py"):
             if p.name in ("models.py", "tax.py"):
@@ -46,8 +47,8 @@ class Test商家改判不补钱:
             for i, ln in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
                 code = ln.split("#", 1)[0]
                 if "kind=EarningKind.adjustment" in code.replace(" ", ""):
-                    hits.append(f"{p.relative_to(REPO)}:{i}")
-        assert not hits, f"又有代码在写平台认亏的调整行:{hits}"
+                    hits.append(str(p.relative_to(REPO)))
+        assert hits == ["server/app/services/merchant_fault.py"], hits
 
     def test_只有判商家责任的售后能申诉(self):
         from app.routers import appeals
@@ -89,8 +90,11 @@ class Test食安投诉商家承担:
         assert not any("食安" in x["what"] for x in credit.public_spec("merchant")["not_counted"])
 
     def test_自动停业不算改判成立的那几起(self):
+        """按申诉记录认,不按判责方认:判责方 platform 里还有历史上「食安平台垫付」成立的单,那些照算"""
         from app.routers import admin
-        assert "AFTER_SALE_FAULT_CLEARED" in inspect.getsource(admin.confirm_food_safety)
+        src = inspect.getsource(admin.confirm_food_safety)
+        assert 'Appeal.target_type == "after_sale"' in src and 'Appeal.status == "overturned"' in src
+        assert 'AfterSale.fault == "platform"' not in src
 
 
 class Test公示照实说:
@@ -98,22 +102,31 @@ class Test公示照实说:
         from app.services import rules
         r = asyncio.run(rules.rules_for("merchant", object()))
         items = "".join(next(s for s in r["sections"] if s["title"] == "申诉")["items"])
-        assert "不补回" in items and "平台承担" not in items, items
+        assert "平台判错了,平台自己认" in items and "补回" in items, items
+        assert "不补回" not in items, items
 
     def test_信用分申诉框(self):
         from app.services import credit
         text = credit._ORIGINAL_AFTER[("merchant", credit.KIND_AFTER_SALE)]
-        assert "不补回" in text and "补回来" not in text, text
+        assert "补回" in text and "不补回" not in text and "平台出" in text, text
 
     def test_判责公示(self):
         from app.services import liability
         what = liability.public_spec()["appeal"]["what_happens"]
-        assert "平台认亏" not in what and "不补回" in what, what
+        assert "平台判错了,平台自己认" in what and "不补回" not in what, what
+
+    def test_商家端申诉框说售后恢复你的净额(self):
+        """用户拍板:商家端申诉框「售后恢复你的净额」在新口径下是对的,保留(安卓、鸿蒙都说)"""
+        for rel in ("apps/merchant_app/lib/appeal_page.dart",
+                    "apps/merchant_app_harmony/entry/src/main/ets/pages/SupportPages.ets"):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            assert "售后恢复你的净额" in text, rel
 
     def test_各端不再说改判平台认亏_食安平台垫付(self):
-        stale = ["改判的钱平台认亏", "被冲的净额补回来", "被冲掉的那笔净额补回来",
-                 "先行赔付由平台垫付", "售后恢复你的净额", "平台先行全额退款",
-                 "改判产生的钱由平台承担"]
+        stale = ["改判的钱平台认亏", "先行赔付由平台垫付", "平台先行全额退款",
+                 "改判产生的钱由平台承担", "被冲的净额不补回", "被冲掉的净额不补回",
+                 "被冲掉的那笔净额不补回", "判责撤销、钱不动", "商家无责(钱不动)",
+                 "平台认赔(历史)"]
         hits = []
         for d in ("server/app", "apps/merchant_app/lib", "apps/user_app/lib",
                   "apps/rider_app/lib", "packages/shared/lib", "web/src", "admin-web/src"):

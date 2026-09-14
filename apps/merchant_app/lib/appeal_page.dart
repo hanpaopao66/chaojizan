@@ -1,6 +1,7 @@
 /// 商家判责申诉:对「判商家责任的售后」与「差评」在 72 小时内申诉。
-/// 申诉成立:售后判责撤销、信用分那一条不再计分 —— **被冲的净额不补回**(2026-09-14 起:
-/// 顾客拿到的退款不追回,平台也不出这笔钱);差评隐藏并回调评分。
+/// 申诉成立:售后判责撤销、信用分那一条不再计分,**售后恢复你的净额** —— 这单冲掉的净额和
+/// 另出的配送费、小费都补回,钱由平台出(2026-09-15 定:平台判错了,平台自己认;顾客拿到的退款
+/// 不追回);差评隐藏并回调评分。
 library;
 
 import 'package:flutter/material.dart';
@@ -56,7 +57,7 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
     setState(() {
       _error = '';
       // 只列可能需要申诉的:判商家责任的已退款售后(服务端只收 fault == merchant 的申诉)、
-      // 3 星及以下差评。已经申诉过的照样列着 —— 改判之后判责方变成 cleared,
+      // 3 星及以下差评。已经申诉过的照样列着 —— 改判之后判责方变成 platform,
       // 按判责方筛就会连「申诉成立」一起消失
       _afterSales = afterSales!
           .where((a) =>
@@ -79,9 +80,9 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('说明理由,平台人工复核。申诉成立:售后判责撤销、信用分那一条不再计分'
-                '(被冲的净额不补回 —— 顾客拿到的退款不追回,平台也不出这笔钱);'
-                '差评隐藏且不计入评分。',
+            const Text('说明理由,平台人工复核。申诉成立:售后判责撤销、信用分那一条不再计分,'
+                '售后恢复你的净额和另出的配送费、小费(平台判错了,钱由平台出;'
+                '顾客拿到的退款不追回);差评隐藏且不计入评分。',
                 style: TextStyle(fontSize: 13)),
             const SizedBox(height: 12),
             TextField(

@@ -1778,7 +1778,7 @@ async def confirm_food_safety(
     from sqlalchemy import exists as sa_exists
     from sqlalchemy import func as sa_func
 
-    from ..models import AFTER_SALE_FAULT_CLEARED, AfterSale, AfterSaleStatus, FoodSafetyReport
+    from ..models import AfterSale, AfterSaleStatus, Appeal, FoodSafetyReport
     from ..models import Order as OrderModel
     from ..services import merchant_fault
     from ..services.errand import is_errand
@@ -1840,9 +1840,13 @@ async def confirm_food_safety(
 
     # 30 天内成立数(含本起)≥3 → 自动停业待人工审核。
     # 排除本单再 +1:防 autoflush 把刚置为 confirmed 的当前工单重复计数。
-    # 商家申诉改判成立的那几起(那条售后判责变成了「改判无责」)不算
-    overturned = sa_exists().where(AfterSale.order_id == FoodSafetyReport.order_id,
-                                   AfterSale.fault == AFTER_SALE_FAULT_CLEARED)
+    # 商家对那条售后判责申诉、改判成立的那几起不算。按申诉记录认,不按判责方认:
+    # 判责方 platform 里还有 2026-09-14 之前「食安平台垫付」的历史单,那些是成立了的,照算
+    overturned = sa_exists().where(
+        AfterSale.order_id == FoodSafetyReport.order_id,
+        sa_exists().where(Appeal.target_type == "after_sale",
+                          Appeal.target_id == AfterSale.id,
+                          Appeal.status == "overturned"))
     confirmed_30d = await db.scalar(
         select(sa_func.count(FoodSafetyReport.id)).where(
             FoodSafetyReport.merchant_id == report.merchant_id,

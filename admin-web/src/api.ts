@@ -346,7 +346,7 @@ export interface AfterSale {
   order_no: string
   status: string
   reason: string
-  /** merchant / rider / cleared(商家申诉改判成立:判责撤销、钱不动)/ platform(历史)/ 空 = 还没判 */
+  /** merchant / rider / platform(申诉改判成立,钱由平台补回;也有历史上的平台认赔)/ 空 = 还没判 */
   fault: string
   images: string[]
   refund_cents: number

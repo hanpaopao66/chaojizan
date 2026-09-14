@@ -138,14 +138,13 @@ export default function AftersalesPage() {
             render: (v: number) => yuan(v) },
           { title: '已退', dataIndex: 'refund_cents', width: 100, align: 'right',
             render: (v: number) => v ? yuan(v) : '—' },
-          // fault 取值:merchant / rider / cleared(商家申诉改判:判责撤销、钱不动)/
-          // platform(历史:平台认赔,2026-09-14 起不再产生),空 = 还没判
+          // fault 取值:merchant / rider / platform(商家或骑手申诉改判成立,冲的扣的钱由平台补回;
+          // 也有历史上的食安垫付、跑腿认赔),空 = 还没判
           { title: '判责', dataIndex: 'fault', width: 110,
             render: (v: string, a) => ({
-              platform: <Tag color="default">平台认赔(历史)</Tag>,
+              platform: <Tag color="default">平台认(改判)</Tag>,
               rider: <Tag color="error">骑手</Tag>,
               merchant: <Tag color="warning">商家</Tag>,
-              cleared: <Tag color="default">改判无责</Tag>,
             }[v] ?? (a.status === 'rejected'
               ? <Tag color="default">已驳回</Tag>
               : <Tag color="warning">未判</Tag>)) },
