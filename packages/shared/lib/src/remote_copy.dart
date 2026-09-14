@@ -36,6 +36,10 @@ class RemoteCopy {
 
   static bool feature(String key) => features[key] ?? true;
 
+  /// 要公示的《信息网络传播视听节目许可证》编号(`/config` 的 licenses.av)。
+  /// 后台「平台开关」里填,空 = 不显示;「关于我们」读它
+  static String avLicense = '';
+
   /// 取一条文案。[fallback] 是客户端自带的完整默认值,不能省。
   static String text(String key, String fallback) => _copy[key] ?? fallback;
 
@@ -79,6 +83,8 @@ class RemoteCopy {
           .map((e) => FaqItem.fromJson(e as Map<String, dynamic>))
           .toList();
       rev = data['rev'] as String? ?? '';
+      final licenses = data['licenses'];
+      if (licenses is Map) avLicense = '${licenses['av'] ?? ''}'.trim();
       if (data['features'] is Map) {
         features = {
           for (final e in (data['features'] as Map).entries) '${e.key}': e.value == true,

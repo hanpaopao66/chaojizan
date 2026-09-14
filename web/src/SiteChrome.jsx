@@ -311,6 +311,8 @@ export function SiteNav({ active, home = false }) {
 export function SiteFooter({ note }) {
   const stats = useJson('/stats/overview')
   const ver = stats?.version?.version
+  // 视听许可证编号:后台「平台开关」里填,空着不显示(开视频要公示,见 docs/LAUNCH-40.md)
+  const av = useJson('/config')?.licenses?.av
   return (
     <footer className="h3-foot">
       <div>超级赞 Super-Z · 群众帮群众 · 让利于民，取之有道，账目为证</div>
@@ -319,7 +321,7 @@ export function SiteFooter({ note }) {
         {ver && <>线上版本 {ver}（与 <a href="https://github.com/hanpaopao66/chaojizan" target="_blank" rel="noreferrer">开源仓</a> tag 对应）</>}
       </div>
       <div className="muted">运营主体：陕西爱卡斯科技有限公司 · <a href="tel:15231109698">15231109698</a> · <a href="mailto:support@chaojizan.cc">support@chaojizan.cc</a></div>
-      <div className="muted"><a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a> · <a href="/legal/terms">用户协议</a> · <a href="/legal/privacy">隐私政策</a> · <a href="/features">消息与视频</a> · <a href="/brand">品牌物料</a> · <a href="/miniapps">小程序</a> · <a href="/developers">开发者</a></div>
+      <div className="muted"><a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>{av && <> · 信息网络传播视听节目许可证 {av}</>} · <a href="/legal/terms">用户协议</a> · <a href="/legal/privacy">隐私政策</a> · <a href="/features">消息与视频</a> · <a href="/brand">品牌物料</a> · <a href="/miniapps">小程序</a> · <a href="/developers">开发者</a></div>
     </footer>
   )
 }

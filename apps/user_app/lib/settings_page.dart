@@ -274,6 +274,15 @@ class _AboutPageState extends State<AboutPage> {
               value: '陕ICP备2025064101号-5',
               onTap: () => _open(Uri.parse('https://beian.miit.gov.cn')),
             ),
+            // 视听许可证编号从服务端来(后台「平台开关」里填),没填就不显示这一行
+            if (RemoteCopy.avLicense.isNotEmpty) ...[
+              const Divider(height: 1),
+              SzEntryTile(
+                icon: Icons.live_tv_outlined,
+                title: '视听许可证',
+                value: RemoteCopy.avLicense,
+              ),
+            ],
           ]),
         ),
         const SizedBox(height: 16),
