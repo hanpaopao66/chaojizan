@@ -5,6 +5,7 @@ import {
 } from '../SiteChrome.jsx'
 import AuditLampFilm from '../films/AuditLampFilm.jsx'
 import DispatchOpenFilm from '../films/DispatchOpenFilm.jsx'
+import CreditSection from './CreditSection.jsx'
 import './transparency.css'
 
 /* 透明中心(/transparency,/status 直达系统状态区)。
@@ -307,7 +308,7 @@ function EpochNotice() {
 const TOC = [
   ['audit', '核账日历'], ['funds', '钱去哪了'], ['fairness', '分账公平'], ['rider', '骑手收入'],
   ['compensation', '赔付记录'], ['reviews', '评价'], ['reports', '月度财报'], ['dispatch', '派单算法'],
-  ['liability', '判责分摊'], ['governance', '治理公开'], ['miniapps', '小程序'], ['community', '社区'], ['badges', '勋章'], ['support', '客服'], ['status', '系统状态'],
+  ['liability', '判责分摊'], ['credit', '信用分'], ['governance', '治理公开'], ['miniapps', '小程序'], ['community', '社区'], ['badges', '勋章'], ['support', '客服'], ['status', '系统状态'],
   ['changelog', '最近更新'],
 ]
 
@@ -490,6 +491,7 @@ export default function TransparencyPage() {
   const gov = useJson('/transparency/governance')
   const dispatch = useJson('/transparency/dispatch')
   const liability = useJson('/transparency/liability')
+  const credit = useJson('/transparency/credit')
   const mini = useJson('/transparency/miniapps')
   const comm = useJson('/transparency/community')
   const badges = useJson('/transparency/badges')
@@ -509,7 +511,7 @@ export default function TransparencyPage() {
       if (!userMoved.current) document.getElementById('status')?.scrollIntoView({ behavior: 'auto' })
     }, 60)
     return () => clearTimeout(t)
-  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, mini, comm, badges])
+  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, credit, mini, comm, badges])
 
   const latest = audit?.latest
   const per = fair?.per100
@@ -854,6 +856,8 @@ export default function TransparencyPage() {
             </>
           ) : <p className="tp-note">读取中…</p>}
         </Sec>
+
+        <CreditSection c={credit} />
 
         <Sec id="governance" eyebrow="治理公开">
           <h2>平台开关怎么改的，都留痕</h2>
