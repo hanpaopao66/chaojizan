@@ -2319,6 +2319,7 @@ class _RiderHomePageState extends State<RiderHomePage>
         onNavigate: _navigateTask,
         onGoHall: () => setState(() => _tab = 0),
         onRefresh: _refresh,
+        api: widget.api,
         header: Column(mainAxisSize: MainAxisSize.min, children: [
           _staleBanner('配送列表'),
           _batchBar(),

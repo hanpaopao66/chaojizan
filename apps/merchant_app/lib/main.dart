@@ -2092,6 +2092,11 @@ class _MerchantHomePageState extends State<MerchantHomePage>
       // 取餐码到交餐时才用得上;待接单那一步「到店自取」四个字就够了
       if (!pending && order.pickup && order.pickupCode.isNotEmpty)
         SzChip('取餐码 ${order.pickupCode}', color: sz.hold, dense: true),
+      // 顾客信用分:**接单之后**才有(服务端只给接过的单带,组件按状态再兜一道)。
+      // 待接单的卡、新单详情里没有它 —— 接单前看得到就会被拿来挑顾客。
+      // 平台的排序、派单、价格里都没有它,点开是公式说明
+      if (customerCreditVisible(order))
+        CustomerCreditChip(order: order, api: widget.api),
     ];
     final actions = _actionsFor(order);
     final showMoney = order.status != OrderStatus.cancelled;

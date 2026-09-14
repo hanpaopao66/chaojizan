@@ -694,6 +694,7 @@ class Order {
             .map((k, v) => MapEntry('$k', v as int)),
         feePartLabels = ((json['fee_part_labels'] as Map?) ?? const {})
             .map((k, v) => MapEntry('$k', '$v')),
+        customerCredit = CustomerCredit.tryParse(json['customer_credit']),
         createdAt = json['created_at'] as String;
 
   final String orderNo;
@@ -827,6 +828,11 @@ class Order {
   /// 美团官方只承诺"接单前能看到价格",看不到明细;这一步我们做了
   final Map<String, int> feeParts;
   final Map<String, String> feePartLabels;
+
+  /// 顾客信用分(只有分数和等级)。**只有接了这一单的商家、接到这一单的骑手拿得到**,
+  /// 其余一律为 null(待接单、抢单大厅、顾客自己看都没有)。显示前再过一道
+  /// [customerCreditVisible] —— 见 customer_credit.dart
+  final CustomerCredit? customerCredit;
   final String createdAt;
 
   String get summary =>
@@ -870,6 +876,29 @@ class Order {
     if (t == null) return null;
     return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
   }
+}
+
+/// 交易对方看到的顾客信用分:分数和等级,**没有明细**
+/// (server/app/services/customer_credit.py 的 brief_of)。
+class CustomerCredit {
+  CustomerCredit.fromJson(Map<String, dynamic> json)
+      : score = (json['score'] as num?)?.toInt() ?? 0,
+        level = json['level'] as String? ?? '',
+        levelLabel = json['level_label'] as String? ?? '';
+
+  /// 没有分数的响应(老服务端、别的形状)给 null,**不当成 0 分** —— 显示一个 0 分比不显示糟得多
+  static CustomerCredit? tryParse(Object? json) =>
+      json is Map && json['score'] is num
+          ? CustomerCredit.fromJson(json.cast<String, dynamic>())
+          : null;
+
+  final int score;
+
+  /// good / fair / low
+  final String level;
+
+  /// 良好 / 一般 / 偏低(服务端给的字,客户端不另写一份)
+  final String levelLabel;
 }
 
 class Address {

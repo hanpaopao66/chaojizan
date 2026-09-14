@@ -37,6 +37,7 @@ class TaskPanel extends StatefulWidget {
     required this.onGoHall,
     required this.onRefresh,
     this.header,
+    this.api,
   });
 
   final List<Order> orders;
@@ -55,6 +56,9 @@ class TaskPanel extends StatefulWidget {
 
   /// 地图上方的一条(刷新失败提示、同店批量条),可空
   final Widget? header;
+
+  /// 点开顾客信用分小签时拉公式说明用;为空时小签不可点
+  final ApiClient? api;
 
   @override
   State<TaskPanel> createState() => _TaskPanelState();
@@ -341,6 +345,17 @@ class _TaskPanelState extends State<TaskPanel> {
               const SizedBox(height: 10),
               _block(context,
                   pickup: false, title: dropTo, sub: dropSub, current: picked),
+              // 顾客信用分:**接到这一单之后**才有,抢单大厅里没有(服务端只给这一单的骑手带)。
+              // 只有分数和等级,看不到是因为什么扣的。派单和排序里都没有它;点开是公式说明
+              if (customerCreditVisible(order))
+                Padding(
+                  padding: const EdgeInsets.only(left: 20, top: 6),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: CustomerCreditChip(
+                        order: order, api: widget.api, viewer: '骑手'),
+                  ),
+                ),
               for (final a in widget.alertsFor(order)) ...[
                 const SizedBox(height: 8),
                 Text(a.text,

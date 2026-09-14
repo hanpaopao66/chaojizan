@@ -1738,6 +1738,33 @@ class ApiClient {
     return data as Map<String, dynamic>;
   }
 
+  // ---------- 顾客信用分(server/app/services/customer_credit.py) ----------
+
+  /// 本人看的完整明细:分数、每一项加减分和对应的记录、到哪天不再计分、
+  /// 每条扣分旁边的申诉入口、`rules`(和 /transparency/credit 同一份公式)。
+  Future<Map<String, dynamic>> myCredit() async =>
+      await _request('GET', '/credit/me') as Map<String, dynamic>;
+
+  /// 「我的」页那一行:分数和等级。响应里没有分数(老服务端)时给 null
+  Future<CustomerCredit?> myCreditBrief() async =>
+      CustomerCredit.tryParse(await _request('GET', '/credit/me/brief'));
+
+  /// 原来的申诉通道接不上时(配送异常过了 72 小时、违规记录),走客服工单申诉一条扣分。
+  /// [kind]:delivery_fault / violation。申诉成立后这一条不再计分
+  Future<Map<String, dynamic>> submitCreditAppeal({
+    required String kind,
+    required int recordId,
+    required String reason,
+  }) async =>
+      await _request('POST', '/credit/me/appeals', body: {
+        'kind': kind,
+        'record_id': recordId,
+        'reason': reason,
+      }) as Map<String, dynamic>;
+
+  /// 信用分怎么算(公开无鉴权)。商家端、骑手端点开信用分小签时的说明也读它
+  Future<Map<String, dynamic>> creditSpec() => _transparency('credit');
+
   // ---------- 透明中心(全部无需鉴权,数字难看也照实下发) ----------
   Future<Map<String, dynamic>> _transparency(String path) async =>
       await _request('GET', '/transparency/$path') as Map<String, dynamic>;

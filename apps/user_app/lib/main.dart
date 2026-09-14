@@ -27,6 +27,7 @@ import 'chat/store.dart';
 import 'chat/ui/avatar.dart' show rootResolve;
 import 'checkout_page.dart';
 import 'coupons_page.dart';
+import 'credit_page.dart';
 import 'group_cart_page.dart';
 import 'help_page.dart';
 import 'hotel_pages.dart';
@@ -7432,6 +7433,9 @@ class _ProfileViewState extends State<ProfileView> {
   List<StayOrder> _stays = const [];
   OrderCounts? _counts;
 
+  /// 我的信用分(分数和等级),「我的信用分」那一行的状态值。拉不到就不挂数字
+  CustomerCredit? _credit;
+
   /// 手里还能用的优惠券 / 团购券张数(网格上 hold 色的角标,设计稿 3e)
   /// 和团购券一共买过几张(订单卡头上的频道足迹),都跟 [_counts] 一起来。
   /// 拉不到就不挂
@@ -7512,6 +7516,10 @@ class _ProfileViewState extends State<ProfileView> {
             .then<OrderCounts?>(OrderCounts.fromJson)
             .onError((_, __) => null)
         : null;
+    // 信用分那一行的状态值。错误当场接住(同下面 appsF 的理由),拉不到就只是不挂数字
+    final creditF = loggedIn
+        ? widget.api.myCreditBrief().onError((_, __) => null)
+        : null;
 
     // 桌面端没有小程序容器,清单都不拉(同首页 _loadMiniApps)。
     // 错误当场接住:前面几个请求还没回来时它先失败,就是一个没人接的异常
@@ -7556,6 +7564,8 @@ class _ProfileViewState extends State<ProfileView> {
     }
     final counts = countsF == null ? null : await countsF;
     if (mounted) setState(() => _counts = counts);
+    final credit = creditF == null ? null : await creditF;
+    if (mounted) setState(() => _credit = credit);
     final apps = appsF == null ? const <MiniAppCard>[] : await appsF;
     if (mounted) setState(() => _miniApps = apps);
   }
@@ -8305,6 +8315,28 @@ class _ProfileViewState extends State<ProfileView> {
           ),
         ),
         const Divider(height: 1),
+        // 我的信用分:分数和等级是**状态值**(value 槽,零额外高度);
+        // 点进去是每一项加减分、对应的记录、申诉入口和公式。游客没有
+        if (widget.api.isLoggedIn) ...[
+          SzEntryTile(
+            icon: Icons.verified_outlined,
+            title: '我的信用分',
+            value: _credit == null
+                ? null
+                : '${_credit!.score} 分 · ${_credit!.levelLabel}',
+            hint: '每一分都指得出是哪条记录',
+            onTap: () async {
+              await Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => CreditPage(api: widget.api)));
+              // 在里面申诉成立的话分数会变:回来重拉这一行
+              try {
+                final c = await widget.api.myCreditBrief();
+                if (mounted) setState(() => _credit = c);
+              } catch (_) {}
+            },
+          ),
+          const Divider(height: 1),
+        ],
         // 账号相关三个入口:横过来 + 一句合并的脚注。
         //
         // ## 有说明、有状态值的怎么也能进网格
