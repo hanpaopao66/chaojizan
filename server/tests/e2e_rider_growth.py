@@ -78,22 +78,35 @@ def main():
     # ---- 新手保护期:只放宽阈值,不改派单 ----
     from app.config import settings
     assert settings.rider_novice_extra_transfers > 0
-    # 演示骑手早就跑满了,所以他**不该**在新手期 ——
-    # 这一条反过来验证判定不是永远返回 true
+    # 用自己造的骑手验两头:刚认证、一单没跑 → 在新手期;认证时刻往前拨过了期限 → 不在。
+    # 原来拿演示骑手验「老骑手不在新手期」,靠的是前面别的套件替他跑满了单 ——
+    # 干净库上分组并行(CI)时演示骑手是刚种出来的,前面没几个套件,会被判成新手
     import asyncio
+    from datetime import datetime, timedelta, timezone
 
     async def check():
+        from sqlalchemy import text
+
         from app.db import SessionLocal, engine
         from app.routers.riders import _novice_window
+        from tests.util import register_fresh_rider
+        uid = call("GET", "/auth/me", await register_fresh_rider("新手期测试"))["id"]
         async with SessionLocal() as db:
-            me = call("GET", "/auth/me", rider)["id"]
-            got = await _novice_window(db, me)
+            fresh = await _novice_window(db, uid)
+            await db.execute(
+                text("UPDATE rider_profiles SET created_at = :t WHERE rider_id = :id"),
+                {"t": datetime.now(timezone.utc) - timedelta(days=settings.rider_novice_days + 1),
+                 "id": uid})
+            await db.commit()
+        async with SessionLocal() as db:  # 另开一个会话:别读到上面那个会话里缓存的旧行
+            aged = await _novice_window(db, uid)
         await engine.dispose()
-        return got
+        return fresh, aged
 
-    assert asyncio.run(check()) is False, \
-        "跑了几百单的老骑手不该还在新手期 —— 判定失效了"
-    print("✓ 新手期判定:注册 7 天内**且**不足 20 单,老骑手不误判")
+    fresh, aged = asyncio.run(check())
+    assert fresh is True, "刚认证、一单没跑的骑手应在新手期"
+    assert aged is False, "认证超过期限的骑手不该还在新手期 —— 判定失效了"
+    print("✓ 新手期判定:认证 7 天内**且**不足 20 单;过了期限的不误判")
 
     # ---- 意见反馈:提交 → 平台回复 → 骑手看得到 ----
     err = call("POST", "/riders/feedback", rider, {"content": "太差"},

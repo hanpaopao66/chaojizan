@@ -61,7 +61,11 @@ rb = call("POST", f"/mini-apps/{appid_b}/launch", user_token, {"platform": "web"
 user_b = json.loads(parse_init(rb["init_data"])["user"])
 assert re.fullmatch(r"o_[a-z2-7]{26}", user_a["open_id"]), user_a
 assert user_a["open_id"] != user_b["open_id"], "同一个人在两个应用里 open_id 必须不同(I2)"
-assert str(me["id"]) not in user_a["open_id"]
+# open_id 是随机生成再存对应表的(mini_app_v2.new_open_id,单测守着),不是从用户 id 算出来的。
+# 这条子串比对只在 id 够长时才有意义:干净库上 id 只有一两位,26 位随机串里碰巧含一个 "5"
+# 的概率过半(CI 分组并行后在干净库上撞见过)
+if len(str(me["id"])) >= 4:
+    assert str(me["id"]) not in user_a["open_id"]
 assert set(user_a) == {"open_id", "language_code"}, "没授权 profile 时只有 open_id 和语言"
 again = call("POST", f"/mini-apps/{appid_a}/launch", user_token, {})
 assert json.loads(parse_init(again["init_data"])["user"])["open_id"] == user_a["open_id"]

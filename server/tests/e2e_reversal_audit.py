@@ -148,6 +148,12 @@ assert mine_w["status"] == "paid" and mine_w["paid_note"] == f"测试批次-{tag
 print(f"✓ 批量打款:凭证号「{mine_w['paid_note']}」骑手端可见")
 
 # ---- T+1 批量打款:只处理昨天及更早的申请,今天刚提的不动(给财务留核对时间) ----
+# 第一笔提走之后余额可能不够第二笔了:同样再送几单。原来这里没补,余额全靠前面别的套件
+# 攒下来的 —— 全量串着跑一直是绿的,分组并行后前面没有那些套件,就 409 余额不足
+wallet = call("GET", "/riders/wallet", rider)
+while wallet["balance_cents"] < 1000:
+    run_full_order()
+    wallet = call("GET", "/riders/wallet", rider)
 w2 = call("POST", "/riders/withdrawals", rider, {"amount_cents": 1000})
 t1 = call("POST", "/admin/withdrawals/t1-batch-paid", admin, {})
 assert "T+1批次-" in t1["note"]

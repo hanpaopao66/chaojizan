@@ -101,7 +101,10 @@ first = open_id(appid)
 assert first == open_id(appid), "同一个应用里要稳定"
 assert open_id(other) != first, "不同应用必须不同"
 uid = call("GET", "/auth/me", user)["id"]
-assert str(uid) not in first[2:], "open_id 里不许带用户 id"
+# 子串比对只在 id 够长时才有意义:open_id 是随机串(小写字母加 2–7),干净库上 id 只有一两位时
+# 碰巧含那个数字的概率很高。「不是从 id 算出来的」由 mini_app_v2.new_open_id 的随机生成和单测守着
+if len(str(uid)) >= 4:
+    assert str(uid) not in first[2:], "open_id 里不许带用户 id"
 sql("DELETE FROM mini_app_openids WHERE user_id = :u AND app_id = "
     "(SELECT id FROM mini_apps WHERE appid = :a)", {"u": uid, "a": appid})
 again = open_id(appid)
