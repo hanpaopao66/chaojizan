@@ -300,6 +300,17 @@ export const getDashboard = () => get<DashboardOut>('/admin/dashboard')
 
 // ---------- 客服工单 ----------
 
+/** 走客服工单的信用分申诉(见 server/app/services/customer_credit.py)。
+ *  kind:delivery_fault 配送异常判为顾客原因 / violation 违规记录 */
+export interface CreditAppealBrief {
+  id: number
+  kind: 'delivery_fault' | 'violation'
+  record_id: number
+  user_id: number
+  status: 'open' | 'upheld' | 'overturned'
+  resolve_note: string
+}
+
 export interface Ticket {
   id: number
   role: string
@@ -309,12 +320,18 @@ export interface Ticket {
   contact: string
   user_phone: string
   created_at: string
+  /** 这张工单是信用分申诉时才有 */
+  credit_appeal?: CreditAppealBrief | null
 }
 
 export const listTickets = () => get<Ticket[]>('/admin/tickets')
 export const replyTicket = (id: number, reply: string) =>
   post(`/admin/tickets/${id}/reply`, { reply })
 export const closeTicket = (id: number) => post(`/admin/tickets/${id}/close`)
+/** 信用分申诉下结论。改判 = 这一条不再计分(违规记录同时推翻);结论会自动回到这张工单里 */
+export const resolveCreditAppeal = (
+  id: number, result: 'upheld' | 'overturned', note: string,
+) => post(`/admin/credit/appeals/${id}/resolve`, { result, note })
 
 // ---------- 售后仲裁 ----------
 
