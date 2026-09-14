@@ -765,6 +765,9 @@ async def resolve_delivery_issue(
     issue.resolve_note = payload.note.strip()
     issue.resolved_at = datetime.now(timezone.utc)
     await db.commit()
+    # 顾客信用分:判为顾客原因是扣分项,先行赔付是订单完成 —— 两种都要刷新
+    from ..services import customer_credit
+    await customer_credit.invalidate(order.customer_id)
 
     await manager.broadcast(
         f"order:{order.order_no}",
@@ -2592,6 +2595,9 @@ async def risk_verdict(
         raise HTTPException(404, "订单不存在或无风控标记")
     order.risk_flags = {**order.risk_flags, "status": verdict}
     await db.commit()
+    # 确认刷单的单不算顾客信用分里的「完成一单」,结论变了要刷新
+    from ..services import customer_credit
+    await customer_credit.invalidate(order.customer_id)
     return {"ok": True, "status": verdict}
 
 
@@ -2674,6 +2680,9 @@ async def record_violation(
         # 同一单同一类的唯一索引:重复判定不该报错,当成幂等
         raise HTTPException(409, "这一单的这类问题已经判定过了")
     await db.refresh(target)
+    # 顾客的违规成立是信用分的扣分项(商家、骑手没有信用分,打一下也无妨)
+    from ..services import customer_credit
+    await customer_credit.invalidate(target.id)
     logger.info("违规判定 subject=%s kind=%s by admin=%s", subject_id,
                 kind, admin.id)
     return {"ok": True, "level": await level_for(target, db)}
@@ -2708,6 +2717,9 @@ async def overturn_violation(
     v.overturned_at = datetime.now(timezone.utc)
     v.overturn_note = str(payload.get("note", "")).strip()[:300]
     await db.commit()
+    # 推翻的那一条不再扣顾客信用分
+    from ..services import customer_credit
+    await customer_credit.invalidate(v.subject_id)
     target = await db.get(User, v.subject_id)
     logger.info("违规推翻 id=%s subject=%s by admin=%s", violation_id,
                 v.subject_id, admin.id)

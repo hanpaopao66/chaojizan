@@ -4652,11 +4652,16 @@ async def my_compliance(
         "used_for": "让你知道平台记了什么、哪些可以申诉。食安投诉的处置"
                     "(下架/停业)会直接影响经营,其余仅供你自查。",
         "never_used_for": "不折算成分数、不用于排名、不影响你在用户端的曝光。"
-                          "平台没有「违规积分」这种东西。",
+                          "平台不给商家打分,没有「违规积分」这种东西。",
     }
 
 
 # ---------- 规则中心(数字从代码里的真实常量算出来) ----------
+
+def _credit_rules_for_merchant() -> list[str]:
+    from ..services.customer_credit import rules_lines
+    return rules_lines("merchant")
+
 
 @router.get("/me/rules")
 async def my_rules(
@@ -4740,10 +4745,17 @@ async def my_rules(
             {
                 "title": "不会发生的事",
                 "items": [
-                    "平台没有「违规积分」这种东西,任何指标都不折算成分数",
+                    # 顾客有信用分之后,「平台没有违规积分」这句对全平台不再成立,
+                    # 只说商家这一侧 —— 公示的话要在坏情况下也是真的
+                    "平台不给商家打分:没有「违规积分」,你的任何指标都不折算成分数",
                     "评价不能删也不能花钱删,唯一例外是申诉成立后隐藏(评分同步扣回)",
                     "自配送的单配送费归你;平台配送的配送费全归骑手,平台一分不抽",
                 ],
+            },
+            {
+                # 从 customer_credit 的常量生成,和骑手端、透明中心是同一份
+                "title": "顾客信用分",
+                "items": _credit_rules_for_merchant(),
             },
         ],
         "note": "这一页的数字直接来自代码里的常量,后台改不了 ——"

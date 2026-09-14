@@ -3746,3 +3746,4 @@ from .models_video import (NOTIFY_KINDS, VIDEO_MODELS, VIDEO_STATUSES,  # noqa: 
                            WatchLater)
 from .models_moderation import (MODERATION_MODELS, RESTRICTIVE_ACTIONS,  # noqa: E402,F401
                                 SANCTION_ACTIONS, SocialSanction)
+from .models_credit import CreditAppeal  # noqa: E402,F401

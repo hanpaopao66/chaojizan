@@ -9,6 +9,7 @@
   /changelog      最近更新(GitHub 同源)+ 线上运行版本——代码即承诺
   /dispatch       派单算法:完整公式、每个权重的取值与理由、承诺不做的事
   /liability      判责与分摊:一单出问题钱怎么分、平台承担哪些、三方怎么申诉
+  /credit         顾客信用分:公式、权重、时间窗、谁能看到、不能用来做什么、怎么申诉
   /uptime         90 天可用率(auto_flow 自记探针,缺档按不可用计,只低不虚高)
   /community      社区:视频审核量与时长、处置记录(不带人)、推荐公式、管理员查看私聊次数(S8)
 
@@ -751,6 +752,19 @@ async def liability_spec():
     from ..services import liability as lb
 
     return lb.public_spec()
+
+
+@router.get("/credit")
+async def credit_spec():
+    """顾客信用分怎么算(公开无鉴权):公式、每项权重、看多少天、谁能看到、
+    不能用来做什么、怎么申诉。
+
+    每个数字**从 services/customer_credit.py 的常量直接读**,不另抄一份 ——
+    本人明细页、规则页、算分用的都是那几个常量(tests/unit/test_customer_credit.py 钉着)。
+    """
+    from ..services import customer_credit as cc
+
+    return cc.public_spec()
 
 
 @router.get("/queue")

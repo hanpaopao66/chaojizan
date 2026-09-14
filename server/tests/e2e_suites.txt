@@ -206,3 +206,4 @@ e2e_danmaku
 e2e_video_comments
 e2e_video_me
 e2e_social_moderation
+e2e_credit

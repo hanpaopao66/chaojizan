@@ -640,6 +640,11 @@ async def resolve_appeal(
     appeal.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(appeal)
+    if appeal.role == "customer":
+        # 顾客的申诉有结论了:配送异常改判的那一条不再扣信用分;维持原判的,
+        # 明细页上那条的申诉状态也变了。提交之后再打缓存
+        from ..services import customer_credit
+        await customer_credit.invalidate(appeal.user_id)
     applicant = await db.get(User, appeal.user_id)
     out = AdminAppealOut.model_validate(appeal)
     out.role, out.name, out.phone = appeal.role, applicant.name, applicant.phone

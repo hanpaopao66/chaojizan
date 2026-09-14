@@ -104,10 +104,15 @@ async def list_tickets(
     if status is not None:
         query = query.where(Ticket.status == status)
     rows = (await db.execute(query)).all()
+    # 信用分申诉是走工单提的:带上它申诉的是哪一条、现在什么状态,
+    # 后台才能在同一张工单上给出「申诉成立 / 维持原判」(见 services/customer_credit.py)
+    from ..services.customer_credit import ticket_appeal_summaries
+    credit = await ticket_appeal_summaries(db, [t.id for t, _ in rows])
     out = []
     for ticket, phone in rows:
         item = AdminTicketOut.model_validate(ticket)
         item.user_phone = phone
+        item.credit_appeal = credit.get(ticket.id)
         out.append(item)
     return out
 
@@ -148,6 +153,12 @@ async def close_ticket(
     db: AsyncSession = Depends(get_db),
 ):
     ticket = await _get_ticket(db, ticket_id)
+    # 信用分申诉的工单**先下结论再关**:关了而申诉还挂着,顾客那边就一直是「申诉处理中」,
+    # 那条扣分也一直在 —— 等于收下申诉然后扔进抽屉
+    from ..models import CreditAppeal
+    if await db.scalar(select(CreditAppeal.id).where(
+            CreditAppeal.ticket_id == ticket.id, CreditAppeal.status == "open")):
+        raise HTTPException(409, "这张工单是信用分申诉,先给出「申诉成立」或「维持原判」再关闭")
     ticket.status = TicketStatus.closed
     await db.commit()
     await db.refresh(ticket)

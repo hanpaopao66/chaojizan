@@ -218,6 +218,15 @@ async def rules_for(audience: str, db: AsyncSession) -> dict:
             },
         ]
 
+    # 顾客信用分(2026-09 拍板)。顾客那一份讲怎么算、谁能看到;商家和骑手那一份讲
+    # 接单之后能看到什么、不许拿它做什么 —— 两份都从 customer_credit 的常量生成。
+    # 它**不是处置**:不限制下单、接单、营业,所以不并进下面「什么会被处置」那一节
+    from .customer_credit import rules_lines
+    sections.append({
+        "title": "信用分" if audience == "customer" else "顾客信用分",
+        "items": rules_lines(audience),
+    })
+
     # 三端共用的两节放在最后,**顺序和措辞都一样** —— 这是对称性的体现,
     # 不是重复代码:任何一端单独改了,就是不公平的开始
     sections.append(_risk_section(audience))
