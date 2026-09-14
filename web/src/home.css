@@ -75,6 +75,8 @@
 /* 下载:上面是三端片子(films/ThreeAppsFilm.jsx),下面三张卡 */
 .h3-dl-film { margin-top: 28px; }
 .dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+/* 第二排:用户端的网页版、电脑版(发布了才有),两张卡 */
+.dl.dl-more { grid-template-columns: repeat(2, 1fr); margin-top: 12px; }
 .dlcard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
 .dlcard b { font-size: 16px; }
 .dlcard p { margin: 0; color: var(--ink-muted); font-size: 13.5px; flex: 1; }
@@ -97,7 +99,7 @@
   .ledger .nums, .dl { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 520px) {
-  .ledger .nums, .dl { grid-template-columns: 1fr; }
+  .ledger .nums, .dl, .dl.dl-more { grid-template-columns: 1fr; }
   /* 服务台两列时,横排的格子留给文字的只剩 36px(320 屏实测),
      「买菜买水果」折成三行。改成字块在上、文字在下,一行放得下 */
   .chcard { flex-direction: column; align-items: flex-start; gap: 8px; }

@@ -36,6 +36,15 @@ export function useJson(url, every) {
   return data
 }
 
+/** 用户端的网页版、电脑版发布了没有。读 appdist/versions.json(发版脚本
+ *  scripts/sync_release_to_appdist.sh 写,App 内更新检查读的也是它):
+ *  { web: 网页版上线了没有, desktop: 电脑版那一条(版本号、下载地址)或 null }。
+ *  没发布过、读不到都当没有 —— 不给一个点进去是 404 的入口 */
+export function useReleases() {
+  const v = useJson('/appdist/versions.json')
+  return { web: !!v?.web?.user, desktop: v?.desktop?.user || null }
+}
+
 /** 复制一段文字,成功回 true。先用 Clipboard API;拿不到(老的微信内核、非安全上下文、
  *  页面没焦点)就退回隐藏 textarea + execCommand */
 export function copyText(text) {
@@ -281,8 +290,12 @@ const NAV = [
 ]
 
 /** 吸顶顶栏。窄屏时链接那一行横向滚动 —— **不是隐藏**:
- *  老官网在手机上把链接整行藏了,入驻页在手机上一个入口都没有(见 home.css) */
+ *  老官网在手机上把链接整行藏了,入驻页在手机上一个入口都没有(见 home.css)。
+ *
+ *  「网页版」:子页的顶栏上有;首页的顶栏上那个位置是「透明中心」,网页版的入口在首屏的
+ *  按钮里 —— 两个都挤进顶栏的话,320 屏上顶栏要折成三行(见 site.css 380 那一档) */
 export function SiteNav({ active, home = false }) {
+  const rel = useReleases()
   return (
     <nav className="h3-nav" aria-label="主导航">
       <a className="h3-brand" href="/"><BrandIcon size={28} /> 超级赞</a>
@@ -298,6 +311,7 @@ export function SiteNav({ active, home = false }) {
         })}
       </div>
       {home && <a className="h3-btn ghost" href="/transparency">透明中心</a>}
+      {!home && rel.web && <a className="h3-btn ghost" href="/web/">网页版</a>}
       <a className="h3-btn primary" href={home ? '#download' : '/download'}>下载 App</a>
     </nav>
   )

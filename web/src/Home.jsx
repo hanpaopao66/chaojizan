@@ -2,7 +2,7 @@ import React from 'react'
 
 import FlowFilm from './FlowFilm.jsx'
 import {
-  CHANNELS, Glyph, STATE_LABEL, SiteFooter, SiteNav, useChannelState, useCountUp, useFeatures, useJson,
+  CHANNELS, Glyph, STATE_LABEL, SiteFooter, SiteNav, useChannelState, useCountUp, useFeatures, useJson, useReleases,
 } from './SiteChrome.jsx'
 
 /* 官网动画集的片子各自成 chunk,不拖首屏:首屏之下那支「一个 App 干完这些事」,
@@ -91,6 +91,8 @@ export default function Home() {
   const audit = useJson('/transparency/audit')
   const { loaded, stateOf } = useChannelState()
   const features = useFeatures()
+  // 网页版、电脑版:发布了才露入口(versions.json 里有那一条),不给点进去是 404 的链接
+  const rel = useReleases()
   const rows = CHANNELS.map(ch => ({ ...ch, ...COPY[ch.key], state: stateOf(ch.key) }))
   const openCount = rows.filter(r => r.state === 'open').length
 
@@ -107,6 +109,7 @@ export default function Home() {
           <p className="h3-lede">外卖、买菜、住宿、团购、跑腿、打车，一个频道一个频道地开。每个频道只有一条规矩：抽成写在明面上，账目谁都能查。</p>
           <div className="h3-cta">
             <a className="h3-btn primary lg" href="#download">下载 App</a>
+            {rel.web && <a className="h3-btn ghost lg" href="/web/">打开网页版</a>}
             <a className="h3-btn ghost lg" href="#ledger">看今天的账</a>
           </div>
           <div className="facts">
@@ -212,7 +215,18 @@ export default function Home() {
           <div className="dlcard"><b>商家端</b><p>入驻免费，总负担 5% 封顶，每日对账 · <a href="/merchant">网页版后台</a></p><a className="h3-btn ghost" href="/appdist/chaojizan-merchant-arm64.apk">下载 APK</a></div>
           <div className="dlcard"><b>骑手端</b><p>配送费 100% 归你，提现零手续费</p><a className="h3-btn ghost" href="/appdist/chaojizan-rider-arm64.apk">下载 APK</a></div>
         </div>
-        <p className="note">iOS 与 H5 版在路上。手机上打开 <a href="/download">chaojizan.cc/download</a> 也能下载。装之前想知道 App 收集什么，<a href="#privacy">往下看隐私清单</a>。</p>
+        {/* 用户端的网页版和电脑版:和上面的 APK 是同一个 Release 里的同一批产物 */}
+        {(rel.web || rel.desktop) && (
+          <div className="dl dl-more">
+            {rel.web && (
+              <div className="dlcard"><b>网页版 · 不用安装，打开就用</b><p>手机、电脑的浏览器都能打开，账号和 App 通用</p><a className="h3-btn ghost" href="/web/">打开网页版</a></div>
+            )}
+            {rel.desktop && (
+              <div className="dlcard"><b>电脑版 · 用户端</b><p>Windows、macOS、Ubuntu 三个版本{rel.desktop.version ? `，最新 v${rel.desktop.version}` : ''}。系统要求和第一次打开怎么放行，写在下载页</p><a className="h3-btn ghost" href="/download#desktop">去下载页</a></div>
+            )}
+          </div>
+        )}
+        <p className="note">{rel.web ? 'iOS 版在路上，iPhone 上可以先用网页版。' : 'iOS 版在路上。'}手机上打开 <a href="/download">chaojizan.cc/download</a> 也能下载。装之前想知道 App 收集什么，<a href="#privacy">往下看隐私清单</a>。</p>
       </section>
 
       {/* 隐私清单:稿子标的位置是「下载页三张卡的上方」。三张卡上方已经是三端片,

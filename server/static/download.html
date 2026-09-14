@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>下载超级赞 Super-Z App · Android 用户端/商家端/骑手端</title>
-<meta name="description" content="下载超级赞(Super-Z)Android 安装包:用户端点外卖、商家端接单出餐、骑手端抢单配送。商家佣金 5% 封顶,配送费 100% 归骑手,账目公开可验证。">
+<title>下载超级赞 Super-Z App · Android 三端 / 网页版 / 电脑版</title>
+<meta name="description" content="下载超级赞(Super-Z):Android 用户端、商家端、骑手端安装包,用户端另有网页版和 Windows / macOS / Ubuntu 电脑版。商家佣金 5% 封顶,配送费 100% 归骑手,账目公开可验证。">
 <link rel="canonical" href="https://chaojizan.cc/download">
 <link rel="icon" type="image/png" sizes="64x64" href="/site/brand/favicon_64.png">
 <!-- 官网浅色版的独立下载页(不走 React 包,手机上点开要快)。
@@ -45,6 +45,22 @@
   .note { color:var(--ink2); font-size:13px; margin-top:22px; line-height:1.85; }
   .note a { color:var(--link); }
   .note a:hover { color:var(--clay); }
+  /* 用户端的网页版、电脑版(发布了才显示,见页尾脚本) */
+  .more { margin-top:34px; }
+  .more .cards, .more .os { margin-top:12px; }
+  .more .ver { margin-top:6px; }
+  .os { background:var(--surface); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  .os .row { display:flex; align-items:flex-start; gap:16px; padding:16px 18px; border-top:1px solid var(--line); }
+  .os .row:first-child { border-top:0; }
+  .os .t b { font-size:16px; font-weight:600; }
+  .os .req { color:var(--ink); font-size:13px; }
+  .os .tip { color:var(--ink2); font-size:12.5px; line-height:1.8; margin-top:6px; }
+  .os .tip code { font-family:ui-monospace,Menlo,monospace; font-size:12px; background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:0 4px; }
+  .os .sha { color:var(--ink3); font-family:ui-monospace,Menlo,monospace; font-size:11px; margin-top:6px; word-break:break-all; }
+  .os .sha:empty { display:none; }
+  .os .btns { display:flex; flex-direction:column; gap:8px; flex:none; }
+  .os .btn { text-align:center; }
+  .os .btn:hover { border-color:var(--ink); }
   .foot { text-align:center; font-size:12.5px; color:var(--ink2); padding:48px 20px 40px; line-height:1.9; }
   .foot a { color:var(--link); }
   @media (max-width:520px) {
@@ -52,6 +68,9 @@
     h1 { font-size:32px; }
     .dl { flex-wrap:wrap; gap:12px 14px; padding:16px; }
     .dl .btn { flex:1 0 100%; text-align:center; }
+    .os .row { flex-wrap:wrap; padding:16px; }
+    .os .btns { flex:1 0 100%; flex-direction:row; }
+    .os .btns .btn { flex:1; }
   }
 </style>
 </head>
@@ -74,9 +93,9 @@
 </header>
 
 <main class="wrap">
-  <div class="eyebrow">下载 · Android</div>
+  <div class="eyebrow">下载 · Android / 网页 / 电脑</div>
   <h1>下载超级赞</h1>
-  <p class="sub">Android 安装包（arm64），用户、商家、骑手各一个。装一次以后 App 内置更新检查，有新版会提醒。</p>
+  <p class="sub">Android 安装包（arm64），用户、商家、骑手各一个；用户端另有网页版和电脑版。装一次以后 App 内置更新检查，有新版会提醒。</p>
   <div class="ver" id="ver">正在读取最新版本…</div>
 
   <div class="cards">
@@ -98,7 +117,60 @@
   </div>
 
   <!-- 汉字之间别换行:HTML 会把换行当成一个空格,中文句子里就多出一格空白 -->
-  <p class="note">安装提示：浏览器下载后直接打开安装；系统提示“未知来源”时，允许本次安装即可。商家在电脑上管店、管酒店房态，用<a href="/merchant">网页版商家后台</a>。也可以从 <a href="https://github.com/hanpaopao66/chaojizan/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a> 下载同一份安装包，附件里有 SHA256SUMS.txt 可以校验（代码开源，欢迎自行构建）。</p>
+  <p class="note">安卓安装提示：浏览器下载后直接打开安装；系统提示“未知来源”时，允许本次安装即可。商家在电脑上管店、管酒店房态，用<a href="/merchant">网页版商家后台</a>。也可以从 <a href="https://github.com/hanpaopao66/chaojizan/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a> 下载同一份安装包，附件里有 SHA256SUMS.txt 可以校验（代码开源，欢迎自行构建）。</p>
+
+  <!-- 用户端的网页版、电脑版:和上面的 APK 是同一个 GitHub Release 里的同一批产物。
+       发布了才显示(页尾脚本读 versions.json,里面有那一条才打开)——
+       还没发过的时候不给一个点进去是 404 的链接 -->
+  <section class="more" id="web" hidden>
+    <div class="eyebrow">网页版</div>
+    <div class="cards">
+      <a class="dl" style="--bar:#C15F3C" href="/web/">
+        <span class="g" style="color:#C15F3C;background:rgba(193,95,60,.12)">网</span>
+        <span class="t"><b>网页版 · 不用安装，打开就用</b><div>手机、电脑的浏览器都能打开，账号和 App 通用</div></span>
+        <span class="btn">打开网页版</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- 系统要求:Windows 10/11 x64 是 Flutter 支持的桌面版本(docs.flutter.dev/reference/supported-platforms);
+       macOS 13 是我们的最低版本(apps/user_app/macos/Runner/Configs/AppInfo.xcconfig 写了为什么);
+       Ubuntu 在 22.04 上编,24.04 上装过 deb、依赖都解得开(见 release.yml 的 linux job)。
+       放行步骤按系统原话写:macOS 的见 support.apple.com/zh-cn/102445。改之前先核对 -->
+  <section class="more" id="desktop" hidden>
+    <div class="eyebrow">电脑版 · 用户端</div>
+    <div class="ver" id="ver-desktop"></div>
+    <div class="os">
+      <div class="row">
+        <div class="t">
+          <b>Windows</b>
+          <div class="req">Windows 10、11，64 位</div>
+          <p class="tip">解压后打开 chaojizan 文件夹，双击 chaojizan.exe。第一次打开如果弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」：我们没有买代码签名证书，系统认不出发行方。</p>
+          <div class="sha" data-k="windows"></div>
+        </div>
+        <div class="btns"><a class="btn" href="/appdist/chaojizan-windows-x64.zip">下载 zip</a></div>
+      </div>
+      <div class="row">
+        <div class="t">
+          <b>macOS</b>
+          <div class="req">macOS 13 及以上，Apple 芯片和 Intel 芯片的 Mac 都能用</div>
+          <p class="tip">打开 dmg，把「超级赞」拖进「应用程序」。我们没有做苹果的开发者签名和公证，第一次打开会被系统拦下：打开「系统设置」→「隐私与安全性」，往下翻，点「仍要打开」，再点「打开」。macOS 14 及更早的系统，也可以在「应用程序」里右键点「超级赞」→「打开」。</p>
+          <div class="sha" data-k="macos"></div>
+        </div>
+        <div class="btns"><a class="btn" href="/appdist/chaojizan-macos.dmg">下载 dmg</a></div>
+      </div>
+      <div class="row">
+        <div class="t">
+          <b>Ubuntu</b>
+          <div class="req">Ubuntu 22.04、24.04，64 位（x86）</div>
+          <p class="tip">deb 包：在下载目录里执行 <code>sudo apt install ./chaojizan-linux-x64.deb</code>，装好后在应用列表里找「超级赞」。tar.gz：解压后运行 <code>chaojizan/chaojizan</code>；发语音消息要系统里有 pulseaudio-utils 和 ffmpeg（用 apt 装 deb 时会一起装上）。</p>
+          <div class="sha" data-k="linux_deb"></div>
+          <div class="sha" data-k="linux"></div>
+        </div>
+        <div class="btns"><a class="btn" href="/appdist/chaojizan-linux-x64.deb">下载 deb</a><a class="btn" href="/appdist/chaojizan-linux-x64.tar.gz">下载 tar.gz</a></div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <footer class="foot">
@@ -112,10 +184,30 @@
   fetch('/appdist/versions.json').then(r => (r.ok ? r.json() : null)).then(d => {
     const u = (d && d.user) || {};
     const el = document.getElementById('ver');
-    if (!u.version) { el.textContent = ''; return; }
-    el.textContent = '最新版本 v' + u.version + (u.build ? ' (build ' + u.build + ')' : '')
+    el.textContent = !u.version ? '' : '最新版本 v' + u.version + (u.build ? ' (build ' + u.build + ')' : '')
       + (u.notes ? ' · ' + u.notes : '');
+    // 网页版、电脑版:versions.json 里有那一条(发版脚本同步过)才显示
+    if (d && d.web && d.web.user) document.getElementById('web').hidden = false;
+    const k = d && d.desktop && d.desktop.user;
+    if (k) showDesktop(k);
+    // 带着 #web / #desktop 过来(首页「去下载页」):那一段是现在才显示的,浏览器没法先定位,补一下
+    const target = location.hash && document.getElementById(location.hash.slice(1));
+    if (target && !target.hidden) target.scrollIntoView();
   }).catch(() => { document.getElementById('ver').textContent = ''; });
+
+  function showDesktop(k) {
+    document.getElementById('desktop').hidden = false;
+    document.getElementById('ver-desktop').textContent =
+      '最新版本 v' + k.version + (k.build ? ' (build ' + k.build + ')' : '');
+    // 每个包的大小和 SHA-256,和 GitHub Release 附件里的 SHA256SUMS.txt 是同一个值
+    const files = k.files || {};
+    document.querySelectorAll('.sha[data-k]').forEach(s => {
+      const f = files[s.dataset.k];
+      if (!f || !f.sha256) return;
+      s.textContent = (f.url || '').split('/').pop() + ' · '
+        + (f.size ? (f.size / 1048576).toFixed(1) + ' MB · ' : '') + 'SHA-256 ' + f.sha256;
+    });
+  }
 </script>
 </body>
 </html>
