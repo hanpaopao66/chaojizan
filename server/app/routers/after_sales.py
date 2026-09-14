@@ -1,10 +1,12 @@
-"""用户主动售后:判责 + 各自承担 + 平台只垫付不兜底。
+"""用户主动售后:判责 + 各自承担 + 平台不出钱(2026-09-14 拍板)。
 
 - 申请必须带举证照片;30 天 3 次成功售后后走客服;黑名单用户只能走工单
 - 商家同意 = 商家责任:退餐费(配送费已履约不退),商家净额+平台佣金冲账
 - 骑手责任(洒餐/丢餐)由客服在管理后台仲裁:顾客全额退款(含配送费),商家净额保留;
   这单骑手收入冲回,商家那份餐钱先从骑手保障金池出(公开账本逐日计提的 rider_fund),
   池子不够的从骑手收入里扣 —— 平台不出钱(services/rider_fault)
+- 跑腿单没有商家,由平台处理:是骑手的问题判骑手责任(同上),不是就驳回;
+  平台不再「同意 = 平台认赔」(原来判责记 platform、商品款平台出)
 退款写 refunds 流水(真实/模拟通道同一入口)+ 订单 refund_cents 汇总 +
 已结算订单冲账(负数行,见 services/settlement.py)。
 """
@@ -217,6 +219,12 @@ async def accept_after_sale(
       责任,走平台客服仲裁(admin.after_sale_rider_fault,钱见 services/rider_fault)
     """
     after_sale, order = await _get_pending(db, after_sale_id, user)
+    if is_errand(order):
+        # 跑腿没有商家,「同意」原来是平台自己认赔(判责记 platform,商品款平台出)。
+        # 2026-09-14 拍板「平台没有钱」之后不再认赔:是骑手的问题,在售后仲裁里判骑手责任
+        # (钱见 services/rider_fault,平台不出);不是骑手的问题就驳回,顾客可以申诉
+        raise HTTPException(409, "跑腿单的售后平台不再认赔:是骑手的问题请判骑手责任"
+                                 "(售后仲裁),不是就驳回")
     # 配送费不退:骑手入账保留,退款只覆盖餐费部分,平台不再为售后单倒贴配送费。
     # total_cents 在缺货部分退款时已同步扣减,此处即"用户当前净付金额"
     delivery_kept = order.delivery_fee_cents if order.rider_id is not None else 0
@@ -224,9 +232,8 @@ async def accept_after_sale(
     if refund_amount <= 0:
         raise HTTPException(409, "该订单已无可退金额")
     after_sale.status = AfterSaleStatus.accepted
-    # 跑腿单没有商家,认责方是平台自己;外卖是商家同意即认责,
-    # 损失从商家结算款出
-    after_sale.fault = "platform" if is_errand(order) else "merchant"
+    # 商家同意即认责,损失从商家结算款出
+    after_sale.fault = "merchant"
     after_sale.reply = payload.reply.strip()
     after_sale.processed_at = datetime.now(timezone.utc)
     order.refund_note = (

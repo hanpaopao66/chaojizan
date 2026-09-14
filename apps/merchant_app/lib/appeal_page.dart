@@ -1,5 +1,6 @@
 /// 商家判责申诉:对「判商家责任的售后」与「差评」在 72 小时内申诉。
-/// 申诉成立:售后恢复被冲净额(平台认亏,不追用户款);差评隐藏并回调评分。
+/// 申诉成立:售后判责撤销、信用分那一条不再计分 —— **被冲的净额不补回**(2026-09-14 起:
+/// 顾客拿到的退款不追回,平台也不出这笔钱);差评隐藏并回调评分。
 library;
 
 import 'package:flutter/material.dart';
@@ -49,16 +50,21 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
       });
       return;
     }
+    final byTarget = {
+      for (final a in appeals!) '${a['target_type']}:${a['target_id']}': a,
+    };
     setState(() {
       _error = '';
-      // 只列可能需要申诉的:已同意退款且非骑手责的售后 / 3 星及以下差评
+      // 只列可能需要申诉的:判商家责任的已退款售后(服务端只收 fault == merchant 的申诉)、
+      // 3 星及以下差评。已经申诉过的照样列着 —— 改判之后判责方变成 cleared,
+      // 按判责方筛就会连「申诉成立」一起消失
       _afterSales = afterSales!
-          .where((a) => a.status == 'accepted' && a.fault != 'rider')
+          .where((a) =>
+              a.status == 'accepted' &&
+              (a.fault == 'merchant' || byTarget.containsKey('after_sale:${a.id}')))
           .toList();
       _badReviews = reviews!.where((r) => r.merchantRating <= 3).toList();
-      _appeals = {
-        for (final a in appeals!) '${a['target_type']}:${a['target_id']}': a,
-      };
+      _appeals = byTarget;
       _loaded = true;
     });
   }
@@ -73,7 +79,8 @@ class _MerchantAppealPageState extends State<MerchantAppealPage> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('说明理由,平台人工复核。申诉成立:售后恢复你的净额(用户退款平台承担);'
+            const Text('说明理由,平台人工复核。申诉成立:售后判责撤销、信用分那一条不再计分'
+                '(被冲的净额不补回 —— 顾客拿到的退款不追回,平台也不出这笔钱);'
                 '差评隐藏且不计入评分。',
                 style: TextStyle(fontSize: 13)),
             const SizedBox(height: 12),

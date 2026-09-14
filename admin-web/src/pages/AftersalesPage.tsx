@@ -1,7 +1,9 @@
 import { Alert, Button, Image, Input, Modal, Select, Space, Table, Tag, message } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
-import { AfterSale, ApiError, listAfterSales, riderFault, yuan } from '../api'
+import {
+  AfterSale, ApiError, listAfterSales, rejectErrandAfterSale, riderFault, yuan,
+} from '../api'
 
 /**
  * 售后仲裁。
@@ -13,6 +15,11 @@ import { AfterSale, ApiError, listAfterSales, riderFault, yuan } from '../api'
  * 平台不出钱)。这一单记为骑手责任,是骑手信用分的扣分项(server/app/services/credit.py),
  * 骑手 72 小时内可以申诉,成立的话扣的钱退回。所以确认框里要把金额和后果写清楚,
  * 不是弹一个「确定吗」。
+ *
+ * ## 跑腿单只有两个选项
+ *
+ * 跑腿没有商家,售后由平台处理。2026-09-14 起平台不再「同意 = 平台认赔」:是骑手的问题
+ * 判骑手责任(钱同上),不是就驳回(顾客可以对驳回申诉)。
  */
 export default function AftersalesPage() {
   const [days, setDays] = useState(7)
@@ -68,6 +75,40 @@ export default function AftersalesPage() {
     })
   }
 
+  function reject(a: AfterSale) {
+    let reply = ''
+    Modal.confirm({
+      title: '驳回这条跑腿售后?',
+      width: 520,
+      content: (
+        <>
+          <Alert type="info" showIcon style={{ margin: '8px 0' }}
+                 message="不是骑手的问题:不退款,顾客会收到驳回理由,72 小时内可以申诉"
+                 description="平台不再替跑腿单认赔。顾客申诉成立的话,判的是骑手责任(扣骑手的钱)。" />
+          <Input.TextArea rows={2} maxLength={200} placeholder="驳回理由(会展示给顾客)"
+                          onChange={(e) => { reply = e.target.value }} />
+        </>
+      ),
+      okText: '驳回',
+      cancelText: '再看看',
+      onOk: async () => {
+        if (reply.trim().length < 2) {
+          message.warning('请写清驳回理由')
+          throw new Error('理由太短')
+        }
+        setActing(true)
+        try {
+          await rejectErrandAfterSale(a.id, reply.trim())
+          message.success('已驳回')
+          await load()
+        } catch (e) {
+          message.error(e instanceof ApiError ? e.message : String(e))
+          throw e
+        } finally { setActing(false) }
+      },
+    })
+  }
+
   return (
     <>
       {err && <Alert type="error" showIcon message={err} style={{ marginBottom: 12 }} />}
@@ -97,17 +138,27 @@ export default function AftersalesPage() {
             render: (v: number) => yuan(v) },
           { title: '已退', dataIndex: 'refund_cents', width: 100, align: 'right',
             render: (v: number) => v ? yuan(v) : '—' },
-          // fault 实测取值:platform / rider / merchant,空 = 还没判
-          { title: '判责', dataIndex: 'fault', width: 100,
-            render: (v: string) => ({
-              platform: <Tag color="default">平台承担</Tag>,
+          // fault 取值:merchant / rider / cleared(商家申诉改判:判责撤销、钱不动)/
+          // platform(历史:平台认赔,2026-09-14 起不再产生),空 = 还没判
+          { title: '判责', dataIndex: 'fault', width: 110,
+            render: (v: string, a) => ({
+              platform: <Tag color="default">平台认赔(历史)</Tag>,
               rider: <Tag color="error">骑手</Tag>,
               merchant: <Tag color="warning">商家</Tag>,
-            }[v] ?? <Tag color="warning">未判</Tag>) },
-          { title: '操作', width: 130, fixed: 'right',
+              cleared: <Tag color="default">改判无责</Tag>,
+            }[v] ?? (a.status === 'rejected'
+              ? <Tag color="default">已驳回</Tag>
+              : <Tag color="warning">未判</Tag>)) },
+          { title: '操作', width: 170, fixed: 'right',
             render: (_, a) => !a.fault ? (
-              <Button type="link" danger size="small" disabled={acting}
-                      onClick={() => judge(a)}>判骑手责任</Button>
+              <Space size={0}>
+                <Button type="link" danger size="small" disabled={acting}
+                        onClick={() => judge(a)}>判骑手责任</Button>
+                {a.is_errand && a.status === 'pending' && (
+                  <Button type="link" size="small" disabled={acting}
+                          onClick={() => reject(a)}>驳回</Button>
+                )}
+              </Space>
             ) : null },
         ]}
       />

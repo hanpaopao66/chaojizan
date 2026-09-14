@@ -90,9 +90,12 @@ class Test两条判责的路都走它:
         assert ("rider_fault", "apply") in _calls(admin.resolve_delivery_issue)
 
     def test_售后仲裁判骑手责任(self):
-        from app.routers import admin
-        calls = _calls(admin.after_sale_rider_fault)
-        assert ("rider_fault", "apply") in calls
+        """整套动作在 rider_fault.judge_after_sale:后台售后仲裁、跑腿单「售后被拒」改判都走它。"""
+        from app.routers import admin, appeals
+        assert ("rider_fault", "judge_after_sale") in _calls(admin.after_sale_rider_fault)
+        assert ("rider_fault", "judge_after_sale") in _calls(appeals._overturn_errand_rejected)
+        calls = _calls(rf.judge_after_sale)
+        assert ("", "apply") in calls
         assert ("", "settle_order") in calls, "还没确认收货的单要先结算再冲,不然之后入账就成了平台出的钱"
 
     def test_三条改判的路都退(self):

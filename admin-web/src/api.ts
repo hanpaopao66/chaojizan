@@ -346,15 +346,21 @@ export interface AfterSale {
   order_no: string
   status: string
   reason: string
+  /** merchant / rider / cleared(商家申诉改判成立:判责撤销、钱不动)/ platform(历史)/ 空 = 还没判 */
   fault: string
   images: string[]
   refund_cents: number
   total_cents: number
   created_at: string
+  /** 跑腿单(没有商家):平台处理,只能判骑手责任或驳回。老服务端没有这个字段 */
+  is_errand?: boolean
 }
 
 export const listAfterSales = (days = 7) =>
   get<AfterSale[]>(`/admin/after-sales?days=${days}`)
+/** 驳回跑腿单的售后(平台只受理跑腿单;外卖售后由商家处理)。顾客可以对驳回申诉 */
+export const rejectErrandAfterSale = (id: number, reply: string) =>
+  post(`/after-sales/${id}/reject`, { reply })
 /** 判骑手责任:全额退用户(含配送费),商家净额不动;这单骑手收入冲回,商家那份餐钱先从
  *  骑手保障金池出、不够的从骑手收入里扣(server/app/services/rider_fault.py,平台不出钱) */
 export const riderFault = (id: number, reason: string) =>

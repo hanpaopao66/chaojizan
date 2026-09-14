@@ -1315,9 +1315,12 @@ async def list_after_sales(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """近 N 天售后申请全量(客服仲裁视角:带举证图、判责方、订单金额)。"""
+    """近 N 天售后申请全量(客服仲裁视角:带举证图、判责方、订单金额)。
+
+    is_errand:跑腿单没有商家,由平台处理 —— 只能判骑手责任或驳回(2026-09-14 起平台不再认赔)。"""
     from ..models import AfterSale
     from ..models import Order as OrderModel
+    from ..services.errand import is_errand
 
     since = datetime.now(timezone.utc) - timedelta(days=min(days, 30))
     rows = await db.execute(
@@ -1340,6 +1343,7 @@ async def list_after_sales(
         "delivery_fee_cents": o.delivery_fee_cents,
         "refund_cents": o.refund_cents,
         "created_at": a.created_at,
+        "is_errand": is_errand(o),
     } for a, o in rows]
 
 
@@ -1358,16 +1362,15 @@ async def after_sale_rider_fault(
       池子不够的部分从骑手收入里扣;骑手 72 小时内可以申诉(after_sale_rider),改判成立退回。
 
     跑腿单的售后也走这里(没有商家,商家那份是 0:骑手这单收入冲回、平台服务费不收)。
+    跑腿售后平台不再「认赔」(2026-09-14):是骑手的问题判骑手责任,不是就驳回。
     还没确认收货的单先按完成结算,再冲 —— 不然之后自动完成时骑手、商家的钱会照常入账,
-    这一截就成了平台出的钱。
+    这一截就成了平台出的钱。整套动作在 rider_fault.judge_after_sale(跑腿单「售后被拒」
+    的申诉改判也用它)。
     """
-    from ..models import AfterSale, AfterSaleStatus, OrderEvent
+    from ..models import AfterSale, AfterSaleStatus
     from ..models import Order as OrderModel
     from ..services import rider_fault
     from ..services.push import push_to_user
-    from ..services.settlement import settle_order
-    from ..services.wechat_pay import request_refund
-    from ..state_machine import OrderStatus
 
     a = await db.get(AfterSale, after_sale_id, with_for_update=True)
     if a is None:
@@ -1378,28 +1381,10 @@ async def after_sale_rider_fault(
     if order.rider_id is None:
         raise HTTPException(409, "这一单没有骑手配送(自取、商家自配送),判不了骑手责任")
     # total_cents 在缺货部分退款时已同步扣减,此处即"用户当前净付金额",全额退
-    refund_amount = order.total_cents
-    if refund_amount <= 0:
+    if order.total_cents <= 0:
         raise HTTPException(409, "该订单已无可退金额")
-    now = datetime.now(timezone.utc)
-    if order.status == OrderStatus.DELIVERED:
-        # 送达了、还没确认收货:先按完成结算(骑手、商家各自入账),下面再按骑手责任冲
-        order.status = OrderStatus.COMPLETED
-        order.completed_at = now
-        await settle_order(db, order)
-        db.add(OrderEvent(order_id=order.id, from_status=OrderStatus.DELIVERED.value,
-                          to_status=OrderStatus.COMPLETED.value,
-                          actor_role="admin", actor_id=admin.id,
-                          note="售后判骑手责任,按完成结算后冲回"))
-    a.status = AfterSaleStatus.accepted
-    a.fault = "rider"
-    a.reply = (payload.reason or "配送责任")[:300]
-    a.processed_at = now
-    note = "骑手责任,全额退款(含配送费)"
-    order.refund_note = f"{order.refund_note};{note}" if order.refund_note else note
-    # refund_cents 由 request_refund 自己累计(提前加会让通道反推出 2T)
-    await request_refund(db, order, refund_amount, "售后判骑手责任")
-    split = await rider_fault.apply(db, order, why=f"售后仲裁:{a.reply}")
+    refund_amount, split = await rider_fault.judge_after_sale(
+        db, a, order, reason=payload.reason, actor_role="admin", actor_id=admin.id)
     await db.commit()
     # 判骑手责任是骑手信用分的扣分项(services/credit.py)。提交之后再打缓存
     from ..services import credit
@@ -1758,55 +1743,103 @@ async def confirm_food_safety(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """投诉成立:先行全额退款(含配送费,fault=platform 平台垫付,不冲商家账,
-    追责走线下);30 天内第 3 起成立自动暂停营业待人工审核。
+    """投诉成立:**商家承担退款**(2026-09-14 起;原来是平台垫钱全额退、不冲商家账)。
+
+    - 退多少:顾客为这单的**餐**付的钱(delivery_fault.merchant_refund_cents:实付 − 配送费 − 小费),
+      全由商家出 —— 这单的商家入账整行冲回(佣金那一截平台也不收),和售后判商家责任同一个写法。
+      配送费、小费照常归骑手(他把餐送到了),不退给顾客:退的话那一截只能平台出,平台不出钱;
+    - 记一条售后判商家责任(fault=merchant):扣店主的信用分(services/credit「食安投诉成立」),
+      商家 72 小时内可以在售后判责的原通道申诉(appeals 的 after_sale);改判成立只撤销判责和
+      信用分那一条、钱不动(和别的售后判责改判一样),这一起也不再计入下面的自动停业计数;
+    - 还没确认收货的单先按完成结算再冲 —— 不然之后自动完成时商家照常入账,这笔退款就成了平台出的;
+    - 这一单之前的售后已经受理过(商家同意、配送异常判商家 / 骑手责任)的,不再退第二遍;
+    - 跑腿单没有平台上的商家,判不了商家责任:409,走跑腿售后(判骑手责任或驳回);
+    - 30 天内第 3 起成立自动暂停营业待人工审核。
     """
     from datetime import datetime, timedelta, timezone
 
+    from sqlalchemy import exists as sa_exists
     from sqlalchemy import func as sa_func
 
-    from ..models import AfterSale, AfterSaleStatus, FoodSafetyReport
+    from ..models import (AFTER_SALE_FAULT_CLEARED, AfterSale, AfterSaleStatus,
+                          FoodSafetyReport, OrderEvent)
     from ..models import Order as OrderModel
+    from ..services import delivery_fault
+    from ..services.errand import is_errand
     from ..services.push import push_to_user
+    from ..services.settlement import reverse_merchant_earning, settle_order
     from ..services.wechat_pay import request_refund
+    from ..state_machine import OrderStatus
+    from .appeals import APPEAL_WINDOW
 
     report = await _fs_get_open(db, report_id)
     order = await db.get(OrderModel, report.order_id, with_for_update=True)
+    if is_errand(order):
+        raise HTTPException(409, "跑腿单没有平台上的商家,食安投诉判不了商家责任:"
+                                 "请在售后仲裁里判骑手责任,或者驳回")
     now = datetime.now(timezone.utc)
+    if order.status == OrderStatus.DELIVERED:
+        # 送达了、还没确认收货:先按完成结算(商家、骑手各自入账),下面再冲商家这一单
+        order.status = OrderStatus.COMPLETED
+        order.completed_at = now
+        await settle_order(db, order)
+        db.add(OrderEvent(order_id=order.id, from_status=OrderStatus.DELIVERED.value,
+                          to_status=OrderStatus.COMPLETED.value,
+                          actor_role="admin", actor_id=admin.id,
+                          note="食安投诉成立,按完成结算后由商家承担退款"))
 
-    refunded = order.total_cents
+    reply = (payload.note or "食安投诉成立,商家承担餐费退款")[:300]
+    existing_as = await db.scalar(
+        select(AfterSale).where(AfterSale.order_id == order.id).with_for_update())
+    already = (existing_as is not None
+               and existing_as.status == AfterSaleStatus.accepted)
+    refunded = 0 if already else delivery_fault.merchant_refund_cents(order)
+    if existing_as is None:
+        db.add(AfterSale(
+            order_id=order.id, customer_id=order.customer_id,
+            merchant_id=order.merchant_id,
+            reason=f"食品安全投诉({report.kind}),平台核实成立,商家承担退款",
+            images=report.images,
+            fault="merchant", status=AfterSaleStatus.accepted,
+            reply=reply, processed_at=now))
+    elif not already or existing_as.fault == "merchant":
+        # 顾客之前提过的售后:还没处理 / 被商家拒了的,按食安投诉成立改成判商家责任、已受理;
+        # 商家自己已经同意过的,钱退过了,这里只把判责时刻换成现在 —— 这是平台的判定,
+        # 商家的申诉窗口从这里起算
+        existing_as.status = AfterSaleStatus.accepted
+        existing_as.fault = "merchant"
+        existing_as.reply = (f"{existing_as.reply};{reply}"
+                             if existing_as.reply else reply)[:300]
+        existing_as.processed_at = now
     if refunded > 0:
-        # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
-        await request_refund(db, order, refunded, "食品安全投诉成立,平台先行全额退款")
-        note = "食安投诉成立,全额退款(含配送费)"
+        # 和售后判商家责任同一个写法:这单的商家入账整行冲回(佣金一起冲,平台不收)
+        await reverse_merchant_earning(
+            db, order, f"食安投诉成立,商家承担退款:{report.kind}")
+        note = "食安投诉成立,商家承担餐费退款(配送费、小费已付给骑手不退)"
         order.refund_note = (f"{order.refund_note};{note}"
                              if order.refund_note else note)
-        # 审计规则 6 豁免口径:fault=platform 平台垫付,不冲商家/骑手账
-        existing_as = await db.scalar(
-            select(AfterSale).where(AfterSale.order_id == order.id))
-        if existing_as is None:
-            db.add(AfterSale(
-                order_id=order.id, customer_id=order.customer_id,
-                merchant_id=order.merchant_id,
-                reason=f"食品安全投诉({report.kind})",
-                images=report.images,
-                fault="platform", status=AfterSaleStatus.accepted,
-                reply=(payload.note or "食安投诉成立,平台先行全额退款")[:300],
-                processed_at=now))
+        # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
+        await request_refund(db, order, refunded, "食品安全投诉成立,商家承担餐费退款")
 
     report.status = "confirmed"
     report.resolved_at = now
     _fs_record(report, "confirmed",
-               payload.note or f"投诉成立,先行退款 ¥{refunded / 100:.2f}", admin.id)
+               payload.note or (f"投诉成立,商家承担餐费退款 ¥{refunded / 100:.2f}"
+                                if refunded else "投诉成立(这一单之前已经退过款)"),
+               admin.id)
 
     # 30 天内成立数(含本起)≥3 → 自动停业待人工审核。
-    # 排除本单再 +1:防 autoflush 把刚置为 confirmed 的当前工单重复计数
+    # 排除本单再 +1:防 autoflush 把刚置为 confirmed 的当前工单重复计数。
+    # 商家申诉改判成立的那几起(那条售后判责变成了「改判无责」)不算
+    overturned = sa_exists().where(AfterSale.order_id == FoodSafetyReport.order_id,
+                                   AfterSale.fault == AFTER_SALE_FAULT_CLEARED)
     confirmed_30d = await db.scalar(
         select(sa_func.count(FoodSafetyReport.id)).where(
             FoodSafetyReport.merchant_id == report.merchant_id,
             FoodSafetyReport.id != report.id,
             FoodSafetyReport.status == "confirmed",
-            FoodSafetyReport.created_at > now - timedelta(days=30))) + 1
+            FoodSafetyReport.created_at > now - timedelta(days=30),
+            ~overturned)) + 1
     shop = await db.get(Merchant, report.merchant_id)
     auto_suspended = False
     if confirmed_30d >= FS_AUTO_SUSPEND_COUNT and shop and shop.is_open:
@@ -1822,16 +1855,28 @@ async def confirm_food_safety(
     await db.commit()
     await db.refresh(report)
 
+    # 判商家责任是店主信用分的扣分项(services/credit),完成结算也改了三方的加分。提交之后再打缓存
+    from ..services import credit
+    await credit.invalidate_order(db, order)
+
     await push_to_user(report.customer_id, "食安投诉已处理",
-                       f"你的食品安全投诉已核实成立,¥{refunded / 100:.2f} 全额退款"
-                       f"(含配送费)已原路退回。感谢监督,平台已同步整改要求",
+                       (f"你的食品安全投诉已核实成立,餐费 ¥{refunded / 100:.2f} 已原路退回"
+                        "(由商家承担;配送费已付给骑手,不退)。感谢监督,平台已同步整改要求"
+                        if refunded else
+                        "你的食品安全投诉已核实成立(这一单之前已经退过款)。"
+                        "感谢监督,平台已同步整改要求"),
                        {"type": "order", "order_no": report.order_no},
                        record_skip=True)
     if shop:
-        body = ("30 天内多起食品安全投诉成立,店铺已被暂停营业,"
-                "请联系平台客服提交整改材料复核" if auto_suspended else
-                f"订单 {report.order_no[-6:]} 的食品安全投诉经核实成立,"
-                f"请立即自查后厨与食材;累计成立将暂停营业")
+        hours = int(APPEAL_WINDOW.total_seconds() // 3600)
+        body = (f"订单 {report.order_no[-6:]} 的食品安全投诉经核实成立"
+                + (f",这单餐费退款 ¥{refunded / 100:.2f} 由你承担(这单净额冲回)" if refunded
+                   else "")
+                + f",记一条商家责任(信用分 −{credit.FAULT_POINTS})。"
+                + ("30 天内多起食品安全投诉成立,店铺已被暂停营业,"
+                   "请联系平台客服提交整改材料复核。" if auto_suspended else
+                   "请立即自查后厨与食材;累计成立将暂停营业。")
+                + f"不认同可以在 {hours} 小时内对这笔售后判责申诉")
         await push_to_user(shop.owner_id, "食品安全整改通知", body,
                            {"type": "order", "order_no": report.order_no},
                            record_skip=True)

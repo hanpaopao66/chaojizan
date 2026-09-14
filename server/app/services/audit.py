@@ -165,8 +165,11 @@ async def _reversal_due_ids(db, order_ids) -> set[int]:
        也照抓不误,规则不吊死在一张表上。完成时刻缺失的老单
        (库里约两成)退回用入账行时间兜底。
 
-    fault 判 rider/platform 的先行赔付单除外:平台垫的钱,商家无责,
-    净额保留不冲账(admin.py 食安那段管这个叫「规则 6 豁免口径」)。
+    fault 判 rider/platform 的单除外,商家无责、净额保留不冲账:rider = 骑手责任
+    (钱见 services/rider_fault);platform = 历史上平台认赔的(食安垫付、跑腿认赔、
+    商家售后改判认亏 —— 2026-09-14 起都不再产生)。
+    **cleared 不豁免**:商家售后判责申诉改判成立只撤销判责、钱不动,那一单冲过账,
+    照旧按商家责任核(models.AFTER_SALE_FAULT_CLEARED)。食安投诉成立现在记 merchant,也照冲账核。
     """
     from ..models import AfterSale, AfterSaleStatus
 
@@ -347,7 +350,8 @@ async def run_audit() -> list[dict]:
 
         from .errand import is_errand, service_fee_cents
 
-        # 平台认赔过的单(帮买售后受理时 fault="platform")。
+        # 平台认赔过的单(帮买售后受理时 fault="platform")。2026-09-14 起跑腿售后不再
+        # 认赔(是骑手的问题判骑手责任、不是就驳回),这一支只剩历史单。
         # AfterSale/AfterSaleStatus 在这个函数里是局部 import 的(见上面
         # 冲账那段),那个 import 在别的作用域,这里要自己拿一次
         from ..models import AfterSale as _AfterSale

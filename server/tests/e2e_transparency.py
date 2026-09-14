@@ -26,7 +26,8 @@ assert sp["total_cents"] == sum(v for k, v in sp.items() if k != "total_cents"),
 assert set(sp) == {"subsidy_cents", "meal_compensation_cents", "adjustment_cents",
                    "total_cents"}, f"spend 多了老版本 App 不认的项:{sorted(sp)}"
 detail = funds["spend_detail"]
-assert 0 <= detail["rider_fault_refund_cents"] <= sp["adjustment_cents"], (detail, sp)
+assert 0 <= detail["rider_fault_refund_cents"] + detail["appeal_refund_cents"] \
+    <= sp["adjustment_cents"], (detail, sp)
 assert funds["retained_cents"] == inc["total_cents"] - sp["total_cents"]
 # 骑手保障金池:余额 == 计提 − 支出 + 回池(按公开账本算,services/rider_fault.fund_balance)
 fund = funds["rider_fund"]

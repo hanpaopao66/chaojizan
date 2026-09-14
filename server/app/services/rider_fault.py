@@ -127,7 +127,7 @@ async def _rows(db: AsyncSession, order_id: int) -> dict:
 async def apply(db: AsyncSession, order: Order, *, why: str) -> Split:
     """判骑手责任:冲回这单骑手收入,商家那份净额先池子后骑手。**只改库不提交**,调用方提交。
 
-    同一单只会判一次(配送异常先行赔付补的那条售后,售后仲裁那条路进不来;唯一约束兜底)。
+    同一单只会判一次(配送异常裁成退款时补的那条售后,售后仲裁那条路进不来;唯一约束兜底)。
     已经判过的再调一次原样返回,不重复扣。
     """
     if order.rider_id is None:
@@ -191,6 +191,48 @@ async def undo(db: AsyncSession, order: Order, *, why: str) -> Split | None:
     income = -int(rows["rider"].get(EarningKind.fault_reversal) or 0)
     return Split(income=income, merchant=0, fund=fund,
                  rider=-int(rows["rider"].get(EarningKind.fault_charge) or 0), fund_before=0)
+
+
+async def judge_after_sale(db: AsyncSession, a, order: Order, *, reason: str,
+                           actor_role: str, actor_id: int | None) -> tuple[int, Split]:
+    """一条售后判骑手责任的整套动作,**只改库不提交**。返回 (退给顾客多少, 这一次的钱)。
+
+    后台售后仲裁(admin.after_sale_rider_fault)和跑腿单「售后被拒」的申诉改判
+    (appeals._overturn:跑腿没有商家,改判成立只可能是骑手的问题)共用这一份,钱只有一种走法:
+
+    1. 送达了、还没确认收货的,先按完成结算(骑手、商家各自入账)再冲 —— 不然之后自动完成时
+       照常入账,这一截就成了平台出的钱;
+    2. 售后记成已受理、判骑手责任(骑手 72 小时内可以在 after_sale_rider 申诉);
+    3. 顾客全额退款(含配送费):total_cents 在缺货部分退款时已同步扣减,就是他现在净付的钱;
+    4. [apply]:这单骑手收入冲回、商家那份先池子后骑手。
+
+    调用方负责校验(这一单有骑手、售后没受理过、还有钱可退)、提交、推送、刷信用分缓存。
+    """
+    from ..models import AfterSaleStatus, OrderEvent
+    from ..state_machine import OrderStatus
+    from .settlement import settle_order
+    from .wechat_pay import request_refund
+
+    now = datetime.now(timezone.utc)
+    if order.status == OrderStatus.DELIVERED:
+        order.status = OrderStatus.COMPLETED
+        order.completed_at = now
+        await settle_order(db, order)
+        db.add(OrderEvent(order_id=order.id, from_status=OrderStatus.DELIVERED.value,
+                          to_status=OrderStatus.COMPLETED.value,
+                          actor_role=actor_role, actor_id=actor_id,
+                          note="售后判骑手责任,按完成结算后冲回"))
+    refund_amount = order.total_cents
+    a.status = AfterSaleStatus.accepted
+    a.fault = "rider"
+    a.reply = (reason or "配送责任")[:300]
+    a.processed_at = now
+    note = "骑手责任,全额退款(含配送费)"
+    order.refund_note = f"{order.refund_note};{note}" if order.refund_note else note
+    # refund_cents 由 request_refund 自己累计(提前加会让通道反推出 2T)
+    await request_refund(db, order, refund_amount, "售后判骑手责任")
+    split = await apply(db, order, why=f"售后仲裁:{a.reply}")
+    return refund_amount, split
 
 
 def rider_push_text(split: Split) -> str:

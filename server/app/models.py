@@ -988,7 +988,9 @@ class RiderProfile(Base):
 class EarningKind(str, enum.Enum):
     earning = "earning"        # 正常入账
     reversal = "reversal"      # 售后冲账(负数行,与入账行相加归零)
-    adjustment = "adjustment"  # 申诉改判等正向调整(恢复被冲的净额,平台认亏)
+    # 申诉改判等正向调整(恢复被冲的净额,平台认亏)。**2026-09-14 起不再产生**:商家售后判责
+    # 改判只撤销判责(AFTER_SALE_FAULT_CLEARED),难度反馈不当场补钱;历史行照旧留着
+    adjustment = "adjustment"
     # ---- 以下三种只在骑手账本上出现:判骑手责任的钱(services/rider_fault.py)----
     #: 这单骑手的收入冲回(负数,等于这单入账行的相反数):没送到就不计收入
     fault_reversal = "fault_reversal"
@@ -1390,9 +1392,10 @@ class AfterSale(Base):
     reason: Mapped[str] = mapped_column(String(500))
     # 举证照片(必传):完成单售后要有图,客服/商家看图判断,恶意售后无所遁形
     images: Mapped[list] = mapped_column(JSONB, default=list)
-    # 判责方:merchant=商家责任(商家承担) / rider=骑手责任(这单骑手收入冲回,商家那份餐钱
-    # 先保障金池、不够的骑手出,见 services/rider_fault) / platform=平台(历史:食安垫付、
-    # 跑腿认赔、改判认亏)
+    # 判责方:merchant=商家责任(商家承担,食安投诉成立也是它) / rider=骑手责任(这单骑手收入冲回,
+    # 商家那份餐钱先保障金池、不够的骑手出,见 services/rider_fault;骑手申诉改判成立后变 platform,
+    # 扣的钱退回) / cleared=商家申诉改判成立:判责撤销、钱不动(见 AFTER_SALE_FAULT_CLEARED) /
+    # platform=平台(历史:食安垫付、跑腿认赔、商家改判认亏,2026-09-14 起都不再产生)
     fault: Mapped[str] = mapped_column(String(12), default="")
     status: Mapped[AfterSaleStatus] = mapped_column(
         _enum_column(AfterSaleStatus, "after_sale_status"),
@@ -1406,6 +1409,15 @@ class AfterSale(Base):
     processed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+#: 商家对「售后判商家责任」申诉、改判成立之后的判责方:**判责撤销、钱不动**。
+#:
+#: 2026-09-14 拍板「平台没有钱」:改判不再补回商家被冲的净额(原来补一条 adjustment、平台认亏,
+#: 判责记成 platform)。顾客拿到的退款也不追回 —— 于是这笔钱照旧是商家出的,只是不再算他的责任、
+#: 不再扣信用分。不能再记成 platform:那表示「平台出的钱」,而平台这一单一分没出。
+#: 审计规则 6 照旧要求这单冲过账(它确实冲了),自动停业的食安计数不算它(admin.confirm_food_safety)
+AFTER_SALE_FAULT_CLEARED = "cleared"
 
 
 class DeliveryIssue(Base):
@@ -1477,7 +1489,8 @@ class Review(Base):
 
 class Appeal(Base):
     """判责申诉:骑手/商家对平台单方裁决(售后判责/配送异常裁决/差评)的复核通道。
-    72 小时内、每个目标一次;改判动作平台认亏,不追用户款(见 routers/appeals.py)。"""
+    72 小时内、每个目标一次;用户已得的退款不追回。改判时钱怎么走各支不同,见 routers/appeals.py
+    (2026-09-14 起商家售后判责改判只撤销判责、不补钱)。"""
 
     __tablename__ = "appeals"
     __table_args__ = (UniqueConstraint("target_type", "target_id"),)
@@ -1574,9 +1587,9 @@ class VoucherPurchase(Base):
 class FoodSafetyReport(Base):
     """食品安全投诉(红线通道):异物/变质/食用后不适。
 
-    不经商家、直达平台(管理后台标红加急);处置动作(先行退款/下架菜品/
-    暂停营业)全部留痕在 actions,监管检查可导出。同一商家 30 天内
-    ≥3 起成立自动停业待人工审核。
+    不经商家、直达平台(管理后台标红加急);处置动作(成立退款 —— 2026-09-14 起由商家承担、
+    记商家责任,原来是平台先行垫付 / 下架菜品 / 暂停营业)全部留痕在 actions,监管检查可导出。
+    同一商家 30 天内 ≥3 起成立自动停业待人工审核(商家申诉改判成立的不算)。
     """
 
     __tablename__ = "food_safety_reports"

@@ -388,7 +388,7 @@ class _TransparencyPageState extends State<TransparencyPage> {
             _kv(sz, '餐损赔付', _yuan(_int(spend['meal_compensation_cents'])),
                 note: '无骑手接单被取消时,已出餐的商家按应收全额赔,佣金不收'),
             _kv(sz, '申诉改判', _yuan(_int(spend['adjustment_cents'])),
-                note: '判错了改回来,平台认亏'),
+                note: '判错了改回来、平台认的钱:骑手责任改判退回的、顾客申诉改判退的,和停发之前的调整'),
             _kv(sz, '合计', _yuan(spendTotal), strong: true),
             const SizedBox(height: 12),
             SzLedgerCard(

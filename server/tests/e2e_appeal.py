@@ -1,5 +1,8 @@
-"""判责申诉:售后改判(恢复商家净额)/配送异常改判(骑手消责)/差评改判(隐藏+评分回调)。
-时限与防重、审计兼容(改判后规则 6 豁免口径认 platform)。
+"""判责申诉:售后改判(撤销商家责任、钱不动)/配送异常改判(骑手消责)/差评改判(隐藏+评分回调)。
+时限与防重、审计兼容。
+
+2026-09-14 拍板「平台没有钱」之后,商家售后判责改判**只撤销判责**:判责方记 cleared、信用分那一条
+不再计分,被冲的净额不补回(原来补一条 adjustment、平台认亏);顾客拿到的退款也不追回。
 在 server/ 目录下运行:python -m tests.e2e_appeal
 """
 import asyncio
@@ -45,12 +48,13 @@ def run_order(to="completed"):
     return no
 
 
-# ---------- ① 售后判商家责 → 商家申诉 → 改判恢复净额 ----------
+# ---------- ① 售后判商家责 → 商家申诉 → 改判:撤销判责,钱不动 ----------
 no1 = run_order()
 after_sale = call("POST", f"/orders/{no1}/after-sale", customer,
                   {"reason": "汤洒了大半(申诉测试)", "images": ["/uploads/demo.jpg"]})
 call("POST", f"/after-sales/{after_sale['id']}/accept", merchant, {"reply": "抱歉,退您餐费"})
 w0 = call("GET", "/merchants/me/wallet", merchant)
+o0 = call("GET", f"/orders/{no1}", customer)
 
 # 用户不能申诉(角色错)
 err = call("POST", "/appeals", customer,
@@ -75,11 +79,26 @@ done = call("POST", f"/admin/appeals/{appeal1['id']}/resolve", admin,
 assert done["status"] == "overturned"
 w1 = call("GET", "/merchants/me/wallet", merchant)
 o1 = call("GET", f"/orders/{no1}", customer)
-net = (o1["food_cents"] + o1["packing_fee_cents"]
-       - o1["discount_cents"] - o1["commission_cents"])
-assert w1["total_earned_cents"] == w0["total_earned_cents"] + net, (w0, w1, net)
-assert o1["refund_cents"] > 0  # 用户退款不追回,平台认亏
-print(f"✓ 售后改判:商家净额 +{net / 100:.2f} 恢复(调整行),用户退款不追回")
+assert w1["total_earned_cents"] == w0["total_earned_cents"], \
+    f"商家改判又补回了净额(平台出钱):{w0['total_earned_cents']} → {w1['total_earned_cents']}"
+assert o1["refund_cents"] == o0["refund_cents"] > 0  # 顾客拿到的退款不追回
+
+
+async def after_sale_state(aid):
+    async with SessionLocal() as db:
+        row = (await db.execute(text(
+            "SELECT fault, reply FROM after_sales WHERE id = :id"), {"id": aid})).one()
+        adj = (await db.execute(text(
+            "SELECT count(*) FROM merchant_earnings WHERE order_no = :n "
+            "AND kind = 'adjustment'"), {"n": no1})).scalar()
+    await engine.dispose()
+    return row, adj
+
+
+(fault1, reply1), adj1 = asyncio.run(after_sale_state(after_sale["id"]))
+assert fault1 == "cleared" and "商家无责" in reply1, (fault1, reply1)
+assert adj1 == 0, f"改判又写了 {adj1} 条调整行"
+print("✓ 售后改判:判责撤销(cleared)、净额不补回、没有调整行;顾客退款不追回")
 
 # 改判后不可再复核
 err = call("POST", f"/admin/appeals/{appeal1['id']}/resolve", admin,

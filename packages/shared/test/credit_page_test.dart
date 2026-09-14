@@ -52,7 +52,8 @@ void main() {
             'appeal': {
               'via': 'appeal', 'target_type': 'after_sale', 'target_id': 31,
               'state': '', 'label': '申诉', 'note': '', 'after': after,
-              'confirm': '平台会重新复核这次判定。改判的话,这一条不再计分,被冲掉的那笔净额补回来。',
+              'confirm': '平台会重新复核这次判定。改判的话,这一条不再计分,记录上写明商家无责;'
+                  '被冲掉的那笔净额不补回(顾客拿到的退款不追回,平台也不出这笔钱)。',
             },
           },
         ],
@@ -78,7 +79,7 @@ void main() {
           {
             'kind': 'after_sale_fault',
             'record_id': 52,
-            'title': '顾客售后,平台仲裁判为骑手责任(洒餐、丢餐等,平台先行赔付)',
+            'title': '顾客售后,平台仲裁判为骑手责任(洒餐、丢餐等)',
             'order_no': 'bbbbbbbbbbbb33cd44',
             'note': '',
             'points': -10,
@@ -163,11 +164,12 @@ void main() {
     expect(hasText('2026-09-15 之前的配送异常裁决、售后判责、违规判定都不扣分'), isTrue);
   });
 
-  testWidgets('商家:售后判责走原通道 after_sale,申诉框里说的是补回净额', (t) async {
+  // 申诉框里那句是服务端给的(credit._ORIGINAL_AFTER):2026-09-14 起商家改判不补回净额
+  testWidgets('商家:售后判责走原通道 after_sale,申诉框里照服务端说「不补回」', (t) async {
     await pumpPage(t, fakeApi(merchant));
     await t.tap(find.widgetWithText(TextButton, '申诉'));
     await t.pumpAndSettle();
-    expect(find.textContaining('被冲掉的那笔净额补回来'), findsOneWidget);
+    expect(find.textContaining('被冲掉的那笔净额不补回'), findsOneWidget);
     expect(find.textContaining('钱也会原路退回'), findsNothing);
     await t.enterText(find.byType(TextField), '出餐前拍过照,盒子是完好的');
     await t.tap(find.widgetWithText(FilledButton, '提交申诉'));

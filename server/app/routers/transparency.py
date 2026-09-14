@@ -297,7 +297,7 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
         SELECT coalesce(sum(net_cents), 0) FROM merchant_earnings
         WHERE note LIKE '无骑手接单取消,平台赔付餐损%'
     """)))
-    # 申诉改判正向调整:恢复被冲的净额,平台认亏
+    # 申诉改判正向调整:恢复被冲的净额、现场难度当场补的钱,平台认亏(2026-09-14 起都不再产生,历史照算)
     adjustments = (await db.scalar(sa_text("""
         SELECT coalesce(sum(net_cents), 0) FROM merchant_earnings
         WHERE kind = 'adjustment'
@@ -316,7 +316,13 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
     fault_back = await db.scalar(sa_text(
         "SELECT coalesce(sum(amount_cents), 0) FROM rider_earnings "
         "WHERE kind = 'fault_refund'"))
-    adjustments += fault_back
+    # 顾客的申诉改判(取消分摊、「按送达处理」)平台原路退回的钱(appeals.APPEAL_REFUND_NOTE):
+    # 平台真金白银退出去的,原来哪一项都没算,留存因此多报了。同样并进「申诉改判」
+    from .appeals import APPEAL_REFUND_NOTE
+    appeal_refunds = await db.scalar(sa_text(
+        "SELECT coalesce(sum(amount_cents), 0) FROM refunds "
+        "WHERE reason = :r AND status = 'success'"), {"r": APPEAL_REFUND_NOTE})
+    adjustments += fault_back + appeal_refunds
     income = commission + voucher_fee
     spend = subsidy + meal_comp + adjustments
     data = {
@@ -328,7 +334,8 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
                   "adjustment_cents": adjustments,
                   "total_cents": spend},
         # 上面几项里的「其中」,不另算进合计
-        "spend_detail": {"rider_fault_refund_cents": fault_back},
+        "spend_detail": {"rider_fault_refund_cents": fault_back,
+                         "appeal_refund_cents": appeal_refunds},
         "rider_fund": fund,
         # 留存要养:支付通道/服务器/短信/地图/审核客服(见月度财报成本侧)
         "retained_cents": income - spend,

@@ -35,11 +35,12 @@ services/enforcement.py 的抬头写了处置为什么不做分数:分数没法�
 - **顾客**:配送异常裁决「按送达处理」—— delivery_issues.resolution = mark_delivered,
   admin.resolve_delivery_issue 那一支写明「用户原因(联系不上 / 地址错)」;违规成立
   (violations.audience = customer)。
-- **商家**:平台判出来的售后商家责任 —— after_sales.fault = merchant,**并且**是下面两条之一:
+- **商家**:平台判出来的售后商家责任 —— after_sales.fault = merchant,**并且**是下面三条之一:
   ① appeals 里 after_sale_rejected 那条改判成立(顾客申诉「售后被拒」,appeals._overturn 那一支:
   「平台认定商家当初就该赔而他拒了」);② 骑手报「到店未出餐」「餐品不齐」、配送异常裁成退款
   判为商家责任时记的那条售后(admin.resolve_delivery_issue,services/delivery_fault);
-  违规成立(violations.audience = merchant)。
+  ③ 食安投诉核实成立(admin.confirm_food_safety,2026-09-14 起商家承担退款、记商家责任;
+  同一单另记了「食品安全事故」违规的不重复扣);违规成立(violations.audience = merchant)。
   商家自己点「同意售后」的那种 fault 也写成 merchant(after_sales.accept_after_sale:「同意即认责」),
   但那是商家自己的决定,不是平台判的 —— **不算**。
 - **骑手**:配送异常裁成退款、判骑手责任 —— delivery_issues.resolution = refund 而且不是
@@ -78,8 +79,7 @@ services/enforcement.py 的抬头写了处置为什么不做分数:分数没法�
 - 商家:接单前拒单(orders.transition 里 paid → cancelled,要写原因)、没来得及接单被系统取消、
   自己同意售后和缺货部分退款、拒绝售后(顾客没申诉,或者申诉被驳回)、接单后取消(只有平台判
   「私自取消」成立才算,那一条记在违规里)、出餐慢 / 出餐超时 / 骑手等餐(出餐时长那条君子协定)、
-  差评和评分、食安投诉成立(平台先行垫付,after_sales.fault = platform;认定是食品安全事故的
-  另记违规,不重复扣)、排队叫号和过号(不是订单)。
+  差评和评分、排队叫号和过号(不是订单)。
 - 骑手:不抢单、下线、在线时长;转单(不管当天转了几次 —— 转多了是转单规则暂停当天抢单、
   次日恢复,没有人判过谁的对错);送得慢、超时;差评;上报配送异常(只有平台判为骑手责任的
   才算);报事故、SOS、强制取餐。
@@ -116,7 +116,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from fastapi import HTTPException
-from sqlalchemy import and_, exists, func, null, or_, select, text
+from sqlalchemy import and_, case, exists, func, literal, null, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -131,7 +131,7 @@ from ..redis_client import get_redis
 #: 口径一变就升:缓存键带着它,部署之后不会拿旧口径的缓存回答。
 #: v2:商家、骑手也有了,缓存键带上角色;v3:扣分只算起算日之后的;
 #: v4:到店未出餐、餐品不齐裁成退款判的是商家责任(扣商家的、不扣骑手的)
-FORMULA_VERSION = 4
+FORMULA_VERSION = 5
 
 #: 起始分。新来的就是这个分,和没有问题的老人在同一个等级,理由见 public_spec 的 base_why
 BASE = 90
@@ -206,7 +206,8 @@ _ORIGINAL_AFTER = {
     ("customer", KIND_DELIVERY): "改判的话,这一条不再计分,钱也会原路退回",
     ("rider", KIND_DELIVERY): "改判的话,这一条不再计分,记录上写明不是你的责任,判责时扣的钱退回",
     ("rider", KIND_AFTER_SALE): "改判的话,这一条不再计分,记录上写明不是你的责任,判责时扣的钱退回",
-    ("merchant", KIND_AFTER_SALE): "改判的话,这一条不再计分,被冲掉的那笔净额补回来",
+    ("merchant", KIND_AFTER_SALE): "改判的话,这一条不再计分,记录上写明商家无责;"
+                                   "被冲掉的那笔净额不补回(顾客拿到的退款不追回,平台也不出这笔钱)",
 }
 
 #: 交易对方能看到分数的订单状态:接单之后、没取消。
@@ -552,8 +553,15 @@ _MERCHANT_AFTER_SALE_TITLE = "你拒绝的售后,顾客申诉后平台复核判�
 _RIDER_AFTER_SALE_TITLE = "顾客售后,平台仲裁判为骑手责任(洒餐、丢餐等)"
 
 
+#: 商家那条售后判责来自食安投诉成立时,issue_kind 列填的记号(见 [_after_sale_query])
+_FOOD_SAFETY_SOURCE = "food_safety"
+
+
 def _merchant_after_sale_title(issue_kind: str | None) -> str:
-    """商家那条售后判责从哪来的:顾客「售后被拒」的申诉改判,或者配送异常判商家责任。"""
+    """商家那条售后判责从哪来的:顾客「售后被拒」的申诉改判、配送异常判商家责任,
+    或者食安投诉核实成立。"""
+    if issue_kind == _FOOD_SAFETY_SOURCE:
+        return "食品安全投诉核实成立,平台判为商家责任(商家承担退款)"
     if issue_kind:
         return (f"骑手上报「{_RIDER_ISSUE_LABELS.get(issue_kind, '其他')}」,"
                 "平台判为商家责任(商家承担退款)")
@@ -591,27 +599,37 @@ def _delivery_appeal_won():
 def _after_sale_query(role: str, ids: list[int], *, still_at_fault: bool = True):
     """售后判为这个人的责任。列:(uid, id, order_no, at, note, issue_kind)。
 
-    - 商家,两个来源(都是平台判出来的):
+    - 商家,三个来源(都是平台判出来的):
       ① 顾客的「售后被拒」申诉改判成立(接上那条改判,它的复核说明就是 note);
       ② 骑手报「到店未出餐」「餐品不齐」、裁成退款判为商家责任时记的那条售后(接上那条配送异常,
          issue_kind 就是它的种类,note 是裁决说明)—— services/delivery_fault;
+      ③ 食安投诉核实成立(接上那条成立的投诉,issue_kind 记 food_safety,note 是售后上的说明)——
+         同一单另记了「食品安全事故」违规的不算这一条(那条违规扣得更多,不重复扣);
       而且现在判责方还是商家(fault = merchant)。商家自己同意的也是 fault = merchant,
-      但哪一条都接不上 —— 不算;商家对它申诉成立后 fault 变成 platform,自然掉出来;
+      但哪一条都接不上 —— 不算;商家对它申诉成立后 fault 变成 cleared,自然掉出来;
     - 骑手:after_sales.fault = rider,骑手是这一单的骑手。配送异常裁成退款时顺手补的那条
       售后(同一单有 resolution = refund 的配送异常)不在这里重复计 —— 那一次记在配送异常上。
       issue_kind 恒为空。
 
     [still_at_fault] 为 False 时不看现在的判责方(明细页列「申诉成立、不再计分」的那些用)。
     """
-    from ..models import AfterSale, Appeal, DeliveryIssue, Merchant, Order
+    from ..models import (AfterSale, Appeal, DeliveryIssue, FoodSafetyReport, Merchant, Order,
+                          Violation)
     from .delivery_fault import MERCHANT_KINDS
 
     if role == "merchant":
-        # 两个来源各接一张,都是外连接:一条售后只可能对上其中一个(配送异常判的那条一记下就是
-        # 「已同意」,顾客没法再对它提「售后被拒」),而每个来源最多一行,不会把售后翻倍
+        # 三个来源各接一张,都是外连接:每个来源最多一行,不会把售后翻倍。一条售后通常只对上
+        # 其中一个(配送异常判的那条一记下就是「已同意」,顾客没法再对它提「售后被拒」);
+        # 食安投诉成立那条可能和别的来源落在同一条售后上,那也只算这一条售后一次
+        fs_violation = exists().where(Violation.kind == "food_safety",
+                                      Violation.order_no == Order.order_no)
+        food_safety = and_(FoodSafetyReport.id.is_not(None), ~fs_violation)
         q = (select(Merchant.owner_id, AfterSale.id, Order.order_no, AfterSale.processed_at,
-                    func.coalesce(Appeal.resolve_note, DeliveryIssue.resolve_note),
-                    DeliveryIssue.kind)
+                    func.coalesce(Appeal.resolve_note, DeliveryIssue.resolve_note,
+                                  AfterSale.reply),
+                    func.coalesce(DeliveryIssue.kind,
+                                  case((food_safety, literal(_FOOD_SAFETY_SOURCE)),
+                                       else_=null())))
              .select_from(AfterSale)
              .join(Merchant, Merchant.id == AfterSale.merchant_id)
              .join(Order, Order.id == AfterSale.order_id)
@@ -621,8 +639,10 @@ def _after_sale_query(role: str, ids: list[int], *, still_at_fault: bool = True)
              .outerjoin(DeliveryIssue, and_(DeliveryIssue.order_id == AfterSale.order_id,
                                             DeliveryIssue.resolution == "refund",
                                             DeliveryIssue.kind.in_(MERCHANT_KINDS)))
+             .outerjoin(FoodSafetyReport, and_(FoodSafetyReport.order_id == AfterSale.order_id,
+                                               FoodSafetyReport.status == "confirmed"))
              .where(Merchant.owner_id.in_(ids),
-                    or_(Appeal.id.is_not(None), DeliveryIssue.id.is_not(None))))
+                    or_(Appeal.id.is_not(None), DeliveryIssue.id.is_not(None), food_safety)))
         return q.where(AfterSale.fault == "merchant") if still_at_fault else q
     via_issue = exists().where(DeliveryIssue.order_id == AfterSale.order_id,
                                DeliveryIssue.resolution == "refund")
@@ -1258,15 +1278,18 @@ def _minus_spec(role: str) -> list[dict]:
         items = [{
             **common,
             "key": KIND_AFTER_SALE,
-            "label": "售后或配送异常,平台判为商家责任",
+            "label": "售后、配送异常或食安投诉,平台判为商家责任",
             "counts": f"平台判为商家责任的,每次 −{FAULT_POINTS}:① 你拒绝的售后,顾客申诉、"
                       "平台复核认定应当受理;② 骑手上报「到店未出餐」「餐品不齐」,平台裁决为商家"
-                      "责任、由你承担退款。你自己同意的售后和退款不算",
+                      "责任、由你承担退款;③ 顾客的食品安全投诉经平台核实成立、由你承担餐费退款"
+                      "(同一单另记了「食品安全事故」违规的,只按违规扣,不重复扣)。"
+                      "你自己同意的售后和退款不算",
             "source": "售后记录 after_sales:判责 fault = 商家,而且是平台判出来的 —— ①「售后被拒」"
                       "的申诉改判成立(appeals 里 after_sale_rejected),② 配送异常(到店未出餐、"
-                      "餐品不齐)裁决退款时记的那条;时间按判责时刻 processed_at",
-            "appeal": f"判责后 {hours} 小时内申诉售后判责(改判的话被冲掉的净额补回来);"
-                      f"过了 {hours} 小时走客服工单",
+                      "餐品不齐)裁决退款时记的那条,③ 食安投诉成立(food_safety_reports.status = "
+                      "confirmed)时记的那条;时间按判责时刻 processed_at",
+            "appeal": f"判责后 {hours} 小时内申诉售后判责(改判的话这一条不再计分,被冲掉的净额"
+                      f"不补回);过了 {hours} 小时走客服工单",
         }]
     else:
         items = [{
@@ -1336,8 +1359,6 @@ _NOT_COUNTED = {
          "下单后加价」成立的,记在违规里"},
         {"what": "出餐慢、出餐超时、骑手到店等餐", "why": "慢不算坏,出餐时长不进任何分数"},
         {"what": "差评、评分", "why": "评分是顾客的看法,不是平台的判定;恶意差评可以申诉隐藏"},
-        {"what": "食安投诉成立(平台先行全额退款)", "why": "先赔顾客的钱由平台垫付,投诉本身不扣分;"
-         "平台认定是食品安全事故的,按违规记「食品安全事故」,那一条扣分,也能申诉"},
         {"what": "排队叫号、过号", "why": "排队不是订单,不进信用分"},
     ],
     "rider": [

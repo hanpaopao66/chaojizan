@@ -8,11 +8,15 @@
 - review           商家申诉恶意差评
 
 改判的钱怎么走(用户拿到的退款不倒找):
-- after_sale 改判  → merchant_earnings 补一条 adjustment 正向行,恢复被冲净额
-                     (账本 net == food - 0 恒等式成立,witness 可验)
+- after_sale 改判  → **只撤销判责**:AfterSale.fault merchant → cleared(models.AFTER_SALE_FAULT_CLEARED),
+                     信用分那一条不再计分;**被冲的净额不补回**(2026-09-14 拍板「平台没有钱」:
+                     原来补一条 adjustment 正向行、平台认亏,停了;顾客拿到的退款也不追回,
+                     所以这笔钱照旧是商家出的)。食安投诉成立记的那条同样(admin.confirm_food_safety)
 - after_sale_rider / delivery_issue 改判 → 对应 AfterSale.fault: rider → platform
                      (骑手消责正名,审计规则 6 的免冲账口径同步认 platform);判责时从骑手
                      扣的加回去、保障金池出的回池(services/rider_fault)—— 错判由平台认
+- after_sale_rejected 改判(顾客) → 按商家同意的口径:退餐费、商家冲账、判商家责任;
+                     跑腿单没有商家 → 判骑手责任(rider_fault.judge_after_sale),平台不出钱
 - review 改判      → 差评 hidden,评分聚合同步扣减
 """
 from datetime import datetime, timedelta, timezone
@@ -146,7 +150,8 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
         shop = await owned_shop(db, user, a.merchant_id) if a is not None else None
         if a is None or shop is None or a.merchant_id != shop.id:
             raise HTTPException(404, "售后记录不存在")
-        if a.status.value != "accepted" or a.fault == "rider":
+        if a.status.value != "accepted" or a.fault != "merchant":
+            # 判骑手责任的是骑手的事;平台认赔的(历史)、改判过的,商家都没有要撤销的判责
             raise HTTPException(409, "只有判商家责任的已退款售后才需要申诉")
         if not _within_window(a.processed_at):
             raise HTTPException(422, "已超过 72 小时申诉时限")
@@ -367,6 +372,11 @@ async def _target_summary(db: AsyncSession, appeal: Appeal) -> str:
         order = await db.get(Order, a.order_id)
         head = {"after_sale": "售后判商家责", "after_sale_rider": "售后判骑手责",
                 "after_sale_rejected": "售后被商家拒绝"}[appeal.target_type]
+        if appeal.target_type == "after_sale_rejected" and order is not None:
+            from ..services.errand import is_errand
+            if is_errand(order):
+                # 跑腿没有商家,拒的是平台;改判成立 = 判骑手责任(扣骑手的钱),复核的人得知道
+                head = "跑腿售后被平台驳回(改判成立即判骑手责任)"
         return (f"{head} 订单#{order.order_no[-6:]} "
                 f"退款 ¥{order.refund_cents / 100:.2f}:{a.reason[:40]}")
     if appeal.target_type == "delivery_issue":
@@ -459,35 +469,25 @@ async def _undo_rider_fault(db: AsyncSession, order_id: int, why: str) -> str:
 
 async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
                     admin_id: int | None = None) -> None:
-    """改判动作。平台认亏:用户已得的退款不追回。
+    """改判动作。用户已得的退款不追回;每一支的钱怎么走见模块抬头。
 
     [admin_id] 只有需要**留痕操作人**的分支用得上(queue_pass 的位置还原) ——
     那一步会改动队列,谁批的必须记下来才能复核。
     """
     if appeal.target_type == "after_sale":
+        # 2026-09-14 起:改判只撤销判责、信用分那一条不再计分,**被冲的净额不补回**
+        # (平台没有钱;顾客拿到的退款也不追回)。原来这里补一条 adjustment 正向行、平台认亏
+        from ..models import AFTER_SALE_FAULT_CLEARED
         a = await db.get(AfterSale, appeal.target_id, with_for_update=True)
-        earning = await db.scalar(select(MerchantEarning).where(
-            MerchantEarning.order_id == a.order_id,
-            MerchantEarning.kind == EarningKind.earning))
-        already = await db.scalar(select(MerchantEarning.id).where(
-            MerchantEarning.order_id == a.order_id,
-            MerchantEarning.kind == EarningKind.adjustment))
-        if earning is None or already:
-            raise HTTPException(409, "该订单无可恢复的净额或已调整过")
-        db.add(MerchantEarning(
-            merchant_id=earning.merchant_id,
-            order_id=earning.order_id,
-            order_no=earning.order_no,
-            food_cents=earning.net_cents,   # 调整行口径:net == food - 0,账本恒等
-            commission_cents=0,
-            net_cents=earning.net_cents,
-            kind=EarningKind.adjustment,
-            note=f"申诉改判,恢复商家净额:{note or '复核认定商家无责'}",
-        ))
-        a.fault = "platform"  # 责任转平台承担,审计豁免口径同步
-        a.reply = (f"{a.reply};申诉改判:商家无责" if a.reply else "申诉改判:商家无责")[:300]
+        if a.fault != "merchant":
+            raise HTTPException(409, "这笔售后现在不是商家责任,没有可以撤销的判责")
+        a.fault = AFTER_SALE_FAULT_CLEARED
+        a.reply = (f"{a.reply};申诉改判:商家无责(钱不动)"
+                   if a.reply else "申诉改判:商家无责(钱不动)")[:300]
+        await _note_food_safety_overturn(db, a.order_id, note)
         await push_to_user(appeal.user_id, "申诉成立",
-                           f"售后判责已改判,净额 ¥{earning.net_cents / 100:.2f} 已恢复入账",
+                           "售后判责已改判为商家无责,信用分那一条不再计分。这笔退款的钱不补回:"
+                           "顾客拿到的不追回,平台也不出这笔钱",
                            {"type": "appeal"})
     elif appeal.target_type == "after_sale_rider":
         # 和配送异常判骑手责任改判同一个写法:判责从骑手转走(骑手消责正名),信用分那一条
@@ -584,7 +584,15 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
         # 商家不服可以再申诉(走既有的 after_sale 那条)。两条的
         # target_type 不同,唯一约束各管各的,所以最多两轮,不会来回拉锯。
         a = await db.get(AfterSale, appeal.target_id, with_for_update=True)
+        if a.status != AfterSaleStatus.rejected:
+            # 被拒之后又按别的路径处理过(比如后台已经判了骑手责任、退过款):再按「售后被拒」
+            # 改判一次就是退第二遍
+            raise HTTPException(409, "这笔售后已经按别的路径处理过了,不能再按「售后被拒」改判")
         order = await db.get(Order, a.order_id, with_for_update=True)
+        from ..services.errand import is_errand
+        if is_errand(order):
+            await _overturn_errand_rejected(db, appeal, a, order, note, admin_id)
+            return
         from ..services.settlement import reverse_merchant_earning
         from ..services.wechat_pay import request_refund
         refundable = max(order.food_cents + order.packing_fee_cents
@@ -632,9 +640,11 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
         # 改判 = 平台认定这一单不该由用户承担。
         #
         # **不向商家和骑手追款。** 他们各自把该做的做完了(餐做好了、路跑了),
-        # 把已经发出去的钱要回来,等于让他们为平台的一次判断失误买单 ——
-        # 与既有立场「改判平台认亏」一致(见本函数 docstring)。
+        # 把已经发出去的钱要回来,等于让他们为平台的一次判断失误买单。
         # 所以这笔由平台掏,走退款通道原路退给用户。
+        #
+        # ⚠️ 2026-09-14「平台没有钱」拍板时,这一支(和顾客「按送达处理」改判那一支)
+        # 没在要改的清单里,照旧是平台出钱 —— 要不要改、改成谁出,还没定。
         #
         # 若复核认定确属**商家**责任,那是另一条路径(售后冲账),
         # 不在这里混着做 —— 一个动作只做一件事,账才查得清。
@@ -675,6 +685,55 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
             f"理由:{note or '复核认定该评价不成立'}。"
             f"如果你不认同,72 小时内可以申诉,平台会再核一次。",
             {"type": "review_hidden", "review_id": review.id})
+
+
+async def _note_food_safety_overturn(db: AsyncSession, order_id: int, note: str) -> None:
+    """食安投诉成立记的那条售后判责被商家申诉改判:在投诉的处置留痕里记一笔。
+
+    投诉本身照旧是「成立」(顾客那边拿到的退款不追回),自动停业的 30 天计数不再算它
+    (admin.confirm_food_safety 按判责方 cleared 排除)。"""
+    from ..models import FoodSafetyReport
+    report = await db.scalar(select(FoodSafetyReport).where(
+        FoodSafetyReport.order_id == order_id, FoodSafetyReport.status == "confirmed")
+        .with_for_update())
+    if report is None:
+        return
+    report.actions = [*(report.actions or []), {
+        "action": "appeal_overturned",
+        "note": f"商家申诉改判:商家无责(钱不动){(':' + note) if note else ''}"[:300],
+        "admin_id": None,
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }]
+
+
+async def _overturn_errand_rejected(db: AsyncSession, appeal: Appeal, a: AfterSale,
+                                    order: Order, note: str, admin_id: int | None) -> None:
+    """跑腿单「售后被拒」改判成立:**判骑手责任**(2026-09-14 起)。
+
+    跑腿没有商家,平台认定这笔售后应当受理,就只可能是骑手的问题。以前这里退了商品款、
+    判责记成「商家」—— 可跑腿没有商家入账可冲,退出去的钱其实是平台出的。现在照售后仲裁
+    判骑手责任走(rider_fault.judge_after_sale:顾客全额退款、这单骑手收入冲回、平台服务费
+    不收),骑手 72 小时内可以在 after_sale_rider 申诉。
+    """
+    from ..services import rider_fault
+    if order.rider_id is None or order.total_cents <= 0:
+        raise HTTPException(409, "这一单没有骑手或者已经没有可退的钱,判不了骑手责任")
+    reason = (f"{a.reply};顾客申诉改判:判骑手责任({note or '复核认定售后应当受理'})"
+              if a.reply else f"顾客申诉改判:判骑手责任({note or '复核认定售后应当受理'})")
+    refunded, split = await rider_fault.judge_after_sale(
+        db, a, order, reason=reason, actor_role="admin", actor_id=admin_id)
+    await push_to_user(
+        appeal.user_id, "申诉成立",
+        f"复核认定这笔售后应当受理,判为骑手责任,¥{refunded / 100:.2f} 已原路退回(含跑腿费)",
+        {"type": "appeal"})
+    from ..services import credit
+    await push_to_user(
+        order.rider_id, "一笔跑腿售后判为骑手责任",
+        f"订单 {order.order_no[-6:]} 的售后,顾客申诉后平台复核认定应当受理,判为骑手责任,"
+        f"顾客已全额退款。{rider_fault.rider_push_text(split)}。"
+        f"这次记为骑手责任(信用分 −{credit.FAULT_POINTS}),"
+        "不认同可以在 72 小时内申诉(「我的信用分」里这一条旁边),改判成立扣的钱退回",
+        {"order_no": order.order_no}, record_skip=True)
 
 
 #: 结论会改信用分扣分项的那几类申诉(services/credit.py 的 ORIGINAL_CHANNEL,

@@ -3843,10 +3843,11 @@ async def my_todos(
         #
         # 窗口判据从 appeals.py 借,不在这儿抄一遍 —— 抄一遍的话哪天只改了
         # 一处,角标说有 2 单可申诉、点进去提交却被 422 挡回来
+        # 判责方和申诉资格同一个口径(appeals._validate_target 只收 fault == merchant 的)
         _count(AfterSale,
                AfterSale.merchant_id == shop.id,
                AfterSale.status == AfterSaleStatus.accepted,
-               AfterSale.fault != "rider",
+               AfterSale.fault == "merchant",
                AfterSale.processed_at.is_not(None),
                AfterSale.processed_at > cutoff,
                AfterSale.id.not_in(appealed_sales_q)).label(
@@ -4716,15 +4717,18 @@ async def my_rules(
                     f"30 天内成立 {FS_AUTO_SUSPEND_COUNT} 起食安投诉,"
                     "系统自动暂停营业并转人工复核",
                     "投诉直达平台不经商家,处置动作全部留痕(你在合规档案里看得到)",
-                    "先行赔付由平台垫付,判定商家责任的才向你追偿",
+                    "投诉核实成立:这单的餐费退款由你承担(这单净额冲回,佣金平台也不收;"
+                    "配送费、小费照常归骑手),记一条商家责任、扣信用分;"
+                    f"{appeal_hours} 小时内可以对这笔售后判责申诉",
                 ],
             },
             {
                 "title": "申诉",
                 "items": [
                     f"售后判责、差评(≤3 星)可在 {appeal_hours} 小时内申诉,每项一次",
-                    "申诉成立:差评隐藏且评分同步扣回、被冲的净额补回来",
-                    "改判的钱平台认亏,不向用户追讨",
+                    "申诉成立:差评隐藏且评分同步扣回;售后判责撤销、信用分那一条不再计分",
+                    # 2026-09-14 起改判不补钱(平台没有钱),见 routers/appeals
+                    "售后判责改判成立,被冲掉的净额不补回:顾客拿到的退款不追回,平台也不出这笔钱",
                 ],
             },
             {

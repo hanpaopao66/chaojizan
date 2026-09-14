@@ -572,11 +572,15 @@ export default function TransparencyPage() {
                 <span className="num">{yuanF(funds?.spend.subsidy_cents)}</span></div>
               <div className="row"><span>商家餐损赔付（无人接单，平台背锅）</span>
                 <span className="num">{yuanF(funds?.spend.meal_compensation_cents)}</span></div>
-              <div className="row"><span>申诉改判调整（误伤的账，平台认亏）</span>
+              <div className="row"><span>申诉改判调整（误伤的账，平台认的钱；2026-09-14 起商家售后判责改判不再补钱）</span>
                 <span className="num">{yuanF(funds?.spend.adjustment_cents)}</span></div>
               {funds?.spend_detail?.rider_fault_refund_cents != null && (
                 <div className="row"><span>　其中：骑手责任改判成立，退回骑手（错判由平台认）</span>
                   <span className="num">{yuanF(funds.spend_detail.rider_fault_refund_cents)}</span></div>
+              )}
+              {funds?.spend_detail?.appeal_refund_cents != null && (
+                <div className="row"><span>　其中：顾客申诉改判（取消分摊、按送达处理），平台原路退回</span>
+                  <span className="num">{yuanF(funds.spend_detail.appeal_refund_cents)}</span></div>
               )}
               <div className="row total"><span>合计</span>
                 <span className="num">{yuanF(funds?.spend.total_cents)}</span></div>

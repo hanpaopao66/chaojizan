@@ -19,12 +19,41 @@ const ROLE_TAGS: Record<string, [string, string]> = {
   customer: ['顾客', 'green'],
 }
 
+/** 改判成立会发生什么,按申诉的是哪一类说(对着服务端 routers/appeals.py 的 _overturn 各支写)。
+ *  2026-09-14「平台没有钱」之后各支的钱不一样:确认框里得照实写,不能一句「退回去」盖过 */
+function overturnEffect(a: Appeal): string {
+  switch (a.target_type) {
+    case 'after_sale':
+      return '撤销商家责任,信用分那一条不再计分;被冲掉的净额不补回(平台不出这笔钱,顾客拿到的退款也不追回)'
+    case 'after_sale_rider':
+      return '撤销骑手责任,判责时扣骑手的钱退回、保障金池出的回池(这笔由平台认)'
+    case 'delivery_issue':
+      return a.role === 'customer'
+        ? '撤销「顾客原因」,顾客付的餐费由平台原路退回'
+        : '撤销骑手责任,判责时扣骑手的钱退回、保障金池出的回池(这笔由平台认)'
+    case 'cancel_split':
+      return '顾客在取消分摊里承担的部分,由平台原路退回'
+    case 'after_sale_rejected':
+      return '按商家同意的口径退餐费、商家冲账、判商家责任;跑腿单没有商家,判的是骑手责任(扣骑手的钱)'
+    case 'review':
+      return '差评隐藏,店铺评分扣回;写评价的人会收到通知、可以申诉'
+    case 'review_hidden':
+      return '评价恢复显示,重新计入评分'
+    case 'risk_flag':
+      return '当场解除限制'
+    case 'queue_pass':
+      return '队还在就还原位置;队散了位置补不回来,这次判决计入商家的排队记录'
+    default:
+      return '撤销原判责'
+  }
+}
+
 /**
  * 判责申诉。
  *
- * 骑手/商家对某次判责不服,在这里申诉。**改判是要花钱的** ——
- * 之前扣的罚款或收回的收入要退回去,所以两个按钮的后果不对称:
- * 「维持原判」什么都不变,「改判」会动账。
+ * 三种角色对某次判责不服,在这里申诉。「维持原判」什么都不变,「改判」按申诉的是哪一类
+ * 动不同的东西(见 [overturnEffect]):骑手的钱退回、顾客的钱由平台退,而商家售后判责改判
+ * 只撤销判责、不补钱 —— 确认框里照实写。
  */
 export default function AppealsPage() {
   const [rows, setRows] = useState<Appeal[]>([])
@@ -49,7 +78,7 @@ export default function AppealsPage() {
           <Alert
             type={overturn ? 'warning' : 'info'} showIcon style={{ margin: '8px 0' }}
             message={overturn
-              ? '撤销原判责,之前扣的会退回去'
+              ? overturnEffect(a)
               : '原判责不变,申诉人会收到这条说明'}
           />
           <Input.TextArea rows={2} maxLength={300}

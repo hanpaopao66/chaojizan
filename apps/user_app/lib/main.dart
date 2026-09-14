@@ -5575,7 +5575,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                           color: Theme.of(context).sz.danger,
                           fontWeight: FontWeight.bold,
                           fontSize: 16)),
-                  Text('不经商家、直达平台加急处理;核实成立全额退款(含配送费)',
+                  // 2026-09-14 起食安投诉成立由商家承担餐费退款;配送费已付给骑手,不退
+                  // (退的话那一截只能平台出,平台不出钱)
+                  Text('不经商家、直达平台加急处理;核实成立,餐费由商家原路退给你'
+                      '(配送费已付给骑手,不退)',
                       style: Theme.of(sheetContext).textTheme.bodySmall),
                   const SizedBox(height: 8),
                   RadioGroup<String>(
@@ -5672,7 +5675,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
           desc.text.trim(), images, medicalUrls: medical);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('食安投诉已提交,平台加急处理;核实成立将全额退款')));
+          content: Text('食安投诉已提交,平台加急处理;核实成立,餐费由商家退给你')));
       _refresh();
     } catch (e) {
       if (!mounted) return;
