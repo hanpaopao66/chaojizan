@@ -48,6 +48,17 @@ services/enforcement.py 的抬头写了处置为什么不做分数:分数没法�
 违规按 enforcement.CATALOG 的严重程度扣(严重 / 一般两档,见 [VIOLATION_POINTS]);
 配送异常、售后判为你的责任,每次 −[FAULT_POINTS]。
 
+### 起算日:旧裁决不算
+
+扣分只算**起算日(config.credit_count_from,北京日期,含这一天)之后**的裁决和判定
+(见 [count_from] / [counts])。以前后台处理配送异常的按钮叫「退款」,判的人不知道自己是在判
+谁的责任、会扣谁的分 —— 拿那时候的裁决扣分,等于事后改了规则。
+
+完成订单的加分**不跟着起算日走**,照常看最近 [WINDOW_DAYS] 天:起算日的理由是「当时判的人
+不知道会算分」,完成一单没有这个问题,那是当事人实实在在做完的单,算上只对他有利;而要是
+加分也从起算日算,每个老用户、老店、老骑手都会在那一天被清回起始分 —— 历史越长的人亏得越多。
+公示里一句话说得清:「扣分只算某天起的裁决和判定」。起算日早于时间窗起点之后,它自然不再起作用。
+
 ### 商家的分记在店主名下
 
 违规记在店主头上(models.Violation.subject_id:「连锁店员做的事记在店主头上 —— 处置的是
@@ -106,6 +117,7 @@ from sqlalchemy import and_, exists, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from ..config import settings
 from ..redis_client import get_redis
 
 # ---------------------------------------------------------------------------
@@ -114,8 +126,8 @@ from ..redis_client import get_redis
 # ---------------------------------------------------------------------------
 
 #: 口径一变就升:缓存键带着它,部署之后不会拿旧口径的缓存回答。
-#: v2:商家、骑手也有了,缓存键带上角色
-FORMULA_VERSION = 2
+#: v2:商家、骑手也有了,缓存键带上角色;v3:扣分只算起算日之后的
+FORMULA_VERSION = 3
 
 #: 起始分。新来的就是这个分,和没有问题的老人在同一个等级,理由见 public_spec 的 base_why
 BASE = 90
@@ -244,6 +256,34 @@ def expires_at(at: datetime) -> datetime:
     return _utc(at) + timedelta(days=WINDOW_DAYS)
 
 
+#: 起算日按北京日期算:「9 月 15 日起」对当事人来说就是北京时间那天零点起
+_BEIJING = timezone(timedelta(hours=8))
+
+
+def count_from() -> datetime:
+    """扣分从这一刻起算(含):config.credit_count_from 那天的北京时间零点。
+
+    每次现读配置(不在导入时算死):改配置、单测改日期,公示和计算一起跟着变。"""
+    d = settings.credit_count_from
+    return datetime(d.year, d.month, d.day, tzinfo=_BEIJING).astimezone(timezone.utc)
+
+
+def count_from_label() -> str:
+    """公示里写的那个日期(「2026-09-15」)。"""
+    return settings.credit_count_from.isoformat()
+
+
+def counts(at: datetime, now: datetime) -> bool:
+    """这一条扣分记不记分:在时间窗里,**而且不早于起算日**。只管扣分项 —— 完成订单的加分
+    只看时间窗(理由见模块抬头「起算日」)。"""
+    return in_window(at, now) and _utc(at) >= count_from()
+
+
+def deduction_since(now: datetime) -> datetime:
+    """查扣分项用的下沿:时间窗起点和起算日取晚的那个。和 [counts] 是同一个口径。"""
+    return max(window_start(now), count_from())
+
+
 def _check_role(role: str) -> None:
     if role not in ROLES:
         raise ValueError(f"没有这种角色的信用分:{role!r}")
@@ -310,12 +350,13 @@ def compute(orders: int, deductions: Iterable[Fact], now: datetime | None = None
     """**唯一的公式。** 三种角色、本人的明细、交易对方看到的分数、透明中心的说明都是它。
 
     信用分 = BASE + min(窗口内完成单数 × ORDER_POINTS, ORDER_CAP) − 窗口内扣分合计,
-    限定在 FLOOR–CEIL。扣分项在这里按每条的真实时刻再筛一遍窗口,查询只负责把候选捞全。
+    限定在 FLOOR–CEIL。扣分项在这里按每条的真实时刻再筛一遍(时间窗 + 起算日,见 [counts]),
+    查询只负责把候选捞全。
     """
     now = now or utcnow()
     orders = max(int(orders or 0), 0)
     plus = min(orders * ORDER_POINTS, ORDER_CAP)
-    live = tuple(sorted((f for f in deductions if f.points < 0 and in_window(f.at, now)),
+    live = tuple(sorted((f for f in deductions if f.points < 0 and counts(f.at, now)),
                         key=lambda f: (_utc(f.at), f.record_id), reverse=True))
     minus = sum(-f.points for f in live)
     score = max(FLOOR, min(CEIL, BASE + plus - minus))
@@ -560,7 +601,10 @@ def _rules(role: str) -> dict:
 
 async def _deductions(db: AsyncSession, role: str, ids: list[int], since: datetime,
                       floor: datetime) -> list[tuple[int, Fact]]:
-    """窗口内计分的扣分项。**已经排除了申诉成立的记录。**"""
+    """计分的扣分项。**已经排除了申诉成立的记录。**
+
+    `since` 是 [deduction_since]:时间窗起点和起算日取晚的那个 —— 起算日之前的裁决和判定
+    根本捞不上来(compute 里 [counts] 还会按同一个口径再筛一遍)。"""
     from ..models import AfterSale, AfterSaleStatus, DeliveryIssue, Violation
 
     out: list[tuple[int, Fact]] = []
@@ -613,12 +657,13 @@ async def load_facts(db: AsyncSession, role: str, uids: Iterable[int],
     now = now or utcnow()
     since = window_start(now)
     floor = since - timedelta(days=_CREATED_SLACK_DAYS)
+    # 加分只看时间窗;扣分另外还要不早于起算日(模块抬头「起算日」)
     q, _ = _order_rows(role, ids, since, floor)
     sq = q.subquery()
     for uid, n in (await db.execute(select(sq.c.uid, func.count()).group_by(sq.c.uid))).all():
         if uid in out:
             out[uid].orders = int(n)
-    for uid, fact in await _deductions(db, role, ids, since, floor):
+    for uid, fact in await _deductions(db, role, ids, deduction_since(now), floor):
         if uid in out:
             out[uid].deductions.append(fact)
     return out
@@ -779,11 +824,12 @@ def _fact_row(f: Fact) -> dict:
 
 
 async def _excluded(db: AsyncSession, role: str, uid: int, now: datetime) -> list[dict]:
-    """窗口内申诉成立、不再计分的记录 —— 让本人看得到自己申诉赢了。"""
+    """窗口内申诉成立、不再计分的记录 —— 让本人看得到自己申诉赢了。
+    起算日之前的本来就不计分,不列(和扣分项同一个下沿)。"""
     from ..models import AfterSale, AfterSaleStatus, Appeal, DeliveryIssue, Violation
 
-    since = window_start(now)
-    floor = since - timedelta(days=_CREATED_SLACK_DAYS)
+    since = deduction_since(now)
+    floor = window_start(now) - timedelta(days=_CREATED_SLACK_DAYS)
     won = "申诉成立,不再计分"
     out: list[dict] = []
     if role in ("customer", "rider"):
@@ -954,7 +1000,7 @@ async def submit_ticket_appeal(db: AsyncSession, user, kind: str, record_id: int
     now = utcnow()
     facts = (await load_facts(db, role, [uid], now))[uid]
     fact = next((f for f in facts.deductions if f.kind == kind and f.record_id == record_id
-                 and f.points < 0 and in_window(f.at, now)), None)
+                 and f.points < 0 and counts(f.at, now)), None)
     if fact is None:
         raise HTTPException(404, "这条记录现在不计分,不需要申诉")
     if await db.scalar(select(CreditAppeal.id).where(
@@ -1275,6 +1321,7 @@ def public_spec(role: str = "customer") -> dict:
     top = LEVELS[0]
     who = ROLE_LABELS[role]
     scope, source = _PLUS_SCOPE[role]
+    since = count_from_label()
     return {
         "version": FORMULA_VERSION,
         "role": role,
@@ -1284,7 +1331,14 @@ def public_spec(role: str = "customer") -> dict:
         "base": BASE,
         "window_days": WINDOW_DAYS,
         "formula": (f"信用分 = {BASE} + 完成订单加分 − 扣分合计,"
-                    f"结果限定在 {FLOOR}–{CEIL} 之间。只看最近 {WINDOW_DAYS} 天"),
+                    f"结果限定在 {FLOOR}–{CEIL} 之间。只看最近 {WINDOW_DAYS} 天;"
+                    f"扣分只算 {since} 起(含这一天)的裁决和判定"),
+        # 起算日(北京日期)和它的理由。加分不跟着它走 —— 理由也写在这一句里
+        "count_from": since,
+        "count_from_why": (f"{since} 之前的配送异常裁决、售后判责、违规判定都不扣分:以前后台处理"
+                           "配送异常的按钮叫「退款」,判的人不知道自己是在判谁的责任、会扣谁的分,"
+                           "拿那时候的裁决扣分等于事后改规则。完成订单的加分照常算最近 "
+                           f"{WINDOW_DAYS} 天 —— 那是你实实在在做完的单,不存在当时不知道的问题"),
         "base_why": (f"新{who}从 {BASE} 分起步,和没有任何问题的老{who}在同一个等级"
                      f"(「{top.label}」)。不从 {CEIL} 起,是给完成订单留出加分的余地;"
                      f"也不从更低的分起,因为没有记录不等于有问题 —— 新{who}一上来就是低分,"
@@ -1348,7 +1402,8 @@ def rules_lines(audience: str) -> list[str]:
         f"你有一个 {FLOOR}–{CEIL} 的信用分,公式在透明中心「信用分怎么算」,"
         "每一分都指得出是哪一条记录",
         f"起步 {BASE} 分;最近 {WINDOW_DAYS} 天每完成一单 +{ORDER_POINTS},最多 +{ORDER_CAP}",
-        f"只扣平台判定成立的事:{minus};违规成立,{_violation_line(audience)}",
+        f"只扣平台判定成立的事,而且只算 {count_from_label()} 起的裁决和判定:{minus};"
+        f"违规成立,{_violation_line(audience)}",
         rights,
         seen,
         never,

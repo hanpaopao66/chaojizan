@@ -57,7 +57,11 @@ void main() {
         ],
         'excluded': [],
         'rules': {
-          'formula': '信用分 = 90 + 完成订单加分 − 扣分合计,结果限定在 0–100 之间。只看最近 180 天',
+          'formula': '信用分 = 90 + 完成订单加分 − 扣分合计,结果限定在 0–100 之间。只看最近 180 天;'
+              '扣分只算 2026-09-15 起(含这一天)的裁决和判定',
+          'count_from': '2026-09-15',
+          'count_from_why': '2026-09-15 之前的配送异常裁决、售后判责、违规判定都不扣分:'
+              '以前后台处理配送异常的按钮叫「退款」,判的人不知道自己是在判谁的责任',
           'visibility': [
             {'who': '顾客', 'what': '你接单之后,在这一单上看到分数和等级,看不到明细'},
           ],
@@ -132,6 +136,13 @@ void main() {
     expect(hasText('完成订单 431 单'), isTrue);
     expect(hasText('你拒绝的售后,顾客申诉后平台复核判为商家责任'), isTrue);
     expect(hasText('订单尾号 77ab12'), isTrue);
+  });
+
+  testWidgets('起算日:「这个分怎么算」里印着服务端给的日期和理由', (t) async {
+    await pumpPage(t, fakeApi(merchant));
+    await t.scrollUntilVisible(find.textContaining('之前的配送异常裁决'), 300);
+    expect(hasText('扣分只算 2026-09-15 起'), isTrue);
+    expect(hasText('2026-09-15 之前的配送异常裁决、售后判责、违规判定都不扣分'), isTrue);
   });
 
   testWidgets('商家:售后判责走原通道 after_sale,申诉框里说的是补回净额', (t) async {

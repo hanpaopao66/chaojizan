@@ -21,7 +21,7 @@ import asyncio
 import importlib
 import inspect
 import textwrap
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -32,6 +32,14 @@ from app.services import credit as cc
 from app.state_machine import OrderStatus
 
 NOW = datetime(2026, 9, 14, 4, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _起算日拨到很久以前(monkeypatch):
+    """起算日(config.credit_count_from)默认 2026-09-15,比这里的 NOW 还晚 —— 不拨开的话,
+    下面每一条带扣分项的用例都会被起算日挡掉,测的就不是它们自己那件事了。
+    专门验起算日的 Test起算日 自己再设。"""
+    monkeypatch.setattr(cc.settings, "credit_count_from", date(2000, 1, 1))
 
 
 def fault(i=1, days_ago=1, kind=None):
@@ -116,6 +124,81 @@ class Test时间窗:
     def test_数据库里取出来的无时区时间按UTC算(self):
         naive = (NOW - timedelta(days=cc.WINDOW_DAYS - 1)).replace(tzinfo=None)
         assert cc.in_window(naive, NOW)
+
+
+class Test起算日:
+    """旧裁决不算:扣分只算起算日(北京日期,含这一天)之后的裁决和判定;加分不跟着它走。"""
+
+    CF = date(2026, 9, 15)
+
+    @pytest.fixture(autouse=True)
+    def _默认的起算日(self, monkeypatch):
+        monkeypatch.setattr(cc.settings, "credit_count_from", self.CF)
+
+    def test_默认是2026年9月15日(self):
+        from app.config import Settings
+        assert Settings.model_fields["credit_count_from"].default == self.CF
+
+    def test_按北京日期的零点算(self):
+        assert cc.count_from() == datetime(2026, 9, 14, 16, 0, tzinfo=timezone.utc)
+        assert cc.count_from_label() == "2026-09-15"
+
+    def test_起算日之前的不算_当天零点起就算(self):
+        edge = cc.count_from()
+        now = edge + timedelta(days=30)
+        facts = [
+            cc.Fact(cc.KIND_DELIVERY, 1, edge - timedelta(seconds=1), -cc.FAULT_POINTS),
+            cc.Fact(cc.KIND_AFTER_SALE, 2, edge, -cc.FAULT_POINTS),
+            cc.Fact(cc.KIND_VIOLATION, 3, edge - timedelta(days=3),
+                    -cc.violation_points("severe")),
+            cc.Fact(cc.KIND_VIOLATION, 4, edge + timedelta(days=1),
+                    -cc.violation_points("major")),
+        ]
+        s = cc.compute(0, facts, now)
+        assert [f.record_id for f in s.deductions] == [4, 2]
+        assert s.minus == cc.FAULT_POINTS + cc.violation_points("major")
+        assert not cc.counts(edge - timedelta(seconds=1), now)
+        assert cc.counts(edge, now)
+
+    def test_无时区的时间按UTC比(self):
+        edge = cc.count_from()
+        assert cc.counts(edge.replace(tzinfo=None), edge + timedelta(days=1))
+        assert not cc.counts((edge - timedelta(minutes=1)).replace(tzinfo=None),
+                             edge + timedelta(days=1))
+
+    def test_加分不跟着起算日走(self):
+        """完成订单照常看时间窗:起算日只是说旧裁决不算,不把谁清回起始分。"""
+        now = cc.count_from() + timedelta(days=1)
+        assert cc.compute(7, [], now).plus == 7 * cc.ORDER_POINTS
+        src = _src(cc, "_order_rows") + _src(cc, "_recent_orders")
+        assert "count_from" not in src and "deduction_since" not in src
+
+    def test_查询的下沿和compute同一个口径(self):
+        edge = cc.count_from()
+        assert cc.deduction_since(edge + timedelta(days=10)) == edge
+        far = edge + timedelta(days=cc.WINDOW_DAYS + 10)
+        assert cc.deduction_since(far) == cc.window_start(far), \
+            "起算日落到时间窗外之后就不再起作用"
+        assert "deduction_since(now)" in _src(cc, "load_facts"), "扣分项的查询没按起算日取下沿"
+        assert "deduction_since(now)" in _src(cc, "_excluded")
+
+    def test_工单申诉按同一个口径认记录(self):
+        """起算日之前的那一条不计分,也就不需要申诉(404),和明细页一致。"""
+        assert "counts(f.at, now)" in _src(cc, "submit_ticket_appeal")
+
+    def test_公示写明起算日和理由_改配置公示跟着变(self, monkeypatch):
+        monkeypatch.setattr(cc.settings, "credit_count_from", date(2026, 10, 1))
+        for role in cc.ROLES:
+            spec = cc.public_spec(role)
+            assert spec["count_from"] == "2026-10-01", role
+            assert "2026-10-01" in spec["formula"], role
+            assert "2026-10-01" in spec["count_from_why"] and "加分" in spec["count_from_why"]
+            assert any("2026-10-01" in line for line in cc.rules_lines(role)), role
+        assert cc.count_from() == datetime(2026, 9, 30, 16, 0, tzinfo=timezone.utc)
+
+    def test_缓存键升了版本(self):
+        """口径变了(v3 起扣分只算起算日之后的):部署之后不能拿旧口径算好的缓存回答。"""
+        assert cc.FORMULA_VERSION >= 3
 
 
 class Test新来的不吃亏:
@@ -233,7 +316,7 @@ class Test公示和计算是同一份:
         """同一套机制:公式、起始分、窗口、等级、上下限、申诉规矩、刷新口径都一字不差 ——
         只有「什么算扣分」「什么不扣分」「谁看得到」按角色不同。"""
         same = ("version", "range", "base", "window_days", "formula", "levels",
-                "minus_cap", "appeal")
+                "minus_cap", "appeal", "count_from", "count_from_why")
         specs = [cc.public_spec(r) for r in cc.ROLES]
         for k in same:
             assert len({repr(s[k]) for s in specs}) == 1, f"「{k}」三种角色不一样"

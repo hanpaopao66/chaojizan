@@ -70,6 +70,8 @@ export default function CreditSection({ specs }) {
       {c ? (
         <>
           <div className="tp-formula">{c.formula}</div>
+          {/* 起算日:之前的裁决不扣分。老服务端没有这个字段 */}
+          {c.count_from_why && <p className="tp-note">{rich(c.count_from_why)}。</p>}
           <p className="tp-note">{rich(c.base_why)}</p>
           <Rows c={c} />
           {c.minus_cap && <p className="tp-note">{c.minus_cap}。</p>}

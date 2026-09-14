@@ -15,13 +15,18 @@
 6. 违规 −10 / −20;走客服工单申诉 → 改判 → 回来、违规被推翻、工单有回复;
    维持原判的不回来、不能再申诉;工单申诉没下结论前工单关不掉;
 7. 配送异常过了 72 小时:原通道接不上、工单申诉成立后不再计分;
-8. 满 180 天的扣分自动不算;加分封顶、追加单和刷单确认的单不算;
+8. 满 180 天的扣分自动不算;起算日之前的裁决和判定不算(当天零点起算),也不收工单申诉;
+   加分封顶、追加单和刷单确认的单不算;
 9. 规则页三端都有「信用分」「交易对方的信用分」两节,商家端规则中心也有。
+
+**前提:服务端的信用分起算日(CREDIT_COUNT_FROM)至少在 4 天前** —— 这套用例造的都是「现在」
+的裁决,还要验「过了 72 小时的照样计分」。CI 设的是 30 天前。
 
 在 server/ 目录下运行:python -m tests.e2e_credit
 """
 import asyncio
 import time
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import text
 
@@ -87,6 +92,13 @@ SPEC = call("GET", "/transparency/credit")
 PLUS = SPEC["plus"][0]
 MINUS = {m["key"]: m for m in SPEC["minus"]}
 VIOL = {r["kind"]: r["points"] for r in MINUS["violation"]["items"]}
+#: 服务端公示的起算日(北京日期的零点,换成 UTC):这之前的裁决和判定不扣分
+CF = datetime.combine(date.fromisoformat(SPEC["count_from"]), datetime.min.time(),
+                      tzinfo=timezone(timedelta(hours=8))).astimezone(timezone.utc)
+assert CF <= datetime.now(timezone.utc) - timedelta(days=4), (
+    f"服务端的信用分起算日是 {SPEC['count_from']},离现在不到 4 天 —— 这套用例造的都是「现在」的"
+    "裁决,还要验「过了 72 小时的照样计分」,都得落在起算日之后。"
+    "用 CREDIT_COUNT_FROM=更早的日期 启动服务端(CI 设的是 30 天前)")
 
 
 def by_spec(orders: int, deductions: list[int]) -> int:
@@ -365,6 +377,36 @@ def main() -> None:
     got = expect(1, [VIOL["malicious_after_sale"]], f"满 {SPEC['window_days']} 天")
     assert ded(got, "violation", v_old) is None
     print(f"✓ 满 {SPEC['window_days']} 天的扣分自动不算,不用谁去「修复」")
+
+    # ============ 8b. 起算日:之前的裁决和判定不算 ============
+    base = [VIOL["malicious_after_sale"]]
+    if CF - timedelta(hours=1) > datetime.now(timezone.utc) - timedelta(
+            days=SPEC["window_days"] - 1):
+        e = place()
+        to_picked_up(e)
+        issue_e = customer_fault(e)
+        v_pre = violation("harassment", e, "起算日前后各验一次的那条判定")
+        expect(1, [*base, fault_pts, VIOL["harassment"]], "起算日之后的一次裁决、一条判定")
+        before = CF - timedelta(seconds=1)
+        sql("UPDATE delivery_issues SET resolved_at = :t WHERE id = :i", {"t": before, "i": issue_e})
+        sql("UPDATE violations SET created_at = :t WHERE id = :i", {"t": before, "i": v_pre})
+        got = expect(1, base, "起算日前一秒的裁决和判定")
+        assert ded(got, "delivery_fault", issue_e) is None and ded(got, "violation", v_pre) is None
+        assert not any(x["record_id"] in (issue_e, v_pre) for x in got["excluded"]), got["excluded"]
+        late = call("POST", "/credit/me/appeals", cust,
+                    {"kind": "violation", "record_id": v_pre, "reason": "起算日之前的这条也申诉一下"},
+                    expect_error=True)
+        assert late["_error"] == 404, f"起算日之前的不计分,也就不需要申诉:{late}"
+        assert SPEC["count_from"] in SPEC["formula"] and SPEC["count_from_why"], SPEC["formula"]
+        sql("UPDATE violations SET created_at = :t WHERE id = :i", {"t": CF, "i": v_pre})
+        expect(1, [*base, VIOL["harassment"]], "起算日当天零点的判定")
+        sql("UPDATE violations SET created_at = :t WHERE id = :i", {"t": before, "i": v_pre})
+        expect(1, base, "放回起算日之前")
+        print(f"✓ 起算日 {SPEC['count_from']}(北京时间零点)之前的裁决和判定不扣分、不收工单申诉;"
+              "当天零点起的算;公示的公式里写着这个日期")
+    else:
+        print(f"· 起算日 {SPEC['count_from']} 已经落到 {SPEC['window_days']} 天时间窗外,"
+              "这一段不再有可验的东西")
 
     # 加分封顶、追加单不算、刷单确认的不算、窗口外的不算:直连库给第二个顾客造单
     cust2, _ = register_user("customer", name="信用分老顾客")

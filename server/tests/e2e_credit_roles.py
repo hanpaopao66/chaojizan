@@ -20,11 +20,14 @@
 9. 满 180 天的扣分不算;加分封顶;追加单、刷单确认的单不算,没送到的那一单不算骑手的;
 10. 规则页三端都有「信用分」「交易对方的信用分」两节;后台看得到三种角色的明细和申诉。
 
+**前提:服务端的信用分起算日(CREDIT_COUNT_FROM)至少在 4 天前**(同 e2e_credit;CI 设的是 30 天前)。
+
 在 server/ 目录下运行:python -m tests.e2e_credit_roles
 """
 import asyncio
 import json
 import time
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 from sqlalchemy import text
@@ -98,6 +101,13 @@ cust, _ = register_user("customer", name="三方信用分顾客")
 cust2, _ = register_user("customer", name="三方信用分顾客二")
 
 SPEC = {r: call("GET", f"/transparency/credit?role={r}") for r in ("merchant", "rider")}
+# 起算日(北京日期零点)之前的裁决和判定不扣分。这套用例造的都是「现在」的裁决,
+# 还要验「过了 72 小时的照样计分」—— 起算日至少得在 4 天前(CI 设的是 30 天前)
+_CF = datetime.combine(date.fromisoformat(SPEC["rider"]["count_from"]), datetime.min.time(),
+                       tzinfo=timezone(timedelta(hours=8)))
+assert _CF <= datetime.now(timezone.utc) - timedelta(days=4), (
+    f"服务端的信用分起算日是 {SPEC['rider']['count_from']},离现在不到 4 天:"
+    "用 CREDIT_COUNT_FROM=更早的日期 启动服务端(CI 设的是 30 天前)")
 FAULT = {r: next(m["points"] for m in SPEC[r]["minus"] if m["key"] != "violation")
          for r in SPEC}
 VIOL = {r: {it["kind"]: it["points"] for m in SPEC[r]["minus"] if m["key"] == "violation"

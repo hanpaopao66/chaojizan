@@ -152,6 +152,13 @@ jobs:
           python -m scripts.seed
           python -m scripts.demo_seed
 
+      # 信用分的起算日(config.credit_count_from,默认 2026-09-15,之前的裁决不扣分)拨到 30 天前。
+      # e2e_credit* 造的都是「现在」的裁决,还要验「过了 72 小时的照样计分」「起算日前一秒的不算」,
+      # 起算日离现在太近(比如刚上线那几天)这些就验不了。**只调日期,规则照样验**。
+      # 算出来的日期写进 GITHUB_ENV,后面起服务、跑用例两步都带着
+      - name: 信用分起算日拨到 30 天前
+        run: echo "CREDIT_COUNT_FROM=$(TZ=Asia/Shanghai date -d '30 days ago' +%F)" >> "$GITHUB_ENV"
+
       - name: 起服务
         working-directory: server
         # JWT_SECRET 在这里现造而不是写进 env: —— 安全扫描对

@@ -585,6 +585,8 @@ class _CreditPageState extends State<CreditPage> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('${s['formula'] ?? ''}', style: body),
             if (levelLine.isNotEmpty) bullet('等级:$levelLine。${s['level_rule'] ?? ''}'),
+            // 起算日之前的裁决不扣分(老服务端没有这个字段)
+            if (s['count_from_why'] != null) bullet('${s['count_from_why']}'),
             if (s['base_why'] != null) bullet('${s['base_why']}'),
             const SizedBox(height: 8),
             for (final p in list('plus')) ...[
