@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 
 from tests.miniapp_util import CHECKLIST_ALL, HELLO, LISTING, admin_token, developer
-from tests.util import BASE, call, demo_shop, login
+from tests.util import BASE, call, demo_shop, register_fresh_customer
 from tests.video_util import ffmpeg_clip, uploader
 
 SERVER = Path(__file__).resolve().parents[2] / "mcp-server" / "server.py"
@@ -64,7 +64,9 @@ class Mcp:
 
 def main() -> None:
     # ---- 点餐:只勾点餐的令牌只看得到点餐的工具;算价 → 下待支付单,付不了款 ----
-    cust = login("13800000001")
+    # 自己注册一个顾客,不用演示号:CI 分组并行时同一组前面的套件也在拿演示号下单,
+    # 同一分钟里撞上「每人每分钟 20 单」的限流,而 MCP 这一路不会像测试工具那样自动重试
+    cust = register_fresh_customer()
     m = Mcp(call("POST", "/auth/agent-tokens", cust, {"name": "MCP 点餐"})["token"])
     tools = m.tools()
     assert "create_pending_order" in tools and "publish_video" not in tools, tools
@@ -81,6 +83,7 @@ def main() -> None:
     o = m.call("create_pending_order", merchant_id=shop["id"],
                items=[{"dish_id": dish["id"], "quantity": qty}],
                address="MCP 测试地址", lat=30.66, lng=104.08)
+    assert "order" in o, f"下待支付单失败:{o}"
     no = o["order"]["order_no"]
     assert o["order"]["status"] == "pending_payment" and "还没付钱" in o["next_step"], o
     assert m.call("get_order_status", order_no=no)["order_no"] == no
