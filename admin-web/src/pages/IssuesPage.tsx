@@ -13,21 +13,33 @@ import {
  * 不是「继续/送达/退款」三个词。
  *
  * 后两种**是在判谁的责任**,而且各自是一个信用分的扣分项(server/app/services/credit.py):
- * 「按送达处理」判的是顾客原因,「先行赔付」判的是骑手责任。以前这里写的是「判定已送达」
- * 「退款」,看不出在判谁 —— 服务端却一直按判责记(appeals 里判谁的责任谁申诉),
- * 所以名字和后果都写明白。
+ * 「按送达处理」判的是顾客原因;「退款」判谁看异常的种类 —— 到店未出餐、餐品不齐是商家那一环的
+ * 问题,判商家责任、商家承担退款;其余(餐损、丢餐……)判骑手责任、平台先行赔付。
+ * 判谁由服务端按种类定(services/delivery_fault,列表里带着 refund_fault),这里只照着写后果,
+ * 不自己按种类另猜一份。以前这里写的是「判定已送达」「退款」,看不出在判谁 —— 服务端却一直
+ * 按判责记(appeals 里判谁的责任谁申诉),所以名字和后果都写明白。
  */
-const ACTIONS: { value: IssueAction; label: string; effect: string }[] = [
-  { value: 'continue_delivery', label: '让骑手继续送',
-    effect: '订单回到配送中,骑手接着送。地址补充清楚了用这个。不判谁的责任' },
-  { value: 'mark_delivered', label: '判为顾客原因,按送达处理',
-    effect: '联系不上、地址有误,责任在顾客:订单按送达处理,24 小时后自动完成,骑手照常拿配送费。'
-      + '记为顾客原因,扣顾客信用分,顾客 72 小时内可以申诉' },
-  { value: 'refund', label: '判为骑手责任,平台先行赔付',
-    effect: '餐在配送途中损坏、丢失,责任在骑手:平台全额退给顾客并结束订单,骑手照常拿配送费、'
-      + '不扣钱。记为骑手责任,扣骑手信用分,骑手 72 小时内可以申诉。'
-      + '商家那一环的问题(没出餐、少装)别选这一项:选「让骑手继续送」,缺的钱走缺货退款或售后' },
-]
+const yuan = (cents?: number) => (cents == null ? '' : `¥${(cents / 100).toFixed(2)}`)
+
+function actionsFor(issue: DeliveryIssue): { value: IssueAction; label: string; effect: string }[] {
+  const merchantFault = issue.refund_fault === 'merchant'
+  const amount = yuan(issue.refund_preview_cents)
+  return [
+    { value: 'continue_delivery', label: '让骑手继续送',
+      effect: '订单回到配送中,骑手接着送。地址补充清楚了、商家出了餐或补齐了用这个。不判谁的责任' },
+    { value: 'mark_delivered', label: '判为顾客原因,按送达处理',
+      effect: '联系不上、地址有误,责任在顾客:订单按送达处理,24 小时后自动完成,骑手照常拿配送费。'
+        + '记为顾客原因,扣顾客信用分,顾客 72 小时内可以申诉' },
+    merchantFault
+      ? { value: 'refund', label: '判为商家责任,商家承担退款',
+          effect: `到店没出餐、餐没装齐,是商家那一环的问题:订单结束,餐费${amount ? ` ${amount}` : ''}`
+            + '由商家承担退给顾客(这单的净额冲回,平台佣金也不收),配送费和小费照常给骑手、不退。'
+            + '记为商家责任,扣商家信用分、不扣骑手的;商家 72 小时内可以在「售后判责」申诉' }
+      : { value: 'refund', label: '判为骑手责任,平台先行赔付',
+          effect: `餐在配送途中损坏、丢失,责任在骑手:平台全额${amount ? ` ${amount}` : ''}退给顾客并结束订单,`
+            + '骑手照常拿配送费、不扣钱。记为骑手责任,扣骑手信用分,骑手 72 小时内可以申诉' },
+  ]
+}
 
 /** 取值对着 `schemas.py` 的 Literal。同样别照感觉编 ——
  *  第一版写的 `no_answer` / `damaged` 后端根本没有这两个值。 */
@@ -118,7 +130,7 @@ export default function IssuesPage() {
               <Image src={cur.photo_url} width={180} style={{ marginBottom: 12 }} />
             )}
             <Radio.Group value={action} onChange={(e) => setAction(e.target.value)}>
-              {ACTIONS.map((a) => (
+              {actionsFor(cur).map((a) => (
                 <Radio key={a.value} value={a.value}
                        style={{ display: 'block', padding: '6px 0' }}>
                   <b>{a.label}</b>

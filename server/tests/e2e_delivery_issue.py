@@ -96,6 +96,47 @@ assert done_at is not None and delivered_at is None, (done_at, delivered_at)
 print(f"✓ 先行赔付:用户退 {o2b['refund_cents']/100:.2f} 元(平台承担),"
       f"商家净额 +{net/100:.2f}、骑手配送费 +{o2['delivery_fee_cents']/100:.2f} 都保留;写下完成时刻")
 
+# 餐品不齐 → 判商家责任:退款由商家承担(这单的净额冲回,佣金一起冲),骑手配送费照拿,
+# 顾客拿回的是他为餐付的那部分;不算骑手的,骑手没有申诉的必要,商家走售后判责的原通道
+no4 = make_order()
+o4 = call("GET", f"/orders/{no4}", customer)
+issue4 = call("POST", "/riders/issues", rider,
+              {"order_no": no4, "kind": "items_missing", "note": "袋子里少一份主食",
+               "photo_url": "/uploads/demo.jpg"})
+row4 = next(i for i in call("GET", "/admin/delivery-issues?status=open", admin)
+            if i["id"] == issue4["id"])
+food_part = o4["total_cents"] - o4["delivery_fee_cents"] - o4["tip_cents"]
+assert row4["refund_fault"] == "merchant" and row4["fault"] == "", row4
+assert row4["refund_preview_cents"] == food_part > 0, (row4, food_part)
+mw0 = call("GET", "/merchants/me/wallet", merchant)
+rw0 = call("GET", "/riders/wallet", rider)
+done4 = call("POST", f"/admin/delivery-issues/{issue4['id']}/resolve", admin,
+             {"action": "refund", "note": "出餐照片少一份,商家少装"})
+assert done4["resolution"] == "refund" and done4["fault"] == "merchant", done4
+o4b = call("GET", f"/orders/{no4}", customer)
+assert o4b["status"] == "completed" and o4b["refund_cents"] == food_part, o4b
+flows = call("GET", f"/orders/{no4}/refunds", customer)
+assert sum(f["amount_cents"] for f in flows) == food_part, flows
+mw1 = call("GET", "/merchants/me/wallet", merchant)
+rw1 = call("GET", "/riders/wallet", rider)
+assert mw1["total_earned_cents"] == mw0["total_earned_cents"], \
+    f"商家这单的净额没冲回:{mw0['total_earned_cents']} → {mw1['total_earned_cents']}"
+assert rw1["total_earned_cents"] == \
+    rw0["total_earned_cents"] + o4["delivery_fee_cents"] + o4["tip_cents"], (rw0, rw1)
+a4 = next(a for a in call("GET", "/admin/after-sales?days=7", admin) if a["order_no"] == no4)
+assert a4["fault"] == "merchant" and a4["status"] == "accepted", a4
+problems = call("POST", "/admin/audit/run", admin)["detail"]
+assert not [p for p in problems if no4 in p.get("detail", "")], \
+    f"审计对商家责任单报了错:{[p for p in problems if no4 in p.get('detail', '')]}"
+mine4 = next(i for i in call("GET", "/riders/issues", rider) if i["id"] == issue4["id"])
+assert mine4["fault"] == "merchant", mine4
+err = call("POST", "/appeals", rider, {"target_type": "delivery_issue", "target_id": issue4["id"],
+                                       "reason": "这一单我也想申诉一下"}, expect_error=True)
+assert err["_error"] == 409 and "商家责任" in err["detail"], err
+print(f"✓ 餐品不齐判商家责任:顾客退餐费 {food_part/100:.2f}(商家承担,净额冲回),"
+      f"骑手配送费和小费 +{(o4['delivery_fee_cents'] + o4['tip_cents'])/100:.2f} 照拿;"
+      "审计不报错;不算骑手的,骑手申诉 409")
+
 # 已协调关单
 no3 = make_order()
 issue3 = call("POST", "/riders/issues", rider,

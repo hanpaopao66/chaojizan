@@ -35,13 +35,16 @@ services/enforcement.py 的抬头写了处置为什么不做分数:分数没法�
 - **顾客**:配送异常裁决「按送达处理」—— delivery_issues.resolution = mark_delivered,
   admin.resolve_delivery_issue 那一支写明「用户原因(联系不上 / 地址错)」;违规成立
   (violations.audience = customer)。
-- **商家**:顾客申诉「售后被拒」、平台复核改判为商家责任的售后 —— after_sales.fault = merchant
-  **并且** appeals 里 after_sale_rejected 那条改判成立(appeals._overturn 那一支:「平台认定商家
-  当初就该赔而他拒了」);违规成立(violations.audience = merchant)。
+- **商家**:平台判出来的售后商家责任 —— after_sales.fault = merchant,**并且**是下面两条之一:
+  ① appeals 里 after_sale_rejected 那条改判成立(顾客申诉「售后被拒」,appeals._overturn 那一支:
+  「平台认定商家当初就该赔而他拒了」);② 骑手报「到店未出餐」「餐品不齐」、配送异常裁成退款
+  判为商家责任时记的那条售后(admin.resolve_delivery_issue,services/delivery_fault);
+  违规成立(violations.audience = merchant)。
   商家自己点「同意售后」的那种 fault 也写成 merchant(after_sales.accept_after_sale:「同意即认责」),
   但那是商家自己的决定,不是平台判的 —— **不算**。
-- **骑手**:配送异常裁决「先行赔付」—— delivery_issues.resolution = refund,admin 那一支写明
-  「骑手责任」,骑手在 appeals 里正是按「判骑手责任(先行赔付)」申诉的;售后仲裁判骑手责任 ——
+- **骑手**:配送异常裁决「先行赔付」判骑手责任 —— delivery_issues.resolution = refund 而且不是
+  「到店未出餐」「餐品不齐」(那两类判的是商家),admin 那一支写明「骑手责任」,骑手在 appeals 里
+  正是按「判骑手责任(先行赔付)」申诉的;售后仲裁判骑手责任 ——
   admin.after_sale_rider_fault 写的 after_sales.fault = rider(配送异常先行赔付时顺手补的那条
   售后记录不重复计);违规成立(violations.audience = rider)。
 
@@ -113,7 +116,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
 from fastapi import HTTPException
-from sqlalchemy import and_, exists, func, or_, select, text
+from sqlalchemy import and_, exists, func, null, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -126,8 +129,9 @@ from ..redis_client import get_redis
 # ---------------------------------------------------------------------------
 
 #: 口径一变就升:缓存键带着它,部署之后不会拿旧口径的缓存回答。
-#: v2:商家、骑手也有了,缓存键带上角色;v3:扣分只算起算日之后的
-FORMULA_VERSION = 3
+#: v2:商家、骑手也有了,缓存键带上角色;v3:扣分只算起算日之后的;
+#: v4:到店未出餐、餐品不齐裁成退款判的是商家责任(扣商家的、不扣骑手的)
+FORMULA_VERSION = 4
 
 #: 起始分。新来的就是这个分,和没有问题的老人在同一个等级,理由见 public_spec 的 base_why
 BASE = 90
@@ -477,13 +481,16 @@ def _order_rows(role: str, ids: list[int], since: datetime, floor: datetime):
 
     - 顾客:配送时判为顾客原因的那一单(他没收到,那一条已经在扣分项里)、到店自取超时没来取、
       系统自动完成的单;
-    - 骑手:配送异常先行赔付后直接完成的那一单(没有送到顾客手里);
-    - 商家:不另排除 —— 餐做好交出去了就是做成了,后面配送出的事不是商家这一环的。
+    - 骑手:配送异常裁成退款、直接结束的那一单(没有送到顾客手里;判谁的责任都一样);
+    - 商家:骑手报「到店未出餐」「餐品不齐」、判为商家责任提前结束的那一单(餐没出、没装齐,
+      这一环没做成,那一条已经在扣分项里)。别的不另排除 —— 餐做好交出去了就是做成了,
+      后面配送出的事不是商家这一环的。
 
     返回 (语句, 完成时刻表达式)。
     """
     from ..models import NOT_APPEND_ORDER, DeliveryIssue, Merchant, Order, OrderEvent
     from ..state_machine import OrderStatus
+    from .delivery_fault import MERCHANT_KINDS
 
     _check_role(role)
     done_at = func.coalesce(Order.completed_at, Order.created_at)
@@ -494,10 +501,13 @@ def _order_rows(role: str, ids: list[int], since: datetime, floor: datetime):
               text("coalesce(orders.risk_flags->>'status', '') != 'confirmed'"))
     if role == "merchant":
         subject = Merchant.owner_id
+        merchant_fault = exists().where(DeliveryIssue.order_id == Order.id,
+                                        DeliveryIssue.resolution == "refund",
+                                        DeliveryIssue.kind.in_(MERCHANT_KINDS))
         q = (select(subject.label("uid"), Order.id.label("oid"), Order.order_no,
                     done_at.label("at"))
              .select_from(Order).join(Merchant, Merchant.id == Order.merchant_id)
-             .where(subject.in_(ids), *common))
+             .where(subject.in_(ids), *common, ~merchant_fault))
         return q, done_at
     if role == "customer":
         subject = Order.customer_id
@@ -538,9 +548,22 @@ _MERCHANT_AFTER_SALE_TITLE = "你拒绝的售后,顾客申诉后平台复核判�
 _RIDER_AFTER_SALE_TITLE = "顾客售后,平台仲裁判为骑手责任(洒餐、丢餐等,平台先行赔付)"
 
 
+def _merchant_after_sale_title(issue_kind: str | None) -> str:
+    """商家那条售后判责从哪来的:顾客「售后被拒」的申诉改判,或者配送异常判商家责任。"""
+    if issue_kind:
+        return (f"骑手上报「{_RIDER_ISSUE_LABELS.get(issue_kind, '其他')}」,"
+                "平台判为商家责任(商家承担退款)")
+    return _MERCHANT_AFTER_SALE_TITLE
+
+
 def _delivery_query(role: str, ids: list[int], floor: datetime):
-    """配送异常:顾客看「按送达处理」的,骑手看「先行赔付」的。列:(uid, id, order_no, kind, at, note)。"""
+    """配送异常:顾客看「按送达处理」的,骑手看判为骑手责任的「先行赔付」。
+    列:(uid, id, order_no, kind, at, note)。
+
+    到店未出餐、餐品不齐裁成退款判的是**商家**责任(services/delivery_fault),不算骑手的 ——
+    商家那一侧记在售后判责上(见 [_after_sale_query])。"""
     from ..models import DeliveryIssue, Order
+    from .delivery_fault import MERCHANT_KINDS
 
     if role == "customer":
         return (select(Order.customer_id, DeliveryIssue.id, DeliveryIssue.order_no,
@@ -550,7 +573,8 @@ def _delivery_query(role: str, ids: list[int], floor: datetime):
                        DeliveryIssue.resolution == "mark_delivered"))
     return (select(DeliveryIssue.rider_id, DeliveryIssue.id, DeliveryIssue.order_no,
                    DeliveryIssue.kind, DeliveryIssue.resolved_at, DeliveryIssue.resolve_note)
-            .where(DeliveryIssue.rider_id.in_(ids), DeliveryIssue.resolution == "refund"))
+            .where(DeliveryIssue.rider_id.in_(ids), DeliveryIssue.resolution == "refund",
+                   DeliveryIssue.kind.notin_(MERCHANT_KINDS)))
 
 
 def _delivery_appeal_won():
@@ -561,33 +585,45 @@ def _delivery_appeal_won():
 
 
 def _after_sale_query(role: str, ids: list[int], *, still_at_fault: bool = True):
-    """售后判为这个人的责任。列:(uid, id, order_no, at, note)。
+    """售后判为这个人的责任。列:(uid, id, order_no, at, note, issue_kind)。
 
-    - 商家:顾客的「售后被拒」申诉改判成立(join 那条改判,它的复核说明就是 note),
+    - 商家,两个来源(都是平台判出来的):
+      ① 顾客的「售后被拒」申诉改判成立(接上那条改判,它的复核说明就是 note);
+      ② 骑手报「到店未出餐」「餐品不齐」、裁成退款判为商家责任时记的那条售后(接上那条配送异常,
+         issue_kind 就是它的种类,note 是裁决说明)—— services/delivery_fault;
       而且现在判责方还是商家(fault = merchant)。商家自己同意的也是 fault = merchant,
-      但 join 不上那条改判 —— 不算;商家对改判再申诉成立后 fault 变成 platform,自然掉出来;
+      但哪一条都接不上 —— 不算;商家对它申诉成立后 fault 变成 platform,自然掉出来;
     - 骑手:after_sales.fault = rider,骑手是这一单的骑手。配送异常先行赔付时顺手补的那条
       售后(同一单有 resolution = refund 的配送异常)不在这里重复计 —— 那一次记在配送异常上。
+      issue_kind 恒为空。
 
     [still_at_fault] 为 False 时不看现在的判责方(明细页列「申诉成立、不再计分」的那些用)。
     """
     from ..models import AfterSale, Appeal, DeliveryIssue, Merchant, Order
+    from .delivery_fault import MERCHANT_KINDS
 
     if role == "merchant":
-        q = (select(Merchant.owner_id, AfterSale.id, Order.order_no,
-                    AfterSale.processed_at, Appeal.resolve_note)
+        # 两个来源各接一张,都是外连接:一条售后只可能对上其中一个(配送异常判的那条一记下就是
+        # 「已同意」,顾客没法再对它提「售后被拒」),而每个来源最多一行,不会把售后翻倍
+        q = (select(Merchant.owner_id, AfterSale.id, Order.order_no, AfterSale.processed_at,
+                    func.coalesce(Appeal.resolve_note, DeliveryIssue.resolve_note),
+                    DeliveryIssue.kind)
              .select_from(AfterSale)
              .join(Merchant, Merchant.id == AfterSale.merchant_id)
              .join(Order, Order.id == AfterSale.order_id)
-             .join(Appeal, and_(Appeal.target_type == "after_sale_rejected",
-                                Appeal.target_id == AfterSale.id,
-                                Appeal.status == "overturned"))
-             .where(Merchant.owner_id.in_(ids)))
+             .outerjoin(Appeal, and_(Appeal.target_type == "after_sale_rejected",
+                                     Appeal.target_id == AfterSale.id,
+                                     Appeal.status == "overturned"))
+             .outerjoin(DeliveryIssue, and_(DeliveryIssue.order_id == AfterSale.order_id,
+                                            DeliveryIssue.resolution == "refund",
+                                            DeliveryIssue.kind.in_(MERCHANT_KINDS)))
+             .where(Merchant.owner_id.in_(ids),
+                    or_(Appeal.id.is_not(None), DeliveryIssue.id.is_not(None))))
         return q.where(AfterSale.fault == "merchant") if still_at_fault else q
     via_issue = exists().where(DeliveryIssue.order_id == AfterSale.order_id,
                                DeliveryIssue.resolution == "refund")
     q = (select(Order.rider_id, AfterSale.id, Order.order_no,
-                AfterSale.processed_at, AfterSale.reply)
+                AfterSale.processed_at, AfterSale.reply, null().label("issue_kind"))
          .select_from(AfterSale)
          .join(Order, Order.id == AfterSale.order_id)
          .where(Order.rider_id.in_(ids), ~via_issue))
@@ -624,9 +660,9 @@ async def _deductions(db: AsyncSession, role: str, ids: list[int], since: dateti
             AfterSale.processed_at.is_not(None),
             AfterSale.processed_at >= since,
             ~_ticket_won(KIND_AFTER_SALE, AfterSale.id))
-        title = (_MERCHANT_AFTER_SALE_TITLE if role == "merchant"
-                 else _RIDER_AFTER_SALE_TITLE)
-        for uid, aid, no, at, note in (await db.execute(q)).all():
+        for uid, aid, no, at, note, issue_kind in (await db.execute(q)).all():
+            title = (_merchant_after_sale_title(issue_kind) if role == "merchant"
+                     else _RIDER_AFTER_SALE_TITLE)
             out.append((uid, Fact(KIND_AFTER_SALE, aid, at, -FAULT_POINTS, title,
                                   no or "", note or "")))
     rules = _rules(role)
@@ -856,9 +892,9 @@ async def _excluded(db: AsyncSession, role: str, uid: int, now: datetime) -> lis
              .where(AfterSale.status == AfterSaleStatus.accepted,
                     AfterSale.processed_at.is_not(None),
                     AfterSale.processed_at >= since, won_q))
-        title = (_MERCHANT_AFTER_SALE_TITLE if role == "merchant"
-                 else _RIDER_AFTER_SALE_TITLE)
-        for _, aid, no, at, _note in (await db.execute(q)).all():
+        for _, aid, no, at, _note, issue_kind in (await db.execute(q)).all():
+            title = (_merchant_after_sale_title(issue_kind) if role == "merchant"
+                     else _RIDER_AFTER_SALE_TITLE)
             out.append({"kind": KIND_AFTER_SALE, "record_id": aid, "title": title,
                         "order_no": no or "", "at": _utc(at).isoformat(), "why": won})
     rules = _rules(role)
@@ -966,7 +1002,7 @@ TICKET_PREFIX = "【信用分申诉】"
 _KIND_LABELS = {
     ("customer", KIND_DELIVERY): "配送异常,判为顾客原因",
     ("rider", KIND_DELIVERY): "配送异常,判为骑手责任",
-    ("merchant", KIND_AFTER_SALE): "售后,平台复核判为商家责任",
+    ("merchant", KIND_AFTER_SALE): "售后或配送异常,平台判为商家责任",
     ("rider", KIND_AFTER_SALE): "售后,平台仲裁判为骑手责任",
 }
 
@@ -1136,10 +1172,11 @@ _PLUS_NOT_COUNTED = {
                  "配送时判为你的原因的那一单",
                  "到店自取超时没去取、系统自动完成的单"],
     "merchant": ["追加的菜(随原单一起送,不算另一单)",
-                 "平台核实是刷单的单"],
+                 "平台核实是刷单的单",
+                 "骑手报「到店未出餐」「餐品不齐」、判为商家责任提前结束的那一单"],
     "rider": ["追加单(和原单一趟送,不算另一单)",
               "平台核实是刷单的单",
-              "配送异常先行赔付后直接完成的那一单(没有送到顾客手里)"],
+              "配送异常裁成退款、直接结束的那一单(没有送到顾客手里)"],
 }
 
 _PLUS_SCOPE = {
@@ -1170,12 +1207,14 @@ def _minus_spec(role: str) -> list[dict]:
         items = [{
             **common,
             "key": KIND_AFTER_SALE,
-            "label": "你拒绝的售后,顾客申诉后平台复核判为商家责任",
-            "counts": "顾客对你拒绝的售后提出申诉、平台复核认定应当受理(判为商家责任)的,"
-                      f"每次 −{FAULT_POINTS}。你自己同意的售后和退款不算",
-            "source": "售后记录 after_sales:判责 fault = 商家,而且是平台对「售后被拒」的申诉"
-                      "改判出来的(appeals 里 after_sale_rejected 改判成立),时间按改判时刻 processed_at",
-            "appeal": f"改判后 {hours} 小时内申诉售后判责(再改判的话被冲掉的净额补回来);"
+            "label": "售后或配送异常,平台判为商家责任",
+            "counts": f"平台判为商家责任的,每次 −{FAULT_POINTS}:① 你拒绝的售后,顾客申诉、"
+                      "平台复核认定应当受理;② 骑手上报「到店未出餐」「餐品不齐」,平台裁决为商家"
+                      "责任、由你承担退款。你自己同意的售后和退款不算",
+            "source": "售后记录 after_sales:判责 fault = 商家,而且是平台判出来的 —— ①「售后被拒」"
+                      "的申诉改判成立(appeals 里 after_sale_rejected),② 配送异常(到店未出餐、"
+                      "餐品不齐)裁决退款时记的那条;时间按判责时刻 processed_at",
+            "appeal": f"判责后 {hours} 小时内申诉售后判责(改判的话被冲掉的净额补回来);"
                       f"过了 {hours} 小时走客服工单",
         }]
     else:
@@ -1184,7 +1223,8 @@ def _minus_spec(role: str) -> list[dict]:
             "key": KIND_DELIVERY,
             "label": "配送异常,平台裁决为骑手责任(先行赔付)",
             "counts": "你上报的配送异常,平台裁决「先行赔付」(判为骑手责任)的,"
-                      f"每次 −{FAULT_POINTS}。平台照样全额赔顾客,不扣你的钱",
+                      f"每次 −{FAULT_POINTS}。平台照样全额赔顾客,不扣你的钱。"
+                      "「到店未出餐」「餐品不齐」判的是商家责任,不算你的",
             "source": "配送异常工单 delivery_issues:裁决 resolution = 先行赔付,"
                       "时间按裁决时刻 resolved_at",
             "appeal": f"裁决后 {hours} 小时内申诉(改判的话记录上写明不是你的责任);"
@@ -1254,6 +1294,8 @@ _NOT_COUNTED = {
         {"what": "差评、评分", "why": "评分是顾客的看法,不是平台的判定"},
         {"what": "上报配送异常", "why": "上报是你的权利;只有平台裁决为骑手责任的才算,"
          "那一条可以申诉"},
+        {"what": "到店未出餐、餐品不齐", "why": "那是商家那一环的问题:平台裁决退款时判的是商家责任、"
+         "由商家承担退款,不算你的,你这一趟的配送费照常结算"},
         {"what": "配送异常判为顾客原因、协调后继续送的", "why": "不是你的责任"},
         {"what": "报事故、SOS、强制取餐", "why": "安全第一,这些都不扣分"},
     ],
@@ -1378,7 +1420,8 @@ def rules_lines(audience: str) -> list[str]:
     _check_role(audience)
     minus = {
         "customer": f"配送时联系不上或地址有误、判为你的原因 −{FAULT_POINTS}",
-        "merchant": f"你拒绝的售后被顾客申诉、平台复核判为商家责任 −{FAULT_POINTS}",
+        "merchant": f"你拒绝的售后被顾客申诉、平台复核判为商家责任,或者骑手报「到店未出餐」"
+                    f"「餐品不齐」、平台判为商家责任 −{FAULT_POINTS}",
         "rider": f"配送异常或售后判为骑手责任 −{FAULT_POINTS}",
     }[audience]
     rights = {

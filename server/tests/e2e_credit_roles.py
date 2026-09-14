@@ -452,6 +452,42 @@ def main() -> None:  # noqa: C901 —— 一条用例从头走到尾,拆开了�
     assert again["_error"] == 409, again
     print("✓ 过了 72 小时:原通道 422,走工单;维持原判的继续计分、写明结论、不能再申诉")
 
+    # ============ 6b. 到店未出餐:判的是商家责任,不是骑手的 ============
+    nr = place()
+    go(boss, nr, "accepted")
+    call("POST", f"/riders/grab/{nr}", rider)
+    issue_nr = call("POST", "/riders/issues", rider,
+                    {"order_no": nr, "kind": "not_ready", "note": "到店二十分钟了,后厨还没开始做"})
+    call("POST", f"/admin/delivery-issues/{issue_nr['id']}/resolve", admin,
+         {"action": "refund", "note": "商家迟迟不出餐,判商家责任"})
+    as_nr = next(x["id"] for x in call("GET", "/admin/after-sales?days=7", admin)
+                 if x["order_no"] == nr)
+    # 这一单提前结束:不算商家完成一单(餐没出),也不算骑手的(没送到);骑手不扣分
+    assert view(cust, a)["merchant_credit"]["score"] == by_spec("merchant", m_orders, [mp, mp]), \
+        "判商家责任之后顾客看到的还是商家的旧分 —— 裁决时店主的缓存没失效"
+    got = expect(boss, "merchant", m_orders, [mp, mp], "到店未出餐判商家责任")
+    row = ded(got, "after_sale_fault", as_nr)
+    assert row and row["order_no"] == nr and "到店未出餐" in row["title"], got["deductions"]
+    assert row["appeal"]["via"] == "appeal" and \
+        row["appeal"]["target_type"] == "after_sale" and \
+        row["appeal"]["target_id"] == as_nr, row["appeal"]
+    got_r = expect(rider, "rider", r_orders, [], "到店未出餐不算骑手的")
+    assert ded(got_r, "delivery_fault", issue_nr["id"]) is None, got_r["deductions"]
+    err = call("POST", "/appeals", rider, {"target_type": "delivery_issue",
+                                           "target_id": issue_nr["id"],
+                                           "reason": "不是我的问题我也来申诉"}, expect_error=True)
+    assert err["_error"] == 409, err
+    ap = call("POST", "/appeals", boss, {"target_type": "after_sale", "target_id": as_nr,
+                                         "reason": "骑手到店时我们正在出餐,只差两分钟"})
+    call("POST", f"/admin/appeals/{ap['id']}/resolve", admin,
+         {"result": "overturned", "note": "复核:出餐记录显示骑手到店后三分钟出餐"})
+    assert view(cust, a)["merchant_credit"]["score"] == by_spec("merchant", m_orders, [mp]), \
+        "商家申诉成立后顾客看到的没回来 —— 改判时缓存没失效"
+    got = expect(boss, "merchant", m_orders, [mp], "到店未出餐那一条申诉成立")
+    assert excluded(got, "after_sale_fault", as_nr), got["excluded"]
+    print(f"✓ 到店未出餐判商家责任:店主 {mp}、骑手不扣,那一单两边都不算完成一单;"
+          "骑手申诉 409;商家走售后判责原通道,改判后回来")
+
     # ============ 7. 违规 ============
     v_m = violation(boss_id, "fake_ready", c, "三次到店都还没开始做就点了出餐")
     assert view(cust, a)["merchant_credit"]["score"] == \

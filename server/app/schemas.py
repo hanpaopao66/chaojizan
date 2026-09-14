@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 # ---------- 坐标 ----------
 #
@@ -27,6 +27,8 @@ from .models import (
     VerifyStatus,
     WithdrawalStatus,
 )
+from .services.delivery_fault import fault_of as delivery_fault_of
+from .services.delivery_fault import refund_fault as delivery_refund_fault
 from .state_machine import STATUS_LABELS, OrderStatus
 
 
@@ -843,6 +845,22 @@ class DeliveryIssueOut(BaseModel):
     address: str = ""
     total_cents: int = 0
     order_status: str = ""
+    #: 裁成「退款」的话退给顾客多少(后台仲裁前看的,路由层按订单算):
+    #: 判骑手责任是实付全额,判商家责任是顾客为餐付的那部分(services/delivery_fault)
+    refund_preview_cents: int = 0
+
+    @computed_field
+    @property
+    def fault(self) -> str:
+        """已裁决的判的是谁的责任:customer / rider / merchant;没判谁的责任为空。
+        后台、骑手端照着它显示,不各自按 resolution 猜(到店未出餐裁成退款判的是商家)。"""
+        return delivery_fault_of(self.kind, self.resolution)
+
+    @computed_field
+    @property
+    def refund_fault(self) -> str:
+        """这一条裁成退款会判谁的责任:到店未出餐、餐品不齐是 merchant,其余 rider。"""
+        return delivery_refund_fault(self.kind)
 
 
 class DeliveryIssueResolveIn(BaseModel):

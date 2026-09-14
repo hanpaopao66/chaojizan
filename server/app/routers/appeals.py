@@ -1,7 +1,8 @@
 """判责申诉:骑手/商家对平台单方裁决的复核通道。
 
 可申诉的三类目标(72 小时内、每个目标一次):
-- after_sale     商家申诉「商家责任」售后判责
+- after_sale     商家申诉「商家责任」售后判责(含配送异常「到店未出餐」「餐品不齐」判商家责任
+                 时记的那条售后 —— services/delivery_fault)
 - delivery_issue 骑手申诉「骑手责任先行赔付」裁决
 - review         商家申诉恶意差评
 
@@ -162,6 +163,10 @@ async def _validate_target(db: AsyncSession, user: User, payload: AppealIn):
                 raise HTTPException(404, "异常记录不存在")
             if issue.resolution != "refund":
                 raise HTTPException(409, "只有判骑手责任(先行赔付)的裁决才需要申诉")
+            from ..services.delivery_fault import refund_fault
+            if refund_fault(issue.kind) != "rider":
+                # 到店未出餐、餐品不齐裁成退款判的是商家责任(商家在售后判责那条通道申诉)
+                raise HTTPException(409, "这一次判的是商家责任,不算你的,不需要申诉")
         elif user.role.value == "customer":
             order = await db.get(Order, issue.order_id)
             if order is None or order.customer_id != user.id:
@@ -342,7 +347,10 @@ async def _target_summary(db: AsyncSession, appeal: Appeal) -> str:
         issue = await db.get(DeliveryIssue, appeal.target_id)
         if issue is None:
             return "(记录不存在)"
-        return (f"配送异常判骑手责 订单#{issue.order_no[-6:]} "
+        from ..services.delivery_fault import fault_of
+        who = {"customer": "顾客原因", "rider": "骑手责", "merchant": "商家责"}.get(
+            fault_of(issue.kind, issue.resolution), "未判责")
+        return (f"配送异常判{who} 订单#{issue.order_no[-6:]} "
                 f"kind={issue.kind}:{issue.note[:40]}")
     review = await db.get(Review, appeal.target_id)
     if review is None:

@@ -1,4 +1,7 @@
 /// 我的配送异常与申诉:上报记录列表;判骑手责任(先行赔付)的裁决可在 72 小时内申诉。
+///
+/// 裁成「退款」判的是谁,**以服务端给的 fault 为准**(services/delivery_fault):
+/// 到店未出餐、餐品不齐判的是商家责任,不算骑手的,也就没有申诉按钮。
 library;
 
 import 'package:flutter/material.dart';
@@ -8,6 +11,8 @@ const _kindLabels = {
   'cannot_contact': '联系不上顾客',
   'wrong_address': '地址错误',
   'food_damaged': '餐品洒损',
+  'not_ready': '到店未出餐',
+  'items_missing': '餐品不齐',
   'other': '其他',
 };
 const _resolutionLabels = {
@@ -15,6 +20,21 @@ const _resolutionLabels = {
   'mark_delivered': '按送达处理(用户原因)',
   'refund': '判骑手责任,平台先行赔付',
 };
+
+/// 老服务端不带 fault 时的兜底:和服务端 delivery_fault.MERCHANT_KINDS 同一组
+const _merchantKinds = {'not_ready', 'items_missing'};
+
+/// 这一条判的是谁的责任:customer / rider / merchant,没判谁的责任为空串。
+String issueFault(Map<String, dynamic> issue) {
+  final f = issue['fault'];
+  if (f is String) return f;
+  final resolution = issue['resolution'] as String? ?? '';
+  if (resolution == 'mark_delivered') return 'customer';
+  if (resolution == 'refund') {
+    return _merchantKinds.contains(issue['kind']) ? 'merchant' : 'rider';
+  }
+  return '';
+}
 
 class RiderIssuesPage extends StatefulWidget {
   const RiderIssuesPage({super.key, required this.api});
@@ -160,7 +180,9 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
                         final resolution = issue['resolution'] as String? ?? '';
                         final open = (issue['status'] as String?) == 'open';
                         final appeal = _appeals[issue['id'] as int];
-                        final blamed = resolution == 'refund';
+                        final fault = issueFault(issue);
+                        // 只有判骑手责任的才算你的、才给申诉:到店未出餐、餐品不齐判的是商家
+                        final blamed = fault == 'rider';
                         return Card(
                           child: Padding(
                             padding: const EdgeInsets.all(12),
@@ -178,8 +200,10 @@ class _RiderIssuesPageState extends State<RiderIssuesPage> {
                                 Text(
                                   open
                                       ? '平台处理中'
-                                      : (_resolutionLabels[resolution] ??
-                                          resolution),
+                                      : fault == 'merchant'
+                                          ? '判商家责任,商家承担退款(不算你的,配送费照常结算)'
+                                          : (_resolutionLabels[resolution] ??
+                                              resolution),
                                   style: TextStyle(
                                       color: blamed
                                           ? theme.colorScheme.error

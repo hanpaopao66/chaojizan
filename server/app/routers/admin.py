@@ -673,6 +673,8 @@ async def list_delivery_issues(
     )
     if status in ("open", "resolved"):
         query = query.where(DeliveryIssue.status == status)
+    from ..services.delivery_fault import merchant_refund_cents
+
     rows = await db.execute(query)
     out = []
     for issue, rider, order in rows:
@@ -682,6 +684,9 @@ async def list_delivery_issues(
         o.address = order.address
         o.total_cents = order.total_cents
         o.order_status = order.status.value
+        # 裁成退款的话退多少:和 resolve_delivery_issue 那一支同一个算法,仲裁的人先看到数
+        o.refund_preview_cents = (merchant_refund_cents(order) if o.refund_fault == "merchant"
+                                  else order.total_cents)
         out.append(o)
     return out
 
@@ -698,17 +703,24 @@ async def resolve_delivery_issue(
     - continue_delivery 已协调,继续配送(只关工单)
     - mark_delivered    用户原因(联系不上/地址错)按送达处理,骑手配送费照拿,
                         24 小时后自动完成结算
-    - refund            骑手责任(餐损):订单立即完成结算(商家净额保留、骑手
-                        配送费照拿——保障金/保险覆盖,不扣工资),用户全额退款
-                        由平台先行赔付;补 AfterSale(fault=rider) 记录,
-                        审计规则 6 的免冲账口径与售后仲裁一致
+    - refund            订单立即完成结算、退款给顾客。判谁的责任按异常的种类定
+                        (services/delivery_fault):
+                        · 途中异常(餐损等)是**骑手责任**:商家净额保留、骑手配送费照拿
+                          (保障金/保险覆盖,不扣工资),用户全额退款由平台先行赔付;
+                          补 AfterSale(fault=rider),审计规则 6 的免冲账口径与售后仲裁一致;
+                        · 到店未出餐、餐品不齐是**商家责任**:退款由商家承担 —— 照售后判商家
+                          责任那条路冲回这单的净额(平台佣金一并不收),退给顾客的是他为餐付的
+                          那部分;配送费、小费照常归骑手;补 AfterSale(fault=merchant),
+                          商家在「售后判责」原通道申诉(72 小时),扣商家信用分、不扣骑手的
     """
     from datetime import datetime, timezone
 
-    from ..models import AfterSale, AfterSaleStatus, OrderEvent
+    from ..models import AfterSale, AfterSaleStatus, Merchant, OrderEvent
     from ..models import Order as OrderModel
+    from ..services import delivery_fault
+    from ..services.errand import is_errand
     from ..services.push import push_to_user
-    from ..services.settlement import settle_order
+    from ..services.settlement import reverse_merchant_earning, settle_order
     from ..services.wechat_pay import request_refund
     from ..state_machine import OrderStatus
     from ..ws import manager
@@ -721,6 +733,9 @@ async def resolve_delivery_issue(
     order = await db.get(OrderModel, issue.order_id, with_for_update=True)
 
     refunded = 0
+    # 裁成退款时判谁的责任:到店未出餐、餐品不齐是商家那一环的问题(services/delivery_fault)
+    merchant_fault = delivery_fault.refund_fault(issue.kind) == "merchant"
+    kind_label = delivery_fault.KIND_LABELS.get(issue.kind, issue.kind)
     if payload.action == "mark_delivered":
         if order.status != OrderStatus.PICKED_UP:
             raise HTTPException(409, "订单不在配送中,不能按送达处理")
@@ -733,7 +748,12 @@ async def resolve_delivery_issue(
         if order.status not in (OrderStatus.ACCEPTED, OrderStatus.READY,
                                 OrderStatus.PICKED_UP):
             raise HTTPException(409, "订单状态不支持先行赔付")
-        refunded = order.total_cents
+        if merchant_fault and is_errand(order):
+            # 跑腿挂的是每城一个的虚拟服务主体,没有商家可判、也没有商家入账可冲
+            raise HTTPException(409, f"跑腿单没有商家,「{kind_label}」判不了商家责任:"
+                                     "请选「让骑手继续送」,缺的东西走售后")
+        refunded = (delivery_fault.merchant_refund_cents(order) if merchant_fault
+                    else order.total_cents)
         if refunded <= 0:
             raise HTTPException(409, "该订单已无可退金额")
         from_status = order.status
@@ -750,25 +770,39 @@ async def resolve_delivery_issue(
             db.add(AfterSale(
                 order_id=order.id, customer_id=order.customer_id,
                 merchant_id=order.merchant_id,
-                reason=f"骑手上报配送异常({issue.kind}),平台仲裁先行赔付",
+                reason=(f"骑手上报「{kind_label}」,平台判为商家责任,商家承担退款"
+                        if merchant_fault else
+                        f"骑手上报配送异常({issue.kind}),平台仲裁先行赔付"),
                 images=[issue.photo_url] if issue.photo_url else [],
-                fault="rider", status=AfterSaleStatus.accepted,
-                reply=(payload.note or "配送责任,平台先行赔付")[:300],
+                fault="merchant" if merchant_fault else "rider",
+                status=AfterSaleStatus.accepted,
+                reply=(payload.note or ("商家责任,商家承担退款" if merchant_fault
+                                        else "配送责任,平台先行赔付"))[:300],
                 processed_at=datetime.now(timezone.utc)))
-        note = "配送异常,平台先行赔付"
+        if merchant_fault:
+            # 和售后判商家责任同一个写法:这单的商家入账整行冲回(佣金一起冲,平台不收)。
+            # settle_order 刚 add 的入账行,查询前会自动 flush,冲得到
+            await reverse_merchant_earning(
+                db, order, f"配送异常「{kind_label}」判商家责任,商家承担退款")
+            note = "配送异常(商家责任),商家承担餐费退款(配送费已付给骑手不退)"
+        else:
+            note = "配送异常,平台先行赔付"
         order.refund_note = (f"{order.refund_note};{note}"
                              if order.refund_note else note)
         # refund_cents 由 request_refund 自己累计:提前加会让通道按
         # total+已退 反推出 2 倍的原始支付总额,微信直接拒退(见 wechat_pay)
-        await request_refund(db, order, refunded, "配送异常,平台先行赔付")
+        await request_refund(db, order, refunded,
+                             "配送异常,商家责任,商家承担" if merchant_fault
+                             else "配送异常,平台先行赔付")
 
     issue.status = "resolved"
     issue.resolution = payload.action
     issue.resolve_note = payload.note.strip()
     issue.resolved_at = datetime.now(timezone.utc)
     await db.commit()
-    # 信用分:判为顾客原因是顾客的扣分项,先行赔付是骑手的扣分项、也是订单完成
-    # (店主那边多一单)—— 三方都要刷新。骑手按上报的那个人算(和 appeals 的申诉资格同一个口径)
+    # 信用分:判为顾客原因是顾客的扣分项;退款判骑手责任是骑手的扣分项,判商家责任(到店未出餐、
+    # 餐品不齐)是店主的扣分项;订单完成也改了三方的加分 —— 三方都要刷新。
+    # 骑手按上报的那个人算(和 appeals 的申诉资格同一个口径)
     from ..services import credit
     await credit.invalidate_order(db, order)
     await credit.invalidate(issue.rider_id)
@@ -786,6 +820,24 @@ async def resolve_delivery_issue(
                            {"order_no": order.order_no})
         await push_to_user(issue.rider_id, "异常已处理",
                            "订单已按送达处理,配送费照常结算", {"order_no": order.order_no})
+    elif merchant_fault:
+        await push_to_user(order.customer_id, "订单已结束,商家承担退款",
+                           f"商家那一环出了问题({kind_label}),餐费 ¥{refunded / 100:.2f} "
+                           "由商家承担、原路退回;配送费和小费归已经跑了这一趟的骑手,不退。"
+                           "给您添麻烦了。",
+                           {"order_no": order.order_no})
+        shop = await db.get(Merchant, order.merchant_id)
+        if shop is not None:
+            # 判了他的责任、扣了他的钱和分,他就得知道,也得知道能申诉(和售后判责同一条通道)
+            await push_to_user(
+                shop.owner_id, "一单判为商家责任",
+                f"订单 {order.order_no[-6:]} 骑手上报「{kind_label}」,平台判为商家责任:"
+                f"这单的餐费 ¥{refunded / 100:.2f} 由你承担、退给顾客(这单的净额冲回),"
+                f"信用分 −{credit.FAULT_POINTS}。不认同可以在 72 小时内申诉(售后判责)",
+                {"order_no": order.order_no, "type": "after_sale"}, record_skip=True)
+        await push_to_user(issue.rider_id, "异常已处理(判为商家责任)",
+                           f"「{kind_label}」判为商家责任,不算你的;这一趟的配送费照常结算",
+                           {"order_no": order.order_no})
     else:
         await push_to_user(order.customer_id, "配送异常,平台先行赔付",
                            f"退款 ¥{refunded / 100:.2f} 将原路返回。给您添麻烦了。",
