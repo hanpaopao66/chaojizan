@@ -63,4 +63,6 @@ def merchant_refund_cents(order) -> int:
     退给顾客的话这一截就只能平台出,而平台不出钱赔付(2026-09-14 拍板)。
     要不要让商家连配送费一起承担、顾客拿回全款,是另一条要拍板的钱路径,这里没做。
     """
-    return max(order.total_cents - order.delivery_fee_cents - order.tip_cents, 0)
+    # 商家自配送没有骑手,配送费算在商家入账里、冲回净额时一起冲回,所以照退(refund_calc.rider_kept_cents)
+    from .refund_calc import rider_kept_cents
+    return max(order.total_cents - rider_kept_cents(order), 0)

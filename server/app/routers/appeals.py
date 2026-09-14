@@ -516,8 +516,9 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
             # 用户申诉的是「按送达处理」那类裁决:他付了全款、一口没吃到。
             # 改判就得把钱退回去,只说一句"记录消除"对他毫无意义。
             order = await db.get(Order, issue.order_id, with_for_update=True)
-            borne = (max(order.food_cents + order.packing_fee_cents
-                         - order.discount_cents, 0) - order.refund_cents)
+            # 退顾客为餐付的钱(services/refund_calc,配送费和小费照归骑手)
+            from ..services.refund_calc import goods_unrefunded_cents
+            borne = await goods_unrefunded_cents(db, order)
             if borne > 0:
                 from ..services.wechat_pay import request_refund
                 await request_refund(db, order, borne, APPEAL_REFUND_NOTE)
@@ -595,8 +596,10 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
             return
         from ..services.settlement import reverse_merchant_earning
         from ..services.wechat_pay import request_refund
-        refundable = max(order.food_cents + order.packing_fee_cents
-                         - order.discount_cents, 0) - order.refund_cents
+        # 和「商家同意售后」同一个口径(services/refund_calc)。原来「菜 + 打包 − 满减 − 已退」
+        # 会把缺货部分退款减两次、还把平台券抵掉的钱当现金退
+        from ..services.refund_calc import goods_unrefunded_cents
+        refundable = await goods_unrefunded_cents(db, order)
         if refundable > 0:
             await request_refund(db, order, refundable,
                                  "售后申诉改判:平台认定应当受理")
@@ -649,10 +652,10 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
         # 若复核认定确属**商家**责任,那是另一条路径(售后冲账),
         # 不在这里混着做 —— 一个动作只做一件事,账才查得清。
         order = await db.get(Order, appeal.target_id, with_for_update=True)
-        borne = (max(order.food_cents + order.packing_fee_cents
-                     - order.discount_cents, 0)
-                 + order.delivery_fee_cents + order.tip_cents
-                 - order.refund_cents)
+        # 他承担的 = 实付里还没退回的钱(services/refund_calc):不含平台券抵掉的部分,
+        # 也不会把之前的缺货退款减两次
+        from ..services.refund_calc import unrefunded_paid_cents
+        borne = await unrefunded_paid_cents(db, order)
         if borne <= 0:
             raise HTTPException(409, "这一单用户没有承担任何金额,无可改判")
         from ..services.wechat_pay import request_refund

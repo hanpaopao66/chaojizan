@@ -61,8 +61,10 @@ class Test判谁的责任:
         assert (out["fault"], out["refund_fault"]) == ("", "merchant")
 
 
-def _order(total, delivery, tip):
-    return SimpleNamespace(total_cents=total, delivery_fee_cents=delivery, tip_cents=tip)
+def _order(total, delivery, tip, rider_id=7):
+    # 默认是平台骑手送的单(到店未出餐、餐不齐都是骑手上报的);rider_id=None 是商家自配送
+    return SimpleNamespace(total_cents=total, delivery_fee_cents=delivery, tip_cents=tip,
+                           rider_id=rider_id)
 
 
 class Test判商家责任退多少:
@@ -77,6 +79,10 @@ class Test判商家责任退多少:
 
     def test_不会是负数(self):
         assert df.merchant_refund_cents(_order(300, 300, 100)) == 0
+
+    def test_商家自配送的配送费照退(self):
+        """自配送没有骑手,配送费算在商家入账里、冲回净额时一起冲回 —— 不退就是商家白拿"""
+        assert df.merchant_refund_cents(_order(2500, 300, 0, rider_id=None)) == 2500
 
 
 class Test真的在用它:

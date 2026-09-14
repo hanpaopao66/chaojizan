@@ -225,10 +225,10 @@ async def accept_after_sale(
         # (钱见 services/rider_fault,平台不出);不是骑手的问题就驳回,顾客可以申诉
         raise HTTPException(409, "跑腿单的售后平台不再认赔:是骑手的问题请判骑手责任"
                                  "(售后仲裁),不是就驳回")
-    # 配送费不退:骑手入账保留,退款只覆盖餐费部分,平台不再为售后单倒贴配送费。
-    # total_cents 在缺货部分退款时已同步扣减,此处即"用户当前净付金额"
-    delivery_kept = order.delivery_fee_cents if order.rider_id is not None else 0
-    refund_amount = max(order.total_cents - delivery_kept, 0)
+    # 配送费和小费都不退:骑手入账保留,退款只覆盖顾客为餐付的钱(services/refund_calc)。
+    # 原来只扣配送费,小费也退给了顾客而骑手照拿 —— 那一截是平台出,而平台不出钱(2026-09-14)
+    from ..services.refund_calc import goods_unrefunded_cents
+    refund_amount = await goods_unrefunded_cents(db, order)
     if refund_amount <= 0:
         raise HTTPException(409, "该订单已无可退金额")
     after_sale.status = AfterSaleStatus.accepted

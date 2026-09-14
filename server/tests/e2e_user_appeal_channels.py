@@ -89,6 +89,64 @@ def main() -> None:
     assert ap2["status"] == "open", ap2
     print("✓ 商家对改判结果还能再申诉一次 —— 两边都有说话的机会")
 
+    # ============ 一·五、退多少:缺货退过一份、带小费 ============
+    # 顾客为餐付的钱 = 实付 − 配送费 − 小费(services/refund_calc)。原来「售后被拒」改判用
+    # 「菜 + 打包 − 满减 − 已退金额」:缺货那份的菜价字段已经扣过、已退金额又累加过,**减了两次**,
+    # 顾客少拿;商家同意售后原来只扣配送费,小费也退给了顾客而骑手照拿,那一截是平台出
+    def tipped_order(buyer, qty, refund_one=False):
+        no = call("POST", "/orders", buyer, {
+            "merchant_id": sid,
+            "items": [{"dish_id": dish["id"], "quantity": qty}],
+            "address": "测试地址", "lat": 30.66, "lng": 104.08, "tip_cents": 300,
+        })["order_no"]
+        call("POST", f"/orders/{no}/pay/mock", buyer)
+        call("POST", f"/orders/{no}/transition", merchant, {"to_status": "accepted"})
+        if refund_one:
+            call("POST", f"/orders/{no}/refund-item", merchant,
+                 {"dish_id": dish["id"], "quantity": 1})
+        call("POST", f"/riders/grab/{no}", rider)
+        call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
+        call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
+        call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
+        return no
+
+    def pending_after_sale(no, who):
+        call("POST", f"/orders/{no}/after-sale", who,
+             {"reason": "少了东西,包装也破了", "images": EVIDENCE})
+        rows = call("GET", "/merchants/me/after-sales?status=pending", merchant)
+        return next(x for x in rows if x["order_no"] == no)
+
+    buyer = register_fresh_customer("缺货后售后被拒")
+    no2 = tipped_order(buyer, 2, refund_one=True)
+    o = call("GET", f"/orders/{no2}", buyer)
+    partial = o["refund_cents"]
+    assert partial > 0 and o["tip_cents"] == 300, o
+    goods = o["total_cents"] - o["delivery_fee_cents"] - o["tip_cents"]
+    a2 = pending_after_sale(no2, buyer)
+    call("POST", f"/after-sales/{a2['id']}/reject", merchant, {"reply": "出餐时是齐的"})
+    ap_oos = call("POST", "/appeals", buyer,
+                  {"target_type": "after_sale_rejected", "target_id": a2["id"],
+                   "reason": "有照片,请复核"})
+    call("POST", f"/admin/appeals/{ap_oos['id']}/resolve", admin,
+         {"result": "overturned", "note": "复核:售后应当受理"})
+    got = call("GET", f"/orders/{no2}", buyer)["refund_cents"] - partial
+    assert got == goods, (
+        f"改判退了 {got} 分,应当是顾客为餐付的 {goods} 分(实付 − 配送费 − 小费);"
+        f"少的那 {goods - got} 分就是被减了两次的缺货退款")
+    print(f"✓ 缺货退过一份、带小费,售后被拒再改判:退 {got} 分 = 实付 − 配送费 − 小费,"
+          f"缺货那份没被减两次")
+
+    buyer = register_fresh_customer("带小费售后")
+    no3 = tipped_order(buyer, 1)
+    o = call("GET", f"/orders/{no3}", buyer)
+    goods = o["total_cents"] - o["delivery_fee_cents"] - o["tip_cents"]
+    a3 = pending_after_sale(no3, buyer)
+    call("POST", f"/after-sales/{a3['id']}/accept", merchant, {"reply": "抱歉,已退款"})
+    got = call("GET", f"/orders/{no3}", buyer)["refund_cents"]
+    assert got == goods, (
+        f"商家同意售后退了 {got} 分,应当是 {goods} 分:小费骑手照拿,再退给顾客就是平台出钱")
+    print(f"✓ 商家同意售后:退 {got} 分,配送费和小费照归骑手、不退")
+
     # ============ 二、账号被风控限制 ============
     victim = register_fresh_customer("风控申诉")
     uid = call("GET", "/auth/me", victim)["id"]

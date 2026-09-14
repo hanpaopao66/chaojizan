@@ -1935,7 +1935,8 @@ async def refund_item(
     # 原始支付总额,先扣了 total 反推出来的就少一截(见 wechat_pay)。
     # refund_cents 也由 request_refund 自己累计(渠道拒绝则不累计)
     if refund_amount > 0:
-        await request_refund(db, order, refund_amount, f"缺货退款:{note_piece}")
+        from ..services.refund_calc import OUT_OF_STOCK_REFUND_PREFIX
+        await request_refund(db, order, refund_amount, f"{OUT_OF_STOCK_REFUND_PREFIX}{note_piece}")
 
     if full_cancel:
         for gift in items:      # 只剩的赠品行,库存一并回补
