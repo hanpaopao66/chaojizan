@@ -289,6 +289,33 @@ export interface BotDev {
   }
 }
 
+/**
+ * AI 助手令牌(MCP 接入,/auth/agent-tokens)。开发者账号只能勾 miniapp(发布小程序和小游戏),
+ * 能调哪些接口由服务端 security.AGENT_MINIAPP 白名单决定。明文只在签发那一次返回
+ */
+export interface AgentToken {
+  id: number
+  name: string
+  scopes: string[]
+  scope_labels: string[]
+  created_at: string | null
+  expires_at: string
+  last_used_at: string | null
+  revoked: boolean
+}
+
+export interface AgentTokenIssued {
+  /** 明文,只有这一次 */
+  token: string
+  expires_at: string
+  scopes: string[]
+  scope_labels: string[]
+  note: string
+}
+
+/** 助手的一次调用。只有方法、路径、状态码、时间,没有请求体 */
+export interface AgentCall { method: string; path: string; status: number; at: string | null }
+
 export const CATEGORIES: Record<string, string> = {
   tools: '工具', productivity: '效率', life: '生活', learning: '学习', casual: '休闲益智', puzzle: '益智解谜',
 }
@@ -374,6 +401,13 @@ export const api = {
     del<BotDev>(`/dev/v1/bots/${id}/webhook?drop_pending_updates=${dropPending}`),
   resetBotToken: (id: number) => post<{ bot: BotDev; token: string; notice: string }>(`/dev/v1/bots/${id}/token`),
   deleteBot: (id: number) => del<{ deleted: boolean; messages: number; chats_left: number }>(`/dev/v1/bots/${id}`),
+
+  // 开发者账号签的助手令牌只能勾 miniapp,别的权限服务端回 422,所以这里写死
+  agentTokens: () => get<AgentToken[]>('/auth/agent-tokens'),
+  createAgentToken: (b: { name: string; days: number }) =>
+    post<AgentTokenIssued>('/auth/agent-tokens', { ...b, scopes: ['miniapp'] }),
+  revokeAgentToken: (id: number) => del<{ ok: boolean }>(`/auth/agent-tokens/${id}`),
+  agentActivity: (limit = 50) => get<{ items: AgentCall[]; note: string }>(`/auth/agent-activity?limit=${limit}`),
 
   uploadImage: async (file: File, purpose: string) => {
     const f = new FormData()
