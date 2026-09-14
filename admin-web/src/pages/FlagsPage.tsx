@@ -109,6 +109,32 @@ const METAS: FlagMeta[] = [
     key: 'miniapp_profile', title: '小程序读取昵称头像', kind: 'switch',
     effect: '关掉后所有小程序的 profile 能力当场收回,requestProfile 一律回 4001(用户已给过的授权记录保留)',
   },
+  // 消息与视频的闸(docs/LAUNCH-40.md 第 1 节):没写过时生产缺省是「消息开,其余关」。
+  // 服务端每次现查、不缓存,拨了立刻生效;/config 同时告诉客户端收起对应入口
+  {
+    key: 'chat_enabled', title: '消息', kind: 'switch', danger: true,
+    effect: '关掉后整个「消息」(私聊、群、频道、贴纸、通话记录)停用,接口回「消息功能暂停中」;'
+      + '订单群和订单通知不受影响。出事时的急停用',
+  },
+  {
+    key: 'video_enabled', title: '视频功能', kind: 'switch', danger: true,
+    effect: '打开后用户端「视频」页签可以看、搜、评论、弹幕;关掉后整个视频接口回「视频功能暂未开放」。'
+      + '需要《信息网络传播视听节目许可证》',
+  },
+  {
+    key: 'video_upload_enabled', title: '视频投稿', kind: 'switch', danger: true,
+    effect: '打开后实名用户可以投稿(建稿、传原片、提交审核);要视频功能也开着才生效。'
+      + '打开前先确认对象存储的容量和审核人手(上线手册第 6 节)',
+  },
+  {
+    key: 'calls_enabled', title: '语音 / 视频通话', kind: 'switch', danger: true,
+    effect: '打开后消息里可以打语音、视频电话;关掉后呼叫直接回「通话功能暂未开放」。'
+      + '打开前要部署好 coturn(上线手册第 5 节)',
+  },
+  {
+    key: 'bots_enabled', title: '机器人', kind: 'switch', danger: true,
+    effect: '打开后开发者可以建机器人、用 Bot API;关掉后 Bot API 全部停用、webhook 暂停、不能建新机器人',
+  },
 ]
 
 export default function FlagsPage() {
