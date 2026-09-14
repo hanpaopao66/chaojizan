@@ -255,6 +255,11 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
       - ./certbot-www:/var/www/certbot:ro
+      # 用户端网页版(官网 /web/,见 nginx/conf.d/superz.conf):发版时
+      # scripts/sync_release_to_appdist.sh 往 ~/super-z/webapp/releases/<tag>/ 里解压、切 current 软链。
+      # 部署机本地仅存(rsync 排除);目录要在 compose 起来之前由部署脚本建好 ——
+      # 不存在的话 docker 会替你建成 root 的目录,之后同步脚本就写不进去了
+      - ../webapp:/srv/webapp:ro
     depends_on:
       - api
 

@@ -160,8 +160,19 @@ if [ -d build/witness-dist ]; then
 fi
 
 echo "== 更新 versions.json =="
+# Python 的布尔字面量首字母大写:把 shell 的 false 直接插进去是个未定义的名字
+# (sync_release_to_appdist.sh 的 FORCE_PY 同一个坑)
+FORCE_PY=False
+[ "$FORCE_JSON" = true ] && FORCE_PY=True
 ssh $DEPLOY "python3 - << EOF
 import json
+import os
+path = os.path.expanduser('~/super-z/appdist/versions.json')
+try:
+    with open(path) as f:
+        old = json.load(f)
+except Exception:
+    old = {}
 shas = {'user': '$SHA_user', 'merchant': '$SHA_merchant',
         'rider': '$SHA_rider'}
 data = {}
@@ -172,16 +183,18 @@ for app in ['user', 'merchant', 'rider']:
         'url': '$API/appdist/chaojizan-' + app + '-arm64.apk',
         'notes': '''$NOTES''',
         # force:这一版是否强制更新(发版当时的一次性决定)
-        'force': $FORCE_JSON,
+        'force': $FORCE_PY,
         # min_build:低于它的客户端视为过旧(**持续有效**的下限,与 force 不同)。
         # 服务端 /app/latest 原样透出,当前只用于观测,不拦截
         'min_build': $MIN_BUILD,
         # 应用内安装前用它校验;缺这个字段客户端会退回浏览器下载(#123)
         'sha256': shas[app],
     }
-import os
-open(os.path.expanduser('~/super-z/appdist/versions.json'), 'w').write(
-    json.dumps(data, ensure_ascii=False, indent=2))
+# 桌面版、网页版只由公开 CI 出(sync_release_to_appdist.sh 写),这个脚本不碰,原样留着
+for k in ('desktop', 'web'):
+    if isinstance(old.get(k), dict):
+        data[k] = old[k]
+open(path, 'w').write(json.dumps(data, ensure_ascii=False, indent=2))
 print('versions.json -> v$VERSION build $BUILD')
 EOF"
 

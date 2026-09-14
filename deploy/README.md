@@ -20,6 +20,8 @@
 | `nginx/conf.d/superz.conf` | 域名分发 + TLS + WebSocket 升级;新域名备案后按注释启用 |
 | `tunnel/frpc.toml`(仅部署机) | 隧道配置,含 token,rsync 排除 |
 | `certs/`、`letsencrypt/`、`certbot-www/`(仅部署机) | 证书与签发挑战目录,rsync 排除 |
+| `~/super-z/appdist/`(仅部署机) | 三端 APK、三个桌面包、versions.json,rsync 排除 |
+| `~/super-z/webapp/`(仅部署机) | 用户端网页版(官网 `/web/`),nginx 只读挂载,rsync 排除;见下文「网页版与桌面版」 |
 | `renew-cert.sh` | 证书续期(webroot 零停机),crontab 每周一 04:30 |
 | `backup.sh` / `restore-drill.sh` | 数据库每日备份 / 恢复演练 |
 | `healthcheck-alert.sh` | 探活告警(crontab 每分钟) |
@@ -80,6 +82,30 @@ bash scripts/deploy_tunnel.sh setup    # 一次性,要在部署机所在局域�
 
 开发机要有 frpc(macOS:`brew install frpc`),大版本和部署机、云服务器上的 frp 一致。
 `bash scripts/deploy_tunnel.sh status / up / down` 看、起、停本机访问端。
+
+## 网页版与桌面版
+
+和 APK 同一个 Release、同一套核对:`.github/workflows/release.yml` 在公开 CI 上从 tag 构建
+用户端网页版(`chaojizan-web.tar.gz`)和 Windows / macOS / Ubuntu 三个桌面包,
+哈希一起写进 `SHA256SUMS.txt`;`scripts/sync_release_to_appdist.sh <tag> "<说明>"` 一次搬完。
+
+- **桌面包**进 `~/super-z/appdist/`,文件名固定(官网下载页直接链):
+  `chaojizan-windows-x64.zip`、`chaojizan-macos.dmg`、`chaojizan-linux-x64.tar.gz`、`chaojizan-linux-x64.deb`。
+  versions.json 里另起一个 `desktop` 键写版本号、地址和 sha256 —— **不动 user / merchant / rider
+  三个键的结构**,老版本 App 和 `/app/latest` 只认那三个;
+- **网页版**解压到 `~/super-z/webapp/releases/<tag>/`,`current` 软链指向当前那版,
+  nginx 的 `/web/` 直接出(不经过 api)。旧版本留最近 3 个。
+
+```bash
+# 看线上是哪一版
+curl -s https://chaojizan.cc/web/version.json
+# 回滚网页版(不用重新发):软链切回上一版
+ssh <部署机> 'cd ~/super-z/webapp && ls releases && ln -sfn releases/<旧tag> current'
+```
+
+`~/super-z/webapp` 要在 compose 起来之前由登录用户建好(`deploy_server.sh` 会建):
+compose 挂载一个不存在的目录时 docker 会替你建成 root 的,之后同步脚本解压进去会没权限
+(真碰上了:`sudo chown -R $(id -un):$(id -gn) ~/super-z/webapp`)。
 
 ## 发版失败的两种"看着成功"
 

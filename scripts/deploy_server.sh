@@ -43,9 +43,12 @@ echo "== 记录版本号(透明中心/页脚展示,证明线上跑的就是仓�
 
 echo "== 同步代码(排除依赖与产物) =="
 # 前三个 exclude 保护部署机上仅存的运行数据(本地仓库没有这些目录,
-# 不加会被 --delete 清掉:.env.prod=生产密钥 / appdist=线上 APK / letsencrypt=证书)
+# 不加会被 --delete 清掉:.env.prod=生产密钥 / appdist=线上 APK / letsencrypt=证书)。
+# /webapp 同理:线上的用户端网页版(sync_release_to_appdist.sh 解压过去的),
+# 带开头的 / 只认顶层这一个,别把源码里哪天叫 webapp 的目录也一起排除了
 rsync -az --delete \
   --exclude 'deploy/.env.prod' --exclude 'appdist' --exclude 'deploy/letsencrypt' \
+  --exclude '/webapp' \
   --exclude 'deploy/certs' --exclude 'deploy/tunnel' \
   --exclude 'deploy/wxpay-certs' --exclude 'server/certs' \
   --exclude 'deploy/certbot-www' --exclude 'deploy/renew.log' \
@@ -57,6 +60,10 @@ rsync -az --delete \
   -e "$RSYNC_RSH" ./ "$DEPLOY:$DEST/"
 
 echo "== 重建容器(alembic 迁移在启动时自动执行) =="
+# nginx 挂 ../webapp(用户端网页版)。先用登录用户的身份把目录建出来:
+# 让 docker 替你建的话属主是 root,之后 sync_release_to_appdist.sh 往里解压会没权限
+# shellcheck disable=SC2086
+ssh $SSH_OPTS "$DEPLOY" "mkdir -p $DEST/webapp/releases"
 # shellcheck disable=SC2086
 ssh $SSH_OPTS "$DEPLOY" "cd $DEST/deploy && \
   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build"
