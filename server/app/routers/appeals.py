@@ -719,7 +719,8 @@ async def _overturn_errand_rejected(db: AsyncSession, appeal: Appeal, a: AfterSa
     不收),骑手 72 小时内可以在 after_sale_rider 申诉。
     """
     from ..services import rider_fault
-    if order.rider_id is None or order.total_cents <= 0:
+    from ..services.refund_calc import unrefunded_paid_cents
+    if order.rider_id is None or await unrefunded_paid_cents(db, order) <= 0:
         raise HTTPException(409, "这一单没有骑手或者已经没有可退的钱,判不了骑手责任")
     reason = (f"{a.reply};顾客申诉改判:判骑手责任({note or '复核认定售后应当受理'})"
               if a.reply else f"顾客申诉改判:判骑手责任({note or '复核认定售后应当受理'})")

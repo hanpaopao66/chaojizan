@@ -203,13 +203,15 @@ async def judge_after_sale(db: AsyncSession, a, order: Order, *, reason: str,
     1. 送达了、还没确认收货的,先按完成结算(骑手、商家各自入账)再冲 —— 不然之后自动完成时
        照常入账,这一截就成了平台出的钱;
     2. 售后记成已受理、判骑手责任(骑手 72 小时内可以在 after_sale_rider 申诉);
-    3. 顾客全额退款(含配送费):total_cents 在缺货部分退款时已同步扣减,就是他现在净付的钱;
+    3. 顾客全额退款(含配送费):退他实付里还没退回去的钱(refund_calc.unrefunded_paid_cents ——
+       缺货、改地址退过的已经从实付里扣了,帮买按小票退过的差价没扣,都只算一次);
     4. [apply]:这单骑手收入冲回、商家那份先池子后骑手。
 
     调用方负责校验(这一单有骑手、售后没受理过、还有钱可退)、提交、推送、刷信用分缓存。
     """
     from ..models import AfterSaleStatus, OrderEvent
     from ..state_machine import OrderStatus
+    from .refund_calc import unrefunded_paid_cents
     from .settlement import settle_order
     from .wechat_pay import request_refund
 
@@ -222,7 +224,8 @@ async def judge_after_sale(db: AsyncSession, a, order: Order, *, reason: str,
                           to_status=OrderStatus.COMPLETED.value,
                           actor_role=actor_role, actor_id=actor_id,
                           note="售后判骑手责任,按完成结算后冲回"))
-    refund_amount = order.total_cents
+    # 原来直接退 total_cents:帮买按小票退过差价的单(那笔退款不扣实付)会把差价再退一遍
+    refund_amount = await unrefunded_paid_cents(db, order)
     a.status = AfterSaleStatus.accepted
     a.fault = "rider"
     a.reply = (reason or "配送责任")[:300]

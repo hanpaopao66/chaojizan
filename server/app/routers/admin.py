@@ -674,6 +674,7 @@ async def list_delivery_issues(
     if status in ("open", "resolved"):
         query = query.where(DeliveryIssue.status == status)
     from ..services.delivery_fault import merchant_refund_cents
+    from ..services.refund_calc import unrefunded_paid_cents
 
     rows = await db.execute(query)
     out = []
@@ -684,9 +685,12 @@ async def list_delivery_issues(
         o.address = order.address
         o.total_cents = order.total_cents
         o.order_status = order.status.value
-        # 裁成退款的话退多少:和 resolve_delivery_issue 那一支同一个算法,仲裁的人先看到数
-        o.refund_preview_cents = (merchant_refund_cents(order) if o.refund_fault == "merchant"
-                                  else order.total_cents)
+        # 裁成退款的话退多少:和 resolve_delivery_issue 那一支同一个算法,仲裁的人先看到数。
+        # 只给还没裁决的算(骑手责任那支要查一次退款流水,已裁决的列表用不上这个数)
+        if issue.status == "open":
+            o.refund_preview_cents = (
+                merchant_refund_cents(order) if o.refund_fault == "merchant"
+                else await unrefunded_paid_cents(db, order))
         out.append(o)
     return out
 
@@ -764,8 +768,10 @@ async def resolve_delivery_issue(
             # 结算会记到现在的骑手头上,判的却是上报的那个人 —— 对不上,不许这么判
             raise HTTPException(409, "这单已经不在上报异常的骑手手上(转单了),"
                                      "判不了他的骑手责任:请先协调,或走售后仲裁")
+        # 骑手责任:全额退 = 顾客实付里还没退回去的钱(services/refund_calc)
+        from ..services.refund_calc import unrefunded_paid_cents
         refunded = (delivery_fault.merchant_refund_cents(order) if merchant_fault
-                    else order.total_cents)
+                    else await unrefunded_paid_cents(db, order))
         if refunded <= 0:
             raise HTTPException(409, "该订单已无可退金额")
         from_status = order.status
@@ -1380,8 +1386,9 @@ async def after_sale_rider_fault(
     order = await db.get(OrderModel, a.order_id, with_for_update=True)
     if order.rider_id is None:
         raise HTTPException(409, "这一单没有骑手配送(自取、商家自配送),判不了骑手责任")
-    # total_cents 在缺货部分退款时已同步扣减,此处即"用户当前净付金额",全额退
-    if order.total_cents <= 0:
+    # 全额退 = 顾客实付里还没退回去的钱(services/refund_calc)
+    from ..services.refund_calc import unrefunded_paid_cents
+    if await unrefunded_paid_cents(db, order) <= 0:
         raise HTTPException(409, "该订单已无可退金额")
     refund_amount, split = await rider_fault.judge_after_sale(
         db, a, order, reason=payload.reason, actor_role="admin", actor_id=admin.id)

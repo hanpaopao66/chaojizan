@@ -1348,8 +1348,10 @@ async def change_address(
         refunded = -delta
         note = f"改地址退配送费差价 ¥{refunded / 100:.2f}"
         # **先发起退款,再下调 total_cents**:微信通道按「当前 total + 已退」
-        # 反推原始支付总额,先扣了 total 反推出来的就少一截(见 wechat_pay)
-        await request_refund(db, order, refunded, "改地址,配送费差价退还")
+        # 反推原始支付总额,先扣了 total 反推出来的就少一截(见 wechat_pay)。
+        # 原因走常量:这笔退了也扣了实付,refund_calc 靠它认出来、别在全额退款时再减一遍
+        from ..services.refund_calc import ADDRESS_CHANGE_REFUND_REASON
+        await request_refund(db, order, refunded, ADDRESS_CHANGE_REFUND_REASON)
         order.delivery_fee_cents += delta
         order.total_cents += delta
         order.refund_note = (f"{order.refund_note};{note}"

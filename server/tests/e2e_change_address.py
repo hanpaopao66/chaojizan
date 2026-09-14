@@ -106,5 +106,25 @@ err = change(o4["order_no"], NEAR, expect_error=True)
 assert err["_error"] == 409 and "自取" in err["detail"]
 print("✓ 自取单不可改配送地址")
 
+# 7) 改过地址的单,后面再按售后退款:改地址退掉的配送费差价只算一次(services/refund_calc)。
+#    这笔退款退的同时实付也扣了,原来和缺货退款一样被减了两次 —— 顾客在售后里少拿这一截
+o5 = make_order(FAR)
+no5 = o5["order_no"]
+after5 = change(no5, NEAR)
+call("POST", f"/riders/grab/{no5}", rider)
+call("POST", f"/orders/{no5}/transition", merchant, {"to_status": "ready"})
+call("POST", f"/orders/{no5}/transition", rider, {"to_status": "picked_up"})
+call("POST", f"/orders/{no5}/transition", rider, {"to_status": "delivered"})
+call("POST", f"/orders/{no5}/after-sale", customer,
+     {"reason": "菜里吃出一根头发", "images": ["/uploads/demo-evidence-1.jpg"]})
+as5 = next(x for x in call("GET", "/merchants/me/after-sales?status=pending", merchant)
+           if x["order_no"] == no5)
+call("POST", f"/after-sales/{as5['id']}/accept", merchant, {"reply": "抱歉,退您餐费"})
+done5 = call("GET", f"/orders/{no5}", customer)
+goods5 = after5["total_cents"] - after5["delivery_fee_cents"] - after5["tip_cents"]
+assert done5["refund_cents"] == diff + goods5, \
+    f"改址退 {diff} + 售后该退 {goods5},实际累计退 {done5['refund_cents']}(差价被减了两次?)"
+print(f"✓ 改过地址的单再退售后:差价 ¥{diff/100:.2f} 只算一次,售后退 ¥{goods5/100:.2f}")
+
 call("PATCH", f"/merchants/me/dishes/{dish['id']}", merchant, {"is_on_sale": False})
 print("\n订单改地址验证通过 🎉")

@@ -7,16 +7,25 @@
   也没减平台券抵掉的部分,顾客会把平台的券钱当现金拿走;
 - 顾客对「取消分摊」申诉改判用「菜 + 打包 − 满减 + 配送费 + 小费 − 已退金额」:同样两处毛病。
 
-口径统一成下面三个函数。字段关系(models.Order):
+口径统一成下面几个函数。字段关系(models.Order):
     实付 total = 菜 + 打包 − 满减 + 配送费 + 小费 − 平台补贴
-缺货部分退款会同步扣减菜 / 满减 / 补贴 / 实付,并把退款记进 refund_cents;
-其它退款只记 refund_cents、不动实付。所以「缺货以外已经退掉的」= refund_cents − 缺货退款之和。
+有两种退款退的同时把实付一起扣掉(total_cents 是「剩余应付」),退款也记进 refund_cents:
+- 缺货部分退款:同步扣减菜 / 满减 / 补贴 / 实付;
+- 改地址退配送费差价:同步扣减配送费 / 实付(routers/orders.change_address)。
+其它退款(售后、帮买按小票退差价……)只记 refund_cents、不动实付。
+所以「还没从实付里扣掉的已退金额」= refund_cents − 上面两种退款之和。
+
+2026-09-14 又查出一处:原来只减缺货退款,改地址退的配送费差价**也被减了两次** —— 改过地址的单,
+顾客在后面几条全额退款的路上少拿这一截。
 """
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 #: 缺货退款写退款流水时的原因前缀。写(routers/orders.refund_item)和读(下面)都用它 ——
 #: 两边各写一遍字符串的话,改一处另一处就静默查不到数
 OUT_OF_STOCK_REFUND_PREFIX = "缺货退款:"
+
+#: 改地址退配送费差价的退款原因。写(routers/orders.change_address)和读(下面)都用它,理由同上
+ADDRESS_CHANGE_REFUND_REASON = "改地址,配送费差价退还"
 
 
 def rider_kept_cents(order) -> int:
@@ -29,19 +38,21 @@ def rider_kept_cents(order) -> int:
     return order.delivery_fee_cents + order.tip_cents
 
 
-async def out_of_stock_refunded_cents(db, order) -> int:
-    """这单缺货退款(部分 / 整单)已经退掉的钱。口径同核账:不算渠道失败的那几笔。"""
+async def deducted_refunds_cents(db, order) -> int:
+    """这单退的同时已经从实付里扣掉的那几笔退款:缺货退款(部分 / 整单)、改地址退的配送费差价。
+    口径同核账:不算渠道失败的那几笔。"""
     from ..models import Refund, RefundStatus
     return int(await db.scalar(
         select(func.coalesce(func.sum(Refund.amount_cents), 0)).where(
             Refund.order_id == order.id,
             Refund.status != RefundStatus.failed,
-            Refund.reason.like(OUT_OF_STOCK_REFUND_PREFIX + "%"))) or 0)
+            or_(Refund.reason.like(OUT_OF_STOCK_REFUND_PREFIX + "%"),
+                Refund.reason == ADDRESS_CHANGE_REFUND_REASON))) or 0)
 
 
 async def unrefunded_paid_cents(db, order) -> int:
-    """顾客实付里还没退回去的钱(不含平台补贴 —— 那本来就不是他付的)。"""
-    other = order.refund_cents - await out_of_stock_refunded_cents(db, order)
+    """顾客实付里还没退回去的钱(不含平台补贴 —— 那本来就不是他付的)。全额退款退的就是它。"""
+    other = order.refund_cents - await deducted_refunds_cents(db, order)
     return max(order.total_cents - other, 0)
 
 

@@ -14,13 +14,13 @@ SERVER = Path(__file__).resolve().parents[2]
 
 
 class _DB:
-    """只回答「这单缺货退了多少」的假库"""
+    """只回答「这单退的同时已经扣了实付的退款(缺货、改地址)有多少」的假库"""
 
-    def __init__(self, out_of_stock: int):
-        self.out_of_stock = out_of_stock
+    def __init__(self, deducted: int):
+        self.deducted = deducted
 
     async def scalar(self, _stmt):
-        return self.out_of_stock
+        return self.deducted
 
 
 def _order(**kw):
@@ -61,6 +61,40 @@ def test_cancel_split_overturn_refunds_what_the_customer_actually_bore():
     # 取消分摊时退了 1800,顾客承担 1200(实付 3000,平台券抵的钱不在实付里,也就不会被当现金退)
     o = _order(total_cents=3000, refund_cents=1800)
     assert _run(refund_calc.unrefunded_paid_cents(_DB(0), o)) == 1200
+
+
+def test_address_change_refund_is_not_subtracted_twice():
+    # 下单实付 3000(配送 500);改地址退配送费差价 100:实付字段扣成 2900、已退累加 100 ——
+    # 这 100 和缺货退款一样,只能算一次(原来只认缺货退款,改过地址的单全额退款时少退 100)
+    o = _order(total_cents=2900, refund_cents=100, delivery_fee_cents=400)
+    assert _run(refund_calc.unrefunded_paid_cents(_DB(100), o)) == 2900
+
+
+def test_refunds_that_did_not_touch_total_are_subtracted():
+    # 帮买按小票退差价 200:只记已退、不扣实付 —— 全额退款要把它减掉,不然差价退两遍
+    o = _order(total_cents=3000, refund_cents=200)
+    assert _run(refund_calc.unrefunded_paid_cents(_DB(0), o)) == 2800
+
+
+def test_both_deducting_refunds_are_recognised_by_reason():
+    """退的同时扣实付的两种退款,都按写入时用的那个原因认 —— 字符串各写一份的话改一处就静默对不上"""
+    import inspect
+    src = inspect.getsource(refund_calc.deducted_refunds_cents)
+    assert "OUT_OF_STOCK_REFUND_PREFIX" in src and "ADDRESS_CHANGE_REFUND_REASON" in src
+    orders_src = (SERVER / "app/routers/orders.py").read_text(encoding="utf-8")
+    assert "request_refund(db, order, refunded, ADDRESS_CHANGE_REFUND_REASON)" in orders_src
+    assert '"改地址,配送费差价退还")' not in orders_src
+
+
+def test_rider_fault_refunds_what_is_left_not_total():
+    """判骑手责任的「全额退款」退还没退回去的实付,不直接退 total_cents"""
+    import inspect
+
+    from app.routers import admin
+    from app.services import rider_fault
+    assert "unrefunded_paid_cents(db, order)" in inspect.getsource(rider_fault.judge_after_sale)
+    assert "refund_amount = order.total_cents" not in inspect.getsource(rider_fault.judge_after_sale)
+    assert "unrefunded_paid_cents(db, order)" in inspect.getsource(admin.resolve_delivery_issue)
 
 
 def test_old_formulas_do_not_come_back():
