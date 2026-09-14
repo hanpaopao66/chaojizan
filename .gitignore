@@ -71,6 +71,9 @@ deploy/.env.deploy
 # 就会把真密钥提交进公开仓库,宁可多挡一层
 deploy/.env.prod
 deploy/tunnel/frpc.toml
+# 本机的 frp 访问端(部署机 SSH 私密通道,scripts/deploy_tunnel.sh):里面有通道密钥和 frps 的令牌
+deploy/tunnel/visitor.toml
+deploy/tunnel/.visitor.*
 deploy/certs/
 deploy/letsencrypt/
 deploy/certbot-www/

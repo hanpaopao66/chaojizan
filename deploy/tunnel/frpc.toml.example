@@ -27,3 +27,14 @@ type = "tcp"
 localIP = "127.0.0.1"
 localPort = 8443           # 部署机 nginx 的 443(compose 发布为 8443)
 remotePort = 443
+
+# 可选:部署机 SSH 的私密通道(stcp),让开发机在外面也能部署。
+# 不在 frps 上开公网端口,只转给持有同一把 secretKey 的访问端(开发机上的 frpc)。
+# 不用手抄:在部署机所在局域网里跑 bash scripts/deploy_tunnel.sh setup,它会生成密钥、
+# 追加这一段、重启 frpc,并在开发机写好访问端(见 deploy/README.md「在外面部署」)。
+# [[proxies]]
+# name = "superz-ssh"
+# type = "stcp"
+# secretKey = ""          # openssl rand -hex 24,和开发机 deploy/tunnel/visitor.toml 里的一致
+# localIP = "127.0.0.1"
+# localPort = 22

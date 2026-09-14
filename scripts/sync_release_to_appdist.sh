@@ -69,15 +69,11 @@ echo "$MIN_BUILD" | grep -qE '^[0-9]+$' || {
 
 echo "== 同步 $TAG（版本 $VERSION，build $BUILD，force=$FORCE_JSON，min_build=$MIN_BUILD）=="
 
-# 先探部署机通不通。LAN-only，换个网段就发不了，
-# 别烧满 SSH 超时再死在 scp 中途（deploy_server.sh 同款预检）
-HOST=${DEPLOY#*@}
-if ! nc -z -G 5 "$HOST" 22 2>/dev/null; then
-  echo "✗ 连不上部署机 $HOST:22。"
-  echo "  发版是 LAN-only —— 接回部署机所在网段或连上 VPN 再来。"
-  echo "  线上不受影响，还是原来那版。"
-  exit 1
-fi
+# 先探部署机通不通，别烧满 SSH 超时再死在 scp 中途（deploy_server.sh 同款预检）。
+# 局域网不通时改走 SSH 私密通道（配过的话，见 scripts/deploy_target.sh）
+. scripts/deploy_target.sh
+deploy_target || exit 1
+echo "== 连部署机：$DEPLOY_VIA =="
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 
@@ -114,9 +110,11 @@ else
 fi
 
 echo "== 上传到部署机 appdist =="
-ssh "$DEPLOY" 'mkdir -p ~/super-z/appdist'
+# shellcheck disable=SC2086
+ssh $SSH_OPTS "$DEPLOY" 'mkdir -p ~/super-z/appdist'
 for app in user merchant rider; do
-  scp -q "$WORK/chaojizan-${app}-arm64.apk" \
+  # shellcheck disable=SC2086
+  scp -q $SCP_OPTS "$WORK/chaojizan-${app}-arm64.apk" \
       "$DEPLOY:~/super-z/appdist/chaojizan-${app}-arm64.apk"
   echo "  chaojizan-${app}-arm64.apk ✓"
 done
@@ -127,14 +125,16 @@ echo "== 复核落地哈希（传输途中出错在这里拦）=="
 # 是最坏的时机。release_apks.sh 用 SHA_<端> 这套写法也是这个原因
 for app in user merchant rider; do
   LOCAL=$(shasum -a 256 "$WORK/chaojizan-${app}-arm64.apk" | awk '{print $1}')
-  REMOTE=$(ssh "$DEPLOY" "shasum -a 256 ~/super-z/appdist/chaojizan-${app}-arm64.apk | awk '{print \$1}'")
+  # shellcheck disable=SC2086
+  REMOTE=$(ssh $SSH_OPTS "$DEPLOY" "shasum -a 256 ~/super-z/appdist/chaojizan-${app}-arm64.apk | awk '{print \$1}'")
   [ "$REMOTE" = "$LOCAL" ] || { echo "✗ ${app} 上传后哈希不符，中止"; exit 1; }
   eval "SHA_${app}=\$LOCAL"
 done
 echo "  三端哈希一致 ✓（且与 Release 页同值）"
 
 echo "== 更新 versions.json =="
-ssh "$DEPLOY" "python3 - << 'PYEOF'
+# shellcheck disable=SC2086
+ssh $SSH_OPTS "$DEPLOY" "python3 - << 'PYEOF'
 import json, os
 shas = {'user': '$SHA_user', 'merchant': '$SHA_merchant',
         'rider': '$SHA_rider'}

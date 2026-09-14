@@ -4,7 +4,9 @@
 # 注意顺序:发 APK 前先跑本脚本!新版 App 依赖新接口(如 /stats/overview、
 # /orders/{no}/refunds),服务端不更新用户会见到 404。
 #
-# 用法:scripts/deploy_server.sh          (需在部署机所在局域网)
+# 用法:scripts/deploy_server.sh
+#   在部署机所在局域网里直接连;在外面时自动走 SSH 私密通道(先在局域网里跑过一次
+#   bash scripts/deploy_tunnel.sh setup),见 scripts/deploy_target.sh
 # -e:任一步失败就停,别在坏状态上继续往下走。
 # -o pipefail:**管道里前面的命令失败也算失败**。
 #
@@ -30,16 +32,10 @@ DEST='~/super-z'
 # 部署机在局域网里,换个网络(咖啡厅、手机热点、公司网)就够不着。
 # 不预检的话表现是:等 75 秒 → 一句裸的 "unexpected end of file" →
 # 而这时候版本号已经写进 server/app_version.txt 了,工作区脏着,
-# 人还得先想明白"到底同步过去没有"。
-PORT=22
-HOSTONLY=${DEPLOY#*@}
-if ! nc -z -G 5 "$HOSTONLY" "$PORT" 2>/dev/null; then
-  echo "✗ 连不上部署机 $HOSTONLY:$PORT"
-  echo "  本机地址:$(ipconfig getifaddr en0 2>/dev/null || echo 未知)"
-  echo "  这个脚本只能在部署机所在局域网里跑(见文件头注释)。"
-  echo "  接回那个网段或连上 VPN 再来 —— 线上服务不受影响,还是原来那版。"
-  exit 1
-fi
+# 人还得先想明白"到底同步过去没有"。局域网不通时改走私密通道(配过的话)。
+. scripts/deploy_target.sh
+deploy_target || exit 1
+echo "== 连部署机:$DEPLOY_VIA =="
 
 echo "== 记录版本号(透明中心/页脚展示,证明线上跑的就是仓里的代码) =="
 { git describe --tags --always 2>/dev/null || echo unknown; \
@@ -58,10 +54,11 @@ rsync -az --delete \
   --exclude 'node_modules' --exclude 'build' --exclude '.dart_tool' \
   --exclude 'server/.env' --exclude 'server/uploads' --exclude 'server/appdist' \
   --exclude 'marketing' --exclude '.claude' \
-  ./ "$DEPLOY:$DEST/"
+  -e "$RSYNC_RSH" ./ "$DEPLOY:$DEST/"
 
 echo "== 重建容器(alembic 迁移在启动时自动执行) =="
-ssh "$DEPLOY" "cd $DEST/deploy && \
+# shellcheck disable=SC2086
+ssh $SSH_OPTS "$DEPLOY" "cd $DEST/deploy && \
   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build"
 
 # nginx **必须最后重启一次**。
@@ -75,7 +72,8 @@ ssh "$DEPLOY" "cd $DEST/deploy && \
 # 2026-08-01 的 v0.8.0 发版就是这么挂的:APK 都发出去了、健康检查也过了,
 # 十分钟后官网和接口全 502,静态文件也一起挂(它们同在一个 server 块)。
 echo "== 重启 nginx(让它重新解析 api 的新 IP) =="
-ssh "$DEPLOY" "cd $DEST/deploy && \
+# shellcheck disable=SC2086
+ssh $SSH_OPTS "$DEPLOY" "cd $DEST/deploy && \
   docker compose -f docker-compose.prod.yml --env-file .env.prod restart nginx"
 sleep 3
 

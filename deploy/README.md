@@ -58,6 +58,29 @@ scp server/certs/apiclient_key.pem server/certs/pub_key.pem <部署机>:~/super-
    所以 `.env.prod` 里写相对路径 `certs/apiclient_key.pem`、`certs/pub_key.pem`。
    密钥缺失时 `get_client()` 记日志返回 None、支付接口 503,不会 500。
 
+## 在外面部署:SSH 私密通道(frp stcp)
+
+部署机在家用宽带的局域网里,平时只能在那个网段里跑 `scripts/deploy_server.sh`、
+`scripts/sync_release_to_appdist.sh`。配一次私密通道之后,在外面也能部署:
+
+```bash
+bash scripts/deploy_tunnel.sh setup    # 一次性,要在部署机所在局域网里跑
+```
+
+它做这几件事:给部署机的 `tunnel/frpc.toml` 加一段 stcp 代理(先备份,把部署机本机的 22 口接进通道)、
+重启 frpc(网站经隧道的访问会断一两秒)、在开发机写 `deploy/tunnel/visitor.toml`(访问端配置,
+不入库、权限 600)、从通道 ssh 一次试试。以后两个部署脚本先试局域网,连不上就自动起访问端、
+改走通道(`scripts/deploy_target.sh`),不用多敲命令。
+
+- **不在云服务器上多开任何公网端口**:stcp 只把流量转给持有同一把 secretKey 的访问端,扫描器看不到;
+- 走通道时部署机的主机密钥**照旧按局域网地址那一条核对**(ssh 的 HostKeyAlias):通道那头换了机器会当场拒绝;
+- 通道密钥单独生成(不和 frp 的 auth token 共用),只在部署机的 frpc.toml 和开发机的 visitor.toml 两处;
+- 部署机 SSH 应该只认密钥,setup 会顺手检查一下 `PasswordAuthentication`,只报告不改(改错了会把自己锁在外面);
+- 撤掉:删掉部署机 frpc.toml 里 `superz-ssh` 那一段、restart frpc;开发机删 `deploy/tunnel/visitor.toml`。
+
+开发机要有 frpc(macOS:`brew install frpc`),大版本和部署机、云服务器上的 frp 一致。
+`bash scripts/deploy_tunnel.sh status / up / down` 看、起、停本机访问端。
+
 ## 发版失败的两种"看着成功"
 
 两次都是**退出码骗人**,而不是部署真的成功。都已经修掉,记在这里防止再犯。

@@ -1,0 +1,14 @@
+# 开发机上的 frp 访问端样例:把部署机的 SSH 私密通道接到本机 127.0.0.1:6022。
+# 不用手抄:在部署机所在局域网里跑 bash scripts/deploy_tunnel.sh setup,它会从部署机的
+# frpc.toml 读 frps 的地址、端口、令牌,生成通道密钥,写出 deploy/tunnel/visitor.toml(不入库、权限 600)。
+serverAddr = "你的云服务器公网IP"
+serverPort = 7000
+auth.token = ""            # 和部署机 frpc.toml 里的一致
+
+[[visitors]]
+name = "superz-ssh-visitor"
+type = "stcp"
+serverName = "superz-ssh"  # 部署机 frpc.toml 里那段 stcp 代理的名字
+secretKey = ""             # 和部署机那段里的一致
+bindAddr = "127.0.0.1"
+bindPort = 6022
