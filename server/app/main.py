@@ -37,6 +37,7 @@ from .routers import (
     orders,
     payments,
     payout,
+    qr_login,
     reviews,
     riders,
     screen,
@@ -546,6 +547,9 @@ app.add_middleware(mini_host.MiniHostMiddleware)
 app.add_middleware(BotTokenPathMiddleware)
 
 app.include_router(auth.router)
+# 扫码登录 / 一键登录(用户端网页版、桌面版),和二维码里那个 /l/{sid} 说明页
+app.include_router(qr_login.router)
+app.include_router(qr_login.page_router)
 app.include_router(merchants.router)
 app.include_router(brands.router)
 app.include_router(orders.router)

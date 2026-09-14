@@ -22,13 +22,39 @@ def verify_password(raw: str, hashed: str) -> bool:
     return bcrypt.checkpw(raw.encode(), hashed.encode())
 
 
-def create_token(user: User) -> str:
+def create_token(user: User, *, login_device_id: int | None = None) -> str:
+    """登录 token。
+
+    [login_device_id]:扫码 / 一键登录签给网页版、桌面版的 token 带上那台设备
+    (login_devices.id,写在 `ld` 里)。带了它的 token 每次请求都回库看那台设备还在不在 ——
+    用户在手机上「移除」之后下一次请求就 401(见 get_current_user)。手机上登录的 token 不带。
+    """
     payload = {
         "sub": str(user.id),
         "role": user.role.value,
         "exp": int(time.time()) + settings.jwt_expire_minutes * 60,
     }
+    if login_device_id is not None:
+        payload["ld"] = int(login_device_id)
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+
+
+async def login_device_alive(db: AsyncSession, payload: dict) -> bool:
+    """token 里带的那台网页 / 电脑(`ld`)还在不在:没被移除、而且是这个人的。
+
+    JWT 自己吊销不了。扫码登录的会话要做到「手机上一移除,那边立刻退出」,
+    就只能像助手令牌一样每次回库查一行 —— 代价是一次主键查询,只有带 `ld` 的会话付。
+    实时网关(realtime/gateway.py)连上来时也走这里。
+    """
+    from .models import LoginDevice
+
+    try:
+        device_id = int(payload.get("ld"))
+        user_id = int(payload.get("sub") or 0)
+    except (TypeError, ValueError):
+        return False
+    row = await db.get(LoginDevice, device_id)
+    return row is not None and row.revoked_at is None and row.user_id == user_id
 
 
 #: AI 助手令牌能碰的接口。(方法, 路径正则) —— **全匹配**,**按权限分开**。
@@ -211,6 +237,14 @@ async def get_current_user(
         request.state.agent_token = agent
         if not agent_can(request.method, request.url.path, agent["scopes"]):
             raise HTTPException(status.HTTP_403_FORBIDDEN, agent_denied(agent["scopes"]))
+    # 扫码登录的网页版 / 桌面版会话:那台设备在手机上被移除了,这里就 401。
+    # 放在唯一入口里,和上面助手令牌同一个理由 —— 逐个路由加,漏一个就是一台移除不掉的电脑
+    if payload.get("ld") is not None:
+        if not await login_device_alive(db, payload):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED,
+                                "这台设备已在手机上退出登录,请重新扫码登录")
+        # /auth/refresh 续期时要原样带上;扫码 / 确认接口据此认出「这是网页、电脑上的会话」
+        request.state.login_device_id = int(payload["ld"])
     user = await db.get(User, int(payload["sub"]))
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户不存在")

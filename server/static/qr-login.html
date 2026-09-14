@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 链接里有登录会话的编号:不带 Referer 出去,不让搜索引擎收 -->
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<title>请用超级赞 App 扫码登录</title>
+<style>
+  /* 与 App 同一套令牌(docs/BRAND.md 的产品层色板),和 shop.html 一致 */
+  :root { --paper:#F0EEE6; --surface:#FBFAF6; --line:#E2DED2;
+          --ink:#141413; --muted:#6B6862; --faint:#9A968C; --clay:#C15F3C; }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper:#1B1A17; --surface:#24231F; --line:#37342D;
+            --ink:#F2F0E8; --muted:#A8A49A; --faint:#7A766D; --clay:#E08A6B; }
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--paper); color:var(--ink); line-height:1.75;
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         padding:40px 20px 56px; }
+  .wrap { max-width:520px; margin:0 auto; }
+  .card { background:var(--surface); border:1px solid var(--line);
+          border-radius:12px; padding:22px 20px; }
+  h1 { font-size:1.3rem; font-weight:600; letter-spacing:-.02em; }
+  p { color:var(--muted); font-size:.92rem; margin-top:10px; }
+  ol { color:var(--muted); font-size:.92rem; margin:10px 0 0; padding-left:1.3em; }
+  li { margin:4px 0; }
+  b { color:var(--ink); font-weight:600; }
+  .cta { display:block; background:var(--clay); color:#FBFAF6; text-align:center;
+         border-radius:8px; padding:13px; text-decoration:none; font-size:1rem;
+         font-weight:500; margin-top:18px; }
+  .foot { color:var(--faint); font-size:.76rem; margin-top:24px; text-align:center; }
+  .foot a { color:var(--clay); text-decoration:none; }
+</style>
+</head>
+<body>
+<!-- 这一页对任何链接都一样:不查、也不显示这个登录会话的任何信息(是谁建的、从哪台电脑来、扫没扫过)。
+     见 server/app/routers/qr_login.py 的 qr_login_page -->
+<div class="wrap">
+  <div class="card">
+    <h1>请用超级赞 App 扫一扫登录</h1>
+    <p>这是超级赞网页版、电脑版的登录二维码。用别的扫码工具扫,登录不了。</p>
+    <ol>
+      <li>在手机上打开<b>超级赞 App</b>,登录你的账号;</li>
+      <li>进「<b>消息</b>」,点右上角的「<b>新建</b>」,选「<b>扫一扫</b>」;</li>
+      <li>扫电脑屏幕上的二维码,在手机上确认登录。</li>
+    </ol>
+    <p>如果这个码是别人发给你的、不是你自己电脑上的,不要扫 —— 扫了确认,对方那台电脑就会登上你的账号。</p>
+    <a class="cta" href="/download">还没有超级赞 App?去下载</a>
+  </div>
+  <div class="foot">
+    超级赞 Super-Z · 陕西爱卡斯科技有限公司 · <a href="/">首页</a>
+  </div>
+</div>
+</body>
+</html>

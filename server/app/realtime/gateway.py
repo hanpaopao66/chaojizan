@@ -48,6 +48,11 @@ async def user_from_token(token: str) -> User | None:
     if payload.get("scope") == "agent":
         return None
     async with SessionLocal() as db:
+        # 扫码登录的网页 / 电脑:那台设备在手机上被移除了就不许再连(和 get_current_user 同一个判据)
+        if payload.get("ld") is not None:
+            from ..security import login_device_alive
+            if not await login_device_alive(db, payload):
+                return None
         user = await db.get(User, int(payload.get("sub") or 0))
     if user is None or user.deleted_at is not None or user.phone.startswith("del"):
         return None

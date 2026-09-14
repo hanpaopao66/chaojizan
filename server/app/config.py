@@ -164,6 +164,17 @@ class Settings(BaseSettings):
     rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 sms_resend_seconds 的重发冷却)
     rate_limit_sms_login_per_minute: int = 10  # 同一手机号验证码登录尝试
     rate_limit_order_per_minute: int = 20      # 同一用户下单
+    # 扫码登录 / 一键登录(routers/qr_login.py),按分钟,和上面几条同一个口径:
+    # - 建会话、轮询按**出口 IP**:一个登录页每 120 秒建一个会话、每分钟轮询三四次,
+    #   一栋写字楼几十个人共用一个出口 IP 也够用;
+    # - 扫码 / 确认 / 取消按**人**;
+    # - 一键登录按人另算,而且每天有上限 —— 它会往这个人的手机上弹确认框,
+    #   偷到 device_key 的人不能靠一直弹、等对方点烦了手一滑点了「登录」
+    rate_limit_qr_create_per_minute: int = 30
+    rate_limit_qr_poll_per_minute: int = 120
+    rate_limit_qr_scan_per_minute: int = 20
+    rate_limit_qr_oneclick_per_minute: int = 5
+    qr_oneclick_daily_limit: int = 30
     # 同一串验证码连错几次就作废它。**光限速挡不住爆破**:6 位码 300 秒有效,
     # 按每分钟 10 次算,一个窗口期还能试 50 次,而正常人手滑不会超过两三次。
     # 作废之后要重新发码,而发码那边有 60 秒冷却 + 每日 8 条 + 第 3 条起滑块

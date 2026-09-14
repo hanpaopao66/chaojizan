@@ -3593,6 +3593,48 @@ class ApiCall(Base):
     )
 
 
+class LoginDevice(Base):
+    """扫码登录过的网页和电脑(用户端「设置 → 已登录的网页和电脑」)。
+
+    ## 这一行代表什么
+
+    一台浏览器或一台装了桌面版的电脑:扫码登录成功时建一行,并给那台设备一把 device_key
+    (只在那一刻交出去一次)。下次它登录过期或退出了,带着 device_key 来就是「一键登录」——
+    **device_key 本身不能登录**,它只能让服务端去问一次这个人的手机 App,手机上点了确认才签 token
+    (见 routers/qr_login.py)。每用一次换一把新的,旧的立刻作废。
+
+    ## 只存哈希
+
+    存 device_key 的 SHA-256,不存明文:这张表整张泄露,也拿不出任何一把能发起一键登录的 key。
+    key 是 32 字节随机数,不需要加盐或慢哈希。
+
+    ## 移除 = 立刻退出
+
+    扫码登录签的 token 里带着这一行的 id(`ld`),security.get_current_user 每次都回库查它。
+    用户在手机上点「移除」,这台设备下一次请求就 401,也不能再一键登录。
+    """
+
+    __tablename__ = "login_devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    #: device_key 的 SHA-256(十六进制)。一键登录按它找这一行
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    #: web = 网页版;desktop = 桌面版
+    client: Mapped[str] = mapped_column(String(16), default="web")
+    #: 给人看的设备描述:「Chrome · macOS」「超级赞电脑版 · Windows」。请求方自己报的,能伪造
+    device: Mapped[str] = mapped_column(String(64), default="")
+    #: 最近一次登录时的 IP,**打过码**(123.45.*.*)。只给用户自己认设备用,不存完整 IP
+    ip_masked: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    #: 最近一次扫码 / 一键登录 / 续期。太久没用(qr_login.DEVICE_IDLE_DAYS)就不能再一键登录
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
 class RuleRevision(Base):
     """规则页的历史版本。**规则改了什么、什么时候改的,公开可查。**
 

@@ -137,13 +137,23 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=TokenOut)
-async def refresh(user: User = Depends(get_current_user)):
+async def refresh(request: Request, user: User = Depends(get_current_user),
+                  db: AsyncSession = Depends(get_db)):
     """滑动续期:持有效 token 即可换新 token(过期时间重新计算)。
 
     商家端接单机长期挂机,客户端在 token 过半龄时静默调用本接口,
     既允许把过期时间收紧到 7 天,又不会让挂机设备掉线。
+
+    扫码登录的网页 / 电脑(token 里带 `ld`)续出来的 token **原样带上那台设备** ——
+    漏了的话续一次期,「手机上移除这台设备」就管不到它了。顺带记一下这台设备最近在用。
     """
-    return TokenOut(token=create_token(user), user_id=user.id,
+    device_id = getattr(request.state, "login_device_id", None)
+    if device_id is not None:
+        from ..models import LoginDevice
+        await db.execute(update(LoginDevice).where(LoginDevice.id == device_id)
+                         .values(last_used_at=datetime.now(timezone.utc)))
+        await db.commit()
+    return TokenOut(token=create_token(user, login_device_id=device_id), user_id=user.id,
                     role=user.role.value, name=user.name)
 
 
@@ -630,6 +640,10 @@ async def delete_account(
     # 订单自带地址快照(orders.address / contact_phone),删地址簿不影响
     # 任何历史订单的可读性与对账。
     await db.execute(sa_delete(Address).where(Address.user_id == user.id))
+    # 扫码登录过的网页和电脑:设备描述、打码的 IP 也是这个人的记录,一并删掉 ——
+    # 那几台设备的会话(token 里带 ld)下一次请求就 401,也不能再一键登录
+    from ..models import LoginDevice
+    await db.execute(sa_delete(LoginDevice).where(LoginDevice.user_id == user.id))
     # 小程序(DEV-PROMPTS-39 §5.5「注销账号级联删除」):云存储、授权、最近使用、
     # 日活明细、open_id 映射一起删。聚合数(mini_app_usage_daily)里没有人,不动
     from ..models import (MiniAppDailyUser, MiniAppGrant, MiniAppKV, MiniAppKVUsage,
