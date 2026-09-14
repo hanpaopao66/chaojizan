@@ -138,6 +138,11 @@
 .tp-why b { color: var(--ink); }
 
 /* 公式:深台面,像「可以照着算」的东西(同 SzLedgerCard) */
+.tp-seg { display: inline-flex; margin-top: 18px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.tp-seg button { font: inherit; font-size: 14px; padding: 8px 18px; border: 0; background: none; color: var(--ink-muted); cursor: pointer; }
+.tp-seg button + button { border-left: 1px solid var(--line); }
+.tp-seg button.on { background: var(--ink); color: var(--surface); }
+.tp-seg button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
 .tp-formula { background: var(--ledger); color: #F2F0E8; border-radius: 12px; padding: 14px 18px; font-size: 14px; line-height: 1.7; margin-top: 18px; overflow-x: auto; }
 /* 「顺路」的式子:整块一行一行地摆,不做行内代码(行内的话折行后碎成两截小框) */
 .tp-code { display: block; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.8; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 12px; color: var(--ink); overflow-wrap: anywhere; }

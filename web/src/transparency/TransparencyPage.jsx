@@ -491,7 +491,10 @@ export default function TransparencyPage() {
   const gov = useJson('/transparency/governance')
   const dispatch = useJson('/transparency/dispatch')
   const liability = useJson('/transparency/liability')
-  const credit = useJson('/transparency/credit')
+  // 信用分三种角色各一份(同一套机制,扣分项和可见范围按角色不同)
+  const creditC = useJson('/transparency/credit?role=customer')
+  const creditM = useJson('/transparency/credit?role=merchant')
+  const creditR = useJson('/transparency/credit?role=rider')
   const mini = useJson('/transparency/miniapps')
   const comm = useJson('/transparency/community')
   const badges = useJson('/transparency/badges')
@@ -511,7 +514,7 @@ export default function TransparencyPage() {
       if (!userMoved.current) document.getElementById('status')?.scrollIntoView({ behavior: 'auto' })
     }, 60)
     return () => clearTimeout(t)
-  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, credit, mini, comm, badges])
+  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, creditC, creditM, creditR, mini, comm, badges])
 
   const latest = audit?.latest
   const per = fair?.per100
@@ -857,7 +860,7 @@ export default function TransparencyPage() {
           ) : <p className="tp-note">读取中…</p>}
         </Sec>
 
-        <CreditSection c={credit} />
+        <CreditSection specs={{ customer: creditC, merchant: creditM, rider: creditR }} />
 
         <Sec id="governance" eyebrow="治理公开">
           <h2>平台开关怎么改的，都留痕</h2>
