@@ -917,6 +917,14 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
 
 async def _record_mentions(db: AsyncSession, chat: Chat, msg: ChatMessage, ents: list,
                            text: str) -> set[int]:
+    """群里被 @ 的人记一行(未读 @ 计数、免打扰也照样推)。
+
+    @超级赞号 在这里**不看**「按超级赞号找到我」开关,和视频评论(video_talk._resolve_mentions)不一样:
+    这里只在这个群现在的成员里找,@ 一个群外的号什么都不发生,和没有这个号一样;群成员在成员列表里
+    本来就看得到彼此的号,算不上「按号找到他」。而且客户端从成员列表里点人时,对方有号就插入 `@号`
+    (没有号才用带 user_id 的 text_mention),这里跟着开关走的话,点选一个关了开关的成员他就收不到 @ 了。
+    消息里的 @号 点开走 /social/v1/resolve,那边照开关回 404。私聊、频道不记。
+    """
     ids = set(mentioned_user_ids(ents))
     names = mentioned_usernames(text, ents)
     if names:

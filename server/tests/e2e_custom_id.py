@@ -5,8 +5,9 @@
 - 冷冻:换掉 / 清空 / 注销释放的旧号,冷冻期内别人注册不了(超级赞号、频道的公开链接都不行),
   原主人不受冷冻限制(一年的名额照样要等);到期(改时间戳)别人能注册,冷冻记录跟着删掉;
 - 找人:按超级赞号、名片编号、手机号找到名片,直接加联系人(不用对方同意,只加在自己这边);
-- 「按超级赞号找到我」关掉:别人按号找 404(和没有这个号同一句话),全局搜索、视频里搜人都不出;
-  名片链接换成 /u/<public_id>,照样打得开;按手机号找照旧;开关只有开 / 关两档。
+- 「按超级赞号找到我」关掉:别人按号找 404(和没有这个号同一句话),全局搜索、视频里搜人都不出,
+  视频评论里 @ 他当普通文字、不通知;名片链接换成 /u/<public_id>,照样打得开;按手机号找照旧;
+  开关只有开 / 关两档。
 
 **自己造账号,不用演示号**:CI 分组并行,演示号会和同组别的套件互相干扰。
 跑法:SUPERZ_API=http://127.0.0.1:8031 DATABASE_URL=… REDIS_URL=… python -m tests.e2e_custom_id
@@ -17,7 +18,7 @@ from datetime import datetime, time, timedelta, timezone
 
 from tests.chat_util import person, sql
 from tests.util import call
-from tests.video_util import realname
+from tests.video_util import clear_rate_limits, fixture_video, realname
 
 BJ = timezone(timedelta(hours=8))
 DATE = re.compile(r"\d{4}-\d{1,2}-\d{1,2}")
@@ -45,6 +46,11 @@ def a_year_passed(p) -> None:
 
 def ids(items) -> list[int]:
     return [x["id"] for x in items]
+
+
+def comment(p, video: dict, text: str) -> dict:
+    clear_rate_limits("video_comment", p.id)
+    return p.post(f"/video/v1/videos/{video['vid']}/comments", {"text": text})
 
 
 def main():
@@ -167,6 +173,14 @@ def main():
     assert d.get(f"/social/v1/resolve-id/{pid}")["user"]["id"] == a.id, "本人给出去的名片码照样能打开"
     assert a.id not in ids(d.get(f"/chat/v1/search?q={n2}")["users"]), "全局搜索也按号搜不到"
     assert a.id not in ids(d.get(f"/video/v1/search/users?q={n2}")["items"]), "视频里搜人也按号搜不到"
+    # 视频评论里 @ 他:当普通文字,不出链接、不发「@我的」,和 @ 一个没注册的号一样
+    # (关之前发的评论展示时也不再给链接,完整的一段在 e2e_video_comments)
+    vv = fixture_video(c.id, title="超级赞号开关测试")
+    at0 = len(a.get("/social/v1/notifications?kind=at")["items"])
+    r_off = comment(d, vv, f"@{n2} 看看这个")
+    r_none = comment(d, vv, f"@{uname('Nobody')} 看看这个")
+    assert r_off["mentions"] == [] and r_none["mentions"] == [], (r_off, r_none)
+    assert len(a.get("/social/v1/notifications?kind=at")["items"]) == at0, "关着不发「@我的」"
     # 按手机号找照旧(两个开关互不相干),关了按手机号找才找不到
     assert d.post("/social/v1/find-by-phone", {"phone": a.phone})["id"] == a.id
     a.patch("/social/v1/me", {"privacy": {"phone_search": "nobody"}})
@@ -179,8 +193,11 @@ def main():
     out = a.patch("/social/v1/me", {"privacy": {"username_search": "everyone"}})
     assert out["link"].endswith(f"/@{n2}"), out["link"]
     assert d.get(f"/social/v1/resolve/{n2}")["user"]["id"] == a.id
+    r_on = comment(d, vv, f"@{n2} 这回呢")
+    assert r_on["mentions"] == [{"user_id": a.id, "username": n2.lower()}], r_on
+    assert len(a.get("/social/v1/notifications?kind=at")["items"]) == at0 + 1, "打开了,@ 他就通知他"
     print("  ✓ 关掉「按超级赞号找到我」:按号找 404(和没有这个号同一句话)、全局搜索和视频搜人不出、"
-          "名片码换随机编号照样打得开、按手机号找照旧;打开后恢复")
+          "视频评论里 @ 他当普通文字不通知、名片码换随机编号照样打得开、按手机号找照旧;打开后恢复")
 
     print("e2e_custom_id 全部通过 ✅")
 

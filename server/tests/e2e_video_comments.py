@@ -2,6 +2,7 @@
 
 两级评论(一级 + 回复,回复的是回复时带「回复 @某人」)、赞 / 踩(点踩数不对外)、热度 / 时间排序和分页、
 UP 主置顶一条、UP 主删自己视频下的评论、作者标记、@ 提及、评论开关、屏蔽词、长度、限流;
+@ 跟着对方的「按超级赞号找到我」:关了就当普通文字、不通知,和 @ 没注册的号一样,关之前发的也不再给链接;
 互动消息:被评论 / 被回复进「回复我的」、被 @ 进「@我的」、被赞按评论合并进「收到的赞」;
 S7:拉黑的人的评论双向不可见,不能评论拉黑了你的 UP 主的视频,不能回复对方。
 
@@ -11,7 +12,7 @@ import json
 
 from tests.chat_util import set_username
 from tests.util import call
-from tests.video_util import clear_rate_limits, fixture_video, person, sql
+from tests.video_util import clear_rate_limits, fixture_video, person, rand_name, sql
 
 
 def main():
@@ -66,6 +67,54 @@ def main():
     assert n_c and n_c[0]["actor"]["id"] == a.id and "@ 了你" in n_c[0]["title"], n_c
     assert n_c[0]["comment"]["id"] == ra["id"] and n_c[0]["video"]["vid"] == vid, n_c[0]
     print("  ✓ 互动消息:评论视频 → UP 主「回复我的」;回复 → 被回复的人;@ → 被 @ 的人「@我的」,带跳转用的评论 id")
+
+    # ---- @ 跟着「按超级赞号找到我」走:关了就当普通文字,和 @ 一个没注册的号一样 ----
+    # 另开一个视频,不动上面这个视频的评论数和分页
+    base2 = f"/video/v1/videos/{fixture_video(up.id, title='@ 开关测试')['vid']}/comments"
+
+    def say2(p, text, parent=None):
+        clear_rate_limits("video_comment", p.id)
+        return p.post(base2, {"text": text} if parent is None else {"text": text, "parent_id": parent})
+
+    def ats():
+        return len(c.get("/social/v1/notifications?kind=at")["items"])
+
+    def listed(viewer=None):
+        items = (viewer.get if viewer else lambda path: call("GET", path))(f"{base2}?sort=new")["items"]
+        return {x["id"]: x for x in items}
+
+    me_c = [{"user_id": c.id, "username": c_name.lower()}]
+    n0 = ats()
+    old = say2(a, f"开关开着:@{c_name} 看这个")
+    old_reply = say2(b, f"回复里也 @{c_name}", parent=old["id"])
+    assert old["mentions"] == me_c and old_reply["mentions"] == me_c and ats() == n0 + 2, \
+        "开着:有链接,有「@我的」"
+
+    c.patch("/social/v1/me", {"privacy": {"username_search": "nobody"}})
+    off = say2(a, f"关了开关:@{c_name} 看这个")
+    ghost = say2(a, f"关了开关:@{rand_name('Ghostq')} 看这个")    # 从没注册过的号
+
+    def same(x):
+        return {k: x[k] for k in x if k not in ("id", "text", "created_at")}
+
+    assert off["mentions"] == [] and same(off) == same(ghost), \
+        f"关了开关的号和没注册的号,响应一模一样:{off} / {ghost}"
+    assert ats() == n0 + 2, "关了开关:不发「@我的」"
+    # 关之前发的:展示时也不再给链接 —— 一级评论、带的回复预览、回复列表;他自己看也一样(评论是公开的)
+    for view in (listed(), listed(c)):
+        assert view[old["id"]]["mentions"] == [] and view[old["id"]]["replies"][0]["mentions"] == []
+    thread = call("GET", f"/video/v1/comments/{old['id']}/replies")
+    assert thread["root"]["mentions"] == [] and thread["items"][0]["mentions"] == []
+
+    c.patch("/social/v1/me", {"privacy": {"username_search": "everyone"}})
+    view = listed()
+    assert view[old["id"]]["mentions"] == me_c and view[old["id"]]["replies"][0]["mentions"] == me_c, \
+        "重新打开:关之前发的评论,链接回来"
+    assert view[off["id"]]["mentions"] == [] and ats() == n0 + 2, \
+        "关着时发的那条当时就当文字存了:打开之后不补链接、不补「@我的」"
+    assert say2(a, f"重新打开:@{c_name}")["mentions"] == me_c and ats() == n0 + 3
+    print("  ✓ @ 跟着「按超级赞号找到我」:开着有链接有「@我的」;关了当普通文字、不通知,和 @ 没注册的号响应一样,"
+          "关之前发的也不给链接(谁看都一样);重新打开旧链接回来,关着时发的不补")
 
     # ---- 赞 / 踩:点踩数不对外;赞按评论合并通知 ----
     act(b).post(f"/video/v1/comments/{ra['id']}/vote", {"vote": 1})

@@ -708,6 +708,9 @@ async def resolve_target(db: AsyncSession, bot_id: int, ref, *, need_talked: boo
 
     kind, v = parse_chat_ref(ref)
     if kind == "username":
+        # 人的 @超级赞号 这里不看「按超级赞号找到我」:机器人只能找自己打开过和它私聊的人(下面判),
+        # 那个人发来的每条更新里本来就带着他的 id 和号(tg_user);没打开过的,有没有关开关都是 403。
+        # 所以这里拿号换不出机器人原本不知道的人
         row = await db.get(Username, v)
         if row is None:
             raise BotError(400, "Bad Request: chat not found")

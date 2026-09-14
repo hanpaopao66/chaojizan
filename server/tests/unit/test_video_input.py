@@ -69,6 +69,82 @@ def test_mentions_follow_username_rules():
     assert len(talk.parse_mentions(many)) == talk.MENTIONS_MAX == 10
 
 
+# ---------------- 评论里的 @ 跟着「按超级赞号找到我」走(2026-09-14 拍板) ----------------
+
+def _comment(mentions, text="@alice_z1 和 @bob_z22 来看"):
+    from datetime import datetime, timezone
+
+    from app.models import VideoComment
+    return VideoComment(id=5, video_id=1, user_id=2, root_id=None, parent_id=None,
+                        reply_to_user_id=None, text=text, mentions=mentions, likes=0,
+                        reply_count=0, pinned=False,
+                        created_at=datetime(2026, 9, 14, 12, tzinfo=timezone.utc))
+
+
+def test_comment_out_drops_mentions_of_people_who_turned_the_switch_off():
+    """展示时:@ 到的人现在关着开关,这条 mention 不下发(客户端当普通文字),和 @ 一个没注册的号
+    长得一模一样;别人照旧。存的 mentions 不动 —— 他重新打开,链接就回来。"""
+    from app.models import Video
+    v = Video(vid="svAAAAAAAAAA", uploader_id=1)
+    alice, bob = {"user_id": 7, "username": "alice_z1"}, {"user_id": 8, "username": "bob_z22"}
+    c = _comment([alice, bob])
+    assert talk.comment_out(c, v, {}, {}, mentions_hidden=set())["mentions"] == [alice, bob]
+    off = talk.comment_out(c, v, {}, {}, mentions_hidden={7})
+    assert off["mentions"] == [bob]
+    never = talk.comment_out(_comment([bob]), v, {}, {}, mentions_hidden=set())
+    assert off == never, "关了开关的号和从没注册过的号,出来的评论一模一样"
+    assert c.mentions == [alice, bob], "只是不下发,库里存的不改"
+    assert talk.comment_out(_comment(None), v, {}, {}, mentions_hidden={7})["mentions"] == []
+
+
+def test_comment_out_must_be_told_who_is_hidden():
+    """mentions_hidden 必传:哪天新加一个出评论的地方忘了查开关,当场报错,而不是静默地把号和人对上。"""
+    from app.models import Video
+    with pytest.raises(TypeError):
+        talk.comment_out(_comment([]), Video(vid="svAAAAAAAAAA", uploader_id=1), {}, {})
+
+
+def test_mentions_off_asks_once_about_everyone_on_the_page(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    asked = []
+
+    async def fake(db, ids):
+        asked.append(sorted(ids))
+        return {8}
+
+    monkeypatch.setattr(talk, "username_search_off", fake)
+    page = [SimpleNamespace(mentions=[{"user_id": 7, "username": "a"}, {"user_id": 8, "username": "b"}]),
+            SimpleNamespace(mentions=None),
+            SimpleNamespace(mentions=[{"user_id": 8, "username": "b"}, "坏数据", {"username": "c"}])]
+    assert asyncio.run(talk.mentions_off(None, page)) == {8}
+    assert asked == [[7, 8]], "一页一次,去重"
+
+
+def test_posting_does_not_resolve_people_who_turned_the_switch_off():
+    """发评论时解析 @ 的那条 SQL 带着开关条件:关了的人查不出来,也就不存 mentions、不发「@我的」。"""
+    import asyncio
+
+    from sqlalchemy.dialects import postgresql
+    seen = []
+
+    class _Rows:
+        def all(self):
+            return []
+
+    class _DB:
+        async def execute(self, stmt):
+            seen.append(str(stmt.compile(dialect=postgresql.dialect(),
+                                         compile_kwargs={"literal_binds": True})))
+            return _Rows()
+
+    assert asyncio.run(talk._resolve_mentions(_DB(), ["alice_z1"])) == []
+    sql = seen[0]
+    assert "social_profiles.privacy ->> 'username_search'" in sql and "'nobody'" in sql, sql
+    assert "LEFT OUTER JOIN social_profiles" in sql, "没有资料行的人按缺省(能找到)算,不能被内连接丢掉"
+    assert asyncio.run(talk._resolve_mentions(_DB(), [])) == [] and len(seen) == 1, "没有 @ 不查库"
+
+
 def test_user_hash_is_stable_short_and_not_the_id():
     h = talk.user_hash(12345)
     assert h == talk.user_hash(12345) and len(h) == 8 and int(h, 16) >= 0

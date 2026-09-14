@@ -478,7 +478,8 @@ class CommentIn(BaseModel):
 @router.post("/videos/{vid}/comments")
 async def comment_post(vid: str, body: CommentIn, me: User = Depends(social_user),
                        db: AsyncSession = Depends(get_db)):
-    """发评论 / 回复:每人每 5 秒 1 条、每天 500 条;≤ 1,000 字;过屏蔽词;@用户名 会通知对方。"""
+    """发评论 / 回复:每人每 5 秒 1 条、每天 500 条;≤ 1,000 字;过屏蔽词;@超级赞号 会通知对方
+    (对方关了「按超级赞号找到我」的,当普通文字,不通知 —— 见 video_talk._resolve_mentions)。"""
     v = await vsvc.viewable(db, vid, me, lock=True)
     talk.clean_comment(body.text)
     await check_rate_limit_seconds("video_comment", str(me.id), 1, 5, "评论太快了,5 秒一条")
@@ -486,7 +487,7 @@ async def comment_post(vid: str, body: CommentIn, me: User = Depends(social_user
     c = await talk.post_comment(db, me, v, body.text, body.parent_id)
     await db.commit()
     ppl = await vsvc.people(db, me.id, {c.user_id, c.reply_to_user_id or c.user_id})
-    return talk.comment_out(c, v, ppl, {})
+    return talk.comment_out(c, v, ppl, {}, mentions_hidden=await talk.mentions_off(db, [c]))
 
 
 async def _comment_ctx(db: AsyncSession, comment_id: int, me: User | None,

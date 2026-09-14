@@ -22,10 +22,10 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..models import (CommentVote, Danmaku, SocialBlock, User, Username, Video, VideoComment,
-                      VideoPart)
+from ..models import (CommentVote, Danmaku, SocialBlock, SocialProfile, User, Username, Video,
+                      VideoComment, VideoPart)
 from . import video as vsvc
-from .social import blocked_between
+from .social import blocked_between, username_search_off, username_searchable
 
 # ---------------- 弹幕 ----------------
 
@@ -194,12 +194,35 @@ def parse_mentions(text: str) -> list[str]:
 
 
 async def _resolve_mentions(db: AsyncSession, names: list[str]) -> list[dict]:
+    """文中的 @超级赞号 → 人。发评论时解析一次,存进 video_comments.mentions
+    (展示时还要按开关再滤一遍,见 [mentions_off])。
+
+    **对方关了「按超级赞号找到我」**(隐私项 username_search):不解析,当普通文字 —— 不出链接、
+    不发「@我的」,和没有这个号一模一样。不然随便发条评论 @ 一下,就能从链接里认出这个号是谁,
+    开关就白关了(和 /social/v1/resolve 同一个口径)。@ 自己也一样:评论是公开的,链接谁都看得到。
+    拉黑不在这里管,照旧:链接照出,通知由 social_notify.notify 按拉黑挡掉。
+    """
     if not names:
         return []
-    rows = (await db.execute(select(Username.username_lc, Username.owner_id).where(
-        Username.username_lc.in_(names), Username.owner_type == "user"))).all()
+    rows = (await db.execute(
+        select(Username.username_lc, Username.owner_id)
+        .outerjoin(SocialProfile, SocialProfile.user_id == Username.owner_id)
+        .where(Username.username_lc.in_(names), Username.owner_type == "user",
+               username_searchable(SocialProfile.privacy)))).all()
     by = {n: uid for n, uid in rows}
     return [{"user_id": by[n], "username": n} for n in names if n in by]
+
+
+async def mentions_off(db: AsyncSession, comments) -> set[int]:
+    """这些评论里 @ 到的人当中,**现在**关着「按超级赞号找到我」的。展示时把他们从 mentions 里拿掉。
+
+    只在发的时候挡不够:开关关掉之前发的评论,mentions 里还存着「这个号 → 这个人」,照样把号和人对上。
+    所以展示时按对方现在的开关再滤一遍 —— 关掉那一刻起,新旧评论里 @ 他的都成了普通文字,
+    重新打开就又有链接(存的 mentions 不改)。关着的时候发的评论当时就没解析,以后打开也不补
+    (补的话就得补发「@我的」,让人收到很久以前的 @)。一页评论一条查询。
+    """
+    ids = {m.get("user_id") for c in comments for m in (c.mentions or []) if isinstance(m, dict)}
+    return await username_search_off(db, [i for i in ids if isinstance(i, int)])
 
 
 async def get_comment(db: AsyncSession, comment_id: int, *, lock: bool = False) -> VideoComment:
@@ -283,14 +306,20 @@ async def _votes_of(db: AsyncSession, viewer_id: int | None, ids: list[int]) -> 
 
 
 def comment_out(c: VideoComment, v: Video, people: dict, votes: dict, *,
-                replies: list[dict] | None = None) -> dict:
-    """评论对象。**点踩数不出现**(只用于内部治理)。"""
+                mentions_hidden: set[int], replies: list[dict] | None = None) -> dict:
+    """评论对象。**点踩数不出现**(只用于内部治理)。
+
+    [mentions_hidden] 是现在关着「按超级赞号找到我」的人([mentions_off] 查出来的),@ 他们的
+    不进 mentions,客户端就当普通文字显示。必传:漏传一处,就又把关了开关的人和他的号对上了。
+    """
     rt = people.get(c.reply_to_user_id) if c.reply_to_user_id else None
+    mentions = [m for m in c.mentions or []
+                if isinstance(m, dict) and m.get("user_id") not in mentions_hidden]
     out = {"id": c.id, "vid": v.vid, "root_id": c.root_id, "parent_id": c.parent_id,
            "user": people.get(c.user_id) or {"id": c.user_id, "name": "", "username": None,
                                              "avatar": ""},
            "reply_to": {"id": rt["id"], "name": rt["name"]} if rt else None,
-           "text": c.text, "mentions": c.mentions or [], "likes": c.likes,
+           "text": c.text, "mentions": mentions, "likes": c.likes,
            "my_vote": votes.get(c.id, 0), "reply_count": c.reply_count, "pinned": c.pinned,
            "is_up": c.user_id == v.uploader_id, "created_at": vsvc.iso(c.created_at)}
     if c.root_id is None:
@@ -319,8 +348,10 @@ async def _render(db: AsyncSession, viewer_id: int | None, v: Video, roots: list
     ppl = await vsvc.people(db, viewer_id, {c.user_id for c in all_c} |
                             {c.reply_to_user_id for c in all_c if c.reply_to_user_id})
     votes = await _votes_of(db, viewer_id, [c.id for c in all_c])
-    return [comment_out(r, v, ppl, votes,
-                        replies=[comment_out(x, v, ppl, votes) for x in replies.get(r.id, [])])
+    off = await mentions_off(db, all_c)
+    return [comment_out(r, v, ppl, votes, mentions_hidden=off,
+                        replies=[comment_out(x, v, ppl, votes, mentions_hidden=off)
+                                 for x in replies.get(r.id, [])])
             for r in roots]
 
 
@@ -388,8 +419,9 @@ async def list_replies(db: AsyncSession, viewer: User | None, v: Video, root: Vi
     ppl = await vsvc.people(db, viewer_id, {c.user_id for c in rows + [root]} |
                             {c.reply_to_user_id for c in rows if c.reply_to_user_id})
     votes = await _votes_of(db, viewer_id, [c.id for c in rows + [root]])
-    return {"root": comment_out(root, v, ppl, votes),
-            "items": [comment_out(c, v, ppl, votes) for c in rows],
+    off = await mentions_off(db, rows + [root])
+    return {"root": comment_out(root, v, ppl, votes, mentions_hidden=off),
+            "items": [comment_out(c, v, ppl, votes, mentions_hidden=off) for c in rows],
             "next_cursor": str(rows[-1].id) if more and rows else None}
 
 
