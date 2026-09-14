@@ -8,6 +8,15 @@ name: Release
 # 换成「公开可查的 CI 日志」:tag 触发、公开 runner 打包、摘要写进 Release 页,
 # 任何人都能从 Release 追到那次构建的完整日志。
 #
+# 同一个 Release 里的产物(全部从同一个提交构建,哈希一起进 SHA256SUMS.txt):
+#   - 三端 APK(安卓直链包):chaojizan-{user,merchant,rider}-arm64.apk
+#   - 用户端网页版:chaojizan-web.tar.gz(官网 /web/,部署机上解压)
+#   - 用户端桌面版:chaojizan-windows-x64.zip、chaojizan-macos.dmg、
+#     chaojizan-linux-x64.tar.gz、chaojizan-linux-x64.deb
+# 各平台分 job 并行构建,每个 job 在自己的日志里先写下自己产物的 SHA-256;
+# 最后的 release job 收齐之后逐个核对这些哈希、合成 SHA256SUMS.txt 再发布 ——
+# 从构建日志到 Release 页,同一个文件的哈希处处一致。
+#
 # 第二档(逐字节可复现)还没做:Flutter 产物要逐字节一致得钉死构建时间戳、
 # 签名外置等一堆事。先立目标不立军令状 —— 当前做到公开构建。
 #
@@ -19,17 +28,27 @@ name: Release
 #   - 或手动 workflow_dispatch 填版本/build 号(会自动打同格式 tag)。
 #   老格式 tag(v0.11.1)不触发构建,避免误发。
 #
+# 手动触发还有两个开关:
+#   - desktop(默认开):同时出网页版和三个桌面版。桌面构建坏了又急着发安卓时关掉 ——
+#     推 tag 的那次如果卡在桌面构建上,Release 不会建出来;用同样的版本 / build 号
+#     手动触发、关掉 desktop,tag 已存在会跳过打 tag,照样发出只有 APK 的 Release;
+#   - dry_run:只构建不发布(不打 tag、不建 Release),产物留在这次运行的 Artifacts 里。
+#     第一次跑桌面构建、改了构建步骤之后,先用它在 CI 上验一遍。
+#
 # 需要的 secrets(Settings → Secrets and variables → Actions):
 #   ANDROID_KEYSTORE_BASE64   签名钥匙库 base64(base64 -i xxx.jks | pbcopy)
 #   ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD
 #   TENCENT_MAP_KEY           可选;缺省时配送地图退化为品牌网格示意
 # 缺签名 secrets 会在第一步明确失败 —— 绝不静默退回 debug 签名发出去
 # (debug 签名的包覆盖不了已装的正式签名版,用户升级会直接失败)。
+# 网页版和桌面版不用这些 secrets:腾讯地图在网页 / 桌面上没有组件,不往里编 key;
+# 桌面包不做系统签名(macOS 没有苹果开发者签名和公证、Windows 没有代码签名证书),
+# 官网下载页写了首次打开怎么放行。
 #
-# 产物口径与 scripts/release_apks.sh 的「官网直链包」一致(#192 的商店包
+# APK 的口径与 scripts/release_apks.sh 的「官网直链包」一致(#192 的商店包
 # 不在这里出:商店包是人工提交的,继续走本地脚本 SKIP_STORE 流程)。
-# 上传部署机 appdist + 更新 versions.json 仍是运维动作,不在公开 CI 里做
-# (CI 不该拿得到生产服务器的钥匙)。
+# 上传部署机 appdist、解压网页版、更新 versions.json 仍是运维动作,不在公开 CI 里做
+# (CI 不该拿得到生产服务器的钥匙):scripts/sync_release_to_appdist.sh <tag> "<说明>"。
 #
 # fork 自部署的人:把 env 里的 PUBLIC_BASE 与 ICP 换成你自己的。
 
@@ -47,25 +66,42 @@ on:
       notes:
         description: "更新说明一句话"
         required: true
+      desktop:
+        description: "同时出网页版和 Windows / macOS / Ubuntu 桌面版(急修安卓、桌面构建又坏着时关掉)"
+        type: boolean
+        default: true
+      dry_run:
+        description: "只构建不发布:不打 tag、不建 Release,产物留在这次运行的 Artifacts 里"
+        type: boolean
+        default: false
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  PUBLIC_BASE: https://chaojizan.cc
+  SUPERZ_ICP: 陕ICP备2025064101号-5
+  FLUTTER_VERSION: "3.44.6" # 与 ci.yml 保持一致
+  # runner 在海外:直连 google()/mavenCentral 是通的,而国内镜像
+  # 对海外访问不稳(2026-08-23 aliyun 的 google 镜像 502,三端全挂)。
+  # 开发机不设这个变量,继续走镜像 —— 那边被挡的恰恰是 dl.google.com。
+  # 现在只有安卓的 Gradle 认它;网页版和桌面版的构建不经过国内镜像(pub、CocoaPods、
+  # NuGet、libwebrtc 都直连官方源),写在这一层是为了以后谁给桌面构建加镜像时也照这个开关走
+  SUPERZ_SKIP_CN_MIRROR: "1"
+
 jobs:
-  build:
-    name: 公开构建三端 APK
+  meta:
+    name: 版本号与更新说明
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      contents: write # 创建 Release / dispatch 模式推 tag
-    env:
-      PUBLIC_BASE: https://chaojizan.cc
-      SUPERZ_ICP: 陕ICP备2025064101号-5
-      # runner 在海外:直连 google()/mavenCentral 是通的,而国内镜像
-      # 对海外访问不稳(2026-08-23 aliyun 的 google 镜像 502,三端全挂)。
-      # 开发机不设这个变量,继续走镜像 —— 那边被挡的恰恰是 dl.google.com
-      SUPERZ_SKIP_CN_MIRROR: "1"
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      build: ${{ steps.ver.outputs.build }}
+      tag: ${{ steps.ver.outputs.tag }}
+      desktop: ${{ steps.ver.outputs.desktop }}
+      dry_run: ${{ steps.ver.outputs.dry_run }}
+      notes: ${{ steps.notes.outputs.text }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,18 +110,34 @@ jobs:
 
       - name: 解析版本与 build 号
         id: ver
+        # ⚠️ 手动触发填的版本号、build 号也走 env 传,并且校验格式 ——
+        # 后面的 job 会把它们拼进命令行和文件名
+        env:
+          EVENT: ${{ github.event_name }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_BUILD: ${{ inputs.build }}
+          IN_DESKTOP: ${{ inputs.desktop }}
+          IN_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"; BUILD="${{ inputs.build }}"
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            VERSION="$IN_VERSION"; BUILD="$IN_BUILD"
+            DESKTOP="$IN_DESKTOP"; DRY_RUN="$IN_DRY_RUN"
           else
             TAG="${GITHUB_REF_NAME}"                    # v0.12.0-b2050
             VERSION="${TAG#v}"; VERSION="${VERSION%-b*}"
             BUILD="${TAG##*-b}"
+            DESKTOP=true; DRY_RUN=false
           fi
           echo "$BUILD" | grep -qE '^[0-9]+$' || { echo "build 号不是数字:$BUILD"; exit 1; }
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
-          echo "构建 v$VERSION build $BUILD"
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "版本名不是 x.y.z:$VERSION"; exit 1; }
+          {
+            echo "version=$VERSION"
+            echo "build=$BUILD"
+            echo "tag=v$VERSION-b$BUILD"
+            echo "desktop=$DESKTOP"
+            echo "dry_run=$DRY_RUN"
+          } >> "$GITHUB_OUTPUT"
+          echo "构建 v$VERSION build $BUILD(网页版 + 桌面版:$DESKTOP,只构建不发布:$DRY_RUN)"
 
       - name: 解析更新说明
         id: notes
@@ -131,6 +183,19 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "本次更新说明:"; printf '%s\n' "$NOTES"
 
+  android:
+    name: 公开构建三端 APK
+    needs: meta
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+
       - name: 还原签名钥匙(缺 secrets 明确失败,不静默降级)
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -159,7 +224,7 @@ jobs:
           java-version: "17"
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.44.6" # 与 ci.yml 保持一致
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
@@ -167,7 +232,6 @@ jobs:
         env:
           TENCENT_MAP_KEY: ${{ secrets.TENCENT_MAP_KEY }}
         run: |
-          VERSION="${{ steps.ver.outputs.version }}"; BUILD="${{ steps.ver.outputs.build }}"
           mkdir -p build/release-apks
           for app in user merchant rider; do
             echo "== ${app}_app v$VERSION+$BUILD =="
@@ -185,7 +249,6 @@ jobs:
 
       - name: 校验 versionCode 平码与安装权限(同 release_apks.sh 两道闸)
         run: |
-          BUILD="${{ steps.ver.outputs.build }}"
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)
           for app in user merchant rider; do
             APK=build/release-apks/chaojizan-${app}-arm64.apk
@@ -196,33 +259,456 @@ jobs:
           done
           echo "versionCode 平码 ✓ 安装权限 ✓"
 
-      - name: 计算 SHA-256
-        id: sha
+      - name: 计算 SHA-256(写进本 job 日志,release job 会逐个核对)
         run: |
           cd build/release-apks
-          sha256sum *.apk | tee SHA256SUMS.txt
+          sha256sum *.apk | tee SHA256SUMS.android.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: build/release-apks/
+          if-no-files-found: error
+          retention-days: 7
+
+  web:
+    name: 用户端网页版
+    needs: meta
+    if: needs.meta.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # 挂在官网的 /web/ 下(不是 /app/:那是现有的接口路径,/app/latest 就在那儿)。
+      # 国内打开要能用,三件事缺一不可:
+      #   - --no-web-resources-cdn:CanvasKit 从本地 canvaskit/ 加载,不去 www.gstatic.com;
+      #   - SZ_FONT_FALLBACK_BASE:引擎的字体回落(正文里的汉字、emoji)改走同源的
+      #     fontfallback/,下一步的 pack_user_web.py 把字体从 gstatic 镜像进来(runner 在海外,连得上);
+      #   - SUPERZ_API 用官网同一个域名:页面和接口同源,不涉及跨域。
+      # 不编腾讯地图 key:网页上没有这个组件,编进去只会把 key 公开在 JS 里
+      - name: 构建网页版
+        run: |
+          cd apps/user_app
+          flutter build web --release \
+            --base-href /web/ \
+            --no-web-resources-cdn \
+            --web-define=SZ_FONT_FALLBACK_BASE=fontfallback/ \
+            --build-name="$VERSION" --build-number="$BUILD" \
+            --dart-define=SUPERZ_CHANNEL=self \
+            "--dart-define=SUPERZ_API=$PUBLIC_BASE" \
+            "--dart-define=SUPERZ_ICP=$SUPERZ_ICP"
+
+      - name: 核对、镜像字体回落、预压缩、打包
+        run: |
+          mkdir -p dist
+          python3 scripts/pack_user_web.py apps/user_app/build/web dist/chaojizan-web.tar.gz
+          cd dist
+          sha256sum chaojizan-web.tar.gz | tee SHA256SUMS.web.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-web
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: 用户端 Windows 版
+    needs: meta
+    if: needs.meta.outputs.desktop == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # flutter_webrtc 在 CMake 配置时从 GitHub 下 libwebrtc,geolocator / audioplayers 下 NuGet 包 ——
+      # runner 在海外,直连就行。
+      # 编译期常量写进 UTF-8 的 JSON 再用 --dart-define-from-file 传:备案号里有汉字,
+      # 在 Windows 上走命令行参数要经过 Git Bash → flutter.bat 两道编码转换,不如文件稳
+      - name: 构建
+        run: |
+          cd apps/user_app
+          printf '{"SUPERZ_CHANNEL":"self","SUPERZ_API":"%s","SUPERZ_ICP":"%s"}\n' \
+            "$PUBLIC_BASE" "$SUPERZ_ICP" > sz-defines.json
+          cat sz-defines.json
+          flutter build windows --release \
+            --build-name="$VERSION" --build-number="$BUILD" \
+            --dart-define-from-file=sz-defines.json
+
+      # 解压就能用的绿色版。VC++ 运行库(msvcp140 / vcruntime140 / vcruntime140_1)一起放进去:
+      # Flutter 的 Windows 分发说明要求随包带上,没装过 VC++ 运行库的机器缺它们打不开
+      - name: 打包 zip
+        run: |
+          OUT=apps/user_app/build/windows/x64/runner/Release
+          test -f "$OUT/chaojizan.exe" || { echo "::error::找不到 chaojizan.exe(windows/CMakeLists.txt 的 BINARY_NAME 改过?)"; exit 1; }
+          mkdir -p dist/chaojizan
+          cp -r "$OUT"/. dist/chaojizan/
+          for dll in msvcp140.dll vcruntime140.dll vcruntime140_1.dll; do
+            cp "/c/Windows/System32/$dll" dist/chaojizan/
+          done
+          ls -la dist/chaojizan
+          cd dist
+          7z a -tzip -mx=9 chaojizan-windows-x64.zip chaojizan > /dev/null
+          ls -la chaojizan-windows-x64.zip
+
+      # 冒烟:起来 20 秒还活着就算「打开不崩」。插件注册失败、缺 DLL 这类问题都是一启动就退出
+      - name: 冒烟测试(能启动、不闪退)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\chaojizan\chaojizan.exe" -PassThru
+          Start-Sleep -Seconds 20
+          if ($p.HasExited) {
+            Write-Output "::error::启动 20 秒内就退出了(退出码 $($p.ExitCode))"
+            exit 1
+          }
+          Stop-Process -Id $p.Id -Force
+          $p.WaitForExit(15000) | Out-Null  # 等它真退出、放开文件,下一步要删这个目录
+          Write-Output "启动 20 秒仍在运行 ✓"
+
+      - name: 计算 SHA-256
+        run: |
+          cd dist
+          sha256sum chaojizan-windows-x64.zip | tee SHA256SUMS.windows.txt
+          rm -rf chaojizan
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  macos:
+    name: 用户端 macOS 版
+    needs: meta
+    if: needs.meta.outputs.desktop == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # 插件全走 Swift Package Manager(Flutter 3.44 起缺省),不需要 Podfile。
+      # 最低系统版本 13.0,原因见 macos/Runner/Configs/AppInfo.xcconfig
+      - name: 构建
+        run: |
+          cd apps/user_app
+          flutter build macos --release \
+            --build-name="$VERSION" --build-number="$BUILD" \
+            --dart-define=SUPERZ_CHANNEL=self \
+            "--dart-define=SUPERZ_API=$PUBLIC_BASE" \
+            "--dart-define=SUPERZ_ICP=$SUPERZ_ICP"
+
+      # 没有苹果开发者签名和公证:Xcode 做的是 ad-hoc 签名(能在本机跑,换台机器首次打开要手动放行,
+      # 官网下载页写了怎么放行)。这里先确认签名完整、是 Intel + Apple 芯片的通用包
+      - name: 核对签名与架构
+        run: |
+          APP="apps/user_app/build/macos/Build/Products/Release/超级赞.app"
+          test -d "$APP" || { echo "::error::找不到 超级赞.app(AppInfo.xcconfig 的 PRODUCT_NAME 改过?)"; exit 1; }
+          codesign --verify --deep --strict "$APP"
+          ARCHS=$(lipo -archs "$APP/Contents/MacOS/超级赞")
+          echo "架构:$ARCHS"
+          case "$ARCHS" in *x86_64*arm64*|*arm64*x86_64*) ;; *) echo "::error::不是通用包:$ARCHS"; exit 1;; esac
+          /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist"
+
+      - name: 冒烟测试(能启动、不闪退)
+        run: |
+          APP="apps/user_app/build/macos/Build/Products/Release/超级赞.app"
+          "$APP/Contents/MacOS/超级赞" > smoke.log 2>&1 &
+          PID=$!
+          sleep 20
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "::error::启动 20 秒内就退出了"; cat smoke.log; exit 1
+          fi
+          kill "$PID"
+          echo "启动 20 秒仍在运行 ✓"
+
+      # dmg 里放 App 和一个「应用程序」的快捷方式,拖过去就装好。
+      # hdiutil 在 GitHub 的 macOS runner 上偶尔报 Resource busy,失败重试两次
+      - name: 打包 dmg
+        run: |
+          APP="apps/user_app/build/macos/Build/Products/Release/超级赞.app"
+          mkdir -p dist dmg-root
+          ditto "$APP" "dmg-root/超级赞.app"
+          ln -s /Applications dmg-root/Applications
+          for i in 1 2 3; do
+            hdiutil create -volname "超级赞" -srcfolder dmg-root -ov -format UDZO dist/chaojizan-macos.dmg && break
+            [ "$i" = 3 ] && exit 1
+            sleep 10
+          done
+          ls -la dist
+          cd dist
+          shasum -a 256 chaojizan-macos.dmg | tee SHA256SUMS.macos.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: 用户端 Ubuntu 版
+    needs: meta
+    if: needs.meta.outputs.desktop == 'true'
+    # 在 22.04 上编:二进制跟着 glibc 走,在这里编出来的 22.04 及以上都能跑
+    # (官网下载页写的「Ubuntu 22.04 及以上」就是这个数,换 runner 要一起改)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Flutter 自己要的(docs.flutter.dev 的 Linux 桌面说明):
+      #   clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+      # 插件要的:
+      #   audioplayers_linux 放语音、铃声 → libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      #   file_selector / url_launcher 走 GTK,上面已有;flutter_webrtc 的 libwebrtc 构建时从 GitHub 下
+      #   record_linux 录音在运行时调系统的 parecord + ffmpeg(deb 里写成推荐安装)
+      # 故意不装 libpulse-dev:装了 flutter_webrtc 会链上 libpulse(只为录系统声音的屏幕共享,用不到),
+      # 用户机器上就多一个启动依赖
+      # 冒烟测试:xvfb + mesa(没有显示器也能起窗口)
+      - name: 装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            xvfb libgl1-mesa-dri xauth
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: 构建
+        run: |
+          cd apps/user_app
+          flutter build linux --release \
+            --build-name="$VERSION" --build-number="$BUILD" \
+            --dart-define=SUPERZ_CHANNEL=self \
+            "--dart-define=SUPERZ_API=$PUBLIC_BASE" \
+            "--dart-define=SUPERZ_ICP=$SUPERZ_ICP"
+
+      - name: 核对动态库依赖
+        run: |
+          B=apps/user_app/build/linux/x64/release/bundle
+          test -x "$B/chaojizan" || { echo "::error::找不到 chaojizan(linux/CMakeLists.txt 的 BINARY_NAME 改过?)"; exit 1; }
+          # libdartjni 是 jni 插件在桌面上顺手编的(只有安卓的 path_provider 用它),桌面上从不加载,
+          # 它要的 libjvm 缺着没关系;其余的缺一个就是用户机器上启动不了
+          missing=$(for f in "$B/chaojizan" "$B"/lib/*.so; do
+                      case "$f" in *libdartjni*) continue;; esac
+                      ldd "$f" | grep 'not found' | sed "s#^#$(basename "$f"): #"
+                    done)
+          if [ -n "$missing" ]; then echo "::error::缺动态库:"; echo "$missing"; exit 1; fi
+          echo "动态库齐全 ✓"
+          echo "要求的最高 glibc:$(objdump -T "$B/chaojizan" "$B"/lib/*.so 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
+
+      - name: 打包 tar.gz 和 deb
+        run: |
+          B=apps/user_app/build/linux/x64/release/bundle
+          mkdir -p dist
+          cp -r "$B" dist/chaojizan
+          tar -C dist --sort=name --owner=0 --group=0 --numeric-owner \
+            -czf dist/chaojizan-linux-x64.tar.gz chaojizan
+
+          # deb:装到 /opt/chaojizan,命令 /usr/bin/chaojizan,菜单里有图标。
+          # .desktop 的文件名和 StartupWMClass 要等于 linux/CMakeLists.txt 的 APPLICATION_ID ——
+          # runner 里 g_set_prgname 用的就是它,对不上的话任务栏认不出这个窗口是谁、图标出不来
+          APP_ID=com.chaojizan.user_app
+          P=pkgroot
+          mkdir -p $P/DEBIAN $P/opt $P/usr/bin $P/usr/share/applications $P/usr/share/pixmaps
+          cp -r "$B" $P/opt/chaojizan
+          ln -s /opt/chaojizan/chaojizan $P/usr/bin/chaojizan
+          install -m644 assets/brand/icon.png $P/usr/share/pixmaps/$APP_ID.png
+          cat > $P/usr/share/applications/$APP_ID.desktop <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=超级赞
+          Comment=点外卖、订酒店、买券、叫跑腿,每一单分账可查
+          Exec=/opt/chaojizan/chaojizan
+          Icon=$APP_ID
+          Terminal=false
+          Categories=Network;
+          StartupWMClass=$APP_ID
+          EOF
+          # 依赖:GTK 和 GStreamer 是启动就要链接的(缺了打不开);
+          # 推荐项:放语音消息要的 GStreamer 插件(AAC 在 libav 里)、录音要的 parecord 和 ffmpeg。
+          # libgtk-3-0t64 是 24.04 改的名字
+          cat > $P/DEBIAN/control <<EOF
+          Package: chaojizan
+          Version: ${VERSION}+b${BUILD}
+          Architecture: amd64
+          Maintainer: 超级赞 <support@chaojizan.cc>
+          Installed-Size: $(du -sk $P/opt | cut -f1)
+          Depends: libgtk-3-0 | libgtk-3-0t64, libgstreamer1.0-0, libgstreamer-plugins-base1.0-0
+          Recommends: gstreamer1.0-plugins-good, gstreamer1.0-libav, pulseaudio-utils, ffmpeg
+          Section: net
+          Priority: optional
+          Homepage: https://chaojizan.cc
+          Description: 超级赞用户端(电脑版)
+           点外卖、订酒店、买券、叫跑腿,每一单分账可查。
+          EOF
+          dpkg-deb --build --root-owner-group $P dist/chaojizan-linux-x64.deb
+          dpkg-deb --info dist/chaojizan-linux-x64.deb
+          ls -la dist
+
+      # 冒烟:按用户的装法装一遍 deb(顺带验证依赖在 22.04 上都解得开),再在虚拟显示器里起 20 秒
+      - name: 冒烟测试(装 deb、能启动、不闪退)
+        run: |
+          sudo apt-get install -y ./dist/chaojizan-linux-x64.deb
+          set +e
+          xvfb-run -a -s "-screen 0 1280x800x24" timeout 20 /usr/bin/chaojizan > smoke.log 2>&1
+          code=$?
+          set -e
+          if [ "$code" != 124 ]; then
+            echo "::error::20 秒内就退出了(退出码 $code)"; cat smoke.log; exit 1
+          fi
+          echo "启动 20 秒仍在运行 ✓"
+
+      - name: 计算 SHA-256
+        run: |
+          cd dist
+          rm -rf chaojizan
+          sha256sum chaojizan-linux-x64.tar.gz chaojizan-linux-x64.deb | tee SHA256SUMS.linux.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: 汇总校验和,发布 Release
+    needs: [meta, android, web, windows, macos, linux]
+    # 安卓必须成功;开了桌面版的话网页版和三个桌面版也必须都成功 ——
+    # 缺一个就不发,不发半套。关了桌面版时那四个 job 是 skipped,不算失败
+    if: >-
+      ${{ !cancelled() && needs.meta.result == 'success' && needs.android.result == 'success' &&
+          (needs.meta.outputs.desktop != 'true' ||
+           (needs.web.result == 'success' && needs.windows.result == 'success' &&
+            needs.macos.result == 'success' && needs.linux.result == 'success')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # 创建 Release / dispatch 模式推 tag
+    env:
+      VERSION: ${{ needs.meta.outputs.version }}
+      BUILD: ${{ needs.meta.outputs.build }}
+      TAG: ${{ needs.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: build/release
+          merge-multiple: true
+
+      # 每个构建 job 在自己的日志里写过自己产物的哈希(SHA256SUMS.<job>.txt);
+      # 这里逐个核对,确认从 artifact 取回来的就是构建 job 编出来的那一份,再合成一份发布
+      - name: 核对各 job 的哈希,合成 SHA256SUMS.txt
+        run: |
+          cd build/release
+          ls -la
+          sha256sum -c SHA256SUMS.*.txt
+          sha256sum chaojizan-* | sort -k2 > SHA256SUMS.txt
+          rm SHA256SUMS.*.txt
+          # 发出去的每个文件都得在清单里,清单里的每一项都得在这里
+          set -- chaojizan-*; [ "$#" = "$(wc -l < SHA256SUMS.txt)" ] || { echo "::error::文件和清单对不上"; exit 1; }
+          cat SHA256SUMS.txt
+
+      - name: 只构建不发布:清单留在 Artifacts
+        if: needs.meta.outputs.dry_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SHA256SUMS
+          path: build/release/SHA256SUMS.txt
+          retention-days: 7
 
       - name: dispatch 模式补打 tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && needs.meta.outputs.dry_run != 'true'
         run: |
-          TAG="v${{ steps.ver.outputs.version }}-b${{ steps.ver.outputs.build }}"
           git tag "$TAG" && git push origin "$TAG" || echo "tag 已存在,跳过"
 
+      # 正文按这一版实际有哪些产物写(关掉了电脑版的那种手动发版只有 APK)。
+      # 更新说明是别人能填的自由文本,走 env 进来,不插进脚本
+      - name: 写 Release 正文
+        if: needs.meta.outputs.dry_run != 'true'
+        env:
+          NOTES: ${{ needs.meta.outputs.notes }}
+          DESKTOP: ${{ needs.meta.outputs.desktop }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            printf '%s\n\n' "$NOTES"
+            echo "本页的安装包由公开 CI 从本 tag 构建(第一档「公开构建」,"
+            echo "逐字节可复现还在路上)—— 构建日志:"
+            echo "$RUN_URL"
+            echo
+            echo "- 安卓:chaojizan-user / merchant / rider-arm64.apk"
+            if [ "$DESKTOP" = true ]; then
+              echo "- 用户端网页版:chaojizan-web.tar.gz($PUBLIC_BASE/web/ 上跑的就是它)"
+              echo "- 用户端电脑版:Windows(zip,解压即用)、macOS(dmg)、Ubuntu(tar.gz / deb)。"
+              echo "  电脑版没有做系统签名,首次打开要手动放行,步骤见 $PUBLIC_BASE/download#desktop"
+            fi
+            echo
+            echo "安装前校验 SHA-256(见附件 SHA256SUMS.txt)。"
+            echo "官网下载页、网页版与应用内更新走 appdist 通道,由运维把本页同一批产物"
+            echo "同步过去 —— 两边哈希应当一致,不一致请立刻开 issue。"
+          } > build/release-body.md
+          cat build/release-body.md
+
       - name: 创建 GitHub Release
+        if: needs.meta.outputs.dry_run != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && format('v{0}-b{1}', steps.ver.outputs.version, steps.ver.outputs.build) || github.ref_name }}
-          name: 超级赞 v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.build }})
-          body: |
-            ${{ steps.notes.outputs.text }}
-
-            本次 APK 由公开 CI 从本 tag 构建(第一档「公开构建」,
-            逐字节可复现还在路上)—— 构建日志:
-            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            安装前校验 SHA-256(见附件 SHA256SUMS.txt)。
-            官网下载页与应用内更新走 appdist 通道,由运维把本页同一批产物
-            同步过去 —— 两边哈希应当一致,不一致请立刻开 issue。
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: 超级赞 v${{ needs.meta.outputs.version }} (build ${{ needs.meta.outputs.build }})
+          body_path: build/release-body.md
           files: |
-            build/release-apks/*.apk
-            build/release-apks/SHA256SUMS.txt
+            build/release/*.apk
+            build/release/*.tar.gz
+            build/release/*.zip
+            build/release/*.dmg
+            build/release/*.deb
+            build/release/SHA256SUMS.txt
