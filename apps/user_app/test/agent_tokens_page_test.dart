@@ -208,7 +208,7 @@ void main() {
     await t.pump();
     final superz = (jsonDecode(copied!) as Map)['mcpServers']['superz'] as Map;
     expect(superz['command'], 'python3');
-    expect(superz['args'], ['/绝对路径/mcp-server/server.py']);
+    expect(superz['args'], ['/绝对路径/server.py']);
     expect(superz['env'], {'SUPERZ_API': _base, 'SUPERZ_AGENT_TOKEN': _token});
 
     await t.tap(find.widgetWithText(TextButton, '复制令牌'));

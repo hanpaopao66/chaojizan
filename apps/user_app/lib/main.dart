@@ -8347,7 +8347,7 @@ class _ProfileViewState extends State<ProfileView> {
         SzEntryTile(
           icon: Icons.smart_toy_outlined,
           title: 'AI 助手',
-          hint: '让助手帮你找店下单;它付不了款',
+          hint: '让助手帮你点餐、发视频;它付不了款',
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => AgentTokensPage(api: widget.api))),
         ),

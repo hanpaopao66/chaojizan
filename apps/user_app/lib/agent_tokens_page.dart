@@ -81,7 +81,7 @@ String _mcpConfig(String api, String token) =>
       'mcpServers': {
         'superz': {
           'command': 'python3',
-          'args': ['/绝对路径/mcp-server/server.py'],
+          'args': ['/绝对路径/server.py'],
           'env': {'SUPERZ_API': api, 'SUPERZ_AGENT_TOKEN': token},
         },
       },
@@ -286,8 +286,8 @@ class _AgentTokensPageState extends State<AgentTokensPage> {
                   child: const Text('复制配置'),
                 ),
               ]),
-              Text('贴进电脑上助手的 MCP 配置里,把 /绝对路径/ 换成 mcp-server '
-                  '在你电脑上的位置。步骤见这一页的「操作说明」。',
+              Text('贴进电脑上助手的 MCP 配置里,把 /绝对路径/server.py 换成 server.py '
+                  '在你电脑上的位置(从开源仓库单独下载那一个文件就行)。步骤见这一页的「操作说明」。',
                   style: TextStyle(
                       fontSize: kFontNote, height: 1.5, color: sz.inkMuted)),
               const SizedBox(height: 6),
