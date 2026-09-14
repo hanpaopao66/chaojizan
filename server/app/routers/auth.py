@@ -320,7 +320,7 @@ async def revoke_agent_token(
 
 @router.post("/sms-code")
 async def send_sms_code(payload: SmsCodeIn, request: Request):
-    """发验证码。60 秒防重发,验证码 5 分钟有效。
+    """发验证码。60 秒防重发(settings.sms_resend_seconds),验证码 5 分钟有效。
 
     防滥发(登录成功即清计数,长登录态本身就是最大的省短信手段):
     同号每日 8 条、同 IP 每日 20 条;同号第 3 条起要求滑块(409 captcha_required)。
@@ -352,8 +352,9 @@ async def send_sms_code(payload: SmsCodeIn, request: Request):
             raise HTTPException(409, "captcha_required")
         await redis.delete(f"slider:{payload.ticket}")  # 一次性
 
-    if not await redis.set(f"sms:cd:{payload.phone}", 1, ex=60, nx=True):
-        raise HTTPException(429, "发送太频繁,请 60 秒后再试")
+    cooldown = settings.sms_resend_seconds
+    if not await redis.set(f"sms:cd:{payload.phone}", 1, ex=cooldown, nx=True):
+        raise HTTPException(429, f"发送太频繁,请 {cooldown} 秒后再试")
     # 计数在冷却检查后再加,连点不重复计
     for key in (day_phone, day_ip):
         if await redis.incr(key) == 1:

@@ -1,13 +1,17 @@
 """验证码登录链路:滑块挑战、每日频控、按端角色注册、登录清计数。
 
-注意:同号发码有 60 秒冷却,本测试含两次 61 秒等待(总时长 ~2 分钟)。
+注意:同号发码有冷却(生产 60 秒,settings.sms_resend_seconds),本测试要等三次冷却;
+CI 里 SMS_RESEND_SECONDS 调短,服务端和本进程读的是同一个环境变量。
 用固定测试号 19900000001,幂等可重复跑(角色断言用"已存在即保持"语义)。
 """
 import time
 
+from app.config import settings
 from tests.util import call
 
 PHONE = "19900000001"
+#: 等冷却过去:服务端的冷却秒数 + 1
+WAIT = settings.sms_resend_seconds + 1
 
 
 def _reset_daily_quota():
@@ -41,14 +45,14 @@ r1 = send()
 assert r1.get("dev_code"), "本地未配短信,应返回 dev_code"
 print("✓ 第 1 条发码放行")
 
-print("  (等 61s 过冷却……)")
-time.sleep(61)
+print(f"  (等 {WAIT}s 过冷却……)")
+time.sleep(WAIT)
 r2 = send()
 assert r2.get("dev_code")
 print("✓ 第 2 条发码放行")
 
-print("  (等 61s 过冷却……)")
-time.sleep(61)
+print(f"  (等 {WAIT}s 过冷却……)")
+time.sleep(WAIT)
 # 第 3 条:要求滑块
 err = send(expect_error=True)
 assert err["_error"] == 409 and "captcha_required" in str(err["detail"])
@@ -72,9 +76,9 @@ login = call("POST", "/auth/sms-login", body={
 assert login["role"] == "rider", f"应为 rider,实际 {login['role']}"
 print(f"✓ 按端角色注册/保持:{login['role']}")
 
-# 登录成功清当日计数:下一条发码不再要滑块(仍受 60s 冷却,等一下)
-print("  (等 61s 过冷却……)")
-time.sleep(61)
+# 登录成功清当日计数:下一条发码不再要滑块(仍受冷却,等一下)
+print(f"  (等 {WAIT}s 过冷却……)")
+time.sleep(WAIT)
 r4 = send()
 assert r4.get("dev_code"), "登录后计数应已清零,无需滑块"
 print("✓ 登录成功清频控计数")

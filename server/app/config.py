@@ -151,8 +151,17 @@ class Settings(BaseSettings):
     # /transparency/queue 报的是实际生效值,不是这里的默认值。
     # 设成 0 等于取消「商家不能秒过号」这条保护,那会写在公示上给所有人看。
     queue_call_grace_seconds: int = 120
+    # 同一手机号两次发验证码至少隔几秒。和上面的叫号宽限期同一个理由放成配置:
+    # e2e_auth_sms 要验「冷却内再发被拒、过了冷却能发」,真等 60 秒 ×3 给每次 CI 加 3 分钟。
+    # CI 里调短,**规则照样验**,不是关掉;生产不写就是 60
+    sms_resend_seconds: int = 60
+    # 来电响铃多久没人接算未接(§5.12)。同上:e2e_calls 要验「没人接两边都收到 missed」,
+    # 真等 45 秒;CI 里调短,生产不写就是 45
+    call_ring_seconds: int = 45
+    # 通话中一方所有连接都断了,等几秒没回来判通话结束(给网络切换、重连留时间)。同上,生产 20
+    call_drop_grace_seconds: int = 20
     rate_limit_login_per_minute: int = 30      # 同一手机号密码尝试
-    rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 60 秒重发限制)
+    rate_limit_sms_per_minute: int = 5         # 同一手机号请求验证码(另有 sms_resend_seconds 的重发冷却)
     rate_limit_sms_login_per_minute: int = 10  # 同一手机号验证码登录尝试
     rate_limit_order_per_minute: int = 20      # 同一用户下单
     # 同一串验证码连错几次就作废它。**光限速挡不住爆破**:6 位码 300 秒有效,

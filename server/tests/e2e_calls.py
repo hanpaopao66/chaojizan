@@ -11,6 +11,7 @@ import base64
 import secrets
 import time
 
+from app.config import settings
 from tests.chat_util import WS, person
 
 
@@ -117,16 +118,17 @@ def main():
     b.delete(f"/social/v1/blocks/{d.id}")
     print("  ✓ 隐私「谁能给我打电话」拦得住;被拉黑的人打过来一律忙线(不暴露拉黑)")
 
-    # ---- 未接(45 秒)----
+    # ---- 未接(生产 45 秒;CI 里 CALL_RING_SECONDS 调短,服务端和本进程读同一个环境变量)----
+    ring = settings.call_ring_seconds
     cid = invite(wc, b.id)
     wb.wait_for(cf("incoming", cid))
     t0 = time.time()
-    wc.wait_for(cf("missed", cid), timeout=52)
+    wc.wait_for(cf("missed", cid), timeout=ring + 7)
     wb.wait_for(cf("missed", cid), timeout=5)
-    assert 43 <= time.time() - t0 <= 52, time.time() - t0
+    assert ring - 2 <= time.time() - t0 <= ring + 7, (time.time() - t0, ring)
     time.sleep(0.5)
     assert last_call_message(c, b)["call"]["state"] == "missed"
-    print("  ✓ 未接:45 秒没人接,两边都收到 missed,聊天里一条「未接」")
+    print(f"  ✓ 未接:{ring} 秒没人接,两边都收到 missed,聊天里一条「未接」")
 
     # ---- 掉线 ----
     cid = invite(wc, b.id)
@@ -134,10 +136,11 @@ def main():
     wb.send({"t": "call", "a": "accept", "call_id": cid, "sdp": "answer"})
     wc.wait_for(cf("accept", cid))
     wc.close()
-    wb.wait_for(cf("hangup", cid), timeout=30)
+    grace = settings.call_drop_grace_seconds
+    wb.wait_for(cf("hangup", cid), timeout=grace + 10)
     time.sleep(0.5)
     assert last_call_message(b, c)["call"]["state"] == "ended"
-    print("  ✓ 掉线:一方所有连接都断了,20 秒没回来就判通话结束,对方收到 hangup")
+    print(f"  ✓ 掉线:一方所有连接都断了,{grace} 秒没回来就判通话结束,对方收到 hangup")
 
     # ---- 开关(#375):关着时呼叫直接回「暂未开放」,ice-servers 503,/config 告诉客户端收起电话按钮 ----
     from tests.util import call as http

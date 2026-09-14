@@ -38,10 +38,10 @@ from .social import SOCIAL_ROLES, allowed, blocked_between, display_name
 
 logger = logging.getLogger("superz.calls")
 
-#: 响铃多久没人接算未接(§5.12)
-RING_SECONDS = 45
-#: 一方掉线后等多久再判断「通话中断」(给网络切换、重连留时间)
-DROP_GRACE_SECONDS = 20
+#: 响铃多久没人接算未接(§5.12)。生产 45 秒;放在配置里是为了 CI 调短(settings.call_ring_seconds)
+RING_SECONDS = settings.call_ring_seconds
+#: 一方掉线后等多久再判断「通话中断」(给网络切换、重连留时间)。生产 20 秒(settings.call_drop_grace_seconds)
+DROP_GRACE_SECONDS = settings.call_drop_grace_seconds
 #: 正在通话的人:call:busy:{user_id} = call_id
 _BUSY_TTL = 4 * 3600
 #: 信令里 sdp / candidate 的上限(正常 sdp 几 KB)
