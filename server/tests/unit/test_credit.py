@@ -666,3 +666,32 @@ class Test缓存:
         names = {name for _, name, _ in
                  _calls(inspect.getsource(getattr(importlib.import_module(module), fn)))}
         assert names & {"invalidate_order", "invalidate_orders"}, f"{module}.{fn} 只打了一方"
+
+
+class Test隐私政策两份一致:
+    """隐私政策有两份:App 内的 packages/shared/lib/src/legal.dart 和网页上的
+    server/static/legal-privacy.html。信用分那一条(第一节第 18 条)和「共享」第 1 条里
+    交易对方能看到分数的那一句,两份必须一字不差(Dart 里的 ** 就是网页上的 <strong>)——
+    改了一份忘了另一份,App 里和网页上说的就是两回事。"""
+
+    @staticmethod
+    def _lines(key: str) -> tuple[str, str]:
+        import re
+        root = Path(__file__).resolve().parents[3]
+        html = (root / "server/static/legal-privacy.html").read_text(encoding="utf-8")
+        dart = (root / "packages/shared/lib/src/legal.dart").read_text(encoding="utf-8")
+        h = next(line for line in html.splitlines() if key in line)
+        h = re.sub(r"^<p>", "", h).removesuffix("<br>").removesuffix("</p>")
+        h = h.replace("<strong>", "**").replace("</strong>", "**")
+        d = next(line for line in dart.splitlines() if line.startswith(key))
+        return h, d
+
+    @pytest.mark.parametrize("key", ["18. 信用分", "1. 为完成配送"])
+    def test_两份一字不差(self, key):
+        h, d = self._lines(key)
+        assert h == d, f"两份隐私政策「{key}」那一条不一样"
+
+    def test_写的是三种角色_交易对方接单之后才看得到(self):
+        item18, _ = self._lines("18. 信用分")
+        for word in ("顾客", "商家", "骑手", "接单之后", "看不到明细", "申诉"):
+            assert word in item18, f"隐私政策第 18 条没写到「{word}」"
