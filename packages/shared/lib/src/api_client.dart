@@ -567,15 +567,24 @@ class ApiClient {
   //
   // **它付不了款。** 助手能把单创建到「待支付」为止,付款那一下在用户
   // 自己的 App 里由人按 —— 即使令牌泄露,对方花不掉一分钱。
-  // 能力范围在服务端 security.AGENT_ALLOWED 收口,默认拒绝。
+  // 能力范围在服务端 security.AGENT_SCOPES 收口:每项权限一张白名单,
+  // 签发时勾了哪几项就只放行那几张,默认拒绝。支付路径哪一张里都没有。
 
   /// 签发。**明文只在返回里给一次**,之后再也拿不到。
-  Future<Map<String, dynamic>> createAgentToken(String name, int days) async {
-    return await _request('POST', '/auth/agent-tokens',
-        body: {'name': name, 'days': days}) as Map<String, dynamic>;
+  ///
+  /// [scopes] 勾哪几项权限(用户端账号能给 `order` 点餐、`video` 发视频)。
+  /// 不传就不带这个字段:服务端按「只点餐」签,分权限之前的服务端也照旧认。
+  /// 返回里的 `scopes` / `scope_labels` 是实际签出来的权限,老服务端不给这两个字段。
+  Future<Map<String, dynamic>> createAgentToken(String name, int days,
+      {List<String>? scopes}) async {
+    return await _request('POST', '/auth/agent-tokens', body: {
+      'name': name,
+      'days': days,
+      if (scopes != null) 'scopes': scopes,
+    }) as Map<String, dynamic>;
   }
 
-  /// 有哪些助手连着我的账号
+  /// 有哪些助手连着我的账号。每条带 `scopes` / `scope_labels`(老服务端没有,那时只能点餐)
   Future<List<Map<String, dynamic>>> agentTokens() async {
     final data = await _request('GET', '/auth/agent-tokens');
     return (data as List).cast<Map<String, dynamic>>();
