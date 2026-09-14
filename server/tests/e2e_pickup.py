@@ -1,6 +1,10 @@
-"""到店自取全链路:免配送费下单 → 不进骑手抢单池 → 出餐 → 取餐码核销完成结算。"""
+"""到店自取全链路:免配送费下单 → 不进骑手抢单池 → 出餐 → 取餐码核销完成结算(写下完成时刻)。
+
+直连库的那一句读 DATABASE_URL,要和服务端指向同一个库。
+"""
 import time
 
+from tests.miniapp_util import sql
 from tests.util import demo_shop, call, login
 
 customer = login("13800000001")
@@ -70,6 +74,17 @@ net = (order["food_cents"] + order["packing_fee_cents"]
        - order["discount_cents"] - done["commission_cents"])
 assert w1["total_earned_cents"] == w0["total_earned_cents"] + net
 print(f"✓ 取餐码核销完成,商家入账 +{net / 100:.2f} 元(5% 佣金照常,无骑手行)")
+
+# 完成时刻落库(法定记录:交易完成时间要留存)。核销那一刻就是这一单的完成时刻;
+# 自取单没有「送达」这一步,送达时刻取同一刻。原来核销只改了状态,两个时刻都是空的
+completed_at, delivered_at, event_at = sql(
+    "SELECT o.completed_at, o.delivered_at, (SELECT max(e.created_at) FROM order_events e "
+    "WHERE e.order_id = o.id AND e.to_status = 'completed') FROM orders o WHERE o.order_no = :n",
+    {"n": no}, fetch="all")[0]
+assert completed_at is not None and delivered_at == completed_at, (completed_at, delivered_at)
+assert event_at is not None and abs((completed_at - event_at).total_seconds()) < 60, \
+    (completed_at, event_at)
+print("✓ 核销写下完成时刻(送达时刻同一刻),和「已完成」那条流转记录对得上")
 
 # 重复核销被拒(状态已终结)
 err = call("POST", f"/orders/{no}/pickup-verify", merchant,

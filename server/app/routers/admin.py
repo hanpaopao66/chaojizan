@@ -738,6 +738,8 @@ async def resolve_delivery_issue(
             raise HTTPException(409, "该订单已无可退金额")
         from_status = order.status
         order.status = OrderStatus.COMPLETED
+        # 完成时刻落库(和其它完成路径一样;原来漏了,迁移 0138 补历史)。餐没送到,送达时间照实留空
+        order.completed_at = datetime.now(timezone.utc)
         await settle_order(db, order)
         db.add(OrderEvent(order_id=order.id, from_status=from_status.value,
                           to_status=OrderStatus.COMPLETED.value,

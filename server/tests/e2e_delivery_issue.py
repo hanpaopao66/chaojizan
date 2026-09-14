@@ -1,7 +1,10 @@
 """配送异常上报与仲裁:骑手上报(餐损必须拍照/归属校验/防重复),
-平台三种裁决——已协调 / 按送达处理 / 骑手责任先行赔付(商家骑手收入保留)。"""
+平台三种裁决——已协调 / 按送达处理 / 骑手责任先行赔付(商家骑手收入保留)。
+
+直连库的那一句读 DATABASE_URL,要和服务端指向同一个库。"""
 import time
 
+from tests.miniapp_util import sql
 from tests.util import demo_shop, orderable_dish, call, login
 
 customer = login("13800000001")
@@ -86,8 +89,12 @@ net = (o2["food_cents"] + o2["packing_fee_cents"]
        - o2["discount_cents"] - o2b["commission_cents"])
 assert mw1["total_earned_cents"] == mw0["total_earned_cents"] + net
 assert rw1["total_earned_cents"] == rw0["total_earned_cents"] + o2["delivery_fee_cents"]
+# 完成时刻落库(法定记录,和其它完成路径一样;原来先行赔付只改了状态);餐没送到,送达时刻照实留空
+done_at, delivered_at = sql("SELECT completed_at, delivered_at FROM orders WHERE order_no = :n",
+                            {"n": no2}, fetch="all")[0]
+assert done_at is not None and delivered_at is None, (done_at, delivered_at)
 print(f"✓ 先行赔付:用户退 {o2b['refund_cents']/100:.2f} 元(平台承担),"
-      f"商家净额 +{net/100:.2f}、骑手配送费 +{o2['delivery_fee_cents']/100:.2f} 都保留")
+      f"商家净额 +{net/100:.2f}、骑手配送费 +{o2['delivery_fee_cents']/100:.2f} 都保留;写下完成时刻")
 
 # 已协调关单
 no3 = make_order()

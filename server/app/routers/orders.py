@@ -1804,6 +1804,13 @@ async def pickup_verify(
 
     from_status = order.status
     order.status = OrderStatus.COMPLETED
+    # 完成时刻落库,写法和 /transition、清扫自动完成一样(法定记录:交易完成时间要留存)。
+    # 自取单没有「送达」这一步,顾客取到餐就是送达。这里原来漏了,核销完成的自取单
+    # completed_at / delivered_at 一直是空的(历史数据由迁移 0138 按「已完成」那条事件的时间补)
+    now = datetime.now(timezone.utc)
+    order.completed_at = now
+    if order.delivered_at is None:
+        order.delivered_at = now
     await settle_order(db, order)
     await _record_event(db, order, from_status.value,
                         OrderStatus.COMPLETED.value, user)
