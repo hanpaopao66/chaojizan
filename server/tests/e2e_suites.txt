@@ -68,6 +68,7 @@ e2e_order_flag
 e2e_agent_token
 e2e_agent_scopes
 e2e_mcp_server
+e2e_av_license
 e2e_api_console
 e2e_channels_flag
 e2e_merchant_promo

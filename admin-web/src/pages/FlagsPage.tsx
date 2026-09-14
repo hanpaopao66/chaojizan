@@ -132,6 +132,11 @@ const METAS: FlagMeta[] = [
       + '打开前要部署好 coturn(上线手册第 5 节)',
   },
   {
+    key: 'av_license_no', title: '视听许可证编号', kind: 'text',
+    placeholder: '《信息网络传播视听节目许可证》编号(留空 = 不显示)',
+    effect: '填上后官网每一页页脚、用户端「关于我们」照原样公示这个编号(开视频要公示);换证时在这里改,不用发版',
+  },
+  {
     key: 'bots_enabled', title: '机器人', kind: 'switch', danger: true,
     effect: '打开后开发者可以建机器人、用 Bot API;关掉后 Bot API 全部停用、webhook 暂停、不能建新机器人',
   },

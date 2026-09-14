@@ -12,7 +12,7 @@ from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import (Announcement, AppEvent, PlatformCopy, PlatformFaq,
+from ..models import (Announcement, AppEvent, PlatformCopy, PlatformFaq, PlatformFlag,
                       SplashConfig, User)
 from ..schemas import (
     AnnouncementIn,
@@ -461,6 +461,7 @@ async def public_config(db: AsyncSession = Depends(get_db)):
         .where(PlatformFaq.is_active.is_(True))
         .order_by(PlatformFaq.sort_order, PlatformFaq.id))).all()
 
+    av = await db.get(PlatformFlag, "av_license_no")
     payload = {
         "marketing": await marketing_on(db),
         # 功能开关:客户端据此收起入口(关着的功能服务端照样回 503,这里只是别让人点进去才知道)
@@ -470,6 +471,8 @@ async def public_config(db: AsyncSession = Depends(get_db)):
                      "calls": await social_flag_on(db, "calls_enabled"),
                      # 机器人(#355):关着时客户端收起「添加到群组」、菜单按钮这些入口
                      "bots": await bots_on(db)},
+        # 要公示的许可证编号(后台「平台开关」里填,空 = 不显示):官网页脚、App「关于我们」读它
+        "licenses": {"av": av.value if av is not None else ""},
         "copy": copy,
         "faq": [{"audience": f.audience, "q": f.question, "a": f.answer}
                 for f in faqs],

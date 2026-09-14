@@ -1369,6 +1369,9 @@ _KNOWN_FLAGS = {
     # 机器人(#355):缺省同视频(开发开、生产关)。关了 Bot API 全部 503、不能建新机器人、
     # 回调和 bot-info 503、不再生成更新、webhook 暂停,见 services/flags.bot_flag_default
     "bots_enabled",
+    # 《信息网络传播视听节目许可证》编号(空 = 不公示):官网每一页页脚、用户端「关于我们」照原样显示。
+    # 放成开关而不是写死:拿证、换证、变更都不用发版
+    "av_license_no",
 }
 
 
@@ -1390,7 +1393,8 @@ async def list_flags(
                 "miniapp_hosted": "on", "miniapp_catalog": "on", "miniapp_profile": "on",
                 # **从 services.flags 读,不另写一份** —— 抄一份就会有一天
                 # 后台显示的默认值和用户端实际看到的不一样
-                "channels_enabled": ",".join(CHANNELS_FALLBACK)}
+                "channels_enabled": ",".join(CHANNELS_FALLBACK),
+                "av_license_no": ""}
     return {k: current.get(k, defaults.get(k, "off")) for k in _KNOWN_FLAGS}
 
 
@@ -1473,6 +1477,10 @@ async def set_flag(
                 _date.fromisoformat(value)
             except ValueError:
                 raise HTTPException(422, "宽限截止日要写成 YYYY-MM-DD,或留空表示立即生效")
+    elif key == "av_license_no":
+        # 只做清洗(一行、60 字以内),不猜编号格式 —— 格式以证书为准,
+        # 拦错一次真编号比漏掉一次格式检查更糟
+        value = " ".join(value.split())[:60]
     elif key in ("night_curfew_hours", "alcohol_curfew_hours"):
         if not re.fullmatch(
                 r"([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d", value):
