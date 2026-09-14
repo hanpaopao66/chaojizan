@@ -28,8 +28,8 @@ import { ApplymentPage } from './ApplymentPage';
 import { StayPages } from './StayPages';
 import { MerchantOrder, Shop } from '../model/Models';
 
-/** 隐私政策版本。与 Flutter 端 legal.dart 的 kLegalVersion 保持一致 */
-const LEGAL_VERSION: string = '2026-07-28';
+/** 隐私政策版本。与 Flutter 端 legal.dart 的 kLegalVersion 保持一致(server/tests/unit/test_legal_version.py 锁着) */
+const LEGAL_VERSION: string = '2026-09-15';
 
 /**
  * 应用根页面。

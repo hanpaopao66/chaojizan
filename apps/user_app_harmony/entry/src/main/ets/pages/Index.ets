@@ -48,8 +48,8 @@ export function applyFontScale(context: common.UIAbilityContext, elder: boolean)
   }
 }
 
-/** 隐私政策版本。与 Flutter 端 legal.dart 的 kLegalVersion 保持一致 */
-const LEGAL_VERSION: string = '2026-07-28';
+/** 隐私政策版本。与 Flutter 端 legal.dart 的 kLegalVersion 保持一致(server/tests/unit/test_legal_version.py 锁着) */
+const LEGAL_VERSION: string = '2026-09-15';
 const PRIVACY_URL: string = 'https://chaojizan.cc/legal/privacy';
 const TERMS_URL: string = 'https://chaojizan.cc/legal/terms';
 
