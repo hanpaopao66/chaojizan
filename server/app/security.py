@@ -31,7 +31,7 @@ def create_token(user: User) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-#: AI 助手令牌**唯一**能碰的接口。(方法, 路径正则) —— **全匹配**。
+#: AI 助手令牌能碰的接口。(方法, 路径正则) —— **全匹配**,**按权限分开**。
 #:
 #: ## 为什么是白名单,而且是全匹配的正则
 #:
@@ -43,15 +43,27 @@ def create_token(user: User) -> str:
 #: `/merchants/me/*` 是**商家自己的经营数据**(还包括 finance/statement.csv),
 #: 一个用来点外卖的助手不该能读它。前缀一松,松掉的地方自己长出来。
 #:
-#: ## 为什么没有支付
+#: ## 为什么分权限
 #:
-#: 「点单」意味着 agent 能花用户的钱。这里给到「创建一张待支付订单」为止,
-#: 付款那一下永远在用户自己的 App 里由人按 —— 即使令牌泄露,
-#: 对方能替你创建一张 15 分钟后自动关闭的待付单,**但花不掉一分钱**。
+#: 一个令牌能做哪几件事,签发时由人勾选(agent_tokens.scopes)。只勾了「点餐」的
+#: 令牌泄露了,对方发不了视频;只给开发者后台发包用的,下不了单。
+#: 能做的事越少,令牌丢了损失越小 —— 所以每项权限单列一张表,不合成一张大的。
 #:
-#: 同理没有:退款、改地址、申诉、地址簿写入、钱包与提现。
-AGENT_ALLOWED: tuple[tuple[str, str], ...] = (
+#: ## 每项权限里都没有的
+#:
+#: **付款**(点餐只到「创建一张待支付订单」,付款那一下永远在用户自己的 App 里
+#: 由人按 —— 令牌泄露也花不掉一分钱)、退款、改地址、申诉、地址簿、钱包与提现、
+#: 删稿、改小程序的密钥和域名、实名认证、签协议 —— 这些要么动钱、要么动身份、
+#: 要么删了回不来,留给人自己在 App 或开发者后台里做。
+
+#: 每项权限都能用的:我是谁、这个令牌能做哪几件事(MCP 据此只列出能用的工具)
+AGENT_COMMON: tuple[tuple[str, str], ...] = (
     ("GET", r"/auth/me"),
+    ("GET", r"/auth/agent-tokens/current"),
+)
+
+#: 点餐:找店、看菜、算配送费、看自己的订单,加上「创建一张待支付订单」
+AGENT_ORDER: tuple[tuple[str, str], ...] = (
     ("GET", r"/merchants"),                  # 附近的店
     ("GET", r"/merchants/search"),
     ("GET", r"/merchants/\d+"),              # 店铺详情(只认数字 id)
@@ -63,24 +75,96 @@ AGENT_ALLOWED: tuple[tuple[str, str], ...] = (
     ("POST", r"/orders"),                    # ← 只到「创建待支付订单」为止
 )
 
+_VID = r"sv[1-9A-HJ-NP-Za-km-z]{10}"         # services/video.py 的 VID_RE
+_UPLOAD = r"[0-9a-f]{32}"                    # 分片上传的 id
 
-def agent_can(method: str, path: str) -> bool:
-    """这个方法+路径是否在助手令牌的能力范围内。**默认拒绝。**
+#: 发视频:建稿件、传原片和封面、挂分 P、改标题简介、提交审核、看自己稿件的进度。
+#: **提交之后是「审核中」,由平台的人审** —— 助手能替你投稿,不能替你过审。
+#: 没有:删稿、删分 P、申诉、放弃改动,以及点赞投币评论弹幕这些「以你的名义对别人做事」的
+AGENT_VIDEO: tuple[tuple[str, str], ...] = (
+    ("GET", r"/video/v1/zones"),                          # 分区(选分区用)
+    ("POST", r"/video/v1/uploads/videos"),                # 建稿件(草稿;要实名)
+    ("PATCH", rf"/video/v1/videos/{_VID}"),               # 改标题、简介、标签、封面
+    ("POST", rf"/video/v1/videos/{_VID}/parts"),          # 挂上传好的原片(开始转码)
+    ("POST", rf"/video/v1/videos/{_VID}/submit"),         # 提交审核
+    ("GET", r"/video/v1/creator/videos"),                 # 我的稿件
+    ("GET", rf"/video/v1/creator/videos/{_VID}"),         # 一个稿件的进度与驳回原因
+    ("POST", r"/media/v1/uploads"),                       # 建分片上传(原片)
+    ("GET", rf"/media/v1/uploads/{_UPLOAD}"),             # 断点续传:看收到了哪几片
+    ("PUT", rf"/media/v1/uploads/{_UPLOAD}/chunks/\d+"),
+    ("POST", rf"/media/v1/uploads/{_UPLOAD}/complete"),
+    ("POST", r"/media/v1/upload"),                        # 整块上传(封面图)
+)
+
+_APPID = r"sz[0-9a-f]{16}"                   # services/miniapp_platform.py 的 APPID_PATTERN
+
+#: 发布小程序和小游戏(开发者账号):建应用、改基本信息、传包、设体验版、提交审核、撤回、
+#: **审核通过的版本**发布上线、回滚、看审核结论和数据。
+#: **审核仍由平台的人做** —— 没过审的版本发布不了,这一点在 miniapp_publish 里,不在这里。
+#: 没有:下架与删除应用、密钥、域名、能力申请、体验者、实名认证、签协议、申诉
+AGENT_MINIAPP: tuple[tuple[str, str], ...] = (
+    ("GET", r"/dev/v1/me"),                               # 开发者账号(认证、协议的状态)
+    ("GET", r"/dev/v1/messages"),                         # 平台通知
+    ("GET", r"/dev/v1/apps"),
+    ("POST", r"/dev/v1/apps"),                            # 建应用 / 小游戏
+    ("GET", rf"/dev/v1/apps/{_APPID}"),
+    ("PUT", rf"/dev/v1/apps/{_APPID}"),                   # 名称、简介、图标、分类
+    ("POST", rf"/dev/v1/apps/{_APPID}/versions"),         # 传包(平台逐条校验)
+    ("GET", rf"/dev/v1/apps/{_APPID}/versions"),
+    ("GET", rf"/dev/v1/apps/{_APPID}/versions/\d+"),
+    ("POST", rf"/dev/v1/apps/{_APPID}/versions/\d+/trial"),     # 设为体验版
+    ("POST", rf"/dev/v1/apps/{_APPID}/versions/\d+/submit"),    # 提交审核
+    ("POST", rf"/dev/v1/apps/{_APPID}/versions/\d+/withdraw"),  # 撤回审核
+    ("POST", rf"/dev/v1/apps/{_APPID}/versions/\d+/release"),   # 审核通过的版本发布上线
+    ("POST", rf"/dev/v1/apps/{_APPID}/rollback"),                # 回到之前的线上版本
+    ("GET", rf"/dev/v1/apps/{_APPID}/decisions"),         # 审核结论(驳回原因)
+    ("GET", rf"/dev/v1/apps/{_APPID}/stats"),
+)
+
+#: 权限名 → 放行的接口。签发时勾的就是这几个键
+AGENT_SCOPES: dict[str, tuple[tuple[str, str], ...]] = {
+    "order": AGENT_ORDER,
+    "video": AGENT_VIDEO,
+    "miniapp": AGENT_MINIAPP,
+}
+#: 给人看的名字(签发页、拒绝的话里用)
+AGENT_SCOPE_LABELS = {"order": "点餐", "video": "发视频", "miniapp": "发布小程序和小游戏"}
+#: 哪种账号能勾哪几项:点餐、发视频是用户端账号的事,发布小程序是开发者账号的事。
+#: 商家、骑手、平台账号不签助手令牌(商家的开放接口走 API Key,另一套)
+AGENT_SCOPES_BY_ROLE: dict[str, tuple[str, ...]] = {
+    "customer": ("order", "video"),
+    "developer": ("miniapp",),
+}
+
+
+def agent_can(method: str, path: str, scopes=("order",)) -> bool:
+    """这个方法+路径是否在(这几项权限的)助手令牌能力范围内。**默认拒绝。**
 
     **全匹配**,不是前缀匹配:`POST /orders` 放行而 `POST /orders/x/pay/mock`
     不放行,靠的就是全匹配 —— 前缀匹配的话后者也会被放进来。
+    不认识的权限名什么都不放行。
     """
     import re
 
-    return any(m == method and re.fullmatch(pat, path.rstrip("/") or "/")
-               for m, pat in AGENT_ALLOWED)
+    p = path.rstrip("/") or "/"
+    rules = AGENT_COMMON + tuple(r for s in scopes for r in AGENT_SCOPES.get(s, ()))
+    return any(m == method and re.fullmatch(pat, p) for m, pat in rules)
 
 
-async def _check_agent_token(db: AsyncSession, payload: dict) -> None:
-    """助手令牌还有效吗 —— 吊销、过期、不存在一律 401。
+def agent_denied(scopes) -> str:
+    """撞到能力边界时的那句话:说清这个令牌能做什么、这件事该去哪做,模型才不会一直重试"""
+    can = "、".join(AGENT_SCOPE_LABELS.get(s, s) for s in scopes) or "(没有)"
+    return (f"AI 助手令牌不能做这件事(这个令牌能做:{can})。"
+            "付款、退款、改地址、删稿、改密钥和域名、实名认证这些只能自己在 App 或开发者后台里操作;"
+            "要让助手做别的,在 App「设置 → AI 助手」(开发者在开发者后台「账号」)签一个勾了那一项的令牌。")
+
+
+async def _check_agent_token(db: AsyncSession, payload: dict) -> dict:
+    """助手令牌还有效吗 —— 吊销、过期、不存在一律 401。有效的话返回它的 id、名字和权限。
 
     JWT 自己吊销不了,所以每次都回库查一行。代价是一次主键查询,
     换来的是「用户在设置里点吊销,下一秒就真的不能用了」。
+    权限也以库里这一行为准,不看 JWT 里写了什么。
     """
     from datetime import datetime, timezone
 
@@ -97,8 +181,11 @@ async def _check_agent_token(db: AsyncSession, payload: dict) -> None:
         exp = exp.replace(tzinfo=timezone.utc)
     if exp <= now:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "这个助手令牌已过期")
+    info = {"id": row.id, "name": row.name, "scopes": list(row.scopes or ["order"]),
+            "expires_at": exp.isoformat()}
     row.last_used_at = now          # 让用户看得出哪个还在用、哪个可以清掉
     await db.commit()
+    return info
 
 
 async def get_current_user(
@@ -118,14 +205,12 @@ async def get_current_user(
     # 所有需要登录的接口都经过它,漏不掉;而逐个路由加限制,
     # 漏一个就是一条没人看守的路。
     if payload.get("scope") == "agent":
-        await _check_agent_token(db, payload)
+        agent = await _check_agent_token(db, payload)
         # 打个标,记录交给中间件 —— 只有那儿同时拿得到状态码和耗时
         request.state.api_client = ("agent", None, int(payload["sub"]))
-        if not agent_can(request.method, request.url.path):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "AI 助手令牌不能做这件事。它只能查询和创建待支付订单 —— "
-                "付款、退款、改地址请在 App 里自己操作。")
+        request.state.agent_token = agent
+        if not agent_can(request.method, request.url.path, agent["scopes"]):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, agent_denied(agent["scopes"]))
     user = await db.get(User, int(payload["sub"]))
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "用户不存在")

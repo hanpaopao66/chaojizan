@@ -197,6 +197,14 @@ def dev_code_visible() -> bool:
 class AgentTokenIn(BaseModel):
     name: str = Field(default="", max_length=40)
     days: int = Field(default=90, ge=1, le=365)
+    #: 勾哪几项权限(security.AGENT_SCOPES 的键)。不传:用户端账号只给「点餐」,开发者账号给「发布小程序」
+    scopes: list[str] | None = Field(default=None, max_length=3)
+
+
+def _scope_labels(scopes) -> list[str]:
+    from ..security import AGENT_SCOPE_LABELS
+
+    return [AGENT_SCOPE_LABELS.get(s, s) for s in scopes]
 
 
 @router.post("/agent-tokens")
@@ -209,11 +217,14 @@ async def create_agent_token(
 
     ## 它能做什么、不能做什么
 
-    能:查店、查菜、看配送费、看自己的订单、**创建一张待支付订单**。
-    不能:**付款**、退款、改地址、申诉、动地址簿、钱包与提现。
+    签发时勾权限(scopes),每项只放行自己那张白名单(security.AGENT_SCOPES):
+    - order 点餐:查店、查菜、看配送费、看自己的订单、**创建一张待支付订单**;
+    - video 发视频:建稿、传原片和封面、提交审核、看稿件进度(审核仍由平台的人做);
+    - miniapp 发布小程序和小游戏(开发者账号):传包、提交审核、审核通过后发布、回滚。
+    哪种账号能勾哪几项见 AGENT_SCOPES_BY_ROLE。
+    哪一项都不能:**付款**、退款、改地址、申诉、动地址簿、钱包与提现、删稿、改密钥和域名。
 
-    范围由 security.AGENT_ALLOWED 收口,**默认拒绝** —— 以后新加的接口
-    自动不对助手开放。
+    **默认拒绝** —— 以后新加的接口自动不对助手开放。
 
     ## 为什么把「付款」留在外面
 
@@ -226,6 +237,19 @@ async def create_agent_token(
 
     from ..models import AgentToken
 
+    from ..security import AGENT_SCOPES_BY_ROLE
+
+    allowed = AGENT_SCOPES_BY_ROLE.get(user.role.value)
+    if not allowed:
+        raise HTTPException(403, "这类账号不签 AI 助手令牌:用户端账号可以让助手点餐、发视频,"
+                                 "开发者账号可以让助手发布小程序和小游戏")
+    wanted = payload.scopes if payload.scopes else [allowed[0]]
+    bad = [s for s in wanted if s not in allowed]
+    if bad:
+        raise HTTPException(422, f"这个账号不能给助手这些权限:{'、'.join(bad)}"
+                                 f"(能给的是:{'、'.join(_scope_labels(allowed))})")
+    scopes = [s for s in allowed if s in wanted]      # 去重,顺序照表
+
     # 一个账号最多挂 10 个助手 —— 超过多半是忘了吊销,而不是真有 10 个助手
     live = await db.scalar(select(func.count()).select_from(AgentToken).where(
         AgentToken.user_id == user.id, AgentToken.revoked_at.is_(None)))
@@ -236,7 +260,7 @@ async def create_agent_token(
     expires = datetime.now(timezone.utc) + timedelta(days=payload.days)
     db.add(AgentToken(user_id=user.id, jti=jti,
                       name=payload.name.strip()[:40] or "未命名助手",
-                      expires_at=expires))
+                      scopes=scopes, expires_at=expires))
     await db.commit()
     token = jwt.encode({
         "sub": str(user.id), "role": user.role.value, "scope": "agent",
@@ -245,9 +269,24 @@ async def create_agent_token(
     return {
         "token": token,
         "expires_at": expires.isoformat(),
+        "scopes": scopes,
+        "scope_labels": _scope_labels(scopes),
         "note": ("**这串明文只显示这一次**,请立刻复制到助手的配置里。"
                  "它付不了款 —— 助手下完单,你在 App 里确认支付。"),
     }
+
+
+@router.get("/agent-tokens/current")
+async def current_agent_token(request: Request, user: User = Depends(get_current_user)):
+    """这个助手令牌自己:名字、能做哪几件事、什么时候过期。
+
+    MCP 启动时问一次,只把这个令牌能用的工具列给模型 —— 列出来却调不通的工具,
+    模型会一遍遍试。拿登录 token 调没有意义,回 404。
+    """
+    agent = getattr(request.state, "agent_token", None)
+    if agent is None:
+        raise HTTPException(404, "这不是 AI 助手令牌")
+    return {**agent, "scope_labels": _scope_labels(agent["scopes"]), "role": user.role.value}
 
 
 @router.get("/agent-activity")
@@ -293,6 +332,8 @@ async def list_agent_tokens(
         AgentToken.user_id == user.id).order_by(AgentToken.id.desc()))).all()
     return [{
         "id": r.id, "name": r.name,
+        "scopes": list(r.scopes or ["order"]),
+        "scope_labels": _scope_labels(r.scopes or ["order"]),
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "expires_at": r.expires_at.isoformat(),
         "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,

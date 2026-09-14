@@ -3517,12 +3517,12 @@ class AgentToken(Base):
     支付、退款、改地址、提现 —— 把它交给一个自动化程序,泄露的后果是
     钱直接没了。
 
-    这个令牌**只能做只读的事,加上「创建一张待支付订单」**。付款那一下
-    永远在用户自己的 App 里,由人按。所以即使它泄露:
-    对方能看到你的订单、能替你创建一张待付的单(15 分钟不付自动关闭),
-    **但花不掉你一分钱**。
+    这个令牌能做的事按权限分(scopes,签发时由人勾选):点餐只到「创建一张待支付订单」,
+    付款那一下永远在用户自己的 App 里,由人按 —— 所以即使它泄露,对方能替你创建一张
+    待付的单(15 分钟不付自动关闭),**但花不掉你一分钱**;发视频能投稿到「审核中」;
+    发布小程序能把审核通过的版本发布上线。
 
-    能力范围写在 security.AGENT_ALLOWED 里,**默认拒绝** ——
+    能力范围写在 security.AGENT_SCOPES 里,**默认拒绝** ——
     以后新加的接口自动不对 agent 开放,不需要谁记得去加限制。
 
     ## 为什么要落库而不是只签 JWT
@@ -3539,6 +3539,10 @@ class AgentToken(Base):
     jti: Mapped[str] = mapped_column(String(43), unique=True, index=True)
     #: 用户自己起的名字(「我的 Claude」),用来分辨吊销哪一个
     name: Mapped[str] = mapped_column(String(40), default="")
+    #: 签发时勾选的权限(security.AGENT_SCOPES 的键):order 点餐 / video 发视频 /
+    #: miniapp 发布小程序和小游戏。服务端每次请求按它放行;老令牌回填成 ["order"]
+    scopes: Mapped[list] = mapped_column(JSONB, default=lambda: ["order"],
+                                         server_default=text("'[\"order\"]'::jsonb"))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)

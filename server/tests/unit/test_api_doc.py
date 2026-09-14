@@ -82,15 +82,24 @@ class Test文档没有把业务口径抄一份:
 
 class Test助手令牌那几句和代码一致:
     def test_写操作只有一条这句话是真的(self, doc):
-        from app.security import AGENT_ALLOWED
-        writes = [(m, p) for m, p in AGENT_ALLOWED if m != "GET"]
-        assert "**只有一条**" in doc, "文档没说清助手的写操作只有一条"
+        from app.security import AGENT_COMMON, AGENT_ORDER
+        writes = [(m, p) for m, p in AGENT_ORDER + AGENT_COMMON if m != "GET"]
+        assert "**只有一条**" in doc, "文档没说清点餐助手的写操作只有一条"
         assert len(writes) == 1, (
-            f"文档说助手的写操作只有一条,实际有 {len(writes)} 条:{writes}")
+            f"文档说点餐助手的写操作只有一条,实际有 {len(writes)} 条:{writes}")
+
+    def test_文档里点名的那条测试真的存在(self, doc):
+        """文档让人去看 test_agent_scope.py 里的某个测试 —— 改名之后文档里的名字就成了死链"""
+        import re
+        from pathlib import Path
+        m = re.search(r"test_agent_scope\.py::(\w+)::(\w+)", doc)
+        assert m, "文档没点名钉住写操作的那条测试"
+        src = (Path(__file__).parent / "test_agent_scope.py").read_text(encoding="utf-8")
+        assert f"class {m.group(1)}" in src and f"def {m.group(2)}(" in src, m.group(0)
 
     def test_文档承诺的没有支付路径是真的(self, doc):
-        from app.security import agent_can
+        from app.security import AGENT_SCOPES, agent_can
         assert "付不了钱" in doc or "不能" in doc
         for path in ("/orders/abc/pay/mock", "/orders/abc/self-refund"):
-            assert not agent_can("POST", path), (
+            assert not agent_can("POST", path, tuple(AGENT_SCOPES)), (
                 f"文档承诺助手付不了钱,而 {path} 实际是放行的")
