@@ -300,15 +300,20 @@ export const getDashboard = () => get<DashboardOut>('/admin/dashboard')
 
 // ---------- 客服工单 ----------
 
-/** 走客服工单的信用分申诉(见 server/app/services/customer_credit.py)。
- *  kind:delivery_fault 配送异常判为顾客原因 / violation 违规记录 */
+/** 走客服工单的信用分申诉(见 server/app/services/credit.py)。顾客、商家、骑手三种角色都走这里。
+ *  kind:delivery_fault 配送异常(顾客:判为顾客原因;骑手:判为骑手责任)/
+ *  after_sale_fault 售后判责(商家:平台复核判为商家责任;骑手:平台仲裁判为骑手责任)/
+ *  violation 违规记录。role_label、kind_label 由服务端给,这里不另写一份 */
 export interface CreditAppealBrief {
   id: number
-  kind: 'delivery_fault' | 'violation'
+  kind: 'delivery_fault' | 'after_sale_fault' | 'violation'
   record_id: number
   user_id: number
   status: 'open' | 'upheld' | 'overturned'
   resolve_note: string
+  role?: 'customer' | 'merchant' | 'rider'
+  role_label?: string
+  kind_label?: string
 }
 
 export interface Ticket {
@@ -328,7 +333,8 @@ export const listTickets = () => get<Ticket[]>('/admin/tickets')
 export const replyTicket = (id: number, reply: string) =>
   post(`/admin/tickets/${id}/reply`, { reply })
 export const closeTicket = (id: number) => post(`/admin/tickets/${id}/close`)
-/** 信用分申诉下结论。改判 = 这一条不再计分(违规记录同时推翻);结论会自动回到这张工单里 */
+/** 信用分申诉下结论。改判 = 这一条不再计分(违规记录同时推翻);结论会自动回到这张工单里、
+ *  并推送给申诉的人(顾客、店主或骑手) */
 export const resolveCreditAppeal = (
   id: number, result: 'upheld' | 'overturned', note: string,
 ) => post(`/admin/credit/appeals/${id}/resolve`, { result, note })
@@ -372,9 +378,9 @@ export interface DeliveryIssue {
 export const listDeliveryIssues = (status = 'open') =>
   get<DeliveryIssue[]>(`/admin/delivery-issues?status=${status}`)
 /** 处置配送异常。**action 是必填的** —— 后端是 Literal,少传直接 422。
- *  - continue_delivery 让骑手继续送
- *  - mark_delivered 判定已送达
- *  - refund 退款 */
+ *  - continue_delivery 让骑手继续送(不判谁的责任)
+ *  - mark_delivered 判为顾客原因,按送达处理(顾客信用分的扣分项)
+ *  - refund 判为骑手责任,平台先行赔付(骑手信用分的扣分项) */
 export type IssueAction = 'continue_delivery' | 'mark_delivered' | 'refund'
 
 export const resolveDeliveryIssue = (

@@ -9,7 +9,8 @@ import { AfterSale, ApiError, listAfterSales, riderFault, yuan } from '../api'
  * ## 判骑手责任是**赔钱**动作
  *
  * 点下去会全额退用户(含配送费),商家和骑手的收入都不动 ——
- * 差额由骑手保障金承担。所以确认框里要把金额和后果写清楚,
+ * 差额由骑手保障金承担;这一单记为骑手责任,是骑手信用分的扣分项
+ * (server/app/services/credit.py)。所以确认框里要把金额和后果写清楚,
  * 不是弹一个「确定吗」。
  */
 export default function AftersalesPage() {
@@ -36,7 +37,8 @@ export default function AftersalesPage() {
         <>
           <Alert type="warning" showIcon style={{ margin: '8px 0' }}
                  message={`将全额退用户 ${yuan(a.total_cents)}(含配送费)`}
-                 description="商家与骑手收入不受影响,差额由骑手保障金承担。" />
+                 description={'商家与骑手收入不受影响,差额由骑手保障金承担。'
+                   + '这一单记为骑手责任,扣骑手信用分(骑手会收到通知,可以申诉)。'} />
           <Input.TextArea rows={2} maxLength={200} placeholder="判责理由"
                           onChange={(e) => { reason = e.target.value }} />
         </>

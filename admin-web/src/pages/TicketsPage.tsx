@@ -5,8 +5,10 @@ import {
   ApiError, Ticket, closeTicket, listTickets, replyTicket, resolveCreditAppeal,
 } from '../api'
 
+// 老服务端不给 kind_label 时的兜底(那时只有顾客的两种)
 const CREDIT_KIND: Record<string, string> = {
-  delivery_fault: '配送异常(判为顾客原因)',
+  delivery_fault: '配送异常',
+  after_sale_fault: '售后判责',
   violation: '违规记录',
 }
 const CREDIT_STATUS: Record<string, string> = {
@@ -15,8 +17,9 @@ const CREDIT_STATUS: Record<string, string> = {
 
 /** 客服工单。回复会推给提单人,关闭之后就不再接受追问。
  *
- *  信用分申诉也走工单(原来的申诉通道接不上的时候):这种工单要先给出「申诉成立 / 维持原判」,
- *  结论由服务端写回工单并通知顾客;没下结论之前工单关不掉(服务端 409)。 */
+ *  信用分申诉也走工单(原来的申诉通道接不上的时候):顾客、商家(店主)、骑手三种角色都有。
+ *  这种工单要先给出「申诉成立 / 维持原判」,结论由服务端写回工单并通知申诉的人;
+ *  没下结论之前工单关不掉(服务端 409)。 */
 export default function TicketsPage() {
   const [rows, setRows] = useState<Ticket[]>([])
   const [loading, setLoading] = useState(false)
@@ -46,7 +49,7 @@ export default function TicketsPage() {
   function resolve(result: 'upheld' | 'overturned') {
     if (!credit) return
     if (reply.trim().length < 2) {
-      message.warning('写一句复核结论(会原样告诉顾客)'); return
+      message.warning('写一句复核结论(会原样告诉申诉的人)'); return
     }
     void act(() => resolveCreditAppeal(credit.id, result, reply.trim()),
       result === 'overturned' ? '已改判:这一条不再计分' : '已维持原判')
@@ -118,11 +121,13 @@ export default function TicketsPage() {
             {credit && (
               <Alert
                 type={creditOpen ? 'warning' : 'info'} showIcon style={{ marginBottom: 12 }}
-                message={`信用分申诉 · ${CREDIT_KIND[credit.kind] ?? credit.kind} #${credit.record_id}`
+                message={`${credit.role_label ?? ''}信用分申诉 · `
+                  + `${credit.kind_label ?? CREDIT_KIND[credit.kind] ?? credit.kind} #${credit.record_id}`
                   + ` · ${CREDIT_STATUS[credit.status] ?? credit.status}`}
                 description={creditOpen
-                  ? '申诉成立:这一条不再计入顾客的信用分(违规记录会同时推翻,处置级别跟着重算)。'
-                    + '下面写的复核结论会原样回到工单里,并推送给顾客。'
+                  ? '申诉成立:这一条不再计入他的信用分(违规记录会同时推翻,处置级别跟着重算;'
+                    + '配送异常、售后判责只改信用分,不动那次裁决的钱)。'
+                    + '下面写的复核结论会原样回到工单里,并推送给申诉的人。'
                   : credit.resolve_note}
               />
             )}
@@ -140,7 +145,7 @@ export default function TicketsPage() {
               <Input.TextArea rows={4} value={reply} maxLength={creditOpen ? 300 : 500} showCount
                               onChange={(e) => setReply(e.target.value)}
                               placeholder={creditOpen
-                                ? '复核结论(会写回工单并推送给顾客)'
+                                ? '复核结论(会写回工单并推送给申诉的人)'
                                 : '回复内容(会推送给提单人)'} />
             )}
           </>
