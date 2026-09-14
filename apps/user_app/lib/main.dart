@@ -6843,7 +6843,8 @@ class _OrderDetailPageState extends State<OrderDetailPage>
       title: '申诉这一单的判责',
       hint: '例如:商家做错了菜 / 骑手一直没动',
       note: '说说为什么你认为这一单不该由你承担。平台会复核;'
-          '改判的话由平台承担,不会向商家和骑手追款。',
+          '改判的话,你承担的那部分由平台原路退回(平台判错了,平台自己认),'
+          '不会向商家和骑手追款。',
     );
     if (reason == null) return;
     try {

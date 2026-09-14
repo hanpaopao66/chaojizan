@@ -115,6 +115,12 @@ class Test公示照实说:
         what = liability.public_spec()["appeal"]["what_happens"]
         assert "平台判错了,平台自己认" in what and "不补回" not in what, what
 
+    def test_顾客端取消分摊的申诉框照实说(self):
+        """顾客对取消分摊申诉,改判的话他承担的那部分由平台原路退回(appeals 的 cancel_split 那一支)"""
+        main = (REPO / "apps/user_app/lib/main.dart").read_text(encoding="utf-8")
+        note = main.split("Future<void> _appealSplit(", 1)[1].split("if (reason == null)", 1)[0]
+        assert "平台判错了,平台自己认" in note and "由平台原路退回" in note, note
+
     def test_商家端申诉框说售后恢复你的净额(self):
         """用户拍板:商家端申诉框「售后恢复你的净额」在新口径下是对的,保留(安卓、鸿蒙都说)"""
         for rel in ("apps/merchant_app/lib/appeal_page.dart",
@@ -126,12 +132,16 @@ class Test公示照实说:
         stale = ["改判的钱平台认亏", "先行赔付由平台垫付", "平台先行全额退款",
                  "改判产生的钱由平台承担", "被冲的净额不补回", "被冲掉的净额不补回",
                  "被冲掉的那笔净额不补回", "判责撤销、钱不动", "商家无责(钱不动)",
-                 "平台认赔(历史)"]
+                 "平台认赔(历史)",
+                 # 2026-09-15 之后还剩的几句(顾客端取消分摊申诉框、鸿蒙商家端注释、共享包文档)
+                 "改判的话由平台承担", "平台认亏,不追用户款", "只撤销判责、不补回净额"]
         hits = []
         for d in ("server/app", "apps/merchant_app/lib", "apps/user_app/lib",
-                  "apps/rider_app/lib", "packages/shared/lib", "web/src", "admin-web/src"):
+                  "apps/rider_app/lib", "packages/shared/lib", "web/src", "admin-web/src",
+                  "merchant-web/src", "apps/merchant_app_harmony/entry/src/main/ets",
+                  "apps/user_app_harmony/entry/src/main/ets"):
             for p in (REPO / d).rglob("*"):
-                if p.suffix not in {".py", ".dart", ".jsx", ".tsx", ".ts"} \
+                if p.suffix not in {".py", ".dart", ".jsx", ".tsx", ".ts", ".ets"} \
                         or "node_modules" in p.parts:
                     continue
                 text = p.read_text(encoding="utf-8", errors="ignore")

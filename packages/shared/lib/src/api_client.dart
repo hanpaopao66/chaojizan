@@ -3018,8 +3018,9 @@ class ApiClient {
   /// targetType: after_sale / after_sale_rider / delivery_issue / review / …(服务端 AppealIn)
   /// 申诉平台的判责结果。**三端共用**:商家(售后判责/差评)、
   /// 骑手(被判骑手责任的配送异常、售后判骑手责任)、用户(取消分摊 / 被判用户责任的配送异常)。
-  /// 72 小时内、每个目标一次;顾客拿到的退款不追回。改判时的钱各支不同(服务端 routers/appeals):
-  /// 骑手责任改判退回扣的钱,商家售后判责改判只撤销判责、不补回净额(2026-09-14 起)。
+  /// 72 小时内、每个目标一次;顾客拿到的退款不追回。改判成立的钱都由平台出(2026-09-15 定:
+  /// 平台判错了,平台自己认;服务端 routers/appeals):骑手责任改判退回扣的钱,商家售后判责改判
+  /// 补回冲掉的净额和另出的配送费、小费,顾客改判由平台原路退回。
   Future<void> submitAppeal({
     required String targetType,
     required int targetId,
