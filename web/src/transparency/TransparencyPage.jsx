@@ -307,7 +307,7 @@ function EpochNotice() {
 const TOC = [
   ['audit', '核账日历'], ['funds', '钱去哪了'], ['fairness', '分账公平'], ['rider', '骑手收入'],
   ['compensation', '赔付记录'], ['reviews', '评价'], ['reports', '月度财报'], ['dispatch', '派单算法'],
-  ['liability', '判责分摊'], ['governance', '治理公开'], ['miniapps', '小程序'], ['community', '社区'], ['support', '客服'], ['status', '系统状态'],
+  ['liability', '判责分摊'], ['governance', '治理公开'], ['miniapps', '小程序'], ['community', '社区'], ['badges', '勋章'], ['support', '客服'], ['status', '系统状态'],
   ['changelog', '最近更新'],
 ]
 
@@ -435,6 +435,49 @@ function CommunitySection({ c }) {
   )
 }
 
+/* 勋章栏:每一枚的条件、按什么算、哪些不算,全从 /transparency/badges 读 ——
+ * 服务端发勋章用的就是这同一份定义(server/app/services/badges.py 的 BADGES),这里一个字都不抄。 */
+function BadgesSection({ b }) {
+  return (
+    <Sec id="badges" eyebrow="勋章">
+      <h2>平台自动发，条件全公开</h2>
+      <p className="tp-lede">
+        资料页上的勋章是平台按下面的条件自动发的，条件和发勋章的代码读的是同一份定义（<a href={b?.source_url ?? 'https://github.com/hanpaopao66/chaojizan/blob/main/server/app/services/badges.py'}>services/badges.py</a>）。标签是用户自己写的，和勋章分开显示。
+      </p>
+      {b ? (
+        <>
+          <div className="sz-table-wrap">
+            <div className="sz-table-scroll">
+              <table className="sz-table tp-wide">
+                <thead><tr><th>勋章</th><th>条件</th><th>按什么算</th><th>不算的</th></tr></thead>
+                <tbody>
+                  {b.badges.map(x => (
+                    <tr key={x.key}>
+                      <td className="nowrap"><span className="sz-tag clay">{x.icon}</span> {x.name}</td>
+                      <td>{x.condition}</td>
+                      <td className="tp-why">{x.counts}</td>
+                      <td className="tp-why">{x.excludes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p className="tp-note">{b.how}</p>
+          <h3 className="tp-sub">隐藏</h3>
+          <p className="tp-lede">{b.visibility}</p>
+          <h3 className="tp-sub">标签</h3>
+          {b.tags.rules.map((r, i) => <p className="tp-note" key={i}>{r}。</p>)}
+          <h3 className="tp-sub">平台不做的事</h3>
+          <ul className="tp-never">
+            {b.never.map((n, i) => <li key={i}>{n}</li>)}
+          </ul>
+        </>
+      ) : <p className="tp-note">读取中…</p>}
+    </Sec>
+  )
+}
+
 export default function TransparencyPage() {
   const audit = useJson('/transparency/audit')
   const funds = useJson('/transparency/funds')
@@ -449,6 +492,7 @@ export default function TransparencyPage() {
   const liability = useJson('/transparency/liability')
   const mini = useJson('/transparency/miniapps')
   const comm = useJson('/transparency/community')
+  const badges = useJson('/transparency/badges')
   // /status 直达系统状态区。上面各栏的数据是陆续到的,每到一份页面就变长一截,
   // 只在 uptime 到的那一刻滚一次的话,后到的栏目会把状态区往下顶。所以每到一份
   // 就重新对齐一次 —— 直到用户自己动了滚轮 / 手指 / 键盘为止
@@ -465,7 +509,7 @@ export default function TransparencyPage() {
       if (!userMoved.current) document.getElementById('status')?.scrollIntoView({ behavior: 'auto' })
     }, 60)
     return () => clearTimeout(t)
-  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, mini, comm])
+  }, [uptime, audit, funds, comp, fair, reports, changelog, gov, dispatch, liability, mini, comm, badges])
 
   const latest = audit?.latest
   const per = fair?.per100
@@ -938,6 +982,8 @@ export default function TransparencyPage() {
         </Sec>
 
         <CommunitySection c={comm} />
+
+        <BadgesSection b={badges} />
 
         <Sec id="support" eyebrow="客服">
           <h2>客服回得快不快</h2>
