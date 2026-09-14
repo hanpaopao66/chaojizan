@@ -900,11 +900,17 @@ export function financeDaily(days = 30): Promise<DayStat[]> {
 }
 
 export interface FinanceOrder {
+  id?: number
   order_no: string
   food_cents: number
   commission_cents: number
   net_cents: number
   created_at: string
+  /** 哪一种行:earning 入账 / reversal 冲账 / adjustment 申诉改判补回 /
+   *  fault_charge 商家责任、骑手那份配送费和小费由你出 / fault_refund 申诉改判退回 */
+  kind?: string
+  /** 服务端给的名字(和对账单 CSV 同一份),老服务端没有这个字段 */
+  kind_label?: string
 }
 
 export function financeOrders(day: string): Promise<FinanceOrder[]> {

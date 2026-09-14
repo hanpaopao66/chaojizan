@@ -70,7 +70,7 @@ export default function FinancePage({ shop }: { shop: Merchant }) {
               style={{ marginTop: 8 }}
               type="error"
               showIcon
-              message="余额为负:通常来自售后冲账或到店无房违约金赔付,后续收入会自动抵扣。有疑问可联系平台客服。"
+              message="余额为负:通常来自售后冲账、判为商家责任时另出的骑手那份配送费和小费,或到店无房违约金赔付,后续收入会自动抵扣。有疑问可联系平台客服。"
             />
           )}
         </Card>
@@ -163,7 +163,8 @@ function DailyTab() {
         onCancel={() => setDetail(null)}
       >
         <Table<FinanceOrder>
-          rowKey="order_no"
+          // 同一单一天里可能有入账、冲账、另出几行:按行 id,不按单号
+          rowKey={(o) => String(o.id ?? `${o.order_no}-${o.kind ?? ''}`)}
           dataSource={detail?.orders ?? []}
           size="small"
           pagination={false}
@@ -172,6 +173,12 @@ function DailyTab() {
               title: '单号',
               dataIndex: 'order_no',
               render: (v: string) => `…${v.slice(-8)}`,
+            },
+            {
+              // 一单可能有入账、冲账、另出骑手那份、申诉改判补回几行,不标出来就加不明白
+              title: '类型',
+              dataIndex: 'kind_label',
+              render: (v: string | undefined, o) => v || (o.kind === 'reversal' ? '外卖冲账' : '外卖入账'),
             },
             { title: '应收', dataIndex: 'food_cents', render: (v: number) => yuan(v) },
             { title: '佣金', dataIndex: 'commission_cents', render: (v: number) => yuan(v) },

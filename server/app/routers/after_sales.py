@@ -1,7 +1,8 @@
 """用户主动售后:判责 + 各自承担 + 平台不出钱(2026-09-14 拍板)。
 
 - 申请必须带举证照片;30 天 3 次成功售后后走客服;黑名单用户只能走工单
-- 商家同意 = 商家责任:退餐费(配送费已履约不退),商家净额+平台佣金冲账
+- 商家同意 = 商家责任(2026-09-15 定):顾客拿回全款(含配送费和小费);商家这单净额冲回
+  (佣金平台也不收),骑手那份配送费和小费照归骑手、由商家另出一行(services/merchant_fault)
 - 骑手责任(洒餐/丢餐)由客服在管理后台仲裁:顾客全额退款(含配送费),商家净额保留;
   这单骑手收入冲回,商家那份餐钱先从骑手保障金池出(公开账本逐日计提的 rider_fund),
   池子不够的从骑手收入里扣 —— 平台不出钱(services/rider_fault)
@@ -23,7 +24,6 @@ from ..services.errand import KIND_ERRAND_BUY, KIND_FOOD, is_errand
 from ..schemas import AfterSaleIn, AfterSaleOut, AfterSaleReplyIn, MerchantAfterSaleOut
 from ..security import require_role
 from ..services.push import push_to_user
-from ..services.settlement import reverse_merchant_earning
 from ..services.wechat_pay import request_refund
 from ..state_machine import OrderStatus
 from ..services.staff import owned_shop
@@ -209,14 +209,18 @@ async def accept_after_sale(
     user: User = Depends(require_role("merchant", "admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """同意售后 = 退还餐费部分(实付 - 配送费);已结算订单同步冲账。
+    """同意售后 = 商家认责:顾客拿回全款(2026-09-15 定),钱全由商家出。
 
-    责任与钱的走向(行业通行判责规则的最简自动化形态):
-    - 商家:冲回净额(菜价 - 佣金),损失由责任方商家承担 —— 同意售后即认责
-    - 平台:佣金也冲回,不赚退款单的钱
-    - 骑手:配送费分文不动 —— 配送已履约,菜品问题不该骑手买单
-    - 用户:配送费不退(餐已送到家);配送本身出问题(洒餐/丢餐)属骑手/平台
-      责任,走平台客服仲裁(admin.after_sale_rider_fault,钱见 services/rider_fault)
+    责任与钱的走向(services/merchant_fault,四条判商家责任的路同一个写法):
+    - 用户:退实付里还没退回去的钱,含配送费和小费(refund_calc.merchant_fault_refund_cents);
+      平台券抵掉的那截不在实付里,不退现金、回平台
+    - 商家:这单净额冲回,再另出一行骑手那份(配送费 + 小费)—— 同意售后即认责
+    - 骑手:配送费和小费照拿 —— 他跑了这一趟,菜品问题不该骑手买单
+    - 平台:佣金也冲回,不赚退款单的钱,也不贴钱
+    - 配送本身出问题(洒餐/丢餐)是骑手责任,走平台客服仲裁
+      (admin.after_sale_rider_fault,钱见 services/rider_fault)
+    - 还没确认收货的单先按完成结算再冲 —— 原来这种单冲不到账(还没入账),等自动完成时商家
+      照常入账,这笔退款就成了平台出的
     """
     after_sale, order = await _get_pending(db, after_sale_id, user)
     if is_errand(order):
@@ -225,10 +229,9 @@ async def accept_after_sale(
         # (钱见 services/rider_fault,平台不出);不是骑手的问题就驳回,顾客可以申诉
         raise HTTPException(409, "跑腿单的售后平台不再认赔:是骑手的问题请判骑手责任"
                                  "(售后仲裁),不是就驳回")
-    # 配送费和小费都不退:骑手入账保留,退款只覆盖顾客为餐付的钱(services/refund_calc)。
-    # 原来只扣配送费,小费也退给了顾客而骑手照拿 —— 那一截是平台出,而平台不出钱(2026-09-14)
-    from ..services.refund_calc import goods_unrefunded_cents
-    refund_amount = await goods_unrefunded_cents(db, order)
+    from ..services import merchant_fault
+    from ..services.refund_calc import merchant_fault_refund_cents
+    refund_amount = await merchant_fault_refund_cents(db, order)
     if refund_amount <= 0:
         raise HTTPException(409, "该订单已无可退金额")
     after_sale.status = AfterSaleStatus.accepted
@@ -236,21 +239,33 @@ async def accept_after_sale(
     after_sale.fault = "merchant"
     after_sale.reply = payload.reply.strip()
     after_sale.processed_at = datetime.now(timezone.utc)
-    order.refund_note = (
-        f"{order.refund_note};售后退餐费(配送费已履约不退)"
-        if order.refund_note else "售后退餐费(配送费已履约不退)"
-    )
-    await reverse_merchant_earning(db, order, f"售后冲账:{after_sale.reason[:50]}")
+    note = "售后全额退款(商家责任,含配送费和小费)"
+    order.refund_note = f"{order.refund_note};{note}" if order.refund_note else note
+    split = await merchant_fault.apply(
+        db, order, why=f"售后:{after_sale.reason[:50]}",
+        actor_role=user.role.value, actor_id=user.id)
     # refund_cents 由 request_refund 自己累计:提前加会让通道按 total+已退
     # 反推出多算一遍本次退款的原始支付总额,微信直接拒退(见 wechat_pay)
     await request_refund(db, order, refund_amount, f"售后退款:{after_sale.reason[:30]}")
     await db.commit()
     await db.refresh(after_sale)
+    # 送达还没确认收货的单这里按完成结算了:三方信用分的「完成一单」变了,提交之后打缓存
+    from ..services import credit
+    await credit.invalidate_order(db, order)
     await push_to_user(
         order.customer_id, "售后已通过",
-        f"退款 ¥{refund_amount / 100:.2f} 将原路返回(配送费已履约不退):{after_sale.reply[:30]}",
+        f"全额退款 ¥{refund_amount / 100:.2f}(含配送费和小费)将原路返回,由商家承担:"
+        f"{after_sale.reply[:30]}",
         {"order_no": order.order_no},
     )
+    shop = await db.get(Merchant, order.merchant_id)
+    if shop is not None and shop.owner_id != user.id:
+        # 店员点的同意:钱是店主的,店主得知道这一单他出了多少
+        await push_to_user(
+            shop.owner_id, "一笔售后已同意",
+            f"订单 {order.order_no[-6:]} 的售后已同意:"
+            f"{merchant_fault.merchant_push_text(split, refund_amount)}",
+            {"order_no": order.order_no, "type": "after_sale"})
     return after_sale
 
 

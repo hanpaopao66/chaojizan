@@ -350,7 +350,8 @@ async def compensation_public(
     request: Request, db: AsyncSession = Depends(get_db),
 ):
     """赔付记录(本月/累计):超时安抚券(停发之前的)和停发之后的超时致歉次数、
-    餐损赔付、退款,以及判骑手责任时保障金池垫的、骑手另出的商家那份餐钱。
+    餐损赔付、退款,判骑手责任时保障金池垫的、骑手另出的商家那份餐钱,
+    以及判商家责任时商家另出的骑手那份配送费和小费。
 
     没有平台愿意亮自己的赔付账——我们把它当承诺兑现的凭据。
     """
@@ -399,6 +400,13 @@ async def compensation_public(
         """),
         "rider_fault_charges": await _pair("""
             SELECT count(*), coalesce(-sum(amount_cents), 0) FROM rider_earnings
+            WHERE kind = 'fault_charge'
+        """),
+        # 判商家责任时(商家同意售后、售后被拒改判、到店未出餐 / 餐品不齐、食安投诉成立),
+        # 顾客拿回全款,骑手那份配送费和小费照归骑手、由商家另出(记正数)。平台一分不出
+        # (services/merchant_fault)
+        "merchant_fault_charges": await _pair("""
+            SELECT count(*), coalesce(-sum(net_cents), 0) FROM merchant_earnings
             WHERE kind = 'fault_charge'
         """),
         "month_since": month_start.date().isoformat(),

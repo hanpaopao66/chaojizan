@@ -43,6 +43,9 @@ RIDER_KINDS = {"earning", "adjustment"}
 RIDER_FAULT_SIGNS = {"fault_reversal": -1, "fault_charge": -1, "fault_refund": 1}
 #: 骑手保障金池的进出(rider_fund.rows):金额恒为正,方向看 kind
 FUND_ROW_KINDS = {"payout", "return"}
+#: 判商家责任的商家行(2026-09 起,规格 §6.2c):**不在 merchant_rows 里**,单独放在
+#: merchant_fault_rows。骑手那份配送费和小费商家另出的是负数,申诉改判退回的是正数
+MERCHANT_FAULT_SIGNS = {"fault_charge": -1, "fault_refund": 1}
 
 
 def local_utc_offset() -> str:
@@ -129,6 +132,13 @@ def verify_rows(payload: dict) -> list[str]:
         if r["kind"] not in FUND_ROW_KINDS or r["amount"] <= 0:
             problems.append(f"保障金池行 {r['o']}: {r['kind']} {r['amount']} —— "
                             f"只应有正数的支出(payout)和回池(return)")
+    # 判商家责任(规格 §6.2c):种类在白名单里、符号对。缺这个字段的老锚点跳过
+    for r in payload.get("merchant_fault_rows", []):
+        sign = MERCHANT_FAULT_SIGNS.get(r["kind"])
+        if sign is None:
+            problems.append(f"商家判责行 {r['o']}: 未知类型 {r['kind']}")
+        elif r["amount"] * sign < 0:
+            problems.append(f"商家判责行 {r['o']}: {r['kind']} 的金额 {r['amount']} 符号不对")
 
     for r in payload.get("voucher_rows", []):
         expect_fee = int(r["gross"] * voucher_rate)
@@ -164,6 +174,9 @@ def verify_rows(payload: dict) -> list[str]:
     if t and "rider_fault" in t and t.get("rider_fault") != sum(
             r["amount"] for r in payload.get("rider_fault_rows", [])):
         problems.append("骑手判责合计与逐行加总不一致")
+    if t and "merchant_fault" in t and t.get("merchant_fault") != sum(
+            r["amount"] for r in payload.get("merchant_fault_rows", [])):
+        problems.append("商家判责合计与逐行加总不一致")
     return problems
 
 

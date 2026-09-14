@@ -701,6 +701,13 @@ export default function TransparencyPage() {
                 <div className="m">累计 {comp.rider_fund_payouts.total.count} 笔 · 池子不够、骑手另出 {yuanF(comp.rider_fault_charges?.total.cents)}（{comp.rider_fault_charges?.total.count ?? 0} 笔）</div>
               </div>
             )}
+            {comp?.merchant_fault_charges && (
+              <div className="tp-card">
+                <div className="num v">{yuanF(comp.merchant_fault_charges.total.cents)}</div>
+                <div className="k">判商家责任：顾客全额退款（含配送费和小费），这单商家净额冲回；骑手跑了这一趟，他那份配送费和小费照拿、由商家另出（平台一分不出）</div>
+                <div className="m">累计 {comp.merchant_fault_charges.total.count} 笔 · 本月 {comp.merchant_fault_charges.month.count} 笔</div>
+              </div>
+            )}
           </div>
         </Sec>
 

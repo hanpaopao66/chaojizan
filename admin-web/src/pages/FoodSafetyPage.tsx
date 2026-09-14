@@ -105,8 +105,9 @@ export default function FoodSafetyPage() {
               ['confirmed', 'dismissed'].includes(it.status) ? null : (
               <Space size={4} wrap>
                 <Button size="small" danger disabled={acting}
-                        onClick={() => ask('确认属实?这单餐费退款由商家承担',
-                          '核实说明(商家会收到:餐费退款由他承担、记一条商家责任,72 小时内可申诉)', true,
+                        onClick={() => ask('确认属实?顾客全额退款(含配送费和小费),由商家承担',
+                          '核实说明(商家会收到:全额退款由他承担 —— 这单净额冲回、骑手那份配送费和小费另出,'
+                          + '记一条商家责任,72 小时内可申诉)', true,
                           (n) => foodSafetyAction(it.id, 'confirm', n), '已确认')}>
                   确认属实
                 </Button>

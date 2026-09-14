@@ -110,7 +110,7 @@ export struct ReviewsPage {
     this.processAccept = accept;
     // 同意时给一句默认话术,拒绝时**不给** —— 拒绝的理由必须商家自己写,
     // 套话式的拒绝只会把顾客推到平台客服那里
-    this.processText = accept ? '非常抱歉给您带来不好的体验,已退您餐费' : '';
+    this.processText = accept ? '非常抱歉给您带来不好的体验,已为您全额退款' : '';
     this.showProcess = true;
   }
 
@@ -170,9 +170,10 @@ export struct ReviewsPage {
       Text(this.processAccept ? '同意退款' : '拒绝售后')
         .fontSize(17).fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.ink')).width('100%');
-      // 同意即认责,钱从结算款扣。这句话必须在按钮之前就说
+      // 同意即认责,钱从结算款扣。这句话必须在按钮之前就说。
+      // 2026-09-15 起:顾客拿回全款,骑手那份配送费和小费照归骑手、由商家另出(services/merchant_fault)
       Text(this.processAccept
-        ? '同意即认责,退款金额从你的结算款里扣。'
+        ? '同意即认责:顾客拿回全款(含配送费和小费),这单净额冲回;骑手已经跑了这一趟,他那份配送费和小费照拿、由你另出。'
         : '拒绝后顾客可以申请平台介入。给个具体原因,别写套话。')
         .fontSize(12).lineHeight(19)
         .fontColor(this.processAccept

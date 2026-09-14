@@ -5,11 +5,10 @@
 反倒算他的错。这类退化不报错,所以守着:
 
 1. 判谁的责任只有一份,取值和骑手上报的种类(schemas 的 Literal)对得上;
-2. 判商家责任时退多少:顾客为餐付的那部分,配送费和小费归骑手、不退(平台不出这笔钱);
+2. 判商家责任时退多少:全款(含配送费和小费),商家这单净额冲回、骑手那份另出(services/merchant_fault);
 3. 用到它的地方(裁决、申诉资格、信用分、出参)真的在用它,不各写一份。
 """
 import inspect
-from types import SimpleNamespace
 from typing import get_args
 
 import pytest
@@ -61,28 +60,14 @@ class Test判谁的责任:
         assert (out["fault"], out["refund_fault"]) == ("", "merchant")
 
 
-def _order(total, delivery, tip, rider_id=7):
-    # 默认是平台骑手送的单(到店未出餐、餐不齐都是骑手上报的);rider_id=None 是商家自配送
-    return SimpleNamespace(total_cents=total, delivery_fee_cents=delivery, tip_cents=tip,
-                           rider_id=rider_id)
-
-
 class Test判商家责任退多少:
-    def test_退顾客为餐付的那部分(self):
-        # 餐 2200 + 配送 300 + 小费 200 = 2700,退 2200;配送费和小费归骑手
-        assert df.merchant_refund_cents(_order(2700, 300, 200)) == 2200
-
-    def test_平台券抵掉的那截不退现金(self):
-        """实付里已经扣了平台券:退的是顾客真付的,那截券的钱回到平台自己手里。"""
-        # 餐 2200、配送 300、平台券 500 → 实付 2000,退 1700
-        assert df.merchant_refund_cents(_order(2000, 300, 0)) == 1700
-
-    def test_不会是负数(self):
-        assert df.merchant_refund_cents(_order(300, 300, 100)) == 0
-
-    def test_商家自配送的配送费照退(self):
-        """自配送没有骑手,配送费算在商家入账里、冲回净额时一起冲回 —— 不退就是商家白拿"""
-        assert df.merchant_refund_cents(_order(2500, 300, 0, rider_id=None)) == 2500
+    def test_退全款_商家另出骑手那份(self):
+        """2026-09-15 定:判商家责任顾客拿回全款(含配送费和小费),钱由商家出 —— 不再在这里算「餐钱」"""
+        assert not hasattr(df, "merchant_refund_cents"), "只退餐钱的老口径又回来了"
+        from app.routers import admin
+        src = inspect.getsource(admin.resolve_delivery_issue)
+        assert "merchant_fault_refund_cents(db, order)" in src
+        assert "merchant_fault_svc.apply(" in src, "判商家责任却没冲这单净额、没让商家另出骑手那份"
 
 
 class Test真的在用它:
@@ -92,8 +77,7 @@ class Test真的在用它:
         from app.routers import admin
         src = inspect.getsource(admin.resolve_delivery_issue)
         assert "delivery_fault.refund_fault(issue.kind)" in src
-        assert "delivery_fault.merchant_refund_cents(order)" in src
-        assert "reverse_merchant_earning(" in src, "判商家责任却没冲这单的净额 —— 钱还是平台出的"
+        assert "merchant_fault_svc.apply(" in src, "判商家责任却没冲这单的净额 —— 钱还是平台出的"
 
     def test_骑手申诉资格按它挡(self):
         from app.routers import appeals

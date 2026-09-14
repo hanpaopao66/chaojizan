@@ -211,3 +211,4 @@ e2e_social_moderation
 e2e_credit
 e2e_credit_roles
 e2e_rider_fault
+e2e_merchant_fault

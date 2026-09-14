@@ -1229,7 +1229,9 @@ class FinanceOrder {
         foodCents = json['food_cents'] as int,
         commissionCents = json['commission_cents'] as int,
         netCents = json['net_cents'] as int,
-        createdAt = json['created_at'] as String;
+        createdAt = json['created_at'] as String,
+        kind = json['kind'] as String? ?? 'earning',
+        kindLabel = json['kind_label'] as String? ?? '';
 
   /// 分页游标的一部分,和 createdAt 一起传
   final int id;
@@ -1238,6 +1240,17 @@ class FinanceOrder {
   final int commissionCents;
   final int netCents;
   final String createdAt;
+
+  /// 哪一种行:earning 入账 / reversal 冲账 / adjustment 申诉改判补回 /
+  /// fault_charge 商家责任、骑手那份配送费和小费由你出 / fault_refund 申诉改判退回。
+  /// 老服务端不给,当成入账
+  final String kind;
+
+  /// 服务端给的名字(和对账单 CSV 同一份);老服务端不给时为空
+  final String kindLabel;
+
+  /// 入账那一行照旧写「流水 − 佣金」,别的几种行写它是什么(商家一眼看出这一行为什么是负的)
+  bool get isEarning => kind == 'earning';
 }
 
 /// 骑手实名档案。

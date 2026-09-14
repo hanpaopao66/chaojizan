@@ -121,7 +121,8 @@ def main() -> None:
     o = call("GET", f"/orders/{no2}", buyer)
     partial = o["refund_cents"]
     assert partial > 0 and o["tip_cents"] == 300, o
-    goods = o["total_cents"] - o["delivery_fee_cents"] - o["tip_cents"]
+    # 商家有责任退全款(2026-09-15 定):缺货退过的那份已经从实付里扣了,剩下的一分不少
+    full = o["total_cents"]
     a2 = pending_after_sale(no2, buyer)
     call("POST", f"/after-sales/{a2['id']}/reject", merchant, {"reply": "出餐时是齐的"})
     ap_oos = call("POST", "/appeals", buyer,
@@ -130,22 +131,30 @@ def main() -> None:
     call("POST", f"/admin/appeals/{ap_oos['id']}/resolve", admin,
          {"result": "overturned", "note": "复核:售后应当受理"})
     got = call("GET", f"/orders/{no2}", buyer)["refund_cents"] - partial
-    assert got == goods, (
-        f"改判退了 {got} 分,应当是顾客为餐付的 {goods} 分(实付 − 配送费 − 小费);"
-        f"少的那 {goods - got} 分就是被减了两次的缺货退款")
-    print(f"✓ 缺货退过一份、带小费,售后被拒再改判:退 {got} 分 = 实付 − 配送费 − 小费,"
+    assert got == full, (
+        f"改判退了 {got} 分,应当是全款 {full} 分(缺货之后剩下的实付,含配送费和小费);"
+        f"少的那 {full - got} 分就是被减了两次的缺货退款")
+    print(f"✓ 缺货退过一份、带小费,售后被拒再改判:全额退剩下的 {got} 分(含配送费和小费),"
           f"缺货那份没被减两次")
 
     buyer = register_fresh_customer("带小费售后")
     no3 = tipped_order(buyer, 1)
     o = call("GET", f"/orders/{no3}", buyer)
-    goods = o["total_cents"] - o["delivery_fee_cents"] - o["tip_cents"]
+    share = o["delivery_fee_cents"] + o["tip_cents"]
     a3 = pending_after_sale(no3, buyer)
     call("POST", f"/after-sales/{a3['id']}/accept", merchant, {"reply": "抱歉,已退款"})
     got = call("GET", f"/orders/{no3}", buyer)["refund_cents"]
-    assert got == goods, (
-        f"商家同意售后退了 {got} 分,应当是 {goods} 分:小费骑手照拿,再退给顾客就是平台出钱")
-    print(f"✓ 商家同意售后:退 {got} 分,配送费和小费照归骑手、不退")
+    assert got == o["total_cents"], (
+        f"商家同意售后退了 {got} 分,应当是全款 {o['total_cents']} 分(含配送费和小费)")
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    day = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()  # 另出的那行刚写,按北京日期取
+    rows = {r["kind"]: r["net_cents"]
+            for r in call("GET", f"/merchants/me/finance/orders?day={day}", merchant)
+            if r["order_no"] == no3}
+    assert rows.get("fault_charge") == -share, (
+        f"骑手照拿配送费和小费 {share} 分,这一份该由商家另出,商家账上却是 {rows}")
+    print(f"✓ 商家同意售后:全额退 {got} 分;骑手那份 {share} 分照拿、由商家另出(平台不出)")
 
     # ============ 二、账号被风控限制 ============
     victim = register_fresh_customer("风控申诉")

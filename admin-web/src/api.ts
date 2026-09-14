@@ -386,8 +386,10 @@ export interface DeliveryIssue {
   /** 裁成「退款」会判谁的责任(服务端 services/delivery_fault):
    *  到店未出餐、餐品不齐是 merchant,其余 rider。老服务端没有这个字段 */
   refund_fault?: string
-  /** 裁成「退款」的话退给顾客多少:判商家责任是顾客为餐付的那部分,判骑手责任是实付全额 */
+  /** 裁成「退款」的话退给顾客多少:两种责任都是全款(实付里还没退回去的钱) */
   refund_preview_cents?: number
+  /** 判商家责任的话商家另出的骑手那份(配送费 + 小费);判骑手责任为 0。老服务端没有这个字段 */
+  merchant_charge_preview_cents?: number
 }
 
 export const listDeliveryIssues = (status = 'open') =>
@@ -395,9 +397,9 @@ export const listDeliveryIssues = (status = 'open') =>
 /** 处置配送异常。**action 是必填的** —— 后端是 Literal,少传直接 422。
  *  - continue_delivery 让骑手继续送(不判谁的责任)
  *  - mark_delivered 判为顾客原因,按送达处理(顾客信用分的扣分项)
- *  - refund 判谁的责任看异常种类(refund_fault):到店未出餐、餐品不齐判商家责任、
- *    商家承担退款(商家信用分的扣分项);其余判骑手责任 —— 顾客全额退款,这单骑手收入冲回,
- *    商家那份餐钱先保障金池、不够的骑手出(骑手信用分的扣分项) */
+ *  - refund 判谁的责任看异常种类(refund_fault):到店未出餐、餐品不齐判商家责任 —— 顾客全额退款,
+ *    商家这单净额冲回、骑手那份配送费和小费另出(商家信用分的扣分项);其余判骑手责任 —— 顾客全额退款,
+ *    这单骑手收入冲回,商家那份餐钱先保障金池、不够的骑手出(骑手信用分的扣分项) */
 export type IssueAction = 'continue_delivery' | 'mark_delivered' | 'refund'
 
 export const resolveDeliveryIssue = (

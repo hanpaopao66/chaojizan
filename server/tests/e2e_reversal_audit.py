@@ -2,8 +2,8 @@
 
 场景:
   1. 完整跑一单到完成(结算入账)
-  2. 售后退款(退餐费,配送费已履约不退)→ refunds 流水(模拟通道即时成功)+
-     商家冲账负数行,骑手配送费不追回(平台原则)
+  2. 售后退款(商家同意 = 商家责任,2026-09-15 起全额退,含配送费和小费)→ refunds 流水
+     (模拟通道即时成功)+ 商家冲账负数行 + 骑手那份商家另出一行,骑手配送费不追回(平台原则)
   3. 审计 7 条恒等式全绿(退款一致性/冲账齐全/全局恒等)
   4. 商家对账单 CSV 含入账和冲账两行
   5. 骑手提现 → 管理员批量打款(凭证号留痕)+ T+1 批次只收昨日前申请
@@ -86,24 +86,26 @@ assert [e.kind for e in earnings] == [EarningKind.earning], "完成后应只有�
 net_before = earnings[0].net_cents
 print(f"✓ 商家入账 {net_before} 分(净额 = 菜价 - 5% 佣金)")
 
-# ---- 售后退款(退餐费,配送费不退)→ 冲账 ----
+# ---- 售后退款(商家责任:全额退,骑手那份商家另出)→ 冲账 ----
 after_sale = call("POST", f"/orders/{no}/after-sale", customer,
     {"reason": "菜品有异物,要求退款", "images": ["/uploads/demo-evidence.jpg"]})
 call("POST", f"/after-sales/{after_sale['id']}/accept", merchant, {"reply": "非常抱歉,退您餐费"})
 
 o, earnings, rider_rows, refunds = asyncio.run(db_fetch())
-assert o.refund_cents == o.total_cents - o.delivery_fee_cents, \
-    "售后应退餐费部分(配送费已履约不退)"
+assert o.refund_cents == o.total_cents, "商家责任的售后应全额退(含配送费和小费)"
+share = o.delivery_fee_cents + o.tip_cents
 kinds = sorted(e.kind.value for e in earnings)
-assert kinds == ["earning", "reversal"], f"应有入账+冲账两行,实际 {kinds}"
+assert kinds == ["earning", "fault_charge", "reversal"], f"应有入账+冲账+另出三行,实际 {kinds}"
 reversal = next(e for e in earnings if e.kind == EarningKind.reversal)
 assert reversal.net_cents == -net_before, "冲账负数行应与入账相加归零"
-assert sum(e.net_cents for e in earnings) == 0, "商家该单净额应归零"
-print("✓ 商家冲账:入账+负数行相加归零,账本只追加未修改")
+charge = next(e for e in earnings if e.kind == EarningKind.fault_charge)
+assert charge.net_cents == -share and charge.commission_cents == 0, "骑手那份由商家另出一行"
+assert sum(e.net_cents for e in earnings) == -share, "商家这单:净额归零,再出骑手那份"
+print("✓ 商家冲账:入账+负数行相加归零,骑手那份另出一行,账本只追加未修改")
 
 assert len(rider_rows) == 1 and rider_rows[0].kind == EarningKind.earning, \
     "骑手配送费不追回(配送已完成,平台原则)"
-print(f"✓ 骑手配送费 {rider_rows[0].amount_cents} 分保留(用户不退这部分,平台零倒贴)")
+print(f"✓ 骑手配送费 {rider_rows[0].amount_cents} 分保留(顾客全退了,这份由商家出,平台零倒贴)")
 
 assert len(refunds) == 1, "应有一条退款流水"
 assert refunds[0].status == RefundStatus.success and refunds[0].channel == "mock"
@@ -130,9 +132,9 @@ req = urllib.request.Request(f"{BASE}/merchants/me/finance/statement.csv?days=7"
 req.add_header("Authorization", f"Bearer {merchant}")
 csv_text = urllib.request.urlopen(req).read().decode()
 lines = [ln for ln in csv_text.splitlines() if no in ln]
-assert len(lines) == 2 and any("冲账" in ln for ln in lines), \
-    f"对账单应含本单入账+冲账两行,实际 {lines}"
-print("✓ 对账单 CSV:入账与冲账两行齐全,商家可下载核对")
+assert len(lines) == 3 and any("冲账" in ln for ln in lines) \
+    and any("由你出" in ln for ln in lines), f"对账单应含本单入账+冲账+另出三行,实际 {lines}"
+print("✓ 对账单 CSV:入账、冲账、骑手那份由你出三行齐全,商家可下载核对")
 
 # ---- 骑手提现 → 批量打款 ----
 wallet = call("GET", "/riders/wallet", rider)

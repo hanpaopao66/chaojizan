@@ -204,18 +204,17 @@ async def main():
     check("售后判骑手责任", no3, paid3, paid3)
     assert order_row(no3, c3)["refund_cents"] == paid3
 
-    # ---- D) 商家同意售后:只退餐费,配送费已履约不退(routers/after_sales)----
+    # ---- D) 商家同意售后:全额退(含配送费和小费,商家出;routers/after_sales)----
     drain_rider()
     c4 = new_customer(4)
     no4, paid4 = place(c4, did, to="delivered")
-    fee4 = order_row(no4, c4)["delivery_fee_cents"]
     a4 = call("POST", f"/orders/{no4}/after-sale", c4,
               {"reason": "退款顺序用例:少了一份",
                "images": ["/uploads/y.jpg"]})
     await ainvoke("POST", f"/after-sales/{a4['id']}/accept", merchant,
                   {"reply": "退款顺序用例"})
-    check("商家同意售后(退餐费)", no4, paid4, paid4 - fee4)
-    assert order_row(no4, c4)["refund_cents"] == paid4 - fee4
+    check("商家同意售后(全额退)", no4, paid4, paid4)
+    assert order_row(no4, c4)["refund_cents"] == paid4
 
     # ---- E) 渠道拒绝这一笔:refund_cents 不能加上去 ----
     drain_rider()

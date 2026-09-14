@@ -103,10 +103,38 @@ def test_old_formulas_do_not_come_back():
         src = (SERVER / rel).read_text(encoding="utf-8")
         assert "- order.refund_cents" not in src, f"{rel} 又自己算退款了,改用 services/refund_calc"
     after_sales = (SERVER / "app/routers/after_sales.py").read_text(encoding="utf-8")
-    assert "goods_unrefunded_cents" in after_sales
+    assert "merchant_fault_refund_cents(db, order)" in after_sales
     appeals = (SERVER / "app/routers/appeals.py").read_text(encoding="utf-8")
-    assert appeals.count("goods_unrefunded_cents(db, order)") == 2
+    # 「餐钱」口径只剩顾客对「按送达处理」申诉改判那一处(平台退、不是商家责任);
+    # 商家有责任的路退全款(2026-09-15 定)
+    assert appeals.count("goods_unrefunded_cents(db, order)") == 1
+    assert "merchant_fault_refund_cents(db, order)" in appeals
     assert "unrefunded_paid_cents(db, order)" in appeals
+
+
+def test_merchant_fault_refunds_everything_left():
+    """商家有责任:顾客拿回全款(含配送费和小费),不再只退「餐钱」"""
+    o = _order(total_cents=2800, refund_cents=0)
+    assert _run(refund_calc.merchant_fault_refund_cents(_DB(0), o)) == 2800
+    # 缺货退过一份:剩下的全退,缺货那笔只算一次
+    o = _order(total_cents=2800, refund_cents=2000)
+    assert _run(refund_calc.merchant_fault_refund_cents(_DB(2000), o)) == 2800
+
+
+def test_goods_only_is_not_used_on_merchant_paths():
+    """「顾客为餐付的钱」这个口径不许再出现在商家有责任的四条路上(名不副实的函数不留在那儿)"""
+    import inspect
+
+    from app.routers import admin, after_sales, appeals
+    for fn in (after_sales.accept_after_sale, admin.resolve_delivery_issue,
+               admin.confirm_food_safety):
+        src = inspect.getsource(fn)
+        assert "goods_unrefunded_cents" not in src, fn.__name__
+        assert "merchant_fault_refund_cents" in src, fn.__name__
+    rejected = inspect.getsource(appeals._overturn).split(
+        'elif appeal.target_type == "after_sale_rejected":')[1].split("elif appeal.target_type")[0]
+    assert "merchant_fault_refund_cents(db, order)" in rejected
+    assert "goods_unrefunded_cents" not in rejected
 
 
 def test_out_of_stock_refunds_are_written_with_the_prefix_we_read():

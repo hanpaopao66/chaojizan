@@ -6,7 +6,9 @@
      配送费 + 小费 − 跑腿服务费,2026-09-14 之前结过等餐补偿的单另加那笔;外卖配送费平台一分不抽),
      **且收款人是接单的那个骑手**
   3. 非取消订单:total == food + delivery
-  4. 任何骑手的可提现余额不得为负;商家余额同理(按店主整户核,口径直接复用钱包)
+  4. 任何骑手提走的钱不得超过挣到的钱;商家同理(按店主整户核,口径直接复用钱包)。
+     判骑手 / 商家责任扣的那几行不算「挣到」—— 余额可以因此为负,之后的收入先抵、提现按余额挡
+  4c/4d. 判骑手责任、判商家责任的恒等式(services/rider_fault、services/merchant_fault)
   5. 每笔订单的 refund_cents 必须等于 refunds 流水之和(失败流水不算 → 自动暴露)
   5b. 退款不得超过用户实付 —— 判据是"剩余应付不许为负"(见该条的长注释:
       total_cents 是剩余应付不是累计实付,直接比 refund_cents 会造出几百盏假红灯)
@@ -16,7 +18,7 @@
       这两格以前是空的:券和住宿的"退款"只改了个状态字段,一条流水都没写。
       住宿那条核的是**能原路退回去**的部分,不是 refund_cents:
       「到店无房」的退款额含商家违约金,本来就超过用户实付(详见规则 15)
-  6. 售后退款(完成单退餐费,配送费已履约不退)的已结算订单必须有商家冲账负数行
+  6. 商家有责任的售后退款(2026-09-15 起退全款,骑手那份商家另出)的已结算订单必须有商家冲账负数行
   7. 全局恒等,分两侧:菜品侧 Σ应收 == Σ商家净额+Σ佣金(售后冲账单剔除);
      配送侧 Σ配送费 == Σ骑手入账(售后单保留 —— 配送费 100% 归骑手的账面铁证)
 
@@ -93,6 +95,8 @@ NO_RIDER_COMP_NOTE = "无骑手接单取消,平台赔付餐损"
 #: 判骑手责任的三种骑手行(services/rider_fault.FAULT_KINDS):这单收入冲回、池子不够骑手出、改判退回
 _RIDER_FAULT_KINDS = (EarningKind.fault_reversal, EarningKind.fault_charge,
                       EarningKind.fault_refund)
+#: 判商家责任的两种商家行(services/merchant_fault.FAULT_KINDS):骑手那份商家另出、改判退回
+_MERCHANT_FAULT_KINDS = (EarningKind.fault_charge, EarningKind.fault_refund)
 
 
 def _rider_due(order) -> int:
@@ -249,6 +253,68 @@ async def _rider_fault_problems(db, since) -> list[dict]:
                     "detail": f"骑手保障金池余额为负:计提 {bal['accrued_cents']} − 支出 "
                               f"{bal['paid_cents']} + 回池 {bal['returned_cents']} = "
                               f"{bal['balance_cents']} 分 —— 池子不够时该骑手出,不该透支"})
+    return out
+
+
+async def _merchant_fault_problems(db, since) -> list[dict]:
+    """判商家责任的恒等式(规则 4d)。和 services/merchant_fault.apply / undo 逐项对着写。
+
+    - 商家另出的那行 == 这单骑手那份(配送费 + 小费;自配送、自取没有这一行);
+    - 有另出那行的单:这单净额冲回了、顾客的实付全退了(顾客拿回全款,平台一分不贴);
+    - 改判成立:另出的那行原样退回(fault_refund == −fault_charge),补回的净额 == 当初冲回的
+      (adjustment == −reversal;2026-09-14 之前改判补的调整行也是这个形状)。
+    """
+    from .refund_calc import (ADDRESS_CHANGE_REFUND_REASON, OUT_OF_STOCK_REFUND_PREFIX,
+                              rider_kept_cents)
+
+    out: list[dict] = []
+    touched = set(await db.scalars(
+        select(MerchantEarning.order_id).where(
+            MerchantEarning.kind.in_((*_MERCHANT_FAULT_KINDS, EarningKind.adjustment)),
+            MerchantEarning.created_at >= since)))
+    if not touched:
+        return out
+    rows: dict[int, dict] = {}
+    for oid, kind, net in (await db.execute(
+            select(MerchantEarning.order_id, MerchantEarning.kind, MerchantEarning.net_cents)
+            .where(MerchantEarning.order_id.in_(touched)))).all():
+        rows.setdefault(oid, {})[kind] = net
+    orders = {o.id: o for o in await db.scalars(select(Order).where(Order.id.in_(touched)))}
+    # 退的同时已经扣了实付的那几笔(缺货、改地址):和 refund_calc.unrefunded_paid_cents 同一个口径
+    deducted = dict((await db.execute(
+        select(Refund.order_id, sa_func.sum(Refund.amount_cents))
+        .where(Refund.order_id.in_(touched), Refund.status != RefundStatus.failed,
+               (Refund.reason.like(OUT_OF_STOCK_REFUND_PREFIX + "%"))
+               | (Refund.reason == ADDRESS_CHANGE_REFUND_REASON))
+        .group_by(Refund.order_id))).all())
+    for oid in sorted(touched):
+        r, o = rows.get(oid, {}), orders.get(oid)
+        no = o.order_no if o is not None else f"#{oid}"
+        charge = r.get(EarningKind.fault_charge)
+        if charge is not None and o is not None:
+            share = rider_kept_cents(o)
+            if -charge != share:
+                out.append({"check": "merchant_fault_split",
+                            "detail": f"订单 {no} 判商家责任另出 {-charge} 分,这单骑手那份(配送费 + "
+                                      f"小费)是 {share} 分 —— 多扣了商家,或者差额成了平台出的钱"})
+            if EarningKind.reversal not in r:
+                out.append({"check": "merchant_fault_split",
+                            "detail": f"订单 {no} 判商家责任另出了骑手那份,这单净额却没冲回"})
+            unrefunded = o.total_cents - (o.refund_cents - int(deducted.get(oid) or 0))
+            if unrefunded > 0:
+                out.append({"check": "merchant_fault_split",
+                            "detail": f"订单 {no} 判商家责任,顾客实付还有 {unrefunded} 分没退"
+                                      f" —— 商家有责任时顾客该拿回全款"})
+        back = r.get(EarningKind.fault_refund)
+        if back is not None and back != -(charge or 0):
+            out.append({"check": "merchant_fault_split",
+                        "detail": f"订单 {no} 商家责任改判:退回另出的 {back} 分,当初另出 "
+                                  f"{-(charge or 0)} 分 —— 对不上"})
+        adj = r.get(EarningKind.adjustment)
+        if adj is not None and adj != -(r.get(EarningKind.reversal) or 0):
+            out.append({"check": "merchant_fault_split",
+                        "detail": f"订单 {no} 改判补回的净额 {adj} 分 ≠ 当初冲回的 "
+                                  f"{-(r.get(EarningKind.reversal) or 0)} 分"})
     return out
 
 
@@ -556,7 +622,16 @@ async def run_audit() -> list[dict]:
         #     还有池子本身不许支成负数(余额按公开账本算:计提 − 支出 + 回池)
         problems.extend(await _rider_fault_problems(db, since))
 
-        # 4b) 商家余额不得为负。
+        # 4d) 判商家责任的钱对不对(services/merchant_fault):另出的那行 == 骑手那份(配送费 + 小费),
+        #     净额冲回了、顾客全款退了;改判成立的,另出的原样退回、补回的净额 == 当初冲回的
+        problems.extend(await _merchant_fault_problems(db, since))
+
+        # 4b) 商家提现不得超过挣到的钱。
+        #
+        # 判商家责任之后(services/merchant_fault),商家的余额**可以是负的**:这单净额冲回、
+        # 骑手那份配送费和小费另出一行,余额不够就挂负数,之后的收入先抵、提现按余额挡住。
+        # 所以和骑手那条(4)一样,判据是「提走的钱不超过挣到的钱」—— 另出的那行不算「挣到」;
+        # 余额为负的店主单独记一行日志,不当错账报。
         #
         # **口径直接调钱包那个函数,不在这里抄第二份。** 上面 _rider_due 的
         # 注释写着"逐单检查与全局恒等必须共用这一个函数",商家这边曾经没照做,
@@ -574,23 +649,39 @@ async def run_audit() -> list[dict]:
         by_owner: dict[int, list] = {}
         for shop in merchants:
             by_owner.setdefault(shop.owner_id, []).append(shop)
+        # 每家店判商家责任另出 / 改判退回的那几行(钱包只算平台代收口径,这里同一个口径)
+        m_fault_sum = dict((await db.execute(
+            select(MerchantEarning.merchant_id, sa_func.sum(MerchantEarning.net_cents))
+            .where(MerchantEarning.kind.in_(_MERCHANT_FAULT_KINDS),
+                   MerchantEarning.settle_mode == "platform")
+            .group_by(MerchantEarning.merchant_id))).all())
+        m_owed_n, m_owed_cents = 0, 0
         for owner_id, shops in by_owner.items():
             earned = 0
+            faults = 0
             out = 0
             for shop in shops:
                 w = await _merchant_wallet(db, shop)
                 earned += w.total_earned_cents      # 按店:外卖+团购+住宿
+                faults += int(m_fault_sum.get(shop.id) or 0)
                 # 提现按 owner_id 查,同一店主的每家店返回的都是同一个数,
                 # 取一次就够(累加就会把连锁的提现重复扣 N 遍)
                 out = w.pending_withdrawal_cents + w.withdrawn_cents
-            if earned - out < 0:
+            if earned - faults - out < 0:
                 names = "、".join(s.name for s in shops)
                 problems.append({
                     "check": "merchant_balance_negative",
                     "detail": f"店主 #{owner_id}(名下 {len(shops)} 家店:{names})"
-                              f"整户余额为负:{earned - out} 分"
-                              f"(累计入账 {earned},提现 {out})",
+                              f"提走的比挣到的多:{earned - faults - out} 分"
+                              f"(累计入账 {earned - faults},提现 {out};"
+                              f"不含判商家责任另出的 {-faults} 分)",
                 })
+            elif earned - out < 0:
+                m_owed_n += 1
+                m_owed_cents += out - earned
+        if m_owed_n:
+            logger.info("判商家责任后余额为负、等后续收入抵扣的店主 %s 户,共欠 %s 分",
+                        m_owed_n, m_owed_cents)
 
         # 5) 退款一致性:订单汇总 == 逐笔流水之和(failed 不计入 → 自动暴露渠道失败)
         refunded_orders = (
@@ -666,7 +757,7 @@ async def run_audit() -> list[dict]:
                     and order.id not in m_reversals):
                 problems.append({
                     "check": "reversal_missing",
-                    "detail": f"订单 {order.order_no} 售后已退餐费但商家入账未冲账",
+                    "detail": f"订单 {order.order_no} 售后已退款但商家入账未冲账",
                 })
 
         # 6.5) 跑腿单一分商家入账都不该有。

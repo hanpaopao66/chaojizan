@@ -15,7 +15,8 @@
 - after_sale_rider / delivery_issue 改判 → 对应 AfterSale.fault: rider → platform
                      (骑手消责正名,审计规则 6 的免冲账口径同步认 platform);判责时从骑手
                      扣的加回去、保障金池出的回池(services/rider_fault)—— 错判由平台认
-- after_sale_rejected 改判(顾客) → 按商家同意的口径:退餐费、商家冲账、判商家责任;
+- after_sale_rejected 改判(顾客) → 按商家同意的口径(services/merchant_fault):顾客拿回全款
+                     (含配送费和小费),商家这单净额冲回、骑手那份另出,判商家责任;
                      跑腿单没有商家 → 判骑手责任(rider_fault.judge_after_sale),平台不出钱
 - review 改判      → 差评 hidden,评分聚合同步扣减
 """
@@ -575,8 +576,8 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
             + (note or ""),
             {"type": "appeal"})
     elif appeal.target_type == "after_sale_rejected":
-        # 改判 = 平台认定这笔售后本来就该成立。那就**按商家同意的口径**走:
-        # 退款给用户、商家冲账。
+        # 改判 = 平台认定这笔售后本来就该成立。那就**按商家同意的口径**走(services/merchant_fault):
+        # 顾客拿回全款(含配送费和小费),商家这单净额冲回、骑手那份另出。
         #
         # 这里**确实向商家追款**,和 cancel_split 那条(不追商家骑手)不一样,
         # 因为性质不同:那边商家把餐做好了、没做错事;这边是平台认定商家
@@ -594,30 +595,35 @@ async def _overturn(db: AsyncSession, appeal: Appeal, note: str,
         if is_errand(order):
             await _overturn_errand_rejected(db, appeal, a, order, note, admin_id)
             return
-        from ..services.settlement import reverse_merchant_earning
+        from ..services import merchant_fault
+        from ..services.refund_calc import merchant_fault_refund_cents
         from ..services.wechat_pay import request_refund
-        # 和「商家同意售后」同一个口径(services/refund_calc)。原来「菜 + 打包 − 满减 − 已退」
-        # 会把缺货部分退款减两次、还把平台券抵掉的钱当现金退
-        from ..services.refund_calc import goods_unrefunded_cents
-        refundable = await goods_unrefunded_cents(db, order)
+        # 和「商家同意售后」同一个口径:全款(services/refund_calc)
+        refundable = await merchant_fault_refund_cents(db, order)
+        split = await merchant_fault.apply(
+            db, order, why=f"售后申诉改判,商家应赔:{note or '复核认定售后成立'}",
+            actor_role="admin", actor_id=admin_id)
         if refundable > 0:
             await request_refund(db, order, refundable,
                                  "售后申诉改判:平台认定应当受理")
-        await reverse_merchant_earning(
-            db, order, f"售后申诉改判,商家应赔:{note or '复核认定售后成立'}")
+            refund_note = "售后申诉改判:全额退款(商家责任,含配送费和小费)"
+            order.refund_note = (f"{order.refund_note};{refund_note}"
+                                 if order.refund_note else refund_note)
         a.status = AfterSaleStatus.accepted
         a.fault = "merchant"
         a.processed_at = datetime.now(timezone.utc)   # 商家的申诉窗口从这里起算
         a.reply = (f"{a.reply};用户申诉改判:售后成立")[:300]
         await push_to_user(
             appeal.user_id, "申诉成立",
-            f"复核认定这笔售后应当受理,¥{refundable / 100:.2f} 已原路退回",
+            f"复核认定这笔售后应当受理,全额 ¥{refundable / 100:.2f}(含配送费和小费)"
+            "已原路退回,由商家承担",
             {"type": "appeal"})
         shop = await db.get(Merchant, a.merchant_id)
         if shop is not None:
             await push_to_user(
                 shop.owner_id, "一笔被你拒绝的售后被改判",
-                f"顾客提出申诉,平台复核后认定应当受理。{note}"
+                f"顾客提出申诉,平台复核后认定应当受理:"
+                f"{merchant_fault.merchant_push_text(split, refundable)}。{note}"
                 f"(如不认同,72 小时内可再申诉)",
                 {"type": "appeal"})
     elif appeal.target_type == "review_hidden":

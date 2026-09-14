@@ -34,6 +34,10 @@ _KIND_LABELS = {
     EarningKind.earning: "外卖佣金",
     EarningKind.reversal: "售后冲账",
     EarningKind.adjustment: "申诉调整",
+    # 判商家责任(services/merchant_fault):商家另出的骑手那份、申诉改判退回 —— 佣金都是 0,
+    # 平台这一行没有收入,列出来是为了和商家结算表逐行对得上
+    EarningKind.fault_charge: "商家责任另出配送费小费(无佣金)",
+    EarningKind.fault_refund: "申诉改判退回配送费小费(无佣金)",
 }
 
 

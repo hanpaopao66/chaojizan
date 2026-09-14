@@ -22,7 +22,6 @@ from ..models import (
     Coupon,
     CouponBatch,
     Dish,
-    EarningKind,
     Merchant,
     MerchantEarning,
     MerchantStatus,
@@ -3298,10 +3297,12 @@ async def finance_statement_csv(
     def yuan(cents: int) -> str:
         return f"{cents / 100:.2f}"
 
-    # 外卖/团购/住宿行统一成 (时间, 单号, 类型, 应收, 佣金, 实收, 备注),按时间排
+    # 外卖/团购/住宿行统一成 (时间, 单号, 类型, 应收, 佣金, 实收, 备注),按时间排。
+    # 外卖行的类型名和逐单明细同一份(services/merchant_fault.EARNING_KIND_LABELS):
+    # 原来只分「入账 / 冲账」两种,申诉改判补回的净额也被写成了「冲账」
+    from ..services.merchant_fault import kind_label
     lines = [
-        (e.created_at, e.order_no,
-         "外卖入账" if e.kind == EarningKind.earning else "外卖冲账",
+        (e.created_at, e.order_no, kind_label(e.kind),
          e.food_cents, e.commission_cents, e.net_cents,
          e.note.replace(",", ";").replace("\n", " "))
         for e in earnings
@@ -4717,9 +4718,20 @@ async def my_rules(
                     f"30 天内成立 {FS_AUTO_SUSPEND_COUNT} 起食安投诉,"
                     "系统自动暂停营业并转人工复核",
                     "投诉直达平台不经商家,处置动作全部留痕(你在合规档案里看得到)",
-                    "投诉核实成立:这单的餐费退款由你承担(这单净额冲回,佣金平台也不收;"
-                    "配送费、小费照常归骑手),记一条商家责任、扣信用分;"
-                    f"{appeal_hours} 小时内可以对这笔售后判责申诉",
+                    "投诉核实成立:顾客拿回全款,由你承担(钱怎么走见「判为商家责任的单」),"
+                    f"记一条商家责任、扣信用分;{appeal_hours} 小时内可以对这笔售后判责申诉",
+                ],
+            },
+            {
+                # 2026-09-15 定:商家有责任,商家连配送费和小费一起出(services/merchant_fault)
+                "title": "判为商家责任的单",
+                "items": [
+                    "你同意的售后,和平台判为商家责任的(顾客申诉「售后被拒」成立、"
+                    "骑手到店没出餐或餐不齐、食安投诉成立):顾客拿回全款,含配送费和小费",
+                    "钱由你出:这单净额冲回(佣金平台也不收);骑手跑了这一趟,配送费和小费照归骑手,"
+                    "这一份也由你出,对账单上另记一行「骑手那份配送费和小费由你出」",
+                    "余额可以因此为负:之后的收入先抵,提现按余额算",
+                    "你自己配送的单,配送费本来就在你的入账里,冲回净额就一起退了,不另扣",
                 ],
             },
             {
@@ -4728,7 +4740,8 @@ async def my_rules(
                     f"售后判责、差评(≤3 星)可在 {appeal_hours} 小时内申诉,每项一次",
                     "申诉成立:差评隐藏且评分同步扣回;售后判责撤销、信用分那一条不再计分",
                     # 2026-09-14 起改判不补钱(平台没有钱),见 routers/appeals
-                    "售后判责改判成立,被冲掉的净额不补回:顾客拿到的退款不追回,平台也不出这笔钱",
+                    "售后判责改判成立,被冲掉的净额和另出的配送费、小费都不补回:"
+                    "顾客拿到的退款不追回,平台也不出这笔钱",
                 ],
             },
             {

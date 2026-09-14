@@ -1,8 +1,8 @@
 """食品安全投诉验证:强制带图、成立退款流水齐、下架菜品、暂停营业、
 第 3 起自动停业、dismissed 不动资金、留痕导出。
 
-2026-09-14 起投诉成立**由商家承担退款**(原来平台先垫全额、不冲商家账):
-退的是餐费(实付 − 配送费 − 小费,配送费、小费已付给骑手),这单商家净额冲回;
+2026-09-14 起投诉成立**由商家承担退款**(原来平台先垫全额、不冲商家账);2026-09-15 起退全款
+(含配送费和小费):这单商家净额冲回,骑手那份配送费和小费照归骑手、由商家另出;
 记一条售后判商家责任、扣店主信用分;商家 72 小时内可以申诉,改判成立只撤销判责、钱不动,
 这一起也不再计入自动停业的计数。还没确认收货的单先按完成结算再冲。账务自检全绿。
 
@@ -98,8 +98,8 @@ def main():
     assert err["_error"] == 409, err
     print("✓ 无图 422,提交成功,同单防重 409")
 
-    # 2) confirmed:商家承担餐费退款(配送费、小费归骑手不退),这单净额冲回、记商家责任。
-    #    这一单还没确认收货(送达就提的投诉):先按完成结算再冲,平台一分不出
+    # 2) confirmed:顾客拿回全款(含配送费和小费),商家承担 —— 这单净额冲回、骑手那份另出,
+    #    记商家责任。这一单还没确认收货(送达就提的投诉):先按完成结算再冲,平台一分不出
     audit_before = run_async(audit_snapshot)
     o1 = call("GET", f"/orders/{no1}", customer)
     assert o1["status"] == "delivered", o1["status"]
@@ -109,21 +109,22 @@ def main():
                 {"note": "凭证清晰,成立"})
     assert done["status"] == "confirmed"
     o1_after = call("GET", f"/orders/{no1}", customer)
-    food_part = o1["total_cents"] - o1["delivery_fee_cents"] - o1["tip_cents"]
-    assert o1_after["refund_cents"] == food_part, (o1_after["refund_cents"], food_part)
+    share = o1["delivery_fee_cents"] + o1["tip_cents"]
+    assert o1_after["refund_cents"] == o1["total_cents"], (o1_after["refund_cents"], o1)
     assert o1_after["status"] == "completed", o1_after["status"]
     flows = call("GET", f"/orders/{no1}/refunds", customer)
-    assert sum(f["amount_cents"] for f in flows) == food_part
+    assert sum(f["amount_cents"] for f in flows) == o1["total_cents"]
     w1 = call("GET", "/merchants/me/wallet", merchant)
-    assert w1["total_earned_cents"] == w0["total_earned_cents"], \
-        f"商家这单的净额没冲回(平台在出钱):{w0['total_earned_cents']} → {w1['total_earned_cents']}"
+    assert w1["total_earned_cents"] == w0["total_earned_cents"] - share, \
+        (f"商家这单净额该冲回、骑手那份 {share} 该另出(不然就是平台在出钱):"
+         f"{w0['total_earned_cents']} → {w1['total_earned_cents']}")
     a1 = next(a for a in call("GET", "/merchants/me/after-sales", merchant)
               if a["order_no"] == no1)
     assert a1["status"] == "accepted" and a1["fault"] == "merchant", a1
     problems = run_async(lambda: audit_new_problems(audit_before, no1))
     assert not problems, problems
-    print(f"✓ 成立:退餐费 {food_part} 分(配送费、小费归骑手不退),商家承担(结算后冲回),"
-          "记商家责任;账务自检全绿")
+    print(f"✓ 成立:全额退 {o1['total_cents']} 分(含配送费和小费),商家承担(结算后冲回,"
+          f"骑手那份 {share} 分另出),记商家责任;账务自检全绿")
 
     # 店主信用分记一条「食安投诉成立」;商家可以申诉,改判只撤销判责、钱不动
     got = call("GET", "/credit/me", merchant)

@@ -861,23 +861,42 @@ class _ShopTabPageState extends State<ShopTabPage> {
     }
   }
 
-  /// 处理售后:同意(退餐费,同意即认责从结算款扣)或拒绝,都必须给用户一句话回复
+  /// 处理售后:同意(同意即认责:顾客拿回全款,这单净额冲回、骑手那份配送费和小费你另出)
+  /// 或拒绝,都必须给用户一句话回复
   Future<void> _processAfterSale(AfterSale sale, bool accept) async {
     final controller = TextEditingController(
-        text: accept ? '非常抱歉给您带来不好的体验,已退您餐费' : '');
+        text: accept ? '非常抱歉给您带来不好的体验,已为您全额退款' : '');
     final reply = await showDialog<String>(
       context: context,
       builder: (context) => SzDialog(
-        title: Text(accept ? '同意售后(退餐费,配送费已履约不退)' : '拒绝售后'),
-        content: TextField(
-          controller: controller,
-          maxLength: 300,
-          maxLines: 3,
-          decoration: InputDecoration(
-            labelText: '回复用户(必填)',
-            hintText: accept ? '' : '说明拒绝原因,用户可向平台申诉',
-            border: const OutlineInputBorder(),
-          ),
+        title: Text(accept ? '同意售后' : '拒绝售后'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (accept)
+              // 2026-09-15 起:商家有责任,商家连配送费和小费一起出(服务端 services/merchant_fault)。
+              // 点之前就得知道要出多少,不能点完才在对账单上看到
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                    '同意即认责:顾客拿回全款 ${yuan(sale.totalCents)}(含配送费和小费);'
+                    '这单净额冲回,骑手已经跑了这一趟,他那份配送费和小费照拿、由你另出。',
+                    style: TextStyle(
+                        fontSize: kFontNote,
+                        color: Theme.of(context).sz.inkMuted)),
+              ),
+            TextField(
+              controller: controller,
+              maxLength: 300,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText: '回复用户(必填)',
+                hintText: accept ? '' : '说明拒绝原因,用户可向平台申诉',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(

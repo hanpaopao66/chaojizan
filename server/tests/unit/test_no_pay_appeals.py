@@ -4,7 +4,7 @@
    判责方记 cleared 而不是 platform —— 平台这一单一分没出);
 2. 跑腿单的售后:平台不再「同意 = 认赔」,是骑手的问题判骑手责任、不是就驳回;
    「售后被拒」改判成立判的也是骑手责任;
-3. 食安投诉成立:商家承担餐费退款(冲这单净额)、记商家责任、扣店主信用分、商家可以申诉;
+3. 食安投诉成立:商家承担全额退款(冲这单净额、另出骑手那份)、记商家责任、扣店主信用分、商家可以申诉;
 4. 公示照实说:规则页、信用分公示、判责公示不再说「改判的钱平台认亏」「被冲的净额补回来」
    「先行赔付由平台垫付」。
 
@@ -73,11 +73,11 @@ class Test食安投诉商家承担:
     def test_冲商家净额_判商家责任(self):
         from app.routers import admin
         code = _code(admin.confirm_food_safety)
-        assert "reverse_merchant_earning(" in code
+        # 冲净额、另出骑手那份、没确认收货的先结算,都在 merchant_fault.apply 里(和别的判商家责任同一个写法)
+        assert "merchant_fault.apply(" in code
         assert 'fault="merchant"' in code and 'fault="platform"' not in code
-        assert "merchant_refund_cents(" in code, "退多少和配送异常判商家责任同一个口径(不含配送费、小费)"
+        assert "merchant_fault_refund_cents(" in code, "退多少和别的判商家责任同一个口径(全款)"
         assert "is_errand(order)" in code
-        assert "settle_order(" in code, "还没确认收货的单先结算再冲,不然之后入账就成了平台出的钱"
 
     def test_店主信用分算这一条(self):
         from app.services import credit

@@ -846,8 +846,10 @@ class DeliveryIssueOut(BaseModel):
     total_cents: int = 0
     order_status: str = ""
     #: 裁成「退款」的话退给顾客多少(后台仲裁前看的,路由层按订单算):
-    #: 判骑手责任是实付全额,判商家责任是顾客为餐付的那部分(services/delivery_fault)
+    #: 两种责任都是全款 —— 实付里还没退回去的钱(services/refund_calc)
     refund_preview_cents: int = 0
+    #: 判商家责任的话商家另出的骑手那份(配送费 + 小费,services/merchant_fault);判骑手责任为 0
+    merchant_charge_preview_cents: int = 0
 
     @computed_field
     @property
@@ -1301,6 +1303,29 @@ class FinanceOrderOut(BaseModel):
     commission_cents: int
     net_cents: int
     created_at: datetime
+    #: 哪一种行:earning 入账 / reversal 冲账 / adjustment 申诉改判补回净额 /
+    #: fault_charge 商家责任、骑手那份另出 / fault_refund 申诉改判退回(services/merchant_fault)
+    kind: str = "earning"
+    note: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _kind_as_value(cls, data):
+        # 从 ORM 行来的 kind 是 EarningKind,出参只要它的值
+        if not isinstance(data, dict):
+            kind = getattr(data, "kind", "earning")
+            return {"id": data.id, "order_no": data.order_no, "food_cents": data.food_cents,
+                    "commission_cents": data.commission_cents, "net_cents": data.net_cents,
+                    "created_at": data.created_at, "kind": getattr(kind, "value", kind),
+                    "note": data.note or ""}
+        return data
+
+    @computed_field
+    @property
+    def kind_label(self) -> str:
+        """给店主看的名字(和对账单 CSV 同一份,services/merchant_fault.EARNING_KIND_LABELS)"""
+        from .services.merchant_fault import kind_label
+        return kind_label(self.kind)
 
 
 # ---------- 售后 ----------

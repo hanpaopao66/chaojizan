@@ -1,5 +1,6 @@
-"""售后判责体系验证:举证必传、商家责任退餐费、骑手责任平台赔付、
-次数风控、恶意售后黑名单。在 server/ 目录下运行:python -m tests.e2e_after_sale
+"""售后判责体系验证:举证必传、商家责任全额退(商家出,含配送费和小费)、骑手责任全额退
+(保障金池先出、不够的骑手出)、次数风控、恶意售后黑名单。
+在 server/ 目录下运行:python -m tests.e2e_after_sale
 """
 import time
 
@@ -104,13 +105,14 @@ mine_p = [p for p in problems if no1 in p.get("detail", "")]
 assert not mine_p, f"审计对骑手责任单误报:{mine_p}"
 print("✓ 审计恒等式对骑手责任单不误报")
 
-# ---- 商家责任:同意 = 退餐费,配送费已履约不退 ----
+# ---- 商家责任:同意 = 顾客拿回全款(含配送费和小费),钱由商家出(2026-09-15 定)----
+# 各方金额逐项核在 e2e_merchant_fault
 no2, total2, fee2 = make_order(customer)
 call("POST", f"/orders/{no2}/transition", customer, {"to_status": "completed"})
 order2 = accept_after_sale(no2, "少送了一份餐具,面里有异物")
-assert order2["refund_cents"] == total2 - fee2, (order2["refund_cents"], total2, fee2)
-assert "配送费已履约不退" in order2["refund_note"]
-print(f"✓ 商家责任:退餐费 ¥{(total2-fee2)/100:.2f},配送费 ¥{fee2/100:.2f} 已履约不退")
+assert order2["refund_cents"] == total2, (order2["refund_cents"], total2, fee2)
+assert "全额退款" in order2["refund_note"], order2["refund_note"]
+print(f"✓ 商家责任:全额退 ¥{total2/100:.2f}(含配送费 ¥{fee2/100:.2f}),由商家承担")
 
 # ---- 次数风控:30 天内 3 次成功售后后,新申请被拦 ----
 # 已成功 2 次(骑手责任 1 + 商家责任 1),再来 1 次凑满 3 次

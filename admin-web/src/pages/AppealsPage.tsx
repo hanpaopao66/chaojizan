@@ -34,7 +34,8 @@ function overturnEffect(a: Appeal): string {
     case 'cancel_split':
       return '顾客在取消分摊里承担的部分,由平台原路退回'
     case 'after_sale_rejected':
-      return '按商家同意的口径退餐费、商家冲账、判商家责任;跑腿单没有商家,判的是骑手责任(扣骑手的钱)'
+      return '按商家同意的口径:顾客全额退款(含配送费和小费),商家这单净额冲回、骑手那份另出,判商家责任;'
+        + '跑腿单没有商家,判的是骑手责任(扣骑手的钱)'
     case 'review':
       return '差评隐藏,店铺评分扣回;写评价的人会收到通知、可以申诉'
     case 'review_hidden':

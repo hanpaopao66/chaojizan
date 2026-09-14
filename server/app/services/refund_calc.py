@@ -17,6 +17,9 @@
 
 2026-09-14 又查出一处:原来只减缺货退款,改地址退的配送费差价**也被减了两次** —— 改过地址的单,
 顾客在后面几条全额退款的路上少拿这一截。
+
+2026-09-15 定:商家有责任,顾客拿回全款(含配送费和小费),商家连骑手那份一起出 ——
+商家那几条路退 [merchant_fault_refund_cents],不再退「餐钱」。
 """
 from sqlalchemy import func, or_, select
 
@@ -56,9 +59,19 @@ async def unrefunded_paid_cents(db, order) -> int:
     return max(order.total_cents - other, 0)
 
 
+async def merchant_fault_refund_cents(db, order) -> int:
+    """商家有责任时退给顾客多少:**全款** —— 实付里还没退回去的钱,含配送费和小费(2026-09-15 定)。
+
+    四条判商家责任的路(商家同意售后、售后被拒改判成立、到店未出餐 / 餐品不齐、食安投诉成立)都退它。
+    钱由商家出:这单净额冲回,骑手那份(配送费 + 小费)商家另出一行(services/merchant_fault);
+    骑手照拿,他跑了这一趟。平台券抵掉的那截不在实付里,不退现金、回平台。"""
+    return await unrefunded_paid_cents(db, order)
+
+
 async def goods_unrefunded_cents(db, order) -> int:
     """顾客为这单的**餐**付的、还没退的钱 = 还没退的实付 − 骑手已经挣到的配送费和小费。
 
-    商家有责任(同意售后、售后被拒改判、到店未出餐这类)时退这么多,由商家冲回净额出;
-    配送费和小费照归骑手 —— 要不要让商家连配送费一起出、顾客拿回全款,是另一条要拍板的钱路径。"""
+    只剩一处用它:顾客对「按送达处理」申诉改判成立(appeals._overturn 的 delivery_issue)。那条
+    **不是商家责任**:平台当初判错了顾客,平台原路退他为餐付的钱;骑手确实跑到了、配送费和小费照归他。
+    商家有责任的几条路退全款,见 [merchant_fault_refund_cents]。"""
     return max(await unrefunded_paid_cents(db, order) - rider_kept_cents(order), 0)

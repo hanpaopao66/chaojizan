@@ -76,10 +76,12 @@ print(f"✓ 平台收入明细:该单佣金 {paid['commission_cents'] / 100:.2f}
 # 售后冲账 → 佣金负数行抵减(净口径)
 a = call("POST", f"/orders/{no}/after-sale", customer,
          {"reason": "税表冲账测试", "images": ["/uploads/demo.jpg"]})
-call("POST", f"/after-sales/{a['id']}/accept", merchant, {"reply": "退餐费"})
+call("POST", f"/after-sales/{a['id']}/accept", merchant, {"reply": "全额退款"})
 _, csv2 = fetch_csv("platform-income", admin)
 lines2 = csv2.strip().splitlines()
-assert sum(1 for x in lines2 if no in x) == 2, "冲账负数行也应逐笔可见"
+# 入账、冲账、商家另出骑手那份(佣金 0,平台这一行没有收入)三行都逐笔可见
+assert sum(1 for x in lines2 if no in x) == 3, "冲账负数行、另出的那行也应逐笔可见"
+assert any(no in x and "商家责任另出" in x for x in lines2), lines2
 total_after_reversal = float(lines2[-1].split(",")[4])
 assert abs(total_after_reversal - float(base_total)) < 0.001, \
     "冲账后该单佣金归零,合计回到基线(净口径)"

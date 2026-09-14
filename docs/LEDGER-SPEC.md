@@ -112,8 +112,9 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 | `voucher_rows` | array | 团购核销行 |
 | `stay_rows` | array | 住宿账行 |
 | `rider_fault_rows` | array | 判骑手责任的骑手行(2026-09 起的新字段,§2.2、§6.2b) |
+| `merchant_fault_rows` | array | 判商家责任时商家另出的骑手那份、申诉改判退回(2026-09 起的新字段,§2.2、§6.2c) |
 | `rider_fund` | object | 骑手保障金池:`{per_order_cents, orders, accrued_cents}`;2026-09 起加了 `paid_cents`、`returned_cents`、`rows`(每一笔支出和回池) |
-| `totals` | object | 合计,见 §6.5(2026-09 起多了三项) |
+| `totals` | object | 合计,见 §6.5(2026-09 起多了四项) |
 
 三个费率字段是**该日口径的冻结值**:降费率只影响之后的新锚点,
 历史锚点里的旧费率永久不变,验证器按锚点自带的费率复算(§8)。
@@ -138,6 +139,10 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 // rider_fund.rows 每行(2026-09 起):保障金池的每一笔支出和回池,金额恒为正
 {"o": "<24位hex>", "amount": 1425, "kind": "payout"}
 // kind ∈ {"payout"(判骑手责任时垫商家那份餐钱), "return"(申诉改判成立回池)}
+
+// merchant_fault_rows 每行(2026-09 起):判商家责任时商家账本上追加的行
+{"o": "<24位hex>", "amount": -800, "kind": "fault_charge"}
+// kind ∈ {"fault_charge"(骑手那份配送费和小费由商家另出,≤0), "fault_refund"(申诉改判成立退回,≥0)}
 
 // voucher_rows 每行(只含已核销)
 {"p": "<24位hex>", "gross": 5000, "fee": 100, "net": 4900}
@@ -324,6 +329,24 @@ rider_fund.rows[].kind ∈ {"payout", "return"} 且 amount > 0
 跨天的一致性(退回 == 当初扣的、回池 == 当初支出)由平台每日核账(规则 4c)守着,
 验证器只能逐日看符号和种类。
 
+### 6.2c 判商家责任的行(2026-09 起的新字段)
+
+2026-09-15 起:商家有责任(商家同意售后、售后被拒改判成立、骑手到店未出餐 / 餐品不齐、
+食安投诉成立),顾客拿回全款(含配送费和小费),钱由商家出 —— 这单的商家净额冲回
+(`merchant_rows` 里照旧一条 `reversal`),骑手那份配送费和小费照归骑手、由商家**另出一行**,
+记在 `merchant_fault_rows`。商家申诉改判成立时平台自己认:冲回的净额补回(`merchant_rows`
+里一条 `adjustment`,和 2026-09-14 之前的改判同一个形状),另出的那行退回(`fault_refund`)。
+这些行按下面的规矩记,**验证器应当**校验(参考实现 Python 版已校验):
+
+```
+merchant_fault_rows[].kind ∈ {"fault_charge", "fault_refund"}
+fault_charge 的 amount <= 0;fault_refund 的 amount >= 0
+```
+
+「另出的 == 这单的配送费 + 小费」「退回 == 当初另出的」要用到账本里没有的订单金额和跨天的行,
+由平台每日核账(规则 4d)守着。`merchant_fault_rows` 的行不进 `merchant_rows`,
+所以 §6.1 的两条恒等式照旧只管菜钱那一栏。
+
 ### 6.3 团购行
 
 ```
@@ -354,8 +377,8 @@ totals.stay_fee     == Σ stay_rows[].fee        (字段存在时)
 
 `totals` 其余字段(`merchant_net`、`platform_commission`、`voucher_fee`、
 `stay_net`、`rider_fund`,以及 2026-09 起的 `rider_fault`、`rider_fund_paid`、
-`rider_fund_returned`)以及 `rider_fund` 对象为**信息性**(Python 参考实现另核了
-`rider_fault` 与逐行加总一致):
+`rider_fund_returned`、`merchant_fault`)以及 `rider_fund` 对象为**信息性**(Python 参考实现另核了
+`rider_fault`、`merchant_fault` 与逐行加总一致):
 它们参与哈希(改了必被抓),但当前无实现校验其与逐行加总的一致性。
 第三方实现多校验几条当然欢迎 —— 校验出不一致同样值得示警。
 

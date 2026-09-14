@@ -956,8 +956,12 @@ class _DayOrdersPageState extends State<DayOrdersPage> {
                                     style: TextStyle(
                                         fontSize: kFontNote, color: sz.ink)),
                                 const SizedBox(height: 2),
+                                // 一单可能有入账、冲账、另出骑手那份、申诉改判补回几行:
+                                // 不是入账的那几行写明是什么,商家一眼看出这一行为什么是负的
                                 Text(
-                                    '流水 ${yuan(o.foodCents)} − 佣金 ${yuan(o.commissionCents)}',
+                                    o.isEarning || o.kindLabel.isEmpty
+                                        ? '流水 ${yuan(o.foodCents)} − 佣金 ${yuan(o.commissionCents)}'
+                                        : o.kindLabel,
                                     style: TextStyle(
                                         fontSize: kFontMicro, color: sz.inkMuted)),
                               ],
