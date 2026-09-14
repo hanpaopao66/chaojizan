@@ -10,8 +10,8 @@
 2. **能力边界**:工具清单里**不许出现任何能付钱的工具**。这是整个
    MCP 接入的支点,而它在这一层是可以静态断言的。
 
-服务端那一侧另有 43 条单测 + 1 条 e2e 守着同一件事
-(`server/tests/unit/test_agent_scope.py`、`e2e_agent_token`)——
+服务端那一侧另有一百多条单测 + 2 条 e2e 守着同一件事
+(`server/tests/unit/test_agent_scope.py`、`e2e_agent_token`、`e2e_agent_scopes`)——
 两边都守是因为:这里少写一个工具不等于服务端不给,服务端不给也不等于
 这里不会去调。少任何一边,「付不了钱」都只是半句话。
 
@@ -30,6 +30,23 @@ import server as mcp  # noqa: E402
 
 def rpc(msg: dict) -> dict | None:
     return mcp.handle(msg)
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """协议层的测试不碰网络:默认「不知道这个令牌能做什么」(= 全列)"""
+    monkeypatch.setattr(mcp, "current_scopes", lambda: None)
+
+
+ORDER_TOOLS = {"search_merchants", "get_menu", "quote_order", "create_pending_order",
+               "get_order_status", "list_my_orders", "get_transparency"}
+VIDEO_TOOLS = {"list_video_zones", "publish_video", "submit_video", "update_video_info",
+               "get_video_status", "list_my_videos"}
+MINIAPP_TOOLS = {"get_developer_account", "list_developer_messages", "list_my_miniapps",
+                 "create_miniapp", "update_miniapp_listing", "get_miniapp",
+                 "upload_miniapp_version", "list_miniapp_versions", "set_trial_version",
+                 "submit_miniapp_review", "cancel_miniapp_review", "release_miniapp_version",
+                 "rollback_miniapp", "get_review_decisions"}
 
 
 class Test协议:
@@ -51,11 +68,14 @@ class Test协议:
     def test_列工具(self):
         r = rpc({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
         names = {t["name"] for t in r["result"]["tools"]}
-        assert names == {
-            "search_merchants", "get_menu", "quote_order",
-            "create_pending_order", "get_order_status", "list_my_orders",
-            "get_transparency",
-        }
+        assert names == {"whoami"} | ORDER_TOOLS | VIDEO_TOOLS | MINIAPP_TOOLS
+
+    def test_每个工具都标了属于哪项权限(self):
+        for t in mcp.TOOLS:
+            assert t["scope"] in (None, "order", "video", "miniapp"), t["name"]
+        assert {t["name"] for t in mcp.TOOLS if t["scope"] == "order"} == ORDER_TOOLS
+        assert {t["name"] for t in mcp.TOOLS if t["scope"] == "video"} == VIDEO_TOOLS
+        assert {t["name"] for t in mcp.TOOLS if t["scope"] == "miniapp"} == MINIAPP_TOOLS
 
     def test_每个工具都有描述和入参结构(self):
         r = rpc({"jsonrpc": "2.0", "id": 4, "method": "tools/list"})
@@ -123,9 +143,15 @@ class Test没有任何能付钱的工具:
         src = Path(mcp.__file__).read_text()
         src = re.sub(r'"""(?:.|\n)*?"""', "", src)     # 剥文档字符串
         src = "\n".join(l.split("#", 1)[0] for l in src.splitlines())
-        for bad in ("/pay", "/self-refund", "/refund-item", "/withdraw",
-                    "/payout", "/appeals"):
+        for bad in ("/pay", "/self-refund", "/refund-item", "/withdrawals",
+                    "/payout", "/appeals", "/secret", "/domains", "/remove", "/verify",
+                    "/agreement"):
             assert bad not in src, f"源码里出现了 {bad} —— 助手够不到这些"
+        # 「/withdraw」只许出现在小程序的「撤回审核」上(/versions/{id}/withdraw)——
+        # 提现是 /withdrawals,上面那条管着;这里别让它换个样子溜进来
+        for m in re.finditer(r"/withdraw\b", src):
+            line = src[src.rfind("\n", 0, m.start()) + 1:src.find("\n", m.start())]
+            assert "/versions/" in line, f"撤回审核以外的地方出现了 /withdraw:{line.strip()}"
 
     def test_创建订单的工具明说了它不付款(self):
         d = mcp.BY_NAME["create_pending_order"]["description"]
@@ -166,10 +192,164 @@ class Test算价:
 
 class Test没有第三方依赖:
     def test_只用标准库(self):
-        """开源项目,少一个依赖少一份供应链风险。"""
+        """开源项目,少一个依赖少一份供应链风险。按解释器自带的「标准库清单」核,
+        不维护一份手写的允许列表(手写的那份每用一个新的标准库模块都要改,改着改着就松了)。"""
         import re
         src = Path(mcp.__file__).read_text()
         mods = set(re.findall(r"^import (\w+)", src, re.M))
         mods |= set(re.findall(r"^from (\w+)", src, re.M))
-        allowed = {"json", "os", "sys", "urllib", "__future__"}
-        assert mods <= allowed, f"引入了标准库之外的东西:{mods - allowed}"
+        outside = {m for m in mods if m not in sys.stdlib_module_names}
+        assert not outside, f"引入了标准库之外的东西:{outside}"
+
+
+class Test按权限只列能用的工具:
+    """列出来却调不通的工具,模型会一遍遍试。"""
+
+    def test_只勾发视频的只看到发视频的工具(self, monkeypatch):
+        monkeypatch.setattr(mcp, "current_scopes", lambda: {"video"})
+        r = rpc({"jsonrpc": "2.0", "id": 20, "method": "tools/list"})
+        assert {t["name"] for t in r["result"]["tools"]} == {"whoami"} | VIDEO_TOOLS
+
+    def test_开发者令牌只看到发布小程序的工具(self, monkeypatch):
+        monkeypatch.setattr(mcp, "current_scopes", lambda: {"miniapp"})
+        r = rpc({"jsonrpc": "2.0", "id": 21, "method": "tools/list"})
+        assert {t["name"] for t in r["result"]["tools"]} == {"whoami"} | MINIAPP_TOOLS
+
+    def test_调没权限的工具不发请求并说清去哪签(self, monkeypatch):
+        monkeypatch.setattr(mcp, "current_scopes", lambda: {"order"})
+        monkeypatch.setattr(mcp, "api", lambda *a, **k: pytest.fail("不该发请求"))
+        r = rpc({"jsonrpc": "2.0", "id": 22, "method": "tools/call",
+                 "params": {"name": "list_my_videos", "arguments": {}}})
+        text = r["result"]["content"][0]["text"]
+        assert r["result"]["isError"] and "发视频" in text and "AI 助手" in text
+
+
+class Test本机文件只认那几类:
+    """MCP 跑在用户电脑上,读得到任何文件。被网页里的一句话诱导着把 ~/.ssh 传出去,
+    这一层要在**发请求之前**就拦下。"""
+
+    def _f(self, tmp_path, name, data):
+        p = tmp_path / name
+        p.write_bytes(data)
+        return str(p)
+
+    def test_扩展名不对不传(self, tmp_path):
+        for name in ("id_rsa", "notes.txt", "secret.pem", "data.zip.txt"):
+            with pytest.raises(mcp.ToolError):
+                mcp.local_file(self._f(tmp_path, name, b"\x00\x00\x00\x18ftypmp42"), "video")
+
+    def test_改了扩展名的也不传(self, tmp_path):
+        with pytest.raises(mcp.ToolError, match="文件头"):
+            mcp.local_file(self._f(tmp_path, "fake.mp4", b"%PDF-1.7 not a video, renamed"), "video")
+        with pytest.raises(mcp.ToolError, match="文件头"):
+            mcp.local_file(self._f(tmp_path, "fake.zip", b"not a zip at all"), "zip")
+
+    def test_真的视频图片和包放行(self, tmp_path):
+        mcp.local_file(self._f(tmp_path, "a.mp4", b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64), "video")
+        mcp.local_file(self._f(tmp_path, "a.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 64), "video")
+        mcp.local_file(self._f(tmp_path, "c.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64), "image")
+        mcp.local_file(self._f(tmp_path, "p.zip", b"PK\x03\x04" + b"\x00" * 64), "zip")
+
+    def test_空文件和找不到的文件(self, tmp_path):
+        with pytest.raises(mcp.ToolError, match="空文件"):
+            mcp.local_file(self._f(tmp_path, "e.mp4", b""), "video")
+        with pytest.raises(mcp.ToolError, match="找不到"):
+            mcp.local_file(str(tmp_path / "nope.mp4"), "video")
+
+
+class Test打包文件夹:
+    def test_根目录要有入口和清单(self, tmp_path):
+        (tmp_path / "index.html").write_text("<h1>hi</h1>")
+        with pytest.raises(mcp.ToolError, match="superz.json"):
+            mcp.zip_dir(str(tmp_path))
+
+    def test_只装允许的扩展名_点开头的和密钥进不了包(self, tmp_path):
+        import zipfile
+        (tmp_path / "index.html").write_text("<h1>hi</h1>")
+        (tmp_path / "superz.json").write_text('{"sdk": "2"}')
+        (tmp_path / "js").mkdir()
+        (tmp_path / "js" / "app.js").write_text("1")
+        (tmp_path / ".env").write_text("SECRET=1")
+        (tmp_path / ".git").mkdir()
+        (tmp_path / ".git" / "config").write_text("[core]")
+        (tmp_path / "node_modules").mkdir()
+        (tmp_path / "node_modules" / "x.js").write_text("1")
+        (tmp_path / "server.pem").write_text("KEY")
+        (tmp_path / "build.py").write_text("print(1)")
+        (tmp_path / "link.js").symlink_to(tmp_path / ".env")
+        data, skipped = mcp.zip_dir(str(tmp_path))
+        names = set(zipfile.ZipFile(__import__("io").BytesIO(data)).namelist())
+        assert names == {"index.html", "superz.json", "js/app.js"}, names
+        for s in (".env", ".git/", "node_modules/", "server.pem", "build.py", "link.js"):
+            assert s in skipped, (s, skipped)
+
+
+class Test发视频一条龙:
+    def test_顺序对_默认提交审核(self, tmp_path, monkeypatch):
+        clip = tmp_path / "v.mp4"
+        clip.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 100)
+        calls = []
+
+        def fake(method, path, **kw):
+            calls.append((method, path))
+            if path == "/video/v1/uploads/videos":
+                return {"vid": "sv2BcDeFgHiJ"}
+            if path == "/media/v1/uploads":
+                assert kw["body"]["purpose"] == "video" and kw["body"]["kind"] == "video_source"
+                return {"id": "a" * 32, "chunk_size": 50, "chunks": 3}
+            if path.endswith("/complete"):
+                return {"id": 7}
+            if path.endswith("/submit"):
+                return {"status": "processing"}
+            return {}
+        monkeypatch.setattr(mcp, "api", fake)
+        out = mcp.t_publish_video(str(clip), "标题", "tech")
+        assert calls == [
+            ("POST", "/video/v1/uploads/videos"),
+            ("POST", "/media/v1/uploads"),
+            ("PUT", f"/media/v1/uploads/{'a' * 32}/chunks/0"),
+            ("PUT", f"/media/v1/uploads/{'a' * 32}/chunks/1"),
+            ("PUT", f"/media/v1/uploads/{'a' * 32}/chunks/2"),
+            ("POST", f"/media/v1/uploads/{'a' * 32}/complete"),
+            ("POST", "/video/v1/videos/sv2BcDeFgHiJ/parts"),
+            ("POST", "/video/v1/videos/sv2BcDeFgHiJ/submit"),
+        ]
+        assert out["vid"] == "sv2BcDeFgHiJ" and "审核" in out["next_step"]
+
+    def test_不提交就停在草稿(self, tmp_path, monkeypatch):
+        clip = tmp_path / "v.mp4"
+        clip.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 10)
+        paths = []
+
+        def fake(method, path, **kw):
+            paths.append(path)
+            return {"vid": "sv2BcDeFgHiJ", "id": "b" * 32, "chunk_size": 100, "chunks": 1}
+        monkeypatch.setattr(mcp, "api", fake)
+        out = mcp.t_publish_video(str(clip), "标题", "tech", submit=False)
+        assert not any(p.endswith("/submit") for p in paths)
+        assert out["status"] == "draft" and "submit_video" in out["next_step"]
+
+    def test_发布工具说清了审核由人做_只在用户要求时调用(self):
+        d = mcp.BY_NAME["publish_video"]["description"]
+        assert "审核" in d and "平台的人" in d and "明确要求" in d
+        d = mcp.BY_NAME["release_miniapp_version"]["description"]
+        assert "审核通过" in d and "明确要求" in d
+
+
+class Test传小程序包:
+    def test_给文件夹就打包再传(self, tmp_path, monkeypatch):
+        (tmp_path / "index.html").write_text("<h1>hi</h1>")
+        (tmp_path / "superz.json").write_text('{"sdk": "2"}')
+        (tmp_path / ".env").write_text("SECRET=1")
+        seen = {}
+
+        def fake(method, path, **kw):
+            seen.update(method=method, path=path, ctype=kw.get("content_type"), data=kw.get("data"))
+            return {"version": {"id": 3}}
+        monkeypatch.setattr(mcp, "api", fake)
+        out = mcp.t_upload_miniapp_version("sz0123456789abcdef", str(tmp_path), "1.0.0", "首版")
+        assert seen["method"] == "POST" and seen["path"] == "/dev/v1/apps/sz0123456789abcdef/versions"
+        assert seen["ctype"].startswith("multipart/form-data")
+        assert b"SECRET" not in seen["data"], "点开头的文件进了包"
+        assert ".env" in out["skipped_files"] and "submit_miniapp_review" in out["next_step"]
+

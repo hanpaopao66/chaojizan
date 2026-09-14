@@ -32,6 +32,7 @@ WEIGHTS = {
     "e2e_screen": 23, "e2e_chat_private": 20, "e2e_calls": 15, "e2e_video_upload": 13, "e2e_video_feed": 12,
     "e2e_social_moderation": 11, "e2e_queue": 11, "e2e_chat_scheduled": 9, "e2e_risk": 8,
     "e2e_refund_order": 7, "e2e_account_delete": 7, "e2e_agent_scopes": 15,
+    "e2e_mcp_server": 20,
 }
 DEFAULT_WEIGHT = 2.6
 
