@@ -56,7 +56,15 @@ Future<void> openMiniApp(BuildContext context, ApiClient api,
     {required String appid, MiniAppCard? card, bool trial = false, String? startParam}) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   if (!miniAppSupported) {
-    messenger?.showSnackBar(const SnackBar(content: Text('这个平台还不能打开小程序,请用手机 App 或网页版')));
+    // 桌面版:系统浏览器里的网页版能开(iframe 容器),直达链接 /web/#/m/<appid> 带过去
+    messenger?.showSnackBar(SnackBar(
+      content: const Text('这个平台还不能打开小程序,请用手机 App 或网页版'),
+      action: SnackBarAction(
+        label: '用网页版打开',
+        onPressed: () => launchUrl(Uri.parse('${api.baseUrl}/web/#/m/$appid'),
+            mode: LaunchMode.externalApplication),
+      ),
+    ));
     return;
   }
   if (!await ensureLoggedIn(context)) return;

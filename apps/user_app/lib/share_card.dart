@@ -137,16 +137,19 @@ class _ShareSheetState extends State<_ShareSheet> {
                   label: const Text('存图'),
                   onPressed: _busy ? null : _save,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FilledButton.icon(
-                    style:
-                        FilledButton.styleFrom(minimumSize: const Size(0, 46)),
-                    icon: const Icon(Icons.share_outlined, size: 18),
-                    label: const Text('分享'),
-                    onPressed: _busy ? null : _share,
+                // Linux 桌面版的分享面板收不了图片文件(share_plus 直接抛异常),只留「存图」
+                if (szCanShareFiles) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      style:
+                          FilledButton.styleFrom(minimumSize: const Size(0, 46)),
+                      icon: const Icon(Icons.share_outlined, size: 18),
+                      label: const Text('分享'),
+                      onPressed: _busy ? null : _share,
+                    ),
                   ),
-                ),
+                ],
               ]),
             ),
             const SizedBox(height: 10),

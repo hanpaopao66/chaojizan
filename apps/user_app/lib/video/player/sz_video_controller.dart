@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:superz_shared/superz_shared.dart' show kVideoUnsupportedHint, szCanPlayVideo;
 import 'package:video_player/video_player.dart';
 
 import '../api.dart';
@@ -237,6 +238,14 @@ class SzVideoController extends ChangeNotifier {
     danmaku.attachPart(part.id, durationMs: part.durationMs);
     if (gen != _openGen || _disposed) return;
 
+    // Windows / Linux 没有 video_player 的实现:建了控制器 initialize 会抛、dispose 会一直等,
+    // 在这之前拦下,错误位上直接写原因(点一下重试还是这句,不会转圈)
+    if (!szCanPlayVideo) {
+      _opening = false;
+      _error = kVideoUnsupportedHint;
+      _notify();
+      return;
+    }
     final r = pickRendition(part.renditions, preferred: _preferredQ);
     if (r == null) {
       _opening = false;

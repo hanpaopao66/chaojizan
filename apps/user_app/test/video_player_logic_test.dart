@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -460,6 +461,40 @@ void main() {
       await tester.pump();
       expect(server.hits('/danmaku').where((r) => r.url.queryParameters['segment'] == '2'), hasLength(1));
       await unmount(tester, c);
+    });
+
+    // Windows / Linux 桌面版没有 video_player 的实现:建了播放器 initialize 会抛、dispose 会一直等,
+    // 界面转圈转到天荒地老。要在建播放器之前就拦下,画面上直接说这个平台放不了
+    for (final p in [TargetPlatform.windows, TargetPlatform.linux]) {
+      testWidgets('${p.name} 桌面版:不建播放器,画面上写「这个平台暂不支持播放」', (tester) async {
+        debugDefaultTargetPlatformOverride = p;
+        try {
+          final c = await mount(tester, videoJson());
+          expect(FakePlayer.all, isEmpty, reason: '一个播放器都不该建');
+          expect(c.error, kVideoUnsupportedHint);
+          expect(c.buffering, isFalse, reason: '不能一直转圈');
+          expect(find.text(kVideoUnsupportedHint), findsOneWidget);
+          await tester.tap(find.text(kVideoUnsupportedHint)); // 点一下重试:还是这句,还是不建播放器
+          await tester.pump();
+          expect(FakePlayer.all, isEmpty);
+          expect(c.error, kVideoUnsupportedHint);
+          await unmount(tester, c);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+    }
+
+    testWidgets('macOS 桌面版有播放器实现,照常建播放器', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        final c = await mount(tester, videoJson());
+        expect(FakePlayer.all, hasLength(1));
+        expect(c.error, isNull);
+        await unmount(tester, c);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     testWidgets('续播:上次看到 20 秒 → 打开就跳过去并提示,点「从头看」回到 0', (tester) async {

@@ -51,6 +51,9 @@ class _KitchenCamPlayerState extends State<KitchenCamPlayer> {
   }
 
   Future<void> _open() async {
+    // Windows / Linux 没有播放器实现:不建控制器(建了会一直转圈,见 szCanPlayVideo),
+    // build 里直接说这个平台放不了 —— 别让人以为是这家的摄像头掉线了
+    if (!szCanPlayVideo) return;
     final c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
     try {
       await c.initialize();
@@ -80,6 +83,25 @@ class _KitchenCamPlayerState extends State<KitchenCamPlayer> {
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
+
+    if (!szCanPlayVideo) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Container(
+          color: Colors.black,
+          padding: const EdgeInsets.all(18),
+          alignment: Alignment.center,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.videocam_off_outlined, size: 34, color: Colors.white70),
+            const SizedBox(height: 10),
+            Text(kVideoUnsupportedHint,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: kFontNote, height: 1.55, color: Colors.white.withValues(alpha: .8))),
+          ]),
+        ),
+      );
+    }
 
     if (_failed) {
       // 服务端说在线,但这边播不出来 —— 如实说,不要留个黑框转圈

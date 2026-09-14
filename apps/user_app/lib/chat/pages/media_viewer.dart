@@ -167,6 +167,9 @@ class _VideoPageState extends State<_VideoPage> {
   }
 
   Future<void> _init() async {
+    // Windows / Linux 没有播放器实现:不建控制器(建了 initialize 抛、dispose 一直等,
+    // 失败分支里 await dispose 会让这页永远转圈)。右上角「保存」照样能把视频存下来
+    if (!szCanPlayVideo) return;
     final r = resolvedMedia(widget.media);
     if (r == null) {
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -208,6 +211,14 @@ class _VideoPageState extends State<_VideoPage> {
   @override
   Widget build(BuildContext context) {
     final c = _c;
+    if (!szCanPlayVideo) {
+      return const Center(
+          child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Text(kVideoUnsupportedHint,
+            textAlign: TextAlign.center, style: TextStyle(color: Colors.white70)),
+      ));
+    }
     if (_failed) {
       return const Center(child: Text('视频放不了', style: TextStyle(color: Colors.white70)));
     }

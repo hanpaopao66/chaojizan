@@ -14,6 +14,9 @@ import 'media_views.dart' show resolveMediaNow;
 ///
 /// 不申请存储权限(清单里是故意去掉的):安卓 10 起写相册走 MediaStore 不需要权限,
 /// 更老的系统存不进,就走分享面板。
+///
+/// 电脑版(Windows / macOS / Ubuntu):下载完弹系统的存储对话框;打开文件交给系统默认程序。
+/// 电脑上没有「相册」,macOS 写照片图库还要单独的权限 —— 见 media_save_io.dart 的 _onDesktop。
 Future<void> saveChatMedia(BuildContext context, MediaInfo media) => _run(context, media, open: false);
 
 Future<void> openChatFile(BuildContext context, MediaInfo media) => _run(context, media, open: true);

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -460,8 +460,11 @@ class ComposerState extends State<Composer> {
               ),
             Wrap(spacing: 8, runSpacing: 8, children: [
               if (can) _AttachTile(icon: Icons.photo_library_outlined, label: '相册', onTap: () => Navigator.pop(ctx, 'gallery')),
-              if (can) _AttachTile(icon: Icons.photo_camera_outlined, label: '拍照', onTap: () => Navigator.pop(ctx, 'camera')),
-              if (can) _AttachTile(icon: Icons.videocam_outlined, label: '拍视频', onTap: () => Navigator.pop(ctx, 'record')),
+              // 桌面包上 image_picker 不能拍照(一点就抛异常),两个入口不出现;相册、文件照常
+              if (can && szCanUseCamera)
+                _AttachTile(icon: Icons.photo_camera_outlined, label: '拍照', onTap: () => Navigator.pop(ctx, 'camera')),
+              if (can && szCanUseCamera)
+                _AttachTile(icon: Icons.videocam_outlined, label: '拍视频', onTap: () => Navigator.pop(ctx, 'record')),
               if (can) _AttachTile(icon: Icons.insert_drive_file_outlined, label: '文件', onTap: () => Navigator.pop(ctx, 'file')),
               _AttachTile(icon: Icons.location_on_outlined, label: '位置', onTap: () => Navigator.pop(ctx, 'location')),
               _AttachTile(icon: Icons.person_outline, label: '名片', onTap: () => Navigator.pop(ctx, 'contact')),
@@ -575,7 +578,18 @@ class ComposerState extends State<Composer> {
     }
     if (!mounted) return;
     HapticFeedback.mediumImpact();
-    final ok = await _rec.start();
+    final bool ok;
+    try {
+      ok = await _rec.start();
+    } catch (_) {
+      // Ubuntu 上 record 靠系统里的 parecord 录、ffmpeg 编码,没装就起不来(抛进程异常,
+      // 不接的话按住没有任何反应)。deb 包里写了推荐安装这两样,解压版要自己装
+      _pressing = false;
+      _toast(!kIsWeb && defaultTargetPlatform == TargetPlatform.linux
+          ? '录不了音:系统里要装 pulseaudio-utils 和 ffmpeg'
+          : '没能打开麦克风');
+      return;
+    }
     if (!ok) {
       _toast('没有麦克风权限,到系统设置里打开');
       return;

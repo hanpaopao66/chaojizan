@@ -3,12 +3,15 @@ import 'dart:io';
 
 import 'package:apk_installer/apk_installer.dart';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'api_client.dart';
+import 'brand.dart' show kFontNote;
+import 'platform_caps.dart';
 import 'sz_widgets.dart';
 
 /// 分发渠道:编译期由 --dart-define=SUPERZ_CHANNEL 指定。
@@ -28,12 +31,18 @@ bool get _selfChannel => kChannel != 'store';
 /// 自建渠道走「应用内下载 → 校验 SHA-256 → 拉起系统安装器」;
 /// 任何一步不成(没带 sha256、下载失败、校验不过、系统不给拉安装器),
 /// 一律退回老路:跳浏览器下载。绝不能把用户卡在一个转圈的进度条上。
+///
+/// 网页版和桌面版另走两条路,见下面。
 Future<void> checkForUpdate(
   BuildContext context, {
   required String baseUrl,
   required String app,
 }) async {
   if (!_selfChannel) return; // 商店渠道:一句话都不说
+  // 网页版:打开的永远是线上部署的那一版(刷新就是新的),没有「更新」这回事。
+  // 不拦的话它会拿 APK 的版本号来比,弹一个让人在浏览器里下载安卓安装包的框
+  if (kIsWeb) return;
+  if (szIsDesktopApp) return _checkDesktop(context, baseUrl: baseUrl, app: app);
 
   Map<String, dynamic> latest;
   int currentBuild;
@@ -75,6 +84,100 @@ Future<void> checkForUpdate(
         sha256Hex: sha256Hex,
         force: force,
         inApp: canInApp,
+      ),
+    ),
+  );
+}
+
+/// versions.json 里某一端桌面版的条目;没有(老 versions.json、这一版没出桌面包)回 null。
+///
+/// 结构(发版脚本 scripts/sync_release_to_appdist.sh 写):
+///
+///     {"user": {...APK...}, "merchant": {...}, "rider": {...},
+///      "desktop": {"user": {"version": "0.19.0", "build": 2061, "notes": "…",
+///                           "page": "https://…/download#desktop",
+///                           "files": {"windows": {"url": "…", "sha256": "…"}, …}}}}
+///
+/// 桌面版放在单独的 `desktop` 键下,**不动 user / merchant / rider 的结构** ——
+/// 老版本 App 和 /app/latest 只认那三个键,新键它们看不见。
+@visibleForTesting
+Map<String, dynamic>? desktopReleaseOf(Object? versions, String app) {
+  if (versions is! Map) return null;
+  final desktop = versions['desktop'];
+  if (desktop is! Map) return null;
+  final entry = desktop[app];
+  if (entry is! Map) return null;
+  return entry.cast<String, dynamic>();
+}
+
+/// 桌面版(Windows / macOS / Ubuntu)的更新检查:**不下载、不安装**,
+/// 只告诉他有新版,点一下打开官网下载页。
+///
+/// 手机上那套「下载 → 校验 → 拉起安装器」在桌面上不成立:APK 装不了,
+/// 而三个系统的安装方式各不一样(解压 zip / 拖进「应用程序」/ 装 deb),
+/// 让官网下载页按系统讲清楚比在 App 里做一遍稳。
+///
+/// 直接读 /appdist/versions.json,不走 /app/latest:那个接口对不认识的参数是忽略,
+/// 服务端没更新的时候,问桌面版会拿到 APK 的条目 —— 那就又回到了「让电脑下安卓包」。
+Future<void> _checkDesktop(
+  BuildContext context, {
+  required String baseUrl,
+  required String app,
+}) async {
+  Map<String, dynamic>? latest;
+  int currentBuild;
+  try {
+    final resp = await http
+        .get(Uri.parse('$baseUrl/appdist/versions.json'))
+        .timeout(const Duration(seconds: 8));
+    if (resp.statusCode != 200) return;
+    latest = desktopReleaseOf(jsonDecode(utf8.decode(resp.bodyBytes)), app);
+    await ApiClient.loadAppBuild();
+    currentBuild = int.tryParse(ApiClient.appBuild ?? '') ?? 0;
+  } catch (_) {
+    return; // 检查失败不打扰使用
+  }
+  if (latest == null) return;
+  final newBuild = (latest['build'] as num?)?.toInt() ?? 0;
+  // 读不到自己的版本号就不提示:宁可漏一次,也别每次打开都说「有新版」
+  if (currentBuild <= 0 || newBuild <= currentBuild) return;
+  final version = latest['version'] as String? ?? '';
+  final notes = latest['notes'] as String? ?? '';
+  final force = latest['force'] as bool? ?? false;
+  final page = latest['page'] as String? ?? '$baseUrl/download#desktop';
+  if (!context.mounted) return;
+  await showDialog<void>(
+    context: context,
+    barrierDismissible: !force,
+    builder: (dialogCtx) => PopScope(
+      canPop: !force,
+      child: SzDialog(
+        title: Text('发现新版本 v$version'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (notes.isNotEmpty)
+              Text(notes, style: const TextStyle(height: 1.6)),
+            const SizedBox(height: 10),
+            Text('电脑版要到官网下载新的安装包,装好后替换旧版即可。',
+                style: TextStyle(
+                    fontSize: kFontNote,
+                    color: Theme.of(dialogCtx).colorScheme.outline)),
+          ],
+        ),
+        actions: [
+          if (!force)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: const Text('稍后再说'),
+            ),
+          FilledButton(
+            onPressed: () => launchUrl(Uri.parse(page),
+                mode: LaunchMode.externalApplication),
+            child: const Text('去官网下载'),
+          ),
+        ],
       ),
     ),
   );

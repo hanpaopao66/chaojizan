@@ -183,6 +183,9 @@ class _VerticalFeedState extends State<VerticalFeed> with WidgetsBindingObserver
       if (s.disposed) return;
       s.detail = d;
       if (d.parts.isEmpty || d.parts.first.renditions.isEmpty) throw StateError('没有可以播放的清晰度');
+      // Windows / Linux 没有播放器实现,不建控制器(建了 initialize 抛、dispose 一直等);
+      // 界面上按平台说原因,不说「这条放不出来」
+      if (!szCanPlayVideo) throw UnsupportedError(kVideoUnsupportedHint);
       final part = d.parts.first;
       // 竖屏一屏就是手机大小:有 720 用 720,没有取不超过 720 的最高档(省流量)
       final r = [...part.renditions]..sort((a, b) => b.q.compareTo(a.q));
@@ -749,7 +752,10 @@ class _VerticalItemState extends State<_VerticalItem> with TickerProviderStateMi
         else if (card.cover.isNotEmpty)
           Image(image: szNetImage(videoResolve(card.cover)), fit: BoxFit.contain),
         if (!ready && s?.error == null) const Center(child: CircularProgressIndicator(color: Colors.white54)),
-        if (s?.error != null) const Center(child: Text('这条放不出来,往下滑看下一条', style: TextStyle(color: Colors.white70))),
+        if (s?.error != null)
+          Center(
+              child: Text(szCanPlayVideo ? '这条放不出来,往下滑看下一条' : kVideoUnsupportedHint,
+                  style: const TextStyle(color: Colors.white70))),
         if (paused) const Center(child: Icon(Icons.play_arrow_rounded, size: 84, color: Colors.white70)),
         if (widget.webMuted && ready)
           Positioned(

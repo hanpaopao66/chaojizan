@@ -382,10 +382,14 @@ class _MapPickerPageState extends State<MapPickerPage> {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
-                      // 没有搜索框(调用方没注入 onSearch)时别叫人去「上方搜索」
-                      kTencentMapKey.isEmpty
-                          ? '这个版本没有启用街道底图,\n${widget.onSearch != null ? '请直接用上方搜索选地址' : '从下面的周边地点里选'}'
-                          : '同意隐私政策后才能显示地图,\n${widget.onSearch != null ? '也可以直接用上方搜索选地址' : '也可以从下面的周边地点里选'}',
+                      // 没有搜索框(调用方没注入 onSearch)时别叫人去「上方搜索」。
+                      // 网页版和桌面版压根没有腾讯地图组件,先说这个 ——
+                      // 写「没有启用」会让人以为等一等就有了(同 delivery_map 的 _fallback)
+                      !mapSdkSupported
+                          ? '这个平台没有地图组件,\n${widget.onSearch != null ? '请直接用上方搜索选地址' : '从下面的周边地点里选'}'
+                          : kTencentMapKey.isEmpty
+                              ? '这个版本没有启用街道底图,\n${widget.onSearch != null ? '请直接用上方搜索选地址' : '从下面的周边地点里选'}'
+                              : '同意隐私政策后才能显示地图,\n${widget.onSearch != null ? '也可以直接用上方搜索选地址' : '也可以从下面的周边地点里选'}',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 13, color: sz.inkMuted),
                     ),

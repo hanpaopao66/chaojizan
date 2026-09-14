@@ -23,6 +23,7 @@ export 'src/responsive.dart';
 export 'src/models.dart';
 export 'src/payout_account_page.dart';
 export 'src/permission_helper.dart';
+export 'src/platform_caps.dart';
 export 'src/legal.dart';
 export 'src/login_page.dart';
 export 'src/privacy_gate.dart';

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -89,8 +90,9 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         // 商店渠道包不显示这一项:商店禁止应用内自更新,`checkForUpdate`
         // 在 store 渠道本来就直接短路,入口留着只会弹一句"已是最新版本"——
-        // 那是假话,版本新不新它根本没去查
-        if (kChannel != 'store') ...[
+        // 那是假话,版本新不新它根本没去查。
+        // 网页版同理:打开的永远是线上那一版,没有东西可查
+        if (kChannel != 'store' && !kIsWeb) ...[
           const Divider(height: 1),
           SzEntryTile(
             icon: Icons.system_update_outlined,

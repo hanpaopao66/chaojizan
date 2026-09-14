@@ -1,11 +1,14 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart' show getSaveLocation;
 import 'package:flutter/material.dart';
 import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:superz_shared/superz_shared.dart' show szIsDesktopApp;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models.dart';
 
@@ -13,6 +16,7 @@ import '../models.dart';
 final _inFlight = <int, Future<File?>>{};
 
 /// 手机:下载到私有目录,然后存相册 / 交给系统应用打开;不行就交给分享面板。
+/// 电脑:下载完弹系统的存储对话框,或者交给系统默认程序打开(见 [_onDesktop])。
 Future<void> fetchThen(BuildContext context, String url, MediaInfo media, {required bool open}) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   // 回调要写成块:箭头写法会把 remove 拿到的 future(就是这个 future 自己)交回给 whenComplete,
@@ -21,6 +25,7 @@ Future<void> fetchThen(BuildContext context, String url, MediaInfo media, {requi
     _inFlight.remove(media.id);
   }));
   if (f == null) return;
+  if (szIsDesktopApp) return _onDesktop(messenger, f, open: open);
   if (open) {
     final r = await OpenFilex.open(f.path);
     if (r.type != ResultType.done) await _share(f); // 手机上没有能打开它的应用
@@ -36,6 +41,32 @@ Future<void> fetchThen(BuildContext context, String url, MediaInfo media, {requi
   } on GalException {
     // 老系统上没有写相册的权限(我们不申请存储权限)、格式相册不认:让用户自己选存到哪
     await _share(f);
+  }
+}
+
+/// 电脑上没有「相册」,分享面板也不是存文件的地方:
+/// 「保存」弹系统的存储对话框让他自己选存哪;「打开文件」交给系统里默认打开它的程序,
+/// 打不开(没有关联程序)再让他存一份。
+///
+/// 不走 gal:macOS 上写照片图库要单独的权限和用途说明(没配的话系统直接把 App 杀掉),
+/// Linux 上 gal 根本没有实现。也不走 open_filex:它在桌面上是起一个 `open` / `xdg-open`
+/// 子进程,macOS 沙箱里交给 NSWorkspace(url_launcher)更稳。
+Future<void> _onDesktop(ScaffoldMessengerState? messenger, File f, {required bool open}) async {
+  if (open) {
+    try {
+      if (await launchUrl(Uri.file(f.path))) return;
+    } catch (_) {
+      // 没有能打开它的程序:往下走,让他存一份
+    }
+  }
+  final name = f.path.split(Platform.pathSeparator).last;
+  final to = await getSaveLocation(suggestedName: name);
+  if (to == null) return; // 对话框里点了取消
+  try {
+    await f.copy(to.path);
+    messenger?.showSnackBar(SnackBar(content: Text('已保存到 ${to.path}')));
+  } catch (_) {
+    messenger?.showSnackBar(const SnackBar(content: Text('没存进去,换个位置再试')));
   }
 }
 
