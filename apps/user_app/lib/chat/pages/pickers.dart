@@ -60,7 +60,7 @@ Future<ChatUser?> pickContact(BuildContext context, {String title = '选择联�
   final list = await store.api.contacts().catchError((_) => <ChatUser>[]);
   if (!context.mounted) return null;
   if (list.isEmpty) {
-    _toast(context, '还没有联系人。先在「消息」右上角「添加联系人」');
+    _toast(context, '还没有联系人。先在「${RemoteCopy.text('nav.chat', '聊天')}」右上角「添加联系人」');
     return null;
   }
   return szShowSheet<ChatUser>(

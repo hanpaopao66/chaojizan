@@ -280,11 +280,15 @@ class _QrLoginPanelState extends State<QrLoginPanel> {
   Widget _qrPanel(BuildContext context) {
     final sz = Theme.of(context).sz;
     final s = _session;
+    // 底部那一格的名字后台能改(nav.chat,默认「聊天」)。这句话指导的是**手机上**的操作,
+    // 而网页版永远是新的、手机上可能还是 2026-09-15 以前的版本(那时叫「消息」),所以把旧名也写上
+    final tab = RemoteCopy.text('nav.chat', '聊天');
+    final where = tab == '消息' ? '「消息」' : '「$tab」(旧版 App 里叫「消息」)';
     final line = switch (_status) {
       'scanned' => '已扫码,请在手机上点「登录」',
       'cancelled' => '你在手机上取消了这次登录',
       'expired' => '二维码已过期',
-      _ => '打开超级赞 App,在「消息」右上角点「新建」,选「扫一扫」',
+      _ => '打开超级赞 App,在$where右上角点「新建」,选「扫一扫」',
     };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,

@@ -130,7 +130,7 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
     final me = _me;
     if (me == null) {
       return SzPageScaffold(
-        appBar: AppBar(title: const Text('消息设置')),
+        appBar: AppBar(title: Text(chatSettingsTitle())),
         body: _error != null ? SzError(error: _error, onRetry: _load) : const Center(child: CircularProgressIndicator()),
       );
     }
@@ -140,7 +140,7 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
     final nextChange = DateTime.tryParse('${me['username_next_change_at'] ?? ''}');
     final bio = '${me['bio'] ?? ''}';
     return SzPageScaffold(
-      appBar: AppBar(title: const Text('消息设置')),
+      appBar: AppBar(title: Text(chatSettingsTitle())),
       body: ListView(padding: const EdgeInsets.symmetric(vertical: 8), children: [
         ListTile(
           leading: ChatAvatar(name: '${me['name'] ?? ''}', url: '${me['avatar'] ?? ''}', size: 56),
@@ -273,13 +273,17 @@ class _ChatSettingsPageState extends State<ChatSettingsPage> {
 
 /// 超级赞号的规则说明。**照服务端写的**(services/social.py 的 validate_username 和改名规则),
 /// 那边改了这里要一起改 —— server/tests/unit/test_custom_id.py 对着查位数和天数。
-const usernameRulesText = '超级赞号相当于微信号:别人输入它就能找到你、加你为联系人,不用知道你的手机号。\n'
+/// 这一页叫「<底部那一格的名字>设置」。那一格的名字后台能改(「文案与显示」页的 nav.chat,默认「聊天」),
+/// 2026-09-15 以前叫「消息」;这里的标题、菜单项、名片页和超级赞号说明里提到这一页的地方都跟着它走
+String chatSettingsTitle() => '${RemoteCopy.text('nav.chat', '聊天')}设置';
+
+String get usernameRulesText => '超级赞号相当于微信号:别人输入它就能找到你、加你为联系人,不用知道你的手机号。\n'
     '· 5–32 位,以英文字母开头,只能用英文字母、数字和下划线;下划线不能放在最后,也不能两个连着\n'
     '· 不区分大小写;不能以 bot 结尾(留给机器人);带 admin、kefu、official、chaojizan 这类字样的,'
     '和 support、help 这类保留词不能用\n'
     '· 第一次设置随时能设;之后一年只能改一次,从上次设置或修改那天算,满 365 天才能再改;只改大小写不算\n'
     '· 改掉或清空的旧号冷冻 180 天,这期间别人不能注册;你自己想用回来也算一次修改\n'
-    '· 不想被人按号找到:消息设置 → 隐私 →「按超级赞号找到我」';
+    '· 不想被人按号找到:${chatSettingsTitle()} → 隐私 →「按超级赞号找到我」';
 
 /// 按北京时间写日期。服务端的「下次可修改」按北京时间的日期算(那天零点起能改),拒绝时的提示也写北京日期;
 /// 手机时区不是北京的话按本地时间写,会差出一天,和服务端那句话对不上

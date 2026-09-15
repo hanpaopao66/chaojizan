@@ -61,7 +61,7 @@ class _FoldersPageState extends State<FoldersPage> {
       body: ListView(children: [
         Padding(
           padding: const EdgeInsets.all(kPagePad),
-          child: Text('分组会出现在「消息」顶部,点一下只看这一类会话。拖动右边的把手调整顺序。',
+          child: Text('分组会出现在「${RemoteCopy.text('nav.chat', '聊天')}」顶部,点一下只看这一类会话。拖动右边的把手调整顺序。',
               style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
         ),
         ReorderableListView(

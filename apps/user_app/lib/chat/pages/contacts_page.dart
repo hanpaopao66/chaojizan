@@ -8,6 +8,7 @@ import '../links.dart';
 import '../models.dart';
 import '../store.dart';
 import '../ui/avatar.dart';
+import 'chat_settings_page.dart' show chatSettingsTitle;
 import 'my_card_page.dart';
 import 'pickers.dart';
 import 'user_profile_page.dart';
@@ -366,8 +367,8 @@ class _AddContactPageState extends State<AddContactPage> {
                   ? _miss!
                   // 网页版、电脑版没有「扫一扫」(只有手机 App 有),别让人去找一个不存在的按钮
                   : canScanHere
-                      ? '$_miss\n当面加的话,请对方打开「消息设置 → 我的名片」,你用「扫一扫」扫他的码。'
-                      : '$_miss\n也可以请对方打开「消息设置 → 我的名片」,把名片链接发给你。',
+                      ? '$_miss\n当面加的话,请对方打开「${chatSettingsTitle()} → 我的名片」,你用「扫一扫」扫他的码。'
+                      : '$_miss\n也可以请对方打开「${chatSettingsTitle()} → 我的名片」,把名片链接发给你。',
               style: TextStyle(fontSize: kFontBody, color: sz.ink, height: 1.6),
             ),
           ),

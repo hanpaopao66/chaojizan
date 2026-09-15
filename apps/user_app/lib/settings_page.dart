@@ -112,7 +112,8 @@ class _SettingsPageState extends State<SettingsPage> {
           // 「消息」tab 的新建菜单里也有一份 —— 聊着天想改隐私的人不用绕回「我的」
           SzEntryTile(
             icon: Icons.lock_outline,
-            title: '消息与隐私',
+            // 跟着底部那一格的名字走(nav.chat,默认「聊天」),点进去那一页叫「聊天设置」
+            title: '${RemoteCopy.text('nav.chat', '聊天')}与隐私',
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const ChatSettingsPage())),
           ),

@@ -132,7 +132,7 @@ class _ChatTabState extends State<ChatTab> {
           ListTile(leading: const Icon(Icons.bookmark_outline), title: const Text('收藏夹'), onTap: () => Navigator.pop(ctx, 'saved')),
           ListTile(leading: const Icon(Icons.call_outlined), title: const Text('通话记录'), onTap: () => Navigator.pop(ctx, 'calls')),
           ListTile(leading: const Icon(Icons.folder_outlined), title: const Text('会话分组'), onTap: () => Navigator.pop(ctx, 'folders')),
-          ListTile(leading: const Icon(Icons.settings_outlined), title: const Text('消息设置'), onTap: () => Navigator.pop(ctx, 'settings')),
+          ListTile(leading: const Icon(Icons.settings_outlined), title: Text(chatSettingsTitle()), onTap: () => Navigator.pop(ctx, 'settings')),
         ]),
       ),
     );

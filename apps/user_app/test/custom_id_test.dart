@@ -187,7 +187,8 @@ void main() {
       await pumpPage(tester);
       await search(tester, 'nobody_here');
       expect(find.textContaining('没有找到。可能是超级赞号输错了,或者对方关闭了「按超级赞号找到我」'), findsOneWidget);
-      expect(find.textContaining('「消息设置 → 我的名片」'), findsOneWidget);
+      // 页名跟着底部那一格走(nav.chat,默认「聊天」;2026-09-15 以前叫「消息」)
+      expect(find.textContaining('「聊天设置 → 我的名片」'), findsOneWidget);
       expect(find.text('添加到联系人'), findsNothing);
     });
 
