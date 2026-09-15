@@ -24,8 +24,12 @@ code() { "${C[@]}" -o /dev/null -w '%{http_code}' "$@"; }
 
 [ "$(code "$URL/web/")" = 200 ] && ok "网页版 /web/" || bad "网页版 /web/ 打不开"
 [ "$(code "$URL/web/main.dart.js")" = 200 ] && ok "网页版脚本" || bad "网页版 main.dart.js 打不开"
-# 网页版编进去的接口地址必须是预发自己(编成生产的话,在预发上点的都落到生产上)
-if "${C[@]}" "$URL/web/main.dart.js" | grep -qF "$BASE"; then
+# 网页版编进去的接口地址必须是预发自己(编成生产的话,在预发上点的都落到生产上)。
+# 先落文件再搜:`curl | grep -q` 在 pipefail 下会误报 —— grep 一匹配就退出,curl 还在写 6MB,吃 SIGPIPE 以 23 退出,
+# 整条管道算失败,「找到了」反而报成「没找到」(第一次部署实测踩到)
+JS=$(mktemp); trap 'rm -f "$JS"' EXIT
+"${C[@]}" -o "$JS" "$URL/web/main.dart.js"
+if grep -qF "$BASE" "$JS"; then
   ok "网页版接口地址是预发($BASE)"
 else
   bad "网页版里没有预发接口地址 $BASE:可能编成了生产的"
@@ -37,16 +41,24 @@ done
 FEAT=$("${C[@]}" "$URL/config" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("features"))' 2>/dev/null || true)
 [ -n "$FEAT" ] && ok "配置下发 features=$FEAT" || bad "/config 取不到"
 
-# 开发配置:验证码随响应回显 → 用演示顾客登录 → 看得到演示店
-DEV=$("${C[@]}" -H 'Content-Type: application/json' -d '{"phone":"13800000001"}' "$URL/auth/sms-code" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin).get("dev_code",""))' 2>/dev/null || true)
+# 开发配置:验证码随响应回显 → 登录 → 看得到演示店。
+# 冒烟专用号(演示号段 138000000xx,scripts/scrub_demo.py 认这个号段;首登自动注册成顾客):
+# 别用人手在用的 …01 —— 同一个号 60 秒内只能发一次码,有人刚发过,部署的冒烟就会误报
+PHONE=13800000099
+sms_code() {
+  "${C[@]}" -w '\n%{http_code}' -H 'Content-Type: application/json' -d "{\"phone\":\"$PHONE\"}" "$URL/auth/sms-code"
+}
+R=$(sms_code)
+if [ "$(tail -1 <<<"$R")" = 429 ]; then sleep 61; R=$(sms_code); fi   # 撞上冷却(比如刚冒烟过一次):等一轮再试
+HTTP=$(tail -1 <<<"$R"); BODY=$(sed '$d' <<<"$R")
+DEV=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("dev_code",""))' <<<"$BODY" 2>/dev/null || true)
 if [ -n "$DEV" ]; then
   ok "验证码直接回显(开发配置)"
   TK=$("${C[@]}" -H 'Content-Type: application/json' \
-    -d "{\"phone\":\"13800000001\",\"code\":\"$DEV\",\"role\":\"customer\"}" "$URL/auth/sms-login" \
+    -d "{\"phone\":\"$PHONE\",\"code\":\"$DEV\",\"role\":\"customer\"}" "$URL/auth/sms-login" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null || true)
   if [ -n "$TK" ]; then
-    ok "演示顾客 13800000001 登录"
+    ok "冒烟账号 $PHONE 验证码登录"
     N=$("${C[@]}" -H "Authorization: Bearer $TK" "$URL/merchants" \
       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d if isinstance(d, list) else d.get("items", [])))' 2>/dev/null || echo 0)
     [ "${N:-0}" -gt 0 ] && ok "首页店铺 $N 家(带着门禁 cookie 和 Bearer 两样一起过)" || bad "首页一家店都没有"
@@ -54,6 +66,7 @@ if [ -n "$DEV" ]; then
     bad "验证码登录失败"
   fi
 else
-  bad "验证码没有回显:.env.staging 的 APP_ENV 不是 dev?"
+  # 没有码的时候响应里也就没有码,原样打出来看原因(频控、APP_ENV 不是 dev……)
+  bad "验证码没有回显:HTTP $HTTP $(head -c 160 <<<"$BODY")"
 fi
 exit $fail

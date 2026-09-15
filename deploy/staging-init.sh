@@ -43,6 +43,9 @@ MINIO_SECURE=false
 PUBLIC_BASE_URL=$BASE
 MOCK_PAY_ENABLED=true
 ADMIN_PASSWORD_LOGIN=true
+# 验证码「同 IP 每日 20 条」:frp 进来的请求在这里全是同一个 IP(frpc 容器),所有测试的人和部署冒烟
+# 共用这 20 条,一天就锁死。预发放宽;生产不动(那边的问题见 frp 丢真实 IP 那条)
+SMS_DAILY_IP_LIMIT=100000
 # 不配短信、推送、地图、微信支付:预发不给真人发短信和推送,不占生产的地图配额,也不碰真钱
 EOF
   echo "✓ 生成 .env.staging"
