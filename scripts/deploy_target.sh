@@ -39,10 +39,11 @@ deploy_target() {
   RSYNC_RSH="ssh $SSH_OPTS"
   DEPLOY="$user@127.0.0.1"
   local ok=0
-  for _ in 1 2 3 4 5; do
+  # 访问端刚起来时第一条连接要建一会儿:5 次 × 2 秒在慢一点的网络上不够(2026-09-15 在外面实测撞上过)
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
     # shellcheck disable=SC2086
     if ssh $SSH_OPTS -o BatchMode=yes "$DEPLOY" true 2>/dev/null; then ok=1; break; fi
-    sleep 2
+    sleep 3
   done
   if [ "$ok" != 1 ]; then
     echo "✗ 私密通道起来了,但 ssh 过不去(看 deploy/tunnel/.visitor.log)。"
