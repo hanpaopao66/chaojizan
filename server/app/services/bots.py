@@ -62,6 +62,9 @@ from .social import blocked_between, display_name, ensure_profile, validate_user
 logger = logging.getLogger("superz.bots")
 
 BOTS_OFF = "机器人功能暂未开放"
+#: 平台自己的机器人(机器人管家)的 webhook 地址以它开头:投递循环在进程里直接调处理函数,不发 HTTP
+#: (bot_webhook.deliver_bot)。setWebhook 和开发者后台都只收 https,开发者设不出这种地址
+INTERNAL_WEBHOOK_PREFIX = "internal:"
 #: 每个开发者最多几个机器人
 MAX_BOTS_PER_DEVELOPER = 20
 #: 更新最多留多久(没投成 / 没取走的,满 24 小时丢掉;和 Telegram 一样)
@@ -1294,6 +1297,7 @@ async def bot_infos(db: AsyncSession, chat: Chat) -> list[dict]:
         if bot is None or u is None or u.deleted_at is not None:
             continue
         prof = await db.get(SocialProfile, bot_id)
+        owner = await db.scalar(select(Developer).where(Developer.user_id == bot.owner_id))
         out.append({
             "id": u.id,
             "name": display_name(u),
@@ -1305,6 +1309,8 @@ async def bot_infos(db: AsyncSession, chat: Chat) -> list[dict]:
                          for c in (bot.commands or [])],
             "menu_button": await menu_for_client(db, bot),
             "privacy_mode": bool(bot.privacy_mode),
+            # 官方开发者名下的(机器人管家):客户端不说「第三方开发者提供」
+            "official": bool(owner and owner.is_official),
         })
     return out
 
@@ -1327,17 +1333,19 @@ async def check_bot_name(db: AsyncSession, name: str) -> str:
     return name
 
 
-async def create_bot(db: AsyncSession, owner: User, name: str, username: str) -> tuple[Bot, str]:
+async def create_bot(db: AsyncSession, owner: User, name: str, username: str, *,
+                     system: bool = False) -> tuple[Bot, str]:
     """建机器人:users 里一行 role=bot(没有手机号、没有能用的密码,登不了)+ bots 一行。返回 (机器人, token)。
 
     用户名和 @用户名 共用一个命名空间(usernames 表的主键兜并发),必须以 bot 结尾。调用方提交。
+    [system] 只给服务端建官方机器人用(scripts/seed_bot_manager.py):允许保留字(guanjia 这类),任何接口都不许透传。
     """
     from ..security import hash_password
     from .moderation import find_banned
 
     name = await check_bot_name(db, name)
     uname = (username or "").strip().lstrip("@")
-    problem = validate_username(uname, is_bot=True)
+    problem = validate_username(uname, is_bot=True, reserved_ok=system)
     if problem:
         raise HTTPException(422, problem)
     if await find_banned(db, uname):

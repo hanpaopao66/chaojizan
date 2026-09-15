@@ -371,8 +371,10 @@ GET /chat/v1/chats/{chat_id}/bot-info
            "about": "帮你点外卖", "description": "发 /menu 看今天的菜",
            "commands": [{"command": "start", "description": "开始"}],
            "menu_button": {"type": "commands"},
-           "privacy_mode": true}]}
+           "privacy_mode": true, "official": false}]}
 ```
+
+`official`:官方开发者名下的机器人(机器人管家,第 12 节)。客户端空会话里不说「机器人由第三方开发者提供」,改说「官方机器人」。
 
 `menu_button`:`{"type":"commands"}` | `{"type":"web_app","text":"点餐","app_id":"sz…","app":{"name":"…","icon":"…"}}` | `null`
 (没设、设成 default、或者小程序下架了)。
@@ -403,3 +405,34 @@ GET /chat/v1/chats/{chat_id}/bot-info
 - `allowed_updates` 不支持;`getUpdates` 同时被两个请求调用时不报 409;
 - 机器人改 / 删自己的消息不限时间(Telegram 删除限 48 小时);
 - 群里的慢速模式对机器人不生效(它有第 6 节的限流)。
+
+---
+
+## 12. 机器人管家 @guanjia_bot
+
+对标 Telegram 的 @BotFather:在对话里建机器人、改命令、重置 token。能做的和开发者后台「机器人」页一样,
+**用的也是同一批函数**(`services/bots.py` 的 create_bot、check_bot_name、validate_commands、reset_token、delete_bot),
+规则、上限、屏蔽词两边一致。实现在 `server/app/services/bot_manager.py`,e2e `server/tests/e2e_bot_manager.py`。
+
+| 命令 | 做什么 |
+|---|---|
+| `/newbot` | 起名 → 起用户名(必须以 bot 结尾)→ 建好,回一个「查看 token」按钮 |
+| `/mybots` | 列出自己的机器人,点一个看详情,详情下面是各项操作的按钮 |
+| `/setcommands` | 发「命令 - 说明」一行一条(和 BotFather 一样),发「清空」去掉所有命令 |
+| `/setdescription`、`/setabout` | 改描述(空会话中间那段,≤ 512 字)、简介(资料卡上的一句话,≤ 120 字) |
+| `/setprivacy` | 群里的隐私模式开 / 关 |
+| `/token` | 确认后重置,旧 token 当场失效,新的同样走「查看 token」按钮 |
+| `/deletebot` | 原样发一遍机器人的用户名才删 |
+| `/cancel`、`/help` | 取消正在做的事、看说明 |
+
+- **谁能用**:聊天用顾客账号,机器人挂在开发者账号名下,管家按**同一个手机号**找开发者账号;没有的叫他先去开发者后台注册。
+  每一步都按这次更新里的 `from.id` 重新找开发者、按 owner_id 查机器人,按钮上的机器人 id 只是个选择,不是凭据;
+- **token 不进聊天记录**:建好 / 重置之后不把 token 发成消息(那样原文就进了消息表和备份,和「平台只存 sha256」
+  的承诺冲突),发的是「查看 token」按钮 —— token 加密放 Redis 10 分钟、只能取一次,点按钮时用回调应答(弹窗)给出去,
+  回调应答不入库。客户端的回调弹窗文字可选、带「复制」按钮;
+- **怎么跑的**:管家是官方开发者名下一个普通机器人,webhook 地址是 `internal:guanjia`。投递循环(`services/bot_webhook.py`)
+  认出 `internal:` 前缀就在进程里调处理函数,不发 HTTP,排队、顺序、锁、过期和别的机器人一样。
+  `internal:` 地址只有服务端写得进去(setWebhook 和开发者后台都只收 https);
+- **防冒充**:`guanjia` 进了用户名保留词,别人起不了带它的用户名;空会话里标「官方机器人」(`bot-info` 的 `official`);
+- 上线:`python -m scripts.seed_bot_manager --apply`(幂等:没有就建,有就把设置对齐;官方开发者没有账号时补一个登不了的系统账号)。
+

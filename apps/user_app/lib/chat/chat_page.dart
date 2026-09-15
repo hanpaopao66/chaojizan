@@ -550,11 +550,23 @@ class _ChatPageState extends State<ChatPage> {
       final text = '${r['text'] ?? ''}';
       if (text.isNotEmpty) {
         if (r['show_alert'] == true) {
+          // 弹窗里的字能选、能一键复制:机器人管家用它给 token(token 不发成消息,见 server/app/services/bot_manager.py),
+          // 别的机器人弹出来的订单号、兑换码也常要复制
           await showDialog<void>(
             context: context,
             builder: (ctx) => SzDialog(
-              content: Text(text, style: const TextStyle(fontSize: kFontBody)),
-              actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好'))],
+              content: SelectableText(text, style: const TextStyle(fontSize: kFontBody)),
+              actions: [
+                TextButton(
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: text));
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    _toast('已复制');
+                  },
+                  child: const Text('复制'),
+                ),
+                FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('好')),
+              ],
             ),
           );
         } else {
@@ -1192,8 +1204,8 @@ class _BotIntro extends StatelessWidget {
             Text(desc.isEmpty ? '点下面的「开始」和 $name 打个招呼。' : desc,
                 textAlign: TextAlign.center, style: TextStyle(color: sz.inkMuted, height: 1.5)),
             const SizedBox(height: 8),
-            Text('机器人由第三方开发者提供,平台不替它背书。', textAlign: TextAlign.center,
-                style: TextStyle(fontSize: kFontNote, color: sz.inkFaint)),
+            Text(bot?.official == true ? '官方机器人,由超级赞平台运营。' : '机器人由第三方开发者提供,平台不替它背书。',
+                textAlign: TextAlign.center, style: TextStyle(fontSize: kFontNote, color: sz.inkFaint)),
           ]),
         ),
       ),

@@ -190,7 +190,10 @@ async def deliver_bot(bot_id: int) -> int:
                         return sent     # 队头在退避:后面的也等着(按顺序投)
                     url, secret = bot.webhook_url, bots.webhook_secret_plain(bot)
                     update_id, payload, attempts = head.update_id, head.payload, head.attempts
-                ok, err = await post(client, url, secret, payload)
+                if url.startswith(bots.INTERNAL_WEBHOOK_PREFIX):
+                    ok, err = await internal_post(bot_id, url, payload)
+                else:
+                    ok, err = await post(client, url, secret, payload)
                 async with SessionLocal() as db:
                     if ok:
                         await db.execute(delete(BotUpdate).where(
@@ -234,3 +237,23 @@ async def post(client: httpx.AsyncClient, url: str, secret: str, payload: dict) 
     if 200 <= resp.status_code < 300:
         return True, ""
     return False, f"Wrong response from the webhook: {resp.status_code} {resp.reason_phrase}"
+
+
+async def internal_post(bot_id: int, url: str, payload: dict) -> tuple[bool, str]:
+    """平台自己的机器人(webhook 地址 `internal:…`,见 bots.INTERNAL_WEBHOOK_PREFIX):在进程里调处理函数。
+
+    排队、按顺序、锁、24 小时过期都和 HTTP 的一样,只是「投」这一步换成函数调用。处理函数自己兜住异常
+    (机器人管家出错会回用户一句话),这里再兜一层:真抛出来就按投递失败退避,和对方服务器 500 一样。
+    """
+    from . import bot_manager
+
+    handlers = {bot_manager.WEBHOOK: bot_manager.handle}
+    handler = handlers.get(url)
+    if handler is None:
+        return False, f"没有这个内部处理:{url}"
+    try:
+        await handler(bot_id, payload)
+    except Exception as e:
+        logger.exception("内部机器人 %s 处理更新出错", bot_id)
+        return False, f"Internal handler failed: {type(e).__name__}"
+    return True, ""

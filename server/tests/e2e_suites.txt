@@ -198,6 +198,7 @@ e2e_media
 e2e_chat_groups
 e2e_calls
 e2e_bots
+e2e_bot_manager
 e2e_chat_export
 e2e_social_idor
 e2e_badges

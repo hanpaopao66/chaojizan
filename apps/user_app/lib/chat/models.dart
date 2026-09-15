@@ -861,6 +861,7 @@ class BotInfo {
     this.menuText = '',
     this.menuAppId = '',
     this.menuAppName = '',
+    this.official = false,
   });
 
   final int id;
@@ -878,6 +879,9 @@ class BotInfo {
   final String menuText;
   final String menuAppId;
   final String menuAppName;
+
+  /// 官方开发者名下的(机器人管家):空会话里不说「第三方开发者提供」
+  final bool official;
 
   factory BotInfo.fromJson(Object? j) {
     final m = _map(j);
@@ -899,6 +903,7 @@ class BotInfo {
       menuText: _str(menu?['text']),
       menuAppId: _str(menu?['app_id']),
       menuAppName: _str(app['name']),
+      official: m['official'] == true,
     );
   }
 }

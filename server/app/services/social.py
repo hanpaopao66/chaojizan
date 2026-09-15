@@ -36,17 +36,21 @@ _RESERVED_EXACT = {
     "all", "here", "botfather", "telegram", "bilibili", "douyin", "wechat",
     "notifications", "settings",
 }
-#: 名字里带这些的不能注册 —— 防止冒充平台和客服(原因代码 C108)
+#: 名字里带这些的不能注册 —— 防止冒充平台和客服(原因代码 C108)。
+#: guanjia:官方的机器人管家 @guanjia_bot(services/bot_manager.py)在对话里发 token 查看按钮,
+#: 冒充它的机器人是骗 token 最顺手的办法
 _RESERVED_PARTS = ("chaojizan", "superz", "super_z", "official", "admin", "kefu",
-                   "guanfang")
+                   "guanfang", "guanjia")
 
 
-def validate_username(name: str, *, is_bot: bool = False, noun: str = "用户名") -> str | None:
+def validate_username(name: str, *, is_bot: bool = False, noun: str = "用户名",
+                      reserved_ok: bool = False) -> str | None:
     """不合规时返回一句能直接给用户看的话;合规返回 None。
 
     [noun] 是话里怎么称呼它:人的叫「超级赞号」,群 / 频道的公开链接叫「链接名」,
     机器人(开发者后台)照旧叫「用户名」。规则三者一样 —— 它们共用一个命名空间。
     客户端「超级赞号」页上的规则说明是照这里写的,改规则要一起改。
+    [reserved_ok] 只给服务端自己建官方账号用(比如机器人管家),任何接口都不许透传。
     """
     if not name:
         return f"{noun}不能为空"
@@ -65,7 +69,7 @@ def validate_username(name: str, *, is_bot: bool = False, noun: str = "用户名
     if not _USERNAME_RE.fullmatch(name):
         return f"{noun}格式不对"
     low = name.lower()
-    if low in _RESERVED_EXACT or any(p in low for p in _RESERVED_PARTS):
+    if not reserved_ok and (low in _RESERVED_EXACT or any(p in low for p in _RESERVED_PARTS)):
         return f"这个{noun}是保留的,换一个吧"
     if is_bot and not low.endswith("bot"):
         return f"机器人的{noun}必须以 bot 结尾"
