@@ -130,8 +130,8 @@ python -c "import os,base64;print(base64.urlsafe_b64encode(os.urandom(32)).decod
 (`<版本 id>` 是版本记录的 id,不是版本号,启动应答里的 `url` 就是这个形状):
 
 ```bash
-curl -sI https://<appid>.mp.chaojizan.cc/v/<版本 id>/index.html | grep -iE 'content-security|permissions-policy|cache-control|set-cookie'  # 没有 set-cookie
-curl -s -o /dev/null -w '%{http_code}\n' https://SZ<大写的appid>.mp.chaojizan.cc/v/<版本 id>/index.html   # 404
+curl -s -D - -o /dev/null https://<appid>.mp.chaojizan.cc/v/<版本 id>/index.html | grep -iE 'content-security|permissions-policy|cache-control|set-cookie'  # 没有 set-cookie(托管路由只接 GET,HEAD 回 405,别用 -I)
+curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: x.<appid>.mp.chaojizan.cc' https://<appid>.mp.chaojizan.cc/v/<版本 id>/index.html   # 404:多一级子域名
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://<appid>.mp.chaojizan.cc/v/<版本 id>/index.html   # 403 或 404
 curl -s -o /dev/null -w '%{http_code}\n' https://mp.chaojizan.cc/                                     # 404
 curl -s -o /dev/null -w '%{http_code}\n' https://chaojizan.cc/mini-apps/catalog                        # 200:主站没被托管吞掉
@@ -141,6 +141,10 @@ curl -s https://chaojizan.cc/.well-known/superz-webapp-keys.json  # 有 kid,和 
 ```
 
 CSP 头里的 `frame-ancestors` 不能有 `*`。
+
+大写的 appid(`SZ…`)在生产上是 200 而不是 404:nginx 转给 api 的是 `$host`,它总是转成小写,大写变体到不了
+MiniHostMiddleware;浏览器也把大小写不同的主机名当同一个 origin,所以这不是隔离上的漏洞。中间件那条严格正则由单测守着。
+(2026-09-15 第一次上生产时照这个清单验过:其余几条都和预期一致。)
 
 ## 3. 上线顺序
 
