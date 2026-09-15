@@ -380,9 +380,10 @@ def main():
     bot.err("setMyCommands", {"commands": [{"command": "ok", "description": ""}]}, 400)
     info = a.get(f"/chat/v1/chats/{cid}/bot-info")["bots"]
     assert len(info) == 1, info
+    # official:只有官方开发者名下的(机器人管家)是 true,第三方的都是 false(docs/BOT-API.md 10.3)
     assert info[0] == {"id": bot.id, "name": "点餐助手", "username": uname, "avatar": "",
                        "about": "", "description": "", "commands": cmds, "menu_button": None,
-                       "privacy_mode": True}, info[0]
+                       "privacy_mode": True, "official": False}, info[0]
     bot.ok("setChatMenuButton", {"menu_button": {"type": "commands"}})
     assert a.get(f"/chat/v1/chats/{cid}/bot-info")["bots"][0]["menu_button"] == {"type": "commands"}
     r = bot.err("setChatMenuButton", {"menu_button": {"type": "web_app", "text": "点餐",
