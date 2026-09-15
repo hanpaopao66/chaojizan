@@ -44,6 +44,9 @@ PURPOSES: dict[str, bool] = {
     # 音乐(DEV-PROMPTS-41 #378):过审作品的封面、歌单封面、音乐人头像 / 横幅。
     # 音频本身在私密桶,播放要签名(§5.5)—— 公开的只有「看的」那一半
     "music_cover": False,
+    # 论坛配图(DEV-PROMPTS-41 #380):发出去就是公开的。发帖时只认 `/img/forum/u<我>-…`
+    # (key 里编了上传者,services/forum._clean_media 照它认),不然能把别人的图贴成自己的
+    "forum": False,
 
     # ---- 私密:泄露了会伤到具体的人 ----
     "id_card": True,        # 身份证

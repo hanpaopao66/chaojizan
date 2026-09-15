@@ -157,7 +157,8 @@ async def _progress(uid: int, text: str) -> None:
 
 async def _build(db: AsyncSession, uid: int, tmp: Path, zip_path: Path) -> dict:
     budget = MEDIA_BUDGET
-    summary = {"chats": 0, "messages": 0, "media": 0, "media_skipped": 0, "videos": 0}
+    summary = {"chats": 0, "messages": 0, "media": 0, "media_skipped": 0, "videos": 0,
+               "forum_posts": 0}
     zf = zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True)
     try:
         me = await db.get(User, uid)
@@ -269,6 +270,13 @@ async def _build(db: AsyncSession, uid: int, tmp: Path, zip_path: Path) -> dict:
         await _progress(uid, "音乐")
         zf.writestr("music.json", json.dumps(await _music_part(db, uid), ensure_ascii=False,
                                              indent=1))
+
+        # 论坛(#380 §3.7「导出拿得全」):自己发过的帖子。图片是公开地址,JSON 里给链接就够了
+        await _progress(uid, "帖子")
+        from .forum import export_rows as forum_rows
+        posts_out = await forum_rows(db, uid)
+        zf.writestr("forum_posts.json", json.dumps(posts_out, ensure_ascii=False, indent=1))
+        summary["forum_posts"] = len(posts_out)
         zf.writestr("README.txt", _readme(summary))
     finally:
         zf.close()
@@ -364,6 +372,9 @@ def _readme(s: dict) -> str:
         "music.json      音乐:音乐人资料、你的作品和每首歌(含歌词、署名)、歌单、喜欢的歌、\n"
         "                你写过的评论、最近播放。音频文件不在包里(歌是你自己上传的)\n\n"
         f"本次:{s['chats']} 个会话、{s['messages']} 条消息、{s['media']} 个媒体文件、{s['videos']} 个投稿。\n"
+        "forum_posts.json 你在论坛发过的帖子(图片是公开地址,直接打开就能看)\n\n"
+        f"本次:{s['chats']} 个会话、{s['messages']} 条消息、{s['media']} 个媒体文件、"
+        f"{s['videos']} 个投稿、{s.get('forum_posts', 0)} 条帖子。\n"
         + (f"有 {s['media_skipped']} 个文件因为超过 2GB 总量没放进来,JSON 里留了名字和大小。\n"
            if s["media_skipped"] else "")
         + "\n只导出你现在还能看到的内容:你清空过的、入群前看不到的、隐藏掉的都不在里面。\n"

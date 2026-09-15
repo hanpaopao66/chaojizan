@@ -1352,6 +1352,13 @@ async def _auto_flow_forever() -> None:
                 await sweep_music()
             except Exception:
                 logger.exception("auto_flow: 音乐清扫失败(不影响其他清扫)")
+            # 论坛(#380 §5.6):投票到点结束,给作者和投过票的人发 system;
+            # 浏览去重表只留 8 天(和视频的播放去重同一个口径)
+            try:
+                from .forum import sweep_forum
+                await sweep_forum()
+            except Exception:
+                logger.exception("auto_flow: 论坛清扫失败(不影响其他清扫)")
             # 公开账本锚点补到昨天(幂等,通常零工作量;见 services/ledger.py)
             from .ledger import backfill_epoch_start, build_missing_anchors
             async with SessionLocal() as db:

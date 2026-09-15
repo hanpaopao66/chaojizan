@@ -1483,6 +1483,9 @@ _KNOWN_FLAGS = {
     # 出来之前不能不经意地打开,见 services/flags.music_flag_default
     "music_enabled",        # 整个音乐功能:关了 /music/v1 全部回 503「音乐暂未开放」
     "music_upload_enabled", # 音乐投稿:关了开通音乐人、建作品、加歌、提交、上传音频回 503
+    # 论坛(DEV-PROMPTS-41 #380):缺省同视频(开发开、生产关),合规结论见 #374 清单第 18 条
+    "forum_enabled",        # 整个论坛:关了 /forum/v1 全部回 503「论坛暂未开放」
+    "forum_post_enabled",   # 论坛发帖:关了发帖、回复、引用、编辑回 503,看还是能看
     # 《信息网络传播视听节目许可证》编号(空 = 不公示):官网每一页页脚、用户端「关于我们」照原样显示。
     # 放成开关而不是写死:拿证、换证、变更都不用发版
     "av_license_no",
@@ -1496,13 +1499,15 @@ async def list_flags(
 ):
     rows = (await db.scalars(select(PlatformFlag))).all()
     current = {r.key: r.value for r in rows}
-    from ..services.flags import (BOT_FLAGS, CHANNELS_FALLBACK, MUSIC_FLAGS, SOCIAL_FLAGS,
-                                  VIDEO_FLAGS, bot_flag_default, music_flag_default,
+    from ..services.flags import (BOT_FLAGS, CHANNELS_FALLBACK, FORUM_FLAGS, MUSIC_FLAGS,
+                                  SOCIAL_FLAGS, VIDEO_FLAGS, bot_flag_default,
+                                  forum_flag_default, music_flag_default,
                                   social_flag_default, video_flag_default)
     defaults = {**{k: video_flag_default() for k in VIDEO_FLAGS},
                 **{k: social_flag_default(k) for k in SOCIAL_FLAGS},
                 **{k: bot_flag_default() for k in BOT_FLAGS},
                 **{k: music_flag_default() for k in MUSIC_FLAGS},
+                **{k: forum_flag_default(k) for k in FORUM_FLAGS},
                 "night_curfew_hours": "01:00-06:00",
                 "screen_show_gmv": "on",  # 大屏金额缺省展示,与 /screen 口径一致
                 # 小程序急停闸缺省是开(miniapp_platform.switch_on:没写过 = 开)

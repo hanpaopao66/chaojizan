@@ -64,6 +64,8 @@ from .routers import video as video_router
 from .routers import video_admin as video_admin_router
 from .routers import social_admin as social_admin_router
 from .routers import social_sanctions as social_sanctions_router
+from .routers import forum as forum_router
+from .routers import forum_admin as forum_admin_router
 from .routers import credit as credit_router
 # 音乐(DEV-PROMPTS-41 #378)
 from .routers import music as music_router
@@ -609,6 +611,8 @@ app.include_router(video_router.router)
 app.include_router(video_admin_router.router)
 app.include_router(social_admin_router.router)
 app.include_router(social_sanctions_router.router)
+app.include_router(forum_router.router)
+app.include_router(forum_admin_router.router)
 app.include_router(notifications_router.router)
 # 音乐(DEV-PROMPTS-41 #378)
 app.include_router(music_router.router)

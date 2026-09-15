@@ -61,6 +61,8 @@ BLOCKED_BY: dict[str, tuple[str, ...]] = {
     "music_submit": ("ban_account",),
     "call": ("ban_account",),
     "social_write": ("ban_account",),
+    #: 论坛发帖(含回复、引用、编辑):禁言的人也发不了 —— 帖子和评论是一回事
+    "forum_post": ("ban_account", "mute"),
 }
 #: 会话被 ban_chat 时挡哪几个执行点(发言、加入)
 CHAT_POINTS = ("speak", "join")
@@ -100,6 +102,16 @@ ACCOUNT_BAN_ALLOWED: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/music/v1/reports"),
     ("DELETE", "/music/v1/me/history"),
     ("PUT", "/music/v1/me/settings"),
+    # 论坛(#380):申诉、举报、只有自己看得见的东西(书签、屏蔽词、个性化开关)、
+    # 浏览上报(它不改任何人能看到的东西,只是个数)。发帖、赞、转发一律不放行
+    ("POST", "/forum/v1/posts/{pid}/appeal"),
+    ("POST", "/forum/v1/reports"),
+    ("POST", "/forum/v1/posts/views"),
+    ("POST", "/forum/v1/posts/{pid}/bookmark"),
+    ("DELETE", "/forum/v1/posts/{pid}/bookmark"),
+    ("POST", "/forum/v1/me/mute-words"),
+    ("DELETE", "/forum/v1/me/mute-words"),
+    ("PUT", "/forum/v1/me/settings"),
 })
 
 _BJ = timezone(timedelta(hours=8))

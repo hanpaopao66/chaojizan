@@ -660,6 +660,10 @@ async def delete_account(
     # 歌单、喜欢、收听、最近播放、评论正文一并处理。口径见 services/music.purge_user
     from ..services.music import purge_user as purge_music_user
     await purge_music_user(db, user.id)
+    # 论坛(#380 §3.7):他的帖子正文、图片、卡片清空并标删除(别人的回复留着),
+    # 赞 / 转发 / 书签 / 投票 / 置顶 / 屏蔽词 / 浏览记录全删,受影响的帖子重算计数
+    from ..services.forum import purge_user as purge_forum_user
+    await purge_forum_user(db, user.id)
     # 消息(同一条 S5):他发的消息正文和媒体清空(seq 占位留着)、贴纸包、用户名、联系人、拉黑;
     # 他是群主的群交给别人,收藏夹删掉。口径见 services/chat_purge.py
     from ..services.chat_purge import purge_user as purge_chat_user

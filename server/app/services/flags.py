@@ -231,6 +231,31 @@ async def music_flag_on(db: AsyncSession, key: str) -> bool:
     return value == "on"
 
 
+#: 论坛的两道闸(DEV-PROMPTS-41 #380 §3.8):整个论坛、发帖(含回复、引用、编辑)。
+#: 关着时 /forum/v1 全部 503「论坛暂未开放」;forum_post_enabled 关着时只有写那几条 503,
+#: 看还是能看 —— 出事的时候先停笔,不用把整个论坛关掉
+FORUM_FLAGS = {"forum_enabled": "论坛", "forum_post_enabled": "论坛发帖"}
+
+
+def forum_flag_default(key: str) -> str:
+    """没写过这两个开关时的缺省值:**开发 / CI 开,生产关**(和视频同一个判据)。
+
+    上线论坛的合规结论(#374 合规清单第 18 条)还没回来,在那之前生产上谁也不能不经意地
+    把它打开 —— 缺省站在「关」这一边,判据是 settings.is_dev(拼错、留空、写成 staging
+    都按生产算)。本地和 CI 显式 APP_ENV=dev,e2e 不用额外开闸。
+    """
+    assert key in FORUM_FLAGS, key
+    return video_flag_default()
+
+
+async def forum_flag_on(db: AsyncSession, key: str) -> bool:
+    """论坛开关开着没有。每次现查、不缓存 —— 拉闸要立刻生效。"""
+    assert key in FORUM_FLAGS, key
+    flag = await db.get(PlatformFlag, key)
+    value = flag.value if flag is not None else forum_flag_default(key)
+    return value == "on"
+
+
 #: 频道开关的 flag 键。值是逗号分隔的 key 列表,如 "food,voucher"。
 CHANNELS_FLAG = "channels_enabled"
 

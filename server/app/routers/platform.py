@@ -450,8 +450,8 @@ async def public_config(db: AsyncSession = Depends(get_db)):
     import hashlib
     import json
 
-    from ..services.flags import (bots_on, marketing_on, music_flag_on, social_flag_on,
-                                  video_flag_on)
+    from ..services.flags import (bots_on, forum_flag_on, marketing_on, music_flag_on,
+                                  social_flag_on, video_flag_on)
 
     from ..services.copy_registry import COPY_KEYS
     from .orders import mock_pay_allowed
@@ -481,6 +481,9 @@ async def public_config(db: AsyncSession = Depends(get_db)):
                      # 音乐(#378):关着时客户端收起金刚区那一格和迷你播放器
                      "music": await music_flag_on(db, "music_enabled"),
                      "music_upload": await music_flag_on(db, "music_upload_enabled"),
+                     # 论坛(#380):forum 关着收起金刚区那一格,forum_post 关着只收起发帖按钮
+                     "forum": await forum_flag_on(db, "forum_enabled"),
+                     "forum_post": await forum_flag_on(db, "forum_post_enabled"),
                      # 加急小费:补收款没接微信支付之前只在开发环境开(orders.boost_tip 同一道闸门),
                      # 关着时客户端不摆按钮 —— 不然点了才告诉人「暂未开放」
                      "boost_tip": mock_pay_allowed()},
