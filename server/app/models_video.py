@@ -507,6 +507,14 @@ class SocialNotification(Base):
     actor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     video_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     comment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: 音乐的目标(DEV-PROMPTS-41 §5.8,#378):评论我的歌、赞我的歌曲评论、作品审核结果。
+    #: 带外键级联:歌 / 评论 / 作品删了,指着它的互动消息跟着消失 —— 留着就是点开 404
+    music_track_id: Mapped[int | None] = mapped_column(
+        ForeignKey("music_tracks.id", ondelete="CASCADE"), nullable=True)
+    music_comment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("music_comments.id", ondelete="CASCADE"), nullable=True)
+    music_release_id: Mapped[int | None] = mapped_column(
+        ForeignKey("music_releases.id", ondelete="CASCADE"), nullable=True)
     #: 合并键:like:video:<id> / like:comment:<id>;不合并的为空
     group_key: Mapped[str] = mapped_column(String(40), default="", server_default="")
     count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")

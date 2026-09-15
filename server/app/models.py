@@ -3806,4 +3806,11 @@ from .models_video import (NOTIFY_KINDS, VIDEO_MODELS, VIDEO_STATUSES,  # noqa: 
                            WatchLater)
 from .models_moderation import (MODERATION_MODELS, RESTRICTIVE_ACTIONS,  # noqa: E402,F401
                                 SANCTION_ACTIONS, SocialSanction)
+# 音乐(DEV-PROMPTS-41 #378)
+from .models_music import (ARTIST_STATUSES, DECLARATIONS, LYRICS_KINDS,  # noqa: E402,F401
+                           MUSIC_MODELS, RELEASE_KINDS, RELEASE_STATUSES, TRANSCODE_STATUSES,
+                           MusicArtist, MusicComment, MusicCommentLike, MusicDecision,
+                           MusicHistory, MusicPlay, MusicPlaylist, MusicPlaylistCollect,
+                           MusicPlaylistTrack, MusicRelease, MusicReleaseCollect, MusicReport,
+                           MusicTrack, MusicTrackLike, MusicUserSetting)
 from .models_credit import CreditAppeal  # noqa: E402,F401
