@@ -46,7 +46,8 @@
    平台也**不出钱赔付、不发补贴**:谁的责任谁承担 —— 商家有责任,顾客拿回全款(配送费和小费也退),钱由商家出;
    骑手有责任,先从公开可查的骑手保障金池出,不够的由骑手承担,不封顶,能申诉。
    平台只在一种情况下出钱:**平台判错了,平台自己认** —— 申诉改判成立,扣的、冲的、该退的钱由平台补回,
-   每一笔在透明中心「申诉改判」和公开账本里单列
+   每一笔在透明中心「申诉改判」和公开账本里单列。首单立减、超时安抚券这类平台出钱的开关连同代码都删了,
+   拨不回来;停发之前发出去的平台券照旧能用
 
 其他几块的收费一样写在明处:团购核销才收 2%,酒店离店才收 5%,跑腿费收 2% 并在账单上单列一行;
 消息、视频、小程序不收钱。平台的收入只有这几笔 —— 不卖数据、不竞价排名、不收推广费、不抽配送费。
@@ -57,7 +58,7 @@
 
 | 入口 | 内容 |
 |---|---|
-| [透明中心](https://chaojizan.cc/transparency) | 每日核账公示(差一分钱都亮红灯)、佣金去向、赔付记录(骑手保障金池的每一笔支出、商家责任另出的配送费和小费、申诉改判平台补回的每一笔)、每 100 元分账实算、实际佣金率、规则变更留痕、系统可用率 |
+| [透明中心](https://chaojizan.cc/transparency) | 每日核账公示(差一分钱都亮红灯)、佣金去向、赔付记录(骑手保障金池的每一笔支出、商家责任另出的配送费和小费、申诉改判平台补回的每一笔;判了商家责任却没让商家另出骑手那份的单,核账会反查出来)、每 100 元分账实算、实际佣金率、规则变更留痕、系统可用率 |
 | [运营大屏](https://chaojizan.cc/screen) | 实时订单/注册规模/城市分布,店内电视可投屏 |
 | [公开账本](https://chaojizan.cc/nodes) | 全部账务流水哈希链锚点,社区见证节点持续复算——改历史上任何一分钱,全网都会知道。Python、Go 绿色版、网页、App 四个见证实现同一套核账,共用用例在 [witness/testdata/](witness/testdata/) |
 | 版本公示 | 线上运行版本 = 本仓 tag,[透明中心·最近更新](https://chaojizan.cc/transparency#changelog) 与本仓提交一字不差 |
@@ -333,7 +334,7 @@ CI 对每个 PR 跑同样的三件事(服务端 e2e 起真 PostGIS/Redis/MinIO,
   —— 铁律写在 [models.py#L826](server/app/models.py#L826) `RiderEarning` 的 docstring,
   冲账实现 [settlement.py#L125](server/app/services/settlement.py#L125)
   `reverse_merchant_earning()`(三个金额字段整体取负新插一行),
-  七条恒等式在 [audit.py](server/app/services/audit.py) 文件头、主函数 `run_audit()`
+  核账的恒等式和反查都列在 [audit.py](server/app/services/audit.py) 文件头、主函数 `run_audit()`
 - **防超卖/防双花/抢单防冲突**:一律数据库条件 UPDATE,并发安全在存储层保证
   —— 抢单 [riders.py#L1518](server/app/routers/riders.py#L1518) `grab_order()`
   (手慢的收到 409),库存扣减 [orders.py#L260](server/app/routers/orders.py#L260)
