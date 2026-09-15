@@ -37,6 +37,9 @@ PURPOSES = {
     "sticker": {"sticker"},
     "chat_photo": {"chat_photo"},
     "video": {"video_source", "cover"},
+    # 音乐(DEV-PROMPTS-41 #378):歌曲原始音频 + 作品封面。都进私密桶,
+    # 封面过审时才复制到公开桶(services/music.publish_cover)
+    "music": {"audio_source", "cover"},
 }
 
 
@@ -66,6 +69,17 @@ async def _video_upload_gate(db: AsyncSession, purpose: str) -> None:
         raise HTTPException(503, "视频投稿暂未开放")
 
 
+async def _music_upload_gate(db: AsyncSession, purpose: str) -> None:
+    """歌曲的原始音频、封面也受「音乐投稿」开关管(#378),道理和视频那道闸一样:
+    关着的时候连传都不让传,免得生产上开关关着、存储却被一首首 200MB 的无损占满。"""
+    if purpose != "music":
+        return
+    from ..services.flags import music_flag_on
+    if not (await music_flag_on(db, "music_enabled")
+            and await music_flag_on(db, "music_upload_enabled")):
+        raise HTTPException(503, "音乐投稿暂未开放")
+
+
 async def _save_upload_file(f: UploadFile, dst, cap: int) -> int:
     size = 0
     with open(dst, "wb") as out:
@@ -89,6 +103,7 @@ async def upload(request: Request, file: UploadFile = File(...), kind: str = For
     await check_rate_limit("media_upload", str(me.id), 60)
     _check_purpose(purpose, kind)
     await _video_upload_gate(db, purpose)
+    await _music_upload_gate(db, purpose)
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     tmp = TMP_DIR / f"up-{uuid.uuid4().hex}"
     try:
@@ -126,6 +141,7 @@ async def create_upload(body: UploadIn, request: Request, me: User = Depends(soc
     await check_rate_limit("media_upload", str(me.id), 60)
     _check_purpose(body.purpose, body.kind)
     await _video_upload_gate(db, body.purpose)
+    await _music_upload_gate(db, body.purpose)
     cap = LIMITS.get(body.kind, LIMITS["file"])
     if body.size > cap:
         raise HTTPException(413, f"这类文件最大 {cap // 1024 // 1024}MB")

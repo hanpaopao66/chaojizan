@@ -46,11 +46,26 @@ async def _push_unread(db: AsyncSession, user_id: int, kind: str | None) -> None
                             {"kind": kind, "unread": await unread_counts(db, user_id)})
 
 
+#: 目标列(#367 视频两个,#378 音乐三个)。加新模块的目标时只往这里加一行 ——
+#: notify() 的签名和插入语句都从它生成,不用改三处
+TARGET_COLUMNS = ("video_id", "comment_id", "music_track_id", "music_comment_id",
+                  "music_release_id")
+
+
 async def notify(db: AsyncSession, user_id: int, kind: str, *, actor_id: int | None = None,
                  video_id: int | None = None, comment_id: int | None = None,
-                 group_key: str = "", count: int = 1, data: dict | None = None) -> bool:
-    """记一条互动消息。返回是否真的记了(自己 / 拉黑的不记)。调用方负责提交。"""
+                 group_key: str = "", count: int = 1, data: dict | None = None,
+                 **targets) -> bool:
+    """记一条互动消息。返回是否真的记了(自己 / 拉黑的不记)。调用方负责提交。
+
+    `targets` 是别的模块的目标列(音乐:music_track_id / music_comment_id / music_release_id),
+    见 TARGET_COLUMNS —— 不认识的键直接报错,免得写错列名之后消息静默地少一个跳转目标。
+    """
     assert kind in NOTIFY_KINDS, kind
+    bad = set(targets) - set(TARGET_COLUMNS)
+    assert not bad, bad
+    cols = {"video_id": video_id, "comment_id": comment_id,
+            **{k: targets.get(k) for k in TARGET_COLUMNS if k not in ("video_id", "comment_id")}}
     if actor_id is not None and actor_id == user_id:
         return False
     if actor_id is not None and await blocked_between(db, user_id, actor_id):
@@ -61,8 +76,8 @@ async def notify(db: AsyncSession, user_id: int, kind: str, *, actor_id: int | N
         if row is None:
             res = await db.execute(
                 insert(SocialNotification).values(
-                    user_id=user_id, kind=kind, actor_id=actor_id, video_id=video_id,
-                    comment_id=comment_id, group_key=group_key, count=max(1, count),
+                    user_id=user_id, kind=kind, actor_id=actor_id, **cols,
+                    group_key=group_key, count=max(1, count),
                     actors=[actor_id] if actor_id else [], data=data or {},
                     created_at=now, updated_at=now)
                 .on_conflict_do_nothing(index_elements=["user_id", "group_key"],
@@ -79,9 +94,9 @@ async def notify(db: AsyncSession, user_id: int, kind: str, *, actor_id: int | N
             row.read_at = None
             row.updated_at = now
     else:
-        db.add(SocialNotification(user_id=user_id, kind=kind, actor_id=actor_id,
-                                  video_id=video_id, comment_id=comment_id, group_key="",
-                                  count=1, actors=[actor_id] if actor_id else [],
+        db.add(SocialNotification(user_id=user_id, kind=kind, actor_id=actor_id, **cols,
+                                  group_key="", count=1,
+                                  actors=[actor_id] if actor_id else [],
                                   data=data or {}, created_at=now, updated_at=now))
     await _push_unread(db, user_id, kind)
     return True
@@ -98,12 +113,18 @@ async def _locked_group_row(db: AsyncSession, user_id: int, group_key: str):
 
 async def system(db: AsyncSession, user_id: int, title: str, text: str, *,
                  video_id: int | None = None, action: str = "", reason_code: str = "",
-                 extra: dict | None = None) -> None:
-    """系统通知:审核结果、处罚、申诉结果、硬币到账。"""
+                 reason_label: str | None = None, extra: dict | None = None,
+                 **targets) -> None:
+    """系统通知:审核结果、处罚、申诉结果、硬币到账。
+
+    `reason_label` 不给时按视频的原因代码表翻;音乐、论坛的代码不在那张表里,
+    调用方自己把翻好的文字传进来(各模块的代码表见各自的 REASON_CODES)。
+    """
     from .video import REASON_CODES
     data = {"title": title, "text": text, "action": action, "reason_code": reason_code,
-            "reason_label": REASON_CODES.get(reason_code, ""), **(extra or {})}
-    await notify(db, user_id, "system", video_id=video_id, data=data)
+            "reason_label": reason_label if reason_label is not None
+            else REASON_CODES.get(reason_code, ""), **(extra or {})}
+    await notify(db, user_id, "system", video_id=video_id, data=data, **targets)
 
 
 def _cursor_of(n: SocialNotification) -> str:
@@ -128,6 +149,16 @@ def _title(n: SocialNotification, actor_name: str) -> str:
         # 一天的新粉丝合并成一行(video_interact.set_follow 的 group_key 按北京日)
         return (f"{actor_name}等 {n.count} 人关注了你" if n.count > 1
                 else f"{actor_name} 关注了你")
+    # 音乐(#378 §5.8):目标是歌 / 歌曲评论,文案要说「歌」,不能沿用视频那一套
+    if d.get("target") in ("track", "mcomment"):
+        target = "歌" if d["target"] == "track" else "评论"
+        if n.kind == "like":
+            return (f"{actor_name}等 {n.count} 人赞了你的{target}" if n.count > 1
+                    else f"{actor_name} 赞了你的{target}")
+        if n.kind == "at":
+            return f"{actor_name} 在歌曲评论里 @ 了你"
+        return (f"{actor_name} 评论了你的歌" if d["target"] == "track"
+                else f"{actor_name} 回复了你的评论")
     target = "视频" if d.get("target") == "video" else "评论"
     if n.kind == "like":
         return (f"{actor_name}等 {n.count} 人赞了你的{target}" if n.count > 1
@@ -160,6 +191,7 @@ async def list_items(db: AsyncSession, viewer_id: int, kind: str, cursor: str | 
     cids = {n.comment_id for n in rows if n.comment_id}
     comments = {c.id: c for c in await db.scalars(
         select(VideoComment).where(VideoComment.id.in_(cids)))} if cids else {}
+    music = await _music_targets(db, rows)
     items = []
     for n in rows:
         actor = cards.get(n.actor_id) if n.actor_id else None
@@ -180,9 +212,41 @@ async def list_items(db: AsyncSession, viewer_id: int, kind: str, cursor: str | 
             "read": n.read_at is not None,
             "created_at": n.created_at.isoformat(),
             "updated_at": n.updated_at.isoformat(),
+            # 音乐(§5.8):客户端按有哪个字段决定点开去哪。没有的一律 None,不是缺键
+            "track": music["tracks"].get(n.music_track_id) if n.music_track_id else None,
+            "release": music["releases"].get(n.music_release_id) if n.music_release_id else None,
+            "music_comment": (music["comments"].get(n.music_comment_id)
+                              if n.music_comment_id else None),
         })
     return {"items": items, "next_cursor": _cursor_of(rows[-1]) if more and rows else None,
             "unread": await unread_counts(db, viewer_id)}
+
+
+async def _music_targets(db: AsyncSession, rows) -> dict[str, dict]:
+    """这一页里被指到的歌、作品、歌曲评论(#378 §5.8)。一次查完,不在循环里查库。"""
+    from ..models import MusicComment, MusicRelease, MusicTrack
+
+    tids = {n.music_track_id for n in rows if n.music_track_id}
+    rids = {n.music_release_id for n in rows if n.music_release_id}
+    cids = {n.music_comment_id for n in rows if n.music_comment_id}
+    tracks: dict[int, dict] = {}
+    releases: dict[int, dict] = {}
+    comments: dict[int, dict] = {}
+    if tids:
+        covers = dict((await db.execute(
+            select(MusicTrack.id, MusicRelease.cover_url)
+            .join(MusicRelease, MusicRelease.id == MusicTrack.release_id)
+            .where(MusicTrack.id.in_(tids)))).all())
+        for t in await db.scalars(select(MusicTrack).where(MusicTrack.id.in_(tids))):
+            tracks[t.id] = {"tid": t.tid, "title": t.title, "cover": covers.get(t.id) or ""}
+    if rids:
+        for r in await db.scalars(select(MusicRelease).where(MusicRelease.id.in_(rids))):
+            releases[r.id] = {"rid": r.rid, "title": r.title}
+    if cids:
+        for c in await db.scalars(select(MusicComment).where(MusicComment.id.in_(cids))):
+            comments[c.id] = {"id": c.id, "root_id": c.root_id or c.id,
+                              "deleted": c.status != "visible"}
+    return {"tracks": tracks, "releases": releases, "comments": comments}
 
 
 async def mark_read(db: AsyncSession, user_id: int, *, kind: str | None = None,

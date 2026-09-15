@@ -41,6 +41,9 @@ PURPOSES: dict[str, bool] = {
     "sticker": False,       # 贴纸:发出去就是给会话里所有人看的
     "chat_photo": False,    # 群 / 频道头像
     "video_cover": False,   # 视频封面、雪碧图(视频本身在私密桶,判权后播放)
+    # 音乐(DEV-PROMPTS-41 #378):过审作品的封面、歌单封面、音乐人头像 / 横幅。
+    # 音频本身在私密桶,播放要签名(§5.5)—— 公开的只有「看的」那一半
+    "music_cover": False,
 
     # ---- 私密:泄露了会伤到具体的人 ----
     "id_card": True,        # 身份证

@@ -80,6 +80,9 @@ async def run_job(job: dict) -> None:
         elif kind == "video_part":
             from ..services.video_media import process_part  # 视频模块(#358)
             await process_part(int(job["part_id"]))
+        elif kind == "music_track":
+            from ..services.music_media import process_track  # 音乐模块(#378)
+            await process_track(int(job["track_id"]))
         else:
             logger.warning("不认识的转码任务:%s", job)
     except Exception:
@@ -195,6 +198,11 @@ async def recover() -> int:
     try:
         from ..services.video_media import recover_parts
         rows += await recover_parts()
+    except ImportError:
+        pass
+    try:
+        from ..services.music_media import recover_tracks
+        rows += await recover_tracks()
     except ImportError:
         pass
     return len(rows)

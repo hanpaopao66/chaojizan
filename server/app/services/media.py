@@ -38,6 +38,8 @@ LIMITS = {
     "video": 100 * 1024 * 1024,
     "file": 100 * 1024 * 1024,
     "video_source": 1024 * 1024 * 1024,
+    #: 音乐原始音频(DEV-PROMPTS-41 M4):单首 ≤ 200MB。无损(flac / wav)按这个上限也够二十分钟
+    "audio_source": 200 * 1024 * 1024,
     "cover": 10 * 1024 * 1024,
     "chat_photo": 10 * 1024 * 1024,
 }
@@ -78,6 +80,9 @@ def sniff(head: bytes) -> tuple[str, str, str]:
         return "audio", ".aac", "audio/aac"
     if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
         return "audio", ".wav", "audio/wav"
+    # FLAC(DEV-PROMPTS-41 M4 允许上传的格式之一):魔数就是四个字母 fLaC
+    if head[:4] == b"fLaC":
+        return "audio", ".flac", "audio/flac"
     if head[:6] == b"#!AMR\n":
         return "audio", ".amr", "audio/amr"
     return "file", "", "application/octet-stream"
@@ -96,6 +101,11 @@ def resolve_kind(declared: str, category: str) -> str:
         return declared if category == "video" else "file"
     if declared == "voice":
         return "voice" if category in ("audio", "video") else "file"
+    # 音乐原始音频(DEV-PROMPTS-41 M4):mp3 / m4a / aac / flac / wav / ogg。
+    # 带封面图的 mp3 会被认成 video(ffmpeg 把内嵌封面当一路视频流),所以 video 也放进来 ——
+    # 真的是不是音频由 music_media 的 ffprobe 说了算,那里没有音轨会失败
+    if declared == "audio_source":
+        return "audio_source" if category in ("audio", "video") else "file"
     return {"image": "photo", "gif": "gif", "video": "video", "audio": "file"}.get(category, "file")
 
 
@@ -234,6 +244,21 @@ async def ingest(db: AsyncSession, owner: User, src: Path, *, declared: str, nam
             mf.key = new_key(kind, owner.id, ".m4a")
             await asyncio.to_thread(storage.put_path, dst, mf.key, private, "audio/mp4")
             mf.sha256 = await asyncio.to_thread(_sha256, dst)
+        elif kind == "audio_source":
+            # 音乐的原始音频(DEV-PROMPTS-41 #378):原样收下、进私密桶,**这里不转码**。
+            # 转 AAC 是在歌曲挂到作品上之后由队列做的(services/music_media.py),
+            # 和投稿原片(video_source)同一个分工:上传只负责「收得下、认得出」
+            if not transcode.have_ffmpeg():
+                raise HTTPException(503, "服务器缺少 ffmpeg,暂时传不了歌曲")
+            p = await transcode.probe(src)
+            if not p.acodec:
+                raise HTTPException(422, "这个文件里没有声音")
+            mf.duration_ms = p.duration_ms
+            orig_key = new_key(kind, owner.id, ext or ".bin")
+            await asyncio.to_thread(storage.put_path, src, orig_key, private, mime)
+            mf.key = orig_key
+            mf.meta = {"source_key": orig_key, "acodec": p.acodec, "bitrate": p.bitrate}
+            mf.sha256 = await asyncio.to_thread(_sha256, src)
         elif kind in ("video", "video_note", "gif", "video_source"):
             if not transcode.have_ffmpeg():
                 raise HTTPException(503, "服务器缺少 ffmpeg,暂时发不了视频")
@@ -399,4 +424,7 @@ async def can_read(db: AsyncSession, user: User | None, mf: MediaFile) -> bool:
     if mf.purpose == "video":
         from .video_access import can_read_video_media  # 视频模块(#357)
         return await can_read_video_media(db, user, mf)
+    if mf.purpose == "music":
+        from .music_access import can_read_music_media  # 音乐模块(#378)
+        return await can_read_music_media(db, user, mf)
     return False

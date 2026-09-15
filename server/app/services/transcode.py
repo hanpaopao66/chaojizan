@@ -158,6 +158,46 @@ def voice_args(src: str, dst: str) -> list[str]:
             dst]
 
 
+# ---------------- 音乐(DEV-PROMPTS-41 M4)----------------
+#
+# 两档:std 128k、hq 256k,都是 AAC-LC / 44.1kHz / 立体声的 m4a,`+faststart`(边下边播)。
+# 响度统一到 −14 LUFS —— 不统一的话歌单里前一首震耳、后一首听不见,用户只能一首一首拧音量。
+# 源码率低于 192k 的**不出 hq**:从 128k 的 mp3 转 256k 的 AAC 不会多出信息,只是白占一倍存储。
+
+#: 档位名 → 目标码率 kbps
+AUDIO_QUALITIES: dict[str, int] = {"std": 128, "hq": 256}
+#: 统一响度(EBU R128 的 I 值,单位 LUFS)、真峰值上限 dBTP、响度范围 LU
+AUDIO_LOUDNESS_I = -14
+AUDIO_LOUDNESS_TP = -1.5
+AUDIO_LOUDNESS_LRA = 11
+AUDIO_SAMPLE_RATE = 44100
+#: 源码率低于这个数就不出 hq(转上去也没有更多信息)
+AUDIO_HQ_MIN_SOURCE_KBPS = 192
+
+
+def audio_qualities(source_bitrate_bps: int) -> list[tuple[str, int]]:
+    """这首歌出哪几档:[(档名, 码率 kbps)]。纯函数(单测锁住)。
+
+    读不出源码率(bitrate = 0,常见于某些 wav / flac 容器)时**按无损算、两档都出** ——
+    宁可多出一档,也不要把一首真无损的歌只留 128k。
+    """
+    out = [("std", AUDIO_QUALITIES["std"])]
+    kbps = source_bitrate_bps // 1000
+    if kbps == 0 or kbps >= AUDIO_HQ_MIN_SOURCE_KBPS:
+        out.append(("hq", AUDIO_QUALITIES["hq"]))
+    return out
+
+
+def audio_rendition_args(src: str, dst: str, kbps: int) -> list[str]:
+    """一档音乐的 ffmpeg 参数。纯函数(单测锁住,改一个字单测就红)。"""
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src, "-vn",
+            "-af", f"loudnorm=I={AUDIO_LOUDNESS_I}:TP={AUDIO_LOUDNESS_TP}:"
+                   f"LRA={AUDIO_LOUDNESS_LRA}",
+            "-c:a", "aac", "-profile:a", "aac_low", "-b:a", f"{kbps}k",
+            "-ar", str(AUDIO_SAMPLE_RATE), "-ac", "2",
+            "-movflags", "+faststart", dst]
+
+
 def pcm_args(src: str) -> list[str]:
     """解成 8kHz 单声道 16 位 PCM 输出到 stdout(算波形用)。"""
     return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", src, "-vn", "-ac", "1",
