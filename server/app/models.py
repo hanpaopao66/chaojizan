@@ -1462,7 +1462,7 @@ class Review(Base):
     image_urls: Mapped[list] = mapped_column(JSONB, default=list)  # 图片评价,最多 6 张
     tags: Mapped[list] = mapped_column(JSONB, default=list)  # 商家维度标签(白名单见 schemas)
     # 配送维度标签:只随 rider_rating,**不进商家维度** ——
-    # 配送是平台的事,配送差评从结构上就不该落到商家头上
+    # 配送是骑手的事,配送差评从结构上就不该落到商家头上
     rider_tags: Mapped[list] = mapped_column(
         JSONB, default=list, server_default="[]")
     reply: Mapped[str] = mapped_column(String(300), default="")  # 商家回复

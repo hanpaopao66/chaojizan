@@ -128,13 +128,29 @@ class Test公示照实说:
             text = (REPO / rel).read_text(encoding="utf-8")
             assert "售后恢复你的净额" in text, rel
 
+    def test_配送是骑手的事_配送标签只算骑手的分(self):
+        """原来写「配送由平台负责」,原意是配送标签只算骑手的分、不扣商家,但会被读成平台对配送问题
+        兜底(平台不出钱赔付)。用户端评价页、商家承诺页、商家规则中心(鸿蒙商家端和商家网页工作台
+        读的也是它)都改成「配送是骑手的事」"""
+        main = (REPO / "apps/user_app/lib/main.dart").read_text(encoding="utf-8")
+        assert "配送是骑手的事,这几项只算骑手的分,不影响商家评分" in main
+        assert "你选的都是配送方面的反馈 —— 配送是骑手的事," in main
+        promises = (REPO / "apps/merchant_app/lib/promises_page.dart").read_text(encoding="utf-8")
+        assert "平台骑手送的单,配送是骑手的事" in promises and "只算骑手的分" in promises
+        from app.routers import merchants
+        rules = inspect.getsource(merchants.my_rules)
+        assert "平台骑手送的单,配送是骑手的事" in rules and "只算骑手的分" in rules
+
     def test_各端不再说改判平台认亏_食安平台垫付(self):
         stale = ["改判的钱平台认亏", "先行赔付由平台垫付", "平台先行全额退款",
                  "改判产生的钱由平台承担", "被冲的净额不补回", "被冲掉的净额不补回",
                  "被冲掉的那笔净额不补回", "判责撤销、钱不动", "商家无责(钱不动)",
                  "平台认赔(历史)",
                  # 2026-09-15 之后还剩的几句(顾客端取消分摊申诉框、鸿蒙商家端注释、共享包文档)
-                 "改判的话由平台承担", "平台认亏,不追用户款", "只撤销判责、不补回净额"]
+                 "改判的话由平台承担", "平台认亏,不追用户款", "只撤销判责、不补回净额",
+                 # 原意是「配送标签只算骑手的分、不扣商家」,但会被读成平台对配送问题兜底。
+                 # 改成「配送是骑手的事,这项只算骑手的分」(用户端评价页、商家承诺页、商家规则中心)
+                 "配送由平台负责", "配送是平台的事"]
         hits = []
         for d in ("server/app", "apps/merchant_app/lib", "apps/user_app/lib",
                   "apps/rider_app/lib", "packages/shared/lib", "web/src", "admin-web/src",

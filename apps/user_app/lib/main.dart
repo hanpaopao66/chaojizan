@@ -7128,7 +7128,7 @@ class _ReviewFormState extends State<_ReviewForm> {
   final _comment = TextEditingController();
   final List<String> _imageUrls = [];
   final Set<String> _tags = {};
-  // 配送标签单独收:配送是平台的事,这组标签只挂骑手评分,不进商家维度
+  // 配送标签单独收:配送是骑手的事,这组标签只算骑手的分,不影响商家评分
   final Set<String> _riderTags = {};
   bool _anonymous = false; // 真匿名:商家侧完全不可反查
   bool _uploading = false;
@@ -7202,7 +7202,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                     value: _riderRating,
                     onChanged: (v) => setState(() => _riderRating = v)),
               ]),
-              // 配送标签只挂骑手评分:配送由平台负责,
+              // 配送标签只算骑手的分:配送是骑手的事,
               // 配送原因的反馈不计入商家评分
               Wrap(
                 spacing: 6,
@@ -7223,7 +7223,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                     ),
                 ],
               ),
-              Text('配送由平台负责,配送方面的反馈不计入商家评分',
+              Text('配送是骑手的事,这几项只算骑手的分,不影响商家评分',
                   style: TextStyle(
                       fontSize: 11, color: Theme.of(context).sz.inkMuted)),
             ],
@@ -7307,7 +7307,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                     ? null
                     : () async {
                         // 轻提示(可跳过不强制):给商家打了低分,但选的全是
-                        // 配送标签 —— 配送由平台负责,别让商家背骑手的锅
+                        // 配送标签 —— 配送是骑手的事,别让商家背骑手的锅
                         if (_merchantRating <= 3 &&
                             _tags.isEmpty &&
                             _riderTags.isNotEmpty) {
@@ -7315,7 +7315,7 @@ class _ReviewFormState extends State<_ReviewForm> {
                             context: context,
                             builder: (dialog) => SzDialog(
                               content: const Text(
-                                  '你选的都是配送方面的反馈 —— 配送由平台负责,'
+                                  '你选的都是配送方面的反馈 —— 配送是骑手的事,'
                                   '建议低分打给骑手评分,不影响商家。\n'
                                   '当然,如果对商家也不满意,可以直接提交。'),
                               actions: [
