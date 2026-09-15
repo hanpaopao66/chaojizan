@@ -17,7 +17,8 @@ from ..models import NOTIFY_KINDS, SocialNotification, Video, VideoComment
 from .rt_events import append_user_event
 from .social import blocked_between
 
-KIND_LABELS = {"reply": "回复我的", "at": "@我的", "like": "收到的赞", "system": "系统通知"}
+KIND_LABELS = {"reply": "回复我的", "at": "@我的", "like": "收到的赞", "system": "系统通知",
+               "follow": "新粉丝", "repost": "转发", "quote": "引用"}
 #: 合并的赞里记住最近几个人
 ACTORS_KEEP = 10
 PAGE = 20
@@ -46,10 +47,10 @@ async def _push_unread(db: AsyncSession, user_id: int, kind: str | None) -> None
                             {"kind": kind, "unread": await unread_counts(db, user_id)})
 
 
-#: 目标列(#367 视频两个,#378 音乐三个)。加新模块的目标时只往这里加一行 ——
+#: 目标列(#367 视频两个,#378 音乐三个,#380 论坛一个)。加新模块的目标时只往这里加一行 ——
 #: notify() 的签名和插入语句都从它生成,不用改三处
 TARGET_COLUMNS = ("video_id", "comment_id", "music_track_id", "music_comment_id",
-                  "music_release_id")
+                  "music_release_id", "forum_post_id")
 
 
 async def notify(db: AsyncSession, user_id: int, kind: str, *, actor_id: int | None = None,
@@ -120,10 +121,15 @@ async def system(db: AsyncSession, user_id: int, title: str, text: str, *,
     `reason_label` 不给时按视频的原因代码表翻;音乐、论坛的代码不在那张表里,
     调用方自己把翻好的文字传进来(各模块的代码表见各自的 REASON_CODES)。
     """
-    from .video import REASON_CODES
+    label = reason_label
+    if label is None and reason_code:
+        # 原因代码分模块加(视频 V2xx、音乐 M3xx、论坛 F4xx,§5.11):
+        # 调用方翻好了就用它的,没翻就按代码去各模块的表里找一遍
+        from .video import REASON_CODES
+        from .forum import FORUM_REASON_CODES
+        label = REASON_CODES.get(reason_code) or FORUM_REASON_CODES.get(reason_code, "")
     data = {"title": title, "text": text, "action": action, "reason_code": reason_code,
-            "reason_label": reason_label if reason_label is not None
-            else REASON_CODES.get(reason_code, ""), **(extra or {})}
+            "reason_label": label or "", **(extra or {})}
     await notify(db, user_id, "system", video_id=video_id, data=data, **targets)
 
 
@@ -159,6 +165,19 @@ def _title(n: SocialNotification, actor_name: str) -> str:
             return f"{actor_name} 在歌曲评论里 @ 了你"
         return (f"{actor_name} 评论了你的歌" if d["target"] == "track"
                 else f"{actor_name} 回复了你的评论")
+    # 论坛(#380 §5.8):目标是帖子时换一套说法,不然「赞了你的评论」指的其实是一条帖子
+    if d.get("target") == "post":
+        if n.kind == "like":
+            return (f"{actor_name}等 {n.count} 人赞了你的帖子" if n.count > 1
+                    else f"{actor_name} 赞了你的帖子")
+        if n.kind == "repost":
+            return (f"{actor_name}等 {n.count} 人转发了你的帖子" if n.count > 1
+                    else f"{actor_name} 转发了你的帖子")
+        if n.kind == "quote":
+            return f"{actor_name} 引用了你的帖子"
+        if n.kind == "at":
+            return f"{actor_name} 在帖子里 @ 了你"
+        return f"{actor_name} 回复了你的帖子"
     target = "视频" if d.get("target") == "video" else "评论"
     if n.kind == "like":
         return (f"{actor_name}等 {n.count} 人赞了你的{target}" if n.count > 1
@@ -192,12 +211,22 @@ async def list_items(db: AsyncSession, viewer_id: int, kind: str, cursor: str | 
     comments = {c.id: c for c in await db.scalars(
         select(VideoComment).where(VideoComment.id.in_(cids)))} if cids else {}
     music = await _music_targets(db, rows)
+    # 论坛(#380 §5.8):每条带 post: {pid, text},客户端按有哪个字段决定点开去哪
+    from ..models import ForumPost
+    pids = {n.forum_post_id for n in rows if n.forum_post_id}
+    posts = {p.id: p for p in await db.scalars(
+        select(ForumPost).where(ForumPost.id.in_(pids)))} if pids else {}
     items = []
     for n in rows:
         actor = cards.get(n.actor_id) if n.actor_id else None
         v = videos.get(n.video_id) if n.video_id else None
         c = comments.get(n.comment_id) if n.comment_id else None
+        fp = posts.get(n.forum_post_id) if n.forum_post_id else None
         items.append({
+            "post": {"pid": fp.pid,
+                     "text": "" if fp.status != "visible" else
+                     " ".join((fp.text or "").split())[:80],
+                     "unavailable": fp.status != "visible"} if fp is not None else None,
             "id": n.id,
             "kind": n.kind,
             "title": _title(n, actor["name"] if actor else "有人"),
