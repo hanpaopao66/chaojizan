@@ -425,6 +425,7 @@ class ChatMessage {
     this.call,
     this.preview,
     this.sticker,
+    this.card,
     this.signature,
     this.reactions = const [],
     this.views,
@@ -462,6 +463,11 @@ class ChatMessage {
   final Map<String, dynamic>? call;
   final Map<String, dynamic>? preview;
   final Map<String, dynamic>? sticker;
+
+  /// 分享卡片(DEV-PROMPTS-41 §5.9):`{type, id, title, subtitle, cover, url}`。
+  /// **标题、封面是服务端查出来存下的快照**,发的时候客户端只给 `{type, id}` ——
+  /// 不然谁都能发一张「超级赞官方」的假卡片
+  final Map<String, dynamic>? card;
   final String? signature;
   final List<ReactionCount> reactions;
   final int? views;
@@ -504,6 +510,7 @@ class ChatMessage {
       call: m['call'] == null ? null : _map(m['call']),
       preview: m['preview'] == null ? null : _map(m['preview']),
       sticker: m['sticker'] == null ? null : _map(m['sticker']),
+      card: m['card'] == null ? null : _map(m['card']),
       signature: m['signature'] as String?,
       reactions: [for (final r in _list(m['reactions'])) ReactionCount.fromJson(r)],
       views: m['views'] is int ? m['views'] as int : null,
@@ -548,6 +555,7 @@ class ChatMessage {
         call: call,
         preview: preview,
         sticker: sticker,
+        card: card,
         signature: signature,
         reactions: reactions ?? this.reactions,
         views: views ?? this.views,

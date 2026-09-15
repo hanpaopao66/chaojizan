@@ -10,6 +10,29 @@ Future<List<int>?> pickForwardTargets(BuildContext context, {String title = '转
     Navigator.of(context).push<List<int>>(
         MaterialPageRoute(builder: (_) => _ForwardPage(title: title)));
 
+/// 把站内的一个东西(歌、歌单、专辑、音乐人、动态、视频)分享进聊天(DEV-PROMPTS-41 §5.9)。
+///
+/// **只发 `{type, id}`**:标题、封面由服务端查出来存成快照 —— 客户端说了不算,
+/// 不然谁都能发一张「超级赞官方」的假卡片。没过审的作品、私密歌单、删了的帖子服务端会拒(422)。
+/// 选人用的是转发那张页(同一套「最多 10 个」)。返回发了几个会话;用户取消返回 0。
+Future<int> shareCardToChat(BuildContext context, {required String type, required String id}) async {
+  final store = ChatStore.instance;
+  if (!store.started) {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('先登录才能分享到聊天')));
+    return 0;
+  }
+  final targets = await pickForwardTargets(context, title: '分享到');
+  if (targets == null || targets.isEmpty) return 0;
+  for (final chatId in targets) {
+    await store.outbox.sendStructured(chatId, 'card', {'card': {'type': type, 'id': id}});
+  }
+  if (context.mounted) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(targets.length > 1 ? '已分享到 ${targets.length} 个会话' : '已分享')));
+  }
+  return targets.length;
+}
+
 class _ForwardPage extends StatefulWidget {
   const _ForwardPage({required this.title});
 

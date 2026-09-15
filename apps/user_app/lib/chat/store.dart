@@ -1055,4 +1055,6 @@ Map<String, dynamic> messageToCache(ChatMessage m) => {
       if (m.sticker != null) 'sticker': {'emoji': m.sticker!['emoji']},
       if (m.location != null) 'location': {'title': m.location!['title']},
       if (m.contact != null) 'contact': {'name': m.contact!['name']},
+      // 分享卡片:离线那一行要写得出「[歌曲] 晚风」,所以类型和标题也存下来
+      if (m.card != null) 'card': {'type': m.card!['type'], 'title': m.card!['title']},
     };

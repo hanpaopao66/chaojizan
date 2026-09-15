@@ -514,6 +514,69 @@ class LinkPreviewCard extends StatelessWidget {
   }
 }
 
+/// 分享卡片(DEV-PROMPTS-41 §5.9):歌曲 / 歌单 / 专辑 / 音乐人 / 动态 / 视频。
+///
+/// 卡片里的字和封面是**服务端存下的快照** —— 发的时候客户端只给 `{type, id}`,
+/// 由服务端查出来写死在消息里。这样两件事都成立:别人改了标题这条消息还是当时那句,
+/// 谁也发不出一张「超级赞官方」的假卡片。点开走 `url`(站内链接)。
+class ShareCardView extends StatelessWidget {
+  const ShareCardView(
+      {super.key, required this.card, required this.fg, required this.accent, required this.onOpen});
+
+  final Map<String, dynamic> card;
+  final Color fg;
+  final Color accent;
+  final void Function(String url) onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final type = '${card['type'] ?? ''}';
+    final what = cardKindLabels[type] ?? '分享';
+    final title = '${card['title'] ?? ''}';
+    final subtitle = '${card['subtitle'] ?? ''}';
+    final cover = '${card['cover'] ?? ''}';
+    final url = '${card['url'] ?? ''}';
+    final unavailable = card['unavailable'] == true || title.isEmpty;
+    return InkWell(
+      onTap: unavailable || url.isEmpty ? null : () => onOpen(url),
+      child: Container(
+        margin: const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.only(left: 8),
+        decoration: BoxDecoration(border: Border(left: BorderSide(color: accent, width: 3))),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (cover.isNotEmpty && !unavailable)
+            Padding(
+              padding: const EdgeInsets.only(right: 8, top: 2),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image(
+                    image: szNetImage(cover),
+                    width: 44,
+                    height: 44,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => const SizedBox(width: 44, height: 44)),
+              ),
+            ),
+          Flexible(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(what, style: TextStyle(fontSize: kFontNote, fontWeight: FontWeight.w600, color: accent)),
+              Text(unavailable ? '内容已不可见' : title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.w600, color: unavailable ? fg.withValues(alpha: .6) : fg)),
+              if (subtitle.isNotEmpty && !unavailable)
+                Text(subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: kFontNote, color: fg.withValues(alpha: .8))),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 /// 投票 / 测验。
 class PollView extends StatefulWidget {
   const PollView({super.key, required this.message, required this.fg, required this.accent, required this.onVote,

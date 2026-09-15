@@ -69,6 +69,11 @@ void main() {
       msg({'kind': 'sticker', 'sticker': {'emoji': '😂', 'id': 9, 'url': '/stickers/9.webp'}}),
       msg({'kind': 'location', 'location': {'title': '梓潼正成·财富ID', 'lat': 30.66, 'lng': 104.05}}),
       msg({'kind': 'contact', 'contact': {'name': '用户5526', 'user_id': 17569}}),
+      msg({
+        'kind': 'card',
+        'card': {'type': 'track', 'id': 'mt1234567890', 'title': '晚风', 'subtitle': '某某',
+                 'cover': '/img/music_cover/x.jpg', 'url': 'https://chaojizan.cc/music/t/mt1234567890'},
+      }),
     ];
     for (final m in samples) {
       expect(previewOf(roundTrip(m)), previewOf(m), reason: '${m.kind}:${m.text}');

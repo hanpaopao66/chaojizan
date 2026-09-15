@@ -62,6 +62,17 @@ const kindLabels = {
   'poll': '投票',
   'dice': '骰子',
   'call': '通话',
+  'card': '分享',
+};
+
+/// 分享卡片按分享的是什么给一个词(DEV-PROMPTS-41 §5.9)
+const cardKindLabels = {
+  'track': '歌曲',
+  'release': '专辑',
+  'playlist': '歌单',
+  'artist': '音乐人',
+  'post': '动态',
+  'video': '视频',
 };
 
 /// 服务消息的一句话(「小王 邀请 小李 加入了群」)。[actor] 是做这件事的人(是我就传「你」),
@@ -146,6 +157,12 @@ String previewOf(ChatMessage m) {
   if (m.kind == 'location') return '[位置] ${m.location?['title'] ?? ''}'.trim();
   if (m.kind == 'contact') return '[名片] ${m.contact?['name'] ?? ''}'.trim();
   if (m.kind == 'call') return callLabel(m.call);
+  if (m.kind == 'card') {
+    final c = m.card ?? const {};
+    final what = cardKindLabels['${c['type'] ?? ''}'] ?? '分享';
+    final title = '${c['title'] ?? ''}'.replaceAll('\n', ' ');
+    return title.isEmpty ? '[$what]' : '[$what] $title';
+  }
   final label = kindLabels[m.kind] ?? '';
   final cap = text.replaceAll('\n', ' ');
   if (m.kind == 'file' && m.media.isNotEmpty && cap.isEmpty) return '[文件] ${m.media.first.name}';

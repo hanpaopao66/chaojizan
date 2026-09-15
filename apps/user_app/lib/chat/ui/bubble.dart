@@ -381,6 +381,15 @@ class _Bubble extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
           child: ContactCard(contact: m.contact ?? const {}, fg: fg, onOpen: actions.onOpenUser),
         ));
+      // 分享进来的歌、歌单、专辑、音乐人、动态、视频(DEV-PROMPTS-41 §5.9):
+      // 卡片里的字是服务端存的快照,点开走站内链接
+      case 'card':
+        children.add(Padding(
+          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+          child: ShareCardView(
+              card: m.card ?? const {}, fg: fg, accent: accent,
+              onOpen: (u) => actions.handlers.onUrl?.call(u)),
+        ));
       case 'poll':
         if (m.poll != null) {
           children.add(Padding(
