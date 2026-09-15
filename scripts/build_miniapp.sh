@@ -4,10 +4,11 @@
 #   bash scripts/build_miniapp.sh notepad     # → miniapps/notepad/dist/notepad.zip
 #   bash scripts/build_miniapp.sh 2048        # → miniapps/2048/dist/2048.zip
 #   bash scripts/build_miniapp.sh snake       # → miniapps/snake/dist/snake.zip
+#   bash scripts/build_miniapp.sh blocks      # → miniapps/blocks/dist/blocks.zip
 #
 # 打印的 SHA-256 应该和线上详情页公示的一致。上传用 server/scripts/publish_official_miniapp.py。
 set -euo pipefail
-app="${1:?用法:build_miniapp.sh <notepad|2048|snake>}"
+app="${1:?用法:build_miniapp.sh <notepad|2048|snake|blocks>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dir="$root/miniapps"
 [ -d "$dir/$app" ] || { echo "没有 miniapps/$app"; exit 1; }

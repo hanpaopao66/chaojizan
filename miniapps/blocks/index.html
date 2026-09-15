@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>方块消除</title>
+</head>
+<body>
+  <main id="game" class="game blocks">
+    <header class="head">
+      <h1>方块消除</h1>
+      <div class="head-btns">
+        <button id="new" class="btn" type="button">新游戏</button>
+        <button id="about-btn" class="btn" type="button">关于</button>
+      </div>
+    </header>
+    <div id="play" class="play">
+      <div class="frame">
+        <canvas id="board" role="img" aria-label="方块消除棋盘" tabindex="0"></canvas>
+        <div id="veil" class="veil" hidden><p id="veil-text"></p></div>
+      </div>
+      <aside class="side">
+        <div class="stat next"><span>下一个</span><canvas id="next" aria-hidden="true"></canvas></div>
+        <div class="stat"><span>分数</span><b id="score">0</b></div>
+        <div class="stat"><span>消行</span><b id="lines">0</b></div>
+        <div class="stat"><span>等级</span><b id="level">1</b></div>
+        <div class="stat"><span>最好</span><b id="best">0</b></div>
+        <button id="pause" class="btn" type="button">暂停</button>
+      </aside>
+    </div>
+    <div class="pad" role="group" aria-label="操作">
+      <button class="key left" type="button" data-act="left" aria-label="左移"></button>
+      <button class="key down" type="button" data-act="down" aria-label="软降"></button>
+      <button class="key right" type="button" data-act="right" aria-label="右移"></button>
+      <span class="gap"></span>
+      <button class="key word" type="button" data-act="drop">落底</button>
+      <button class="key word main" type="button" data-act="rotate">旋转</button>
+    </div>
+    <p id="live" class="sr" aria-live="polite"></p>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

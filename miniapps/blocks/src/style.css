@@ -1,0 +1,56 @@
+/* 方块消除:左边棋盘(canvas),右边一窄条「下一个」和分数,底下一排大按钮 */
+.blocks { --key: clamp(2.75rem, 7vh, 3.5rem); --side-w: 4.5rem; }
+.blocks .head h1 { font-size: 1.5rem; }
+.head-btns { display: flex; gap: .5rem; }
+.head-btns .btn { min-height: 2.5rem; padding: .3rem .75rem; font-size: .875rem; }
+
+/* 棋盘区占满剩下的高度;main.ts 按它的大小算格子(整数像素) */
+.play {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; gap: .6rem;
+}
+.frame { position: relative; flex: none; touch-action: none; /* 在棋盘上划只挪方块,不滚页面 */ }
+.frame canvas { display: block; border-radius: .5rem; box-shadow: 0 0 0 1px var(--line); outline: none; }
+.frame canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.veil {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; padding-top: 40%;
+  display: flex; align-items: flex-start; justify-content: center; pointer-events: none;
+}
+.veil[hidden] { display: none; }
+.veil p {
+  margin: 0 .75rem; padding: .7rem 1rem; border-radius: .8rem; text-align: center; font-weight: 600;
+  background: var(--card); border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(20, 20, 19, .12);
+  animation: fade 220ms var(--std) both;
+}
+.veil small { display: block; font-weight: 400; color: var(--muted); font-size: .8125rem; margin-top: .15rem; }
+
+.side { width: var(--side-w); flex: none; display: flex; flex-direction: column; gap: .45rem; align-self: stretch; justify-content: center; }
+.stat {
+  padding: .3rem .4rem; border-radius: .6rem; background: var(--card); border: 1px solid var(--line);
+  display: grid; justify-items: center; text-align: center;
+}
+.stat span { font-size: .6875rem; color: var(--muted); letter-spacing: .06em; }
+.stat b { font-size: 1rem; font-variant-numeric: tabular-nums; line-height: 1.35; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.stat.bump b { animation: bump 220ms var(--spring); }
+.stat.next canvas { display: block; margin: .2rem 0 .1rem; }
+.side .btn { padding: .3rem .25rem; font-size: .875rem; }
+
+.pad { flex: none; display: flex; justify-content: center; align-items: center; gap: .45rem; }
+.pad .gap { width: .6rem; }
+.key {
+  width: var(--key); height: var(--key); border-radius: .9rem; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card); border: 1px solid var(--line); touch-action: none;
+  transition: transform 120ms var(--std), background-color 120ms var(--std);
+}
+.key.word { font-weight: 600; font-size: .875rem; }
+.key.main { width: calc(var(--key) * 1.25); background: var(--button); color: var(--button-ink); border-color: transparent; }
+/* 箭头用边框画(不用 ▲ 这类字符:有的安卓把它渲染成彩色表情) */
+.key.left::before, .key.right::before, .key.down::before {
+  content: ''; width: 28%; height: 28%;
+  border-left: 3px solid var(--ink); border-top: 3px solid var(--ink); border-radius: 2px;
+}
+.key.left::before { transform: translateX(20%) rotate(-45deg); }
+.key.right::before { transform: translateX(-20%) rotate(135deg); }
+.key.down::before { transform: translateY(-20%) rotate(225deg); }
+.key.hit { transform: scale(.94); background: var(--line); }
+.key.main.hit { background: var(--button); opacity: .85; }

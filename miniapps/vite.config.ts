@@ -1,4 +1,4 @@
-// 官方小程序共用一份构建配置:vite build --mode <名字>(notepad / 2048 / snake)
+// 官方小程序共用一份构建配置:vite build --mode <名字>(notepad / 2048 / snake / blocks)
 // 产物在 <app>/dist/pkg,再由 scripts/build_miniapp.sh 打成可复现的 zip。
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
@@ -7,7 +7,7 @@ import { defineConfig } from 'vite'
 const here = fileURLToPath(new URL('.', import.meta.url))
 
 /** 小程序 → 开发服务器端口 */
-const APPS: Record<string, number> = { notepad: 5190, '2048': 5191, snake: 5192 }
+const APPS: Record<string, number> = { notepad: 5190, '2048': 5191, snake: 5192, blocks: 5193 }
 
 export default defineConfig(({ mode }) => {
   // 命令行的 --mode 2048 会被解析成数字,先转字符串再比;不认识的名字按老规矩当 notepad
