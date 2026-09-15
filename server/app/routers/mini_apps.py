@@ -52,6 +52,8 @@ AppId = Path(pattern=APPID_PATTERN)
 SORT_RULE = ("精选位在前(人工挑选,每次变动的理由在透明中心公示);其余按首次上架时间从新到旧 ——"
              "发新版本不会往前挪。搜索时按名称精确命中 > 前缀 > 包含 > 一句话介绍或开发者名。"
              "没有竞价、没有付费位置。")
+#: 下拉面板的「常用」:自己打开过至少这么多次才算(见 my_mini_apps)
+FREQUENT_MIN_OPENS = 3
 
 
 def bridge_error(status: int, code: int, message: str) -> HTTPException:
@@ -177,7 +179,11 @@ async def my_mini_apps(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """最近使用(≤ 8)+ 我的小程序(收藏)。多端同步 —— 存在服务端,不在手机上。"""
+    """最近使用(≤ 8)+ 常用(≤ 8)+ 我的小程序(收藏)。多端同步 —— 存在服务端,不在手机上。
+
+    「常用」只看**你自己**打开的次数(`record_open` 每次启动加一),和目录顺序、别人的用量都无关 ——
+    不是推荐。打开不到 [FREQUENT_MIN_OPENS] 次的不算:开过一两次的,「最近使用」里已经有了。
+    """
     rows = (await db.execute(
         select(MiniAppUserPref, MiniApp).join(MiniApp, MiniApp.id == MiniAppUserPref.app_id)
         .where(MiniAppUserPref.user_id == user.id))).all()
@@ -185,12 +191,17 @@ async def my_mini_apps(
     rows = [(p, a) for p, a in rows if a.id in listable]
     recent = sorted((r for r in rows if r[0].last_opened_at), key=lambda r: r[0].last_opened_at,
                     reverse=True)[:8]
+    # 次数多的在前;一样多的,最近打开的在前(再一样按 appid,顺序稳定)
+    frequent = sorted(
+        (r for r in rows if r[0].open_count >= FREQUENT_MIN_OPENS and r[0].last_opened_at),
+        key=lambda r: (-r[0].open_count, -r[0].last_opened_at.timestamp(), r[1].appid))[:8]
     starred = sorted((r for r in rows if r[0].starred), key=lambda r: (r[1].name, r[1].appid))
     recent_cards = await _cards(db, [a for _, a in recent])
+    frequent_cards = await _cards(db, [a for _, a in frequent])
     starred_cards = await _cards(db, [a for _, a in starred])
     for c, (p, _) in zip(recent_cards, recent):
         c["last_opened_at"] = p.last_opened_at.isoformat()
-    return {"recent": recent_cards, "starred": starred_cards}
+    return {"recent": recent_cards, "frequent": frequent_cards, "starred": starred_cards}
 
 
 @router.get("/me/data")

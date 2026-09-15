@@ -67,6 +67,15 @@ call("DELETE", f"/mini-apps/{older}/star", other_device)
 assert call("GET", "/mini-apps/me", token)["starred"] == []
 print("✓ 收藏、最近使用存在服务端,换设备看到的一样")
 
+# 常用:只看自己打开的次数,打开不到 3 次的不算。older 再开两次(共 3 次)进来,newer 只开过 1 次不进
+assert me["frequent"] == [], "每个只开过一两次,还谈不上常用"
+call("POST", f"/mini-apps/{older}/launch", token, {})
+call("POST", f"/mini-apps/{older}/launch", other_device, {})
+me = call("GET", "/mini-apps/me", token)
+assert [x["appid"] for x in me["frequent"]] == [older], "开够 3 次才算常用,次数跨设备累计"
+assert [x["appid"] for x in me["recent"]][:2] == [older, newer], "最近使用照旧按打开时间"
+print("✓ 常用按自己打开的次数,不到 3 次不算,换设备累计")
+
 v1 = call("GET", "/mini-apps", token)
 assert older not in str(v1) and newer not in str(v1), "托管应用不许出现在老 App 的清单里"
 print("✓ v1 清单只含外部地址条目")

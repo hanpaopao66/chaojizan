@@ -3459,13 +3459,15 @@ class ApiClient {
     return MiniAppDetail.fromJson(data as Map<String, dynamic>);
   }
 
-  /// 最近使用(≤ 8)+ 我的小程序(收藏)。存在服务端,换设备也在。
-  Future<({List<MiniAppCard> recent, List<MiniAppCard> starred})> miniAppMine() async {
+  /// 最近使用(≤ 8)+ 常用(≤ 8,按自己打开的次数)+ 我的小程序(收藏)。存在服务端,换设备也在。
+  /// 老服务端没有 frequent,按空的处理(面板上那一段就不出现)。
+  Future<({List<MiniAppCard> recent, List<MiniAppCard> frequent, List<MiniAppCard> starred})>
+      miniAppMine() async {
     final data = await _request('GET', '/mini-apps/me') as Map<String, dynamic>;
     List<MiniAppCard> cards(String k) => (data[k] as List? ?? const [])
         .map((e) => MiniAppCard.fromJson(e as Map<String, dynamic>))
         .toList();
-    return (recent: cards('recent'), starred: cards('starred'));
+    return (recent: cards('recent'), frequent: cards('frequent'), starred: cards('starred'));
   }
 
   /// 启动:服务端校验、签 initData v2,返回版本化地址(已带启动片段)。

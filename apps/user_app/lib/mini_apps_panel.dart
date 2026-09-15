@@ -6,9 +6,15 @@
 /// - [MiniAppsPeek]:下拉过程中跟手下移的预览条;
 /// - [showMiniAppsPanel]:松手后从顶部滑入的全屏面板。
 ///
-/// 面板三段:最近使用(≤ 8)、我的小程序、全部小程序 ›。**只要目录不空就能下拉**。
-/// 顺序全听服务端:最近使用按打开时间,我的小程序按名字,全部小程序是目录的纯函数排序
-/// (精选在前、其余按首次上架时间)—— 客户端一个都不重排,也不做推荐。
+/// 面板自上而下四段:最近使用、常用(各一行)、我的小程序(**默认折叠**)、全部小程序 ›。
+/// **只要目录不空就能下拉**。
+/// 顺序全听服务端:最近使用按打开时间,常用按自己打开的次数,我的小程序按名字,全部小程序是目录的纯函数排序
+/// (精选在前、其余按首次上架时间)—— 客户端一个都不重排,也不做推荐。客户端只做一件事:
+/// 「常用」里去掉上一行「最近使用」已经摆出来的,同一个图标不在两行里各占一格。
+///
+/// 要紧凑(2026-09-15 用户):抽屉是随手一拉的地方,一眼要扫完。所以格子只画图标和名字 ——
+/// 小程序自己有图标和名字,一句话介绍留给详情页;列数按可用宽度排,常见手机一行 5 个;
+/// 最近使用、常用各只摆一行,更多的在「我的小程序」和「全部小程序」里。
 library;
 
 import 'dart:math' as math;
@@ -144,9 +150,22 @@ class _MiniAppsPanel extends StatefulWidget {
   State<_MiniAppsPanel> createState() => _MiniAppsPanelState();
 }
 
+/// 一格的目标宽度:360–414 宽的手机上正好一行 5 个,宽屏按宽度多排;名字 5 个字以内放得下
+const double _kCellWidth = 64;
+const int _kMinCols = 4;
+const int _kMaxCols = 8;
+const double _kIconSize = 44;
+
+/// 可用宽度下一行排几个
+int miniAppPanelColumns(double width) =>
+    ((width - 2 * kPagePad) / _kCellWidth).floor().clamp(_kMinCols, _kMaxCols);
+
 class _MiniAppsPanelState extends State<_MiniAppsPanel> {
   List<MiniAppCard> _recent = const [];
+  List<MiniAppCard> _frequent = const [];
   List<MiniAppCard> _starred = const [];
+  // 我的小程序默认折叠:常点的已经在最上面两行了,收藏的全摊开会把「全部小程序」挤到屏幕外
+  bool _starredOpen = false;
   double _upPull = 0;
   bool _closing = false;
 
@@ -160,7 +179,7 @@ class _MiniAppsPanelState extends State<_MiniAppsPanel> {
     if (!widget.api.isLoggedIn) return;
     try {
       final m = await widget.api.miniAppMine();
-      if (mounted) setState(() => (_recent = m.recent, _starred = m.starred));
+      if (mounted) setState(() => (_recent = m.recent, _frequent = m.frequent, _starred = m.starred));
     } catch (_) {}
   }
 
@@ -189,57 +208,88 @@ class _MiniAppsPanelState extends State<_MiniAppsPanel> {
     return false;
   }
 
-  Widget _grid(List<MiniAppCard> apps, {int offset = 0}) {
+  /// 格子:宽度按列数分,**高度由内容撑**(Wrap 而不是定高的 GridView)。
+  /// 定高要猜名字那一行多高,主题行高、系统字号一变就溢出 —— 第一版按「字号 × 1.4」猜,实际高出 2 像素,测试当场红了
+  Widget _grid(List<MiniAppCard> apps, int cols, double width, {int offset = 0}) {
     final sz = Theme.of(context).sz;
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 4),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4, mainAxisSpacing: 14, crossAxisSpacing: 10, childAspectRatio: 0.82),
-      itemCount: apps.length,
-      itemBuilder: (context, i) {
-        final a = apps[i];
-        return SzDelayedIn(
-          delay: const Duration(milliseconds: 80) + SzMotion.staggerAt(offset + i),
-          curve: SzMotion.standard,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(kRadiusMd),
-            onTap: () => _open(a),
-            child: Column(children: [
-              MiniAppIcon(card: a, api: widget.api, size: 52),
-              const SizedBox(height: 6),
-              Text(a.name,
-                  maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: kFontNote, color: sz.ink)),
-              if (a.tagline.isNotEmpty)
-                Text(a.tagline,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
-            ]),
+    const gap = 4.0;
+    // 向下取整:几个格子宽度加起来不能超过一行,差一点浮点误差最后一个就会被挤到下一行
+    final cell = ((width - 2 * kPagePad - (cols - 1) * gap) / cols).floorToDouble();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 2),
+      child: Wrap(spacing: gap, runSpacing: 6, children: [
+        for (var i = 0; i < apps.length; i++)
+          SizedBox(
+            width: cell,
+            child: SzDelayedIn(
+              delay: const Duration(milliseconds: 80) + SzMotion.staggerAt(offset + i),
+              curve: SzMotion.standard,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(kRadiusMd),
+                onTap: () => _open(apps[i]),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    MiniAppIcon(card: apps[i], api: widget.api, size: _kIconSize),
+                    const SizedBox(height: 4),
+                    Text(apps[i].name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: kFontNote, color: sz.ink)),
+                  ]),
+                ),
+              ),
+            ),
           ),
-        );
-      },
+      ]),
     );
   }
 
+  TextStyle _titleStyle() =>
+      TextStyle(fontSize: kFontBody, fontWeight: FontWeight.w600, color: Theme.of(context).sz.inkMuted);
+
   Widget _title(String text, {Widget? trailing}) {
-    final sz = Theme.of(context).sz;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(kPagePad, 14, kPagePad, 0),
+      padding: EdgeInsets.fromLTRB(kPagePad, trailing == null ? 10 : 2, kPagePad, 0),
       child: Row(children: [
-        Text(text, style: TextStyle(fontSize: kFontBody, fontWeight: FontWeight.w600, color: sz.inkMuted)),
+        Text(text, style: _titleStyle()),
         const Spacer(),
         if (trailing != null) trailing,
       ]),
     );
   }
 
+  /// 「我的小程序」的标题行:点一下展开 / 收起,标着有几个
+  Widget _starredHeader() {
+    final sz = Theme.of(context).sz;
+    return Semantics(
+      button: true,
+      expanded: _starredOpen,
+      child: InkWell(
+        onTap: () => setState(() => _starredOpen = !_starredOpen),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(kPagePad, 10, kPagePad, 4),
+          child: Row(children: [
+            Text('我的小程序', style: _titleStyle()),
+            const SizedBox(width: 6),
+            Text('${_starred.length}', style: TextStyle(fontSize: kFontNote, color: sz.inkFaint)),
+            const Spacer(),
+            AnimatedRotation(
+              turns: _starredOpen ? .5 : 0,
+              duration: SzMotion.of(context, SzMotion.base),
+              curve: SzMotion.standard,
+              child: Icon(Icons.expand_more, size: 20, color: sz.inkFaint),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
-    final recent = _recent.take(8).toList();
-    final all = widget.catalog.take(8).toList();
     return GestureDetector(
       // 上滑收起(面板从上面来,回上面去);点空白也收
       onVerticalDragEnd: (d) {
@@ -249,42 +299,68 @@ class _MiniAppsPanelState extends State<_MiniAppsPanel> {
       child: Scaffold(
         backgroundColor: sz.paper,
         body: SafeArea(
-          child: Column(children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(kPagePad, 18, kPagePad, 0),
-              child: Row(children: [
-                Text('小程序', style: TextStyle(fontSize: kFontTitle, fontWeight: FontWeight.w600, color: sz.ink)),
-                const Spacer(),
-                Text('网页应用 · 不装包', style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
-              ]),
-            ),
-            Expanded(
-              child: NotificationListener<ScrollNotification>(
-                onNotification: _onScroll,
-                child: ListView(padding: EdgeInsets.zero, children: [
-                  if (recent.isNotEmpty) ...[_title('最近使用'), _grid(recent)],
-                  if (_starred.isNotEmpty) ...[_title('我的小程序'), _grid(_starred, offset: recent.length)],
-                  _title('全部小程序',
-                      trailing: TextButton(
-                        onPressed: () => Navigator.of(context)
-                            .push(MaterialPageRoute(builder: (_) => MiniAppCatalogPage(api: widget.api))),
-                        child: Text('查看全部 ›', style: TextStyle(fontSize: kFontNote, color: sz.link)),
-                      )),
-                  _grid(all, offset: recent.length + _starred.length),
-                ]),
-              ),
-            ),
-            // 顺序说明是一句对外承诺:精选是人工的(理由公示),其余按上架时间 —— 没有可以买的位置
-            Padding(
-              padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 6),
-              child: Text('精选由平台人工挑选、理由公示;其余按上架时间 · 不做推荐,也不卖位置',
-                  textAlign: TextAlign.center, style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Icon(Icons.keyboard_arrow_up, color: sz.inkFaint),
-            ),
-          ]),
+          // 宽屏(平板、电脑)限宽居中:一行摆十几个图标,眼睛从左扫到右太远(见 SzContentWidth)
+          child: SzContentWidth(
+            child: LayoutBuilder(builder: (context, box) {
+              final cols = miniAppPanelColumns(box.maxWidth);
+              final recent = _recent.take(cols).toList();
+              final inRecent = {for (final a in recent) a.appid};
+              final frequent = _frequent.where((a) => !inRecent.contains(a.appid)).take(cols).toList();
+              final all = widget.catalog.take(cols * 2).toList();
+              final shownAbove = recent.length + frequent.length;
+              return Column(children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(kPagePad, 12, kPagePad, 0),
+                  child: Row(children: [
+                    Text('小程序',
+                        style: TextStyle(fontSize: kFontTitle, fontWeight: FontWeight.w600, color: sz.ink)),
+                    const Spacer(),
+                    Text('网页应用 · 不装包', style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
+                  ]),
+                ),
+                Expanded(
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _onScroll,
+                    child: ListView(padding: const EdgeInsets.only(bottom: 8), children: [
+                      if (recent.isNotEmpty) ...[_title('最近使用'), _grid(recent, cols, box.maxWidth)],
+                      if (frequent.isNotEmpty) ...[
+                        _title('常用'),
+                        _grid(frequent, cols, box.maxWidth, offset: recent.length),
+                      ],
+                      if (_starred.isNotEmpty) ...[
+                        _starredHeader(),
+                        AnimatedSize(
+                          duration: SzMotion.of(context, SzMotion.base),
+                          curve: SzMotion.standard,
+                          alignment: Alignment.topCenter,
+                          child: _starredOpen
+                              ? _grid(_starred, cols, box.maxWidth, offset: shownAbove)
+                              : const SizedBox(width: double.infinity),
+                        ),
+                      ],
+                      _title('全部小程序',
+                          trailing: TextButton(
+                            onPressed: () => Navigator.of(context)
+                                .push(MaterialPageRoute(builder: (_) => MiniAppCatalogPage(api: widget.api))),
+                            child: Text('查看全部 ›', style: TextStyle(fontSize: kFontNote, color: sz.link)),
+                          )),
+                      _grid(all, cols, box.maxWidth, offset: shownAbove + (_starredOpen ? _starred.length : 0)),
+                    ]),
+                  ),
+                ),
+                // 顺序说明是一句对外承诺:精选是人工的(理由公示),其余按上架时间 —— 没有可以买的位置
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 4),
+                  child: Text('精选由平台人工挑选、理由公示;其余按上架时间 · 不做推荐,也不卖位置',
+                      textAlign: TextAlign.center, style: TextStyle(fontSize: kFontMicro, color: sz.inkFaint)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Icon(Icons.keyboard_arrow_up, color: sz.inkFaint),
+                ),
+              ]);
+            }),
+          ),
         ),
       ),
     );
