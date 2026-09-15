@@ -199,6 +199,36 @@ export const getFlags = () => get<Flags>('/admin/flags')
 export const setFlag = (key: string, value: string, reason: string) =>
   post<Flags>(`/admin/flags/${encodeURIComponent(key)}`, { value, reason })
 
+// ---------- 文案(每个位置改字、显示 / 隐藏;登记表在 server/app/services/copy_registry.py)----------
+
+export interface CopyItem {
+  key: string
+  group: string
+  /** 出现在哪 */
+  where: string
+  /** 客户端自带的默认值 */
+  default: string
+  max_len: number
+  hideable: boolean
+  /** 不能在这一页藏的原因,或者去哪儿藏 */
+  hide_note: string
+  /** 改过的字;null = 用默认值 */
+  text: string | null
+  hidden: boolean
+  /** 承诺类:服务端按真实费率算,只能看 */
+  locked: boolean
+  /** false = 客户端不读的老 key,只能删 */
+  known: boolean
+  updated_at: string | null
+}
+
+export const getCopy = () => get<CopyItem[]>('/admin/copy')
+export const putCopy = (key: string, body: { text?: string | null; hidden?: boolean }) =>
+  request<{ key: string; text: string | null; hidden: boolean }>(
+    'PUT', `/admin/copy/${encodeURIComponent(key)}`, body)
+export const resetCopy = (key: string) =>
+  request<{ deleted: string }>('DELETE', `/admin/copy/${encodeURIComponent(key)}`)
+
 // ---------- 对账自检 ----------
 
 export interface AuditProblem {

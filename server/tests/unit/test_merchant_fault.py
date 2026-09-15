@@ -419,8 +419,11 @@ class Test反查判了商家责任就得有另出的那行:
         code = "\n".join(ln.split("#", 1)[0] for ln in
                          src.split('"""', 2)[2].splitlines())       # 去掉文档串和注释
         assert "flag_history" not in code, "它不是开关,不进透明中心的开关时间线"
+        # 接在 0141 后面、已经回来看过的:0142(文案加 hidden 列,和起算点无关)。再有新的接上来,这里会响
+        reviewed = {"0142_platform_copy_hidden.py"}
         others = [p.name for p in MIGRATION.parent.glob("*.py")
-                  if p != MIGRATION and "down_revision = '0141'" in p.read_text(encoding="utf-8")]
+                  if p != MIGRATION and p.name not in reviewed
+                  and "down_revision = '0141'" in p.read_text(encoding="utf-8")]
         assert not others, f"0141 后面还接了迁移,记得把这条测试的「接在 0140 后面」一起看:{others}"
 
     def test_不是开关_后台看不到改不了_不进开关时间线(self):

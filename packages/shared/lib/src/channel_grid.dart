@@ -86,7 +86,7 @@ class SzChannelGrid extends StatelessWidget {
             // 不换行就直接画到隔壁格子上去了(overflow:visible 不报错,
             // 只是默默画出界,比报错还难发现)。换行成两行,
             // 既没出界,也没把用户要的大字缩回去。
-            Text(ch.name,
+            Text(ch.title,
                 maxLines: 2,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,

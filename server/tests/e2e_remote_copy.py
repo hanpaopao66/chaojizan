@@ -70,6 +70,33 @@ def main() -> None:
     if original is not None:  # 还原,不给别的用例留脏数据
         call("PUT", f"/admin/copy/{key}", token=a_token, body={"text": original})
 
+    # --- 登记表(services/copy_registry.py):后台列全、只收登记过的 key、按位置限字数 ---
+    listed = {x["key"]: x for x in call("GET", "/admin/copy", token=a_token)}
+    assert listed["nav.chat"]["default"] == "聊天" and listed["nav.chat"]["hideable"] is True, listed["nav.chat"]
+    assert listed["nav.home"]["hideable"] is False and listed["nav.home"]["hide_note"], listed["nav.home"]
+    assert listed["channel.food.name"]["default"] == "点外卖", listed["channel.food.name"]
+    bad = call("PUT", "/admin/copy/no.such.place", token=a_token, body={"text": "x"}, expect_error=True)
+    assert bad["_error"] == 422 and "客户端不读" in str(bad["detail"]), bad
+    bad = call("PUT", "/admin/copy/nav.chat", token=a_token, body={"text": "聊天聊天聊"}, expect_error=True)
+    assert bad["_error"] == 422 and "最多 4 个字" in str(bad["detail"]), bad
+    print("✓ 后台列出全部位置(带默认值、能不能藏);没登记的 key、超出字数的一律拒")
+
+    # --- 显示 / 隐藏(0142):能藏的藏得掉,首页、我的藏不掉;恢复默认连字带显示一起回来 ---
+    call("PUT", "/admin/copy/nav.chat", token=a_token, body={"hidden": True})
+    cfg2 = call("GET", "/config")
+    assert "nav.chat" in cfg2["hidden"] and "nav.chat" not in cfg2["copy"], (cfg2["hidden"], cfg2["copy"])
+    call("PUT", "/admin/copy/nav.chat", token=a_token, body={"text": "对话"})
+    cfg2 = call("GET", "/config")
+    assert cfg2["copy"]["nav.chat"] == "对话" and "nav.chat" in cfg2["hidden"], "改字不该把藏着的放出来"
+    bad = call("PUT", "/admin/copy/nav.home", token=a_token, body={"hidden": True}, expect_error=True)
+    assert bad["_error"] == 422 and "不许藏" in str(bad["detail"]), bad
+    call("PUT", "/admin/copy/nav.chat", token=a_token, body={"hidden": False})
+    assert "nav.chat" not in call("GET", "/config")["hidden"]
+    call("DELETE", "/admin/copy/nav.chat", token=a_token)
+    cfg2 = call("GET", "/config")
+    assert "nav.chat" not in cfg2["copy"] and "nav.chat" not in cfg2["hidden"], "恢复默认没恢复干净"
+    print("✓ 藏 / 放出 / 改字互不干扰;首页、我的不许藏;恢复默认后字和显示都回到客户端默认")
+
     # --- FAQ 整表替换 ---
     call("PUT", "/admin/faq", token=a_token, body={"items": [
         {"q": "e2e 问题一", "a": "e2e 答案一"},

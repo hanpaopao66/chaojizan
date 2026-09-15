@@ -18,6 +18,7 @@ import {
   BankOutlined,
   ControlOutlined,
   FileSearchOutlined,
+  FontSizeOutlined,
   LogoutOutlined,
   MenuOutlined,
   SafetyCertificateOutlined,
@@ -47,6 +48,7 @@ import StaysPage from '../pages/StaysPage'
 import TaxPage from '../pages/TaxPage'
 import TicketsPage from '../pages/TicketsPage'
 import FlagsPage from '../pages/FlagsPage'
+import CopyPage from '../pages/CopyPage'
 import LogsPage from '../pages/LogsPage'
 import MerchantsPage from '../pages/MerchantsPage'
 import MiniAppsPage from '../pages/MiniAppsPage'
@@ -103,6 +105,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     { key: '/invoices', icon: <FileTextOutlined />, label: '开票' },
     { key: '/tax', icon: <BankOutlined />, label: '税务导出' },
     { key: '/flags', icon: <ControlOutlined />, label: '平台开关' },
+    { key: '/copy', icon: <FontSizeOutlined />, label: '文案与显示' },
     { key: '/audit', icon: <FileSearchOutlined />, label: '对账自检' },
     { key: '/logs', icon: <AuditOutlined />, label: '操作留痕' },
   ]
@@ -190,6 +193,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/riders" element={<RidersPage />} />
             <Route path="/withdrawals" element={<WithdrawalsPage />} />
             <Route path="/flags" element={<FlagsPage />} />
+            <Route path="/copy" element={<CopyPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/logs" element={<LogsPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />

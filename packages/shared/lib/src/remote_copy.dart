@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
@@ -23,9 +24,17 @@ class RemoteCopy {
 
   static const _copyKey = 'remote_copy_v1';
   static const _faqKey = 'remote_faq_v1';
+  static const _hiddenKey = 'remote_hidden_v1';
 
   static Map<String, String> _copy = const {};
   static List<FaqItem> _faq = const [];
+
+  /// 后台藏起来的位置(`/config` 的 hidden,0142):底部菜单的一格、一段说明。
+  /// 哪些位置能藏由服务端的登记表定(server/app/services/copy_registry.py),客户端只管照做
+  static Set<String> _hidden = const {};
+
+  /// 拉到新的文案 / 显示隐藏之后加一:底部菜单这类常驻的界面听它,拉到就当场换,不用等下次启动
+  static final ValueNotifier<int> changed = ValueNotifier(0);
 
   /// 内容版本号(服务端算的内容哈希),便于排查"我改了怎么没生效"
   static String rev = '';
@@ -42,6 +51,17 @@ class RemoteCopy {
 
   /// 取一条文案。[fallback] 是客户端自带的完整默认值,不能省。
   static String text(String key, String fallback) => _copy[key] ?? fallback;
+
+  /// 这个位置显示不显示(后台没藏就显示;拉不到配置也显示)
+  static bool shown(String key) => !_hidden.contains(key);
+
+  /// 测试用:直接摆好文案和隐藏的位置
+  @visibleForTesting
+  static void debugSet({Map<String, String>? copy, Set<String>? hidden}) {
+    if (copy != null) _copy = copy;
+    if (hidden != null) _hidden = hidden;
+    changed.value++;
+  }
 
   /// 取帮助中心问答。服务端没配就整体用本地默认值 ——
   /// 不做逐条合并:FAQ 是一篇要通读的东西,半本地半远端会读出前后矛盾。
@@ -67,6 +87,7 @@ class RemoteCopy {
             .map((e) => FaqItem.fromJson(e as Map<String, dynamic>))
             .toList();
       }
+      _hidden = {...?prefs.getStringList(_hiddenKey)};
     } catch (_) {
       // 缓存坏了就当没有,下面的网络请求会重新灌
     }
@@ -90,13 +111,23 @@ class RemoteCopy {
           for (final e in (data['features'] as Map).entries) '${e.key}': e.value == true,
         };
       }
+      final prefs = await SharedPreferences.getInstance();
+      // 显示 / 隐藏单独处理,不跟下面「空响应不覆盖」那条走:后台把藏起来的位置全部放出来时,hidden 就是空的,
+      // 要是当成「空响应」跳过,客户端就一直藏着。老服务端没有这个字段 = 什么都没藏
+      final hidden = {for (final k in (data['hidden'] as List? ?? const [])) '$k'};
+      if (!setEquals(hidden, _hidden)) {
+        _hidden = hidden;
+        await prefs.setStringList(_hiddenKey, hidden.toList());
+        changed.value++;
+      }
       if (copy.isEmpty && faq.isEmpty) return; // 空响应不覆盖已有缓存
+      final copyChanged = !mapEquals(copy, _copy);
       _copy = copy;
       _faq = faq;
-      final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_copyKey, jsonEncode(copy));
       await prefs.setString(
           _faqKey, jsonEncode([for (final f in faq) f.toJson()]));
+      if (copyChanged) changed.value++;
     } catch (_) {
       // 拉不到就用缓存/本地默认值,不打扰使用
     }

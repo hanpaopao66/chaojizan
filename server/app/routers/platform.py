@@ -452,9 +452,14 @@ async def public_config(db: AsyncSession = Depends(get_db)):
 
     from ..services.flags import bots_on, marketing_on, social_flag_on, video_flag_on
 
+    from ..services.copy_registry import COPY_KEYS
+
     rows = (await db.scalars(select(PlatformCopy))).all()
-    copy = {r.key: r.text for r in rows if not r.key.startswith(PLEDGE_PREFIX)}
+    # 空串 = 只藏没改字,不下发(客户端用自己的默认值)
+    copy = {r.key: r.text for r in rows if r.text and not r.key.startswith(PLEDGE_PREFIX)}
     copy.update(_pledge_copy())  # 承诺类永远以服务端计算值为准,覆盖任何存量脏数据
+    # 藏起来的位置(0142):只认登记表里允许藏的 —— 库里要是有一条不许藏的 hidden,也不下发
+    hidden = sorted(r.key for r in rows if r.hidden and r.key in COPY_KEYS and COPY_KEYS[r.key].hideable)
 
     faqs = (await db.scalars(
         select(PlatformFaq)
@@ -474,6 +479,7 @@ async def public_config(db: AsyncSession = Depends(get_db)):
         # 要公示的许可证编号(后台「平台开关」里填,空 = 不显示):官网页脚、App「关于我们」读它
         "licenses": {"av": av.value if av is not None else ""},
         "copy": copy,
+        "hidden": hidden,
         "faq": [{"audience": f.audience, "q": f.question, "a": f.answer}
                 for f in faqs],
     }
@@ -489,12 +495,29 @@ async def list_copy(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """后台看全部文案:承诺类也列出来(标 locked),但改不了。"""
-    rows = (await db.scalars(select(PlatformCopy).order_by(PlatformCopy.key))).all()
-    out = [{"key": r.key, "text": r.text, "locked": False,
-            "updated_at": r.updated_at} for r in rows
-           if not r.key.startswith(PLEDGE_PREFIX)]
-    out += [{"key": k, "text": v, "locked": True, "updated_at": None}
+    """后台「文案」页:登记表里的每个位置(没改过的也列,带默认值)+ 承诺类(locked,只能看)。
+
+    库里要是还有登记表之外的老 key(客户端不读的),也列出来、标 known=false,只能删。
+    """
+    from ..services.copy_registry import COPY_KEYS
+
+    rows = {r.key: r for r in (await db.scalars(select(PlatformCopy))).all()}
+    out = []
+    for key, meta in COPY_KEYS.items():
+        r = rows.get(key)
+        out.append({"key": key, "group": meta.group, "where": meta.where, "default": meta.default,
+                    "max_len": meta.max_len, "hideable": meta.hideable, "hide_note": meta.hide_note,
+                    "text": (r.text or None) if r else None, "hidden": bool(r and r.hidden),
+                    "locked": False, "known": True, "updated_at": r.updated_at if r else None})
+    for key, r in sorted(rows.items()):
+        if key not in COPY_KEYS and not key.startswith(PLEDGE_PREFIX):
+            out.append({"key": key, "group": "客户端不读的老文案", "where": "没有客户端读这个 key,改了也不会生效,删掉即可",
+                        "default": "", "max_len": 1000, "hideable": False, "hide_note": "",
+                        "text": r.text or None, "hidden": bool(r.hidden), "locked": False, "known": False,
+                        "updated_at": r.updated_at})
+    out += [{"key": k, "group": "承诺(按真实费率算,改不了)", "where": "由服务端按平台配置的费率生成",
+             "default": v, "max_len": 0, "hideable": False, "hide_note": "", "text": v, "hidden": False,
+             "locked": True, "known": True, "updated_at": None}
             for k, v in sorted(_pledge_copy().items())]
     return out
 
@@ -506,24 +529,48 @@ async def upsert_copy(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """新增/修改一条文案。承诺类 key 一律拒绝,并说明原因。"""
+    """改一个位置:`{"text": "新字"}` 改字、`{"text": null}` 恢复默认字、`{"hidden": true/false}` 藏 / 显示;
+    两样可以一起给。承诺类、登记表之外的 key 一律拒绝,并说明原因。"""
+    from ..services.copy_registry import COPY_KEYS
+    from ..services.moderation import find_banned
+
     if key.startswith(PLEDGE_PREFIX):
         raise HTTPException(
             422, "承诺类文案由服务端按真实费率生成,不能手工改 —— "
                  "改费率请改平台配置,文案会自动跟着变")
-    text_value = str(payload.get("text") or "").strip()
-    if not text_value:
-        raise HTTPException(422, "文案不能为空")
-    if len(text_value) > 1000:
-        raise HTTPException(422, "文案最长 1000 字")
+    meta = COPY_KEYS.get(key)
+    if meta is None:
+        raise HTTPException(422, "没有这个文案位置:客户端不读这个 key,改了也不会生效")
     row = await db.scalar(select(PlatformCopy).where(PlatformCopy.key == key))
-    if row is None:
-        row = PlatformCopy(key=key[:60], text=text_value)
-        db.add(row)
+    text_value = row.text if row else ""
+    hidden = bool(row and row.hidden)
+    if "text" in payload:
+        if payload["text"] is None:
+            text_value = ""
+        else:
+            text_value = str(payload["text"]).strip()
+            if not text_value:
+                raise HTTPException(422, "文案不能为空;要用回默认的字,点「恢复默认」")
+            if len(text_value) > meta.max_len:
+                raise HTTPException(422, f"这个位置最多 {meta.max_len} 个字,现在是 {len(text_value)} 个")
+            if await find_banned(db, text_value):
+                raise HTTPException(422, "文案里有不允许发布的内容")
+    if "hidden" in payload:
+        want = bool(payload["hidden"])
+        if want and not meta.hideable:
+            raise HTTPException(422, meta.hide_note or "这个位置不能藏")
+        hidden = want
+    if not text_value and not hidden:
+        # 字是默认的、也没藏:这一行没有存在的意义,删掉(客户端全用默认)
+        if row is not None:
+            await db.delete(row)
+    elif row is None:
+        db.add(PlatformCopy(key=key, text=text_value, hidden=hidden))
     else:
         row.text = text_value
+        row.hidden = hidden
     await db.commit()
-    return {"key": key, "text": text_value}
+    return {"key": key, "text": text_value or None, "hidden": hidden}
 
 
 @router.delete("/admin/copy/{key}")
@@ -532,7 +579,7 @@ async def delete_copy(
     admin: User = Depends(require_role("admin")),
     db: AsyncSession = Depends(get_db),
 ):
-    """删掉一条下发文案 = 回退到客户端的本地默认值(不是变空白)。"""
+    """恢复默认:删掉这一行 = 字回到客户端的本地默认值、藏起来的也重新显示(不是变空白)。"""
     if key.startswith(PLEDGE_PREFIX):
         raise HTTPException(422, "承诺类文案不由后台维护,无从删起")
     row = await db.scalar(select(PlatformCopy).where(PlatformCopy.key == key))

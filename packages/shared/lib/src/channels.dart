@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'brand.dart';
+import 'remote_copy.dart';
 
 /// 频道注册表(#132):聚合平台的频道是**开放集合**,这里是唯一事实来源。
 ///
@@ -60,6 +61,10 @@ class SzChannel {
 
   /// 对应服务端的 `merchants.biz_type`;纯前端频道(如团购)为空
   final String? bizType;
+
+  /// 界面上显示的名字:后台「文案」页能改(`channel.<key>.name`,server/app/services/copy_registry.py),
+  /// 拿不到就是上面写死的 [name]。显示一律用它;[name] 只当默认值
+  String get title => RemoteCopy.text('channel.$key.name', name);
 }
 
 /// 已上线频道。**新增频道只改这里。**
@@ -160,7 +165,7 @@ class SzChannelChip extends StatelessWidget {
         border: Border.all(color: c),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text('${ch.glyph} ${ch.name}',
+      child: Text('${ch.glyph} ${ch.title}',
           style: TextStyle(
               fontSize: dense ? 10.5 : 12,
               fontWeight: FontWeight.w500,

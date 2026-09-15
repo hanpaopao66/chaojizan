@@ -1675,7 +1675,10 @@ class PlatformCopy(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # 点位 key,如 home.vacancy / faq.1.q;客户端按 key 取,取不到用本地默认值
     key: Mapped[str] = mapped_column(String(60), unique=True, index=True)
+    # 空串 = 不改字(只藏),/config 不下发它,客户端用自己的默认值
     text: Mapped[str] = mapped_column(String(1000))
+    # 整个位置藏起来(0142)。哪些 key 能藏见 services/copy_registry.py
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

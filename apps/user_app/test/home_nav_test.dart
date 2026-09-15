@@ -116,13 +116,28 @@ void main() {
     expect(find.text('券包'), findsOneWidget);
   });
 
+  test('后台藏了「视频」「聊天」:底栏只剩显示的格子;「首页」「我的」藏不掉', () {
+    addTearDown(() => RemoteCopy.debugSet(hidden: {}));
+    RemoteCopy.debugSet(hidden: {});
+    expect(homeTabsShown(), [0, 1, 2, 3]);
+    RemoteCopy.debugSet(hidden: {'nav.chat'});
+    expect(homeTabsShown(), [0, 1, 3], reason: '点第三格要切到「我的」(编号 3),不能按位置切成「聊天」');
+    RemoteCopy.debugSet(hidden: {'nav.video', 'nav.chat'});
+    expect(homeTabsShown(), [0, 3]);
+    // 服务端的登记表不许藏这两格,就算下发了也不认 —— 藏了就进不去设置、登录不了
+    RemoteCopy.debugSet(hidden: {'nav.home', 'nav.me'});
+    expect(homeTabsShown(), [0, 1, 2, 3]);
+  });
+
   test('main.dart 里没有「切到订单 tab」的残留', () {
     // 订单 tab 已经不存在:再出现 `_tab = 1` 的订单跳转,就是切到了「消息」
     final src = _read('lib/main.dart');
     expect(src.contains("label: '订单'"), isFalse);
     expect(src.contains('_ordersFilter'), isFalse);
-    for (final label in ['首页', '消息', '视频', '我的']) {
-      expect(src.contains("label: '$label'"), isTrue, reason: label);
+    // 四格的字从后台「文案」页取(nav.*,server/app/services/copy_registry.py),这里写的是默认值;
+    // 2026-09-15「消息」改叫「聊天」
+    for (final (key, label) in [('home', '首页'), ('video', '视频'), ('chat', '聊天'), ('me', '我的')]) {
+      expect(src.contains("RemoteCopy.text('nav.$key', '$label')"), isTrue, reason: label);
     }
   });
 }

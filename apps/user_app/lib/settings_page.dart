@@ -237,13 +237,16 @@ class _AboutPageState extends State<AboutPage> {
         const SizedBox(height: 4),
         Text(_version.isEmpty ? '' : _version,
             textAlign: TextAlign.center, style: theme.textTheme.bodySmall),
-        const SizedBox(height: 8),
-        Text(
-            RemoteCopy.text('about.tagline',
-                '低抽成、账目透明的本地生活服务平台\n'
-                '外卖 5% 封顶 · 配送费 100% 归骑手 · 每一单资金流向可查'),
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall?.copyWith(height: 1.6)),
+        // 这一段后台能改字、也能整个藏起来(about.tagline)
+        if (RemoteCopy.shown('about.tagline')) ...[
+          const SizedBox(height: 8),
+          Text(
+              RemoteCopy.text('about.tagline',
+                  '低抽成、账目透明的本地生活服务平台\n'
+                  '外卖 5% 封顶 · 配送费 100% 归骑手 · 每一单资金流向可查'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.6)),
+        ],
         const SizedBox(height: 24),
         Card(
           // 这五条的副标题**全是值**(公司名、电话、邮箱、网址、备案号) ——

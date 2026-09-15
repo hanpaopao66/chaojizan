@@ -258,6 +258,17 @@ const int _kTabVideo = 1;
 const int _kTabChat = 2;
 const int _kTabMe = 3;
 
+/// 底部菜单现在显示哪几格(返回 tab 编号,按底栏上的先后)。后台「文案」页能藏「视频」「聊天」;
+/// 「首页」「我的」不许藏(藏了就进不去设置、登录不了,见 server/app/services/copy_registry.py),
+/// 服务端就算下发了也不认。内部照旧按编号,IndexedStack 还是四个;只有底栏按显示的格子排,点第几格再换回编号
+@visibleForTesting
+List<int> homeTabsShown() => [
+      _kTabHome,
+      if (RemoteCopy.shown('nav.video')) _kTabVideo,
+      if (RemoteCopy.shown('nav.chat')) _kTabChat,
+      _kTabMe,
+    ];
+
 class _HomePageState extends State<HomePage> {
   int _tab = _kTabHome;
 
@@ -296,6 +307,7 @@ class _HomePageState extends State<HomePage> {
     chatUnreadBadge.addListener(_onBadge);
     chatExtraBadge.addListener(_onBadge);
     videoImmersive.addListener(_onBadge);
+    RemoteCopy.changed.addListener(_onCopy);
     // 消息模块:登录了就连实时通道(底栏角标要一直准,不能等点进「消息」tab 才连);
     // 游客登录成功 / 退出登录都会 bump authTick
     rootResolve = widget.api.resolveUrl;
@@ -351,6 +363,7 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    RemoteCopy.changed.removeListener(_onCopy);
     chatUnreadBadge.removeListener(_onBadge);
     chatExtraBadge.removeListener(_onBadge);
     videoImmersive.removeListener(_onBadge);
@@ -417,6 +430,40 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
   }
 
+  /// 后台改了底部菜单的字、藏了一格:拉到就换。正停在被藏的那一格上的,回首页
+  void _onCopy() {
+    if (!mounted) return;
+    setState(() {
+      if (!_shownTabs.contains(_tab)) _tab = _kTabHome;
+    });
+  }
+
+  List<int> get _shownTabs => homeTabsShown();
+
+  /// 底栏一格。字都能在后台「文案」页改(nav.*),拿不到用这里写的默认值
+  SzNavItem _navItem(int tab) => switch (tab) {
+        _kTabHome => SzNavItem(
+            icon: Icons.storefront_outlined,
+            selectedIcon: Icons.storefront,
+            label: RemoteCopy.text('nav.home', '首页')),
+        _kTabVideo => SzNavItem(
+            icon: Icons.smart_display_outlined,
+            selectedIcon: Icons.smart_display,
+            label: RemoteCopy.text('nav.video', '视频')),
+        _kTabChat => SzNavItem(
+            icon: Icons.chat_bubble_outline,
+            selectedIcon: Icons.chat_bubble,
+            label: RemoteCopy.text('nav.chat', '聊天'),
+            // 数的是「有未读的行」(设计稿 A:数会话不数消息),服务号、订单群、视频互动各算一行,
+            // 不把 9 条赞全加进来;免打扰的会话、静音的视频互动不算
+            badgeCount: chatUnreadBadge.value + chatExtraBadge.value,
+            badgeColor: Theme.of(context).sz.clay),
+        _ => SzNavItem(
+            icon: Icons.person_outline,
+            selectedIcon: Icons.person,
+            label: RemoteCopy.text('nav.me', '我的')),
+      };
+
   Future<void> _pickDeliveryAddress() async {
     if (!await ensureLoggedIn(context)) return;
     if (!mounted) return;
@@ -433,8 +480,9 @@ class _HomePageState extends State<HomePage> {
     // 桌面上鼠标的"家"在内容附近,把导航钉在 1440px 屏的最底部,
     // 每次切页都要横跨半个屏幕跑一趟。侧栏还顺带省下 80px 竖向空间,
     // 而桌面浏览器的可视高度本来就比手机紧张(地址栏、标签栏都在吃)
+    final tabs = _shownTabs;
     final scaffold = SzNavScaffold(
-      selectedIndex: _tab,
+      selectedIndex: tabs.contains(_tab) ? tabs.indexOf(_tab) : 0,
       // 宽度上限交给外壳,标题栏和内容才会用**同一个**宽度对齐。
       // 自己在 body 上套 SzContentWidth 的话,标题栏还是横跨全屏:
       // 标题贴最左、图标钉最右,而下面的内容是居中的。
@@ -443,31 +491,10 @@ class _HomePageState extends State<HomePage> {
       // 消息和「我的」是单列(要短行才好读)。统一限死会把卡片流也压成 720
       contentMaxWidth: _tab == _kTabHome || _tab == _kTabVideo ? kFeedMaxWidth : kContentMaxWidth,
       onSelected: (i) => setState(() {
-        _tab = i;
-        _visited.add(i);
+        _tab = tabs[i];
+        _visited.add(_tab);
       }),
-      items: [
-        const SzNavItem(
-            icon: Icons.storefront_outlined,
-            selectedIcon: Icons.storefront,
-            label: '首页'),
-        const SzNavItem(
-            icon: Icons.smart_display_outlined,
-            selectedIcon: Icons.smart_display,
-            label: '视频'),
-        SzNavItem(
-            icon: Icons.chat_bubble_outline,
-            selectedIcon: Icons.chat_bubble,
-            label: '消息',
-            // 数的是「有未读的行」(设计稿 A:数会话不数消息),服务号、订单群、视频互动各算一行,
-            // 不把 9 条赞全加进来;免打扰的会话、静音的视频互动不算
-            badgeCount: chatUnreadBadge.value + chatExtraBadge.value,
-            badgeColor: Theme.of(context).sz.clay),
-        const SzNavItem(
-            icon: Icons.person_outline,
-            selectedIcon: Icons.person,
-            label: '我的'),
-      ],
+      items: [for (final t in tabs) _navItem(t)],
       // 「消息」「视频」两个 tab 自己画顶部(消息要放分组条,视频要放搜索框和子页签,
       // 竖屏子页还要整块变黑),外壳这里不给标题栏
       appBar: _tab == _kTabChat || _tab == _kTabVideo ? null : AppBar(
@@ -4462,7 +4489,7 @@ class _ChannelStripState extends State<_ChannelStrip> {
               _ChannelPill(
                   key: _keyOf(ch.key),
                   channel: ch,
-                  label: ch.name,
+                  label: ch.title,
                   count: counts?.total(ch.key),
                   selected: widget.selected == ch.key,
                   sliderReady: ready,
@@ -4881,8 +4908,8 @@ class _OrderListViewState extends State<OrderListView> {
       return f == OrderFilter.all ? '还没有订单\n去点一单支持身边小店吧' : '没有${f.label}的订单';
     }
     return f == OrderFilter.all
-        ? '「${ch.name}」还没有订单'
-        : '「${ch.name}」没有${f.label}的订单';
+        ? '「${ch.title}」还没有订单'
+        : '「${ch.title}」没有${f.label}的订单';
   }
 
   /// 状态语义色:进行中 = 品牌橙(需要关注),完成 = 账目绿(钱已结清),取消 = 灰

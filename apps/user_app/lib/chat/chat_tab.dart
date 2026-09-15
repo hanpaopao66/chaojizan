@@ -169,9 +169,11 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   String _title() {
-    if (!store.started) return '消息';
+    // 标题跟着底部菜单那一格的名字走(后台「文案」页的 nav.chat,默认「聊天」)
+    final name = RemoteCopy.text('nav.chat', '聊天');
+    if (!store.started) return name;
     return switch (store.conn) {
-      ConnState.online => '消息',
+      ConnState.online => name,
       ConnState.connecting => '连接中…',
       ConnState.offline => '等待网络…',
     };
