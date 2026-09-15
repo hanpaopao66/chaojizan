@@ -249,14 +249,29 @@ class _MiniAppsPanelState extends State<_MiniAppsPanel> {
   TextStyle _titleStyle() =>
       TextStyle(fontSize: kFontBody, fontWeight: FontWeight.w600, color: Theme.of(context).sz.inkMuted);
 
-  Widget _title(String text, {Widget? trailing}) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(kPagePad, trailing == null ? 10 : 2, kPagePad, 0),
-      child: Row(children: [
-        Text(text, style: _titleStyle()),
-        const Spacer(),
-        if (trailing != null) trailing,
-      ]),
+  Widget _title(String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(kPagePad, 10, kPagePad, 0),
+        child: Text(text, style: _titleStyle()),
+      );
+
+  /// 「全部小程序 · 查看全部 ›」:整行可点。原来右边是个 TextButton,自带 48 高的点击区,
+  /// 这一行的上下留白比别的标题多出一截(截图里一眼就看得出来)
+  Widget _catalogTitle() {
+    final sz = Theme.of(context).sz;
+    return Semantics(
+      button: true,
+      child: InkWell(
+        onTap: () => Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => MiniAppCatalogPage(api: widget.api))),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(kPagePad, 10, kPagePad, 4),
+          child: Row(children: [
+            Text('全部小程序', style: _titleStyle()),
+            const Spacer(),
+            Text('查看全部 ›', style: TextStyle(fontSize: kFontNote, color: sz.link)),
+          ]),
+        ),
+      ),
     );
   }
 
@@ -338,12 +353,7 @@ class _MiniAppsPanelState extends State<_MiniAppsPanel> {
                               : const SizedBox(width: double.infinity),
                         ),
                       ],
-                      _title('全部小程序',
-                          trailing: TextButton(
-                            onPressed: () => Navigator.of(context)
-                                .push(MaterialPageRoute(builder: (_) => MiniAppCatalogPage(api: widget.api))),
-                            child: Text('查看全部 ›', style: TextStyle(fontSize: kFontNote, color: sz.link)),
-                          )),
+                      _catalogTitle(),
                       _grid(all, cols, box.maxWidth, offset: shownAbove + (_starredOpen ? _starred.length : 0)),
                     ]),
                   ),
