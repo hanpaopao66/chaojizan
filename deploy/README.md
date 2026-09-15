@@ -29,6 +29,7 @@
 | `staging-compose.sh` / `staging-init.sh` | 预发机上 compose 的唯一入口 / 一次性准备(密钥、门禁、占位证书、frpc) |
 | `staging-cert.sh` | 预发域名证书:在**生产部署机**上签(80 端口的挑战只有这边答得了),由 `scripts/deploy_staging.sh` 调 |
 | `rehearse-migrations.sh` | 迁移彩排:生产库现导一份进一次性容器,用新代码跑迁移,查完销毁 |
+| `staging-smoke.sh` | 预发冒烟:在预发机本机过门禁,走网页版、后台、配置、演示账号登录 |
 | `healthcheck-alert.sh` | 探活告警(crontab 每分钟) |
 
 ## 日常操作(部署机)

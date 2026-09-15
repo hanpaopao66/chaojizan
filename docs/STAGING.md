@@ -58,7 +58,9 @@ bash scripts/deploy_staging.sh v0.21.0-b2064 --skip-web   # 部署某个提交;�
 5. 预发机缺的基础镜像由开发机拉 arm64 版灌过去(预发机自己拉 Docker Hub 时断时续);
 6. 构建镜像,**迁移彩排**(见下);
 7. 起服务、重启 nginx,空库时灌演示数据;
-8. 在预发机本机过门禁查 `/health`(版本号要对得上)、确认不带 cookie 会被挡、看 frpc 连上没有、从外网试一次。
+8. 在预发机本机过门禁查 `/health`(版本号要对得上)、确认不带 cookie 会被挡;
+   冒烟(`deploy/staging-smoke.sh`):网页版和它编进去的接口地址、三个后台、配置下发、演示顾客验证码登录、首页有店;
+   最后看 frpc 连上没有、从外网试一次。
 
 ## 迁移彩排
 
@@ -74,7 +76,10 @@ bash scripts/deploy_staging.sh v0.21.0-b2064 --skip-web   # 部署某个提交;�
 ## 上线前你要做的(一次)
 
 1. **DNS**:阿里云解析里给 `chaojizan.cc` 加一条 A 记录,主机记录 `staging`,指向和 `chaojizan.cc` 相同的云服务器 IP;
-2. **安全组**:云服务器(跑 frps 的那台)入方向放行 TCP 8443;
+2. **云服务器(跑 frps 的那台)放行 8443**,两处都要:
+   - 安全组入方向放行 TCP 8443;
+   - `frps.toml` 的 `allowPorts` 里加上 8443(比如 `{ single = 8443 }`),然后重启 frps。
+     没加的话预发机的 frpc 日志里是 `start error: port not allowed`,部署脚本会指出来;
 3. **预发机固定地址**:路由器里给 Mac mini 做 DHCP 保留(或者插网线后再保留),`deploy/.env.deploy` 里的 `STAGING` 跟着改;
 4. (可选)Mac mini 装 Rosetta:`sudo softwareupdate --install-rosetta --agree-to-license`,之后 `colima restart`。
    现在 x86 镜像靠 qemu 模拟也能跑,只是慢;预发的镜像都是 arm64 版,暂时用不到。

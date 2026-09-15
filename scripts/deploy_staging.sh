@@ -92,6 +92,11 @@ if [ "$MODE" = init ]; then
   prod_ssh "sed -n '/^\\[\\[/q;p' ~/super-z/deploy/tunnel/frpc.toml | grep -E '^[[:space:]]*(serverAddr|serverPort|auth\\.|transport\\.)'" \
     | st_write "$DEST/deploy/tunnel/frps-common.toml"
   st "bash $DEST/deploy/staging-init.sh '$STAGING_BASE' $RESET_GATE"
+  if [ -n "$RESET_GATE" ] && st "bash $DEST/deploy/staging-compose.sh ps -q nginx" | grep -q .; then
+    # nginx 只在启动 / 重载时读门禁的 include 文件:不重启的话还是认旧 cookie、发旧 cookie
+    st "bash $DEST/deploy/staging-compose.sh restart nginx" >/dev/null
+    echo "✓ 门禁已换,nginx 已重启:所有人要重新输一次密码"
+  fi
   echo "✓ 初始化完成。接着跑一次 bash scripts/deploy_staging.sh 部署"
   exit 0
 fi
@@ -200,11 +205,19 @@ echo "$HEALTH" | grep -q "\"version\":\"$VERSION\"" || { echo "✗ 预发上跑�
 GATE=$(st "curl -sk -m 5 -o /dev/null -w '%{http_code} %{redirect_url}' https://127.0.0.1:8443/")
 echo "   不带通行 cookie:$GATE(应当 302 到 /__gate)"
 case "$GATE" in 302*) ;; *) echo "✗ 门禁没生效"; exit 1 ;; esac
-st "docker logs --tail 20 superz-staging-frpc-1 2>&1" | grep -E "start proxy success|error|login" | tail -2 | sed 's/^/   frpc: /'
+st "bash $DEST/deploy/staging-smoke.sh '$STAGING_BASE'" || { echo "✗ 冒烟没过(上面打 ✗ 的那几条)"; exit 1; }
+FRPC=$(st "docker logs --tail 20 superz-staging-frpc-1 2>&1" | perl -pe 's/\e\[[0-9;]*m//g')
+if echo "$FRPC" | grep -q "port not allowed"; then
+  echo "   ✗ frpc:云服务器上的 frps 没放行这个端口(frps.toml 的 allowPorts),见 docs/STAGING.md「上线前你要做的」"
+elif echo "$FRPC" | grep -q "start proxy success"; then
+  echo "   frpc:转发已建立"
+else
+  echo "$FRPC" | grep -E "error|login" | tail -2 | sed 's/^/   frpc: /'
+fi
 EXT=$(curl -s -m 10 --noproxy '*' -o /dev/null -w '%{http_code}' "$STAGING_BASE/" || true)
 if [ "$EXT" = "302" ]; then
   echo "   外网 $STAGING_BASE/ → 302 ✓"
 else
-  echo "   外网 $STAGING_BASE/ 还打不开($EXT):DNS 记录和云服务器安全组见 docs/STAGING.md「上线前你要做的」"
+  echo "   外网 $STAGING_BASE/ 还打不开($EXT):DNS、安全组、frps 端口见 docs/STAGING.md「上线前你要做的」"
 fi
 echo "预发部署完成 ✓ $VERSION"
