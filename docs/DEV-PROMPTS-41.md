@@ -356,6 +356,8 @@ withdrawn ──再提交(音乐人)──▶ reviewing        rejected 申诉�
  "counts":{"replies":1,"reposts":2,"quotes":0,"likes":9,"bookmarks":1,"views":120},
  "viewer":{"liked":false,"reposted":false,"bookmarked":false},
  "edited":false,"edited_at":null,"created_at":"…","pinned":false}
+// 投票:没投过、没结束、又不是作者时,每项的 votes 和 total 是 null(投票前看不到结果,和 X 一样)
+// 卡片:服务端按 {type,id} 现查,查不到(删了、没过审、私密)时 card 是 {"type":…,"id":…,"unavailable":true}
 // 不可见的帖子(删了、下架了、拉黑关系)在串里占位:
 {"pid":"fp…","unavailable":true,"reason":"deleted|removed|blocked"}
 // 时间线条目
@@ -368,6 +370,7 @@ withdrawn ──再提交(音乐人)──▶ reviewing        rejected 申诉�
 |---|---|---|
 | GET `/home` | 发现页 | `{daily:[track≤6], daily_personalized, playlists:[playlist≤6], new_tracks:[track≤6], charts:[{key,name,top:[track≤3]}], genres:[{key,name}]}` |
 | GET `/genres` | 曲风表 | `[{key,name}]` |
+| GET `/genres/{key}/tracks?page=` | 这个曲风下的歌,按热歌榜分数 | `{items:[track+rank], has_more}` |
 | GET `/tracks/{tid}` | 歌曲详情 | track + `lyrics_kind`、`credits`、`declaration`、`stream:{std,hq\|null,expires_at}` |
 | GET `/tracks/{tid}/lyrics` | 歌词 | `{kind, text}` |
 | GET `/tracks/{tid}/stream` | 重新签地址 | `{std, hq, expires_at}` |
@@ -461,7 +464,12 @@ withdrawn ──再提交(音乐人)──▶ reviewing        rejected 申诉�
 `POST /posts/{pid}/remove {reason_code, note}`、`POST /posts/{pid}/restore`、`GET /appeals`、`POST /appeals/{decision_id}/resolve`、
 `GET /tags?hidden=`、`POST /tags/{tag}/hide {reason_code, note}` / `unhide`、`GET /stats`、`GET /reason-codes`。
 
-图片:`storage.PURPOSES` 加 `"forum": False`(公开);发帖时 `media` 里的每个地址必须是 `/img/forum/u<我>-…`(本人上传的)。
+图片:`storage.PURPOSES` 加 `"forum": False`(公开),走现有的 `POST /uploads`(`purpose=forum`);发帖时 `media` 里的每个地址必须是
+`/img/forum/u<我>-…`(本人上传的)。
+
+**卡片解析**:新文件 `services/cards.py`(论坛后端建)—— `register(type, resolver)` + `async resolve(db, type, id, viewer_id) -> dict | None`,
+返回 `{type, id, title, subtitle, cover, url}`;先注册 `video`、`post`,音乐的 `track` / `release` / `playlist` / `artist`
+由音乐后端在 `services/music.py` 里提供 `async card_of(db, type, public_id, viewer_id)`,合并时接进来;聊天的 `card` 消息(§5.9)也用它。
 
 ### 8.4 全站共用(#377)
 
