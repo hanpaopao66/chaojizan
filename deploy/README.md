@@ -23,6 +23,7 @@
 | `~/super-z/appdist/`(仅部署机) | 三端 APK、三个桌面包、versions.json,rsync 排除 |
 | `~/super-z/webapp/`(仅部署机) | 用户端网页版(官网 `/web/`),nginx 只读挂载,rsync 排除;见下文「网页版与桌面版」 |
 | `renew-cert.sh` | 证书续期(webroot 零停机),crontab 每周一 04:30 |
+| `mp-cert.sh` | 小程序托管域名 `mp.chaojizan.cc` 的多域名证书:发布了托管应用就跑一次,把新 appid 签进去(见 docs/MINIAPP-ROLLOUT.md 2.1) |
 | `backup.sh` / `restore-drill.sh` | 数据库每日备份 / 恢复演练 |
 | `healthcheck-alert.sh` | 探活告警(crontab 每分钟) |
 

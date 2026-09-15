@@ -69,6 +69,10 @@ echo "== 重建容器(alembic 迁移在启动时自动执行) =="
 # 让 docker 替你建的话属主是 root,之后 sync_release_to_appdist.sh 往里解压会没权限
 # shellcheck disable=SC2086
 ssh $SSH_OPTS "$DEPLOY" "mkdir -p $DEST/webapp/releases"
+# 小程序托管域名(conf.d/mp.conf)引用的证书还没签的话,先放一张自签名占位 ——
+# 证书文件不存在 nginx 就起不来,整站都会挂。正式证书由 deploy/mp-cert.sh 签,见 docs/MINIAPP-ROLLOUT.md 2.1
+# shellcheck disable=SC2086
+ssh $SSH_OPTS "$DEPLOY" "bash $DEST/deploy/mp-cert.sh --placeholder-if-missing"
 # shellcheck disable=SC2086
 ssh $SSH_OPTS "$DEPLOY" "cd $DEST/deploy && \
   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build"

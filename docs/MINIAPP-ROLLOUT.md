@@ -49,10 +49,20 @@
   地址看着像官方页面、审核预览和网页版宿主里的托管页可能和主站页面同一个进程;
 - 泛域名解析:加一条 `*.mp.chaojizan.cc` 的 A 记录,指向和 `chaojizan.cc` 同一个云服务器 IP。
   frp 是 TCP 转发(`deploy/tunnel/frpc.toml.example`),不看域名,**云服务器那边不用改**;
-- 泛域名证书只能走 **DNS-01**(现在的 `deploy/renew-cert.sh` 是 HTTP-01 webroot,签不了泛域名):
-  用 acme.sh 或 certbot 的 DNS 插件接域名服务商的 DNS API,签 `*.mp.chaojizan.cc` + `mp.chaojizan.cc`,
-  续期另排一条 cron,证书放 `deploy/certs/mp/`。**别把它加进 renew-cert.sh 的 DOMAINS**
-  (那个脚本按域名首段起目录名,`*.mp…` 会得到 `*`)。
+- **证书(2026-09-15 起)**:先不签泛域名证书,用 `deploy/mp-cert.sh` 按库里的托管应用签一张**多域名证书**
+  (`mp.chaojizan.cc` + 每个托管应用的 `<appid>.mp.chaojizan.cc`),走 HTTP-01 webroot —— 和 `renew-cert.sh`
+  同一套 certbot 容器、同一个 `certbot-www` 目录。能这么签是因为泛解析已经指到云服务器、frp 是 TCP 直通、
+  nginx 80 端口的 `server_name _` 会答任何子域名的验证请求(当天实测过)。好处是不用把阿里云的 DNS 密钥放到部署机上;
+  - 新发布了托管应用(官方脚本或开发者后台)就在部署机上再跑一次 `bash ~/super-z/deploy/mp-cert.sh`:
+    新 appid 进证书、nginx 热重载;没变化又没到期就什么都不做;
+  - 续期交给 `renew-cert.sh`(`certbot renew` 一起续;脚本第一次签完会把 `mp.chaojizan.cc` 写进 `.domains.local`,
+    续好的证书才会拷进 `certs/mp/`);
+  - `conf.d/mp.conf` 引用的证书不存在时 nginx 起不来、整站都挂,所以 `deploy_server.sh` 在起容器之前先跑
+    `mp-cert.sh --placeholder-if-missing`,没有证书就放一张 30 天的自签名占位;
+  - **一张证书最多 100 个域名**。托管应用多到接近这个数(或者第三方应用发布频繁、等不了手动跑脚本),就换成
+    **DNS-01 泛域名证书** `*.mp.chaojizan.cc` + `mp.chaojizan.cc`:用 acme.sh 或 certbot 的 DNS 插件接阿里云解析的 API
+    (建一个只有 DNS 权限的 RAM 子账号,密钥由人自己配在部署机上),续期另排一条 cron,证书照样放 `deploy/certs/mp/`。
+    **别把 `*.mp…` 加进 renew-cert.sh 的 DOMAINS**(那个脚本按域名首段起目录名,`*.mp…` 会得到 `*`)。
 
 ### 2.2 nginx
 
@@ -136,7 +146,8 @@ CSP 头里的 `frame-ancestors` 不能有 `*`。
 
 1. **服务端**(迁移 + 新接口;老接口行为不变,老版本 App 只看得到外部地址条目);
 2. **新版 App**(容器 v2)走正常的发版流程;
-3. ⚠ **上传官方小程序**(托管域名、证书、签名密钥都到位之后):
+3. ⚠ **上传官方小程序**(托管域名、签名密钥都到位之后;发布完在部署机上跑 `bash ~/super-z/deploy/mp-cert.sh`,
+   把新 appid 签进证书 —— 签之前那几分钟,目录里已经有它但打不开):
 
    ```bash
    bash scripts/build_miniapp.sh notepad     # 打印的 SHA-256 要和上线后详情页公示的一致
