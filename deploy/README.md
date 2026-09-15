@@ -25,6 +25,10 @@
 | `renew-cert.sh` | 证书续期(webroot 零停机),crontab 每周一 04:30 |
 | `mp-cert.sh` | 小程序托管域名 `mp.chaojizan.cc` 的多域名证书:发布了托管应用就跑一次,把新 appid 签进去(见 docs/MINIAPP-ROLLOUT.md 2.1) |
 | `backup.sh` / `restore-drill.sh` | 数据库每日备份 / 恢复演练 |
+| `docker-compose.staging.yml` | 预发环境:叠在生产 compose 上,只改预发机才不一样的东西(见 docs/STAGING.md) |
+| `staging-compose.sh` / `staging-init.sh` | 预发机上 compose 的唯一入口 / 一次性准备(密钥、门禁、占位证书、frpc) |
+| `staging-cert.sh` | 预发域名证书:在**生产部署机**上签(80 端口的挑战只有这边答得了),由 `scripts/deploy_staging.sh` 调 |
+| `rehearse-migrations.sh` | 迁移彩排:生产库现导一份进一次性容器,用新代码跑迁移,查完销毁 |
 | `healthcheck-alert.sh` | 探活告警(crontab 每分钟) |
 
 ## 日常操作(部署机)

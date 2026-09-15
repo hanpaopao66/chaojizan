@@ -1,0 +1,67 @@
+# 预发环境(docs/STAGING.md):叠在生产 compose 上用 —— 服务、构建上下文、命令、资源限制全部沿用
+# docker-compose.prod.yml,这里只改「预发机上才不一样的东西」。生产加了服务、改了参数,预发自动跟着变。
+#
+#   cd deploy && docker compose -f docker-compose.prod.yml -f docker-compose.staging.yml --env-file .env.staging up -d --build
+#
+# 由 scripts/deploy_staging.sh 调,别手敲。.env.staging 只在预发机上(deploy_staging.sh init 生成),
+# APP_ENV=dev:验证码直接回显、模拟支付 —— 所以对外必须有 nginx 门禁(scripts/gen_staging_nginx.py)。
+#
+# 预发机是 Apple 芯片(arm64)。下面换了镜像的两处都是因为生产那份在这台机器上用不了,理由写在各自旁边;
+# 版本和生产对齐,换镜像不换版本。
+services:
+  db:
+    # 生产的 postgis/postgis:16-3.4 只有 x86 版,在 arm64 上要靠模拟跑,数据库慢得没法用。
+    # imresamu/postgis 是 docker-postgis 维护者自己发的多架构版,同为 PostgreSQL 16 + PostGIS 3.4
+    image: imresamu/postgis:16-3.4
+
+  migrate:
+    env_file: !override
+      - .env.staging
+
+  api:
+    env_file: !override
+      - .env.staging
+    # 生产挂的 appdist(APK 分发)、见证脚本、微信支付商户密钥,预发都没有:只留上传卷
+    volumes: !override
+      - uploads:/srv/uploads
+
+  sweeper:
+    env_file: !override
+      - .env.staging
+    volumes: !override
+      - uploads:/srv/uploads
+
+  media-worker:
+    env_file: !override
+      - .env.staging
+
+  minio:
+    # 生产是 minio/minio:latest,Docker Hub 上已经没有了(国内镜像源也拉不到)。quay.io 上这个版本标签和生产
+    # `docker image inspect` 是**同一个摘要** sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e。
+    # 写标签不写摘要:预发机的网拉不动,镜像是开发机 docker save 过去的,load 之后按摘要引用会找不到、又去联网拉
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+
+  minio-init:
+    # 同上,和生产 minio/mc:latest 同一个摘要 sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+
+  nginx:
+    # 只开 443:没有 80 —— 预发证书在部署机上签(deploy/staging-cert.sh),这台不答 HTTP 挑战
+    ports: !override
+      - "8443:443"
+    # conf.d 换成生成的预发配置(和生产同一套 location,外加证书和门禁);门禁密码、cookie 值只在预发机上
+    volumes: !override
+      - ./nginx/staging.generated:/etc/nginx/conf.d:ro
+      - ./certs/staging:/etc/nginx/certs/staging:ro
+      - ./staging-gate:/etc/nginx/staging-gate:ro
+      - ../webapp:/srv/webapp:ro
+
+  frpc:
+    # 云服务器上多开一个端口(STAGING_REMOTE_PORT,缺省 8443)转到这台的 nginx:443。
+    # network_mode 仍是 host(虚拟机里的 host),127.0.0.1:8443 就是上面 nginx 发布的端口
+    volumes: !override
+      - ./tunnel/frpc.staging.toml:/etc/frp/frpc.toml:ro
+
+  witness:
+    # 官方见证节点只该有一个(在生产部署机上)。预发不起:要起得显式带 --profile prod-only
+    profiles: ["prod-only"]
