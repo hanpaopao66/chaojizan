@@ -11,7 +11,9 @@
 | 验 `hash` | 你的 AppSecret | 你的后端本来就保管密钥 |
 | 验 `signature` | 平台公钥 `GET /.well-known/superz-webapp-keys.json` | 不想碰任何密钥;一次拉公钥缓存起来 |
 
-算法(和 Telegram 一致,只换了常量):
+算法和 Telegram 同构,不同在三处:常量换成 `SuperZWebAppData`(故意和 Telegram 的 `WebAppData` 分开,签名串不能互相冒用)、
+密钥是你的 AppSecret、hash 的 data_check_string 也不含 `signature`(Telegram 的 hash 只去掉 `hash` 本身)。
+从 Telegram 搬过来的后端改的就是这一处,见[从 Telegram 迁移](telegram.md#最小例子):
 
 ```text
 data_check_string = 除 hash、signature 外的全部字段,按键名字典序排序,

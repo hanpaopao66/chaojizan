@@ -1,8 +1,8 @@
 # 超级赞小程序开发者文档
 
 超级赞小程序就是**普通网页**:HTML、CSS、JavaScript,打成 zip 上传,平台托管、审核、发布;
-用户在超级赞 App 里下拉就能打开。技术路线对标 Telegram Mini Apps —— 如果你写过 TG 的 Mini App,
-这里几乎可以照搬(见[从 Telegram 迁移](telegram.md))。
+用户在超级赞 App 里下拉就能打开。技术路线对标 Telegram Mini Apps —— SDK 同时挂了 `window.Telegram.WebApp`,
+写过 TG 的 Mini App 的,前端改一行 script 地址、后端改验签那一处就能搬过来(见[从 Telegram 迁移](telegram.md))。
 
 ## 为什么是普通 Web 技术
 
@@ -53,7 +53,7 @@
 12. [更新日志与兼容表](changelog.md) —— SDK 和宿主各版本改了什么、哪个版本支持哪个能力
 13. [故障排查](troubleshooting.md) —— 白屏、CSP 拦截、验签失败、时钟偏差、4001 / 4007
 14. [示例导读](examples.md) —— 记事本、2048 源码逐段讲(另有贪吃蛇、方块消除、扫雷、五子棋的源码)
-15. [从 Telegram Mini Apps 迁移](telegram.md) —— API 对照表、不一样的地方
+15. [从 Telegram Mini Apps 迁移](telegram.md) —— 兼容层、要改的三处、API 对照表、不一样的地方
 
 入口:开发者后台 [`/dev/`](/dev/) · 示例源码 [`miniapps/`](https://github.com/hanpaopao66/chaojizan/tree/main/miniapps) ·
 最小模板 [`miniapps/_template/`](https://github.com/hanpaopao66/chaojizan/tree/main/miniapps/_template) ·
