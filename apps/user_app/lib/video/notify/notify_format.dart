@@ -1,13 +1,29 @@
 // 互动消息的数据对象和显示用的纯函数(标题、头像合并、系统通知的动作)。单测锁住。
 import '../models.dart';
 
-/// 四个页签(VIDEO-API 9):回复我的 / @我的 / 收到的赞 / 系统通知
+/// 互动消息的种类(VIDEO-API 9 的四类;DEV-PROMPTS-41 起全站一处:关注、转发、引用也在这)。
+///
+/// 服务端认识哪几类以 `/social/v1/notifications/unread` 返回的键为准([activeNotifyKinds]):
+/// 老服务端不认新种类(拉 `kind=repost` 会 422),客户端只拉两边都认识的那几类。
 const notifyKinds = <(String kind, String label)>[
   ('reply', '回复我的'),
   ('at', '@我的'),
   ('like', '收到的赞'),
+  ('follow', '新增关注'),
+  ('repost', '转发'),
+  ('quote', '引用'),
   ('system', '系统通知'),
 ];
+
+/// 最早的四类:服务端的未读表拿不到时(接口失败)按它们拉,和老版本一样
+const _baseKinds = ['reply', 'at', 'like', 'system'];
+
+/// 这次该拉哪几类:客户端认识、服务端也认识(未读表里有这个键)的。
+List<String> activeNotifyKinds(Map<String, dynamic>? unread) {
+  if (unread == null || unread.isEmpty) return List.of(_baseKinds);
+  final kinds = [for (final (k, _) in notifyKinds) if (unread.containsKey(k)) k];
+  return kinds.isEmpty ? List.of(_baseKinds) : kinds;
+}
 
 /// 互动消息的一条。
 class NotifyItem {
@@ -21,6 +37,9 @@ class NotifyItem {
     this.count = 1,
     this.video,
     this.comment,
+    this.post,
+    this.track,
+    this.release,
     this.data = const {},
     this.read = false,
     this.createdAt,
@@ -39,6 +58,9 @@ class NotifyItem {
       count: vInt(m['count']) > 0 ? vInt(m['count']) : 1,
       video: m['video'] is Map ? vMap(m['video']) : null,
       comment: m['comment'] is Map ? vMap(m['comment']) : null,
+      post: m['post'] is Map ? vMap(m['post']) : null,
+      track: m['track'] is Map ? vMap(m['track']) : null,
+      release: m['release'] is Map ? vMap(m['release']) : null,
       data: vMap(m['data']),
       read: m['read'] == true,
       createdAt: DateTime.tryParse('${m['created_at'] ?? ''}')?.toLocal(),
@@ -69,6 +91,15 @@ class NotifyItem {
 
   /// 跳转用 `{id, root_id, deleted}`
   final Map<String, dynamic>? comment;
+
+  /// 论坛的帖子 `{pid, text}`(回复 / @ / 赞 / 转发 / 引用我的帖子、帖子被下架)
+  final Map<String, dynamic>? post;
+
+  /// 音乐的歌 `{tid, title, cover}`(评论了我的歌、回复 / 赞了我的歌曲评论)
+  final Map<String, dynamic>? track;
+
+  /// 音乐的作品 `{rid, title}`(过审 / 驳回 / 下架)
+  final Map<String, dynamic>? release;
   final Map<String, dynamic> data;
   final bool read;
   final DateTime? createdAt;
@@ -77,6 +108,21 @@ class NotifyItem {
   final DateTime? updatedAt;
 
   String get vid => '${video?['vid'] ?? ''}';
+
+  String get pid => '${post?['pid'] ?? ''}';
+  String get tid => '${track?['tid'] ?? ''}';
+  String get rid => '${release?['rid'] ?? ''}';
+
+  /// 这一条说的是哪一类东西:video / post / track / release;都没有(关注、纯系统通知)是空串
+  String get target => video != null
+      ? 'video'
+      : post != null
+          ? 'post'
+          : track != null
+              ? 'track'
+              : release != null
+                  ? 'release'
+                  : '';
 
   /// 点开要定位的评论:评论还在才给(删了的定位不到,直接打开视频)
   int? get commentId {
@@ -93,19 +139,35 @@ String notifyHeadline(NotifyItem n) {
   final name = n.actor != null && n.actor!.name.isNotEmpty
       ? n.actor!.name
       : (n.actors.isNotEmpty && n.actors.first.name.isNotEmpty ? n.actors.first.name : '有人');
-  final target = n.data['target'] == 'video' ? '视频' : '评论';
+  final target = notifyTargetWord(n);
+  final many = n.count > 1 ? '$name等 ${n.count} 人' : '$name ';
   switch (n.kind) {
     case 'like':
-      return n.count > 1 ? '$name等 ${n.count} 人赞了你的$target' : '$name 赞了你的$target';
+      return '$many赞了你的$target';
     case 'at':
-      return '$name 在评论里 @ 了你';
+      return n.post != null ? '$name 在帖子里 @ 了你' : '$name 在评论里 @ 了你';
     case 'reply':
+      if (n.post != null) return '$name 回复了你的帖子';
+      if (n.track != null) return n.data['target'] == 'track' ? '$name 评论了你的歌' : '$name 回复了你的评论';
       return n.data['target'] == 'video' ? '$name 评论了你的视频' : '$name 回复了你的评论';
+    case 'follow':
+      return '$many关注了你';
+    case 'repost':
+      return '$many转发了你的帖子';
+    case 'quote':
+      return '$name 引用了你的帖子';
     case 'system':
       final t = '${n.data['title'] ?? ''}';
       return t.isNotEmpty ? t : '系统通知';
   }
   return name;
+}
+
+/// 「赞了你的____」里那个词:视频 / 帖子 / 评论(视频评论、歌曲评论都叫评论)
+String notifyTargetWord(NotifyItem n) {
+  if (n.data['target'] == 'video') return '视频';
+  if (n.post != null && n.comment == null) return '帖子';
+  return '评论';
 }
 
 /// 头像怎么排:最近那个人在最前,其余按 actors 的顺序、按 id 去重,最多 [max] 个。
@@ -118,7 +180,8 @@ String notifyHeadline(NotifyItem n) {
     if (shown.length >= max) break;
     if (seen.add(p.id)) shown.add(p);
   }
-  final total = n.kind == 'like' && n.count > shown.length ? n.count : shown.length;
+  final merged = const {'like', 'follow', 'repost'}.contains(n.kind);
+  final total = merged && n.count > shown.length ? n.count : shown.length;
   return (shown: shown, more: total - shown.length);
 }
 
@@ -168,11 +231,15 @@ int _newerFirst(NotifyItem a, NotifyItem b) {
 /// 翻到下一页时会有条目「插」回已经显示过的位置。所以只显示到**水位**为止:
 /// 还有下一页的那几类里,「已拉到的最旧那条」最新的那个时刻;再往下等拉了下一页才确定。
 class NotifyMerge {
+  /// [kinds]:这次在拉的那几类(见 [activeNotifyKinds]);不传就是客户端认识的全部
+  NotifyMerge({List<String>? kinds}) : kinds = kinds ?? [for (final (k, _) in notifyKinds) k];
+
+  final List<String> kinds;
   final Map<String, List<NotifyItem>> _items = {};
   final Map<String, String?> _cursor = {};
   final Map<String, bool> _more = {};
 
-  bool get loaded => _more.length == notifyKinds.length;
+  bool get loaded => kinds.every(_more.containsKey);
 
   /// 放进某一类的一页,和手里已有的合并;同一个 id 出现两次(新的赞把那条刷到了最前)时留新拉到的那份。
   ///
@@ -194,7 +261,7 @@ class NotifyMerge {
 
   DateTime? get _watermark {
     DateTime? w;
-    for (final (k, _) in notifyKinds) {
+    for (final k in kinds) {
       if (_more[k] != true) continue;
       final list = _items[k] ?? const <NotifyItem>[];
       if (list.isEmpty) continue;
@@ -216,7 +283,7 @@ class NotifyMerge {
   String? nextKind() {
     String? pick;
     DateTime? best;
-    for (final (k, _) in notifyKinds) {
+    for (final k in kinds) {
       if (_more[k] != true) continue;
       final list = _items[k] ?? const <NotifyItem>[];
       final t = list.isEmpty ? null : notifyTime(list.last);

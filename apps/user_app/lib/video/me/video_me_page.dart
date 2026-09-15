@@ -125,7 +125,7 @@ class _VideoMePageState extends State<VideoMePage> {
               final n = videoNotifyBadge();
               return SzEntryTile(
                 icon: Icons.smart_toy_outlined,
-                title: '视频互动',
+                title: '互动消息',
                 value: n > 0 ? '$n 条未读' : null,
                 valueTone: n > 0 ? sz.hold : null,
                 hint: '回复、@、赞和投稿审核结果',

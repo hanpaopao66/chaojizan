@@ -101,7 +101,7 @@ void main() {
     expect(find.text('超级赞'), findsOneWidget);
     expect(find.byType(VerifiedMark), findsOneWidget, reason: '平台服务号带认证标');
     expect(find.text('「消息」「视频」两个新入口上线了'), findsOneWidget, reason: '服务号的预览是最新一条公告');
-    expect(find.text('视频互动'), findsOneWidget);
+    expect(find.text('互动消息'), findsOneWidget);
     expect(find.byType(BotTag), findsOneWidget);
     expect(find.textContaining('配送中 · '), findsOneWidget);
     expect(find.textContaining('赵师傅: 到楼下了'), findsOneWidget);
@@ -109,7 +109,7 @@ void main() {
     double y(String t) => tester.getTopLeft(find.text(t)).dy;
     expect(y('超级赞'), lessThan(y('订单 #aaa001 · 张记面馆')));
     expect(y('订单 #aaa001 · 张记面馆'), lessThan(y('订单 #bbb002 · 砂锅粥')), reason: '在送的置顶,送完的往下排');
-    expect(y('订单 #bbb002 · 砂锅粥'), lessThan(y('视频互动')), reason: '视频互动没有提醒时排在最后');
+    expect(y('订单 #bbb002 · 砂锅粥'), lessThan(y('互动消息')), reason: '视频互动没有提醒时排在最后');
 
     // 服务号 1 条新公告、订单群 2 条未读:底栏各算一行
     expect(find.descendant(of: find.byType(UnreadBadge), matching: find.text('1')), findsOneWidget);

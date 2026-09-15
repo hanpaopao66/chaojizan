@@ -154,6 +154,31 @@ void main() {
       expect(notifyHeadline(notify({'kind': 'system', 'actor': null, 'actors': [], 'data': {}})), '系统通知');
       expect(notifyHeadline(notify({'kind': 'reply', 'actor': null, 'actors': []})), '有人 回复了你的评论');
     });
+
+    test('动态和歌的互动也在这一处(DEV-PROMPTS-41 §5.8)', () {
+      final post = {'pid': 'fp1234567890', 'text': '今天的面很好吃'};
+      final track = {'tid': 'mt1234567890', 'title': '晚风', 'cover': ''};
+      expect(notifyHeadline(notify({'video': null, 'post': post})), '小王 回复了你的帖子');
+      expect(notifyHeadline(notify({'kind': 'at', 'video': null, 'post': post})), '小王 在帖子里 @ 了你');
+      // 赞的是帖子本身:没有评论对象
+      expect(notifyHeadline(notify({'kind': 'like', 'count': 3, 'video': null, 'comment': null, 'post': post})),
+          '小王等 3 人赞了你的帖子');
+      expect(notifyHeadline(notify({'kind': 'repost', 'count': 2, 'video': null, 'comment': null, 'post': post})),
+          '小王等 2 人转发了你的帖子');
+      expect(notifyHeadline(notify({'kind': 'quote', 'video': null, 'comment': null, 'post': post})), '小王 引用了你的帖子');
+      expect(notifyHeadline(notify({'kind': 'follow', 'count': 1, 'video': null, 'comment': null})), '小王 关注了你');
+      expect(notifyHeadline(notify({'kind': 'follow', 'count': 5, 'video': null, 'comment': null})), '小王等 5 人关注了你');
+      expect(notifyHeadline(notify({'video': null, 'track': track, 'data': {'target': 'track'}})), '小王 评论了你的歌');
+      expect(notifyHeadline(notify({'video': null, 'track': track, 'data': {'target': 'comment'}})), '小王 回复了你的评论');
+    });
+
+    test('这一条说的是哪一类东西', () {
+      expect(notify({}).target, 'video', reason: 'notify() 造的默认带视频');
+      expect(notify({'video': null, 'post': {'pid': 'fp1'}}).target, 'post');
+      expect(notify({'video': null, 'track': {'tid': 'mt1'}}).target, 'track');
+      expect(notify({'video': null, 'release': {'rid': 'mr1'}}).target, 'release');
+      expect(notify({'video': null, 'kind': 'follow'}).target, '');
+    });
   });
 
   group('头像合并', () {
@@ -214,8 +239,18 @@ void main() {
       expect(unreadBadge(100), '99+');
     });
 
-    test('四个页签的顺序', () {
-      expect([for (final k in notifyKinds) k.$1], ['reply', 'at', 'like', 'system']);
+    test('种类的顺序:互动消息是全站一处,关注、转发、引用也在里面', () {
+      expect([for (final k in notifyKinds) k.$1],
+          ['reply', 'at', 'like', 'follow', 'repost', 'quote', 'system']);
+    });
+
+    test('只拉服务端认识的那几类:老服务端没有 follow / repost / quote 就不拉', () {
+      expect(activeNotifyKinds({'reply': 0, 'at': 0, 'like': 0, 'system': 0, 'total': 0}),
+          ['reply', 'at', 'like', 'system']);
+      expect(activeNotifyKinds({'reply': 0, 'at': 0, 'like': 0, 'follow': 1, 'repost': 0, 'quote': 0, 'system': 0}),
+          ['reply', 'at', 'like', 'follow', 'repost', 'quote', 'system']);
+      expect(activeNotifyKinds(null), ['reply', 'at', 'like', 'system'], reason: '拿不到未读表:按最早的四类');
+      expect(activeNotifyKinds(const {}), ['reply', 'at', 'like', 'system']);
     });
   });
 

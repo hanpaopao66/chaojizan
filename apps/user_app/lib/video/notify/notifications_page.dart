@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../../chat/links.dart' show openAppLink;
+import '../../chat/pages/user_profile_page.dart' show openUserProfile;
 import '../../chat/store.dart';
 import '../../chat/ui/conv_row.dart';
 import '../../chat/ui/format.dart' show dayLabel, hm, sameDay;
@@ -16,14 +18,14 @@ import 'notify_prefs.dart';
 
 export 'notify_format.dart' show notifyKinds;
 
-/// 互动消息的总未读数(服务端的 total,四类加起来)。
+/// 互动消息的总未读数(服务端的 total,各类加起来)。
 final ValueNotifier<int> videoNotifyUnread = ValueNotifier<int>(0);
 
-/// 每一类各有几条没读(`reply / at / like / system`)。「提醒设置」只数勾上的几类,所以要分开记;
+/// 每一类各有几条没读(`reply / at / like / follow / repost / quote / system`)。「提醒设置」只数勾上的几类,所以要分开记;
 /// 每次都换一个新的 Map,听它的地方(会话列表、底栏)哪一类变了都能收到。
 final ValueNotifier<Map<String, int>> videoNotifyUnreadKinds = ValueNotifier<Map<String, int>>(const {});
 
-/// 「视频互动」那一行此刻该挂几:按「提醒设置」过滤过的未读数。
+/// 「互动消息」那一行此刻该挂几:按「提醒设置」过滤过的未读数。
 int videoNotifyBadge() => notifyBadgeCount(videoNotifyUnreadKinds.value, VideoNotifyPrefs.instance.kinds);
 
 void _takeUnreadMap(Object? u) {
@@ -81,10 +83,12 @@ void stopVideoNotifyWatcher() {
   _takeUnreadMap(const {'total': 0});
 }
 
-/// 「视频互动」(#367,设计稿 C):**一个机器人会话**,不是一个带四个页签的页面。
+/// 「互动消息」(#367 设计稿 C;DEV-PROMPTS-41 起视频、动态、音乐合在这一处):**一个机器人会话**,
+/// 不是一个带页签的页面。
 ///
-/// 一条互动 = 一条消息,按时间往下排,最新的在最底下;赞是服务端合并好的一条(「小王等 8 人赞了你的评论」),
-/// 不一条条炸;回复的气泡里用引用块放**我的原话**(隔两天谁记得在回复谁),下面挂「回复 / 看视频」两个按钮。
+/// 一条互动 = 一条消息,按时间往下排,最新的在最底下;赞、关注、转发是服务端合并好的一条
+/// (「小王等 8 人赞了你的评论」「张三等 3 人关注了你」),不一条条炸;回复的气泡里用引用块放**我的原话**
+/// (隔两天谁记得在回复谁),下面挂「回复 / 看视频 / 看动态 / 看评论」这些按钮。
 /// 打开时没读的那几条上面画「以下为新消息」,然后整个会话标成已读 —— 没有「全部已读」按钮,也没有页签。
 /// 机器人不收消息,所以没有输入框,底下只有「静音」和「提醒设置」(存在服务端、各设备同步,见 [VideoNotifyPrefs])。
 class VideoNotificationsPage extends StatefulWidget {
@@ -95,7 +99,7 @@ class VideoNotificationsPage extends StatefulWidget {
 }
 
 class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
-  final _merge = NotifyMerge();
+  NotifyMerge _merge = NotifyMerge();
   bool _loadingOlder = false;
   bool _firstDone = false;
   Object? _error;
@@ -139,15 +143,26 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
   Future<void> _loadFirst() async {
     setState(() => _error = null);
     try {
-      final pages = await Future.wait([for (final (k, _) in notifyKinds) videoApi.notifications(k)]);
-      for (var i = 0; i < notifyKinds.length; i++) {
+      // 先问服务端认识哪几类(未读表的键):老服务端不认 follow / repost / quote,拉它们会 422。
+      // 拿不到未读表就按最早的四类拉,和老版本一样
+      Map<String, dynamic>? unread;
+      try {
+        unread = await videoApi.notificationsUnread();
+        _takeUnreadMap(unread);
+      } catch (_) {
+        unread = null;
+      }
+      final kinds = activeNotifyKinds(unread);
+      _merge = NotifyMerge(kinds: kinds);
+      final pages = await Future.wait([for (final k in kinds) videoApi.notifications(k)]);
+      for (var i = 0; i < kinds.length; i++) {
         final m = pages[i];
-        _merge.put(notifyKinds[i].$1, [for (final x in vList(m['items'])) NotifyItem.fromJson(x)],
+        _merge.put(kinds[i], [for (final x in vList(m['items'])) NotifyItem.fromJson(x)],
             next: m['next_cursor'] as String?);
         _takeUnreadMap(m['unread']);
       }
-      final unread = _merge.visible().where((n) => !n.read);
-      _dividerAbove = unread.isEmpty ? null : unread.last.id;
+      final stillUnread = _merge.visible().where((n) => !n.read);
+      _dividerAbove = stillUnread.isEmpty ? null : stillUnread.last.id;
       _firstDone = true;
       _error = null;
     } catch (e) {
@@ -160,6 +175,7 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
 
   /// 开着的时候来了新的:只重拉那一类的第一页,合进来,再标已读
   Future<void> _refresh(String kind) async {
+    if (!_merge.kinds.contains(kind)) return;   // 这次没在拉的类(服务端比客户端新)
     try {
       final m = await videoApi.notifications(kind);
       if (!mounted) return;
@@ -213,6 +229,47 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
     openVideo(context, n.vid, commentId: cid, rootCommentId: cid != null && root > 0 && root != cid ? root : null);
   }
 
+  /// 点开这一条说的东西。视频直接走视频那条路;论坛的帖子、音乐的歌和作品走**站内链接**
+  /// (chat/links.dart 的 openAppLink)—— 互动消息不直接依赖论坛、音乐两个模块,
+  /// 少一层耦合,链接那边认得出就跳得过去。
+  Future<void> _openTarget(NotifyItem n, {bool atComment = false}) async {
+    switch (n.target) {
+      case 'video':
+        _openVideo(n, atComment: atComment);
+      case 'post':
+        await _openLink('/forum/p/${n.pid}');
+      case 'track':
+        final cid = n.commentId;
+        await _openLink('/music/t/${n.tid}${cid != null ? '?c=$cid' : ''}');
+      case 'release':
+        await _openLink('/music/r/${n.rid}');
+      default:
+        final who = n.actor;
+        if (who != null) await openUserProfile(context, who.id);
+    }
+  }
+
+  Future<void> _openLink(String path) async {
+    final ok = await openAppLink(context, Uri.parse('https://chaojizan.cc$path'));
+    if (!ok && mounted) vToast(context, '打不开,升级到最新版再试');
+  }
+
+  /// 这一条下面挂哪几个按钮
+  List<(String, VoidCallback)> _buttons(NotifyItem n) => switch (n.target) {
+        'video' => n.video == null
+            ? const []
+            : [
+                if (n.kind == 'reply' || n.kind == 'at') ('回复', () => _openVideo(n, atComment: true)),
+                ('看视频', () => _openVideo(n)),
+              ],
+        'post' => [('看动态', () => unawaited(_openTarget(n)))],
+        'track' => [('看评论', () => unawaited(_openTarget(n, atComment: true)))],
+        'release' => [('看作品', () => unawaited(_openTarget(n)))],
+        _ => n.kind == 'follow' && n.actor != null
+            ? [('看看 TA', () => unawaited(openUserProfile(context, n.actor!.id)))]
+            : const [],
+      };
+
   Future<void> _toggleMute() async {
     final next = !_prefs.muted;
     try {
@@ -240,7 +297,7 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(kPagePad, 0, kPagePad, 4),
-                    child: Text('哪几类算进「视频互动」的未读', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
+                    child: Text('哪几类算进「互动消息」的未读', style: TextStyle(fontSize: kFontNote, color: sz.inkMuted)),
                   ),
                   for (final (kind, label) in notifyKinds)
                     SwitchListTile(
@@ -250,10 +307,13 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
                       }),
                       title: Text(label),
                       subtitle: Text(switch (kind) {
-                        'reply' => '评论了你的视频、回复了你的评论',
-                        'at' => '在评论里 @ 了你',
-                        'like' => '视频和评论收到的赞,同一条合并成一条',
-                        _ => '投稿审核结果、处罚和申诉结果',
+                        'reply' => '评论、回复了你的视频、动态或歌',
+                        'at' => '在评论或动态里 @ 了你',
+                        'like' => '视频、动态、评论收到的赞,同一条合并成一条',
+                        'follow' => '有人关注了你,同一天的合并成一条',
+                        'repost' => '转发了你的动态',
+                        'quote' => '引用了你的动态',
+                        _ => '审核结果、下架、处罚和申诉结果',
                       }),
                     ),
                   Padding(
@@ -275,19 +335,19 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
       titleSpacing: 0,
       title: ConvHeaderTitle(
         avatar: const IconAvatar(icon: Icons.smart_toy_outlined, size: 34),
-        title: '视频互动',
+        title: '互动消息',
         suffix: [
           const BotTag(),
           if (_prefs.muted) Icon(Icons.notifications_off, size: 14, color: sz.inkFaint),
         ],
-        // 服务端只推这四类:回复、@、赞,再加上自己投稿的审核结果和处罚通知
-        subtitle: '回复、@、赞和投稿审核结果',
+        // 视频、动态、音乐的互动都在这一处(DEV-PROMPTS-41 §5.8)
+        subtitle: '回复、@、赞、关注、转发和审核结果',
       ),
     );
     if (!rootApi.isLoggedIn) {
       return SzPageScaffold(
         appBar: appBar,
-        body: VideoLoginGate(text: '登录后能看到谁回复了你、赞了你', onLoggedIn: () => unawaited(_loadFirst())),
+        body: VideoLoginGate(text: '登录后能看到谁回复了你、赞了你、关注了你', onLoggedIn: () => unawaited(_loadFirst())),
       );
     }
     return SzPageScaffold(
@@ -304,7 +364,7 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
     }
     final vis = _merge.visible();
     if (vis.isEmpty) {
-      return const SzEmpty(text: '还没有互动\n有人回复、@ 你或者赞了你,会在这里告诉你');
+      return const SzEmpty(text: '还没有互动\n有人回复、@ 你、赞你或者关注你,会在这里告诉你');
     }
     return LayoutBuilder(builder: (context, box) {
       final cardW = math.min(300.0, box.maxWidth - 28);
@@ -350,7 +410,7 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
     final sz = Theme.of(context).sz;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      child: Text('这个会话只收视频的回复、@、赞和投稿审核结果,不会往这儿塞推荐和活动。平台公告在「超级赞」里。',
+      child: Text('这个会话只收别人对你的互动 —— 视频、动态、音乐的回复、@、赞、关注、转发,还有审核和处罚结果,不会往这儿塞推荐和活动。平台公告在「超级赞」里。',
           style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted, height: 1.7)),
     );
   }
@@ -390,9 +450,10 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
   // ---------------- 一条互动 ----------------
 
   Widget _card(NotifyItem n) => switch (n.kind) {
-        'like' => _likeCard(n),
+        // 赞、关注、转发都是「一堆人对同一个东西做了同一件事」,服务端合并成一条,画法也一样
+        'like' || 'follow' || 'repost' => _mergedCard(n),
         'system' => _systemCard(n),
-        _ => _replyCard(n),
+        _ => _replyCard(n),   // reply / at / quote
       };
 
   /// 机器人发来的一条:发丝描边的卡片,左下角是小尾巴;[buttons] 是挂在下面的 inline 按钮。
@@ -484,6 +545,65 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
     );
   }
 
+  /// 这一条说的那个东西:视频、动态、歌、作品各一行。没有目标(比如关注)就不画
+  Widget? _targetLine(NotifyItem n) => switch (n.target) {
+        'video' => _videoLine(n),
+        'post' => _iconLine(Icons.forum_outlined, '${n.post?['text'] ?? ''}', empty: '这条动态已经不在了'),
+        'track' => _coverLine('${n.track?['cover'] ?? ''}', '${n.track?['title'] ?? ''}',
+            icon: Icons.music_note_outlined, empty: '这首歌已经不在了'),
+        'release' => _iconLine(Icons.album_outlined, '${n.release?['title'] ?? ''}', empty: '这个作品已经不在了'),
+        _ => null,
+      };
+
+  /// 一个小图标 + 一行字(动态、作品)
+  Widget _iconLine(IconData icon, String text, {required String empty}) {
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Padding(padding: const EdgeInsets.only(top: 2), child: Icon(icon, size: 15, color: sz.inkFaint)),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Text(text.trim().isEmpty ? empty : text,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: kFontNote, color: sz.inkMuted, height: 1.4)),
+        ),
+      ]),
+    );
+  }
+
+  /// 方封面 + 一行字(歌)
+  Widget _coverLine(String cover, String title, {required IconData icon, required String empty}) {
+    final sz = Theme.of(context).sz;
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: 34,
+            height: 34,
+            child: cover.isEmpty
+                ? ColoredBox(color: sz.line, child: Icon(icon, size: 16, color: sz.inkFaint))
+                : Image(
+                    image: szNetImage(videoResolve(cover)),
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => ColoredBox(color: sz.line),
+                  ),
+          ),
+        ),
+        const SizedBox(width: 9),
+        Expanded(
+          child: Text(title.trim().isEmpty ? empty : title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: kFontNote, color: sz.inkMuted, height: 1.4)),
+        ),
+      ]),
+    );
+  }
+
   /// 视频那一小条:缩略图 + 标题。视频删了就说一声
   Widget _videoLine(NotifyItem n) {
     final sz = Theme.of(context).sz;
@@ -517,23 +637,29 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
     );
   }
 
+  /// 我的原话:回复、赞、转发时引在上面 —— 隔两天谁记得对方在回复哪一条
+  String _mine(NotifyItem n) {
+    final replied = '${n.data['replied_text'] ?? ''}';
+    final videoTitle = '${n.video?['title'] ?? ''}';
+    final trackTitle = '${n.track?['title'] ?? ''}';
+    final postText = '${n.post?['text'] ?? ''}';
+    if (replied.isNotEmpty) return '你:$replied';          // 我的那条评论
+    if (n.target == 'video' && n.data['target'] == 'video') return videoTitle.isEmpty ? '' : '你的视频《$videoTitle》';
+    if (n.target == 'track' && n.data['target'] == 'track') return trackTitle.isEmpty ? '' : '你的歌《$trackTitle》';
+    if (n.target == 'post') return postText.trim().isEmpty ? '' : '你的动态:$postText';
+    if (n.text.isNotEmpty && n.kind == 'like') return '你:${n.text}';
+    return '';
+  }
+
+  /// 回复我的、@ 我的、引用我的:对方说了什么是主体,我的原话引在上面
   Widget _replyCard(NotifyItem n) {
     final sz = Theme.of(context).sz;
-    final replied = '${n.data['replied_text'] ?? ''}';
-    final title = '${n.video?['title'] ?? ''}';
-    // 回复我的评论:引我的原话;评论了我的视频:引视频名;@ 我的没有「我的原话」,只挂视频那一条
-    final quote = n.kind == 'reply'
-        ? (n.data['target'] == 'video' ? (title.isEmpty ? '' : '你的视频《$title》') : (replied.isEmpty ? '' : '你:$replied'))
-        : '';
+    final quote = n.kind == 'at' ? '' : _mine(n);
     final deleted = n.text == '该评论已删除';
+    final line = _targetLine(n);
     return _bubble(
-      onTap: () => _openVideo(n, atComment: true),
-      buttons: n.video == null
-          ? const []
-          : [
-              ('回复', () => _openVideo(n, atComment: true)),
-              ('看视频', () => _openVideo(n)),
-            ],
+      onTap: () => unawaited(_openTarget(n, atComment: true)),
+      buttons: _buttons(n),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _headline(n),
         if (quote.isNotEmpty) _quote(quote),
@@ -545,21 +671,26 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: kFontBodyLg, height: 1.5, color: deleted ? sz.inkMuted : sz.ink)),
           ),
-        if (n.kind == 'at' || n.video == null) _videoLine(n),
+        if (line != null) line,
       ]),
     );
   }
 
-  Widget _likeCard(NotifyItem n) {
+  /// 赞、关注、转发:服务端把一堆人合成一条,这里是几张脸 + 一句话 + 我的原话
+  Widget _mergedCard(NotifyItem n) {
     final sz = Theme.of(context).sz;
-    final target = n.data['target'] == 'video' ? '视频' : '评论';
     final a = notifyAvatars(n);
     final name = a.shown.isEmpty ? '有人' : a.shown.first.name;
-    final title = '${n.video?['title'] ?? ''}';
-    final quote = target == '评论' ? (n.text.isEmpty ? '' : '你:${n.text}') : (title.isEmpty ? '' : '你的视频《$title》');
+    final suffix = switch (n.kind) {
+      'follow' => '关注了你',
+      'repost' => '转发了你的动态',
+      _ => '赞了你的${notifyTargetWord(n)}',
+    };
+    final quote = n.kind == 'follow' ? '' : _mine(n);
     return _bubble(
       tail: false,
-      onTap: () => _openVideo(n, atComment: target == '评论'),
+      onTap: () => unawaited(_openTarget(n, atComment: notifyTargetWord(n) == '评论')),
+      buttons: _buttons(n),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           if (a.shown.isNotEmpty) Padding(padding: const EdgeInsets.only(right: 8), child: _faces(a.shown)),
@@ -569,9 +700,9 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
               if (n.count > 1) ...[
                 const TextSpan(text: ' 等 '),
                 TextSpan(text: '${n.count}', style: szTabular(fontWeight: FontWeight.w600, color: sz.ink)),
-                TextSpan(text: ' 人赞了你的$target'),
+                TextSpan(text: ' 人$suffix'),
               ] else
-                TextSpan(text: ' 赞了你的$target'),
+                TextSpan(text: ' $suffix'),
             ]),
           ),
         ]),
@@ -614,9 +745,10 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
     final code = '${n.data['reason_code'] ?? ''}';
     final coins = vInt(n.data['coins']);
     final color = bad ? sz.danger : (label.isEmpty ? sz.clay : sz.earn);
+    final line = _targetLine(n);
     return _bubble(
-      onTap: n.video == null ? null : () => _openVideo(n),
-      buttons: n.video == null ? const [] : [('看视频', () => _openVideo(n))],
+      onTap: n.target.isEmpty ? null : () => unawaited(_openTarget(n)),
+      buttons: _buttons(n),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _headline(n, spans: [TextSpan(text: notifyHeadline(n), style: const TextStyle(fontWeight: FontWeight.w600))]),
         if (label.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: VTag(label, color: color)),
@@ -639,10 +771,13 @@ class _VideoNotificationsPageState extends State<VideoNotificationsPage> {
         if (bad && action != 'failed' && action != 'appeal_upheld')
           Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Text('觉得判错了可以在「创作中心」里申诉,会由另一名审核员复核',
+            child: Text(
+                n.target == 'release'
+                    ? '觉得判错了可以在「音乐人中心」里申诉,会由另一名审核员复核'
+                    : '觉得判错了可以在「创作中心」里申诉,会由另一名审核员复核',
                 style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted, height: 1.5)),
           ),
-        if (n.video != null) _videoLine(n),
+        if (line != null) line,
       ]),
     );
   }

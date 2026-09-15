@@ -30,14 +30,14 @@ import 'ui/format.dart';
 /// 底部「消息」tab 的角标:有未读的会话数。**免打扰的会话不计** ——
 /// 静音的群不该在底栏上一直喊你(Telegram 也是这么算的)。
 /// 会话列表每次拉到数据、每收到一个事件都会更新它。
-/// 平台服务号、订单群、视频互动那几行另算,见 [chatExtraBadge]
+/// 平台服务号、订单群、互动消息那几行另算,见 [chatExtraBadge]
 final ValueNotifier<int> chatUnreadBadge = ValueNotifier<int>(0);
 
 /// 「消息」tab(DEV-PROMPTS-40 #348,设计稿 A)。
 ///
 /// **万物皆会话**:原来列表顶上的三条固定入口(通知 / 订单消息 / 互动消息)取消了,
 /// 它们和聊天一样是会话行 —— 平台通知是带认证标的服务号「超级赞」,每一单是一个订单群
-/// (你、商家、骑手),视频的回复 / @ / 赞是「视频互动」机器人。
+/// (你、商家、骑手),视频、动态、音乐的回复 / @ / 赞 / 关注是「互动消息」机器人。
 /// 排法照 Telegram:置顶的在前(服务号、还在送的订单群、自己置顶的会话),其余按最后一条消息的时间;
 /// 有归档的会话时最上面多一行「归档」。
 class ChatTab extends StatefulWidget {
@@ -64,7 +64,7 @@ class _ChatTabState extends State<ChatTab> {
     extras.addListener(_on);
     videoNotifyUnreadKinds.addListener(_on);
     VideoNotifyPrefs.instance.addListener(_on);
-    // 首页已经把服务号、订单群拉过一次(底栏角标要用);这里再刷一遍,顺带拉视频互动的最近一条
+    // 首页已经把服务号、订单群拉过一次(底栏角标要用);这里再刷一遍,顺带拉互动消息的最近一条
     unawaited(extras.start(widget.api).then((_) => extras.refreshBot()));
   }
 
@@ -404,7 +404,7 @@ class _BotRow extends StatelessWidget {
     }
     return ConvRow(
       avatar: const IconAvatar(icon: Icons.smart_toy_outlined),
-      title: '视频互动',
+      title: '互动消息',
       titleSuffix: [
         const BotTag(),
         if (muted) Icon(Icons.notifications_off, size: 13, color: sz.inkFaint),

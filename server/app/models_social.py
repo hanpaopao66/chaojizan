@@ -45,6 +45,10 @@ NOTIFY_DEFAULTS: dict[str, object] = {
     "interactions_reply": True,
     "interactions_at": True,
     "interactions_like": True,
+    # DEV-PROMPTS-41:互动消息合成全站一处,关注、转发、引用也在这几类里(NOTIFY_KINDS 同一张表)
+    "interactions_follow": True,
+    "interactions_repost": True,
+    "interactions_quote": True,
     "interactions_system": True,
 }
 

@@ -76,7 +76,8 @@ def main():
     # ---- 视频互动的「静音」「提醒设置」存在服务端(设计稿 C):换手机、网页版是同一份 ----
     from tests.chat_util import WS, uev
     n = a.get("/social/v1/me")["notify"]
-    kinds = ("reply", "at", "like", "system")
+    # DEV-PROMPTS-41 起互动消息是全站一处:关注、转发、引用也各有一个开关
+    kinds = ("reply", "at", "like", "follow", "repost", "quote", "system")
     assert n["interactions"] is True and all(n[f"interactions_{k}"] is True for k in kinds), n
     w = WS(a.token)
     w.wait_for(lambda f: f.get("t") == "ready")
