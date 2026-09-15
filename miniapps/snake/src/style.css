@@ -1,0 +1,55 @@
+/* 贪吃蛇:棋盘是 canvas(320 格每一步都在变,用不着 DOM),底下一个十字方向键 */
+.snake { --key: clamp(2.75rem, 7.2vh, 3.6rem); }
+
+/* 棋盘区占满剩下的高度;main.ts 按它的实际大小算格子(整数像素,线条不糊) */
+.stage {
+  flex: 1; min-height: 0; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; /* 在棋盘上滑动只转向,不滚页面、不缩放 */
+}
+.frame { position: relative; }
+.stage canvas { display: block; border-radius: .6rem; box-shadow: 0 0 0 1px var(--line); outline: none; }
+.stage canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+/* 提示放在蛇头不在的那半边(main.ts 切 .low),别挡住蛇 */
+.veil {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; padding: 22% 0;
+  display: flex; align-items: flex-start; justify-content: center; pointer-events: none;
+}
+.veil.low { align-items: flex-end; }
+.veil[hidden] { display: none; }
+.veil p {
+  margin: 0 1rem; padding: .7rem 1.1rem; border-radius: .8rem; text-align: center; font-weight: 600;
+  background: var(--card); border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(20, 20, 19, .12);
+  animation: fade 220ms var(--std) both;
+}
+.veil small { display: block; font-weight: 400; color: var(--muted); font-size: .8125rem; margin-top: .15rem; }
+
+.controls { flex: none; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: .75rem; }
+.side {
+  justify-self: center; min-width: 3.5rem; min-height: 2.75rem; padding: .4rem .5rem; border-radius: .7rem;
+  border: 1px solid var(--line); background: var(--card); font-weight: 600; font-size: .875rem; white-space: nowrap;
+}
+.pad {
+  display: grid; gap: .35rem;
+  grid-template-columns: repeat(3, var(--key)); grid-template-rows: repeat(3, var(--key));
+}
+.key {
+  display: flex; align-items: center; justify-content: center; border-radius: .9rem;
+  background: var(--card); border: 1px solid var(--line); touch-action: none;
+  transition: transform 120ms var(--std), background-color 120ms var(--std);
+}
+.key.up { grid-column: 2; grid-row: 1; }
+.key.left { grid-column: 1; grid-row: 2; }
+.key.mid { grid-column: 2; grid-row: 2; font-size: .8125rem; font-weight: 600; color: var(--muted); }
+.key.right { grid-column: 3; grid-row: 2; }
+.key.down { grid-column: 2; grid-row: 3; }
+/* 箭头用边框画(不用 ▲ 这类字符:有的安卓把它渲染成彩色表情) */
+.key[data-dir]::before {
+  content: ''; width: 28%; height: 28%;
+  border-left: 3px solid var(--ink); border-top: 3px solid var(--ink); border-radius: 2px;
+}
+.key.up::before { transform: translateY(20%) rotate(45deg); }
+.key.down::before { transform: translateY(-20%) rotate(225deg); }
+.key.left::before { transform: translateX(20%) rotate(-45deg); }
+.key.right::before { transform: translateX(-20%) rotate(135deg); }
+.key.hit { transform: scale(.94); background: var(--line); }

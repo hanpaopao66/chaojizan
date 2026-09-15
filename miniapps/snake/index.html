@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>贪吃蛇</title>
+</head>
+<body>
+  <main id="game" class="game snake">
+    <header class="head">
+      <h1>贪吃蛇</h1>
+      <div class="scores">
+        <div class="score"><span>分数</span><b id="score">0</b></div>
+        <div class="score"><span>最好</span><b id="best">0</b></div>
+      </div>
+    </header>
+    <div id="stage" class="stage">
+      <div class="frame">
+        <canvas id="board" role="img" aria-label="贪吃蛇棋盘" tabindex="0"></canvas>
+        <div id="veil" class="veil" hidden><p id="veil-text"></p></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="new" class="side" type="button">新游戏</button>
+      <div class="pad" role="group" aria-label="方向">
+        <button class="key up" type="button" data-dir="up" aria-label="上"></button>
+        <button class="key left" type="button" data-dir="left" aria-label="左"></button>
+        <button id="pause" class="key mid" type="button">暂停</button>
+        <button class="key right" type="button" data-dir="right" aria-label="右"></button>
+        <button class="key down" type="button" data-dir="down" aria-label="下"></button>
+      </div>
+      <button id="about-btn" class="side" type="button">关于</button>
+    </div>
+    <p id="live" class="sr" aria-live="polite"></p>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

@@ -11,7 +11,8 @@ const out = join(root, 'node_modules/.cache/sz-tests')
 rmSync(out, { recursive: true, force: true })
 mkdirSync(out, { recursive: true })
 const files = []
-for (const app of ['notepad', '2048']) {
+// shared 是小游戏共用的存档和随机数
+for (const app of ['shared', 'notepad', '2048', 'snake']) {
   const dir = join(root, app, 'test')
   for (const f of readdirSync(dir).filter((x) => x.endsWith('.test.ts'))) {
     const target = join(out, `${app}-${f.replace(/\.ts$/, '.mjs')}`)

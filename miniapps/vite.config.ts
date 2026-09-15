@@ -1,4 +1,4 @@
-// 两个官方小程序共用一份构建配置:vite build --mode notepad / --mode 2048
+// 官方小程序共用一份构建配置:vite build --mode <名字>(notepad / 2048 / snake)
 // 产物在 <app>/dist/pkg,再由 scripts/build_miniapp.sh 打成可复现的 zip。
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
@@ -6,9 +6,12 @@ import { defineConfig } from 'vite'
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 
+/** 小程序 → 开发服务器端口 */
+const APPS: Record<string, number> = { notepad: 5190, '2048': 5191, snake: 5192 }
+
 export default defineConfig(({ mode }) => {
-  // 命令行的 --mode 2048 会被解析成数字,先转字符串再比
-  const app = String(mode) === '2048' ? '2048' : 'notepad'
+  // 命令行的 --mode 2048 会被解析成数字,先转字符串再比;不认识的名字按老规矩当 notepad
+  const app = Object.prototype.hasOwnProperty.call(APPS, String(mode)) ? String(mode) : 'notepad'
   return {
     root: resolve(here, app),
     // 托管地址是 /v/<版本号>/…,资源一律用相对路径
@@ -25,8 +28,8 @@ export default defineConfig(({ mode }) => {
       sourcemap: false,
     },
     server: {
-      port: app === '2048' ? 5191 : 5190,
-      // SDK 源码在 packages/miniapp-sdk,开发服务器要能读到仓库根
+      port: APPS[app],
+      // SDK 源码在 packages/miniapp-sdk、小游戏共用的代码在 miniapps/shared,开发服务器要能读到仓库根
       fs: { allow: [resolve(here, '..')] },
     },
   }

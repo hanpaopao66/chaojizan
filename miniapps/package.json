@@ -2,13 +2,15 @@
   "name": "superz-official-miniapps",
   "private": true,
   "version": "1.0.0",
-  "description": "超级赞官方小程序:记事本、2048(也是开发者的参考实现)",
+  "description": "超级赞官方小程序:记事本、2048、贪吃蛇(也是开发者的参考实现)",
   "type": "module",
   "scripts": {
     "dev:notepad": "vite --mode notepad",
     "dev:2048": "vite --mode 2048",
+    "dev:snake": "vite --mode snake",
     "build:notepad": "vite build --mode notepad",
     "build:2048": "vite build --mode 2048",
+    "build:snake": "vite build --mode snake",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs"
   },

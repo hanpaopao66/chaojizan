@@ -1,0 +1,112 @@
+/* 小游戏共用的底子。颜色全部走宿主下发的主题变量(SDK 写在 :root 上),后面的值是不在宿主里时的兜底
+   (骨白 / 墨 / 黏土)。亮暗由 ui.ts 的 followTheme 在 <html> 上切 .dark:在宿主里跟宿主,不在宿主里跟系统。 */
+:root {
+  --bg: var(--sz-theme-bg-color, #F0EEE6);
+  --card: var(--sz-theme-secondary-bg-color, #FBFAF6);
+  --ink: var(--sz-theme-text-color, #141413);
+  --muted: var(--sz-theme-hint-color, #6B6862);
+  --line: var(--sz-theme-line-color, #E2DED2);
+  --accent: var(--sz-theme-accent-text-color, #C15F3C);
+  --button: var(--sz-theme-button-color, #C15F3C);
+  --button-ink: var(--sz-theme-button-text-color, #FFFFFF);
+  --danger: var(--sz-theme-destructive-text-color, #B3261E);
+  --std: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  /* 顶上让开刘海和宿主的胶囊(··· 和关闭),底下让开横条 */
+  --top: max(var(--sz-safe-area-inset-top, 0px), var(--sz-content-safe-area-inset-top, 0px));
+  --bottom: var(--sz-safe-area-inset-bottom, 0px);
+  /* 两边留够 24px:安卓的返回手势从屏幕边缘划进来,能滑的区域离边远一点,不和它抢 */
+  --side: max(1.5rem, var(--sz-safe-area-inset-left, 0px), var(--sz-safe-area-inset-right, 0px));
+}
+:root.dark {
+  --bg: var(--sz-theme-bg-color, #1B1A17);
+  --card: var(--sz-theme-secondary-bg-color, #24231F);
+  --ink: var(--sz-theme-text-color, #F2F0E8);
+  --muted: var(--sz-theme-hint-color, #A8A49A);
+  --line: var(--sz-theme-line-color, #37342D);
+  --accent: var(--sz-theme-accent-text-color, #E08A6B);
+  --button: var(--sz-theme-button-color, #E08A6B);
+  --button-ink: var(--sz-theme-button-text-color, #1B1A17);
+  --danger: var(--sz-theme-destructive-text-color, #F2B8B5);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 1rem/1.5 system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; touch-action: manipulation; }
+button:disabled { cursor: default; opacity: .45; }
+button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* 整页:竖屏一列,限宽,居中 */
+.game {
+  width: 100%; max-width: 30rem; height: 100%; margin: 0 auto;
+  padding: calc(.75rem + var(--top)) var(--side) calc(.75rem + var(--bottom));
+  display: flex; flex-direction: column; gap: .75rem;
+}
+.head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex: none; }
+.head h1 {
+  margin: 0; font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+  font-size: 1.75rem; font-weight: 700; letter-spacing: .02em; white-space: nowrap;
+}
+.scores { display: flex; gap: .5rem; }
+.score {
+  min-width: 4rem; padding: .25rem .6rem; border-radius: .6rem; background: var(--card);
+  border: 1px solid var(--line); text-align: center; display: grid;
+}
+.score span { font-size: .6875rem; color: var(--muted); letter-spacing: .08em; }
+.score b { font-size: 1.0625rem; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.score.bump b { animation: bump 220ms var(--spring); }
+
+.btn {
+  min-height: 2.75rem; padding: .45rem .9rem; border-radius: .6rem; font-weight: 600;
+  border: 1px solid var(--line); background: var(--card); white-space: nowrap;
+}
+.btn.primary { background: var(--button); color: var(--button-ink); border-color: transparent; }
+.foot { flex: none; display: flex; justify-content: center; gap: 1rem; }
+.foot button { color: var(--muted); font-size: .8125rem; padding: .25rem .5rem; min-height: 2rem; }
+
+/* 分段选择(难度、先后手、翻开 / 插旗) */
+.seg { display: flex; padding: .2rem; gap: .2rem; border-radius: .7rem; background: var(--card); border: 1px solid var(--line); }
+.seg button { flex: 1; min-height: 2.5rem; border-radius: .5rem; font-weight: 600; color: var(--muted); padding: 0 .5rem; }
+.seg button[aria-pressed="true"], .seg button[aria-checked="true"] { background: var(--button); color: var(--button-ink); }
+
+.overlay {
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+  animation: fade 220ms var(--std) both;
+}
+@supports not (color: color-mix(in srgb, red 10%, white)) {
+  .overlay { background: rgba(240, 238, 230, .88); }
+  :root.dark .overlay { background: rgba(27, 26, 23, .88); }
+}
+.overlay[hidden] { display: none; }
+.panel {
+  width: min(88vw, 380px); max-height: 100%; overflow-y: auto; background: var(--card);
+  border: 1px solid var(--line); border-radius: 1rem;
+  padding: 1.5rem 1.25rem 1.25rem; text-align: center; box-shadow: 0 12px 40px rgba(20, 20, 19, .16);
+}
+.panel h2 { margin: 0 0 .5rem; font-family: "Songti SC", "Noto Serif CJK SC", serif; font-size: 1.5rem; }
+.panel h3 { margin: 1rem 0 .4rem; font-size: .875rem; color: var(--muted); font-weight: 600; text-align: left; }
+.panel p { margin: .35rem 0; color: var(--muted); font-size: .9375rem; }
+.panel .big { font-size: 2.25rem; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.panel .row { display: flex; gap: .5rem; justify-content: center; margin-top: 1.1rem; flex-wrap: wrap; }
+.panel .row button { min-height: 2.75rem; padding: .55rem 1.1rem; border-radius: .6rem; font-weight: 600; border: 1px solid var(--line); }
+.panel .row button.primary { background: var(--button); color: var(--button-ink); border-color: transparent; }
+.panel.about { text-align: left; }
+.panel.about ul { padding-left: 1.2rem; margin: .5rem 0; }
+.panel.about li { color: var(--ink); font-size: .9375rem; margin: .3rem 0; }
+.panel .seg { margin: .25rem 0; }
+
+@keyframes bump { 50% { transform: scale(1.15); } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
