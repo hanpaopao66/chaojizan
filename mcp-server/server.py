@@ -597,7 +597,7 @@ TOOLS = [
                        "提交审核,一次做完。提交后是「审核中」,**由平台的人审,通过后才公开** —— "
                        "助手能替用户投稿,不能替用户过审。**只在用户明确要求发布时调用**;"
                        "拿不准就传 submit=false 先建草稿,让用户确认后再 submit_video。"
-                       "要先在 App 里完成实名认证。视频只收 mp4/mov/m4v/webm/mkv,最大 1GB、30 分钟。",
+                       "视频只收 mp4/mov/m4v/webm/mkv,最大 1GB、30 分钟。",
         "inputSchema": _obj({
             "file_path": {"type": "string", "description": "视频文件在本机的路径"},
             "title": {"type": "string", "description": "标题,200 字以内"},

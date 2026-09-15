@@ -116,7 +116,8 @@ void main() {
 
     expect(checked(t, '点餐'), isTrue);
     expect(checked(t, '发视频'), isFalse, reason: '发视频得人自己勾');
-    expect(find.text('需要先完成实名认证'), findsOneWidget);
+    expect(find.text('需要先完成实名认证'), findsNothing,
+        reason: '2026-09-15 起投稿不要求实名,勾「发视频」不用先办什么');
 
     await t.enterText(find.byType(TextField), '我的 Claude');
     await t.tap(issueButton());

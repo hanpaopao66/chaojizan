@@ -51,7 +51,7 @@ const _kScopes = <({String key, String label, String what, String? needs})>[
     label: '发视频',
     what: '把电脑上的视频投成稿件、提交审核,停在「审核中」,审核由平台的人做;'
         '删不了稿,不能点赞评论',
-    needs: '需要先完成实名认证',
+    needs: null,
   ),
 ];
 

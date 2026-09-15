@@ -109,7 +109,7 @@ _UPLOAD = r"[0-9a-f]{32}"                    # 分片上传的 id
 #: 没有:删稿、删分 P、申诉、放弃改动,以及点赞投币评论弹幕这些「以你的名义对别人做事」的
 AGENT_VIDEO: tuple[tuple[str, str], ...] = (
     ("GET", r"/video/v1/zones"),                          # 分区(选分区用)
-    ("POST", r"/video/v1/uploads/videos"),                # 建稿件(草稿;要实名)
+    ("POST", r"/video/v1/uploads/videos"),                # 建稿件(草稿)
     ("PATCH", rf"/video/v1/videos/{_VID}"),               # 改标题、简介、标签、封面
     ("POST", rf"/video/v1/videos/{_VID}/parts"),          # 挂上传好的原片(开始转码)
     ("POST", rf"/video/v1/videos/{_VID}/submit"),         # 提交审核
