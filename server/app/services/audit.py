@@ -9,6 +9,8 @@
   4. 任何骑手提走的钱不得超过挣到的钱;商家同理(按店主整户核,口径直接复用钱包)。
      判骑手 / 商家责任扣的那几行不算「挣到」—— 余额可以因此为负,之后的收入先抵、提现按余额挡
   4c/4d. 判骑手责任、判商家责任的恒等式(services/rider_fault、services/merchant_fault)
+  4e. 反查:新规则生效之后判了商家责任的单(平台骑手送的、配送费 + 小费 > 0),必须有商家另出的
+      那一行 —— 4d 从写了的行出发,一行都没写的单它看不见
   5. 每笔订单的 refund_cents 必须等于 refunds 流水之和(失败流水不算 → 自动暴露)
   5b. 退款不得超过用户实付 —— 判据是"剩余应付不许为负"(见该条的长注释:
       total_cents 是剩余应付不是累计实付,直接比 refund_cents 会造出几百盏假红灯)
@@ -313,6 +315,56 @@ async def _merchant_fault_problems(db, since) -> list[dict]:
             out.append({"check": "merchant_fault_split",
                         "detail": f"订单 {no} 改判补回的净额 {adj} 分 ≠ 当初冲回的 "
                                   f"{-(r.get(EarningKind.reversal) or 0)} 分"})
+    return out
+
+
+#: 规则 4e 报的问题名(判了商家责任,却没有商家另出的那一行)
+MERCHANT_FAULT_CHARGE_MISSING = "merchant_fault_charge_missing"
+
+
+async def _merchant_fault_charge_missing(db, since) -> list[dict]:
+    """判了商家责任,就必须有商家另出的那一行(规则 4e,反查)。
+
+    4d 从另出的那一行出发核金额 —— 哪条路绕开了 merchant_fault.apply、一行都没写,它看不见:
+    顾客照样拿回全款、骑手照拿配送费和小费,差的那份就成了平台出的钱。这里从判责的记录出发
+    (services/merchant_fault.judged_query:售后判商家责任、到店未出餐 / 餐品不齐裁成退款、食安投诉成立),
+    新规则生效之后判的、骑手那份(配送费 + 小费,自配送和自取为 0)> 0 的单,必须有 fault_charge 那一行。
+    有了这一行,金额对不对归 4d 核(它核每一条另出的行:== 这单骑手那份)—— 两条各管一半,
+    一个问题不报两遍。
+
+    起算点是「近 30 天」和「新规则在这个库上生效的那一刻」取晚的(merchant_fault.charge_since,
+    迁移 0141 在升级时记的):生效之前按旧规则判的单本来就没有这一行,不是违规。
+    起算点没了(没记、记坏了)就报出来 —— 悄悄不查,等于这条规则停了而没人知道。
+    """
+    from zoneinfo import ZoneInfo
+
+    from sqlalchemy import exists
+
+    from .errand import is_errand
+    from .merchant_fault import CHARGE_SINCE_FLAG, charge_since, judged_query, rider_share_cents
+
+    floor = await charge_since(db)
+    if floor is None:
+        return [{"check": MERCHANT_FAULT_CHARGE_MISSING,
+                 "detail": f"反查的起算点没记在库里(platform_flags 的 {CHARGE_SINCE_FLAG},"
+                           "迁移 0141 写的):「判了商家责任就得有商家另出那一行」这条没法查"}]
+    judged = judged_query(max(since, floor)).subquery()
+    charged = exists().where(MerchantEarning.order_id == Order.id,
+                             MerchantEarning.kind == EarningKind.fault_charge)
+    out: list[dict] = []
+    for o, at in (await db.execute(
+            select(Order, judged.c.at).join(judged, judged.c.oid == Order.id)
+            .where(~charged).order_by(Order.id))).all():
+        share = rider_share_cents(o)
+        if share <= 0 or is_errand(o):
+            continue        # 自配送、自取没有骑手那份;跑腿单没有商家(判不了商家责任)
+        if at.tzinfo is None:       # 与仓库其它处一致:naive 当 UTC
+            at = at.replace(tzinfo=timezone.utc)
+        when = at.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%m-%d %H:%M")
+        out.append({"check": MERCHANT_FAULT_CHARGE_MISSING,
+                    "detail": f"订单 {o.order_no} {when} 判了商家责任,骑手那份配送费和小费 {share} 分"
+                              "却没有商家另出的那一行 —— 商家有责任时顾客拿回全款、骑手照拿,"
+                              "这一份没人出就成了平台出的钱"})
     return out
 
 
@@ -623,6 +675,9 @@ async def run_audit() -> list[dict]:
         # 4d) 判商家责任的钱对不对(services/merchant_fault):另出的那行 == 骑手那份(配送费 + 小费),
         #     净额冲回了、顾客全款退了;改判成立的,另出的原样退回、补回的净额 == 当初冲回的
         problems.extend(await _merchant_fault_problems(db, since))
+
+        # 4e) 反查:判了商家责任,就必须有商家另出的那一行 —— 4d 只核写了的,一行都没写的它看不见
+        problems.extend(await _merchant_fault_charge_missing(db, since))
 
         # 4b) 商家提现不得超过挣到的钱。
         #

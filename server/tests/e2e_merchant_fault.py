@@ -15,14 +15,17 @@
 7. 商家余额因此为负:可提现 0、提现被挡;审计不当错账报(提走的没超过挣到的);
 8. 商家对第 3 段那一单申诉、改判成立:平台判错了,平台自己认 —— 冲回的净额和另出的那行都补回,
    顾客的退款不追回、骑手照拿;进透明中心「申诉改判」和公开账本 platform_correction;
-9. 顾客对「按送达处理」申诉、改判成立:平台原路退,进公开账本 appeal_refund_rows。
+9. 顾客对「按送达处理」申诉、改判成立:平台原路退,进公开账本 appeal_refund_rows;
+10. 反查(规则 4e):直接改库,模拟一条绕开 merchant_fault.apply 的路 —— 判了商家责任、却没有商家另出的
+    那一行,核账报出这一单;挪到起算点(迁移 0141 记的新规则生效时刻)之前判的老单不报;售后上没记
+    商家责任的食安成立、餐品不齐单也认得出;另出的金额不对归 4d 报,4e 不重复报。每一步都还原。
 
 在 server/ 目录下运行:python -m tests.e2e_merchant_fault
 """
 import asyncio
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -194,6 +197,52 @@ def check_merchant_fault(no, cust, *, why, self_delivery=False) -> dict:
 def after_sale_id(no) -> int:
     return next(a["id"] for a in call("GET", "/merchants/me/after-sales", boss)
                 if a["order_no"] == no)
+
+
+# ---- 第 10 段(规则 4e 反查)用的:进程内直接改库,模拟一条绕开 merchant_fault.apply 的路 ----
+
+def charge_since_in_db() -> datetime:
+    """这个库上「判商家责任要另出骑手那份」生效的时刻(迁移 0141 在升级那一刻记的)"""
+    from app.services.merchant_fault import CHARGE_SINCE_FLAG
+    raw = sql("SELECT value FROM platform_flags WHERE key = :k", {"k": CHARGE_SINCE_FLAG})
+    assert raw, "迁移 0141 没把起算点记进库里"
+    return datetime.fromisoformat(raw)
+
+
+async def _take_charge_row(no: str) -> dict:
+    """把这单另出的那一行从库里拿掉,原样返回(之后还回去)"""
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import EarningKind, MerchantEarning
+    async with SessionLocal() as db:
+        row = await db.scalar(select(MerchantEarning).where(
+            MerchantEarning.order_no == no, MerchantEarning.kind == EarningKind.fault_charge))
+        assert row is not None, f"订单 {no} 本来就没有另出的那一行"
+        saved = {c.key: getattr(row, c.key) for c in MerchantEarning.__table__.columns}
+        await db.delete(row)
+        await db.commit()
+    return saved
+
+
+async def _put_charge_row(saved: dict) -> None:
+    from app.db import SessionLocal
+    from app.models import MerchantEarning
+    async with SessionLocal() as db:
+        db.add(MerchantEarning(**saved))
+        await db.commit()
+
+
+def problems_about(no: str) -> dict:
+    """跑一次核账(和每日自检同一个入口),这单被报了哪几条:{check: [detail…]}"""
+    out: dict = {}
+    for p in call("POST", "/admin/audit/run", admin)["detail"]:
+        if no in p.get("detail", ""):
+            out.setdefault(p["check"], []).append(p["detail"])
+    return out
+
+
+_AS_OF = "(SELECT id FROM orders WHERE order_no = :no)"
 
 
 def main() -> None:
@@ -378,6 +427,80 @@ def main() -> None:
     assert verify_rows(p) == [], verify_rows(p)
     print(f"✓ 顾客「按送达处理」申诉改判成立:平台原路退 ¥{goods / 100:.2f}(退款原因写着平台判错了),"
           "进「申诉改判」和公开账本 appeal_refund_rows")
+
+    # ============ 10. 反查:判了商家责任,就必须有商家另出的那一行(规则 4e)============
+    # 4d 从另出的那一行出发核金额,一行都没写的单它看不见。这里直接改库,模拟一条绕开
+    # merchant_fault.apply 的路:判了商家责任、顾客全款退了、骑手照拿,商家却没另出 —— 核账要报出来。
+    # 每一步都还原,不给同一组后面的套件留脏数据
+    t0 = charge_since_in_db()
+    checks = {"merchant_fault_charge_missing"}
+
+    # 10a. 第 1 段那一单(商家同意售后):删掉另出的那一行 → 4e 报这一单(4d 看不见它)
+    saved = _run(_take_charge_row(a))
+    try:
+        got = problems_about(a)
+        assert set(got) == checks, f"删掉另出的那一行,核账该报且只报 4e:{got}"
+        assert f"{r1['share']} 分" in got["merchant_fault_charge_missing"][0], got
+        # 10b. 同一单当成起算点之前判的老单(按旧规则判的本来就没有这一行)→ 不报
+        judged_at = sql(f"SELECT processed_at FROM after_sales WHERE order_id = {_AS_OF}", {"no": a})
+        sql(f"UPDATE after_sales SET processed_at = :t WHERE order_id = {_AS_OF}",
+            {"t": t0 - timedelta(seconds=1), "no": a})
+        try:
+            assert problems_about(a) == {}, "起算点之前按旧规则判的老单不该报"
+        finally:
+            sql(f"UPDATE after_sales SET processed_at = :t WHERE order_id = {_AS_OF}",
+                {"t": judged_at, "no": a})
+    finally:
+        _run(_put_charge_row(saved))
+    assert problems_about(a) == {}, "还回去之后又该是干净的"
+    print(f"✓ 反查:商家同意售后的单删掉另出的那一行,核账报出这一单(骑手那份 ¥{r1['share'] / 100:.2f});"
+          "同一单挪到起算点之前判就不报;还回去照旧全绿")
+
+    # 10c. 第 4 段那一单(食安投诉成立):另出的那一行删掉、售后上也不记商家责任(绕开售后那张表的路)
+    #      → 从食安投诉那张表认出来,照样报
+    saved = _run(_take_charge_row(d))
+    sql(f"UPDATE after_sales SET fault = '' WHERE order_id = {_AS_OF}", {"no": d})
+    try:
+        got = problems_about(d)
+        assert set(got) == checks, f"绕开售后表的食安成立单也该报:{got}"
+    finally:
+        sql(f"UPDATE after_sales SET fault = 'merchant' WHERE order_id = {_AS_OF}", {"no": d})
+        _run(_put_charge_row(saved))
+    assert problems_about(d) == {}
+    print("✓ 反查:食安投诉成立的单,另出的那一行没了、售后上也没记商家责任,照样从投诉记录认出来报")
+
+    # 10d. 餐品不齐判商家责任(配送异常那条路):同上,从配送异常那张表认出来;
+    #      另出的那一行在、金额不对的,归 4d 报(4e 只管有没有,一个问题不报两遍)
+    c10, _ = new_customer()
+    h = place(c10)
+    go(boss, h, "accepted")
+    call("POST", f"/riders/grab/{h}", rider)
+    issue10 = call("POST", "/riders/issues", rider,
+                   {"order_no": h, "kind": "items_missing", "note": "袋子里少一份饮料",
+                    "photo_url": EVIDENCE})
+    call("POST", f"/admin/delivery-issues/{issue10['id']}/resolve", admin,
+         {"action": "refund", "note": "袋内照片少一份,商家少装"})
+    r10 = check_merchant_fault(h, c10, why="餐品不齐")
+    saved = _run(_take_charge_row(h))
+    sql(f"UPDATE after_sales SET fault = '' WHERE order_id = {_AS_OF}", {"no": h})
+    try:
+        got = problems_about(h)
+        assert set(got) == checks, f"绕开售后表的餐品不齐单也该报:{got}"
+    finally:
+        sql(f"UPDATE after_sales SET fault = 'merchant' WHERE order_id = {_AS_OF}", {"no": h})
+        _run(_put_charge_row(saved))
+    assert problems_about(h) == {}
+    sql("UPDATE merchant_earnings SET food_cents = food_cents + 100, net_cents = net_cents + 100 "
+        "WHERE order_no = :no AND kind = 'fault_charge'", {"no": h})
+    try:
+        got = problems_about(h)
+        assert set(got) == {"merchant_fault_split"}, f"另出的金额不对,该 4d 报、4e 不重复报:{got}"
+    finally:
+        sql("UPDATE merchant_earnings SET food_cents = food_cents - 100, net_cents = net_cents - 100 "
+            "WHERE order_no = :no AND kind = 'fault_charge'", {"no": h})
+    assert problems_about(h) == {}
+    print(f"✓ 反查:餐品不齐判商家责任的单同样认得出;另出的 ¥{r10['share'] / 100:.2f} 金额不对时归 4d 报,"
+          "4e 不重复报")
 
     print("\ne2e_merchant_fault 全部通过 ✅")
 

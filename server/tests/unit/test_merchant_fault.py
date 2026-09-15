@@ -7,7 +7,9 @@
 3. 另出的那行:负数、佣金 0、行内 net == food − commission、记在平台代收口径上、只出一次;
 4. 公开账本:这两种行不进 merchant_rows,单独进 merchant_fault_rows;见证节点认得出对错;
 5. 核账:另出的 == 骑手那份、净额冲回了、顾客全款退了;商家余额为负不是错账,提走的比挣到的多才是;
-6. 对账单、逐单明细、税务导出认得这几种行。
+6. 对账单、逐单明细、税务导出认得这几种行;
+7. 反查(规则 4e):新规则生效之后判了商家责任的单,必须有另出的那一行 —— 起算点是迁移 0141
+   在升级那一刻记进库里的,之前按旧规则判的单不报;起算点没了要报。
 
 这类退化不报错(平台悄悄又开始贴钱、商家被多扣),一半按源码守,行为由 e2e_merchant_fault 核。
 """
@@ -15,7 +17,7 @@ import ast
 import inspect
 import sys
 import textwrap
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -289,3 +291,140 @@ class Test透明中心的申诉改判只放纠错的钱:
         assert appeals.APPEAL_REFUND_NOTE in appeals.APPEAL_REFUND_NOTES
         assert "平台判错了,平台自己认" in appeals.APPEAL_REFUND_NOTE
         assert "申诉改判:平台承担,原路退回" in appeals.APPEAL_REFUND_NOTES, "历史流水照认"
+
+
+# ---------------- 规则 4e:判了商家责任,就必须有另出的那一行 ----------------
+
+T0 = datetime(2026, 9, 15, 2, 0, tzinfo=timezone.utc)      # 新规则在这个库上生效的时刻
+MIGRATION = Path(__file__).resolve().parents[2] / "alembic" / "versions" / \
+    "0141_merchant_fault_charge_since.py"
+
+
+class _AuditDB:
+    """_merchant_fault_charge_missing 用到的两个方法:get 读起算点,execute 回事先摆好的行并记下语句。"""
+
+    def __init__(self, flag_value, rows=()):
+        self.flag_value, self.rows, self.stmts = flag_value, list(rows), []
+
+    async def get(self, model, key):
+        assert key == mf.CHARGE_SINCE_FLAG, key
+        return None if self.flag_value is None else SimpleNamespace(key=key, value=self.flag_value)
+
+    async def execute(self, stmt, *a, **k):
+        self.stmts.append(stmt)
+        return SimpleNamespace(all=lambda: self.rows)
+
+
+def _sql(stmt):
+    from sqlalchemy.dialects import postgresql
+    c = stmt.compile(dialect=postgresql.dialect())
+    return str(c), c.params
+
+
+def _judged(**kw):
+    base = dict(id=1, order_no="f" * 20, rider_id=7, delivery_fee_cents=500, tip_cents=300,
+                order_kind="food")
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def _run4e(db, since=T0 - timedelta(days=30)):
+    import asyncio
+
+    from app.services import audit
+    return asyncio.run(audit._merchant_fault_charge_missing(db, since))
+
+
+class Test反查判了商家责任就得有另出的那行:
+    """规则 4e(services/audit._merchant_fault_charge_missing):4d 只核写了另出那一行的单,
+    绕开 merchant_fault.apply、一行都没写的它看不见。从判责的记录反过来找;起算点是迁移 0141 记进库里的
+    「新规则生效时刻」,之前按旧规则判的单不报。行为(删掉那一行就报、老单不报)由 e2e_merchant_fault 第 10 段核。"""
+
+    def test_接进了每日核账_跟在4d后面(self):
+        from app.services import audit
+        src = inspect.getsource(audit.run_audit)
+        assert "_merchant_fault_charge_missing(db, since)" in src
+        assert src.index("_merchant_fault_problems(db, since)") \
+            < src.index("_merchant_fault_charge_missing(db, since)")
+
+    def test_四条路的记录都认_判给别人的不算(self):
+        from app.services.delivery_fault import MERCHANT_KINDS
+        sql, params = _sql(mf.judged_query(T0))
+        # ① 售后判商家责任(商家同意、售后被拒改判;配送异常、食安成立也会补一条)
+        assert "after_sales.fault = %(fault_1)s" in sql and params["fault_1"] == "merchant"
+        # ② 到店未出餐、餐品不齐裁成退款
+        assert "delivery_issues.resolution = %(resolution_1)s" in sql \
+            and params["resolution_1"] == "refund"
+        assert list(params["kind_1"]) == list(MERCHANT_KINDS)
+        # ③ 食安投诉成立
+        assert "food_safety_reports.status = %(status_1)s" in sql \
+            and params["status_1"] == "confirmed"
+        # 售后判给了别人(骑手责任、商家申诉改判成立)的,②③ 不算
+        assert sql.count("NOT IN (SELECT after_sales.order_id") == 2
+        assert list(params["fault_2"]) == ["rider", "platform"]
+        # 三处都只看起算点之后的,一单取最后一次
+        assert sum(1 for v in params.values() if v == T0) == 3, params
+        assert "max(" in sql and "GROUP BY" in sql
+
+    def test_起算点没了要报_不能悄悄不查(self):
+        for broken in (None, "", "不是时间"):
+            out = _run4e(_AuditDB(broken))
+            assert [p["check"] for p in out] == ["merchant_fault_charge_missing"], out
+            assert "起算点" in out[0]["detail"] and mf.CHARGE_SINCE_FLAG in out[0]["detail"]
+
+    def test_平台骑手送的没有那一行就报_自配送自取跑腿不报(self):
+        at = T0 + timedelta(hours=3)
+        rows = [(_judged(), at),
+                (_judged(id=2, order_no="e" * 20, rider_id=None), at),              # 自配送 / 自取
+                (_judged(id=3, order_no="d" * 20, delivery_fee_cents=0, tip_cents=0), at),
+                (_judged(id=4, order_no="c" * 20, order_kind="errand_send"), at)]  # 跑腿没有商家
+        db = _AuditDB(T0.isoformat(), rows)
+        out = _run4e(db)
+        assert len(out) == 1 and out[0]["check"] == "merchant_fault_charge_missing", out
+        assert "f" * 20 in out[0]["detail"] and "800 分" in out[0]["detail"], out
+        sql, params = _sql(db.stmts[0])
+        # 只捞没有 fault_charge 那一行的单(有了的,金额对不对归 4d)
+        assert "NOT (EXISTS (SELECT *" in sql and "merchant_earnings.kind" in sql
+        assert EarningKind.fault_charge in params.values()
+
+    def test_起算点取近30天和生效时刻里晚的那个(self):
+        for since, expect in ((T0 - timedelta(days=30), T0),                   # 刚上线:从生效那一刻起
+                              (T0 + timedelta(days=5), T0 + timedelta(days=5))):  # 上线一个多月后:近 30 天
+            db = _AuditDB(T0.isoformat())
+            _run4e(db, since=since)
+            _, params = _sql(db.stmts[0])
+            floors = {v for v in params.values() if isinstance(v, datetime)}
+            assert floors == {expect}, (since, floors)
+
+    def test_起算点读库(self):
+        import asyncio
+
+        def read(value):
+            return asyncio.run(mf.charge_since(_AuditDB(value)))
+
+        assert read(T0.isoformat()) == T0
+        assert read("2026-09-15T02:00:00") == T0, "没带时区的当 UTC"
+        assert read(None) is None and read("  ") is None and read("2026-13-45") is None
+
+    def test_迁移在升级那一刻记进库里_接在0140后面(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("m0141", MIGRATION)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        assert (m.revision, m.down_revision) == ("0141", "0140")
+        assert m.KEY == mf.CHARGE_SINCE_FLAG
+        src = MIGRATION.read_text(encoding="utf-8")
+        assert "ON CONFLICT (key) DO NOTHING" in src, "重跑不许把起算点往后挪"
+        assert "datetime.now(timezone.utc).isoformat()" in src
+        code = "\n".join(ln.split("#", 1)[0] for ln in
+                         src.split('"""', 2)[2].splitlines())       # 去掉文档串和注释
+        assert "flag_history" not in code, "它不是开关,不进透明中心的开关时间线"
+        others = [p.name for p in MIGRATION.parent.glob("*.py")
+                  if p != MIGRATION and "down_revision = '0141'" in p.read_text(encoding="utf-8")]
+        assert not others, f"0141 后面还接了迁移,记得把这条测试的「接在 0140 后面」一起看:{others}"
+
+    def test_不是开关_后台看不到改不了_不进开关时间线(self):
+        from app.routers import admin, transparency
+        assert mf.CHARGE_SINCE_FLAG not in admin._KNOWN_FLAGS, "进了后台「平台开关」页就能被人改掉"
+        assert mf.CHARGE_SINCE_FLAG not in transparency._PUBLIC_FLAGS
+        assert "if key not in _KNOWN_FLAGS" in inspect.getsource(admin.set_flag)

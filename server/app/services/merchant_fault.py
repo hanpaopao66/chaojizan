@@ -40,13 +40,22 @@
 商家的 fault_charge / fault_refund 两种行不进 merchant_rows(那一栏每一行是「应收 − 佣金 = 净额」的菜钱),
 单独进 merchant_fault_rows,逐行公开;补回净额的 adjustment 行照旧在 merchant_rows 里。
 见 services/ledger.py、docs/LEDGER-SPEC.md。
+
+## 反查:判了商家责任,就必须有另出的那一行(审计规则 4e)
+
+规则 4d 按上面的恒等式核**已经写了**另出那一行的单;哪条路绕开了 [apply]、一行都没写,4d 看不见 ——
+顾客照样拿回全款、骑手照拿,差的那份就成了平台出的钱。4e 从判责的记录反过来找([judged_query]):
+新规则生效之后判了商家责任、平台骑手送的、骑手那份 > 0 的单,必须有另出的那一行。
+
+生效时刻([charge_since])由迁移 0141 在升级那一刻记进库里:之前按旧规则判的单本来就没有这一行,
+不能报成违规;生产、CI、本地各按各自升级的那一刻算,不用按环境配日期。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import EarningKind, MerchantEarning, Order
@@ -193,3 +202,60 @@ def merchant_push_text(split: Split, refunded: int) -> str:
         parts.append(f"骑手那份配送费和小费 ¥{split.charge / 100:.2f} 也由你出"
                      "(余额不够的,之后的收入先抵)")
     return ",".join(parts) or "这单没有要你出的钱"
+
+
+#: 「判商家责任要另出骑手那份」这条规则在这个库上从哪一刻起生效:platform_flags 里的这个键,值是 UTC 的
+#: ISO 时刻,迁移 0141 在升级那一刻写进去。它不是开关:不在后台「平台开关」页(admin._KNOWN_FLAGS)、
+#: 也不写 flag_history、不进透明中心的开关时间线 —— 能改它就等于能让反查对一段时间闭眼
+CHARGE_SINCE_FLAG = "merchant_fault_charge_since"
+
+
+async def charge_since(db: AsyncSession) -> datetime | None:
+    """新规则在这个库上生效的时刻(审计规则 4e 从这一刻起反查)。
+
+    没记、记坏了返回 None —— 调用方要把「起算点没了」当问题报出来,不能当成「不用查」。"""
+    from ..models import PlatformFlag
+    flag = await db.get(PlatformFlag, CHARGE_SINCE_FLAG)
+    raw = (flag.value or "").strip() if flag is not None else ""
+    if not raw:
+        return None
+    try:
+        at = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+
+
+def judged_query(floor: datetime):
+    """floor 之后判了商家责任、现在还算商家责任的单:列 (oid 订单 id, at 最后一次判的时刻)。
+
+    四条路落下的记录都认:
+    - 售后判责方是商家(after_sales.fault = merchant):商家同意、售后被拒改判成立写它,配送异常判商家责任、
+      食安投诉成立也会补一条或改成它。时刻取 processed_at(没写的退回 created_at);
+    - 配送异常「到店未出餐」「餐品不齐」裁成退款(delivery_issues),时刻取 resolved_at;
+    - 食安投诉核实成立(food_safety_reports.status = confirmed),时刻取 resolved_at。
+
+    后两种单独再认一遍,是为了绕开了售后那张表的路也看得见。这一单的售后判的是别人的(rider 骑手责任;
+    platform:商家申诉改判成立,或者历史上的平台认赔)不算 —— 钱按那个责任走了,不该商家另出。
+
+    一单判过几次(比如商家自己同意过,后来食安投诉又成立)只要有一次在 floor 之后就算,时刻取最后一次:
+    [apply] 幂等,后一次判的时候没有另出那一行就会补上,所以最后一次在生效之后,就该有这一行。
+    """
+    from ..models import AfterSale, DeliveryIssue, FoodSafetyReport
+    from .delivery_fault import MERCHANT_KINDS
+
+    judged_other = select(AfterSale.order_id).where(AfterSale.fault.in_(("rider", "platform")))
+    a_at = func.coalesce(AfterSale.processed_at, AfterSale.created_at)
+    d_at = func.coalesce(DeliveryIssue.resolved_at, DeliveryIssue.created_at)
+    f_at = func.coalesce(FoodSafetyReport.resolved_at, FoodSafetyReport.created_at)
+    rows = union_all(
+        select(AfterSale.order_id.label("oid"), a_at.label("at"))
+        .where(AfterSale.fault == "merchant", a_at >= floor),
+        select(DeliveryIssue.order_id, d_at)
+        .where(DeliveryIssue.resolution == "refund", DeliveryIssue.kind.in_(MERCHANT_KINDS),
+               d_at >= floor, DeliveryIssue.order_id.notin_(judged_other)),
+        select(FoodSafetyReport.order_id, f_at)
+        .where(FoodSafetyReport.status == "confirmed", f_at >= floor,
+               FoodSafetyReport.order_id.notin_(judged_other)),
+    ).subquery()
+    return select(rows.c.oid, func.max(rows.c.at).label("at")).group_by(rows.c.oid)

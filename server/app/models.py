@@ -2167,7 +2167,12 @@ class WeatherAlert(Base):
 class PlatformFlag(Base):
     """平台运行时开关(极简 KV):管理员改,立即生效,不用发版。
 
-    目前唯一的键:weather_surcharge = "on"/"off" —— 恶劣天气配送加价开关。
+    后台「平台开关」页能看能改的键见 admin._KNOWN_FLAGS(比如 weather_surcharge = "on"/"off"
+    —— 恶劣天气配送加价开关)。
+
+    另有一个**不是开关**的键:merchant_fault_charge_since —— 「判商家责任要另出骑手那份」这条规则
+    在这个库上生效的时刻(迁移 0141 写,核账规则 4e 从这一刻起反查,见 services/merchant_fault)。
+    它不在 _KNOWN_FLAGS 里(后台看不到、改它的接口 404),也不写 flag_history。
     """
 
     __tablename__ = "platform_flags"
