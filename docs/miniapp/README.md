@@ -52,7 +52,7 @@
 11. [开发者协议与隐私政策模板](agreement.md) —— 草案:协议要点、隐私政策模板
 12. [更新日志与兼容表](changelog.md) —— SDK 和宿主各版本改了什么、哪个版本支持哪个能力
 13. [故障排查](troubleshooting.md) —— 白屏、CSP 拦截、验签失败、时钟偏差、4001 / 4007
-14. [示例导读](examples.md) —— 记事本、2048 源码逐段讲(另有贪吃蛇、方块消除、扫雷、五子棋的源码)
+14. [示例导读](examples.md) —— 记事本、2048 源码逐段讲(另有贪吃蛇、方块消除、扫雷、五子棋的源码,萌兽三路讲存档设计)
 15. [从 Telegram Mini Apps 迁移](telegram.md) —— 兼容层、要改的三处、API 对照表、不一样的地方
 
 入口:开发者后台 [`/dev/`](/dev/) · 示例源码 [`miniapps/`](https://github.com/hanpaopao66/chaojizan/tree/main/miniapps) ·
