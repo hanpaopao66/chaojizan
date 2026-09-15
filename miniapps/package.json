@@ -2,7 +2,7 @@
   "name": "superz-official-miniapps",
   "private": true,
   "version": "1.0.0",
-  "description": "超级赞官方小程序:记事本、2048、贪吃蛇、方块消除、扫雷(也是开发者的参考实现)",
+  "description": "超级赞官方小程序:记事本、2048、贪吃蛇、方块消除、扫雷、五子棋(也是开发者的参考实现)",
   "type": "module",
   "scripts": {
     "dev:notepad": "vite --mode notepad",
@@ -10,11 +10,13 @@
     "dev:snake": "vite --mode snake",
     "dev:blocks": "vite --mode blocks",
     "dev:minesweeper": "vite --mode minesweeper",
+    "dev:gomoku": "vite --mode gomoku",
     "build:notepad": "vite build --mode notepad",
     "build:2048": "vite build --mode 2048",
     "build:snake": "vite build --mode snake",
     "build:blocks": "vite build --mode blocks",
     "build:minesweeper": "vite build --mode minesweeper",
+    "build:gomoku": "vite build --mode gomoku",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs"
   },

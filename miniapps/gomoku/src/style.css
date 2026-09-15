@@ -1,0 +1,29 @@
+/* 五子棋:棋盘是 canvas,正方形,占满剩下的空间;只有点击没有滑动,两边的留白可以窄一点,交叉点间距大一点 */
+.gomoku { --side: max(.75rem, var(--sz-safe-area-inset-left, 0px), var(--sz-safe-area-inset-right, 0px)); }
+.gomoku .head h1 { font-size: 1.5rem; }
+.head-btns { display: flex; gap: .5rem; }
+.head-btns .btn { min-height: 2.5rem; padding: .3rem .75rem; font-size: .875rem; }
+
+.info { flex: none; display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-height: 2.25rem; }
+.who { margin: 0; display: flex; align-items: center; gap: .45rem; color: var(--muted); font-size: .875rem; }
+.stone { display: inline-block; width: .95rem; height: .95rem; border-radius: 50%; border: 1.5px solid #6B4F2E; }
+.stone.b { background: #1B1A17; border-color: #1B1A17; }
+.stone.w { background: #F7F4EC; }
+:root.dark .stone.b { border-color: #8A857A; }
+.status { margin: 0; font-weight: 700; font-size: 1.0625rem; text-align: right; }
+.status.think { color: var(--muted); font-weight: 600; }
+
+.stage {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  touch-action: manipulation; /* 连点两下是「选点 + 落子」,别被浏览器当成双击放大 */
+}
+.stage canvas { display: block; border-radius: .4rem; box-shadow: 0 2px 10px rgba(20, 20, 19, .14); outline: none; }
+.stage canvas:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+
+.bottom { flex: none; display: flex; align-items: center; gap: .75rem; }
+.bottom #undo { min-width: 5rem; }
+.hint { margin: 0; flex: 1; font-size: .8125rem; color: var(--muted); }
+
+.panel .choice { margin: .75rem 0 .25rem; text-align: left; }
+.panel .choice h3 { margin: 0 0 .35rem; }
+.panel .note { font-size: .8125rem; }

@@ -181,8 +181,8 @@ def test_csp_report_logs_blocked_origin_only(monkeypatch, caplog):
 # ---- 前端:开发者写的内容只能当文字渲染 ----
 
 SCAN = ["admin-web/src", "developer-web/src", "web/src", "miniapps/notepad", "miniapps/2048",
-        "miniapps/shared", "miniapps/snake", "miniapps/blocks", "miniapps/minesweeper", "miniapps/_template",
-        "packages/miniapp-sdk/src"]
+        "miniapps/shared", "miniapps/snake", "miniapps/blocks", "miniapps/minesweeper", "miniapps/gomoku",
+        "miniapps/_template", "packages/miniapp-sdk/src"]
 SINK = re.compile(r"dangerouslySetInnerHTML|\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML"
                   r"|document\.write\(|v-html")
 #: 允许的例外,写明为什么安全

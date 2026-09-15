@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>五子棋</title>
+</head>
+<body>
+  <main id="game" class="game gomoku">
+    <header class="head">
+      <h1>五子棋</h1>
+      <div class="head-btns">
+        <button id="new" class="btn" type="button">新游戏</button>
+        <button id="about-btn" class="btn" type="button">关于</button>
+      </div>
+    </header>
+    <div class="info">
+      <p id="who" class="who"><i id="who-stone" class="stone"></i><span id="who-text"></span></p>
+      <p id="status" class="status"></p>
+    </div>
+    <div id="stage" class="stage">
+      <canvas id="board" role="img" aria-label="五子棋棋盘" tabindex="0"></canvas>
+    </div>
+    <div class="bottom">
+      <button id="undo" class="btn" type="button">悔棋</button>
+      <p id="hint" class="hint"></p>
+    </div>
+    <p id="live" class="sr" aria-live="polite"></p>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
