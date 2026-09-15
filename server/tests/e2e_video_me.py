@@ -19,7 +19,7 @@ def act(p):
 
 def main():
     adm = admin_token()
-    up, fan, other = uploader(), person(), person()   # 改稿提交也要实名(D11)
+    up, fan, other = uploader(), person(), person()
     vids = [fixture_video(up.id, title=f"空间视频 {i}", zone="life", hours_ago=10 - i)
             for i in range(3)]
     for v in vids:

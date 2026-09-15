@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..models import (CoinLedger, CommentVote, Danmaku, FavFolder, FavItem, Follow, MediaFile,
                       Merchant, MerchantStatus, SearchTermUser, SocialBlock, SocialContact,
-                      SocialNotification, SocialProfile, User, UserIdentity, UserRole, Video,
+                      SocialNotification, SocialProfile, User, UserRole, Video,
                       VideoCoin, VideoComment, VideoDecision, VideoLike, VideoNotInterested,
                       VideoPart, VideoReport, VideoShare, VideoStatDay, VideoUserSetting,
                       VideoViewDay, WatchHistory, WatchLater)
@@ -187,13 +187,6 @@ async def own_video(db: AsyncSession, vid: str, user: User, *, lock: bool = True
     if v.uploader_id != user.id:
         raise HTTPException(404, "视频不存在或已删除")
     return v
-
-
-async def require_realname(db: AsyncSession, user: User) -> None:
-    """发视频要完成实名认证(D11)。聊天、评论、弹幕只需要手机号账号。"""
-    ok = await db.scalar(select(UserIdentity.id).where(UserIdentity.user_id == user.id))
-    if ok is None:
-        raise HTTPException(403, "发视频要先完成实名认证(我的 → 设置 → 实名认证)")
 
 
 # ---------------- 人和卡片 ----------------
@@ -646,8 +639,10 @@ def _json_field(k: str, val):
 
 
 async def create_draft(db: AsyncSession, user: User, body: dict) -> Video:
-    """建稿件(草稿)。每人每天最多 10 个(D8),要实名(D11)。"""
-    await require_realname(db, user)
+    """建稿件(草稿)。每人每天最多 10 个(D8)。
+
+    **不要求实名**:2026-09-15 运营方定,投稿和聊天、评论、弹幕一样只要手机号账号(原 D11 要求实名,
+    门槛在这里和客户端投稿页各有一道,一起去掉了)。"""
     since = bj_midnight(bj_day())
     n = await db.scalar(select(func.count()).select_from(Video).where(
         Video.uploader_id == user.id, Video.created_at >= since))

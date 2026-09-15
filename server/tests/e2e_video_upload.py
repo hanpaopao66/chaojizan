@@ -17,7 +17,7 @@ from tests.chat_util import WS
 from tests.util import call
 from tests.video_util import (add_part, admin2_token, admin_token, chunked_upload, clear_rate_limits,
                               creator, ffmpeg_clip, media_upload, new_video, person, raw,
-                              realname, set_coins, set_flag, sql, wait_video)
+                              set_coins, set_flag, sql, wait_video)
 
 
 def gone(url: str, timeout: float = 5) -> bool:
@@ -46,11 +46,12 @@ def main():
     a, b = person(), person()   # a = UP 主,b = 观众
     print(f"  UP 主 A={a.id},观众 B={b.id}")
 
-    # ---- 实名门槛(D11)----
-    r = a.post("/video/v1/uploads/videos", {"title": "没实名"}, expect_error=True)
-    assert r.get("_error") == 403 and "实名" in r["detail"], r
-    realname(a)
-    print("  ✓ D11:没实名不能投稿,实名之后可以")
+    # ---- 不要求实名(2026-09-15 运营方定;原 D11 要求实名)----
+    # a 从头到尾不实名:建稿、挂分 P、提交审核一路走下来,就是这条的断言
+    probe = a.post("/video/v1/uploads/videos", {"title": "没实名也能投"})
+    assert probe.get("vid"), probe
+    assert a.delete(f"/video/v1/videos/{probe['vid']}").get("ok") is True
+    print("  ✓ 投稿不要求实名(建稿、挂分 P、提交都不拦)")
 
     # ---- 上传原片:横屏走分片,竖屏整块 ----
     horiz, vert = ffmpeg_clip(1280, 720, 4), ffmpeg_clip(720, 1280, 4)

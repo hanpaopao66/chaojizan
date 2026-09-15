@@ -85,7 +85,7 @@ class _IdentityPageState extends State<IdentityPage> {
                                   style: theme.textTheme.bodyMedium),
                               const SizedBox(height: 12),
                               Text(
-                                '实名信息用于酒类等受限商品的年龄核验,以及投稿视频、公开群组的实名要求。'
+                                '实名信息用于酒类等受限商品的年龄核验,以及公开群组的实名要求。'
                                 '身份证号已加密存储,不会展示、不会提供给商家、骑手或其他用户;'
                                 '注销账号时实名数据一并删除。',
                                 textAlign: TextAlign.center,
@@ -105,7 +105,7 @@ class _IdentityPageState extends State<IdentityPage> {
                       const SizedBox(height: 6),
                       Text(
                         '这几件事要先实名:买酒类等受限商品(依法向未成年人禁售,要核验年龄)、'
-                        '投稿视频、把群或频道设成公开。聊天、评论、弹幕不用实名。'
+                        '把群或频道设成公开。聊天、投稿视频、评论、弹幕不用实名。'
                         '只做一次,全程有效。\n'
                         '身份证号加密存储、明文不出接口,不会提供给商家、骑手或其他用户;'
                         '注销账号时实名数据一并删除。',

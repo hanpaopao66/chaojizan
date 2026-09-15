@@ -794,7 +794,7 @@ class VideoPatch(VideoIn):
 @router.post("/uploads/videos", dependencies=[Depends(upload_on)])
 async def create_video(body: VideoIn | None = None, me: User = Depends(social_user),
                        db: AsyncSession = Depends(get_db)):
-    """建稿件(草稿)。要实名(D11);每人每天最多 10 个(D8)。
+    """建稿件(草稿)。每人每天最多 10 个(D8);不要求实名(2026-09-15 运营方定,原 D11 要求实名)。
     原片用媒体接口传(purpose=video,kind=video_source),再 POST /videos/{vid}/parts 挂上。"""
     await check_rate_limit("video_create", str(me.id), 20)
     v = await vsvc.create_draft(db, me, (body or VideoIn()).model_dump(exclude_unset=True))
@@ -825,7 +825,6 @@ class PartIn(BaseModel):
 async def add_part(vid: str, body: PartIn, me: User = Depends(social_user),
                    db: AsyncSession = Depends(get_db)):
     """加一 P,马上开始转码。做完推用户事件 `video`。"""
-    await vsvc.require_realname(db, me)
     v = await vsvc.own_video(db, vid, me)
     p = await vsvc.add_part(db, me, v, body.media_id, body.title)
     await vsvc.emit_video_event(db, v)
@@ -851,7 +850,6 @@ async def delete_part(vid: str, part_id: int, me: User = Depends(social_user),
 @router.post("/videos/{vid}/submit", dependencies=[Depends(upload_on)])
 async def submit(vid: str, me: User = Depends(social_user), db: AsyncSession = Depends(get_db)):
     """提交审核。转码没完的先进 processing,全部就绪自动进 reviewing。"""
-    await vsvc.require_realname(db, me)
     v = await vsvc.own_video(db, vid, me)
     await vsvc.submit(db, me, v)
     await db.commit()

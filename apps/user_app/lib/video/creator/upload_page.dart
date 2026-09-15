@@ -6,7 +6,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:superz_shared/superz_shared.dart';
 
 import '../../chat/store.dart';
-import '../../identity_page.dart';
 import '../../session.dart';
 import '../me/common.dart';
 import '../models.dart';
@@ -25,7 +24,7 @@ const _fallbackZones = <(String, String)>[
 /// 投稿 / 编辑稿件(#358)。[vid] 为空 = 新投稿;有 = 编辑已有的稿件。
 ///
 /// 新投稿的顺序是「先选视频、马上建草稿、边传边填」:
-/// - 没实名(D11)在打开相册之前就说;选完视频就建草稿 —— 今天投满了、投稿没开放,在传 1GB 之前就知道;
+/// - 选完视频就建草稿 —— 今天投满了、投稿没开放,在传 1GB 之前就知道(投稿不要求实名,2026-09-15 起);
 /// - 原片交给全局的上传任务([VideoUploads]),离开这一页也接着传,传完自动挂到这个草稿上;
 /// - 表单按差量保存(只送改了的字段),已发布的稿件改内容进待审,线上一个字不动。
 class VideoUploadPage extends StatefulWidget {
@@ -217,18 +216,9 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
     }
   }
 
-  /// 新投稿:看实名 → 选视频 → 建草稿 → 开始传。
+  /// 新投稿:选视频 → 建草稿 → 开始传。投稿不要求实名(2026-09-15 运营方定,原 D11 要求实名)。
   Future<void> _pickFirst() async {
     if (!await ensureLoggedIn(context)) return;
-    // 没实名先说,别让人从相册里挑完一个视频才被拦下。判据和服务端建稿时一样(有没有实名记录);
-    // 查不到状态就放过去,由建稿那一步兜底
-    try {
-      final st = await rootApi.identityStatus();
-      if (st['verified'] == false) {
-        if (mounted) await _needRealname('发视频要先完成实名认证(我的 → 设置 → 实名认证)');
-        return;
-      }
-    } catch (_) {}
     if (!mounted) return;
     final x = await _pickVideo();
     if (x == null) return;
@@ -497,31 +487,10 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
     }
   }
 
-  /// 服务端的错误原样展示;没实名给「去认证」(D11);状态变了(409)顺手拉一次最新的。
+  /// 服务端的错误原样展示;状态变了(409)顺手拉一次最新的。
   Future<void> _onError(Object e) async {
-    if (e is ApiException && e.statusCode == 403 && e.message.contains('实名')) {
-      await _needRealname(e.message);
-      return;
-    }
     if (e is ApiException && (e.statusCode == 409 || e.statusCode == 422)) unawaited(_refresh());
     if (mounted) _toast(videoErrorText(e));
-  }
-
-  Future<void> _needRealname(String detail) async {
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => SzDialog(
-        title: const Text('先完成实名认证'),
-        content: Text('$detail\n\n平台对投稿要求实名(评论、弹幕不用)。认证只看姓名和身份证号,证号加密保存,不会给任何人看。'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('以后再说')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('去认证')),
-        ],
-      ),
-    );
-    if (go == true && mounted) {
-      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => IdentityPage(api: rootApi)));
-    }
   }
 
   /// 有没存的改动时返回先问一句:存、不存、接着改。
@@ -614,7 +583,6 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
       const SizedBox(height: 28),
       note('单个视频最大 1GB、最长 30 分钟;一个稿件最多 10 P'),
       note('每人每天最多投 10 个稿件'),
-      note('发视频要先完成实名认证(评论、弹幕不用)'),
       note('所有投稿先审后发,审核通过前只有你自己看得到'),
       note('选好视频就会建一个草稿;离开这一页视频也会接着传,传完自动挂上去'),
     ]);
