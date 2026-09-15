@@ -28,8 +28,7 @@ from ..config import settings
 from ..models import (MediaFile, MusicArtist, MusicComment, MusicCommentLike, MusicDecision,
                       MusicHistory, MusicPlay, MusicPlaylist, MusicPlaylistCollect,
                       MusicPlaylistTrack, MusicRelease, MusicReleaseCollect, MusicReport,
-                      MusicTrack, MusicTrackLike, MusicUserSetting, SocialNotification, User,
-                      UserRole)
+                      MusicTrack, MusicTrackLike, MusicUserSetting, User, UserRole)
 from ..state_machine import TransitionError
 from . import music_state as ms
 from . import storage
