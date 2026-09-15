@@ -7,10 +7,11 @@
 #   bash scripts/build_miniapp.sh blocks      # → miniapps/blocks/dist/blocks.zip
 #   bash scripts/build_miniapp.sh minesweeper # → miniapps/minesweeper/dist/minesweeper.zip
 #   bash scripts/build_miniapp.sh gomoku      # → miniapps/gomoku/dist/gomoku.zip
+#   bash scripts/build_miniapp.sh critters    # → miniapps/critters/dist/critters.zip(萌兽三路:版号有结论之前只做不上架)
 #
 # 打印的 SHA-256 应该和线上详情页公示的一致。上传用 server/scripts/publish_official_miniapp.py。
 set -euo pipefail
-app="${1:?用法:build_miniapp.sh <notepad|2048|snake|blocks|minesweeper|gomoku>}"
+app="${1:?用法:build_miniapp.sh <notepad|2048|snake|blocks|minesweeper|gomoku|critters>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dir="$root/miniapps"
 [ -d "$dir/$app" ] || { echo "没有 miniapps/$app"; exit 1; }

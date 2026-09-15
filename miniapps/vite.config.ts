@@ -1,4 +1,4 @@
-// 官方小程序共用一份构建配置:vite build --mode <名字>(notepad / 2048 / snake / blocks / minesweeper / gomoku)
+// 官方小程序共用一份构建配置:vite build --mode <名字>(notepad / 2048 / snake / blocks / minesweeper / gomoku / critters)
 // 产物在 <app>/dist/pkg,再由 scripts/build_miniapp.sh 打成可复现的 zip。
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
@@ -8,7 +8,7 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 
 /** 小程序 → 开发服务器端口 */
 const APPS: Record<string, number> = {
-  notepad: 5190, '2048': 5191, snake: 5192, blocks: 5193, minesweeper: 5194, gomoku: 5195,
+  notepad: 5190, '2048': 5191, snake: 5192, blocks: 5193, minesweeper: 5194, gomoku: 5195, critters: 5196,
 }
 
 export default defineConfig(({ mode }) => {

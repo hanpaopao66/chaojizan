@@ -182,6 +182,7 @@ def test_csp_report_logs_blocked_origin_only(monkeypatch, caplog):
 
 SCAN = ["admin-web/src", "developer-web/src", "web/src", "miniapps/notepad", "miniapps/2048",
         "miniapps/shared", "miniapps/snake", "miniapps/blocks", "miniapps/minesweeper", "miniapps/gomoku",
+        "miniapps/critters",
         "miniapps/_template", "packages/miniapp-sdk/src"]
 SINK = re.compile(r"dangerouslySetInnerHTML|\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML"
                   r"|document\.write\(|v-html")

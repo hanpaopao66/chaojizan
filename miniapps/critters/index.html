@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>萌兽三路</title>
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <main id="app" class="app">
+    <div id="screen" class="menus"></div>
+    <section id="battle" class="battle" hidden>
+      <canvas id="field" class="field" role="img" aria-label="战场"></canvas>
+      <div id="b-top" class="hud-top">
+        <button id="b-pause" class="hud-btn" type="button" aria-label="暂停"></button>
+        <div class="hud-title"><b id="b-name"></b><small id="b-goal"></small></div>
+        <div id="b-timer" class="timer" aria-label="剩余时间">2:30</div>
+        <div class="tally">
+          <span class="me" title="我推倒的塔"><i class="flag"></i><b id="b-down">0</b></span>
+          <span class="them" title="对面推倒的塔"><i class="flag"></i><b id="b-lost">0</b></span>
+        </div>
+      </div>
+      <div id="b-boss" class="boss-bar" hidden><span class="boss-name"></span><i><b></b></i></div>
+      <div id="b-banner" class="banner" hidden aria-hidden="true"></div>
+      <div id="b-hint" class="hint" hidden><i class="finger"></i><span>按住一张卡,拖到下半场的路上松手</span></div>
+      <div id="b-bottom" class="hud-bottom">
+        <div class="hand">
+          <div class="next"><small>下一张</small><div id="b-next" class="next-card"></div></div>
+          <button class="card" type="button" data-slot="0"></button>
+          <button class="card" type="button" data-slot="1"></button>
+          <button class="card" type="button" data-slot="2"></button>
+          <button class="card" type="button" data-slot="3"></button>
+        </div>
+        <div class="energy">
+          <div id="b-energy-bar" class="ebar"><i id="b-fill"></i><span class="ticks"></span></div>
+          <b id="b-energy" class="enum">5</b>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <p id="live" class="sr" aria-live="polite"></p>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
