@@ -13,5 +13,5 @@
   },
   "include": ["notepad/src", "notepad/test", "2048/src", "2048/test", "shared/src", "shared/test",
     "snake/src", "snake/test", "blocks/src", "blocks/test", "minesweeper/src", "minesweeper/test",
-    "gomoku/src", "gomoku/test", "../packages/miniapp-sdk/src", "types.d.ts"]
+    "gomoku/src", "gomoku/test", "critters/src", "critters/test", "../packages/miniapp-sdk/src", "types.d.ts"]
 }
