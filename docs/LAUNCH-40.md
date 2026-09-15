@@ -17,6 +17,8 @@
 | `bots_enabled` | 机器人平台(Bot API、开发者后台建机器人、内联键盘回调) | 开 | **关** | 第三方开发者责任条款定稿之后 |
 | `media_transcode` | 转码急停(关掉时任务只排队不执行) | 开 | 开 | 机器被转码压垮时临时关 |
 
+- 表里是**没写过**开关时的缺省值。生产上 `video_enabled`、`video_upload_enabled` 已在 2026-09-15 由后台打开
+  (运营方知情后先开放,见 [COMPLIANCE-40.md](COMPLIANCE-40.md) 第 5 条),要关就在开关页拨回去;
 - 判「开发」的依据是 `APP_ENV=dev`;拼错、留空、写成 staging 一律按生产算(`services/flags.video_flag_default`);
 - `/config` 的 `features` 把 chat / calls / video / video_upload / bots 下发给客户端,关着的入口直接收起(电话按钮、「我的」页视频块);
   服务端照样兜底回 503,客户端只是不让人点进去才知道。
@@ -83,7 +85,8 @@
 ## 8. 上线前核对
 
 - [ ] `.env.prod`:`APP_ENV` 是 `prod`(或不写);`TURN_*` 只在开通话时才配
-- [ ] 后台开关页确认:`calls_enabled`、`video_enabled`、`video_upload_enabled`、`bots_enabled` 显示「关」
+- [ ] 后台开关页确认:`calls_enabled`、`bots_enabled` 显示「关」;`video_enabled`、`video_upload_enabled` 2026-09-15 起在生产上是「开」
+  (运营方知情后先开放,见 [COMPLIANCE-40.md](COMPLIANCE-40.md) 第 5 条),审核在后台「社区 → 视频审核」
 - [ ] `docker compose ps`:migrate 退出码 0;api、sweeper、media-worker、minio、nginx 在跑
 - [ ] 两个真实账号互发一条文字、一张图、一段语音;群里 @ 一下;频道发一条
 - [ ] 签名地址直出 200 / 206;`/_minio_internal/` 直接访问 404
