@@ -214,14 +214,15 @@ GATE=$(st "curl -sk -m 5 -o /dev/null -w '%{http_code} %{redirect_url}' https://
 echo "   不带通行 cookie:$GATE(应当 302 到 /__gate)"
 case "$GATE" in 302*) ;; *) echo "✗ 门禁没生效"; exit 1 ;; esac
 st "bash $DEST/deploy/staging-smoke.sh '$STAGING_BASE'" || { echo "✗ 冒烟没过(上面打 ✗ 的那几条)"; exit 1; }
-FRPC=$(st "docker logs --tail 20 superz-staging-frpc-1 2>&1" | perl -pe 's/\e\[[0-9;]*m//g')
-if echo "$FRPC" | grep -q "port not allowed"; then
-  echo "   ✗ frpc:云服务器上的 frps 没放行这个端口(frps.toml 的 allowPorts),见 docs/STAGING.md「上线前你要做的」"
-elif echo "$FRPC" | grep -q "start proxy success"; then
-  echo "   frpc:转发已建立"
-else
-  echo "$FRPC" | grep -E "error|login" | tail -2 | sed 's/^/   frpc: /'
-fi
+# 以最后一条状态为准:frps 放行之前的「port not allowed」会在日志里留很久,只 grep 有没有会一直误报(09-15 踩到)
+FRPC=$(st "docker logs --tail 50 superz-staging-frpc-1 2>&1" | perl -pe 's/\e\[[0-9;]*m//g' \
+  | grep -E "start proxy success|port not allowed|start error|login to server failed" | tail -1)
+case "$FRPC" in
+  *"start proxy success"*) echo "   frpc:转发已建立" ;;
+  *"port not allowed"*) echo "   ✗ frpc:云服务器上的 frps 没放行这个端口(frps.toml 的 allowPorts),见 docs/STAGING.md「上线前你要做的」" ;;
+  "") echo "   frpc:日志里还没有转发的记录(刚起?过一会儿看 staging-compose.sh logs frpc)" ;;
+  *) echo "   frpc: $FRPC" ;;
+esac
 EXT=$(curl -s -m 10 --noproxy '*' -o /dev/null -w '%{http_code}' "$STAGING_BASE/" || true)
 if [ "$EXT" = "302" ]; then
   echo "   外网 $STAGING_BASE/ → 302 ✓"

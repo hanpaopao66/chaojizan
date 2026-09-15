@@ -98,6 +98,15 @@ bash scripts/deploy_staging.sh v0.21.0-b2064 --skip-web   # 部署某个提交;�
 | `deploy/nginx/staging.generated/` | 生成的 nginx 配置 |
 | `webapp/current/` | 预发编的用户端网页版 |
 
+在预发上跑某个 e2e 套件(测试代码临时拷进 api 容器、跑完删掉;用例会在预发库里造数据,不要紧):
+
+```bash
+ssh <预发机> bash ~/super-z-staging/deploy/staging-e2e.sh e2e_miniapp_catalog
+```
+
+官方小程序也可以发一份到预发(和生产同一个脚本 `server/scripts/publish_official_miniapp.py`,审核人写演示管理员 13800000000),
+预发没有托管域名,开发配置下小程序走主站的 `/_mini-host/` 路径打开。
+
 运维命令都走 `deploy/staging-compose.sh`(项目名、两份 compose、env 文件只写在这一处):
 
 ```bash
