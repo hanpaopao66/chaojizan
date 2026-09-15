@@ -160,7 +160,8 @@ SRI 见 `/sdk/versions.json`。同一份脚本还挂了 `window.Telegram.WebApp`
 ## 按钮(宿主原生画)
 
 ### MainButton
-底栏主按钮。页面只管文字和状态,按钮本身宿主画 —— 页面盖不住、也仿冒不了。属性:`type`(`'main'` / `'secondary'`)、
+底栏主按钮。和 Telegram 一样是通栏按钮,底栏的底色是主题的 `bottom_bar_bg_color`(`setBottomBarColor` 改得了)。
+页面只管文字和状态,按钮本身宿主画 —— 页面盖不住、也仿冒不了。属性:`type`(`'main'` / `'secondary'`)、
 `text`、`color`、`textColor`、`isVisible`、`isActive`、`isProgressVisible`、`hasShineEffect`、`position`。
 和 Telegram 一样可以直接赋值(`MainButton.text = '下单'`),同一轮里连着改几个属性只发一次;
 `color` / `textColor` 没设时读到的是跟主题走的默认色(主按钮:`button_color` / `button_text_color`;
@@ -201,7 +202,9 @@ SRI 见 `/sdk/versions.json`。同一份脚本还挂了 `window.Telegram.WebApp`
 次按钮,API 和 MainButton 相同;`setParams` 多一个 `position`:`left` / `right` / `top` / `bottom`(相对主按钮)。
 
 ### BackButton
-宿主顶栏左侧的返回箭头。**显示时,安卓系统返回键也交给页面**(触发 `backButtonClicked`);隐藏时系统返回键关闭小程序。
+宿主顶栏左边的返回箭头:显示时顶栏最左边的关闭(×)换成返回箭头(和 Telegram 一样),`···` 菜单里多一项「关闭」。
+**显示时,安卓系统返回键也交给页面**(触发 `backButtonClicked`);隐藏时系统返回键关闭小程序。
+全屏时顶栏收成胶囊,返回箭头不画 —— 安卓的系统返回键照常交给页面,iOS 请在页面里自己画返回。
 
 ### BackButton.show()
 显示返回箭头。

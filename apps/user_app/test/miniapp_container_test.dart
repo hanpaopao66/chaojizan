@@ -64,18 +64,21 @@ class _Opened {
   int pageTaps = 0;
   int _id = 0;
 
-  Future<Map<String, dynamic>?> call(WidgetTester t, String method, [Map<String, dynamic> params = const {}]) async {
+  /// 页面调一个桥方法。[settle] = false:画面上有无限动画(加载中的转圈)时只推几帧,不等动画停
+  Future<Map<String, dynamic>?> call(WidgetTester t, String method,
+      [Map<String, dynamic> params = const {}, bool settle = true]) async {
     final r = await c!.receive({
       'v': 2, 'type': 'call', 'id': ++_id, 'method': method, 'params': params, 'token': c!.dispatcher.token,
     });
-    await t.pumpAndSettle();
+    settle ? await t.pumpAndSettle() : await t.pump(const Duration(milliseconds: 300));
     return r;
   }
 
   List<String> events() => [for (final m in sent) if (m['type'] == 'event') '${m['name']}'];
 }
 
-Future<_Opened> _open(WidgetTester t, {String kind = 'app', Size size = const Size(390, 844)}) async {
+Future<_Opened> _open(WidgetTester t,
+    {String kind = 'app', Size size = const Size(390, 844), Brightness brightness = Brightness.light}) async {
   SharedPreferences.setMockInitialValues({});
   t.view.physicalSize = size * 3;
   t.view.devicePixelRatio = 3;
@@ -85,7 +88,7 @@ Future<_Opened> _open(WidgetTester t, {String kind = 'app', Size size = const Si
   final api = _api(kind: kind);
   final card = MiniAppCard.fromJson(_card(kind: kind));
   await t.pumpWidget(MaterialApp(
-    theme: brandTheme(Brightness.light),
+    theme: brandTheme(brightness),
     home: Builder(
       builder: (context) => Scaffold(
         body: Center(
@@ -129,6 +132,12 @@ Rect _panel(WidgetTester t) => t.getRect(find.byKey(const ValueKey('miniapp-pane
 Finder get _capsule => find.byType(MiniAppCapsule);
 
 Finder _inCapsule(String tooltip) => find.descendant(of: _capsule, matching: find.byTooltip(tooltip));
+
+Finder get _header => find.byKey(const ValueKey('miniapp-header'));
+
+Finder _inHeader(Finder f) => find.descendant(of: _header, matching: f);
+
+Color _materialColor(WidgetTester t, Finder f) => t.widget<Material>(f).color!;
 
 void main() {
   testWidgets('应用:requestFullscreen → 铺满整屏、顶栏收成右上角胶囊;exitFullscreen 回到弹层原来的大小', (t) async {
@@ -240,5 +249,108 @@ void main() {
     await o.call(t, 'expand');
     expect(_panel(t).height, closeTo((844 - 24) * kMiniAppSheetMax, 1));
     expect(o.c!.expanded, isTrue);
+  });
+
+  // ---------------------------------------------------------------- 外框(照 Telegram 排,保留「由 XX 提供」)
+
+  testWidgets('顶栏照 Telegram 排:左关闭、中间图标和名称、名称下面「由 XX 提供」和认证标记、右 ···', (t) async {
+    await _open(t);
+    final close = t.getCenter(_inHeader(find.byTooltip('关闭')));
+    final more = t.getCenter(_inHeader(find.byTooltip('更多')));
+    final name = t.getCenter(_inHeader(find.text('记事本')));
+    final provider = t.getCenter(_inHeader(find.text('由 某某科技 提供 · 企业 · 已认证')));
+    expect(close.dx, lessThan(60), reason: '关闭在最左');
+    expect(more.dx, greaterThan(330), reason: '··· 在最右');
+    expect(name.dx, closeTo(195, 40), reason: '名称居中');
+    expect(provider.dy, greaterThan(name.dy), reason: '「由 XX 提供」在名称下面一行');
+    expect(provider.dx, closeTo(195, 40));
+    expect(_inHeader(find.byKey(const ValueKey('miniapp-verified'))), findsOneWidget, reason: '认证标记');
+    expect(_inHeader(find.byTooltip('返回')), findsNothing);
+  });
+
+  testWidgets('页面显示了 BackButton:左边的关闭换成返回箭头,点它交给页面;··· 菜单里留一个关闭', (t) async {
+    final o = await _open(t);
+    await o.call(t, 'backButton', {'is_visible': true});
+    expect(_inHeader(find.byTooltip('返回')), findsOneWidget);
+    expect(_inHeader(find.byTooltip('关闭')), findsNothing);
+    expect(t.getCenter(_inHeader(find.byTooltip('返回'))).dx, lessThan(60), reason: '返回箭头占关闭原来的位置');
+    await t.tap(_inHeader(find.byTooltip('返回')));
+    await t.pumpAndSettle();
+    expect(o.events().last, 'backButtonClicked');
+    expect(find.byType(MiniAppFrame), findsOneWidget);
+
+    await t.tap(_inHeader(find.byTooltip('更多')));
+    await t.pumpAndSettle();
+    final close = find.descendant(of: find.byType(BottomSheet), matching: find.text('关闭'));
+    expect(close, findsOneWidget, reason: '页面一直不藏返回键,用户也关得掉');
+    await t.tap(close);
+    await t.pumpAndSettle();
+    expect(find.byType(MiniAppFrame), findsNothing);
+  });
+
+  testWidgets('BackButton 藏起来后关闭回到左边,菜单里不再多一项关闭', (t) async {
+    final o = await _open(t);
+    await o.call(t, 'backButton', {'is_visible': true});
+    await o.call(t, 'backButton', {'is_visible': false});
+    expect(_inHeader(find.byTooltip('关闭')), findsOneWidget);
+    await t.tap(_inHeader(find.byTooltip('更多')));
+    await t.pumpAndSettle();
+    expect(find.descendant(of: find.byType(BottomSheet), matching: find.text('关闭')), findsNothing);
+  });
+
+  testWidgets('顶栏底色:没设是主题的 header_bg_color;跟 setHeaderColor 走,深底配浅字', (t) async {
+    final o = await _open(t);
+    expect(_materialColor(t, _header), SzColors.light.paper);
+    await o.call(t, 'setHeaderColor', {'color': '#1F3A5F'});
+    expect(_materialColor(t, _header), const Color(0xFF1F3A5F));
+    final icon = t.widget<Icon>(find.descendant(of: _inHeader(find.byTooltip('更多')), matching: find.byType(Icon)));
+    expect(icon.color, SzColors.dark.ink, reason: '深色底上用浅色字');
+  });
+
+  testWidgets('底栏:通栏按钮、底色是 bottom_bar_bg_color(setBottomBarColor 改得了);次按钮按 position 排', (t) async {
+    final o = await _open(t);
+    await o.call(t, 'mainButton', {'text': '提交', 'is_visible': true});
+    await o.call(t, 'secondaryButton', {'text': '稍后', 'is_visible': true, 'position': 'left'});
+    final bar = find.byKey(const ValueKey('miniapp-bottom-bar'));
+    expect(_materialColor(t, bar), SzColors.light.surface);
+    final main = t.getRect(find.byKey(const ValueKey('miniapp-main-button')));
+    final second = t.getRect(find.byKey(const ValueKey('miniapp-secondary-button')));
+    expect(main.height, 48);
+    expect(second.right, lessThan(main.left), reason: 'position=left:次按钮在主按钮左边');
+    expect(main.width + second.width, closeTo(390 - 24 - 8, 1), reason: '两个按钮平分通栏');
+    expect(_materialColor(t, find.byKey(const ValueKey('miniapp-main-button'))), SzColors.light.clay);
+    await t.tap(find.text('提交'));
+    await t.pumpAndSettle();
+    expect(o.events().last, 'mainButtonClicked');
+
+    await o.call(t, 'setBottomBarColor', {'color': '#102030'});
+    expect(_materialColor(t, bar), const Color(0xFF102030));
+    await o.call(t, 'secondaryButton', {'text': '稍后', 'is_visible': true, 'position': 'top'});
+    final m2 = t.getRect(find.byKey(const ValueKey('miniapp-main-button')));
+    final s2 = t.getRect(find.byKey(const ValueKey('miniapp-secondary-button')));
+    expect(s2.bottom, lessThanOrEqualTo(m2.top), reason: 'position=top:次按钮在上面');
+    expect(m2.width, closeTo(390 - 24, 1), reason: '竖排时每个都是通栏');
+  });
+
+  testWidgets('加载中:不传 leaveActive 的点不了;宿主按页面给的 is_active 判断', (t) async {
+    final o = await _open(t);
+    await o.call(t, 'mainButton', {'text': '提交', 'is_visible': true, 'is_active': false, 'is_progress_visible': true},
+        false);
+    await t.tap(find.byKey(const ValueKey('miniapp-main-button')));
+    await t.pump();
+    expect(o.events(), isNot(contains('mainButtonClicked')));
+    await o.call(t, 'mainButton', {'text': '提交', 'is_visible': true, 'is_active': true, 'is_progress_visible': true},
+        false);
+    await t.tap(find.byKey(const ValueKey('miniapp-main-button')));
+    await t.pump();
+    expect(o.events().last, 'mainButtonClicked', reason: 'leaveActive:加载中也能点(和 Telegram 一样)');
+  });
+
+  testWidgets('暗色主题:顶栏、底栏用暗色那一套', (t) async {
+    final o = await _open(t, brightness: Brightness.dark);
+    expect(_materialColor(t, _header), SzColors.dark.paper);
+    await o.call(t, 'mainButton', {'text': '提交', 'is_visible': true});
+    expect(_materialColor(t, find.byKey(const ValueKey('miniapp-bottom-bar'))), SzColors.dark.surface);
+    expect(_materialColor(t, find.byKey(const ValueKey('miniapp-main-button'))), SzColors.dark.clay);
   });
 }

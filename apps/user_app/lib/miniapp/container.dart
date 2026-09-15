@@ -536,6 +536,8 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
           if (c != null && c.settingsButtonVisible) item(Icons.tune, '设置', c.clickSettings),
           item(Icons.refresh, '重新进入', _launch),
           item(Icons.flag_outlined, '投诉', () => showMiniAppReportSheet(context, widget.api, card)),
+          // 顶栏左边换成了返回箭头:这里留一个关闭 —— 页面一直不藏返回键,用户也关得掉(关闭确认照常)
+          if (c != null && c.backButtonVisible && !_immersive) item(Icons.close, '关闭', _requestClose),
           item(Icons.delete_sweep_outlined, '清除这个小程序的数据', _clearData, color: sz.danger),
           if (_debug && c != null) item(Icons.bug_report_outlined, '桥调用日志', () => _showLog(c)),
         ]),
@@ -709,27 +711,53 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
     );
   }
 
+  /// 主题里的一个色(宿主下发给页面的那一套 16 个键),没有就用 [fallback]
+  Color _theme(String key, Color fallback) => colorOf(_c?.themeParams[key]) ?? fallback;
+
+  /// 底栏:和 Telegram 一样是通栏按钮,底色是 bottom_bar_bg_color(页面 setBottomBarColor 改得了)。
+  /// 按钮宿主原生画,页面只给文字和状态 —— 画在网页外面,页面盖不住也仿冒不了。
   Widget _bottomBar() {
     final c = _c;
     if (c == null || !(c.mainButton.visible || c.secondaryButton.visible)) return const SizedBox.shrink();
     final sz = Theme.of(context).sz;
+    final bar = colorOf(c.bottomBarColor) ?? _theme('bottom_bar_bg_color', sz.surface);
     Widget button(BottomButtonState s, VoidCallback onTap, {required bool primary}) {
-      final bg = colorOf(s.color) ?? (primary ? sz.clay : sz.surface);
-      final fg = colorOf(s.textColor) ?? (primary ? sz.surface : sz.ink);
-      final child = s.progress
-          ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
-          : Text(s.text.isEmpty ? (primary ? '继续' : '取消') : s.text,
-              maxLines: 1, overflow: TextOverflow.ellipsis);
-      final enabled = s.active && !s.progress;
-      return primary
-          ? FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: bg, foregroundColor: fg, minimumSize: const Size.fromHeight(46)),
-              onPressed: enabled ? onTap : null,
-              child: child)
-          : OutlinedButton(
-              style: OutlinedButton.styleFrom(foregroundColor: fg, backgroundColor: bg, minimumSize: const Size.fromHeight(46)),
-              onPressed: enabled ? onTap : null,
-              child: child);
+      // 默认色和 Telegram 一样:主按钮 button_color / button_text_color;次按钮底色同底栏、字是 button_color
+      final bg = colorOf(s.color) ?? (primary ? _theme('button_color', sz.clay) : bar);
+      final fg = colorOf(s.textColor) ??
+          (primary ? _theme('button_text_color', sz.surface) : _theme('button_color', sz.clay));
+      // 次按钮和底栏同色时描一圈发丝线,不然看不出是个按钮
+      final outline = !primary && bg == bar;
+      final enabled = s.active; // 和 Telegram 一样:showProgress(leaveActive) 时加载中也能点
+      return Opacity(
+        opacity: enabled ? 1 : 0.5,
+        child: Material(
+          key: ValueKey(primary ? 'miniapp-main-button' : 'miniapp-secondary-button'),
+          color: bg,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: outline ? BorderSide(color: _theme('line_color', sz.line)) : BorderSide.none,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: enabled ? onTap : null,
+            child: SizedBox(
+              height: 48,
+              child: Center(
+                child: s.progress
+                    ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
+                    : Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Text(s.text.isEmpty ? (primary ? '继续' : '取消') : s.text,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: kFontBodyLg, fontWeight: FontWeight.w600, color: fg)),
+                      ),
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     final main = c.mainButton.visible ? button(c.mainButton, c.clickMain, primary: true) : null;
@@ -742,33 +770,42 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
       if (second != null && (pos == 'right' || pos == 'bottom')) second,
     ];
     return Material(
-      color: sz.paper,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 8),
-          child: vertical
-              ? Column(mainAxisSize: MainAxisSize.min, children: [
-                  for (final (i, w) in items.indexed) ...[if (i > 0) const SizedBox(height: 8), w],
-                ])
-              : Row(children: [
-                  for (final (i, w) in items.indexed) ...[if (i > 0) const SizedBox(width: 10), Expanded(child: w)],
-                ]),
+      key: const ValueKey('miniapp-bottom-bar'),
+      color: bar,
+      child: DecoratedBox(
+        decoration: BoxDecoration(border: Border(top: BorderSide(color: _theme('line_color', sz.line)))),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: vertical
+                ? Column(mainAxisSize: MainAxisSize.min, children: [
+                    for (final (i, w) in items.indexed) ...[if (i > 0) const SizedBox(height: 8), w],
+                  ])
+                : Row(children: [
+                    for (final (i, w) in items.indexed) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: w)],
+                  ]),
+          ),
         ),
       ),
     );
   }
 
+  /// 顶栏,照 Telegram 的排法:左边关闭(页面显示了 BackButton 时换成返回箭头),中间图标 + 名称,
+  /// 右边 `···`。名称下面那一行「由 XX 提供」和认证标记**保留** —— 防仿冒靠的就是它,页面画不掉。
+  /// 底色跟页面的 setHeaderColor 走,没设就是主题的 header_bg_color;字色按底色深浅自动取。
   Widget _header() {
     final sz = Theme.of(context).sz;
     final c = _c;
-    final headerBg = colorOf(c?.headerColor) ?? sz.paper;
+    final headerBg = colorOf(c?.headerColor) ?? _theme('header_bg_color', sz.paper);
     final dark = ThemeData.estimateBrightnessForColor(headerBg) == Brightness.dark;
     final fg = dark ? SzColors.dark.ink : SzColors.light.ink;
     final sheet = _isSheet(context);
+    final back = c != null && c.backButtonVisible;
     // 小游戏退出全屏时面板顶到屏幕边:顶栏自己让开状态栏
     final top = widget.fullscreen ? MediaQuery.paddingOf(context).top : 0.0;
     return Material(
+      key: const ValueKey('miniapp-header'),
       color: headerBg,
       child: GestureDetector(
         // 拖顶栏:弹层半屏 ↔ 全屏(只有窄屏的应用弹层能拖)
@@ -785,18 +822,19 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
                     decoration: BoxDecoration(color: fg.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(2))),
               ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+              padding: const EdgeInsets.fromLTRB(4, 2, 4, 4),
               child: Row(children: [
-                if (c != null && c.backButtonVisible)
-                  IconButton(onPressed: c.clickBack, icon: Icon(Icons.arrow_back, color: fg), tooltip: '返回')
-                else
-                  const SizedBox(width: 10),
-                Expanded(child: _AppIdentity(card: card, trial: widget.trial, api: widget.api, color: fg, compact: true)),
+                back
+                    ? IconButton(onPressed: c.clickBack, icon: Icon(Icons.arrow_back, color: fg), tooltip: '返回')
+                    : IconButton(onPressed: _requestClose, icon: Icon(Icons.close, color: fg), tooltip: '关闭'),
+                Expanded(
+                  child: _AppIdentity(
+                      card: card, trial: widget.trial, api: widget.api, color: fg, compact: true, centered: true),
+                ),
                 IconButton(onPressed: _menu, icon: Icon(Icons.more_horiz, color: fg), tooltip: '更多'),
-                IconButton(onPressed: _requestClose, icon: Icon(Icons.close, color: fg), tooltip: '关闭'),
               ]),
             ),
-            Divider(height: 1, color: sz.line),
+            Divider(height: 1, color: _theme('line_color', sz.line)),
           ]),
         ),
       ),
@@ -879,48 +917,79 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
   }
 }
 
-/// 图标 + 名称 + 「由 XX 提供 · 认证」。顶栏、菜单、启动页共用 —— 同一个应用在哪儿都是同一副样子。
+/// 图标 + 名称 + 「由 XX 提供 · 认证」。顶栏、菜单共用 —— 同一个应用在哪儿都是同一副样子。
+///
+/// 「由 XX 提供」这一行和认证标记是防仿冒的关键:它画在网页外面,页面画不掉,也没法冒充成别人。
+/// [centered] 是顶栏的排法(照 Telegram:图标和名称居中一行,「由 XX 提供」在下面一行)。
 class _AppIdentity extends StatelessWidget {
-  const _AppIdentity({required this.card, required this.api, this.trial = false, this.color, this.compact = false});
+  const _AppIdentity(
+      {required this.card, required this.api, this.trial = false, this.color, this.compact = false, this.centered = false});
 
   final MiniAppCard card;
   final ApiClient api;
   final bool trial;
   final Color? color;
   final bool compact;
+  final bool centered;
 
   @override
   Widget build(BuildContext context) {
     final sz = Theme.of(context).sz;
     final ink = color ?? sz.ink;
     final dev = card.developer;
+    final muted = ink.withValues(alpha: 0.62);
+    final name = Text(card.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: compact ? kFontBodyLg : kFontTitle, fontWeight: FontWeight.w600, color: ink));
+    final badge = trial
+        ? [
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(color: sz.claySoft, borderRadius: BorderRadius.circular(4)),
+              child: Text('体验版', style: TextStyle(fontSize: kFontMicro, color: sz.clay)),
+            ),
+          ]
+        : const <Widget>[];
+    // 「由 XX 提供 · 企业 · 已认证」一整句一个 Text;认证过的(或官方)后面跟一个认证标记
+    final provider = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(
+          child: Text(
+            '由 ${dev.name.isEmpty ? '开发者' : dev.name} 提供${dev.label.isEmpty ? '' : ' · ${dev.label}'}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: kFontMicro, color: muted),
+          ),
+        ),
+        if (dev.verified || dev.official)
+          Padding(
+            padding: const EdgeInsets.only(left: 3),
+            child: Icon(Icons.verified, key: const ValueKey('miniapp-verified'), size: 12, color: muted),
+          ),
+      ],
+    );
+    if (centered) {
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          MiniAppIcon(card: card, api: api, size: 20),
+          const SizedBox(width: 6),
+          Flexible(child: name),
+          ...badge,
+        ]),
+        const SizedBox(height: 1),
+        provider,
+      ]);
+    }
     return Row(children: [
       MiniAppIcon(card: card, api: api, size: compact ? 28 : 40),
       const SizedBox(width: 10),
       Expanded(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-          Row(children: [
-            Flexible(
-              child: Text(card.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: compact ? kFontBodyLg : kFontTitle, fontWeight: FontWeight.w600, color: ink)),
-            ),
-            if (trial) ...[
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(color: sz.claySoft, borderRadius: BorderRadius.circular(4)),
-                child: Text('体验版', style: TextStyle(fontSize: kFontMicro, color: sz.clay)),
-              ),
-            ],
-          ]),
-          Text(
-            '由 ${dev.name.isEmpty ? '开发者' : dev.name} 提供${dev.label.isEmpty ? '' : ' · ${dev.label}'}',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: kFontMicro, color: ink.withValues(alpha: 0.62)),
-          ),
+          Row(children: [Flexible(child: name), ...badge]),
+          provider,
         ]),
       ),
     ]);

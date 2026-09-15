@@ -60,7 +60,16 @@ const THEMES = {
 const DEVICES = { phone: { w: 390, h: 844, label: '390 × 844' }, small: { w: 360, h: 800, label: '360 × 800' }, tablet: { w: 768, h: 1024, label: '平板 768 × 1024' } }
 
 interface LogRow { at: string; dir: '→' | '←' | '!'; text: string; bad?: boolean }
-interface BottomBtn { text: string; is_visible: boolean; is_active: boolean; is_progress_visible: boolean; color?: string; text_color?: string }
+interface BottomBtn { text: string; is_visible: boolean; is_active: boolean; is_progress_visible: boolean; color?: string; text_color?: string; position?: string }
+
+// 顶栏字色按底色深浅取(和 App 的 estimateBrightnessForColor 一个意思)
+function inkOn(hex: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return '#141413'
+  const n = parseInt(m[1], 16)
+  const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255
+  return lum < 0.5 ? '#F2F0E8' : '#141413'
+}
 
 function token(): string {
   const b = new Uint8Array(16)
@@ -263,14 +272,29 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
   }, [safeTop, safeBottom, fullscreen])
 
   const theme = THEMES[scheme]
-  const header = headerColor || theme.bg_color
-  const btn = (b: BottomBtn, primary: boolean, name: string) => (
-    <Button block type={primary ? 'primary' : 'default'} loading={b.is_progress_visible} disabled={!b.is_active}
-      style={primary ? { background: b.color || theme.button_color, color: b.text_color || theme.button_text_color, border: 0 } : {}}
-      onClick={() => { send({ v: 2, type: 'event', name }); add({ dir: '→', text: name }) }}>
-      {b.text || (primary ? '继续' : '取消')}
-    </Button>
-  )
+  // 顶栏和底栏照 App 的外框(向 Telegram 靠):顶栏底色跟 setHeaderColor / header_bg_color,
+  // 底栏是通栏按钮、底色跟 setBottomBarColor / bottom_bar_bg_color
+  const header = headerColor || theme.header_bg_color
+  const headerInk = inkOn(header)
+  const bar = bottomBarColor || theme.bottom_bar_bg_color
+  const btn = (b: BottomBtn, primary: boolean, name: string) => {
+    const bg = b.color || (primary ? theme.button_color : bar)
+    const fg = b.text_color || (primary ? theme.button_text_color : theme.button_color)
+    return (
+      <Button block loading={b.is_progress_visible} disabled={!b.is_active}
+        style={{ height: 48, borderRadius: 12, fontWeight: 600, background: bg, color: fg, flex: 1,
+          border: !primary && bg === bar ? `1px solid ${theme.line_color}` : 0 }}
+        onClick={() => { send({ v: 2, type: 'event', name }); add({ dir: '→', text: name }) }}>
+        {b.text || (primary ? '继续' : '取消')}
+      </Button>
+    )
+  }
+  const pos = secondary?.position || 'left'
+  const barButtons = [
+    secondary?.is_visible && (pos === 'left' || pos === 'top') ? <span key="s" style={{ flex: 1, display: 'flex' }}>{btn(secondary, false, 'secondaryButtonClicked')}</span> : null,
+    main?.is_visible ? <span key="m" style={{ flex: 1, display: 'flex' }}>{btn(main, true, 'mainButtonClicked')}</span> : null,
+    secondary?.is_visible && (pos === 'right' || pos === 'bottom') ? <span key="s2" style={{ flex: 1, display: 'flex' }}>{btn(secondary, false, 'secondaryButtonClicked')}</span> : null,
+  ]
 
   if (!servable.length) return <Empty description="先在「版本」里上传一个开发版,再在这里跑" />
   return (
@@ -314,14 +338,22 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
           background: theme.bg_color, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative',
         }}>
           {!fullscreen && (
+            // 左:关闭(页面显示了 BackButton 时换成返回箭头);中:图标名称,下面一行「由 XX 提供」和认证标记;右:···
             <div style={{ height: 56, flex: 'none', background: header, borderBottom: `1px solid ${theme.line_color}`,
-              display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', color: theme.text_color }}>
-              {backVisible ? <a onClick={() => send({ v: 2, type: 'event', name: 'backButtonClicked' })} style={{ color: theme.text_color }}>‹</a> : null}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{launch?.app.name || '—'}</div>
-                <div style={{ fontSize: 11, opacity: 0.65 }}>由 {launch?.app.developer.name || '开发者'} 提供 · {launch?.app.developer.label}</div>
+              display: 'flex', alignItems: 'center', padding: '0 4px', color: headerInk }}>
+              <a style={{ width: 40, textAlign: 'center', fontSize: 18, color: headerInk }} title={backVisible ? '返回' : '关闭'}
+                onClick={() => {
+                  if (backVisible) { send({ v: 2, type: 'event', name: 'backButtonClicked' }); add({ dir: '→', text: 'backButtonClicked(顶栏返回箭头)' }) }
+                  else message.info('真机上这一下会关闭小程序(开了关闭确认的先问一句)')
+                }}>{backVisible ? '←' : '✕'}</a>
+              <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+                <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {launch?.app.name || '—'}</div>
+                <div style={{ fontSize: 11, opacity: 0.62, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  由 {launch?.app.developer.name || '开发者'} 提供{launch?.app.developer.label ? ` · ${launch.app.developer.label}` : ''}
+                  {launch?.app.developer.verified || launch?.app.developer.official ? ' ✓' : ''}</div>
               </div>
-              <span>···</span><span>✕</span>
+              <span style={{ width: 40, textAlign: 'center' }}>···</span>
             </div>
           )}
           <div style={{ flex: 1, position: 'relative' }}>
@@ -339,9 +371,9 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
             )}
           </div>
           {(main?.is_visible || secondary?.is_visible) && (
-            <div style={{ display: 'flex', gap: 8, padding: `8px 12px ${8 + safeBottom}px`, background: bottomBarColor || theme.bottom_bar_bg_color }}>
-              {secondary?.is_visible && btn(secondary, false, 'secondaryButtonClicked')}
-              {main?.is_visible && btn(main, true, 'mainButtonClicked')}
+            <div style={{ display: 'flex', flexDirection: pos === 'top' || pos === 'bottom' ? 'column' : 'row', gap: 8,
+              padding: `8px 12px ${8 + safeBottom}px`, background: bar, borderTop: `1px solid ${theme.line_color}` }}>
+              {barButtons}
             </div>
           )}
         </div>
