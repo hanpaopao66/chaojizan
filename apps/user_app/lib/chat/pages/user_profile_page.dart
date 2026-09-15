@@ -37,6 +37,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
   Object? _error;
   bool _busy = false;
 
+  /// `GET /social/v1/users/{id}/follow-stats`:`{fans, following, followed, follows_you}`
+  Map<String, dynamic>? _follow;
+
   ChatStore get store => ChatStore.instance;
 
   @override
@@ -52,6 +55,39 @@ class _UserProfilePageState extends State<UserProfilePage> {
       if (mounted) setState(() => _u = u);
     } catch (e) {
       if (mounted) setState(() => _error = e);
+    }
+    await _loadFollow();
+  }
+
+  /// 关注关系是全站一张表(#377):这里读到的粉丝数、关注数,和视频、动态、音乐里看到的是同一份。
+  /// 接口挂在 /social/v1 下、不受各模块开关影响;拉不到就不显示这一行,不挡资料页。
+  Future<void> _loadFollow() async {
+    try {
+      final r = await store.api.api.requestJson('GET', '/social/v1/users/${widget.userId}/follow-stats');
+      if (mounted && r is Map) setState(() => _follow = r.cast<String, dynamic>());
+    } catch (_) {
+      // 没登录、老服务端:这一行不显示
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    final cur = _follow?['followed'] == true;
+    setState(() => _busy = true);
+    try {
+      final r = await store.api.api
+          .requestJson(cur ? 'DELETE' : 'POST', '/social/v1/users/${widget.userId}/follow');
+      if (r is Map) {
+        final m = r.cast<String, dynamic>();
+        setState(() => _follow = {...?_follow, 'followed': m['followed'] == true, 'fans': m['fans']});
+      }
+      if (mounted && !cur) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('已关注:他的视频、动态和歌都会出现在你的关注里')));
+      }
+    } on ApiException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -198,6 +234,27 @@ class _UserProfilePageState extends State<UserProfilePage> {
           child: Text(u.isBot ? '机器人' : u.lastSeen.label(),
               style: TextStyle(color: u.lastSeen.online ? sz.clay : sz.inkMuted, fontSize: kFontNote)),
         ),
+        // 关注 / 粉丝:全站一张表,视频、动态、音乐是同一份(#377)
+        if (_follow != null && !u.isBot) ...[
+          const SizedBox(height: 8),
+          Center(
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              _FollowCount(label: '关注', value: vCount(_follow!['following'])),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Container(width: 1, height: 18, color: sz.line),
+              ),
+              _FollowCount(label: '粉丝', value: vCount(_follow!['fans'])),
+            ]),
+          ),
+          if (_follow!['follows_you'] == true && !u.isSelf)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Center(
+                child: Text('他关注了你', style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+              ),
+            ),
+        ],
         // 勋章和标签(别人隐藏了的服务端就不给;自己看自己时隐藏的也在,标着「已隐藏」)
         if (!u.tagsBadges.isEmpty)
           Padding(
@@ -234,6 +291,17 @@ class _UserProfilePageState extends State<UserProfilePage> {
                         },
                 ),
               ),
+              // 关注:一次关注,他的视频、动态、歌都跟着来(#377)。机器人不关注,拉黑了也不给关注
+              if (!u.isBot && !u.blocked && _follow != null) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _ActionButton(
+                    icon: _follow!['followed'] == true ? Icons.how_to_reg_outlined : Icons.person_add_outlined,
+                    label: _follow!['followed'] == true ? '已关注' : '关注',
+                    onTap: _busy ? null : _toggleFollow,
+                  ),
+                ),
+              ],
               // 语音 / 视频通话(Telegram 的资料页也能直接打);机器人、拉黑了、通话没开放时不出
               if (!u.isBot && !u.blocked && RemoteCopy.feature('calls')) ...[
                 const SizedBox(width: 10),
@@ -308,6 +376,31 @@ class _UserProfilePageState extends State<UserProfilePage> {
       ]),
     );
   }
+}
+
+/// 关注 / 粉丝数:上面是数,下面是字。一万起写「1.2 万」,和视频、动态里一个口径
+class _FollowCount extends StatelessWidget {
+  const _FollowCount({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = Theme.of(context).sz;
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      Text(value, style: szTabular(fontSize: kFontTitle, fontWeight: FontWeight.w700, color: sz.ink)),
+      const SizedBox(height: 2),
+      Text(label, style: TextStyle(fontSize: kFontMicro, color: sz.inkMuted)),
+    ]);
+  }
+}
+
+String vCount(Object? raw) {
+  final n = raw is int ? raw : int.tryParse('${raw ?? 0}') ?? 0;
+  if (n < 10000) return '$n';
+  final w = n / 10000;
+  return '${w >= 100 ? w.toStringAsFixed(0) : w.toStringAsFixed(1)} 万';
 }
 
 class _ActionButton extends StatelessWidget {
