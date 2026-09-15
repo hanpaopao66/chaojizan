@@ -4,9 +4,10 @@
 
 | 版本 | 日期 | 变化 |
 |---|---|---|
+| 2.1.0 | 2026-09-15 | Telegram 兼容层:同时挂 `window.Telegram.WebApp`,CSS 变量多一套 `--tg-*` 名字,主题色补齐 Telegram 的 15 个键(`line_color` 保留),Telegram 有、超级赞没有的接口给「不支持」的桩(见 [SDK 参考 · Telegram 兼容层](sdk-reference.md#telegram-兼容层));新增 `setBottomBarColor` / `bottomBarColor` / `isOrientationLocked`;颜色收主题色键和 `#RGB`、`rgb()`;底栏按钮的属性可以直接赋值,`showProgress(leaveActive)` 和 Telegram 一致 |
 | 2.0.0 | 2026-09 | 首个开放版本:initData v2、MainButton / SecondaryButton / BackButton / SettingsButton、弹窗、触感、分享、打开外链、云存储(带 rev)、全屏与锁方向(小游戏)、requestProfile、CSS 变量、`?sz_mock=1`;保留 v1 的 `window.superz` |
 
-`/_sdk/2.0.0/…` 永不改变;`/_sdk/2/…` 始终指向最新的 2.x。改了行为会升版本号并写在这里。
+`/_sdk/2.1.0/…`、`/_sdk/2.0.0/…` 永不改变;`/_sdk/2/…` 始终指向最新的 2.x。改了行为会升版本号并写在这里。
 
 ## 宿主 × 能力
 

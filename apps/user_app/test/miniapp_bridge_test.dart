@@ -1,11 +1,13 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:superz_shared/superz_shared.dart';
 import 'package:user_app/miniapp/bridge.dart';
 import 'package:user_app/miniapp/controller.dart';
+import 'package:user_app/miniapp/theme.dart';
 
 /// 小程序桥 v2 的分发器与方法表(DEV-PROMPTS-39 #324)。
 ///
@@ -237,6 +239,48 @@ void main() {
       expect(sent.where((m) => m['name'] == 'viewportChanged').length, 1);
       c.updateSafeArea({'top': 24, 'bottom': 0, 'left': 0, 'right': 0}, {'top': 0, 'bottom': 0, 'left': 0, 'right': 0});
       expect(sent.where((m) => m['name'] == 'safeAreaChanged').length, 1);
+    });
+  });
+
+  group('Telegram 兼容(协议 2.1)', () {
+    test('宿主下发 Telegram 的 15 个主题色键,外加 line_color;亮暗两套都齐', () {
+      expect(kTelegramThemeKeys.length, 15);
+      for (final (sz, b) in [(SzColors.light, Brightness.light), (SzColors.dark, Brightness.dark)]) {
+        final t = miniAppThemeParams(sz, b);
+        for (final k in kTelegramThemeKeys) {
+          expect(t[k], matches(RegExp(r'^#[0-9A-F]{6}$')), reason: '$b 缺 $k');
+        }
+        expect(t['line_color'], isNotNull, reason: 'line_color 是超级赞多出来的,保留');
+        expect(t.length, 16);
+        // 后加的 6 个键和 SDK 给老宿主补齐时用的是同一张对应表(packages/miniapp-sdk 的 DERIVED_THEME)
+        expect(t['header_bg_color'], t['bg_color']);
+        expect(t['bottom_bar_bg_color'], t['secondary_bg_color']);
+        expect(t['section_bg_color'], t['secondary_bg_color']);
+        expect(t['section_header_text_color'], t['hint_color']);
+        expect(t['section_separator_color'], t['line_color']);
+        expect(t['subtitle_text_color'], t['hint_color']);
+      }
+    });
+
+    test('init 报协议 2.1;启动地址片段里的版本换成宿主的,initData 一个字节不动', () async {
+      final init = await c.receive({'v': 2, 'type': 'hello', 'sdk': '2.1.0'});
+      expect(init!['version'], kBridgeProtocolVersion);
+      expect(kBridgeProtocolVersion, '2.1');
+      const data = 'szWebAppData=app_id%3Dsz0%26user%3D%257B%2522open_id%2522%257D';
+      expect(withHostVersion('https://a.example/v/1/index.html#$data&szWebAppVersion=2.0&szWebAppPlatform=android'),
+          'https://a.example/v/1/index.html#$data&szWebAppVersion=2.1&szWebAppPlatform=android');
+      expect(withHostVersion('https://a.example/v/1/index.html#$data'),
+          'https://a.example/v/1/index.html#$data&szWebAppVersion=2.1');
+      expect(withHostVersion('https://a.example/entry'), 'https://a.example/entry', reason: '没有片段的老条目不动');
+      expect(c.entryUrl, endsWith('#szWebAppData=x&szWebAppVersion=2.1'));
+    });
+
+    test('setBottomBarColor 只收 #RRGGBB,记到控制器上画底栏', () async {
+      final bad = await call('setBottomBarColor', {'color': 'bottom_bar_bg_color'});
+      expect((bad!['error'] as Map)['code'], BridgeCode.invalidParams, reason: '主题色键由 SDK 换成色值再发');
+      final ok = await call('setBottomBarColor', {'color': '#102030'});
+      expect(ok!['ok'], isTrue);
+      expect(c.bottomBarColor, '#102030');
     });
   });
 

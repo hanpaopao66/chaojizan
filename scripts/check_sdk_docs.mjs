@@ -2,7 +2,8 @@
 // 小程序文档的三道自动检查(DEV-PROMPTS-39 #323 #333):
 //
 // 1. SDK 参考页(docs/miniapp/sdk-reference.md)的方法清单和 SDK 真正导出的东西**一一对上** ——
-//    SDK 加了方法没写文档、文档写了 SDK 没有的方法,都红;
+//    SDK 加了方法没写文档、文档写了 SDK 没有的方法,都红;Telegram 兼容层(window.Telegram.WebApp)
+//    自己盖的、补的每个成员,在参考页「Telegram 兼容层」那张表里也必须有一行,反过来也一样;
 // 2. 服务端文档里贴的 Python / Node 验签代码和 docs/miniapp/examples/ 下被测试跑过的文件**一字不差**,
 //    并且 Node 那份现场拿测试向量跑一遍(Python 那份由 server/tests/unit/test_miniapp_docs_examples.py 跑);
 // 3. 文档之间的站内链接(xxx.md、xxx.md#锚点)都指得到;每一页都在 README 的目录里
@@ -27,7 +28,7 @@ if (!existsSync(dist)) {
   console.error('缺 SDK 构建产物,先跑 cd packages/miniapp-sdk && npm test')
   process.exit(1)
 }
-const { WebApp } = await import(pathToFileURL(dist).href)
+const { WebApp, TelegramWebApp } = await import(pathToFileURL(dist).href)
 
 const exported = new Set()
 const GROUPS = { MainButton: 'MainButton', SecondaryButton: 'MainButton', BackButton: 'BackButton', SettingsButton: 'BackButton', HapticFeedback: 'HapticFeedback', CloudStorage: 'CloudStorage' }
@@ -52,6 +53,21 @@ for (const line of ref.split('\n')) {
 }
 for (const n of exported) if (!documented.has(n)) problems.push(`SDK 导出了 ${n},sdk-reference.md 里没有「### ${n}」`)
 for (const n of documented) if (!exported.has(n)) problems.push(`sdk-reference.md 写了「### ${n}」,SDK 里没有`)
+
+// Telegram 兼容层:门面自己的成员(和 SuperZ.WebApp 约定不同的、超级赞没有而补的桩)↔ 参考页那一节的表格第一列
+const tgOwn = new Set(TelegramWebApp ? Object.getOwnPropertyNames(TelegramWebApp) : [])
+const tgSection = ref.split(/^## /m).find((s) => s.startsWith('Telegram 兼容层'))
+const tgListed = new Set()
+if (!TelegramWebApp) problems.push('SDK 没有导出 TelegramWebApp(window.Telegram.WebApp 的门面)')
+if (!tgSection) problems.push('sdk-reference.md 缺「## Telegram 兼容层」一节')
+else {
+  for (const line of tgSection.split('\n')) {
+    if (!line.startsWith('|')) continue
+    for (const m of (line.split('|')[1] || '').matchAll(/`([A-Za-z]\w*)/g)) tgListed.add(m[1])
+  }
+  for (const n of tgOwn) if (!tgListed.has(n)) problems.push(`Telegram.WebApp.${n} 在 sdk-reference.md「Telegram 兼容层」的表里没有`)
+  for (const n of tgListed) if (!tgOwn.has(n)) problems.push(`sdk-reference.md「Telegram 兼容层」写了 ${n},兼容层里没有这一项`)
+}
 
 // ---------------------------------------------------------------- 2. 验签示例
 
@@ -125,4 +141,4 @@ if (problems.length) {
   console.error('✗ 小程序文档检查没过:\n  - ' + problems.join('\n  - '))
   process.exit(1)
 }
-console.log(`✓ 小程序文档:SDK ${exported.size} 项与参考页一致,验签示例跑过测试向量,${files.length} 页站内链接都指得到`)
+console.log(`✓ 小程序文档:SDK ${exported.size} 项、Telegram 兼容层 ${tgOwn.size} 项与参考页一致,验签示例跑过测试向量,${files.length} 页站内链接都指得到`)

@@ -1,6 +1,6 @@
 {
   "name": "@superz/miniapp-sdk",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "超级赞小程序 SDK v2(window.SuperZ.WebApp)",
   "license": "MIT",
   "type": "module",

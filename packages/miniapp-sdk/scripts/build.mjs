@@ -2,7 +2,7 @@
 // 再发布到 server/static/sdk/<版本>/(不可变)和 sdk/2/(最新 2.x)。打印 gzip 大小与 SRI。
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
@@ -43,7 +43,11 @@ for (const dir of [pkg.version, pkg.version.split('.')[0]]) {
     copyFileSync(join(dist, f), join(server, dir, f))
   }
 }
-writeFileSync(join(server, 'versions.json'), JSON.stringify({
-  latest: pkg.version, [pkg.version]: { 'sz-webapp.js': { bytes: js.length, gzip: gz, integrity: sri } },
+// 老版本的条目留着:/_sdk/2.0.0/ 永远在线,钉了老版本 + SRI 的页面还要从这里查 integrity
+const versionsFile = join(server, 'versions.json')
+const known = existsSync(versionsFile) ? JSON.parse(readFileSync(versionsFile, 'utf8')) : {}
+delete known.latest
+writeFileSync(versionsFile, JSON.stringify({
+  latest: pkg.version, ...known, [pkg.version]: { 'sz-webapp.js': { bytes: js.length, gzip: gz, integrity: sri } },
 }, null, 2) + '\n')
 console.log(`sz-webapp.js ${js.length} 字节,gzip ${gz} 字节;integrity ${sri}`)

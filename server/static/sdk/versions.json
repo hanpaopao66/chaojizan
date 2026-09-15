@@ -1,10 +1,17 @@
 {
-  "latest": "2.0.0",
+  "latest": "2.1.0",
   "2.0.0": {
     "sz-webapp.js": {
       "bytes": 16977,
       "gzip": 6842,
       "integrity": "sha384-jAs1XxMfLP97lEAw0RoPvvTum8w9wmZW7RHdZXiKA1wUeFy7FJ6X8IYYzE3HJT6f"
+    }
+  },
+  "2.1.0": {
+    "sz-webapp.js": {
+      "bytes": 27446,
+      "gzip": 9981,
+      "integrity": "sha384-CKpOXDczaJeB+9H7zxjfhZeUloO/5W/FzyvIk25hwxrmhSnLi/X8VZTIyM3UGzRt"
     }
   }
 }

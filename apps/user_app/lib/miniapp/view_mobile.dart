@@ -81,7 +81,7 @@ class MiniAppViewState extends State<MiniAppView> {
       _web.runJavaScript(
           'window.__szReceive && window.__szReceive(${jsonEncode(jsonEncode(msg))})');
     };
-    _web.loadRequest(Uri.parse(_c.launch.url));
+    _web.loadRequest(Uri.parse(_c.entryUrl));
   }
 
   void _debugging() {
@@ -95,7 +95,7 @@ class MiniAppViewState extends State<MiniAppView> {
   }
 
   /// 「重新进入」:按新的启动地址重新加载
-  void reload() => _web.loadRequest(Uri.parse(_c.launch.url));
+  void reload() => _web.loadRequest(Uri.parse(_c.entryUrl));
 
   /// 「清除数据」:页面自己的 localStorage / IndexedDB 在它自己的 origin 里清
   Future<void> clearLocalData() async {

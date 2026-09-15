@@ -13,6 +13,28 @@ import 'package:superz_shared/superz_shared.dart';
 
 import 'bridge.dart';
 
+/// 宿主实现的桥协议版本(和 SDK 的 PROTOCOL_VERSION 是同一个数)。
+///
+/// 2.1:所有应用都能全屏、`setBottomBarColor`、主题色 16 个键。页面的 SDK 按它判断能力,
+/// Telegram 兼容层也按它折算 `Telegram.WebApp.version`(2.1 起报 8.0)。
+const kBridgeProtocolVersion = '2.1';
+
+/// 启动地址片段里的 `szWebAppVersion` 换成宿主自己的协议版本。
+///
+/// 片段是服务端拼的,服务端不知道是哪个版本的 App 在开,只能写最低的 2.0;SDK 加载时同步读片段,
+/// 页面启动时的同步探测(Telegram 代码常见的 `isVersionAtLeast('8.0')`)要在 init 到之前就看到真实版本。
+/// 只改这一个参数,其余(尤其是 initData)一个字节都不动。没有片段的地址原样返回。
+String withHostVersion(String url, [String version = kBridgeProtocolVersion]) {
+  final i = url.indexOf('#');
+  if (i < 0) return url;
+  final frag = url.substring(i + 1);
+  final re = RegExp(r'(^|&)szWebAppVersion=[^&]*');
+  final next = re.hasMatch(frag)
+      ? frag.replaceFirstMapped(re, (m) => '${m[1]}szWebAppVersion=$version')
+      : '$frag&szWebAppVersion=$version';
+  return '${url.substring(0, i + 1)}$next';
+}
+
 /// 底栏按钮(MainButton / SecondaryButton)的状态。宿主原生画,页面只能改文字和状态。
 @immutable
 class BottomButtonState {
@@ -116,6 +138,9 @@ class MiniAppController extends ChangeNotifier {
   bool closingConfirmation = false;
   String? headerColor;
   String? backgroundColor;
+
+  /// 页面 setBottomBarColor 设的底栏底色;null = 用主题的 bottom_bar_bg_color
+  String? bottomBarColor;
   bool fullscreen = false;
   bool orientationLocked = false;
 
@@ -129,8 +154,11 @@ class MiniAppController extends ChangeNotifier {
 
   bool get isGame => launch.card.isGame;
 
+  /// 真正加载的地址:启动片段里的协议版本换成宿主自己的(见 [withHostVersion])
+  String get entryUrl => withHostVersion(launch.url);
+
   Map<String, dynamic> _init() => {
-        'version': '2.0',
+        'version': kBridgeProtocolVersion,
         'platform': platform,
         'colorScheme': colorScheme,
         'themeParams': themeParams,
@@ -220,6 +248,13 @@ class MiniAppController extends ChangeNotifier {
       'setBackgroundColor': m('setBackgroundColor', (p) async {
         if (!isHexColor(p['color'])) throw const BridgeError(BridgeCode.invalidParams, '颜色要写 #RRGGBB');
         backgroundColor = p['color'] as String;
+        _changed();
+        return true;
+      }),
+      // 协议 2.1:底栏(主按钮 / 次按钮那一条)的底色,和 Telegram 的 setBottomBarColor 一样
+      'setBottomBarColor': m('setBottomBarColor', (p) async {
+        if (!isHexColor(p['color'])) throw const BridgeError(BridgeCode.invalidParams, '颜色要写 #RRGGBB');
+        bottomBarColor = p['color'] as String;
         _changed();
         return true;
       }),

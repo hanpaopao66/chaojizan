@@ -159,6 +159,7 @@ const kMethodCapability = <String, String?>{
   'close': null,
   'setHeaderColor': null,
   'setBackgroundColor': null,
+  'setBottomBarColor': null,
   'setClosingConfirmation': null,
   'mainButton': null,
   'secondaryButton': null,

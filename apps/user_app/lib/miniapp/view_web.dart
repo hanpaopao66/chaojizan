@@ -87,7 +87,7 @@ class MiniAppViewState extends State<MiniAppView> {
         _loadListener = ((web.Event _) => _onFrameLoad()).toJS;
         _frame.addEventListener('load', _loadListener);
       }
-      _frame.src = _c.launch.url;
+      _frame.src = _c.entryUrl;
     }
     ui_web.platformViewRegistry.registerViewFactory(_viewType, (int _) => _frame);
     _listener = _onMessage.toJS;
@@ -98,7 +98,7 @@ class MiniAppViewState extends State<MiniAppView> {
     };
   }
 
-  void reload() => _frame.src = _c.launch.url;
+  void reload() => _frame.src = _c.entryUrl;
 
   /// iframe 又加载了一个文档:问它还是不是这个小程序(见 [EscapeWatch])。
   /// 每秒问一次 —— async 引 SDK 的页面,监听装上之前的那几问会丢

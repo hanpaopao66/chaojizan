@@ -12,9 +12,22 @@ import { ApiError, LaunchPayload, Version, api } from '../api'
  * 云存储走开发者自己的命名空间,不碰任何真实用户的数据。
  */
 
+// 模拟宿主实现的桥协议版本(和 App 的 kBridgeProtocolVersion 同一个数)
+const PROTOCOL_VERSION = '2.1'
+
+// 启动片段里的 szWebAppVersion 换成宿主自己的版本(服务端只知道写最低的 2.0);别的参数一个字节不动
+function withHostVersion(url: string): string {
+  const i = url.indexOf('#')
+  if (i < 0) return url
+  const frag = url.slice(i + 1)
+  const re = /(^|&)szWebAppVersion=[^&]*/
+  return url.slice(0, i + 1) + (re.test(frag)
+    ? frag.replace(re, `$1szWebAppVersion=${PROTOCOL_VERSION}`) : `${frag}&szWebAppVersion=${PROTOCOL_VERSION}`)
+}
+
 // 桥方法 → 能力(和 App 的 miniapp/bridge.dart 的 kMethodCapability 同一张表)
 const CAP: Record<string, string | null> = {
-  ready: null, expand: null, close: null, setHeaderColor: null, setBackgroundColor: null,
+  ready: null, expand: null, close: null, setHeaderColor: null, setBackgroundColor: null, setBottomBarColor: null,
   setClosingConfirmation: null, mainButton: null, secondaryButton: null, backButton: null, settingsButton: null,
   haptic: 'haptics', showPopup: 'popup', openLink: 'openLink', share: 'share',
   'CloudStorage.getItems': 'storage', 'CloudStorage.setItem': 'storage', 'CloudStorage.removeItems': 'storage',
@@ -27,16 +40,21 @@ const STORAGE_OP: Record<string, string> = {
   'CloudStorage.getKeys': 'keys',
 }
 
+// 和 App 的 miniapp/theme.dart 同一套取值:Telegram 的 15 个键 + 超级赞的 line_color
 const THEMES = {
   light: {
     bg_color: '#F0EEE6', secondary_bg_color: '#FBFAF6', text_color: '#141413', hint_color: '#6B6862',
     link_color: '#2C5F87', button_color: '#C15F3C', button_text_color: '#FBFAF6', accent_text_color: '#C15F3C',
-    destructive_text_color: '#D03030', line_color: '#E2DED2',
+    destructive_text_color: '#D03030', header_bg_color: '#F0EEE6', bottom_bar_bg_color: '#FBFAF6',
+    section_bg_color: '#FBFAF6', section_header_text_color: '#6B6862', section_separator_color: '#E2DED2',
+    subtitle_text_color: '#6B6862', line_color: '#E2DED2',
   },
   dark: {
     bg_color: '#1B1A17', secondary_bg_color: '#24231F', text_color: '#F2F0E8', hint_color: '#A8A49A',
     link_color: '#7FB2D9', button_color: '#E08A6B', button_text_color: '#1B1A17', accent_text_color: '#E08A6B',
-    destructive_text_color: '#E06B6B', line_color: '#37342D',
+    destructive_text_color: '#E06B6B', header_bg_color: '#1B1A17', bottom_bar_bg_color: '#24231F',
+    section_bg_color: '#24231F', section_header_text_color: '#A8A49A', section_separator_color: '#37342D',
+    subtitle_text_color: '#A8A49A', line_color: '#37342D',
   },
 }
 const DEVICES = { phone: { w: 390, h: 844, label: '390 × 844' }, small: { w: 360, h: 800, label: '360 × 800' }, tablet: { w: 768, h: 1024, label: '平板 768 × 1024' } }
@@ -66,6 +84,7 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
   const [settingsVisible, setSettingsVisible] = useState(false)
   const [ready, setReady] = useState(false)
   const [headerColor, setHeaderColor] = useState<string | null>(null)
+  const [bottomBarColor, setBottomBarColor] = useState<string | null>(null)
   const [fullscreen, setFullscreen] = useState(kind === 'game')
   const [showPayload, setShowPayload] = useState(false)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -86,7 +105,7 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
 
   const vp = DEVICES[device]
   const initMsg = () => ({
-    v: 2, type: 'init', token: tok.current, version: '2.0', platform, colorScheme: scheme,
+    v: 2, type: 'init', token: tok.current, version: PROTOCOL_VERSION, platform, colorScheme: scheme,
     themeParams: THEMES[scheme],
     viewport: { height: vp.h - (fullscreen ? 0 : 56) - (main?.is_visible ? 62 : 0), stableHeight: vp.h - 56, isExpanded: true },
     safeArea: { top: fullscreen ? safeTop : 0, bottom: safeBottom, left: 0, right: 0 },
@@ -101,6 +120,7 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
       const r = await api.simLaunch(appid, versionId, { platform, theme: THEMES[scheme] })
       tok.current = token()
       setMain(null); setSecondary(null); setBackVisible(false); setSettingsVisible(false); setReady(false); setHeaderColor(null)
+      setBottomBarColor(null)
       setLaunch(r)
       add({ dir: '!', text: `启动 ${r.version.version}(build ${r.version.build}),initData 带 env=sim` })
     } catch (e) {
@@ -150,6 +170,7 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
           case 'close': message.info('页面请求关闭(真机上容器会关掉)'); return reply(true, true)
           case 'setHeaderColor': setHeaderColor(p.color); return reply(true, true)
           case 'setBackgroundColor': return reply(true, true)
+          case 'setBottomBarColor': setBottomBarColor(p.color); return reply(true, true)
           case 'setClosingConfirmation': return reply(true, true)
           case 'mainButton': setMain(p as BottomBtn); return reply(true, true)
           case 'secondaryButton': setSecondary(p as BottomBtn); return reply(true, true)
@@ -291,7 +312,7 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
           )}
           <div style={{ flex: 1, position: 'relative' }}>
             {launch ? (
-              <iframe ref={frame} key={launch.url} src={launch.url} title="模拟器" onLoad={onFrameLoad}
+              <iframe ref={frame} key={launch.url} src={withHostVersion(launch.url)} title="模拟器" onLoad={onFrameLoad}
                 sandbox="allow-scripts allow-same-origin allow-forms"
                 style={{ border: 0, width: '100%', height: '100%', background: launch.app.background_color }} />
             ) : (
@@ -304,7 +325,7 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
             )}
           </div>
           {(main?.is_visible || secondary?.is_visible) && (
-            <div style={{ display: 'flex', gap: 8, padding: `8px 12px ${8 + safeBottom}px`, background: theme.bg_color }}>
+            <div style={{ display: 'flex', gap: 8, padding: `8px 12px ${8 + safeBottom}px`, background: bottomBarColor || theme.bottom_bar_bg_color }}>
               {secondary?.is_visible && btn(secondary, false, 'secondaryButtonClicked')}
               {main?.is_visible && btn(main, true, 'mainButtonClicked')}
             </div>
