@@ -127,7 +127,15 @@ else
 fi
 
 echo "== 预发证书 =="
-if [ "$(dig +short "$STAGING_HOST" A | tail -1)" = "" ]; then
+# 本机解析查不到时再问一次权威服务器:刚加的记录,本机(和不少公共 DNS)还缓存着「没有这条记录」的否定应答,
+# 要等否定缓存过期;而 Let's Encrypt 验证时查的是权威服务器,这时候已经能签了(09-15 实测)
+dns_a() {
+  local a
+  a=$(dig +short "$1" A | tail -1)
+  [ -n "$a" ] || a=$(dig +short @"$(dig +short NS "${1#*.}" | head -1)" "$1" A 2>/dev/null | tail -1)
+  echo "$a"
+}
+if [ "$(dns_a "$STAGING_HOST")" = "" ]; then
   echo "   $STAGING_HOST 还没有 DNS 记录,先用自签名占位(见 docs/STAGING.md「上线前你要做的」)"
 elif prod_connect; then
   # 脚本用这次检出里的那份、从 stdin 喂过去:生产部署机上的代码是上一次生产部署的,可能还没有这个脚本;
