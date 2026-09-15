@@ -1,7 +1,8 @@
-"""M5 运营功能验证:起送价 / 打包费 / 商家满减 / 平台首单立减 / 佣金口径。
+"""M5 运营功能验证:起送价 / 打包费 / 商家满减 / 佣金口径;新用户首单没有平台补贴。
 
 用独立新商家全程测试,不污染演示商家的运营设置。
-首单立减需要服务端开启(FIRST_ORDER_DISCOUNT_CENTS>0),未开启时该段自动跳过。
+平台首单立减(平台出钱)2026-09-15 连开关带代码删了:新用户的第一单和第二单一样,
+没有平台补贴(subsidy_cents = 0),备注里也没有「首单立减」。
 在 server/ 目录下运行:python -m tests.e2e_operations
 """
 import time
@@ -45,7 +46,7 @@ print("✓ 倒贴规则被拒(减 ≥ 门槛,422)")
 dish = call("POST", "/merchants/me/dishes", boss,
             {"name": f"运营菜-{tag}", "price_cents": 1500, "stock": 100})
 
-# ---- 用独立新用户(顺便验证首单立减) ----
+# ---- 用独立新用户(顺便验证首单没有平台补贴) ----
 cust_phone = "136" + tag[-8:]
 customer = call("POST", "/auth/register", body={
     "phone": cust_phone, "password": "123456", "name": "运营测试客",
@@ -68,15 +69,13 @@ order = place(3)
 assert order["food_cents"] == 4500
 assert order["packing_fee_cents"] == 200
 assert order["discount_cents"] == 500, order["promo_note"]
-subsidy = order["subsidy_cents"]
-expected_total = 4500 + 200 - 500 + order["delivery_fee_cents"] - subsidy
+# 首单立减删了:新用户的第一单也没有平台补贴
+assert order["subsidy_cents"] == 0, f"新用户首单又有平台补贴了:{order['promo_note']}"
+assert "首单立减" not in order["promo_note"], order["promo_note"]
+expected_total = 4500 + 200 - 500 + order["delivery_fee_cents"]
 assert order["total_cents"] == expected_total, "实付恒等式"
-print(f"✓ 满30减5 生效,实付 = 菜品+打包-满减+配送-补贴 = {expected_total} 分")
-
-if subsidy > 0:
-    print(f"✓ 首单立减 {subsidy} 分(平台承担):{order['promo_note']}")
-else:
-    print("- 首单立减未开启(FIRST_ORDER_DISCOUNT_CENTS=0),跳过补贴断言")
+print(f"✓ 满30减5 生效,实付 = 菜品+打包-满减+配送 = {expected_total} 分;"
+      "新用户首单没有平台补贴(首单立减删了)")
 
 # 支付 → 佣金按实收口径(菜品+打包-满减)
 no = order["order_no"]
@@ -86,12 +85,12 @@ assert paid["commission_cents"] == int(gross * 0.05), \
     f"佣金 {paid['commission_cents']} ≠ 5% × 实收 {gross}"
 print(f"✓ 佣金按实收口径:5% × {gross} = {paid['commission_cents']} 分(商家让利平台跟着少收)")
 
-# 第二单:不再有首单立减
+# 第二单:同样没有平台补贴,满减照常
 order2 = place(2)  # ¥30,满30减5
-assert order2["subsidy_cents"] == 0, "首单立减只能享受一次"
+assert order2["subsidy_cents"] == 0, order2["promo_note"]
 assert order2["discount_cents"] == 500
 call("POST", f"/orders/{order2['order_no']}/pay/mock", customer)
-print("✓ 第二单无首单立减(只减一次),满减照常")
+print("✓ 第二单同样没有平台补贴,满减照常")
 
 # ---- 跑完整单到结算,验证账本与审计 ----
 call("POST", f"/orders/{no}/transition", boss, {"to_status": "accepted"})
@@ -112,4 +111,4 @@ bad = {p["check"] for p in problems} & {"order_total_mismatch",
 assert not bad, f"审计恒等式不平:{problems}"
 print("✓ 完成结算后审计全绿(新口径恒等式全平)")
 
-print("\nM5 运营功能(起送/打包/满减/首单立减/佣金口径)验证通过 🎉")
+print("\nM5 运营功能(起送/打包/满减/佣金口径,首单没有平台补贴)验证通过 🎉")

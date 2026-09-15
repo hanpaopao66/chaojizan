@@ -625,32 +625,15 @@ async def create_order(
             discount = min(rule.get("off_cents", 0), food_cents + packing)
     manjian_discount = discount  # 记住满减档,店铺券与它二选其一取最优
 
-    # 平台首单立减:从没支付过订单的新用户,成本平台承担。
-    # 被处置的账号暂停平台补贴(**下单照常,不拦** —— 误伤优先放行)。
-    #
-    # 走 level_for 而不是直接读 user.risk_level:处置现在有两条通道 ——
-    # 按目录计次算出来的,和人工直接设的。只看后者的话,
-    # 按目录被限制的人照样领补贴,目录就成了一张纸。
-    from ..services.enforcement import LEVEL_NONE, level_for
+    # 平台补贴(subsidy):**只可能来自已经发到用户手里的平台券**。平台首单立减(平台出钱)
+    # 2026-09-15 连开关带这段代码一起删了,平台券也停发了 —— 停发之前发出去、没用的券照旧能抵扣。
+    # 单测 test_platform_no_pay 按源码守着:subsidy 只在下面平台券那一支加
     subsidy = 0
-    if (settings.first_order_discount_cents > 0
-            and await level_for(user, db) == LEVEL_NONE):
-        has_paid = await db.scalar(
-            select(Order.id).where(
-                Order.customer_id == user.id,
-                Order.status.notin_(
-                    [OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED]),
-            ).limit(1)
-        )
-        if has_paid is None:
-            subsidy = min(settings.first_order_discount_cents,
-                          food_cents + packing - discount)
-            notes.append(f"首单立减-{subsidy / 100:g}元(平台)")
 
     # 优惠券抵扣:平台券走 subsidy(平台承担),店铺券走 discount(商家承担)
     coupon = None
-    # 券是否真的抵到了钱。平台券在 coupon_off 被钳成 0 时(前面的立减/满减
-    # 已经把可抵金额吃光)一分没减,那种情况下不能把券烧掉
+    # 券是否真的抵到了钱。平台券在 coupon_off 被钳成 0 时(满减已经把可抵金额吃光)
+    # 一分没减,那种情况下不能把券烧掉
     coupon_applied = False
     if payload.coupon_id:
         from ..models import Coupon
@@ -692,8 +675,7 @@ async def create_order(
                 await db.rollback()
                 raise HTTPException(
                     409, f"未达券的使用门槛 ¥{coupon.min_spend_cents / 100:g}")
-            coupon_off = min(coupon.amount_cents,
-                             food_cents + packing - discount - subsidy)
+            coupon_off = min(coupon.amount_cents, food_cents + packing - discount)
             if coupon_off > 0:
                 subsidy += coupon_off
                 coupon_applied = True
@@ -1902,7 +1884,7 @@ async def refund_item(
     else:
         # **退款按用户实付口径,不是菜单原价。**
         #
-        # 满减/首单立减/平台券是**整单**优惠,用户从来没按原价付过这道菜。
+        # 满减/平台券(以前的单还有首单立减)是**整单**优惠,用户从来没按原价付过这道菜。
         # 按 price×qty 退,退出去的钱里就有一截是他没付过的:
         # 餐费 5300 满减 2000 配送 300 → 实付 3600,退掉 4500 的那道菜
         # 就退了 4500,total_cents 被扣成 -900,平台净流出 900 分

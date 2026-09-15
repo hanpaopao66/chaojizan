@@ -684,8 +684,10 @@ class Order(Base):
     food_cents: Mapped[int] = mapped_column(Integer)            # 菜品合计(折前)
     packing_fee_cents: Mapped[int] = mapped_column(Integer, default=0)   # 打包费(归商家)
     discount_cents: Mapped[int] = mapped_column(Integer, default=0)      # 商家满减,商家承担
-    subsidy_cents: Mapped[int] = mapped_column(Integer, default=0)       # 平台补贴(首单立减),平台承担
-    promo_note: Mapped[str] = mapped_column(String(100), default="")     # 如「满30减5;首单立减3」
+    # 平台补贴,平台承担:新单只可能是停发之前发出去的平台券抵掉的钱;以前的单还有首单立减
+    # (2026-09-15 连开关带代码删了)。核账、公开账本、退款口径照旧认这一列
+    subsidy_cents: Mapped[int] = mapped_column(Integer, default=0)
+    promo_note: Mapped[str] = mapped_column(String(100), default="")     # 如「满减-5元(商家);小费2元(100%归骑手)」
     delivery_fee_cents: Mapped[int] = mapped_column(Integer)
     # 配送费的构成快照 {base, night, weather, door}(分)。
     #
@@ -2181,7 +2183,7 @@ class Coupon(Base):
     """券。平台券(超时安抚券、新客券)2026-09-14 起停发,存量照旧能用;
     新发的只有商家自己出钱的券(funder=merchant)。
 
-    下单抵扣走 subsidy_cents 口径(与首单立减同一条审计通道);
+    下单抵扣走 subsidy_cents 口径(平台补贴那一列,以前的首单立减也记在这里,同一条审计通道);
     source 唯一约束保证同一来源(如 eta:订单号)最多发一张。
     订单全额退款/关单时释放回券包(used_order_no 清空),未过期可再用。
     """

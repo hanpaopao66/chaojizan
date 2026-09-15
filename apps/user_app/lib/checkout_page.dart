@@ -159,8 +159,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
       return _CouponVerdict.no('还差${_money(minSpend - left)}');
     }
     final off = amount < left ? amount : left;
-    // 服务端还会再扣掉首单立减(orders.py:498 的 subsidy),那笔平台补贴客户端判不了。
-    // 所以这里给的是抵扣**上限**:真实抵扣只会更少,不会因此 409
+    // 服务端平台券那一支是同一个算法:首单立减 2026-09-15 删了,服务端不再在券之前先减一笔
+    // 平台补贴
     if (off <= 0) return const _CouponVerdict.no('本单无可抵扣');
     return _CouponVerdict.ok(merchantOff: manjian, platformOff: off);
   }
@@ -567,7 +567,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final merchantOff = verdict.merchantOff;
     final platformOff = verdict.platformOff; // 平台承担:平台券
     final shopCoupon = coupon != null && coupon['funder'] == 'merchant';
-    // 首单立减由服务端判定,这里不预估(下单后订单明细会显示)
+    // 平台补贴只剩平台券这一种(首单立减 2026-09-15 删了),上面已经算进 platformOff
     final tip = _pickup ? 0 : _tipCents;
     final total = fee == null
         ? null

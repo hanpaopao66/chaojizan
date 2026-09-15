@@ -43,9 +43,9 @@ o = call("POST", "/orders", fresh, {
     "merchant_id": shop["id"],
     "items": [{"dish_id": dish["id"], "quantity": 1}], **addr})
 assert o["order_no"]
-# 平台补贴不给(首单立减被暂停)
+# 平台补贴不给(首单立减 2026-09-15 删了,新单只有停发之前的平台券抵扣才有平台补贴)
 assert o["subsidy_cents"] == 0, "limit 用户不应获得平台补贴"
-print("✓ limit:领券403(带申诉提示)、平台补贴暂停,但下单正常")
+print("✓ limit:领券403(带申诉提示)、没有平台补贴,但下单正常")
 
 # 回滚:解除限制后恢复领券
 call("POST", f"/admin/users/{uid}/risk-level", admin, {"level": ""})

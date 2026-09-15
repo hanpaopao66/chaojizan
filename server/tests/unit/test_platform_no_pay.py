@@ -4,15 +4,18 @@
 2. 平台券:平台批次一张不发,后台建批次、定向发券 410,平台批次不能再启用;
 3. 邀请有礼:填码 410,结算不再发奖励,商家不能再建新客推荐券批次;
 4. 地址难度反馈:不当场补钱(不写调整入账),规则写明以后的单顾客付;
-5. 首单立减保持 0;
-6. 说法:各端不再说「超时自动赔安抚券」「这一单当场补钱(平台出)」「邀请好友各得券」。
+5. 首单立减:开关和下单那段代码 2026-09-15 删了(拨不回来),下单时的平台补贴只可能来自
+   已经发到用户手里的平台券;历史订单上的平台补贴照旧认;
+6. 说法:各端不再说「超时自动赔安抚券」「这一单当场补钱(平台出)」「邀请好友各得券」「首单立减现在是 0」。
 
 这类退化不报错(平台悄悄又开始出钱),一半按行为测,一半按源码守;e2e 在
 e2e_eta_apology / e2e_coupon_ops / e2e_referral* / e2e_hardship_no_pay。
 """
+import ast
 import asyncio
 import inspect
 import re
+import textwrap
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -160,8 +163,133 @@ class Test平台券停发:
         src = inspect.getsource(admin.toggle_coupon_batch)
         assert "batch.merchant_id is None" in src and "410" in src
 
-    def test_首单立减保持0(self):
-        assert Settings().first_order_discount_cents == 0
+
+def _strip_comments(src: str) -> str:
+    """只看代码:去掉文档串和 # 注释(讲历史的注释不该让测试判违规)"""
+    src = re.sub(r'"""[\s\S]*?"""', "", src)
+    return "\n".join(ln.split("#", 1)[0] for ln in src.splitlines())
+
+
+def _names(target) -> list[str]:
+    """赋值目标里的变量名(a / a, b / *a 都算)"""
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [n for t in target.elts for n in _names(t)]
+    if isinstance(target, ast.Starred):
+        return _names(target.value)
+    return []
+
+
+def _writes(tree, name: str) -> list[tuple[ast.AST, list[ast.AST]]]:
+    """给变量 name 赋值的每一处:(赋值节点, 从外到里的祖先链)"""
+    out = []
+
+    def walk(node, parents):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Assign):
+                targets = child.targets
+            elif isinstance(child, (ast.AugAssign, ast.AnnAssign, ast.NamedExpr)):
+                targets = [child.target]
+            elif isinstance(child, (ast.For, ast.AsyncFor, ast.comprehension)):
+                targets = [child.target]
+            else:
+                targets = []
+            if any(name in _names(t) for t in targets):
+                out.append((child, parents + [node]))
+            walk(child, parents + [node])
+
+    walk(tree, [])
+    return out
+
+
+def _in_branch(node, if_node: ast.If, *, orelse: bool) -> bool:
+    """node 在 if_node 的 if 分支(orelse=False)或 else 分支(orelse=True)里"""
+    return any(node is n for stmt in (if_node.orelse if orelse else if_node.body)
+               for n in ast.walk(stmt))
+
+
+class Test首单立减删了:
+    """2026-09-15 定:平台首单立减(平台出钱)跟超时安抚券一样,开关和下单那段代码一起删了,拨不回来。
+    停发之前发出去的平台券照旧能抵扣(走 subsidy);历史订单上的 subsidy_cents(以前的首单立减、平台券)
+    核账、公开账本、退款口径照旧认。"""
+
+    def test_开关删了_拨不回来(self):
+        assert not hasattr(Settings(), "first_order_discount_cents")
+        code = _strip_comments((REPO / "server/app/config.py").read_text(encoding="utf-8"))
+        assert "first_order" not in code, "首单立减的开关又加回来了"
+
+    def test_下单那段代码删了(self):
+        from app.routers import orders
+        code = _strip_comments(inspect.getsource(orders.create_order))
+        for gone in ("首单", "first_order", "has_paid"):
+            assert gone not in code, f"下单时又在判首单({gone})"
+
+    def test_下单时平台补贴只来自已经发到用户手里的平台券(self):
+        """create_order 里给 subsidy 赋值的只许三处:起始 0、平台券那一支加上券抵的钱、最后往下钳。
+        再加一处(首单立减、新人红包……)就红 —— 平台出钱的口子不许从这里再开"""
+        from app.routers import orders
+        tree = ast.parse(textwrap.dedent(inspect.getsource(orders.create_order)))
+        writes = _writes(tree, "subsidy")
+        shapes = [ast.unparse(n) for n, _ in writes]
+        assert len(writes) == 3, f"subsidy 的赋值多了或少了:{shapes}"
+        (init, _), (add, add_parents), (clamp, _) = writes
+        assert ast.unparse(init) == "subsidy = 0", shapes
+        assert isinstance(add, ast.AugAssign) and isinstance(add.op, ast.Add) \
+            and ast.unparse(add.value) == "coupon_off", shapes
+        assert isinstance(clamp, ast.Assign) and ast.unparse(clamp.value).startswith(
+            "min(subsidy, "), f"最后那一处只许往下钳:{shapes}"
+        # 加的那一处:在「用了券」那一支里、在「不是店铺券」的 else 里
+        ifs = [p for p in add_parents if isinstance(p, ast.If)]
+        coupon_if = next((p for p in ifs if ast.unparse(p.test) == "payload.coupon_id"), None)
+        assert coupon_if is not None and _in_branch(add, coupon_if, orelse=False), \
+            "subsidy 只许在用了券的那一支里加"
+        funder_if = next((p for p in ifs if ast.unparse(p.test) == "coupon.funder == 'merchant'"),
+                         None)
+        assert funder_if is not None and _in_branch(add, funder_if, orelse=True), \
+            "subsidy 只许在平台券(不是店铺券)那一支里加"
+        # 这张券是这个用户手里的、没用过、没过期的(发券停了,手里的券只可能是停发之前发的)
+        branch = ast.unparse(coupon_if)
+        for guard in ("db.get(Coupon, payload.coupon_id", "coupon.user_id != user.id",
+                      "coupon.used_order_no", "expires < now_utc"):
+            assert guard in branch, guard
+        # 抵多少只看券面额和这单还能抵的钱
+        offs = [ast.unparse(n) for n, _ in _writes(tree, "coupon_off")]
+        assert offs == ["coupon_off = min(coupon.amount_cents, food_cents + packing - discount)"], \
+            offs
+        # 落库的就是它,别处不另写
+        order_kw = [kw for n in ast.walk(tree) if isinstance(n, ast.Call)
+                    and ast.unparse(n.func) == "Order" for kw in n.keywords
+                    if kw.arg == "subsidy_cents"]
+        assert [ast.unparse(kw.value) for kw in order_kw] == ["subsidy"], order_kw
+        assert ".subsidy_cents =" not in ast.unparse(tree), "下单时别处又改了订单上的平台补贴"
+
+    def test_防薅首单立减的风控规则跟着删了(self):
+        from app.services import risk
+        code = _strip_comments(inspect.getsource(risk._assess))
+        assert "subsidy" not in code, "新号拿不到平台补贴了,防薅补贴的那条规则不该还在"
+
+    def test_历史订单上的平台补贴照旧认(self):
+        from app.routers import transparency
+        from app.services import audit, refund_calc
+        assert "- Order.subsidy_cents" in inspect.getsource(audit.run_audit), \
+            "核账规则 3:实付 = 菜 + 打包 − 满减 + 配送 + 小费 − 平台补贴"
+        assert "sum(subsidy_cents)" in inspect.getsource(transparency.funds_public), \
+            "透明中心「钱去哪了」照旧公示平台补贴"
+        split = transparency.split_order_row({
+            "total_cents": 2300, "food_cents": 2100, "packing_fee_cents": 0,
+            "discount_cents": 0, "subsidy_cents": 300, "commission_cents": 105,
+            "self_delivery": False, "pickup": False, "order_kind": "food"})
+        assert split["platform"] == 105 - 300 and split["merchant"] == 1995, split
+
+        class _DB:
+            async def scalar(self, *a, **k):
+                return 0
+
+        o = SimpleNamespace(id=1, total_cents=2300, refund_cents=0, subsidy_cents=300,
+                            rider_id=7, delivery_fee_cents=500, tip_cents=0)
+        assert asyncio.run(refund_calc.merchant_fault_refund_cents(_DB(), o)) == 2300, \
+            "退顾客实付的钱:平台券抵掉的那截不在实付里,不退现金"
 
 
 class Test邀请有礼停了:
@@ -230,6 +358,10 @@ _STALE = [
     "说了这一单当场补钱",
     "邀请好友完成首单,你俩各得券",
     "这笔钱由平台出,不向顾客或商家追收",
+    # 首单立减 2026-09-15 连开关带代码删了:「现在是 0」的说法、下单备注里那一条都不许再出现
+    "首单立减(现在是 0)",
+    "首单立减，现在是 0",
+    "首单立减-",
 ]
 _SCAN = ["server/app", "apps/user_app/lib", "apps/rider_app/lib", "apps/merchant_app/lib",
          "packages/shared/lib", "web/src", "admin-web/src", "merchant-web/src"]

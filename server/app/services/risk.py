@@ -2,11 +2,14 @@
 
 原则:宁可错标不可错拦——命中只写 orders.risk_flags 供后台复核,
 资金结算照常(钱是真付的);确认(confirmed)的单从月售/销量排行剔除。
-规则四条(阈值在 config 可调):
+规则三条(阈值在 config 可调):
   addr_freq            同收货位置(~65m)24h 内多单且多账号
-  new_account_subsidy  注册 1 小时内下单且用了首单立减(补贴照给)
   merchant_related     下单设备与店主设备相同(自己刷自己店)
   multi_account_device 同设备 24h 内多账号下单
+
+原来还有一条 new_account_subsidy(注册 1 小时内下单且用了首单立减),防的是小号薅首单立减。
+首单立减 2026-09-15 连开关带代码删了、平台券也停发了,新号下单拿不到任何平台补贴,这条跟着删;
+历史订单 risk_flags 里记着的这个标记照旧留着。
 """
 import asyncio
 import logging
@@ -46,23 +49,14 @@ async def _assess(order_id: int) -> None:
             if (row[0] >= settings.risk_addr_orders_24h and row[1] >= 2):
                 hits.append("addr_freq")
 
-        # ② 新号 + 首单立减(标记,补贴照给——宁可错给不可错杀)
-        if (order.subsidy_cents > 0 and customer is not None
-                and customer.created_at is not None):
-            created = customer.created_at
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            if now - created < timedelta(hours=1):
-                hits.append("new_account_subsidy")
-
-        # ③ 商家关联:下单设备与店主设备相同(同一部手机装了两端)
+        # ② 商家关联:下单设备与店主设备相同(同一部手机装了两端)
         if (customer is not None and merchant is not None
                 and customer.device_id):
             owner = await db.get(User, merchant.owner_id)
             if owner is not None and owner.device_id == customer.device_id:
                 hits.append("merchant_related")
 
-        # ④ 同设备多账号:24h 内该设备下单的账号数 ≥2
+        # ③ 同设备多账号:24h 内该设备下单的账号数 ≥2
         if customer is not None and customer.device_id:
             accounts = await db.scalar(
                 select(func.count(func.distinct(Order.customer_id)))

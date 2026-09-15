@@ -384,8 +384,8 @@ class _TransparencyPageState extends State<TransparencyPage> {
             const SzSectionTitle('赔出去 / 贴出去'),
             const SizedBox(height: 6),
             _kv(sz, '平台补贴', _yuan(_int(spend['subsidy_cents'])),
-                note: '首单立减(现在是 0)、停发之前发的超时安抚券被抵扣、'
-                    '停发之前难度反馈当场补给骑手的钱'),
+                note: '停发之前发的平台券被抵扣(如超时安抚券);首单立减已删、'
+                    '难度反馈当场补给骑手的钱已停,以前发生过的照算'),
             _kv(sz, '餐损赔付', _yuan(_int(spend['meal_compensation_cents'])),
                 note: '历史:无骑手接单被取消时,已出餐的商家按应收赔;2026-09-15 起不再赔'),
             _kv(sz, '申诉改判', _yuan(_int(spend['adjustment_cents'])),

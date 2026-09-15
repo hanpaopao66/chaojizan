@@ -68,13 +68,13 @@ void main() {
 
   group('分法跟着单子的类型走', () {
     test('外卖:商家 / 骑手 / 平台,加起来 = 实付 + 平台补贴', () {
-      // 菜 20 + 打包 1 − 满减 2 − 首单立减 3 + 配送 4 + 小费 1 = 实付 21
+      // 菜 20 + 打包 1 − 满减 2 − 平台券 3 + 配送 4 + 小费 1 = 实付 21
       final o = order(food: 2000, packing: 100, discount: 200, subsidy: 300,
           delivery: 400, tip: 100, commission: 95, total: 2100);
       final s = orderSplit(o);
       expect(byName(s), {'商家实收': 1805, '骑手所得': 500, '平台留存': 95});
       expect(s.sumCents, o.totalCents + o.subsidyCents,
-          reason: '首单立减是平台出的,用户没付、商家照收');
+          reason: '平台券抵掉的是平台出的,用户没付、商家照收');
     });
 
     test('商家自送:没有骑手那一行,配送费并进商家', () {

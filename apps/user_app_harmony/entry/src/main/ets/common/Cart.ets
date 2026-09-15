@@ -187,8 +187,8 @@ export function bestCoupon(coupons: Coupon[], merchant: Merchant,
  * 最终优惠额。
  *
  * 店铺券**取代**满减(不叠加),平台券在满减之外再减。
- * 首单立减是服务端判的(要查用户有没有付过款),客户端算不了 ——
- * 所以这里给出的是**抵扣上限**,真实到手只会更省,不会因此 409
+ * 平台补贴只剩平台券这一种:首单立减 2026-09-15 删了,服务端不再在券之前先减一笔
+ * 平台补贴,平台券那一支和这里是同一个算法
  */
 export function totalOffCents(merchant: Merchant, food: number, packing: number,
                               picked: CouponVerdict | null): number {

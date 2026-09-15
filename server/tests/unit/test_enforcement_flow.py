@@ -8,8 +8,8 @@
 
 三件事最容易在后续改动里悄悄断掉:
 
-1. **生效点绕过目录。** 三处限制原先直接读 `user.risk_level`;目录接上
-   之后必须走 `level_for`,否则按目录被限制的人照样领补贴 ——
+1. **生效点绕过目录。** 限制原先直接读 `user.risk_level`;目录接上
+   之后必须走 `level_for`,否则按目录被限制的人照样领券 ——
    而这种"规则写了但不生效"不会报错,只会让规则页变成谎话。
 2. **判定的人替目录拍板。** 判定接口不该收 level 参数 ——
    判定的人只回答"这件事成立吗",给什么处置是目录定的。
@@ -22,10 +22,13 @@ import pytest
 
 
 class Test生效点必须走目录:
-    """三处都改成 level_for。直接读 user.risk_level = 绕过目录。"""
+    """生效点都走 level_for。直接读 user.risk_level = 绕过目录。
+
+    原来有三处,第三处是下单(被限制的人不给首单立减)。首单立减 2026-09-15 连开关带代码删了,
+    下单时平台不再给任何补贴(停发之前的平台券是用户手里的券,不是下单时给的),那一处跟着没了;
+    处置照旧不拦下单。"""
 
     @pytest.mark.parametrize("mod,fn", [
-        ("app.routers.orders", "create_order"),
         ("app.routers.merchants", "claim_shop_coupon"),
         ("app.routers.favorites", "_issue_favorite_coupon"),
     ])

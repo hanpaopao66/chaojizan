@@ -715,7 +715,7 @@ class Order {
   final int foodCents;
   final int packingFeeCents;
   final int discountCents;   // 商家满减
-  final int subsidyCents;    // 平台补贴(首单立减)
+  final int subsidyCents;    // 平台补贴(平台券抵掉的;以前的单还有首单立减)
   final String promoNote;
   final int deliveryFeeCents;
 

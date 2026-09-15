@@ -315,9 +315,10 @@ class Settings(BaseSettings):
     # 原来的开关 eta_compensation_enabled 2026-09-15 连同发券那段代码一起删了 —— 跟等餐补偿一样,
     # 停了就不留一个能拨回来的开关。已经发出去、没用的券照旧能用(下单抵扣走 subsidy 口径)
 
-    # 平台拉新:首单立减(分),0=关闭。成本平台承担,订单上记 subsidy_cents,
-    # 审计恒等式和透明账单都能看到这笔钱从平台流向了用户。**保持 0**:平台不出钱做营销
-    first_order_discount_cents: int = 0
+    # 平台拉新的首单立减(平台出钱,原来默认 0)2026-09-15 连同开关 first_order_discount_cents
+    # 和下单那段代码一起删了 —— 跟超时安抚券一样,停了就不留一个能拨回来的开关。
+    # 以前的首单立减、停发之前发出去的平台券抵掉的钱照旧记在订单 subsidy_cents 上,
+    # 核账、公开账本、退款口径照旧认;新单的 subsidy 只可能来自已经发到用户手里的平台券
 
     # 团购券核销服务费率(只在核销时收;券未使用平台分文不取)
     voucher_commission_rate: float = 0.02

@@ -81,7 +81,7 @@ async def run():
     paid = o["total_cents"]                      # 用户实付
     assert o["food_cents"] == 5300, o
     assert o["discount_cents"] == 2000, f"满减没生效:{o['promo_note']}"
-    assert o["subsidy_cents"] == 0, o            # 演示号不是新用户,无立减
+    assert o["subsidy_cents"] == 0, o            # 没用平台券,没有平台补贴
     assert o["packing_fee_cents"] == 0, o
     assert paid == 5300 - 2000 + fee, (paid, fee)
     print(f"✓ 下单:餐品 5300 - 满减 2000 + 配送 {fee} = 实付 {paid}")

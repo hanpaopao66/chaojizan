@@ -568,7 +568,7 @@ export default function TransparencyPage() {
             </div>
             <div className="col">
               <h4>支出去向（累计）</h4>
-              <div className="row"><span>补贴（首单立减，现在是 0；停发之前发的超时安抚券被抵扣、难度反馈当场补给骑手的钱）</span>
+              <div className="row"><span>补贴（停发之前发的平台券被抵扣，如超时安抚券；首单立减已删、难度反馈当场补给骑手的钱已停，以前发生过的照算）</span>
                 <span className="num">{yuanF(funds?.spend.subsidy_cents)}</span></div>
               <div className="row"><span>商家餐损赔付（历史：无人接单取消时平台赔的；2026-09-15 起不再赔）</span>
                 <span className="num">{yuanF(funds?.spend.meal_compensation_cents)}</span></div>

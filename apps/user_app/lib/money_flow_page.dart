@@ -220,7 +220,7 @@ class MoneyFlowPage extends StatelessWidget {
     final split = orderSplit(order);
 
     assert(() {
-      // 平台补贴(首单立减)用户没付、商家照收;帮买超支是事后补收的
+      // 平台补贴(平台券抵掉的,以前的单还有首单立减)用户没付、商家照收;帮买超支是事后补收的
       final expect = total + order.subsidyCents + split.extraCents;
       if (split.sumCents != expect) {
         debugPrint('分账对不上:${split.sumCents} != $expect(订单 ${order.orderNo})'

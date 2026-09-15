@@ -128,7 +128,8 @@ _TODAY_SH = ("date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai')"
 def split_order_row(r: dict) -> dict:
     """一笔外卖/零售/跑腿单按**支付时的口径**拆成商家 / 骑手 / 平台三份。
 
-    三份加起来**恒等于用户实付** —— 平台补贴(首单立减)算平台自己掏的钱,
+    三份加起来**恒等于用户实付** —— 平台补贴(停发之前发的平台券抵掉的钱;以前的单还有
+    首单立减,2026-09-15 删了)算平台自己掏的钱,
     所以平台那一份是「佣金 − 补贴」,可以是负数(平台倒贴)。
     骑手那一份用「实付 − 商家 − 平台」求出来,而不是另拼一遍配送费 + 小费 ——
     上门费、夜间费这些都在 delivery_fee 里,另拼一遍迟早漏一项,
@@ -287,7 +288,8 @@ async def funds_public(request: Request, db: AsyncSession = Depends(get_db)):
         SELECT coalesce(sum(commission_cents), 0) FROM voucher_purchases
         WHERE status = 'redeemed'
     """)))
-    # 平台补贴:首单立减(现在是 0)+ 停发之前发出去的安抚券被抵扣,同走订单 subsidy 审计通道
+    # 平台补贴:停发之前发出去的平台券被抵扣 + 以前的首单立减(2026-09-15 连开关带代码删了),
+    # 同走订单 subsidy 审计通道
     order_subsidy = (await db.scalar(sa_text("""
         SELECT coalesce(sum(subsidy_cents), 0) FROM orders
         WHERE status NOT IN ('pending_payment','cancelled')
