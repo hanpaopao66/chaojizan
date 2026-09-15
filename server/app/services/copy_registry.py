@@ -49,6 +49,10 @@ COPY_KEYS: dict[str, CopyKey] = {
                                     _CHANNEL_HIDE),
     "channel.errand.name": CopyKey("首页业务", "首页业务入口 · 跑腿的标题", "帮我送", CHANNEL_NAME_MAX, False,
                                    _CHANNEL_HIDE),
+    "channel.music.name": CopyKey("首页业务", "首页业务入口 · 音乐的标题", "音乐", CHANNEL_NAME_MAX, False,
+                                  _CHANNEL_HIDE),
+    "channel.forum.name": CopyKey("首页业务", "首页业务入口 · 论坛的标题", "论坛", CHANNEL_NAME_MAX, False,
+                                  _CHANNEL_HIDE),
 
     "home.category_vacancy": CopyKey(
         "说明文字", "用户端首页 · 某个品类还没有商家时的空状态",

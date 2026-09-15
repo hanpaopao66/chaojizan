@@ -97,6 +97,17 @@ const List<SzChannel> kChannels = [
     key: 'errand', name: '帮我送', glyph: '跑', sub: '取件送件 · 收 2%',
     tone: 3, bizType: 'errand',
   ),
+  SzChannel(
+    // 音乐(DEV-PROMPTS-41):音乐人上传的原创作品,先审后发。不卖歌、不卖会员,
+    // 所以它不是一条「生意」,没有 bizType —— 订单页那几个按频道分的列表不会出现它
+    key: 'music', name: '音乐', glyph: '乐', sub: '音乐人的原创',
+    tone: 4,
+  ),
+  SzChannel(
+    // 论坛:超级赞账号发的动态、回复、转发
+    key: 'forum', name: '论坛', glyph: '论', sub: '大家在聊什么',
+    tone: 6,
+  ),
   // 下一个频道加在这里即可,例如:
   // SzChannel(key: 'ride', name: '打车', glyph: '车', sub: '一口价 · 不抽司机',
   //           tone: 3),

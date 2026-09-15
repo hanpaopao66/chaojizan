@@ -1568,7 +1568,7 @@ async def set_flag(
     elif key == "channels_enabled":
         # **只接受已注册的频道 key。** 打错一个字的后果是那个频道
         # 从首页消失,而后台显示得好好的 —— 这种错没人查得出来。
-        known = {"food", "retail", "stay", "voucher", "errand"}
+        known = {"food", "retail", "stay", "voucher", "errand", "music", "forum"}
         keys = [k.strip() for k in value.replace("，", ",").split(",")
                 if k.strip()]
         bad = [k for k in keys if k not in known]

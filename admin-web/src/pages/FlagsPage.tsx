@@ -36,9 +36,12 @@ interface FlagMeta {
  * 好过一边悄悄漂移。 */
 const CHANNELS: { key: string; name: string }[] = [
   { key: 'food', name: '点外卖' },
+  { key: 'retail', name: '买菜买水果' },
   { key: 'stay', name: '住宿' },
   { key: 'voucher', name: '超值团购' },
   { key: 'errand', name: '帮我送(跑腿)' },
+  { key: 'music', name: '音乐' },
+  { key: 'forum', name: '论坛' },
 ]
 
 const METAS: FlagMeta[] = [
