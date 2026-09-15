@@ -28,8 +28,9 @@ from .db import Base
 VIDEO_STATUSES = ("draft", "processing", "reviewing", "scheduled", "published", "rejected",
                   "failed", "removed", "deleted")
 VISIBILITIES = ("public", "unlisted", "private")
-#: 互动消息的种类(#367 四类;#377 起全站共用:follow 是有人关注我,关注关系全站一张表)
-NOTIFY_KINDS = ("reply", "at", "like", "system", "follow")
+#: 互动消息的种类(#367 四类;#377 起全站共用:follow 是有人关注我,关注关系全站一张表;
+#: #380 论坛加 repost 转发、quote 引用)
+NOTIFY_KINDS = ("reply", "at", "like", "system", "follow", "repost", "quote")
 
 
 def _now_col():
@@ -515,7 +516,10 @@ class SocialNotification(Base):
         ForeignKey("music_comments.id", ondelete="CASCADE"), nullable=True)
     music_release_id: Mapped[int | None] = mapped_column(
         ForeignKey("music_releases.id", ondelete="CASCADE"), nullable=True)
-    #: 合并键:like:video:<id> / like:comment:<id>;不合并的为空
+    #: 论坛的目标帖子(#380 §5.8)。帖子硬删了(注销清理)通知跟着删 —— 点开是 404 的消息没有意义
+    forum_post_id: Mapped[int | None] = mapped_column(
+        ForeignKey("forum_posts.id", ondelete="CASCADE"), nullable=True)
+    #: 合并键:like:video:<id> / like:comment:<id> / like:post:<id> / repost:post:<id>;不合并的为空
     group_key: Mapped[str] = mapped_column(String(40), default="", server_default="")
     count: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     #: 最近的几个人(合并的赞用),新的在前

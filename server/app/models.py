@@ -3813,4 +3813,10 @@ from .models_music import (ARTIST_STATUSES, DECLARATIONS, LYRICS_KINDS,  # noqa:
                            MusicHistory, MusicPlay, MusicPlaylist, MusicPlaylistCollect,
                            MusicPlaylistTrack, MusicRelease, MusicReleaseCollect, MusicReport,
                            MusicTrack, MusicTrackLike, MusicUserSetting)
+# 论坛(DEV-PROMPTS-41 #380)
+from .models_forum import (FORUM_MODELS, POST_STATUSES, REPLY_POLICIES,  # noqa: E402,F401
+                           ForumBookmark, ForumDecision, ForumLike, ForumMention, ForumMuteWord,
+                           ForumPin, ForumPoll, ForumPollVote, ForumPost, ForumPostEdit,
+                           ForumPostTag, ForumReport, ForumRepost, ForumTag, ForumUserSetting,
+                           ForumViewDay)
 from .models_credit import CreditAppeal  # noqa: E402,F401
