@@ -13,10 +13,8 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
-import jwt
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ..config import settings
 from ..db import SessionLocal
 from ..models import SocialProfile, User
 from ..services.social import SOCIAL_ROLES
@@ -40,23 +38,13 @@ DISCONNECT_HOOKS: list[Callable[[int], Awaitable[None]]] = []
 
 
 async def user_from_token(token: str) -> User | None:
-    """和 security.get_current_user 同一套判据,外加:助手令牌不许连、只许用户端账号。"""
-    try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-    except jwt.PyJWTError:
-        return None
-    if payload.get("scope") == "agent":
-        return None
+    """登录校验走 security.socket_user(和 get_current_user 同一套判据:设备移除、账号注销、
+    助手令牌不许连),这里只多一条:只许用户端账号。"""
+    from ..security import socket_user
+
     async with SessionLocal() as db:
-        # 扫码登录的网页 / 电脑:那台设备在手机上被移除了就不许再连(和 get_current_user 同一个判据)
-        if payload.get("ld") is not None:
-            from ..security import login_device_alive
-            if not await login_device_alive(db, payload):
-                return None
-        user = await db.get(User, int(payload.get("sub") or 0))
-    if user is None or user.deleted_at is not None or user.phone.startswith("del"):
-        return None
-    if user.role not in SOCIAL_ROLES:
+        user = await socket_user(db, token)
+    if user is None or user.role not in SOCIAL_ROLES:
         return None
     return user
 

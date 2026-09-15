@@ -14,6 +14,12 @@
 收窄成"只有顾客"的话,表现是"配送中页面不刷新"——
 那种故障没人会往鉴权上想,能安静地坏很久。
 
+## 和 HTTP 同一套判据(2026-09-15)
+
+这条通道以前自己解令牌:手机上移除了的网页、助手令牌、已注销账号的旧令牌,
+HTTP 当场 401 / 403,这里照连不误。现在走 security.socket_user,最后一段逐个钉住 ——
+每一种都先证明它本来连得上(对照组),再证明失效之后连不上。
+
     SUPERZ_API=http://127.0.0.1:8010 python -m tests.e2e_ws_order_auth
 """
 import json
@@ -52,6 +58,16 @@ def can_connect(order_no: str, token: str) -> bool:
         return False
 
 
+def qr_login(phone_token: str) -> dict:
+    """走一遍扫码登录,拿到网页版的令牌(带 ld)和设备号 —— 流程同 e2e_qr_login。"""
+    s = call("POST", "/auth/qr/sessions", body={"client": "web"})
+    call("POST", f"/auth/qr/sessions/{s['sid']}/scan", phone_token)
+    call("POST", f"/auth/qr/sessions/{s['sid']}/confirm", phone_token, {})
+    got = call("GET", f"/auth/qr/sessions/{s['sid']}?state=scanned&wait=0",
+               headers={"X-QR-Secret": s["secret"]})
+    return {"token": got["token"], "device_id": got["device_id"]}
+
+
 def main() -> None:
     no = call("POST", "/orders", customer, {
         "merchant_id": shop["id"],
@@ -83,6 +99,33 @@ def main() -> None:
     assert not can_connect("nosuchorderno000000", customer), (
         "不存在的订单号也放行 —— 那等于可以拿它探测订单号是否存在")
     print("✓ 不存在的订单号连不上(不给探测订单号的口子)")
+
+    # ---------- 和 HTTP 同一套判据:助手令牌、移除的设备、注销的账号 ----------
+    fresh = register_fresh_customer("实时通道")
+    mine = call("POST", "/orders", fresh, {
+        "merchant_id": shop["id"],
+        "items": [{"dish_id": dish["id"], "quantity": 1}],
+        "address": "测试地址", "lat": 30.66, "lng": 104.08,
+    })["order_no"]
+    assert can_connect(mine, fresh), "新账号连不上自己的订单通道(对照组)"
+
+    agent = call("POST", "/auth/agent-tokens", fresh,
+                 {"name": "实时通道测试", "scopes": ["order"]})["token"]
+    assert not can_connect(mine, agent), (
+        "助手令牌连得上实时通道 —— 它能碰什么是按 HTTP 接口逐条放的白名单,实时通道不在里面")
+    print("✓ 助手令牌连不上")
+
+    web = qr_login(fresh)
+    assert can_connect(mine, web["token"]), "扫码登录的网页连不上自己的订单通道(对照组)"
+    call("DELETE", f"/auth/login-devices/{web['device_id']}", fresh)
+    assert not can_connect(mine, web["token"]), (
+        "手机上移除了那台网页,它还连得上订单通道 —— HTTP 那边已经 401 了")
+    print("✓ 扫码登录的网页:移除前连得上,移除后连不上")
+
+    call("POST", f"/orders/{mine}/transition", fresh, {"to_status": "cancelled"})
+    call("DELETE", "/auth/me", fresh)
+    assert not can_connect(mine, fresh), "账号注销了,旧令牌还连得上订单通道"
+    print("✓ 注销之后,旧令牌连不上")
 
     print("\ne2e_ws_order_auth 全部通过 ✅")
 

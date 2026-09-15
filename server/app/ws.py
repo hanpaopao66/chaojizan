@@ -1,8 +1,11 @@
 """WebSocket 实时推送(多主题)。
 
 主题:
-  order:{order_no}     订单状态变更(用户/骑手端订阅,无鉴权,order_no 即凭证)
-  merchant:{id}        商家新单提醒(需要 token,校验店铺归属)
+  order:{order_no}     订单状态变更(这一单的顾客、骑手、商家能订阅)
+  merchant:{id}        商家新单提醒(校验店铺归属)
+
+两条都先过 security.socket_user —— 和 HTTP 的 get_current_user 同一套判据
+(设备移除、账号注销、助手令牌),再各自判归属。
 
 推送内容示例:
   {"type": "order_status", "order_no": "...", "status": "picked_up"}
@@ -10,13 +13,12 @@
 """
 from collections import defaultdict
 
-import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
-from .config import settings
-from .db import SessionLocal
 from sqlalchemy import select
 
-from .models import Order, User
+from .db import SessionLocal
+from .models import Order, UserRole
+from .security import socket_user
 from .services.staff import operable_shop
 
 router = APIRouter()
@@ -74,19 +76,19 @@ async def order_ws(ws: WebSocket, order_no: str, token: str = Query("")):
     (连锁老板、区域经理、店员的归属判定都在那里面)。
     """
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-        uid = int(payload["sub"])
         async with SessionLocal() as db:
+            user = await socket_user(db, token)
+            if user is None:
+                raise ValueError
             order = await db.scalar(
                 select(Order).where(Order.order_no == order_no))
             if order is None:
                 raise ValueError
-            ok = uid in (order.customer_id, order.rider_id)
-            if not ok and payload.get("role") == "merchant":
-                user = await db.get(User, uid)
-                if user is not None:
-                    shop, _ = await operable_shop(db, user, order.merchant_id)
-                    ok = shop is not None and shop.id == order.merchant_id
+            ok = user.id in (order.customer_id, order.rider_id)
+            # 角色按库里的判(和 require_role 一样),不信令牌里写的 role
+            if not ok and user.role == UserRole.merchant:
+                shop, _ = await operable_shop(db, user, order.merchant_id)
+                ok = shop is not None and shop.id == order.merchant_id
         if not ok:
             raise ValueError
     except Exception:
@@ -106,12 +108,9 @@ async def merchant_ws(ws: WebSocket, merchant_id: int, token: str = Query("")):
     而"听不到新单"这种故障商家只会以为是今天没生意。
     """
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
-        if payload.get("role") != "merchant":
-            raise ValueError
         async with SessionLocal() as db:
-            user = await db.get(User, int(payload["sub"]))
-            if user is None:
+            user = await socket_user(db, token)
+            if user is None or user.role != UserRole.merchant:
                 raise ValueError
             shop, _ = await operable_shop(db, user, merchant_id)
         if shop is None or shop.id != merchant_id:

@@ -57,6 +57,36 @@ async def login_device_alive(db: AsyncSession, payload: dict) -> bool:
     return row is not None and row.revoked_at is None and row.user_id == user_id
 
 
+async def socket_user(db: AsyncSession, token: str) -> User | None:
+    """实时通道(WebSocket)的登录校验:**和 get_current_user 同一套判据**,外加助手令牌一律不许连。
+
+    WebSocket 挂不上 `Depends(get_current_user)`,以前每条通道自己 `jwt.decode`:
+    手机上「移除」了那台电脑、账号注销了,HTTP 请求当场 401,老的订单 / 商家通道却照连不误,
+    一直连到令牌 30 天后过期。判据只写这一处,三条通道(ws.py 两条、realtime/gateway.py)都调它,
+    单测 test_socket_auth 钉住没有别处再自己解登录令牌。
+
+    - 签名、有效期;
+    - 助手令牌(scope=agent)不许连:它能碰什么是按 HTTP 接口逐条放的白名单,实时通道不在里面;
+    - 扫码登录的网页 / 电脑(`ld`):那台设备还在(login_device_alive);
+    - 账号还在、没注销(和 get_current_user 一样,deleted_at 和手机号前缀两条都判)。
+
+    角色和归属由各条通道自己判。返回的 User 属于传进来的 db。
+    """
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
+        user_id = int(payload.get("sub") or 0)
+    except (jwt.PyJWTError, TypeError, ValueError):
+        return None
+    if payload.get("scope") == "agent":
+        return None
+    if payload.get("ld") is not None and not await login_device_alive(db, payload):
+        return None
+    user = await db.get(User, user_id)
+    if user is None or user.deleted_at is not None or user.phone.startswith("del"):
+        return None
+    return user
+
+
 #: AI 助手令牌能碰的接口。(方法, 路径正则) —— **全匹配**,**按权限分开**。
 #:
 #: ## 为什么是白名单,而且是全匹配的正则
