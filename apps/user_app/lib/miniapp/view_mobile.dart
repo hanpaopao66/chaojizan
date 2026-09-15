@@ -27,6 +27,7 @@ class MiniAppView extends StatefulWidget {
     required this.controller,
     required this.onError,
     this.debug = false,
+    this.interactive = true,
   });
 
   final MiniAppController controller;
@@ -35,8 +36,21 @@ class MiniAppView extends StatefulWidget {
   /// 「我的 → 设置 → 开发者选项 → 小程序调试」:安卓开远程调试(chrome://inspect)、iOS 设 inspectable
   final bool debug;
 
+  /// 网页版才用得上(见 view_web.dart)。手机上画在 WebView 上面的宿主控件由 Flutter 自己分派触摸,本来就点得到
+  final bool interactive;
+
   @override
   State<MiniAppView> createState() => MiniAppViewState();
+}
+
+/// 网页版要在胶囊底下垫一块 DOM(见 view_web.dart);手机上原样返回。
+class PointerShield extends StatelessWidget {
+  const PointerShield({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => child;
 }
 
 class MiniAppViewState extends State<MiniAppView> {

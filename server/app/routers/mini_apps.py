@@ -414,10 +414,15 @@ async def status(
             "current_version_id": app.current_version_id}
 
 
+#: 宿主下发的主题色键数上限。现在是 16 个(Telegram 的 15 个 + line_color);
+#: 留出余量 —— 撞上限的后果是启动 422、小程序整个打不开,不能卡在正好够用
+MAX_THEME_KEYS = 32
+
+
 def _theme_ok(theme: dict | None) -> dict | None:
     if not theme:
         return None
-    if len(theme) > 16:
+    if len(theme) > MAX_THEME_KEYS:
         raise HTTPException(422, "主题参数太多")
     out = {}
     for k, v in theme.items():

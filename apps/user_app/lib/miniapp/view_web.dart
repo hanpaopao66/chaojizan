@@ -13,6 +13,17 @@
 /// - 导航逃逸:页面自己跳去别的站,父页面拦不住也读不到地址。iframe 每次 load 之后发 ping
 ///   (targetOrigin 是托管 origin,只有托管页收得到),8 秒内没有 pong 就清空 iframe、报错
 ///   —— 见 bridge.dart 的 [EscapeWatch]。
+///
+/// ## 画在 iframe 上面的宿主界面要点得到
+///
+/// 浏览器按 DOM 分派点击:落在 iframe 范围里的点击进了 iframe 自己的文档,**冒泡不出来**,Flutter 收不到 ——
+/// 于是宿主画在网页上面的东西(全屏时的胶囊、`···` 菜单、弹窗、「即将离开超级赞」)在网页版上点了没反应。
+/// 两处处理:
+///
+/// - 宿主有别的路由盖在小程序上面(菜单、弹窗、确认框)时,iframe 设 `pointer-events: none`,
+///   点击落回 Flutter([MiniAppView.interactive]);
+/// - 胶囊不是路由,常驻在网页上面:它底下垫一块 DOM([PointerShield]),点击先落在这块 div 上、冒泡回 Flutter,
+///   再由 Flutter 按自己的命中测试交给胶囊的按钮。
 library;
 
 import 'dart:async';
@@ -35,14 +46,44 @@ class MiniAppView extends StatefulWidget {
     required this.controller,
     required this.onError,
     this.debug = false,
+    this.interactive = true,
   });
 
   final MiniAppController controller;
   final void Function(String message) onError;
   final bool debug;
 
+  /// false = 宿主有东西盖在网页上面(菜单、弹窗):iframe 暂时不接点击,让点击落回 Flutter
+  final bool interactive;
+
   @override
   State<MiniAppView> createState() => MiniAppViewState();
+}
+
+/// 垫在「画在 iframe 上面、要点得到」的宿主控件底下的一块透明 DOM(见文件头)。
+class PointerShield extends StatelessWidget {
+  const PointerShield({super.key, required this.child});
+
+  final Widget child;
+
+  static bool _registered = false;
+  static const _viewType = 'superz-miniapp-pointer-shield';
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_registered) {
+      _registered = true;
+      ui_web.platformViewRegistry.registerViewFactory(
+          _viewType,
+          (int _) => web.HTMLDivElement()
+            ..style.width = '100%'
+            ..style.height = '100%');
+    }
+    return Stack(children: [
+      const Positioned.fill(child: HtmlElementView(viewType: _viewType)),
+      child,
+    ]);
+  }
 }
 
 class MiniAppViewState extends State<MiniAppView> {
@@ -80,6 +121,7 @@ class MiniAppViewState extends State<MiniAppView> {
       // 摄像头、麦克风、定位一概不给:要用得走桥,有确认、有记录
       ..setAttribute('allow', 'clipboard-write')
       ..setAttribute('referrerpolicy', 'no-referrer');
+    _frame.style.pointerEvents = widget.interactive ? 'auto' : 'none';
     if (hosted && sameOrigin) {
       scheduleMicrotask(() => widget.onError('托管地址和宿主同源,为了你的账号安全不加载'));
     } else {
@@ -99,6 +141,14 @@ class MiniAppViewState extends State<MiniAppView> {
   }
 
   void reload() => _frame.src = _c.entryUrl;
+
+  @override
+  void didUpdateWidget(MiniAppView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.interactive != widget.interactive) {
+      _frame.style.pointerEvents = widget.interactive ? 'auto' : 'none';
+    }
+  }
 
   /// iframe 又加载了一个文档:问它还是不是这个小程序(见 [EscapeWatch])。
   /// 每秒问一次 —— async 引 SDK 的页面,监听装上之前的那几问会丢

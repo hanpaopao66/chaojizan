@@ -11,17 +11,20 @@
 
 ## 宿主 × 能力
 
-| 能力 | 方法 | 宿主 2.0(App 与网页版) | 备注 |
-|---|---|---|---|
-| 基础 | ready / expand / close / 主题 / 视口 / 安全区 / 按钮 / 关闭确认 | ✓ | |
-| haptics | HapticFeedback.* | ✓(网页版无振动,调用照常成功) | |
-| popup | showPopup / showAlert / showConfirm | ✓ | 最多 3 个按钮 |
-| openLink | openLink | ✓ | 先弹「即将离开超级赞」 |
-| share | share | ✓(网页版不支持系统分享时复制到剪贴板) | |
-| storage | CloudStorage.* | ✓ | |
-| fullscreen / orientation | requestFullscreen / lockOrientation … | ✓(仅小游戏;网页版不锁方向) | |
-| profile | requestProfile | ✓ | 要申请 |
-| location / scanQr / clipboard / phone | — | 下一阶段 | 现在申请回「暂未开放」 |
+宿主 2.1 是 2026-09-15 起的 App(和网页版);更早的 App 是宿主 2.0。页面用 `isVersionAtLeast('2.1')` 区分。
+
+| 能力 | 方法 | 宿主 2.0 | 宿主 2.1 | 备注 |
+|---|---|---|---|---|
+| 基础 | ready / expand / close / 主题 / 视口 / 安全区 / 按钮 / 关闭确认 | ✓ | ✓ | 2.1 的主题色是 16 个键,2.0 是 10 个(SDK 补齐) |
+| 基础 | setBottomBarColor | — | ✓ | |
+| haptics | HapticFeedback.* | ✓ | ✓ | 网页版无振动,调用照常成功 |
+| popup | showPopup / showAlert / showConfirm | ✓ | ✓ | 最多 3 个按钮 |
+| openLink | openLink | ✓ | ✓ | 先弹「即将离开超级赞」 |
+| share | share | ✓ | ✓ | 网页版不支持系统分享时复制到剪贴板 |
+| storage | CloudStorage.* | ✓ | ✓ | |
+| fullscreen / orientation | requestFullscreen / lockOrientation … | 仅小游戏 | ✓ 所有应用 | 网页版不锁方向;全屏时试浏览器的全屏 API |
+| profile | requestProfile | ✓ | ✓ | 要申请 |
+| location / scanQr / clipboard / phone | — | 下一阶段 | 下一阶段 | 现在申请回「暂未开放」 |
 
 ## initData 协议
 

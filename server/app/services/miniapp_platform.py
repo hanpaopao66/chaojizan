@@ -28,10 +28,11 @@ CATEGORIES = {
     "tools": "工具", "productivity": "效率", "life": "生活", "learning": "学习",
     "casual": "休闲益智", "puzzle": "益智解谜",
 }
-#: 所有应用都有的能力(不用申请)
-BASIC_CAPABILITIES = ("initData", "storage", "share", "haptics", "popup", "openLink")
-#: 只给小游戏
-GAME_CAPABILITIES = ("fullscreen", "orientation")
+#: 所有应用都有的能力(不用申请)。
+#: 全屏和锁方向 2026-09-15 起所有应用都有(和 Telegram 一致,原来只给小游戏):全屏时宿主只留右上角的胶囊
+#: (`···`、关闭),页面盖不住;小游戏和应用的区别只剩「打开即全屏、按 superz.json 锁方向」和包大小上限。
+BASIC_CAPABILITIES = ("initData", "storage", "share", "haptics", "popup", "openLink",
+                      "fullscreen", "orientation")
 #: 要申请 + 审核的能力。M2 只开 profile;其余是 M3,申请接口回「暂未开放」
 REQUESTABLE_CAPABILITIES = {"profile": "昵称和头像"}
 FUTURE_CAPABILITIES = {"location": "定位", "scanQr": "扫码", "clipboard": "读取剪贴板",
@@ -47,6 +48,8 @@ SWITCH_HOSTED = "miniapp_hosted"
 SWITCH_CATALOG = "miniapp_catalog"
 SWITCH_PROFILE = "miniapp_profile"
 SWITCHES = (SWITCH_HOSTED, SWITCH_CATALOG, SWITCH_PROFILE)
+#: 驳回和处罚的原因代码(后台、透明中心、开发者规则页同一张表;逐条解释在 docs/miniapp/review.md)。
+#: R501 的尺度不因全屏而变:全屏时顶栏收成右上角的宿主胶囊,胶囊不许被遮挡、也不许在页面里画一个像它的东西。
 REASON_CODES = {
     "R101": "打不开或核心功能不可用", "R102": "与名称、描述、截图不符", "R103": "空壳、测试页、半成品",
     "R201": "违法违规内容", "R202": "色情低俗", "R203": "赌博、彩票、博彩",
@@ -118,8 +121,6 @@ async def switch_on(db: AsyncSession, key: str) -> bool:
 
 async def capabilities_of(db: AsyncSession, app: MiniApp) -> list[str]:
     caps = list(BASIC_CAPABILITIES)
-    if app.kind == "game":
-        caps += list(GAME_CAPABILITIES)
     granted = list((await db.execute(select(MiniAppCapability.capability).where(
         MiniAppCapability.app_id == app.id, MiniAppCapability.status == "approved"))).scalars())
     if "profile" in granted and not await switch_on(db, SWITCH_PROFILE):

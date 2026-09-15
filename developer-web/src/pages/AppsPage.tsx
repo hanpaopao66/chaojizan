@@ -68,7 +68,7 @@ export default function AppsPage({ me }: { me: Me | null }) {
           <Form.Item name="kind" label="类型">
             <Radio.Group>
               <Radio.Button value="app">应用</Radio.Button>
-              <Radio.Button value="game">小游戏(全屏、可锁方向)</Radio.Button>
+              <Radio.Button value="game">小游戏(打开即全屏、按 superz.json 锁方向)</Radio.Button>
             </Radio.Group>
           </Form.Item>
           <Form.Item name="category" label="分类">

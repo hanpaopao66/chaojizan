@@ -7,6 +7,7 @@
 - 紧急隔离后同一个地址**立即** 404,解除后恢复;对象从未被覆盖(SHA-256 不变)。
 """
 import hashlib
+import json
 import stat
 import urllib.parse
 import zipfile
@@ -61,7 +62,18 @@ print("✓ 服务器域名只收 https origin,拒 http / IP / localhost / 带路
 
 v = publish(dev, appid)
 user, _ = customer()
-launch = call("POST", f"/mini-apps/{appid}/launch", user, {"platform": "web"})
+# 宿主(协议 2.1)下发 16 个主题色:Telegram 的 15 个 + line_color
+THEME16 = {k: "#F0EEE6" for k in (
+    "bg_color", "text_color", "hint_color", "link_color", "button_color", "button_text_color",
+    "secondary_bg_color", "header_bg_color", "bottom_bar_bg_color", "accent_text_color",
+    "section_bg_color", "section_header_text_color", "section_separator_color",
+    "subtitle_text_color", "destructive_text_color", "line_color")}
+launch = call("POST", f"/mini-apps/{appid}/launch", user, {"platform": "web", "theme": THEME16})
+caps = launch["app"]["capabilities"]
+assert {"fullscreen", "orientation"} <= set(caps), f"全屏和锁方向所有应用都有(不只小游戏):{caps}"
+frag = urllib.parse.parse_qs(launch["url"].split("#", 1)[1])
+assert json.loads(frag["szWebAppThemeParams"][0]) == THEME16, "16 个主题色原样进启动片段"
+print("✓ 普通应用也有全屏、锁方向;宿主下发的 16 个主题色原样进启动片段")
 url = launch["url"].split("#", 1)[0]
 path = urllib.parse.urlsplit(url).path
 assert path.endswith(f"/v/{v['id']}/index.html"), path

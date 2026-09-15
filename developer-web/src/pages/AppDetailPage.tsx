@@ -12,7 +12,7 @@ import Simulator from '../components/Simulator'
 
 const CAP_LABEL: Record<string, string> = {
   initData: '身份(initData)', storage: '云存储', share: '系统分享', haptics: '触感', popup: '弹窗', openLink: '打开外链',
-  fullscreen: '全屏(小游戏)', orientation: '锁方向(小游戏)', profile: '昵称和头像(需申请)',
+  fullscreen: '全屏', orientation: '锁方向', profile: '昵称和头像(需申请)',
 }
 
 function err(e: unknown) {

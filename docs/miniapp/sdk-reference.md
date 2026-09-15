@@ -118,21 +118,26 @@ SRI 见 `/sdk/versions.json`。同一份脚本还挂了 `window.Telegram.WebApp`
 设备安全区 `{ top, bottom, left, right }`(px)。
 
 ### contentSafeAreaInset
-内容安全区:小游戏全屏时右上角有宿主的胶囊(`···` 和关闭),内容要让开它。超级赞的口径是**从屏幕边算起的总边距**
+内容安全区:全屏时(应用、小游戏都一样)右上角有宿主的胶囊(`···` 和关闭),内容要让开它。超级赞的口径是**从屏幕边算起的总边距**
 (已经包含 `safeAreaInset`),单用它就够;`Telegram.WebApp.contentSafeAreaInset` 按 Telegram 的口径换算成
 安全区里面再让出的那一截,和 `safeAreaInset` 相加才是总边距。
 
 ### isFullscreen
-是否全屏(小游戏)。
+是否沉浸式全屏。小游戏打开时就是 `true`。
 
 ### requestFullscreen()
-进入全屏。能力:fullscreen(仅小游戏)。
+进入沉浸式全屏:页面铺满整屏、系统栏藏起来,宿主的顶栏收成右上角的胶囊(`···` 和关闭,页面盖不住)。
+能力:fullscreen —— 所有应用都有(宿主 2.1 起;老版本 App 里只有小游戏能全屏,普通应用会收到 `fullscreenFailed`)。
+结果看事件:成了发 `fullscreenChanged`;已经是全屏再调发 `fullscreenFailed`(`error: 'ALREADY_FULLSCREEN'`),
+宿主做不到发 `fullscreenFailed`(`error: 'UNSUPPORTED'`)。网页版宿主会顺手试浏览器的全屏 API(要在页面刚被点过时调才会成),
+成不成页面都铺满窗口;用户按 Esc 退出浏览器全屏,应用跟着退出全屏。
 
 ### exitFullscreen()
-退出全屏。能力:fullscreen。
+退出全屏:应用回到弹层原来的大小,小游戏露出顶栏(仍然铺满)。能力:fullscreen。
 
 ### lockOrientation()
-按 `superz.json` 的 `orientation` 锁屏幕方向。能力:orientation(仅小游戏)。
+锁住**当前**的横竖(和 Telegram 一样)。能力:orientation(所有应用都有)。网页版不锁方向。
+小游戏打开时照旧按 `superz.json` 的 `orientation` 锁,不用自己调。
 
 ### unlockOrientation()
 解除方向锁定。能力:orientation。
@@ -150,7 +155,7 @@ SRI 见 `/sdk/versions.json`。同一份脚本还挂了 `window.Telegram.WebApp`
 
 事件名:`themeChanged`、`viewportChanged`、`safeAreaChanged`、`contentSafeAreaChanged`、`mainButtonClicked`、
 `secondaryButtonClicked`、`backButtonClicked`、`settingsButtonClicked`、`popupClosed`、`activated`、`deactivated`、
-`fullscreenChanged`、`fullscreenFailed`。
+`fullscreenChanged`、`fullscreenFailed`(带 `error`:`ALREADY_FULLSCREEN` / `UNSUPPORTED`,和 Telegram 一样)。
 
 ## 按钮(宿主原生画)
 

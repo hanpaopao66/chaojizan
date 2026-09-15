@@ -2,20 +2,24 @@
 
 建应用时选「小游戏」,`superz.json` 里 `"kind": "game"`。和应用的区别:
 
-- 在 App 里**全屏路由**打开(沉浸式),右上角是宿主的胶囊(`···` 和关闭);
-- 多两项能力:全屏(`requestFullscreen`)、锁方向(`lockOrientation`,按 `superz.json` 的 `orientation`);
+- 在 App 里**打开就是沉浸式全屏**,右上角是宿主的胶囊(`···` 和关闭);应用在弹层里打开,自己调 `requestFullscreen` 才全屏;
+- 打开时按 `superz.json` 的 `orientation` 锁方向;
 - 包上限 30 MB(应用是 10 MB)。
+
+全屏(`requestFullscreen`)和锁方向(`lockOrientation`)这两项能力 2026-09-15 起**所有应用都有**,不再只给小游戏。
 
 ## 全屏与方向
 
 ```js
 const app = SuperZ.WebApp
-app.requestFullscreen().catch(() => {})   // 宿主打开小游戏时已经是全屏,这一句给网页版用
-app.lockOrientation().catch(() => {})
+// 宿主打开小游戏时已经是全屏(再调会收到 fullscreenFailed: ALREADY_FULLSCREEN,不用管);
+// 网页版上这一句会顺手试浏览器的全屏 API —— 放在用户第一次点击里调,浏览器才肯
+app.requestFullscreen().catch(() => {})
 ```
 
-横屏游戏在 `superz.json` 写 `"orientation": "landscape"`,宿主打开时就按它锁。内容要让开
-`contentSafeAreaInset`(胶囊和刘海)。
+横屏游戏在 `superz.json` 写 `"orientation": "landscape"`,宿主打开时就按它锁;玩到一半想固定住当前方向用
+`lockOrientation()`(锁当前的横竖,和 Telegram 一样)。内容要让开 `contentSafeAreaInset`(胶囊和刘海)。
+`exitFullscreen()` 会露出宿主的顶栏,游戏仍然铺满屏幕。
 
 ## 性能预算
 

@@ -216,6 +216,16 @@ class MiniAppController extends ChangeNotifier {
     }
   }
 
+  /// 宿主这边退出了全屏(网页版用户按 Esc 退出了浏览器全屏):和页面调 exitFullscreen 走同一条路
+  Future<void> hostExitFullscreen() async {
+    if (!fullscreen) return;
+    if (await ui.setFullscreen(false)) {
+      fullscreen = false;
+      emit('fullscreenChanged', {'isFullscreen': false});
+      _changed();
+    }
+  }
+
   void clickMain() => emit('mainButtonClicked');
   void clickSecondary() => emit('secondaryButtonClicked');
   void clickBack() => emit('backButtonClicked');
@@ -327,18 +337,33 @@ class MiniAppController extends ChangeNotifier {
             'cursor': p['cursor'] ?? '',
             'limit': p['limit'] ?? 500,
           })),
+      // 全屏(协议 2.1 起所有应用都能用)。事件和 Telegram 一样:成了发 fullscreenChanged,
+      // 没成发 fullscreenFailed 带 error —— 已经是全屏 ALREADY_FULLSCREEN,宿主做不到 UNSUPPORTED
       'requestFullscreen': m('requestFullscreen', (_) async {
+        if (fullscreen) {
+          // 网页版的小游戏打开时只是在窗口里铺满:页面再要一次,顺手试浏览器全屏(状态不变)
+          await ui.setFullscreen(true);
+          emit('fullscreenFailed', {'error': 'ALREADY_FULLSCREEN', 'isFullscreen': true});
+          return true;
+        }
         final ok = await ui.setFullscreen(true);
-        fullscreen = ok || fullscreen;
-        emit(ok ? 'fullscreenChanged' : 'fullscreenFailed', {'isFullscreen': fullscreen});
+        if (ok) {
+          fullscreen = true;
+          emit('fullscreenChanged', {'isFullscreen': true});
+        } else {
+          emit('fullscreenFailed', {'error': 'UNSUPPORTED', 'isFullscreen': false});
+        }
         _changed();
         return ok;
       }),
       'exitFullscreen': m('exitFullscreen', (_) async {
+        if (!fullscreen) return true;
         final ok = await ui.setFullscreen(false);
-        if (ok) fullscreen = false;
-        emit('fullscreenChanged', {'isFullscreen': fullscreen});
-        _changed();
+        if (ok) {
+          fullscreen = false;
+          emit('fullscreenChanged', {'isFullscreen': false});
+          _changed();
+        }
         return ok;
       }),
       'lockOrientation': m('lockOrientation', (_) async {

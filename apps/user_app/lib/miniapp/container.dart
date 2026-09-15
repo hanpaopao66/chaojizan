@@ -4,20 +4,31 @@
 ///
 /// 图标、名称、「由 XX 提供」和认证标记、`···`、关闭 —— 全是原生画在网页**外面**的,
 /// 页面内容再怎么画也盖不住。这是防仿冒的关键:一个小程序可以把自己画成支付页,
-/// 但画不掉顶栏上那行「由 XX 提供」。小游戏全屏时顶栏收成右上角的胶囊,同样盖不住。
+/// 但画不掉顶栏上那行「由 XX 提供」。全屏时顶栏收成右上角的胶囊(`···`、关闭),
+/// 浮在网页**上面**,同样盖不住;点 `···` 看得到「由 XX 提供」和认证标记。
 ///
-/// ## 呈现
+/// ## 呈现:一个路由、一棵不变的树
 ///
-/// - 应用:半屏 → 全屏的弹层(拖顶栏);
-/// - 小游戏:全屏路由,沉浸式,按 superz.json 锁方向,安全区照实下发。
+/// 网页(平台视图)从头到尾待在树里同一个位置,换的只是它外面那一圈的位置和大小 —— 切全屏不会重新加载页面。
+///
+/// - 应用:半屏 → 全屏的弹层(拖顶栏);宽屏是居中的面板。页面调 requestFullscreen → 沉浸式全屏:
+///   面板铺满整屏、系统栏藏起来、顶栏收成右上角的胶囊;exitFullscreen 回到弹层原来的大小;
+/// - 小游戏:打开就是沉浸式全屏,按 superz.json 锁方向;exitFullscreen 露出顶栏(仍铺满,不变成弹层);
+/// - 网页版宿主:进全屏时顺手试浏览器的全屏 API(页面里刚点过、手势还有效时才会成),
+///   成不了就只在窗口里铺满、收起顶栏;用户按 Esc 退出浏览器全屏时,应用跟着回到弹层。
+///   电脑上没有原生小程序容器,桌面版引导到网页版打开,行为同网页版。
+///
+/// 安全区照实下发;内容安全区把胶囊那一截算进去(超级赞的口径是从屏幕边算起的总边距,
+/// Telegram 兼容层在 SDK 里换算成 Telegram 的口径)。
 ///
 /// ## 返回键
 ///
 /// 页面显示了 BackButton → 系统返回交给页面(backButtonClicked);没显示 → 关闭
-///(开了关闭确认的先问一句)。
+///(开了关闭确认的先问一句)。全屏时也一样。
 library;
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +39,7 @@ import 'package:superz_shared/superz_shared.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../session.dart';
+import '../video/player/browser_fullscreen.dart';
 import 'bridge.dart';
 import 'controller.dart';
 import 'pages.dart';
@@ -50,6 +62,15 @@ String get miniAppPlatform => kIsWeb
 
 const kMiniAppDebugPref = 'miniapp_debug';
 const kMiniAppTesterPref = 'miniapp_is_tester';
+
+/// 弹层的三个高度(占状态栏以下可用高度的比例):打开时、拖到最低、拖到最高
+const kMiniAppSheetInitial = 0.72;
+const kMiniAppSheetMin = 0.45;
+const kMiniAppSheetMax = 0.96;
+
+/// 全屏时胶囊离安全区顶的距离、胶囊的高度。内容安全区的顶 = 安全区顶 + 这两项
+const kCapsuleTop = 8.0;
+const kCapsuleHeight = 40.0;
 
 /// 打开一个小程序。[card] 有就立刻出启动页(图标、名字),没有(直达链接)先查一次详情。
 Future<void> openMiniApp(BuildContext context, ApiClient api,
@@ -79,19 +100,20 @@ Future<void> openMiniApp(BuildContext context, ApiClient api,
     }
     if (!context.mounted) return;
   }
-  final frame = MiniAppFrame(
-      api: api, card: c, trial: trial, startParam: startParam, fullscreen: c.isGame);
-  if (c.isGame) {
-    await Navigator.of(context).push(PageRouteBuilder(
-      opaque: true,
-      transitionDuration: SzMotion.of(context, SzMotion.base),
-      pageBuilder: (_, __, ___) => frame,
-      transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
-    ));
-  } else {
-    await szShowSheet<void>(context: context, builder: (_) => frame, isDismissible: false);
-  }
+  await Navigator.of(context).push(miniAppRoute(
+      context, MiniAppFrame(api: api, card: c, trial: trial, startParam: startParam, fullscreen: c.isGame),
+      game: c.isGame));
 }
+
+/// 小程序的路由。应用的弹层自己按路由动画画遮罩(淡入)和面板(从底下升上来),
+/// 所以路由本身透明、不带过渡;小游戏整页淡入。
+Route<void> miniAppRoute(BuildContext context, Widget frame, {required bool game}) => PageRouteBuilder<void>(
+      opaque: game,
+      transitionDuration: SzMotion.of(context, SzMotion.slow),
+      reverseTransitionDuration: SzMotion.of(context, SzMotion.base),
+      pageBuilder: (_, __, ___) => frame,
+      transitionsBuilder: (_, anim, __, child) => game ? FadeTransition(opacity: anim, child: child) : child,
+    );
 
 class MiniAppFrame extends StatefulWidget {
   const MiniAppFrame({
@@ -101,6 +123,7 @@ class MiniAppFrame extends StatefulWidget {
     this.trial = false,
     this.startParam,
     this.fullscreen = false,
+    this.viewBuilder,
   });
 
   final ApiClient api;
@@ -108,24 +131,42 @@ class MiniAppFrame extends StatefulWidget {
   final bool trial;
   final String? startParam;
 
-  /// 小游戏全屏打开;应用在弹层里
+  /// 小游戏:打开就是沉浸式全屏;应用在弹层里,页面要了才全屏
   final bool fullscreen;
+
+  /// 测试用:用它代替真正的网页(WebView / iframe 在测试环境里起不来)
+  @visibleForTesting
+  final Widget Function(BuildContext context, MiniAppController controller)? viewBuilder;
 
   @override
   State<MiniAppFrame> createState() => _MiniAppFrameState();
 }
 
 class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver implements MiniAppUi {
-  final _sheet = DraggableScrollableController();
   final _viewKey = GlobalKey<MiniAppViewState>();
   MiniAppController? _c;
   String? _error;
   bool _splash = true;
+
+  /// 启动页淡出之后整个拿掉:它里面的转圈是无限动画,留在树里(哪怕透明)会一直占着帧
+  bool _splashGone = false;
   bool _debug = false;
   bool? _starred;
   Timer? _splashTimer;
   Timer? _stableTimer;
   bool _closing = false;
+
+  /// 沉浸式全屏(页面看到的 isFullscreen)。小游戏打开就是
+  late bool _immersive = widget.fullscreen;
+
+  /// 弹层的高度比例(应用、窄屏、非全屏时)。拖顶栏改它,expand() 拉到最高
+  double _size = kMiniAppSheetInitial;
+  bool _dragging = false;
+
+  /// 网页版:这次全屏试过浏览器的全屏 API
+  bool _browserFs = false;
+  void Function()? _stopBrowserWatch;
+  bool _orientationTouched = false;
 
   MiniAppCard get card => _c?.launch.card ?? widget.card;
 
@@ -140,7 +181,9 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
     if (widget.fullscreen) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      _orientationTouched = true;
     }
+    _stopBrowserWatch = onBrowserFullscreenExit(_onBrowserFullscreenExit);
     WidgetsBinding.instance.addPostFrameCallback((_) => _launch());
   }
 
@@ -148,6 +191,7 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
     setState(() {
       _error = null;
       _splash = true;
+      _splashGone = false;
     });
     final theme = Theme.of(context);
     try {
@@ -170,10 +214,11 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
         final t = Theme.of(context);
         c.themeParams = miniAppThemeParams(t.sz, t.brightness);
         c.colorScheme = t.brightness == Brightness.dark ? 'dark' : 'light';
+        c.fullscreen = _immersive;
       }
       setState(() => _c = c);
       if (old != null) _viewKey.currentState?.reload();
-      if (widget.fullscreen) unawaited(lockOrientation(true));
+      if (widget.fullscreen) unawaited(_lockManifestOrientation());
       _splashTimer?.cancel();
       // ready() 八秒还没来也照常展示 —— 页面可能忘了调,不能让用户对着启动页干等
       _splashTimer = Timer(const Duration(seconds: 8), () {
@@ -229,13 +274,12 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
     WidgetsBinding.instance.removeObserver(this);
     _splashTimer?.cancel();
     _stableTimer?.cancel();
+    _stopBrowserWatch?.call();
     _c?.removeListener(_onController);
     _c?.dispose();
-    _sheet.dispose();
-    if (widget.fullscreen) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      SystemChrome.setPreferredOrientations(const []);
-    }
+    if (_browserFs) unawaited(exitBrowserFullscreen());
+    if (_immersive || widget.fullscreen) SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (_orientationTouched) SystemChrome.setPreferredOrientations(const []);
     super.dispose();
   }
 
@@ -286,9 +330,8 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
 
   @override
   void expand() {
-    if (_sheet.isAttached) {
-      _sheet.animateTo(0.96, duration: SzMotion.of(context, SzMotion.base), curve: SzMotion.standard);
-    }
+    if (!mounted || widget.fullscreen || _immersive) return;
+    setState(() => _size = kMiniAppSheetMax);
   }
 
   @override
@@ -401,23 +444,59 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
     return ok == true;
   }
 
+  /// 进 / 出沉浸式全屏。手机上藏系统栏;网页版顺手试浏览器的全屏 API(成不成都在窗口里铺满)。
   @override
-  Future<bool> setFullscreen(bool on) async => widget.fullscreen;
+  Future<bool> setFullscreen(bool on) async {
+    if (!mounted) return false;
+    if (kIsWeb) {
+      if (on) {
+        _browserFs = true;
+        unawaited(enterBrowserFullscreen());
+      } else if (_browserFs) {
+        _browserFs = false;
+        unawaited(exitBrowserFullscreen());
+      }
+    } else {
+      unawaited(SystemChrome.setEnabledSystemUIMode(on ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge));
+    }
+    if (on != _immersive) setState(() => _immersive = on);
+    return true;
+  }
 
+  /// 网页版用户按 Esc(或系统手势)退出了浏览器全屏:应用跟着回到弹层,和页面调 exitFullscreen 一样发事件。
+  /// 小游戏本来就铺满窗口,只是浏览器的地址栏回来了,不动它。
+  void _onBrowserFullscreenExit() {
+    if (!_browserFs) return;
+    _browserFs = false;
+    if (!widget.fullscreen && _immersive) unawaited(_c?.hostExitFullscreen());
+  }
+
+  /// 锁**当前**的横竖(和 Telegram 一样);解锁放开。网页版不锁方向。
   @override
   Future<bool> lockOrientation(bool lock) async {
-    if (kIsWeb) return false;
+    if (kIsWeb || !mounted) return false;
+    _orientationTouched = true;
     if (!lock) {
       await SystemChrome.setPreferredOrientations(const []);
       return true;
     }
+    final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
+    await SystemChrome.setPreferredOrientations(landscape
+        ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+        : const [DeviceOrientation.portraitUp]);
+    return true;
+  }
+
+  /// 小游戏打开时按 superz.json 的 orientation 锁(这一条行为不变)
+  Future<void> _lockManifestOrientation() async {
+    if (kIsWeb) return;
     final o = _c?.launch.orientation ?? 'portrait';
+    _orientationTouched = true;
     await SystemChrome.setPreferredOrientations(o == 'landscape'
         ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
         : o == 'any'
             ? const []
             : const [DeviceOrientation.portraitUp]);
-    return true;
   }
 
   // ---------------------------------------------------------------- 菜单
@@ -504,36 +583,97 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
     );
   }
 
+  // ---------------------------------------------------------------- 布局
+
+  /// 面板现在铺不铺满整屏:小游戏、全屏中的应用
+  bool get _covers => widget.fullscreen || _immersive;
+
+  /// 窄屏上的应用弹层(能拖顶栏);宽屏是居中的面板
+  bool _isSheet(BuildContext context) => !_covers && isSheetBottom(context);
+
+  /// 面板在屏幕上的位置和大小。键盘弹出时面板整个让到键盘上面
+  Rect _panelRect(BoxConstraints box, MediaQueryData mq) {
+    final w = box.maxWidth, h = box.maxHeight;
+    final kb = mq.viewInsets.bottom;
+    if (_covers) return Rect.fromLTWH(0, 0, w, h - kb);
+    if (isSheetBottom(context)) {
+      final avail = h - mq.padding.top;
+      final ph = math.max(0.0, math.min(avail * _size, avail - kb));
+      return Rect.fromLTWH(0, h - kb - ph, w, ph);
+    }
+    final pw = math.max(0.0, math.min(w - 48, kContentMaxWidth));
+    final ph = math.max(0.0, math.min(h * 0.8, h - kb - 48));
+    return Rect.fromLTWH((w - pw) / 2, (h - kb - ph) / 2, pw, ph);
+  }
+
+  void _dragUpdate(DragUpdateDetails d) {
+    final avail = MediaQuery.sizeOf(context).height - MediaQuery.paddingOf(context).top;
+    if (avail <= 0) return;
+    setState(() {
+      _dragging = true;
+      _size = (_size - (d.primaryDelta ?? 0) / avail).clamp(kMiniAppSheetMin, kMiniAppSheetMax).toDouble();
+    });
+  }
+
+  void _dragEnd(DragEndDetails d) {
+    final v = d.primaryVelocity ?? 0;
+    setState(() {
+      _dragging = false;
+      // 甩一下:往上甩到最高,往下甩到最低(不关闭 —— 关闭走 × 或返回键,关闭确认才拦得住)
+      if (v < -700) _size = kMiniAppSheetMax;
+      if (v > 700) _size = kMiniAppSheetMin;
+    });
+  }
+
   // ---------------------------------------------------------------- 画
 
   void _report(BoxConstraints box) {
     final c = _c;
-    if (c == null) return;
+    if (c == null || !mounted) return;
     final mq = MediaQuery.of(context);
     final bottomBar = c.mainButton.visible || c.secondaryButton.visible;
+    final wideDialog = !_covers && !isSheetBottom(context);
+    final atScreenBottom = !wideDialog && mq.viewInsets.bottom == 0;
     c.updateSafeArea({
-      'top': widget.fullscreen ? mq.padding.top : 0,
-      'bottom': bottomBar ? 0 : mq.padding.bottom,
-      'left': mq.padding.left,
-      'right': mq.padding.right,
+      // 顶:全屏时网页顶到屏幕边,照实报状态栏 / 刘海;弹层和露出顶栏时顶栏在网页上面
+      'top': _immersive ? mq.padding.top : 0,
+      'bottom': bottomBar || !atScreenBottom ? 0 : mq.padding.bottom,
+      'left': wideDialog ? 0 : mq.padding.left,
+      'right': wideDialog ? 0 : mq.padding.right,
     }, {
-      // 全屏时右上角有宿主的胶囊,内容要让开它
-      'top': widget.fullscreen ? mq.padding.top + 48 : 0,
+      // 全屏时右上角有宿主的胶囊:内容安全区的顶把它那一截算进去
+      'top': _immersive ? mq.padding.top + kCapsuleTop + kCapsuleHeight : 0,
       'bottom': 0, 'left': 0, 'right': 0,
     });
     final h = box.maxHeight;
-    final expanded = !_sheet.isAttached || _sheet.size > 0.9;
+    final expanded = _covers || !isSheetBottom(context) || _size > 0.9;
     c.updateViewport(h, stable: false, isExpanded: expanded);
     _stableTimer?.cancel();
     _stableTimer = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) c.updateViewport(h, stable: true);
+      if (mounted && !_dragging) c.updateViewport(h, stable: true);
     });
+  }
+
+  Widget _view(MiniAppController c) {
+    final build = widget.viewBuilder;
+    if (build != null) return build(context, c);
+    return MiniAppView(
+      key: _viewKey,
+      controller: c,
+      debug: _debug,
+      // 宿主的菜单、弹窗盖在上面时,网页版的 iframe 先不接点击(不然点不到盖在它上面的东西)
+      interactive: ModalRoute.of(context)?.isCurrent ?? true,
+      onError: (m) {
+        if (mounted) setState(() => _error = '页面没打开:$m');
+      },
+    );
   }
 
   Widget _body() {
     final sz = Theme.of(context).sz;
     final c = _c;
     final bg = colorOf(c?.backgroundColor) ?? colorOf(c?.launch.backgroundColor) ?? sz.paper;
+    final mq = MediaQuery.of(context);
     return ColoredBox(
       color: bg,
       child: Stack(children: [
@@ -541,32 +681,29 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
           Positioned.fill(
             child: LayoutBuilder(builder: (context, box) {
               WidgetsBinding.instance.addPostFrameCallback((_) => _report(box));
-              return MiniAppView(
-                key: _viewKey,
-                controller: c,
-                debug: _debug,
-                onError: (m) {
-                  if (mounted) setState(() => _error = '页面没打开:$m');
-                },
-              );
+              return _view(c);
             }),
           ),
         if (_error != null)
           _ErrorPane(message: _error!, onRetry: _launch, onClose: () => Navigator.of(context).maybePop())
-        else
+        else if (!_splashGone)
           IgnorePointer(
             ignoring: !_splash,
             child: AnimatedOpacity(
               opacity: _splash ? 1 : 0,
               duration: SzMotion.of(context, SzMotion.base),
+              onEnd: () {
+                if (mounted && !_splash) setState(() => _splashGone = true);
+              },
               child: _Splash(card: card, api: widget.api, color: bg),
             ),
           ),
-        if (widget.fullscreen)
+        // 胶囊最后画:在网页上面,页面盖不住
+        if (_immersive)
           Positioned(
-            top: MediaQuery.paddingOf(context).top + 8,
-            right: 10,
-            child: _Capsule(onMenu: _menu, onClose: _requestClose),
+            top: mq.padding.top + kCapsuleTop,
+            right: mq.padding.right + 10,
+            child: PointerShield(child: MiniAppCapsule(onMenu: _menu, onClose: _requestClose)),
           ),
       ]),
     );
@@ -622,65 +759,123 @@ class _MiniAppFrameState extends State<MiniAppFrame> with WidgetsBindingObserver
     );
   }
 
-  Widget _header(ScrollController? drag) {
+  Widget _header() {
     final sz = Theme.of(context).sz;
     final c = _c;
     final headerBg = colorOf(c?.headerColor) ?? sz.paper;
     final dark = ThemeData.estimateBrightnessForColor(headerBg) == Brightness.dark;
     final fg = dark ? SzColors.dark.ink : SzColors.light.ink;
+    final sheet = _isSheet(context);
+    // 小游戏退出全屏时面板顶到屏幕边:顶栏自己让开状态栏
+    final top = widget.fullscreen ? MediaQuery.paddingOf(context).top : 0.0;
     return Material(
       color: headerBg,
-      child: SingleChildScrollView(
-        controller: drag,
-        physics: const ClampingScrollPhysics(),
-        child: Column(children: [
-          // 拖拽条由 szShowSheet 按主题画(底部弹层才有),这里不再画第二条
-          Padding(
-            padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
-            child: Row(children: [
-              if (c != null && c.backButtonVisible)
-                IconButton(onPressed: c.clickBack, icon: Icon(Icons.arrow_back, color: fg), tooltip: '返回')
-              else
-                const SizedBox(width: 10),
-              Expanded(child: _AppIdentity(card: card, trial: widget.trial, api: widget.api, color: fg, compact: true)),
-              IconButton(onPressed: _menu, icon: Icon(Icons.more_horiz, color: fg), tooltip: '更多'),
-              IconButton(onPressed: _requestClose, icon: Icon(Icons.close, color: fg), tooltip: '关闭'),
-            ]),
-          ),
-          Divider(height: 1, color: sz.line),
-        ]),
+      child: GestureDetector(
+        // 拖顶栏:弹层半屏 ↔ 全屏(只有窄屏的应用弹层能拖)
+        onVerticalDragUpdate: sheet ? _dragUpdate : null,
+        onVerticalDragEnd: sheet ? _dragEnd : null,
+        child: Padding(
+          padding: EdgeInsets.only(top: top),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (sheet)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Container(
+                    width: 32, height: 4,
+                    decoration: BoxDecoration(color: fg.withValues(alpha: 0.22), borderRadius: BorderRadius.circular(2))),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
+              child: Row(children: [
+                if (c != null && c.backButtonVisible)
+                  IconButton(onPressed: c.clickBack, icon: Icon(Icons.arrow_back, color: fg), tooltip: '返回')
+                else
+                  const SizedBox(width: 10),
+                Expanded(child: _AppIdentity(card: card, trial: widget.trial, api: widget.api, color: fg, compact: true)),
+                IconButton(onPressed: _menu, icon: Icon(Icons.more_horiz, color: fg), tooltip: '更多'),
+                IconButton(onPressed: _requestClose, icon: Icon(Icons.close, color: fg), tooltip: '关闭'),
+              ]),
+            ),
+            Divider(height: 1, color: sz.line),
+          ]),
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final page = PopScope(
+    return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _onBack();
       },
-      child: widget.fullscreen
-          ? Scaffold(body: Column(children: [Expanded(child: _body()), _bottomBar()]))
-          : _sheetBody(),
+      child: Scaffold(
+        // 透明:应用弹层后面要看得见原来的页面;键盘避让自己算(面板整个让到键盘上面)
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: false,
+        body: LayoutBuilder(builder: _frame),
+      ),
     );
-    return page;
   }
 
-  Widget _sheetBody() {
-    Widget content(ScrollController? drag) =>
-        Column(children: [_header(drag), Expanded(child: _body()), _bottomBar()]);
-    if (!isSheetBottom(context)) {
-      return SizedBox(height: MediaQuery.sizeOf(context).height * 0.8, child: content(null));
-    }
-    return DraggableScrollableSheet(
-      controller: _sheet,
-      expand: false,
-      initialChildSize: 0.72,
-      minChildSize: 0.45,
-      maxChildSize: 0.96,
-      builder: (context, drag) => content(drag),
+  Widget _frame(BuildContext context, BoxConstraints box) {
+    final sz = Theme.of(context).sz;
+    final mq = MediaQuery.of(context);
+    final route = ModalRoute.of(context)?.animation ?? kAlwaysCompleteAnimation;
+    final rect = _panelRect(box, mq);
+    final motion = _dragging ? Duration.zero : SzMotion.of(context, SzMotion.base);
+    final radius = _covers
+        ? BorderRadius.zero
+        : isSheetBottom(context)
+            ? const BorderRadius.vertical(top: Radius.circular(16))
+            : BorderRadius.circular(16);
+    // 树的形状在应用 / 小游戏、弹层 / 全屏之间都不变,只改位置、大小、顶栏高度 —— 网页不会被重建
+    final panel = Material(
+      key: const ValueKey('miniapp-panel'),
+      color: sz.paper,
+      clipBehavior: Clip.antiAlias,
+      borderRadius: radius,
+      child: Column(children: [
+        ClipRect(
+          child: AnimatedAlign(
+            alignment: Alignment.topCenter,
+            heightFactor: _immersive ? 0 : 1,
+            duration: SzMotion.of(context, SzMotion.base),
+            curve: SzMotion.standard,
+            child: _header(),
+          ),
+        ),
+        Expanded(child: _body()),
+        _bottomBar(),
+      ]),
     );
+    return Stack(children: [
+      if (!widget.fullscreen)
+        // 应用弹层后面的遮罩:点它不关(关闭走 × 或返回键,关闭确认才拦得住)
+        Positioned.fill(
+          child: FadeTransition(
+            opacity: route,
+            child: const ModalBarrier(dismissible: false, color: Colors.black54),
+          ),
+        ),
+      AnimatedPositioned(
+        duration: motion,
+        curve: SzMotion.standard,
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        child: widget.fullscreen
+            ? panel
+            : SlideTransition(
+                // drive 不给路由动画挂监听(CurvedAnimation 会挂,每次重建挂一个就漏了)
+                position: route.drive(Tween(begin: const Offset(0, 1), end: Offset.zero)
+                    .chain(CurveTween(curve: SzMotion.standard))),
+                child: panel,
+              ),
+      ),
+    ]);
   }
 }
 
@@ -833,9 +1028,9 @@ class _ErrorPane extends StatelessWidget {
   }
 }
 
-/// 小游戏全屏时的宿主胶囊:`···` 和关闭。浮在页面**上面**,页面盖不住。
-class _Capsule extends StatelessWidget {
-  const _Capsule({required this.onMenu, required this.onClose});
+/// 全屏时的宿主胶囊:`···` 和关闭。浮在页面**上面**,页面盖不住;应用、小游戏全屏时都是它。
+class MiniAppCapsule extends StatelessWidget {
+  const MiniAppCapsule({super.key, required this.onMenu, required this.onClose});
 
   final VoidCallback onMenu;
   final VoidCallback onClose;

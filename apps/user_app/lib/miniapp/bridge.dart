@@ -152,7 +152,7 @@ class BridgeDispatcher {
   }
 }
 
-/// 桥方法 → 能力名(和服务端 miniapp_platform 的 BASIC/GAME/REQUESTABLE 同一套名字)。
+/// 桥方法 → 能力名(和服务端 miniapp_platform 的 BASIC/REQUESTABLE 同一套名字;全屏、锁方向 2026-09-15 起是基础能力)。
 const kMethodCapability = <String, String?>{
   'ready': null,
   'expand': null,

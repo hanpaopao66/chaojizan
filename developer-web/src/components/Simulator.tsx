@@ -201,8 +201,16 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
             await navigator.clipboard?.writeText([p.text, p.url].filter(Boolean).join('\n')).catch(() => undefined)
             message.success('模拟分享:内容已复制')
             return reply(true, { shared: true })
-          case 'requestFullscreen': setFullscreen(true); send({ v: 2, type: 'event', name: 'fullscreenChanged', data: { isFullscreen: true } }); return reply(true, true)
-          case 'exitFullscreen': setFullscreen(false); send({ v: 2, type: 'event', name: 'fullscreenChanged', data: { isFullscreen: false } }); return reply(true, true)
+          // 全屏:所有应用都能用(和 App 一样);已经是全屏再要一次回 ALREADY_FULLSCREEN,和 Telegram 同一个约定
+          case 'requestFullscreen':
+            if (fullscreen) {
+              send({ v: 2, type: 'event', name: 'fullscreenFailed', data: { error: 'ALREADY_FULLSCREEN', isFullscreen: true } })
+              return reply(true, true)
+            }
+            setFullscreen(true); send({ v: 2, type: 'event', name: 'fullscreenChanged', data: { isFullscreen: true } }); return reply(true, true)
+          case 'exitFullscreen':
+            if (!fullscreen) return reply(true, true)
+            setFullscreen(false); send({ v: 2, type: 'event', name: 'fullscreenChanged', data: { isFullscreen: false } }); return reply(true, true)
           case 'lockOrientation': case 'unlockOrientation': return reply(true, true)
           case 'requestProfile': {
             const ok = window.confirm(`「${launch.app.name}」想获取你的昵称和头像(模拟授权)`)
@@ -248,7 +256,10 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
   // 改主题、安全区:照真机一样发事件
   useEffect(() => { if (launch) send({ v: 2, type: 'event', name: 'themeChanged', data: { themeParams: THEMES[scheme], colorScheme: scheme } }) }, [scheme])
   useEffect(() => {
-    if (launch) send({ v: 2, type: 'event', name: 'safeAreaChanged', data: { top: fullscreen ? safeTop : 0, bottom: safeBottom, left: 0, right: 0 } })
+    if (!launch) return
+    send({ v: 2, type: 'event', name: 'safeAreaChanged', data: { top: fullscreen ? safeTop : 0, bottom: safeBottom, left: 0, right: 0 } })
+    // 全屏时右上角有宿主胶囊:内容安全区从屏幕边算起,把胶囊那一截(离顶 8 + 高 40)算进去
+    send({ v: 2, type: 'event', name: 'contentSafeAreaChanged', data: { top: fullscreen ? safeTop + 48 : 0, bottom: 0, left: 0, right: 0 } })
   }, [safeTop, safeBottom, fullscreen])
 
   const theme = THEMES[scheme]
@@ -284,7 +295,10 @@ export default function Simulator({ appid, versions, kind }: { appid: string; ve
           <Space wrap>
             安全区 上 <InputNumber size="small" min={0} max={60} value={safeTop} onChange={(v) => setSafeTop(Number(v) || 0)} />
             下 <InputNumber size="small" min={0} max={60} value={safeBottom} onChange={(v) => setSafeBottom(Number(v) || 0)} />
-            全屏 <Switch size="small" checked={fullscreen} onChange={setFullscreen} />
+            全屏 <Switch size="small" checked={fullscreen} onChange={(on) => {
+              setFullscreen(on)
+              if (launch) send({ v: 2, type: 'event', name: 'fullscreenChanged', data: { isFullscreen: on } })
+            }} />
           </Space>
           <Space wrap>
             <Button size="small" disabled={!launch} onClick={() => {

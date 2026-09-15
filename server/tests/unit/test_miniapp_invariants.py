@@ -20,7 +20,7 @@ from app.services import miniapp_publish as pub
 from app.services import storage
 from app.services.miniapp_package import PackageReport
 from app.services.miniapp_platform import (BASIC_CAPABILITIES, FUTURE_CAPABILITIES,
-                                           GAME_CAPABILITIES, REQUESTABLE_CAPABILITIES)
+                                           REQUESTABLE_CAPABILITIES)
 
 ROOT = Path(__file__).resolve().parents[3]
 SERVER = ROOT / "server/app"
@@ -105,7 +105,16 @@ def _host_methods() -> dict[str, str | None]:
 
 
 def _capabilities() -> set[str]:
-    return {*BASIC_CAPABILITIES, *GAME_CAPABILITIES, *REQUESTABLE_CAPABILITIES}
+    return {*BASIC_CAPABILITIES, *REQUESTABLE_CAPABILITIES}
+
+
+def test_fullscreen_is_basic_for_every_app():
+    """全屏和锁方向 2026-09-15 起所有应用都有(和 Telegram 一致):不按 kind 分,也不用申请。"""
+    assert {"fullscreen", "orientation"} <= set(BASIC_CAPABILITIES)
+    assert not {"fullscreen", "orientation"} & set(REQUESTABLE_CAPABILITIES)
+    src = (SERVER / "services/miniapp_platform.py").read_text()
+    body = re.search(r"async def capabilities_of\(.*?\n(?=\n\n)", src, re.S).group(0)
+    assert "kind" not in body, "能力不该再按应用 / 小游戏分叉"
 
 
 def test_three_method_tables_agree():

@@ -20,6 +20,7 @@ class _FakeUi implements MiniAppUi {
   String? popupAnswer = 'ok';
   bool consent = true;
   bool openOk = true;
+  bool fullscreenOk = true;
 
   @override
   Future<bool> askProfileConsent() async {
@@ -46,7 +47,10 @@ class _FakeUi implements MiniAppUi {
   }
 
   @override
-  Future<bool> setFullscreen(bool on) async => true;
+  Future<bool> setFullscreen(bool on) async {
+    calls.add('fullscreen:$on');
+    return fullscreenOk;
+  }
 
   @override
   Future<bool> share(String text) async {
@@ -152,7 +156,7 @@ void main() {
       expect(ui.calls, isEmpty);
     });
 
-    test('全屏只给小游戏', () async {
+    test('没有 fullscreen 能力(老服务端下发的清单)时全屏回 4001', () async {
       final r = await call('requestFullscreen');
       expect((r!['error'] as Map)['code'], BridgeCode.capabilityNotGranted);
     });
@@ -226,6 +230,51 @@ void main() {
 
     test('托管应用调 v1 的 getInitData 回 4003', () async {
       expect(((await call('legacy.getInitData'))!['error'] as Map)['code'], BridgeCode.notSupported);
+    });
+  });
+
+  group('全屏(所有应用都能用,事件和 Telegram 一致)', () {
+    setUp(() {
+      c.launch = _launch(caps: const ['initData', 'storage', 'fullscreen', 'orientation']);
+    });
+
+    test('进全屏发 fullscreenChanged;再要一次回 ALREADY_FULLSCREEN;退出发 fullscreenChanged(false)', () async {
+      expect((await call('requestFullscreen'))!['ok'], isTrue);
+      expect(c.fullscreen, isTrue);
+      expect(sent.last, {'v': 2, 'type': 'event', 'name': 'fullscreenChanged', 'data': {'isFullscreen': true}});
+      await call('requestFullscreen');
+      expect(sent.last['name'], 'fullscreenFailed');
+      expect((sent.last['data'] as Map)['error'], 'ALREADY_FULLSCREEN');
+      expect(c.fullscreen, isTrue);
+      await call('exitFullscreen');
+      expect(c.fullscreen, isFalse);
+      expect(sent.last, {'v': 2, 'type': 'event', 'name': 'fullscreenChanged', 'data': {'isFullscreen': false}});
+      final before = sent.length;
+      await call('exitFullscreen');
+      expect(sent.length, before, reason: '本来就不是全屏,退出不发事件');
+    });
+
+    test('宿主做不到全屏时发 fullscreenFailed(UNSUPPORTED),状态不变', () async {
+      ui.fullscreenOk = false;
+      await call('requestFullscreen');
+      expect(c.fullscreen, isFalse);
+      expect(sent.last['name'], 'fullscreenFailed');
+      expect((sent.last['data'] as Map)['error'], 'UNSUPPORTED');
+    });
+
+    test('网页版用户按 Esc 退出浏览器全屏:宿主退出全屏,和页面调 exitFullscreen 发一样的事件', () async {
+      await call('requestFullscreen');
+      await c.hostExitFullscreen();
+      expect(c.fullscreen, isFalse);
+      expect(ui.calls.last, 'fullscreen:false');
+      expect(sent.last, {'v': 2, 'type': 'event', 'name': 'fullscreenChanged', 'data': {'isFullscreen': false}});
+    });
+
+    test('锁方向:所有应用都能调', () async {
+      expect((await call('lockOrientation'))!['ok'], isTrue);
+      expect(c.orientationLocked, isTrue);
+      await call('unlockOrientation');
+      expect(c.orientationLocked, isFalse);
     });
   });
 
