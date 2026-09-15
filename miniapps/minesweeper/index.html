@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>扫雷</title>
+</head>
+<body>
+  <main id="game" class="game minesweeper">
+    <header class="head">
+      <h1>扫雷</h1>
+      <div class="head-btns">
+        <button id="new" class="btn" type="button">新游戏</button>
+        <button id="about-btn" class="btn" type="button">关于</button>
+      </div>
+    </header>
+    <div id="levels" class="seg" role="group" aria-label="难度">
+      <button type="button" data-level="easy">初级</button>
+      <button type="button" data-level="medium">中级</button>
+      <button type="button" data-level="hard">高级</button>
+    </div>
+    <div class="info">
+      <div class="counter"><span>剩余雷数</span><b id="left">10</b></div>
+      <p id="hint" class="hint">长按插旗 · 双击数字翻开周围</p>
+      <div class="counter"><span>用时</span><b id="time">0:00</b></div>
+    </div>
+    <div id="scroller" class="scroller">
+      <div id="board" class="board" role="grid" aria-label="扫雷棋盘" tabindex="0"></div>
+    </div>
+    <div class="bottom">
+      <div id="mode" class="seg mode" role="group" aria-label="点一下是">
+        <button type="button" data-mode="open">翻开</button>
+        <button type="button" data-mode="flag">插旗</button>
+      </div>
+      <button id="zoom" class="btn" type="button" hidden>放大</button>
+    </div>
+    <p id="live" class="sr" aria-live="polite"></p>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

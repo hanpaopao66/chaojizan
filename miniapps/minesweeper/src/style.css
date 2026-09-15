@@ -1,0 +1,60 @@
+/* 扫雷:格子是 DOM(最多 480 格,只改变了的那几格;读屏能一格一格读),颜色来自 palette.ts 写的 --ms-* 变量 */
+.minesweeper { --side: max(.75rem, var(--sz-safe-area-inset-left, 0px), var(--sz-safe-area-inset-right, 0px)); gap: .6rem; }
+.minesweeper .head h1 { font-size: 1.5rem; }
+.head-btns { display: flex; gap: .5rem; }
+.head-btns .btn { min-height: 2.5rem; padding: .3rem .75rem; font-size: .875rem; }
+#levels { flex: none; }
+
+.info { flex: none; display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+.counter { display: grid; min-width: 4.5rem; padding: .2rem .6rem; border-radius: .6rem; background: var(--card); border: 1px solid var(--line); text-align: center; }
+.counter span { font-size: .6875rem; color: var(--muted); letter-spacing: .06em; }
+.counter b { font-size: 1.125rem; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.hint { margin: 0; font-size: .75rem; color: var(--muted); text-align: center; }
+
+/* 棋盘放不下(高级、放大)时在这里面滚动;格子上的长按和滚动由 pointercancel 分开 */
+.scroller {
+  flex: 1; min-height: 0; overflow: auto; display: flex; border-radius: .5rem;
+  touch-action: pan-x pan-y; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+}
+.board {
+  margin: auto; display: grid; gap: 1px; padding: 1px; border-radius: .45rem; outline: none;
+  grid-template-columns: repeat(var(--cols, 9), var(--cell, 32px)); grid-auto-rows: var(--cell, 32px);
+  background: var(--ms-grid);
+}
+.board:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.c {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: calc(var(--cell, 32px) * .6); line-height: 1; font-variant-numeric: tabular-nums;
+  background: var(--ms-open); border-radius: 2px; cursor: pointer;
+}
+/* 没翻开:凸起(底边一道深色),和平平的翻开格一眼分得开 */
+.c.h { background: var(--ms-hidden); box-shadow: inset 0 -3px 0 var(--ms-edge); border-radius: 4px; }
+.c.peek { background: var(--ms-open); box-shadow: none; }
+.c.cur { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 1; }
+.c.n1 { color: var(--ms-n1); } .c.n2 { color: var(--ms-n2); } .c.n3 { color: var(--ms-n3); } .c.n4 { color: var(--ms-n4); }
+.c.n5 { color: var(--ms-n5); } .c.n6 { color: var(--ms-n6); } .c.n7 { color: var(--ms-n7); } .c.n8 { color: var(--ms-n8); }
+/* 旗:一根杆子加一面三角旗,用边框画(不用表情字符,各家手机长得不一样) */
+.c.f::before {
+  content: ''; position: absolute; left: 36%; top: 22%; width: 0; height: 0;
+  border-left: calc(var(--cell, 32px) * .34) solid var(--ms-flag);
+  border-top: calc(var(--cell, 32px) * .15) solid transparent; border-bottom: calc(var(--cell, 32px) * .15) solid transparent;
+}
+.c.f::after { content: ''; position: absolute; left: 32%; top: 20%; width: 2px; height: 58%; background: var(--ms-flag); border-radius: 1px; }
+/* 插错的旗:打个叉 */
+.c.x { background-image: linear-gradient(45deg, transparent 44%, var(--ms-mine) 44%, var(--ms-mine) 56%, transparent 56%),
+  linear-gradient(-45deg, transparent 44%, var(--ms-mine) 44%, var(--ms-mine) 56%, transparent 56%); }
+/* 雷:一个圆加上下左右四根刺 */
+.c.m::before { content: ''; position: relative; z-index: 1; width: 42%; height: 42%; border-radius: 50%; background: var(--ms-mine); }
+.c.m::after {
+  content: ''; position: absolute; width: 66%; height: 66%;
+  background: linear-gradient(var(--ms-mine), var(--ms-mine)) center / 2px 100% no-repeat,
+    linear-gradient(var(--ms-mine), var(--ms-mine)) center / 100% 2px no-repeat;
+}
+.c.boom { background: var(--ms-boom); }
+.board.done .c { cursor: default; }
+
+.bottom { flex: none; display: flex; gap: .6rem; align-items: stretch; }
+.bottom .mode { flex: 1; }
+.bottom .mode button { min-height: 3rem; font-size: 1rem; }
+.bottom #zoom { min-width: 4.5rem; }
+.bottom #zoom[hidden] { display: none; }

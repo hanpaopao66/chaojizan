@@ -12,5 +12,6 @@
     "types": []
   },
   "include": ["notepad/src", "notepad/test", "2048/src", "2048/test", "shared/src", "shared/test",
-    "snake/src", "snake/test", "blocks/src", "blocks/test", "../packages/miniapp-sdk/src", "types.d.ts"]
+    "snake/src", "snake/test", "blocks/src", "blocks/test", "minesweeper/src", "minesweeper/test",
+    "../packages/miniapp-sdk/src", "types.d.ts"]
 }
