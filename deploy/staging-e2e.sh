@@ -4,6 +4,9 @@
 #   bash ~/super-z-staging/deploy/staging-e2e.sh e2e_miniapp_catalog [e2e_xxx ...]
 #
 # 测试代码临时拷进 api 容器(镜像里本来不带 tests),在容器里直连 api(不过门禁),跑完删掉。
+# **直连不经过 nginx**:预发和生产一样开着 MEDIA_ACCEL(媒体由 nginx 从 MinIO 直出,api 只回 X-Accel-Redirect),
+# 所以断言「签名地址能播 / Range 回 206」的那几段会失败(e2e_video_upload 的播放、e2e_media)—— 预期之内,
+# CI 里 MEDIA_ACCEL 是关的,那几段在 CI 上跑。
 # 用例会在预发库里造数据(新号、测试小程序、订单)—— 预发本来就是开发配置 + 演示数据,不要紧;
 # 目录里会多出测试用的小程序,要清的话在后台下架。
 #
