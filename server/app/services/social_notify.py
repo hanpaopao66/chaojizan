@@ -124,6 +124,10 @@ def _title(n: SocialNotification, actor_name: str) -> str:
     d = n.data or {}
     if n.kind == "system":
         return d.get("title") or "系统通知"
+    if n.kind == "follow":
+        # 一天的新粉丝合并成一行(video_interact.set_follow 的 group_key 按北京日)
+        return (f"{actor_name}等 {n.count} 人关注了你" if n.count > 1
+                else f"{actor_name} 关注了你")
     target = "视频" if d.get("target") == "video" else "评论"
     if n.kind == "like":
         return (f"{actor_name}等 {n.count} 人赞了你的{target}" if n.count > 1

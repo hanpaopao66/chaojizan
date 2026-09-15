@@ -209,6 +209,7 @@ e2e_danmaku
 e2e_video_comments
 e2e_video_me
 e2e_social_moderation
+e2e_social_follow
 e2e_credit
 e2e_credit_roles
 e2e_rider_fault

@@ -16,7 +16,8 @@ from .social import social_user
 
 router = APIRouter(prefix="/social/v1/notifications", tags=["互动消息"])
 
-Kind = Literal["reply", "at", "like", "system"]
+# 和 models.NOTIFY_KINDS 同一张表(#377 加了 follow;论坛、音乐接进来以后还会再加)
+Kind = Literal["reply", "at", "like", "system", "follow"]
 
 
 @router.get("")

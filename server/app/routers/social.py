@@ -20,7 +20,7 @@ from ..db import get_db
 from ..models import (PRIVACY_VALUES, SocialBlock, SocialContact, SocialProfile, User,
                       UserRole, Username)
 from ..ratelimit import check_daily_limit, check_rate_limit
-from ..security import get_current_user
+from ..security import get_current_user, get_current_user_optional
 from ..services.moderation import find_banned, guard_text
 from ..services.social import (SOCIAL_ROLES, allowed, claim_username, display_name,
                                ensure_profile, hold_problem, notify_of, privacy_of,
@@ -256,6 +256,68 @@ async def _card_or_404(db: AsyncSession, viewer: User, target_id: int) -> dict:
 async def get_user(user_id: int, user: User = Depends(social_user),
                    db: AsyncSession = Depends(get_db)):
     return await _card_or_404(db, user, user_id)
+
+
+# ---------------- 关注(#377,全站一张 follows 表)----------------
+#
+# 视频、论坛、音乐的「关注」是同一个关系:关注一个人,就能在视频的关注流、论坛的关注时间线里看到他,
+# 他是音乐人的话歌也在。以前接口挂在 /video/v1 下,视频开关一关连关注都 503 —— 挪到这里,不挂任何模块开关。
+# 视频的老接口保留,调的是同一个 video_interact.set_follow(被关注的人收到 follow 互动消息)。
+
+@router.post("/users/{user_id}/follow")
+async def follow_user(user_id: int, me: User = Depends(social_user),
+                      db: AsyncSession = Depends(get_db)):
+    from ..services import video_interact as act
+    await check_rate_limit("social_follow", str(me.id), 60)
+    out = await act.set_follow(db, me, user_id, True)
+    await db.commit()
+    return out
+
+
+@router.delete("/users/{user_id}/follow")
+async def unfollow_user(user_id: int, me: User = Depends(social_user),
+                        db: AsyncSession = Depends(get_db)):
+    from ..services import video_interact as act
+    await check_rate_limit("social_follow", str(me.id), 60)
+    out = await act.set_follow(db, me, user_id, False)
+    await db.commit()
+    return out
+
+
+@router.get("/users/{user_id}/followers")
+async def user_followers(user_id: int, cursor: str | None = None,
+                         me: User | None = Depends(get_current_user_optional),
+                         db: AsyncSession = Depends(get_db)):
+    from ..services import video_interact as act
+    return await act.follow_page(db, me, user_id, fans=True, cursor=cursor)
+
+
+@router.get("/users/{user_id}/following")
+async def user_following(user_id: int, cursor: str | None = None,
+                         me: User | None = Depends(get_current_user_optional),
+                         db: AsyncSession = Depends(get_db)):
+    from ..services import video_interact as act
+    return await act.follow_page(db, me, user_id, fans=False, cursor=cursor)
+
+
+@router.get("/users/{user_id}/follow-stats")
+async def follow_stats(user_id: int, me: User | None = Depends(get_current_user_optional),
+                       db: AsyncSession = Depends(get_db)):
+    """粉丝数、关注数,以及我和他之间的关注关系(没登录时两个布尔都是 false)。"""
+    from ..models import Follow
+    from ..services import video as vsvc
+    target = await db.get(User, user_id)
+    if target is None or target.deleted_at is not None:
+        raise HTTPException(404, "没有这个用户")
+    fans, following = await vsvc.follow_counts(db, user_id)
+    followed = follows_you = False
+    if me is not None and me.id != user_id:
+        pair = set(await db.execute(select(Follow.follower_id, Follow.followee_id).where(
+            ((Follow.follower_id == me.id) & (Follow.followee_id == user_id))
+            | ((Follow.follower_id == user_id) & (Follow.followee_id == me.id)))))
+        followed = (me.id, user_id) in pair
+        follows_you = (user_id, me.id) in pair
+    return {"fans": fans, "following": following, "followed": followed, "follows_you": follows_you}
 
 
 @router.get("/resolve/{username}")

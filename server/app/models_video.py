@@ -28,8 +28,8 @@ from .db import Base
 VIDEO_STATUSES = ("draft", "processing", "reviewing", "scheduled", "published", "rejected",
                   "failed", "removed", "deleted")
 VISIBILITIES = ("public", "unlisted", "private")
-#: 互动消息的四类(#367)
-NOTIFY_KINDS = ("reply", "at", "like", "system")
+#: 互动消息的种类(#367 四类;#377 起全站共用:follow 是有人关注我,关注关系全站一张表)
+NOTIFY_KINDS = ("reply", "at", "like", "system", "follow")
 
 
 def _now_col():

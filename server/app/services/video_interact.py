@@ -431,8 +431,18 @@ async def set_follow(db: AsyncSession, user: User, target_id: int, follow: bool)
     if follow:
         if await blocked_between(db, user.id, target_id):
             raise HTTPException(403, "你们之间有拉黑关系,不能关注")
-        await db.execute(insert(Follow).values(follower_id=user.id, followee_id=target_id,
-                                               created_at=utcnow()).on_conflict_do_nothing())
+        added = (await db.execute(
+            insert(Follow).values(follower_id=user.id, followee_id=target_id, created_at=utcnow())
+            .on_conflict_do_nothing().returning(Follow.follower_id))).scalar()
+        # 关注关系全站一张表(#377):视频、论坛、音乐的关注都走这里,被关注的人收到一条 follow 互动消息。
+        # 一天之内的新粉丝合并成一行(「张三等 3 人关注了你」);已经关注着再点一次不重复发
+        if added is not None:
+            from . import social_notify
+            day = vsvc.bj_day()
+            today = await db.scalar(select(func.count()).select_from(Follow).where(
+                Follow.followee_id == target_id, Follow.created_at >= vsvc.bj_midnight(day)))
+            await social_notify.notify(db, target_id, "follow", actor_id=user.id,
+                                       group_key=f"follow:{day.isoformat()}", count=int(today or 1))
     else:
         await db.execute(delete(Follow).where(Follow.follower_id == user.id,
                                               Follow.followee_id == target_id))
