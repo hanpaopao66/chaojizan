@@ -6668,8 +6668,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                                 api: widget.api, order: order))),
                     label: const Text('钱去哪了'),
                   ),
-                // 无人接单告警中:加急小费(100% 归骑手),更快有人接
-                if (order.noRiderAlerted &&
+                // 无人接单告警中:加急小费(100% 归骑手),更快有人接。
+                // 补收款没接上之前服务端关着(/config 的 features.boost_tip),关着就不摆按钮
+                if (RemoteCopy.feature('boost_tip') &&
+                    order.noRiderAlerted &&
                     order.riderId == null &&
                     !order.pickup &&
                     !order.selfDelivery)

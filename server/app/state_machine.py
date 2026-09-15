@@ -31,7 +31,10 @@ STATUS_LABELS = {
 # (当前状态, 目标状态) -> 允许操作的角色
 # system = 支付回调 / 定时任务(超时自动取消、自动确认收货)
 TRANSITIONS: dict[tuple[OrderStatus, OrderStatus], set[str]] = {
-    (OrderStatus.PENDING_PAYMENT, OrderStatus.PAID): {"customer", "system"},
+    # **只有收到钱才算已支付**:入账统一走 payment_core.mark_order_paid(微信回调;开发环境的模拟支付)。
+    # 这里曾经写着 customer —— 顾客调 /orders/{no}/transition 传 paid 就把自己的单改成了已支付,
+    # 一分钱没付:商家照常接单出餐,完成时 settle_order 还给商家和骑手记账,记的是平台没收到的钱
+    (OrderStatus.PENDING_PAYMENT, OrderStatus.PAID): {"system"},
     (OrderStatus.PENDING_PAYMENT, OrderStatus.CANCELLED): {"customer", "system"},
     # system = 自动接单(商家开关 Merchant.auto_accept,见 payment_core)
     (OrderStatus.PAID, OrderStatus.ACCEPTED): {"merchant", "system"},

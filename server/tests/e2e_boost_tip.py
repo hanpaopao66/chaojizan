@@ -44,6 +44,10 @@ def set_no_rider(order_no):
 
 no = make_order()
 
+# 补收款没接微信支付之前,加急小费和模拟支付同一道闸门:只在开发环境开(CI 就是开发环境)。
+# 生产上 /boost-tip 回 503、/config 的 features.boost_tip 是 false,客户端据此不摆按钮
+assert call("GET", "/config")["features"]["boost_tip"] is True, "开发环境下加急小费应当开着"
+
 # 未进入无人接单窗口:加急被拒
 err = call("POST", f"/orders/{no}/boost-tip", customer, {"add_cents": 500},
            expect_error=True)

@@ -1,4 +1,4 @@
-"""越权与隐私泄露回归(六条实测复现的洞)。
+"""越权与隐私泄露回归(前六条是实测复现的洞,第七条是读代码发现的)。
 
 这套用例是**判权专用**的:每一条都对应一次实测能拿到不该拿的数据,
 所以断言全部写成"该看不到的人真的看不到",而不是"功能能用"。
@@ -9,7 +9,7 @@ privacy_phone 上 —— 那一行从来没被断言过,于是绿了很久。
 **断言必须钉在真正会泄露的那个字段上**,注释说的和 assert 写的不是一回事时,
 以 assert 为准,而 assert 写错了没人看得出来。
 
-六条:
+七条:
 1. /auth/sms-login 没有任何频控 —— 6 位码、300 秒有效,连打 25 次全 401;
 2. /orders/{no} 与 /events /refunds 没有归属校验 —— 第三方账号读到门牌+真名+明文手机号;
 3. 抢单池下发顾客真号 —— 骑手只轮询、一单不接就拿到完整 11 位号码与门牌;
@@ -17,6 +17,8 @@ privacy_phone 上 —— 那一行从来没被断言过,于是绿了很久。
 5. 酒店店员能改房价 —— 住宿侧漏了餐饮侧那道 owned_shop 闸门;
 6. /files 判权里的「上传者本人」是裸子串匹配 —— 判权形同虚设,
    而且它先于按归属查库命中,让「送达留证只给该单顾客」失效。
+7. 状态机给「待支付 → 已支付」放行了顾客 —— 调 /transition 传 paid,不付钱单子就成了已支付
+   (2026-09-15 读代码发现,生产上查过没有被用过的痕迹)。
 
     SUPERZ_API=http://127.0.0.1:8010 python -m tests.e2e_authz_regression
 """
@@ -481,6 +483,34 @@ def t6b_delivery_proof():
     retire(merchant, dish)
 
 
+# ---------------- 7. 不付钱把单子改成已支付 ----------------
+
+def t7_customer_self_pay():
+    print("\n== 7. 顾客自己把单子改成已支付 ==")
+    customer, merchant = login(CUSTOMER), login(MERCHANT)
+    shop = demo_shop()
+    dish = call("POST", "/merchants/me/dishes", merchant,
+                {"name": f"判权测试菜-{int(time.time()*1000)%10**7}",
+                 "price_cents": 2000, "stock": 50})
+    no = call("POST", "/orders", customer, {
+        "merchant_id": shop["id"],
+        "items": [{"dish_id": dish["id"], "quantity": 1}],
+        "address": "测试地址1号", "lat": 30.6612, "lng": 104.0823,
+        "contact_name": "张三", "contact_phone": "13911110007",
+    })["order_no"]
+
+    r = call("POST", f"/orders/{no}/transition", customer, {"to_status": "paid"},
+             expect_error=True)
+    assert err_code(r) == 403, (
+        f"顾客没付钱,调流转接口就把单子改成了已支付 —— 商家会照常出餐,结算还给商家骑手记账:{r}")
+    assert call("GET", f"/orders/{no}", customer)["status"] == "pending_payment", \
+        "拒了但状态还是变了"
+    print("✓ 顾客调 /transition 传 paid:403,单子还是待支付")
+
+    call("POST", f"/orders/{no}/transition", customer, {"to_status": "cancelled"})
+    retire(merchant, dish)
+
+
 def main() -> None:
     t1_sms_code_bruteforce()
     t2_order_ownership()
@@ -489,6 +519,7 @@ def main() -> None:
     t5_hotel_staff_price()
     t6a_owner_segment()
     t6b_delivery_proof()
+    t7_customer_self_pay()
     print("\n越权与隐私泄露回归全部通过 🎉")
 
 

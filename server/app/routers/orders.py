@@ -1376,7 +1376,13 @@ async def boost_tip(
     微信补收未接入前走 mock 幂等入账(参照 mock_pay),补收成功才把 tip/total 抬上去。
     只在「无人接单告警」窗口开放(no_rider_alerted_at 已置、尚无骑手),
     避免正常单被无谓加价;取消时 tip 随 total 一起退(现有退款链覆盖)。
+
+    **补收款接上之前只在开发环境开**(和 mock_pay 同一道闸门)。这里以前在生产上也「视为已收」:
+    顾客点一下,tip/total 就抬上去 —— 结算时平台替他给骑手垫最多 100 元,
+    取消时还按 total 退款,退的是一笔从没收过的钱。
     """
+    if not mock_pay_allowed():
+        raise HTTPException(503, "加急小费暂未开放:补收款还没接上微信支付")
     order = await db.scalar(
         select(Order).where(Order.order_no == order_no).with_for_update())
     if order is None or order.customer_id != user.id:

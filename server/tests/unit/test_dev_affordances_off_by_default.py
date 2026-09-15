@@ -74,6 +74,13 @@ class Test每个开发便利都挂在环境判据上:
             assert "mock_pay_allowed()" in src, f"{fn.__module__}.{fn.__name__} 没走 mock_pay_allowed"
             assert "settings.mock_pay_enabled" not in src
 
+    def test_加急小费的视为已收走同一道闸门(self):
+        """补收款没接,加急小费是「不收钱直接抬 tip/total」—— 和模拟支付是同一种开发便利。
+        生产上漏了这道闸:顾客点一下,平台替他给骑手垫最多 100 元,取消时还按 total 退。"""
+        from app.routers import orders
+        src = inspect.getsource(orders.boost_tip)
+        assert "mock_pay_allowed()" in src, "加急小费没走 mock_pay_allowed:生产上不收钱就加小费"
+
     def test_管理员密码登录(self):
         from app.routers import auth
         src = inspect.getsource(auth.admin_password_login_allowed)

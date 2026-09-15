@@ -453,6 +453,7 @@ async def public_config(db: AsyncSession = Depends(get_db)):
     from ..services.flags import bots_on, marketing_on, social_flag_on, video_flag_on
 
     from ..services.copy_registry import COPY_KEYS
+    from .orders import mock_pay_allowed
 
     rows = (await db.scalars(select(PlatformCopy))).all()
     # 空串 = 只藏没改字,不下发(客户端用自己的默认值)
@@ -475,7 +476,10 @@ async def public_config(db: AsyncSession = Depends(get_db)):
                      "chat": await social_flag_on(db, "chat_enabled"),
                      "calls": await social_flag_on(db, "calls_enabled"),
                      # 机器人(#355):关着时客户端收起「添加到群组」、菜单按钮这些入口
-                     "bots": await bots_on(db)},
+                     "bots": await bots_on(db),
+                     # 加急小费:补收款没接微信支付之前只在开发环境开(orders.boost_tip 同一道闸门),
+                     # 关着时客户端不摆按钮 —— 不然点了才告诉人「暂未开放」
+                     "boost_tip": mock_pay_allowed()},
         # 要公示的许可证编号(后台「平台开关」里填,空 = 不显示):官网页脚、App「关于我们」读它
         "licenses": {"av": av.value if av is not None else ""},
         "copy": copy,
