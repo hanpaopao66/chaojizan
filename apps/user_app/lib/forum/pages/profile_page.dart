@@ -94,6 +94,13 @@ class _ForumProfilePageState extends State<ForumProfilePage> with SingleTickerPr
     }
   }
 
+  /// 私信直接用聊天,不另做(§2.2)。要登录 —— 聊天没登录根本没启动。
+  Future<void> _message() async {
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
+    await openPrivateWith(context, widget.userId);
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = _profile;
@@ -200,8 +207,7 @@ class _ForumProfilePageState extends State<ForumProfilePage> with SingleTickerPr
               const SizedBox(width: 10),
               Expanded(
                 child: OutlinedButton.icon(
-                  // 私信直接用聊天,不另做(§2.2)
-                  onPressed: () => openPrivateWith(context, widget.userId),
+                  onPressed: _message,
                   icon: const Icon(Icons.chat_bubble_outline, size: 16),
                   label: const Text('发消息'),
                 ),

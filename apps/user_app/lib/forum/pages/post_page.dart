@@ -53,12 +53,16 @@ class _PostPageState extends State<PostPage> {
         _replies = forumCursorPager((cursor) => forumApi.replies(widget.pid, sort: _sort, cursor: cursor))
           ..refresh();
       });
-      // 详情页也算一次浏览(F5,服务端按人按天去重)
-      final device = rootApi.isLoggedIn ? null : await forumDeviceId();
-      await forumApi.reportViews([widget.pid], deviceId: device);
     } catch (e) {
       if (mounted) setState(() => _error = e);
+      return;
     }
+    // 详情页也算一次浏览(F5,服务端按人按天去重)。
+    // **和拉详情分开 try**:上报被限流(429)不该把已经拿到的帖子换成错误页
+    try {
+      final device = rootApi.isLoggedIn ? null : await forumDeviceId();
+      await forumApi.reportViews([widget.pid], deviceId: device);
+    } catch (_) {}
   }
 
   void _setSort(String sort) {

@@ -122,11 +122,22 @@ Future<void> openForumSettings(BuildContext context) =>
 Future<void> openForumFormula(BuildContext context) =>
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ForumFormulaPage()));
 
+/// 本站的域名。站内链接只认这两个 —— `chaojizan.cc.evil.example/forum/p/…`
+/// 这种长得一样的不算,不然帖子里贴一个假链接就能把人骗进「站内页面」。
+/// 相对地址(没有 host)当自己人:那是我们自己拼的。
+const _ownHosts = {'chaojizan.cc', 'www.chaojizan.cc'};
+
 /// 站内链接里论坛认的两种(§5.1):`/forum/p/<pid>`、`/forum/t/<话题>`。
 ///
 /// 认得就自己打开并返回 true,不认得返回 false 交回给调用方。
-/// #382 合并时把它注册进 `registerAppLinkHandler`,论坛不反向依赖 chat。
+/// #382 合并时把 [forumAppLinkHandler] 注册进 `registerAppLinkHandler`,
+/// 论坛不反向依赖 chat。
 bool handleForumLink(BuildContext context, Uri uri) {
+  if (uri.host.isNotEmpty && !_ownHosts.contains(uri.host.toLowerCase())) return false;
+  // 带用户名密码、带非默认端口的本站链接我们自己从来不发,也不认
+  if (uri.userInfo.isNotEmpty || (uri.hasPort && uri.port != (uri.scheme == 'http' ? 80 : 443))) {
+    return false;
+  }
   final seg = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (seg.length < 3 || seg[0] != 'forum') return false;
   if (seg[1] == 'p' && RegExp(r'^fp[1-9A-HJ-NP-Za-km-z]{10}$').hasMatch(seg[2])) {
@@ -136,12 +147,15 @@ bool handleForumLink(BuildContext context, Uri uri) {
   if (seg[1] == 't') {
     // pathSegments 已经解过一次码,话题原样用
     final tag = seg[2];
-    if (tag.isEmpty || tag.length > 30) return false;
+    if (tag.isEmpty || tag.runes.length > 30) return false;
     unawaitedOpen(openTag(context, tag.toLowerCase(), display: tag));
     return true;
   }
   return false;
 }
+
+/// 注册进 `registerAppLinkHandler` 的那一份(它要的是 `Future<bool>`)。
+Future<bool> forumAppLinkHandler(BuildContext context, Uri uri) async => handleForumLink(context, uri);
 
 /// 链接处理是同步判定「认不认」、异步打开页面 —— 这里把那个 Future 明确丢掉。
 void unawaitedOpen(Future<void> f) {
