@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..db import get_db
 from ..models import Follow, MusicArtist, MusicRelease, MusicTrack, User, UserRole
 from ..ratelimit import (check_daily_limit, check_rate_limit, check_rate_limit_seconds,
@@ -76,8 +77,29 @@ def _page(page: int) -> int:
 # 发现
 # =====================================================================
 
-#: 榜单、发现页可以缓存这么久(§5.6「榜单可以按 PUBLIC_CACHE_MAX_SECONDS 缓存」)
-PUBLIC_CACHE_MAX_SECONDS = 60
+# ---- 榜单的进程内小缓存 ----
+#
+# 三个榜要把全部已发布的歌和三张明细表按时间窗 COUNT(DISTINCT) 一遍,是这个模块最重的查询,
+# 而且**所有人看到的是同一份**(榜不个性化)。缓存的上限统一压在 settings.public_cache_max_seconds
+# 上(和 /screen、透明中心同一只闸):e2e 把它设成 0 就等于不缓存 ——
+# 「听完一首歌立刻去看榜」在测试里必须当场生效。
+#
+# 每日推荐、发现页的 daily 不进这里:那是按人算的。
+CHART_TTL_SECONDS = 60
+_chart_cache: dict[str, tuple[float, list]] = {}
+
+
+async def _cached_chart(db: AsyncSession, key: str) -> list[tuple[int, dict]]:
+    import time
+
+    ttl = min(CHART_TTL_SECONDS, settings.public_cache_max_seconds)
+    hit = _chart_cache.get(key)
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    ranked = await rank.chart(db, key)
+    if ttl > 0:
+        _chart_cache[key] = (time.monotonic() + ttl, ranked)
+    return ranked
 
 
 async def _tracks_by_ids(db: AsyncSession, viewer_id: int | None,
@@ -103,7 +125,7 @@ async def home(me: User | None = Depends(viewer_optional), db: AsyncSession = De
         new_scored[t]["score"], new_rows[t]["published_at"], t))[:6]
     charts = []
     for key, name in rank.CHARTS.items():
-        top = (await rank.chart(db, key))[:3]
+        top = (await _cached_chart(db, key))[:3]
         charts.append({"key": key, "name": name,
                        "top": await _tracks_by_ids(db, me.id if me else None, top)})
     pl_ids, pl_scored, _ = await rank.recommended_playlists(db, 0, 6)
@@ -156,7 +178,7 @@ async def charts(me: User | None = Depends(viewer_optional), db: AsyncSession = 
     now = datetime.now(timezone.utc).isoformat()
     out = []
     for key, name in rank.CHARTS.items():
-        top = (await rank.chart(db, key))[:3]
+        top = (await _cached_chart(db, key))[:3]
         out.append({"key": key, "name": name, "updated_at": now,
                     "top": await _tracks_by_ids(db, me.id if me else None, top)})
     return out
@@ -169,7 +191,7 @@ async def chart_detail(key: str, me: User | None = Depends(viewer_optional),
 
     if key not in rank.CHARTS:
         raise HTTPException(404, "没有这个榜单")
-    ranked = await rank.chart(db, key)
+    ranked = await _cached_chart(db, key)
     items = await _tracks_by_ids(db, me.id if me else None, ranked)
     return {"key": key, "name": rank.CHARTS[key],
             "updated_at": datetime.now(timezone.utc).isoformat(),

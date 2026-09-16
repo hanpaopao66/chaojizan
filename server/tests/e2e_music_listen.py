@@ -4,6 +4,10 @@
 最近播放 upsert、清空 → 换个音质 → 地址过期 / 签名被改一律 404 →
 作品下架之后旧地址立刻失效 → 榜单和曲风页把它算进去。
 
+⚠️ 榜单在 api 进程里缓存 60 秒(routers/music._cached_chart),**服务端要以
+`PUBLIC_CACHE_MAX_SECONDS=0` 起**(CI 和 scripts/e2e_iso.sh 都是这么配的),
+否则「听完立刻看榜」这一段会拿到上一轮的缓存。
+
 跑法:SUPERZ_API=http://127.0.0.1:8110 DATABASE_URL=… REDIS_URL=… python -m tests.e2e_music_listen
 """
 import time
