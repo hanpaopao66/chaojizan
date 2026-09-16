@@ -535,6 +535,20 @@ widget 测试(播放器队列与模式、LRC 解析与高亮、发现页、音�
 
 ### #382 合并与打通
 
-金刚区两格(`kChannels`、首页点击、`CHANNELS_FALLBACK`、后台开关页和 `known` 集合、文案登记表、官网)、聊天 `card` 消息(§5.9)、
-互动消息合并(§5.8,客户端「互动消息」一处)、个人主页(关注按钮、他的动态 / 视频 / 音乐)、迷你播放器常驻、站内链接
-(`/music/…`、`/forum/…`)、合规清单第 17、18 条、文档索引。
+主会话在四个模块并行开发期间**先把「接口位」铺好了**(都在 main 上,各带测试):
+
+| 已经做好的 | 提交 | 合并时要接的 |
+|---|---|---|
+| 统一关注 `/social/v1/users/{id}/follow` 等 | `e75a281` | 音乐、论坛客户端调它(不要自己另写) |
+| 互动消息合并成一处:客户端按 `/unread` 的键决定拉哪几类,新增 follow / repost / quote 卡片,帖子 / 歌 / 作品的目标行 | `4be56bf` | 后端 `social_notify.list_items` 要下发 `post` / `track` / `release` 字段(§5.8) |
+| 资料页关注按钮 + 关注 / 粉丝数 | `2d58a7d` | 再加「他的动态 / 视频 / 音乐」三个入口 |
+| 金刚区登记两格(色槽 4、6)、文案登记表、后台频道白名单 | `c13bbba` | `main.dart` 的点击路由 `case 'music' / 'forum'` |
+| 聊天分享卡片的客户端(消息类型 `card`、离线预览、`shareCardToChat`) | `724944f` | 服务端那一半:`chat_store` 的发送分支 + `chat_view` 的 `extra.card` + 转发白名单 + 把 `music.card_of` 注册进 `services/cards.py` |
+| 站内链接**模块自己注册**(`registerAppLinkHandler`) | `7a7b8d0` | 音乐、论坛在各自 `nav.dart` 里注册 `handleMusicLink` / `handleForumLink` |
+| 底部导航上方的常驻条插槽 `szAboveNavSlot` | `fbedf75` | 音乐播放器放 `MusicMiniBar` 进去、停了收走 |
+| 合规清单第 17、18 条、文档索引 | `c1eb2a0`、`02a7ad1` | —— |
+
+合并顺序:音乐后端(迁移 0143)→ 论坛后端(迁移 0144,`down_revision` 从 `0142` 改成 `0143`)→ 两个客户端 → 打通 →
+全量回归(单测两遍、全部 e2e、三端检查)→ push → 发版 → 部署 → 生产开开关(`music_enabled`、`music_upload_enabled`、
+`forum_enabled`、`forum_post_enabled`、金刚区两格)。官网(web/)的业务频道表**不加**音乐和论坛:那张表带费率和频道规矩页,
+这两个不是生意;官网怎么呈现单独再定。
