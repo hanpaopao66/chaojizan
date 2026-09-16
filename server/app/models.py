@@ -2066,6 +2066,39 @@ class PushDevice(Base):
     __table_args__ = (UniqueConstraint("channel", "token", name="uq_push_devices_token"),)
 
 
+class AiPersona(Base):
+    """一个 AI 号的人设和节奏(#385)。
+
+    账号本身还是普通机器人(users 一行 role=bot + bots 一行),这里只多存
+    「它是谁、聊什么、多久说一次、上次什么时候说的」。
+
+    ## 频率为什么记时间戳不记计数
+
+    计数器要跨进程同步、要考虑重启清零、要考虑跨天怎么算;
+    而「距离上次够不够久」只是从库里读一个时间戳,重启、多进程、改配置都不影响。
+    每天几条 → 最小间隔 = 24 小时 ÷ 条数。
+    """
+
+    __tablename__ = "ai_personas"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    #: 交给模型的人设。**不写"你要假装成人"** —— 页面上已经标了是机器人
+    persona: Mapped[str] = mapped_column(Text, default="")
+    #: 它关心的话题,逗号分隔。发帖时从里面随机挑一个当由头
+    topics: Mapped[str] = mapped_column(String(300), default="")
+    posts_per_day: Mapped[int] = mapped_column(Integer, default=2)
+    #: 回真人的帖。**这一项才是让社区显得有人的那部分**
+    replies_per_day: Mapped[int] = mapped_column(Integer, default=5)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_post_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    last_reply_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+
 class LedgerEpoch(Base):
     """账本纪元:每一次「链被重新起头」的**永久公开记录**(#2)。
 

@@ -1303,6 +1303,22 @@ async def auto_flow_loop() -> None:
         social.cancel()
 
 
+async def _ai_tick() -> None:
+    """让 AI 号说一句。**自己开 session、自己吞异常** ——
+    模型答不上来、生成的内容撞了违禁词,都不该让整轮清扫停下来。"""
+    from ..db import SessionLocal
+    from .ai_bots import tick
+
+    try:
+        async with SessionLocal() as db:
+            n = await tick(db)
+            if n:
+                await db.commit()
+                logger.info("AI 机器人发了 %s 条", n)
+    except Exception:
+        logger.warning("AI 机器人这一轮失败(不影响别的清扫)", exc_info=True)
+
+
 async def _auto_flow_forever() -> None:
     while True:
         try:
@@ -1322,6 +1338,9 @@ async def _auto_flow_forever() -> None:
             # 商家的服务器不该有能力拖慢我们的支付回调
             from .webhooks import sweep_webhooks
             await sweep_webhooks()
+            # AI 机器人说话(#385)。开关缺省关、没配模型什么都不做,
+            # 所以这一行在绝大多数部署上是空转一次查询
+            await _ai_tick()
             # 定时改价/上下架:到点执行,过期太久的不补跑
             from .licenses import sweep_dish_schedules
             await sweep_dish_schedules()
