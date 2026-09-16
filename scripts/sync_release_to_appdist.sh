@@ -88,8 +88,20 @@ WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 echo "== 下载 Release 附件 =="
 # chaojizan-* 一把全拿:APK、网页版、桌面包。SHA256SUMS.txt 里列的每一个都得在,
 # 下面 shasum -c 才核得过 —— 只挑一部分下载的话,没下的那几个会被报成缺文件
-gh release download "$TAG" -R "$REPO" -D "$WORK" \
-  -p 'chaojizan-*' -p 'SHA256SUMS.txt'
+# **重试三次。** 一把拿 9 个附件(最大的 57MB)时 gh 是并发下的,网络抖一下就是
+# 一句 `unexpected EOF`,整条发版流程停在这儿。2026-09-16 连着撞了两次,
+# 而单个文件重下都是好的 —— 所以是并发 + 网络,不是文件坏了。
+# 下载失败不改线上任何东西,重试是安全的(真坏了下面 shasum -c 那道闸会拦)。
+for try in 1 2 3; do
+  rm -rf "$WORK"/chaojizan-* "$WORK"/SHA256SUMS.txt
+  if gh release download "$TAG" -R "$REPO" -D "$WORK" \
+      -p 'chaojizan-*' -p 'SHA256SUMS.txt'; then
+    break
+  fi
+  [ "$try" = 3 ] && { echo "✗ 附件下了三次都没下全,先看网络"; exit 1; }
+  echo "  第 $try 次没下全,5 秒后重来"
+  sleep 5
+done
 
 echo "== 核对 CI 写下的 SHA-256（下载途中坏了在这里拦）=="
 ( cd "$WORK" && shasum -a 256 -c SHA256SUMS.txt ) || {
