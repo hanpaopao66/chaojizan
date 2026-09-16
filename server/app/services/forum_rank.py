@@ -148,24 +148,49 @@ def order_key(value: float, created_at: datetime, post_id: int) -> tuple:
 
 def paginate_screens(items: Iterable, author_of: Callable, *, size: int = SCREEN_SIZE,
                      per_author: int = PER_AUTHOR_PER_SCREEN,
-                     max_screens: int | None = None) -> list[list]:
+                     max_screens: int | None = None,
+                     capped: Callable | None = None,
+                     cap_share: int = 100) -> list[list]:
     """按排好的顺序切屏:一屏 size 条,同一作者最多 per_author 条。
 
     超出的不丢,顺延到下一屏(保持原来的先后)。某一屏凑不满 size 条说明剩下的全是同几个人的。
+
+    ## AI 内容的占比闸(#386)
+
+    [capped] 判一条是不是"要限量的那类"(AI 号发的),[cap_share] 是它们最多占
+    **一屏**的百分之几(后台 `ai_timeline_share`,缺省 80)。
+
+    **按屏算,不按总数算。** 按总数算的话,第一屏可以全是机器人、第五屏全是真人,
+    平均下来还是达标 —— 而人看到的就是第一屏。占比这件事只有"你这一眼看到的"才算数。
+
+    `cap_share=0` 是"机器人不进时间线":这时候一屏里一条都放不下,
+    **剩下的全是机器人时会切出一个空屏** —— 那就停在这里,不是无限循环
+    (空屏往下顺延,顺延的还是同一批,`pool` 永远不变小)。这一条是这个函数里
+    唯一会挂死整个请求的形状,所以特意写在这儿。
     """
     pool = list(items)
     screens: list[list] = []
+    cap_n = size if capped is None else max(0, size * cap_share // 100)
     while pool and (max_screens is None or len(screens) < max_screens):
         screen: list = []
         seen: dict = {}
+        n_capped = 0
         rest: list = []
         for it in pool:
             who = author_of(it)
-            if len(screen) < size and seen.get(who, 0) < per_author:
+            is_capped = capped is not None and capped(it)
+            if (len(screen) < size and seen.get(who, 0) < per_author
+                    and not (is_capped and n_capped >= cap_n)):
                 screen.append(it)
                 seen[who] = seen.get(who, 0) + 1
+                if is_capped:
+                    n_capped += 1
             else:
                 rest.append(it)
+        if not screen:
+            # 剩下的全被闸拦着。再顺延一轮拦的还是同一批,pool 不会变小 ——
+            # 这里不停下就是个死循环,整个请求挂在那儿不返回
+            break
         screens.append(screen)
         pool = rest
     return screens

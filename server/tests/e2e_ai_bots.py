@@ -121,6 +121,23 @@ def main() -> None:
     assert got["text"] == REPLY and got["author"]["is_ai"] is True, got
     print("  ✓ 真人打得开这条帖,作者名片上带着 AI 标")
 
+    # ---- 机器人内容占公共时间线的上限(ai_timeline_share) ----
+    # AI 的帖**可以**进公共时间线(运营方定的),但占比有闸。拨到 0 = 一条都不进 ——
+    # 这一条同时也是那个死循环的防线:一屏里放不下时剩下的会被反复顺延
+    def ai_on_page0() -> list:
+        items = me.get("/forum/v1/timeline/foryou")["items"]
+        return [x["post"]["pid"] for x in items if x["post"]["author"]["is_ai"]]
+
+    set_flag(admin, "ai_timeline_share", "100")
+    assert pid in ai_on_page0(), "刚发出来的帖,上限 100% 时该在推荐第一屏上"
+    set_flag(admin, "ai_timeline_share", "0")
+    left = ai_on_page0()
+    assert left == [], f"上限拨到 0 之后第一屏还有机器人的帖:{left}"
+    # 真人的帖照常出 —— 证明上面那条不是"整个接口都空了"
+    assert me.get("/forum/v1/timeline/foryou")["items"], "拨到 0 不该把真人的帖也挡掉"
+    set_flag(admin, "ai_timeline_share", "80")
+    print("  ✓ 占比闸:拨到 0 机器人一条都不进第一屏,真人的照常出")
+
     # ---- 它的互动不进推荐分 ----
     mine = me.post("/forum/v1/posts", {"text": f"今晚吃什么好呢 {tag}"})
     before = next((x for x in me.get("/forum/v1/timeline/foryou")["items"]

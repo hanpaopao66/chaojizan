@@ -261,13 +261,32 @@ async def foryou(db: AsyncSession, user: User | None, page: int = 0) -> dict:
                            topic=v.personalize and p.id in tag_hits)
         scored.append((p, b))
     scored.sort(key=lambda x: rank.order_key(x[1]["score"], x[0].created_at, x[0].id))
-    screens = rank.paginate_screens(scored, lambda x: x[0].author_id, max_screens=page + 2)
+    # **机器人内容占一屏的上限**(#386,后台 ai_timeline_share,缺省 80%)。
+    # AI 号的帖**可以**进公共时间线(运营方 2026-09-16 定),但满屏机器人比空着更糟:
+    # 空着是「还没人来」,机器人互相寒暄是「这地方是假的」
+    ai_authors = await _ai_author_ids(db, [p.author_id for p in rows])
+    from . import ai_bots as _ab
+
+    share = await _ab.limit(db, "ai_timeline_share")
+    screens = rank.paginate_screens(
+        scored, lambda x: x[0].author_id, max_screens=page + 2,
+        capped=(lambda x: x[0].author_id in ai_authors) if ai_authors else None,
+        cap_share=share)
     chunk = screens[page] if page < len(screens) else []
     items = await posts_out(db, v, [p for p, _ in chunk])
     return {"items": [{"type": "post", "post": it, "rank": b}
                       for it, (_, b) in zip(items, chunk)],
             "page": page, "has_more": len(screens) > page + 1, "personalized": v.personalize,
             "ranked_at": now.isoformat()}
+
+
+async def _ai_author_ids(db: AsyncSession, author_ids: list[int]) -> frozenset:
+    """这些作者里哪些是 AI 号。一条 IN 查询,不按行去问。"""
+    ids = {i for i in author_ids if i}
+    if not ids:
+        return frozenset()
+    return frozenset(await db.scalars(
+        select(User.id).where(User.id.in_(list(ids)), User.is_ai.is_(True))))
 
 
 async def _posts_with_my_tags(db: AsyncSession, v: Viewer, post_ids: list[int]) -> frozenset:

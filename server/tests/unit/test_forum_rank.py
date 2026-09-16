@@ -110,3 +110,71 @@ def test_排序输入里只有公开字段():
     got = {f.name for f in dataclasses.fields(rank.RankInput)}
     assert got == {"post_id", "author_id", "created_at", "counts"}, got
     assert {f.name for f in dataclasses.fields(rank.Counts)} == set(rank.WEIGHTS)
+
+
+# ---------------- 机器人内容占一屏的上限(#386) ----------------
+
+def _mix(pattern: str) -> list[tuple[int, bool]]:
+    """按图案造一屏候选:`a` = AI 的,`h` = 真人的。**每条一个不同的作者** ——
+    不然「同一作者最多 2 条」那条闸会先拦住,测不到占比这一条。"""
+    return [(i, ch == "a") for i, ch in enumerate(pattern)]
+
+
+def _pages(pattern: str, share: int, size: int = 10):
+    return rank.paginate_screens(_mix(pattern), lambda x: x[0], size=size,
+                                 per_author=2, capped=lambda x: x[1],
+                                 cap_share=share)
+
+
+def test_不给闸时一切照旧():
+    """`capped=None` 是缺省。已有的调用一个字都不用改,行为要和从前一模一样。"""
+    items = list(range(25))
+    assert rank.paginate_screens(items, lambda x: x, size=10, per_author=99) == [
+        list(range(10)), list(range(10, 20)), list(range(20, 25))]
+
+
+def test_八成的闸_一屏十条最多八条机器人():
+    got = _pages("a" * 20, 80, size=10)
+    assert [sum(1 for _, ai in s if ai) for s in got[:2]] == [8, 8], (
+        f"一屏十条、上限八成 → 最多 8 条机器人:{got}")
+
+
+def test_挤下来的不丢_顺延到下一屏():
+    got = _pages("aaaaaaaaaahhhhhhhhhh", 80, size=10)
+    flat = [i for s in got for i, _ in s]
+    assert sorted(flat) == list(range(20)), f"一条都不该丢:{got}"
+    # 头两条真人帖被提前,好凑满第一屏 —— 顺序在同类里仍然保持
+    ai_first = [i for i, ai in got[0] if ai]
+    assert ai_first == sorted(ai_first), "机器人那几条之间的先后不许被打乱"
+
+
+def test_一屏里机器人不够上限时不硬凑():
+    got = _pages("ahahahahah", 80, size=10)
+    assert len(got[0]) == 10 and sum(1 for _, ai in got[0] if ai) == 5, (
+        "上限是「最多」,不是「必须凑到」")
+
+
+def test_拨到一百等于不限():
+    assert len(_pages("a" * 10, 100, size=10)[0]) == 10
+
+
+def test_拨到零就是机器人不进时间线_而且不会挂死():
+    """**这一条是这个函数里唯一会挂死整个请求的形状。**
+
+    上限 0 时一屏里一条机器人都放不下,于是剩下的全被顺延 —— 而顺延的还是同一批,
+    `pool` 永远不变小。不特意停下就是个死循环:请求不返回、连接一直占着,
+    而日志里什么都没有。
+    """
+    got = _pages("a" * 30, 0, size=10)
+    assert got == [] or all(not ai for s in got for _, ai in s), got
+
+
+def test_拨到零时真人的帖照常出_机器人那些被丢在后面():
+    got = _pages("aaaaahhhhh", 0, size=10)
+    assert [i for s in got for i, _ in s] == [5, 6, 7, 8, 9], (
+        f"真人的五条该照常出,机器人的五条一条都不出:{got}")
+
+
+def test_闸只拦被标记的那一类_真人再多也不受影响():
+    got = _pages("h" * 30, 0, size=10)
+    assert sum(len(s) for s in got) == 30, "拨到 0 拦的是机器人,不是所有人"
