@@ -3,6 +3,10 @@
 /// 守的是:资料页读的是 `/social/v1/users/{id}/follow-stats`(不挂任何模块开关)、点一下就写
 /// `/social/v1/users/{id}/follow`、按钮和粉丝数当场跟着变;这个接口拿不到时(没登录、老服务端)
 /// 资料页照常能看,只是不显示这一行。
+///
+/// 后半段守的是 #382 那三个板块入口:关注一次、三处都跟着来,那就得三处都有门 ——
+/// 「TA 的视频」「TA 的动态」人人都有,「TA 的音乐」要先是音乐人。这几行是 import 一掉就
+/// 静默少一格的那种接线,analyze 不报。
 library;
 
 import 'dart:convert';
@@ -17,6 +21,8 @@ import 'package:superz_shared/superz_shared.dart';
 import 'package:user_app/chat/pages/user_profile_page.dart';
 import 'package:user_app/chat/store.dart';
 import 'package:user_app/main.dart' show superZTheme;
+import 'package:user_app/music/api.dart' show MusicApi;
+import 'package:user_app/music/nav.dart' as music;
 
 void main() {
   setUpAll(() => PackageInfo.setMockInitialValues(
@@ -104,5 +110,38 @@ void main() {
     expect(find.text('小王'), findsWidgets, reason: '资料本身还在');
     expect(find.text('粉丝'), findsNothing);
     expect(find.text('关注'), findsNothing);
+  });
+
+  /// [artist] 为 false 时 `/music/v1/users/42/artist` 404 —— 不是音乐人(接口关着也是这条路)
+  void useMusic({required bool artist}) => music.musicApi = MusicApi(ApiClient(
+        baseUrl: 'https://api.example.test',
+        httpClient: MockClient((req) async => req.url.path == '/music/v1/users/42/artist' && artist
+            ? json({'aid': 'a1', 'name': '小王', 'tracks': 7})
+            : json({'detail': '不是音乐人'}, 404)),
+      ));
+
+  tearDown(() => useMusic(artist: false));
+
+  testWidgets('不是音乐人:「TA 的视频」「TA 的动态」照样有,「TA 的音乐」不出', (tester) async {
+    final s = server();
+    ChatStore.instance.debugUseClient(s.api);
+    useMusic(artist: false);
+    await pump(tester);
+
+    expect(find.text('小王 的视频'), findsOneWidget);
+    expect(find.text('小王 的动态'), findsOneWidget, reason: '动态不用先开通,人人都有一份');
+    expect(find.text('小王 的音乐'), findsNothing);
+  });
+
+  testWidgets('是音乐人:三个入口都在,音乐那格写着有几首歌', (tester) async {
+    final s = server();
+    ChatStore.instance.debugUseClient(s.api);
+    useMusic(artist: true);
+    await pump(tester);
+
+    expect(find.text('小王 的视频'), findsOneWidget);
+    expect(find.text('小王 的音乐'), findsOneWidget);
+    expect(find.text('音乐人 · 7 首歌'), findsOneWidget);
+    expect(find.text('小王 的动态'), findsOneWidget);
   });
 }

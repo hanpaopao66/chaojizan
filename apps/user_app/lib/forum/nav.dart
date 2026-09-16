@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../chat/links.dart' show registerAppLinkHandler;
+import '../chat/pages/forward_page.dart' show shareCardToChat;
 import '../session.dart';
 import 'api.dart';
 import 'models.dart';
@@ -157,16 +159,20 @@ bool handleForumLink(BuildContext context, Uri uri) {
 /// 注册进 `registerAppLinkHandler` 的那一份(它要的是 `Future<bool>`)。
 Future<bool> forumAppLinkHandler(BuildContext context, Uri uri) async => handleForumLink(context, uri);
 
+/// App 起来时调一次(main.dart),把论坛的站内链接接进 `openAppLink` ——
+/// 和音乐的 `registerMusicLinks()` 并排。论坛不反向依赖 chat,注册表在 chat/links.dart。
+void registerForumLinks() => registerAppLinkHandler(forumAppLinkHandler);
+
 /// 链接处理是同步判定「认不认」、异步打开页面 —— 这里把那个 Future 明确丢掉。
 void unawaitedOpen(Future<void> f) {
   f.ignore();
 }
 
-/// 分享一条帖子。
+/// 分享一条帖子:发到消息 / 复制链接 / 系统分享。
 ///
-/// 现在是「复制链接 / 系统分享」两条;#382 合并后把「发到消息」接上聊天的
-/// `shareCardToChat`(消息类型 `card`,§5.9)—— 那半边在主会话的 724904f 里,
-/// 这个 worktree 还没有,所以先只发链接,不假装有卡片。
+/// 「发到消息」走聊天的 `shareCardToChat`(消息类型 `card`,§5.9):**只发
+/// `{type:'post', id:pid}`**,标题和封面由服务端查出来存快照 —— 客户端说了不算。
+/// 所以这里的 `title` 只用来给弹层写一行提示,不会跟着消息发出去。
 Future<void> shareForumPost(BuildContext context, FPost post) async {
   if (post.unavailable) return;
   final link = forumPostLink(post.pid);
@@ -177,6 +183,7 @@ Future<void> shareForumPost(BuildContext context, FPost post) async {
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         ListTile(title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
         const Divider(height: 1),
+        ListTile(leading: const Icon(Icons.forum_outlined), title: const Text('发到消息'), onTap: () => Navigator.pop(ctx, 'chat')),
         ListTile(leading: const Icon(Icons.link), title: const Text('复制链接'), onTap: () => Navigator.pop(ctx, 'link')),
         ListTile(leading: const Icon(Icons.ios_share), title: const Text('更多'), onTap: () => Navigator.pop(ctx, 'other')),
       ]),
@@ -184,6 +191,8 @@ Future<void> shareForumPost(BuildContext context, FPost post) async {
   );
   if (pick == null || !context.mounted) return;
   switch (pick) {
+    case 'chat':
+      await shareCardToChat(context, type: 'post', id: post.pid);
     case 'link':
       await Clipboard.setData(ClipboardData(text: link));
       if (context.mounted) {

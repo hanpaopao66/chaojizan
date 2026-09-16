@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../../forum/nav.dart' as forum;
 import '../../music/nav.dart' as music;
 import '../../video/nav.dart' show openUpSpace;
 
@@ -359,6 +360,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
                 value: '音乐人 · ${_artist!['tracks'] ?? 0} 首歌',
                 onTap: () => music.openArtist(context, '${_artist!['aid']}'),
               ),
+            // 动态不像音乐那样要先开通,人人都有一份 —— 不用先探一次接口
+            SzEntryTile(
+              icon: Icons.forum_outlined,
+              title: '${u.displayName} 的动态',
+              onTap: () => forum.openForumProfile(context, u.id),
+            ),
           ]),
         ],
         const SizedBox(height: 12),

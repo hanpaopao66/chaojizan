@@ -60,6 +60,7 @@ import 'video/creator/creator_center_page.dart';
 import 'video/creator/upload_tasks.dart';
 import 'video/me/coins_page.dart';
 import 'video/me/favorites_page.dart' as vfav;
+import 'forum/nav.dart' as forum;
 import 'music/nav.dart' as music;
 import 'music/player/mini_bar.dart' show MusicMiniBar;
 import 'music/player/music_player.dart' show MusicPlayer;
@@ -328,6 +329,7 @@ class _HomePageState extends State<HomePage> {
     MusicPlayer.instance.onNotice = _musicNotice;
     unawaited(MusicPlayer.instance.load());
     music.registerMusicLinks();
+    forum.registerForumLinks();
     // 消息模块:登录了就连实时通道(底栏角标要一直准,不能等点进「消息」tab 才连);
     // 游客登录成功 / 退出登录都会 bump authTick
     rootResolve = widget.api.resolveUrl;
@@ -1816,9 +1818,13 @@ class _MerchantListViewState extends State<MerchantListView>
                       api: widget.api, orderNo: (paid ?? created).orderNo)));
               return;
             }
-            // 音乐不是「一门生意」,没有列表页可跳 —— 直接进音乐首页(论坛同理,等它的客户端合进来再接)
+            // 音乐和论坛不是「一门生意」,没有商家列表页可跳 —— 直接进各自的首页
             if (ch.key == 'music') {
               await music.openMusicHome(context);
+              return;
+            }
+            if (ch.key == 'forum') {
+              await forum.openForumHome(context);
               return;
             }
             final route = switch (ch.key) {
