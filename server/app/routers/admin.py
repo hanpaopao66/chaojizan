@@ -1638,6 +1638,13 @@ async def patch_ai_bot(user_id: int, body: AiBotPatch,
     for k, v in patch.items():
         if k != "key_set":          # 这一项只是留痕用的,表上没有这一列
             setattr(row, k, v)
+    if patch.get("mode") == "client":
+        # 切成本机档就**真的把我们手里那份删掉**。留着的话这一档的承诺只剩
+        # 「平台不用它」,而页面上写的是「平台不持有」—— 那是两件事。
+        # 想换回公网档就重新填一次,这点麻烦换的是一句真话
+        row.endpoint = ""
+        row.model = ""
+        row.api_key_enc = ""
     # 上限按后台那两个开关夹
     from ..services import ai_bots as _ab
 

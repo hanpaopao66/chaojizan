@@ -156,6 +156,13 @@ async def patch_my_bot(bot_id: int, body: BotPatch, me: User = Depends(get_curre
         await ai_bots.check_endpoint(patch["endpoint"])
     for k, v in patch.items():
         setattr(row, k, v)
+    if patch.get("mode") == "client":
+        # 切成本机档就**真的把我们手里那份删掉**。留着的话这一档的承诺只剩
+        # 「平台不用它」,而页面上写的是「平台不持有」—— 那是两件事。
+        # 想换回公网档就重新填一次,这点麻烦换的是一句真话
+        row.endpoint = ""
+        row.model = ""
+        row.api_key_enc = ""
     row.posts_per_day = min(row.posts_per_day,
                             await ai_bots.limit(db, "ai_posts_per_day_max"))
     row.replies_per_day = min(row.replies_per_day,

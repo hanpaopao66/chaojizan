@@ -121,25 +121,33 @@ def main() -> None:
     assert got["text"] == REPLY and got["author"]["is_ai"] is True, got
     print("  ✓ 真人打得开这条帖,作者名片上带着 AI 标")
 
+    # 真人也发一条。**这一条必须在占比闸之前发** —— 干净的库(CI 的每个分片都是)
+    # 在这一刻只有 AI 那一条帖,于是"拨到 0 之后时间线空了"是理所当然的,
+    # 那个反证等于没证
+    mine = me.post("/forum/v1/posts", {"text": f"今晚吃什么好呢 {tag}"})
+
     # ---- 机器人内容占公共时间线的上限(ai_timeline_share) ----
     # AI 的帖**可以**进公共时间线(运营方定的),但占比有闸。拨到 0 = 一条都不进 ——
     # 这一条同时也是那个死循环的防线:一屏里放不下时剩下的会被反复顺延
-    def ai_on_page0() -> list:
-        items = me.get("/forum/v1/timeline/foryou")["items"]
-        return [x["post"]["pid"] for x in items if x["post"]["author"]["is_ai"]]
+    def page0() -> list:
+        return [x["post"] for x in me.get("/forum/v1/timeline/foryou")["items"]]
 
     set_flag(admin, "ai_timeline_share", "100")
-    assert pid in ai_on_page0(), "刚发出来的帖,上限 100% 时该在推荐第一屏上"
+    on = [x["pid"] for x in page0()]
+    assert pid in on, "刚发出来的帖,上限 100% 时该在推荐第一屏上"
+    assert mine["pid"] in on, "真人那条也该在(下面的反证要靠它)"
     set_flag(admin, "ai_timeline_share", "0")
-    left = ai_on_page0()
-    assert left == [], f"上限拨到 0 之后第一屏还有机器人的帖:{left}"
-    # 真人的帖照常出 —— 证明上面那条不是"整个接口都空了"
-    assert me.get("/forum/v1/timeline/foryou")["items"], "拨到 0 不该把真人的帖也挡掉"
+    left = page0()
+    assert [x["pid"] for x in left if x["author"]["is_ai"]] == [], (
+        f"上限拨到 0 之后第一屏还有机器人的帖:{left}")
+    # **反证**:同一屏上真人那条照样在。不然"拨到 0 → 一条机器人都没有"
+    # 也可能是整个接口空了、或者这一屏根本没取到东西
+    assert mine["pid"] in [x["pid"] for x in left], (
+        f"拨到 0 把真人的帖也挡掉了:{left}")
     set_flag(admin, "ai_timeline_share", "80")
-    print("  ✓ 占比闸:拨到 0 机器人一条都不进第一屏,真人的照常出")
+    print("  ✓ 占比闸:拨到 0 机器人一条都不进第一屏,同一屏上真人那条照样在")
 
     # ---- 它的互动不进推荐分 ----
-    mine = me.post("/forum/v1/posts", {"text": f"今晚吃什么好呢 {tag}"})
     before = next((x for x in me.get("/forum/v1/timeline/foryou")["items"]
                    if x["post"]["pid"] == mine["pid"]), None)
     assert before is not None, "自己的帖该在推荐里"

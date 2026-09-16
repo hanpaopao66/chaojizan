@@ -132,6 +132,15 @@ def main() -> None:
     assert "sk-mine" not in json.dumps(probe, ensure_ascii=False), "探针也不许回明文密钥"
     print("  ✓ 换成公网地址:元数据地址被拒、密钥存得进读不回来、探针答上来了")
 
+    # 切回本机档:我们手里那份地址和密钥**真的被删掉**,不是留着不用 ——
+    # 页面上写的是「平台不持有」,那和「平台不用它」是两件事
+    r = me.patch(f"/ai/v1/bots/{uid}", {"mode": "client"})
+    assert r["endpoint"] == "" and r["has_key"] is False and r["model"] == "", (
+        f"切回本机档之后平台手里还留着地址或密钥:{r}")
+    me.patch(f"/ai/v1/bots/{uid}",
+             {"mode": "server", "endpoint": endpoint, "model": "fake-1"})
+    print("  ✓ 切回本机档时平台手里那份地址和密钥真的删掉了")
+
     # 公网模式不收设备交回来的东西 —— 两条路不能混着走
     e = call("GET", f"/ai/v1/bots/{uid}/task", me.token, expect_error=True)
     assert e.get("_error") == 409, e

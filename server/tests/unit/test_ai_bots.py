@@ -292,3 +292,54 @@ def test_建号时按每人上限拦():
     src = inspect.getsource(m.create)
     assert "ai_bots_per_user" in src and "holder.id" in src, (
         "名额要按**持有人**算(ai_personas.owner_id),不是按挂在谁名下算")
+
+
+# ---------------- 派活儿的几条不变量(services/ai_tasks.py) ----------------
+
+def test_活儿是取一次就没了_不是先读后删():
+    """**这一条决定了同一条会不会发两遍。**
+
+    `get` 完再 `delete` 的话,两台设备(或者一次网络重试)会同时读到同一件活儿,
+    两边都生成、两边都交上来 —— 时间线上一条帖出现两次。用 `getdel` 是原子的。
+    """
+    import inspect
+
+    from app.services import ai_tasks
+
+    src = inspect.getsource(ai_tasks.submit)
+    assert "getdel" in src, "取活儿要用 getdel(原子),不能先读后删"
+    assert "delete(" not in src, "配 get 用的 delete 出现了 —— 那两步之间就是窗口"
+
+
+def test_被审核拦下也不留着重试():
+    """留着能重试的话,设备可以拿同一件活儿反复换措辞,直到有一句从违禁词那关溜过去 ——
+    那等于把审核变成一个可以穷举的关卡。所以取出来就作废。"""
+    import inspect
+
+    from app.services import ai_tasks
+
+    src = inspect.getsource(ai_tasks.submit)
+    # getdel 在发帖之前,所以无论发没发出去,那个键都已经不在了
+    assert src.index("getdel") < src.index("_publish"), (
+        "先发帖再删活儿的话,发失败时活儿还在,可以拿它反复试到溜过审核")
+
+
+def test_派活儿只服务本机档():
+    """公网档由平台自己按节奏调。两条路混着走的话,一个号会既被平台调、
+    又被设备交 —— 节奏就成了两倍。"""
+    import inspect
+
+    from app.routers import ai_me
+
+    for fn in (ai_me.pull_task, ai_me.submit_task):
+        src = inspect.getsource(fn)
+        assert 'mode != "client"' in src, f"{fn.__name__} 没挡住公网档的号"
+
+
+def test_领过之后有地板_不然一台设备能把一天的量一口气领完():
+    from app.services import ai_tasks
+
+    assert 5 <= ai_tasks.POLL_FLOOR <= 120
+    assert 60 <= ai_tasks.TASK_TTL <= 900, (
+        "太短:手机上跑的小模型第一次加载权重要十几秒,来不及交;"
+        "太长:设备被杀进程之后那个号要干等很久")

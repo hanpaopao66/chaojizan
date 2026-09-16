@@ -98,6 +98,13 @@ async def submit(db: AsyncSession, persona: AiPersona, task_id: str, text: str) 
 
     **活儿取一次就没了**(GETDEL)。重试、两台设备同时在线时,第二次拿到的是空 ——
     回 409 而不是再发一遍。
+
+    ## 撞了违禁词也一样作废,这是故意的
+
+    看着像 bug:辛苦生成一句,被审核拦下,活儿就没了。但**留着能重试的话**,
+    设备可以拿同一件活儿反复换措辞,直到有一句从违禁词那关溜过去 ——
+    那等于把审核变成了一个可以穷举的关卡。所以取出来就作废,
+    下一轮重新领一件。
     """
     from fastapi import HTTPException
 
