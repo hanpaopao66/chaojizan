@@ -46,6 +46,65 @@ REPLY_WINDOW_HOURS = 12
 #: 挑候选时最多看多少条,从里面随机挑一条 —— 不总是回最新那条
 REPLY_POOL = 30
 
+#: 秩序上限:**后台可调**(平台开关),这里只是没人拨过时的缺省。
+#:
+#: 做成可调是因为这几个数要看着线上的样子定 —— 调大很容易,调小是要先被用户骂一轮的。
+#: 2026-09-16 运营方定的值就写在这里。
+LIMIT_DEFAULTS = {
+    "ai_bots_per_user": 20,        # 每人最多几个机器人
+    "ai_timeline_share": 80,       # 机器人内容在公共时间线里最多占百分之几
+    "ai_replies_per_post": 100,    # 同一条真人帖下面最多站几个机器人
+    "ai_posts_per_day_max": 48,    # 单个机器人每天最多发几条
+    "ai_replies_per_day_max": 96,  # 单个机器人每天最多回几条
+}
+
+
+async def check_endpoint(url: str) -> None:
+    """用户填的模型地址,由**我们的服务器**去请求 —— 所以必须过内网守卫。
+
+    填 `127.0.0.1` 或云厂商元数据地址(169.254.169.254)来探我们的内网,是最经典的一招。
+    解析出 IP 再判那一半**复用 webhook 那份**(`bots.check_host_public`,
+    它用的是 `is_global` 而不是只看 `is_private` —— 云元数据和运营商 NAT 都不在
+    `is_private` 里,而那两个恰恰最该拦)。抄一份的下场是两边迟早不一样,
+    而不一样的那一边就是洞。
+
+    **端口不限**,这一点和 webhook 不同:那边只许 80/88/443/8443 是 Telegram 的规矩,
+    而自己跑的模型服务常在 8000、11434 这类端口上。防 SSRF 靠的是判 IP,不是判端口。
+    """
+    from urllib.parse import urlparse
+
+    from fastapi import HTTPException
+
+    from . import bots
+
+    url = (url or "").strip()
+    if not url or len(url) > 300:
+        raise HTTPException(422, "模型地址 1–300 个字符")
+    if bots.dev_local_url(url):
+        return                       # 开发 / 预发:允许本机(e2e 要在本机起个假模型)
+    p = urlparse(url)
+    if p.scheme != "https":
+        raise HTTPException(422, "模型地址要用 https —— 明文发出去的是你的提示词和密钥")
+    if not p.hostname:
+        raise HTTPException(422, "模型地址里缺少域名")
+    if p.username or p.password:
+        raise HTTPException(422, "模型地址里不能带用户名和密码")
+    try:
+        await bots.check_host_public(url, "模型地址:")
+    except bots.BotError as e:
+        raise HTTPException(422, str(e.detail if hasattr(e, "detail") else e)) from e
+
+
+async def limit(db: AsyncSession, key: str) -> int:
+    """读一个秩序上限。填了非数字(手工改过库)按缺省算,不让它把整轮带倒。"""
+    from ..models import PlatformFlag
+
+    row = await db.get(PlatformFlag, key)
+    try:
+        return int(row.value) if row and row.value else LIMIT_DEFAULTS[key]
+    except (ValueError, TypeError):
+        return LIMIT_DEFAULTS[key]
+
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -76,7 +135,12 @@ def reply_prompt(p: AiPersona, text: str) -> str:
 
 
 async def _say(db: AsyncSession, persona: AiPersona, prompt: str) -> str:
-    r = await ai.complete(db, prompt, system=persona.persona or "")
+    """**用这个机器人自己的模型**。平台没有模型可用(#386)。
+
+    本机模式(`client`)在这里永远生成不出来 —— 那一档由 App 调本机模型再把文本交回来,
+    不走这条路。所以这里只服务 `server` 模式。
+    """
+    r = await ai.complete(ai.config_of(persona), prompt)
     if not r.ok:
         logger.info("AI 号 %s 没生成出来:%s", persona.user_id, r.error)
     return r.text
@@ -106,11 +170,14 @@ async def _publish(db: AsyncSession, persona: AiPersona, text: str,
 async def _pick_target(db: AsyncSession, persona: AiPersona, now: datetime) -> ForumPost | None:
     """挑一条真人的原帖来回。
 
-    三条限制,缺一不可:
+    四条限制,缺一不可:
     - **只回真人的**(作者不是 AI):AI 之间互相回会滚成一片没人看的对话;
     - 只回原帖,不回回复:不然会在一条串里越接越长;
-    - **这条帖它自己还没回过**:同一条下面冒出两句同一个机器人的话,是最出戏的。
+    - **这条帖它自己还没回过**:同一条下面冒出两句同一个机器人的话,是最出戏的;
+    - **这条帖下面的机器人还没站满**(`ai_replies_per_post`,后台可调)。
     """
+    from sqlalchemy import func
+
     since = now - timedelta(hours=REPLY_WINDOW_HOURS)
     mine = select(ForumPost.reply_to_id).where(ForumPost.author_id == persona.user_id,
                                                ForumPost.reply_to_id.is_not(None))
@@ -121,7 +188,19 @@ async def _pick_target(db: AsyncSession, persona: AiPersona, now: datetime) -> F
                ForumPost.reply_to_id.is_(None), ForumPost.author_id != persona.user_id,
                User.is_ai.is_(False), ForumPost.id.not_in(mine))
         .order_by(ForumPost.created_at.desc()).limit(REPLY_POOL)))
-    return random.choice(rows) if rows else None
+    if not rows:
+        return None
+    cap = await limit(db, "ai_replies_per_post")
+    random.shuffle(rows)
+    for p in rows:
+        bots_here = await db.scalar(
+            select(func.count()).select_from(ForumPost)
+            .join(User, User.id == ForumPost.author_id)
+            .where(ForumPost.reply_to_id == p.id, ForumPost.status == "visible",
+                   User.is_ai.is_(True))) or 0
+        if int(bots_here) < cap:
+            return p
+    return None
 
 
 async def tick(db: AsyncSession, *, now: datetime | None = None) -> int:
@@ -131,13 +210,14 @@ async def tick(db: AsyncSession, *, now: datetime | None = None) -> int:
     now = now or utcnow()
     if not await _on(db):
         return 0
-    if not await ai.configured(db):
-        return 0
     if not await forum_flag_on(db, "forum_post_enabled"):
         # 论坛都停笔了,AI 更不该在这时候说话
         return 0
+    # **只有 server 模式的在这条循环里**:本机模式由 App 自己按节奏调本机模型,
+    # 服务端既没有它的地址也没有它的 key
     personas = list(await db.scalars(
-        select(AiPersona).where(AiPersona.active.is_(True)).order_by(AiPersona.user_id)))
+        select(AiPersona).where(AiPersona.active.is_(True), AiPersona.mode == "server")
+        .order_by(AiPersona.user_id)))
     random.shuffle(personas)
     done = 0
     for p in personas:
@@ -173,21 +253,30 @@ async def _act(db: AsyncSession, p: AiPersona, now: datetime) -> bool:
     return False
 
 
-async def create(db: AsyncSession, owner: User, *, name: str, username: str, persona: str,
-                 topics: str = "", posts_per_day: int = 2,
-                 replies_per_day: int = 5) -> AiPersona:
-    """建一个 AI 号。走的是普通机器人那条路,再标上 `is_ai`。调用方提交。"""
+async def create(db: AsyncSession, dev_owner: User, *, holder: User, name: str,
+                 username: str, persona: str, topics: str = "", posts_per_day: int = 2,
+                 replies_per_day: int = 5, mode: str = "client") -> AiPersona:
+    """建一个 AI 号。走的是普通机器人那条路,再标上 `is_ai`。调用方提交。
+
+    两个"主人"是两件事,别混:
+
+    - `dev_owner` 是 **bots.owner_id** —— 机器人账号体系要求主人是个开发者账号
+      (官方开发者),这是 #355 那套的规矩;
+    - `holder` 是 **ai_personas.owner_id** —— 这个机器人**是谁的**,谁来配它、
+      谁为它说的话负责。用户级别的接入就体现在这一个字段上。
+    """
     from . import bots
 
-    bot, _token = await bots.create_bot(db, owner, name, username, system=True)
+    bot, _token = await bots.create_bot(db, dev_owner, name, username, system=True)
     user = await db.get(User, bot.user_id)
     if user is not None:
         user.is_ai = True          # 名片上的 AI 标、榜单里的那几道闸都看它
     bot.about = persona[:120]
-    row = AiPersona(user_id=bot.user_id, persona=persona, topics=topics,
-                    posts_per_day=posts_per_day, replies_per_day=replies_per_day,
-                    active=True)
+    row = AiPersona(user_id=bot.user_id, owner_id=holder.id, mode=mode, persona=persona,
+                    topics=topics, posts_per_day=posts_per_day,
+                    replies_per_day=replies_per_day, active=True)
     db.add(row)
     await db.flush()
-    logger.info("建了 AI 号 %s(@%s)", bot.user_id, username)
+    logger.info("建了 AI 号 %s(@%s),主人 %s,模式 %s", bot.user_id, username,
+                holder.id, mode)
     return row

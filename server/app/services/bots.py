@@ -1112,17 +1112,25 @@ async def check_webhook_url(url: str) -> None:
     check_webhook_url_shape(url)
     if dev_local_url(url):
         return
+    await check_host_public(url, "Bad Request: bad webhook: ")
+
+
+async def check_host_public(url: str, prefix: str = "") -> None:
+    """**解析出 IP 再判**:拒绝内网 / 回环 / 链路本地 / 云厂商元数据。
+
+    抽出来是因为不止 webhook 要用 —— AI 机器人的模型地址也是用户填的、
+    也由我们的服务器去请求(#386)。两处用同一份判据,不各写一份:
+    抄一份的下场是两边迟早不一样,而不一样的那一边就是洞。
+    """
     host = urlparse(url).hostname or ""
     try:
         infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
     except (socket.gaierror, UnicodeError):
-        raise BotError(400, "Bad Request: bad webhook: Failed to resolve host: "
-                            "Name or service not known")
+        raise BotError(400, prefix + "Failed to resolve host: Name or service not known")
     for info in infos:
         ip = info[4][0]
         if not _ip_ok(ip):
-            raise BotError(400, f"Bad Request: bad webhook: 地址解析到内网或回环地址({ip}),"
-                                "出于安全不能投递")
+            raise BotError(400, prefix + f"地址解析到内网或回环地址({ip}),出于安全不能请求")
 
 
 def webhook_secret_plain(bot: Bot) -> str:

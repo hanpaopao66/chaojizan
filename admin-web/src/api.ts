@@ -153,26 +153,18 @@ function accept(out: LoginOut): LoginOut {
 
 // ---------- AI 机器人 ----------
 
-export interface AiProbeOut {
-  ok: boolean
-  reply?: string
-  error?: string
-  endpoint: string
-  model: string
-  has_key?: boolean
-}
-
-/** 让模型现答一句,看配对了没有。
- *
- * 地址填错一个字、模型名写错、本机的模型没起来 —— 这些的表现都是
- * **AI 一个字都不发**,而这一页看上去配得好好的。所以配完当场验一次。 */
-export const aiProbe = (prompt?: string) =>
-  post<AiProbeOut>('/admin/ai/probe', prompt ? { prompt } : {})
-
 export interface AiBot {
   user_id: number
   name: string
   username: string
+  /** 这个机器人是谁的。后台建的挂在建它的管理员名下 —— 平台自己不持有机器人 */
+  owner_id: number | null
+  /** client 本机模型(在他自己的设备上跑,服务端够不着)/ server 平台去调他填的地址 */
+  mode: 'client' | 'server'
+  endpoint: string
+  model: string
+  /** 密钥只回「设没设」,永远不回明文 */
+  has_key: boolean
   persona: string
   topics: string
   posts_per_day: number
@@ -187,15 +179,32 @@ export const aiBots = () => get<{ items: AiBot[] }>('/admin/ai/bots')
 
 export const createAiBot = (body: {
   name: string; username: string; persona: string; topics: string
-  posts_per_day: number; replies_per_day: number
+  posts_per_day: number; replies_per_day: number; mode?: 'client' | 'server'
 }) => post<AiBot>('/admin/ai/bots', body)
 
 export const patchAiBot = (userId: number, body: Partial<Pick<AiBot,
-  'persona' | 'topics' | 'posts_per_day' | 'replies_per_day' | 'active'>>) =>
+  'persona' | 'topics' | 'posts_per_day' | 'replies_per_day' | 'active'
+  | 'mode' | 'endpoint' | 'model'>> & { api_key?: string; timeout_seconds?: number }) =>
   request<AiBot>('PATCH', `/admin/ai/bots/${userId}`, body)
 
-/** 让它现在说一句,不等节奏。绕过的只有「距离上次够不够久」,
- *  违禁词、先审后发、开关一条都不绕 */
+export interface AiProbeOut {
+  ok: boolean
+  reply?: string
+  error?: string
+  endpoint: string
+  model: string
+  has_key?: boolean
+}
+
+/** 让**这个机器人自己的模型**现答一句,看配对了没有。
+ *
+ * 地址填错一个字、模型名写错、他那边的模型没起来 —— 这些的表现都是
+ * **这个号一个字都不发**,而这一页看上去配得好好的。所以配完当场验一次。
+ *
+ * 本机模式探不了:模型在他自己的设备上,我们的服务器够不着。那不是故障。 */
+export const aiProbe = (userId: number, prompt?: string) =>
+  post<AiProbeOut>(`/admin/ai/bots/${userId}/probe`, prompt ? { prompt } : {})
+
 export const aiBotSayNow = (userId: number) =>
   post<{ pid: string; text: string }>(`/admin/ai/bots/${userId}/say`)
 

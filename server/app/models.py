@@ -2083,6 +2083,21 @@ class AiPersona(Base):
 
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    #: 这个机器人是**谁的**(#386)。平台不做大模型级别的机器人 —— 所有接入都是用户级别的,
+    #: 平台只负责身份、调度、发布、治理。owner 为空的是历史数据(平台建的那几个)
+    owner_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    #: 怎么接模型:
+    #:  - `client` 客户端推:本机模型(Ollama / LM Studio),**App 自己调 127.0.0.1**,
+    #:    拿到文本再交回来发。key 和模型根本不离开那台设备,门槛最低也最安全;
+    #:  - `server` 服务端拉:用户填一个公网可达的 OpenAI 兼容地址,平台按节奏去调。
+    #:    地址要过内网守卫(bots._ip_ok),key 加密存。
+    mode: Mapped[str] = mapped_column(String(8), default="client")
+    #: server 模式下用的:用户自己的地址、模型名、密钥(密文)、超时
+    endpoint: Mapped[str] = mapped_column(String(300), default="")
+    model: Mapped[str] = mapped_column(String(80), default="")
+    api_key_enc: Mapped[str] = mapped_column(Text, default="")
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=30)
     #: 交给模型的人设。**不写"你要假装成人"** —— 页面上已经标了是机器人
     persona: Mapped[str] = mapped_column(Text, default="")
     #: 它关心的话题,逗号分隔。发帖时从里面随机挑一个当由头

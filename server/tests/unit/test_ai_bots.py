@@ -104,3 +104,160 @@ def test_只回最近的帖_窗口不能太长():
 
 def test_候选池不是只看最新一条():
     assert ai_bots.REPLY_POOL >= 10, "总是回最新那条的话,看起来就像在蹲守"
+
+
+# ---------------- 秩序上限:后台可调,但缺省要站得住 ----------------
+
+def test_缺省值就是运营方拍的那几个数():
+    """这几个数 2026-09-16 运营方自己定的。改缺省值要有人拍板,不是随手调。"""
+    assert ai_bots.LIMIT_DEFAULTS == {
+        "ai_bots_per_user": 20,
+        "ai_timeline_share": 80,
+        "ai_replies_per_post": 100,
+        "ai_posts_per_day_max": 48,
+        "ai_replies_per_day_max": 96,
+    }
+
+
+class FakeDb:
+    """只够 limit() / _pick_target() 用的那点会话。"""
+
+    def __init__(self, flags: dict | None = None, posts=(), bots_under=0):
+        self._flags = flags or {}
+        self._posts = list(posts)
+        self._bots_under = bots_under
+        self.counted = 0
+
+    async def get(self, _model, key):
+        v = self._flags.get(key)
+        if v is None:
+            return None
+        return type("Row", (), {"key": key, "value": v})()
+
+    async def scalars(self, _q):
+        return list(self._posts)
+
+    async def scalar(self, _q):
+        self.counted += 1
+        n = self._bots_under
+        return n(self.counted) if callable(n) else n
+
+
+def limit(flags, key):
+    import asyncio
+    return asyncio.run(ai_bots.limit(FakeDb(flags), key))
+
+
+def test_没人拨过按缺省():
+    assert limit({}, "ai_replies_per_post") == 100
+
+
+def test_后台拨过就按后台的():
+    assert limit({"ai_replies_per_post": "3"}, "ai_replies_per_post") == 3
+
+
+@pytest.mark.parametrize("bad", ["", "  ", "很多", "3.5", None])
+def test_填了不是数的按缺省_不把整轮带倒(bad):
+    """手工改过库、或者以后前端放进来个空串。**这里炸了的表现是所有 AI 全哑**,
+    而且不报错 —— 所以宁可按缺省走。"""
+    assert limit({"ai_bots_per_user": bad}, "ai_bots_per_user") == 20
+
+
+def test_拨成零就是一个都不许():
+    assert limit({"ai_bots_per_user": "0"}, "ai_bots_per_user") == 0
+
+
+# ---------------- 一条帖下面最多站几个机器人 ----------------
+
+def pick(bots_under, n_posts=1, cap="2"):
+    import asyncio
+
+    posts = [type("P", (), {"id": i, "pid": f"p{i}", "text": "今天这家串串太咸了"})()
+             for i in range(n_posts)]
+    db = FakeDb({"ai_replies_per_post": cap}, posts=posts, bots_under=bots_under)
+    return asyncio.run(ai_bots._pick_target(db, persona(), NOW))
+
+
+@pytest.mark.parametrize("under,ok", [(0, True), (1, True), (2, False), (5, False)])
+def test_站满了就不再往这条帖下面站(under, ok):
+    """上限 2:已经有 2 个就不许第 3 个。差一个的判断(< 还是 <=)错了的表现是
+    一条真人帖底下排一长队机器人 —— 那是这个功能最难看的失败形状。"""
+    assert (pick(under) is not None) is ok
+
+
+def test_这条满了就换下一条():
+    # 第一条已经站了 5 个(超上限),第二条空着 → 该挑第二条
+    got = pick(lambda i: 5 if i == 1 else 0, n_posts=2)
+    assert got is not None
+
+
+def test_全都满了就这一轮不回():
+    assert pick(9, n_posts=3) is None
+
+
+def test_一条帖都没有时不去数机器人():
+    db = FakeDb({}, posts=[], bots_under=0)
+    import asyncio
+    assert asyncio.run(ai_bots._pick_target(db, persona(), NOW)) is None
+    assert db.counted == 0, "没有候选还去查上限是白跑一趟"
+
+
+# ---------------- 用户填的模型地址:由我们的服务器去请求,所以要过内网守卫 ----------------
+
+@pytest.fixture
+def prod(monkeypatch):
+    """按生产判。本机开发时 127.0.0.1 是**故意**放行的(e2e 要在本机起个假模型),
+    不按生产判的话下面几条会因为那个口子而静默变成空测。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "app_env", "prod")
+
+
+def endpoint_err(url: str) -> str:
+    import asyncio
+
+    from fastapi import HTTPException
+
+    try:
+        asyncio.run(ai_bots.check_endpoint(url))
+    except HTTPException as e:
+        return str(e.detail)
+    return ""
+
+
+@pytest.mark.parametrize("url,needle", [
+    ("", "1–300"),
+    ("x" * 301, "1–300"),
+    ("http://api.example.com/v1", "https"),
+    ("https://", "缺少域名"),
+    ("https://u:p@api.example.com/v1", "用户名和密码"),
+])
+def test_形状不对的地址当场拒(url, needle, prod):
+    assert needle in endpoint_err(url)
+
+
+@pytest.mark.parametrize("url", [
+    "https://169.254.169.254/latest/v1",   # 云厂商元数据 —— 最经典的那一招
+    "https://10.0.0.5/v1",
+    "https://172.16.3.4/v1",
+    "https://[::1]/v1",
+    "https://127.0.0.1:11434/v1",
+])
+def test_指向内网和元数据的地址拒掉(url, prod):
+    assert "内网或回环" in endpoint_err(url), (
+        "这条守的是 SSRF:地址是用户填的,请求是我们的服务器发的")
+
+
+def test_本机地址只在开发环境放行(monkeypatch):
+    """e2e 要在本机起一个假模型。这个口子挂在 `is_dev` 上 ——
+    `app_env` 缺省是 prod,所以线上自动是关的。"""
+    from app.config import settings
+    monkeypatch.setattr(settings, "app_env", "dev")
+    assert endpoint_err("http://127.0.0.1:11434/v1") == ""
+    monkeypatch.setattr(settings, "app_env", "prod")
+    assert "内网或回环" in endpoint_err("https://127.0.0.1:11434/v1")
+
+
+def test_端口不限_自己跑的模型常在八千和一万一(prod):
+    """和 webhook 不同。那边只许 80/88/443/8443 是 Telegram 的规矩;
+    而 vLLM 在 8000、Ollama 在 11434。**防 SSRF 靠判 IP,不是判端口。**"""
+    assert "端口" not in endpoint_err("https://api.example.com:11434/v1")

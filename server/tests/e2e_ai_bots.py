@@ -85,8 +85,6 @@ def main() -> None:
     # ---- 总闸关着:什么都不发 ----
     set_flag(admin, "ai_bots_enabled", "off")
     endpoint = start_fake_model()
-    set_flag(admin, "ai_endpoint", endpoint)
-    set_flag(admin, "ai_model", "fake-1")
 
     bot = call("POST", "/admin/ai/bots", admin, {
         "name": f"吃货小z{tag}", "username": f"chihuo{tag}bot",
@@ -94,6 +92,11 @@ def main() -> None:
         "posts_per_day": 24, "replies_per_day": 48})
     uid = bot["user_id"]
     assert bot["active"] is True and bot["posts"] == 0, bot
+    # **模型是这个号自己的**(#386):平台没有模型,所以要先给它填地址
+    assert bot["mode"] == "client", "缺省是本机模式 —— 那一档服务端连地址都没有"
+    assert bot["owner_id"], "每个机器人都得有主人"
+    call("PATCH", f"/admin/ai/bots/{uid}", admin,
+         {"mode": "server", "endpoint": endpoint, "model": "fake-1"})
     print(f"  ✓ 建了 AI 号 {uid} @{bot['username']}")
 
     e = call("POST", f"/admin/ai/bots/{uid}/say", admin, {}, expect_error=True)
@@ -148,6 +151,35 @@ def main() -> None:
     assert now["rank"]["parts"]["e"] > e_before, (
         f"真人点赞也没算进去,那上面那条断言是假绿:{now['rank']}")
     print(f"  ✓ 真人点赞照常算(e {e_before} → {now['rank']['parts']['e']})")
+
+    # ---- 模型是这个号自己的:密钥存进去读不回来,上限按后台那两个数夹 ----
+    r = call("PATCH", f"/admin/ai/bots/{uid}", admin, {"api_key": "sk-secret-e2e"})
+    assert r["has_key"] is True, "密钥该记下了"
+    assert "sk-secret-e2e" not in json.dumps(r, ensure_ascii=False), (
+        f"密钥回了明文 —— 这一页任何管理员都打得开,截图、录屏、肩后看都算泄露:{r}")
+    assert "sk-secret-e2e" not in json.dumps(
+        call("GET", "/admin/ai/bots", admin), ensure_ascii=False), "列表里也不许回明文"
+    print("  ✓ 密钥存得进、读不回来(列表和详情都只说「设没设」)")
+
+    set_flag(admin, "ai_posts_per_day_max", "3")
+    r = call("PATCH", f"/admin/ai/bots/{uid}", admin, {"posts_per_day": 200})
+    assert r["posts_per_day"] == 3, f"后台把上限拨到 3,填 200 应该被夹到 3:{r}"
+    set_flag(admin, "ai_posts_per_day_max", "48")
+    print("  ✓ 每天发几条被后台那个上限夹住(拨到 3,填 200 存下来是 3)")
+
+    # 指向内网的地址拒掉 —— 这个地址是用户填的,请求是**我们的服务器**发的
+    e = call("PATCH", f"/admin/ai/bots/{uid}", admin,
+             {"endpoint": "https://169.254.169.254/latest/v1"}, expect_error=True)
+    assert e.get("_error") == 422 and "内网或回环" in str(e.get("detail")), e
+    print("  ✓ 填云厂商元数据地址来探我们内网,当场拒(SSRF)")
+
+    # 切回本机模式:服务端既没有地址也没有密钥,所以探不了、也替不了它说话
+    call("PATCH", f"/admin/ai/bots/{uid}", admin, {"mode": "client"})
+    for path in (f"/admin/ai/bots/{uid}/probe", f"/admin/ai/bots/{uid}/say"):
+        e = call("POST", path, admin, {}, expect_error=True)
+        assert e.get("_error") == 409 and "本机" in str(e.get("detail")), (path, e)
+    call("PATCH", f"/admin/ai/bots/{uid}", admin, {"mode": "server"})
+    print("  ✓ 本机模式的号服务端不替它生成(探针和「说一句」都回 409,不是假装成功)")
 
     # ---- 停用不删号 ----
     call("PATCH", f"/admin/ai/bots/{uid}", admin, {"active": False})

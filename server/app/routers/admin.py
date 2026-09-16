@@ -1491,16 +1491,30 @@ _KNOWN_FLAGS = {
     "av_license_no",
     # AI 机器人(#385)。换模型、改地址、调提示词是运营会反复做的事,
     # 做成环境变量意味着每改一次都要上部署机改文件再重启 —— 所以放这儿,改完立即生效
-    "ai_bots_enabled",     # 总闸:关着时一个 AI 一个字都不发
-    "ai_endpoint",         # OpenAI 兼容的地址,如 http://127.0.0.1:11434/v1
-    "ai_model",            # 模型名
-    "ai_api_key",          # **只写不读**:存密文,读回来只说「已设置 / 未设置」
-    "ai_system_prompt",    # 给所有 AI 号的共同交代(各自的人设另说)
-    "ai_timeout_seconds",  # 等模型多久放弃这一次
+    "ai_bots_enabled",        # 总闸:关着时一个 AI 一个字都不发
+    # 下面这几项管的是**秩序**,不是模型 —— 平台不做大模型级别的机器人(#386),
+    # 模型配置跟着每个机器人自己走(ai_personas)。
+    # 都做成开关是因为这几个数要看着线上的样子调:调大容易,调小是要先被骂一轮的
+    "ai_bots_per_user",       # 每人最多几个机器人
+    "ai_timeline_share",      # 机器人内容在公共时间线里最多占百分之几
+    "ai_replies_per_post",    # 同一条真人帖下面最多站几个机器人
+    "ai_posts_per_day_max",   # 单个机器人每天最多发几条(用户在这个数以内自己填)
+    "ai_replies_per_day_max",  # 单个机器人每天最多回几条
 }
 
-#: 读回来不给明文的开关。后台只需要知道「设没设」,不需要看见它
-_SECRET_FLAGS = {"ai_api_key"}
+#: 这几项是数,各有各的范围。夹在范围里而不是拒绝 —— 运营手滑填个 1000,
+#: 意思显然是「越大越好」,拒绝他不如按上限收下
+_AI_NUMBERS = {
+    "ai_bots_per_user": (0, 100),
+    "ai_timeline_share": (0, 100),
+    "ai_replies_per_post": (0, 1000),
+    "ai_posts_per_day_max": (0, 288),
+    "ai_replies_per_day_max": (0, 576),
+}
+
+#: 读回来不给明文的开关。**模型密钥不在这里** —— 它跟着每个机器人走
+#: (ai_personas.api_key_enc),平台这一层没有任何密钥
+_SECRET_FLAGS: set[str] = set()
 
 
 class AiBotIn(BaseModel):
@@ -1513,14 +1527,27 @@ class AiBotIn(BaseModel):
     topics: str = Field(default="", max_length=300)
     posts_per_day: int = Field(default=2, ge=0, le=24)
     replies_per_day: int = Field(default=5, ge=0, le=48)
+    #: 模型放在哪。client = 主人的设备上(服务端够不着),server = 主人填个公网地址。
+    #: **缺省是 client** —— 不传这个字段时,服务端一个地址都不持有,也就一次外连都不会发。
+    #: 后台那个表单缺省勾的是 server(管理员手里没有跑本机模型的 App),它每次都显式传。
+    mode: str = Field(default="client", pattern="^(client|server)$")
 
 
 class AiBotPatch(BaseModel):
     persona: str | None = Field(default=None, max_length=2000)
     topics: str | None = Field(default=None, max_length=300)
-    posts_per_day: int | None = Field(default=None, ge=0, le=24)
-    replies_per_day: int | None = Field(default=None, ge=0, le=48)
+    #: 上限由 ai_posts_per_day_max / ai_replies_per_day_max 两个开关夹(后台可调),
+    #: 这里只挡住明显离谱的值
+    posts_per_day: int | None = Field(default=None, ge=0, le=288)
+    replies_per_day: int | None = Field(default=None, ge=0, le=576)
     active: bool | None = None
+    #: client 本机模型(App 自己调,服务端没有地址也没有 key)/ server 平台去调他填的地址
+    mode: str | None = Field(default=None, pattern="^(client|server)$")
+    endpoint: str | None = Field(default=None, max_length=300)
+    model: str | None = Field(default=None, max_length=80)
+    #: 传了才改;传空串 = 清掉。**存密文,读不回来**
+    api_key: str | None = Field(default=None, max_length=300)
+    timeout_seconds: int | None = Field(default=None, ge=1, le=120)
 
 
 async def _ai_bot_out(db: AsyncSession, row) -> dict:
@@ -1533,8 +1560,11 @@ async def _ai_bot_out(db: AsyncSession, row) -> dict:
 
     posts = await db.scalar(select(func.count()).select_from(ForumPost).where(
         ForumPost.author_id == row.user_id)) or 0
-    return {"user_id": row.user_id, "name": u.name if u else "", 
+    return {"user_id": row.user_id, "name": u.name if u else "",
             "username": name_row.username_lc if name_row else "",
+            "owner_id": row.owner_id, "mode": row.mode,
+            "endpoint": row.endpoint, "model": row.model,
+            "has_key": bool(row.api_key_enc),
             "persona": row.persona, "topics": row.topics,
             "posts_per_day": row.posts_per_day, "replies_per_day": row.replies_per_day,
             "active": row.active, "posts": int(posts),
@@ -1569,10 +1599,11 @@ async def create_ai_bot(body: AiBotIn, admin: User = Depends(require_role("admin
         # 挂在官方开发者名下,和官方小程序、机器人管家同一个主人
         raise HTTPException(409, "还没有官方开发者账号:先在部署机上跑 "
                                  "python -m scripts.seed_bot_manager --apply")
-    row = await ai_bots.create(db, owner, name=body.name, username=body.username,
-                               persona=body.persona, topics=body.topics,
-                               posts_per_day=body.posts_per_day,
-                               replies_per_day=body.replies_per_day)
+    # 后台建的号挂在**这个管理员**名下 —— 平台自己不持有机器人(#386),谁建的谁负责
+    row = await ai_bots.create(db, owner, holder=admin, name=body.name,
+                               username=body.username, persona=body.persona,
+                               topics=body.topics, posts_per_day=body.posts_per_day,
+                               replies_per_day=body.replies_per_day, mode=body.mode)
     await log_admin_action(db, admin, "ai_bot.create", target_type="user",
                            target_id=str(row.user_id), detail={"username": body.username})
     await db.commit()
@@ -1590,8 +1621,30 @@ async def patch_ai_bot(user_id: int, body: AiBotPatch,
     if row is None:
         raise HTTPException(404, "没有这个 AI 号")
     patch = body.model_dump(exclude_unset=True)
+    key = patch.pop("api_key", None)
+    if key is not None:
+        from ..services import crypto
+        # 空串 = 清掉(本机模型多半根本不需要 key)
+        row.api_key_enc = crypto.encrypt(key) if key else ""
+        # 留痕里只记「设了 / 清了」。**键名也不能叫 api_key** ——
+        # admin_audit._clean 连键名都拦(留痕是给运营复盘的,不是第二份敏感数据副本)
+        patch["key_set"] = bool(key)
+    if "endpoint" in patch and patch["endpoint"]:
+        # 用户填的地址由**我们的服务器**去请求,所以要过内网守卫 ——
+        # 填 127.0.0.1 或云厂商元数据地址(169.254.169.254)来探内网是最经典的一招。
+        # 复用 webhook 那套判据(bots 里那份已经考虑了云元数据和运营商 NAT),不另写一份
+        from ..services import ai_bots
+        await ai_bots.check_endpoint(patch["endpoint"])
     for k, v in patch.items():
-        setattr(row, k, v)
+        if k != "key_set":          # 这一项只是留痕用的,表上没有这一列
+            setattr(row, k, v)
+    # 上限按后台那两个开关夹
+    from ..services import ai_bots as _ab
+
+    row.posts_per_day = min(row.posts_per_day,
+                            await _ab.limit(db, "ai_posts_per_day_max"))
+    row.replies_per_day = min(row.replies_per_day,
+                              await _ab.limit(db, "ai_replies_per_day_max"))
     await log_admin_action(db, admin, "ai_bot.patch", target_type="user",
                            target_id=str(user_id), detail=patch)
     await db.commit()
@@ -1617,8 +1670,10 @@ async def ai_bot_say_now(user_id: int, admin: User = Depends(require_role("admin
         raise HTTPException(409, "AI 机器人总闸关着")
     from ..services import ai
 
-    if not await ai.configured(db):
-        raise HTTPException(409, "还没配大模型")
+    if row.mode != "server":
+        raise HTTPException(409, "这是本机模式的号:该由它主人的 App 生成再交回来,服务端替不了")
+    if not ai.config_of(row).ok:
+        raise HTTPException(409, "这个号还没填模型地址")
     text = await ai_bots._say(db, row, ai_bots.post_prompt(row))
     if not text:
         raise HTTPException(502, "模型没答上来,点「试一下」看看")
@@ -1632,11 +1687,11 @@ async def ai_bot_say_now(user_id: int, admin: User = Depends(require_role("admin
     return {"pid": post.pid, "text": post.text}
 
 
-@router.post("/ai/probe")
-async def ai_probe(payload: dict | None = None,
+@router.post("/ai/bots/{user_id}/probe")
+async def ai_probe(user_id: int, payload: dict | None = None,
                    admin: User = Depends(require_role("admin")),
                    db: AsyncSession = Depends(get_db)):
-    """让模型现答一句,看配对了没有。
+    """让**这个机器人自己的模型**现答一句,看它配对了没有。
 
     ## 为什么必须有这个
 
@@ -1646,16 +1701,24 @@ async def ai_probe(payload: dict | None = None,
 
     和推送那边的 `scripts/push_probe` 是同一个道理:**配完当场验一次**。
     """
+    from ..models import AiPersona
     from ..services import ai
 
-    cfg = await ai.config(db)
+    row = await db.get(AiPersona, user_id)
+    if row is None:
+        raise HTTPException(404, "没有这个 AI 号")
+    if row.mode != "server":
+        # 本机模式的地址是他自己电脑上的 127.0.0.1,我们的服务器够不着 ——
+        # 这不是故障,是那一档的定义
+        raise HTTPException(409, "这是本机模式的号:模型在他自己的设备上,服务端探不了")
+    cfg = ai.config_of(row)
     if not cfg.ok:
         return {"ok": False, "error": "地址和模型名都要填",
                 "endpoint": cfg.endpoint, "model": cfg.model}
     prompt = str((payload or {}).get("prompt") or "用一句话说说今天适合吃什么")
-    r = await ai.complete(db, prompt[:200], cfg=cfg)
-    await log_admin_action(db, admin, "ai.probe", target_type="flag", target_id="ai_endpoint",
-                           detail={"ok": r.ok, "model": cfg.model})
+    r = await ai.complete(cfg, prompt[:200])
+    await log_admin_action(db, admin, "ai.probe", target_type="user",
+                           target_id=str(user_id), detail={"ok": r.ok, "model": cfg.model})
     await db.commit()
     return {"ok": r.ok, "reply": r.text, "error": r.error,
             "endpoint": cfg.endpoint, "model": cfg.model,
@@ -1782,17 +1845,16 @@ async def set_flag(
                 r"([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d", value):
             raise HTTPException(422, "时段格式:HH:MM-HH:MM(支持跨天,如 23:00-05:00)")
     elif key in _SECRET_FLAGS:
-        # 存密文。传空串 = 清掉这个密钥(本机跑的模型多半根本不需要 key)
+        # 存密文。传空串 = 清掉这个密钥
         if value:
             from ..services import crypto
             value = crypto.encrypt(value)
-    elif key in ("ai_endpoint", "ai_model", "ai_system_prompt"):
-        value = value.strip()[:2000]
-    elif key == "ai_timeout_seconds":
+    elif key in _AI_NUMBERS:
+        lo, hi = _AI_NUMBERS[key]
         try:
-            value = str(max(1, min(int(float(value or 30)), 120)))
+            value = str(max(lo, min(int(float(value)), hi)))
         except ValueError:
-            raise HTTPException(422, "等待秒数要是个数(1–120)")
+            raise HTTPException(422, f"要填一个 {lo}–{hi} 的数")
     elif value not in ("on", "off"):
         raise HTTPException(422, "value 只能是 on/off")
     flag = await db.get(PlatformFlag, key)

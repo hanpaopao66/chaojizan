@@ -1,10 +1,17 @@
-"""接自己的大模型(#385)。
+"""接大模型:**用户自己的**(#385、#386)。
 
-## 为什么配置在后台不在 .env
+## 配置跟着**每个机器人**走,不在平台那儿
 
-换模型、改地址、调提示词是**运营会反复做的事**,做成环境变量意味着每改一次都要
-改部署机上的文件再重启 —— 那不是这类配置该有的成本。所以和「首页显示哪些业务」
-「文案与显示」一样,放进平台开关(`platform_flags`),后台改完立即生效。
+2026-09-16 运营方定:**平台不做大模型级别的机器人,所有接入都是用户级别的,
+平台只负责搭建平台。** 所以这里没有"平台的模型" —— 每个机器人自己带地址和密钥
+(`ai_personas`),平台永远不用自己的凭据去调任何模型。
+
+两种接法:
+
+- `client` 本机模型:App 自己调 127.0.0.1,**这个模块根本不参与** ——
+  key 和模型不离开那台设备;
+- `server` 公网地址:平台按节奏去调用户填的地址。地址要过内网守卫
+  (`bots._ip_ok`,那套已经考虑了云厂商元数据和运营商 NAT),密钥加密存。
 
 ## 只认 OpenAI 兼容的接口
 
@@ -12,32 +19,21 @@
 本机跑的 llama.cpp、vLLM、Ollama、LM Studio 都提供这个形状,一个地址就接上了。
 **不为任何一家写专门的适配** —— 那是把自己绑在某一家上。
 
-## API key 的存法和别的开关不一样
+## API key 存密文,而且只跟着那一个机器人
 
-它是密钥:存密文(services/crypto),后台读回来只说「已设置 / 未设置」,不回明文。
-本机跑的模型多半根本不需要 key,留空就是不带这个头。
+存 `ai_personas.api_key_enc`(services/crypto 加密),接口读回来只说「已设置 / 未设置」。
+本机模式根本不用交 key。
 
 ## 一条硬规矩:不配就什么都不发生
 
-`configured()` 为假时,上层一个字都不会生成。这和推送、OCR 那几处同一个口径 ——
+`Config.ok` 为假时一个字都不会生成。这和推送、OCR 那几处同一个口径 ——
 半配的状态最难查,所以缺任何一样都当没配。
 """
 import logging
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from ..models import PlatformFlag
 
 logger = logging.getLogger("superz.ai")
-
-#: 后台可配的几项。值都存在 platform_flags 里,改完立即生效、不用发版
-ENDPOINT = "ai_endpoint"
-MODEL = "ai_model"
-API_KEY = "ai_api_key"          # 存密文,后台读回来只说有没有
-SYSTEM_PROMPT = "ai_system_prompt"
-TIMEOUT = "ai_timeout_seconds"
 
 #: 一次生成最多要多少字。太长的帖子没人看,也更容易跑题
 MAX_CHARS = 400
@@ -67,29 +63,27 @@ class Config:
         return bool(self.endpoint and self.model)
 
 
-async def config(db: AsyncSession) -> Config:
-    rows = {r.key: r.value for r in await db.scalars(select(PlatformFlag).where(
-        PlatformFlag.key.in_([ENDPOINT, MODEL, API_KEY, SYSTEM_PROMPT, TIMEOUT])))}
-    key = rows.get(API_KEY) or ""
+def config_of(persona) -> Config:
+    """一个机器人自己的模型配置。
+
+    `client` 模式下**这里永远是没配** —— 那一档由 App 调本机模型,
+    服务端不该有它的地址,更不该有它的 key。
+    """
+    if getattr(persona, "mode", "client") != "server":
+        return Config()
+    key = persona.api_key_enc or ""
     if key:
         from . import crypto
         try:
             key = crypto.decrypt(key)
         except Exception:
-            # 换过 FERNET 密钥、值被手工改过:当没配,而不是拿一串密文去当 key 发出去
-            logger.warning("AI 的 api key 解不开,当没配")
+            # 换过 FERNET 密钥、值被手工改过:当没配,而不是拿一串密文当 key 发出去
+            logger.warning("机器人 %s 的 api key 解不开,当没配", persona.user_id)
             key = ""
-    try:
-        timeout = float(rows.get(TIMEOUT) or DEFAULT_TIMEOUT)
-    except ValueError:
-        timeout = DEFAULT_TIMEOUT
-    return Config(endpoint=rows.get(ENDPOINT) or "", model=rows.get(MODEL) or "",
-                  api_key=key, system_prompt=rows.get(SYSTEM_PROMPT) or "",
-                  timeout=max(1.0, min(timeout, 120.0)))
-
-
-async def configured(db: AsyncSession) -> bool:
-    return (await config(db)).ok
+    return Config(endpoint=persona.endpoint or "", model=persona.model or "",
+                  api_key=key, system_prompt=persona.persona or "",
+                  timeout=max(1.0, min(float(persona.timeout_seconds or DEFAULT_TIMEOUT),
+                                       120.0)))
 
 
 async def _get_client() -> httpx.AsyncClient:
@@ -141,12 +135,13 @@ def clean(text: str) -> str:
     return t[:MAX_CHARS]
 
 
-async def complete(db: AsyncSession, prompt: str, *, system: str = "",
-                   cfg: Config | None = None) -> Reply:
-    """让模型答一段。返回 [Reply];失败只回错误,不抛。"""
-    cfg = cfg or await config(db)
+async def complete(cfg: Config, prompt: str, *, system: str = "") -> Reply:
+    """让模型答一段。返回 [Reply];失败只回错误,不抛。
+
+    **配置必须由调用方给** —— 没有"默认用平台的模型"这回事。
+    """
     if not cfg.ok:
-        return Reply(error="没配大模型(后台「开关」页填地址和模型名)")
+        return Reply(error="这个机器人没填模型地址")
     messages = []
     sys = system or cfg.system_prompt
     if sys:
