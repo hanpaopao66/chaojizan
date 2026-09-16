@@ -1022,10 +1022,10 @@ async def create_report(db: AsyncSession, user: User, target_type: str, target_i
         .order_by(MusicReport.id.desc()).limit(1))
     if dup is not None:
         return dup
-    r = MusicReport(reporter_id=user.id, target_type=target_type, target_id=target_id,
-                    reason_code=reason_code, note=(note or "").strip()[:500], contact=contact,
-                    status="open", created_at=now)
-    db.add(r)
+    report = MusicReport(reporter_id=user.id, target_type=target_type, target_id=target_id,
+                         reason_code=reason_code, note=(note or "").strip()[:500],
+                         contact=contact, status="open", created_at=now)
+    db.add(report)
     await db.flush()
     n = await db.scalar(select(func.count(func.distinct(MusicReport.reporter_id))).where(
         MusicReport.target_type == target_type, MusicReport.target_id == target_id,
@@ -1035,8 +1035,8 @@ async def create_report(db: AsyncSession, user: User, target_type: str, target_i
             MusicReport.target_type == target_type, MusicReport.target_id == target_id,
             MusicReport.status == "open").values(status="escalated")
             .execution_options(synchronize_session=False))
-        r.status = "escalated"
-    return r
+        report.status = "escalated"
+    return report
 
 
 # ---------------- 音乐人主页与数据 ----------------
