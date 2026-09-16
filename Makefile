@@ -44,6 +44,19 @@ analyze:
 # 没必要先等几分钟的 flutter pub get。
 	@python3 scripts/gen_tokens.py --check && echo "== 设计令牌一致 ✓"
 	@python3 scripts/check_channel_tones.py && echo "== 频道色可分辨 ✓"
+# CI 的「显示字覆盖率」这一步本地一直没有 —— 2026-09-16 撞上了:官网文案改了口径,
+# 带进「乐坛榜歌聊论间音」八个字,本地 make analyze 全绿、推上去 CI 红。
+# 缺的字不报错、不崩,只是**默默**掉回系统黑体,同一行里两种字形打架。
+#
+# 这是「本地绿和 CI 绿必须是同一件事」的第四次:analyze 不跑 Dart 单测、
+# CI 不查 TypeScript、本地不跑 CI 的脚本检查,现在是这一条。
+#
+# 它要 fonttools。系统 python3 通常没有,服务端 .venv 里有;两个都没有就直接红 ——
+# 悄悄跳过等于把"本地全绿"重新变成半句话。
+	@PY=$$([ -x server/.venv/bin/python ] && echo server/.venv/bin/python || echo python3); \
+	  $$PY -c 'import fontTools' 2>/dev/null || { \
+	    echo "✗ 缺 fonttools,查不了官网显示字覆盖率(CI 会查):pip install fonttools"; exit 1; }; \
+	  $$PY scripts/gen_font_subset.py --check
 	@bash scripts/check_fontsize_drift.sh
 	@python3 scripts/check_macos_entitlements.py && echo "== macOS 权限声明 ✓"
 	@bash scripts/check_wide_layout.sh
