@@ -13,16 +13,17 @@ import 'common.dart';
 ///
 /// 点话题进话题页、点 @ 进那个人的论坛主页、点链接:本站的直接在 App 里开,
 /// 站外的问一句再交给浏览器 —— 和聊天里的外链同一个口径,不替人点。
+/// 点在**普通字**上不归这里管:整条帖子外面那层 InkWell 已经盖住了正文,
+/// 可点片段的手势识别器只认自己那几个字,别的照样落到外面那层。
+/// 再在这里包一个 GestureDetector 的话,两个 tap 识别器抢同一下,
+/// 轻则没有水波纹,重则同一条详情页被 push 两遍。
 class PostText extends StatefulWidget {
-  const PostText(this.text, this.entities, {super.key, this.maxLines, this.style, this.onTap});
+  const PostText(this.text, this.entities, {super.key, this.maxLines, this.style});
 
   final String text;
   final FEntities entities;
   final int? maxLines;
   final TextStyle? style;
-
-  /// 点在**普通字**上时做什么(整条帖子可点时传打开详情)
-  final VoidCallback? onTap;
 
   @override
   State<PostText> createState() => _PostTextState();
@@ -64,15 +65,11 @@ class _PostTextState extends State<PostText> {
       _recognizers.add(r);
       spans.add(TextSpan(text: seg.text, style: linkStyle, recognizer: r));
     }
-    final rich = Text.rich(
+    return Text.rich(
       TextSpan(children: spans),
       maxLines: widget.maxLines,
       overflow: widget.maxLines == null ? TextOverflow.clip : TextOverflow.ellipsis,
     );
-    // onTap 给了的话,普通字那部分也要能点开详情 —— 片段上的手势优先
-    return widget.onTap == null
-        ? rich
-        : GestureDetector(behavior: HitTestBehavior.translucent, onTap: widget.onTap, child: rich);
   }
 
   Future<void> _tap(FSegment seg) async {

@@ -116,6 +116,16 @@ void main() {
       await t.pumpWidget(host(PostTile(post: FPost.fromJson(postJson()))));
       expect(tappableSpans(t), 0);
     });
+
+    testWidgets('点在普通字上只打开一次详情,不是两次', (t) async {
+      // 正文外面套过一层 GestureDetector 的话,它和整条那层 InkWell 会抢同一下,
+      // 同一个详情页可能被 push 两遍
+      var taps = 0;
+      await t.pumpWidget(host(PostTile(post: FPost.fromJson(postJson()), onTap: () => taps++)));
+      await t.tap(find.text('就一句话'));
+      await t.pump();
+      expect(taps, 1);
+    });
   });
 
   group('谁能回复', () {

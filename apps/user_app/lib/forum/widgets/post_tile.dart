@@ -253,7 +253,7 @@ class _PostTileState extends State<PostTile> {
       if (post.text.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: PostText(post.text, post.entities, style: style, onTap: widget.onTap),
+          child: PostText(post.text, post.entities, style: style),
         ),
       if (post.media.isNotEmpty)
         Padding(padding: const EdgeInsets.only(top: 8), child: PostMedia(post.media)),
@@ -367,7 +367,7 @@ class _PostTileState extends State<PostTile> {
         if (canEdit) const PopupMenuItem(value: 'edit', child: Text('编辑')),
         if (post.edited) const PopupMenuItem(value: 'edits', child: Text('编辑历史')),
         if (mine) PopupMenuItem(value: 'pin', child: Text(post.pinned ? '取消置顶' : '置顶到主页')),
-        const PopupMenuItem(value: 'copy', child: Text('复制链接')),
+        const PopupMenuItem(value: 'share', child: Text('分享')),
         if (!mine) const PopupMenuItem(value: 'report', child: Text('举报')),
         if (mine) const PopupMenuItem(value: 'appeal', child: Text('对下架申诉')),
         if (mine) const PopupMenuItem(value: 'delete', child: Text('删除')),
@@ -383,7 +383,7 @@ class _PostTileState extends State<PostTile> {
         await _openEdits(context);
       case 'pin':
         await _pin(context);
-      case 'copy':
+      case 'share':
         await shareForumPost(context, post);
       case 'report':
         await reportForumPost(context, post.pid);
