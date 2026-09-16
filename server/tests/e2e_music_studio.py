@@ -9,7 +9,7 @@
 """
 from tests.music_util import (add_track, admin_token, approve, artist, call, chunked_audio,
                               new_release, person, rand_name, raw, set_flag, studio_release,
-                              tone, upload_audio, upload_cover, wait_ready)
+                              tone, upload_audio, upload_cover, upload_public_image, wait_ready)
 
 
 def main():
@@ -32,6 +32,16 @@ def main():
         r = other.post("/music/v1/studio/artist", {"name": bad}, expect_error=True)
         assert r.get("_error") == 422, f"{why} 应该 422:{r}"
     print("  ✓ 艺名唯一、保留词、长度都拦住了")
+
+    # ---- 改资料:头像 / 横幅走公开图那条路(§8.2)----
+    avatar = upload_public_image(p)
+    assert avatar.startswith("/img/music_cover/"), avatar
+    patched = p.patch("/music/v1/studio/artist",
+                      {"bio": "改过的简介", "genres": ["rock", "folk"], "avatar_url": avatar})
+    assert patched["artist"]["avatar"] == avatar, patched
+    assert patched["artist"]["genres"] == ["rock", "folk"], patched
+    bad_genre = p.patch("/music/v1/studio/artist", {"genres": ["没这个曲风"]}, expect_error=True)
+    assert bad_genre.get("_error") == 422, bad_genre
 
     # ---- 上传:整块 wav、分片 flac(sniff 认 fLaC) ----
     src_a = upload_audio(p, tone(hz=440), "a.wav")

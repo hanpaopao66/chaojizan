@@ -231,7 +231,7 @@
 | POST / DELETE `/music/v1/releases/{rid}/collect` | 收藏专辑:`{collected, collects}` |
 
 歌单名 ≤ 40 字、简介 ≤ 500 字、标签最多 5 个;封面只收站内公开图(`/img/…`,走
-`POST /uploads` 的 `purpose=music_cover`),不收外链。私密歌单对别人是 404。
+`POST /upload` 的 `purpose=music_cover`),不收外链(外链 422)。私密歌单对别人是 404。
 
 ---
 
@@ -331,7 +331,7 @@
 
 - ≤20MB 走 `POST /media/v1/upload`(整块),更大的走 `POST /media/v1/uploads` + 分片 4MB;
 - 拿到 `media_id` 之后 `POST /studio/releases/{rid}/tracks {media_id, …}`,服务端**立刻开始转码**;
-- 音乐人自己的头像、横幅和歌单封面是**公开图**,走 `POST /uploads` 的 `purpose=music_cover`,
+- 音乐人自己的头像、横幅和歌单封面是**公开图**,走 `POST /upload` 的 `purpose=music_cover`,
   拿到 `/img/…` 地址后 PATCH 进去。
 
 ### 8.3 转码(M4)

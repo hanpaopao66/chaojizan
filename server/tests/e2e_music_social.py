@@ -9,7 +9,7 @@
 """
 from tests.chat_util import set_username
 from tests.music_util import (admin_token, artist, call, clear_rate_limits, person,
-                              publish_release, rand_name)
+                              publish_release, rand_name, upload_public_image)
 
 
 def main():
@@ -52,9 +52,15 @@ def main():
     assert bad.get("_error") == 422, f"新顺序必须是全部歌曲:{bad}"
     rm = u.delete(f"/music/v1/playlists/{pid}/tracks/{tids[1]}")
     assert rm["track_count"] == 2, rm
-    u.patch(f"/music/v1/playlists/{pid}", {"title": "改过的歌单"})
-    assert u.get(f"/music/v1/playlists/{pid}")["title"] == "改过的歌单"
-    print("  ✓ 歌单增删改、去重、排序")
+    img = upload_public_image(u)
+    assert img.startswith("/img/music_cover/"), img
+    u.patch(f"/music/v1/playlists/{pid}", {"title": "改过的歌单", "cover_url": img})
+    changed = u.get(f"/music/v1/playlists/{pid}")
+    assert changed["title"] == "改过的歌单" and changed["cover"] == img, changed
+    outer = u.patch(f"/music/v1/playlists/{pid}", {"cover_url": "https://evil.example.com/x.jpg"},
+                    expect_error=True)
+    assert outer.get("_error") == 422, f"封面不收外链:{outer}"
+    print("  ✓ 歌单增删改、去重、排序、封面只收站内图")
 
     # ---- 收藏别人的歌单;私密的外人看不到 ----
     clear_rate_limits("music_act", u.id)

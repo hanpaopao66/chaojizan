@@ -19,8 +19,9 @@ from tests.video_util import (admin2_token, admin_token, clear_rate_limits, png_
 
 __all__ = ["Person", "person", "sql", "call", "BASE", "admin_token", "admin2_token",
            "clear_rate_limits", "png_bytes", "raw", "rand_name", "set_flag",
-           "tone", "upload_audio", "upload_cover", "artist", "new_release", "add_track",
-           "wait_ready", "publish_release", "studio_release", "approve", "TRACK_SECONDS"]
+           "tone", "upload_audio", "upload_cover", "upload_public_image", "artist",
+           "new_release", "add_track", "wait_ready", "publish_release", "studio_release",
+           "approve", "TRACK_SECONDS"]
 
 #: 测试音频的长度:要过 §5.4 的门槛(min(30 秒, 时长一半)),6 秒的歌听 3 秒就算一次收听
 TRACK_SECONDS = 6
@@ -69,6 +70,24 @@ def upload_audio(p: Person, data: bytes | None = None, name: str = "demo.wav",
 def upload_cover(p: Person, expect_error: bool = False) -> dict:
     return _multipart(p, png_bytes(600, 600, (200, 80, 40)), "cover.png", "cover", "music",
                       expect_error)
+
+
+def upload_public_image(p: Person, purpose: str = "music_cover") -> str:
+    """歌单封面、音乐人头像 / 横幅走的是公开图那条路(`POST /upload`,routers/uploads.py),
+    不是 /media/v1 —— 它们本来就是给所有人看的,进公开桶,返回 /img/… 地址。"""
+    boundary = uuid.uuid4().hex
+    body = (f'--{boundary}\r\nContent-Disposition: form-data; name="purpose"\r\n\r\n'
+            f'{purpose}\r\n'.encode()
+            + f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+              f'filename="p.png"\r\nContent-Type: image/png\r\n\r\n'.encode()
+            + png_bytes(400, 400, (40, 120, 200)) + b"\r\n"
+            + f"--{boundary}--\r\n".encode())
+    code, _, raw_body = raw(p.token, "/upload", method="POST", data=body,
+                            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    out = json.loads(raw_body or b"{}")
+    if code != 200:
+        raise SystemExit(f"FAIL 传公开图: {code} {out}")
+    return out["url"]
 
 
 def chunked_audio(p: Person, data: bytes, name: str = "big.wav") -> dict:
