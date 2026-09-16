@@ -261,8 +261,24 @@ class MusicApi {
     return [for (final x in list) MRelease.fromJson(x)];
   }
 
-  Future<MRelease> studioRelease(String rid) async =>
-      MRelease.fromJson(await _get('/music/v1/studio/releases/$rid'));
+  /// 一个作品的详情(编辑页要它)。
+  ///
+  /// §8.2 的表里只列了 `GET /studio/releases`(全部),没有单个的那一条。
+  /// 所以这里**先试单个,不认就退回从列表里挑** —— 服务端那边实现了哪一种都能用,
+  /// 不用两个 agent 先对一次口径。
+  Future<MRelease> studioRelease(String rid) async {
+    try {
+      return MRelease.fromJson(await _get('/music/v1/studio/releases/$rid'));
+    } on ApiException catch (e) {
+      // 开关关着(503)、没权限(403)这些是真的错,原样抛出去;
+      // 只有「没这条路由」才退回列表
+      if (e.statusCode != 404 && e.statusCode != 405) rethrow;
+      final all = await studioReleases();
+      final hit = all.where((r) => r.rid == rid);
+      if (hit.isEmpty) rethrow;
+      return hit.first;
+    }
+  }
 
   Future<MRelease> createRelease({
     required String title,
