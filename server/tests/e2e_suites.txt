@@ -203,6 +203,7 @@ e2e_chat_export
 e2e_social_idor
 e2e_badges
 e2e_chat_scheduled
+e2e_chat_push
 e2e_video_upload
 e2e_video_feed
 e2e_danmaku

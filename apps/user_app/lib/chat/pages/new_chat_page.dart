@@ -115,7 +115,7 @@ class _NewChatPageState extends State<NewChatPage> {
         Text(
           _channel
               ? '频道只有管理员能发帖,订阅的人只能看和回应。建好之后在资料页里可以设成公开频道。'
-              : '已选 ${widget.memberIds.length} 位成员。群最多 1000 人;建好之后可以生成邀请链接。',
+              : '已选 ${widget.memberIds.length} 位成员。群最多 20 万人;建好之后可以生成邀请链接。',
           style: TextStyle(fontSize: kFontNote, color: sz.inkMuted),
         ),
       ]),

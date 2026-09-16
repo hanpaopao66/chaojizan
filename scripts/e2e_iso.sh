@@ -61,6 +61,9 @@ export QUEUE_CALL_GRACE_SECONDS=2
 export SMS_RESEND_SECONDS=3
 export CALL_RING_SECONDS=5
 export CALL_DROP_GRACE_SECONDS=3
+# 群推送按成员分批扫,生产一批 500。这里设成 2:几个人的小群也横跨好几批,
+# 分批那段代码每次 e2e 都真的走多趟 —— 默认值下它在测试里永远只走一趟
+export CHAT_PUSH_CHUNK=2
 export TENCENT_MAP_KEY=
 export RUN_MIGRATIONS_ON_STARTUP=false
 EOF

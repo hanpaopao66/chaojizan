@@ -37,8 +37,17 @@ SETTINGS_DEFAULTS: dict = {
     "history_visible": True,     # 群:新成员能不能看到进群前的消息
     "protected": False,          # 禁止转发、保存
 }
-#: 群人数上限(D7)
-GROUP_MAX_MEMBERS = 1000
+#: 群人数上限(D7)。2026-09-16 从 1000 提到 20 万,和 Telegram 超级群同一档。
+#:
+#: 这个数**不是一行常量的事**。1000 人时「每条消息把成员全查出来再逐个推」
+#: 还撑得住,20 万就不行 —— 同一批把 chat_push.notify_message 改成分批扫了。
+#: 规格 D7 原话就是「群放到 20 万:要换成大群那套分发」。
+GROUP_MAX_MEMBERS = 200_000
+
+#: 逐个成员写用户事件的上限。超过这个数就不写了,靠会话事件 + 会话列表过滤兜底
+#: (见 chat_store.delete_chat 的注释)。20 万条 user_event 会让解散群这个请求直接超时,
+#: 而那时候群已经标成删除了 —— 事务回滚的话就是「点了没反应」,再点一次还是超时。
+BULK_MEMBER_EVENTS_MAX = 1000
 #: 编辑窗口:发出后 48 小时内能改(频道管理员不限)
 EDIT_WINDOW_HOURS = 48
 

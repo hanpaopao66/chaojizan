@@ -22,7 +22,8 @@ from ..models import (ACTIVE_ROLES, Chat, ChatMember, ChatMessage, InviteLink,
                       Poll, PollVote, SocialProfile, Sticker, User, UserIdentity, UserRole,
                       Username)
 from ..ratelimit import check_daily_limit, check_rate_limit, check_rate_limit_seconds
-from .chat_perms import (DEFAULT_ADMIN_RIGHTS, GROUP_MAX_MEMBERS, SLOW_MODES, ADMIN_RIGHTS,
+from .chat_perms import (BULK_MEMBER_EVENTS_MAX, DEFAULT_ADMIN_RIGHTS, GROUP_MAX_MEMBERS,
+                         SLOW_MODES, ADMIN_RIGHTS,
                          MEMBER_PERMS, Perms, can_delete_for_all, can_edit_message,
                          chat_settings, perms_for, reaction_allowed)
 from .chat_view import (GROUP_READ_RECEIPTS_MAX, is_active, member_of, message_payload,
@@ -410,11 +411,19 @@ async def delete_chat(db: AsyncSession, chat: Chat, actor: User) -> None:
         await db.execute(delete(Username).where(Username.owner_type == "chat",
                                                 Username.owner_id == chat.id))
         chat.username = None
-    members = list(await db.scalars(select(ChatMember.user_id).where(
-        ChatMember.chat_id == chat.id, ChatMember.role.in_(ACTIVE_ROLES))))
     await append_chat_event(db, chat.id, "chat", {"deleted": True, "id": chat.id})
-    for uid in members:
-        await append_user_event(db, uid, "chat_leave", {"chat_id": chat.id, "role": "deleted"})
+    # 逐个成员再写一条用户事件,是给「在线但没订阅这个会话」的客户端兜底的。
+    # 20 万人的群这么写会把解散这个请求拖到超时(每条都要 UPDATE 一次 user_pts 再 INSERT),
+    # 所以超过 BULK_MEMBER_EVENTS_MAX 就不写:
+    #   - 在线的成员照样收得到 —— 上面那条会话事件发给这个会话所有在线的人,
+    #     客户端 store.dart 的 `case 'chat'` 认 `deleted:true`,当场把会话移掉;
+    #   - 不在线的下次拉会话列表就没有了 —— 那条 SQL 本来就带 `c.deleted_at IS NULL`。
+    if (chat.member_count or 0) <= BULK_MEMBER_EVENTS_MAX:
+        members = list(await db.scalars(select(ChatMember.user_id).where(
+            ChatMember.chat_id == chat.id, ChatMember.role.in_(ACTIVE_ROLES))))
+        for uid in members:
+            await append_user_event(db, uid, "chat_leave",
+                                    {"chat_id": chat.id, "role": "deleted"})
     # 群里的机器人:告诉它自己不在这个群了(#355)。只查机器人成员,不按人头逐个查
     from .bots import bots_in, on_member_changed
     for bot_id, _, _ in await bots_in(db, chat):

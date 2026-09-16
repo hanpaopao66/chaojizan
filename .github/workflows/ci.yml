@@ -86,6 +86,9 @@ jobs:
       SMS_RESEND_SECONDS: "3"
       CALL_RING_SECONDS: "5"
       CALL_DROP_GRACE_SECONDS: "3"
+      # 群推送的分批大小(生产 500)。设成 2 是为了让四个人的群也走好几批 ——
+      # 群上限是 20 万,少扫一批就是静默漏人,默认值下测不出来
+      CHAT_PUSH_CHUNK: "2"
 
     steps:
       - uses: actions/checkout@v4

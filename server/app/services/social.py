@@ -236,12 +236,21 @@ def privacy_of(p: SocialProfile | None) -> dict[str, str]:
     return out
 
 
-def notify_of(p: SocialProfile | None) -> dict[str, object]:
+def notify_prefs(raw: dict | None) -> dict[str, object]:
+    """通知偏好 = 缺省值 + 这个人显式改过的那几项。
+
+    收**原始的那个 JSON**,不收 SocialProfile —— 大群推送是按成员分批扫的
+    (chat_push._CHUNK),那里只 select 出 `notify` 这一列,不整行取回来。
+    """
     out = dict(NOTIFY_DEFAULTS)
-    for k, v in ((p.notify if p else None) or {}).items():
+    for k, v in (raw or {}).items():
         if k in out and isinstance(v, bool):
             out[k] = v
     return out
+
+
+def notify_of(p: SocialProfile | None) -> dict[str, object]:
+    return notify_prefs(p.notify if p else None)
 
 
 def display_name(user: User) -> str:
