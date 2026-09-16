@@ -24,7 +24,13 @@ from tests.miniapp_util import developer, sms_login
 from tests.util import call
 
 SERVER = Path(__file__).resolve().parents[1]
-TOKEN_RE = re.compile(r"\b\d+:[A-Za-z0-9_-]{35}\b")
+#: token 长这样:`<机器人 id>:<35 位>`(services/bots.new_token)。
+#: **两头都不加 \b。** 结尾那个曾经加过,于是 token 正好以 `-` 收尾时
+#: (1/64,约 1.7%)两处都静默失灵:
+#: `fullmatch` 那条随机红一次,而「token 不许发成消息」那条是 `search` ——
+#: 它找不到就当没泄露,**一个真的泄露会被判成通过**。
+#: `-` 不是单词字符,串尾又没有字符,那个位置构不成单词边界。
+TOKEN_RE = re.compile(r"\d+:[A-Za-z0-9_-]{35}")
 
 
 def seed() -> None:
