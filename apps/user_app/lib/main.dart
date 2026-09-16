@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'channel_config.dart';
 import 'agent_tokens_page.dart';
+import 'ai/my_bots_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -8505,6 +8506,16 @@ class _ProfileViewState extends State<ProfileView> {
           hint: '让助手帮你点餐、发视频;它付不了款',
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
               builder: (_) => AgentTokensPage(api: widget.api))),
+        ),
+        const Divider(height: 1),
+        // 同样是立场表达:用户看到「AI 机器人」会以为是平台养的水军。
+        // 这一行先把「模型是你自己的」说掉 —— 平台只搭台子,不出算力也不存模型
+        SzEntryTile(
+          icon: Icons.forum_outlined,
+          title: '我的 AI 机器人',
+          hint: '用你自己的模型在论坛里说话;它的互动不进公开榜单',
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => MyAiBotsPage(api: widget.api))),
         ),
         const Divider(height: 1),
         // 商店审核要求:我的页可达协议全文。

@@ -709,6 +709,74 @@ class ApiClient {
         as Map<String, dynamic>;
   }
 
+  // ---------- 我自己的 AI 机器人(#386) ----------
+  //
+  // **平台不做大模型级别的机器人,所有接入都是用户级别的。** 每个人自己带模型:
+  //
+  // - 本机模型(`client`,缺省):模型跑在这台设备上,地址和密钥**从不上传**。
+  //   服务端派活儿、这台设备生成、再把那句话交回去;
+  // - 公网地址(`server`):填一个 OpenAI 兼容的地址,平台按节奏去调。
+  //
+  // 该不该说、回谁、节奏——全是服务端定的。设备只负责把提示词变成一句话:
+  // 那几条是不变量,交给设备等于交给「改一行客户端代码就能绕开」。
+
+  /// 我现在能建几个、每天最多发几条。**先告诉人规矩再让他填表**
+  Future<Map<String, dynamic>> aiLimits() async =>
+      await _request('GET', '/ai/v1/limits') as Map<String, dynamic>;
+
+  Future<List<Map<String, dynamic>>> aiBots() async {
+    final data = await _request('GET', '/ai/v1/bots') as Map<String, dynamic>;
+    return (data['items'] as List? ?? const []).cast<Map<String, dynamic>>();
+  }
+
+  /// 建一个。[username] 必须以 bot 结尾——别人一眼看得出这是机器人
+  Future<Map<String, dynamic>> createAiBot({
+    required String name,
+    required String username,
+    required String persona,
+    String topics = '',
+    String mode = 'client',
+    int postsPerDay = 2,
+    int repliesPerDay = 5,
+  }) async =>
+      await _request('POST', '/ai/v1/bots', body: {
+        'name': name,
+        'username': username,
+        'persona': persona,
+        'topics': topics,
+        'mode': mode,
+        'posts_per_day': postsPerDay,
+        'replies_per_day': repliesPerDay,
+      }) as Map<String, dynamic>;
+
+  /// 改。[apiKey] 传了才改,传空串 = 清掉;**任何时候都读不回来**
+  Future<Map<String, dynamic>> patchAiBot(int botId,
+          Map<String, dynamic> patch) async =>
+      await _request('PATCH', '/ai/v1/bots/$botId', body: patch)
+          as Map<String, dynamic>;
+
+  /// 删掉。**它发过的帖还在**(作者显示成已删除),不然别人回过的串会断掉
+  Future<void> deleteAiBot(int botId) =>
+      _request('DELETE', '/ai/v1/bots/$botId');
+
+  /// 领一件活儿。**没到点就回 null,那不是错误**,是最常见的返回
+  Future<Map<String, dynamic>?> aiPullTask(int botId) async {
+    final data =
+        await _request('GET', '/ai/v1/bots/$botId/task') as Map<String, dynamic>;
+    return data['task'] as Map<String, dynamic>?;
+  }
+
+  /// 交差。一件活儿**只能交一次**:重复交回 409(网络重试时不会发重)
+  Future<Map<String, dynamic>> aiSubmitTask(
+          int botId, String taskId, String text) async =>
+      await _request('POST', '/ai/v1/bots/$botId/task/$taskId',
+          body: {'text': text}) as Map<String, dynamic>;
+
+  /// 让填的那个公网地址现答一句,看配对了没有。本机模式回 409(服务端够不着那台设备)
+  Future<Map<String, dynamic>> aiProbeBot(int botId) async =>
+      await _request('POST', '/ai/v1/bots/$botId/probe')
+          as Map<String, dynamic>;
+
   // ---------- 异常订单标记(只上报,不给拉黑权) ----------
 
   /// 标记疑似职业索赔/恶意差评。
