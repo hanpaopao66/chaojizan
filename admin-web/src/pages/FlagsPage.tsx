@@ -143,6 +143,28 @@ const METAS: FlagMeta[] = [
     key: 'bots_enabled', title: '机器人', kind: 'switch', danger: true,
     effect: '打开后开发者可以建机器人、用 Bot API;关掉后 Bot API 全部停用、webhook 暂停、不能建新机器人',
   },
+  // 音乐与论坛(DEV-PROMPTS-41):服务端早就认这四个键,这一页却一直没列 ——
+  // 于是只能拿 curl 拨。合规清单第 17、18 条的结论还没回来,拨之前先看一眼那两条
+  {
+    key: 'music_enabled', title: '音乐', kind: 'switch', danger: true,
+    effect: '打开后用户端能进音乐:听歌、歌单、榜单、评论;关掉后 /music/v1 全部回「音乐暂未开放」。'
+      + '金刚区要不要有这一格,另看上面「首页显示哪些业务」有没有勾「音乐」',
+  },
+  {
+    key: 'music_upload_enabled', title: '音乐投稿', kind: 'switch', danger: true,
+    effect: '打开后用户可以开通音乐人、建作品、传音频、提交审核;要音乐功能也开着才生效。'
+      + '只收原创或已获授权的作品、先审后发 —— 打开前先确认审核人手(合规清单第 17 条)',
+  },
+  {
+    key: 'forum_enabled', title: '论坛', kind: 'switch', danger: true,
+    effect: '打开后用户端能进论坛:看帖、话题、搜索、投票;关掉后 /forum/v1 全部回「论坛暂未开放」。'
+      + '金刚区那一格同样看「首页显示哪些业务」里有没有勾「论坛」',
+  },
+  {
+    key: 'forum_post_enabled', title: '论坛发帖', kind: 'switch', danger: true,
+    effect: '关掉是「停笔不关站」:发帖、回复、引用、编辑回 503,看还是能看。'
+      + '出事时先拨这一个,不必把整个论坛关掉',
+  },
 ]
 
 export default function FlagsPage() {
