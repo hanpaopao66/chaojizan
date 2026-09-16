@@ -392,7 +392,13 @@ def main() -> None:
         sql("UPDATE violations SET created_at = :t WHERE id = :i", {"t": before, "i": v_pre})
         got = expect(1, base, "起算日前一秒的裁决和判定")
         assert ded(got, "delivery_fault", issue_e) is None and ded(got, "violation", v_pre) is None
-        assert not any(x["record_id"] in (issue_e, v_pre) for x in got["excluded"]), got["excluded"]
+        # **要连 kind 一起比。** record_id 是各自那张表的主键,
+        # delivery_issues 的 3 号和 violations 的 3 号是两回事 —— 只比数字的话,
+        # 别的套件在同一个库里多造几条数据、两张表的自增号错开一点,这里就会假红。
+        # (2026-09-16 撞上过:新加了三个 e2e 套件,分组重排,前面跑的东西变了)
+        pre = {("delivery_fault", issue_e), ("violation", v_pre)}
+        assert not any((x["kind"], x["record_id"]) in pre for x in got["excluded"]), \
+            got["excluded"]
         late = call("POST", "/credit/me/appeals", cust,
                     {"kind": "violation", "record_id": v_pre, "reason": "起算日之前的这条也申诉一下"},
                     expect_error=True)
