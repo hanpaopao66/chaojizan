@@ -157,7 +157,7 @@ def main() -> None:
     assert muted.get("/forum/v1/timeline/foryou")["items"] is not None
     clear_rate_limits("forum_act", muted.id)
     assert muted.post(f"/forum/v1/posts/{mine['pid']}/bookmark") == {"bookmarked": True}
-    assert muted.post("/forum/v1/me/mute-words", {"word": "随便"})["items"] == ["随便"]
+    assert muted.post("/forum/v1/me/mute-words", {"word": "随便"}) == ["随便"]
     print("✓ 禁言挡得住发帖和编辑,挡不住看、书签、屏蔽词")
 
     banned = person("137")

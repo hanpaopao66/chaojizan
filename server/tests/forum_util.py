@@ -74,10 +74,30 @@ def age_poll(pid: str, minutes: float) -> None:
         {"s": minutes * 60, "p": pid})
 
 
+def run_sweep() -> dict:
+    """直接跑一轮论坛清扫(投票结束发通知、浏览去重表过期)。
+
+    e2e 环境里 AUTO_FLOW_ENABLED=false —— 清扫循环不跑,不然它会在用例中间动数据。
+    要测清扫本身就在这里直接调,和服务端连同一个库。
+    """
+    import asyncio
+
+    from app.services.forum import sweep_forum
+
+    async def _go():
+        try:
+            return await sweep_forum()
+        finally:
+            from app.db import engine
+            await engine.dispose()   # 多次 asyncio.run:释放连接池防事件循环串台
+
+    return asyncio.run(_go())
+
+
 def timeline_pids(out: dict) -> list[str]:
     return [it["post"]["pid"] for it in out["items"]]
 
 
 __all__ = ["Person", "person", "sql", "call", "BASE", "admin_token", "admin2_token",
            "clear_rate_limits", "set_flag", "png_bytes", "upload_forum_image", "post", "act",
-           "age_post", "age_poll", "timeline_pids"]
+           "age_post", "age_poll", "run_sweep", "timeline_pids"]

@@ -172,7 +172,8 @@ async def post_edits(pid: str, me: User | None = Depends(viewer_optional),
     p = await fsvc.viewable(db, pid, me)
     rows = list(await db.scalars(select(ForumPostEdit).where(ForumPostEdit.post_id == p.id)
                                  .order_by(ForumPostEdit.id)))
-    return {"items": [{"text": r.text, "created_at": fsvc.iso(r.created_at)} for r in rows]}
+    # §8.3 写的返回就是一个裸数组 `[{text, created_at}]`,客户端照着写 —— 不包 {items}
+    return [{"text": r.text, "created_at": fsvc.iso(r.created_at)} for r in rows]
 
 
 @router.delete("/posts/{pid}")
@@ -357,9 +358,11 @@ class WordIn(BaseModel):
     word: str = Field(max_length=fsvc.MUTE_WORD_MAX)
 
 
+# 三个接口的返回都是**当前全部屏蔽词的裸数组**(§8.3 的 `[word]`),加完删完不用再拉一次
+
 @router.get("/me/mute-words")
 async def get_mute_words(me: User = Depends(social_user), db: AsyncSession = Depends(get_db)):
-    return {"items": await fsvc.mute_words(db, me.id)}
+    return await fsvc.mute_words(db, me.id)
 
 
 @router.post("/me/mute-words")
@@ -367,15 +370,16 @@ async def add_mute_word(body: WordIn, me: User = Depends(social_user),
                         db: AsyncSession = Depends(get_db)):
     items = await fsvc.add_mute_word(db, me.id, body.word)
     await db.commit()
-    return {"items": items}
+    return items
 
 
 @router.delete("/me/mute-words")
 async def remove_mute_word(word: str, me: User = Depends(social_user),
                            db: AsyncSession = Depends(get_db)):
+    """要删的词在 query 里:DELETE 不带请求体(很多 HTTP 客户端根本不发)。"""
     items = await fsvc.remove_mute_word(db, me.id, word)
     await db.commit()
-    return {"items": items}
+    return items
 
 
 class SettingsIn(BaseModel):

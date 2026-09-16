@@ -145,7 +145,7 @@
 | GET `/forum/v1/posts/{pid}` | 公开 | `{post, ancestors:[post 或占位]}` |
 | GET `/forum/v1/posts/{pid}/replies?sort=top\|new&cursor=` | 公开 | 回复。`top` 按赞数、`new` 按时间正序 |
 | PATCH `/forum/v1/posts/{pid}` | 登录 + 发帖闸 | `{text}` → post。发出 30 分钟内、最多 5 次,旧正文进历史 |
-| GET `/forum/v1/posts/{pid}/edits` | 公开 | `{items:[{text, created_at}]}` |
+| GET `/forum/v1/posts/{pid}/edits` | 公开 | `[{text, created_at}]`(裸数组,旧的在前) |
 | DELETE `/forum/v1/posts/{pid}` | 登录 | 软删:下面的回复保留,这一条在串里占位 |
 | POST / DELETE `/forum/v1/posts/{pid}/like` | 登录 | `{liked, likes}` |
 | POST / DELETE `/forum/v1/posts/{pid}/repost` | 登录 | `{reposted, reposts}` |
@@ -175,8 +175,8 @@
 | GET `/forum/v1/users/{uid}/profile` | 公开 | `{user:{person}, bio, joined_at, posts, following, fans, followed, follows_you, pinned}` |
 | GET `/forum/v1/users/{uid}/posts?tab=posts\|replies\|media\|likes&cursor=` | 公开 | `posts` 含转发(是 timeline item);`likes` **只有本人能看**(别人 403) |
 | GET `/forum/v1/me/bookmarks?cursor=` | 登录 | 我的书签 |
-| GET / POST `/forum/v1/me/mute-words` | 登录 | `{items:[word]}`;POST 体 `{word}`。每人最多 100 个 |
-| DELETE `/forum/v1/me/mute-words?word=…` | 登录 | 删一个(词在 query 里,DELETE 不带请求体) |
+| GET / POST `/forum/v1/me/mute-words` | 登录 | 返回**当前全部屏蔽词的裸数组** `["球赛", …]`;POST 体 `{word}`。每人最多 100 个 |
+| DELETE `/forum/v1/me/mute-words?word=…` | 登录 | 删一个,返回剩下的(词在 query 里,DELETE 不带请求体) |
 | GET / PUT `/forum/v1/me/settings` | 登录 | `{personalize}` |
 
 关注 / 粉丝走全站统一的 `/social/v1/users/{id}/follow`、`followers`、`following`、`follow-stats`

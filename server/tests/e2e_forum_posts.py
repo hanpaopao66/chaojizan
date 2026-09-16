@@ -12,8 +12,8 @@
     . "$(bash scripts/e2e_iso.sh env 2)" && cd server && python -m tests.e2e_forum_posts
 """
 from tests.chat_util import set_username
-from tests.forum_util import (act, age_post, clear_rate_limits, person, post,
-                              upload_forum_image)
+from tests.forum_util import (act, age_poll, age_post, clear_rate_limits, person, post,
+                              run_sweep, upload_forum_image)
 
 
 def main() -> None:
@@ -113,7 +113,7 @@ def main() -> None:
     edited = a.patch(f"/forum/v1/posts/{p['pid']}", {"text": "改成 #天气 了"})
     assert edited["edited"] is True and edited["edited_at"], edited
     assert edited["entities"]["tags"] == [{"tag": "天气", "display": "天气"}], edited["entities"]
-    hist = c.get(f"/forum/v1/posts/{p['pid']}/edits")["items"]
+    hist = c.get(f"/forum/v1/posts/{p['pid']}/edits")
     assert len(hist) == 1 and hist[0]["text"].startswith("周末去"), hist
     r = b.patch(f"/forum/v1/posts/{p['pid']}", {"text": "我改你的"}, expect_error=True)
     assert r.get("_error") == 403, r
@@ -177,6 +177,24 @@ def main() -> None:
     r = post(a, "一个选项", poll={"options": ["甲"], "minutes": 60}, expect_error=True)
     assert r.get("_error") == 422, r
     print("✓ 投票:投票前看不到票数,每人一票不能改,选项数和时长都校验")
+
+    # 投票结束:作者和投过票的人各收到一条 system,清扫跑两遍也只发一次
+    age_poll(poll["pid"], 1)
+    assert run_sweep()["polls_closed"] >= 1
+    for who in (a, b):
+        msgs = [n for n in who.get("/social/v1/notifications?kind=system")["items"]
+                if (n["data"] or {}).get("action") == "poll_closed"
+                and (n["data"] or {}).get("pid") == poll["pid"]]
+        assert len(msgs) == 1, f"投票结束的通知不是一条:{msgs}"
+    run_sweep()
+    again = [n for n in a.get("/social/v1/notifications?kind=system")["items"]
+             if (n["data"] or {}).get("pid") == poll["pid"]]
+    assert len(again) == 1, "清扫跑第二遍又发了一条"
+    ended = b.get(f"/forum/v1/posts/{poll['pid']}")["post"]["poll"]
+    assert ended["closed"] is True and ended["total"] == 1, ended
+    没投过的人 = c.get(f"/forum/v1/posts/{poll['pid']}")["post"]["poll"]
+    assert 没投过的人["total"] == 1, "结束之后谁都看得到票数"
+    print("✓ 投票结束:作者和投过票的人各一条 system,清扫幂等;结束后票数对所有人可见")
 
     # ---------- 浏览:按人按天去重 ----------
     clear_rate_limits("forum_views", b.id)

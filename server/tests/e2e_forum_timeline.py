@@ -18,11 +18,12 @@ from tests.forum_util import (admin_token, age_post, call, clear_rate_limits, pe
                               set_flag, timeline_pids)
 
 
-def find_in_foryou(who, pid: str, pages: int = 8) -> dict:
-    """在推荐里翻几页找这一条。
+def foryou_item(who, pid: str, pages: int = 8) -> dict | None:
+    """在推荐里翻几页找这一条,找不到给 None。
 
     库里帖子越积越多(全量回归时前面的套件也在发帖),要找的那条不一定落在第一屏 ——
     断言「它在第一屏」等于断言「库是空的」,那个用例迟早会因为别人加了帖子而红。
+    反过来「不在第一屏」也不等于「过滤掉了」,所以正反两种断言都走这里翻页。
     """
     for page in range(pages):
         out = (who.get(f"/forum/v1/timeline/foryou?page={page}") if who is not None
@@ -32,7 +33,13 @@ def find_in_foryou(who, pid: str, pages: int = 8) -> dict:
                 return it
         if not out["has_more"]:
             break
-    raise AssertionError(f"推荐里翻了 {pages} 页也没找到 {pid}")
+    return None
+
+
+def find_in_foryou(who, pid: str, pages: int = 8) -> dict:
+    it = foryou_item(who, pid, pages)
+    assert it is not None, f"推荐里翻了 {pages} 页也没找到 {pid}"
+    return it
 
 
 def main() -> None:
@@ -127,27 +134,24 @@ def main() -> None:
     # ---------- 双向拉黑 ----------
     hater = person("137")
     hated = post(hater, "拉黑测试的帖子")
+    assert foryou_item(hater, hated["pid"]) is not None, "自己发的帖子自己都看不到?"
     a.post("/social/v1/blocks", {"user_id": hater.id})
-    assert hated["pid"] not in timeline_pids(a.get("/forum/v1/timeline/foryou")), "拉黑的人还在我的推荐里"
+    assert foryou_item(a, hated["pid"]) is None, "拉黑的人还在我的推荐里"
     r = a.get(f"/forum/v1/posts/{hated['pid']}", expect_error=True)
     assert r.get("_error") == 404, r
     # 反过来也看不到:我拉黑了他,他也看不到我的
     mine = post(a, "拉黑之后发的")
-    assert mine["pid"] not in timeline_pids(hater.get("/forum/v1/timeline/foryou")), \
-        "被我拉黑的人还看得到我的帖子"
+    assert foryou_item(hater, mine["pid"]) is None, "被我拉黑的人还看得到我的帖子"
     print("✓ 拉黑是双向的:推荐里没有,直接点开 404")
 
     # ---------- 屏蔽词 ----------
     noisy = post(b, "有人在聊球赛结果")
     reader = person("137")
-    assert reader.post("/forum/v1/me/mute-words", {"word": "球赛"})["items"] == ["球赛"]
-    assert noisy["pid"] not in timeline_pids(reader.get("/forum/v1/timeline/foryou")), \
-        "屏蔽词没把帖子滤掉"
-    assert noisy["pid"] in timeline_pids(call("GET", "/forum/v1/timeline/foryou")), \
-        "屏蔽词只该对我自己生效"
-    assert reader.delete(
-        f"/forum/v1/me/mute-words?word={urllib.parse.quote('球赛')}")["items"] == []
-    assert noisy["pid"] in timeline_pids(reader.get("/forum/v1/timeline/foryou"))
+    assert reader.post("/forum/v1/me/mute-words", {"word": "球赛"}) == ["球赛"]
+    assert foryou_item(reader, noisy["pid"]) is None, "屏蔽词没把帖子滤掉"
+    assert foryou_item(None, noisy["pid"]) is not None, "屏蔽词只该对我自己生效"
+    assert reader.delete(f"/forum/v1/me/mute-words?word={urllib.parse.quote('球赛')}") == []
+    assert foryou_item(reader, noisy["pid"]) is not None, "删掉屏蔽词还看不到"
     print("✓ 屏蔽词只对我生效,删掉就又看得到")
 
     # ---------- 热门话题:按人数算 ----------
