@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../chat/links.dart' show registerAppLinkHandler;
 import '../session.dart';
 import 'api.dart';
 import 'models.dart';
@@ -151,6 +152,12 @@ String musicLinkFor(String type, String id) {
   const path = {'track': 't', 'release': 'r', 'playlist': 'p', 'artist': 'a'};
   return 'https://chaojizan.cc/music/${path[type] ?? 't'}/$id';
 }
+
+/// 把音乐的站内链接接进分发表(App 启动时调一次)。
+///
+/// 方向是反的才对:聊天的 links.dart 不认识音乐,音乐自己来登记 —— 音乐关掉了,
+/// 那几条链接就没人认,调用方照旧去问「要不要用浏览器打开」。
+void registerMusicLinks() => registerAppLinkHandler((ctx, uri) async => handleMusicLink(ctx, uri));
 
 /// 在 App 里打开一条音乐链接。认得就打开并返回 true,不认得返回 false ——
 /// 交给调用方(主会话会把它接进 `openAppLink`,和视频的 `/v/…` 并排)。

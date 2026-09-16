@@ -60,6 +60,10 @@ import 'video/creator/creator_center_page.dart';
 import 'video/creator/upload_tasks.dart';
 import 'video/me/coins_page.dart';
 import 'video/me/favorites_page.dart' as vfav;
+import 'music/nav.dart' as music;
+import 'music/player/mini_bar.dart' show MusicMiniBar;
+import 'music/player/music_player.dart' show MusicPlayer;
+import 'music/studio/upload_tasks.dart' show MusicUploads;
 import 'video/me/history_page.dart';
 import 'video/me/video_settings_page.dart';
 import 'video/me/watch_later_page.dart';
@@ -317,6 +321,13 @@ class _HomePageState extends State<HomePage> {
     videoImmersive.addListener(_onBadge);
     RemoteCopy.changed.addListener(_onCopy);
     szAboveNavSlot.addListener(_onSlot);
+    // 音乐:迷你播放条常驻在底栏上方 —— 没在放歌时它自己什么都不画,占 0 像素;
+    // 播放器不持有 BuildContext,「这首放不了,已跳下一首」这类话要靠 onNotice 说出来;
+    // load() 只读本机存的音质和播放模式,不碰平台通道(真建播放器是按到播放键那一刻的事)
+    szAboveNavSlot.value = const MusicMiniBar();
+    MusicPlayer.instance.onNotice = _musicNotice;
+    unawaited(MusicPlayer.instance.load());
+    music.registerMusicLinks();
     // 消息模块:登录了就连实时通道(底栏角标要一直准,不能等点进「消息」tab 才连);
     // 游客登录成功 / 退出登录都会 bump authTick
     rootResolve = widget.api.resolveUrl;
@@ -374,6 +385,7 @@ class _HomePageState extends State<HomePage> {
   void dispose() {
     RemoteCopy.changed.removeListener(_onCopy);
     szAboveNavSlot.removeListener(_onSlot);
+    if (MusicPlayer.instance.onNotice == _musicNotice) MusicPlayer.instance.onNotice = null;
     chatUnreadBadge.removeListener(_onBadge);
     chatExtraBadge.removeListener(_onBadge);
     videoImmersive.removeListener(_onBadge);
@@ -429,8 +441,10 @@ class _HomePageState extends State<HomePage> {
       if (store.started) store.stop();
       stopVideoNotifyWatcher();
       ChatExtras.instance.stop();
-      // 换号 / 退出:上一个人还在后台传的投稿不能挂到下一个人名下
+      // 换号 / 退出:上一个人还在后台传的投稿、作品不能挂到下一个人名下;放着的歌也停掉
       VideoUploads.instance.clear();
+      MusicUploads.instance.clear();
+      unawaited(MusicPlayer.instance.clearQueue());
     }
     // 「消息」里服务号、订单群那几行也进底栏角标,不能等点进「消息」才拉(平台公告不用登录)
     unawaited(ChatExtras.instance.start(widget.api));
@@ -438,6 +452,11 @@ class _HomePageState extends State<HomePage> {
 
   void _onBadge() {
     if (mounted) setState(() {});
+  }
+
+  /// 播放器要说的话(放不了、跳到下一首、定时关闭到点了)
+  void _musicNotice(String message) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// 后台改了底部菜单的字、藏了一格:拉到就换。正停在被藏的那一格上的,回首页
@@ -1795,6 +1814,11 @@ class _MerchantListViewState extends State<MerchantListView>
               await Navigator.of(context).push(MaterialPageRoute<void>(
                   builder: (_) => OrderDetailPage(
                       api: widget.api, orderNo: (paid ?? created).orderNo)));
+              return;
+            }
+            // 音乐不是「一门生意」,没有列表页可跳 —— 直接进音乐首页(论坛同理,等它的客户端合进来再接)
+            if (ch.key == 'music') {
+              await music.openMusicHome(context);
               return;
             }
             final route = switch (ch.key) {

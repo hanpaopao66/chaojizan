@@ -23,7 +23,7 @@ GROUP_READ_RECEIPTS_MAX = 100
 KIND_LABELS = {
     "photo": "图片", "video": "视频", "file": "文件", "voice": "语音", "video_note": "视频消息",
     "sticker": "贴纸", "gif": "GIF", "location": "位置", "contact": "名片", "poll": "投票",
-    "dice": "骰子", "call": "通话",
+    "dice": "骰子", "call": "通话", "card": "分享",
 }
 
 
@@ -132,6 +132,8 @@ def message_out(m: ChatMessage, *, sender: dict | None, chat: Chat | None = None
         "call": extra.get("call"),
         "preview": extra.get("preview"),
         "sticker": extra.get("sticker"),
+        # 分享卡片(§5.9):存的是发出去那一刻的快照,客户端照它画
+        "card": extra.get("card"),
         "signature": extra.get("signature"),
         "reactions": reactions or [],
         "views": m.views if chat is not None and chat.type == "channel" else None,
@@ -152,6 +154,10 @@ def preview_text(m: ChatMessage) -> str:
     text = mask_spoilers(m.text or "", m.entities)
     if m.kind == "text":
         return text[:80]
+    if m.kind == "card":
+        # 分享卡片(§5.9):写清分享的是什么 —— 「[歌曲] 晚风」比「[分享]」有用
+        from .cards import preview as card_preview
+        return card_preview((m.extra or {}).get("card"))[:80]
     label = KIND_LABELS.get(m.kind, "")
     if text:
         return f"[{label}] {text[:60]}" if label else text[:80]

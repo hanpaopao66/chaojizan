@@ -219,6 +219,8 @@ e2e_music_review
 e2e_forum_posts
 e2e_forum_timeline
 e2e_forum_moderation
+# 分享卡片(#382):要音乐和论坛的东西才发得出来
+e2e_chat_card: e2e_music_studio
 e2e_credit
 e2e_credit_roles
 e2e_rider_fault

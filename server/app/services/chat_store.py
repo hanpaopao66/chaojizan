@@ -792,7 +792,7 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
     # 发言权限
     need = {"text": "send_messages", "poll": "send_polls", "sticker": "send_stickers",
             "gif": "send_stickers", "dice": "send_stickers"}.get(kind, "send_media")
-    if kind in ("location", "contact"):
+    if kind in ("location", "contact", "card"):
         need = "send_messages"
     if not p.send_messages or not getattr(p, need):
         raise _err(403, "你在这个会话里没有发这类消息的权限")
@@ -878,6 +878,20 @@ async def send(db: AsyncSession, chat: Chat, me: User, body: dict) -> tuple[Chat
         if emoji not in DICE:
             raise _err(422, "不支持这个骰子")
         extra["dice"] = {"emoji": emoji, "value": secrets.randbelow(DICE[emoji]) + 1}
+        text = ""
+    elif kind == "card":
+        # 分享卡片(DEV-PROMPTS-41 §5.9):客户端只给 {type, id},**标题、副标题、封面由服务端查出来存快照**。
+        # 不信客户端的两个理由:一是谁都能发一张「超级赞官方」的假卡片;二是对方以后改了标题,
+        # 这条消息还应该是当时那句话。看不到的东西(没过审的作品、私密歌单、删了的帖子)直接拒。
+        from . import cards
+        c = body.get("card") if isinstance(body.get("card"), dict) else {}
+        ctype, cid = str(c.get("type") or ""), str(c.get("id") or "")
+        if ctype not in cards.known_types():
+            raise _err(422, "不支持分享这种内容")
+        snap = await cards.resolve(db, ctype, cid, me.id)
+        if snap is None:
+            raise _err(422, "这个内容现在分享不了(可能已经删了、还没过审或者不公开)")
+        extra["card"] = {"type": ctype, "id": cid, **snap}
         text = ""
     elif kind == "poll":
         poll_id = await _create_poll(db, chat, me, body.get("poll") or {})
@@ -1318,7 +1332,7 @@ async def _forward_one(db: AsyncSession, target: Chat, me: User, src: ChatMessag
     elif not p.send_messages:
         raise _err(403, "你在这个会话里不能发言")
     extra = {k: v for k, v in (src.extra or {}).items()
-             if k in ("location", "contact", "dice", "sticker", "preview")}
+             if k in ("location", "contact", "dice", "sticker", "preview", "card")}
     poll_id = None
     if src.poll_id:
         # 转发投票:目标会话里是一份新的投票,题目和选项照抄

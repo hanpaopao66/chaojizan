@@ -247,6 +247,8 @@ class SendIn(BaseModel):
     contact: dict | None = None
     poll: dict | None = None
     dice: dict | None = None
+    #: 分享卡片(DEV-PROMPTS-41 §5.9):只收 {type, id},标题封面由服务端查(见 services/cards.py)
+    card: dict | None = None
     sticker_id: int | None = None
 
 
