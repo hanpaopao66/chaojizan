@@ -123,6 +123,26 @@ interface LoginOut {
  */
 export async function login(phone: string, password: string): Promise<LoginOut> {
   const out = await request<LoginOut>('POST', '/auth/login', { phone, password })
+  return accept(out)
+}
+
+/** 发管理员登录用的验证码。真发短信 —— 审核白名单的固定码对 admin 不适用
+ *  (`auth.review_code_ok` 里把 admin 排掉了)。同号每天 8 条、第 3 条起后端要滑块,
+ *  这一页没有滑块,撞上了就把后端那句原话显示出来。 */
+export async function sendLoginCode(phone: string): Promise<void> {
+  await request('POST', '/auth/sms-code', { phone })
+}
+
+/** 验证码登录。**生产上管理员只有这一条路** ——
+ *  服务端 `admin_password_login_allowed()` = 开关 && is_dev,生产恒为假,
+ *  密码登录会被 403「管理员请使用手机验证码登录」顶回来。 */
+export async function smsLogin(phone: string, code: string): Promise<LoginOut> {
+  const out = await request<LoginOut>(
+    'POST', '/auth/sms-login', { phone, code, role: 'admin' })
+  return accept(out)
+}
+
+function accept(out: LoginOut): LoginOut {
   if (out.role !== 'admin') {
     // 拿到 token 也不存 —— 存了下次打开会直接进一个空后台
     throw new ApiError(403, '这个账号不是平台管理员,请用管理员账号登录')
