@@ -1,6 +1,6 @@
 """小程序托管(#322):上传 → 启动 → 取 index.html 验返回头 → 隔离 → 404。
 
-- 恶意包(zip slip、符号链接、zip 炸弹、缺清单、超限、禁用扩展名)全部被拒,报告可读;
+- 恶意包(zip slip、符号链接、解压总量超限、缺清单、超限、禁用扩展名)全部被拒,报告可读;
 - 托管出口的返回头逐条对 §5.6:CSP(含声明的服务器域名、report-uri)、
   Permissions-Policy、nosniff、入口 HTML 不缓存、其余文件永久缓存;
 - 别的应用的版本号、不存在的文件一律 404;
@@ -40,8 +40,11 @@ rejected(make_zip(HELLO, raw_entries=[(link, "/etc/passwd")]), "符号链接")
 rejected(make_zip({"app.js": "1"}), "index.html")
 rejected(make_zip(HELLO, superz=False), "superz.json")
 rejected(make_zip({**HELLO, "run.exe": "MZ"}), "exe")
-bomb = make_zip({**HELLO, "big.txt": b"0" * (4 * 1024 * 1024)})
-rejected(bomb, "zip 炸弹")
+# 真炸弹的形状:压缩后很小,解压出一百来 MB。**判据是绝对上限,不是压缩比** ——
+# 「不超过压缩量 3 倍」那条 2026-09-16 去掉了,它拒的全是正常包
+# (重复度高的文本压缩比本来就有几十上百倍)
+bomb = make_zip({**HELLO, **{f"big{i}.txt": b"0" * (5 * 1024 * 1024) for i in range(19)}})
+rejected(bomb, "超过 90 MB 上限")
 rejected(make_zip(HELLO, superz={"kind": "game"}), "kind")
 print("✓ zip slip / 符号链接 / 缺入口 / 缺清单 / 禁用扩展名 / zip 炸弹 / kind 不符,全部被拒且报告可读")
 

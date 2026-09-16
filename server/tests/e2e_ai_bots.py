@@ -21,7 +21,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from tests.chat_util import person
-from tests.miniapp_util import admin_token, sql
+from tests.miniapp_util import admin_token, developer, sql
 from tests.util import call
 
 REPLY = "这家我上周去过,牛肉是现片的"
@@ -53,10 +53,34 @@ def set_flag(admin: str, key: str, value: str) -> None:
     call("POST", f"/admin/flags/{key}", admin, {"value": value})
 
 
+def ensure_official_dev() -> None:
+    """**这条 e2e 自己造数据。**
+
+    建 AI 号要挂在官方开发者名下(和官方小程序、机器人管家同一个主人),而那一行是部署时
+    `scripts/seed_bot_manager --apply` 建的 —— CI 的每个分片是一个干净的库,不会有。
+    套件之间不许互相依赖数据(见 e2e_suites.txt 开头那段),所以这里自己补。
+
+    **账号走正常注册**,不裸插 users:那张表有十几个非空列,手写 INSERT 今天少一个
+    `is_online` 明天少一个别的,每加一列就炸一次。
+    """
+    row = sql("select id from developers where is_official and user_id is not null limit 1",
+              fetch="all")
+    if row:
+        return
+    # 注册一个开发者,把**他自己那一行**标成官方。
+    # 不新插一行、也不动已有的行:developers.user_id 是唯一的,而且别的套件
+    # (官方小程序那几条)也在看 is_official,改它们的行会把那边带倒
+    _tok, phone = developer()
+    sql("""update developers set is_official = true, display_name = '超级赞官方'
+            where user_id = (select id from users
+                              where phone = :p and role = 'developer')""", {"p": phone})
+
+
 def main() -> None:
     admin = admin_token()
     me = person()
     tag = random.randint(1000, 9999)
+    ensure_official_dev()
 
     # ---- 总闸关着:什么都不发 ----
     set_flag(admin, "ai_bots_enabled", "off")

@@ -1558,9 +1558,13 @@ async def create_ai_bot(body: AiBotIn, admin: User = Depends(require_role("admin
     from ..models import Developer
     from ..services import ai_bots
 
-    dev = await db.scalar(select(Developer).where(Developer.is_official.is_(True))
+    # 挑一个**有账号的**官方开发者。原来是「取第一个,再看它有没有账号」——
+    # 有好几行官方开发者、而第一行恰好没账号时,明明有能用的却报「没有官方开发者账号」
+    dev = await db.scalar(select(Developer)
+                          .where(Developer.is_official.is_(True),
+                                 Developer.user_id.is_not(None))
                           .order_by(Developer.id).limit(1))
-    owner = await db.get(User, dev.user_id) if dev and dev.user_id else None
+    owner = await db.get(User, dev.user_id) if dev else None
     if owner is None:
         # 挂在官方开发者名下,和官方小程序、机器人管家同一个主人
         raise HTTPException(409, "还没有官方开发者账号:先在部署机上跑 "
