@@ -9,8 +9,10 @@
 (它按别名 `u{user_id}` 推,设备在极光那边)。这样接一个端、切一个端,
 不用等三端都接完才敢上。
 
-国内安卓的厂商通道(华为 / 小米 / OPPO / vivo)还没接:这类设备登记进来了也发不出去,
-**push_logs 里会写明"这条通道还没接"** —— 不静默跳过,不然"推送没到"这件事没人看得见。
+国内安卓的厂商通道(华为 / 小米 / OPPO / vivo)服务端也接好了,`.env` 填上就生效;
+还差客户端那一半(拿 regid 要装各家 SDK,见 docs/INTEGRATIONS.md 2.4)。
+代码里没有的通道(比如荣耀)**push_logs 里会写明"这条通道还没接"** ——
+不静默跳过,不然"推送没到"这件事没人看得见。
 
 未配置任何通道时静默跳过(返回 False),所有调用点都不感知。
 
@@ -144,7 +146,11 @@ async def _send_devices(jobs: dict[int, tuple[str, str, dict | None]]
     """
     from ..db import SessionLocal
     from . import push_devices
-    from .push_channels import apns
+    from .push_channels import apns, hms, oppo, vivo, xiaomi
+
+    #: 通道名 → 那一家的模块。**加一家只加这一行** ——
+    #: 上面那圈循环不认识任何一家具体是谁,它们长成同一个样子(push_channels/base.py)
+    mods = {"apns": apns, "hms": hms, "xiaomi": xiaomi, "oppo": oppo, "vivo": vivo}
 
     out: dict[int, tuple[bool, str]] = {}
     if not jobs:
@@ -158,24 +164,25 @@ async def _send_devices(jobs: dict[int, tuple[str, str, dict | None]]
             oks: list[bool] = []
             errors: list[str] = []
             for d in devices:
-                if d.channel == "apns":
-                    if not apns.configured():
-                        errors.append("apns 没配")
-                        continue
-                    r = await apns.send(d.token, title, content, extras,
-                                        app=d.app, sandbox=d.sandbox,
-                                        collapse_id=str((extras or {}).get("chat_id") or ""))
-                    oks.append(r.ok)
-                    if not r.ok:
-                        errors.append(f"apns {r.error}")
-                    await push_devices.mark_result(db, d.id, ok=r.ok, gone=r.gone)
-                elif d.channel == "jpush":
+                if d.channel == "jpush":
                     # 极光那条路按别名推,不按设备 —— 这一行只是"这台设备在极光上",
                     # 真正的发送交给下面的老路,这里不重复发
                     continue
-                else:
-                    # 厂商通道还没接。**记下来**,不假装成功也不静默
+                mod = mods.get(d.channel)
+                if mod is None:
+                    # 表里有、代码里没有。**记下来**,不假装成功也不静默
                     errors.append(f"{d.channel} 这条通道还没接")
+                    continue
+                if not mod.configured():
+                    errors.append(f"{d.channel} 没配")
+                    continue
+                r = await mod.send(d.token, title, content, extras, app=d.app,
+                                   sandbox=d.sandbox,
+                                   collapse_id=str((extras or {}).get("chat_id") or ""))
+                oks.append(r.ok)
+                if not r.ok:
+                    errors.append(r.error or d.channel)
+                await push_devices.mark_result(db, d.id, ok=r.ok, gone=r.gone)
             if not oks and not errors:
                 continue  # 名下只有 jpush 那种设备:交给老路
             out[uid] = (any(oks), "；".join(errors[:3]))

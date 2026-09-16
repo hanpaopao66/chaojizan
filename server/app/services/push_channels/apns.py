@@ -32,6 +32,7 @@ import time
 import httpx
 
 from ...config import settings
+from .base import Result
 
 logger = logging.getLogger("superz.push.apns")
 
@@ -108,18 +109,6 @@ async def aclose() -> None:
     if _client is not None and not _client.is_closed:
         await _client.aclose()
     _client = None
-
-
-class Result:
-    """一次发送的结果。`gone` = 这个 token 已经没用了,调用方把设备下线。"""
-
-    def __init__(self, ok: bool, error: str = "", gone: bool = False):
-        self.ok = ok
-        self.error = error
-        self.gone = gone
-
-    def __repr__(self) -> str:  # 排查时直接打出来
-        return f"Result(ok={self.ok}, error={self.error!r}, gone={self.gone})"
 
 
 #: 这几种回复意味着这个 token 永远不会再收到东西了,别再发

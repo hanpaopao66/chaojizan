@@ -166,14 +166,67 @@ TestFlight 是 release 编的但用沙箱),服务端按设备选地址。这是"
 **Xcode 里还要开一次**:Runner target → Signing & Capabilities → + Capability →
 Push Notifications;后台送达要再加 Background Modes → Remote notifications。
 
-### 2.2 国内安卓厂商通道 —— 还没接(下一批)
+### 2.2 国内安卓厂商通道(华为 / 小米 / OPPO / vivo)—— 服务端已接好
 
-国内安卓上 App 被杀掉之后,**只有手机厂商自己的通道叫得醒它**(华为 / 小米 / OPPO / vivo /
-荣耀)。各家免费,但要各自注册、各自过审、各自的载荷格式。这一批只把通道名留在
-`push_devices.CHANNELS` 里:这类设备登记进来了发不出去,**push_logs 里写明「这条通道还没接」**,
-不静默跳过 —— "推送没到"这件事没人会来报 bug,只能靠日志自己看得见。
+国内安卓上 App 被杀掉之后,**只有手机厂商自己的通道叫得醒它**。各家免费,
+但要各自注册、各自过审、各自的载荷格式。服务端四家都实现了
+(`app/services/push_channels/{hms,xiaomi,oppo,vivo}.py`),`.env.prod` 填上就生效:
 
-在那之前安卓靠已有的 WebSocket 长连接:App 活着就收得到,被杀掉才收不到。
+```
+# 华为(AppGallery Connect → 项目设置)
+HMS_APP_ID=…
+HMS_APP_SECRET=…
+HMS_PACKAGE_USER=…            # 三个端各自的安卓包名
+HMS_PACKAGE_MERCHANT=…
+HMS_PACKAGE_RIDER=…
+
+# 小米(开放平台 → 应用 → AppSecret)。不用换令牌,请求头直接带它
+XIAOMI_APP_SECRET=…
+XIAOMI_PACKAGE_USER=…
+XIAOMI_PACKAGE_MERCHANT=…
+XIAOMI_PACKAGE_RIDER=…
+
+# OPPO(签名 SHA256,时间戳毫秒)
+OPPO_APP_KEY=…
+OPPO_MASTER_SECRET=…
+
+# vivo(签名 MD5 —— 和 OPPO 不一样,最容易抄串)
+VIVO_APP_ID=…
+VIVO_APP_KEY=…
+VIVO_APP_SECRET=…
+VIVO_CLASSIFICATION=1          # 0 运营消息 / 1 系统消息,以你在后台申请到的为准
+```
+
+**每配好一家都要实发一条验一次**:
+
+```bash
+docker exec superz-api python -m scripts.push_probe --user 42 --list      # 看这个人有哪些设备
+docker exec superz-api python -m scripts.push_probe --user 42 --channel hms
+```
+
+为什么非要实发:这几家的接口**只回一句笼统的错误**。签名算错、时间戳单位用了秒、
+消息类别标错、包名填错,回来的都是「鉴权失败」「参数错误」。不实发一条到自己手机上,
+根本看不出配没配对 —— 而"推送没到"这件事用户不会来报 bug,等发现时已经过去几周。
+
+**还差客户端那一半**:拿 regid 要装各家的 SDK(闭源,要进隐私政策的 SDK 清单),
+这一步还没做,见下面 2.4。在那之前安卓靠已有的 WebSocket 长连接:
+App 活着就收得到,被杀掉才收不到。
+
+荣耀(honor)还没接:通道名在 `push_devices.CHANNELS` 里占着位,
+这类设备登记进来发不出去,push_logs 里写明「这条通道还没接」,不假装成功。
+
+### 2.4 安卓客户端拿 token —— 还没做
+
+厂商通道的 token 只能由各家自己的 SDK 提供,没有别的路。要做的:
+
+1. 三个 App 的 `android/build.gradle.kts` 加各家的 Maven 源和依赖;
+2. 各家的应用配置文件(华为要 `agconnect-services.json`);
+3. 原生侧拿到 regid 之后走**已经铺好的那条通道**(`superz/push`,和 iOS 同一条),
+   Dart 侧 `POST /push/v1/devices` 登记 —— 这一半已经写好了,不用改;
+4. **合规**:这几个 SDK 是闭源的,按 COMPLIANCE-40 第 15 条要逐一列进隐私政策的
+   SDK 清单(名称、目的、收集的信息),并且按第 14 条改版本号让老用户重新同意。
+
+第 4 条是硬的:SDK 进了包就要公示,不能先上再补。
 
 ### 2.3 极光(过渡期保留)
 

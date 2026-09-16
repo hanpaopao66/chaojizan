@@ -398,6 +398,32 @@ class Settings(BaseSettings):
     apns_topic_merchant: str = ""
     apns_topic_rider: str = ""
 
+    # 国内安卓厂商通道(#384 第二步)。App 被杀掉之后只有厂商自己的通道叫得醒它,
+    # 各家免费,但要各自注册、各自过审、各自的载荷格式。
+    #
+    # **每一家配好之后都要用 `python -m scripts.push_probe` 实发一条验一次** ——
+    # 各家接口会变,签名算错、类别标错都只回一句笼统的错误,不实发是看不出来的。
+    hms_app_id: str = ""          # 华为 AppGallery Connect 的 App ID
+    hms_app_secret: str = ""
+    hms_package_user: str = ""    # 三个端各自的安卓包名(点通知要拉起对应的 App)
+    hms_package_merchant: str = ""
+    hms_package_rider: str = ""
+
+    xiaomi_app_secret: str = ""   # 小米开放平台的 AppSecret(请求头直接带它,不用换令牌)
+    xiaomi_package_user: str = ""
+    xiaomi_package_merchant: str = ""
+    xiaomi_package_rider: str = ""
+
+    oppo_app_key: str = ""        # OPPO 推送平台;签名是 SHA256,时间戳是**毫秒**
+    oppo_master_secret: str = ""
+
+    vivo_app_id: str = ""         # vivo 推送平台;签名是 **MD5**(和 OPPO 不一样)
+    vivo_app_key: str = ""
+    vivo_app_secret: str = ""
+    #: vivo 的消息类别:0 运营消息 / 1 系统消息。**乱标系统消息会被处罚**,
+    #: 以你在 vivo 后台申请到的类别为准,所以做成配置不写死
+    vivo_classification: int = 1
+
     # 阿里云号码隐私保护(AXB 中间号)。未配置时降级:
     # 商家/骑手侧界面与小票只显示打码号(138****0001),拨打走 privacy_phone 字段
     # (过渡期给真号,strict 模式不给);配置后绑定 AXB,看到与拨打的都是 X 号
