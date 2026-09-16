@@ -60,6 +60,11 @@ import CommunityReviewPage from '../pages/community/ReviewPage'
 import CommunitySanctionsPage from '../pages/community/SanctionsPage'
 import CommunityStatsPage from '../pages/community/StatsPage'
 import CommunityWordsPage from '../pages/community/WordsPage'
+// 音乐治理(DEV-PROMPTS-41 #378)
+import MusicAppealsPage from '../pages/music/AppealsPage'
+import MusicArtistsPage from '../pages/music/ArtistsPage'
+import MusicReportsPage from '../pages/music/ReportsPage'
+import MusicReviewPage from '../pages/music/ReviewPage'
 
 /**
  * 平台后台外壳。
@@ -93,6 +98,11 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
       { key: '/community/appeals', label: '申诉' },
       { key: '/community/words', label: '屏蔽词' },
       { key: '/community/stats', label: '数据' },
+      // 音乐(#378):审核的单位是作品,举报里有版权投诉(带联系方式),申诉同样换人复核
+      { key: '/music/review', label: '音乐审核' },
+      { key: '/music/reports', label: '音乐举报' },
+      { key: '/music/artists', label: '音乐人' },
+      { key: '/music/appeals', label: '音乐申诉' },
     ] },
     { key: '/mini-apps', icon: <AppstoreOutlined />, label: '小程序' },
     { key: '/risk', icon: <WarningOutlined />, label: '风控' },
@@ -114,7 +124,8 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     <Menu
       mode="inline"
       selectedKeys={[location.pathname]}
-      defaultOpenKeys={location.pathname.startsWith('/community/') ? ['community'] : []}
+      defaultOpenKeys={location.pathname.startsWith('/community/')
+        || location.pathname.startsWith('/music/') ? ['community'] : []}
       items={items}
       onClick={({ key }) => { nav(key); setDrawerOpen(false) }}
     />
@@ -180,6 +191,10 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/community/appeals" element={<CommunityAppealsPage />} />
             <Route path="/community/words" element={<CommunityWordsPage />} />
             <Route path="/community/stats" element={<CommunityStatsPage />} />
+            <Route path="/music/review" element={<MusicReviewPage />} />
+            <Route path="/music/reports" element={<MusicReportsPage />} />
+            <Route path="/music/artists" element={<MusicArtistsPage />} />
+            <Route path="/music/appeals" element={<MusicAppealsPage />} />
             <Route path="/mini-apps" element={<MiniAppsPage />} />
             <Route path="/risk" element={<RiskPage />} />
             <Route path="/order-flags" element={<OrderFlagsPage />} />
