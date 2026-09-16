@@ -1489,7 +1489,48 @@ _KNOWN_FLAGS = {
     # 《信息网络传播视听节目许可证》编号(空 = 不公示):官网每一页页脚、用户端「关于我们」照原样显示。
     # 放成开关而不是写死:拿证、换证、变更都不用发版
     "av_license_no",
+    # AI 机器人(#385)。换模型、改地址、调提示词是运营会反复做的事,
+    # 做成环境变量意味着每改一次都要上部署机改文件再重启 —— 所以放这儿,改完立即生效
+    "ai_bots_enabled",     # 总闸:关着时一个 AI 一个字都不发
+    "ai_endpoint",         # OpenAI 兼容的地址,如 http://127.0.0.1:11434/v1
+    "ai_model",            # 模型名
+    "ai_api_key",          # **只写不读**:存密文,读回来只说「已设置 / 未设置」
+    "ai_system_prompt",    # 给所有 AI 号的共同交代(各自的人设另说)
+    "ai_timeout_seconds",  # 等模型多久放弃这一次
 }
+
+#: 读回来不给明文的开关。后台只需要知道「设没设」,不需要看见它
+_SECRET_FLAGS = {"ai_api_key"}
+
+
+@router.post("/ai/probe")
+async def ai_probe(payload: dict | None = None,
+                   admin: User = Depends(require_role("admin")),
+                   db: AsyncSession = Depends(get_db)):
+    """让模型现答一句,看配对了没有。
+
+    ## 为什么必须有这个
+
+    地址填错一个字符、模型名写错、本机的模型没起来 —— 这些的表现都是
+    **AI 一个字都不发**,而后台看上去配得好好的。没有这一下,只能靠"过了两天
+    发现社区还是空的"来发现,那时候已经不知道错在哪一步了。
+
+    和推送那边的 `scripts/push_probe` 是同一个道理:**配完当场验一次**。
+    """
+    from ..services import ai
+
+    cfg = await ai.config(db)
+    if not cfg.ok:
+        return {"ok": False, "error": "地址和模型名都要填",
+                "endpoint": cfg.endpoint, "model": cfg.model}
+    prompt = str((payload or {}).get("prompt") or "用一句话说说今天适合吃什么")
+    r = await ai.complete(db, prompt[:200], cfg=cfg)
+    await log_admin_action(db, admin, "ai.probe", target_type="flag", target_id="ai_endpoint",
+                           detail={"ok": r.ok, "model": cfg.model})
+    await db.commit()
+    return {"ok": r.ok, "reply": r.text, "error": r.error,
+            "endpoint": cfg.endpoint, "model": cfg.model,
+            "has_key": bool(cfg.api_key)}
 
 
 @router.get("/flags")
@@ -1516,7 +1557,12 @@ async def list_flags(
                 # 后台显示的默认值和用户端实际看到的不一样
                 "channels_enabled": ",".join(CHANNELS_FALLBACK),
                 "av_license_no": ""}
-    return {k: current.get(k, defaults.get(k, "off")) for k in _KNOWN_FLAGS}
+    out = {k: current.get(k, defaults.get(k, "off")) for k in _KNOWN_FLAGS}
+    # 密钥类只说设没设。**不回明文**:后台页面会把它显示在输入框里,
+    # 而那一页任何管理员都打得开,截图、录屏、肩后看都算泄露
+    for k in _SECRET_FLAGS:
+        out[k] = "set" if current.get(k) else ""
+    return out
 
 
 @router.get("/action-logs")
@@ -1606,6 +1652,18 @@ async def set_flag(
         if not re.fullmatch(
                 r"([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d", value):
             raise HTTPException(422, "时段格式:HH:MM-HH:MM(支持跨天,如 23:00-05:00)")
+    elif key in _SECRET_FLAGS:
+        # 存密文。传空串 = 清掉这个密钥(本机跑的模型多半根本不需要 key)
+        if value:
+            from ..services import crypto
+            value = crypto.encrypt(value)
+    elif key in ("ai_endpoint", "ai_model", "ai_system_prompt"):
+        value = value.strip()[:2000]
+    elif key == "ai_timeout_seconds":
+        try:
+            value = str(max(1, min(int(float(value or 30)), 120)))
+        except ValueError:
+            raise HTTPException(422, "等待秒数要是个数(1–120)")
     elif value not in ("on", "off"):
         raise HTTPException(422, "value 只能是 on/off")
     flag = await db.get(PlatformFlag, key)
@@ -1615,17 +1673,21 @@ async def set_flag(
     else:
         flag.value = value
 
-    # 变更留痕(治理透明):白名单键在透明中心时间线公开,原因选填一并展示
+    # 变更留痕(治理透明):白名单键在透明中心时间线公开,原因选填一并展示。
+    # **密钥类只记「设了 / 清了」** —— 留痕是给人看"改过什么",
+    # 不是把密钥抄一份到另一张表里(那张表还要对外公示)
+    shown_old, shown_new = (("set" if old_value else "", "set" if value else "")
+                            if key in _SECRET_FLAGS else (old_value, value))
     from ..models import FlagHistory
     db.add(FlagHistory(
-        key=key, old_value=old_value, new_value=value,
+        key=key, old_value=shown_old, new_value=shown_new,
         reason=str(payload.get("reason") or "").strip()[:200]))
 
     # FlagHistory 是**对外公示**用的,里面没有"谁改的" —— 那是故意的,
     # 公开侧不下发管理员身份。内部问责另记一条
     await log_admin_action(db, admin, "flag.set",
                            target_type="flag", target_id=key,
-                           detail={"from": old_value, "to": value,
+                           detail={"from": shown_old, "to": shown_new,
                                    "reason": str(
                                        payload.get("reason") or "").strip()[:200]})
 

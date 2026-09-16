@@ -151,6 +151,24 @@ function accept(out: LoginOut): LoginOut {
   return out
 }
 
+// ---------- AI 机器人 ----------
+
+export interface AiProbeOut {
+  ok: boolean
+  reply?: string
+  error?: string
+  endpoint: string
+  model: string
+  has_key?: boolean
+}
+
+/** 让模型现答一句,看配对了没有。
+ *
+ * 地址填错一个字、模型名写错、本机的模型没起来 —— 这些的表现都是
+ * **AI 一个字都不发**,而这一页看上去配得好好的。所以配完当场验一次。 */
+export const aiProbe = (prompt?: string) =>
+  post<AiProbeOut>('/admin/ai/probe', prompt ? { prompt } : {})
+
 // ---------- 商家审核 ----------
 
 export interface AdminMerchant {

@@ -1,7 +1,7 @@
 import { Alert, Button, Card, Input, Modal, Space, Switch, Tag, message } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 
-import { ApiError, CitiesOut, Flags, getCities, getFlags, setFlag } from '../api'
+import { aiProbe, ApiError, CitiesOut, Flags, getCities, getFlags, setFlag } from '../api'
 
 /**
  * 平台开关。
@@ -27,6 +27,8 @@ interface FlagMeta {
   kind: 'switch' | 'text' | 'channels'
   placeholder?: string
   danger?: boolean
+  /** 密钥类:后端只回「set / 空」,不回明文。输入框留空 = 不改,填了才覆盖 */
+  secret?: boolean
 }
 
 /** 频道注册表 —— 和 packages/shared/lib/src/channels.dart 的 kChannels 对应。
@@ -165,6 +167,38 @@ const METAS: FlagMeta[] = [
     effect: '关掉是「停笔不关站」:发帖、回复、引用、编辑回 503,看还是能看。'
       + '出事时先拨这一个,不必把整个论坛关掉',
   },
+  // AI 机器人(#385)。换模型、改地址、调提示词是会反复做的事,所以放在这一页,
+  // 改完立即生效、不用发版。**AI 号都是明确标注的机器人**,它们的互动不进任何公开榜单
+  {
+    key: 'ai_bots_enabled', title: 'AI 机器人', kind: 'switch', danger: true,
+    effect: '总闸。关着时 AI 一个字都不发。打开前先把下面的地址和模型名填好、'
+      + '点「试一下」确认答得出来 —— 配错了的表现是「什么都不发生」,不会报错',
+  },
+  {
+    key: 'ai_endpoint', title: '模型地址', kind: 'text',
+    placeholder: 'http://127.0.0.1:11434/v1',
+    effect: 'OpenAI 兼容的地址(本机跑的 Ollama、vLLM、LM Studio 都是这个形状)。'
+      + '只认这一种,不给任何一家写专门适配',
+  },
+  {
+    key: 'ai_model', title: '模型名', kind: 'text', placeholder: 'qwen2.5:7b',
+    effect: '和地址缺一不可 —— 缺一个就当没配,不会生成任何内容',
+  },
+  {
+    key: 'ai_api_key', title: '模型密钥', kind: 'text', secret: true,
+    placeholder: '本机模型多半不需要;留空 = 不改',
+    effect: '**存进去就读不出来**:这一页任何管理员都打得开,所以只显示「已设置」。'
+      + '要清掉的话填一个空格再保存',
+  },
+  {
+    key: 'ai_system_prompt', title: '给 AI 的共同交代', kind: 'text',
+    placeholder: '你是这个本地生活社区的一位成员,说话像真人但不隐瞒自己是机器人',
+    effect: '所有 AI 号共用的前置说明;每个号自己的人设另外配',
+  },
+  {
+    key: 'ai_timeout_seconds', title: '等模型多久', kind: 'text', placeholder: '30',
+    effect: '超过就放弃这一次(1–120 秒)。生成内容是背景任务,不值得占着连接干等',
+  },
 ]
 
 export default function FlagsPage() {
@@ -173,6 +207,31 @@ export default function FlagsPage() {
   const [err, setErr] = useState('')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [cities, setCities] = useState<CitiesOut | null>(null)
+  const [probing, setProbing] = useState(false)
+
+  /** 让模型现答一句。答得出来才说明这一套是通的 */
+  async function probe() {
+    setProbing(true)
+    try {
+      const r = await aiProbe()
+      Modal.info({
+        title: r.ok ? '模型答上来了' : '没答上来',
+        content: (
+          <div style={{ whiteSpace: 'pre-wrap' }}>
+            <div style={{ color: 'var(--sz-ink-muted)', fontSize: 12, marginBottom: 8 }}>
+              {r.endpoint} · {r.model}{r.has_key ? ' · 带密钥' : ''}
+            </div>
+            {r.ok ? r.reply : (r.error || '不知道为什么')}
+          </div>
+        ),
+        width: 520,
+      })
+    } catch (e) {
+      message.error(e instanceof ApiError ? e.message : String(e))
+    } finally {
+      setProbing(false)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -293,20 +352,33 @@ export default function FlagsPage() {
                   />
                 ) : (
                   <Space.Compact>
+                    {/* 密钥类:后端只回 'set'/'',所以输入框**不回填**当前值 ——
+                        回填的话会把一串假值当成真密钥再存一次。留空 = 不改 */}
                     <Input
                       style={{ width: 260 }}
-                      value={draft ?? cur}
-                      placeholder={m.placeholder}
+                      value={m.secret ? (draft ?? '') : (draft ?? cur)}
+                      placeholder={m.secret && cur === 'set'
+                        ? '已设置(留空 = 不改)'
+                        : m.placeholder}
                       onChange={(e) => setDrafts(
                         (d) => ({ ...d, [m.key]: e.target.value }))}
                     />
                     <Button
                       type="primary"
-                      disabled={draft === undefined || draft === cur}
-                      onClick={() => change(m, (draft ?? cur).trim())}
+                      disabled={m.secret
+                        ? !draft
+                        : draft === undefined || draft === cur}
+                      onClick={() => change(m, m.secret
+                        ? (draft ?? '')
+                        : (draft ?? cur).trim())}
                     >
                       保存
                     </Button>
+                    {/* 配完当场验一次:地址错一个字、模型没起来,表现都是
+                        「AI 什么都不发」,而这一页看上去是好的 */}
+                    {m.key === 'ai_model' && (
+                      <Button loading={probing} onClick={probe}>试一下</Button>
+                    )}
                   </Space.Compact>
                 )}
               </Space>
