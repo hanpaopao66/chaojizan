@@ -249,7 +249,13 @@ export default function FlagsPage() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          setFlags(await setFlag(meta.key, value, reason.trim()))
+          // **合并,不是替换。** 服务端回的是完整的一份,但这里仍然写成合并:
+          // 万一哪天它又只回改动的那一个键(2026-09-16 之前就是),
+          // 替换会让另外三十个开关在页面上当场全变成「关」——
+          // 库里其实一个都没动,而看见的人不知道,他会挨个去「修」,
+          // 每一下都是真写入、还会进透明中心的公开时间线
+          const got = await setFlag(meta.key, value, reason.trim())
+          setFlags((f) => ({ ...f, ...got }))
           setDrafts((d) => ({ ...d, [meta.key]: '' }))
           message.success('已生效')
         } catch (e) {

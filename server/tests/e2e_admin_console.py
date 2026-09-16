@@ -18,6 +18,7 @@
 
 在 server/ 目录下运行:python -m tests.e2e_admin_console
 """
+from tests.miniapp_util import admin_token
 from tests.util import call, request_raw
 
 
@@ -69,6 +70,36 @@ def main() -> None:
     st, _, _ = request_raw("GET", "/admin.html")
     assert st == 404, f"旧后台还在:{st}"
     print("✓ 旧的单文件审核页已下线")
+
+    # ---------- 6) 拨一个开关,别的开关不许在返回里消失 ----------
+    # 后台那一页是 `setFlags(await setFlag(...))` —— 拿返回值**整个替换**它手里的
+    # 开关表。所以 POST 必须回完整的一份。原来只回 `{改的那一个: 值}`,
+    # 于是拨一个开关、页面上另外三十个当场全变成「关」:库里一个都没动、
+    # 刷新就回来了,但看见的人不知道,他会挨个去「修」——
+    # 而每一下都是真写入,还会进透明中心的公开时间线
+    adm = admin_token()
+    before = call("GET", "/admin/flags", adm)
+    assert len(before) > 5, f"开关表太短,下面的断言没意义:{before}"
+    others = {k: v for k, v in before.items() if k != "weather_shutdown"}
+
+    was = before.get("weather_shutdown", "off")
+    resp = call("POST", "/admin/flags/weather_shutdown", adm,
+                {"value": "on" if was != "on" else "off", "reason": "e2e 回归"})
+    missing = sorted(set(others) - set(resp))
+    assert not missing, (
+        f"拨一个开关之后,返回里少了 {len(missing)} 个开关:{missing[:6]}…\n"
+        "后台那一页会拿这份整个替换,少掉的在页面上全显示成「关」")
+    assert {k: resp[k] for k in others} == others, (
+        "别的开关的值在返回里被改了 —— 页面上会显示成刚才那一下把它们也拨了")
+
+    # **反证**:库里真的只动了那一个。不然"返回里都在"也可能是它
+    # 把整张表一起写了一遍
+    after = call("GET", "/admin/flags", adm)
+    assert {k: v for k, v in after.items() if k != "weather_shutdown"} == others, \
+        "别的开关在库里也被动了"
+    assert after["weather_shutdown"] != was, "要改的那一个反倒没改成"
+    call("POST", "/admin/flags/weather_shutdown", adm, {"value": was, "reason": "e2e 复原"})
+    print("✓ 拨一个开关:返回里带着完整的一份,别的开关值不变、库里也只动了那一个")
 
     print("\ne2e_admin_console 全部通过 ✅")
 

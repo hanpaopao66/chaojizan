@@ -1732,11 +1732,15 @@ async def ai_probe(user_id: int, payload: dict | None = None,
             "has_key": bool(cfg.api_key)}
 
 
-@router.get("/flags")
-async def list_flags(
-    admin: User = Depends(require_role("admin")),
-    db: AsyncSession = Depends(get_db),
-):
+async def _flags_out(db: AsyncSession) -> dict:
+    """现在所有开关的值(没写过的按缺省)。
+
+    **GET 和 POST 回的是同一份。** POST 原来只回改动的那一个键
+    (`{key: value}`),而后台那一页是 `setFlags(await setFlag(...))` ——
+    整个替换。于是拨一个开关,页面上**另外三十个全变成了关**。
+    库里一个都没动、刷新就回来了,但看见的人不知道:他会挨个去"修",
+    而每一下都是真写入,还会进透明中心的公开时间线。
+    """
     rows = (await db.scalars(select(PlatformFlag))).all()
     current = {r.key: r.value for r in rows}
     from ..services.flags import (BOT_FLAGS, CHANNELS_FALLBACK, FORUM_FLAGS, MUSIC_FLAGS,
@@ -1762,6 +1766,14 @@ async def list_flags(
     for k in _SECRET_FLAGS:
         out[k] = "set" if current.get(k) else ""
     return out
+
+
+@router.get("/flags")
+async def list_flags(
+    admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _flags_out(db)
 
 
 @router.get("/action-logs")
@@ -1922,10 +1934,12 @@ async def set_flag(
                 await push_to_user(rid, "极端天气,注意安全",
                                    "平台已暂停接新单;在途订单不急,安全第一",
                                    {"type": "weather"})
-        return {key: value}
+        # **回完整的一份**,不是只回改的那一个 —— 后台那一页拿返回值
+        # 整个替换它手里的开关表。只回一个键的话,另外三十个当场全变成「关」
+        return await _flags_out(db)
 
     await db.commit()
-    return {key: value}
+    return await _flags_out(db)
 
 
 # ---------- 食品安全投诉(红线通道,标红加急) ----------
