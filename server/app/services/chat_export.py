@@ -263,10 +263,82 @@ async def _build(db: AsyncSession, uid: int, tmp: Path, zip_path: Path) -> dict:
                             "views": v.views, "likes": v.likes, "parts": p_out})
         zf.writestr("videos.json", json.dumps(vid_out, ensure_ascii=False, indent=1))
         summary["videos"] = len(vid_out)
+        # 音乐(DEV-PROMPTS-41 §3.7「导出拿得全」):音乐人资料、作品和歌的元数据、歌单及歌名、
+        # 喜欢的歌、我写的评论、最近播放。**音频文件不放进包里** —— 歌是自己上传的、
+        # 母带在自己手里,包里再塞一份几百 MB 没有意义(和视频不一样,视频的原片转完就删了)
+        await _progress(uid, "音乐")
+        zf.writestr("music.json", json.dumps(await _music_part(db, uid), ensure_ascii=False,
+                                             indent=1))
         zf.writestr("README.txt", _readme(summary))
     finally:
         zf.close()
     return summary
+
+
+async def _music_part(db: AsyncSession, uid: int) -> dict:
+    """导出里的音乐部分(DEV-PROMPTS-41 §3.7)。只放元数据和文字,不放音频文件。"""
+    from ..models import (MusicArtist, MusicComment, MusicHistory, MusicPlaylist,
+                          MusicPlaylistTrack, MusicRelease, MusicTrack, MusicTrackLike)
+
+    def _track_brief(t: MusicTrack) -> dict:
+        return {"tid": t.tid, "title": t.title, "duration_ms": t.duration_ms}
+
+    out: dict = {"artist": None, "releases": [], "playlists": [], "likes": [],
+                 "comments": [], "history": []}
+    a = await db.scalar(select(MusicArtist).where(MusicArtist.user_id == uid))
+    if a is not None:
+        out["artist"] = {"aid": a.aid, "name": a.name, "bio": a.bio or "",
+                         "genres": list(a.genres or []), "status": a.status,
+                         "created_at": a.created_at.isoformat() if a.created_at else None}
+        for r in await db.scalars(select(MusicRelease).where(
+                MusicRelease.artist_id == a.id, MusicRelease.deleted_at.is_(None))
+                .order_by(MusicRelease.id)):
+            tracks = list(await db.scalars(select(MusicTrack).where(
+                MusicTrack.release_id == r.id).order_by(MusicTrack.track_no, MusicTrack.id)))
+            out["releases"].append({
+                "rid": r.rid, "title": r.title, "kind": r.kind, "status": r.status,
+                "genre": r.genre, "language": r.language,
+                "release_date": r.release_date.isoformat() if r.release_date else None,
+                "published_at": r.published_at.isoformat() if r.published_at else None,
+                "tracks": [{**_track_brief(t), "track_no": t.track_no, "lyrics": t.lyrics or "",
+                            "credits": t.credits or {}, "declaration": t.declaration,
+                            "plays": t.plays, "likes": t.likes} for t in tracks]})
+    for p in await db.scalars(select(MusicPlaylist).where(
+            MusicPlaylist.owner_id == uid, MusicPlaylist.deleted_at.is_(None))
+            .order_by(MusicPlaylist.id)):
+        rows = (await db.execute(
+            select(MusicTrack.tid, MusicTrack.title)
+            .join(MusicPlaylistTrack, MusicPlaylistTrack.track_id == MusicTrack.id)
+            .where(MusicPlaylistTrack.playlist_id == p.id)
+            .order_by(MusicPlaylistTrack.position))).all()
+        out["playlists"].append({"pid": p.pid, "title": p.title,
+                                 "description": p.description or "",
+                                 "is_public": p.is_public,
+                                 "tracks": [{"tid": t, "title": n} for t, n in rows]})
+    liked = (await db.execute(
+        select(MusicTrack.tid, MusicTrack.title, MusicTrackLike.created_at)
+        .join(MusicTrackLike, MusicTrackLike.track_id == MusicTrack.id)
+        .where(MusicTrackLike.user_id == uid)
+        .order_by(MusicTrackLike.created_at.desc()))).all()
+    out["likes"] = [{"tid": t, "title": n, "at": c.isoformat() if c else None}
+                    for t, n, c in liked]
+    mine = (await db.execute(
+        select(MusicComment.id, MusicComment.text, MusicComment.created_at, MusicTrack.tid,
+               MusicTrack.title)
+        .join(MusicTrack, MusicTrack.id == MusicComment.track_id)
+        .where(MusicComment.user_id == uid, MusicComment.status == "visible")
+        .order_by(MusicComment.id))).all()
+    out["comments"] = [{"id": i, "text": t, "at": c.isoformat() if c else None,
+                        "track": {"tid": tid, "title": title}}
+                       for i, t, c, tid, title in mine]
+    hist = (await db.execute(
+        select(MusicTrack.tid, MusicTrack.title, MusicHistory.played_at)
+        .join(MusicHistory, MusicHistory.track_id == MusicTrack.id)
+        .where(MusicHistory.user_id == uid)
+        .order_by(MusicHistory.played_at.desc()))).all()
+    out["history"] = [{"tid": t, "title": n, "at": p.isoformat() if p else None}
+                      for t, n, p in hist]
+    return out
 
 
 async def _add_object(zf: zipfile.ZipFile, tmp: Path, key: str, private: bool, arc: str) -> bool:
@@ -288,7 +360,9 @@ def _readme(s: dict) -> str:
         "profile.json    你的资料、隐私设置、联系人、拉黑名单\n"
         "chats/*.json    每个会话一个文件:你现在还能看到的全部消息(按 seq 从旧到新)\n"
         "media/          消息里的图片、视频、语音、文件(文件名前面是媒体编号,和 JSON 里 media[].id 对应)\n"
-        "videos.json     你的投稿;videos/ 下是每 P 最高清晰度的视频文件\n\n"
+        "videos.json     你的投稿;videos/ 下是每 P 最高清晰度的视频文件\n"
+        "music.json      音乐:音乐人资料、你的作品和每首歌(含歌词、署名)、歌单、喜欢的歌、\n"
+        "                你写过的评论、最近播放。音频文件不在包里(歌是你自己上传的)\n\n"
         f"本次:{s['chats']} 个会话、{s['messages']} 条消息、{s['media']} 个媒体文件、{s['videos']} 个投稿。\n"
         + (f"有 {s['media_skipped']} 个文件因为超过 2GB 总量没放进来,JSON 里留了名字和大小。\n"
            if s["media_skipped"] else "")

@@ -65,6 +65,9 @@ from .routers import video_admin as video_admin_router
 from .routers import social_admin as social_admin_router
 from .routers import social_sanctions as social_sanctions_router
 from .routers import credit as credit_router
+# 音乐(DEV-PROMPTS-41 #378)
+from .routers import music as music_router
+from .routers import music_admin as music_admin_router
 from .routers.uploads import PRIVATE_DIR, UPLOAD_DIR
 from .realtime import gateway as rt_gateway
 from .services import rt_events  # noqa: F401  注册提交后分发实时事件的钩子
@@ -607,6 +610,9 @@ app.include_router(video_admin_router.router)
 app.include_router(social_admin_router.router)
 app.include_router(social_sanctions_router.router)
 app.include_router(notifications_router.router)
+# 音乐(DEV-PROMPTS-41 #378)
+app.include_router(music_router.router)
+app.include_router(music_admin_router.router)
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 PRIVATE_DIR.mkdir(exist_ok=True)

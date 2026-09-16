@@ -656,6 +656,10 @@ async def delete_account(
     # 互动消息一并处理;对象存储里的文件在提交之后删
     from ..services.video import purge_user as purge_video_user
     await purge_video_user(db, user.id)
+    # 音乐(同一条 S5,DEV-PROMPTS-41 §3.7):音乐人身份、作品、歌曲和媒体立即清掉,
+    # 歌单、喜欢、收听、最近播放、评论正文一并处理。口径见 services/music.purge_user
+    from ..services.music import purge_user as purge_music_user
+    await purge_music_user(db, user.id)
     # 消息(同一条 S5):他发的消息正文和媒体清空(seq 占位留着)、贴纸包、用户名、联系人、拉黑;
     # 他是群主的群交给别人,收藏夹删掉。口径见 services/chat_purge.py
     from ..services.chat_purge import purge_user as purge_chat_user

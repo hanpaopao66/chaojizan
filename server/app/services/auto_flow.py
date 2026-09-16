@@ -1346,6 +1346,12 @@ async def _auto_flow_forever() -> None:
                 await sweep_videos()
             except Exception:
                 logger.exception("auto_flow: 视频清扫失败(不影响其他清扫)")
+            # 音乐(DEV-PROMPTS-41 §7.1):收听明细留 60 天、最近播放每人只留 300 首
+            try:
+                from .music import sweep_music
+                await sweep_music()
+            except Exception:
+                logger.exception("auto_flow: 音乐清扫失败(不影响其他清扫)")
             # 公开账本锚点补到昨天(幂等,通常零工作量;见 services/ledger.py)
             from .ledger import backfill_epoch_start, build_missing_anchors
             async with SessionLocal() as db:

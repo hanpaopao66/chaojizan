@@ -207,6 +207,30 @@ async def bots_on(db: AsyncSession) -> bool:
     return value == "on"
 
 
+#: 音乐的两道闸(DEV-PROMPTS-41 #378):整个音乐功能、音乐投稿。
+MUSIC_FLAGS = {"music_enabled": "音乐功能", "music_upload_enabled": "音乐投稿"}
+
+
+def music_flag_default() -> str:
+    """没写过这两个开关时的缺省值:**开发 / CI 开,生产关**(判据和视频一样)。
+
+    音乐要面对版权和《网络出版服务许可证》那一类问题(#374 合规清单第 17 条),结论出来之前
+    生产上谁也不能不经意地把它打开 —— 所以缺省站在「关」这一边,判据是 settings.is_dev
+    (拼错、留空、写成 staging 都按生产算)。本地和 CI 显式 APP_ENV=dev,e2e 不用额外开闸。
+    """
+    from ..config import settings
+
+    return "on" if settings.is_dev else "off"
+
+
+async def music_flag_on(db: AsyncSession, key: str) -> bool:
+    """音乐开关开着没有。每次现查、不缓存 —— 拉闸要立刻生效。"""
+    assert key in MUSIC_FLAGS, key
+    flag = await db.get(PlatformFlag, key)
+    value = flag.value if flag is not None else music_flag_default()
+    return value == "on"
+
+
 #: 频道开关的 flag 键。值是逗号分隔的 key 列表,如 "food,voucher"。
 CHANNELS_FLAG = "channels_enabled"
 

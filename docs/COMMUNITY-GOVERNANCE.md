@@ -39,6 +39,7 @@ DEV-PROMPTS-40 #368(聊天部分)、#370、#371,不变量 **S6**(每个处罚都
 | `create_chat` | chat_store.create_chat、private_chat(新建时) | ban_account |
 | `join` | chat_store.join_by_invite、join_public | ban_account |
 | `video_submit` | video.submit | ban_account |
+| `music_submit` | music 的开通音乐人、建作品、加歌、submit | ban_account |
 | `call` | calls._invite(WebSocket 信令) | ban_account |
 | `social_write` | routers/social.social_user(其余全部社交写接口) | ban_account |
 
@@ -49,8 +50,9 @@ DEV-PROMPTS-40 #368(聊天部分)、#370、#371,不变量 **S6**(每个处罚都
 | `speak` | chat_store.send、forward(目标会话)、edit、update_chat_info(改名、简介、公开链接) |
 | `join` | chat_store.join_by_invite、join_public、add_members、decide_join_request(同意)、邀请链接预览 `GET /chat/v1/join/{code}` |
 
-**封号在 `social_user` 统一挡**:社交写接口(`/chat/v1`、`/social/v1`、`/video/v1`、`/media/v1`、`/chat/v1/stickers`
-下所有 POST / PUT / PATCH / DELETE;唯一的例外是不用登录的播放心跳 `POST /video/v1/videos/{vid}/view`)都挂着这个依赖,
+**封号在 `social_user` 统一挡**:社交写接口(`/chat/v1`、`/social/v1`、`/video/v1`、`/music/v1`、`/media/v1`、
+`/chat/v1/stickers` 下所有 POST / PUT / PATCH / DELETE;例外是两个不用登录的上报
+`POST /video/v1/videos/{vid}/view`、`POST /music/v1/tracks/{tid}/play`)都挂着这个依赖,
 被封号的人发来的写请求**默认全拒**,只放行下面这张表里的(新加的写接口忘了处理封号,也不会漏过去;
 单测扫全部路由,没挂 `social_user` 的社交写接口会让它红):
 
@@ -74,6 +76,10 @@ DEV-PROMPTS-40 #368(聊天部分)、#370、#371,不变量 **S6**(每个处罚都
 | POST | /video/v1/reports | 举报(只给平台看) |
 | DELETE | /video/v1/me/history | 自己的观看历史 |
 | DELETE | /video/v1/me/history/{vid} | 自己的观看历史 |
+| POST | /music/v1/studio/releases/{rid}/appeal | 申诉作品驳回 / 下架 |
+| POST | /music/v1/reports | 举报(只给平台看) |
+| DELETE | /music/v1/me/history | 自己的最近播放 |
+| PUT | /music/v1/me/settings | 个性化推荐开关(任何时候都能关) |
 
 注销账号是 `DELETE /auth/me`,不挂 `social_user`,封号期间照样能注销(见 §8);
 导出进度 `GET /chat/v1/export` 是读,不受影响。

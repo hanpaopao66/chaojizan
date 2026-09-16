@@ -56,6 +56,9 @@ BLOCKED_BY: dict[str, tuple[str, ...]] = {
     "create_chat": ("ban_account",),
     "join": ("ban_account",),
     "video_submit": ("ban_account",),
+    # 音乐(DEV-PROMPTS-41 #378):开通音乐人、建作品、加歌、提交审核。
+    # 评论用上面的 comment 点(禁言也该管得住歌曲评论)
+    "music_submit": ("ban_account",),
     "call": ("ban_account",),
     "social_write": ("ban_account",),
 }
@@ -90,6 +93,13 @@ ACCOUNT_BAN_ALLOWED: frozenset[tuple[str, str]] = frozenset({
     ("POST", "/video/v1/reports"),
     ("DELETE", "/video/v1/me/history"),
     ("DELETE", "/video/v1/me/history/{vid}"),
+    # 音乐(#378):申诉、举报、清空自己的最近播放、只有自己看得见的设置。
+    # 发歌、发评论、建歌单一律不放行。收听上报不在这里 —— 它不挂 social_user
+    # (没登录也能听,M5),这一层根本走不到它
+    ("POST", "/music/v1/studio/releases/{rid}/appeal"),
+    ("POST", "/music/v1/reports"),
+    ("DELETE", "/music/v1/me/history"),
+    ("PUT", "/music/v1/me/settings"),
 })
 
 _BJ = timezone(timedelta(hours=8))
