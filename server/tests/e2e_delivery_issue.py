@@ -69,11 +69,21 @@ print("✓ 按送达处理:订单转已送达,骑手配送费照常(24h 后自�
 
 
 def sweep():
-    """手动跑一次清扫(服务端 AUTO_FLOW_ENABLED=false)。跑完 dispose 引擎:
-    连接绑在创建它的事件循环上,两次 asyncio.run 共用会报错。"""
+    """手动跑一次清扫(服务端 AUTO_FLOW_ENABLED=false)。
+
+    跑完**两个池子都要 dispose**:连接绑在创建它的事件循环上,
+    上一轮 `asyncio.run` 的循环已经关了,下一轮拿到那条连接就是
+    `got Future attached to a different loop`(或者 `Event loop is closed`)。
+
+    原来只 dispose 了数据库引擎,**Redis 那个漏了** —— 而 `app/redis_client.py`
+    的连接池是模块级的、整个进程一个。它平时不炸只是因为第一次清扫不一定碰 Redis:
+    库里攒的东西多了才碰,于是表现成"单独跑绿、全量跑随机红",
+    看着像是被别的套件影响了。
+    """
     import asyncio
 
     from app.db import engine
+    from app.redis_client import pool
     from app.services.auto_flow import sweep_once
 
     async def go():
@@ -81,6 +91,7 @@ def sweep():
             await sweep_once()
         finally:
             await engine.dispose()
+            await pool.disconnect()
 
     asyncio.run(go())
 
