@@ -21,6 +21,7 @@ import {
   FontSizeOutlined,
   LogoutOutlined,
   MenuOutlined,
+  MessageOutlined,
   SafetyCertificateOutlined,
   ShopOutlined,
   TeamOutlined,
@@ -65,6 +66,10 @@ import MusicAppealsPage from '../pages/music/AppealsPage'
 import MusicArtistsPage from '../pages/music/ArtistsPage'
 import MusicReportsPage from '../pages/music/ReportsPage'
 import MusicReviewPage from '../pages/music/ReviewPage'
+import ForumAppealsPage from '../pages/forum/AppealsPage'
+import ForumPostsPage from '../pages/forum/PostsPage'
+import ForumReportsPage from '../pages/forum/ReportsPage'
+import ForumTagsPage from '../pages/forum/TagsPage'
 
 /**
  * 平台后台外壳。
@@ -104,6 +109,14 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
       { key: '/music/artists', label: '音乐人' },
       { key: '/music/appeals', label: '音乐申诉' },
     ] },
+    // 论坛(DEV-PROMPTS-41 #380):举报和申诉是每天要处理的;帖子管理是巡查、回查投诉用的;
+    // 热门话题单独一页 —— 隐藏一个话题要写原因、留痕(§2.2 不偷偷压话题)
+    { key: 'forum', icon: <MessageOutlined />, label: '论坛', children: [
+      { key: '/forum/reports', label: '论坛举报' },
+      { key: '/forum/posts', label: '帖子管理' },
+      { key: '/forum/tags', label: '热门话题' },
+      { key: '/forum/appeals', label: '论坛申诉' },
+    ] },
     { key: '/mini-apps', icon: <AppstoreOutlined />, label: '小程序' },
     { key: '/risk', icon: <WarningOutlined />, label: '风控' },
     { key: '/order-flags', icon: <FlagOutlined />, label: '异常标记' },
@@ -124,8 +137,12 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
     <Menu
       mode="inline"
       selectedKeys={[location.pathname]}
-      defaultOpenKeys={location.pathname.startsWith('/community/')
-        || location.pathname.startsWith('/music/') ? ['community'] : []}
+      // 视频和音乐在「社区治理」下,论坛自己一栏:进到哪一块就展开哪一栏
+      defaultOpenKeys={[
+        ...(location.pathname.startsWith('/community/')
+          || location.pathname.startsWith('/music/') ? ['community'] : []),
+        ...(location.pathname.startsWith('/forum/') ? ['forum'] : []),
+      ]}
       items={items}
       onClick={({ key }) => { nav(key); setDrawerOpen(false) }}
     />
@@ -195,6 +212,10 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/music/reports" element={<MusicReportsPage />} />
             <Route path="/music/artists" element={<MusicArtistsPage />} />
             <Route path="/music/appeals" element={<MusicAppealsPage />} />
+            <Route path="/forum/reports" element={<ForumReportsPage />} />
+            <Route path="/forum/posts" element={<ForumPostsPage />} />
+            <Route path="/forum/tags" element={<ForumTagsPage />} />
+            <Route path="/forum/appeals" element={<ForumAppealsPage />} />
             <Route path="/mini-apps" element={<MiniAppsPage />} />
             <Route path="/risk" element={<RiskPage />} />
             <Route path="/order-flags" element={<OrderFlagsPage />} />
