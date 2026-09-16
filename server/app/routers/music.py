@@ -283,6 +283,19 @@ async def _artist(db: AsyncSession, aid: str) -> MusicArtist:
     return a
 
 
+@router.get("/users/{user_id}/artist")
+async def user_artist(user_id: int, db: AsyncSession = Depends(get_db)):
+    """这个人是不是音乐人(资料页的「TA 的音乐」入口按它决定露不露)。
+
+    不是、或者被停用了都回 404 —— 和别处一样,「有但你看不了」不单独说。
+    """
+    a = await msvc.artist_of_user(db, user_id)
+    if a is None or a.status != "active":
+        raise HTTPException(404, "这个人还不是音乐人")
+    return {"aid": a.aid, "name": a.name, "avatar": a.avatar_url or "",
+            "tracks": len(await msvc.published_track_ids(db, a.id))}
+
+
 @router.get("/artists/{aid}")
 async def artist_home(aid: str, me: User | None = Depends(viewer_optional),
                       db: AsyncSession = Depends(get_db)):

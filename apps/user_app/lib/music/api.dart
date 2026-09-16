@@ -205,6 +205,16 @@ class MusicApi {
 
   Future<MArtist> artist(String aid) async => MArtist.fromJson(await _get('/music/v1/artists/$aid'));
 
+  /// 这个人是不是音乐人:不是就 404(资料页据此决定露不露「TA 的音乐」)
+  Future<Map<String, dynamic>?> artistOfUser(int userId) async {
+    try {
+      final m = await _get('/music/v1/users/$userId/artist');
+      return m is Map ? m.cast<String, dynamic>() : null;
+    } on ApiException {
+      return null;
+    }
+  }
+
   Future<MPage<MTrack>> artistTracks(String aid, {int page = 0}) async =>
       _trackPage(await _get('/music/v1/artists/$aid/tracks', {'page': page}));
 

@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:superz_shared/superz_shared.dart';
 
+import '../../music/nav.dart' as music;
+import '../../video/nav.dart' show openUpSpace;
+
 import '../calls/call_controller.dart';
 import '../chat_page.dart';
 import '../models.dart';
@@ -40,6 +43,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
   /// `GET /social/v1/users/{id}/follow-stats`:`{fans, following, followed, follows_you}`
   Map<String, dynamic>? _follow;
 
+  /// 这个人的音乐人主页(不是音乐人就是 null)。关注是全站一张表,所以三个板块的入口都摆在这一页
+  Map<String, dynamic>? _artist;
+
   ChatStore get store => ChatStore.instance;
 
   @override
@@ -57,6 +63,17 @@ class _UserProfilePageState extends State<UserProfilePage> {
       if (mounted) setState(() => _error = e);
     }
     await _loadFollow();
+    await _loadArtist();
+  }
+
+  /// 是不是音乐人:不是就 404(接口关着、老服务端也当不是),这一行不显示
+  Future<void> _loadArtist() async {
+    try {
+      final a = await music.musicApi.artistOfUser(widget.userId);
+      if (mounted && a != null) setState(() => _artist = a);
+    } catch (_) {
+      // 音乐没开、老服务端:不显示这个入口
+    }
   }
 
   /// 关注关系是全站一张表(#377):这里读到的粉丝数、关注数,和视频、动态、音乐里看到的是同一份。
@@ -326,6 +343,24 @@ class _UserProfilePageState extends State<UserProfilePage> {
               ),
             ]),
           ),
+        // 他在别的板块的东西(#382 打通):关注一次,三处都跟着来
+        if (!u.isSelf && !u.isBot) ...[
+          const SizedBox(height: 4),
+          SzEntryGroup(children: [
+            SzEntryTile(
+              icon: Icons.smart_display_outlined,
+              title: '${u.displayName} 的视频',
+              onTap: () => openUpSpace(context, u.id),
+            ),
+            if (_artist != null)
+              SzEntryTile(
+                icon: Icons.library_music_outlined,
+                title: '${u.displayName} 的音乐',
+                value: '音乐人 · ${_artist!['tracks'] ?? 0} 首歌',
+                onTap: () => music.openArtist(context, '${_artist!['aid']}'),
+              ),
+          ]),
+        ],
         const SizedBox(height: 12),
         if (u.blocked)
           Container(
