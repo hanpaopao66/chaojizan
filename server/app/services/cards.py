@@ -131,5 +131,25 @@ async def _post_card(db: AsyncSession, pid: str, viewer_id: int | None) -> dict 
             "url": f"{PUBLIC_BASE}/forum/p/{p.pid}"}
 
 
+# ---------------- 音乐(#378 在 services/music.py 里实现,这里只注册)----------------
+#
+# 卡片解析表在这里,解析函数在各模块里:论坛不 import 音乐,音乐也不 import 论坛,
+# 谁被关掉了另一边照样能跑(关掉那一类的卡片解析不出来,就是占位「内容已不可见」)。
+
+
+def _register_music() -> None:
+    from . import music
+
+    for t in ("track", "release", "playlist", "artist"):
+        register(t, _music_resolver(t, music))
+
+
+def _music_resolver(type_: str, music):
+    async def fn(db, id_: str, viewer_id: int | None):
+        return await music.card_of(db, type_, id_, viewer_id)
+    return fn
+
+
 register("video", _video_card)
 register("post", _post_card)
+_register_music()

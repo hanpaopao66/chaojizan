@@ -4,8 +4,7 @@
 social_notifications 加 forum_post_id(可空,帖子删了级联删通知);kind 加 repost / quote
 (kind 是 String(8),没有 CHECK 约束,加种类不用改列)。
 
-**合并时要改 down_revision**:音乐的 0143 和这一批是两个 agent 并行做的,这个 worktree 里
-还没有 0143,所以 down_revision 先写 '0142';主会话合并音乐 + 论坛时改成 '0143'。
+音乐的 0143 和这一批是两个 agent 并行做的,合并时把 down_revision 从 '0142' 接到了 '0143'。
 
 不回填任何数据。
 
@@ -18,7 +17,7 @@ from sqlalchemy.dialects import postgresql
 
 revision = '0144'
 # 合并时改成 '0143'(音乐那一批的迁移),见文件头
-down_revision = '0142'
+down_revision = '0143'
 branch_labels = None
 depends_on = None
 

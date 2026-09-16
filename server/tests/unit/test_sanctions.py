@@ -197,8 +197,8 @@ def test_doc_record_fields_match():
 
 # ---------------- 封号:默认全挡 ----------------
 
-SOCIAL_PREFIXES = ("/chat/v1", "/social/v1", "/video/v1", "/music/v1", "/media/v1")
-SOCIAL_PREFIXES = ("/chat/v1", "/social/v1", "/video/v1", "/forum/v1", "/media/v1")
+SOCIAL_PREFIXES = ("/chat/v1", "/social/v1", "/video/v1", "/music/v1", "/forum/v1",
+                   "/media/v1")
 WRITE = {"POST", "PUT", "PATCH", "DELETE"}
 #: 不挂 social_user 的社交写接口(没登录也能调的):视频的播放心跳、音乐的收听上报。
 #: 两个都不改任何人能看到的东西,而且不登录也能看 / 能听(#378 M5)
