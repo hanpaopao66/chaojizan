@@ -22,6 +22,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <!-- 音乐(DEV-PROMPTS-41 §4 M9):锁屏之后歌接着放。audioplayers 的 stayAwake 要它
+         (给播放器挂 PARTIAL_WAKE_LOCK),没有就是熄屏几秒后 CPU 睡下、声音断掉。
+         不是敏感权限,装的时候不弹框,也不能用来定位或读任何数据 -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>
     <!-- 明文流量一律关闭(#193):隐私政策里向用户承诺过「传输全程 HTTPS 加密」

@@ -76,6 +76,13 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- 音乐(DEV-PROMPTS-41 §4 M9):锁屏、切后台之后歌接着放。
+	     没有这一项的话 AVAudioSession 的 playback 分类也留不住声音,一锁屏就静音。
+	     **这一批只做后台播放,不做锁屏控制条** —— 那要另接一套 Now Playing 信息和远程控制 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<!-- iOS 上 canOpenURL 只对这里列出的 scheme 返回 true。
 	     没声明的话「装没装地图」一律探测为否,导航只能掉进网页版 -->
 	<key>LSApplicationQueriesSchemes</key>
