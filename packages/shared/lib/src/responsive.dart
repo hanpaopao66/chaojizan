@@ -148,6 +148,7 @@ class SzNavScaffold extends StatefulWidget {
     this.appBar,
     this.floatingActionButton,
     this.leading,
+    this.aboveNav,
     this.contentMaxWidth = kFeedMaxWidth,
   });
 
@@ -157,6 +158,10 @@ class SzNavScaffold extends StatefulWidget {
   final Widget body;
   final PreferredSizeWidget? appBar;
   final Widget? floatingActionButton;
+
+  /// 底部导航**上方**的常驻条(音乐的迷你播放条挂这里,见 [szAboveNavSlot])。
+  /// 宽屏时贴在内容那一列的底下 —— 侧栏在左边,条子跟着内容走才对得齐
+  final Widget? aboveNav;
 
   /// 侧栏顶部的东西(logo 之类)。**只在宽屏出现** ——
   /// 窄屏的底部导航没地方放它。
@@ -200,18 +205,21 @@ class _SzNavScaffoldState extends State<SzNavScaffold> {
         appBar: appBar,
         body: body,
         floatingActionButton: floatingActionButton,
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: selectedIndex,
-          onDestinationSelected: onSelected,
-          destinations: [
-            for (final it in items)
-              NavigationDestination(
-                icon: _badged(it, Icon(it.icon)),
-                selectedIcon: _badged(it, Icon(it.selectedIcon)),
-                label: it.label,
-              ),
-          ],
-        ),
+        bottomNavigationBar: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (widget.aboveNav != null) widget.aboveNav!,
+          NavigationBar(
+            selectedIndex: selectedIndex,
+            onDestinationSelected: onSelected,
+            destinations: [
+              for (final it in items)
+                NavigationDestination(
+                  icon: _badged(it, Icon(it.icon)),
+                  selectedIcon: _badged(it, Icon(it.selectedIcon)),
+                  label: it.label,
+                ),
+            ],
+          ),
+        ]),
       );
     }
 
@@ -255,6 +263,8 @@ class _SzNavScaffoldState extends State<SzNavScaffold> {
               _WideAppBar(appBar: appBar!, maxWidth: contentMaxWidth),
             Expanded(
                 child: SzContentWidth(maxWidth: contentMaxWidth, child: body)),
+            if (widget.aboveNav != null)
+              SzContentWidth(maxWidth: contentMaxWidth, child: widget.aboveNav!),
           ]),
         ),
       ]),

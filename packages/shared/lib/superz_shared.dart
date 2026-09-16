@@ -4,6 +4,7 @@ export 'src/account_deletion_page.dart';
 export 'src/analytics.dart';
 export 'src/announcement_banner.dart';
 export 'src/api_client.dart';
+export 'src/app_slots.dart';
 export 'src/brand.dart';
 export 'src/brand_art.dart';
 export 'src/motion.dart';

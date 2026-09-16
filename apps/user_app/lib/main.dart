@@ -288,6 +288,14 @@ class _HomePageState extends State<HomePage> {
   /// 定位失败(权限关了/取不到)。顶部要说出来,不能继续假装「当前位置」
   bool _hereFailed = false;
 
+  /// 底部导航上方那条常驻条:音乐在放歌时放进来(app_slots.dart 的 szAboveNavSlot),
+  /// 外壳只负责画,不认识是哪个模块放的
+  Widget? get _aboveNav => szAboveNavSlot.value;
+
+  void _onSlot() {
+    if (mounted) setState(() {});
+  }
+
   /// 「我的」页订单四格、首页进行中订单条都走这里:push 独立的订单页。
   ///
   /// 底部原来有「订单」tab,四格是**切 tab**;2026-09 底部换成「消息」「视频」
@@ -308,6 +316,7 @@ class _HomePageState extends State<HomePage> {
     chatExtraBadge.addListener(_onBadge);
     videoImmersive.addListener(_onBadge);
     RemoteCopy.changed.addListener(_onCopy);
+    szAboveNavSlot.addListener(_onSlot);
     // 消息模块:登录了就连实时通道(底栏角标要一直准,不能等点进「消息」tab 才连);
     // 游客登录成功 / 退出登录都会 bump authTick
     rootResolve = widget.api.resolveUrl;
@@ -364,6 +373,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     RemoteCopy.changed.removeListener(_onCopy);
+    szAboveNavSlot.removeListener(_onSlot);
     chatUnreadBadge.removeListener(_onBadge);
     chatExtraBadge.removeListener(_onBadge);
     videoImmersive.removeListener(_onBadge);
@@ -483,6 +493,9 @@ class _HomePageState extends State<HomePage> {
     final tabs = _shownTabs;
     final scaffold = SzNavScaffold(
       selectedIndex: tabs.contains(_tab) ? tabs.indexOf(_tab) : 0,
+      // 底部导航上方的常驻条:音乐在放歌时把迷你播放条放进 szAboveNavSlot,
+      // 走到哪一格都跟着;不放歌时是 null,一点地方都不占。外壳不认识音乐模块(见 app_slots.dart)
+      aboveNav: _aboveNav,
       // 宽度上限交给外壳,标题栏和内容才会用**同一个**宽度对齐。
       // 自己在 body 上套 SzContentWidth 的话,标题栏还是横跨全屏:
       // 标题贴最左、图标钉最右,而下面的内容是居中的。
