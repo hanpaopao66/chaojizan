@@ -45,24 +45,28 @@ class _MusicStudioPageState extends State<MusicStudioPage> {
       body: MLoader<MArtist?>(
         key: _key,
         load: () => musicApi.studioMe(),
-        builder: (context, artist, reload) =>
-            artist == null ? _OpenForm(onOpened: reload) : _StudioBody(artist: artist, onChanged: reload),
+        builder: (context, artist, reload) => artist == null
+            ? MusicArtistOpenForm(onOpened: reload)
+            : _StudioBody(artist: artist, onChanged: reload),
       ),
     );
   }
 }
 
 /// 开通音乐人的表单。
-class _OpenForm extends StatefulWidget {
-  const _OpenForm({required this.onOpened});
+///
+/// 是公开的类,好让测试直接 pump 它 —— 整页要先登录,而表单上那两句话
+/// (不要求实名、必须是原创或已获授权)是拍板过的立场,得有断言钉着。
+class MusicArtistOpenForm extends StatefulWidget {
+  const MusicArtistOpenForm({super.key, required this.onOpened});
 
   final Future<void> Function() onOpened;
 
   @override
-  State<_OpenForm> createState() => _OpenFormState();
+  State<MusicArtistOpenForm> createState() => _OpenFormState();
 }
 
-class _OpenFormState extends State<_OpenForm> {
+class _OpenFormState extends State<MusicArtistOpenForm> {
   final _name = TextEditingController();
   final _bio = TextEditingController();
   final Set<String> _genres = {};
