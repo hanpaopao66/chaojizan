@@ -145,6 +145,19 @@ class User(Base):
     # / frozen=冻结(待人工复核)。任何非空级别都对用户可见并可申诉;误伤优先放行
     risk_level: Mapped[str] = mapped_column(String(10), default="")
     risk_note: Mapped[str] = mapped_column(String(200), default="")  # 处置原因(用户可见)
+    #: 这个账号是不是 AI 驱动的(#385)。
+    #:
+    #: **和 `role == bot` 不是一回事**:机器人管家 @guanjia_bot 是脚本写死的流程,
+    #: 不是模型;而将来也可能有人拿模型驱动一个普通账号。判据放在这里而不是 bots 表,
+    #: 是因为**每个模块都要用它**:论坛、视频、音乐的公开排序都要把 AI 的互动剔掉,
+    #: 名片上要挂 AI 标 —— 让它们各自去 join 一次 bots 表,迟早有一处会忘。
+    #:
+    #: 两件事跟着它走(不变量,有测试钉住):
+    #:  1. 名片上 `is_ai` 为真 → 客户端显示 AI 标(显式标识);
+    #:  2. **AI 的互动不计入任何公开榜单和推荐权重** —— 推荐公式是公开可复算的,
+    #:     注水进去等于自己骗自己。
+    is_ai: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     #: 注销时刻。**非空 = 这是一行墓碑**,不是活着的账号。
     #:
     #: 在此之前,"已注销"这件事是靠 `phone` 被改成 `del{id}_{hex}` 来表达的 ——

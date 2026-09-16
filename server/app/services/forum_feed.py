@@ -43,19 +43,31 @@ def clamp_page(page: int) -> int:
 
 # ---------------- 窗口计数 ----------------
 
-_WINDOW_SQL = """
+#: **AI 的互动不进公开排序**(#385)。
+#:
+#: 推荐公式是公开的、任何人可以照着复算的(§5.7)。AI 号点的赞、转的帖如果算进去,
+#: 那份"可复算"就成了自己骗自己 —— 而且是从内部骗起:运营看到的热度里有一部分是自己刷的。
+#:
+#: 写成一句 `NOT EXISTS`,四条 union 各挂一次。**不是 `role <> 'bot'`**:
+#: 机器人管家那种脚本机器人是真的在替人干活,它的互动算数;这里要排的是模型生成的。
+_NOT_AI = ("NOT EXISTS (SELECT 1 FROM users u WHERE u.id = {col} AND u.is_ai)")
+
+_WINDOW_SQL = f"""
 SELECT post_id, 'likes' AS k, count(DISTINCT user_id) AS n
-  FROM forum_likes WHERE created_at >= :since GROUP BY post_id
+  FROM forum_likes WHERE created_at >= :since
+   AND {_NOT_AI.format(col='user_id')} GROUP BY post_id
 UNION ALL
 SELECT post_id, 'reposts', count(DISTINCT user_id) FROM forum_reposts
- WHERE created_at >= :since GROUP BY post_id
+ WHERE created_at >= :since AND {_NOT_AI.format(col='user_id')} GROUP BY post_id
 UNION ALL
 SELECT quote_of_id, 'quotes', count(DISTINCT author_id) FROM forum_posts
  WHERE quote_of_id IS NOT NULL AND status = 'visible' AND created_at >= :since
+   AND {_NOT_AI.format(col='author_id')}
  GROUP BY quote_of_id
 UNION ALL
 SELECT reply_to_id, 'repliers', count(DISTINCT author_id) FROM forum_posts
  WHERE reply_to_id IS NOT NULL AND status = 'visible' AND created_at >= :since
+   AND {_NOT_AI.format(col='author_id')}
  GROUP BY reply_to_id
 """
 
@@ -571,8 +583,11 @@ async def trending(db: AsyncSession) -> dict:
         select(ForumTag.id, ForumTag.tag, ForumTag.display, n24.label("a24"), n3.label("a3"))
         .join(ForumPostTag, ForumPostTag.tag_id == ForumTag.id)
         .join(ForumPost, ForumPost.id == ForumPostTag.post_id)
+        .join(User, User.id == ForumPostTag.author_id)
         .where(ForumPostTag.created_at >= t24, ForumTag.hidden.is_(False),
-               ForumPost.status == "visible")
+               ForumPost.status == "visible",
+               # AI 用过的话题不算人头(#385):热门话题是"多少人在聊",不是"我们生成了多少"
+               User.is_ai.is_(False))
         .group_by(ForumTag.id, ForumTag.tag, ForumTag.display)
         .having(n24 >= rank.TREND_MIN_AUTHORS)
         .order_by(rank.TREND_RECENT_WEIGHT * n3 + n24, ForumTag.tag)

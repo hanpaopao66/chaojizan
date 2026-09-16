@@ -40,27 +40,32 @@ def ranked_now() -> datetime:
     return datetime.now(timezone.utc).replace(second=0, microsecond=0)
 
 
-_WINDOW_SQL = """
+#: **AI 的互动不进公开排序**(#385,和论坛同一条不变量)。
+#: 浏览那一条按 viewer_key 去重(可能是没登录的人),没有 user_id 可判,所以不挂 —— 
+#: AI 也不会去"看"视频,它没有播放器。
+_NOT_AI = "NOT EXISTS (SELECT 1 FROM users u WHERE u.id = user_id AND u.is_ai)"
+
+_WINDOW_SQL = f"""
 SELECT video_id, 'views' AS k, count(DISTINCT viewer_key) AS n
   FROM video_view_days WHERE created_at >= :since GROUP BY video_id
 UNION ALL
 SELECT video_id, 'likes', count(DISTINCT user_id) FROM video_likes
- WHERE created_at >= :since GROUP BY video_id
+ WHERE created_at >= :since AND {_NOT_AI} GROUP BY video_id
 UNION ALL
 SELECT video_id, 'coins', count(DISTINCT user_id) FROM video_coins
- WHERE created_at >= :since GROUP BY video_id
+ WHERE created_at >= :since AND {_NOT_AI} GROUP BY video_id
 UNION ALL
 SELECT video_id, 'favorites', count(DISTINCT user_id) FROM fav_items
- WHERE created_at >= :since GROUP BY video_id
+ WHERE created_at >= :since AND {_NOT_AI} GROUP BY video_id
 UNION ALL
 SELECT video_id, 'comments', count(DISTINCT user_id) FROM video_comments
- WHERE created_at >= :since AND deleted_at IS NULL GROUP BY video_id
+ WHERE created_at >= :since AND deleted_at IS NULL AND {_NOT_AI} GROUP BY video_id
 UNION ALL
 SELECT video_id, 'danmaku', count(DISTINCT user_id) FROM danmaku
- WHERE created_at >= :since AND deleted_at IS NULL GROUP BY video_id
+ WHERE created_at >= :since AND deleted_at IS NULL AND {_NOT_AI} GROUP BY video_id
 UNION ALL
 SELECT video_id, 'shares', count(DISTINCT user_id) FROM video_shares
- WHERE created_at >= :since GROUP BY video_id
+ WHERE created_at >= :since AND {_NOT_AI} GROUP BY video_id
 """
 
 

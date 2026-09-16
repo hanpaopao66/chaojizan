@@ -421,6 +421,9 @@ async def user_cards(db: AsyncSession, viewer_id: int, ids: Iterable[int]) -> di
             "contact_alias": c.alias if c else "",
             "blocked": uid in i_blocked,
             "is_bot": u.role == UserRole.bot,
+            # 显式标识(#385):客户端据此挂 AI 标。**不是 is_bot 的同义词** ——
+            # 机器人管家是脚本不是模型,而模型也可能驱动一个普通账号
+            "is_ai": bool(u.is_ai),
             "is_self": same,
         }
     return out

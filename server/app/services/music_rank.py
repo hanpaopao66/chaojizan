@@ -240,13 +240,17 @@ async def _listeners(db: AsyncSession, track_ids, since: datetime,
 
 
 async def _likers(db: AsyncSession, track_ids, since: datetime) -> dict[int, int]:
-    from ..models import MusicTrackLike
+    """喜欢的**人数**。**AI 号不算**(#385):榜单公式是公开可复算的,
+    把自己生成的互动算进去等于自己骗自己。"""
+    from ..models import MusicTrackLike, User
 
     if not track_ids:
         return {}
     rows = (await db.execute(
         select(MusicTrackLike.track_id, func.count(func.distinct(MusicTrackLike.user_id)))
-        .where(MusicTrackLike.track_id.in_(track_ids), MusicTrackLike.created_at >= since)
+        .join(User, User.id == MusicTrackLike.user_id)
+        .where(MusicTrackLike.track_id.in_(track_ids), MusicTrackLike.created_at >= since,
+               User.is_ai.is_(False))
         .group_by(MusicTrackLike.track_id))).all()
     return {t: int(n) for t, n in rows}
 
@@ -257,12 +261,17 @@ async def _playlisters(db: AsyncSession, track_ids, since: datetime) -> dict[int
 
     if not track_ids:
         return {}
+    from ..models import User
+
     rows = (await db.execute(
         select(MusicPlaylistTrack.track_id,
                func.count(func.distinct(MusicPlaylistTrack.added_by)))
+        .join(User, User.id == MusicPlaylistTrack.added_by)
         .where(MusicPlaylistTrack.track_id.in_(track_ids),
                MusicPlaylistTrack.added_at >= since,
-               MusicPlaylistTrack.added_by.is_not(None))
+               MusicPlaylistTrack.added_by.is_not(None),
+               # AI 加进歌单不算人头(#385,和喜欢同一条不变量)
+               User.is_ai.is_(False))
         .group_by(MusicPlaylistTrack.track_id))).all()
     return {t: int(n) for t, n in rows}
 
