@@ -26,12 +26,25 @@ String musicErrorText(Object e) => e is ApiException ? e.message : '$e';
 void mToast(BuildContext context, Object message) => vToast(context, message);
 
 /// 分享弹层:给哪几条路。抽出来是因为 nav.dart 不该直接堆界面。
-Future<String?> szShowSheetForShare(BuildContext context, String title) => szShowSheet<String>(
+///
+/// [toForum] 是「发到动态」露不露 —— 论坛这一格在金刚区被关掉时,写完一条帖子
+/// 才被 503 顶回来比没有这个入口更糟(ChannelConfig 是同步的,不发请求)。
+Future<String?> szShowSheetForShare(BuildContext context, String title, {bool toForum = false}) =>
+    szShowSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           ListTile(title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
           const Divider(height: 1),
+          ListTile(
+              leading: const Icon(Icons.send_outlined),
+              title: const Text('发到消息'),
+              onTap: () => Navigator.pop(ctx, 'chat')),
+          if (toForum)
+            ListTile(
+                leading: const Icon(Icons.forum_outlined),
+                title: const Text('发到动态'),
+                onTap: () => Navigator.pop(ctx, 'forum')),
           ListTile(leading: const Icon(Icons.link), title: const Text('复制链接'), onTap: () => Navigator.pop(ctx, 'link')),
           ListTile(leading: const Icon(Icons.ios_share), title: const Text('更多'), onTap: () => Navigator.pop(ctx, 'other')),
         ]),

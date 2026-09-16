@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../channel_config.dart';
 import '../chat/links.dart' show registerAppLinkHandler;
+import '../chat/pages/forward_page.dart' show shareCardToChat;
+import '../forum/nav.dart' as forum;
 import '../session.dart';
 import 'api.dart';
 import 'models.dart';
@@ -181,14 +184,18 @@ bool handleMusicLink(BuildContext context, Uri uri) {
 
 /// 分享一首歌 / 一个作品 / 一个歌单 / 一位音乐人。
 ///
-/// 现在是「复制链接」和系统分享两条路。**主会话之后会加上「发到聊天」** ——
-/// 那一条要走 §5.9 的 `card` 消息(客户端只传 `{type, id}`,标题封面由服务端
-/// 查出来存快照),这一批服务端还没有,所以先发链接。
+/// 「发到消息」和「发到动态」走的是 §5.9 的卡片:**客户端只报 `{type, id}`**,
+/// 标题封面由服务端现查(I3 —— 不然谁都能发一张「超级赞官方」的假卡片)。
+/// 没过审的作品、私密歌单服务端会拒,这里不预判。
 Future<void> shareMusic(BuildContext context, String type, String id, String title) async {
   final link = musicLinkFor(type, id);
-  final pick = await szShowSheetForShare(context, title);
+  final pick = await szShowSheetForShare(context, title, toForum: ChannelConfig.current.contains('forum'));
   if (pick == null || !context.mounted) return;
   switch (pick) {
+    case 'chat':
+      await shareCardToChat(context, type: type, id: id);
+    case 'forum':
+      await forum.openCompose(context, card: {'type': type, 'id': id});
     case 'link':
       await Clipboard.setData(ClipboardData(text: link));
       if (context.mounted) mToast(context, '链接已复制');
