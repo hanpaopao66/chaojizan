@@ -261,3 +261,34 @@ def test_端口不限_自己跑的模型常在八千和一万一(prod):
     """和 webhook 不同。那边只许 80/88/443/8443 是 Telegram 的规矩;
     而 vLLM 在 8000、Ollama 在 11434。**防 SSRF 靠判 IP,不是判端口。**"""
     assert "端口" not in endpoint_err("https://api.example.com:11434/v1")
+
+
+# ---------------- AI 号不占开发者那份配额 ----------------
+
+def test_开发者配额把_ai_号排除在外():
+    """**这条是个陷阱题。** 所有 AI 号在外键上都挂在**同一个**官方开发者名下
+    (机器人账号体系要求主人是开发者),但它们不是那个开发者的 ——
+    每个都属于建它的那个用户。
+
+    不排掉的话:`create_bot` 里「每个开发者最多 20 个机器人」会变成
+    **全平台最多 20 个 AI 号**,第 21 个用户建第一个号时撞上一句和他毫无关系的话,
+    而在那之前一切正常。限 AI 号的是 ai_bots_per_user,不是这一条。
+    """
+    import inspect
+
+    from app.services import bots
+
+    src = inspect.getsource(bots.create_bot)
+    head = src[:src.index("MAX_BOTS_PER_DEVELOPER")]
+    assert "is_ai" in head, (
+        "数开发者有几个机器人时没把 AI 号排掉 —— 全平台的 AI 号共用一份 20 的配额")
+
+
+def test_建号时按每人上限拦():
+    import inspect
+
+    from app.services import ai_bots as m
+
+    src = inspect.getsource(m.create)
+    assert "ai_bots_per_user" in src and "holder.id" in src, (
+        "名额要按**持有人**算(ai_personas.owner_id),不是按挂在谁名下算")

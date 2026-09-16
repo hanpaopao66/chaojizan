@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import AiPersona, ForumPost, User
+from ..models import AiPersona, Bot, ForumPost, User
 from . import ai
 
 logger = logging.getLogger("superz.ai.bots")
@@ -265,8 +265,19 @@ async def create(db: AsyncSession, dev_owner: User, *, holder: User, name: str,
     - `holder` 是 **ai_personas.owner_id** —— 这个机器人**是谁的**,谁来配它、
       谁为它说的话负责。用户级别的接入就体现在这一个字段上。
     """
+    from fastapi import HTTPException
+    from sqlalchemy import func
+
     from . import bots
 
+    # 每人几个是**后台可调**的(ai_bots_per_user)。限的是「谁的」,不是「挂在谁名下」——
+    # 所有 AI 号在 FK 上都挂在官方开发者名下,那一层的配额对它们没有意义
+    cap = await limit(db, "ai_bots_per_user")
+    mine = await db.scalar(select(func.count()).select_from(AiPersona)
+                           .where(AiPersona.owner_id == holder.id)) or 0
+    if int(mine) >= cap:
+        raise HTTPException(409, f"每人最多 {cap} 个 AI 机器人,你已经有 {mine} 个了。"
+                                 f"删掉一个才能再建")
     bot, _token = await bots.create_bot(db, dev_owner, name, username, system=True)
     user = await db.get(User, bot.user_id)
     if user is not None:
@@ -280,3 +291,23 @@ async def create(db: AsyncSession, dev_owner: User, *, holder: User, name: str,
     logger.info("建了 AI 号 %s(@%s),主人 %s,模式 %s", bot.user_id, username,
                 holder.id, mode)
     return row
+
+
+async def remove(db: AsyncSession, persona: AiPersona) -> dict:
+    """删一个 AI 号(调用方提交)。
+
+    **删是真的删**:和注销账号同一套级联(聊天记录清空、上传的文件删掉、退出所有群、
+    @用户名释放),users 那行留墓碑。它**发过的帖还在**,作者显示成已删除 ——
+    和真人注销账号之后一样,别人回过它的那些串不会断掉。
+
+    不做"停用就腾出名额":名额如果按在用的数算,一个人可以占着几百个用户名不放,
+    而用户名是抢完就没有的。
+    """
+    from . import bots
+
+    bot = await db.get(Bot, persona.user_id)
+    await db.delete(persona)
+    await db.flush()
+    if bot is None:
+        return {}
+    return await bots.delete_bot(db, bot)

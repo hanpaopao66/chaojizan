@@ -50,6 +50,7 @@ from .routers import (
     uploads,
     vouchers,
 )
+from .routers import ai_me as ai_me_router
 from .routers import badges as badges_router
 from .routers import bot_api as bot_api_router
 from .routers import chat as chat_router
@@ -590,6 +591,7 @@ app.include_router(mini_apps.router)
 app.include_router(mini_host.router)
 app.include_router(dev_miniapps.router)
 app.include_router(dev_bots_router.router)
+app.include_router(ai_me_router.router)
 app.include_router(admin_miniapps.router)
 from .routers import carts, group_cart, referrals
 app.include_router(queue.router)

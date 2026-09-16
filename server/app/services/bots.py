@@ -1358,7 +1358,14 @@ async def create_bot(db: AsyncSession, owner: User, name: str, username: str, *,
         raise HTTPException(422, problem)
     if await find_banned(db, uname):
         raise HTTPException(422, "这个用户名包含不允许使用的内容")
-    n = await db.scalar(select(func.count()).select_from(Bot).where(Bot.owner_id == owner.id))
+    # **AI 号不占开发者的配额**(#386)。它们在 FK 上挂在官方开发者名下,但它们不是
+    # 开发者的 —— 每个都属于建它的那个用户(ai_personas.owner_id),限它们的是
+    # ai_bots_per_user。不排掉的话:全平台的 AI 号共用官方开发者这一份 20 的配额,
+    # 第 21 个用户建第一个号时会撞上「每个开发者最多 20 个机器人」——
+    # 一句和他毫无关系的话,而且在那之前一切正常
+    n = await db.scalar(select(func.count()).select_from(Bot)
+                        .join(User, User.id == Bot.user_id)
+                        .where(Bot.owner_id == owner.id, User.is_ai.is_(False)))
     if (n or 0) >= MAX_BOTS_PER_DEVELOPER:
         raise HTTPException(409, f"每个开发者最多 {MAX_BOTS_PER_DEVELOPER} 个机器人")
     if await db.get(Username, uname.lower()) is not None:
