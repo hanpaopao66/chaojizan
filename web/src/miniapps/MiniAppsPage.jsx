@@ -103,7 +103,11 @@ function Catalog() {
 
   const searching = q.trim() !== ''
   return (
-    <SitePage title="超级赞 · 小程序" note="目录顺序由公开的排序函数决定">
+    <SitePage
+      title="超级赞 · 小程序"
+      desc="超级赞 App 里全部上架的小程序和小游戏:下拉就能打开,不用装。精选在前(人工挑选、理由公示),其余按首次上架时间从新到旧——没有竞价,没有付费位置。开发者用普通网页就能做,技术路线对标 Telegram Mini Apps。"
+      note="目录顺序由公开的排序函数决定"
+    >
       <div className="sz-page ma">
         <div className="sz-eyebrow">小程序</div>
         <h1 className="sz-h1">下拉就能打开的小程序，<br />怎么排序也写在明处。</h1>
@@ -237,7 +241,12 @@ function Detail({ appid }) {
   const released = v?.released_at ? bjParts(v.released_at) : null
   const first = d.first_released_at ? bjParts(d.first_released_at) : null
   return (
-    <SitePage title={`${d.name} · 超级赞小程序`}>
+    <SitePage
+      title={`${d.name} · 超级赞小程序`}
+      desc={`${d.name}——超级赞${d.kind === 'game' ? '小游戏' : '小程序'}`
+        + `${d.category_label ? `(${d.category_label})` : ''}。`
+        + `在超级赞 App 里下拉就能打开,不用安装;开发者信息、版本记录和审核状态都在这一页。`}
+    >
       <div className="sz-page ma ma-detail">
         <div className="sz-eyebrow"><a href="/miniapps">小程序</a> · {d.kind === 'game' ? '小游戏' : '应用'}{d.category_label ? ` · ${d.category_label}` : ''}</div>
         <div className="ma-head">

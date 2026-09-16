@@ -55,7 +55,11 @@ const M_RULES = [
 
 export function JoinMerchant() {
   return (
-    <SitePage active="merchant" title="超级赞 · 商家入驻:开店不要钱,卖出去才收 5%">
+    <SitePage
+      active="merchant"
+      title="超级赞 · 商家入驻:开店不要钱,卖出去才收 5%"
+      desc="超级赞商家入驻:开店、上架、活动都不收钱,卖出去才收 5%(行业平台实际负担 20%+),配送费一分不抽,团购到店核销才收 2%。没有竞价排名、没有推广位,排序用公开的排序函数。营业执照 + 食品经营许可证即可开店,当天审核。"
+    >
       <div className="sz-page">
         <div className="sz-cols jm-cols">
           <div>
@@ -118,7 +122,11 @@ const R_RULES = [
 
 export function JoinRider() {
   return (
-    <SitePage active="rider" title="超级赞 · 骑手加入:配送费 100% 归你">
+    <SitePage
+      active="rider"
+      title="超级赞 · 骑手加入:配送费 100% 归你"
+      desc="超级赞骑手加入:配送费 100% 归骑手,平台一分不抽;只做众包、自由抢单,没有强制上线时长、没有派单考核、没有超时罚款。实名认证后即可跑单,当日提现。判责有申诉通道,判了责能找人复核。"
+    >
       <div className="sz-page">
         <div className="sz-eyebrow">骑手加入</div>
         <h1 className="sz-h1">用户付的配送费，<br />一分不少到你手里。</h1>

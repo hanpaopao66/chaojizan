@@ -21,6 +21,11 @@ export default defineConfig({
     target: ['es2019', 'safari12'],
   },
   server: {
+    // 端口:给了 PORT 就用它(预览工具在 5173 被别的程序占着时会分配一个),
+    // 并且严格占用 —— 自动顺延到 5174 会撞上商家后台,预览也等错端口。
+    // 没给 PORT 时照旧是 vite 默认的 5173
+    port: process.env.PORT ? Number(process.env.PORT) : undefined,
+    strictPort: Boolean(process.env.PORT),
     // 本地开发时把数据接口代理到后端
     proxy: {
       '/stats': 'http://127.0.0.1:8010',

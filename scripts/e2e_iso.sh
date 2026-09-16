@@ -64,6 +64,10 @@ export CALL_DROP_GRACE_SECONDS=3
 export TENCENT_MAP_KEY=
 export RUN_MIGRATIONS_ON_STARTUP=false
 EOF
+    # 信用分起算日:不往前推,e2e_credit / e2e_credit_roles / e2e_rider_fault 造的裁决全落在起算日之前,
+    # 一条都不计分(CI 也是这么设的,见 .github/workflows/ci.yml)
+    echo "export CREDIT_COUNT_FROM=$(TZ=Asia/Shanghai python3 -c \
+      'import datetime;print(datetime.date.today()-datetime.timedelta(days=30))')" >> "$ENVF"
     sec="e2e-iso-$(python3 -c 'import secrets;print(secrets.token_hex(24))')"
     echo "export JWT_SECRET=${sec}" >> "$ENVF"
     cd "$ROOT/server"

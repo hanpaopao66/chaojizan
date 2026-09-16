@@ -521,7 +521,12 @@ export default function TransparencyPage() {
   const rate = fair?.commission
 
   return (
-    <SitePage active="ledger" title="超级赞 · 透明中心:今天的每一分钱去了哪" note="本页数据与公开账本同源">
+    <SitePage
+      active="ledger"
+      title="超级赞 · 透明中心:今天的每一分钱去了哪"
+      desc="超级赞透明中心:今天每一单的钱怎么分给商家、骑手和平台,每日账本哈希链、见证节点核账结果、内容审核与处置记录、推荐和榜单公式原文,全部公开。任何人都能自己跑一个见证节点,独立复算这本账。"
+      note="本页数据与公开账本同源"
+    >
       <div className="sz-page tp">
         <TodayBlock audit={audit} />
 

@@ -60,7 +60,11 @@ function Swatches({ list }) {
 
 export default function BrandPage() {
   return (
-    <SitePage title="超级赞 · 品牌物料(开放下载)" note="物料可自由转发传播；商用印刷请保持数字承诺原样">
+    <SitePage
+      title="超级赞 · 品牌物料(开放下载)"
+      desc="超级赞品牌物料开放下载:标志、配色、字体、海报和二维码物料,可自由转发传播。商用印刷请保持 5% 佣金、配送费 100% 归骑手这些数字承诺原样。"
+      note="物料可自由转发传播；商用印刷请保持数字承诺原样"
+    >
       <div className="sz-page br">
         <div className="sz-eyebrow">品牌物料 · 开放下载</div>
         <h1 className="sz-h1">品牌物料，随便拿。</h1>

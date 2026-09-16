@@ -4,3 +4,6 @@ Disallow: /admin
 Disallow: /uploads/
 
 Sitemap: https://chaojizan.cc/sitemap.xml
+
+# 给大模型抓取器的事实清单(费率、板块、公式原文的出处):
+# https://chaojizan.cc/llms.txt

@@ -38,7 +38,11 @@ export default function RatesPage() {
   const fair = useJson('/transparency/fairness')
   const real = fair?.commission?.real_rate_30d
   return (
-    <SitePage active="rates" title="超级赞 · 费率:抽多少、什么时候抽">
+    <SitePage
+      active="rates"
+      title="超级赞 · 费率:抽多少、什么时候抽"
+      desc="超级赞每个频道的费率明细:外卖和买菜 5% 封顶、团购到店核销才收 2%、跑腿 2%、住宿离店才计佣,配送费 100% 归骑手。聊天、视频、音乐、论坛、小程序一概不收钱。每一条都写清楚什么时候抽、抽在谁头上,和公开账本对得上。"
+    >
       <div className="sz-page">
         <div className="sz-eyebrow">费率</div>
         <h1 className="sz-h1">抽多少、什么时候抽、<br />为什么是这个数。</h1>

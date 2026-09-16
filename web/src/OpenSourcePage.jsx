@@ -98,7 +98,11 @@ function useTimeline() {
 export default function OpenSourcePage() {
   const { loaded, entries, firsts } = useTimeline()
   return (
-    <SitePage active="opensource" title="超级赞 · 开源仓与规则变更留痕">
+    <SitePage
+      active="opensource"
+      title="超级赞 · 开源仓与规则变更留痕"
+      desc="超级赞全部代码 AGPL-3.0 开源在 GitHub:服务端、三个 App、官网、后台、小程序 SDK。费率、判责、推荐与榜单公式这些「会动到钱和流量」的规则,改一次留一条记录,改了什么、谁改的、什么时候生效,都公示在这一页。"
+    >
       <div className="sz-page">
         <div className="sz-eyebrow">开源仓</div>
         <h1 className="sz-h1 os-h1">规矩写在代码里，<br />改了就有记录。</h1>

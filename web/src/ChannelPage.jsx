@@ -202,7 +202,13 @@ export default function ChannelPage({ channelKey }) {
     }
   }, [ch.key])
   return (
-    <SitePage active="services" title={`超级赞 · ${ch.fullName ?? ch.name}:${title.join('')}`}>
+    <SitePage
+      active="services"
+      title={`超级赞 · ${ch.fullName ?? ch.name}:${title.join('')}`}
+      desc={`超级赞的${ch.fullName ?? ch.name}:${title.join('')}。`
+        + `抽多少、什么时候抽写在费率表里,和公开账本对得上;没有竞价排名,排序用公开的排序函数。`
+        + `和外卖、聊天、视频、音乐、论坛在同一个 App、同一个账号里。`}
+    >
       <div className="cp-pills-wrap">
         <nav className="cp-pills" aria-label="频道" ref={pillsRef}>
           {CHANNELS.map(c => {

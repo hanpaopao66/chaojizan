@@ -93,7 +93,11 @@ function DevHome() {
     { icon: 'rules', t: '审核与运营规范', d: '允许与禁止、原因代码逐条解释、排序规则、处罚与申诉', href: '/developers/review' },
   ]
   return (
-    <SitePage title="超级赞 · 开发者中心" note="平台数据与透明中心同源">
+    <SitePage
+      title="超级赞 · 开发者中心"
+      desc="超级赞开放平台:用 HTML、CSS、JavaScript 打成 zip 上传,平台托管、审核、发布,用户在 App 里下拉就能打开。技术路线对标 Telegram Mini Apps。另有聊天机器人 Bot API、商家收银 ERP 的 API Key,和给 AI 助手用的分权限令牌。发布免费,没有可以花钱买的曝光。"
+      note="平台数据与透明中心同源"
+    >
       <div className="sz-page dv-home">
         <div className="sz-eyebrow">开发者中心</div>
         <h1 className="sz-h1">用普通网页，<br />做超级赞里的小程序。</h1>
@@ -187,7 +191,11 @@ function DocLayout({ page, doc, children }) {
   // 开始搜的时候正文换成结果列表,结果比正文短得多 —— 停在原处的话看到的是页脚
   useEffect(() => { if (searching) window.scrollTo({ top: 0, left: 0, behavior: 'instant' }) }, [searching])
   return (
-    <SitePage title={`${title} · 超级赞开发者文档`}>
+    <SitePage
+      title={`${title} · 超级赞开发者文档`}
+      desc={`${title}——超级赞开放平台开发者文档。小程序 SDK、登录与 open_id、支付、审核规范、`
+        + `机器人接口和开放接口,全部公开;平台代码 AGPL-3.0 开源。`}
+    >
       <div className={`dv ${doc?.headings.length && !searching ? 'has-toc' : ''}`}>
         <aside className={`dv-side ${menu ? 'open' : ''}`}>
           <a className="dv-back" href="/developers">开发者中心</a>

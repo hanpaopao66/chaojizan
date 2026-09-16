@@ -144,7 +144,7 @@ export default function Home() {
             <SuperAppFilm stateOf={stateOf} features={features} />
           </React.Suspense>
         </div>
-        <p className="note">消息、视频这两个 tab 怎么用，见<a href="/features">消息与视频</a>；每个频道抽多少，往下看费率表。</p>
+        <p className="note">聊天、视频、音乐、论坛这四块怎么用，见<a href="/features">聊天与内容</a>；每个频道抽多少，往下看费率表。</p>
       </section>
 
       <section className="h3-sec h3-film-sec" aria-label="示例：一笔外卖单的钱怎么走">

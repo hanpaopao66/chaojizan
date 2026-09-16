@@ -101,12 +101,15 @@ export function useChannelState() {
 }
 
 /* App 的功能开关:读 /config 的 features —— 和 App 收起入口用的是同一份后台开关
- * (services/flags.py)。拿不到时按生产缺省:消息开;视频、投稿、通话、机器人关。
- * 道理同 CHANNELS_FALLBACK:读不到就当开着,关着的功能会在官网上复活。
- * 视频要等《信息网络传播视听节目许可证》,生产上缺省关着(docs/LAUNCH-40.md §1) */
-const FEATURES_FALLBACK = { chat: true, video: false, video_upload: false, calls: false, bots: false }
+ * (services/flags.py)。拿不到时按生产缺省:聊天开,其余全关。
+ * 道理同 CHANNELS_FALLBACK:读不到就当开着的话,关着的功能会在官网上复活。
+ * 视频要等《信息网络传播视听节目许可证》、音乐要等《网络文化经营许可证》,
+ * 生产上缺省关着(docs/LAUNCH-40.md §1、docs/COMPLIANCE-40.md #17) */
+const FEATURES_FALLBACK = { chat: true, video: false, video_upload: false, calls: false, bots: false,
+  music: false, music_upload: false, forum: false, forum_post: false }
 
-/** 功能开没开:{ loaded, chat, video, video_upload, calls, bots } */
+/** 功能开没开:{ loaded, chat, video, video_upload, calls, bots, music, forum, … }
+ *  回落一律按「关着」算:读不到 /config 时宁可少画一格,也不要让人点进去才发现没开。 */
 export function useFeatures() {
   const resp = useJson('/config')
   const f = resp && typeof resp.features === 'object' && resp.features ? resp.features : null
@@ -281,7 +284,7 @@ export function Icon({ name, size = 22, color, className = '' }) {
  * 其余页面上它们指向各自的独立页。「消息与视频」是用户端底部新加的两个 tab 的介绍页 */
 const NAV = [
   { key: 'services', label: '服务', href: '/channel/food', jump: '#services' },
-  { key: 'features', label: '消息与视频', href: '/features' },
+  { key: 'features', label: '聊天与内容', href: '/features' },
   { key: 'rates', label: '费率', href: '/rates', jump: '#rates' },
   { key: 'ledger', label: '账本', href: '/transparency', jump: '#ledger' },
   { key: 'merchant', label: '商家入驻', href: '/join/merchant' },
@@ -335,15 +338,54 @@ export function SiteFooter({ note }) {
         {ver && <>线上版本 {ver}（与 <a href="https://github.com/hanpaopao66/chaojizan" target="_blank" rel="noreferrer">开源仓</a> tag 对应）</>}
       </div>
       <div className="muted">运营主体：陕西爱卡斯科技有限公司 · <a href="tel:15231109698">15231109698</a> · <a href="mailto:support@chaojizan.cc">support@chaojizan.cc</a></div>
-      <div className="muted"><a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>{av && <> · 信息网络传播视听节目许可证 {av}</>} · <a href="/legal/terms">用户协议</a> · <a href="/legal/privacy">隐私政策</a> · <a href="/features">消息与视频</a> · <a href="/brand">品牌物料</a> · <a href="/miniapps">小程序</a> · <a href="/developers">开发者</a></div>
+      <div className="muted"><a href="https://beian.miit.gov.cn" target="_blank" rel="noreferrer">陕ICP备2025064101号-5</a>{av && <> · 信息网络传播视听节目许可证 {av}</>} · <a href="/legal/terms">用户协议</a> · <a href="/legal/privacy">隐私政策</a> · <a href="/features">聊天与内容</a> · <a href="/brand">品牌物料</a> · <a href="/miniapps">小程序</a> · <a href="/developers">开发者</a></div>
     </footer>
   )
 }
 
-/** 子页外壳:顶栏 + 正文 + 页脚,并设这一页自己的 title
+// ---------- 每一页自己的 SEO 头 ----------
+
+/** 没写自己描述的页面回落到这句(和 index.html 里的那条同源)。
+ *  必须有回落:搜索引擎抓 /rates 时,不能让它读到上一页留下的描述。 */
+const SITE_DESC = '超级赞(Super-Z)是劳动者互助的本地生活基础设施:一个 App 装下外卖、'
+  + '买菜买水果、住宿、团购、跑腿,也装下聊天、视频、音乐、论坛、小程序和机器人。'
+  + '商家佣金 5% 封顶,配送费 100% 归骑手,推荐和榜单用公开公式,账目三方公开、社区可验证,代码 AGPL-3.0 开源。'
+
+function head(sel, make) {
+  let el = document.head.querySelector(sel)
+  if (!el) { el = make(); document.head.appendChild(el) }
+  return el
+}
+
+function setMeta(attr, key, content) {
+  const el = head(`meta[${attr}="${key}"]`, () => {
+    const m = document.createElement('meta'); m.setAttribute(attr, key); return m
+  })
+  el.setAttribute('content', content)
+}
+
+/** 设这一页的 title / 描述 / canonical / 分享卡片。
+ *
+ * 官网是单页应用,换路由时这几项不会自己变 —— 不设的话,所有页面在搜索结果和
+ * 微信分享卡片里都长着首页那一套,搜「超级赞 费率」点进来看到的还是首页的摘要。
+ * canonical 只写路径(不带查询串):/rates?from=weixin 和 /rates 是同一页。 */
+function applyHead(title, desc) {
+  if (title) document.title = title
+  const d = desc || SITE_DESC
+  setMeta('name', 'description', d)
+  setMeta('property', 'og:title', title || document.title)
+  setMeta('property', 'og:description', d)
+  const url = location.origin + location.pathname
+  setMeta('property', 'og:url', url)
+  head('link[rel="canonical"]', () => {
+    const l = document.createElement('link'); l.rel = 'canonical'; return l
+  }).setAttribute('href', url)
+}
+
+/** 子页外壳:顶栏 + 正文 + 页脚,并设这一页自己的 title 和描述
  *  (转发到微信群、加书签、出现在搜索结果里,都要认得出是哪一页) */
-export function SitePage({ active, title, note, children }) {
-  useEffect(() => { if (title) document.title = title }, [title])
+export function SitePage({ active, title, desc, note, children }) {
+  useEffect(() => { applyHead(title, desc) }, [title, desc])
   return (
     <div className="h3">
       <SiteNav active={active} />
