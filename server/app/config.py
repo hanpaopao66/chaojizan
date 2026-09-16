@@ -385,6 +385,19 @@ class Settings(BaseSettings):
     jpush_app_key: str = ""
     jpush_master_secret: str = ""
 
+    # 苹果推送(APNs)直连 —— 自建推送第一步(#384)。免费、无配额,不经过第三方。
+    #
+    # apns_key_p8:开发者后台下载的 .p8 私钥**正文**(-----BEGIN PRIVATE KEY----- 那一整段)。
+    #   写进 .env 时换行用 \n,这里会还原 —— 一行一个值的格式塞不下真换行。
+    # apns_key_id:那个密钥的 Key ID(10 位);apns_team_id:开发者团队 ID(10 位)。
+    # 三个 bundle id 各填各的:**apns-topic 必须是 bundle id**,填错是静默收不到。
+    apns_key_p8: str = ""
+    apns_key_id: str = ""
+    apns_team_id: str = ""
+    apns_topic_user: str = ""
+    apns_topic_merchant: str = ""
+    apns_topic_rider: str = ""
+
     # 阿里云号码隐私保护(AXB 中间号)。未配置时降级:
     # 商家/骑手侧界面与小票只显示打码号(138****0001),拨打走 privacy_phone 字段
     # (过渡期给真号,strict 模式不给);配置后绑定 AXB,看到与拨打的都是 X 号

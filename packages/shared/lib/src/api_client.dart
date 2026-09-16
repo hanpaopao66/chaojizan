@@ -653,6 +653,25 @@ class ApiClient {
     return (data['enabled'] as List? ?? []).cast<String>();
   }
 
+  // ---------- 推送设备(自建推送,#384) ----------
+  //
+  // 苹果的 device token 由系统交给 App,这里报给我们自己的服务端 ——
+  // 不经过任何第三方,也就没有配额和费用。
+
+  /// 登记这台设备。每次启动都可以调,幂等。
+  Future<void> registerPushDevice(String channel, String token,
+          {bool sandbox = false, String app = 'user'}) async =>
+      _request('POST', '/push/v1/devices', body: {
+        'channel': channel,
+        'token': token,
+        'sandbox': sandbox,
+        'app': app,
+      });
+
+  /// 退出登录时下线这台设备 —— 不下线的话,推送会继续发到这台手机上。
+  Future<void> removePushDevice(String channel, String token) async =>
+      _request('POST', '/push/v1/devices/remove', body: {'channel': channel, 'token': token});
+
   // ---------- AI 助手令牌(MCP 接入) ----------
   //
   // **它付不了款。** 助手能把单创建到「待支付」为止,付款那一下在用户

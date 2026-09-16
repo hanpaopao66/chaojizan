@@ -164,6 +164,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: '退出登录',
                 onTap: () async {
                   PushService.onLogout(); // 解绑推送别名,失败静默
+                  ApnsService.onLogout(); // 自建推送:把这台设备下线,失败静默
                   await widget.api.clearSession();
                   authTick.value++; // 各 tab 切回游客态
                   if (!context.mounted) return;

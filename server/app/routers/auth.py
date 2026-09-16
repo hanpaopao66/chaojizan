@@ -644,6 +644,10 @@ async def delete_account(
     # 那几台设备的会话(token 里带 ld)下一次请求就 401,也不能再一键登录
     from ..models import LoginDevice
     await db.execute(sa_delete(LoginDevice).where(LoginDevice.user_id == user.id))
+    # 推送设备(#384):名下所有设备下线。不下线的话,这台手机会继续收到推送 ——
+    # 账号都注销了还在弹「你有一条新消息」,是最刺眼的那种残留
+    from ..services import push_devices
+    await push_devices.unregister_all(db, user.id)
     # 小程序(DEV-PROMPTS-39 §5.5「注销账号级联删除」):云存储、授权、最近使用、
     # 日活明细、open_id 映射一起删。聚合数(mini_app_usage_daily)里没有人,不动
     from ..models import (MiniAppDailyUser, MiniAppGrant, MiniAppKV, MiniAppKVUsage,

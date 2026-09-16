@@ -1,11 +1,12 @@
-# 外部服务联调清单(微信支付 / 极光推送 / 腾讯云短信)
+# 外部服务联调清单(微信支付 / 推送 / 腾讯云短信)
 
 三个服务的代码已全部就位,**没有 Key 时自动降级**,拿到 Key 后填 `server/.env` 即可逐个点亮:
 
 | 服务 | 未配置时的行为 | 配置后 |
 |---|---|---|
 | 微信支付 | `/pay/wechat` 返回 503,客户端自动走模拟支付 | 真实收款 |
-| 极光推送 | 静默跳过,WebSocket 前台通道照常 | 退后台也能收到新单/状态通知 |
+| 推送(苹果 APNs 自建) | 静默跳过,WebSocket 前台通道照常 | 退后台、锁屏也能收到 |
+| 推送(国内安卓厂商通道) | **还没接**:push_logs 里写明,不假装成功 | 下一批 |
 | 腾讯云短信 | 验证码随接口返回并自动填入(开发模式) | 真实短信 |
 
 ## 1. 微信支付
@@ -118,7 +119,65 @@
 **联调步骤**:填 `.env` → 重启 → 用户端下单会拿到真实 prepay 参数 → 接 fluwx 拉起支付 →
 微信回调 `/payments/wechat/notify` → 订单自动变已支付(商家听单照常触发)
 
-## 2. 极光推送(依赖:极光开发者账号,免费版即可起步)
+## 2. 推送
+
+2026-09-16 起**自己接**,不再依赖聚合商。顺序:苹果 → 国内安卓厂商通道 → 其余靠长连接。
+
+理由很简单:苹果和各家安卓厂商的推送**本身都是免费的**,聚合商卖的是"把六家包成一个接口"
+这件事。代价是按量付费,以及一个第三方拿到「谁在什么时候收到了什么标题」。
+Telegram 也不用聚合商(它走 Google 的 FCM 和苹果的 APNs)。
+
+### 2.1 苹果(APNs)—— 已接好
+
+**你要准备的**:苹果开发者后台 → Keys → 新建一个 **APNs Auth Key**,下载 `.p8`
+(**只能下载一次**,丢了只能作废重建)。记下 Key ID(10 位)和 Team ID(10 位)。
+一个 key 管你名下所有 App,三个端共用。
+
+`.env.prod` 填五项(+ 三个 bundle id):
+
+```
+APNS_KEY_P8=-----BEGIN PRIVATE KEY-----\nMIGT...\n-----END PRIVATE KEY-----
+APNS_KEY_ID=ABCDE12345
+APNS_TEAM_ID=TEAM123456
+APNS_TOPIC_USER=你的用户端 bundle id
+APNS_TOPIC_MERCHANT=商家端 bundle id
+APNS_TOPIC_RIDER=骑手端 bundle id
+```
+
+`.p8` 正文里的换行写成 `\n`(一行一个值的格式塞不下真换行,代码里会还原)。
+**apns-topic 必须是 bundle id**,填错是静默收不到,没有任何报错。
+
+**代码侧已就位**:
+- 服务端 `app/services/push_channels/apns.py` 直连 APNs(HTTP/2 + ES256 的 JWT,
+  令牌缓存 50 分钟 —— 换太勤苹果回 429,换太晚 403);
+- 设备地址在 `push_devices` 表(`app/services/push_devices.py`),
+  客户端 `POST /push/v1/devices` 登记、`/devices/remove` 下线;
+- 选路在 `app/services/push.py`:**名下有自建设备就走自建,一台都没有才退回极光那条老路** ——
+  可以一个端一个端地切,不用等三端都接完;
+- 苹果回 410 Unregistered / 400 BadDeviceToken 时那台设备自动下线;其余失败连续 5 次才下线
+  (一次机房抖动不该把全站设备下线一遍);
+- 客户端 `ios/Runner/AppDelegate.swift` + `shared/apns_service.dart`:
+  **不接任何 SDK**,token 由系统交给 App。
+
+**沙箱和生产是两台服务器**:Xcode / TestFlight 装的包拿到的是沙箱 token,发到生产会回
+`BadDeviceToken`。客户端按打包时嵌的 `aps-environment` 如实上报(不看 `#if DEBUG` ——
+TestFlight 是 release 编的但用沙箱),服务端按设备选地址。这是"开发机怎么收不到推送"的头号原因。
+
+**Xcode 里还要开一次**:Runner target → Signing & Capabilities → + Capability →
+Push Notifications;后台送达要再加 Background Modes → Remote notifications。
+
+### 2.2 国内安卓厂商通道 —— 还没接(下一批)
+
+国内安卓上 App 被杀掉之后,**只有手机厂商自己的通道叫得醒它**(华为 / 小米 / OPPO / vivo /
+荣耀)。各家免费,但要各自注册、各自过审、各自的载荷格式。这一批只把通道名留在
+`push_devices.CHANNELS` 里:这类设备登记进来了发不出去,**push_logs 里写明「这条通道还没接」**,
+不静默跳过 —— "推送没到"这件事没人会来报 bug,只能靠日志自己看得见。
+
+在那之前安卓靠已有的 WebSocket 长连接:App 活着就收得到,被杀掉才收不到。
+
+### 2.3 极光(过渡期保留)
+
+#### 极光的老配置(依赖:极光开发者账号,免费版即可起步)
 
 **你要准备的**:jiguang.cn 注册 → 创建应用 → 拿 `AppKey` 和 `Master Secret`;
 Android 各厂商通道(小米/华为/OPPO...)在极光后台按引导逐个开通(可后补)。

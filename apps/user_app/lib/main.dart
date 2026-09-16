@@ -223,6 +223,14 @@ class UserApp extends StatelessWidget {
               // 腾讯的接口是"同意前调用则地图显示为空白",
               // 而且失败是静默的 —— 没异常没日志,只有一块白板
               await PushService.init();
+              // 苹果推送直连(#384):把「登记 / 下线设备」两个动作接上自己的接口。
+              // 安卓在这条路上什么都不做 —— 厂商通道是下一批,在那之前靠长连接
+              ApnsService.app = 'user';
+              ApnsService.onRegister = (ch, tok, sandbox) => rootApi
+                  .registerPushDevice(ch, tok, sandbox: sandbox, app: ApnsService.app);
+              ApnsService.onUnregister = rootApi.removePushDevice;
+              ApnsService.wire();
+              if (rootApi.isLoggedIn) unawaited(ApnsService.onLogin());
               await agreeAndStart();
               unawaited(RemoteCopy.refresh(rootApi));
             },

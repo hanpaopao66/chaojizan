@@ -2004,6 +2004,55 @@ class PushLog(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
+class PushDevice(Base):
+    """一台设备的推送地址(自建推送,#384)。
+
+    ## 为什么要有这张表
+
+    以前推送走极光:服务端只认 `u{user_id}` 这个别名,**设备token 在极光那边**。
+    自己发就得自己存:苹果要 APNs 的 device token,安卓各厂商要各自的 regid /
+    push token,而同一个人可能有三台设备、三个端(用户端 / 商家端 / 骑手端)。
+
+    ## 一条设备一行,谁登录就归谁
+
+    同一个 token 只可能属于一台设备,所以 `(channel, token)` 唯一。
+    换人登录时把这一行改挂到新的人名下 —— **不是新插一行**:
+    不然上一个人退出登录之后,推送还会继续发到这台手机上。
+
+    ## 失效了就下线
+
+    苹果回 410 Unregistered、厂商回「token 无效」时把 `disabled_at` 写上,
+    不再往这里发。**不删行**:留着才看得出「这台设备什么时候掉的」,
+    排查"他说收不到"时第一眼要看的就是这个。
+    """
+
+    __tablename__ = "push_devices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    #: 走哪条通道:apns(苹果)/ hms(华为)/ xiaomi / oppo / vivo / honor / jpush(过渡期的极光)
+    channel: Mapped[str] = mapped_column(String(10), index=True)
+    #: 设备token。苹果是 64 位十六进制,厂商的是各自的 regid,留足长度
+    token: Mapped[str] = mapped_column(String(512))
+    #: 哪个端:user / merchant / rider —— 决定推给哪个 bundle id / 包名
+    app: Mapped[str] = mapped_column(String(10), default="user")
+    #: APNs 的开发沙箱(TestFlight 和 Xcode 装的包发到沙箱,发错环境是收不到的头号原因)
+    sandbox: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: 最近一次注册 / 心跳。客户端每次启动都报一次,用来看设备还活着没有
+    seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    #: 连续失败几次。偶发失败不下线,连续失败到阈值才下线
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    #: 非空 = 已下线(token 失效、用户退出登录)
+    disabled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("channel", "token", name="uq_push_devices_token"),)
+
+
 class LedgerEpoch(Base):
     """账本纪元:每一次「链被重新起头」的**永久公开记录**(#2)。
 

@@ -282,7 +282,7 @@ class _ChatSearchPageState extends State<ChatSearchPage> {
     final alsoFile = d.onThisDevice
         ? await showDialog<bool>(
             context: context,
-            builder: (ctx) => AlertDialog(
+            builder: (ctx) => SzDialog(
               title: const Text('从下载内容里移除'),
               content: Text('「${d.name}」已经存在这台设备上。要连这个文件一起删掉吗?'),
               actions: [

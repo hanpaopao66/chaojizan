@@ -30,6 +30,7 @@ export 'src/legal.dart';
 export 'src/login_page.dart';
 export 'src/privacy_gate.dart';
 export 'src/splash_gate.dart';
+export 'src/apns_service.dart';
 export 'src/push_service.dart';
 export 'src/support_page.dart';
 export 'src/update_checker.dart';

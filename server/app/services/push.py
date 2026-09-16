@@ -1,7 +1,18 @@
-"""极光推送(JPush)服务端直推。
+"""推送:先走自建通道,没有自建设备再退回极光(#384)。
 
-未配置 Key 时静默跳过(返回 False),所有调用点都不感知。
-客户端集成(setAlias 绑定 u{user_id})见 docs/INTEGRATIONS.md。
+## 两条路,按设备选
+
+2026-09-16 起自己接推送,第一步是苹果:`push_channels/apns.py` 直连 APNs,
+免费、无配额、不经过第三方。设备地址存在 `push_devices` 表里(services/push_devices.py)。
+
+一个人名下**有**自建设备就按设备逐台发;**一台都没有**才退回极光那条老路
+(它按别名 `u{user_id}` 推,设备在极光那边)。这样接一个端、切一个端,
+不用等三端都接完才敢上。
+
+国内安卓的厂商通道(华为 / 小米 / OPPO / vivo)还没接:这类设备登记进来了也发不出去,
+**push_logs 里会写明"这条通道还没接"** —— 不静默跳过,不然"推送没到"这件事没人看得见。
+
+未配置任何通道时静默跳过(返回 False),所有调用点都不感知。
 
 ## 关于扇出(推给一批人)
 
@@ -96,14 +107,80 @@ async def push_to_user(user_id: int, title: str, content: str,
     订单状态类高频推送保持静默跳过;回复/收藏/召回等触达类传 True——
     低频、值得留痕,配好 Key 前就能验证触发链路,配好后无缝变真实发送。
     """
+    own = await _send_own(user_id, title, content, extras)
+    if own is not None:
+        ok, error = own
+        await _record(user_id, title, content, ok, error)
+        return ok
     if not settings.jpush_configured:
-        logger.debug("jpush 未配置,跳过推送: u%s %s", user_id, title)
+        logger.debug("没有可用通道,跳过推送: u%s %s", user_id, title)
         if record_skip:
-            await _record(user_id, title, content, False, "jpush 未配置(仅记录意图)")
+            await _record(user_id, title, content, False, "没有可用通道(仅记录意图)")
         return False
     ok, error = await _send(_payload_for(user_id, title, content, extras))
     await _record(user_id, title, content, ok, error)
     return ok
+
+
+async def _send_own(user_id: int, title: str, content: str,
+                    extras: dict | None) -> tuple[bool, str] | None:
+    """走自建通道推给这个人名下的设备。
+
+    返回 None = **这个人一台自建设备都没有**,调用方去走极光那条老路;
+    返回 (ok, error) = 发过了,ok 是"至少有一台成功"。
+
+    一个人可能有好几台设备(手机 + 平板 + 换过的旧机器),有一台收到就算送达 ——
+    全部失败才算失败。
+    """
+    results = await _send_devices({user_id: (title, content, extras)})
+    return results.get(user_id)
+
+
+async def _send_devices(jobs: dict[int, tuple[str, str, dict | None]]
+                        ) -> dict[int, tuple[bool, str]]:
+    """按设备发一批。key 是人,value 是要发的内容;返回每个人的结果。
+
+    一个人一台设备都没有时**不出现在返回里** —— 调用方据此决定要不要退回极光。
+    """
+    from ..db import SessionLocal
+    from . import push_devices
+    from .push_channels import apns
+
+    out: dict[int, tuple[bool, str]] = {}
+    if not jobs:
+        return out
+    async with SessionLocal() as db:
+        by_user = await push_devices.active_for(db, list(jobs))
+        if not by_user:
+            return out
+        for uid, devices in by_user.items():
+            title, content, extras = jobs[uid]
+            oks: list[bool] = []
+            errors: list[str] = []
+            for d in devices:
+                if d.channel == "apns":
+                    if not apns.configured():
+                        errors.append("apns 没配")
+                        continue
+                    r = await apns.send(d.token, title, content, extras,
+                                        app=d.app, sandbox=d.sandbox,
+                                        collapse_id=str((extras or {}).get("chat_id") or ""))
+                    oks.append(r.ok)
+                    if not r.ok:
+                        errors.append(f"apns {r.error}")
+                    await push_devices.mark_result(db, d.id, ok=r.ok, gone=r.gone)
+                elif d.channel == "jpush":
+                    # 极光那条路按别名推,不按设备 —— 这一行只是"这台设备在极光上",
+                    # 真正的发送交给下面的老路,这里不重复发
+                    continue
+                else:
+                    # 厂商通道还没接。**记下来**,不假装成功也不静默
+                    errors.append(f"{d.channel} 这条通道还没接")
+            if not oks and not errors:
+                continue  # 名下只有 jpush 那种设备:交给老路
+            out[uid] = (any(oks), "；".join(errors[:3]))
+        await db.commit()
+    return out
 
 
 async def _send(payload: dict) -> tuple[bool, str]:
@@ -168,15 +245,25 @@ async def fanout(targets: list[tuple[int, str, str, dict | None]],
         logger.warning("推送扇出人数 %s 超过上限 %s,已截断", len(targets), cap)
         targets = targets[:cap]
 
-    if not settings.jpush_configured:
-        logger.debug("jpush 未配置,跳过扇出 %s 条", len(targets))
-        if record_skip:
-            await _record_many([
-                (uid, title, content, False, "jpush 未配置(仅记录意图)")
-                for uid, title, content, _extras in targets])
-        return len(targets)
+    # 先走自建通道。发过的人不再交给极光 —— 不然一条消息弹两次
+    own = await _send_devices({uid: (title, content, extras)
+                               for uid, title, content, extras in targets})
+    rows: list[tuple[int, str, str, bool, str]] = [
+        (uid, title, content, *own[uid])
+        for uid, title, content, _e in targets if uid in own]
+    targets = [t for t in targets if t[0] not in own]
+    if not targets:
+        await _record_many(rows)
+        return len(rows)
 
-    rows: list[tuple[int, str, str, bool, str]] = []
+    if not settings.jpush_configured:
+        logger.debug("没有可用通道,跳过扇出 %s 条", len(targets))
+        if record_skip:
+            rows += [(uid, title, content, False, "没有可用通道(仅记录意图)")
+                     for uid, title, content, _extras in targets]
+        await _record_many(rows)
+        return len(rows)
+
     size = max(1, settings.push_fanout_concurrency)
     for start in range(0, len(targets), size):
         chunk = targets[start:start + size]
@@ -191,7 +278,9 @@ async def fanout(targets: list[tuple[int, str, str, dict | None]],
             else:
                 rows.append((uid, title, content, res[0], res[1]))
     await _record_many(rows)
-    return len(targets)
+    # 数的是**真发出去的条数**(自建 + 极光),不是"本来打算推给几个人" ——
+    # 一条通道都没有时返回 0,调用方的日志里才看得出来没发
+    return len(rows)
 
 
 def spawn(coro, *, what: str = "推送") -> None:

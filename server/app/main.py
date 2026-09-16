@@ -57,6 +57,7 @@ from .routers import chat_bots as chat_bots_router
 from .routers import dev_bots as dev_bots_router
 from .routers import media as media_router
 from .routers import notifications as notifications_router
+from .routers import push as push_router
 from .routers import social as social_router
 from .routers import stickers as stickers_router
 from .routers import calls as calls_router
@@ -614,6 +615,7 @@ app.include_router(social_sanctions_router.router)
 app.include_router(forum_router.router)
 app.include_router(forum_admin_router.router)
 app.include_router(notifications_router.router)
+app.include_router(push_router.router)
 # 音乐(DEV-PROMPTS-41 #378)
 app.include_router(music_router.router)
 app.include_router(music_admin_router.router)
