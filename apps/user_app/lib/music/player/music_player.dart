@@ -375,6 +375,26 @@ class MusicPlayer extends ChangeNotifier {
     await _start();
   }
 
+  /// 拖着换队列里的顺序。正在放的那首跟着它自己走 —— 把它拖到别处不该换歌。
+  ///
+  /// [to] 是**拔掉之后**的落点(`onReorderItem` 给的就是这个),不用再自己减一。
+  void reorder(int from, int to) {
+    if (from < 0 || from >= queue.length) return;
+    final at = to;
+    if (at < 0 || at >= queue.length || at == from) return;
+    final t = queue.removeAt(from);
+    queue.insert(at, t);
+    if (index == from) {
+      index = at;
+    } else if (from < index && at >= index) {
+      index--;
+    } else if (from > index && at <= index) {
+      index++;
+    }
+    _reshuffle();
+    notifyListeners();
+  }
+
   Future<void> clearQueue() async {
     await _flushListen();
     queue.clear();
