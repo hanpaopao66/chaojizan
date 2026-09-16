@@ -54,7 +54,7 @@ cd miniapps/_template && zip -r ../hello.zip . -x README.md
 后台「版本 → 上传开发版」,拖进 zip。平台逐条校验并给出报告:
 
 - 根目录必须有 `index.html` 和 `superz.json`;
-- 应用 ≤ 10 MB、小游戏 ≤ 30 MB(压缩后),单文件 ≤ 5 MB,最多 1000 个文件;
+- 应用 ≤ 10 MB、小游戏 ≤ 30 MB(压缩后),单文件 ≤ 5 MB,最多 1000 个文件,解压后总共 ≤ 90 MB;
 - 只收这些扩展名:html、js、mjs、css、json、txt、png、jpg、jpeg、gif、webp、svg、ico、woff、woff2、ttf、otf、mp3、ogg、wav、m4a、webm、mp4、wasm、map;
 - 不能有符号链接、绝对路径、`..`、隐藏文件。
 

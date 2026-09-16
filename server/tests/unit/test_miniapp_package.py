@@ -57,10 +57,25 @@ def test_zip_too_big_for_app_but_fine_for_game():
     assert rep_game.ok, rep_game.errors
 
 
-def test_zip_bomb_rejected_by_ratio():
-    rep = validate_package(make_zip(ok_files(**{"zeros.txt": b"\0" * (8 * 1024 * 1024)})),
-                           kind="app")
-    assert not rep.ok and any("zip 炸弹" in e for e in rep.errors)
+def test_压缩得很好的正常包要收下():
+    """**这条是 2026-09-16 那个 bug 的回归测试。**
+
+    原来有一条「解压后不许超过压缩量 3 倍」,而 zip 对文本的压缩比本来就远不止 3 倍 ——
+    重复度高的 JS / JSON 实测能到 200 倍以上。结果正常的小游戏包被拒,
+    用户看到的还是一句「疑似 zip 炸弹」,完全不知道该怎么改。
+    """
+    js = b"function tick(){ update(); render(); }\n" * 8000   # 约 320 KB,压完只有几 KB
+    rep = validate_package(make_zip(ok_files(**{"game.js": js})), kind="app")
+    assert rep.ok, rep.errors
+    assert rep.files["game.js"]["size"] == len(js)
+
+
+def test_解压后超过总量上限_拒掉():
+    """真炸弹是这个形状:压缩后很小,声明解压出几百 MB。绝对上限兜得住,不需要比例那一条。"""
+    rep = validate_package(
+        make_zip(ok_files(**{f"zeros{i}.txt": b"\0" * (5 * 1024 * 1024) for i in range(20)})),
+        kind="app")
+    assert not rep.ok and any("上限" in e for e in rep.errors)
 
 
 def test_single_file_over_5mb():

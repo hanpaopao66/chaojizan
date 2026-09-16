@@ -3,8 +3,15 @@
 ## 校验规则(每条在 tests/unit/test_miniapp_package.py 里有一个用例)
 
 - zip;应用 ≤ 10 MB、小游戏 ≤ 30 MB(压缩后),单文件 ≤ 5 MB,文件数 ≤ 1000;
-- 解压总量 ≤ 3 倍压缩量且 ≤ 90 MB(防 zip 炸弹 —— 看的是 zip 目录里声明的大小,
+- 解压总量 ≤ 90 MB(防 zip 炸弹 —— 看的是 zip 目录里声明的大小,
   解压时再按实际读出的字节数复核一遍,声明造假的包在读的时候被截住);
+
+  **原来这里还有一条「不超过压缩量 3 倍」,2026-09-16 去掉了。** 它不是防炸弹的那道闸,
+  只是个误伤器:zip 对文本的压缩比本来就远不止 3 倍(重复度高的 JS / JSON 实测能到 200 倍以上),
+  于是正常的小游戏包被拒,而用户只看到一句「疑似 zip 炸弹」。
+  真正兜住炸弹的是**绝对上限**:单文件 5 MB、文件数 1000、总量 90 MB,
+  而且这三条在解压时按实际字节数**再核一遍** —— 声明造假也撑不破。
+  比例这一条给不出任何额外保护,只会持续误伤;
 - 根目录必须有 index.html 和 superz.json;
 - 扩展名白名单;拒绝符号链接、绝对路径、反斜杠、`..`(zip slip)、重复路径;
 - superz.json:sdk 必须是 "2",kind 必须和应用一致,orientation ∈ portrait/landscape/any,
@@ -26,7 +33,7 @@ from dataclasses import dataclass, field
 MAX_ZIP = {"app": 10 * 1024 * 1024, "game": 30 * 1024 * 1024}
 MAX_FILE = 5 * 1024 * 1024
 MAX_FILES = 1000
-MAX_RATIO = 3
+#: 解压总量上限。**比例那一条已经去掉** —— 见模块开头的说明
 MAX_TOTAL = 90 * 1024 * 1024
 
 CONTENT_TYPES = {
@@ -105,9 +112,11 @@ def validate_package(data: bytes, *, kind: str) -> PackageReport:
         rep.fail(f"文件数 {len(infos)} 超过上限 {MAX_FILES}")
         return rep
     declared = sum(i.file_size for i in infos)
-    if declared > max(len(data), 1) * MAX_RATIO or declared > MAX_TOTAL:
-        rep.fail(f"解压后 {declared // 1024} KB,超过压缩量的 {MAX_RATIO} 倍或 "
-                 f"{MAX_TOTAL // 1024 // 1024} MB 上限(疑似 zip 炸弹)")
+    if declared > MAX_TOTAL:
+        # 只说实话:多大、上限多少。原来那句「超过压缩量的 3 倍或 90 MB 上限(疑似 zip 炸弹)」
+        # 把两个判据挤在一句里,用户看不出自己到底撞了哪一条
+        rep.fail(f"解压后一共 {declared // 1024 // 1024} MB,"
+                 f"超过 {MAX_TOTAL // 1024 // 1024} MB 上限")
         return rep
     seen: set[str] = set()
     total = 0
