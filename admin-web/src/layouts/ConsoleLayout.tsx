@@ -1,5 +1,6 @@
 import {
   AppstoreOutlined,
+  RobotOutlined,
   AuditOutlined,
   CarOutlined,
   CustomerServiceOutlined,
@@ -70,6 +71,7 @@ import ForumAppealsPage from '../pages/forum/AppealsPage'
 import ForumPostsPage from '../pages/forum/PostsPage'
 import ForumReportsPage from '../pages/forum/ReportsPage'
 import ForumTagsPage from '../pages/forum/TagsPage'
+import AiBotsPage from '../pages/AiBotsPage'
 
 /**
  * 平台后台外壳。
@@ -117,6 +119,9 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
       { key: '/forum/tags', label: '热门话题' },
       { key: '/forum/appeals', label: '论坛申诉' },
     ] },
+    // AI 机器人(#385):明确标注的机器人,互动不进任何公开榜单。
+    // 单独一栏而不是塞进论坛下面 —— 以后它们不只在论坛说话
+    { key: '/ai-bots', icon: <RobotOutlined />, label: 'AI 机器人' },
     { key: '/mini-apps', icon: <AppstoreOutlined />, label: '小程序' },
     { key: '/risk', icon: <WarningOutlined />, label: '风控' },
     { key: '/order-flags', icon: <FlagOutlined />, label: '异常标记' },
@@ -215,6 +220,7 @@ export default function ConsoleLayout({ onLogout }: { onLogout: () => void }) {
             <Route path="/forum/reports" element={<ForumReportsPage />} />
             <Route path="/forum/posts" element={<ForumPostsPage />} />
             <Route path="/forum/tags" element={<ForumTagsPage />} />
+            <Route path="/ai-bots" element={<AiBotsPage />} />
             <Route path="/forum/appeals" element={<ForumAppealsPage />} />
             <Route path="/mini-apps" element={<MiniAppsPage />} />
             <Route path="/risk" element={<RiskPage />} />

@@ -1503,6 +1503,131 @@ _KNOWN_FLAGS = {
 _SECRET_FLAGS = {"ai_api_key"}
 
 
+class AiBotIn(BaseModel):
+    """建一个 AI 号。人设是给模型看的,超级赞号是给人看的。"""
+
+    name: str = Field(min_length=1, max_length=20)
+    #: 必须以 bot 结尾(和别的机器人同一条规矩),用户一眼看得出是机器人
+    username: str = Field(min_length=5, max_length=32)
+    persona: str = Field(min_length=1, max_length=2000)
+    topics: str = Field(default="", max_length=300)
+    posts_per_day: int = Field(default=2, ge=0, le=24)
+    replies_per_day: int = Field(default=5, ge=0, le=48)
+
+
+class AiBotPatch(BaseModel):
+    persona: str | None = Field(default=None, max_length=2000)
+    topics: str | None = Field(default=None, max_length=300)
+    posts_per_day: int | None = Field(default=None, ge=0, le=24)
+    replies_per_day: int | None = Field(default=None, ge=0, le=48)
+    active: bool | None = None
+
+
+async def _ai_bot_out(db: AsyncSession, row) -> dict:
+    from ..models import Username
+
+    u = await db.get(User, row.user_id)
+    name_row = await db.scalar(select(Username).where(
+        Username.owner_type == "user", Username.owner_id == row.user_id))
+    from ..models import ForumPost
+
+    posts = await db.scalar(select(func.count()).select_from(ForumPost).where(
+        ForumPost.author_id == row.user_id)) or 0
+    return {"user_id": row.user_id, "name": u.name if u else "", 
+            "username": name_row.username_lc if name_row else "",
+            "persona": row.persona, "topics": row.topics,
+            "posts_per_day": row.posts_per_day, "replies_per_day": row.replies_per_day,
+            "active": row.active, "posts": int(posts),
+            "last_post_at": row.last_post_at.isoformat() if row.last_post_at else None,
+            "last_reply_at": row.last_reply_at.isoformat() if row.last_reply_at else None}
+
+
+@router.get("/ai/bots")
+async def list_ai_bots(admin: User = Depends(require_role("admin")),
+                       db: AsyncSession = Depends(get_db)):
+    from ..models import AiPersona
+
+    rows = list(await db.scalars(select(AiPersona).order_by(AiPersona.user_id)))
+    return {"items": [await _ai_bot_out(db, r) for r in rows]}
+
+
+@router.post("/ai/bots")
+async def create_ai_bot(body: AiBotIn, admin: User = Depends(require_role("admin")),
+                        db: AsyncSession = Depends(get_db)):
+    """建一个 AI 号。账号走普通机器人那条路,再标上 is_ai。"""
+    from ..models import Developer
+    from ..services import ai_bots
+
+    dev = await db.scalar(select(Developer).where(Developer.is_official.is_(True))
+                          .order_by(Developer.id).limit(1))
+    owner = await db.get(User, dev.user_id) if dev and dev.user_id else None
+    if owner is None:
+        # 挂在官方开发者名下,和官方小程序、机器人管家同一个主人
+        raise HTTPException(409, "还没有官方开发者账号:先在部署机上跑 "
+                                 "python -m scripts.seed_bot_manager --apply")
+    row = await ai_bots.create(db, owner, name=body.name, username=body.username,
+                               persona=body.persona, topics=body.topics,
+                               posts_per_day=body.posts_per_day,
+                               replies_per_day=body.replies_per_day)
+    await log_admin_action(db, admin, "ai_bot.create", target_type="user",
+                           target_id=str(row.user_id), detail={"username": body.username})
+    await db.commit()
+    return await _ai_bot_out(db, row)
+
+
+@router.patch("/ai/bots/{user_id}")
+async def patch_ai_bot(user_id: int, body: AiBotPatch,
+                       admin: User = Depends(require_role("admin")),
+                       db: AsyncSession = Depends(get_db)):
+    """改人设 / 节奏 / 停用。**停用不删号** —— 它发过的帖还在,删号会把那些帖一起带走。"""
+    from ..models import AiPersona
+
+    row = await db.get(AiPersona, user_id)
+    if row is None:
+        raise HTTPException(404, "没有这个 AI 号")
+    patch = body.model_dump(exclude_unset=True)
+    for k, v in patch.items():
+        setattr(row, k, v)
+    await log_admin_action(db, admin, "ai_bot.patch", target_type="user",
+                           target_id=str(user_id), detail=patch)
+    await db.commit()
+    return await _ai_bot_out(db, row)
+
+
+@router.post("/ai/bots/{user_id}/say")
+async def ai_bot_say_now(user_id: int, admin: User = Depends(require_role("admin")),
+                         db: AsyncSession = Depends(get_db)):
+    """让这个号**现在**说一句,不等节奏。
+
+    配好之后总要先看一眼它说出来是什么样 —— 等清扫轮到它可能要几个小时,
+    而那时候发出去的已经是线上的帖子了。这里绕过的只有「距离上次够不够久」,
+    违禁词、先审后发、开关一条都不绕。
+    """
+    from ..models import AiPersona
+    from ..services import ai_bots
+
+    row = await db.get(AiPersona, user_id)
+    if row is None:
+        raise HTTPException(404, "没有这个 AI 号")
+    if not await ai_bots._on(db):
+        raise HTTPException(409, "AI 机器人总闸关着")
+    from ..services import ai
+
+    if not await ai.configured(db):
+        raise HTTPException(409, "还没配大模型")
+    text = await ai_bots._say(db, row, ai_bots.post_prompt(row))
+    if not text:
+        raise HTTPException(502, "模型没答上来,点「试一下」看看")
+    post = await ai_bots._publish(db, row, text)
+    if post is None:
+        raise HTTPException(422, "发不出去:撞了违禁词、被禁言,或者论坛发帖开关关着")
+    row.last_post_at = ai_bots.utcnow()
+    await log_admin_action(db, admin, "ai_bot.say", target_type="user",
+                           target_id=str(user_id), detail={"pid": post.pid})
+    await db.commit()
+    return {"pid": post.pid, "text": post.text}
+
+
 @router.post("/ai/probe")
 async def ai_probe(payload: dict | None = None,
                    admin: User = Depends(require_role("admin")),

@@ -206,6 +206,7 @@ e2e_chat_scheduled
 e2e_chat_push
 e2e_chat_search_tabs
 e2e_push_devices
+e2e_ai_bots
 e2e_video_upload
 e2e_video_feed
 e2e_danmaku

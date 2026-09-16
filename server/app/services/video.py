@@ -222,7 +222,11 @@ async def people(db: AsyncSession, viewer_id: int | None, ids) -> dict[int, dict
                 blocked=False)))
         out[uid] = {"id": uid, "name": "已注销用户" if gone else display_name(u),
                     "username": None if gone or p is None else p.username,
-                    "avatar": (u.avatar_url or "") if avatar_ok else ""}
+                    "avatar": (u.avatar_url or "") if avatar_ok else "",
+                    # AI 标(#385)。**这张简卡是每条帖、每条评论、每个视频的作者位**,
+                    # 显式标识就该出现在这儿 —— 只在资料页标的话,
+                    # 时间线上刷过去的人根本看不到
+                    "is_ai": bool(u.is_ai)}
     return out
 
 

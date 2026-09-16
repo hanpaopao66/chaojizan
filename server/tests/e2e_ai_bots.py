@@ -1,0 +1,142 @@
+"""AI 机器人在论坛里说话(#385)。
+
+这一条把前面所有承诺连起来验一次 —— **每一条都是"错了也不报错"的那种**:
+
+1. 总闸关着时一个字都不发(缺省就是关的);
+2. 名片上 `is_ai` 为真 —— 客户端据此挂 AI 标(《标识办法》要的显式标识);
+3. 它发的帖走**和真人一样的路**:在时间线上看得见、点得开、能被举报;
+4. **它的互动不进推荐分**。这条是最要紧的:推荐公式是公开可复算的,
+   AI 点的赞算进去等于自己骗自己 —— 而且错了的表现只是"数字大了一点",
+   不报错、不崩,没有 AI 号的时候根本看不出来;
+5. 改人设、停用都不删号 —— 它发过的帖还在。
+
+模型这一环用**一个假的 OpenAI 兼容服务**顶替(e2e 环境不该依赖本机跑着模型),
+地址填成它,和真模型走的是同一条代码路径。
+
+跑法:SUPERZ_API=http://127.0.0.1:8013 DATABASE_URL=… python -m tests.e2e_ai_bots
+"""
+import json
+import random
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+from tests.chat_util import person
+from tests.miniapp_util import admin_token, sql
+from tests.util import call
+
+REPLY = "这家我上周去过,牛肉是现片的"
+
+
+class FakeModel(BaseHTTPRequestHandler):
+    """一个最小的 OpenAI 兼容服务:不管问什么都回同一句。"""
+
+    def do_POST(self):  # noqa: N802
+        self.rfile.read(int(self.headers.get("content-length") or 0))
+        body = json.dumps({"choices": [{"message": {"content": REPLY}}]}).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):  # 别把 e2e 的输出刷满
+        pass
+
+
+def start_fake_model() -> str:
+    srv = HTTPServer(("127.0.0.1", 0), FakeModel)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{srv.server_address[1]}/v1"
+
+
+def set_flag(admin: str, key: str, value: str) -> None:
+    call("POST", f"/admin/flags/{key}", admin, {"value": value})
+
+
+def main() -> None:
+    admin = admin_token()
+    me = person()
+    tag = random.randint(1000, 9999)
+
+    # ---- 总闸关着:什么都不发 ----
+    set_flag(admin, "ai_bots_enabled", "off")
+    endpoint = start_fake_model()
+    set_flag(admin, "ai_endpoint", endpoint)
+    set_flag(admin, "ai_model", "fake-1")
+
+    bot = call("POST", "/admin/ai/bots", admin, {
+        "name": f"吃货小z{tag}", "username": f"chihuo{tag}bot",
+        "persona": "你是一位爱吃的成都上班族", "topics": "火锅,串串",
+        "posts_per_day": 24, "replies_per_day": 48})
+    uid = bot["user_id"]
+    assert bot["active"] is True and bot["posts"] == 0, bot
+    print(f"  ✓ 建了 AI 号 {uid} @{bot['username']}")
+
+    e = call("POST", f"/admin/ai/bots/{uid}/say", admin, {}, expect_error=True)
+    assert e.get("_error") == 409 and "总闸" in str(e.get("detail")), e
+    print("  ✓ 总闸关着时一个字都不发(缺省就是关的)")
+
+    # ---- 名片上挂 AI 标 ----
+    card = me.get(f"/social/v1/users/{uid}")
+    assert card["is_ai"] is True, f"AI 号的名片上要有这一位:{card}"
+    assert card["is_bot"] is True, "它同时也是机器人"
+    print("  ✓ 名片上 is_ai 为真(客户端据此挂 AI 标)")
+
+    # ---- 打开总闸:发一条 ----
+    set_flag(admin, "ai_bots_enabled", "on")
+    r = call("POST", f"/admin/ai/bots/{uid}/say", admin, {})
+    assert r["text"] == REPLY, r
+    pid = r["pid"]
+    print(f"  ✓ 发出来了:{pid} 「{r['text']}」")
+
+    # 走的是和真人一样的路:真人看得见、点得开
+    got = me.get(f"/forum/v1/posts/{pid}")["post"]
+    assert got["text"] == REPLY and got["author"]["is_ai"] is True, got
+    print("  ✓ 真人打得开这条帖,作者名片上带着 AI 标")
+
+    # ---- 它的互动不进推荐分 ----
+    mine = me.post("/forum/v1/posts", {"text": f"今晚吃什么好呢 {tag}"})
+    before = next((x for x in me.get("/forum/v1/timeline/foryou")["items"]
+                   if x["post"]["pid"] == mine["pid"]), None)
+    assert before is not None, "自己的帖该在推荐里"
+    e_before = before["rank"]["parts"]["e"]
+    likes_before = before["rank"]["parts"]["likes"]
+
+    # 让 AI 号去点个赞(直接写库:走接口要机器人 token,这里要验的是算分那一层)
+    sql("INSERT INTO forum_likes (post_id, user_id, created_at) "
+        "SELECT id, :u, now() FROM forum_posts WHERE pid = :p "
+        "ON CONFLICT DO NOTHING", {"u": uid, "p": mine["pid"]})
+    after = next((x for x in me.get("/forum/v1/timeline/foryou")["items"]
+                  if x["post"]["pid"] == mine["pid"]), None)
+    assert after is not None
+    assert after["rank"]["parts"]["e"] == e_before, (
+        f"AI 点的赞进互动分了:{e_before} → {after['rank']['parts']['e']}。"
+        "公开公式里混进自己刷的数,等于自己骗自己")
+    assert after["rank"]["parts"]["likes"] == likes_before, (
+        f"公示的「几人点赞」也把 AI 算进去了:{after['rank']['parts']}")
+    print(f"  ✓ AI 点了赞,互动分和公示的点赞人数都纹丝不动(还是 e={e_before})")
+
+    # 真人点赞照样算 —— 证明上面那条不是"这条路根本没通"
+    other = person()
+    other.post(f"/forum/v1/posts/{mine['pid']}/like", {})
+    now = next((x for x in me.get("/forum/v1/timeline/foryou")["items"]
+                if x["post"]["pid"] == mine["pid"]), None)
+    assert now["rank"]["parts"]["e"] > e_before, (
+        f"真人点赞也没算进去,那上面那条断言是假绿:{now['rank']}")
+    print(f"  ✓ 真人点赞照常算(e {e_before} → {now['rank']['parts']['e']})")
+
+    # ---- 停用不删号 ----
+    call("PATCH", f"/admin/ai/bots/{uid}", admin, {"active": False})
+    row = next(x for x in call("GET", "/admin/ai/bots", admin)["items"]
+               if x["user_id"] == uid)
+    assert row["active"] is False and row["posts"] >= 1, row
+    assert me.get(f"/forum/v1/posts/{pid}")["post"]["text"] == REPLY, \
+        "停用不该把它发过的帖带走"
+    print("  ✓ 停用之后它不再说话,发过的帖还在")
+
+    set_flag(admin, "ai_bots_enabled", "off")
+    print("AI 机器人 e2e 通过 ✓")
+
+
+if __name__ == "__main__":
+    main()

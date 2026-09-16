@@ -169,6 +169,36 @@ export interface AiProbeOut {
 export const aiProbe = (prompt?: string) =>
   post<AiProbeOut>('/admin/ai/probe', prompt ? { prompt } : {})
 
+export interface AiBot {
+  user_id: number
+  name: string
+  username: string
+  persona: string
+  topics: string
+  posts_per_day: number
+  replies_per_day: number
+  active: boolean
+  posts: number
+  last_post_at: string | null
+  last_reply_at: string | null
+}
+
+export const aiBots = () => get<{ items: AiBot[] }>('/admin/ai/bots')
+
+export const createAiBot = (body: {
+  name: string; username: string; persona: string; topics: string
+  posts_per_day: number; replies_per_day: number
+}) => post<AiBot>('/admin/ai/bots', body)
+
+export const patchAiBot = (userId: number, body: Partial<Pick<AiBot,
+  'persona' | 'topics' | 'posts_per_day' | 'replies_per_day' | 'active'>>) =>
+  request<AiBot>('PATCH', `/admin/ai/bots/${userId}`, body)
+
+/** 让它现在说一句,不等节奏。绕过的只有「距离上次够不够久」,
+ *  违禁词、先审后发、开关一条都不绕 */
+export const aiBotSayNow = (userId: number) =>
+  post<{ pid: string; text: string }>(`/admin/ai/bots/${userId}/say`)
+
 // ---------- 商家审核 ----------
 
 export interface AdminMerchant {
