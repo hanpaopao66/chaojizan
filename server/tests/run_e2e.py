@@ -34,6 +34,10 @@ WEIGHTS = {
     "e2e_refund_order": 7, "e2e_account_delete": 7, "e2e_agent_scopes": 15,
     "e2e_badges": 8,
     "e2e_mcp_server": 20,
+    # 音乐(#378):每首歌都要现场 ffmpeg 生成 + 转两档 AAC(loudnorm 要过一遍整首),
+    # 所以比同规模的套件慢不少
+    "e2e_music_studio": 70, "e2e_music_review": 95, "e2e_music_social": 45,
+    "e2e_music_listen": 40,
 }
 DEFAULT_WEIGHT = 2.6
 

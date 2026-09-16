@@ -210,6 +210,10 @@ e2e_video_comments
 e2e_video_me
 e2e_social_moderation
 e2e_social_follow
+e2e_music_studio
+e2e_music_listen
+e2e_music_social
+e2e_music_review
 e2e_credit
 e2e_credit_roles
 e2e_rider_fault
