@@ -56,7 +56,10 @@ def main() -> None:
     p1 = post(a, "第一条 #天气")
     p2 = post(a, "第二条")
     p3 = post(b, "别人的一条")
-    age_post(p1["pid"], 7)                       # 发帖 7 小时前
+    # 往前挪 1 小时:既走到时间衰减那一项(分母 (1+2)^1.5),分数又明显高过刚发的帖子
+    # ——(5+1)/3^1.5 ≈ 1.15,而一条互动都没有的新帖最多 1/2^1.5 ≈ 0.35。
+    # 这样不管库里积了多少帖子,它都排在第一屏,断言不会因为「别的套件也在发帖」而红
+    age_post(p1["pid"], 1)
     # **点赞的人不能是等会儿要看推荐的那个** —— 点过赞的话题会给他 topic 加权,基准就不干净了
     liker = person("137")
     for who in (b, c, liker):
@@ -68,7 +71,7 @@ def main() -> None:
     parts = item["rank"]["parts"]
     assert parts["likes"] == 3 and parts["reposts"] == 1, parts
     assert parts["e"] == 3 + 2 * 1 == 5, parts
-    assert 6.9 <= parts["hours"] <= 7.2, parts
+    assert 0.9 <= parts["hours"] <= 1.3, parts
     # 推荐分 = (E + 1) ÷ (小时数 + 2)^1.5,没关注、没共同话题时两个方括号都是 0
     want = (parts["e"] + 1) / (parts["hours"] + 2) ** 1.5
     assert math.isclose(item["rank"]["score"], want, rel_tol=1e-9), (item["rank"], want)

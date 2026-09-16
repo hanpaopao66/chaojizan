@@ -18,7 +18,7 @@ from tests.forum_util import (act, age_poll, age_post, clear_rate_limits, person
 
 def main() -> None:
     a, b, c = person("137"), person("137"), person("137")
-    a_name, b_name = set_username(a, "fa"), set_username(b, "fb")
+    b_name = set_username(b, "fb")
 
     # ---------- 发帖:实体只由服务端解析 ----------
     p = post(a, f"周末去 #成都# 玩 @{b_name},看 https://chaojizan.cc/x",

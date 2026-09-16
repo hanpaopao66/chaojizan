@@ -11,12 +11,12 @@
 """
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models import ForumPost, ForumTag, User
+from ..models import User
 from ..ratelimit import (check_daily_limit, check_rate_limit, check_rate_limit_seconds)
 from ..security import get_current_user_optional
 from ..services import forum as fsvc

@@ -18,9 +18,9 @@ from sqlalchemy import Select, and_, case, func, or_, select, tuple_
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import (Follow, ForumBookmark, ForumLike, ForumMuteWord, ForumPin, ForumPoll,
-                      ForumPost, ForumPostTag, ForumRepost, ForumTag, SocialBlock,
-                      SocialProfile, User, UserRole)
+from ..models import (Follow, ForumBookmark, ForumLike, ForumPin, ForumPoll, ForumPost,
+                      ForumPostTag, ForumRepost, ForumTag, SocialBlock, SocialProfile, User,
+                      UserRole)
 from . import cards
 from . import forum as fsvc
 from . import forum_rank as rank
