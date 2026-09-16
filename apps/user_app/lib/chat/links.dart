@@ -8,6 +8,22 @@ import 'pages/user_profile_page.dart';
 import 'store.dart';
 import 'ui/avatar.dart';
 
+/// 模块自己注册的站内链接处理函数(音乐、论坛在各自的 nav.dart 里注册)。
+///
+/// **方向是反的才对**:聊天不认识音乐和论坛的页面,它只负责把链接问一圈 ——
+/// 谁认得谁处理。这样加一个新模块不用改这里,关掉一个模块也不会留下打不开的死链接。
+typedef AppLinkHandler = Future<bool> Function(BuildContext context, Uri uri);
+
+final List<AppLinkHandler> _moduleHandlers = [];
+
+/// 注册一个站内链接处理函数(同一个函数重复注册只算一次,热重载时不会叠)。
+void registerAppLinkHandler(AppLinkHandler handler) {
+  if (!_moduleHandlers.contains(handler)) _moduleHandlers.add(handler);
+}
+
+@visibleForTesting
+void clearAppLinkHandlers() => _moduleHandlers.clear();
+
 /// 本站的域名。名片码、站内链接只认这两个
 const _ownHosts = {'chaojizan.cc', 'www.chaojizan.cc'};
 
@@ -48,11 +64,19 @@ const _ownHosts = {'chaojizan.cc', 'www.chaojizan.cc'};
 /// - `chaojizan.cc/u/名片编号` → 这个人的资料(没有超级赞号、或者关了按号找到的人的名片链接);
 /// - `chaojizan.cc/v/视频号` → 视频详情(`?p=2` 从第 2 P 开始)。
 ///
+/// - `chaojizan.cc/music/…`、`chaojizan.cc/forum/…` → 由音乐、论坛模块**自己注册**的处理函数认
+///   ([registerAppLinkHandler]);聊天不反向依赖那两个模块。
+///
 /// 返回 true 表示认得、已经处理;false 交给调用方(一般是问一句再用浏览器打开)。
 Future<bool> openAppLink(BuildContext context, Uri uri) async {
   if (!_ownHosts.contains(uri.host.toLowerCase())) return false;
   final seg = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (seg.isEmpty) return false;
+  // 模块注册的先问一遍:音乐、论坛的链接不需要登录就能看,和视频一样放在「消息没启动」前面
+  for (final h in _moduleHandlers) {
+    if (await h(context, uri)) return true;
+    if (!context.mounted) return true;
+  }
   // 视频不需要登录也能看,放在「消息没启动」的判断前面
   if (seg[0] == 'v' && seg.length > 1 && RegExp(r'^sv[1-9A-HJ-NP-Za-km-z]{10}$').hasMatch(seg[1])) {
     final p = int.tryParse(uri.queryParameters['p'] ?? '');
