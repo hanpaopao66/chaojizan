@@ -244,6 +244,18 @@ void main() {
       expect(fPollLeft(poll), '已结束');
     });
 
+    test('voted 给了个不是数的东西时当没投过,不许平白打上勾', () {
+      final poll = FPoll.fromJson({
+        'options': [
+          {'text': '甲', 'votes': 1}
+        ],
+        'total': 1,
+        'voted': false,
+      });
+      expect(poll.voted, isNull);
+      expect(poll.didVote, isFalse);
+    });
+
     test('一票没有时占比是 0,不除以 0', () {
       final poll = FPoll.fromJson({
         'options': [

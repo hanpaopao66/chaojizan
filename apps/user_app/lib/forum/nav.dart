@@ -170,7 +170,7 @@ void unawaitedOpen(Future<void> f) {
 Future<void> shareForumPost(BuildContext context, FPost post) async {
   if (post.unavailable) return;
   final link = forumPostLink(post.pid);
-  final title = _shareTitle(post);
+  final title = forumShareTitle(post);
   final pick = await szShowSheet<String>(
     context: context,
     builder: (ctx) => SafeArea(
@@ -195,8 +195,12 @@ Future<void> shareForumPost(BuildContext context, FPost post) async {
 }
 
 /// 分享时用的一句话:正文前 30 字;没正文(纯图 / 卡片 / 投票)就写作者。
-String _shareTitle(FPost post) {
-  final t = post.text.trim().replaceAll('\n', ' ');
+///
+/// 30 字这个数和 §5.9 会话列表里的 `[帖子] 正文前 30 字` 是同一个口径 ——
+/// #382 把分享换成聊天卡片时,卡片标题接着用它,两处不要各算各的。
+/// 按 Unicode 字符数截(emoji 算一个),换行压成空格(标题只有一行)。
+String forumShareTitle(FPost post) {
+  final t = post.text.trim().replaceAll(RegExp(r'\s+'), ' ');
   if (t.isNotEmpty) {
     final runes = t.runes.toList();
     return runes.length <= 30 ? t : '${String.fromCharCodes(runes.take(30))}…';

@@ -122,6 +122,43 @@ void main() {
     });
   });
 
+  group('分享标题', () {
+    FPost post({String text = '', String author = '小王'}) => FPost.fromJson({
+          'pid': 'fpHbFUgZ3A32',
+          'text': text,
+          'author': {'id': 42, 'name': author, 'username': 'xiaowang', 'avatar': ''},
+        });
+
+    test('短正文原样用', () {
+      expect(forumShareTitle(post(text: '今天天气不错')), '今天天气不错');
+    });
+
+    test('30 字正好不截,31 字截到 30 再加省略号', () {
+      expect(forumShareTitle(post(text: '字' * 30)), '字' * 30);
+      expect(forumShareTitle(post(text: '字' * 31)), '${'字' * 30}…');
+    });
+
+    test('按 Unicode 字符截,不是 UTF-16 码元 —— 别把 emoji 劈成两半', () {
+      final title = forumShareTitle(post(text: '😀' * 31));
+      expect(title, '${'😀' * 30}…');
+      expect(title.runes.length, 31, reason: '30 个 emoji + 一个省略号');
+    });
+
+    test('换行和连续空白压成一个空格(标题只有一行)', () {
+      expect(forumShareTitle(post(text: '第一行\n第二行')), '第一行 第二行');
+      expect(forumShareTitle(post(text: '  前后有空白  ')), '前后有空白');
+    });
+
+    test('没正文(纯图 / 卡片 / 投票)就写作者', () {
+      expect(forumShareTitle(post(text: '')), '小王 的帖子');
+      expect(forumShareTitle(post(text: '   ')), '小王 的帖子');
+    });
+
+    test('连作者都没有时有兜底', () {
+      expect(forumShareTitle(FPost.fromJson({'pid': 'fpX'})), '一条帖子');
+    });
+  });
+
   group('常量', () {
     test('和规格 F1 / F3 / §7.2 的数对得上', () {
       expect(kPostMaxChars, 500);

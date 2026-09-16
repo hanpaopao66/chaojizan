@@ -17,7 +17,14 @@ DateTime? _time(Object? v) => v == null ? null : DateTime.tryParse('$v')?.toLoca
 
 /// 可空的整数:投票没投过时 `votes` / `total` 是 null(§8.1),
 /// 不能拿 0 顶上 —— 0 票和「还看不到票数」是两回事。
-int? _intOrNull(Object? v) => v == null ? null : _int(v);
+///
+/// 不是数也给 null(不是 0):`voted: false` 要是被读成 0,
+/// 「没投过」就成了「投了第 1 项」,那一项会平白打上勾。
+int? _intOrNull(Object? v) {
+  if (v == null) return null;
+  if (v is num) return v.toInt();
+  return int.tryParse('$v');
+}
 
 /// 帖子里的一个话题。`tag` 是小写的规范形(跳转用),`display` 是作者原样写的(显示用)。
 class FTag {
