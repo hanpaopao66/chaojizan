@@ -265,6 +265,25 @@ class ChatApi {
   Future<Map<String, dynamic>> search(String q) async =>
       (await _get('/chat/v1/search', {'q': q}) as Map).cast();
 
+  /// 分类搜索(搜索页顶上那一排)。`tab` 见服务端 SEARCH_TABS。
+  ///
+  /// 分类下**允许不填关键词** —— 点进「文件」就该看到全部文件。
+  /// 翻页给的是消息自增 id(`before_id`),不是 seq:seq 是会话内的号,跨会话排不出先后。
+  Future<({List<Map<String, dynamic>> items, bool hasMore, int? nextBeforeId})> searchTab(
+      String tab, {String q = '', int? beforeId, int limit = 30}) async {
+    final r = (await _get('/chat/v1/search', {
+      'tab': tab,
+      if (q.isNotEmpty) 'q': q,
+      if (beforeId != null) 'before_id': '$beforeId',
+      'limit': '$limit',
+    })) as Map;
+    return (
+      items: [for (final it in r['items'] as List) (it as Map).cast<String, dynamic>()],
+      hasMore: r['has_more'] == true,
+      nextBeforeId: (r['next_before_id'] as num?)?.toInt(),
+    );
+  }
+
   Future<({List<ChatMessage> items, bool hasMore})> searchIn(int chatId,
       {String q = '', String kind = '', int? before}) async {
     final r = (await _get('/chat/v1/chats/$chatId/search', {

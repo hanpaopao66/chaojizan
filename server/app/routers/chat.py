@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, case, exists, func, or_, select, update
+from sqlalchemy import and_, case, exists, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -701,21 +701,149 @@ async def sync(body: SyncIn, me: User = Depends(social_user), db: AsyncSession =
 
 # ---------------- 搜索与共享媒体 ----------------
 
+#: 全局搜索顶上那一排分类(对齐 Telegram 的搜索页)。
+#:
+#: 「下载内容」不在这里,也不该在:那是**客户端本地**的下载记录 ——
+#: 谁把哪个文件存进了自己手机,服务端既不知道也不该知道。客户端自己记(chat/downloads.dart)。
+SEARCH_TABS = ("chats", "channels", "apps", "media", "links", "files", "music", "voice")
+
+#: 按消息类型分的那几类。links 和 music 的判据不是 kind,见 _tab_conds
+_TAB_KINDS = {
+    "media": ("photo", "video", "gif", "video_note"),
+    "files": ("file",),
+    "voice": ("voice",),
+}
+
+#: 音乐这一类算哪些分享卡片(§5.9)。我们有音乐模块,所以「音乐」比 Telegram 那格更实 ——
+#: 除了音频文件,分享进聊天的歌、专辑、歌单、音乐人也算
+_MUSIC_CARDS = ("track", "release", "playlist", "artist")
+
+#: 音频文件:media 里任意一个的 mime 是 audio/*。
+#: 写成 SQL 片段是因为 JSONB 数组里按前缀匹配某个键,ORM 表达不出来
+_AUDIO_FILE = text("EXISTS (SELECT 1 FROM jsonb_array_elements(chat_messages.media) e"
+                   " WHERE e->>'mime' LIKE 'audio/%')")
+
+
+def _tab_conds(tab: str) -> list:
+    """这一类要加的筛选条件。"""
+    if tab in _TAB_KINDS:
+        return [ChatMessage.kind.in_(_TAB_KINDS[tab])]
+    if tab == "links":
+        return [or_(ChatMessage.entities.contains([{"type": "url"}]),
+                    ChatMessage.entities.contains([{"type": "text_link"}]))]
+    if tab == "music":
+        return [or_(and_(ChatMessage.kind == "card",
+                         ChatMessage.extra["card"]["type"].astext.in_(_MUSIC_CARDS)),
+                    and_(ChatMessage.kind == "file", _AUDIO_FILE))]
+    return []
+
+
+async def _search_messages(db: AsyncSession, me: User, tab: str, term: str,
+                           before_id: int | None, limit: int) -> dict:
+    """跨会话找消息:多媒体 / 链接 / 文件 / 音乐 / 语音,以及不分类时的正文搜索。
+
+    翻页用**消息自增 id**,不是 seq —— seq 是会话内的号,跨会话排不出先后。
+    """
+    conds = [ChatMember.role.in_(ACTIVE_ROLES), ChatMessage.deleted_at.is_(None),
+             ChatMessage.kind != "service", ChatMessage.seq > ChatMember.cleared_seq,
+             ~exists().where(and_(MessageHide.chat_id == ChatMessage.chat_id,
+                                  MessageHide.seq == ChatMessage.seq,
+                                  MessageHide.user_id == me.id))]
+    conds += _tab_conds(tab)
+    if term:
+        conds.append(ChatMessage.text.ilike(f"%{term}%"))
+    if before_id:
+        conds.append(ChatMessage.id < before_id)
+    rows = list(await db.scalars(
+        select(ChatMessage)
+        .join(ChatMember, and_(ChatMember.chat_id == ChatMessage.chat_id,
+                               ChatMember.user_id == me.id))
+        .where(*conds).order_by(ChatMessage.id.desc()).limit(limit)))
+    by_chat: dict[int, list] = {}
+    for m in rows:
+        by_chat.setdefault(m.chat_id, []).append(m)
+    out = []
+    for cid, ms in by_chat.items():
+        c = await db.get(Chat, cid)
+        if c is None:
+            continue
+        card = await chat_card(db, me.id, c)
+        for item, m in zip(await enrich_messages(db, me.id, c, ms), ms):
+            out.append({"chat": {"id": c.id, "type": c.type, "title": card["title"],
+                                 "photo": card["photo"]},
+                        "id": m.id, "message": item})
+    out.sort(key=lambda x: x["id"], reverse=True)
+    return {"items": out, "has_more": len(rows) == limit,
+            "next_before_id": rows[-1].id if len(rows) == limit else None}
+
+
+async def _search_apps(db: AsyncSession, me: User, term: str, limit: int) -> dict:
+    """「应用」这一类:小程序 + 机器人(Telegram 那格也是这两样)。
+
+    小程序**走目录自己那套能不能列的判据**(mini_apps._listable),不在这里另写一份 ——
+    抄一份的下场是急停闸关了小程序,搜索里还搜得到、点得开。
+    """
+    from ..models import Bot, UserRole
+    from ..services.flags import bots_on
+    from .mini_apps import _cards, _listable
+
+    if not term:
+        return {"items": [], "has_more": False, "next_before_id": None}
+    apps = [a for a in await _listable(db, discovery=True)
+            if term.lower() in (a.name or "").lower()][:limit]
+    cards = {c["appid"]: c for c in await _cards(db, apps)} if apps else {}
+    items = [{"kind": "miniapp", "appid": a.appid, "name": a.name,
+              "tagline": a.tagline or "", "icon": cards.get(a.appid, {}).get("icon", ""),
+              "developer": cards.get(a.appid, {}).get("developer", {}).get("name", "")}
+             for a in apps if a.appid in cards]
+    # 机器人:按名字或超级赞号找。机器人平台关着的时候一个都不列 ——
+    # 搜得到、点进去却用不了,比没有更糟
+    if await bots_on(db):
+        like = f"%{term}%"
+        bot_ids = list(await db.scalars(
+            select(User.id).join(Bot, Bot.user_id == User.id)
+            .outerjoin(Username, and_(Username.owner_type == "user",
+                                      Username.owner_id == User.id))
+            .where(User.role == UserRole.bot, User.deleted_at.is_(None),
+                   or_(User.name.ilike(like),
+                       Username.username_lc.like(f"%{term.lstrip('@').lower()}%")))
+            .limit(limit)))
+        bots = await user_cards(db, me.id, bot_ids)
+        items += [{"kind": "bot", **bots[i]} for i in bot_ids if i in bots]
+    return {"items": items[:limit], "has_more": False, "next_before_id": None}
+
+
 @router.get("/search")
-async def search(q: str = Query(min_length=1, max_length=64), me: User = Depends(social_user),
-                 db: AsyncSession = Depends(get_db)):
-    """全局搜索:我的会话名、联系人和公开的人 / 群 / 频道(用户名)、我能读的消息正文。"""
+async def search(q: str = Query("", max_length=64), tab: str = "",
+                 before_id: int | None = None, limit: int = Query(30, ge=1, le=100),
+                 me: User = Depends(social_user), db: AsyncSession = Depends(get_db)):
+    """全局搜索。
+
+    不带 `tab` 时是老形状(`chats` / `users` / `messages`),老版本 App 还在用。
+    带 `tab` 时只返回那一类:见 SEARCH_TABS —— 分类下**允许不填关键词**
+    (「多媒体」这类点进去就该列出全部,和 Telegram 一样),不分类时还是要关键词。
+    """
     await check_rate_limit("chat_search", str(me.id), 60)
     term = q.strip()
+    if tab and tab not in SEARCH_TABS:
+        raise HTTPException(422, f"不认识的分类:{tab}")
+    if not tab and not term:
+        raise HTTPException(422, "要搜什么")
+    if tab in ("media", "links", "files", "music", "voice"):
+        return await _search_messages(db, me, tab, term, before_id, limit)
+    if tab == "apps":
+        return await _search_apps(db, me, term, limit)
     like = f"%{term}%"
     my = (select(ChatMember.chat_id).where(ChatMember.user_id == me.id,
                                            ChatMember.role.in_(ACTIVE_ROLES)))
+    # 「对话」那格不含频道,「频道」那格只有频道;不分类时两样都给(老形状)
+    types = {"chats": ("group",), "channels": ("channel",)}.get(tab, ("group", "channel"))
     chats = list(await db.scalars(select(Chat).where(
-        Chat.id.in_(my), Chat.deleted_at.is_(None), Chat.type.in_(("group", "channel")),
+        Chat.id.in_(my), Chat.deleted_at.is_(None), Chat.type.in_(types),
         Chat.title.ilike(like)).limit(20)))
     chat_items = [await chat_card(db, me.id, c) for c in chats]
-    # 私聊按对方名字搜
-    peers = list(await db.scalars(select(User.id).join(
+    # 私聊按对方名字搜。频道那格不要人
+    peers = [] if tab == "channels" else list(await db.scalars(select(User.id).join(
         ChatMember, and_(ChatMember.user_id == User.id)).where(
         ChatMember.chat_id.in_(select(ChatMember.chat_id).where(
             ChatMember.user_id == me.id, ChatMember.role.in_(ACTIVE_ROLES))),
@@ -727,14 +855,20 @@ async def search(q: str = Query(min_length=1, max_length=64), me: User = Depends
         rows = (await db.execute(select(Username.owner_type, Username.owner_id).where(
             Username.username_lc.like(f"{uname}%")).limit(20))).all()
         hidden = await username_search_off(db, [oid for t, oid in rows if t == "user"])
-        public_users = [oid for t, oid in rows if t == "user" and oid != me.id
-                        and oid not in hidden]
+        public_users = [] if tab == "channels" else [
+            oid for t, oid in rows if t == "user" and oid != me.id and oid not in hidden]
         for t, oid in rows:
             if t == "chat":
                 card = await public_chat_card(db, me, oid)
-                if card:
+                if card and card.get("type") in types:
                     public_chats.append(card)
     cards = await user_cards(db, me.id, list(dict.fromkeys(peers + public_users)))
+    if tab in ("chats", "channels"):
+        # 分类下是一串「条目」,每条自报是会话还是人 —— 客户端一个列表画到底,不用分三坨
+        items = [{"kind": "chat", **c} for c in chat_items + public_chats]
+        items += [{"kind": "user", **cards[i]}
+                  for i in dict.fromkeys(peers + public_users) if i in cards]
+        return {"items": items, "has_more": False, "next_before_id": None}
     # 消息正文:只搜我能读的(清空过的不搜)
     mrows = (await db.execute(
         select(ChatMessage).join(ChatMember, and_(ChatMember.chat_id == ChatMessage.chat_id,

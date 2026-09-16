@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../downloads.dart';
 import '../models.dart';
 import 'media_save_io.dart' if (dart.library.js_interop) 'media_save_web.dart' as impl;
 import 'media_views.dart' show resolveMediaNow;
@@ -17,11 +18,28 @@ import 'media_views.dart' show resolveMediaNow;
 ///
 /// 电脑版(Windows / macOS / Ubuntu):下载完弹系统的存储对话框;打开文件交给系统默认程序。
 /// 电脑上没有「相册」,macOS 写照片图库还要单独的权限 —— 见 media_save_io.dart 的 _onDesktop。
-Future<void> saveChatMedia(BuildContext context, MediaInfo media) => _run(context, media, open: false);
+/// [from] 是这个文件所在的会话,只用来给「下载内容」那一格写上「哪来的」。
+/// 不传也能用 —— 少一行来源好过少一条记录。
+Future<void> saveChatMedia(BuildContext context, MediaInfo media, {ChatMeta? from}) =>
+    _run(context, media, open: false, from: from);
 
-Future<void> openChatFile(BuildContext context, MediaInfo media) => _run(context, media, open: true);
+Future<void> openChatFile(BuildContext context, MediaInfo media, {ChatMeta? from}) =>
+    _run(context, media, open: true, from: from);
 
-Future<void> _run(BuildContext context, MediaInfo media, {required bool open}) async {
+/// 删掉下载到本机的那份文件(「下载内容」里选了「连文件一起删」时用)。
+/// 网页版没有这回事 —— 文件在浏览器的下载目录里,那份只能用户自己去删。
+Future<void> deleteDownloaded(String path) => impl.deleteLocal(path);
+
+/// 下载记录里的「哪来的」。只要两个字段,不把整个会话对象拖进来
+class ChatMeta {
+  const ChatMeta(this.id, this.title);
+
+  final int id;
+  final String title;
+}
+
+Future<void> _run(BuildContext context, MediaInfo media,
+    {required bool open, ChatMeta? from}) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   final r = await resolveMediaNow(media);
   if (r == null) {
@@ -30,5 +48,9 @@ Future<void> _run(BuildContext context, MediaInfo media, {required bool open}) a
   }
   if (!context.mounted) return;
   final sep = r.url.contains('?') ? '&' : '?';
-  await impl.fetchThen(context, '${r.url}${sep}download=1', media, open: open);
+  final path = await impl.fetchThen(context, '${r.url}${sep}download=1', media, open: open);
+  // 下成了才记。取消存储对话框、没网、存相册被拒都拿不到路径,那就不算下载过
+  if (path != null) {
+    await Downloads.instance.record(media, path: path, chatId: from?.id, chatTitle: from?.title);
+  }
 }

@@ -44,7 +44,8 @@ class _ViewerState extends State<_Viewer> {
     super.dispose();
   }
 
-  Future<void> _save(ChatMessage m) => saveChatMedia(context, m.media.first);
+  Future<void> _save(ChatMessage m) => saveChatMedia(context, m.media.first,
+      from: ChatMeta(m.chatId, ChatStore.instance.chats[m.chatId]?.title ?? ''));
 
   @override
   Widget build(BuildContext context) {

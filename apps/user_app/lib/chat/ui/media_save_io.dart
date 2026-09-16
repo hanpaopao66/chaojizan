@@ -17,19 +17,26 @@ final _inFlight = <int, Future<File?>>{};
 
 /// 手机:下载到私有目录,然后存相册 / 交给系统应用打开;不行就交给分享面板。
 /// 电脑:下载完弹系统的存储对话框,或者交给系统默认程序打开(见 [_onDesktop])。
-Future<void> fetchThen(BuildContext context, String url, MediaInfo media, {required bool open}) async {
+///
+/// 返回落到本机的那个路径(没下成返回 null)——「下载内容」那一格要记它,
+/// 之后从清单里点开就不用再下一遍。
+Future<String?> fetchThen(BuildContext context, String url, MediaInfo media,
+    {required bool open}) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
   // 回调要写成块:箭头写法会把 remove 拿到的 future(就是这个 future 自己)交回给 whenComplete,
   // 它会等那个 future —— 自己等自己,永远卡住
   final f = await (_inFlight[media.id] ??= _download(messenger, url, media).whenComplete(() {
     _inFlight.remove(media.id);
   }));
-  if (f == null) return;
-  if (szIsDesktopApp) return _onDesktop(messenger, f, open: open);
+  if (f == null) return null;
+  if (szIsDesktopApp) {
+    await _onDesktop(messenger, f, open: open);
+    return f.path;
+  }
   if (open) {
     final r = await OpenFilex.open(f.path);
     if (r.type != ResultType.done) await _share(f); // 手机上没有能打开它的应用
-    return;
+    return f.path;
   }
   try {
     if (_isVideo(f.path)) {
@@ -42,6 +49,7 @@ Future<void> fetchThen(BuildContext context, String url, MediaInfo media, {requi
     // 老系统上没有写相册的权限(我们不申请存储权限)、格式相册不认:让用户自己选存到哪
     await _share(f);
   }
+  return f.path;
 }
 
 /// 电脑上没有「相册」,分享面板也不是存文件的地方:
@@ -67,6 +75,17 @@ Future<void> _onDesktop(ScaffoldMessengerState? messenger, File f, {required boo
     messenger?.showSnackBar(SnackBar(content: Text('已保存到 ${to.path}')));
   } catch (_) {
     messenger?.showSnackBar(const SnackBar(content: Text('没存进去,换个位置再试')));
+  }
+}
+
+/// 删掉下载到私有目录的那份。文件不在了当成功 —— 用户要的是「它没了」
+Future<void> deleteLocal(String path) async {
+  if (path.isEmpty) return;
+  try {
+    final f = File(path);
+    if (await f.exists()) await f.delete();
+  } catch (_) {
+    // 删不掉(权限、已被系统清理)不值得打断用户:清单里那一行已经没了
   }
 }
 

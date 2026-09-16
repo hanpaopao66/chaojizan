@@ -230,7 +230,11 @@ class FileView extends StatelessWidget {
     final progress = message.isLocal ? message.progress : null;
     return InkWell(
       // 手机上在 App 里下载、交给系统应用打开;网页上交给浏览器(见 media_save.dart)
-      onTap: media.id == 0 ? null : () => openChatFile(context, media),
+      onTap: media.id == 0
+          ? null
+          : () => openChatFile(context, media,
+              from: ChatMeta(message.chatId,
+                  ChatStore.instance.chats[message.chatId]?.title ?? '')),
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),

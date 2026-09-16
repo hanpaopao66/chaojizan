@@ -148,7 +148,11 @@ class _MediaTabState extends State<_MediaTab> with AutomaticKeepAliveClientMixin
               title: Text(f?.name ?? '文件', maxLines: 1, overflow: TextOverflow.ellipsis),
               subtitle: Text('${fileSize(f?.size ?? 0)} · $sub'),
               // 点一下打开文件(和聊天里点文件一样,Telegram 的共享媒体也是这样);长按回到聊天里那条
-              onTap: f == null ? null : () => openChatFile(context, f),
+              onTap: f == null
+                  ? null
+                  : () => openChatFile(context, f,
+                      from: ChatMeta(widget.chatId,
+                          ChatStore.instance.chats[widget.chatId]?.title ?? '')),
               onLongPress: () => openChat(context, widget.chatId, jumpTo: m.seq),
             );
           case 'voice':
