@@ -65,11 +65,6 @@ void main() {
             200,
             headers: {'content-type': 'application/json; charset=utf-8'});
       }
-      if (req.url.path.endsWith('.apk')) {
-        if (downloadFails) return http.Response('boom', 500);
-        apkHits++;
-        return http.Response.bytes(apkBytes, 200);
-      }
       return http.Response('', 404);
     });
 
@@ -78,11 +73,37 @@ void main() {
     PathProviderPlatform.instance = _FakePathProvider(tmp.path);
 
     final m = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    // 模拟系统的下载队列(DownloadManager)。**这是生产走的那条路** ——
+    // 「排队」那一下就把文件写出来,和真的下完了一样
     m.setMockMethodCallHandler(
         const MethodChannel('superz/apk_installer'), (call) async {
       switch (call.method) {
         case 'canInstall':
           return true;
+
+        case 'download':
+          apkHits++;
+          if (!downloadFails) {
+            final dir = Directory('${tmp.path}/apk');
+            dir.createSync(recursive: true);
+            File('${dir.path}/${call.arguments['fileName']}')
+                .writeAsBytesSync(apkBytes);
+          }
+          return 7;
+
+        case 'downloadStatus':
+          return downloadFails
+              ? {'status': 'failed', 'soFar': 0, 'total': 0, 'reason': 1004}
+              : {
+                  'status': 'done',
+                  'soFar': apkBytes.length,
+                  'total': apkBytes.length,
+                  'reason': 0,
+                };
+
+        case 'cancelDownload':
+          return true;
+
         case 'install':
           if (installThrows) {
             // 后台起 Activity 被系统挡下来时,原生侧回的就是这个
@@ -216,8 +237,8 @@ void main() {
   });
 
   android('**下载真的失败时**才跳浏览器', (t) async {
+    downloadFails = true;              // 系统那条下载报失败
     await open(t);
-    downloadFails = true;              // 把下载打断
     await tapUpdate(t);
     expect(launched, hasLength(1),
         reason: '手里什么都没有,这时候退回浏览器是对的');

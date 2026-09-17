@@ -48,6 +48,8 @@ Future<void> checkForUpdate(
   BuildContext context, {
   required String baseUrl,
   required String app,
+  /// 只给测试用:**`flutter_test` 把真实 HTTP 全掐了**(所有请求一律回 400),
+  /// 不留这个口子,连「有没有新版」这一跳都测不了。生产上永远是 null
   @visibleForTesting http.Client? client,
 }) async {
   if (!_selfChannel) return; // 商店渠道:一句话都不说
@@ -96,7 +98,6 @@ Future<void> checkForUpdate(
         sha256Hex: sha256Hex,
         force: force,
         inApp: canInApp,
-        client: client,
       ),
     ),
   );
@@ -204,7 +205,6 @@ class _UpdateDialog extends StatefulWidget {
     required this.sha256Hex,
     required this.force,
     required this.inApp,
-    this.client,
   });
 
   final String version;
@@ -213,11 +213,6 @@ class _UpdateDialog extends StatefulWidget {
   final String sha256Hex;
   final bool force;
   final bool inApp;
-
-  /// 只给测试用。**`flutter_test` 把真实 HTTP 全掐了**(所有请求回 400),
-  /// 不留这个口子,应用内下载这条路一条用例都写不了 —— 而它 2026-09-17
-  /// 出过一个真 bug。生产上永远是 null,走真的 client
-  final http.Client? client;
 
   @override
   State<_UpdateDialog> createState() => _UpdateDialogState();
@@ -233,6 +228,11 @@ class _UpdateDialogState extends State<_UpdateDialog>
 
   /// 用户点过「更新」但还没装上 —— 回到前台时替他把安装器拉起来
   bool _wantInstall = false;
+
+  /// 正在跑的那条系统下载。非空 = 后台下着,这一页关掉也不影响
+  int? _downloadId;
+
+  bool get _background => _downloadId != null;
 
   @override
   void initState() {
@@ -349,6 +349,52 @@ class _UpdateDialogState extends State<_UpdateDialog>
     await _install(file);
   }
 
+  /// 走系统的后台下载队列。**退出这一页、切走 App、熄屏都继续下。**
+  ///
+  /// 返回下好的文件(已过 SHA-256 校验);排不进队列或下载失败就抛,
+  /// 由调用方决定退回浏览器。
+  Future<File> _downloadInBackground(File file) async {
+    final id = await ApkInstaller.download(
+        widget.url, file.uri.pathSegments.last,
+        title: '超级赞 v${widget.version}');
+    _downloadId = id;
+    try {
+      while (true) {
+        final st = await ApkInstaller.downloadStatus(id);
+        if (st.failed) {
+          throw Exception(st.status == 'gone'
+              ? '下载被取消了'
+              : '下载失败(系统错误码 ${st.reason})');
+        }
+        if (st.done) break;
+        if (mounted) setState(() => _progress = st.fraction ?? 0);
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+    } finally {
+      _downloadId = null;
+    }
+    // 落点就是 FileProvider 那份 apk/ 目录,不用再挪
+    final got = File(file.path);
+    if (!got.existsSync()) {
+      throw Exception('下载完了却找不到安装包');
+    }
+    await _verify(got);
+    return got;
+  }
+
+  /// **不校验就等于给中间人一个装任意 APK 的口子。** 这是这条需求里唯一不能省的部分。
+  ///
+  /// 也正因为这个,系统那条「下载完成」通知是关掉的 —— 点它会直接装,绕过这里。
+  Future<void> _verify(File file) async {
+    final digest = sha256.convert(await file.readAsBytes()).toString();
+    if (digest.toLowerCase() != widget.sha256Hex) {
+      try {
+        file.deleteSync();
+      } catch (_) {}
+      throw Exception('安装包校验不通过(可能被篡改或下载不完整)');
+    }
+  }
+
   Future<File> _download() async {
     final dir = Directory(
         '${(await getExternalStorageDirectory())!.path}/apk');
@@ -372,37 +418,10 @@ class _UpdateDialogState extends State<_UpdateDialog>
       } catch (_) {}
     }
 
-    final req = http.Request('GET', Uri.parse(widget.url));
-    final resp = await (widget.client ?? http.Client()).send(req).timeout(
-        const Duration(seconds: 30));
-    if (resp.statusCode != 200) {
-      throw Exception('下载失败(HTTP ${resp.statusCode})');
-    }
-    final total = resp.contentLength ?? 0;
-    final sink = file.openWrite();
-    var received = 0;
-    try {
-      await for (final chunk in resp.stream) {
-        sink.add(chunk);
-        received += chunk.length;
-        if (total > 0 && mounted) {
-          setState(() => _progress = received / total);
-        }
-      }
-    } finally {
-      await sink.close();
-    }
-
-    // 校验:不校验就等于给中间人一个装任意 APK 的口子。
-    // 这是这条需求里唯一不能省的部分
-    final digest = sha256.convert(await file.readAsBytes()).toString();
-    if (digest.toLowerCase() != widget.sha256Hex) {
-      try {
-        file.deleteSync();
-      } catch (_) {}
-      throw Exception('安装包校验不通过(可能被篡改或下载不完整)');
-    }
-    return file;
+    // 交给系统的后台下载队列。**这是唯一的下载路径** ——
+    // 走到这儿一定有 ApkInstaller.supported(inApp 就是这么判的),
+    // 再留一份「进程内下载」只会是永远跑不到、也没人测的死代码
+    return _downloadInBackground(file);
   }
 
   @override
@@ -421,7 +440,13 @@ class _UpdateDialogState extends State<_UpdateDialog>
             LinearProgressIndicator(
                 value: _progress == 0 ? null : _progress),
             const SizedBox(height: 6),
-            Text('正在下载 ${((_progress ?? 0) * 100).toStringAsFixed(0)}%',
+            Text(
+                _background
+                    // 下载归系统管了,这一页只是在看着。说清楚可以走开,
+                    // 不然人会守着这个进度条
+                    ? '正在后台下载 ${((_progress ?? 0) * 100).toStringAsFixed(0)}%'
+                        ' · 可以关掉这一页,下载不受影响'
+                    : '正在下载 ${((_progress ?? 0) * 100).toStringAsFixed(0)}%',
                 style: const TextStyle(fontSize: 12)),
           ] else
             Text(
@@ -440,10 +465,13 @@ class _UpdateDialogState extends State<_UpdateDialog>
         ],
       ),
       actions: [
-        if (!widget.force && !downloading)
+        // **下载中也让他走。** 下载归系统的队列管,关掉这一页照样下完;
+        // 拦着不让关,等于逼人守着一个进度条 —— 而这正是「后台下载」的意义。
+        // 下完之后回到 App 会直接弹安装(包已经在本地、哈希也对得上)
+        if (!widget.force && (!downloading || _background))
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('稍后再说'),
+            child: Text(downloading ? '后台下载' : '稍后再说'),
           ),
         FilledButton(
           onPressed: downloading ? null : _run,

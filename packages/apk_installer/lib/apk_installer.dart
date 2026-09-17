@@ -39,11 +39,88 @@ class ApkInstaller {
     }
   }
 
-  /// 把下载好的 APK 交给系统安装器。抛异常表示拉不起来,调用方退回浏览器。
+  /// 把下载好的 APK 交给系统安装器。抛异常表示拉不起来(比如 App 在后台 ——
+  /// Android 10 起后台不许起 Activity),**这时候包还是好的**,调用方别扔。
   static Future<void> install(String path) async {
     if (!supported) {
       throw UnsupportedError('当前平台不支持应用内安装');
     }
     await _channel.invokeMethod<bool>('install', {'path': path});
   }
+
+  // ---------- 后台下载(交给系统的 DownloadManager) ----------
+  //
+  // **为什么不在 Dart 里下**:Dart 那份活在 Flutter 引擎里,App 被系统回收就断了,
+  // 而且没法在通知栏画进度。DownloadManager 退到后台、熄屏、进程被杀都继续下,
+  // 进度由系统自己显示 —— 那是系统的通知,不占我们的通知权限。
+  //
+  // 「下载完成」那条系统通知是**刻意关掉**的:点它会直接装,绕过 SHA-256 校验。
+
+  /// 排进系统下载队列,返回这条下载的编号。[fileName] 是落地文件名
+  /// (和 FileProvider 声明的 `apk/` 目录同一个地方,下完就地能装)。
+  static Future<int> download(String url, String fileName,
+      {String? title}) async {
+    if (!supported) throw UnsupportedError('当前平台不支持后台下载');
+    final id = await _channel.invokeMethod<int>('download', {
+      'url': url,
+      'fileName': fileName,
+      if (title != null) 'title': title,
+    });
+    if (id == null) throw Exception('排不进下载队列');
+    return id;
+  }
+
+  /// 查一条下载现在怎么样了。
+  ///
+  /// [status] 取 `running` / `paused` / `done` / `failed` / `gone`
+  /// (`gone` = 用户在通知栏划掉了,或者系统清了记录 —— 不是错误,重新下就是)。
+  static Future<ApkDownloadStatus> downloadStatus(int id) async {
+    final m = await _channel
+        .invokeMapMethod<String, dynamic>('downloadStatus', {'id': id});
+    return ApkDownloadStatus(
+      status: m?['status'] as String? ?? 'gone',
+      soFar: (m?['soFar'] as num?)?.toInt() ?? 0,
+      total: (m?['total'] as num?)?.toInt() ?? 0,
+      path: m?['path'] as String?,
+      reason: (m?['reason'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  static Future<void> cancelDownload(int id) async {
+    if (!supported) return;
+    try {
+      await _channel.invokeMethod<bool>('cancelDownload', {'id': id});
+    } catch (_) {}
+  }
+}
+
+/// 一条后台下载的现状。
+class ApkDownloadStatus {
+  const ApkDownloadStatus({
+    required this.status,
+    required this.soFar,
+    required this.total,
+    required this.path,
+    required this.reason,
+  });
+
+  final String status;
+  final int soFar;
+
+  /// 总字节。**可能是 -1**:服务器没给 Content-Length 时 DownloadManager
+  /// 就不知道总量。这时候只能画个不确定的进度条,别拿它做除数
+  final int total;
+
+  /// 落地路径。只有 `done` 时才有
+  final String? path;
+
+  /// 失败原因(DownloadManager 的 ERROR_* 码)
+  final int reason;
+
+  bool get done => status == 'done';
+  bool get failed => status == 'failed' || status == 'gone';
+
+  /// 0–1;总量不知道时回 null(交给不确定进度条)
+  double? get fraction =>
+      total > 0 ? (soFar / total).clamp(0.0, 1.0) : null;
 }
