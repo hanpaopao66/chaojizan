@@ -7,7 +7,10 @@ import 'package:http/testing.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:superz_shared/superz_shared.dart';
+import 'package:user_app/channel_config.dart';
 import 'package:user_app/main.dart';
+import 'package:user_app/order_filter.dart';
+import 'package:user_app/profile_sections.dart';
 
 /// 「我的」页的入口密度与分块(#296)。
 ///
@@ -148,10 +151,12 @@ void main() {
     bool countsEndpoint = true,
     Map<String, dynamic>? counts,
     Map<String, dynamic> features = const {},
+    void Function(String path)? onRequest,
   }) {
     return ApiClient(
       baseUrl: 'http://test.local',
       httpClient: MockClient((req) async {
+        onRequest?.call(req.url.path);
         Object? payload;
         switch (req.url.path) {
           case '/auth/login':
@@ -202,10 +207,28 @@ void main() {
     );
   }
 
+  /// 滚到列表底部。
+  ///
+  /// **不用 `dragUntilVisible`**:它每次只 pump 50ms,连续 drag 会把列表
+  /// 带进惯性滑动 —— 业务板块卡在快速滚动里一闪而过时它判不到,
+  /// 一路滑到底后 `element(finder)` 抛 `Bad state: No element`
+  /// (2026-09-17 板块卡测试踩的)。这里每步 pumpAndSettle,滚动是可控的。
+  ///
+  /// 滚到底之后**最后几屏都在构建范围内**(viewport + cacheExtent),
+  /// 所以业务板块的入口都能查到;要点的话还得再 [WidgetTester.ensureVisible]。
+  Future<void> scrollToBottom(WidgetTester t) async {
+    for (var i = 0; i < 12; i++) {
+      await t.drag(find.byType(ListView), const Offset(0, -300));
+      await t.pumpAndSettle();
+    }
+  }
+
   /// 把「我的」页放进真机口径的可视区里。
   /// 宽 390、高 [firstScreen] —— 也就是**只给它首屏那么大的窗**。
   Future<void> pumpProfile(WidgetTester t, ApiClient api,
-      {double scale = 1.0}) async {
+      {double scale = 1.0,
+      void Function(OrderFilter filter, {String? channel})? onOpenOrders,
+      void Function(SzChannel channel)? onOpenChannel}) async {
     setPhoneViewport(t, const Size(390, 844));
     await t.pumpWidget(MediaQuery(
       data: MediaQueryData(textScaler: TextScaler.linear(scale)),
@@ -215,7 +238,12 @@ void main() {
           body: Align(
             alignment: Alignment.topLeft,
             child: SizedBox(
-                width: 390, height: firstScreen, child: ProfileView(api: api)),
+                width: 390,
+                height: firstScreen,
+                child: ProfileView(
+                    api: api,
+                    onOpenOrders: onOpenOrders,
+                    onOpenChannel: onOpenChannel)),
           ),
         ),
       ),
@@ -236,6 +264,7 @@ void main() {
     // 板块开关(/config 的 features.*)。缺省全开 —— 服务端不给这个字段时
     // 客户端按"开着"算(`!= false`),桩要和那个口径一致
     Map<String, dynamic> features = const {},
+    void Function(String path)? onRequest,
   }) async {
     SharedPreferences.setMockInitialValues({});
     final api = fakeApi(
@@ -248,7 +277,8 @@ void main() {
         miniApps: miniApps,
         countsEndpoint: countsEndpoint,
         counts: counts,
-        features: features);
+        features: features,
+        onRequest: onRequest);
     await api.login('13800000001', 'pw');
     return api;
   }
@@ -271,20 +301,19 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   group('首屏密度', () {
-    testWidgets('已登录:首屏至少 14 个入口', (t) async {
+    testWidgets('已登录:首屏至少 12 个入口', (t) async {
       final api = await loggedIn(orders: [order()]);
       await pumpProfile(t, api);
       final n = visibleEntries(t);
-      // 18:两轮网格化之后的实测值(帮助/反馈/食安投诉一组,
-      // 实名/邀请/生日推送一组;邀请有礼 2026-09-14 下线后实测仍是 18)。
-      // 门槛跟着实测往上抬 —— 只抬不降,
-      // 不然下次有人把网格改回列表条这里照样绿。
+      // 18 → 12:2026-09-17 归类改造把券/地址/收藏和帮助那两行网格收进了
+      // 各业务板块卡(板块卡在账号列表之后 —— 往上放会把「长辈版」挤出
+      // 首屏,那条约束更硬)。首屏剩的是订单四格、账目三个入口、
+      // 平台服务两个入口和账号设置前两条。
       //
-      // 注意首屏数不是唯一收益:第二轮压的是首屏**以下**的长度,
-      // 整页要滚的距离 261 → 215px
-      expect(n, greaterThanOrEqualTo(18),
-          reason: '首屏只看得到 $n 个入口。改版前是 8 个,'
-              '这一页的全部意义就是把这个数字提上来');
+      // **门槛降下来是这次改版的代价,不是标准松了**:下次再想降,
+      // 先问一遍「首屏是不是连订单和账目都看不见了」。
+      expect(n, greaterThanOrEqualTo(12),
+          reason: '首屏只看得到 $n 个入口。订单、账目、长辈版必须在首屏内');
     });
 
     testWidgets('未登录:首屏不许是一片灰占位,至少 10 个入口', (t) async {
@@ -292,7 +321,9 @@ void main() {
       final api = fakeApi();
       await pumpProfile(t, api);
       final n = visibleEntries(t);
-      expect(n, greaterThanOrEqualTo(15),
+      // 15 → 10:同上,业务入口收进了板块卡;游客首屏仍是
+      // 账目三个入口 + 帮助/反馈 + 长辈版/实名/发票/AI 那几条
+      expect(n, greaterThanOrEqualTo(10),
           reason: '游客首屏只有 $n 个能点的东西 —— '
               '登录前这一页也得是有用的');
     });
@@ -463,6 +494,11 @@ void main() {
         'tickets': {'total': 4, 'usable': 2},
       });
       await pumpProfile(t, api);
+      // 团购买过 4 张:在订单卡头的足迹里,不在角标里(卡还在首屏时先查)
+      expect(find.text('4'), findsOneWidget);
+      expect(badgeText('4'), findsNothing);
+      // 券的角标现在挂在业务板块卡上(外卖/团购),滚到底一起查
+      await scrollToBottom(t);
       expect(badgeText('3'), findsOneWidget, reason: '优惠券还能用 3 张');
       expect(badgeText('2'), findsOneWidget, reason: '团购券还能用 2 张');
       final hold = Theme.of(t.element(find.byType(ProfileView))).sz.hold;
@@ -471,9 +507,6 @@ void main() {
             find.ancestor(of: badgeText(n), matching: find.byType(Badge)));
         expect(badge.backgroundColor, hold);
       }
-      // 团购买过 4 张:在卡头足迹里,不在角标里
-      expect(find.text('4'), findsOneWidget);
-      expect(badgeText('4'), findsNothing);
     });
 
     testWidgets('拿不到数(老服务端):卡头退回「全部订单」', (t) async {
@@ -662,8 +695,7 @@ void main() {
 
     testWidgets('三个板块各一格,不再摊开视频那六格', (t) async {
       await pumpProfile(t, await loggedIn());
-      await t.dragUntilVisible(tile('我的视频'),
-          find.byType(ListView), const Offset(0, -80));
+      await scrollToBottom(t);
       for (final k in ['我的视频', '我的音乐', '我的论坛']) {
         expect(tile(k), findsOneWidget, reason: k);
       }
@@ -678,8 +710,7 @@ void main() {
       // 人以为功能坏了。反过来同样难受:闸关着入口还在,点进去只说「暂未开放」
       await pumpProfile(
           t, await loggedIn(features: {'video': true, 'music': false, 'forum': true}));
-      await t.dragUntilVisible(tile('我的视频'),
-          find.byType(ListView), const Offset(0, -80));
+      await scrollToBottom(t);
       expect(tile('我的视频'), findsOneWidget);
       expect(tile('我的论坛'), findsOneWidget);
       expect(find.text('我的音乐'), findsNothing, reason: '音乐关着就不该有这一格');
@@ -697,14 +728,155 @@ void main() {
     // 「这时候整张卡不画、而不是画成一张空卡」那一条**没有用例守**:
     // 试过三种数卡片的写法(按首屏数 / 滚到底数 / 给足高度数),
     // 每一种红的原因都是 ListView 的懒加载而不是产品行为 —— 再往下写
-    // 就是在测框架。那一条由实现里那句 `if (items.isEmpty) return
-    // const SizedBox.shrink();` 兜着,改动时留意。
+    // 就是在测框架。那一条由 `_sectionEntries` 返回空列表时跳过这个频道
+    // (以及 `_sectionCards` 最后返回空列表)兜着,改动时留意。
 
     testWidgets('服务端没给 features 时按「开着」算——老服务端不该把入口弄没', (t) async {
       await pumpProfile(t, await loggedIn(features: const {}));
-      await t.dragUntilVisible(tile('我的音乐'),
-          find.byType(ListView), const Offset(0, -80));
+      await scrollToBottom(t);
       expect(tile('我的音乐'), findsOneWidget);
+    });
+  });
+
+  // ---------------- 业务板块:一个频道一张卡(2026-09-17 归类) ----------------
+  //
+  // 券/地址/收藏/帮助原来混在一张网格卡里,和订单、账目并列。现在按频道归:
+  // 外卖、住宿、团购各一张卡,一行图标 + 「查看更多」聚合页。
+  group('业务板块', () {
+    Finder cardOf(String text) => find
+        .ancestor(of: find.text(text), matching: find.byType(ProfileSectionCard))
+        .first;
+
+    testWidgets('外卖板块:一行四个图标 + 查看更多,聚合页列出低频入口', (t) async {
+      await pumpProfile(t, await loggedIn(orders: [order()]));
+      await scrollToBottom(t);
+      // 团购板块也挂着「我的收藏」,断言要缩在外卖卡里
+      final food = cardOf('收货地址');
+      expect(find.descendant(of: food, matching: find.text('优惠券')),
+          findsOneWidget);
+      expect(find.descendant(of: food, matching: find.text('我的收藏')),
+          findsOneWidget);
+      // 第一行放不下六个入口,所以有「查看更多」
+      final more = find.descendant(of: food, matching: find.text('查看更多'));
+      await t.ensureVisible(more);
+      await t.pumpAndSettle();
+      await t.tap(more);
+      await t.pumpAndSettle();
+      // 聚合页把全部入口列出来 —— 第一行放不下的那两个也在这里
+      expect(find.text('我的食安投诉'), findsOneWidget);
+      expect(find.text('开发票'), findsOneWidget);
+    });
+
+    testWidgets('一行放得下的板块不挂「查看更多」——挂一个点进去还是同一批入口', (t) async {
+      ChannelConfig.setForTest(const ['stay']);
+      addTearDown(ChannelConfig.resetForTest);
+      await pumpProfile(t, await loggedIn());
+      await scrollToBottom(t);
+      expect(find.text('住宿订单'), findsOneWidget);
+      expect(find.text('查看更多'), findsNothing);
+    });
+
+    testWidgets('后台关掉的频道不出板块卡——入口和开关要对上', (t) async {
+      ChannelConfig.setForTest(const ['stay']);
+      addTearDown(ChannelConfig.resetForTest);
+      await pumpProfile(t, await loggedIn());
+      await scrollToBottom(t);
+      expect(find.text('住宿订单'), findsOneWidget);
+      expect(find.text('收货地址'), findsNothing,
+          reason: '外卖频道没开,就不该有外卖板块卡');
+    });
+
+    testWidgets('板块卡的订单入口带着频道进订单页', (t) async {
+      ChannelConfig.setForTest(const ['stay']);
+      addTearDown(ChannelConfig.resetForTest);
+      OrderFilter? gotFilter;
+      String? gotChannel;
+      await pumpProfile(t, await loggedIn(), onOpenOrders: (f, {channel}) {
+        gotFilter = f;
+        gotChannel = channel;
+      });
+      await scrollToBottom(t);
+      // 滚到底只保证「建出来了」,可能还压在视口上沿:
+      // 点之前把它滚进可视区,不然 tap 会打在屏幕外
+      await t.ensureVisible(find.text('住宿订单'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('住宿订单'));
+      await t.pumpAndSettle();
+      expect(gotFilter, OrderFilter.all);
+      expect(gotChannel, 'stay',
+          reason: '板块卡的订单入口要带频道 —— 数字说几单、列表就看得见几单');
+    });
+
+    testWidgets('聚合页顶上有回流按钮,点了去对应频道下单', (t) async {
+      SzChannel? got;
+      await pumpProfile(t, await loggedIn(orders: [order()]),
+          onOpenChannel: (ch) => got = ch);
+      await scrollToBottom(t);
+      final more = find.descendant(
+          of: cardOf('收货地址'), matching: find.text('查看更多'));
+      await t.ensureVisible(more);
+      await t.pumpAndSettle();
+      await t.tap(more);
+      await t.pumpAndSettle();
+      expect(find.text('去点外卖'), findsOneWidget,
+          reason: '聚合页只有「我的」入口的话,想再下一单得退回首页找金刚区');
+      await t.tap(find.text('去点外卖'));
+      await t.pumpAndSettle();
+      expect(got?.key, 'food');
+    });
+
+    testWidgets('零售板块的回流按钮也接上了(买菜买水果)', (t) async {
+      ChannelConfig.setForTest(const ['retail']);
+      addTearDown(ChannelConfig.resetForTest);
+      SzChannel? got;
+      await pumpProfile(t, await loggedIn(), onOpenChannel: (ch) => got = ch);
+      await scrollToBottom(t);
+      final more = find.descendant(
+          of: cardOf('收货地址'), matching: find.text('查看更多'));
+      await t.ensureVisible(more);
+      await t.pumpAndSettle();
+      await t.tap(more);
+      await t.pumpAndSettle();
+      expect(find.text('去买菜买水果'), findsOneWidget);
+      await t.tap(find.text('去买菜买水果'));
+      await t.pumpAndSettle();
+      expect(got?.key, 'retail');
+    });
+  });
+
+  // ---------------- 首屏之外的两个体验项(2026-09-18) ----------------
+  group('进行中订单条', () {
+    testWidgets('有进行中的单:订单区上面直接出一条,不是只有角标', (t) async {
+      final api = await loggedIn(orders: [
+        order(no: 'A', status: 'accepted'),
+      ]);
+      await pumpProfile(t, api);
+      expect(find.byType(ActiveOrdersBanner), findsOneWidget);
+      // 一单时标题带商家名;桩里没有 eta_at,副标题就是「点开看进度」
+      expect(find.textContaining('楼下面馆'), findsOneWidget);
+      expect(find.text('点开看进度'), findsOneWidget);
+    });
+
+    testWidgets('没有进行中的单:零高度,不占位', (t) async {
+      final api = await loggedIn(orders: [order()]);
+      await pumpProfile(t, api);
+      expect(find.byType(ActiveOrdersBanner), findsNothing);
+    });
+  });
+
+  group('下拉刷新', () {
+    testWidgets('往下拉一次,订单接口再拉一遍', (t) async {
+      var orderCalls = 0;
+      final api = await loggedIn(orders: [order()], onRequest: (path) {
+        if (path == '/orders') orderCalls++;
+      });
+      await pumpProfile(t, api);
+      final before = orderCalls;
+      // 列表在顶部,往下甩出越界 → RefreshIndicator 扣扳机
+      await t.fling(find.byType(ListView), const Offset(0, 300), 1000);
+      await t.pumpAndSettle();
+      expect(orderCalls, greaterThan(before),
+          reason: '拉了半天没重新拉数据,那这个手势就是假的');
     });
   });
 }

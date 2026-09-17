@@ -70,6 +70,24 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https" android:host="chaojizan.cc" android:pathPrefix="/m/"/>
             </intent-filter>
+            <!-- 系统分享面板的接收入口(ACTION_SEND)。**不声明这里,分享面板里
+                 根本看不到超级赞** —— 系统只列声明过接收分享的 App,和有没有
+                 聊天功能无关。文字和图片;收到后弹会话选择,由 ShareReceiver 处理 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
             <meta-data android:name="flutter_deeplinking_enabled" android:value="true"/>
         </activity>
         <!-- Don't delete the meta-data below.

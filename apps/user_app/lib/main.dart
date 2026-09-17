@@ -40,6 +40,7 @@ import 'money_flow_page.dart';
 import 'order_filter.dart';
 import 'share_card.dart';
 import 'food_safety_records_page.dart';
+import 'home_compose.dart';
 import 'identity_page.dart';
 import 'coming_soon_page.dart';
 import 'feature_flags.dart';
@@ -47,8 +48,11 @@ import 'delivery_map_page.dart';
 import 'dish_detail_page.dart';
 import 'errand_page.dart';
 import 'payment_service.dart';
+import 'profile_sections.dart';
+import 'share_receiver.dart';
 import 'qr_login/qr_confirm_page.dart';
-import 'qr_login/qr_login.dart' show QrLoginWatcher;
+import 'qr_login/qr_login.dart' show QrLoginWatcher, canScanHere;
+import 'qr_login/qr_scan_page.dart' show openQrScanner;
 import 'reviews_page.dart';
 import 'search_page.dart';
 import 'session.dart';
@@ -56,6 +60,10 @@ import 'settings_page.dart';
 import 'stay_order_pages.dart';
 import 'transparency_page.dart';
 import 'trust_page.dart';
+import 'chat/pages/chat_admin.dart' show pickContactsMulti;
+import 'chat/pages/contacts_page.dart' show AddContactPage;
+import 'chat/pages/my_card_page.dart' show MyCardPage;
+import 'chat/pages/new_chat_page.dart' show NewChatPage;
 import 'chat/pages/sanctions_page.dart';
 import 'video/creator/upload_tasks.dart';
 import 'forum/nav.dart' as forum;
@@ -306,15 +314,54 @@ class _HomePageState extends State<HomePage> {
     if (mounted) setState(() {});
   }
 
-  /// 「我的」页订单四格、首页进行中订单条都走这里:push 独立的订单页。
+  /// 「我的」页订单四格、板块卡的订单入口、首页进行中订单条都走这里:
+  /// push 独立的订单页。
   ///
   /// 底部原来有「订单」tab,四格是**切 tab**;2026-09 底部换成「消息」「视频」
   /// (DEV-PROMPTS-40 #339),订单页改成 push 出来的子页 —— 返回回到来的地方,
-  /// 不会出现第二个订单列表
-  void _openOrders(OrderFilter filter) {
+  /// 不会出现第二个订单列表。
+  ///
+  /// [channel] 从板块卡进来时带上(外卖/住宿/跑腿),订单页落在那个频道的单上;
+  /// 四格和首页那条不带,是全部频道
+  void _openOrders(OrderFilter filter, {String? channel}) {
     Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => OrdersPage(api: widget.api, filter: filter)));
+        builder: (_) =>
+            OrdersPage(api: widget.api, filter: filter, channel: channel)));
   }
+
+  /// 首页右上角「+」:发起类动作。
+  ///
+  /// 扫一扫走 [openQrScanner](相机说明、登录码、名片码、小程序链接都在它里面);
+  /// 其余三件要先登录 —— 名片、群、联系人都挂在账号上
+  Future<void> _composeHome() async {
+    final pick = await showHomeComposeSheet(context, canScan: canScanHere);
+    if (!mounted || pick == null) return;
+    switch (pick) {
+      case HomeComposeAction.scan:
+        await openQrScanner(context, widget.api);
+      case HomeComposeAction.card:
+        if (!await ensureLoggedIn(context)) return;
+        if (!mounted) return;
+        await Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => const MyCardPage()));
+      case HomeComposeAction.group:
+        if (!await ensureLoggedIn(context)) return;
+        if (!mounted) return;
+        final ids = await pickContactsMulti(context, title: '选择群成员');
+        if (ids == null || !mounted) return;
+        await Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => NewChatPage(type: 'group', memberIds: ids)));
+      case HomeComposeAction.addContact:
+        if (!await ensureLoggedIn(context)) return;
+        if (!mounted) return;
+        await Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => const AddContactPage()));
+    }
+  }
+
+  /// 首页列表的 State:频道跳转要用它的定位(`_myLat/_myLng` 在那里),
+  /// 「我的」页板块聚合页的回流按钮靠这个 key 调到同一段逻辑
+  final _homeListKey = GlobalKey<_MerchantListViewState>();
 
   @override
   void initState() {
@@ -368,6 +415,26 @@ class _HomePageState extends State<HomePage> {
       ..presenter = _presentQrConfirm
       ..onSignedOut = _onQrSignedOut
       ..start(widget.api, ChatStore.instance.userEvents.stream);
+    // 系统分享收进来(Android ACTION_SEND):冷启动的原生 intent 等这里去取,
+    // 热启动的原生侧直接推过来;收到后弹会话选择,发到哪由用户定
+    ShareReceiver.instance.pending.addListener(_onIncomingShare);
+    unawaited(ShareReceiver.instance.init());
+  }
+
+  bool _shareBusy = false;
+
+  /// 收到系统分享:弹会话选择把内容发出去。
+  /// **不自动发** —— 收到就往某个会话里塞是不礼貌的,发到哪由用户选
+  Future<void> _onIncomingShare() async {
+    final share = ShareReceiver.instance.pending.value;
+    if (share == null || _shareBusy || !mounted) return;
+    _shareBusy = true;
+    ShareReceiver.instance.pending.value = null;
+    try {
+      await sendIncomingShare(context, share);
+    } finally {
+      _shareBusy = false;
+    }
   }
 
   Future<void> _presentQrConfirm(Map<String, dynamic> request) async {
@@ -409,6 +476,7 @@ class _HomePageState extends State<HomePage> {
     }
     _callPill?.remove();
     _callPill = null;
+    ShareReceiver.instance.pending.removeListener(_onIncomingShare);
     super.dispose();
   }
 
@@ -593,6 +661,14 @@ class _HomePageState extends State<HomePage> {
           //
           // 收货地址在「我的」页的卡券网格里有一份,这里让位不丢入口;
           // 首页/订单 tab 保持原样(那两个 tab 的地址是下单上下文)
+          // 首页右上角「+」:发起类动作(扫一扫 / 我的名片 / 发起群聊 /
+          // 添加联系人)。地址栏在左边、加号在右边,和商业平台的肌肉记忆一致
+          if (_tab == _kTabHome)
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: '新建',
+              onPressed: _composeHome,
+            ),
           if (_tab == _kTabMe) ...[
             IconButton(
               icon: const Icon(Icons.support_agent_outlined),
@@ -629,6 +705,7 @@ class _HomePageState extends State<HomePage> {
         children: [
           _visited.contains(_kTabHome)
               ? MerchantListView(
+                  key: _homeListKey,
                   api: widget.api,
                   deliveryAddress: _deliveryAddress,
                   onLocated: (name, failed) {
@@ -653,7 +730,13 @@ class _HomePageState extends State<HomePage> {
               ? ChatTab(api: widget.api)
               : const SizedBox.shrink(),
           _visited.contains(_kTabMe)
-              ? ProfileView(api: widget.api, onOpenOrders: _openOrders)
+              ? ProfileView(
+                  api: widget.api,
+                  onOpenOrders: _openOrders,
+                  // 频道跳转住在首页列表的 State 里(住宿要用它的定位),
+                  // 这里借 key 调同一段 —— 首页是初始 tab,这个 State 一直在
+                  onOpenChannel: (ch) =>
+                      _homeListKey.currentState?._openChannel(ch))
               : const SizedBox.shrink(),
         ],
       ),
@@ -740,30 +823,53 @@ class _ActiveOrdersBarState extends State<ActiveOrdersBar>
   }
 
   @override
+  Widget build(BuildContext context) =>
+      ActiveOrdersBanner(api: widget.api, active: _active);
+}
+
+/// 进行中订单条的**展示部分**:数据由调用方给 ——
+/// 首页那条自己轮询(状态会变),「我的」页用已经拉到的订单列表,
+/// 不再多打一次接口,也不在 IndexedStack 保活的两个 tab 上各转一个定时器。
+class ActiveOrdersBanner extends StatelessWidget {
+  const ActiveOrdersBanner({
+    super.key,
+    required this.api,
+    required this.active,
+    this.padding = const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+  });
+
+  final ApiClient api;
+  final List<Order> active;
+
+  /// 外框留白。首页的列表不带页边,用默认值;「我的」页的 ListView 已经有
+  /// 左右 18 的页边,传 [EdgeInsets.zero],免得两边各留一次
+  final EdgeInsetsGeometry padding;
+
+  @override
   Widget build(BuildContext context) {
-    if (_active.isEmpty) return const SizedBox.shrink();
+    if (active.isEmpty) return const SizedBox.shrink();
     final sz = Theme.of(context).sz;
-    final first = _active.first;
+    final first = active.first;
     final eta = DateTime.tryParse(first.etaAt ?? '')?.toLocal();
-    final title = _active.length == 1
+    final title = active.length == 1
         ? '${first.merchantName} · ${first.status.label}'
-        : '${_active.length} 个订单进行中';
-    final sub = _active.length == 1
+        : '${active.length} 个订单进行中';
+    final sub = active.length == 1
         ? (eta == null
             ? '点开看进度'
             : '预计 ${eta.hour.toString().padLeft(2, '0')}:${eta.minute.toString().padLeft(2, '0')} 送达')
         : '最新一单:${first.merchantName} · ${first.status.label}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(kPagePad, 8, kPagePad, 0),
+      padding: padding,
       child: Material(
         color: sz.claySoft,
         borderRadius: BorderRadius.circular(kRadiusMd),
         child: InkWell(
           borderRadius: BorderRadius.circular(kRadiusMd),
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-              builder: (_) => _active.length == 1
-                  ? OrderDetailPage(api: widget.api, orderNo: first.orderNo)
-                  : OrdersPage(api: widget.api, filter: OrderFilter.active))),
+              builder: (_) => active.length == 1
+                  ? OrderDetailPage(api: api, orderNo: first.orderNo)
+                  : OrdersPage(api: api, filter: OrderFilter.active))),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(children: [
@@ -802,10 +908,15 @@ class _ActiveOrdersBarState extends State<ActiveOrdersBar>
 /// 入口:「我的」页订单四格和「我的订单」、首页进行中订单条。
 /// 顶栏右边是券包:团购券不走订单接口,订单页不能因为改版就少了这个入口
 class OrdersPage extends StatefulWidget {
-  const OrdersPage({super.key, required this.api, this.filter = OrderFilter.all});
+  const OrdersPage({super.key, required this.api, this.filter = OrderFilter.all,
+      this.channel});
 
   final ApiClient api;
   final OrderFilter filter;
+
+  /// 从「我的」页板块卡进来时带的频道(外卖/住宿/跑腿…)。
+  /// null = 全部;有值时订单页一进来就落在那个频道的单上
+  final String? channel;
 
   @override
   State<OrdersPage> createState() => _OrdersPageState();
@@ -836,6 +947,7 @@ class _OrdersPageState extends State<OrdersPage> {
       body: OrdersTab(
         api: widget.api,
         filter: widget.filter,
+        channel: widget.channel,
         onCounts: (c) {
           final n = c.ticketsUsable ?? 0;
           if (mounted && n != _ticketsUsable) {
@@ -1752,6 +1864,61 @@ class _MerchantListViewState extends State<MerchantListView>
     );
   }
 
+  /// 频道的下单入口:首页金刚区那一格和「我的」页板块聚合页的回流按钮
+  /// 都走这里 —— 一套跳转,不然两处迟早不一致。
+  ///
+  /// 放在这个 State 里是因为住宿列表要 `_myLat/_myLng`(正在用来找店的位置),
+  /// 那是这个 State 的数据,外壳够不着
+  Future<void> _openChannel(SzChannel ch) async {
+    // 跑腿单一建出来就是「待支付」,必须把订单接回来直接进支付。
+    // 之前这里和其他频道一样 push 完就不管返回值,
+    // 结果用户填完地址、看完报价、点了下单,页面一关单子就没了
+    if (ch.key == 'errand') {
+      final created = await Navigator.of(context).push<Order>(
+          MaterialPageRoute<Order>(
+              builder: (_) => ErrandPage(api: widget.api)));
+      // 用 State 的 mounted 而不是 context.mounted:
+      // 这个 context 是 State 的,分析器要求两者对上
+      if (created == null || !mounted) return;
+      final paid = await payPendingOrder(widget.api, created, context);
+      if (!mounted) return;
+      // 付没付成都进详情:付成了能看进度,没付成那里有「去支付」
+      await Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => OrderDetailPage(
+              api: widget.api, orderNo: (paid ?? created).orderNo)));
+      return;
+    }
+    // 音乐和论坛不是「一门生意」,没有商家列表页可跳 —— 直接进各自的首页
+    if (ch.key == 'music') {
+      await music.openMusicHome(context);
+      return;
+    }
+    if (ch.key == 'forum') {
+      await forum.openForumHome(context);
+      return;
+    }
+    final route = switch (ch.key) {
+      'food' => MaterialPageRoute<void>(
+          builder: (_) => CategoryPage(
+              api: widget.api, deliveryAddress: widget.deliveryAddress)),
+      // 和外卖同一页,品类表换零售那张(biz_type=retail 一路带到 /merchants)
+      'retail' => MaterialPageRoute<void>(
+          builder: (_) => CategoryPage(
+              api: widget.api,
+              bizType: 'retail',
+              deliveryAddress: widget.deliveryAddress)),
+      'stay' => MaterialPageRoute<void>(
+          builder: (_) =>
+              HotelListPage(api: widget.api, lat: _myLat, lng: _myLng)),
+      'voucher' => MaterialPageRoute<void>(
+          builder: (_) => DealsPage(api: widget.api)),
+      // 跑腿在上面单独处理(要接住订单去支付),不走这个 switch
+      // 注册了但还没接页面的频道:不跳空白页,直接不响应
+      _ => null,
+    };
+    if (route != null) Navigator.of(context).push(route);
+  }
+
   /// 金刚区:业务矩阵。已上线的三项做成描述性宽卡(标题 + 一行副文案),
   /// 未上线的愿景位仍是紧凑格——每个占位都是一句"我们打算怎么不黑"的宣言,
   /// 是愿景展示位,不是空头支票堆。
@@ -1804,50 +1971,9 @@ class _MerchantListViewState extends State<MerchantListView>
           // 排版规则(列数、末行不孤单)照旧全在 SzChannelGrid 里
           child: SzChannelGrid(
               channels: ChannelConfig.visible(kChannels),
-              onTap: (ch) async {
-            // 跑腿单一建出来就是「待支付」,必须把订单接回来直接进支付。
-            // 之前这里和其他频道一样 push 完就不管返回值,
-            // 结果用户填完地址、看完报价、点了下单,页面一关单子就没了
-            if (ch.key == 'errand') {
-              final created = await Navigator.of(context).push<Order>(
-                  MaterialPageRoute<Order>(
-                      builder: (_) => ErrandPage(api: widget.api)));
-              // 用 State 的 mounted 而不是 context.mounted:
-              // 这个 context 是 State 的,分析器要求两者对上
-              if (created == null || !mounted) return;
-              final paid = await payPendingOrder(widget.api, created, context);
-              if (!mounted) return;
-              // 付没付成都进详情:付成了能看进度,没付成那里有「去支付」
-              await Navigator.of(context).push(MaterialPageRoute<void>(
-                  builder: (_) => OrderDetailPage(
-                      api: widget.api, orderNo: (paid ?? created).orderNo)));
-              return;
-            }
-            // 音乐和论坛不是「一门生意」,没有商家列表页可跳 —— 直接进各自的首页
-            if (ch.key == 'music') {
-              await music.openMusicHome(context);
-              return;
-            }
-            if (ch.key == 'forum') {
-              await forum.openForumHome(context);
-              return;
-            }
-            final route = switch (ch.key) {
-              'food' => MaterialPageRoute<void>(
-                  builder: (_) => CategoryPage(
-                      api: widget.api,
-                      deliveryAddress: widget.deliveryAddress)),
-              'stay' => MaterialPageRoute<void>(
-                  builder: (_) => HotelListPage(
-                      api: widget.api, lat: _myLat, lng: _myLng)),
-              'voucher' => MaterialPageRoute<void>(
-                  builder: (_) => DealsPage(api: widget.api)),
-              // 跑腿在上面单独处理(要接住订单去支付),不走这个 switch
-              // 注册了但还没接页面的频道:不跳空白页,直接不响应
-              _ => null,
-            };
-            if (route != null) Navigator.of(context).push(route);
-          }),
+              // 点了之后去哪全在 _openChannel 里 ——
+              // 「我的」页板块聚合页的回流按钮走的是同一段
+              onTap: _openChannel),
         ),
         // 未上线业务的愿景占位:审核包里整体隐藏(feature_flags.dart)
         if (kShowComingSoonBiz)
@@ -4288,6 +4414,7 @@ class OrdersTab extends StatefulWidget {
     super.key,
     required this.api,
     this.filter = OrderFilter.all,
+    this.channel,
     this.onCounts,
   });
 
@@ -4296,8 +4423,11 @@ class OrdersTab extends StatefulWidget {
   /// 计数拉到了告诉外面一声:标题栏的「券包 · N」用它,不再单独请求一次
   final ValueChanged<OrderCounts>? onCounts;
 
-  /// 从「我的」页四格跳过来时带的筛选;直接点底部 tab 时是 [OrderFilter.all]
+  /// 从「我的」页四格跳过来时带的筛选;直接进订单页时是 [OrderFilter.all]
   final OrderFilter filter;
+
+  /// 从「我的」页板块卡跳过来时带的频道;null = 全部
+  final String? channel;
 
   @override
   State<OrdersTab> createState() => _OrdersTabState();
@@ -4306,8 +4436,9 @@ class OrdersTab extends StatefulWidget {
 class _OrdersTabState extends State<OrdersTab> {
   late OrderFilter _filter = widget.filter;
 
-  /// 频道条上选中的频道;null = 全部
-  String? _channel;
+  /// 频道条上选中的频道;null = 全部。
+  /// 初值取入口带的频道 —— 板块卡的「我的订单」点进来就落在这个板块上
+  late String? _channel = widget.channel;
 
   /// 有单的频道,由 [OrderListView] 拉到数据后报上来。
   ///
@@ -4346,15 +4477,17 @@ class _OrdersTabState extends State<OrdersTab> {
   /// State 不会重建,只有 widget 换新。不接这一下的话第二次点「待评价」
   /// 会停在上一次的筛选上。
   ///
-  /// 频道同时回到「全部」:「我的」页四格的数字是外卖 + 住宿一起数的,
-  /// 落在某一个频道上的话,数字说 2 单、列表里只看得到 1 单
+  /// 频道回到**入口带的那个**:从板块卡进来时是板块频道,
+  /// 从四格进来时是 null(全部)——
+  /// 四格的数字是外卖 + 住宿一起数的,落在某一个频道上的话,
+  /// 数字说 2 单、列表里只看得到 1 单
   @override
   void didUpdateWidget(OrdersTab old) {
     super.didUpdateWidget(old);
     if (widget.filter != old.filter) {
       setState(() {
         _filter = widget.filter;
-        _channel = null;
+        _channel = widget.channel;
       });
     }
   }
@@ -7491,16 +7624,21 @@ class _ReviewDisplay extends StatelessWidget {
 /// 顺带:账目三个入口**游客也能用**(`openMoneyFlow` 拉不到订单时回落
 /// 说明弹层,信任页走公开接口),所以它也是未登录首屏唯一不发灰的块。
 class ProfileView extends StatefulWidget {
-  const ProfileView({super.key, required this.api, this.onOpenOrders});
+  const ProfileView(
+      {super.key, required this.api, this.onOpenOrders, this.onOpenChannel});
 
   final ApiClient api;
 
-  /// 点订单四格时切到订单 tab 并带上筛选。
+  /// 板块聚合页的回流按钮:去这个板块的列表页下单。
+  /// 跳转逻辑(含跑腿接支付)在 HomePage 里,这一页够不着;null = 没接外壳
+  final void Function(SzChannel channel)? onOpenChannel;
+
+  /// 点订单四格/板块卡的订单入口时进订单页并带上筛选(和板块频道)。
   ///
   /// 为什么是回调不是 push:`_tab` 在外壳的 State 里,这一页够不着;
   /// 而 push 一个新的订单列表页会造出第二个订单列表,
   /// 返回行为和底部 tab 不一致。null = 没接外壳(测试里),按钮仍可点但不跳
-  final void Function(OrderFilter filter)? onOpenOrders;
+  final void Function(OrderFilter filter, {String? channel})? onOpenOrders;
 
   @override
   State<ProfileView> createState() => _ProfileViewState();
@@ -7679,8 +7817,12 @@ class _ProfileViewState extends State<ProfileView> {
   ///
   /// 原先要替用户挑「外卖还是住宿」(哪边有单落哪边,两边都有落外卖)——
   /// 两边都有时,角标说 2 单、落地的列表只看得到外卖那 1 单。
-  /// 现在「全部」里各频道的单本来就排在一起,不用再挑
-  void _openOrders(OrderFilter f) => widget.onOpenOrders?.call(f);
+  /// 现在「全部」里各频道的单本来就排在一起,不用再挑。
+  ///
+  /// [channel] 只有板块卡会带:进了订单页落在该板块的单上,
+  /// 数字说几单、列表就看得见几单
+  void _openOrders(OrderFilter f, {String? channel}) =>
+      widget.onOpenOrders?.call(f, channel: channel);
 
   Future<void> _editBirthdayAndPush() async {
     final me = _profile ?? await widget.api.me();
@@ -7854,41 +7996,61 @@ class _ProfileViewState extends State<ProfileView> {
     // 比一直不显示更糟
     final marketing =
         _marketingOn && !guest && profile != null && profile.riskLevel.isEmpty;
-    return ListView(
-      // 左右 18 和其他页同一条页边(设计稿 3e);顶上只留 4 —— 身份行不套卡,
-      // 自己就是页头
-      padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 24),
-      // 块与块之间只留白,**不画分隔线** —— 卡片自己的 1px 描边已经在分区了,
-      // 再加横线就是同一件事说两遍
-      children: [
-        if (profile != null && profile.riskLevel.isNotEmpty) ...[
-          _riskBanner(context, profile),
+    // 进行中的单(判据和首页那条一样:外卖/跑腿的活跃状态)。
+    // 数据用这一页已经拉到的订单,不另发请求、也不起第二个定时器
+    final activeOrders =
+        _orders.where(OrderFilter.active.matchesFood).toList();
+    // 下拉刷新:订单、角标、信用分都是会变的,而用户对「我的」页的
+    // 默认手势就是往下拉。List 不传 controller,默认就是 AlwaysScrollable,
+    // 内容不满一屏也拉得动(scripts/check_refresh_pullable.py)
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        // 左右 18 和其他页同一条页边(设计稿 3e);顶上只留 4 —— 身份行不套卡,
+        // 自己就是页头
+        padding: const EdgeInsets.fromLTRB(kPagePad, 4, kPagePad, 24),
+        // 块与块之间只留白,**不画分隔线** —— 卡片自己的 1px 描边已经在分区了,
+        // 再加横线就是同一件事说两遍
+        children: [
+          if (profile != null && profile.riskLevel.isNotEmpty) ...[
+            _riskBanner(context, profile),
+            const SizedBox(height: 12),
+          ],
+          guest ? _loginCard(context) : _identityRow(context, profile),
           const SizedBox(height: 12),
-        ],
-        guest ? _loginCard(context) : _identityRow(context, profile),
-        const SizedBox(height: 12),
-        // 关掉之后连同它的间距一起消失 —— 留一个 12px 的空档
-        // 就是"关了但还占着位"
-        if (!_ledgerHidden) ...[
-          _ledgerCard(context),
+          // 关掉之后连同它的间距一起消失 —— 留一个 12px 的空档
+          // 就是"关了但还占着位"
+          if (!_ledgerHidden) ...[
+            _ledgerCard(context),
+            const SizedBox(height: 12),
+          ],
+          // 进行中的单直接露在订单区上面:这一页最高频的诉求就是
+          // 「骑手到哪了」,不能只有四个角标数字。零单时零高度
+          if (activeOrders.isNotEmpty) ...[
+            ActiveOrdersBanner(
+                api: widget.api,
+                active: activeOrders,
+                padding: EdgeInsets.zero),
+            const SizedBox(height: 12),
+          ],
+          // 游客不渲染订单区:四个 0 角标的格子就是灰占位,
+          // 而订单 tab 自己已经有登录引导了
+          if (!guest) ...[
+            _ordersCard(context),
+            const SizedBox(height: 12),
+          ],
+          // 平台服务在账号列表之前:帮助/反馈/小程序是「找平台」的事,
+          // 和券/地址/收藏那类「我的东西」不是一类,和账目卡收起时的三个
+          // 查账入口才是一类(那张卡关掉不能等于删功能)
+          _servicesCard(context),
           const SizedBox(height: 12),
+          _entryList(context, marketing: marketing),
+          // 业务板块放在最后:往上放会把「长辈版」挤出首屏(找它的人正是
+          // 看不清这一页的人)。各板块的首页/金刚区那一格是主入口,
+          // 这里是「我的」侧的第二个入口 —— 摆哪儿都不影响功能,先让路给可达性
+          ..._sectionCards(),
         ],
-        // 游客不渲染订单区:四个 0 角标的格子就是灰占位,
-        // 而订单 tab 自己已经有登录引导了
-        if (!guest) ...[
-          _ordersCard(context),
-          const SizedBox(height: 12),
-        ],
-        _gridCard(context),
-        const SizedBox(height: 12),
-        _entryList(context, marketing: marketing),
-        // 板块入口放在最后:往上放会把「长辈版」挤出首屏(找它的人正是看不清这一页的人)。
-        // 各板块自己的 tab / 金刚区那一格是主入口,这里是第二个
-        if (!guest) ...[
-          const SizedBox(height: 12),
-          _sectionsCard(context),
-        ],
-      ],
+      ),
     );
   }
 
@@ -8248,108 +8410,18 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  /// 卡券与常用 + 找平台的事(+ 账目卡收起后的三个查账入口):一张卡,几行网格。
+  /// 平台服务:帮助、反馈、小程序,加上账目卡收起后的三个查账入口。
   ///
-  /// 原来是两张卡,卡券一张、找人和查账一张。并成一张(设计稿 3e):
-  /// 两张卡之间那道缝和两圈描边说的是同一件事 —— 这些都是「点进去办事」的入口。
-  /// 分组还在,只是从两张卡换成卡里的一道细线。
+  /// 这张卡原来叫「卡券与常用 + 找平台的事」:券、地址、收藏和帮助混在一张
+  /// 网格里。归类改造后券/地址/收藏各自归到业务板块卡(外卖、住宿、团购
+  /// 都有自己的位置),这里只留**不属于任何一门生意**的入口。
   ///
-  /// ## 为什么是网格
-  ///
-  /// 判据没变,还是 `SzIconGrid` 文档里那条:**标题两三个字就说清、
-  /// 彼此完全平级、给不出状态值**。排成竖列的话每条 46px 只放三四个字。
-  ///
-  /// - 第一行「卡券与常用」。收货地址在这里留一份,
-  ///   所以「我的」tab 的 AppBar 才腾得出位置给客服和设置;
-  /// - 第二行「找平台」:问、说、查自己的投诉,再加「小程序」
-  ///   (有清单才出 —— 首页下拉抽屉是隐性手势,这是一个看得见的入口);
-  /// - 账目卡收起时,第三行是它的三个入口。
-  ///
-  /// ## 三行都按 4 列排
-  ///
-  /// 不满一行的补空位(`columns: 4`),上下格子对得齐 ——
-  /// 同一张卡里 4 格压 3 格,看着像布局坏了。原来第二行是刻意的一行三个
-  /// (两组分在两张卡里,对不齐也看不出来),并成一张卡之后这个理由没了。
-  /// 4 列在 320 屏上每格 70px,「我的食安投诉」六个字会折成两行 ——
-  /// SzIconGrid 允许折行,字是全的(见它文档「标签必须能换行」)。
-  /// 视频(#366):历史、稍后再看、收藏、创作中心、硬币、视频设置。视频开关关着(生产缺省)时整块不出
-  /// 各板块的「我的」:**一个板块一格**。
-  ///
-  /// ## 为什么不按原来那样摊开
-  ///
-  /// 这儿原来是视频的六格(观看历史 / 稍后再看 / 视频收藏 / 创作中心 / 我的硬币 /
-  /// 视频设置)。板块从一个变成三个之后,照样摊开就是十八格 —— 而且那六格
-  /// **在 [VideoMePage] 里本来就有一份**,这一份是重复的。
-  ///
-  /// 判据 3(DEV-PROMPTS-33 §2.1):两三个字、彼此平级、给不出状态值 → 网格。
-  /// 板块名正好是这个形状,而每个板块里那一堆(历史 / 收藏 / 设置……)各自有
-  /// 说明和状态,属于目的页的事。
-  ///
-  /// ## 关着的板块不出这一格
-  ///
-  /// 收的是入口不是能力:板块关着时服务端照样回 503,这里只是别让人点进去才知道。
-  /// 三个都关着时整张卡不画 —— 留一张空卡比没有更难看。
-  Widget _sectionsCard(BuildContext context) {
-    Future<void> open(Widget page) =>
-        Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
-    final items = <SzIconGridItem>[
-      if (_videoOn)
-        SzIconGridItem(
-            icon: Icons.play_circle_outline,
-            label: '我的视频',
-            onTap: () => open(const VideoMePage())),
-      if (_musicOn)
-        SzIconGridItem(
-            icon: Icons.library_music_outlined,
-            label: '我的音乐',
-            onTap: () => open(const MyMusicPage())),
-      if (_forumOn)
-        SzIconGridItem(
-            icon: Icons.forum_outlined,
-            label: '我的论坛',
-            onTap: () async {
-              if (!await ensureLoggedIn(context)) return;
-              if (!context.mounted) return;
-              // 论坛的「我的」就是自己的主页(帖子 / 回复 / 媒体 / 喜欢)
-              await forum.openForumProfile(context, widget.api.userId!);
-            }),
-    ];
-    if (items.isEmpty) return const SizedBox.shrink();
-    return Card(child: SzIconGrid(columns: 3, items: items));
-  }
-
-  Widget _gridCard(BuildContext context) {
-    Future<void> guarded(Widget Function() page) async {
-      if (!await ensureLoggedIn(context)) return;
-      if (!context.mounted) return;
-      await Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => page()));
-    }
-
+  /// 账目三个入口仍然只在卡片收起时出现:卡开着还挂一份就是同一个入口
+  /// 在一页上出现两次;而这是那张卡能被关掉的前提(见 [_ledgerHidden])。
+  Widget _servicesCard(BuildContext context) {
     const divider = Divider(height: 1, indent: kCardPad, endIndent: kCardPad);
-
     return Card(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        SzIconGrid(columns: 4, items: [
-          // 券的角标是「还有几张能用」,hold 色,和订单的待办红分开(设计稿 3e)
-          for (final (icon, label, badge, page) in [
-            (Icons.local_activity_outlined, '优惠券', _usableCoupons,
-                () => CouponsPage(api: widget.api) as Widget),
-            (Icons.confirmation_number_outlined, '团购券', _usableTickets,
-                () => MyVouchersPage(api: widget.api) as Widget),
-            (Icons.favorite_outline, '我的收藏', 0,
-                () => FavoritesPage(api: widget.api) as Widget),
-            (Icons.place_outlined, '收货地址', 0,
-                () => AddressBookPage(api: widget.api) as Widget),
-          ])
-            SzIconGridItem(
-                icon: icon,
-                label: label,
-                badge: badge,
-                badgeColor: Theme.of(context).sz.hold,
-                onTap: () => guarded(page)),
-        ]),
-        divider,
         SzIconGrid(columns: 4, items: [
           SzIconGridItem(
             icon: Icons.help_outline,
@@ -8360,16 +8432,9 @@ class _ProfileViewState extends State<ProfileView> {
           SzIconGridItem(
             icon: Icons.rate_review_outlined,
             label: '意见反馈',
-            onTap: () => guarded(() => FeedbackPage(api: widget.api)),
+            onTap: () => _pushGuarded(() => FeedbackPage(api: widget.api)),
           ),
-          // 食安投诉查得到进度,投诉才不是黑洞。
-          // 标签里的「我的」说明是查自己的,别省 —— 省了就像个投诉入口,
-          // 而这里是**看自己投诉办到哪一步**
-          SzIconGridItem(
-            icon: Icons.health_and_safety_outlined,
-            label: '我的食安投诉',
-            onTap: () => guarded(() => FoodSafetyRecordsPage(api: widget.api)),
-          ),
+          // 有清单才出 —— 首页下拉抽屉是隐性手势,这是一个看得见的入口
           if (_miniApps.isNotEmpty)
             SzIconGridItem(
               icon: Icons.apps_outlined,
@@ -8409,6 +8474,235 @@ class _ProfileViewState extends State<ProfileView> {
         ],
       ]),
     );
+  }
+
+  /// 业务板块:一个可见频道一张卡(2026-09-17 归类改造)。
+  ///
+  /// ## 显示哪些板块
+  ///
+  /// 和首页金刚区**同一份后台配置**([ChannelConfig]):后台关掉的频道,
+  /// 这里整张卡不出 —— 入口和开关要对上,点进去才发现关着比没有入口更糟。
+  /// 板块卡只收「我的」侧的入口(订单/券/地址/收藏/发票),
+  /// 下单的主入口仍然是金刚区那一格,这里不抢它。
+  ///
+  /// 内容板块(视频/音乐/论坛)不是生意、没有订单和券,走各自的开关
+  /// (/config 的 features.*,缺省开),一个板块一格。
+  ///
+  /// ## 为什么摆在账号列表后面
+  ///
+  /// 往上放会把「长辈版」挤出首屏 —— 找它的正是看不清这一页的人,
+  /// 那条约束比板块的先后重要(见 [_entryList] 的注释)。
+  List<Widget> _sectionCards() {
+    final out = <Widget>[];
+    void add(ProfileSectionCard card) {
+      out.add(card);
+      out.add(const SizedBox(height: 12));
+    }
+
+    for (final ch in ChannelConfig.visible(kChannels)) {
+      final entries = _sectionEntries(ch.key);
+      if (entries.isEmpty) continue;
+      final browse = _browseLabel(ch.key);
+      add(ProfileSectionCard(
+          title: ch.title,
+          glyph: ch.glyph,
+          channelKey: ch.key,
+          entries: entries,
+          browseLabel: browse ?? '',
+          onBrowse: browse == null || widget.onOpenChannel == null
+              ? null
+              : () => widget.onOpenChannel!(ch)));
+    }
+    // 内容板块要登录:这几个「我的」页拉的都是个人数据,游客进去也是登录引导
+    if (widget.api.isLoggedIn) {
+      if (_videoOn) {
+        add(ProfileSectionCard(
+          title: '视频',
+          glyph: '视',
+          channelKey: 'video',
+          entries: [
+            ProfileSectionEntry(
+              icon: Icons.play_circle_outline,
+              label: '我的视频',
+              hint: '观看历史、收藏、创作中心都在里面',
+              onTap: () => _pushGuarded(() => const VideoMePage()),
+            ),
+          ],
+        ));
+      }
+      if (_musicOn) {
+        add(ProfileSectionCard(
+          title: '音乐',
+          glyph: '乐',
+          channelKey: 'music',
+          entries: [
+            ProfileSectionEntry(
+              icon: Icons.library_music_outlined,
+              label: '我的音乐',
+              hint: '我的歌单、收藏和作品',
+              onTap: () => _pushGuarded(() => const MyMusicPage()),
+            ),
+          ],
+        ));
+      }
+      if (_forumOn) {
+        add(ProfileSectionCard(
+          title: '论坛',
+          glyph: '论',
+          channelKey: 'forum',
+          entries: [
+            ProfileSectionEntry(
+              icon: Icons.forum_outlined,
+              label: '我的论坛',
+              hint: '我的帖子、回复、媒体和喜欢',
+              onTap: () async {
+                if (!await ensureLoggedIn(context)) return;
+                if (!mounted) return;
+                // 论坛的「我的」就是自己的主页(帖子 / 回复 / 媒体 / 喜欢)
+                await forum.openForumProfile(context, widget.api.userId!);
+              },
+            ),
+          ],
+        ));
+      }
+    }
+    return out;
+  }
+
+  /// 聚合页回流按钮的文案。null = 这个频道还没有可去的列表页,
+  /// 不画按钮 —— 画一个点了没反应的按钮,比没有更糟
+  String? _browseLabel(String key) => switch (key) {
+        'food' => '去点外卖',
+        'retail' => '去买菜买水果',
+        'stay' => '去找住宿',
+        'voucher' => '去逛团购',
+        'errand' => '去下跑腿单',
+        _ => null,
+      };
+
+  /// 一个业务板块里「我的」侧的全部入口。**顺序就是聚合页的顺序**,
+  /// 前四个进卡片第一行 —— 按在这个板块里办事的顺序排:
+  /// 先看单,再看券,然后是地址和收藏;低频的(食安投诉、发票)收进聚合页。
+  ///
+  /// 音乐/论坛不在这里出:它们没有订单和券,在 [_sectionCards] 里
+  /// 按内容板块处理。返回空 = 这个频道不做板块卡
+  List<ProfileSectionEntry> _sectionEntries(String key) {
+    switch (key) {
+      case 'food':
+        return [
+          _orderEntry('food', '我的订单'),
+          _couponEntry(),
+          _addressEntry(),
+          _favoritesEntry(),
+          _foodSafetyEntry(),
+          _invoiceEntry(),
+        ];
+      case 'retail':
+        return [
+          _orderEntry('retail', '我的订单'),
+          _addressEntry(),
+          _favoritesEntry(),
+          _couponEntry(),
+          _foodSafetyEntry(),
+        ];
+      case 'stay':
+        return [
+          _orderEntry('stay', '住宿订单'),
+          _favoritesEntry(),
+          _invoiceEntry(),
+        ];
+      case 'voucher':
+        return [
+          _voucherEntry(),
+          _favoritesEntry(),
+          _invoiceEntry(),
+        ];
+      case 'errand':
+        return [
+          _orderEntry('errand', '跑腿订单'),
+          _addressEntry(),
+        ];
+      default:
+        return const [];
+    }
+  }
+
+  /// 板块卡里的订单入口:进订单页并落在这个频道上,数字说几单、
+  /// 列表就看得见几单。
+  ///
+  /// 角标是「这个频道还有几单没走完」(待支付 + 进行中)——
+  /// 待评价不进来:评价没有时限,订单卡头上已经有那一格
+  ProfileSectionEntry _orderEntry(String channel, String label) =>
+      ProfileSectionEntry(
+        icon: Icons.receipt_long_outlined,
+        label: label,
+        hint: '待支付、配送进度、售后都在这儿',
+        badge: _channelTodo(channel),
+        onTap: () => _openOrders(OrderFilter.all, channel: channel),
+      );
+
+  int _channelTodo(String channel) {
+    final c = _counts;
+    if (c == null) return 0;
+    return (c.of(channel, OrderFilter.pendingPayment) ?? 0) +
+        (c.of(channel, OrderFilter.active) ?? 0);
+  }
+
+  ProfileSectionEntry _couponEntry() => ProfileSectionEntry(
+        icon: Icons.local_activity_outlined,
+        label: '优惠券',
+        hint: '结算时自动带出能用的券',
+        // 券的角标是「还有几张能用」,hold 色,和订单的待办红分开(设计稿 3e)
+        badge: _usableCoupons,
+        badgeColor: Theme.of(context).sz.hold,
+        onTap: () => _pushGuarded(() => CouponsPage(api: widget.api)),
+      );
+
+  ProfileSectionEntry _voucherEntry() => ProfileSectionEntry(
+        icon: Icons.confirmation_number_outlined,
+        label: '团购券',
+        hint: '未使用随时全额退',
+        badge: _usableTickets,
+        badgeColor: Theme.of(context).sz.hold,
+        onTap: () => _pushGuarded(() => MyVouchersPage(api: widget.api)),
+      );
+
+  ProfileSectionEntry _addressEntry() => ProfileSectionEntry(
+        icon: Icons.place_outlined,
+        label: '收货地址',
+        hint: '下单时直接选这里存的地址',
+        onTap: () => _pushGuarded(() => AddressBookPage(api: widget.api)),
+      );
+
+  ProfileSectionEntry _favoritesEntry() => ProfileSectionEntry(
+        icon: Icons.favorite_outline,
+        label: '我的收藏',
+        hint: '收藏过的店都在这儿',
+        onTap: () => _pushGuarded(() => FavoritesPage(api: widget.api)),
+      );
+
+  /// 食安投诉查得到进度,投诉才不是黑洞。
+  /// 标签里的「我的」说明是查自己的,别省 —— 省了就像个投诉入口,
+  /// 而这里是**看自己投诉办到哪一步**
+  ProfileSectionEntry _foodSafetyEntry() => ProfileSectionEntry(
+        icon: Icons.health_and_safety_outlined,
+        label: '我的食安投诉',
+        hint: '看自己的投诉办到哪一步',
+        onTap: () => _pushGuarded(() => FoodSafetyRecordsPage(api: widget.api)),
+      );
+
+  ProfileSectionEntry _invoiceEntry() => ProfileSectionEntry(
+        icon: Icons.receipt_outlined,
+        label: '开发票',
+        hint: '暂未开放,需要时联系客服',
+        onTap: _showInvoiceInfo,
+      );
+
+  /// 需要登录的入口:先问登录,再跳
+  Future<void> _pushGuarded(Widget Function() page) async {
+    if (!await ensureLoggedIn(context)) return;
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page()));
   }
 
   /// 设置类列表:需要一句说明、或者有状态值可显示的入口。
