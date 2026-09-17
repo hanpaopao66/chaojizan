@@ -64,7 +64,7 @@ on:
         description: "build 号(必须递增,上一版是多少去 versions.json 查)"
         required: true
       notes:
-        description: "更新说明一句话"
+        description: "这一版改了什么、要注意什么。写给用户看:用平常话,不写内部编号、不写口号(会原样进 Release 正文)"
         required: true
       desktop:
         description: "同时出网页版和 Windows / macOS / Ubuntu 桌面版(急修安卓、桌面构建又坏着时关掉)"
@@ -695,20 +695,25 @@ jobs:
         run: |
           {
             printf '%s\n\n' "$NOTES"
-            echo "本页的安装包由公开 CI 从本 tag 构建(第一档「公开构建」,"
-            echo "逐字节可复现还在路上)—— 构建日志:"
+            echo "本页的安装包由 GitHub Actions 从本 tag 构建,构建日志:"
             echo "$RUN_URL"
             echo
-            echo "- 安卓:chaojizan-user / merchant / rider-arm64.apk"
+            echo "### 附件"
+            echo
+            echo "- 安卓:chaojizan-user-arm64.apk、chaojizan-merchant-arm64.apk、chaojizan-rider-arm64.apk"
             if [ "$DESKTOP" = true ]; then
-              echo "- 用户端网页版:chaojizan-web.tar.gz($PUBLIC_BASE/web/ 上跑的就是它)"
+              echo "- 用户端网页版:chaojizan-web.tar.gz(部署在 $PUBLIC_BASE/web/)"
               echo "- 用户端电脑版:Windows(zip,解压即用)、macOS(dmg)、Ubuntu(tar.gz / deb)。"
               echo "  电脑版没有做系统签名,首次打开要手动放行,步骤见 $PUBLIC_BASE/download#desktop"
             fi
             echo
-            echo "安装前校验 SHA-256(见附件 SHA256SUMS.txt)。"
-            echo "官网下载页、网页版与应用内更新走 appdist 通道,由运维把本页同一批产物"
-            echo "同步过去 —— 两边哈希应当一致,不一致请立刻开 issue。"
+            echo "### 安装前"
+            echo
+            echo "先核对 SHA-256,清单在附件 SHA256SUMS.txt 里。官网下载页、网页版和应用内更新"
+            echo "从 appdist 通道同步的是同一批文件,两边哈希一致;对不上请开 issue。"
+            echo
+            echo "构建可复现(逐字节一致)还没做。现在做到的是公开构建:"
+            echo "任何人都能从上面那份日志追到这次发布。"
           } > build/release-body.md
           cat build/release-body.md
 
