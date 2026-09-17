@@ -1,5 +1,3 @@
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -10,8 +8,15 @@ class ApkInstaller {
 
   static const _channel = MethodChannel('superz/apk_installer');
 
+  /// 判据和 `platform_caps.dart` 里那几个保持一致:`!kIsWeb` + `defaultTargetPlatform`。
+  ///
+  /// 原来还加了一个 `Platform.isAndroid`。生产上它和前一个条件永远同真同假
+  /// (`defaultTargetPlatform` 只在 debug 下可被覆盖),**但它让整条应用内安装的
+  /// 路径没法写测试** —— 测试进程跑在 mac/linux 上,`Platform.isAndroid` 恒假,
+  /// 于是任何用例都只能走到「跳浏览器」那一支。这条路径 2026-09-17 出过一个
+  /// 真 bug(熄屏下好了包却跳浏览器重下),而它一条测试都没有。
   static bool get supported =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android && Platform.isAndroid;
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   /// 用户是否已授予本应用「安装未知应用」。Android 8.0 以下恒为 true。
   static Future<bool> canInstall() async {

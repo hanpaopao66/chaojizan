@@ -30,6 +30,11 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # 应用内更新那条路要把 path_provider 换成假的(测试进程里没有外部存储目录)。
+  # 换 platform interface 而不是 mock channel:方法名不用猜,path_provider 自己升级
+  # 也不会把用例悄悄弄哑
+  path_provider_platform_interface: ^2.1.2
+  plugin_platform_interface: ^2.1.8
 
 flutter:
   # 拉丁字母与数字的字体子集(中文一律回落系统字);来源与复现见

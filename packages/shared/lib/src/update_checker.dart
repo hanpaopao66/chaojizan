@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -28,15 +29,26 @@ bool get _selfChannel => kChannel != 'store';
 /// 服务端接口 GET /app/latest?app=user|merchant|rider,发版脚本维护
 /// versions.json。同签名 + build 号递增 → 手机上直接覆盖安装,无需卸载。
 ///
-/// 自建渠道走「应用内下载 → 校验 SHA-256 → 拉起系统安装器」;
-/// 任何一步不成(没带 sha256、下载失败、校验不过、系统不给拉安装器),
-/// 一律退回老路:跳浏览器下载。绝不能把用户卡在一个转圈的进度条上。
+/// 自建渠道走「应用内下载 → 校验 SHA-256 → 拉起系统安装器」。
+///
+/// **「拿不到包」和「拿到了但现在装不了」是两件事,退路不一样:**
+///
+/// - 没带 sha256、下载失败、校验不过 —— 手里什么都没有,退回浏览器下载;
+/// - **包下好了、也校验过了,只是拉不起安装界面** —— 这时候跳浏览器是错的,
+///   等于让人把同一个 57MB 再下一遍。留着那个包,回到前台再装。
+///
+/// 第二种最常见的成因是**熄屏**:Android 10 起后台不许 startActivity,
+/// 而熄屏时 App 就在后台。下载在后台是能跑完的,所以用户看到的是
+/// 「下完了,却跳去浏览器重下」—— 2026-09-17 用户报的就是这个。
+///
+/// 绝不能把用户卡在一个转圈的进度条上。
 ///
 /// 网页版和桌面版另走两条路,见下面。
 Future<void> checkForUpdate(
   BuildContext context, {
   required String baseUrl,
   required String app,
+  @visibleForTesting http.Client? client,
 }) async {
   if (!_selfChannel) return; // 商店渠道:一句话都不说
   // 网页版:打开的永远是线上部署的那一版(刷新就是新的),没有「更新」这回事。
@@ -47,7 +59,7 @@ Future<void> checkForUpdate(
   Map<String, dynamic> latest;
   int currentBuild;
   try {
-    final resp = await http
+    final resp = await (client ?? http.Client())
         .get(Uri.parse('$baseUrl/app/latest?app=$app'))
         .timeout(const Duration(seconds: 8));
     if (resp.statusCode != 200) return;
@@ -84,6 +96,7 @@ Future<void> checkForUpdate(
         sha256Hex: sha256Hex,
         force: force,
         inApp: canInApp,
+        client: client,
       ),
     ),
   );
@@ -191,6 +204,7 @@ class _UpdateDialog extends StatefulWidget {
     required this.sha256Hex,
     required this.force,
     required this.inApp,
+    this.client,
   });
 
   final String version;
@@ -200,17 +214,66 @@ class _UpdateDialog extends StatefulWidget {
   final bool force;
   final bool inApp;
 
+  /// 只给测试用。**`flutter_test` 把真实 HTTP 全掐了**(所有请求回 400),
+  /// 不留这个口子,应用内下载这条路一条用例都写不了 —— 而它 2026-09-17
+  /// 出过一个真 bug。生产上永远是 null,走真的 client
+  final http.Client? client;
+
   @override
   State<_UpdateDialog> createState() => _UpdateDialogState();
 }
 
-class _UpdateDialogState extends State<_UpdateDialog> {
+class _UpdateDialogState extends State<_UpdateDialog>
+    with WidgetsBindingObserver {
   double? _progress; // null = 未开始
   String? _error;
 
+  /// 下好并且**校验过**的安装包。非空 = 手里有货,任何情况下都不该再跳浏览器
+  File? _ready;
+
+  /// 用户点过「更新」但还没装上 —— 回到前台时替他把安装器拉起来
+  bool _wantInstall = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 熄屏时拉不起安装界面(后台 startActivity 被系统挡着)。亮屏回到前台
+    // 这一刻正是能拉起来的时候,替他补上 —— 否则他得自己想到再点一次
+    if (state == AppLifecycleState.resumed && _ready != null && _wantInstall) {
+      unawaited(_install(_ready!));
+    }
+  }
+
+  /// **只在手里什么都没有的时候走这条**(下载失败、校验不过)。
+  /// 包已经下好了就绝不能来这儿:那等于让人把同一个包再下一遍
   void _fallbackToBrowser([String? why]) {
     if (why != null && mounted) setState(() => _error = why);
     launchUrl(Uri.parse(widget.url), mode: LaunchMode.externalApplication);
+  }
+
+  /// 拉起系统安装器。**拉不起来不算失败**,包还在手里,回到前台再试
+  Future<void> _install(File file) async {
+    try {
+      await ApkInstaller.install(file.path);
+      // 拉起安装器后弹框留着:安装被用户取消时还能再点一次
+      if (mounted) setState(() => _error = null);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = '已经下好了(校验通过),但现在装不了:'
+          '手机息屏或 App 在后台时,系统不让弹安装界面。'
+          '回到这一页点「立即安装」即可,不用重新下载。');
+    }
   }
 
   Future<void> _run() async {
@@ -255,38 +318,62 @@ class _UpdateDialogState extends State<_UpdateDialog> {
       return;
     }
 
+    _wantInstall = true;
+
+    // 上一轮已经下好并校验过了(多半是当时熄屏、安装界面弹不出来)——
+    // 直接装,**不要重新下**
+    if (_ready != null) {
+      await _install(_ready!);
+      return;
+    }
+
     setState(() {
       _error = null;
       _progress = 0;
     });
+    File file;
     try {
-      final file = await _download();
-      if (!mounted) return;
-      await ApkInstaller.install(file.path);
-      // 拉起安装器后弹框留着:安装被用户取消时还能再点一次
-      if (mounted) setState(() => _progress = null);
+      file = await _download();
     } catch (e) {
+      // 走到这儿说明**手里什么都没有**:下载失败或校验不过。这才该退回浏览器
       if (!mounted) return;
       setState(() => _progress = null);
       _fallbackToBrowser('$e,已改用浏览器下载');
+      return;
     }
+    if (!mounted) return;
+    setState(() {
+      _progress = null;
+      _ready = file;
+    });
+    await _install(file);
   }
 
   Future<File> _download() async {
     final dir = Directory(
         '${(await getExternalStorageDirectory())!.path}/apk');
     if (!dir.existsSync()) dir.createSync(recursive: true);
-    // 先清空:目录里的要么是已经装完的包,要么是上次失败的残骸,一律没用了。
+    final file = File('${dir.path}/superz-${widget.version}.apk');
+
+    // **这一版的包已经躺在这儿、而且校验得过,就直接用。**
+    // 熄屏那一次装不上、App 又被系统回收之后,再点一次不该让人重下 57MB。
+    // 判据是哈希不是「文件在不在」——半截的残骸也"在"
+    if (file.existsSync() &&
+        sha256.convert(await file.readAsBytes()).toString().toLowerCase() ==
+            widget.sha256Hex) {
+      return file;
+    }
+
+    // 剩下的都没用了:别的版本的包(已经装过)、这一版下了一半的残骸。
     // 不清理的话每更新一版就在用户手机上多躺几十 MB,永远不会自己消失
     for (final f in dir.listSync()) {
       try {
         f.deleteSync();
       } catch (_) {}
     }
-    final file = File('${dir.path}/superz-${widget.version}.apk');
 
     final req = http.Request('GET', Uri.parse(widget.url));
-    final resp = await http.Client().send(req).timeout(
+    final resp = await (widget.client ?? http.Client()).send(req).timeout(
         const Duration(seconds: 30));
     if (resp.statusCode != 200) {
       throw Exception('下载失败(HTTP ${resp.statusCode})');
@@ -339,9 +426,12 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           ] else
             Text(
                 _error ??
-                    (widget.inApp
-                        ? '下载完成后会自动打开安装,覆盖安装即可(无需卸载)。'
-                        : '点击更新后在浏览器下载,下载完成直接安装即可(无需卸载)。'),
+                    (_ready != null
+                        // 包在手里了:别再说「会下载」,那会让人以为要重来一遍
+                        ? '安装包已下好并校验通过,点「立即安装」即可(无需卸载)。'
+                        : widget.inApp
+                            ? '下载完成后会自动打开安装,覆盖安装即可(无需卸载)。'
+                            : '点击更新后在浏览器下载,下载完成直接安装即可(无需卸载)。'),
                 style: TextStyle(
                     fontSize: 12,
                     color: _error != null
@@ -357,7 +447,12 @@ class _UpdateDialogState extends State<_UpdateDialog> {
           ),
         FilledButton(
           onPressed: downloading ? null : _run,
-          child: Text(downloading ? '下载中…' : '立即更新'),
+          child: Text(downloading
+              ? '下载中…'
+              // 已经下好了就说「安装」——点它不会再产生一次下载
+              : _ready != null
+                  ? '立即安装'
+                  : '立即更新'),
         ),
       ],
     );
