@@ -114,7 +114,7 @@ class ProfileSectionCard extends StatelessWidget {
             child: Row(children: [
               Text(glyph,
                   style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w600, color: color)),
+                      fontSize: kFontBodyLg, fontWeight: FontWeight.w600, color: color)),
               const SizedBox(width: 6),
               Text(title,
                   style: TextStyle(
@@ -183,7 +183,7 @@ class ProfileSectionPage extends StatelessWidget {
         title: Row(mainAxisSize: MainAxisSize.min, children: [
           Text(glyph,
               style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w600, color: color)),
+                  fontSize: kFontBodyLg, fontWeight: FontWeight.w600, color: color)),
           const SizedBox(width: 6),
           Text(title),
         ]),
