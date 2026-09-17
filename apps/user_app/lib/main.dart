@@ -57,18 +57,14 @@ import 'stay_order_pages.dart';
 import 'transparency_page.dart';
 import 'trust_page.dart';
 import 'chat/pages/sanctions_page.dart';
-import 'video/creator/creator_center_page.dart';
 import 'video/creator/upload_tasks.dart';
-import 'video/me/coins_page.dart';
-import 'video/me/favorites_page.dart' as vfav;
 import 'forum/nav.dart' as forum;
 import 'music/nav.dart' as music;
 import 'music/player/mini_bar.dart' show MusicMiniBar;
 import 'music/player/music_player.dart' show MusicPlayer;
 import 'music/studio/upload_tasks.dart' show MusicUploads;
-import 'video/me/history_page.dart';
-import 'video/me/video_settings_page.dart';
-import 'video/me/watch_later_page.dart';
+import 'music/pages/my_music_page.dart' show MyMusicPage;
+import 'video/me/video_me_page.dart' show VideoMePage;
 import 'video/notify/notifications_page.dart';
 import 'video/video_tab.dart';
 import 'voucher_pages.dart';
@@ -7514,8 +7510,11 @@ class _ProfileViewState extends State<ProfileView> {
   UserProfile? _profile;
   // 营销总开关(服务端 /config):关着时生日券推送等营销入口整体隐藏
   bool _marketingOn = false;
-  // 视频开关(/config 的 features.video):生产缺省关,关着时「视频」那块入口不出
+  // 板块开关(/config 的 features.*):生产缺省关,关着时那个板块的入口不出。
+  // **只收入口,不代表接口通** —— 关着时服务端照样回 503,这里是别让人点进去才知道
   bool _videoOn = RemoteCopy.feature('video');
+  bool _musicOn = RemoteCopy.feature('music');
+  bool _forumOn = RemoteCopy.feature('forum');
 
   /// 订单四格的角标数据源:优先用 `/orders/counts` 的全量 count,
   /// 和订单页状态筛选上的「待评价 · 3」是同一个数。
@@ -7640,7 +7639,10 @@ class _ProfileViewState extends State<ProfileView> {
       if (mounted) {
         setState(() {
           _marketingOn = config['marketing'] == true;
-          _videoOn = (config['features'] as Map?)?['video'] != false;
+          final f = config['features'] as Map?;
+          _videoOn = f?['video'] != false;
+          _musicOn = f?['music'] != false;
+          _forumOn = f?['forum'] != false;
         });
       }
     } catch (_) {}
@@ -7880,11 +7882,11 @@ class _ProfileViewState extends State<ProfileView> {
         _gridCard(context),
         const SizedBox(height: 12),
         _entryList(context, marketing: marketing),
-        // 视频入口放在最后:往上放会把「长辈版」挤出首屏(找它的人正是看不清这一页的人)。
-        // 视频 tab 左上角的头像是它的主入口,这里是第二个
-        if (!guest && _videoOn) ...[
+        // 板块入口放在最后:往上放会把「长辈版」挤出首屏(找它的人正是看不清这一页的人)。
+        // 各板块自己的 tab / 金刚区那一格是主入口,这里是第二个
+        if (!guest) ...[
           const SizedBox(height: 12),
-          _videoCard(context),
+          _sectionsCard(context),
         ],
       ],
     );
@@ -8271,19 +8273,49 @@ class _ProfileViewState extends State<ProfileView> {
   /// 4 列在 320 屏上每格 70px,「我的食安投诉」六个字会折成两行 ——
   /// SzIconGrid 允许折行,字是全的(见它文档「标签必须能换行」)。
   /// 视频(#366):历史、稍后再看、收藏、创作中心、硬币、视频设置。视频开关关着(生产缺省)时整块不出
-  Widget _videoCard(BuildContext context) {
+  /// 各板块的「我的」:**一个板块一格**。
+  ///
+  /// ## 为什么不按原来那样摊开
+  ///
+  /// 这儿原来是视频的六格(观看历史 / 稍后再看 / 视频收藏 / 创作中心 / 我的硬币 /
+  /// 视频设置)。板块从一个变成三个之后,照样摊开就是十八格 —— 而且那六格
+  /// **在 [VideoMePage] 里本来就有一份**,这一份是重复的。
+  ///
+  /// 判据 3(DEV-PROMPTS-33 §2.1):两三个字、彼此平级、给不出状态值 → 网格。
+  /// 板块名正好是这个形状,而每个板块里那一堆(历史 / 收藏 / 设置……)各自有
+  /// 说明和状态,属于目的页的事。
+  ///
+  /// ## 关着的板块不出这一格
+  ///
+  /// 收的是入口不是能力:板块关着时服务端照样回 503,这里只是别让人点进去才知道。
+  /// 三个都关着时整张卡不画 —— 留一张空卡比没有更难看。
+  Widget _sectionsCard(BuildContext context) {
     Future<void> open(Widget page) =>
         Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
-    return Card(
-      child: SzIconGrid(columns: 3, items: [
-        SzIconGridItem(icon: Icons.history, label: '观看历史', onTap: () => open(const VideoHistoryPage())),
-        SzIconGridItem(icon: Icons.watch_later_outlined, label: '稍后再看', onTap: () => open(const WatchLaterPage())),
-        SzIconGridItem(icon: Icons.star_outline, label: '视频收藏', onTap: () => open(const vfav.FavoritesPage())),
-        SzIconGridItem(icon: Icons.video_camera_back_outlined, label: '创作中心', onTap: () => open(const CreatorCenterPage())),
-        SzIconGridItem(icon: Icons.monetization_on_outlined, label: '我的硬币', onTap: () => open(const CoinsPage())),
-        SzIconGridItem(icon: Icons.tune, label: '视频设置', onTap: () => open(const VideoSettingsPage())),
-      ]),
-    );
+    final items = <SzIconGridItem>[
+      if (_videoOn)
+        SzIconGridItem(
+            icon: Icons.play_circle_outline,
+            label: '我的视频',
+            onTap: () => open(const VideoMePage())),
+      if (_musicOn)
+        SzIconGridItem(
+            icon: Icons.library_music_outlined,
+            label: '我的音乐',
+            onTap: () => open(const MyMusicPage())),
+      if (_forumOn)
+        SzIconGridItem(
+            icon: Icons.forum_outlined,
+            label: '我的论坛',
+            onTap: () async {
+              if (!await ensureLoggedIn(context)) return;
+              if (!context.mounted) return;
+              // 论坛的「我的」就是自己的主页(帖子 / 回复 / 媒体 / 喜欢)
+              await forum.openForumProfile(context, widget.api.userId!);
+            }),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return Card(child: SzIconGrid(columns: 3, items: items));
   }
 
   Widget _gridCard(BuildContext context) {

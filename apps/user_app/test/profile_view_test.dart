@@ -147,6 +147,7 @@ void main() {
     List<Map<String, dynamic>> miniApps = const [],
     bool countsEndpoint = true,
     Map<String, dynamic>? counts,
+    Map<String, dynamic> features = const {},
   }) {
     return ApiClient(
       baseUrl: 'http://test.local',
@@ -180,7 +181,7 @@ void main() {
           case '/mini-apps/me':
             payload = {'recent': [], 'starred': []};
           case '/config':
-            payload = {'marketing': marketing};
+            payload = {'marketing': marketing, 'features': features};
           case '/orders':
             payload = orders;
           case '/orders/counts':
@@ -232,6 +233,9 @@ void main() {
     List<Map<String, dynamic>> miniApps = const [],
     bool countsEndpoint = true,
     Map<String, dynamic>? counts,
+    // 板块开关(/config 的 features.*)。缺省全开 —— 服务端不给这个字段时
+    // 客户端按"开着"算(`!= false`),桩要和那个口径一致
+    Map<String, dynamic> features = const {},
   }) async {
     SharedPreferences.setMockInitialValues({});
     final api = fakeApi(
@@ -243,7 +247,8 @@ void main() {
         createdAt: createdAt,
         miniApps: miniApps,
         countsEndpoint: countsEndpoint,
-        counts: counts);
+        counts: counts,
+        features: features);
     await api.login('13800000001', 'pw');
     return api;
   }
@@ -645,6 +650,61 @@ void main() {
       final api = await loggedIn();
       await pumpProfile(t, api);
       expect(find.text('小程序'), findsNothing);
+    });
+  });
+
+  // ---------------- 板块入口:一个板块一格(2026-09-17) ----------------
+  //
+  // 这一页原来只有视频有自己一块(六格图标),音乐和论坛一个入口都没有。
+  // 板块多起来之后照样摊开就是十八格,而那六格在 VideoMePage 里本来就有一份。
+  group('板块入口', () {
+    Finder tile(String label) => find.widgetWithText(InkWell, label);
+
+    testWidgets('三个板块各一格,不再摊开视频那六格', (t) async {
+      await pumpProfile(t, await loggedIn());
+      await t.dragUntilVisible(tile('我的视频'),
+          find.byType(ListView), const Offset(0, -80));
+      for (final k in ['我的视频', '我的音乐', '我的论坛']) {
+        expect(tile(k), findsOneWidget, reason: k);
+      }
+      // 那六格是 VideoMePage 的事。摆在这里是第二份,两份迟早对不上
+      for (final k in ['观看历史', '稍后再看', '视频收藏', '创作中心', '视频设置']) {
+        expect(find.text(k), findsNothing, reason: '$k 不该还留在「我的」页上');
+      }
+    });
+
+    testWidgets('关掉的板块不出那一格——**入口和开关要对上**', (t) async {
+      // 用户 2026-09-17 踩过的正是这一类:功能闸开了,入口没跟着出,
+      // 人以为功能坏了。反过来同样难受:闸关着入口还在,点进去只说「暂未开放」
+      await pumpProfile(
+          t, await loggedIn(features: {'video': true, 'music': false, 'forum': true}));
+      await t.dragUntilVisible(tile('我的视频'),
+          find.byType(ListView), const Offset(0, -80));
+      expect(tile('我的视频'), findsOneWidget);
+      expect(tile('我的论坛'), findsOneWidget);
+      expect(find.text('我的音乐'), findsNothing, reason: '音乐关着就不该有这一格');
+    });
+
+    testWidgets('三个都关着时一格都不出', (t) async {
+      await pumpProfile(
+          t,
+          await loggedIn(
+              features: {'video': false, 'music': false, 'forum': false}));
+      for (final k in ['我的视频', '我的音乐', '我的论坛']) {
+        expect(find.text(k), findsNothing, reason: k);
+      }
+    });
+    // 「这时候整张卡不画、而不是画成一张空卡」那一条**没有用例守**:
+    // 试过三种数卡片的写法(按首屏数 / 滚到底数 / 给足高度数),
+    // 每一种红的原因都是 ListView 的懒加载而不是产品行为 —— 再往下写
+    // 就是在测框架。那一条由实现里那句 `if (items.isEmpty) return
+    // const SizedBox.shrink();` 兜着,改动时留意。
+
+    testWidgets('服务端没给 features 时按「开着」算——老服务端不该把入口弄没', (t) async {
+      await pumpProfile(t, await loggedIn(features: const {}));
+      await t.dragUntilVisible(tile('我的音乐'),
+          find.byType(ListView), const Offset(0, -80));
+      expect(tile('我的音乐'), findsOneWidget);
     });
   });
 }
