@@ -149,26 +149,33 @@ jobs:
         run: |
           if [ "$EVENT" = "workflow_dispatch" ]; then
             NOTES="$DISPATCH_NOTES"
-          elif [ "$(git cat-file -t "$GITHUB_REF_NAME" 2>/dev/null)" = "tag" ]; then
-            # 带注解的 tag:注解正文就是更新说明。
-            #
-            # ⚠️ 必须**先判对象类型**。轻量 tag 上 `%(contents)` 不会返回空,
-            # 它会退回那个提交的**提交信息** —— 也就是「chore: xxx」这类
-            # 开发日志,直接当成给用户看的更新说明发出去。
-            NOTES=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
           else
-            # 轻量 tag:列出上一版以来的提交,总比空着强。
-            # 老格式 tag(v0.12.0)不匹配 v*-b*,所以要兜两层
-            PREV=$(git tag -l 'v*-b*' --sort=-version:refname \
-                   | grep -vx "$GITHUB_REF_NAME" | head -1)
-            [ -n "$PREV" ] || PREV=$(git tag -l 'v*' --sort=-version:refname \
-                                     | grep -vx "$GITHUB_REF_NAME" | head -1)
-            if [ -n "$PREV" ]; then
-              LOG=$(git log --no-merges --format='- %s' "$PREV..$GITHUB_REF_NAME")
+            # ⚠️ 先显式取一次带注解的 tag 对象:checkout 在 tag 事件上留下的
+            # 可能是指向提交的轻量 ref,那时 `cat-file -t` 是 commit,
+            # `%(contents)` 会退回提交信息 —— 发 v0.26.0 时踩到过,
+            # Release 正文里出现的是「docs: …」那串提交列表。
+            git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" 2>/dev/null || true
+            if [ "$(git cat-file -t "$GITHUB_REF_NAME" 2>/dev/null)" = "tag" ]; then
+              # 带注解的 tag:注解正文就是更新说明。
+              #
+              # ⚠️ 必须**先判对象类型**。轻量 tag 上 `%(contents)` 不会返回空,
+              # 它会退回那个提交的**提交信息** —— 也就是「chore: xxx」这类
+              # 开发日志,直接当成给用户看的更新说明发出去。
+              NOTES=$(git tag -l --format='%(contents)' "$GITHUB_REF_NAME")
             else
-              LOG=$(git log --no-merges --format='- %s' -20 "$GITHUB_REF_NAME")
+              # 轻量 tag:列出上一版以来的提交,总比空着强。
+              # 老格式 tag(v0.12.0)不匹配 v*-b*,所以要兜两层
+              PREV=$(git tag -l 'v*-b*' --sort=-version:refname \
+                     | grep -vx "$GITHUB_REF_NAME" | head -1)
+              [ -n "$PREV" ] || PREV=$(git tag -l 'v*' --sort=-version:refname \
+                                       | grep -vx "$GITHUB_REF_NAME" | head -1)
+              if [ -n "$PREV" ]; then
+                LOG=$(git log --no-merges --format='- %s' "$PREV..$GITHUB_REF_NAME")
+              else
+                LOG=$(git log --no-merges --format='- %s' -20 "$GITHUB_REF_NAME")
+              fi
+              NOTES=$(printf '本版改动(自 %s):\n%s' "${PREV:-仓库开始}" "$LOG")
             fi
-            NOTES=$(printf '本版改动(自 %s):\n%s' "${PREV:-仓库开始}" "$LOG")
           fi
           if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
             echo "::error::取不到更新说明。Release 页空着等于没发说明 ——"
