@@ -14,19 +14,25 @@ serverAddr = "你的云服务器公网IP"
 serverPort = 7000
 auth.token = ""            # openssl rand -hex 16,两端一致
 
+# 两条都带 proxy protocol v2:TCP 隧道本身会把客户端地址丢掉(nginx 只看得到 frpc),
+# 这个头把真实 IP 带到 nginx,按 IP 限流才分得开人。frps 那边不用改。
+# localPort 指的是 nginx 专门接 proxy protocol 的 81/444(compose 发布为 127.0.0.1 的 8881/8444),
+# **不是** 8880/8443 —— 那两个端口不认这个头,指错了整站打不开(见 nginx/conf.d/superz.conf「真实来源 IP」)。
 [[proxies]]
 name = "web-http"
 type = "tcp"
 localIP = "127.0.0.1"
-localPort = 8880           # 部署机 nginx 的 80(compose 发布为 8880)
+localPort = 8881           # 部署机 nginx 的 81(proxy protocol,compose 发布为 127.0.0.1:8881)
 remotePort = 80
+transport.proxyProtocolVersion = "v2"
 
 [[proxies]]
 name = "web-https"
 type = "tcp"
 localIP = "127.0.0.1"
-localPort = 8443           # 部署机 nginx 的 443(compose 发布为 8443)
+localPort = 8444           # 部署机 nginx 的 444(proxy protocol,compose 发布为 127.0.0.1:8444)
 remotePort = 443
+transport.proxyProtocolVersion = "v2"
 
 # 可选:部署机 SSH 的私密通道(stcp),让开发机在外面也能部署。
 # 不在 frps 上开公网端口,只转给持有同一把 secretKey 的访问端(开发机上的 frpc)。
