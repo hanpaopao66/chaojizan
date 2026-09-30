@@ -67,6 +67,77 @@ scp server/certs/apiclient_key.pem server/certs/pub_key.pem <部署机>:~/super-
    所以 `.env.prod` 里写相对路径 `certs/apiclient_key.pem`、`certs/pub_key.pem`。
    密钥缺失时 `get_client()` 记日志返回 None、支付接口 503,不会 500。
 
+## 真实来源 IP(frp proxy protocol)
+
+frp 是 TCP 隧道,不开 proxy protocol 的话 nginx 看到的连接全部来自 frpc,api 眼里全站只有一个 IP:
+验证码「同 IP 每日 20 条」(`server/app/routers/auth.py`)一天就把所有新用户锁死,
+`/screen`、`/transparency` 的 120/分钟也是全站共用。现在的链路:
+
+```
+frps(不用改) → frpc(transport.proxyProtocolVersion = "v2")
+  → 127.0.0.1:8881/8444 → nginx 81/444(listen … proxy_protocol,realip 取出真实地址)
+  → X-Forwarded-For 覆盖成 $remote_addr → api 的 client_ip()
+```
+
+8880/8443(nginx 80/443)照旧是普通端口,本机、局域网直连的冒烟和调试不受影响。
+细节和理由见 `nginx/conf.d/superz.conf` 里「真实来源 IP」那段。
+
+### 上线步骤(一次性,顺序别反)
+
+**第 1 步:部署机本地的 legacy-\*.conf 补监听。** 这些文件不入库,部署脚本不会替你改。
+每个 `listen 443 ssl;` 下面加一行 `listen 444 ssl proxy_protocol;`(有 `listen 80;` 的同理加 `listen 81 proxy_protocol;`)。
+漏了的话,切完隧道之后老域名会落到主站的 server 块上,证书对不上。
+
+```bash
+ssh <部署机> 'grep -n "listen" ~/super-z/deploy/nginx/conf.d/legacy*.conf'
+```
+
+**第 2 步:照常发版**(`bash scripts/deploy_server.sh`)。nginx 会因为多发布了两个端口被重建,新端口开起来;
+frpc 还指着老端口,站点不断。发完在部署机上确认:
+
+```bash
+ss -ltn | grep -E '127.0.0.1:(8881|8444)'                                  # 两个新端口在听
+curl -sk -o /dev/null -w '%{http_code}\n' --resolve chaojizan.cc:8443:127.0.0.1 https://chaojizan.cc:8443/health   # 老端口照旧 200
+```
+
+**第 3 步:改部署机的 `~/super-z/deploy/tunnel/frpc.toml`**(不入库,手改)。只改 web-http、web-https 两段,
+SSH 私密通道那段(stcp)不动:
+
+```toml
+[[proxies]]
+name = "web-http"
+...
+localPort = 8881                         # 原来是 8880
+transport.proxyProtocolVersion = "v2"    # 新加
+
+[[proxies]]
+name = "web-https"
+...
+localPort = 8444                         # 原来是 8443
+transport.proxyProtocolVersion = "v2"    # 新加
+```
+
+```bash
+cd ~/super-z/deploy && cp tunnel/frpc.toml tunnel/frpc.toml.bak-$(date +%F)
+# 编辑 tunnel/frpc.toml 之后:
+docker compose -f docker-compose.prod.yml --env-file .env.prod restart frpc   # 隧道断一两秒
+```
+
+`localPort` 和 `proxyProtocolVersion` **必须一起改**:带头的连接打到 8443,或者不带头的连接打到 8444,都是整站打不开。
+
+**第 4 步:验证。** 手机关掉 Wi-Fi 用流量打开 https://chaojizan.cc,然后在部署机上:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail 20 nginx
+```
+
+每行开头应该是公网 IP(和手机上查到的一致),不再是 `172.x.x.x`。
+
+**回滚**:把 `frpc.toml` 换回备份(localPort 回 8880/8443、去掉 proxyProtocolVersion),`restart frpc`。
+nginx 这边不用动 —— 新旧端口同时开着。
+
+预发不走这条链路(预发 nginx 只开普通 443,见 `docker-compose.staging.yml`),维持现状。
+
 ## 在外面部署:SSH 私密通道(frp stcp)
 
 部署机在家用宽带的局域网里,平时只能在那个网段里跑 `scripts/deploy_server.sh`、

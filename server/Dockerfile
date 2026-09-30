@@ -59,12 +59,9 @@ EXPOSE 8000
 # (nginx 配置里那段 resolver 注释就是为这事写的),所以只能按网段信,
 # 不能钉死一个地址。写 "*" 则是连公网直连都信,没有理由。
 #
-# ⚠️ 已知局限,别以为配完就万事大吉:nginx 用的是
-# `$proxy_add_x_forwarded_for`(**追加**而非覆盖),所以公网客户端
-# 自带的 XFF 会被保留在链左侧。真正的来源 IP 还取决于 frp 隧道那一跳
-# 有没有透传(仓库里看不到 frpc.toml)—— 如果没有,这里拿到的
-# 仍然可能是同一个值。要根治得在 frps 开 proxyProtocolVersion,
-# nginx 上配 set_real_ip_from / real_ip_header,然后把这里改成只信 nginx。
+# 真实来源 IP 还要前面两跳配合,这里只是最后一环:frpc 开 proxy protocol,
+# nginx 用 realip 取出真实地址,再把 X-Forwarded-For **覆盖**成它(不是追加,
+# 否则客户端自带的 XFF 会排在最左边)。见 deploy/nginx/conf.d/superz.conf「真实来源 IP」。
 ENV FORWARDED_ALLOW_IPS=172.16.0.0/12
 
 # --workers 1。**这不是"少用点资源",是四个 worker 会各跑一份不该跑四份的东西**:
