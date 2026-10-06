@@ -98,8 +98,11 @@ void main() {
     });
 
     testWidgets('这个月真的还没挣:写 ¥0,不写「—」', (t) async {
-      await pump(t, fakeRiderApi(monthEarnedCents: 0));
+      // 转单扣给个非 0 的数:不然「本月转单扣」那格也是 ¥0,数不出是哪格
+      await pump(t,
+          fakeRiderApi(monthEarnedCents: 0, monthTransferFeeCents: 1000));
       expect(find.text('¥0'), findsOneWidget);
+      expect(find.text('¥10'), findsOneWidget);
     });
 
     testWidgets('还没有顾客评价:评价格是「—」,不是 0 分', (t) async {
