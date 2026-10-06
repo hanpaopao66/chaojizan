@@ -41,6 +41,9 @@ RIDER_KINDS = {"earning", "adjustment"}
 #: 判骑手责任的骑手行(2026-09 起,规格 §6.2b):**不在 rider_rows 里**,单独放在
 #: rider_fault_rows。冲回这单收入、池子不够骑手另出的是负数,申诉改判退回的是正数
 RIDER_FAULT_SIGNS = {"fault_reversal": -1, "fault_charge": -1, "fault_refund": 1}
+#: 转单的钱(2026-10 起,规格 §6.2e):**不在 rider_rows 里**,单独放在 rider_transfer_rows。
+#: 接了不送扣的是负数,订单完成补给送到的骑手、取消退回的是正数
+RIDER_TRANSFER_SIGNS = {"transfer_fee": -1, "transfer_bonus": 1, "transfer_refund": 1}
 #: 骑手保障金池的进出(rider_fund.rows):金额恒为正,方向看 kind
 FUND_ROW_KINDS = {"payout", "return"}
 #: 判商家责任的商家行(2026-09 起,规格 §6.2c):**不在 merchant_rows 里**,单独放在
@@ -128,6 +131,13 @@ def verify_rows(payload: dict) -> list[str]:
             problems.append(f"骑手判责行 {r['o']}: 未知类型 {r['kind']}")
         elif r["amount"] * sign < 0:
             problems.append(f"骑手判责行 {r['o']}: {r['kind']} 的金额 {r['amount']} 符号不对")
+    # 转单的钱(规格 §6.2e):种类在白名单里、符号对。缺这个字段的老锚点跳过
+    for r in payload.get("rider_transfer_rows", []):
+        sign = RIDER_TRANSFER_SIGNS.get(r["kind"])
+        if sign is None:
+            problems.append(f"骑手转单行 {r['o']}: 未知类型 {r['kind']}")
+        elif r["amount"] * sign < 0:
+            problems.append(f"骑手转单行 {r['o']}: {r['kind']} 的金额 {r['amount']} 符号不对")
     for r in (payload.get("rider_fund") or {}).get("rows", []):
         if r["kind"] not in FUND_ROW_KINDS or r["amount"] <= 0:
             problems.append(f"保障金池行 {r['o']}: {r['kind']} {r['amount']} —— "
@@ -178,6 +188,9 @@ def verify_rows(payload: dict) -> list[str]:
     if t and "rider_fault" in t and t.get("rider_fault") != sum(
             r["amount"] for r in payload.get("rider_fault_rows", [])):
         problems.append("骑手判责合计与逐行加总不一致")
+    if t and "rider_transfer" in t and t.get("rider_transfer") != sum(
+            r["amount"] for r in payload.get("rider_transfer_rows", [])):
+        problems.append("骑手转单合计与逐行加总不一致")
     if t and "merchant_fault" in t and t.get("merchant_fault") != sum(
             r["amount"] for r in payload.get("merchant_fault_rows", [])):
         problems.append("商家判责合计与逐行加总不一致")

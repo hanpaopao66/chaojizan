@@ -4,11 +4,15 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'weekly_page.dart';
 
-/// 判骑手责任的三种账本行(服务端 EarningKind 的 fault_*)在流水里的说法
+/// 判骑手责任的三种账本行(服务端 EarningKind 的 fault_*)和转单的三种行
+/// (transfer_*,服务端 services/rider_transfer)在流水里的说法
 const Map<String, String> _kFaultKinds = {
   'fault_reversal': '骑手责任 · 这单收入不计',
   'fault_charge': '骑手责任 · 商家那份餐钱(保障金池不够的部分)',
   'fault_refund': '申诉成立 · 扣的钱退回',
+  'transfer_fee': '接了没送 · 转单扣款(给送到的骑手)',
+  'transfer_bonus': '转单加钱 · 前面的骑手没送,扣的钱归你',
+  'transfer_refund': '这单取消了 · 转单扣的钱退回',
 };
 
 /// 骑手账本(设计稿 5g):深台面 + 逐单。
@@ -25,9 +29,11 @@ const Map<String, String> _kFaultKinds = {
 ///   跑腿费的 2%** —— 这个数由服务端按这一段的跑腿单算好(worklog 的
 ///   `*_platform_cut_cents`),是多少写多少,没接跑腿单就是真的 ¥0。
 ///
-/// 「罚款 ¥0」照写:平台没有任何罚款项。判为骑手责任的那一单另算(服务端
-/// services/rider_fault:这单收入不计,商家那份餐钱先由保障金池出、不够的从收入里扣)——
-/// 那是赔商家那份餐钱,不是罚款,逐单里单独一行写明([_kFaultKinds]),不混进台面的「罚款」。
+/// 台面上原来写死「罚款 ¥0」。2026-10-06 起接了不送(转单)立刻扣钱(服务端
+/// services/rider_transfer,钱给最后送到那单的骑手,平台不经手),这一格改成
+/// 「转单扣」,数是服务端按这一段算好的(worklog 的 `*_transfer_fee_cents`)。
+/// 判为骑手责任的那一单另算(服务端 services/rider_fault:这单收入不计,商家那份餐钱
+/// 先由保障金池出、不够的从收入里扣),逐单里单独一行写明([_kFaultKinds])。
 class WalletPage extends StatefulWidget {
   const WalletPage({super.key, required this.api, this.period = 0});
 
@@ -194,6 +200,7 @@ class _WalletPageState extends State<WalletPage> {
     final orders = _num('${p}_orders');
     final minutes = _num('${p}_minutes');
     final cut = _num('${p}_platform_cut_cents');
+    final transferFee = _num('${p}_transfer_fee_cents');
 
     return RefreshIndicator(
       onRefresh: () => _load(replay: true),
@@ -206,7 +213,7 @@ class _WalletPageState extends State<WalletPage> {
                 onRetry: _load),
             const SizedBox(height: 8),
           ],
-          _ledgerCard(wallet, earned, orders, minutes, cut),
+          _ledgerCard(wallet, earned, orders, minutes, cut, transferFee),
           const SizedBox(height: 16),
           Row(children: [
             Expanded(
@@ -267,7 +274,8 @@ class _WalletPageState extends State<WalletPage> {
   }
 
   Widget _ledgerCard(
-      Wallet wallet, int? earned, int? orders, int? minutes, int? cut) {
+      Wallet wallet, int? earned, int? orders, int? minutes, int? cut,
+      int? transferFee) {
     return SzLedgerCard(
       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       child: Builder(builder: (context) {
@@ -320,8 +328,14 @@ class _WalletPageState extends State<WalletPage> {
                   style: fig),
             ])),
             Text.rich(TextSpan(children: [
-              TextSpan(text: '罚款 ', style: dim),
-              TextSpan(text: '¥0', style: fig),
+              TextSpan(text: '转单扣 ', style: dim),
+              // 老服务端没有这个字段:那时还没有转单扣款,就是 0
+              TextSpan(
+                  text: _worklog == null
+                      ? '—'
+                      : szYuanText(transferFee ?? 0, '¥',
+                          (transferFee ?? 0) % 100 == 0 ? 0 : 2),
+                  style: fig),
             ])),
           ]),
           const SizedBox(height: 14),

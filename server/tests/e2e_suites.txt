@@ -155,6 +155,7 @@ e2e_rider_insurance
 e2e_rider_onboarding
 e2e_rider_sos
 e2e_rider_transfer
+e2e_rider_transfer_fee
 e2e_rider_worklog
 e2e_risk
 e2e_risk_action

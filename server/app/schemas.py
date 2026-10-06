@@ -814,6 +814,8 @@ class TransferOut(BaseModel):
     suspend_threshold: int = 0  # 非免责转单达此数,当日暂停抢单(次日恢复)
     # 这次是无责转单(过了预计出餐时间、上报未出餐满 N 分钟),不占当日次数
     waited_free: bool = False
+    # 这次转单扣了多少(分):接了没送立刻扣,无责转单为 0
+    fee_cents: int = 0
 
 
 class DeliveryIssueIn(BaseModel):
@@ -1112,6 +1114,8 @@ class OrderOut(BaseModel):
     # 为什么要进返回体:骑手端是轮询架构、没有 WS;没配推送的部署里,
     # 这是催单能到骑手眼前的唯一通道 —— 推送和消息中心那两条路都到不了
     urge_count: int = 0
+    # 骑手视角:前面有骑手接了没送、转单扣的钱,送到这单的人完成时拿到(分)
+    transfer_bonus_cents: int = 0
     total_cents: int
     commission_cents: int
     scheduled_at: datetime | None = None

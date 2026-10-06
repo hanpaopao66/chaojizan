@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..db import get_db
 from ..models import (Dish, Merchant, MerchantStatus, Order, OrderEvent,
-                      Review, User)
+                      Review, RiderEarning, User, UserRole)
 from ..ratelimit import check_rate_limit
 from ..redis_client import RIDER_LOC_KEY, get_redis
 from ..schemas import (
@@ -207,12 +207,37 @@ async def orders_out(db: AsyncSession, orders: list[Order],
     # 每个订单各发一条 SQL —— 那正是这个字段要消灭的东西
     reviewed = await _reviewed_ids(db, orders)
     urges = await _urge_counts(db, orders)
-    return [
-        order_out(o, merchants.get(o.merchant_id), viewer,
-                  has_review=o.id in reviewed,
-                  urge_count=urges.get(o.id, 0))
-        for o in orders
-    ]
+    bonus = await _transfer_bonus(db, orders, viewer)
+    outs = []
+    for o in orders:
+        out = order_out(o, merchants.get(o.merchant_id), viewer,
+                        has_review=o.id in reviewed,
+                        urge_count=urges.get(o.id, 0))
+        out.transfer_bonus_cents = bonus.get(o.id, 0)
+        outs.append(out)
+    return outs
+
+
+async def _transfer_bonus(db: AsyncSession, orders: list[Order],
+                          viewer: User | None) -> dict[int, int]:
+    """转单加钱:这批单里各有多少转单扣款等着补给送到的骑手。**一次查完。**
+
+    只给骑手看(这是骑手之间的钱),只查还没送到的单。
+    """
+    if viewer is None or viewer.role != UserRole.rider:
+        return {}
+    live = [o.id for o in orders
+            if o.status in (OrderStatus.ACCEPTED, OrderStatus.READY,
+                            OrderStatus.PICKED_UP)]
+    if not live:
+        return {}
+    from ..services.rider_transfer import TRANSFER_KINDS
+    rows = (await db.execute(
+        select(RiderEarning.order_id, func.sum(RiderEarning.amount_cents))
+        .where(RiderEarning.order_id.in_(live),
+               RiderEarning.kind.in_(TRANSFER_KINDS))
+        .group_by(RiderEarning.order_id))).all()
+    return {oid: -int(total) for oid, total in rows if total and total < 0}
 
 
 async def _urge_counts(db: AsyncSession,
@@ -1119,6 +1144,9 @@ async def transition(
     if payload.to_status == OrderStatus.CANCELLED:
         from ..services.eta import release_coupon
         await release_coupon(db, order.order_no)
+        # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+        from ..services.rider_transfer import refund_on_cancel
+        await refund_on_cancel(db, order)
     # 出餐了就把「到店未出餐」的催单工单自动销掉(不占用同单一张 open 工单的名额)
     if payload.to_status == OrderStatus.READY:
         # 发货照:**零售必须拍,餐饮不要求**。
@@ -1481,6 +1509,9 @@ async def self_refund(
     order.cancel_reason = reason
     from ..services.eta import release_coupon
     await release_coupon(db, order.order_no)
+    # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+    from ..services.rider_transfer import refund_on_cancel
+    await refund_on_cancel(db, order)
     await _record_event(db, order, from_status.value,
                         OrderStatus.CANCELLED.value, user)
     await db.commit()
@@ -1615,6 +1646,9 @@ async def cancel_with_split(
     order.cancel_reason = f"用户取消 · {_quote_label(split)}"
     from ..services.eta import release_coupon
     await release_coupon(db, order.order_no)
+    # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+    from ..services.rider_transfer import refund_on_cancel
+    await refund_on_cancel(db, order)
     await _record_event(db, order, from_status.value,
                         OrderStatus.CANCELLED.value, user)
     await db.commit()
@@ -1951,6 +1985,9 @@ async def refund_item(
         order.cancel_reason = "商家缺货,整单退款"
         from ..services.eta import release_coupon
         await release_coupon(db, order.order_no)
+        # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+        from ..services.rider_transfer import refund_on_cancel
+        await refund_on_cancel(db, order)
         await _record_event(db, order, from_status.value, OrderStatus.CANCELLED.value, user)
     else:
         order.items = items

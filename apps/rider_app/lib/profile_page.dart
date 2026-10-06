@@ -34,8 +34,8 @@ import 'witness_page.dart';
 ///   「上传了没有 / 本市要不要求」,不编到期日;
 /// - 结算卡「每日 22:00」:没有定时结算,提现 T+1;
 /// - 「骑手互助会」:平台没有这个组织,那一行只留见证节点;
-/// - 「罚款 · 永远是 0」:平台确实没有任何罚款项,但「永远」是一句承诺,
-///   不是代码里的事实 —— 写「没有这项」。
+/// - 「罚款 · 永远是 0」:2026-10-06 起接了不送(转单)要扣钱(服务端
+///   services/rider_transfer),这一格改成「本月转单扣」,写真数。
 ///
 /// ## 稿子上没画、但一个都不能少的入口
 ///
@@ -534,9 +534,13 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
     ];
   }
 
-  /// 三个数:用户评价 / 本月所得 / 罚款。整卡点进周报。
+  /// 三个数:用户评价 / 本月所得 / 本月转单扣。整卡点进周报。
   Widget _stats(SzColors sz) {
     final month = (_worklog?['month_earned_cents'] as num?)?.toInt();
+    // 老服务端没有这个字段:那时还没有转单扣款,就是 0
+    final fee = _worklog == null
+        ? null
+        : (_worklog?['month_transfer_fee_cents'] as num?)?.toInt() ?? 0;
     // 数和标签都缩放不折行:三格等分,320 屏 1.4× 下一格只有九十来宽
     Widget cell(String value, String label) => Expanded(
           child: Column(children: [
@@ -564,7 +568,8 @@ class _RiderProfilePageState extends State<RiderProfilePage> {
         bar(),
         cell(month == null ? '—' : szYuanText(month, '¥', 0), '本月所得'),
         bar(),
-        cell('0', '罚款 · 没有这项'),
+        cell(fee == null ? '—' : szYuanText(fee, '¥', fee % 100 == 0 ? 0 : 2),
+            '本月转单扣'),
       ]),
     );
   }

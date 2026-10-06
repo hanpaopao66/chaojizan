@@ -55,12 +55,12 @@ void main() {
   });
 
   group('三个数来自服务端聚合', () {
-    testWidgets('评价 4.9、本月所得 ¥5,214、罚款 0', (t) async {
+    testWidgets('评价 4.9、本月所得 ¥5,214、本月转单扣 ¥0', (t) async {
       await pump(t, fakeRiderApi(monthEarnedCents: 521400));
       expect(find.text('4.9'), findsOneWidget);
       expect(find.text('¥5,214'), findsOneWidget);
-      expect(find.text('0'), findsOneWidget);
-      expect(find.text('罚款 · 没有这项'), findsOneWidget);
+      expect(find.text('¥0'), findsOneWidget);
+      expect(find.text('本月转单扣'), findsOneWidget);
     });
 
     testWidgets('订单列表返回什么都不影响这些数', (t) async {

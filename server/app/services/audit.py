@@ -11,6 +11,8 @@
   4c/4d. 判骑手责任、判商家责任的恒等式(services/rider_fault、services/merchant_fault)
   4e. 反查:新规则生效之后判了商家责任的单(平台骑手送的、配送费 + 小费 > 0),必须有商家另出的
       那一行 —— 4d 从写了的行出发,一行都没写的单它看不见
+  4f. 转单扣的钱(services/rider_transfer)只在骑手之间流动:订单结束时扣的 == 补的 + 退的,
+      补的那行落在送到这单的骑手身上
   5. 每笔订单的 refund_cents 必须等于 refunds 流水之和(失败流水不算 → 自动暴露)
   5b. 退款不得超过用户实付 —— 判据是"剩余应付不许为负"(见该条的长注释:
       total_cents 是剩余应付不是累计实付,直接比 refund_cents 会造出几百盏假红灯)
@@ -96,6 +98,10 @@ NO_RIDER_COMP_NOTE = "无骑手接单取消,平台赔付餐损"
 #: 判骑手责任的三种骑手行(services/rider_fault.FAULT_KINDS):这单收入冲回、池子不够骑手出、改判退回
 _RIDER_FAULT_KINDS = (EarningKind.fault_reversal, EarningKind.fault_charge,
                       EarningKind.fault_refund)
+#: 转单扣款和取消退回(services/rider_transfer):跟判责的行一样不算「挣到」,
+#: 规则 4 按扣款口径算。送到拿的 transfer_bonus 是挣到的,不在这里
+_RIDER_DEDUCT_KINDS = (*_RIDER_FAULT_KINDS, EarningKind.transfer_fee,
+                       EarningKind.transfer_refund)
 #: 判商家责任的两种商家行(services/merchant_fault.FAULT_KINDS):骑手那份商家另出、改判退回
 _MERCHANT_FAULT_KINDS = (EarningKind.fault_charge, EarningKind.fault_refund)
 
@@ -192,6 +198,49 @@ async def _reversal_due_ids(db, order_ids) -> set[int]:
                Refund.status != RefundStatus.failed,
                Refund.created_at >= settled_at)))
     return due - exempt
+
+
+async def _rider_transfer_problems(db, since) -> list[dict]:
+    """转单扣款的恒等式(规则 4f)。和 services/rider_transfer 对着写。"""
+    from .rider_transfer import TRANSFER_KINDS
+    touched = set(await db.scalars(
+        select(RiderEarning.order_id).where(RiderEarning.kind.in_(TRANSFER_KINDS),
+                                            RiderEarning.created_at >= since)))
+    if not touched:
+        return []
+    orders = {o.id: o for o in await db.scalars(
+        select(Order).where(Order.id.in_(touched)))}
+    rows: dict[int, list] = {}
+    for oid, rider_id, kind, amount in (await db.execute(
+            select(RiderEarning.order_id, RiderEarning.rider_id,
+                   RiderEarning.kind, RiderEarning.amount_cents)
+            .where(RiderEarning.order_id.in_(touched),
+                   RiderEarning.kind.in_(TRANSFER_KINDS)))).all():
+        rows.setdefault(oid, []).append((rider_id, kind, amount))
+    problems = []
+    for oid, rs in rows.items():
+        order = orders.get(oid)
+        if order is None:
+            continue
+        net = sum(a for _, _, a in rs)
+        if any(a > 0 for _, k, a in rs if k == EarningKind.transfer_fee) or any(
+                a < 0 for _, k, a in rs if k != EarningKind.transfer_fee):
+            problems.append({"check": "rider_transfer_sign",
+                             "detail": f"订单 {order.order_no} 转单账行符号不对"
+                                       f"(扣的该是负数,补的、退的该是正数)"})
+        if order.status in (OrderStatus.COMPLETED, OrderStatus.CANCELLED) and net != 0:
+            problems.append({"check": "rider_transfer_unbalanced",
+                             "detail": f"订单 {order.order_no} 已结束,转单扣的钱"
+                                       f"没有全数补出或退回:差 {-net} 分"})
+        elif net > 0:
+            problems.append({"check": "rider_transfer_unbalanced",
+                             "detail": f"订单 {order.order_no} 补出 / 退回的转单钱"
+                                       f"比扣的多 {net} 分"})
+        for rider_id, kind, _ in rs:
+            if kind == EarningKind.transfer_bonus and rider_id != order.rider_id:
+                problems.append({"check": "rider_transfer_bonus_rider",
+                                 "detail": f"订单 {order.order_no} 转单加的钱没给送到的骑手"})
+    return problems
 
 
 async def _rider_fault_problems(db, since) -> list[dict]:
@@ -638,12 +687,12 @@ async def run_audit() -> list[dict]:
             earned = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(RiderEarning.amount_cents), 0))
                 .where(RiderEarning.rider_id == rider.id,
-                       RiderEarning.kind.notin_(_RIDER_FAULT_KINDS))
+                       RiderEarning.kind.notin_(_RIDER_DEDUCT_KINDS))
             )
             faults = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(RiderEarning.amount_cents), 0))
                 .where(RiderEarning.rider_id == rider.id,
-                       RiderEarning.kind.in_(_RIDER_FAULT_KINDS))
+                       RiderEarning.kind.in_(_RIDER_DEDUCT_KINDS))
             )
             out = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(Withdrawal.amount_cents), 0))
@@ -658,7 +707,7 @@ async def run_audit() -> list[dict]:
                 problems.append({
                     "check": "rider_balance_negative",
                     "detail": f"骑手 {rider.phone} 提走的比挣到的多:{earned - out} 分"
-                              f"(不含判骑手责任扣的钱)",
+                              f"(不含判骑手责任、转单扣的钱)",
                 })
             elif earned + faults - out < 0:
                 owed_n += 1
@@ -678,6 +727,10 @@ async def run_audit() -> list[dict]:
 
         # 4e) 反查:判了商家责任,就必须有商家另出的那一行 —— 4d 只核写了的,一行都没写的它看不见
         problems.extend(await _merchant_fault_charge_missing(db, since))
+
+        # 4f) 转单扣的钱(services/rider_transfer)只在骑手之间流动:订单结束了,
+        #     扣的 == 补给送到的人的 + 退回的;补的那行必须落在送到这单的骑手身上
+        problems.extend(await _rider_transfer_problems(db, since))
 
         # 4b) 商家提现不得超过挣到的钱。
         #

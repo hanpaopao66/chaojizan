@@ -112,6 +112,7 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 | `voucher_rows` | array | 团购核销行 |
 | `stay_rows` | array | 住宿账行 |
 | `rider_fault_rows` | array | 判骑手责任的骑手行(2026-09 起的新字段,§2.2、§6.2b) |
+| `rider_transfer_rows` | array | 转单的钱:扣、补给送到的骑手、取消退回(2026-10 起的新字段,§6.2e) |
 | `merchant_fault_rows` | array | 判商家责任时商家另出的骑手那份、申诉改判退回(2026-09 起的新字段,§2.2、§6.2c) |
 | `appeal_refund_rows` | array | 顾客申诉改判成立、平台原路退回的钱(2026-09 起的新字段,§2.2、§6.2d) |
 | `rider_fund` | object | 骑手保障金池:`{per_order_cents, orders, accrued_cents}`;2026-09 起加了 `paid_cents`、`returned_cents`、`rows`(每一笔支出和回池) |
@@ -136,6 +137,11 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 {"o": "<24位hex>", "amount": -500, "kind": "fault_reversal"}
 // kind ∈ {"fault_reversal"(这单收入冲回,≤0), "fault_charge"(保障金池不够、骑手另出,≤0),
 //         "fault_refund"(申诉改判成立退回,≥0)}
+
+// rider_transfer_rows 每行(2026-10 起):转单的钱,只在骑手之间流动
+{"o": "<24位hex>", "amount": -1000, "kind": "transfer_fee"}
+// kind ∈ {"transfer_fee"(接了不送、转出扣的,≤0), "transfer_bonus"(订单完成补给送到的骑手,≥0),
+//         "transfer_refund"(订单取消、没人送到,退回,≥0)}
 
 // rider_fund.rows 每行(2026-09 起):保障金池的每一笔支出和回池,金额恒为正
 {"o": "<24位hex>", "amount": 1425, "kind": "payout"}
@@ -376,6 +382,25 @@ appeal_refund_rows[].amount > 0
 
 四项加起来就是这一天平台为纠错出的钱,平台写在 `totals.platform_correction`(§6.5),
 和透明中心「钱去哪了」的「申诉改判」一项同一个口径。
+
+### 6.2e 转单的钱(2026-10 起的新字段)
+
+2026-10-06 起:**要么就接,接了就送。** 骑手接了单又转出(退回抢单池),立刻从他的收入里扣一笔
+(默认 10 元);扣的钱跟着这单走,最后把这单送到的骑手在订单完成时拿到;这单最后取消了、没人送到,
+就原样退回给扣过钱的骑手。过了预计出餐时间商家还没出餐的无责转单不扣。**平台不经手这笔钱**,
+它只在骑手之间流动。
+
+这些行**不在 `rider_rows` 里**(扣的那行是负数,那一栏「只进不冲」),单独逐笔记在 `rider_transfer_rows`,
+合计写在 `totals.rider_transfer`。**验证器应当**校验(四个参考实现都已校验):
+
+```
+rider_transfer_rows[].kind ∈ {"transfer_fee", "transfer_bonus", "transfer_refund"}
+transfer_fee 的 amount <= 0;transfer_bonus、transfer_refund 的 amount >= 0
+totals.rider_transfer == Σ rider_transfer_rows[].amount       (字段存在时)
+```
+
+扣、补、退常常不在同一天(订单跨零点、取消在之后),所以逐日不要求加起来为 0 ——
+跨天的守恒(订单结束时 扣的 == 补的 + 退的,补的落在送到的骑手身上)由平台每日核账(规则 4f)守着。
 
 ### 6.3 团购行
 

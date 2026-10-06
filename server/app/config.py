@@ -234,8 +234,13 @@ class Settings(BaseSettings):
     no_rider_cancel_minutes: int = 30
     # 骑手转单:每天免责次数(超出仍可转,只计数供考核参考,不拦截)
     transfer_free_times_per_day: int = 2
-    # 上报「到店未出餐」满 N 分钟仍没出餐的,转单不占当日次数(无责转单)
+    # 无责转单:过了预计出餐时间,且上报「到店未出餐」满 N 分钟仍没出餐的,
+    # 转单不扣钱、不占当日次数
     pickup_wait_free_transfer_minutes: int = 10
+    # 接了不送(非无责转单)立刻扣的钱(分)。扣下来的钱跟着这单走,
+    # 最后送到的骑手完成时拿到;这单取消了就退回(services/rider_transfer.py)。
+    # 2026-10-06 运营方定 10 元;0 = 不扣
+    rider_transfer_fee_cents: int = 1000
     # 转单软约束:同一自然日非免责转单达 N 次,当日暂停抢单(不罚钱不封号,
     # 次日自动恢复;免责转单与事故释放永不计入)
     transfer_daily_suspend_threshold: int = 5
