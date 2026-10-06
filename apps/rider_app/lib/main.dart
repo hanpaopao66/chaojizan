@@ -1292,7 +1292,7 @@ class _RiderHomePageState extends State<RiderHomePage>
   }
 
   /// 配送异常上报:途中(联系不上/地址错/餐损)+ 交接(到店未出餐/餐不齐)。
-  /// 到店未出餐 = 催商家出餐,等满 10 分钟还可无责转单;
+  /// 到店未出餐 = 催商家出餐;过了预计出餐时间且等满 10 分钟,还可无责转单;
   /// 餐损/餐不齐必须拍照,走平台仲裁。
   Future<void> _reportIssue(Order order) async {
     final pickedUp = order.status == OrderStatus.pickedUp;
@@ -1409,7 +1409,7 @@ class _RiderHomePageState extends State<RiderHomePage>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(kind == 'not_ready'
-              ? '已催商家出餐;等满 10 分钟仍未出餐,可无责转单'
+              ? '已催商家出餐;过了预计出餐时间、等满 10 分钟仍未出餐,可无责转单'
               : '已上报,平台会尽快处理;紧急情况可直接电话联系顾客')));
     } catch (e) {
       if (!mounted) return;
@@ -1474,10 +1474,13 @@ class _RiderHomePageState extends State<RiderHomePage>
       if (!mounted) return;
       final count = result['today_count'] as int? ?? 0;
       final free = result['free_times'] as int? ?? 2;
+      final waitedFree = result['waited_free'] as bool? ?? false;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(count > free
-              ? '已转单(今日第 $count 次,超过免责 $free 次会计入考核参考)'
-              : '已转单,其他骑手会接力配送')));
+          content: Text(waitedFree
+              ? '已无责转单(过了出餐时间商家仍未出餐),不占今日次数'
+              : count > free
+                  ? '已转单(今日第 $count 次,超过免责 $free 次会计入考核参考)'
+                  : '已转单,其他骑手会接力配送')));
       _refresh();
     } catch (e) {
       if (!mounted) return;

@@ -1086,25 +1086,15 @@ async def transition(
             order.delivered_at = now   # 自取单没有"送达"这一步
     # 出餐瞬间定格是否超时(承诺时长口径;预约单以预约前推为基准)
     if payload.to_status == OrderStatus.READY and order.accepted_at is not None:
+        from ..services.prep_time import expected_ready_at
         shop_for_promise = (shop if role == "merchant"
                             else await db.get(Merchant, order.merchant_id))
-        accepted_at = order.accepted_at
-        if accepted_at.tzinfo is None:
-            accepted_at = accepted_at.replace(tzinfo=timezone.utc)
         # 忙碌模式生效期出餐超时判定同步放宽(按判定时刻的忙碌状态,
-        # 接单后忙碌恰好结束的边界单按常规口径,不做更细的追溯)
-        promise_minutes = shop_for_promise.promise_ready_minutes + (
-            shop_for_promise.busy_extra_minutes
-            if shop_for_promise.busy_active else 0)
-        promise = timedelta(minutes=promise_minutes)
+        # 接单后忙碌恰好结束的边界单按常规口径,不做更细的追溯)。
+        # 骑手无责转单读的是同一个时刻(见 expected_ready_at)
         # 「or」保持粘性:骑手上报「到店未出餐」已标过延误的,不因补出餐而清掉
-        if order.scheduled_at is not None:
-            scheduled_at = order.scheduled_at
-            if scheduled_at.tzinfo is None:
-                scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
-            order.ready_late = order.ready_late or now > scheduled_at
-        else:
-            order.ready_late = order.ready_late or (now - accepted_at > promise)
+        order.ready_late = order.ready_late or (
+            now > expected_ready_at(order, shop_for_promise))
     # 制作开始前取消的订单,库存还回去
     if (
         payload.to_status == OrderStatus.CANCELLED

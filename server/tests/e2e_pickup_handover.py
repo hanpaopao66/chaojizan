@@ -118,28 +118,54 @@ async def main():
           "photo_url": "https://example.com/bag.jpg"})
     print("✓ items_missing 必须带图,带图成功(走平台仲裁)")
 
-    # 6) 无责转单:not_ready 上报满 10 分钟仍未出餐,转单不占当日次数
+    # 6) 无责转单:过了预计出餐时间,且 not_ready 上报满 10 分钟仍未出餐,
+    #    转单不占当日次数;没到出餐时间的,等再久也按普通转单计数
+    async def backdate(no, issue_min, accepted_min=None):
+        async with SessionLocal() as db:
+            await db.execute(
+                text("UPDATE delivery_issues SET created_at = now() - "
+                     "make_interval(mins => :m) WHERE order_id = "
+                     "(SELECT id FROM orders WHERE order_no = :no)"),
+                {"no": no, "m": issue_min})
+            if accepted_min is not None:
+                await db.execute(
+                    text("UPDATE orders SET accepted_at = now() - "
+                         "make_interval(mins => :m) WHERE order_no = :no"),
+                    {"no": no, "m": accepted_min})
+            await db.commit()
+
     noA = make_order(to_status="accepted")
     call("POST", f"/riders/grab/{noA}", rider)
     r = call("POST", f"/riders/transfer/{noA}", rider, {"reason": "other"})
     assert r["today_count"] == 1, r  # 正常转单计 1 次
+
+    # 刚接单就到店等:上报满 10 分钟,但还没到承诺出餐时间 → 不算无责
+    noC = make_order(to_status="accepted")
+    call("POST", f"/riders/grab/{noC}", rider)
+    call("POST", "/riders/issues", rider,
+         {"order_no": noC, "kind": "not_ready", "note": "来早了"})
+    await backdate(noC, 11)
+    r = call("POST", f"/riders/transfer/{noC}", rider, {"reason": "other"})
+    assert r["today_count"] == 2 and not r["waited_free"], \
+        f"没到出餐时间不能无责转单:{r}"
+    row = await db_row(
+        "SELECT note FROM order_events oe JOIN orders o ON o.id = oe.order_id "
+        "WHERE o.order_no = :no AND oe.to_status = 'transferred'", no=noC)
+    assert row and "无责" not in row[0], row
+    print("✓ 没到出餐时间:等满 10 分钟转单照常计数,不算无责")
+
     noB = make_order(to_status="accepted")
     call("POST", f"/riders/grab/{noB}", rider)
     call("POST", "/riders/issues", rider,
          {"order_no": noB, "kind": "not_ready", "note": "一直没出餐"})
-    async with SessionLocal() as db:
-        await db.execute(
-            text("UPDATE delivery_issues SET created_at = now() - interval "
-                 "'11 minutes' WHERE order_id = "
-                 "(SELECT id FROM orders WHERE order_no = :no)"), {"no": noB})
-        await db.commit()
+    await backdate(noB, 11, accepted_min=120)  # 远超任何承诺出餐时长
     r = call("POST", f"/riders/transfer/{noB}", rider, {"reason": "other"})
-    assert r["today_count"] == 1, f"等餐超时转单不该计数:{r}"
+    assert r["today_count"] == 2 and r["waited_free"], f"等餐超时转单不该计数:{r}"
     row = await db_row(
         "SELECT note FROM order_events oe JOIN orders o ON o.id = oe.order_id "
         "WHERE o.order_no = :no AND oe.to_status = 'transferred'", no=noB)
     assert row and "无责" in row[0], row
-    print("✓ 等餐满 10 分钟转单:不占当日次数,事件注明无责")
+    print("✓ 过了出餐时间、等餐满 10 分钟转单:不占当日次数,事件注明无责")
 
     print("\ne2e_pickup_handover 全部通过 ✅")
 

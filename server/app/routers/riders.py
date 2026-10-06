@@ -1930,10 +1930,15 @@ async def transfer_order(
         raise HTTPException(409, "订单当前状态不能转单")
 
     now = datetime.now(timezone.utc)
-    # 无责转单:上报「到店未出餐」满 N 分钟商家还没出餐(工单仍 open),
-    # 等不起是商家的问题,这次转单不占当日免责次数
-    waited_free = bool(await db.scalar(
-        select(DeliveryIssue.id).where(
+    # 无责转单:**过了预计出餐时间**,且上报「到店未出餐」满 N 分钟商家
+    # 还没出餐(工单仍 open),等不起是商家的问题,这次转单不占当日免责次数。
+    # 没到出餐时间就到店,等是骑手自己来早了,不算商家的账 ——
+    # 照常可以转,只是按普通转单计数
+    from ..services.prep_time import expected_ready_at
+    shop = await db.get(Merchant, order.merchant_id)
+    ready_due = expected_ready_at(order, shop) if shop else None
+    waited_free = (ready_due is not None and now >= ready_due) and bool(
+        await db.scalar(select(DeliveryIssue.id).where(
             DeliveryIssue.order_id == order.id,
             DeliveryIssue.rider_id == user.id,
             DeliveryIssue.kind == "not_ready",
@@ -2017,6 +2022,7 @@ async def transfer_order(
         today_count=count,
         free_times=settings.transfer_free_times_per_day,
         suspend_threshold=await _suspend_threshold(db, user.id),
+        waited_free=waited_free,
     )
 
 

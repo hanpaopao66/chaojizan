@@ -812,6 +812,8 @@ class TransferOut(BaseModel):
     today_count: int      # 今日已转单次数(含本次)
     free_times: int       # 每日免责次数(超出仍可转,计入考核参考)
     suspend_threshold: int = 0  # 非免责转单达此数,当日暂停抢单(次日恢复)
+    # 这次是无责转单(过了预计出餐时间、上报未出餐满 N 分钟),不占当日次数
+    waited_free: bool = False
 
 
 class DeliveryIssueIn(BaseModel):

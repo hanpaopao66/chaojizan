@@ -173,6 +173,27 @@ def true_ready_at(
                picked_up_at - timedelta(seconds=HANDOVER_SECONDS))
 
 
+def expected_ready_at(order, shop) -> datetime | None:
+    """这一单**按承诺该出餐**的时刻;没接单的返回 None。
+
+    口径就是出餐超时(`ready_late`)那一套:即时单 = 接单 + 承诺出餐时长
+    (忙碌模式生效期加上忙碌延长);预约单 = 预约时间。
+    出餐超时判定和骑手无责转单都读它 —— 两边口径分开写,
+    就会出现"商家没算超时、骑手却已经能无责转单"这种两头说不通的单。
+
+    忙碌状态按调用时刻取,和出餐那一下判超时一致,不做追溯。
+    """
+    if order.scheduled_at is not None:
+        at = order.scheduled_at
+    elif order.accepted_at is not None:
+        minutes = shop.promise_ready_minutes + (
+            shop.busy_extra_minutes if shop.busy_active else 0)
+        at = order.accepted_at + timedelta(minutes=minutes)
+    else:
+        return None
+    return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+
+
 @dataclass(frozen=True)
 class PrepStat:
     merchant_id: int
