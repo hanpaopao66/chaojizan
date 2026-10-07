@@ -241,6 +241,10 @@ class Settings(BaseSettings):
     # 最后送到的骑手完成时拿到;这单取消了就退回(services/rider_transfer.py)。
     # 2026-10-06 运营方定 10 元;0 = 不扣
     rider_transfer_fee_cents: int = 1000
+    # 转单另外加钱:转单骑手自己填,10 元之外再加多少,同样立刻从他账上扣、
+    # 给送到的骑手(2026-10-07 运营方定「另外自定义加钱,谁转单谁出」)。
+    # 这里只管上限,防手滑填错;0 = 不许另加
+    rider_transfer_extra_max_cents: int = 5000
     # 转单软约束:同一自然日非免责转单达 N 次,当日暂停抢单(不罚钱不封号,
     # 次日自动恢复;免责转单与事故释放永不计入)
     transfer_daily_suspend_threshold: int = 5

@@ -1421,8 +1421,11 @@ class _RiderHomePageState extends State<RiderHomePage>
   /// 转单:已抢未取餐的单退回抢单池。要么就接,接了就送 —— 转出立刻扣钱
   /// (服务端 rider_transfer_fee_cents,默认 10 元),扣的钱给最后送到这单的骑手;
   /// 过了预计出餐时间商家还没出餐的无责转单不扣。已取餐不能转,走异常上报。
+  /// 还可以自己另外加钱(谁转单谁出),让人快点接;上限由服务端定。
   Future<void> _transferOrder(Order order) async {
     var reason = 'vehicle_broken';
+    final extraCtl = TextEditingController();
+    int extraCents() => (int.tryParse(extraCtl.text.trim()) ?? 0) * 100;
     final ok = await szShowSheet<bool>(
       context: context,
       builder: (sheetContext) => StatefulBuilder(
@@ -1457,6 +1460,15 @@ class _RiderHomePageState extends State<RiderHomePage>
                   ],
                 ),
               ),
+              TextField(
+                controller: extraCtl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: '另外加钱(元,可不填)',
+                  helperText: '你自己出,送到这单的骑手拿;这单取消就退给你',
+                ),
+              ),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
@@ -1470,19 +1482,26 @@ class _RiderHomePageState extends State<RiderHomePage>
         ),
       ),
     );
+    // 不在这里 dispose:sheet 收起动画还在用它
+    final extra = extraCents();
     if (ok != true || !mounted) return;
     try {
-      final result = await widget.api.transferOrder(order.orderNo, reason);
+      final result = await widget.api
+          .transferOrder(order.orderNo, reason, extraCents: extra);
       if (!mounted) return;
       final count = result['today_count'] as int? ?? 0;
       final free = result['free_times'] as int? ?? 2;
       final waitedFree = result['waited_free'] as bool? ?? false;
       final fee = result['fee_cents'] as int? ?? 0;
+      final added = result['extra_cents'] as int? ?? 0;
+      final paid = fee + added;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(waitedFree
-              ? '已无责转单(过了出餐时间商家仍未出餐),不扣钱、不占今日次数'
-              : fee > 0
-                  ? '已转单,扣 ${szYuanText(fee)}(给送到这单的骑手);今日第 $count 次'
+              ? (added > 0
+                  ? '已无责转单,另外加的 ${szYuanText(added)} 已扣(给送到这单的骑手)'
+                  : '已无责转单(过了出餐时间商家仍未出餐),不扣钱、不占今日次数')
+              : paid > 0
+                  ? '已转单,扣 ${szYuanText(paid)}(给送到这单的骑手);今日第 $count 次'
                   : count > free
                       ? '已转单(今日第 $count 次,超过 $free 次会计入考核参考)'
                       : '已转单,其他骑手会接力配送')));

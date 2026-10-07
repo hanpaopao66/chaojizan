@@ -140,7 +140,7 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 
 // rider_transfer_rows 每行(2026-10 起):转单的钱,只在骑手之间流动
 {"o": "<24位hex>", "amount": -1000, "kind": "transfer_fee"}
-// kind ∈ {"transfer_fee"(接了不送、转出扣的,≤0), "transfer_bonus"(订单完成补给送到的骑手,≥0),
+// kind ∈ {"transfer_fee"(接了不送、转出扣的,以及转单骑手自己另外加的钱,≤0), "transfer_bonus"(订单完成补给送到的骑手,≥0),
 //         "transfer_refund"(订单取消、没人送到,退回,≥0)}
 
 // rider_fund.rows 每行(2026-09 起):保障金池的每一笔支出和回池,金额恒为正

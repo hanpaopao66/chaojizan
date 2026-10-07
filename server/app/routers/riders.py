@@ -1907,6 +1907,7 @@ async def my_discipline(
         "transfer_used_today": used,
         "free_times": settings.transfer_free_times_per_day,
         "transfer_fee_cents": settings.rider_transfer_fee_cents,
+        "transfer_extra_max_cents": max(0, settings.rider_transfer_extra_max_cents),
         "suspend_threshold": threshold,
         "grab_suspended_today": used >= threshold,
         "novice_window": threshold > settings.transfer_daily_suspend_threshold,
@@ -1933,7 +1934,8 @@ async def transfer_order(
     已取餐(餐在骑手手上)不能自助转单,只能走配送异常仲裁。
     要么就接,接了就送(2026-10-06):非无责的转单**每一次**立刻扣
     `rider_transfer_fee_cents`(默认 10 元),扣的钱给最后送到这单的骑手
-    (services/rider_transfer)。当日计数与暂停抢单的软约束照旧。
+    (services/rider_transfer)。转单骑手还可以自己另外加钱(`extra_cents`,
+    谁转单谁出,无责转单也能加),一起跟着这单走。当日计数与暂停抢单的软约束照旧。
     用户与商家不推送(无感换人,避免焦虑),只提醒在线骑手来接力。
     """
     from datetime import datetime, timedelta, timezone
@@ -1948,6 +1950,9 @@ async def transfer_order(
         raise HTTPException(409, "已取餐不能转单(餐在你手上);有困难请上报配送异常,平台协调处理")
     if order.status not in (OrderStatus.ACCEPTED, OrderStatus.READY):
         raise HTTPException(409, "订单当前状态不能转单")
+    if payload.extra_cents > max(0, settings.rider_transfer_extra_max_cents):
+        raise HTTPException(
+            422, f"另外加钱最多 {settings.rider_transfer_extra_max_cents / 100:g} 元")
 
     now = datetime.now(timezone.utc)
     # 无责转单:**过了预计出餐时间**,且上报「到店未出餐」满 N 分钟商家
@@ -1980,8 +1985,10 @@ async def transfer_order(
     )
     # 接了不送:立刻扣钱,扣的钱跟着这单走,最后送到的骑手完成时拿到。
     # 无责转单不扣(services/rider_transfer)
-    from ..services.rider_transfer import charge
+    from ..services.rider_transfer import add_extra, charge, pending_cents
     fee = 0 if waited_free else charge(db, order, user.id)
+    # 另外加钱:谁转单谁出,自己填的数
+    extra = add_extra(db, order, user.id, payload.extra_cents)
     label = _TRANSFER_REASON_LABELS[payload.reason]
     db.add(OrderEvent(
         order_id=order.id,
@@ -1991,9 +1998,11 @@ async def transfer_order(
         actor_id=user.id,
         note=f"转单原因:{label}" + ("(到店等餐超时,无责)" if waited_free
                                     else f"(接了没送,扣 {fee / 100:g} 元)" if fee
-                                    else ""),
+                                    else "")
+             + (f"(另外加 {extra / 100:g} 元)" if extra else ""),
     ))
     await db.commit()
+    bonus = await pending_cents(db, order.id)
 
     # 每日转单计数(北京自然日,Redis 过期兜底;考核口径以 OrderEvent 为准)
     redis = get_redis()
@@ -2040,8 +2049,8 @@ async def transfer_order(
         ).all()
         for rider_id in online_riders:
             await push_to_user(rider_id, "有转出的订单",
-                               (f"有骑手转出了一单,送到加 {fee / 100:g} 元,"
-                                "顺路就去抢单大厅接力吧") if fee else
+                               (f"有骑手转出了一单,送到加 {bonus / 100:g} 元,"
+                                "顺路就去抢单大厅接力吧") if bonus > 0 else
                                "有骑手转出了一单,顺路就去抢单大厅接力吧",
                                {"type": "grab"})
     except Exception:
@@ -2052,6 +2061,8 @@ async def transfer_order(
         suspend_threshold=await _suspend_threshold(db, user.id),
         waited_free=waited_free,
         fee_cents=fee,
+        extra_cents=extra,
+        bonus_cents=max(0, bonus),
     )
 
 

@@ -4,6 +4,11 @@
 立刻从骑手账上扣 `rider_transfer_fee_cents`(默认 10 元);转单要加钱 ——
 扣下来的钱跟着这单走,谁最后送到,订单完成时补给谁。
 
+另外加钱(2026-10-07 运营方定「另外自定义加钱,谁转单谁出」):转单时骑手
+可以自己填一个数,在 10 元之外再加,同样立刻从他账上扣、跟着这单走、取消就退。
+记成同一种 `transfer_fee` 行(备注写明是自己加的),守恒等式不用变。
+无责转单也可以加 —— 他想让人快点接,钱是他自己愿意出的。
+
 只有两种转出不扣:
 - 无责转单:过了预计出餐时间、上报「到店未出餐」满 N 分钟商家还没出餐
   (routers/riders.transfer_order 的 waited_free),等不起是商家的问题;
@@ -50,6 +55,17 @@ def charge(db: AsyncSession, order: Order, rider_id: int) -> int:
         amount_cents=-fee, kind=EarningKind.transfer_fee,
         note="接单后转出(没送),立刻扣;送到这单的骑手完成时拿到"))
     return fee
+
+
+def add_extra(db: AsyncSession, order: Order, rider_id: int, cents: int) -> int:
+    """转单骑手自己另外加的钱,立刻扣。**只改库不提交**。返回扣了多少(分)。"""
+    if cents <= 0:
+        return 0
+    db.add(RiderEarning(
+        rider_id=rider_id, order_id=order.id, order_no=order.order_no,
+        amount_cents=-cents, kind=EarningKind.transfer_fee,
+        note="转单时自己另外加的钱;送到这单的骑手完成时拿到"))
+    return cents
 
 
 async def pending_cents(db: AsyncSession, order_id: int) -> int:

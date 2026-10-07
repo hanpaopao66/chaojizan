@@ -4,9 +4,11 @@
 
 1. 骑手 A 接了又转出:立刻扣 10 元(余额少 10、返回 fee_cents);
    抢单大厅里这单挂着「转单加钱 10 元」;骑手 B 接手送到、顾客确认完成,B 多拿 10 元;
+1b. 另外自定义加钱(谁转单谁出):A 转出时另加 5 元,立刻扣 15 元,B 送到拿 15 元;
+   超过上限的 422,一分不扣;
 2. A 又接一单再转出,扣 10 元;这单后来被商家取消,没人送到 → 10 元退回给 A;
 3. 无责转单(过了预计出餐时间、上报未出餐满 10 分钟)不扣;
-4. 账本页本日「转单扣」= 10 元(第 2 单退回的抵掉);
+4. 账本页本日「转单扣」= 25 元(第 1 单 10 + 第 1b 单 15,第 2 单退回的抵掉);
 5. 审计规则 4f 不报错;公开账本里转单行在 rider_transfer_rows、不在 rider_rows,
    见证节点逐行核账照样过。
 
@@ -137,6 +139,33 @@ def main() -> None:
     assert balance(rider_b) == b0 + earned + fee, "送到的人多拿转单扣的钱"
     print(f"✓ 接了不送立刻扣 {fee / 100:g} 元;接手送到的骑手完成时多拿这笔")
 
+    # ============ 1b. 另外自定义加钱:谁转单谁出 ============
+    extra = 500
+    no4 = place()
+    a3, b3 = balance(rider_a), balance(rider_b)
+    call("POST", f"/riders/grab/{no4}", rider_a)
+    err = call("POST", f"/riders/transfer/{no4}", rider_a,
+               {"reason": "other", "extra_cents": 10 ** 6}, expect_error=True)
+    assert err["_error"] == 422, err
+    assert balance(rider_a) == a3, "加钱超上限被拒,一分不扣"
+    r = call("POST", f"/riders/transfer/{no4}", rider_a,
+             {"reason": "other", "extra_cents": extra})
+    assert r["fee_cents"] == fee and r["extra_cents"] == extra, r
+    assert r["bonus_cents"] == fee + extra, r
+    assert balance(rider_a) == a3 - fee - extra, "另加的钱也是转单的人立刻出"
+    card = [o for o in call("GET", "/riders/available-orders", rider_b)
+            if o["order_no"] == no4]
+    assert card and card[0]["transfer_bonus_cents"] == fee + extra, card
+    call("POST", f"/riders/grab/{no4}", rider_b)
+    go(boss, no4, "ready")
+    go(rider_b, no4, "picked_up")
+    go(rider_b, no4, "delivered")
+    go(cust, no4, "completed")
+    assert ("transfer_bonus", fee + extra) in rows(rider_b, no4), rows(rider_b, no4)
+    earned = sum(a for k, a in rows(rider_b, no4) if k == "earning")
+    assert balance(rider_b) == b3 + earned + fee + extra
+    print(f"✓ 另外加 {extra / 100:g} 元:转单的人连同 {fee / 100:g} 元一起出,送到的人全拿")
+
     # ============ 2. 转出后订单取消:退回 ============
     no2 = place()
     a1 = balance(rider_a)
@@ -166,8 +195,8 @@ def main() -> None:
 
     # ============ 4. 账本页:本日转单扣 ============
     w = call("GET", "/riders/me/worklog", rider_a)
-    assert w["today_transfer_fee_cents"] == fee, w
-    print(f"✓ 账本页本日「转单扣」{fee / 100:g} 元(取消退回的抵掉)")
+    assert w["today_transfer_fee_cents"] == fee * 2 + extra, w
+    print(f"✓ 账本页本日「转单扣」{(fee * 2 + extra) / 100:g} 元(取消退回的抵掉)")
 
     # ============ 5. 审计、公开账本、见证节点 ============
     problems = call("POST", "/admin/audit/run", admin)["detail"]

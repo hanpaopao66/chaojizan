@@ -806,6 +806,9 @@ class TransferIn(BaseModel):
     """骑手转单:已抢未取餐的单退回抢单池。原因只留痕不判责。"""
 
     reason: Literal["vehicle_broken", "unwell", "route_conflict", "other"]
+    # 另外加钱(分):转单骑手自己填,谁转单谁出,送到的骑手拿;
+    # 上限 rider_transfer_extra_max_cents
+    extra_cents: int = Field(0, ge=0)
 
 
 class TransferOut(BaseModel):
@@ -816,6 +819,10 @@ class TransferOut(BaseModel):
     waited_free: bool = False
     # 这次转单扣了多少(分):接了没送立刻扣,无责转单为 0
     fee_cents: int = 0
+    # 这次另外加了多少(分):骑手自己填的,同样已经扣了
+    extra_cents: int = 0
+    # 现在送到这单能拿多少(分):前面每一手扣的、加的都算上
+    bonus_cents: int = 0
 
 
 class DeliveryIssueIn(BaseModel):
