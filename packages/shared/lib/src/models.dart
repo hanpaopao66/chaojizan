@@ -88,6 +88,8 @@ class Merchant {
         avgSpendCents = json['avg_spend_cents'] as int?,
         promiseReadyMinutes = json['promise_ready_minutes'] as int? ?? 15,
         selfDelivery = json['self_delivery'] as bool? ?? false,
+        deliveryShareCents = json['delivery_share_cents'] as int? ?? 0,
+        deliverySharePct = json['delivery_share_pct'] as int? ?? 0,
         topDishes = (json['top_dishes'] as List? ?? const [])
             .map((e) => TopDish.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -141,6 +143,9 @@ class Merchant {
   final String description;
   final int promiseReadyMinutes; // 承诺出餐时长(分钟)
   final bool selfDelivery;       // 商家自配送(订单不进抢单池,自己送)
+  /// 商家承担的配送费:每单固定(分)或比例(%),二选一,都是 0 = 顾客全付
+  final int deliveryShareCents;
+  final int deliverySharePct;
   final String address;
   /// 到我的直线距离(米),**服务端算的**(PostGIS 球面距离)。
   /// null = 这次查询没带定位。
