@@ -37,10 +37,11 @@ class Test只加不减:
 
 
 class Test口径和现有上门费一致:
-    def test_四楼及以下不算爬楼(self):
-        """和 pricing.door_fee_cents 同一条线:1–4 楼派费覆盖得住。"""
-        assert hs.comp_cents(["no_elevator"], 4, None) == 0
-        assert hs.comp_cents(["no_elevator"], 5, None) == 100
+    def test_二楼及以下不算爬楼(self):
+        """和 pricing.door_fee_cents 同一条线:3 楼起每层 ¥0.5(2026-10-08 定)。"""
+        assert hs.comp_cents(["no_elevator"], 2, None) == 0
+        assert hs.comp_cents(["no_elevator"], 3, None) == 50
+        assert hs.comp_cents(["no_elevator"], 6, None) == 200
 
     def test_爬楼封顶(self):
         assert hs.comp_cents(["no_elevator"], 99, None) == \
@@ -83,9 +84,9 @@ class Test钱要摊开给人看:
         assert all("¥" in ln for ln in lines)
 
     def test_没触发的项不出现(self):
-        """4 楼无电梯不收钱,就不该在明细里写一行 ——
+        """2 楼无电梯不收钱,就不该在明细里写一行 ——
         列一行 ¥0 只会让人以为被收了钱。"""
-        assert hs.explain(["no_elevator"], 4, None) == []
+        assert hs.explain(["no_elevator"], 2, None) == []
 
 
 class Test共识按不同骑手算:

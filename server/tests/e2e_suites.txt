@@ -102,6 +102,7 @@ e2e_printers
 e2e_merchant_ops
 e2e_rider_appeal
 e2e_fee_transparency
+e2e_delivery_share
 e2e_rider_prefs
 e2e_weather_review
 e2e_rider_stats
@@ -230,3 +231,4 @@ e2e_credit_roles
 e2e_rider_fault
 e2e_merchant_fault
 e2e_ai_my_bots
+e2e_rider_insurance_fee

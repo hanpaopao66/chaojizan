@@ -2,6 +2,7 @@ import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import Float, cast, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +39,7 @@ from ..schemas import (
     WithdrawalOut,
 )
 from ..security import require_role
+from ..services import facecheck
 from ..state_machine import GRABBABLE_STATUSES, OrderStatus
 from ..ws import manager
 from .orders import order_out, orders_out
@@ -55,6 +57,9 @@ def _profile_out(p: RiderProfile) -> RiderProfileOut:
         status=p.status,
         reject_reason=p.reject_reason,
         id_verified=p.id_verified_at is not None,
+        face_enrolled=p.face_enrolled_at is not None,
+        face_verified_at=p.face_verified_at,
+        face_expires_at=facecheck.expires_at(p.face_verified_at),
     )
 
 
@@ -76,6 +81,24 @@ async def _require_verified(db: AsyncSession, rider_id: int) -> RiderProfile:
     if profile is None or profile.status != VerifyStatus.approved:
         raise HTTPException(403, "请先完成实名认证并通过审核后再接单")
     return profile
+
+
+def _require_face(profile: RiderProfile) -> None:
+    """接新单的前置:人脸核验在有效期内(防代送,见 services/facecheck.py)。
+
+    detail 带 `error: face_check_required`,客户端据此直接拉起核验页,
+    而不是只弹一句错误让他自己去找入口。
+    """
+    why = facecheck.needs_check(profile.face_verified_at)
+    if not why:
+        return
+    hours = settings.rider_face_check_interval_hours
+    message = ("跑单前需要先做一次人脸核验,确认是你本人在跑(约 10 秒)"
+               if why == facecheck.PURPOSE_ENROLL else
+               f"上次人脸核验已过 {hours:g} 小时,做一次复核才能接新单;"
+               "手上的单照常送完")
+    raise HTTPException(403, detail={
+        "error": "face_check_required", "reason": why, "message": message})
 
 
 # ---------- 实名认证 ----------
@@ -119,9 +142,8 @@ async def submit_profile(
 
     - **健康证不是法定要求**(送餐员不属于"直接接触入口食品的人员",
       四川已明确取消)—— 这里选填,只有地方另有要求的城市才卡;
-    - **人脸认证不做**:《人脸识别技术应用安全管理办法》(2025-06-01 施行)
-      明写"存在其他非人脸方式能达到同等业务要求的,不得将人脸识别作为
-      唯一验证方式",并鼓励优先用国家人口基础信息库 —— 二要素正是那个方式;
+    - **人脸不在这一步**:这一步只管身份(二要素查人口库)。人脸核验在
+      实名之后单独做(下面的 /face/*),回答的是另一个问题 —— 拿手机的是不是本人;
     - **身份证照片不收**:二要素核验不需要它,而它是敏感个人影像。
       不收就没有泄露面。
 
@@ -132,8 +154,8 @@ async def submit_profile(
     **真正的门槛从来不是填资料,是等审批。**
 
     注意:二要素只证明"这个姓名+证号真实且匹配",**不证明拿手机的人就是他**。
-    账号出租、顶替跑单防不住 —— 那个风险留给异常触发的核身去处理,
-    不该拿它当理由给所有人加一道人脸门槛。
+    账号出租、顶替跑单防不住 —— 所以实名之后还有人脸核验,
+    并且在线期间定时复核(见 services/facecheck.py)。
     """
     from datetime import datetime, timezone
 
@@ -177,6 +199,274 @@ async def submit_profile(
     return _profile_out(profile)
 
 
+# ---------- 人脸核验(防代送)----------
+def _face_status(profile: RiderProfile | None) -> dict:
+    verified_at = profile.face_verified_at if profile else None
+    return {
+        "required": settings.rider_face_check_required,
+        "interval_hours": settings.rider_face_check_interval_hours,
+        "consented": bool(profile and profile.face_consent_at),
+        "enrolled": bool(profile and profile.face_enrolled_at),
+        "verified_at": verified_at,
+        "expires_at": facecheck.expires_at(verified_at),
+        # 空串 = 不用做;enroll = 从没做过;expired = 过了有效期
+        "due": facecheck.needs_check(verified_at) if profile else "enroll",
+    }
+
+
+@router.get("/face/status")
+async def face_status(
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """人脸核验状态。客户端按 expires_at 在本地倒计时提醒,不用轮询这里。"""
+    profile = await db.scalar(
+        select(RiderProfile).where(RiderProfile.rider_id == user.id))
+    return _face_status(profile)
+
+
+@router.post("/face/start")
+async def face_start(
+    payload: dict,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """发起一次人脸核验。
+
+    - 先实名:首次核验要拿实名的姓名+证号去和公安库比对;
+    - **单独同意**:第一次必须带 `consent: true`,记下同意时刻。
+      人脸是敏感个人信息,和实名、隐私政策那些同意分开问;
+    - 从没做过 → enroll;做过 → periodic(定时复核)。
+
+    返回 check_id 和客户端要用的东西(verify_url 或 client_token,
+    开发环境的假实现两个都是空,客户端直接调 /face/finish 就行)。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from ..models import RiderFaceCheck
+    from ..services.crypto import decrypt
+
+    profile = await _require_verified(db, user.id)
+    now = datetime.now(timezone.utc)
+    if profile.face_consent_at is None:
+        if payload.get("consent") is not True:
+            raise HTTPException(
+                422, "人脸核验需要你单独同意:只用来确认是本人在跑单。"
+                     "首次核验的照片会加密留存,只用于之后复核比对,注销账号即删除")
+        profile.face_consent_at = now
+
+    day_start = (now + timedelta(hours=8)).replace(
+        hour=0, minute=0, second=0, microsecond=0) - timedelta(hours=8)
+    started_today = await db.scalar(
+        select(func.count()).select_from(RiderFaceCheck).where(
+            RiderFaceCheck.rider_id == user.id,
+            RiderFaceCheck.created_at >= day_start))
+    if started_today >= facecheck.DAILY_START_LIMIT:
+        raise HTTPException(
+            429, "今天人脸核验次数太多了,请联系平台客服处理")
+
+    try:
+        provider = facecheck.get_provider(
+            str(payload.get("dev_outcome") or ""))
+        purpose = (facecheck.PURPOSE_PERIODIC if profile.face_enrolled_at
+                   else facecheck.PURPOSE_ENROLL)
+        session = await provider.start(
+            purpose=purpose, rider_id=user.id, real_name=profile.real_name,
+            id_no=(decrypt(profile.id_no_encrypted)
+                   if profile.id_no_encrypted else ""),
+            enroll_ref=profile.face_enroll_ref)
+    except RuntimeError as exc:
+        # 服务挂了 / 没配:如实说,**不放行**
+        raise HTTPException(503, str(exc))
+
+    row = RiderFaceCheck(rider_id=user.id, purpose=purpose,
+                         provider=provider.name, provider_ref=session.ref)
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    return {"check_id": row.id, "purpose": purpose, "provider": provider.name,
+            "verify_url": session.verify_url,
+            "client_token": session.client_token}
+
+
+@router.post("/face/finish")
+async def face_finish(
+    payload: dict,
+    user: User = Depends(require_role("rider")),
+    db: AsyncSession = Depends(get_db),
+):
+    """骑手在手机上做完了,服务端去服务商那里**查**结果。
+
+    客户端自己说过了不算 —— 改一下客户端就能绕过。过了就刷新有效期。
+    """
+    from datetime import datetime, timezone
+
+    from ..models import RiderFaceCheck
+
+    check_id = payload.get("check_id")
+    if not isinstance(check_id, int):
+        raise HTTPException(422, "缺少 check_id")
+    row = await db.scalar(
+        select(RiderFaceCheck).where(RiderFaceCheck.id == check_id)
+        .with_for_update())
+    if row is None or row.rider_id != user.id:
+        raise HTTPException(404, "没有这次核验")
+    if row.status != "pending":
+        raise HTTPException(409, "这次核验已经出过结果了,请重新发起")
+    now = datetime.now(timezone.utc)
+    created = (row.created_at if row.created_at.tzinfo
+               else row.created_at.replace(tzinfo=timezone.utc))
+    if now - created > facecheck.SESSION_TTL:
+        row.status, row.reason, row.finished_at = "failed", "超时作废", now
+        await db.commit()
+        raise HTTPException(409, "这次核验已超时,请重新发起")
+
+    if row.provider_ref.startswith(facecheck.PENDING_PREFIX):
+        # H5 接入:中转页还没换到服务商的刷脸页,说明他根本还没刷。
+        # 不作废这次核验 —— 他回去接着刷就行
+        raise HTTPException(409, "还没刷脸,请先在打开的页面里完成")
+    profile = await _require_verified(db, user.id)
+    try:
+        provider = facecheck.get_provider()
+        if provider.name != row.provider:
+            raise RuntimeError("人脸核验服务已切换,请重新发起")
+        result = await provider.result(row.provider_ref,
+                                       compare=row.method == "photo")
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+
+    row.finished_at = now
+    row.status = "passed" if result.passed else "failed"
+    row.reason = result.reason[:200]
+    if result.passed:
+        profile.face_verified_at = now
+        if row.purpose == facecheck.PURPOSE_ENROLL:
+            profile.face_enrolled_at = now
+            profile.face_enroll_ref = row.provider_ref
+            # 首次(和公安库比对过的)那张照片留作复核的比对源。
+            # 复核时拍的不替换它 —— 比对源要一直是验过身份的那一张
+            if result.photo:
+                from ..services.crypto import encrypt
+                profile.face_photo_bucket = result.photo[0]
+                profile.face_photo_object_enc = encrypt(result.photo[1])
+    await db.commit()
+    out = _face_status(profile)
+    out["passed"] = result.passed
+    out["reason"] = result.reason
+    return out
+
+
+# ---- H5 中转页(阿里云这类要在刷脸的浏览器里现取 MetaInfo 的服务商)----
+#
+# 这三个接口**不带登录态**:App 用应用内浏览器打开,浏览器里没有骑手的 token。
+# 凭证是 /face/start 发的 128 位随机串,只能换一次服务商的刷脸页,15 分钟作废。
+# 换出去的只是一个刷脸页地址,结果仍由 App 带着登录态调 /face/finish 去查。
+_H5_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人脸核验</title>
+<style>body{font:16px/1.6 -apple-system,"PingFang SC",sans-serif;margin:0;
+padding:48px 24px;text-align:center;color:#222;background:#fff}
+p{color:#666;font-size:14px}</style></head><body>
+<h3 id="t">__TITLE__</h3><p id="m">__MESSAGE__</p>
+__SCRIPT__</body></html>"""
+
+_H5_SCRIPT = """<script src="https://o.alicdn.com/yd-cloudauth/cloudauth-cdn/jsvm_all.js"></script>
+<script>
+(function(){
+  function fail(msg){document.getElementById('t').textContent='没能打开刷脸页面';
+    document.getElementById('m').textContent=msg+'。请回到 App 重新发起核验';}
+  var meta;
+  try{meta=JSON.stringify(window.getMetaInfo());}catch(e){return fail('浏览器环境不支持');}
+  fetch(location.pathname+'/init',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({meta_info:meta})})
+  .then(function(r){return r.json().then(function(d){return [r.ok,d];});})
+  .then(function(x){if(x[0]&&x[1].url){location.replace(x[1].url);}
+    else{fail(x[1].detail||'核验服务暂时不可用');}})
+  .catch(function(){fail('网络不太好');});
+})();
+</script>"""
+
+
+def _h5_html(title: str, message: str, script: str = "") -> HTMLResponse:
+    import html
+    page = (_H5_PAGE.replace("__TITLE__", html.escape(title))
+            .replace("__MESSAGE__", html.escape(message))
+            .replace("__SCRIPT__", script))
+    # 不缓存、不外泄来源:地址里带着一次性凭证
+    return HTMLResponse(page, headers={"Cache-Control": "no-store",
+                                       "Referrer-Policy": "no-referrer"})
+
+
+@router.get("/face/h5-done", include_in_schema=False)
+async def face_h5_done():
+    """服务商刷脸页做完跳回这里。结果不在这里判 —— 让他回 App 查。"""
+    return _h5_html("刷脸完成", "请回到 App,点「查看结果」")
+
+
+@router.get("/face/h5/{token}", include_in_schema=False)
+async def face_h5_page(token: str):
+    return _h5_html("正在打开人脸核验…", "请稍候,马上进入刷脸页面", _H5_SCRIPT)
+
+
+@router.post("/face/h5/{token}/init", include_in_schema=False)
+async def face_h5_init(
+    token: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """中转页取到 MetaInfo 后调:向服务商发起核验,换回刷脸页地址。"""
+    from datetime import datetime, timezone
+
+    from ..models import RiderFaceCheck
+    from ..services.crypto import decrypt
+
+    meta_info = payload.get("meta_info")
+    if not isinstance(meta_info, str) or not meta_info or len(token) != 32:
+        raise HTTPException(422, "参数不完整")
+    row = await db.scalar(
+        select(RiderFaceCheck).where(
+            RiderFaceCheck.provider_ref == facecheck.PENDING_PREFIX + token)
+        .with_for_update())
+    if row is None or row.status != "pending":
+        raise HTTPException(404, "这个核验链接已失效")
+    created = (row.created_at if row.created_at.tzinfo
+               else row.created_at.replace(tzinfo=timezone.utc))
+    if datetime.now(timezone.utc) - created > facecheck.SESSION_TTL:
+        raise HTTPException(404, "这个核验链接已过期")
+    profile = await _require_verified(db, row.rider_id)
+    # 复核且首次留了照片、复核场景也配了 → 和照片比对(便宜);否则和公安库比对
+    photo = None
+    if (row.purpose == facecheck.PURPOSE_PERIODIC and profile.face_photo_bucket
+            and profile.face_photo_object_enc
+            and settings.face_aliyun_compare_scene_id):
+        photo = (profile.face_photo_bucket,
+                 decrypt(profile.face_photo_object_enc))
+    if photo is None and not profile.id_no_encrypted:
+        # 旧的人工审核路径留下的档案没有证号,没法和公安库比对
+        raise HTTPException(409, "你的实名信息不完整,请联系客服补全后再核验")
+    try:
+        provider = facecheck.get_provider()
+        if provider.name != row.provider or not hasattr(provider, "init_h5"):
+            raise RuntimeError("人脸核验服务已切换,请回 App 重新发起")
+        base = settings.public_base_url.rstrip("/")
+        certify_id, url = await provider.init_h5(
+            # 阿里云要 32 位字母数字、全局唯一:核验 id 补齐 + 凭证前段
+            outer_order_no=f"rf{row.id:010d}{token[:20]}",
+            rider_id=row.rider_id, real_name=profile.real_name,
+            id_no=(decrypt(profile.id_no_encrypted)
+                   if profile.id_no_encrypted else ""),
+            meta_info=meta_info,
+            return_url=f"{base}/riders/face/h5-done", photo=photo)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    # 换成服务商的编号:凭证就此作废,同一个链接不能再换第二次
+    row.provider_ref = certify_id
+    row.method = "photo" if photo else "authority"
+    await db.commit()
+    return {"url": url}
+
+
 @router.post("/online")
 async def set_online(
     payload: OnlineIn,
@@ -190,6 +480,7 @@ async def set_online(
     warning = ""
     if payload.is_online:
         profile = await _require_verified(db, user.id)  # 上线前卡实名
+        _require_face(profile)  # 再卡人脸:实名的人和拿手机的人是同一个
         # ---- 健康证:**只有本地有规章的城市才卡** ----
         #
         # 国家层面不要求送餐员持健康证(不属于"直接接触入口食品的人员",
@@ -1731,7 +2022,10 @@ async def grab_order(
     db: AsyncSession = Depends(get_db),
 ):
     """抢单。条件 UPDATE 保证同一单只有一个骑手抢到,手慢的收到 409。"""
-    await _require_verified(db, user.id)  # 抢单前再卡一道认证
+    profile = await _require_verified(db, user.id)  # 抢单前再卡一道认证
+    # 人脸核验过期:不能接新单。**在线状态不动**,手上的单照常送 ——
+    # 只拦新单,不把人从路上拽下来
+    _require_face(profile)
     # 转单软约束:当日非免责转单达阈值,今日暂停抢单(次日自动恢复)。
     # 不罚钱不封号;等餐超时/事故释放的无责转单不计数,不受影响
     used = await _transfer_used_today(user.id)
@@ -2412,13 +2706,15 @@ async def my_insurance(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    """我的保障记录(近 30 天):registered=保障金池兜底 / insured=已投保。"""
+    """我的保障记录(近 30 天):registered=保障金池兜底 / insured=已投保。
+    premium_cents = 当天扣的保费(当天第一单送到时扣,0 = 还没扣)。"""
     from ..models import RiderInsuranceDay
     rows = (await db.scalars(
         select(RiderInsuranceDay)
         .where(RiderInsuranceDay.rider_id == user.id)
         .order_by(RiderInsuranceDay.day.desc()).limit(30))).all()
-    return [{"day": r.day, "status": r.status, "policy_no": r.policy_no}
+    return [{"day": r.day, "status": r.status, "policy_no": r.policy_no,
+             "premium_cents": r.premium_cents}
             for r in rows]
 
 

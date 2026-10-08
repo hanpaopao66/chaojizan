@@ -133,8 +133,42 @@ def _reset_demo_rider_transfer_count():
         pass
 
 
+def _refresh_demo_rider_face():
+    """把演示骑手的人脸核验刷新到"刚做过"。
+
+    人脸核验 4 小时过期(防代送),而演示库是长期复用的 —— 不刷新的话,
+    隔天再跑全套,所有抢单用例都会挂在「人脸核验已过期」上。
+    人脸核验本身的流程由 e2e_rider_verify 走真接口验,这里只管让别的用例能接单。
+    best-effort。
+    """
+    try:
+        import asyncio as _asyncio
+
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.config import settings as _settings
+
+        async def go():
+            engine = create_async_engine(_settings.database_url)
+            try:
+                async with engine.begin() as conn:
+                    await conn.execute(text(
+                        "UPDATE rider_profiles SET face_consent_at = "
+                        "coalesce(face_consent_at, now()), face_enrolled_at = "
+                        "coalesce(face_enrolled_at, now()), face_verified_at = "
+                        "now() WHERE rider_id IN (SELECT id FROM users "
+                        "WHERE phone IN (:a, :b))"), {"a": RIDER, "b": "13800000005"})
+            finally:
+                await engine.dispose()
+        _asyncio.run(go())
+    except Exception:
+        pass
+
+
 _clear_demo_rider_backlog()
 _reset_demo_rider_transfer_count()
+_refresh_demo_rider_face()
 
 
 def request_raw(method: str, path: str, *, headers: dict | None = None,
@@ -291,8 +325,10 @@ async def register_fresh_rider(name="测试骑手"):
         await db.execute(
             text("INSERT INTO rider_profiles (rider_id, real_name, "
                  "id_no_encrypted, id_card_photo_url, health_cert_photo_url, "
-                 "status, reject_reason) VALUES (:id, :name, '', "
-                 "'', '', 'approved', '')"), {"id": uid, "name": name})
+                 "status, reject_reason, face_consent_at, face_enrolled_at, "
+                 "face_verified_at) VALUES (:id, :name, '', "
+                 "'', '', 'approved', '', now(), now(), now())"),
+            {"id": uid, "name": name})
         # 食安培训记录:法定要求(123 号令第二十九条),没有它上不了线。
         # 这个助手造的是**完整入驻**的骑手,所以要带上 ——
         # 少了它,所有依赖骑手上线的用例都会挂在合规卡点上

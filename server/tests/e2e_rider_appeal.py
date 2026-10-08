@@ -63,6 +63,9 @@ async def verify_rider(tok):
             db.add(p)
         p.status = VerifyStatus.approved
         p.id_verified_at = datetime.now(timezone.utc)
+        # 人脸核验(防代送)也算完整入驻的一部分,不然一抢单就被拦
+        p.face_consent_at = p.face_enrolled_at = p.face_verified_at = \
+            datetime.now(timezone.utc)
         await db.commit()
     return me["id"]
 

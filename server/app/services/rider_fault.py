@@ -93,7 +93,9 @@ async def fund_balance(db: AsyncSession) -> dict:
     - 计提:已经关账的日子读锚点里冻结的 rider_fund.accrued_cents(当天的每单计提额也冻在里面,
       改了配置不会回头改历史);还没关账的那几天(今天、清扫没来得及建锚点的日子)按现行配置现算
       —— 和 ledger.build_day_payload 同一个口径:每一条配送入账行(kind = earning)计提一笔;
-    - 支出、回池:rider_fund_movements,每一笔都进公开账本的 rider_fund.rows。
+    - 支出、回池:rider_fund_movements,每一笔都进公开账本的 rider_fund.rows;
+    - 保险费(2026-10-08 起,services/insurance):保险服务商接入之前(当天记录是登记模式),
+      骑手每天扣的那笔保费进池子。每一笔都在公开账本的 rider_insurance_rows 里。
     """
     anchored, last_day = (await db.execute(text(
         "SELECT coalesce(sum((payload::jsonb -> 'rider_fund' ->> 'accrued_cents')::bigint), 0),"
@@ -109,8 +111,13 @@ async def fund_balance(db: AsyncSession) -> dict:
         select(RiderFundMovement.kind, func.coalesce(func.sum(RiderFundMovement.amount_cents), 0))
         .group_by(RiderFundMovement.kind))).all())
     paid, returned = int(moved.get(PAYOUT, 0)), int(moved.get(RETURN, 0))
+    from ..models import RiderInsuranceDay
+    premiums = int(await db.scalar(
+        select(func.coalesce(func.sum(RiderInsuranceDay.premium_cents), 0))
+        .where(RiderInsuranceDay.status == "registered")) or 0)
     return {"accrued_cents": accrued, "paid_cents": paid, "returned_cents": returned,
-            "balance_cents": accrued - paid + returned,
+            "premium_cents": premiums,
+            "balance_cents": accrued + premiums - paid + returned,
             "per_order_cents": settings.rider_fund_per_order_cents}
 
 

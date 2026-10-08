@@ -207,10 +207,9 @@ class Settings(BaseSettings):
 
     # 上门难度费(顾客付,全额归骑手)。**只对无电梯的高楼层收** ——
     # 等电梯的时间已经在 ETA 里补过,再收钱就是同一件事收两次。
-    # 起收楼层取 5:骑手的原话是"爬 1–4 楼勉强能被派费覆盖,
-    # 从 5 楼开始就不合理了"
-    door_fee_free_floor: int = 4        # 4 楼及以下不收
-    door_fee_per_floor_cents: int = 100  # 超出部分每层 ¥1
+    # 2026-10-08 jy 定:没电梯时从 3 楼起每层加 ¥0.5(原来是 5 楼起每层 ¥1)
+    door_fee_free_floor: int = 2        # 2 楼及以下不收
+    door_fee_per_floor_cents: int = 50  # 超出部分每层 ¥0.5
     door_fee_max_cents: int = 500       # 封顶 ¥5
 
     # 正常出餐区间(分钟):骑手到店后等这么久以内算正常。「提前点出餐」的嫌疑判据
@@ -439,6 +438,10 @@ class Settings(BaseSettings):
     # 保障金池兜底先行赔付;配置后每日首次上线自动投保
     insurance_app_id: str = ""
     insurance_secret: str = ""
+    # 骑手每天第一单送到入账时扣的保险费(分),同一个北京日只扣一次。
+    # 2026-10-08 运营方定 2.5 元;0 = 不扣。扣的钱去哪看 services/insurance.py:
+    # 接入保险服务商后交保费,接入之前(登记模式)进骑手保障金池,出事故由池子先行赔付
+    rider_insurance_fee_cents: int = 250
 
     # 证照 OCR(入驻表单自动填充)。默认关闭;接的是**自部署的识别服务**
     # (本地模型起个 HTTP 服务),不走三方付费 API。配好 OCR_ENDPOINT 自动启用,
@@ -452,6 +455,30 @@ class Settings(BaseSettings):
     # 格式与 GB 11643 校验位真实校验,通过即算实名;配置后调三方 API 核验一致性
     idcheck_api_url: str = ""
     idcheck_app_code: str = ""   # 三方核验服务凭证(如阿里云云市场 AppCode)
+
+    # 骑手人脸核验(防代送,见 services/facecheck.py)。
+    # 实名(二要素)之外再加一道:证明拿手机跑单的就是实名的那个人。
+    # - required:上线和抢单是否要求核验在有效期内。**生产上没配服务商时,
+    #   这个开着就意味着谁都上不了线** —— 上线前先配好服务商,或者先关掉;
+    # - interval_hours:一次核验管多久。到点没复核不能接新单,手上的单照常送完;
+    # - provider:服务商名。留空在开发环境走假实现(services/facecheck.FakeFaceProvider),
+    #   生产留空则开始核验直接 503,不放行
+    rider_face_check_required: bool = True
+    rider_face_check_interval_hours: float = 4.0
+    face_provider: str = ""   # 目前只有 aliyun
+    # 阿里云金融级实人认证(ID_PRO,活体 + 公安库比对,H5 接入)。
+    # AccessKey 建议用只授 cloudauth 权限的 RAM 子账号;场景 ID 在实人认证控制台建
+    face_aliyun_access_key_id: str = ""
+    face_aliyun_access_key_secret: str = ""
+    face_aliyun_scene_id: str = ""
+    # 复核用的第二个场景(金融级活体人脸验证 PV_FV,和首次留存的照片比对,约 0.15 元/次)。
+    # 留空 = 复核也走上面那个场景和公安库比对(约 1 元/次)
+    face_aliyun_compare_scene_id: str = ""
+    # 首次核验的照片由阿里云直接写进这个地域的 OSS;注销时要去这里删
+    face_aliyun_oss_endpoint: str = "oss-cn-shanghai.aliyuncs.com"
+    face_aliyun_endpoint: str = "https://cloudauth.cn-shanghai.aliyuncs.com/"
+    #: 活体动作。LIVENESS = 眨眼(默认,兼容性最好);MOVE_ACTION = 远近移动 + 眨眼(更难翻拍)
+    face_aliyun_model: str = "LIVENESS"
 
     # 阿里云短信(验证码)。AccessKey 建议用只授短信权限的 RAM 子账号
     sms_secret_id: str = ""       # 阿里云 AccessKey ID
@@ -521,6 +548,12 @@ class Settings(BaseSettings):
     @property
     def idcheck_configured(self) -> bool:
         return bool(self.idcheck_api_url and self.idcheck_app_code)
+
+    @property
+    def face_aliyun_configured(self) -> bool:
+        return bool(self.face_aliyun_access_key_id
+                    and self.face_aliyun_access_key_secret
+                    and self.face_aliyun_scene_id)
 
     @property
     def ocr_configured(self) -> bool:

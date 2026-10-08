@@ -204,6 +204,9 @@ class MerchantOut(BaseModel):
     close_time: str = ""
     promise_ready_minutes: int = 15  # 承诺出餐时长(分钟)
     self_delivery: bool = False  # 商家自配送(开启后订单不进抢单池)
+    # 商家承担配送费:固定金额(分)或比例(%),都是 0 = 顾客全付
+    delivery_share_cents: int = 0
+    delivery_share_pct: int = 0
     monthly_sales: int = 0  # 近 30 天完成单数,仅店铺详情接口计算
     #: 人均(分):近 30 天已完成单的**餐费**均价,不含配送费与打包费。
     #: 用户比的是"这家菜多少钱",配送费在卡片上单列。
@@ -392,6 +395,9 @@ class MerchantPatch(BaseModel):
     photo_urls: list[str] | None = Field(default=None, max_length=9)  # 门店相册
     promise_ready_minutes: int | None = Field(default=None, ge=5, le=60)
     self_delivery: bool | None = None  # 自配送开关(只影响之后的新订单)
+    # 商家承担配送费(只影响之后的新订单):固定金额和比例二选一,设一个会把另一个清零
+    delivery_share_cents: int | None = Field(default=None, ge=0, le=10_000)
+    delivery_share_pct: int | None = Field(default=None, ge=0, le=100)
     auto_accept: bool | None = None    # 自动接单(支付成功即进入制作)
     food_seal: bool | None = None      # 食安封签(商家自述)
     # 堂食标识(#187):unknown 未填报 / yes 有堂食 / no 无堂食。
@@ -1102,6 +1108,8 @@ class OrderOut(BaseModel):
     food_cents: int
     packing_fee_cents: int = 0
     discount_cents: int = 0
+    # 商家承担的配送费(已含在 discount_cents 里,单列出来给人看)
+    merchant_delivery_cents: int = 0
     subsidy_cents: int = 0
     promo_note: str = ""
     delivery_fee_cents: int
@@ -1533,6 +1541,12 @@ class RiderProfileOut(BaseModel):
     reject_reason: str = ""
     #: 是否经过二要素核验(区别于历史的人工审核路径)
     id_verified: bool = False
+    #: 做过首次人脸核验没有
+    face_enrolled: bool = False
+    #: 最近一次人脸核验通过的时刻,和这次核验管到什么时候。
+    #: 过了 face_expires_at 不能接新单(手上的单照常送完)
+    face_verified_at: datetime | None = None
+    face_expires_at: datetime | None = None
     #: **本市**是否要求健康证。国家层面不要求(送餐员不属于"直接接触
     #: 入口食品的人员",四川已取消),只有查证过本地有规章的城市才为 true
     health_cert_required: bool = False

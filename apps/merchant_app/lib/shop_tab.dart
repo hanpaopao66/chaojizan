@@ -817,6 +817,93 @@ class _ShopTabPageState extends State<ShopTabPage> {
     }
   }
 
+  /// 承担配送费:不承担 / 每单固定 N 元 / 按比例。服务端两个字段二选一,设一个清另一个
+  Future<void> _editDeliveryShare() async {
+    final shop = _shop!;
+    var mode = shop.deliveryShareCents > 0
+        ? 'fixed'
+        : shop.deliverySharePct > 0
+            ? 'pct'
+            : 'none';
+    final controller = TextEditingController(
+        text: shop.deliveryShareCents > 0
+            ? (shop.deliveryShareCents / 100).toStringAsFixed(
+                shop.deliveryShareCents % 100 == 0 ? 0 : 2)
+            : shop.deliverySharePct > 0
+                ? '${shop.deliverySharePct}'
+                : '');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => SzDialog(
+          title: const Text('承担配送费'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'none', label: Text('不承担')),
+                  ButtonSegment(value: 'fixed', label: Text('每单固定')),
+                  ButtonSegment(value: 'pct', label: Text('按比例')),
+                ],
+                selected: {mode},
+                showSelectedIcon: false,
+                onSelectionChanged: (v) => setLocal(() => mode = v.first),
+              ),
+              if (mode != 'none') ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                      prefixText: mode == 'fixed' ? '¥ ' : null,
+                      suffixText: mode == 'pct' ? '%' : null,
+                      helperText: '只摊距离、夜间、天气那几项,无电梯爬楼费仍由顾客付',
+                      helperMaxLines: 2,
+                      border: const OutlineInputBorder()),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('保存')),
+          ],
+        ),
+      ),
+    );
+    if (saved != true || !mounted) return;
+    final val = double.tryParse(controller.text.trim()) ?? 0;
+    if (mode == 'fixed' && (val < 0 || val > 100)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入 0~100 元')));
+      return;
+    }
+    if (mode == 'pct' && (val < 0 || val > 100)) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入 0~100 之间的比例')));
+      return;
+    }
+    try {
+      await widget.api.updateShop({
+        'delivery_share_cents': mode == 'fixed' ? (val * 100).round() : 0,
+        'delivery_share_pct': mode == 'pct' ? val.round() : 0,
+      });
+      _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+    }
+  }
+
   String _hhmmLocal(DateTime utc) {
     final t = utc.toLocal();
     return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
@@ -1708,6 +1795,17 @@ class _ShopTabPageState extends State<ShopTabPage> {
                 shop.packingFeeCents > 0 ? yuan(shop.packingFeeCents) : '免收',
             onTap: () => _editAmount('每单打包费(元,0 为免收)',
                 shop.packingFeeCents, 'packing_fee_cents'),
+          ),
+          SzEntryTile(
+            icon: Icons.delivery_dining_outlined,
+            title: '承担配送费',
+            value: shop.deliveryShareCents > 0
+                ? '每单 ${yuanShort(shop.deliveryShareCents)}'
+                : shop.deliverySharePct > 0
+                    ? '${shop.deliverySharePct}%'
+                    : '不承担',
+            hint: '顾客少付、你少收,骑手照拿全额;爬楼费仍由顾客付',
+            onTap: _editDeliveryShare,
           ),
           SzEntryTile(
             icon: Icons.percent_outlined,

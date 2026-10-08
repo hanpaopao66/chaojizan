@@ -337,6 +337,13 @@ class Merchant(Base):
     promise_ready_minutes: Mapped[int] = mapped_column(Integer, default=15)
     # 商家自配送:开启后新订单不进抢单池,商家自己送(配送费归商家)
     self_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 商家承担一部分配送费(2026-10-08):固定金额(分)或比例(%),二选一,都是 0 = 顾客全付。
+    # 只摊距离/夜间/天气那几项;上门爬楼费和骑手反馈的难度费仍由顾客付。
+    # 骑手拿的钱不变 —— 这笔记进订单的 discount_cents(商家让利口径),顾客少付、商家少收
+    delivery_share_cents: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
+    delivery_share_pct: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
     # 微信特约商户号(服务商模式进件后回填)+ 可分账标记(接收方绑定完成)。
     # 都就绪后新订单 settle_mode=profit_sharing:货款分账直达商家,不经平台
     sub_mchid: Mapped[str] = mapped_column(String(32), default="")
@@ -795,6 +802,11 @@ class Order(Base):
         String(40), nullable=True, index=True)
     # 追加单(加菜):关联原单,免配送费,骑手/配送随原单;原单取消则级联取消
     parent_order_no: Mapped[str] = mapped_column(String(32), default="", index=True)
+    #: 商家承担的配送费(下单快照,分)。**已经算在 discount_cents 里**,这一列只是拆出来给人看:
+    #: 顾客少付这么多、商家少收这么多、骑手照拿全额配送费;佣金基数跟满减一样扣掉它(商家让利不抽成)。
+    #: 账目恒等式、对账、见证节点都只认 discount_cents,不用为它另加一项
+    merchant_delivery_cents: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
     # 商家自配送(下单快照):不进抢单池、无骑手,商家操作配送三态;
     # 配送费归商家(入账行并入 food 口径),平台照常只抽餐费佣金
     self_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -957,10 +969,13 @@ class RiderProfile(Base):
       避免送餐人员直接接触食品 —— 送餐员因此不属于"直接接触入口食品的人员",
       不在预防性健康检查范围内。四川已明确取消。所以这里是**选填**,
       只在地方另有要求的城市才卡(见 riders.py 的城市判断);
-    - **人脸认证不做。** 《人脸识别技术应用安全管理办法》(网信办+公安部,
-      2025-06-01 施行)明写:存在其他非人脸方式能达到同等业务要求的,
-      **不得将人脸识别作为唯一验证方式**;并鼓励优先用国家人口基础信息库。
-      二要素核验正是那个"其他方式";
+    - **身份核验仍以二要素为准,人脸只管"是不是本人在跑"。** 二要素只证明
+      "这个姓名+证号真实且匹配",证明不了拿手机的人就是他,账号出租、
+      代送防不住。所以实名之后再加人脸核验(services/facecheck.py),并每隔
+      几小时复核一次。《人脸识别技术应用安全管理办法》(2025-06-01 施行)
+      不让人脸当**唯一**验证方式,这里它是二要素之外的第二道,不是替代;
+      人脸要**单独同意**(face_consent_at)。首次核验的照片留存在平台的
+      阿里云 OSS 里供复核比对(同意文案写明,注销即删),不经过我们的服务器;
     - **身份证照片不收。** 二要素核验(姓名+证号查人口库)不需要照片,
       而照片是敏感个人影像 —— 不收就没有泄露面。字段保留只为兼容历史数据。
 
@@ -982,6 +997,21 @@ class RiderProfile(Base):
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     #: 二要素核验通过的时刻。空 = 走的是历史人工审核路径
     id_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 骑手单独同意人脸核验的时刻。空 = 还没同意,不能发起核验
+    face_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 首次人脸核验(与公安库比对)通过的时刻。空 = 还没做过
+    face_enrolled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 首次核验在服务商那边的编号(出争议时去服务商那边查)
+    face_enroll_ref: Mapped[str] = mapped_column(String(100), default="")
+    #: 首次核验留存的刷脸照片在平台阿里云 OSS 的位置,复核拿它当比对源。
+    #: **照片本身不在我们服务器上**,对象名 Fernet 加密存。注销时去 OSS 删掉
+    face_photo_bucket: Mapped[str] = mapped_column(String(100), default="")
+    face_photo_object_enc: Mapped[str] = mapped_column(String(500), default="")
+    #: 最近一次人脸核验通过的时刻。过了有效期(默认 4 小时)不能接新单
+    face_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     #: 历史字段,新流程不再写入(旧数据迁移时保留照片 URL 以备追溯)
     id_card_photo_url: Mapped[str] = mapped_column(String(300), default="")
@@ -1016,6 +1046,9 @@ class EarningKind(str, enum.Enum):
     fault_charge = "fault_charge"
     #: 申诉改判成立,另出 / 扣掉的加回去(正数)
     fault_refund = "fault_refund"
+    #: 骑手:每天第一单送到入账时扣的当日保险费(负数),一个骑手一个北京日一条
+    #: (services/insurance.charge_daily_fee)。不是罚款,是保费
+    insurance_fee = "insurance_fee"
 
 
 class RiderEarning(Base):
@@ -1774,7 +1807,11 @@ class AppEvent(Base):
 
 class RiderInsuranceDay(Base):
     """骑手意外险每日记录:上线自动投保(桩未配置时为登记模式,
-    保障金池兜底先行赔付);费用从保障金池支出。"""
+    保障金池兜底先行赔付)。
+
+    保费由骑手出:当天第一单送到入账时扣 `rider_insurance_fee_cents`,
+    扣了多少记在 premium_cents(0 = 今天还没扣)。登记模式下这笔钱进保障金池
+    (services/insurance.py、services/rider_fault.fund_balance)。"""
 
     __tablename__ = "rider_insurance_days"
     __table_args__ = (UniqueConstraint("rider_id", "day"),)
@@ -1936,6 +1973,33 @@ class RiderSession(Base):
     rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     online_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     offline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+class RiderFaceCheck(Base):
+    """骑手每一次人脸核验的留痕(防代送)。
+
+    **这张表不存人脸图像**:这里留的是服务商的核验编号(provider_ref),
+    出了争议拿它去服务商那边查。
+    """
+
+    __tablename__ = "rider_face_checks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    #: enroll = 首次(与公安库比对);periodic = 在线期间定时复核
+    purpose: Mapped[str] = mapped_column(String(16))
+    provider: Mapped[str] = mapped_column(String(32))
+    provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
+    #: pending / passed / failed
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    #: 这次和谁比对:authority = 公安库;photo = 首次留存的照片。
+    #: 查结果时要知道(两种方案在服务商那边是两个场景)。空 = 还没发起到服务商
+    method: Mapped[str] = mapped_column(String(16), default="")
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
 

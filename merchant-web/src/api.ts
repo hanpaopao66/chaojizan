@@ -198,6 +198,9 @@ export interface Merchant {
   packing_fee_cents: number
   promise_ready_minutes: number
   self_delivery: boolean
+  /** 商家承担的配送费:固定金额(分)或比例(%),二选一,都是 0 = 顾客全付;老服务端不给 */
+  delivery_share_cents?: number
+  delivery_share_pct?: number
   commission_rate: string | number
   viewer_is_staff: boolean
   /** 是不是这家店登记的经营者本人。连锁的区域经理不是店员但也不是本人,

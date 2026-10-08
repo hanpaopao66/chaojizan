@@ -147,6 +147,11 @@ function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }
   const [readyMinutes, setReadyMinutes] = useState(shop.promise_ready_minutes)
   const [selfDelivery, setSelfDelivery] = useState(shop.self_delivery)
   const [foodSeal, setFoodSeal] = useState(shop.food_seal)
+  // 承担配送费:不承担 / 每单固定 N 元 / 按比例。服务端是两个字段二选一
+  const [shareMode, setShareMode] = useState<'none' | 'fixed' | 'pct'>(
+    shop.delivery_share_cents ? 'fixed' : shop.delivery_share_pct ? 'pct' : 'none')
+  const [shareYuan, setShareYuan] = useState((shop.delivery_share_cents ?? 0) / 100)
+  const [sharePct, setSharePct] = useState(shop.delivery_share_pct || 50)
   const [busy, setBusy] = useState(false)
 
   async function save() {
@@ -158,6 +163,8 @@ function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }
         promise_ready_minutes: readyMinutes,
         self_delivery: selfDelivery,
         food_seal: foodSeal,
+        delivery_share_cents: shareMode === 'fixed' ? Math.round(shareYuan * 100) : 0,
+        delivery_share_pct: shareMode === 'pct' ? sharePct : 0,
       })
       message.success('已保存')
       onChanged()
@@ -188,6 +195,25 @@ function FoodCard({ shop, onChanged }: { shop: Merchant; onChanged: () => void }
         </Form.Item>
         <Form.Item label="商家自配送(订单不进抢单池)">
           <Switch checked={selfDelivery} onChange={setSelfDelivery} />
+        </Form.Item>
+        <Form.Item label="承担配送费"
+          tooltip="你替顾客出一部分配送费,顾客少付、你少收,骑手照拿全额。无电梯爬楼费仍由顾客付">
+          <Space>
+            <Select value={shareMode} onChange={setShareMode} style={{ width: 120 }}
+              options={[
+                { value: 'none', label: '不承担' },
+                { value: 'fixed', label: '每单固定' },
+                { value: 'pct', label: '按比例' },
+              ]} />
+            {shareMode === 'fixed' && (
+              <InputNumber min={0} max={100} value={shareYuan} addonAfter="元"
+                onChange={(v) => setShareYuan(v ?? 0)} />
+            )}
+            {shareMode === 'pct' && (
+              <InputNumber min={1} max={100} value={sharePct} addonAfter="%"
+                onChange={(v) => setSharePct(v ?? 0)} />
+            )}
+          </Space>
         </Form.Item>
         <Form.Item label="食安封签"
           tooltip="打包贴一次性封签,拆封即留痕。用户端显示「商家声明使用食安封签」——是你的声明不是平台认证">
