@@ -120,12 +120,16 @@ def build_ticket(order: Order, shop_name: str, *, purpose: str = "front",
     lines.append(f"菜品 {_yuan(order.food_cents)}"
                  + (f"  打包费 {_yuan(order.packing_fee_cents)}"
                     if order.packing_fee_cents else ""))
-    if order.discount_cents:
-        lines.append(f"满减 -{_yuan(order.discount_cents)}")
+    # 商家承担的配送费并在 discount_cents 里,拆开印:顾客要看得出哪笔是满减、哪笔是店家替他出的配送费
+    shared = getattr(order, "merchant_delivery_cents", 0) or 0
+    if order.discount_cents - shared:
+        lines.append(f"满减 -{_yuan(order.discount_cents - shared)}")
     if order.pickup:
         lines.append("到店自取 免配送费")
     else:
         lines.append(f"配送费 {_yuan(order.delivery_fee_cents)}(全归骑手)")
+        if shared:
+            lines.append(f"  其中商家承担 {_yuan(shared)}")
         # 配送费构成印在票上:顾客当面问"怎么这么贵"时,商家能直接指给他看。
         # 这笔钱商家一分不拿却总要替我们解释,印出来比让他背话术实在。
         # 与蓝牙小票、四端展示同一份拆分快照,不另算一遍
