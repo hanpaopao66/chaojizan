@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:superz_shared/superz_shared.dart';
 
@@ -569,11 +571,21 @@ class _CheckoutPageState extends State<CheckoutPage> {
     final shopCoupon = coupon != null && coupon['funder'] == 'merchant';
     // 平台补贴只剩平台券这一种(首单立减 2026-09-15 删了),上面已经算进 platformOff
     final tip = _pickup ? 0 : _tipCents;
+    // 商家替顾客出的那部分配送费。服务端下单时会钳在「菜 + 打包 − 满减 − 平台券」以内,
+    // 这里同一个钳法,免得点得极少时结算页和付款对不上
+    final merchantShare = (_pickup || fee == null)
+        ? 0
+        : math.max(
+            0,
+            math.min(_feePreview?['merchant_share_cents'] as int? ?? 0,
+                _foodCents + packing - merchantOff - platformOff));
     final total = fee == null
         ? null
-        : _foodCents + packing - merchantOff + fee + tip - platformOff;
+        : _foodCents + packing - merchantOff - merchantShare + fee + tip
+            - platformOff;
     final commission =
-        ((_foodCents + packing - merchantOff) * widget.merchant.commissionRate)
+        ((_foodCents + packing - merchantOff - merchantShare) *
+                widget.merchant.commissionRate)
             .round();
 
     return SzPageScaffold(
@@ -787,6 +799,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   // 拆分逐行列出:夜间、恶劣天气、上门难度此前都是
                   // "悄悄加上去的",顾客只看到总数变了
                   ..._feeBreakdownRows(theme),
+                  if (merchantShare > 0)
+                    SzFeeRow(
+                        label: '商家承担配送费',
+                        note: '骑手照拿全额',
+                        amountCents: merchantShare,
+                        negative: true),
                 ],
                 if (!_pickup && tip > 0)
                   SzFeeRow(label: '小费', note: '全额归骑手', amountCents: tip),
@@ -867,10 +885,12 @@ class _CheckoutPageState extends State<CheckoutPage> {
               child: SzMoneyFlow(items: [
                 SzFlowItem(
                   name: '商家实收',
-                  amountCents: _foodCents + packing - merchantOff - commission,
-                  fraction:
-                      (_foodCents + packing - merchantOff - commission) / total,
-                  note: '菜品 + 打包 − ${shopCoupon ? '店铺券' : '满减'},只扣 '
+                  amountCents: _foodCents + packing - merchantOff
+                      - merchantShare - commission,
+                  fraction: (_foodCents + packing - merchantOff
+                          - merchantShare - commission) / total,
+                  note: '菜品 + 打包 − ${shopCoupon ? '店铺券' : '满减'}'
+                      '${merchantShare > 0 ? ' − 承担的配送费' : ''},只扣 '
                       '${widget.merchant.commissionPct}% 服务费',
                 ),
                 if (!_pickup)
@@ -887,7 +907,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   amountCents: commission,
                   fraction: commission / total,
                   note: '服务器、客服与赔付池 · 按商家侧口径 '
-                      '${yuan(commission)} / ${yuan(_foodCents + packing - merchantOff)}'
+                      '${yuan(commission)} / ${yuan(_foodCents + packing - merchantOff - merchantShare)}'
                       ' = ${widget.merchant.commissionPct}%',
                   isHold: true,
                 ),

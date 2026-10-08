@@ -8,17 +8,17 @@
 (由 RIDER_FACE_CHECK_REQUIRED 控制,服务商没配好之前可以先关掉)。
 
 Revision ID: 0153
-Revises: 0149
+Revises: 0151
 
 编号 0150-0152 预留给同时在开的转单、配送费、保险那几个 PR。
-down_revision 暂时接在 main 上最新的 0149;前面那几个先合并的话,
-合并本 PR 前把 down_revision 改成当时 main 上最新的那个,保持一条链。
+和配送费(0151)合在同一个 PR 里,接在 0151 后面;转单(0150)如果先进 main,
+合并前把 0151 的 down_revision 改接 0150,保持一条链。
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = '0153'
-down_revision = '0149'
+down_revision = '0151'
 branch_labels = None
 depends_on = None
 

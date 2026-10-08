@@ -702,6 +702,17 @@ async def update_my_shop(
     if changes.get("is_open"):
         shop.closed_until = None
 
+    # 商家承担配送费:固定金额和比例二选一。同时传两个非 0 说不清以哪个为准,直接拒;
+    # 设了一个就把另一个清零,免得改成比例之后旧的固定金额还在暗中生效
+    share_fixed = changes.get("delivery_share_cents")
+    share_pct = changes.get("delivery_share_pct")
+    if share_fixed and share_pct:
+        raise HTTPException(422, "承担配送费请在固定金额和比例里选一种")
+    if share_fixed:
+        changes["delivery_share_pct"] = 0
+    elif share_pct:
+        changes["delivery_share_cents"] = 0
+
     # 满赠规则:赠品必须是本店在售菜品;名字以库里为准存快照(展示不再查菜)
     if "gift_rules" in changes:
         for rule in changes["gift_rules"]:
@@ -4322,7 +4333,8 @@ async def my_marketing_stats(
 
     rows = (await db.execute(
         select(Order.discount_cents, Order.food_cents, Order.packing_fee_cents,
-               Order.refund_cents, Order.promo_note)
+               Order.refund_cents, Order.promo_note,
+               Order.merchant_delivery_cents)
         .where(Order.merchant_id == shop.id,
                Order.created_at > since,
                Order.status.in_([OrderStatus.DELIVERED,
@@ -4330,12 +4342,18 @@ async def my_marketing_stats(
     promo_orders = promo_give = promo_food = 0
     coupon_orders = coupon_give = 0
     plain_orders = plain_food = 0
-    for discount, food, packing, refund, note in rows:
+    delivery_share_orders = delivery_share_give = 0
+    for discount, food, packing, refund, note, shared in rows:
         # 商家实收口径(与佣金基数同源),再扣掉退款
         gross = max(food + packing - discount, 0)
         if refund >= gross:
             continue  # 全额退款:这单没做成,不算任何一类的生意
         net = gross - refund
+        # 承担配送费也并在 discount_cents 里:单数一笔,剩下的才是满减 / 店铺券
+        if shared:
+            delivery_share_orders += 1
+            delivery_share_give += shared
+            discount -= shared
         if discount <= 0:
             plain_orders += 1
             plain_food += net
@@ -4402,8 +4420,13 @@ async def my_marketing_stats(
             "until": d.flash_until,
             "monthly_sales": sales.get(d.id, 0),
         } for d in flash_dishes],
+        # 替顾客出的配送费(不算活动,单列)
+        "delivery_share": {
+            "orders": delivery_share_orders,
+            "give_cents": delivery_share_give,
+        },
         # 商家最该知道的一句话:让利总额与它换回的营业额
-        "total_give_cents": promo_give + coupon_give,
+        "total_give_cents": promo_give + coupon_give + delivery_share_give,
         "note": "这里给的是相关性不是因果:用了活动的单客单价更高,"
                 "不等于活动让客单价变高。判断值不值得,还要看你的毛利。",
     }

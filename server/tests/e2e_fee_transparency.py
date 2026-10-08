@@ -45,14 +45,15 @@ def check_door_fee_rules():
     from app.services.pricing import door_fee_cents
 
     assert door_fee_cents(None, None) == 0, "没填楼层不收(不猜)"
-    assert door_fee_cents(3, False) == 0, "4 楼及以下不收"
-    assert door_fee_cents(6, False) == 200, "无电梯 6 楼:超出 2 层 × ¥1"
+    assert door_fee_cents(2, False) == 0, "2 楼及以下不收"
+    assert door_fee_cents(3, False) == 50, "无电梯 3 楼起收,每层 ¥0.5"
+    assert door_fee_cents(6, False) == 200, "无电梯 6 楼:超出 4 层 × ¥0.5"
     assert door_fee_cents(20, False) == 500, "封顶 ¥5"
     assert door_fee_cents(6, True) == 0, \
         "有电梯不收 —— 等电梯的时间已经在 ETA 里补过,再收就是收两次钱"
     assert door_fee_cents(6, False, to_door=False) == 0, \
         "顾客选了送到楼下就不收(骑手也没有义务上楼)"
-    print("✓ 上门难度费:不猜、4 楼以下免、有电梯免、选楼下免、封顶 ¥5")
+    print("✓ 上门难度费:不猜、2 楼以下免、有电梯免、选楼下免、封顶 ¥5")
 
 
 def preview(**kw):

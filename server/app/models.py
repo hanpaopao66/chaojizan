@@ -337,6 +337,13 @@ class Merchant(Base):
     promise_ready_minutes: Mapped[int] = mapped_column(Integer, default=15)
     # 商家自配送:开启后新订单不进抢单池,商家自己送(配送费归商家)
     self_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 商家承担一部分配送费(2026-10-08):固定金额(分)或比例(%),二选一,都是 0 = 顾客全付。
+    # 只摊距离/夜间/天气那几项;上门爬楼费和骑手反馈的难度费仍由顾客付。
+    # 骑手拿的钱不变 —— 这笔记进订单的 discount_cents(商家让利口径),顾客少付、商家少收
+    delivery_share_cents: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
+    delivery_share_pct: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
     # 微信特约商户号(服务商模式进件后回填)+ 可分账标记(接收方绑定完成)。
     # 都就绪后新订单 settle_mode=profit_sharing:货款分账直达商家,不经平台
     sub_mchid: Mapped[str] = mapped_column(String(32), default="")
@@ -795,6 +802,11 @@ class Order(Base):
         String(40), nullable=True, index=True)
     # 追加单(加菜):关联原单,免配送费,骑手/配送随原单;原单取消则级联取消
     parent_order_no: Mapped[str] = mapped_column(String(32), default="", index=True)
+    #: 商家承担的配送费(下单快照,分)。**已经算在 discount_cents 里**,这一列只是拆出来给人看:
+    #: 顾客少付这么多、商家少收这么多、骑手照拿全额配送费;佣金基数跟满减一样扣掉它(商家让利不抽成)。
+    #: 账目恒等式、对账、见证节点都只认 discount_cents,不用为它另加一项
+    merchant_delivery_cents: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0")
     # 商家自配送(下单快照):不进抢单池、无骑手,商家操作配送三态;
     # 配送费归商家(入账行并入 food 口径),平台照常只抽餐费佣金
     self_delivery: Mapped[bool] = mapped_column(Boolean, default=False)
