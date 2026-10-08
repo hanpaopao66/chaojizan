@@ -6,14 +6,17 @@ merchant_delivery_cents 是**已经算进 discount_cents 的那一部分**,单�
 
 缺省 0:已有商家和订单一个都不受影响。
 
-Revision ID: 0150
-Revises: 0149
+接在 0150(转单加钱,PR #2)后面:这条迁移要等 PR #2 合并之后才能合并,
+单独在这个分支上跑 alembic upgrade 会报找不到 0150。
+
+Revision ID: 0151
+Revises: 0150
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0150'
-down_revision = '0149'
+revision = '0151'
+down_revision = '0150'
 branch_labels = None
 depends_on = None
 
