@@ -11,6 +11,8 @@
   4c/4d. 判骑手责任、判商家责任的恒等式(services/rider_fault、services/merchant_fault)
   4e. 反查:新规则生效之后判了商家责任的单(平台骑手送的、配送费 + 小费 > 0),必须有商家另出的
       那一行 —— 4d 从写了的行出发,一行都没写的单它看不见
+  4g. 骑手保险费(services/insurance):每一行都是负数;每个骑手扣过的保险费合计 == 他每日保障
+      记录上记的保费合计(扣了一笔就记一笔,一天只扣一次)
   5. 每笔订单的 refund_cents 必须等于 refunds 流水之和(失败流水不算 → 自动暴露)
   5b. 退款不得超过用户实付 —— 判据是"剩余应付不许为负"(见该条的长注释:
       total_cents 是剩余应付不是累计实付,直接比 refund_cents 会造出几百盏假红灯)
@@ -96,6 +98,8 @@ NO_RIDER_COMP_NOTE = "无骑手接单取消,平台赔付餐损"
 #: 判骑手责任的三种骑手行(services/rider_fault.FAULT_KINDS):这单收入冲回、池子不够骑手出、改判退回
 _RIDER_FAULT_KINDS = (EarningKind.fault_reversal, EarningKind.fault_charge,
                       EarningKind.fault_refund)
+#: 不算「挣到」的骑手行(规则 4):判骑手责任的三种,加上每天扣的保险费(services/insurance)
+_RIDER_DEDUCT_KINDS = (*_RIDER_FAULT_KINDS, EarningKind.insurance_fee)
 #: 判商家责任的两种商家行(services/merchant_fault.FAULT_KINDS):骑手那份商家另出、改判退回
 _MERCHANT_FAULT_KINDS = (EarningKind.fault_charge, EarningKind.fault_refund)
 
@@ -194,6 +198,46 @@ async def _reversal_due_ids(db, order_ids) -> set[int]:
     return due - exempt
 
 
+async def _rider_insurance_problems(db, since) -> list[dict]:
+    """骑手保险费(规则 4g)。和 services/insurance.charge_daily_fee 对着写:
+    扣一笔保险费,就在当天的保障记录上记一笔保费,两边的合计必须一样。
+
+    按骑手整户比,不按天比:扣款行的 created_at 是事务开始的时刻,当天记录的日期是代码里
+    取的北京日,零点前后那一下两边可能差一天,按天比会造出假红灯。
+    """
+    from ..models import RiderInsuranceDay
+    out: list[dict] = []
+    riders = set(await db.scalars(
+        select(RiderEarning.rider_id).where(RiderEarning.kind == EarningKind.insurance_fee,
+                                            RiderEarning.created_at >= since)))
+    if not riders:
+        return out
+    bad = (await db.execute(
+        select(RiderEarning.order_no, RiderEarning.amount_cents)
+        .where(RiderEarning.kind == EarningKind.insurance_fee,
+               RiderEarning.created_at >= since, RiderEarning.amount_cents >= 0))).all()
+    for no, amt in bad:
+        out.append({"check": "rider_insurance_sign",
+                    "detail": f"订单 {no} 上的保险费行是 {amt} 分 —— 扣的钱该是负数"})
+    charged = dict((await db.execute(
+        select(RiderEarning.rider_id, sa_func.coalesce(sa_func.sum(RiderEarning.amount_cents), 0))
+        .where(RiderEarning.kind == EarningKind.insurance_fee,
+               RiderEarning.rider_id.in_(riders))
+        .group_by(RiderEarning.rider_id))).all())
+    recorded = dict((await db.execute(
+        select(RiderInsuranceDay.rider_id,
+               sa_func.coalesce(sa_func.sum(RiderInsuranceDay.premium_cents), 0))
+        .where(RiderInsuranceDay.rider_id.in_(riders))
+        .group_by(RiderInsuranceDay.rider_id))).all())
+    for rider_id in sorted(riders):
+        took, rec = -int(charged.get(rider_id, 0)), int(recorded.get(rider_id, 0))
+        if took != rec:
+            out.append({"check": "rider_insurance_mismatch",
+                        "detail": f"骑手 #{rider_id} 扣了保险费 {took} 分,每日保障记录上只记了 "
+                                  f"{rec} 分 —— 多扣了,或者扣了没记"})
+    return out
+
+
 async def _rider_fault_problems(db, since) -> list[dict]:
     """判骑手责任的恒等式(规则 4c)。和 services/rider_fault.apply / undo 逐项对着写。"""
     from ..models import RiderFundMovement
@@ -250,7 +294,8 @@ async def _rider_fault_problems(db, since) -> list[dict]:
     bal = await fund_balance(db)
     if bal["balance_cents"] < 0:
         out.append({"check": "rider_fund_negative",
-                    "detail": f"骑手保障金池余额为负:计提 {bal['accrued_cents']} − 支出 "
+                    "detail": f"骑手保障金池余额为负:计提 {bal['accrued_cents']} + 保险费 "
+                              f"{bal['premium_cents']} − 支出 "
                               f"{bal['paid_cents']} + 回池 {bal['returned_cents']} = "
                               f"{bal['balance_cents']} 分 —— 池子不够时该骑手出,不该透支"})
     return out
@@ -638,12 +683,12 @@ async def run_audit() -> list[dict]:
             earned = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(RiderEarning.amount_cents), 0))
                 .where(RiderEarning.rider_id == rider.id,
-                       RiderEarning.kind.notin_(_RIDER_FAULT_KINDS))
+                       RiderEarning.kind.notin_(_RIDER_DEDUCT_KINDS))
             )
             faults = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(RiderEarning.amount_cents), 0))
                 .where(RiderEarning.rider_id == rider.id,
-                       RiderEarning.kind.in_(_RIDER_FAULT_KINDS))
+                       RiderEarning.kind.in_(_RIDER_DEDUCT_KINDS))
             )
             out = await db.scalar(
                 select(sa_func.coalesce(sa_func.sum(Withdrawal.amount_cents), 0))
@@ -658,7 +703,7 @@ async def run_audit() -> list[dict]:
                 problems.append({
                     "check": "rider_balance_negative",
                     "detail": f"骑手 {rider.phone} 提走的比挣到的多:{earned - out} 分"
-                              f"(不含判骑手责任扣的钱)",
+                              f"(不含判骑手责任扣的钱和保险费)",
                 })
             elif earned + faults - out < 0:
                 owed_n += 1
@@ -678,6 +723,9 @@ async def run_audit() -> list[dict]:
 
         # 4e) 反查:判了商家责任,就必须有商家另出的那一行 —— 4d 只核写了的,一行都没写的它看不见
         problems.extend(await _merchant_fault_charge_missing(db, since))
+
+        # 4g) 骑手保险费(services/insurance):扣的是负数;每个骑手扣的合计 == 每日记录上记的保费合计
+        problems.extend(await _rider_insurance_problems(db, since))
 
         # 4b) 商家提现不得超过挣到的钱。
         #

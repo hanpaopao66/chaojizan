@@ -54,6 +54,10 @@ const _riderFaultSigns = {'fault_reversal': -1, 'fault_charge': -1, 'fault_refun
 /// 骑手那份配送费和小费商家另出的是负数,申诉改判退回的是正数
 const _merchantFaultSigns = {'fault_charge': -1, 'fault_refund': 1};
 
+/// 骑手保险费(规格 §6.2f,2026-10 起):**不在 rider_rows 里**,单独放在 rider_insurance_rows。
+/// 每天第一单扣的保费,是负数
+const _riderInsuranceSigns = {'insurance_fee': -1};
+
 List<Map> _rows(dynamic v) => (v as List? ?? const []).whereType<Map>().toList();
 
 /// 逐行加总某个字段;[kind] 给了就只加这一种
@@ -122,6 +126,7 @@ List<String> verifyRows(Map payload) {
   for (final (key, signs, label) in [
     ('rider_fault_rows', _riderFaultSigns, '骑手判责行'),
     ('merchant_fault_rows', _merchantFaultSigns, '商家判责行'),
+    ('rider_insurance_rows', _riderInsuranceSigns, '骑手保险费行'),
   ]) {
     for (final r in _rows(payload[key])) {
       final sign = signs[r['kind']];
@@ -153,6 +158,7 @@ List<String> verifyRows(Map payload) {
     for (final (key, want, msg) in [
       ('stay_fee', _sum(payload['stay_rows'], 'fee'), '住宿服务费合计与逐行加总不一致'),
       ('rider_fault', _sum(payload['rider_fault_rows'], 'amount'), '骑手判责合计与逐行加总不一致'),
+      ('rider_insurance', _sum(payload['rider_insurance_rows'], 'amount'), '骑手保险费合计与逐行加总不一致'),
       ('merchant_fault', _sum(payload['merchant_fault_rows'], 'amount'), '商家判责合计与逐行加总不一致'),
       ('appeal_refund', _sum(payload['appeal_refund_rows'], 'amount'), '申诉改判退款合计与逐行加总不一致'),
       ('platform_correction', platformCorrection(payload), '平台纠错(申诉改判)合计与逐行加总不一致'),

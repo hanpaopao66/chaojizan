@@ -2412,13 +2412,15 @@ async def my_insurance(
     user: User = Depends(require_role("rider")),
     db: AsyncSession = Depends(get_db),
 ):
-    """我的保障记录(近 30 天):registered=保障金池兜底 / insured=已投保。"""
+    """我的保障记录(近 30 天):registered=保障金池兜底 / insured=已投保。
+    premium_cents = 当天扣的保费(当天第一单送到时扣,0 = 还没扣)。"""
     from ..models import RiderInsuranceDay
     rows = (await db.scalars(
         select(RiderInsuranceDay)
         .where(RiderInsuranceDay.rider_id == user.id)
         .order_by(RiderInsuranceDay.day.desc()).limit(30))).all()
-    return [{"day": r.day, "status": r.status, "policy_no": r.policy_no}
+    return [{"day": r.day, "status": r.status, "policy_no": r.policy_no,
+             "premium_cents": r.premium_cents}
             for r in rows]
 
 

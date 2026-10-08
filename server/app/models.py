@@ -1016,6 +1016,9 @@ class EarningKind(str, enum.Enum):
     fault_charge = "fault_charge"
     #: 申诉改判成立,另出 / 扣掉的加回去(正数)
     fault_refund = "fault_refund"
+    #: 骑手:每天第一单送到入账时扣的当日保险费(负数),一个骑手一个北京日一条
+    #: (services/insurance.charge_daily_fee)。不是罚款,是保费
+    insurance_fee = "insurance_fee"
 
 
 class RiderEarning(Base):
@@ -1774,7 +1777,11 @@ class AppEvent(Base):
 
 class RiderInsuranceDay(Base):
     """骑手意外险每日记录:上线自动投保(桩未配置时为登记模式,
-    保障金池兜底先行赔付);费用从保障金池支出。"""
+    保障金池兜底先行赔付)。
+
+    保费由骑手出:当天第一单送到入账时扣 `rider_insurance_fee_cents`,
+    扣了多少记在 premium_cents(0 = 今天还没扣)。登记模式下这笔钱进保障金池
+    (services/insurance.py、services/rider_fault.fund_balance)。"""
 
     __tablename__ = "rider_insurance_days"
     __table_args__ = (UniqueConstraint("rider_id", "day"),)

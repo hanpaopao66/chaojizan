@@ -172,6 +172,10 @@ func num(v any) float64 {
 // rider_fault_rows。冲回这单收入、池子不够骑手另出的是负数,申诉改判退回的是正数
 var riderFaultSigns = map[string]float64{"fault_reversal": -1, "fault_charge": -1, "fault_refund": 1}
 
+// riderInsuranceSigns 骑手保险费(2026-10 起,规格 §6.2f):**不在 rider_rows 里**,单独放在
+// rider_insurance_rows。每天第一单扣的保费,是负数
+var riderInsuranceSigns = map[string]float64{"insurance_fee": -1}
+
 // merchantFaultSigns 判商家责任的商家行(规格 §6.2c):**不在 merchant_rows 里**,单独放在
 // merchant_fault_rows。骑手那份配送费和小费商家另出的是负数,申诉改判退回的是正数
 var merchantFaultSigns = map[string]float64{"fault_charge": -1, "fault_refund": 1}
@@ -295,6 +299,16 @@ func verifyRows(p map[string]any) []string {
 				"骑手判责行 %v: %s 的金额 %v 符号不对", r["o"], kind, r["amount"]))
 		}
 	}
+	// 骑手保险费(规格 §6.2f):种类在白名单里、符号对。缺这个字段的老锚点跳过
+	for _, r := range rowsOf(p["rider_insurance_rows"]) {
+		kind, _ := r["kind"].(string)
+		if sign, known := riderInsuranceSigns[kind]; !known {
+			problems = append(problems, fmt.Sprintf("骑手保险费行 %v: 未知类型 %s", r["o"], kind))
+		} else if num(r["amount"])*sign < 0 {
+			problems = append(problems, fmt.Sprintf(
+				"骑手保险费行 %v: %s 的金额 %v 符号不对", r["o"], kind, r["amount"]))
+		}
+	}
 	fund, _ := p["rider_fund"].(map[string]any)
 	for _, r := range rowsOf(fund["rows"]) {
 		kind, _ := r["kind"].(string)
@@ -331,6 +345,7 @@ func verifyRows(p map[string]any) []string {
 		}{
 			{"stay_fee", sumOf(rowsOf(p["stay_rows"]), "fee", ""), "住宿服务费合计与逐行加总不一致"},
 			{"rider_fault", sumOf(rowsOf(p["rider_fault_rows"]), "amount", ""), "骑手判责合计与逐行加总不一致"},
+			{"rider_insurance", sumOf(rowsOf(p["rider_insurance_rows"]), "amount", ""), "骑手保险费合计与逐行加总不一致"},
 			{"merchant_fault", sumOf(rowsOf(p["merchant_fault_rows"]), "amount", ""), "商家判责合计与逐行加总不一致"},
 			{"appeal_refund", sumOf(rowsOf(p["appeal_refund_rows"]), "amount", ""), "申诉改判退款合计与逐行加总不一致"},
 			{"platform_correction", platformCorrection(p), "平台纠错(申诉改判)合计与逐行加总不一致"},

@@ -149,7 +149,7 @@ class Test核账:
     def test_余额为负不是错账_提走的比挣到的多才是(self):
         from app.services import audit
         src = inspect.getsource(audit.run_audit)
-        assert "RiderEarning.kind.notin_(_RIDER_FAULT_KINDS)" in src
+        assert "RiderEarning.kind.notin_(_RIDER_DEDUCT_KINDS)" in src
 
 
 def _payload(**extra) -> dict:
