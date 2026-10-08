@@ -453,6 +453,17 @@ class Settings(BaseSettings):
     idcheck_api_url: str = ""
     idcheck_app_code: str = ""   # 三方核验服务凭证(如阿里云云市场 AppCode)
 
+    # 骑手人脸核验(防代送,见 services/facecheck.py)。
+    # 实名(二要素)之外再加一道:证明拿手机跑单的就是实名的那个人。
+    # - required:上线和抢单是否要求核验在有效期内。**生产上没配服务商时,
+    #   这个开着就意味着谁都上不了线** —— 上线前先配好服务商,或者先关掉;
+    # - interval_hours:一次核验管多久。到点没复核不能接新单,手上的单照常送完;
+    # - provider:服务商名。留空在开发环境走假实现(services/facecheck.FakeFaceProvider),
+    #   生产留空则开始核验直接 503,不放行
+    rider_face_check_required: bool = True
+    rider_face_check_interval_hours: float = 4.0
+    face_provider: str = ""
+
     # 阿里云短信(验证码)。AccessKey 建议用只授短信权限的 RAM 子账号
     sms_secret_id: str = ""       # 阿里云 AccessKey ID
     sms_secret_key: str = ""      # 阿里云 AccessKey Secret

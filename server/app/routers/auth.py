@@ -636,6 +636,10 @@ async def delete_account(
     # 这张表除了 users.id 没有别的外键指过来,删掉不牵连任何账务。
     await db.execute(
         sa_delete(RiderProfile).where(RiderProfile.rider_id == user.id))
+    # 人脸核验留痕:没有图像,但核验编号能在服务商那边查回这个人的脸,一并删
+    from ..models import RiderFaceCheck
+    await db.execute(
+        sa_delete(RiderFaceCheck).where(RiderFaceCheck.rider_id == user.id))
     # 地址簿:联系人姓名 + 电话 + 门牌 + 经纬度,是全库最贴身的一张表。
     # 订单自带地址快照(orders.address / contact_phone),删地址簿不影响
     # 任何历史订单的可读性与对账。

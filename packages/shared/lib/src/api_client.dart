@@ -24,6 +24,9 @@ class ApiException implements Exception {
   /// 被平台处罚挡住了(禁言、封号、封群)
   bool get sanctioned => detail?['error'] == 'sanctioned';
 
+  /// 骑手人脸核验没做或过期了,接不了新单 —— 页面据此直接拉起核验页
+  bool get faceCheckRequired => detail?['error'] == 'face_check_required';
+
   /// 小程序桥错误码(DEV-PROMPTS-39 §5.4,如 4007 版本冲突、4009 已暂停)。
   /// 服务端的 detail 是 `{code, message}` 时才有;宿主原样转给页面
   final int? code;
@@ -2970,6 +2973,26 @@ class ApiClient {
       'health_cert_photo_url': healthCertPhotoUrl,
     });
     return RiderProfile.fromJson(data as Map<String, dynamic>);
+  }
+
+  // ---------- 骑手人脸核验(防代送)----------
+  Future<RiderFaceStatus> riderFaceStatus() async {
+    final data = await _request('GET', '/riders/face/status');
+    return RiderFaceStatus.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 发起一次人脸核验。第一次要带 [consent] = true(人脸要单独同意)。
+  Future<RiderFaceSession> startRiderFace({bool consent = false}) async {
+    final data = await _request('POST', '/riders/face/start',
+        body: {if (consent) 'consent': true});
+    return RiderFaceSession.fromJson(data as Map<String, dynamic>);
+  }
+
+  /// 做完了,请服务端去服务商那里查结果。返回值里 passed / reason 是这次的结果
+  Future<RiderFaceStatus> finishRiderFace(int checkId) async {
+    final data = await _request('POST', '/riders/face/finish',
+        body: {'check_id': checkId});
+    return RiderFaceStatus.fromJson(data as Map<String, dynamic>);
   }
 
   /// 食品安全培训内容(#167)。三分钟看完 + 几道确认题。

@@ -4,10 +4,9 @@
 
 逐条核过法规:
 
-- **人脸认证不做**:《人脸识别技术应用安全管理办法》(网信办+公安部,
-  2025-06-01 施行)明写"存在其他非人脸方式能达到同等业务要求的,
-  **不得将人脸识别作为唯一验证方式**",并鼓励优先用国家人口基础信息库 ——
-  二要素核验正是那个方式;
+- **身份以二要素为准,人脸只管"是不是本人在跑"**:二要素证明不了拿手机的
+  就是他。所以实名之后还要做人脸核验,在线期间每 4 小时复核,过期不能接新单。
+  人脸要单独同意,服务端不存人脸图像(《人脸识别技术应用安全管理办法》);
 - **健康证不是法定要求**:《网络餐饮服务食品安全监督管理办法》要求餐食封装、
   避免送餐人员直接接触食品,送餐员因此不属于"直接接触入口食品的人员"。
   四川已明确取消。所以选填;
@@ -131,6 +130,90 @@ err = call("GET", "/admin/rider-profiles", rider, expect_error=True)
 assert err["_error"] == 403, err
 print("✓ 非管理员不能访问审核接口")
 
+# ---------- 3.5 人脸核验:实名之后再加一道,防代送 ----------
+def set_face_verified_at(sql_expr: str, who: str):
+    """直接改最近一次核验时刻,模拟"过了 4 小时"。"""
+    async def go():
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import create_async_engine
+
+        from app.config import settings
+        engine = create_async_engine(settings.database_url)
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(
+                    f"UPDATE rider_profiles SET face_verified_at = {sql_expr} "
+                    "WHERE rider_id = (SELECT id FROM users WHERE phone = :p)"),
+                    {"p": who})
+        finally:
+            await engine.dispose()
+    asyncio.run(go())
+
+
+def do_face(token):
+    chk = call("POST", "/riders/face/start", token, {"consent": True})
+    return call("POST", "/riders/face/finish", token,
+                {"check_id": chk["check_id"]})
+
+
+st = call("GET", "/riders/face/status", rider)
+assert st["due"] == "enroll" and st["enrolled"] is False, st
+assert st["interval_hours"] > 0, st
+
+err = call("POST", "/riders/online", rider, {"is_online": True},
+           expect_error=True)
+assert err["_error"] == 403, err
+assert isinstance(err["detail"], dict) \
+    and err["detail"]["error"] == "face_check_required", \
+    f"要带上机器可读的标记,客户端才能直接拉起核验页:{err}"
+assert err["detail"]["reason"] == "enroll", err
+print("✓ 实名通过但没做人脸 → 不能上线,并告诉客户端去做核验")
+
+# 单独同意:不勾选不能发起
+err = call("POST", "/riders/face/start", rider, {}, expect_error=True)
+assert err["_error"] == 422 and "同意" in err["detail"], err
+print("✓ 人脸核验要单独同意,不同意不能发起")
+
+# 没过:不刷新有效期
+chk = call("POST", "/riders/face/start", rider,
+           {"consent": True, "dev_outcome": "fail"})
+assert chk["purpose"] == "enroll", chk
+res = call("POST", "/riders/face/finish", rider, {"check_id": chk["check_id"]})
+assert res["passed"] is False and res["reason"], res
+assert res["due"] == "enroll", res
+print(f"✓ 核验没过不放行,并说原因:{res['reason']}")
+
+# 同一次核验不能查两次结果(拿旧编号来顶)
+err = call("POST", "/riders/face/finish", rider,
+           {"check_id": chk["check_id"]}, expect_error=True)
+assert err["_error"] == 409, err
+
+# 过了:有效期 4 小时
+res = do_face(rider)
+assert res["passed"] is True and res["enrolled"] is True, res
+assert res["due"] == "", res
+prof = call("GET", "/riders/profile", rider)
+assert prof["face_enrolled"] is True and prof["face_expires_at"], prof
+print(f"✓ 首次人脸核验通过,有效到 {prof['face_expires_at']}")
+
+# 别人的核验编号不能拿来用
+other, _ = fresh_rider("别人")
+err = call("POST", "/riders/face/finish", other,
+           {"check_id": chk["check_id"]}, expect_error=True)
+assert err["_error"] in (403, 404), err
+print("✓ 别人的核验不能拿来顶")
+
+# 第二次起是复核(与首次核验比对),不是再查一次公安库
+set_face_verified_at("now() - interval '5 hours'", phone)
+st = call("GET", "/riders/face/status", rider)
+assert st["due"] == "expired", st
+chk = call("POST", "/riders/face/start", rider, {})
+assert chk["purpose"] == "periodic", chk
+call("POST", "/riders/face/finish", rider, {"check_id": chk["check_id"]})
+assert call("GET", "/riders/face/status", rider)["due"] == "", \
+    "复核过了就该恢复"
+print("✓ 过期后复核(periodic)通过,恢复接单资格")
+
 # ---------- 4. 食安培训:法定要求,上线前必须完成 ----------
 tr = call("GET", "/riders/training", rider)
 assert tr["done"] is False, tr
@@ -192,6 +275,18 @@ assert on["is_online"] is True, on
 assert on.get("warning", "") == "", on
 print("✓ 培训完成后正常上线")
 
+# ---------- 4.5 在线时人脸过期:不能接新单,但不被踢下线 ----------
+set_face_verified_at("now() - interval '5 hours'", phone)
+pool = call("GET", "/riders/available-orders", rider)
+some = pool[0]["order_no"] if pool else "NO-SUCH-ORDER"
+err = call("POST", f"/riders/grab/{some}", rider, expect_error=True)
+assert err["_error"] == 403 and isinstance(err["detail"], dict) \
+    and err["detail"]["reason"] == "expired", err
+assert "送完" in err["detail"]["message"], \
+    "要说清楚手上的单照常送,不然他会以为单子也被收走了"
+print(f"✓ 人脸过期:不能抢新单 —— {err['detail']['message']}")
+do_face(rider)
+
 # ---------- 5. 培训记录留痕(法定 ≥2 年) ----------
 st = call("GET", "/riders/exam/status", rider)
 assert st["passed"] is True and st["version"], st
@@ -226,6 +321,7 @@ def set_cities(value):
 rider2, phone2 = fresh_rider("健康证测试")
 call("POST", "/riders/profile", rider2,
      {"real_name": "钱七", "id_card_no": make_id("51010119900202002")})
+do_face(rider2)
 qs = call("GET", "/riders/exam/questions", rider2)
 call("POST", "/riders/exam/submit", rider2,
      {"answers": {str(q["id"]): bank[q["id"]]["answer"] for q in qs}})
@@ -275,4 +371,4 @@ assert call("POST", "/riders/online", rider2,
 call("POST", "/riders/online", rider2, {"is_online": False})
 print("✓ 移出清单后恢复正常")
 
-print("\n骑手入驻(实名当场核验 + 食安培训 + 健康证按城市)全部通过 🎉")
+print("\n骑手入驻(实名当场核验 + 人脸核验 + 食安培训 + 健康证按城市)全部通过 🎉")

@@ -79,6 +79,7 @@ def _user_state(uid):
                 " WHERE id = :i"), {"i": uid})).first()
             counts = {}
             for table, col in (("rider_profiles", "rider_id"),
+                               ("rider_face_checks", "rider_id"),
                                ("addresses", "user_id"),
                                ("user_identities", "user_id")):
                 counts[table] = (await db.execute(_text(
@@ -98,12 +99,16 @@ call("POST", "/riders/profile", rider_tok,
      {"real_name": "测试骑手", "id_card_no": "110101199003072316"})
 assert call("GET", "/riders/profile", rider_tok)["real_name"], \
     "实名信息应先存在,否则下面的删除断言是空转"
+# 做一次人脸核验:留痕表里有了这个人的核验编号,注销时也要删
+chk = call("POST", "/riders/face/start", rider_tok, {"consent": True})
+call("POST", "/riders/face/finish", rider_tok, {"check_id": chk["check_id"]})
 call("POST", "/riders/online", rider_tok, {"is_online": True},
      expect_error=True)  # 城市/认证等原因可能拒,下面按实际值判
 
 before, before_n = _user_state(rider_id)
 assert before_n["rider_profiles"] == 1, \
     f"注销前实名行应存在,实得 {before_n['rider_profiles']}(断言会空转)"
+assert before_n["rider_face_checks"] == 1, before_n
 
 call("DELETE", "/auth/me", rider_tok)
 after, after_n = _user_state(rider_id)
@@ -111,6 +116,9 @@ assert after_n["rider_profiles"] == 0, (
     f"注销页承诺「实名信息一并删除」,rider_profiles 仍有 "
     f"{after_n['rider_profiles']} 行")
 print("✓ 骑手实名信息(姓名/证号/紧急联系人)随注销真的删掉了")
+assert after_n["rider_face_checks"] == 0, \
+    f"人脸核验留痕没删:{after_n['rider_face_checks']} 行"
+print("✓ 人脸核验留痕随注销一并删掉")
 assert after.deleted_at is not None, "deleted_at 应被写上(墓碑判据)"
 assert after.is_online is False, "is_online 未重置,会被算进在线骑手/派单广播"
 print("✓ 骑手墓碑行:deleted_at 已写、is_online 已归零")

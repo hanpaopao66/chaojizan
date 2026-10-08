@@ -957,10 +957,13 @@ class RiderProfile(Base):
       避免送餐人员直接接触食品 —— 送餐员因此不属于"直接接触入口食品的人员",
       不在预防性健康检查范围内。四川已明确取消。所以这里是**选填**,
       只在地方另有要求的城市才卡(见 riders.py 的城市判断);
-    - **人脸认证不做。** 《人脸识别技术应用安全管理办法》(网信办+公安部,
-      2025-06-01 施行)明写:存在其他非人脸方式能达到同等业务要求的,
-      **不得将人脸识别作为唯一验证方式**;并鼓励优先用国家人口基础信息库。
-      二要素核验正是那个"其他方式";
+    - **身份核验仍以二要素为准,人脸只管"是不是本人在跑"。** 二要素只证明
+      "这个姓名+证号真实且匹配",证明不了拿手机的人就是他,账号出租、
+      代送防不住。所以实名之后再加人脸核验(services/facecheck.py),并每隔
+      几小时复核一次。《人脸识别技术应用安全管理办法》(2025-06-01 施行)
+      不让人脸当**唯一**验证方式,这里它是二要素之外的第二道,不是替代;
+      人脸要**单独同意**(face_consent_at),服务端**不存人脸图像**,
+      只存核验结果和服务商的核验编号;
     - **身份证照片不收。** 二要素核验(姓名+证号查人口库)不需要照片,
       而照片是敏感个人影像 —— 不收就没有泄露面。字段保留只为兼容历史数据。
 
@@ -982,6 +985,18 @@ class RiderProfile(Base):
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     #: 二要素核验通过的时刻。空 = 走的是历史人工审核路径
     id_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 骑手单独同意人脸核验的时刻。空 = 还没同意,不能发起核验
+    face_consent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 首次人脸核验(与公安库比对)通过的时刻。空 = 还没做过
+    face_enrolled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+    #: 首次核验在服务商那边的编号。之后的复核拿它当比对源 ——
+    #: 人脸照片留在服务商那里,**我们这边不存图**
+    face_enroll_ref: Mapped[str] = mapped_column(String(100), default="")
+    #: 最近一次人脸核验通过的时刻。过了有效期(默认 4 小时)不能接新单
+    face_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
     #: 历史字段,新流程不再写入(旧数据迁移时保留照片 URL 以备追溯)
     id_card_photo_url: Mapped[str] = mapped_column(String(300), default="")
@@ -1936,6 +1951,30 @@ class RiderSession(Base):
     rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     online_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     offline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
+
+
+class RiderFaceCheck(Base):
+    """骑手每一次人脸核验的留痕(防代送)。
+
+    **只存结果,不存人脸图像**:图像在骑手手机和服务商之间传,
+    这里留的是服务商的核验编号(provider_ref),出了争议拿它去服务商那边查。
+    """
+
+    __tablename__ = "rider_face_checks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    #: enroll = 首次(与公安库比对);periodic = 在线期间定时复核
+    purpose: Mapped[str] = mapped_column(String(16))
+    provider: Mapped[str] = mapped_column(String(32))
+    provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
+    #: pending / passed / failed
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
 
