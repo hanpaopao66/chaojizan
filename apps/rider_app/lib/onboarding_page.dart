@@ -548,6 +548,16 @@ class RiderInsurancePage extends StatefulWidget {
 }
 
 class _RiderInsurancePageState extends State<RiderInsurancePage> {
+  /// 保单号(已投保的)和当天扣的保费(老服务端没有 premium_cents,当 0)
+  static Widget? _subtitle(dynamic r) {
+    final premium = (r['premium_cents'] as num?)?.toInt() ?? 0;
+    final parts = [
+      if (r['status'] == 'insured') '保单号:${r['policy_no']}',
+      premium > 0 ? '保费 ${szYuanText(premium)}' : '没扣保费(当天第一单送到时才扣)',
+    ];
+    return Text(parts.join(' · '));
+  }
+
   List<dynamic> _rows = [];
 
   @override
@@ -575,6 +585,9 @@ class _RiderInsurancePageState extends State<RiderInsurancePage> {
               padding: const EdgeInsets.all(14),
               child: Text(
                 '每天首次上线自动登记当日保障,无需操作。\n'
+                '保费由你出:当天第一单送到时从这单收入里扣,一天只扣一次,当天没送到单就不扣'
+                '(每天扣了多少写在下面的记录里,账本流水里也有一行「今日保险费」)。'
+                '接入保险公司之前,这笔钱进保障金池,平台不留。\n'
                 '「保障金池」= 平台从每单佣金计提的专项资金(公开账本可查,每一笔支出也在),'
                 '接入保险公司前出事故由它先行赔付医疗费;出事故先上报,医疗票据实报实销。'
                 '判为骑手责任(洒餐、丢餐)的单,商家那份餐钱也先由它垫,池子不够的才从你的收入里扣,'
@@ -597,9 +610,7 @@ class _RiderInsurancePageState extends State<RiderInsurancePage> {
                     dense: true,
                     leading: const Icon(Icons.health_and_safety_outlined),
                     title: Text('${r['day']}'),
-                    subtitle: r['status'] == 'insured'
-                        ? Text('保单号:${r['policy_no']}')
-                        : null,
+                    subtitle: _subtitle(r),
                     trailing: Text(
                         r['status'] == 'insured' ? '已投保' : '保障金池兜底',
                         style: TextStyle(
@@ -649,6 +660,8 @@ class _RiderRulesPageState extends State<RiderRulesPage> {
     (
       '结算规则',
       '· 配送费(含夜间/恶劣天气加价)+ 小费,100% 归你,平台分文不取;\n'
+          '· 意外险保费每天 2.5 元:当天第一单送到时从这单收入里扣,一天只扣一次,'
+          '当天没送到单就不扣;接入保险公司之前这笔钱进保障金池,出事故由池子先行赔付;\n'
           '· 订单完成即入账,T+1 提现零手续费;\n'
           '· 订单超时只向顾客致歉,不罚款,不从你收入里扣。'
     ),

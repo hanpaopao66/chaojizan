@@ -11,6 +11,10 @@ const Map<String, String> _kFaultKinds = {
   'fault_refund': '申诉成立 · 扣的钱退回',
 };
 
+/// 每天第一单扣的意外险保费(服务端 EarningKind.insurance_fee,services/insurance)。
+/// 是保费不是罚款,台面的「罚款」照旧不算它
+const String _kInsuranceFee = '今日保险费 · 一天只扣一次';
+
 /// 骑手账本(设计稿 5g):深台面 + 逐单。
 ///
 /// 台面答「这一段挣了多少、平台拿走多少」,逐单答「是哪几单」。
@@ -431,6 +435,7 @@ class _WalletPageState extends State<WalletPage> {
       if (e.kind == 'adjustment') '调整',
       // 判骑手责任(服务端 services/rider_fault):这单收入冲回、保障金池不够的部分另扣、申诉成立退回
       if (_kFaultKinds[e.kind] != null) _kFaultKinds[e.kind]!,
+      if (e.kind == 'insurance_fee') _kInsuranceFee,
     ].join(' · ');
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),

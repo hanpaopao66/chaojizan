@@ -438,6 +438,10 @@ class Settings(BaseSettings):
     # 保障金池兜底先行赔付;配置后每日首次上线自动投保
     insurance_app_id: str = ""
     insurance_secret: str = ""
+    # 骑手每天第一单送到入账时扣的保险费(分),同一个北京日只扣一次。
+    # 2026-10-08 运营方定 2.5 元;0 = 不扣。扣的钱去哪看 services/insurance.py:
+    # 接入保险服务商后交保费,接入之前(登记模式)进骑手保障金池,出事故由池子先行赔付
+    rider_insurance_fee_cents: int = 250
 
     # 证照 OCR(入驻表单自动填充)。默认关闭;接的是**自部署的识别服务**
     # (本地模型起个 HTTP 服务),不走三方付费 API。配好 OCR_ENDPOINT 自动启用,

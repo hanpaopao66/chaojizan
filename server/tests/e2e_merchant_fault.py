@@ -172,8 +172,10 @@ def check_merchant_fault(no, cust, *, why, self_delivery=False) -> dict:
         assert "fault_charge" not in m, f"{why}:自配送的配送费在入账里,冲回就退了,不该再另出:{m}"
     else:
         assert m.get("fault_charge") == -share, f"{why}:商家该另出 {share}:{m}"
-    # 骑手:配送费和小费照拿,没有判责行
+    # 骑手:配送费和小费照拿,没有判责行。当天第一单还扣了保险费(services/insurance),
+    # 那笔跟这单的判责无关、进的是保障金池,不在这里算
     r = rider_rows(no)
+    r.pop("insurance_fee", None)
     if self_delivery:
         assert r == {}, (why, r)
     else:

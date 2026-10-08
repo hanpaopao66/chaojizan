@@ -603,6 +603,10 @@ export default function TransparencyPage() {
                 <h4>骑手保障金池（按公开账本算）</h4>
                 <div className="row"><span>计提（每笔配送入账从佣金里拨 {yuanF(funds.rider_fund.per_order_cents)}）</span>
                   <span className="num">{yuanF(funds.rider_fund.accrued_cents)}</span></div>
+                {funds.rider_fund.premium_cents != null && (
+                  <div className="row"><span>骑手保险费（接入保险公司之前，每天第一单扣的保费进池子）</span>
+                    <span className="num">{yuanF(funds.rider_fund.premium_cents)}</span></div>
+                )}
                 <div className="row"><span>支出（判骑手责任时先垫商家那份餐钱，不够的骑手出）</span>
                   <span className="num">{yuanF(funds.rider_fund.paid_cents)}</span></div>
                 <div className="row"><span>回池（骑手申诉改判成立）</span>
