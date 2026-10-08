@@ -36,7 +36,7 @@ IMPLS = {
 }
 #: 规格 §6.5 里见证要核的合计(骑手、住宿服务费是规范性的,其余是 2026-09 起四个实现都核的)
 CHECKED_TOTALS = ("rider_amount", "stay_fee", "rider_fault", "merchant_fault",
-                  "appeal_refund", "platform_correction")
+                  "appeal_refund", "platform_correction", "rider_insurance")
 
 
 def _tags(problems):

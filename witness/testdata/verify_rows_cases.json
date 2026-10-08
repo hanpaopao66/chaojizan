@@ -183,8 +183,21 @@
      "rider_fund_returned": 1425,
      "merchant_fault": 0,
      "appeal_refund": 1800,
-     "platform_correction": 5200
-    }
+     "platform_correction": 5200,
+     "rider_insurance": -500
+    },
+    "rider_insurance_rows": [
+     {
+      "o": "i1",
+      "amount": -250,
+      "kind": "insurance_fee"
+     },
+     {
+      "o": "i2",
+      "amount": -250,
+      "kind": "insurance_fee"
+     }
+    ]
    },
    "expect": []
   },
@@ -550,6 +563,46 @@
    "expect": [
     "骑手判责行",
     "骑手判责行"
+   ]
+  },
+  {
+   "name": "骑手保险费行:符号不对",
+   "payload": {
+    "schema": 1,
+    "day": "2026-10-08",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "rider_insurance_rows": [
+     {
+      "o": "i3",
+      "amount": 250,
+      "kind": "insurance_fee"
+     }
+    ]
+   },
+   "expect": [
+    "骑手保险费行"
+   ]
+  },
+  {
+   "name": "骑手保险费行:没见过的类型",
+   "payload": {
+    "schema": 1,
+    "day": "2026-10-08",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "rider_insurance_rows": [
+     {
+      "o": "i4",
+      "amount": -250,
+      "kind": "fine"
+     }
+    ]
+   },
+   "expect": [
+    "骑手保险费行"
    ]
   },
   {
@@ -1371,6 +1424,174 @@
    },
    "expect": [
     "骑手判责合计与逐行加总不一致"
+   ]
+  },
+  {
+   "name": "合计:骑手保险费合计对不上",
+   "payload": {
+    "schema": 1,
+    "day": "2026-09-15",
+    "commission_rate_max": 0.05,
+    "voucher_rate": 0.02,
+    "stay_rate": 0.05,
+    "merchant_rows": [
+     {
+      "o": "a1",
+      "food": 3000,
+      "commission": 150,
+      "net": 2850,
+      "kind": "earning"
+     },
+     {
+      "o": "a2",
+      "food": -2000,
+      "commission": -100,
+      "net": -1900,
+      "kind": "reversal"
+     },
+     {
+      "o": "a2",
+      "food": 1900,
+      "commission": 0,
+      "net": 1900,
+      "kind": "adjustment"
+     }
+    ],
+    "rider_rows": [
+     {
+      "o": "a1",
+      "amount": 600,
+      "kind": "earning"
+     },
+     {
+      "o": "a3",
+      "amount": 300,
+      "kind": "adjustment"
+     }
+    ],
+    "voucher_rows": [
+     {
+      "p": "b1",
+      "gross": 5000,
+      "fee": 100,
+      "net": 4900
+     }
+    ],
+    "stay_rows": [
+     {
+      "s": "c1",
+      "gross": 20000,
+      "fee": 1000,
+      "net": 19000,
+      "kind": "settle"
+     },
+     {
+      "s": "c2",
+      "gross": 20000,
+      "fee": 0,
+      "net": 5000,
+      "kind": "cancel"
+     },
+     {
+      "s": "c3",
+      "gross": 20000,
+      "fee": 0,
+      "net": 20000,
+      "kind": "noshow"
+     },
+     {
+      "s": "c4",
+      "gross": 20000,
+      "fee": 0,
+      "net": -20000,
+      "kind": "penalty"
+     }
+    ],
+    "rider_fault_rows": [
+     {
+      "o": "a4",
+      "amount": -600,
+      "kind": "fault_reversal"
+     },
+     {
+      "o": "a4",
+      "amount": -200,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a5",
+      "amount": 800,
+      "kind": "fault_refund"
+     }
+    ],
+    "merchant_fault_rows": [
+     {
+      "o": "a2",
+      "amount": -700,
+      "kind": "fault_charge"
+     },
+     {
+      "o": "a2",
+      "amount": 700,
+      "kind": "fault_refund"
+     }
+    ],
+    "appeal_refund_rows": [
+     {
+      "o": "a6",
+      "amount": 1800
+     }
+    ],
+    "rider_fund": {
+     "per_order_cents": 20,
+     "orders": 1,
+     "accrued_cents": 20,
+     "paid_cents": 1425,
+     "returned_cents": 1425,
+     "rows": [
+      {
+       "o": "a4",
+       "amount": 1425,
+       "kind": "payout"
+      },
+      {
+       "o": "a5",
+       "amount": 1425,
+       "kind": "return"
+      }
+     ]
+    },
+    "totals": {
+     "merchant_net": 2850,
+     "platform_commission": 50,
+     "rider_amount": 900,
+     "voucher_fee": 100,
+     "stay_net": 24000,
+     "stay_fee": 1000,
+     "rider_fund": 20,
+     "rider_fault": 0,
+     "rider_fund_paid": 1425,
+     "rider_fund_returned": 1425,
+     "merchant_fault": 0,
+     "appeal_refund": 1800,
+     "platform_correction": 5200,
+     "rider_insurance": -250
+    },
+    "rider_insurance_rows": [
+     {
+      "o": "i1",
+      "amount": -250,
+      "kind": "insurance_fee"
+     },
+     {
+      "o": "i2",
+      "amount": -250,
+      "kind": "insurance_fee"
+     }
+    ]
+   },
+   "expect": [
+    "骑手保险费合计与逐行加总不一致"
    ]
   },
   {

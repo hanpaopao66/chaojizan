@@ -153,19 +153,21 @@ def main() -> None:
                                                    "note": "路上摔了,汤洒了", "photo_url": EVIDENCE})
     call("POST", f"/admin/delivery-issues/{issue['id']}/resolve", admin,
          {"action": "refund", "note": "餐损,判骑手责任"})
-    # 结算那一刻这单的配送入账也计提了一笔,裁决时池子里多了这一笔
-    f1 = min(pool0 + per_order, m_net)
+    # 结算那一刻这单的配送入账也计提了一笔,裁决时池子里多了这一笔;
+    # 这是骑手当天第一单,结算时还扣了当日保险费(services/insurance),登记模式下也进池子
+    rows = fault_rows(a)
+    ins = -rows.get("insurance_fee", 0)
+    f1 = min(pool0 + per_order + ins, m_net)
     x1 = m_net - f1
     ob = call("GET", f"/orders/{a}", cust)
     assert ob["status"] == "completed" and ob["refund_cents"] == o["total_cents"], ob
     assert merchant_earned() - mw0 == m_net, "商家无责,这单净额该照旧入账"
-    assert rider_balance() - r0 == -x1, \
-        f"骑手这单收入冲回、另扣 {x1}:余额应变 {-x1},实际 {rider_balance() - r0}"
-    rows = fault_rows(a)
+    assert rider_balance() - r0 == -x1 - ins, \
+        f"骑手这单收入冲回、另扣 {x1}、保险费 {ins}:余额应变 {-x1 - ins},实际 {rider_balance() - r0}"
     assert rows.get("earning") == income and rows.get("fault_reversal") == -income, rows
     assert rows.get("fault_charge", 0) == -x1, rows
     pool1 = fund()["balance_cents"]
-    assert pool1 == pool0 + per_order - f1, (pool0, per_order, f1, pool1)
+    assert pool1 == pool0 + per_order + ins - f1, (pool0, per_order, ins, f1, pool1)
     audit_clean(a, "配送异常判骑手责任")
     p = today_payload()
     from app.services.ledger import hash_no
@@ -188,7 +190,7 @@ def main() -> None:
                                           "reason": "是路面塌陷,有现场照片"})
     call("POST", f"/admin/appeals/{ap['id']}/resolve", admin,
          {"result": "overturned", "note": "复核:路面塌陷,非骑手责任"})
-    assert rider_balance() - r0 == income, "改判成立:这单收入和另扣的都该退回"
+    assert rider_balance() - r0 == income - ins, "改判成立:这单收入和另扣的都该退回(保险费不退,那天他确实在跑)"
     assert fault_rows(a).get("fault_refund") == income + x1, fault_rows(a)
     assert fund()["balance_cents"] == pool1 + f1, "池子出的那部分该回池"
     audit_clean(a, "配送异常改判")

@@ -230,3 +230,4 @@ e2e_credit_roles
 e2e_rider_fault
 e2e_merchant_fault
 e2e_ai_my_bots
+e2e_rider_insurance_fee

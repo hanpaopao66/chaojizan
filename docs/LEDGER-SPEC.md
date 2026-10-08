@@ -114,6 +114,7 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 | `rider_fault_rows` | array | 判骑手责任的骑手行(2026-09 起的新字段,§2.2、§6.2b) |
 | `merchant_fault_rows` | array | 判商家责任时商家另出的骑手那份、申诉改判退回(2026-09 起的新字段,§2.2、§6.2c) |
 | `appeal_refund_rows` | array | 顾客申诉改判成立、平台原路退回的钱(2026-09 起的新字段,§2.2、§6.2d) |
+| `rider_insurance_rows` | array | 骑手每天第一单扣的保险费(2026-10 起的新字段,§2.2、§6.2f) |
 | `rider_fund` | object | 骑手保障金池:`{per_order_cents, orders, accrued_cents}`;2026-09 起加了 `paid_cents`、`returned_cents`、`rows`(每一笔支出和回池) |
 | `totals` | object | 合计,见 §6.5(2026-09 起多了六项) |
 
@@ -136,6 +137,10 @@ Base URL:部署方的公开域名(官方实例为 `https://chaojizan.cc`)。
 {"o": "<24位hex>", "amount": -500, "kind": "fault_reversal"}
 // kind ∈ {"fault_reversal"(这单收入冲回,≤0), "fault_charge"(保障金池不够、骑手另出,≤0),
 //         "fault_refund"(申诉改判成立退回,≥0)}
+
+// rider_insurance_rows 每行(2026-10 起):骑手每天第一单送到时扣的当日保险费,一个骑手一天一行
+{"o": "<24位hex>", "amount": -250, "kind": "insurance_fee"}
+// kind ∈ {"insurance_fee"(≤0)}
 
 // rider_fund.rows 每行(2026-09 起):保障金池的每一笔支出和回池,金额恒为正
 {"o": "<24位hex>", "amount": 1425, "kind": "payout"}
@@ -377,6 +382,24 @@ appeal_refund_rows[].amount > 0
 四项加起来就是这一天平台为纠错出的钱,平台写在 `totals.platform_correction`(§6.5),
 和透明中心「钱去哪了」的「申诉改判」一项同一个口径。
 
+### 6.2f 骑手保险费(2026-10 起的新字段)
+
+2026-10-08 起:骑手意外险的保费由骑手出。每天第一单送到入账时,从这一单的收入里扣一笔
+(默认 2.5 元),同一个北京日只扣一次;这一天一单没送到就不扣。**这不是罚款**,单独记成保险费。
+接入保险公司之前(登记模式),这笔钱进骑手保障金池,出事故由池子先行赔付;平台不留。
+
+这些行**不在 `rider_rows` 里**(扣的是负数,那一栏「只进不冲」),单独逐笔记在
+`rider_insurance_rows`,合计写在 `totals.rider_insurance`。**验证器应当**校验(四个参考实现都已校验):
+
+```
+rider_insurance_rows[].kind ∈ {"insurance_fee"}
+rider_insurance_rows[].amount <= 0
+totals.rider_insurance == Σ rider_insurance_rows[].amount       (字段存在时)
+```
+
+「一个骑手一天只扣一次」验证器核不了(行里只有订单号哈希,看不出是哪个骑手),
+由平台每日核账(规则 4g:每个骑手扣的合计 == 每日保障记录上记的保费合计)守着。
+
 ### 6.3 团购行
 
 ```
@@ -407,9 +430,10 @@ totals.stay_fee     == Σ stay_rows[].fee        (字段存在时)
 
 `totals` 其余字段(`merchant_net`、`platform_commission`、`voucher_fee`、
 `stay_net`、`rider_fund`,以及 2026-09 起的 `rider_fault`、`rider_fund_paid`、
-`rider_fund_returned`、`merchant_fault`、`appeal_refund`、`platform_correction`)以及 `rider_fund`
-对象为**信息性**(四个参考实现都另核了 `rider_fault`、`merchant_fault`、`appeal_refund`
-与逐行加总一致,`platform_correction` 与下式一致;这几项字段存在才核,老锚点没有就跳过):
+`rider_fund_returned`、`merchant_fault`、`appeal_refund`、`platform_correction`,2026-10 起的
+`rider_insurance`)以及 `rider_fund`
+对象为**信息性**(四个参考实现都另核了 `rider_fault`、`merchant_fault`、`appeal_refund`、
+`rider_insurance` 与逐行加总一致,`platform_correction` 与下式一致;这几项字段存在才核,老锚点没有就跳过):
 
 ```
 platform_correction == Σ merchant_rows[kind="adjustment"].net
