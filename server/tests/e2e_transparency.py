@@ -36,10 +36,11 @@ comp_corr = call("GET", "/transparency/compensation")["appeal_corrections"]
 assert comp_corr["total"]["cents"] == sp["adjustment_cents"], \
     f"赔付记录的「申诉改判」和钱去哪了的对不上:{comp_corr} {sp}"
 assert funds["retained_cents"] == inc["total_cents"] - sp["total_cents"]
-# 骑手保障金池:余额 == 计提 − 支出 + 回池(按公开账本算,services/rider_fault.fund_balance)
+# 骑手保障金池:余额 == 计提 + 保险费 − 支出 + 回池(services/rider_fault.fund_balance;
+# 保险费是接入保险公司之前骑手每天扣的那笔,services/insurance)
 fund = funds["rider_fund"]
-assert fund["balance_cents"] == (fund["accrued_cents"] - fund["paid_cents"]
-                                 + fund["returned_cents"]), fund
+assert fund["balance_cents"] == (fund["accrued_cents"] + fund["premium_cents"]
+                                 - fund["paid_cents"] + fund["returned_cents"]), fund
 assert fund["balance_cents"] >= 0, f"保障金池被支成负数:{fund}"
 print(f"✓ 佣金去向:收入 {inc['total_cents']} = 支出 {sp['total_cents']}"
       f" + 留存 {funds['retained_cents']}(恒等)")
