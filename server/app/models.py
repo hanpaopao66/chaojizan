@@ -992,8 +992,8 @@ class RiderProfile(Base):
     #: 首次人脸核验(与公安库比对)通过的时刻。空 = 还没做过
     face_enrolled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
-    #: 首次核验在服务商那边的编号。之后的复核拿它当比对源 ——
-    #: 人脸照片留在服务商那里,**我们这边不存图**
+    #: 首次核验在服务商那边的编号(出争议时去服务商那边查)。
+    #: **我们这边不存人脸图**
     face_enroll_ref: Mapped[str] = mapped_column(String(100), default="")
     #: 最近一次人脸核验通过的时刻。过了有效期(默认 4 小时)不能接新单
     face_verified_at: Mapped[datetime | None] = mapped_column(

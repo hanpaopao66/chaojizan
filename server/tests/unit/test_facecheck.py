@@ -66,7 +66,7 @@ class Test服务商:
 
     def test_没接入的服务商不放行(self, monkeypatch):
         # 配了个名字但代码里还没实现:不能悄悄退回假实现
-        monkeypatch.setattr(settings, "face_provider", "aliyun")
+        monkeypatch.setattr(settings, "face_provider", "tencent")
         monkeypatch.setattr(settings, "app_env", "dev")
         with pytest.raises(RuntimeError):
             facecheck.get_provider()
@@ -80,3 +80,76 @@ class Test服务商:
         assert asyncio.run(go("pass")).passed is True
         failed = asyncio.run(go("fail"))
         assert failed.passed is False and failed.reason
+
+
+class Test阿里云:
+    """阿里云金融级实人认证(ID_PRO,H5)。打的是假的 HTTP,验请求长什么样、结果怎么判。"""
+
+    @pytest.fixture
+    def aliyun(self, monkeypatch):
+        monkeypatch.setattr(settings, "face_provider", "aliyun")
+        monkeypatch.setattr(settings, "face_aliyun_access_key_id", "ak")
+        monkeypatch.setattr(settings, "face_aliyun_access_key_secret", "sk")
+        monkeypatch.setattr(settings, "face_aliyun_scene_id", "1000001")
+        monkeypatch.setattr(settings, "public_base_url", "https://x.test")
+        sent = []
+        import httpx
+        real = httpx.AsyncClient  # 只取一次:装第二个回复时不能把上一个假的当成真的
+
+        def install(reply: dict):
+            def handler(request):
+                from urllib.parse import parse_qsl
+                sent.append(dict(parse_qsl(request.content.decode())))
+                return httpx.Response(200, json=reply)
+
+            monkeypatch.setattr(
+                httpx, "AsyncClient",
+                lambda **kw: real(transport=httpx.MockTransport(handler)))
+        return install, sent
+
+    def test_没配全不放行(self, monkeypatch):
+        monkeypatch.setattr(settings, "face_provider", "aliyun")
+        monkeypatch.setattr(settings, "face_aliyun_scene_id", "")
+        with pytest.raises(RuntimeError, match="未配置"):
+            facecheck.get_provider()
+
+    def test_发起时不调阿里云_给中转页(self, aliyun):
+        p = facecheck.get_provider()
+        s = asyncio.run(p.start(purpose="enroll", rider_id=1, real_name="王",
+                                id_no="", enroll_ref=""))
+        assert s.ref.startswith(facecheck.PENDING_PREFIX)
+        token = s.ref[len(facecheck.PENDING_PREFIX):]
+        assert len(token) == 32
+        assert s.verify_url == f"https://x.test/riders/face/h5/{token}"
+
+    def test_中转页换刷脸地址_请求带签名和公安比对参数(self, aliyun):
+        install, sent = aliyun
+        install({"Code": "200", "ResultObject": {
+            "CertifyId": "cid1", "CertifyUrl": "https://ali/x"}})
+        cid, url = asyncio.run(facecheck.get_provider().init_h5(
+            outer_order_no="rf" + "0" * 30, rider_id=9, real_name="王小明",
+            id_no="110101199003072316", meta_info="{}",
+            return_url="https://x.test/riders/face/h5-done"))
+        assert (cid, url) == ("cid1", "https://ali/x")
+        req = sent[0]
+        assert req["Action"] == "InitFaceVerify"
+        assert req["ProductCode"] == "ID_PRO" and req["SceneId"] == "1000001"
+        assert req["CertName"] == "王小明" and req["MetaInfo"] == "{}"
+        assert req["Signature"] and req["AccessKeyId"] == "ak"
+
+    def test_过没过以Passed为准_没过给人话(self, aliyun):
+        install, sent = aliyun
+        install({"Code": "200", "ResultObject": {"Passed": "T"}})
+        assert asyncio.run(facecheck.get_provider().result("cid1")).passed
+        assert sent[0]["Action"] == "DescribeFaceVerify"
+        assert sent[0]["CertifyId"] == "cid1"
+
+        install({"Code": "200", "ResultObject": {"Passed": "F", "SubCode": "204"}})
+        r = asyncio.run(facecheck.get_provider().result("cid1"))
+        assert r.passed is False and "不是同一个人" in r.reason
+
+    def test_接口报错不放行(self, aliyun):
+        install, _ = aliyun
+        install({"Code": "401", "Message": "签名错"})
+        with pytest.raises(RuntimeError, match="暂时不可用"):
+            asyncio.run(facecheck.get_provider().result("cid1"))

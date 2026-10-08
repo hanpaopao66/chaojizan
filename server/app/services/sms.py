@@ -28,16 +28,23 @@ def _percent_encode(s: str) -> str:
     return encoded.replace("+", "%20").replace("*", "%2A").replace("%7E", "~")
 
 
-def _sign(params: dict) -> str:
-    """RPC 签名:base64(HMAC-SHA1(AccessKeySecret + "&", StringToSign))。"""
+def rpc_sign(params: dict, secret: str) -> str:
+    """阿里云 RPC 签名:base64(HMAC-SHA1(AccessKeySecret + "&", StringToSign))。
+
+    POST 表单提交用。别的阿里云 RPC 接口(人脸核验 facecheck.py)也走这个。
+    """
     canonical = "&".join(
         f"{_percent_encode(k)}={_percent_encode(params[k])}"
         for k in sorted(params))
     string_to_sign = f"POST&{_percent_encode('/')}&{_percent_encode(canonical)}"
     digest = hmac.new(
-        (settings.sms_secret_key + "&").encode("utf-8"),
+        (secret + "&").encode("utf-8"),
         string_to_sign.encode("utf-8"), hashlib.sha1).digest()
     return base64.b64encode(digest).decode("utf-8")
+
+
+def _sign(params: dict) -> str:
+    return rpc_sign(params, settings.sms_secret_key)
 
 
 async def send_verification_code(phone: str, code: str) -> bool:

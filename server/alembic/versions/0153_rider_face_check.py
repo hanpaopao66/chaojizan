@@ -6,13 +6,17 @@
 存量骑手四列都是空的,意味着上线后第一次上线/抢单会被要求先做一次核验
 (由 RIDER_FACE_CHECK_REQUIRED 控制,服务商没配好之前可以先关掉)。
 
-Revision ID: 0150
+Revision ID: 0153
 Revises: 0149
+
+编号 0150-0152 预留给同时在开的转单、配送费、保险那几个 PR。
+down_revision 暂时接在 main 上最新的 0149;前面那几个先合并的话,
+合并本 PR 前把 down_revision 改成当时 main 上最新的那个,保持一条链。
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = '0150'
+revision = '0153'
 down_revision = '0149'
 branch_labels = None
 depends_on = None

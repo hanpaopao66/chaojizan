@@ -2,6 +2,7 @@ import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import Float, cast, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -235,7 +236,7 @@ async def face_start(
     - 先实名:首次核验要拿实名的姓名+证号去和公安库比对;
     - **单独同意**:第一次必须带 `consent: true`,记下同意时刻。
       人脸是敏感个人信息,和实名、隐私政策那些同意分开问;
-    - 从没做过 → enroll(与公安库比对);做过 → periodic(与首次核验比对)。
+    - 从没做过 → enroll;做过 → periodic(定时复核)。
 
     返回 check_id 和客户端要用的东西(verify_url 或 client_token,
     开发环境的假实现两个都是空,客户端直接调 /face/finish 就行)。
@@ -320,6 +321,10 @@ async def face_finish(
         await db.commit()
         raise HTTPException(409, "这次核验已超时,请重新发起")
 
+    if row.provider_ref.startswith(facecheck.PENDING_PREFIX):
+        # H5 接入:中转页还没换到服务商的刷脸页,说明他根本还没刷。
+        # 不作废这次核验 —— 他回去接着刷就行
+        raise HTTPException(409, "还没刷脸,请先在打开的页面里完成")
     profile = await _require_verified(db, user.id)
     try:
         provider = facecheck.get_provider()
@@ -342,6 +347,108 @@ async def face_finish(
     out["passed"] = result.passed
     out["reason"] = result.reason
     return out
+
+
+# ---- H5 中转页(阿里云这类要在刷脸的浏览器里现取 MetaInfo 的服务商)----
+#
+# 这三个接口**不带登录态**:App 用应用内浏览器打开,浏览器里没有骑手的 token。
+# 凭证是 /face/start 发的 128 位随机串,只能换一次服务商的刷脸页,15 分钟作废。
+# 换出去的只是一个刷脸页地址,结果仍由 App 带着登录态调 /face/finish 去查。
+_H5_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>人脸核验</title>
+<style>body{font:16px/1.6 -apple-system,"PingFang SC",sans-serif;margin:0;
+padding:48px 24px;text-align:center;color:#222;background:#fff}
+p{color:#666;font-size:14px}</style></head><body>
+<h3 id="t">__TITLE__</h3><p id="m">__MESSAGE__</p>
+__SCRIPT__</body></html>"""
+
+_H5_SCRIPT = """<script src="https://o.alicdn.com/yd-cloudauth/cloudauth-cdn/jsvm_all.js"></script>
+<script>
+(function(){
+  function fail(msg){document.getElementById('t').textContent='没能打开刷脸页面';
+    document.getElementById('m').textContent=msg+'。请回到 App 重新发起核验';}
+  var meta;
+  try{meta=JSON.stringify(window.getMetaInfo());}catch(e){return fail('浏览器环境不支持');}
+  fetch(location.pathname+'/init',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({meta_info:meta})})
+  .then(function(r){return r.json().then(function(d){return [r.ok,d];});})
+  .then(function(x){if(x[0]&&x[1].url){location.replace(x[1].url);}
+    else{fail(x[1].detail||'核验服务暂时不可用');}})
+  .catch(function(){fail('网络不太好');});
+})();
+</script>"""
+
+
+def _h5_html(title: str, message: str, script: str = "") -> HTMLResponse:
+    import html
+    page = (_H5_PAGE.replace("__TITLE__", html.escape(title))
+            .replace("__MESSAGE__", html.escape(message))
+            .replace("__SCRIPT__", script))
+    # 不缓存、不外泄来源:地址里带着一次性凭证
+    return HTMLResponse(page, headers={"Cache-Control": "no-store",
+                                       "Referrer-Policy": "no-referrer"})
+
+
+@router.get("/face/h5-done", include_in_schema=False)
+async def face_h5_done():
+    """服务商刷脸页做完跳回这里。结果不在这里判 —— 让他回 App 查。"""
+    return _h5_html("刷脸完成", "请回到 App,点「查看结果」")
+
+
+@router.get("/face/h5/{token}", include_in_schema=False)
+async def face_h5_page(token: str):
+    return _h5_html("正在打开人脸核验…", "请稍候,马上进入刷脸页面", _H5_SCRIPT)
+
+
+@router.post("/face/h5/{token}/init", include_in_schema=False)
+async def face_h5_init(
+    token: str,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """中转页取到 MetaInfo 后调:向服务商发起核验,换回刷脸页地址。"""
+    from datetime import datetime, timezone
+
+    from ..models import RiderFaceCheck
+    from ..services.crypto import decrypt
+
+    meta_info = payload.get("meta_info")
+    if not isinstance(meta_info, str) or not meta_info or len(token) != 32:
+        raise HTTPException(422, "参数不完整")
+    row = await db.scalar(
+        select(RiderFaceCheck).where(
+            RiderFaceCheck.provider_ref == facecheck.PENDING_PREFIX + token)
+        .with_for_update())
+    if row is None or row.status != "pending":
+        raise HTTPException(404, "这个核验链接已失效")
+    created = (row.created_at if row.created_at.tzinfo
+               else row.created_at.replace(tzinfo=timezone.utc))
+    if datetime.now(timezone.utc) - created > facecheck.SESSION_TTL:
+        raise HTTPException(404, "这个核验链接已过期")
+    profile = await _require_verified(db, row.rider_id)
+    if not profile.id_no_encrypted:
+        # 旧的人工审核路径留下的档案没有证号,没法和公安库比对
+        raise HTTPException(409, "你的实名信息不完整,请联系客服补全后再核验")
+    try:
+        provider = facecheck.get_provider()
+        if provider.name != row.provider or not hasattr(provider, "init_h5"):
+            raise RuntimeError("人脸核验服务已切换,请回 App 重新发起")
+        base = settings.public_base_url.rstrip("/")
+        certify_id, url = await provider.init_h5(
+            # 阿里云要 32 位字母数字、全局唯一:核验 id 补齐 + 凭证前段
+            outer_order_no=f"rf{row.id:010d}{token[:20]}",
+            rider_id=row.rider_id, real_name=profile.real_name,
+            id_no=decrypt(profile.id_no_encrypted),
+            meta_info=meta_info,
+            return_url=f"{base}/riders/face/h5-done")
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    # 换成服务商的编号:凭证就此作废,同一个链接不能再换第二次
+    row.provider_ref = certify_id
+    await db.commit()
+    return {"url": url}
 
 
 @router.post("/online")
