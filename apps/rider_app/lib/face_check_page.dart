@@ -13,7 +13,8 @@ import 'package:url_launcher/url_launcher.dart';
 /// ## 合规口径
 ///
 /// - 第一次要**单独同意**(勾选框),和实名、隐私政策那些分开问;
-/// - 平台**不保存人脸照片**:照片在手机和核验服务商之间传,平台只拿结果;
+/// - 首次核验的照片**加密留存**,只用来和之后的复核比对(复核因此便宜得多),
+///   注销账号即删除 —— 同意框里要写明;
 /// - 过期了只是不能接新单,**手上的单照常送完** —— 这句话要说出来,
 ///   不然他会以为单子也被收走了。
 class FaceCheckPage extends StatefulWidget {
@@ -161,7 +162,7 @@ class _FaceCheckPageState extends State<FaceCheckPage> {
                     '在线时每 $hours复核一次。到点没做只是不能接新单,'
                     '手上的单照常送完'),
                 _line(sz, Icons.no_photography_outlined,
-                    '平台不保存你的人脸照片,只记录核验通过没有'),
+                    '首次核验的照片会加密留存,只用于之后复核比对,注销账号即删除'),
               ],
             ),
           ),
@@ -173,7 +174,7 @@ class _FaceCheckPageState extends State<FaceCheckPage> {
               controlAffinity: ListTileControlAffinity.leading,
               contentPadding: EdgeInsets.zero,
               title: const Text(
-                  '我同意平台为确认本人跑单,在上线和接单时对我进行人脸核验',
+                  '我同意平台为确认本人跑单进行人脸核验,并留存首次核验的照片用于之后复核比对',
                   style: TextStyle(fontSize: kFontBody)),
             ),
           if (_failReason.isNotEmpty) ...[

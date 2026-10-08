@@ -251,8 +251,8 @@ async def face_start(
     if profile.face_consent_at is None:
         if payload.get("consent") is not True:
             raise HTTPException(
-                422, "人脸核验需要你单独同意:只用来确认是本人在跑单,"
-                     "平台不保存你的人脸照片")
+                422, "人脸核验需要你单独同意:只用来确认是本人在跑单。"
+                     "首次核验的照片会加密留存,只用于之后复核比对,注销账号即删除")
         profile.face_consent_at = now
 
     day_start = (now + timedelta(hours=8)).replace(
@@ -330,7 +330,8 @@ async def face_finish(
         provider = facecheck.get_provider()
         if provider.name != row.provider:
             raise RuntimeError("人脸核验服务已切换,请重新发起")
-        result = await provider.result(row.provider_ref)
+        result = await provider.result(row.provider_ref,
+                                       compare=row.method == "photo")
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
 
@@ -342,6 +343,12 @@ async def face_finish(
         if row.purpose == facecheck.PURPOSE_ENROLL:
             profile.face_enrolled_at = now
             profile.face_enroll_ref = row.provider_ref
+            # 首次(和公安库比对过的)那张照片留作复核的比对源。
+            # 复核时拍的不替换它 —— 比对源要一直是验过身份的那一张
+            if result.photo:
+                from ..services.crypto import encrypt
+                profile.face_photo_bucket = result.photo[0]
+                profile.face_photo_object_enc = encrypt(result.photo[1])
     await db.commit()
     out = _face_status(profile)
     out["passed"] = result.passed
@@ -428,7 +435,14 @@ async def face_h5_init(
     if datetime.now(timezone.utc) - created > facecheck.SESSION_TTL:
         raise HTTPException(404, "这个核验链接已过期")
     profile = await _require_verified(db, row.rider_id)
-    if not profile.id_no_encrypted:
+    # 复核且首次留了照片、复核场景也配了 → 和照片比对(便宜);否则和公安库比对
+    photo = None
+    if (row.purpose == facecheck.PURPOSE_PERIODIC and profile.face_photo_bucket
+            and profile.face_photo_object_enc
+            and settings.face_aliyun_compare_scene_id):
+        photo = (profile.face_photo_bucket,
+                 decrypt(profile.face_photo_object_enc))
+    if photo is None and not profile.id_no_encrypted:
         # 旧的人工审核路径留下的档案没有证号,没法和公安库比对
         raise HTTPException(409, "你的实名信息不完整,请联系客服补全后再核验")
     try:
@@ -440,13 +454,15 @@ async def face_h5_init(
             # 阿里云要 32 位字母数字、全局唯一:核验 id 补齐 + 凭证前段
             outer_order_no=f"rf{row.id:010d}{token[:20]}",
             rider_id=row.rider_id, real_name=profile.real_name,
-            id_no=decrypt(profile.id_no_encrypted),
+            id_no=(decrypt(profile.id_no_encrypted)
+                   if profile.id_no_encrypted else ""),
             meta_info=meta_info,
-            return_url=f"{base}/riders/face/h5-done")
+            return_url=f"{base}/riders/face/h5-done", photo=photo)
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
     # 换成服务商的编号:凭证就此作废,同一个链接不能再换第二次
     row.provider_ref = certify_id
+    row.method = "photo" if photo else "authority"
     await db.commit()
     return {"url": url}
 

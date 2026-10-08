@@ -253,7 +253,7 @@ class _VerifyFormPageState extends State<VerifyFormPage> {
                     '核验查的是国家人口库,不需要照片。照片是敏感信息,不收就不会泄露'),
                 _yes(sz, '实名之后做一次人脸核验',
                     '只用来确认是你本人在跑单,防止账号被借去代送。在线时每隔几个'
-                    '小时复核一次;平台不保存你的人脸照片'),
+                    '小时复核一次;首次核验的照片加密留存用于比对,注销即删'),
                 if (widget.existing.healthCertRequired)
                   _yes(sz, '${widget.existing.city}需要健康证',
                       '国家层面不要求送餐员持健康证,但你所在的城市另有规定 —— '

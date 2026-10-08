@@ -90,7 +90,7 @@ void main() {
     final button = find.widgetWithText(FilledButton, '开始核验');
     expect(t.widget<FilledButton>(button).onPressed, isNull,
         reason: '人脸要单独同意,没勾就不能发起');
-    expect(find.textContaining('不保存你的人脸照片'), findsOneWidget);
+    expect(find.textContaining('注销账号即删除'), findsOneWidget);
 
     await t.tap(find.byType(Checkbox));
     await t.pump();

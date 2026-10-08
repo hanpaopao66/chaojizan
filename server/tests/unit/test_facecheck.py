@@ -153,3 +153,93 @@ class Test阿里云:
         install({"Code": "401", "Message": "签名错"})
         with pytest.raises(RuntimeError, match="暂时不可用"):
             asyncio.run(facecheck.get_provider().result("cid1"))
+
+
+class Test留存照片复核:
+    """2026-10-08 定了"存照片换便宜的复核":首次 ID_PRO 留照片,复核 PV_FV 拿它比对。"""
+
+    @pytest.fixture
+    def aliyun(self, monkeypatch):
+        import httpx
+        monkeypatch.setattr(settings, "face_provider", "aliyun")
+        monkeypatch.setattr(settings, "face_aliyun_access_key_id", "ak")
+        monkeypatch.setattr(settings, "face_aliyun_access_key_secret", "sk")
+        monkeypatch.setattr(settings, "face_aliyun_scene_id", "111")
+        monkeypatch.setattr(settings, "face_aliyun_compare_scene_id", "222")
+        sent = []
+        real = httpx.AsyncClient
+
+        def install(status=200, reply=None):
+            def handler(request):
+                from urllib.parse import parse_qsl
+                sent.append((request.method, str(request.url), request.headers,
+                             dict(parse_qsl(request.content.decode()))))
+                return httpx.Response(status, json=reply or {})
+            monkeypatch.setattr(
+                httpx, "AsyncClient",
+                lambda **kw: real(transport=httpx.MockTransport(handler)))
+        return install, sent
+
+    def test_首次通过带回照片位置(self, aliyun):
+        install, _ = aliyun
+        import json
+        material = json.dumps({"facialPictureFront": {
+            "ossBucketName": "superz-face", "ossObjectName": "a/b.jpg"}})
+        install(reply={"Code": "200", "ResultObject": {
+            "Passed": "T", "MaterialInfo": material}})
+        r = asyncio.run(facecheck.get_provider().result("cid"))
+        assert r.photo == ("superz-face", "a/b.jpg")
+
+    def test_场景没开留存_照片为空不报错(self, aliyun):
+        install, _ = aliyun
+        install(reply={"Code": "200", "ResultObject": {
+            "Passed": "T", "MaterialInfo": "{}"}})
+        assert asyncio.run(facecheck.get_provider().result("cid")).photo is None
+
+    def test_复核用PV_FV和留存照片比对_不传证号(self, aliyun):
+        install, sent = aliyun
+        install(reply={"Code": "200", "ResultObject": {
+            "CertifyId": "c2", "CertifyUrl": "https://ali/y"}})
+        asyncio.run(facecheck.get_provider().init_h5(
+            outer_order_no="rf" + "0" * 30, rider_id=9, real_name="王小明",
+            id_no="110101199003072316", meta_info="{}", return_url="r",
+            photo=("superz-face", "a/b.jpg")))
+        req = sent[0][3]
+        assert req["ProductCode"] == "PV_FV" and req["SceneId"] == "222"
+        assert req["OssBucketName"] == "superz-face"
+        assert req["OssObjectName"] == "a/b.jpg"
+        assert "CertNo" not in req, "复核不需要证号,能不传就不传"
+
+    def test_复核查结果用复核场景(self, aliyun):
+        install, sent = aliyun
+        install(reply={"Code": "200", "ResultObject": {"Passed": "T"}})
+        asyncio.run(facecheck.get_provider().result("c2", compare=True))
+        assert sent[0][3]["SceneId"] == "222"
+
+    def test_没配复核场景_退回公安库比对(self, aliyun, monkeypatch):
+        install, sent = aliyun
+        monkeypatch.setattr(settings, "face_aliyun_compare_scene_id", "")
+        install(reply={"Code": "200", "ResultObject": {
+            "CertifyId": "c3", "CertifyUrl": "https://ali/z"}})
+        asyncio.run(facecheck.get_provider().init_h5(
+            outer_order_no="rf" + "0" * 30, rider_id=9, real_name="王小明",
+            id_no="110101199003072316", meta_info="{}", return_url="r",
+            photo=("superz-face", "a/b.jpg")))
+        assert sent[0][3]["ProductCode"] == "ID_PRO"
+        assert sent[0][3]["CertNo"] == "110101199003072316"
+
+    def test_注销删照片_签名请求发到对应桶(self, aliyun):
+        install, sent = aliyun
+        install(status=204)
+        assert asyncio.run(facecheck.delete_photo("superz-face", "a/b.jpg"))
+        method, url, headers, _ = sent[0]
+        assert method == "DELETE"
+        assert url == "https://superz-face.oss-cn-shanghai.aliyuncs.com/a/b.jpg"
+        assert headers["Authorization"].startswith("OSS ak:")
+
+    def test_注销删照片_本来就没有也算删了_别的错如实报(self, aliyun):
+        install, _ = aliyun
+        install(status=404)
+        assert asyncio.run(facecheck.delete_photo("b", "o"))
+        install(status=403)
+        assert not asyncio.run(facecheck.delete_photo("b", "o"))

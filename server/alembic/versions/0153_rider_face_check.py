@@ -1,7 +1,8 @@
 """骑手人脸核验:实名之后再加一道,并定时复核,防代送
 
 - `rider_profiles` 加四列:单独同意时刻、首次核验时刻与服务商编号、最近通过时刻;
-- 新表 `rider_face_checks`:每次核验的留痕。**只存结果和服务商编号,不存人脸图像。**
+- 再加两列:首次核验留存照片在平台阿里云 OSS 的位置(复核拿它比对,对象名加密);
+- 新表 `rider_face_checks`:每次核验的留痕。只存结果和服务商编号,不存图像。
 
 存量骑手四列都是空的,意味着上线后第一次上线/抢单会被要求先做一次核验
 (由 RIDER_FACE_CHECK_REQUIRED 控制,服务商没配好之前可以先关掉)。
@@ -32,6 +33,12 @@ def upgrade() -> None:
         server_default=''))
     op.add_column('rider_profiles', sa.Column(
         'face_verified_at', sa.DateTime(timezone=True), nullable=True))
+    op.add_column('rider_profiles', sa.Column(
+        'face_photo_bucket', sa.String(length=100), nullable=False,
+        server_default=''))
+    op.add_column('rider_profiles', sa.Column(
+        'face_photo_object_enc', sa.String(length=500), nullable=False,
+        server_default=''))
     op.create_table(
         'rider_face_checks',
         sa.Column('id', sa.Integer(), primary_key=True),
@@ -43,6 +50,8 @@ def upgrade() -> None:
                   unique=True),
         sa.Column('status', sa.String(length=16), nullable=False,
                   server_default='pending'),
+        sa.Column('method', sa.String(length=16), nullable=False,
+                  server_default=''),
         sa.Column('reason', sa.String(length=200), nullable=False,
                   server_default=''),
         sa.Column('created_at', sa.DateTime(timezone=True),
@@ -57,6 +66,7 @@ def downgrade() -> None:
     op.drop_index('ix_rider_face_checks_rider_id',
                   table_name='rider_face_checks')
     op.drop_table('rider_face_checks')
-    for col in ('face_verified_at', 'face_enroll_ref', 'face_enrolled_at',
+    for col in ('face_photo_object_enc', 'face_photo_bucket',
+                'face_verified_at', 'face_enroll_ref', 'face_enrolled_at',
                 'face_consent_at'):
         op.drop_column('rider_profiles', col)

@@ -962,8 +962,8 @@ class RiderProfile(Base):
       代送防不住。所以实名之后再加人脸核验(services/facecheck.py),并每隔
       几小时复核一次。《人脸识别技术应用安全管理办法》(2025-06-01 施行)
       不让人脸当**唯一**验证方式,这里它是二要素之外的第二道,不是替代;
-      人脸要**单独同意**(face_consent_at),服务端**不存人脸图像**,
-      只存核验结果和服务商的核验编号;
+      人脸要**单独同意**(face_consent_at)。首次核验的照片留存在平台的
+      阿里云 OSS 里供复核比对(同意文案写明,注销即删),不经过我们的服务器;
     - **身份证照片不收。** 二要素核验(姓名+证号查人口库)不需要照片,
       而照片是敏感个人影像 —— 不收就没有泄露面。字段保留只为兼容历史数据。
 
@@ -992,9 +992,12 @@ class RiderProfile(Base):
     #: 首次人脸核验(与公安库比对)通过的时刻。空 = 还没做过
     face_enrolled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
-    #: 首次核验在服务商那边的编号(出争议时去服务商那边查)。
-    #: **我们这边不存人脸图**
+    #: 首次核验在服务商那边的编号(出争议时去服务商那边查)
     face_enroll_ref: Mapped[str] = mapped_column(String(100), default="")
+    #: 首次核验留存的刷脸照片在平台阿里云 OSS 的位置,复核拿它当比对源。
+    #: **照片本身不在我们服务器上**,对象名 Fernet 加密存。注销时去 OSS 删掉
+    face_photo_bucket: Mapped[str] = mapped_column(String(100), default="")
+    face_photo_object_enc: Mapped[str] = mapped_column(String(500), default="")
     #: 最近一次人脸核验通过的时刻。过了有效期(默认 4 小时)不能接新单
     face_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
@@ -1957,8 +1960,8 @@ class RiderSession(Base):
 class RiderFaceCheck(Base):
     """骑手每一次人脸核验的留痕(防代送)。
 
-    **只存结果,不存人脸图像**:图像在骑手手机和服务商之间传,
-    这里留的是服务商的核验编号(provider_ref),出了争议拿它去服务商那边查。
+    **这张表不存人脸图像**:这里留的是服务商的核验编号(provider_ref),
+    出了争议拿它去服务商那边查。
     """
 
     __tablename__ = "rider_face_checks"
@@ -1971,6 +1974,9 @@ class RiderFaceCheck(Base):
     provider_ref: Mapped[str] = mapped_column(String(100), unique=True)
     #: pending / passed / failed
     status: Mapped[str] = mapped_column(String(16), default="pending")
+    #: 这次和谁比对:authority = 公安库;photo = 首次留存的照片。
+    #: 查结果时要知道(两种方案在服务商那边是两个场景)。空 = 还没发起到服务商
+    method: Mapped[str] = mapped_column(String(16), default="")
     reason: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())

@@ -468,6 +468,11 @@ class Settings(BaseSettings):
     face_aliyun_access_key_id: str = ""
     face_aliyun_access_key_secret: str = ""
     face_aliyun_scene_id: str = ""
+    # 复核用的第二个场景(金融级活体人脸验证 PV_FV,和首次留存的照片比对,约 0.15 元/次)。
+    # 留空 = 复核也走上面那个场景和公安库比对(约 1 元/次)
+    face_aliyun_compare_scene_id: str = ""
+    # 首次核验的照片由阿里云直接写进这个地域的 OSS;注销时要去这里删
+    face_aliyun_oss_endpoint: str = "oss-cn-shanghai.aliyuncs.com"
     face_aliyun_endpoint: str = "https://cloudauth.cn-shanghai.aliyuncs.com/"
     #: 活体动作。LIVENESS = 眨眼(默认,兼容性最好);MOVE_ACTION = 远近移动 + 眨眼(更难翻拍)
     face_aliyun_model: str = "LIVENESS"

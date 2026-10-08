@@ -10,16 +10,20 @@
 
 - **首次(enroll)**:实名之后做一次活体 + 与公安库照片比对,确认是本人;
 - **复核(periodic)**:在线期间每隔几个小时(默认 4 小时,
-  `RIDER_FACE_CHECK_INTERVAL_HOURS`)再刷一次脸。阿里云这一版复核也和公安库比对
-  (原因见 AliyunFaceProvider)。
+  `RIDER_FACE_CHECK_INTERVAL_HOURS`)再刷一次脸,和**首次核验留存的照片**比对
+  (阿里云活体人脸验证,约 0.15 元/次;每次都查公安库要约 1 元/次)。
   到点没复核 → 不能接新单,**手上的单照常送完**(餐在路上,不能为了核验扔下);
 
 ## 合规口径(《人脸识别技术应用安全管理办法》,2025-06-01 施行)
 
 - 人脸**不是唯一**验证方式:身份仍以二要素为准,人脸只回答"是不是本人在跑";
 - **单独同意**:第一次核验前要骑手明确勾选同意(RiderProfile.face_consent_at);
-- **服务端不存人脸图像**:图像在骑手手机和服务商之间传,我们只存结果和
-  服务商的核验编号。
+- **照片只留首次那一张,而且不在我们的服务器上**:2026-10-08 运营方定了
+  "存照片换便宜的复核"。照片由阿里云直接写进平台自己的阿里云 OSS
+  (实人认证控制台开「留存认证资料」+ OSS 授权),我们只记它在哪个桶、
+  哪个对象(对象名加密存),复核时把这个位置交给阿里云去比对。
+  同意文案要写明这件事;**注销账号时把这张照片删掉**(delete_photo);
+- 存了人脸信息的人数到 10 万要向省级网信部门备案(办法第十五条),运营上记着。
 
 ## 服务商
 
@@ -71,6 +75,9 @@ class FaceResult:
     passed: bool
     #: 没过时给骑手看的原因,要说人话("光线太暗"而不是错误码)
     reason: str = ""
+    #: 首次核验留存的照片在 OSS 的位置 (bucket, object)。复核拿它当比对源。
+    #: 服务商没返回(场景没开留存 / 假实现)时为空,复核就退回和公安库比对
+    photo: tuple[str, str] | None = None
 
 
 class FaceProvider(Protocol):
@@ -87,8 +94,11 @@ class FaceProvider(Protocol):
         """
         ...
 
-    async def result(self, ref: str) -> FaceResult:
-        """查这次核验的结果。还没做完也算没过。服务异常抛 RuntimeError。"""
+    async def result(self, ref: str, *, compare: bool = False) -> FaceResult:
+        """查这次核验的结果。还没做完也算没过。服务异常抛 RuntimeError。
+
+        compare=True 表示这次是和留存照片比对的复核(有的服务商要换场景去查)。
+        """
         ...
 
 
@@ -109,7 +119,7 @@ class FakeFaceProvider:
         tag = "fail" if self.outcome == "fail" else "pass"
         return FaceSession(ref=f"fake-{tag}-{secrets.token_hex(8)}")
 
-    async def result(self, ref: str) -> FaceResult:
+    async def result(self, ref: str, *, compare: bool = False) -> FaceResult:
         if ref.startswith("fake-fail-"):
             return FaceResult(False, "没有检测到本人(开发环境模拟的失败)")
         return FaceResult(True)
@@ -150,11 +160,15 @@ class AliyunFaceProvider:
     凭证只能换一次阿里云地址(换完编号就变成阿里云的 CertifyId),
     阿里云那边的 CertifyId 和刷脸页也都是 30 分钟内一次有效。
 
-    ## 复核为什么也比对公安库
+    ## 首次和复核用的不是一个方案
 
-    阿里云便宜的那档(活体人脸验证,约 0.15 元/次)要我们**自己上传比对照片**,
-    也就是得把骑手的人脸照片存在我们这边 —— 和"平台不存人脸图像"冲突。
-    所以复核暂时也走 ID_PRO(约 0.8-1 元/次)。要省钱就得先决定存不存照片。
+    - 首次:ID_PRO(活体 + 公安库照片比对,约 0.8-1 元/次)。场景开了
+      「留存认证资料」+ OSS 授权的话,结果里带着这次刷脸照片在 OSS 的位置;
+    - 复核:PV_FV(活体人脸验证,约 0.15 元/次),比对源就是上面那张照片
+      (OssBucketName + OssObjectName)。照片不经过我们的服务器;
+    - 首次那次没拿到照片位置(场景没开留存、老数据),复核退回 ID_PRO,贵但能用。
+
+    两个方案在阿里云控制台是**两个场景**,场景 ID 分开配。
     """
 
     name = "aliyun"
@@ -208,34 +222,107 @@ class AliyunFaceProvider:
 
     async def init_h5(self, *, outer_order_no: str, rider_id: int,
                       real_name: str, id_no: str, meta_info: str,
-                      return_url: str) -> tuple[str, str]:
-        """中转页拿到 MetaInfo 之后调。返回 (CertifyId, 阿里云刷脸页地址)。"""
-        obj = await self._call("InitFaceVerify", {
+                      return_url: str,
+                      photo: tuple[str, str] | None = None) -> tuple[str, str]:
+        """中转页拿到 MetaInfo 之后调。返回 (CertifyId, 阿里云刷脸页地址)。
+
+        photo 有值 = 复核,和这张留存照片比对(PV_FV);没有 = 和公安库比对(ID_PRO)。
+        """
+        common = {
             "OuterOrderNo": outer_order_no,
-            "ProductCode": "ID_PRO",
             "Model": settings.face_aliyun_model,
             "CertType": "IDENTITY_CARD",
-            "CertName": real_name,
-            "CertNo": id_no,
             "MetaInfo": meta_info,
             "ReturnUrl": return_url,
             "CertifyUrlType": "H5",
             "UserId": str(rider_id),
-        })
+        }
+        if photo and settings.face_aliyun_compare_scene_id:
+            obj = await self._call("InitFaceVerify", {
+                **common, "ProductCode": "PV_FV",
+                "SceneId": settings.face_aliyun_compare_scene_id,
+                "OssBucketName": photo[0], "OssObjectName": photo[1],
+            })
+        else:
+            obj = await self._call("InitFaceVerify", {
+                **common, "ProductCode": "ID_PRO",
+                "CertName": real_name, "CertNo": id_no,
+            })
         certify_id = str(obj.get("CertifyId") or "")
         certify_url = str(obj.get("CertifyUrl") or "")
         if not certify_id or not certify_url:
             raise RuntimeError("人脸核验服务暂时不可用,请稍后再试")
         return certify_id, certify_url
 
-    async def result(self, ref: str) -> FaceResult:
-        obj = await self._call("DescribeFaceVerify", {"CertifyId": ref})
+    async def result(self, ref: str, *, compare: bool = False) -> FaceResult:
+        """compare=True:这次是 PV_FV 复核,要用复核那个场景 ID 去查。"""
+        extra = ({"SceneId": settings.face_aliyun_compare_scene_id}
+                 if compare and settings.face_aliyun_compare_scene_id else {})
+        obj = await self._call("DescribeFaceVerify", {"CertifyId": ref, **extra})
         # 官方口径:以 Passed 为准(T 过,F 没过,中途放弃也是 F)
         if obj.get("Passed") == "T":
-            return FaceResult(True)
+            return FaceResult(True, photo=_photo_of(obj.get("MaterialInfo")))
         code = str(obj.get("SubCode") or "")
         return FaceResult(False, _ALIYUN_SUBCODES.get(
             code, f"没有通过,请本人在光线充足的地方重试(代码 {code or '无'})"))
+
+
+def _photo_of(material) -> tuple[str, str] | None:
+    """从 DescribeFaceVerify 的 MaterialInfo 里取刷脸照片在 OSS 的位置。
+
+    MaterialInfo 是一段 JSON **字符串**;照片在 facialPictureFront 下。
+    场景没开留存或 OSS 没授权时这几个字段不返回 —— 取不到就是 None,不报错。
+    """
+    import json
+    try:
+        info = json.loads(material) if isinstance(material, str) else material
+        front = (info or {}).get("facialPictureFront") or {}
+        bucket = str(front.get("ossBucketName") or "")
+        obj = str(front.get("ossObjectName") or "")
+    except (ValueError, AttributeError):
+        return None
+    return (bucket, obj) if bucket and obj else None
+
+
+async def delete_photo(bucket: str, obj: str) -> bool:
+    """删掉 OSS 里留存的那张刷脸照片(注销账号时调)。成功 / 本来就没有 = True。
+
+    走 OSS 的 REST DeleteObject(V1 签名,纯 httpx,不引 SDK)。
+    RAM 子账号要有这个桶的 oss:DeleteObject 权限。
+    """
+    import base64
+    import hashlib
+    import hmac
+    import urllib.parse
+    from email.utils import formatdate
+
+    import httpx
+
+    if not (bucket and obj and settings.face_aliyun_access_key_id):
+        return False
+    date = formatdate(usegmt=True)
+    resource = f"/{bucket}/{obj}"
+    to_sign = f"DELETE\n\n\n{date}\n{resource}"
+    sig = base64.b64encode(hmac.new(
+        settings.face_aliyun_access_key_secret.encode(), to_sign.encode(),
+        hashlib.sha1).digest()).decode()
+    url = (f"https://{bucket}.{settings.face_aliyun_oss_endpoint}/"
+           f"{urllib.parse.quote(obj)}")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.delete(url, headers={
+                "Date": date,
+                "Authorization":
+                    f"OSS {settings.face_aliyun_access_key_id}:{sig}"})
+    except httpx.HTTPError as exc:
+        logger.warning("删除留存人脸照片失败 %s: %s", resource, exc)
+        return False
+    # 204 删掉了;404 本来就没有。别的都算没删掉,留日志人工补
+    if resp.status_code in (204, 404):
+        return True
+    logger.warning("删除留存人脸照片失败 %s: %s %s", resource,
+                   resp.status_code, resp.text[:200])
+    return False
 
 
 def get_provider(dev_outcome: str = "") -> FaceProvider:
