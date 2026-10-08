@@ -243,7 +243,10 @@ services:
       "
 
   # 公网入口:TLS 终结 + 按域名分发。证书/挑战目录都在部署机本地(不入库,
-  # rsync 排除;见 renew-cert.sh)。8880/8443 与 frpc 的 localPort 对应
+  # rsync 排除;见 renew-cert.sh)。
+  #   8880/8443 → 80/443:普通端口,本机和局域网直连(冒烟、调试)
+  #   8881/8444 → 81/444:带 proxy protocol 的端口,只给本机 frpc 用(frpc.toml 的 localPort 指这两个),
+  #                       真实客户端 IP 就从这里进来。只绑 127.0.0.1,见 nginx/conf.d/superz.conf「真实来源 IP」
   nginx:
     logging: *default-logging
     image: nginx:1.27-alpine
@@ -251,6 +254,8 @@ services:
     ports:
       - "8880:80"
       - "8443:443"
+      - "127.0.0.1:8881:81"
+      - "127.0.0.1:8444:444"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro

@@ -28,8 +28,13 @@ def client_ip(request: Request) -> str:
          它会用可信代理送来的 X-Forwarded-For 改写 request.client;
       2. 这里再读一次 XFF 首值 —— 万一忘了配启动参数,至少还有这一层。
 
-    注意 XFF 是客户端可伪造的头,只有经过步骤 1 的可信代理链才有意义。
-    所以这个值只配用来做限流分桶,**不要拿它做鉴权判断**。
+    首值为什么可信:生产 nginx 把 X-Forwarded-For **覆盖**成 realip 之后的 $remote_addr
+    (真实客户端,frp 隧道经 proxy protocol 带过来),客户端自己带的 XFF 传不到这里。
+    见 deploy/nginx/conf.d/superz.conf「真实来源 IP」。nginx 那边要是改回
+    `$proxy_add_x_forwarded_for`(追加),首值就又是客户端说了算了。
+
+    即便如此,这个值只配用来做限流分桶,**不要拿它做鉴权判断**
+    (127.0.0.1:8010 直连调试口不经过 nginx,XFF 随便写)。
     """
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd.strip():
