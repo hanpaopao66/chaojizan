@@ -34,7 +34,8 @@ from zoneinfo import ZoneInfo
 
 from ..services.flags import in_hhmm_range, night_curfew_window, weather_surcharge_on
 from ..services.pricing import (delivery_fee_parts, haversine_m,
-                                in_delivery_range)
+                                in_delivery_range,
+                                merchant_delivery_share_cents)
 
 # 配送费拆分项的中文名。**放服务端,四端共用一份** ——
 # 三个客户端各写一遍,迟早写得不一样,而这是要给顾客看的账
@@ -783,6 +784,21 @@ async def create_order(
             notes.append(
                 f"骑手反馈这里不好送+{fee_parts['hardship'] / 100:g}元(归骑手)")
 
+    # 商家承担一部分配送费:记成商家让利(并进 discount_cents),顾客少付、商家少收,
+    # 骑手照拿全额配送费。钳在「菜 + 打包 − 满减 − 平台补贴」以内 ——
+    # 商家实收不能被它扣成负数,平台补贴那边的资金安全钳制也不被它打破
+    merchant_delivery = 0
+    if fee_parts:
+        merchant_delivery = min(
+            merchant_delivery_share_cents(
+                fee_parts,
+                fixed_cents=merchant.delivery_share_cents or 0,
+                pct=merchant.delivery_share_pct or 0),
+            max(0, food_cents + packing - discount - subsidy))
+    if merchant_delivery:
+        discount += merchant_delivery
+        notes.append(f"商家承担配送费-{merchant_delivery / 100:g}元(商家)")
+
     if group_members > 1:
         notes.append(f"拼单×{group_members}人")
     # 地址精确度:该地址被骑手反馈过 ≥2 次「地址不准」,提示核对(不拦截)
@@ -819,6 +835,7 @@ async def create_order(
         food_cents=food_cents,
         packing_fee_cents=packing,
         discount_cents=discount,
+        merchant_delivery_cents=merchant_delivery,
         subsidy_cents=subsidy,
         promo_note=";".join(notes),
         delivery_fee_cents=fee_cents,
@@ -1327,17 +1344,34 @@ async def change_address(
         order.contact_phone = payload.contact_phone.strip()
     refunded = 0
     if delta < 0:
-        refunded = -delta
+        # 商家承担了配送费的单:配送费降下来以后,商家承担的那份最多就是新的可分担部分,
+        # 多出来的先还给商家(他替顾客出的钱,顾客没付过),剩下的才退给顾客
+        shared = order.merchant_delivery_cents or 0
+        merchant_back = 0
+        if shared:
+            parts = dict(order.fee_parts or {})
+            parts["base"] = new_base
+            merchant_back = max(0, shared - merchant_delivery_share_cents(
+                parts, fixed_cents=shared))
+            order.merchant_delivery_cents = shared - merchant_back
+            order.discount_cents -= merchant_back
+            # 佣金基数跟着商家实收走(同缺货退款)
+            gross = max(order.food_cents + order.packing_fee_cents
+                        - order.discount_cents, 0)
+            order.commission_cents = int(Decimal(gross) * merchant.commission_rate)
+        refunded = -delta - merchant_back
         note = f"改地址退配送费差价 ¥{refunded / 100:.2f}"
         # **先发起退款,再下调 total_cents**:微信通道按「当前 total + 已退」
         # 反推原始支付总额,先扣了 total 反推出来的就少一截(见 wechat_pay)。
         # 原因走常量:这笔退了也扣了实付,refund_calc 靠它认出来、别在全额退款时再减一遍
         from ..services.refund_calc import ADDRESS_CHANGE_REFUND_REASON
-        await request_refund(db, order, refunded, ADDRESS_CHANGE_REFUND_REASON)
+        if refunded:
+            await request_refund(db, order, refunded, ADDRESS_CHANGE_REFUND_REASON)
         order.delivery_fee_cents += delta
-        order.total_cents += delta
-        order.refund_note = (f"{order.refund_note};{note}"
-                             if order.refund_note else note)
+        order.total_cents -= refunded
+        if refunded:
+            order.refund_note = (f"{order.refund_note};{note}"
+                                 if order.refund_note else note)
     await _record_event(db, order, order.status.value, "address_changed", user)
     await db.commit()
     await db.refresh(order)
@@ -1905,9 +1939,12 @@ async def refund_item(
         # 这样订单自洽式 total = 菜品+打包-满减+配送+小费-补贴 天然守恒
         # (审计规则 3),而 Σ退款 ≤ 用户实付 是它的推论。
         food_before = order.food_cents
+        # 商家承担的配送费也在 discount_cents 里,但它跟菜没关系 —— 配送照样整趟跑,
+        # 不该随退一道菜被商家收回一截。只分摊满减 / 店铺券那部分
+        food_disc = order.discount_cents - (order.merchant_delivery_cents or 0)
         if food_before > 0:
-            disc_share = min(order.discount_cents * list_price // food_before,
-                             order.discount_cents)
+            disc_share = min(food_disc * list_price // food_before,
+                             food_disc)
             sub_share = min(order.subsidy_cents * list_price // food_before,
                             order.subsidy_cents)
         else:
@@ -1939,6 +1976,7 @@ async def refund_item(
         order.food_cents = 0
         order.packing_fee_cents = 0
         order.discount_cents = 0
+        order.merchant_delivery_cents = 0
         order.subsidy_cents = 0
         # **配送费和小费也要清零。** 这两项和上面几项一样,已经随
         # refund_amount(= 当时的 total_cents)整额退给用户了 ——
@@ -2073,9 +2111,17 @@ async def preview_delivery_fee(
         # 「大概 30 分钟」和「不知道」的区别新手分不出来,但他会记住你说错了
         logger.warning("结算页预估送达失败,不显示", exc_info=True)
 
+    # 商家承担的那部分:预览就要扣出来,否则结算页显示 ¥5 付款变 ¥3 也是两个答案。
+    # 下单时还会再钳一次「菜 + 打包 − 满减 − 补贴」,菜点得极少时可能比这里小
+    merchant_share = merchant_delivery_share_cents(
+        parts, fixed_cents=merchant.delivery_share_cents or 0,
+        pct=merchant.delivery_share_pct or 0)
     return {
         "distance_m": round(distance),
         "fee_cents": sum(parts.values()),
+        # 骑手拿 fee_cents 全额;顾客付 customer_fee_cents,差额商家出
+        "merchant_share_cents": merchant_share,
+        "customer_fee_cents": sum(parts.values()) - merchant_share,
         "parts": parts,
         "labels": FEE_PART_LABELS,
         "door_fee_cents": door_saving,

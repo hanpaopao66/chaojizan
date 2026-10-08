@@ -51,13 +51,13 @@ HARDSHIP_LABELS: dict[str, tuple[str, str]] = {
 #: 每一项补多少钱(分)。**写死在代码里并公开**,不做后台可调的黑箱。
 #:
 #: 口径和 `pricing.door_fee_cents` 保持一致:
-#: 爬楼按超出 4 楼的层数每层 ¥1、封顶 ¥5(等电梯的时间已经在 ETA 里
+#: 爬楼按超出 2 楼的层数每层 ¥0.5、封顶 ¥5(等电梯的时间已经在 ETA 里
 #: 补过,所以有电梯不算);步行进小区按每 100 米 ¥0.5、封顶 ¥3。
 #:
 #: 定价原则是「够用就好,不追求精确」—— 精确要举证,而举证的成本
 #: 落在马路上跑车的人身上,那就又回到了我们要躲开的坑里。
-NO_ELEVATOR_FREE_FLOOR = 4
-NO_ELEVATOR_PER_FLOOR_CENTS = 100
+NO_ELEVATOR_FREE_FLOOR = 2
+NO_ELEVATOR_PER_FLOOR_CENTS = 50
 NO_ELEVATOR_MAX_CENTS = 500
 
 WALK_IN_FREE_M = 100

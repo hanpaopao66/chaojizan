@@ -45,7 +45,7 @@ def door_fee_cents(floor: int | None, has_elevator: bool | None,
 
     等电梯的时间已经在 ETA 里补过(labor_guard.floor_minutes),再收一笔
     就是同一件事收两次钱。真正吃力气的是**背着餐爬楼梯**,
-    而骑手的原话是:爬 1–4 楼勉强能被派费覆盖,**从 5 楼开始就不合理了**。
+    2026-10-08 起从 3 楼开始收,每层 ¥0.5(原来 5 楼起每层 ¥1)。
 
     ## 为什么按声明的楼层算,不按实际爬了几层
 
@@ -112,3 +112,24 @@ def delivery_fee_cents(
     # 等餐超时补偿(#145,平台出钱)2026-09-14 停发,不再加进来
     return sum(delivery_fee_parts(
         distance_m, weather_on=weather_on, when=when).values())
+
+
+#: 商家可以分担的那几项。上门爬楼费(door)和骑手反馈的难度费(hardship)不在内 ——
+#: 那是这个地址本身的难度,由顾客付;选「送到楼下」就能省掉,商家不该替他买单
+MERCHANT_SHAREABLE_PARTS = ("base", "night", "weather")
+
+
+def merchant_delivery_share_cents(parts: dict[str, int], *,
+                                  fixed_cents: int = 0, pct: int = 0) -> int:
+    """商家替顾客出的配送费(分)。固定金额优先,其次按比例;都没设就是 0。
+
+    只摊 MERCHANT_SHAREABLE_PARTS 那几项,封顶就是这几项之和 —— 商家最多替顾客
+    把这部分全包了,不会倒贴到爬楼费上。**骑手拿到的配送费不受影响**:
+    这笔钱在订单上记成商家让利(discount_cents),是顾客少付、商家少收。
+    """
+    shareable = sum(max(0, parts.get(k, 0)) for k in MERCHANT_SHAREABLE_PARTS)
+    if fixed_cents > 0:
+        return min(fixed_cents, shareable)
+    if pct > 0:
+        return shareable * min(pct, 100) // 100
+    return 0

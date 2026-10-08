@@ -207,10 +207,9 @@ class Settings(BaseSettings):
 
     # 上门难度费(顾客付,全额归骑手)。**只对无电梯的高楼层收** ——
     # 等电梯的时间已经在 ETA 里补过,再收钱就是同一件事收两次。
-    # 起收楼层取 5:骑手的原话是"爬 1–4 楼勉强能被派费覆盖,
-    # 从 5 楼开始就不合理了"
-    door_fee_free_floor: int = 4        # 4 楼及以下不收
-    door_fee_per_floor_cents: int = 100  # 超出部分每层 ¥1
+    # 2026-10-08 jy 定:没电梯时从 3 楼起每层加 ¥0.5(原来是 5 楼起每层 ¥1)
+    door_fee_free_floor: int = 2        # 2 楼及以下不收
+    door_fee_per_floor_cents: int = 50  # 超出部分每层 ¥0.5
     door_fee_max_cents: int = 500       # 封顶 ¥5
 
     # 正常出餐区间(分钟):骑手到店后等这么久以内算正常。「提前点出餐」的嫌疑判据
