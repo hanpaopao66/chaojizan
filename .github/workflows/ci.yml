@@ -89,6 +89,9 @@ jobs:
       # 群推送的分批大小(生产 500)。设成 2 是为了让四个人的群也走好几批 ——
       # 群上限是 20 万,少扫一批就是静默漏人,默认值下测不出来
       CHAT_PUSH_CHUNK: "2"
+      # 镜像都拉不到时从源码编译的 MinIO 版本(见「拉 MinIO 镜像」那步)。
+      # 钉死版本:换版本就是换缓存键,会重新编一次
+      MINIO_SRC_VERSION: v0.0.0-20260212201848-7aac2a2c5b7c
 
     steps:
       - uses: actions/checkout@v4
@@ -106,36 +109,64 @@ jobs:
       # MinIO 不作为 service 容器起:它需要 `server /data` 这个 command,
       # 而 GitHub 的 service 容器给不了 command。
       #
-      # 镜像用**生产同款** MinIO 官方镜像。原先用的 bitnami/minio 公开 tag 已被
-      # 下架(Bitnami 2025 年把免费镜像挪走了),CI 直接拉不到 ——
-      # 而且 CI 和生产用不同的镜像本来就违背"同一套东西"的原则。
-      #
-      # 从 quay.io 拉,不从 Docker Hub:Docker Hub 上的 minio/minio 在 2026 年
-      # 整个仓库没了(拉取直接 "repository does not exist"),官方的同一份镜像
-      # 还在 quay.io/minio/minio。生产机上是早先缓存的 minio/minio,暂时不受影响
-      #
-      # 2026-09-30 起 quay.io/minio/minio 也拉不到了(unauthorized)。改成先拉
-      # ghcr.io/hanpaopao66/minio:prod —— 那是从生产部署机缓存的 minio/minio 原样推上去的,
-      # 仍是「生产同款」;拉不到再退回 quay.io(万一它恢复了)。两个都拉不到就直接失败,
-      # 报错里会看到是哪一步。
-      - name: 起 MinIO(生产同款镜像)
+      # 镜像这条路一路被堵:bitnami/minio 免费 tag 2025 年下架;Docker Hub 上的
+      # minio/minio 2026 年整个仓库没了;2026-09-30 起 quay.io/minio/minio 也
+      # unauthorized。先拉 ghcr.io/hanpaopao66/minio:prod(从生产部署机缓存的
+      # minio/minio 原样推上去的,生产同款),再试 quay.io,**都拉不到就从源码编译**
+      # (MinIO 社区版现在以源码分发为主,GitHub 上的源码不需要任何凭据)。
+      # 编出来的二进制按版本缓存,同一个版本只编一次(约 2 分钟)。
+      - name: 拉 MinIO 镜像
+        id: minio_image
         run: |
-          MINIO_IMAGE=""
           for img in ghcr.io/hanpaopao66/minio:prod quay.io/minio/minio; do
-            if docker pull -q "$img"; then MINIO_IMAGE="$img"; break; fi
+            if docker pull -q "$img"; then echo "image=$img" >> "$GITHUB_OUTPUT"; exit 0; fi
             echo "拉不到 $img,试下一个"
           done
-          [ -n "$MINIO_IMAGE" ] || { echo "::error::MinIO 镜像一个都拉不到"; exit 1; }
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=superz \
-            -e MINIO_ROOT_PASSWORD=superz-ci-secret \
-            "$MINIO_IMAGE" server /data
+          echo "镜像都拉不到,改用源码编译的二进制"
+
+      - name: 源码编译 MinIO 的缓存
+        if: steps.minio_image.outputs.image == ''
+        id: minio_cache
+        uses: actions/cache@v4
+        with:
+          path: ~/minio-bin
+          key: minio-src-${{ env.MINIO_SRC_VERSION }}
+
+      - uses: actions/setup-go@v5
+        if: steps.minio_image.outputs.image == '' && steps.minio_cache.outputs.cache-hit != 'true'
+        with:
+          go-version: "1.24"
+          cache: false
+
+      - name: 源码编译 MinIO
+        if: steps.minio_image.outputs.image == '' && steps.minio_cache.outputs.cache-hit != 'true'
+        run: |
+          GOBIN=$HOME/minio-bin CGO_ENABLED=0 \
+            go install "github.com/minio/minio@${MINIO_SRC_VERSION}"
+
+      - name: 起 MinIO
+        env:
+          MINIO_IMAGE: ${{ steps.minio_image.outputs.image }}
+        run: |
+          if [ -n "$MINIO_IMAGE" ]; then
+            docker run -d --name minio -p 9000:9000 \
+              -e MINIO_ROOT_USER=superz \
+              -e MINIO_ROOT_PASSWORD=superz-ci-secret \
+              "$MINIO_IMAGE" server /data
+          else
+            mkdir -p /tmp/minio-data
+            MINIO_ROOT_USER=superz MINIO_ROOT_PASSWORD=superz-ci-secret \
+              nohup "$HOME/minio-bin/minio" server /tmp/minio-data \
+              --address :9000 > /tmp/minio.log 2>&1 &
+          fi
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:9000/minio/health/live && break
             sleep 2
           done
-          curl -sf http://127.0.0.1:9000/minio/health/live \
-            || { echo "MinIO 起不来"; docker logs minio; exit 1; }
+          curl -sf http://127.0.0.1:9000/minio/health/live || {
+            echo "MinIO 起不来"
+            if [ -n "$MINIO_IMAGE" ]; then docker logs minio; else tail -50 /tmp/minio.log; fi
+            exit 1; }
 
       # 桶名与生产一致 —— 本地/CI/生产用同一套名字,才不会"CI 绿了线上炸"。
       # 用服务端本来就依赖的 python minio 客户端建,不为 CI 再装一个 mc
