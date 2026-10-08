@@ -111,6 +111,9 @@ async def _transition_batch(
             # 抵扣过券的,把券放回券包(未过期可再用)
             from .eta import release_coupon
             await release_coupon(db, order.order_no)
+            # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+            from .rider_transfer import refund_on_cancel
+            await refund_on_cancel(db, order)
             # 已支付订单自动取消 = 全额退款(与人工取消/拒单同一口径)。
             # refund_cents 由 request_refund 自己累计(渠道拒绝则不累计)
             if from_status != OrderStatus.PENDING_PAYMENT and order.total_cents > 0:
@@ -395,6 +398,9 @@ async def _sweep_orphan_appends(db: AsyncSession, now: datetime) -> list[Order]:
         # 实付,券却跟着这条"平台侧原因"的取消一起没了
         from .eta import release_coupon
         await release_coupon(db, order.order_no)
+        # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+        from .rider_transfer import refund_on_cancel
+        await refund_on_cancel(db, order)
         db.add(OrderEvent(order_id=order.id, from_status=from_status.value,
                           to_status=OrderStatus.CANCELLED.value,
                           actor_role="system", actor_id=None))
@@ -554,6 +560,9 @@ async def _sweep_no_rider(db: AsyncSession, now: datetime):
         # 无骑手取消没收,是这条漏洞里最说不过去的一种
         from .eta import release_coupon
         await release_coupon(db, order.order_no)
+        # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+        from .rider_transfer import refund_on_cancel
+        await refund_on_cancel(db, order)
         # 已出餐的餐损不赔(2026-09-15 起,见上面的说明):这里不写任何商家入账行
         db.add(OrderEvent(
             order_id=order.id,

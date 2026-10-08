@@ -22,7 +22,7 @@ logger = logging.getLogger("superz.ledger")
 GENESIS = "0" * 64
 #: payload 版本。见 docs/LEDGER-SPEC.md。
 #: 2026-09 新加的 rider_fault_rows、merchant_fault_rows、appeal_refund_rows、rider_fund 里的
-#: 支出/回池、totals 里的六项都是**新字段**(规格 §7:新字段只加不改,验证器必须容忍未知字段),不升版本。
+#: 支出/回池、totals 里的六项,2026-10 的 rider_transfer_rows 与 totals.rider_transfer 都是**新字段**(规格 §7:新字段只加不改,验证器必须容忍未知字段),不升版本。
 #: merchant_rows 里不再出现 fault_charge / fault_refund 两种行 —— 它们在 2026-09-15 之前根本不存在,
 #: 历史锚点不受影响
 SCHEMA = 1
@@ -30,6 +30,10 @@ SCHEMA = 1
 #: 判骑手责任的三种骑手行(services/rider_fault.FAULT_KINDS)。它们**不进 rider_rows** ——
 #: 那一栏的规矩是「配送费只进不冲」,见证节点按它核;单独进 rider_fault_rows,同样逐行公开
 RIDER_FAULT_KINDS = ("fault_reversal", "fault_charge", "fault_refund")
+#: 转单的钱(services/rider_transfer,2026-10 起):接了不送扣的(transfer_fee,负)、
+#: 订单完成补给送到的骑手(transfer_bonus,正)、订单取消退回(transfer_refund,正)。
+#: 同样**不进 rider_rows**(扣的那行是负数,那一栏「只进不冲」),单独进 rider_transfer_rows
+RIDER_TRANSFER_KINDS = ("transfer_fee", "transfer_bonus", "transfer_refund")
 #: 判商家责任的两种商家行(services/merchant_fault.FAULT_KINDS):骑手那份配送费和小费商家另出
 #: (fault_charge,负)、申诉改判退回(fault_refund,正)。**不进 merchant_rows** —— 那一栏每一行是
 #: 「应收 − 佣金 = 净额」的菜钱;单独进 merchant_fault_rows,同样逐行公开(2026-09 起的新字段)
@@ -78,11 +82,20 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             f"FROM merchant_earnings WHERE {where} AND kind IN ({m_faults}) ORDER BY id"), span)
     ]
     faults = ", ".join(f"'{k}'" for k in RIDER_FAULT_KINDS)
+    transfers = ", ".join(f"'{k}'" for k in RIDER_TRANSFER_KINDS)
     rider_rows = [
         {"o": hash_no(r[0]), "amount": r[1], "kind": r[2]}
         for r in await db.execute(text(
             f"SELECT order_no, amount_cents, kind "
-            f"FROM rider_earnings WHERE {where} AND kind NOT IN ({faults}) ORDER BY id"), span)
+            f"FROM rider_earnings WHERE {where} AND kind NOT IN ({faults}) "
+            f"AND kind NOT IN ({transfers}) ORDER BY id"), span)
+    ]
+    # 转单的钱:骑手之间的划转,平台不经手。逐行公开,跨天的守恒由每日核账规则 4f 守着
+    rider_transfer_rows = [
+        {"o": hash_no(r[0]), "amount": r[1], "kind": r[2]}
+        for r in await db.execute(text(
+            f"SELECT order_no, amount_cents, kind "
+            f"FROM rider_earnings WHERE {where} AND kind IN ({transfers}) ORDER BY id"), span)
     ]
     # 判骑手责任:这单收入冲回(fault_reversal,负)、保障金池不够的部分骑手出(fault_charge,负)、
     # 申诉改判加回去(fault_refund,正)。见 services/rider_fault.py
@@ -156,6 +169,7 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
         "voucher_rows": voucher_rows,
         "stay_rows": stay_rows,
         "rider_fault_rows": rider_fault_rows,
+        "rider_transfer_rows": rider_transfer_rows,
         "merchant_fault_rows": merchant_fault_rows,
         "appeal_refund_rows": appeal_refund_rows,
         "rider_fund": {
@@ -175,6 +189,7 @@ async def build_day_payload(db: AsyncSession, day: str) -> dict:
             "stay_fee": sum(r["fee"] for r in stay_rows),
             "rider_fund": fund_orders * settings.rider_fund_per_order_cents,
             "rider_fault": sum(r["amount"] for r in rider_fault_rows),
+            "rider_transfer": sum(r["amount"] for r in rider_transfer_rows),
             "rider_fund_paid": fund_paid,
             "rider_fund_returned": fund_returned,
             "merchant_fault": sum(r["amount"] for r in merchant_fault_rows),

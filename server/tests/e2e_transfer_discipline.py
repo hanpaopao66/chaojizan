@@ -43,7 +43,7 @@ async def main():
     bj_date = (datetime.now(timezone.utc) + timedelta(hours=8)).date()
     redis_key = f"rider:transfer:{rider_id}:{bj_date}"
 
-    # 1) 免责转单不计数:到店未出餐工单满 10 分钟后转单
+    # 1) 免责转单不计数:过了预计出餐时间、到店未出餐工单满 10 分钟后转单
     no_free = make_order()
     call("POST", f"/riders/grab/{no_free}", rider)
     call("POST", "/riders/issues", rider,
@@ -52,6 +52,10 @@ async def main():
         await db.execute(text(
             "UPDATE delivery_issues SET created_at = now() - interval "
             "'11 minutes' WHERE order_no = :no"), {"no": no_free})
+        # 接单拨到 2 小时前:远超任何承诺出餐时长,没到出餐时间的不算免责
+        await db.execute(text(
+            "UPDATE orders SET accepted_at = now() - interval '2 hours' "
+            "WHERE order_no = :no"), {"no": no_free})
         await db.commit()
     r = call("POST", f"/riders/transfer/{no_free}", rider,
              {"reason": "other"})

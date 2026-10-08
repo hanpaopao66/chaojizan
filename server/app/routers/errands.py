@@ -551,6 +551,9 @@ async def mark_unavailable(
                          f"|买不到:{(payload or {}).get('note', '')}")[:300]
     order.status = OrderStatus.CANCELLED
     order.cancel_reason = "帮买:商品买不到"
+    # 转单扣的钱:这单没人送到,退回扣过钱的骑手(services/rider_transfer)
+    from ..services.rider_transfer import refund_on_cancel
+    await refund_on_cancel(db, order)
     db.add(OrderEvent(
         order_id=order.id, from_status=from_status.value,
         to_status=OrderStatus.CANCELLED.value,

@@ -126,6 +126,8 @@ ApiClient fakeRiderApi({
   int weekEarnedCents = 43200,
   // 本月 / 累计(5i「本月所得」、身份行「N 单」)
   int monthEarnedCents = 521400,
+  // 本月转单扣(5i 三个数里的第三个)
+  int monthTransferFeeCents = 0,
   int monthOrders = 301,
   int totalOrders = 1842,
   int weekPlatformCutCents = 24,
@@ -177,6 +179,7 @@ ApiClient fakeRiderApi({
               'month_minutes': weekMinutes * 4,
               'month_orders': monthOrders,
               'month_earned_cents': monthEarnedCents,
+              'month_transfer_fee_cents': monthTransferFeeCents,
               'today_platform_cut_cents': 0,
               'week_platform_cut_cents': weekPlatformCutCents,
               'month_platform_cut_cents': weekPlatformCutCents,

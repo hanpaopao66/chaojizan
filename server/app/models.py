@@ -1016,14 +1016,29 @@ class EarningKind(str, enum.Enum):
     fault_charge = "fault_charge"
     #: 申诉改判成立,另出 / 扣掉的加回去(正数)
     fault_refund = "fault_refund"
+    # ---- 转单的钱(services/rider_transfer.py),只在骑手账本上 ----
+    #: 接了不送、转出,立刻扣(负数)。一单可以有多行
+    transfer_fee = "transfer_fee"
+    #: 订单完成,前面扣的钱补给送到的骑手(正数),一单一行
+    transfer_bonus = "transfer_bonus"
+    #: 订单取消、没人送到,扣的钱退回(正数),一单一个骑手一行
+    transfer_refund = "transfer_refund"
 
 
 class RiderEarning(Base):
     """骑手收入流水:订单完成时入账,一单一种类型一条。
-    只追加、不修改、不删除——账本的铁律;冲账也是追加一条负数行。"""
+    只追加、不修改、不删除——账本的铁律;冲账也是追加一条负数行。
+
+    例外:转单扣款(transfer_fee)和取消退回(transfer_refund)一单可以有多行 ——
+    一单可能被转好几手,每一手各扣各的。唯一约束因此是部分唯一索引,
+    这两种以外仍然一单一种一条(结算幂等靠它)。"""
 
     __tablename__ = "rider_earnings"
-    __table_args__ = (UniqueConstraint("order_id", "kind"),)
+    __table_args__ = (
+        Index("uq_rider_earnings_order_kind", "order_id", "kind", unique=True,
+              postgresql_where=text(
+                  "kind NOT IN ('transfer_fee', 'transfer_refund')")),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     rider_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)

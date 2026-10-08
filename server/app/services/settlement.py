@@ -162,6 +162,9 @@ async def settle_cancelled_with_split(db: AsyncSession, order: Order,
 async def settle_order(db: AsyncSession, order: Order) -> None:
     """订单完成的唯一结算入口。"""
     await credit_rider_for_order(db, order)
+    # 前面有骑手接了没送、转单扣的钱,补给送到的这位(services/rider_transfer)
+    from .rider_transfer import pay_bonus
+    await pay_bonus(db, order)
     await credit_merchant_for_order(db, order)
     # 分账口径的单:落分账台账并尝试请求(幂等;失败留 pending 清扫兜底)
     from .profit_sharing import ensure_record

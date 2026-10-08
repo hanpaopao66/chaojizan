@@ -2867,10 +2867,12 @@ class ApiClient {
 
   /// 转单:已抢未取餐的单退回抢单池。
   /// reason: vehicle_broken / unwell / route_conflict / other
-  /// 返回 {today_count, free_times}(每日免责次数,超出仍可转但计入考核参考)
-  Future<Map<String, dynamic>> transferOrder(String orderNo, String reason) async {
+  /// extraCents:另外加钱(分),转单骑手自己填,谁转单谁出,送到的骑手拿
+  /// 返回 {today_count, free_times, waited_free, fee_cents, extra_cents, bonus_cents}
+  Future<Map<String, dynamic>> transferOrder(String orderNo, String reason,
+      {int extraCents = 0}) async {
     final data = await _request('POST', '/riders/transfer/$orderNo',
-        body: {'reason': reason});
+        body: {'reason': reason, if (extraCents > 0) 'extra_cents': extraCents});
     return data as Map<String, dynamic>;
   }
 

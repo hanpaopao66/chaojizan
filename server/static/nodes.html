@@ -638,6 +638,8 @@ async function sha256(s) {
    普通对象查 'constructor' 这种种类会查到原型上的东西,没见过的种类就漏报了 */
 const RIDER_FAULT_SIGNS = new Map([['fault_reversal', -1], ['fault_charge', -1], ['fault_refund', 1]]);
 const MERCHANT_FAULT_SIGNS = new Map([['fault_charge', -1], ['fault_refund', 1]]);
+/* 转单的钱(§6.2e,2026-10 起):接了不送扣的是负数,补给送到的骑手、取消退回的是正数 */
+const RIDER_TRANSFER_SIGNS = new Map([['transfer_fee', -1], ['transfer_bonus', 1], ['transfer_refund', 1]]);
 const sumOf = (rows, field, kind) =>
   (rows || []).reduce((s, r) => (!kind || r.kind === kind ? s + r[field] : s), 0);
 /* 平台这一天为纠错(申诉改判成立)出的钱,规格 §6.5 */
@@ -678,8 +680,10 @@ function verifyRows(p) {
     }
   }
   // 判骑手责任(§6.2b)、判商家责任(§6.2c):种类在白名单里、符号对。缺这些字段的老锚点跳过
+  // 转单的钱(§6.2e)同样的规矩
   for (const [key, signs, label] of [['rider_fault_rows', RIDER_FAULT_SIGNS, '骑手判责行'],
-                                     ['merchant_fault_rows', MERCHANT_FAULT_SIGNS, '商家判责行']])
+                                     ['merchant_fault_rows', MERCHANT_FAULT_SIGNS, '商家判责行'],
+                                     ['rider_transfer_rows', RIDER_TRANSFER_SIGNS, '骑手转单行']])
     for (const r of p[key] || []) {
       if (!signs.has(r.kind)) problems.push(`${label} ${r.o}: 未知类型 ${r.kind}`);
       else if (r.amount * signs.get(r.kind) < 0)
@@ -698,6 +702,7 @@ function verifyRows(p) {
     for (const [key, want, msg] of [
       ['stay_fee', sumOf(p.stay_rows, 'fee'), '住宿服务费合计与逐行加总不一致'],
       ['rider_fault', sumOf(p.rider_fault_rows, 'amount'), '骑手判责合计与逐行加总不一致'],
+      ['rider_transfer', sumOf(p.rider_transfer_rows, 'amount'), '骑手转单合计与逐行加总不一致'],
       ['merchant_fault', sumOf(p.merchant_fault_rows, 'amount'), '商家判责合计与逐行加总不一致'],
       ['appeal_refund', sumOf(p.appeal_refund_rows, 'amount'), '申诉改判退款合计与逐行加总不一致'],
       ['platform_correction', platformCorrection(p), '平台纠错(申诉改判)合计与逐行加总不一致'],

@@ -1292,7 +1292,7 @@ class _RiderHomePageState extends State<RiderHomePage>
   }
 
   /// 配送异常上报:途中(联系不上/地址错/餐损)+ 交接(到店未出餐/餐不齐)。
-  /// 到店未出餐 = 催商家出餐,等满 10 分钟还可无责转单;
+  /// 到店未出餐 = 催商家出餐;过了预计出餐时间且等满 10 分钟,还可无责转单(不扣钱);
   /// 餐损/餐不齐必须拍照,走平台仲裁。
   Future<void> _reportIssue(Order order) async {
     final pickedUp = order.status == OrderStatus.pickedUp;
@@ -1409,7 +1409,7 @@ class _RiderHomePageState extends State<RiderHomePage>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(kind == 'not_ready'
-              ? '已催商家出餐;等满 10 分钟仍未出餐,可无责转单'
+              ? '已催商家出餐;过了预计出餐时间、等满 10 分钟仍未出餐,可无责转单(不扣钱)'
               : '已上报,平台会尽快处理;紧急情况可直接电话联系顾客')));
     } catch (e) {
       if (!mounted) return;
@@ -1418,10 +1418,14 @@ class _RiderHomePageState extends State<RiderHomePage>
     }
   }
 
-  /// 转单:已抢未取餐的单退回抢单池(车坏了/身体不适等突发状况不用硬扛)。
-  /// 每天免责 2 次,超出仍可转但计入考核参考;已取餐不能转,走异常上报。
+  /// 转单:已抢未取餐的单退回抢单池。要么就接,接了就送 —— 转出立刻扣钱
+  /// (服务端 rider_transfer_fee_cents,默认 10 元),扣的钱给最后送到这单的骑手;
+  /// 过了预计出餐时间商家还没出餐的无责转单不扣。已取餐不能转,走异常上报。
+  /// 还可以自己另外加钱(谁转单谁出),让人快点接;上限由服务端定。
   Future<void> _transferOrder(Order order) async {
     var reason = 'vehicle_broken';
+    final extraCtl = TextEditingController();
+    int extraCents() => (int.tryParse(extraCtl.text.trim()) ?? 0) * 100;
     final ok = await szShowSheet<bool>(
       context: context,
       builder: (sheetContext) => StatefulBuilder(
@@ -1432,7 +1436,8 @@ class _RiderHomePageState extends State<RiderHomePage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('转单', style: Theme.of(sheetContext).textTheme.titleMedium),
-              Text('订单退回抢单池由其他骑手接力;每天免责 2 次,请勿频繁转单',
+              Text('接了就要送:转出会立刻从你账上扣钱,扣的钱给最后送到这单的骑手。'
+                  '过了预计出餐时间、上报「未出餐」满 10 分钟商家还没出餐的,不扣',
                   style: Theme.of(sheetContext).textTheme.bodySmall),
               const SizedBox(height: 8),
               RadioGroup<String>(
@@ -1455,6 +1460,15 @@ class _RiderHomePageState extends State<RiderHomePage>
                   ],
                 ),
               ),
+              TextField(
+                controller: extraCtl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: '另外加钱(元,可不填)',
+                  helperText: '你自己出,送到这单的骑手拿;这单取消就退给你',
+                ),
+              ),
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
@@ -1468,16 +1482,29 @@ class _RiderHomePageState extends State<RiderHomePage>
         ),
       ),
     );
+    // 不在这里 dispose:sheet 收起动画还在用它
+    final extra = extraCents();
     if (ok != true || !mounted) return;
     try {
-      final result = await widget.api.transferOrder(order.orderNo, reason);
+      final result = await widget.api
+          .transferOrder(order.orderNo, reason, extraCents: extra);
       if (!mounted) return;
       final count = result['today_count'] as int? ?? 0;
       final free = result['free_times'] as int? ?? 2;
+      final waitedFree = result['waited_free'] as bool? ?? false;
+      final fee = result['fee_cents'] as int? ?? 0;
+      final added = result['extra_cents'] as int? ?? 0;
+      final paid = fee + added;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(count > free
-              ? '已转单(今日第 $count 次,超过免责 $free 次会计入考核参考)'
-              : '已转单,其他骑手会接力配送')));
+          content: Text(waitedFree
+              ? (added > 0
+                  ? '已无责转单,另外加的 ${szYuanText(added)} 已扣(给送到这单的骑手)'
+                  : '已无责转单(过了出餐时间商家仍未出餐),不扣钱、不占今日次数')
+              : paid > 0
+                  ? '已转单,扣 ${szYuanText(paid)}(给送到这单的骑手);今日第 $count 次'
+                  : count > free
+                      ? '已转单(今日第 $count 次,超过 $free 次会计入考核参考)'
+                      : '已转单,其他骑手会接力配送')));
       _refresh();
     } catch (e) {
       if (!mounted) return;
@@ -1625,6 +1652,12 @@ class _RiderHomePageState extends State<RiderHomePage>
           text: '用户催了${o.urgeCount > 1 ? " ${o.urgeCount} 次" : ""},'
               '放心按安全速度骑',
           color: sz.hold
+        ),
+      // 转单加钱:前面有人接了没送,扣的钱跟着这单走,送到就归你
+      if (o.transferBonusCents > 0)
+        (
+          text: '转单加钱 ${szYuanText(o.transferBonusCents)} · 送到这单就归你',
+          color: sz.earn
         ),
       if (o.parentOrderNo.isNotEmpty)
         (

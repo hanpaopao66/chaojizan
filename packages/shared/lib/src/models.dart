@@ -637,6 +637,7 @@ class Order {
         refundNote = json['refund_note'] as String? ?? '',
         hasReview = json['has_review'] as bool? ?? false,
         urgeCount = json['urge_count'] as int? ?? 0,
+        transferBonusCents = json['transfer_bonus_cents'] as int? ?? 0,
         scheduledAt = json['scheduled_at'] as String?,
         etaAt = json['eta_at'] as String?,
         // 到店时刻:骑手端据此决定还要不要显示「我到店了」。
@@ -749,6 +750,10 @@ class Order {
   /// 用户催了几次(只对进行中的单统计)。骑手端靠轮询看到它 ——
   /// 没配推送的部署里这是催单能到骑手眼前的唯一通道
   final int urgeCount;
+
+  /// 转单加钱(只有骑手视角有):前面有骑手接了没送、转单扣的钱,
+  /// 送到这单的人完成时拿到(服务端 services/rider_transfer)
+  final int transferBonusCents;
   final String? scheduledAt; // 预约送达时间(空 = 尽快送)
   final String? etaAt;       // 预计送达时间(送达超时 15 分钟推一条致歉,不发券)
   /// 骑手到店时刻(空 = 还没标记)。等餐时长 = 取餐 − 到店,申诉的证据
