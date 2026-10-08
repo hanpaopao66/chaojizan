@@ -1294,6 +1294,72 @@ class RiderProfile {
   bool get isApproved => status == 'approved';
 }
 
+/// 骑手人脸核验状态(防代送)。
+///
+/// 实名(二要素)只证明身份真实,证明不了拿手机的是不是本人;所以实名之后
+/// 还要做一次人脸核验,在线期间每隔 [intervalHours] 小时复核。过期了
+/// **不能接新单**,手上的单照常送完。
+class RiderFaceStatus {
+  RiderFaceStatus.fromJson(Map<String, dynamic> json)
+      : required = json['required'] as bool? ?? true,
+        intervalHours = (json['interval_hours'] as num?)?.toDouble() ?? 4,
+        consented = json['consented'] as bool? ?? false,
+        enrolled = json['enrolled'] as bool? ?? false,
+        expiresAt = DateTime.tryParse('${json['expires_at'] ?? ''}')?.toLocal(),
+        due = json['due'] as String? ?? '',
+        passed = json['passed'] as bool?,
+        reason = json['reason'] as String? ?? '';
+
+  /// 平台是否要求人脸核验(运营可整体关掉)
+  final bool required;
+  final double intervalHours;
+
+  /// 骑手单独同意过人脸核验没有。没同意过,发起时要先让他勾选
+  final bool consented;
+
+  /// 做过首次核验没有
+  final bool enrolled;
+
+  /// 这次核验管到什么时候;空 = 还没做过
+  final DateTime? expiresAt;
+
+  /// 空串 = 不用做;enroll = 从没做过;expired = 过了有效期
+  final String due;
+
+  /// 只有 /face/finish 的返回里有:这次过没过、没过的原因
+  final bool? passed;
+  final String reason;
+
+  /// 按本机时间算还要不要做 —— 客户端拿 [expiresAt] 本地倒计时,不轮询服务端
+  bool dueAt(DateTime now) {
+    if (!required) return false;
+    if (due.isNotEmpty) return true;
+    final e = expiresAt;
+    return e == null || !now.isBefore(e);
+  }
+}
+
+/// 一次人脸核验:服务端发起后给客户端的东西。
+///
+/// [verifyUrl] 非空 = 服务商走 H5,打开它做活体;都为空 = 开发环境的假实现,
+/// 直接调 finish 就行。结果**一律以服务端去服务商那里查的为准**。
+class RiderFaceSession {
+  RiderFaceSession.fromJson(Map<String, dynamic> json)
+      : checkId = json['check_id'] as int,
+        purpose = json['purpose'] as String? ?? '',
+        provider = json['provider'] as String? ?? '',
+        verifyUrl = json['verify_url'] as String? ?? '',
+        clientToken = json['client_token'] as String? ?? '';
+
+  final int checkId;
+
+  /// enroll = 首次(与公安库比对);periodic = 定时复核
+  final String purpose;
+  final String provider;
+  final String verifyUrl;
+  final String clientToken;
+}
+
 class Wallet {
   Wallet.fromJson(Map<String, dynamic> json)
       : balanceCents = json['balance_cents'] as int,

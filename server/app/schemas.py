@@ -1533,6 +1533,12 @@ class RiderProfileOut(BaseModel):
     reject_reason: str = ""
     #: 是否经过二要素核验(区别于历史的人工审核路径)
     id_verified: bool = False
+    #: 做过首次人脸核验没有
+    face_enrolled: bool = False
+    #: 最近一次人脸核验通过的时刻,和这次核验管到什么时候。
+    #: 过了 face_expires_at 不能接新单(手上的单照常送完)
+    face_verified_at: datetime | None = None
+    face_expires_at: datetime | None = None
     #: **本市**是否要求健康证。国家层面不要求(送餐员不属于"直接接触
     #: 入口食品的人员",四川已取消),只有查证过本地有规章的城市才为 true
     health_cert_required: bool = False

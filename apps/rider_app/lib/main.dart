@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'alert_prefs.dart';
 import 'dispatch_spec_page.dart';
+import 'face_check_page.dart';
 import 'hall_widgets.dart';
 import 'hardship_sheet.dart';
 import 'location_service.dart';
@@ -535,6 +536,62 @@ class _RiderHomePageState extends State<RiderHomePage>
       final p = await widget.api.riderProfile();
       if (mounted) setState(() => _verify = p);
     } catch (_) {} // 拉不到状态不挡首页,上线/抢单时服务端仍会兜底校验
+    _loadFace();
+  }
+
+  // ---------- 人脸核验(防代送,在线期间定时复核) ----------
+  //
+  // 有效期在本地按 expiresAt 倒计时(5 秒一次的刷新顺带重画横幅),
+  // 不为它单独轮询服务端。真正的卡点在服务端:过期了上线/抢单会被 403,
+  // 那时 [_ensureFace] 直接拉起核验页。
+  RiderFaceStatus? _face;
+
+  Future<void> _loadFace() async {
+    try {
+      final f = await widget.api.riderFaceStatus();
+      if (mounted) setState(() => _face = f);
+    } catch (_) {} // 拉不到不挡首页,服务端兜底
+  }
+
+  /// 拉起人脸核验页。返回 true = 这次通过了
+  Future<bool> _ensureFace() async {
+    final ok = await FaceCheckPage.open(context, widget.api);
+    await _loadFace();
+    return ok;
+  }
+
+  /// 在线时的人脸核验横幅:已过期 → 说清楚不能接新单但手上的单照送;
+  /// 15 分钟内到期 → 提前提醒,别等抢单时才被拦
+  Widget? _faceBanner() {
+    final f = _face;
+    if (!_online || f == null || !f.required) return null;
+    final sz = Theme.of(context).sz;
+    final now = DateTime.now();
+    final String text;
+    final Color color;
+    if (f.dueAt(now)) {
+      (text, color) = ('人脸核验已过期,复核后才能接新单(手上的单照常送) · 去复核', sz.danger);
+    } else {
+      final left = f.expiresAt!.difference(now).inMinutes;
+      if (left >= 15) return null;
+      (text, color) = ('人脸核验 ${left < 1 ? 1 : left} 分钟后到期 · 点这里提前复核', sz.clay);
+    }
+    return InkWell(
+      onTap: _ensureFace,
+      child: Container(
+        width: double.infinity,
+        color: color.withValues(alpha: 0.10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(children: [
+          Icon(Icons.face_retouching_natural, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+              child: Text(text,
+                  style: TextStyle(color: color, fontSize: kFontBody,
+                      fontWeight: FontWeight.w600))),
+        ]),
+      ),
+    );
   }
 
   /// 跑单动作前置校验:未认证弹窗引导,审核中提示等待。返回 true = 放行
@@ -611,6 +668,11 @@ class _RiderHomePageState extends State<RiderHomePage>
       res = await widget.api.setOnline(value);
     } catch (e) {
       if (!mounted) return;
+      if (e is ApiException && e.faceCheckRequired) {
+        // 没做过 / 过期了:直接拉起核验页,过了就接着上线,不让他自己去找入口
+        if (await _ensureFace() && mounted) _toggleOnline(value);
+        return;
+      }
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(e.toString())));
       return;
@@ -740,6 +802,15 @@ class _RiderHomePageState extends State<RiderHomePage>
       });
     } catch (e) {
       if (!mounted) return;
+      if (e is ApiException && e.faceCheckRequired) {
+        // 人脸核验到期:拉起复核,过了就替他把这一单再抢一次
+        setState(() {
+          _grabbing.remove(order.orderNo);
+          if (fromOffer) _offer = null;
+        });
+        if (await _ensureFace() && mounted) await _grab(order);
+        return;
+      }
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('$e')));
       setState(() {
@@ -2336,7 +2407,7 @@ class _RiderHomePageState extends State<RiderHomePage>
 
   @override
   Widget build(BuildContext context) {
-    final banner = _verifyBanner();
+    final banner = _verifyBanner() ?? _faceBanner();
     final gpsBanner = _gpsBanner();
     // 首次就没拉到:**整页错误态**,绝不能让它长得像"今天没单"。
     // 有过一次成功就退回顶部横条 —— 旧列表还能看,别把能用的也拿走

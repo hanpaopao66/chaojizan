@@ -40,6 +40,7 @@ from ..schemas import (
     RejectIn,
 )
 from ..security import require_role
+from ..services import facecheck
 from ..services.admin_audit import log_admin_action
 
 router = APIRouter(prefix="/admin", tags=["管理后台"])
@@ -900,6 +901,9 @@ def _rider_profile_out(p: RiderProfile, rider: User) -> AdminRiderProfileOut:
         status=p.status,
         reject_reason=p.reject_reason,
         id_verified=p.id_verified_at is not None,
+        face_enrolled=p.face_enrolled_at is not None,
+        face_verified_at=p.face_verified_at,
+        face_expires_at=facecheck.expires_at(p.face_verified_at),
     )
     out.rider_phone = rider.dial_phone
     out.created_at = p.created_at
