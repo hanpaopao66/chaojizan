@@ -8,10 +8,37 @@ import time
 from sqlalchemy import text
 
 from app.db import SessionLocal, engine
-from tests.util import call, login
+from tests.util import CUSTOMER, DEMO_SHOP_ID, MERCHANT, call, login, orderable_dish
 
 rider = login("13800000003")
 admin = login("13800000000")
+
+
+def top_up_rider(target_cents):
+    """下面要提 3 笔 ¥10,演示骑手余额不够就自己跑单挣(带小费,全归骑手)。
+
+    余额取决于同组里排在前面的套件 —— 分组一变(加了套件就会变)这里就可能不够。
+    """
+    customer, merchant = login(CUSTOMER), login(MERCHANT)
+    while call("GET", "/riders/wallet", rider)["balance_cents"] < target_cents:
+        dishes = call("GET", f"/merchants/{DEMO_SHOP_ID}/dishes")
+        dish = orderable_dish(dishes)
+        order = call("POST", "/orders", customer, {
+            "merchant_id": DEMO_SHOP_ID,
+            "items": [{"dish_id": dish["id"], "quantity": 1}],
+            "address": "提现测试地址", "lat": 30.66, "lng": 104.08,
+            "tip_cents": 5000})
+        no = order["order_no"]
+        call("POST", f"/orders/{no}/pay/mock", customer)
+        call("POST", f"/orders/{no}/transition", merchant, {"to_status": "accepted"})
+        call("POST", f"/riders/grab/{no}", rider)
+        call("POST", f"/orders/{no}/transition", merchant, {"to_status": "ready"})
+        call("POST", f"/orders/{no}/transition", rider, {"to_status": "picked_up"})
+        call("POST", f"/orders/{no}/transition", rider, {"to_status": "delivered"})
+        call("POST", f"/orders/{no}/transition", customer, {"to_status": "completed"})
+
+
+top_up_rider(3000)
 
 # 新注册骑手:未登记账户 → 提现 422(先于余额校验,引导先设置)
 phone = f"139{int(time.time()) % 100000000:08d}"
