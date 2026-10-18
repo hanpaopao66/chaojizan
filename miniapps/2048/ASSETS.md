@@ -1,0 +1,27 @@
+# 2048 的素材来源
+
+**没有任何外部素材。** 仓库里没有图片、字体、音频文件,构建产物里也没有:
+
+- 方块与棋盘是 DOM + CSS transform 画的,颜色全部来自 CSS 变量;
+- 音效:没有音效;BGM 为 0;
+- 字体:系统字体栈(苹方 / Noto Sans CJK / system-ui),不下载、不打包任何字体;
+- 网络:运行时没有任何 `fetch` / `XMLHttpRequest` / 外部 CDN 请求;规则与存档都在本地算。
+
+## 原创性
+
+规则、界面、配色、文案都是为超级赞原创的;没有使用任何商业游戏的名称、素材、角色或界面。
+
+## 怎么核对
+
+```sh
+# 1. 仓库里没有任何二进制素材(只应有 index.html / superz.json / dist / src / test)
+find miniapps/2048 -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.webp' \
+  -o -name '*.mp3' -o -name '*.wav' -o -name '*.ogg' -o -name '*.m4a' -o -name '*.woff*' -o -name '*.ttf' \) \
+  -not -path '*/dist/*'
+
+# 2. 源码里没有外部请求 / 内联脚本 / eval
+grep -rn 'http://\|https://\|fetch(\|XMLHttpRequest\|eval(' miniapps/2048/src miniapps/2048/index.html
+
+# 3. 构建产物只有 index.html、superz.json、assets/*.js、assets/*.css
+unzip -l miniapps/2048/dist/2048.zip
+```
