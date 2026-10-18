@@ -123,8 +123,8 @@ id 是毫秒时间戳的 36 进制 + 4 位随机,按时间可排序。删除先�
 | 突击时刻 | `src/map.ts`、`src/match.ts`、`src/nav.ts` | 地图/视线/命中/回合状态机/寻路都是纯数据,AI 决策固定种子可复现 |
 
 三款都只把游戏进度/战绩存进云存储,没有广告、内购、排行榜,不申请敏感能力;构建产物可用
-`bash scripts/build_miniapp.sh <app>` 复现 SHA-256。它们**已构建、未上架**(小游戏版号结论待答复,
-见 [MINIAPP-COMPLIANCE.md](../MINIAPP-COMPLIANCE.md) 第 7 条)。
+`bash scripts/build_miniapp.sh <app>` 复现 SHA-256。它们已于 2026-10-18 上架(运营方知情后的决定;
+小游戏版号/防沉迷结论仍待答复,见 [MINIAPP-COMPLIANCE.md](../MINIAPP-COMPLIANCE.md) 第 7 条)。
 
 ## 最小模板(`miniapps/_template/`)
 

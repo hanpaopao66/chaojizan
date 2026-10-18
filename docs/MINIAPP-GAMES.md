@@ -11,9 +11,18 @@
 三款都遵守平台既有边界:**免费、无内购、无广告、无排行榜、单机、不申请敏感能力**;
 数据只存超级赞云存储(隐私政策逐款写清),美术全部程序化生成或内联 SVG,CSP 里没有外部请求。
 
-> **上架状态(2026-10-18):三款都已构建、测试、浏览器验收完成,但尚未上架。**
-> 小游戏版号/防沉迷的结论还没回来(见 [MINIAPP-COMPLIANCE.md](MINIAPP-COMPLIANCE.md) 第 7 条),
-> 「再上新游戏同样先问运营方」——是否上架等运营方拍板。上线步骤见文末。
+> **上架状态(2026-10-18):已上架。** 三款构建、测试、浏览器验收完成后,经运营方确认,
+> 于 2026-10-18 14:53 UTC 通过 `server/scripts/publish_official_miniapp.py` 发布到线上目录:
+>
+> | 游戏 | appid | 版本 | 线上 SHA-256 |
+> |---|---|---|---|
+> | 方块原野 | `szb330306ad8f1a66e` | 1.0.0(build 1) | `ddc815a34a104aaabb7fa44ae829323ac291ff936e0420f88c857f0cbecf3eb7` |
+> | 星火牌局 | `sza3fca964d43cc0e9` | 1.0.0(build 1) | `d3959834707e77a6fc02264917a2ae10cac61d9d4c2fb550ee4d9c140883c0e2` |
+> | 突击时刻 | `szd03584f00c9cc310` | 1.0.0(build 1) | `0042be34fe42005b414ac4e1971382ea034ad63ea26bf1558607a318b957899d` |
+>
+> 当天把三个新 appid 签进了托管证书(`deploy/mp-cert.sh`,证书覆盖 12 个域名)。小游戏版号/防沉迷的
+> 结论**仍未回来**(见 [MINIAPP-COMPLIANCE.md](MINIAPP-COMPLIANCE.md) 第 7 条)—— 这次上架是运营方
+> 知情后的决定,和前 6 款游戏同样口径;代码里没有支付和广告能力。
 
 ## 一览
 
@@ -129,6 +138,13 @@ QA 记录(2026-10-18,Lead 独立复核,不依赖各游戏自己的脚本):
 `errors=[]`, `warnings=[]`,包内只有 `index.html`、`superz.json`、`assets/*.js`、`assets/*.css`。
 三款连续构建两次 SHA 一致(可复现)。
 
+上架后线上复核(2026-10-18):
+
+- 匿名 `GET /mini-apps/catalog` 能看到三款,`is_official=true`,首次上架时间都是 2026-10-18;
+- 详情页 `GET /mini-apps/<appid>` 返回 200;
+- 托管页 `https://<appid>.mp.chaojizan.cc/v/<version_id>/index.html` 返回 200,带 CSP 与
+  `X-Content-Type-Options: nosniff`;三个新 appid 的 TLS 证书都校验通过(`mp.chaojizan.cc` 多域名证书)。
+
 ### 上线前独立审查(2026-10-18)
 
 三款做完后另起了一个只读审查 agent 逐文件过了一遍,抓到并修掉了几个真问题 —— 记在这里,因为
@@ -152,7 +168,7 @@ QA 记录(2026-10-18,Lead 独立复核,不依赖各游戏自己的脚本):
 - 首批官方小程序与开放平台的规范:[DEV-PROMPTS-39.md](DEV-PROMPTS-39.md)(#320–#338);
 - 小游戏版号与防沉迷的问题:[MINIAPP-COMPLIANCE.md](MINIAPP-COMPLIANCE.md) 第 7 条;
 - 托管、发布、证书:[MINIAPP-ROLLOUT.md](MINIAPP-ROLLOUT.md);
-- 上架步骤(改生产数据前要征得同意):
+- 改版重新发布的步骤(三款已于 2026-10-18 首发上架;以后改版按这个来,改生产数据前要征得同意):
 
   ```bash
   # 1. 构建,拿到本地 SHA-256(和详情页要公示的一致)
