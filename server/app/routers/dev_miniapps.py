@@ -5,6 +5,7 @@
 
 认证前能做的:建应用、传开发版、设体验版、加体验者、用模拟器。认证后才能提交审核(#329)。
 """
+import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
@@ -43,6 +44,8 @@ from .mini_apps import bridge_error, run_storage
 
 router = APIRouter(prefix="/dev/v1", tags=["小程序开发者"])
 AppId = Path(pattern=APPID_PATTERN)
+
+logger = logging.getLogger("superz.miniapp.dev")
 
 #: 非官方应用的名称里不许出现的字样(仿冒平台,R501)
 RESERVED_NAME_WORDS = ("超级赞", "官方", "客服", "支付", "钱包", "SuperZ", "superz")
@@ -189,6 +192,31 @@ async def _me(db: AsyncSession, c: Ctx) -> dict:
     }
 
 
+async def _submit_manual_identity_review(db: AsyncSession, c: Ctx,
+                                         real_name: str, id_no: str) -> dict:
+    """二要素核验没接入时,个人实名转管理后台人工审核。
+
+    **不是放行**:状态进 pending,pending 期间照样不能提交审核;
+    管理后台「开发者认证 · 待审核」里能看到这条,审核通过才变 verified。
+    真名、证号照旧只存密文,接口只回尾号 —— 和机器核验走的是同一套落库。
+    """
+    dev = c.dev
+    _transition("developer", dev.status, "pending")
+    dev.status = "pending"
+    dev.kind = "individual"
+    dev.real_name_enc = encrypt(real_name)
+    dev.id_no_enc = encrypt(id_no)
+    dev.id_no_tail = id_no[-4:]
+    dev.submitted_at = now()
+    dev.reject_reason = ""
+    await record_decision(db, target_type="developer", target_id=dev.id,
+                          action="verify_submit", developer_id=dev.id,
+                          note_internal="实名核验服务未配置,转人工审核")
+    await db.commit()
+    logger.warning("实名核验服务未配置,开发者个人实名转人工审核 developer=%s", dev.id)
+    return await _me(db, c)
+
+
 @router.get("/me")
 async def me(c: Ctx = Depends(ctx), db: AsyncSession = Depends(get_db)):
     return await _me(db, c)
@@ -213,9 +241,17 @@ async def verify_individual(body: DevVerifyIndividualIn, c: Ctx = Depends(ctx),
                             db: AsyncSession = Depends(get_db)):
     """个人实名:本地校验证号 + 满 18 岁 + 三方二要素(配置后)。通过即认证。
 
+    机器核验没接入(idcheck_* 未配置)时不把人挡在 503 后面:本地格式 / 校验位 /
+    年龄都过了就**转人工审核**,进管理后台「开发者认证 · 待审核」队列。
+    **不是放行** —— pending 期间照样不能提交审核,管理员看过才变 verified。
+
+    机器核验**服务不可用**(配了但调不通)仍然 503:那是临时故障,等一会儿重试即可,
+    和「平台还没接核验服务」不是一回事。
+
     真名、证号只存密文,接口只回尾号;公开页只显示你自取的开发者名 +「个人开发者 · 已实名」。
     """
-    from ..services.idcheck import is_adult, validate_id_no, verify_two_elements
+    from ..services.idcheck import (IdcheckNotConfigured, is_adult, validate_id_no,
+                                    verify_two_elements)
 
     dev = c.dev
     if dev.status not in ("unverified", "rejected"):
@@ -229,6 +265,8 @@ async def verify_individual(body: DevVerifyIndividualIn, c: Ctx = Depends(ctx),
         raise HTTPException(422, "开发者须年满 18 周岁")
     try:
         ok = await verify_two_elements(body.real_name.strip(), id_no)
+    except IdcheckNotConfigured:
+        return await _submit_manual_identity_review(db, c, body.real_name.strip(), id_no)
     except RuntimeError as exc:
         raise HTTPException(503, f"{exc},请稍后再试") from exc
     if not ok:

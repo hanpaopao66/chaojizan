@@ -3,6 +3,11 @@
 照支付桩模式:idcheck_* 未配置时走「开发模式」——18 位格式、出生日期
 合法性、GB 11643-1999 校验位都真实校验,通过即算实名;配置后再调
 三方 API 核验「姓名与证号是否一致」。年龄判定统一从证号解析生日计算。
+
+**未配置 ≠ 放行**:生产上没配就抛 `IdcheckNotConfigured`,由调用方决定
+怎么降级 —— 骑手 / 用户实名仍然 503 不放行;开发者个人实名转人工审核
+(见 routers/dev_miniapps.py)。三方服务挂了抛 `IdcheckUnavailable`,
+那是临时故障,调用方给「请稍后再试」。
 """
 import logging
 from datetime import date, datetime, timedelta, timezone
@@ -12,6 +17,16 @@ import httpx
 from ..config import settings
 
 logger = logging.getLogger("superz.idcheck")
+
+
+class IdcheckNotConfigured(RuntimeError):
+    """三方二要素核验没配置。**不是服务故障** —— 等一会儿也不会好,
+    只能人工审核(开发者)或者暂时不做这项业务(骑手 / 用户)。"""
+
+
+class IdcheckUnavailable(RuntimeError):
+    """三方二要素核验暂时不可用(网络 / 上游异常)。可以稍后重试。"""
+
 
 # GB 11643-1999:前 17 位加权求和模 11 查表得校验位
 _WEIGHTS = (7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2)
@@ -61,11 +76,11 @@ async def verify_two_elements(real_name: str, id_no: str) -> bool:
     也是「提现户名必须与实名一致」那道闸的基准 —— 实名能随便填,
     那道闸等于绕过。
 
-    配置后调三方 API,服务异常抛 RuntimeError(调用方给中文降级提示)。
+    配置后调三方 API,服务异常抛 `IdcheckUnavailable`(调用方给中文降级提示)。
     """
     if not settings.idcheck_configured:
         if not settings.is_dev:
-            raise RuntimeError("实名核验服务未配置")
+            raise IdcheckNotConfigured("实名核验服务未配置")
         return True
     try:
         async with httpx.AsyncClient(timeout=8) as client:
@@ -83,4 +98,4 @@ async def verify_two_elements(real_name: str, id_no: str) -> bool:
         return result in ("01", "1", "match", "true")
     except httpx.HTTPError as exc:
         logger.warning("二要素核验服务异常: %s", exc)
-        raise RuntimeError("实名核验服务暂时不可用") from exc
+        raise IdcheckUnavailable("实名核验服务暂时不可用") from exc

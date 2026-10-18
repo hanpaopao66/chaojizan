@@ -52,7 +52,18 @@ assert good not in str(me) and "张三丰" not in str(me), "证号、真名不�
 assert me["real_name_masked"] == "张**" and me["public"]["label"] == "个人开发者 · 已实名"
 assert "张三丰" not in str(call("GET", "/admin/mini-apps/developers", adm)), \
     "后台列表里也只有遮住的真名"
-print("✓ 个人认证:校验位、18 岁、只存密文只回尾号;公开只显示「个人开发者 · 已实名」")
+
+# 人工审核要看完整实名信息时走单独的 reveal:理由必填,返回完整信息,但列表仍只有遮住的真名
+dev_id = me["id"]
+r = call("POST", f"/admin/mini-apps/developers/{dev_id}/identity", adm,
+         {"reason": ""}, expect_error=True)
+assert r["_error"] == 422, "查看实名信息必须写理由 —— 空理由的留痕等于没留"
+r = call("POST", f"/admin/mini-apps/developers/{dev_id}/identity", adm,
+         {"reason": "人工审核个人实名"})
+assert r["real_name"] == "张三丰" and r["id_no"] == good and r["audited"] is True
+assert "张三丰" not in str(call("GET", "/admin/mini-apps/developers", adm)), \
+    "查看实名信息不能把后台列表变成第二份明文"
+print("✓ 个人认证:校验位、18 岁、只存密文只回尾号;管理端查看实名信息必须写理由、列表仍打码")
 
 # ---- 企业认证:人工 驳回 → 重新提交 → 通过 ----
 cdev, _ = developer(verified=False)

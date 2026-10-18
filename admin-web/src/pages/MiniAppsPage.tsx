@@ -186,9 +186,44 @@ function Developers({ onChanged }: { onChanged: () => void }) {
     let reason = ''
     Modal.confirm({
       title: approve ? `通过「${d.company_name || d.display_name}」的认证?` : '驳回认证',
-      content: approve ? null : <Input.TextArea rows={2} placeholder="驳回原因(开发者看得到)" onChange={(e) => { reason = e.target.value }} />,
+      content: approve
+        ? (d.identity_review ? <Typography.Text type="warning">这是转人工审核的个人实名,建议先用「查看实名信息」核对再通过。</Typography.Text> : null)
+        : <Input.TextArea rows={2} placeholder="驳回原因(开发者看得到)" onChange={(e) => { reason = e.target.value }} />,
       onOk: async () => {
         try { await post(`/admin/mini-apps/developers/${d.id}/verify`, { approve, reason }); load(); onChanged() } catch (e) { fail(e); throw e }
+      },
+    })
+  }
+  /**
+   * 个人实名转人工审核时,后台需要看到完整姓名和证号才能判断。
+   * 单独一个 POST、必须写理由、每次留痕 —— 和进件资料的 reveal 同一条规矩;
+   * 审计里只有尾号,列表里也还是遮住的。
+   */
+  function revealIdentity(d: any) {
+    let reason = ''
+    Modal.confirm({
+      title: `查看「${d.display_name}」的实名信息`,
+      content: (
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Typography.Text type="warning">姓名与完整身份证号会解密显示。每次查看都写进审计,审计里只记尾号和理由。</Typography.Text>
+          <Input.TextArea rows={2} maxLength={200} placeholder="查看理由(必填,会写进审计)"
+            onChange={(e) => { reason = e.target.value }} />
+        </Space>
+      ),
+      okText: '查看',
+      onOk: async () => {
+        try {
+          const r = await post<{ real_name: string; id_no: string }>(`/admin/mini-apps/developers/${d.id}/identity`, { reason })
+          Modal.info({
+            title: '实名信息',
+            content: (
+              <Descriptions column={1} size="small" bordered style={{ marginTop: 8 }}>
+                <Descriptions.Item label="姓名">{r.real_name}</Descriptions.Item>
+                <Descriptions.Item label="身份证号">{r.id_no}</Descriptions.Item>
+              </Descriptions>
+            ),
+          })
+        } catch (e) { fail(e); throw e }
       },
     })
   }
@@ -198,9 +233,26 @@ function Developers({ onChanged }: { onChanged: () => void }) {
         options={[{ value: 'pending', label: '待审核' }, { value: 'verified', label: '已认证' }, { value: 'rejected', label: '未通过' }, { value: 'suspended', label: '已暂停' }]} />
       <Table rowKey="id" size="small" dataSource={rows} locale={{ emptyText: '没有' }}
         columns={[
-          { title: '类型', render: (_, d) => (d.kind === 'company' ? '企业' : '个人') },
+          {
+            title: '类型',
+            render: (_, d) => (
+              <Space size={4} wrap>
+                {d.kind === 'company' ? '企业' : '个人'}
+                {d.identity_review && <Tag color="processing">实名待人工核验</Tag>}
+              </Space>
+            ),
+          },
           { title: '名称', render: (_, d) => d.company_name || d.display_name },
-          { title: '统一社会信用代码 / 实名', render: (_, d) => d.uscc || (d.real_name_masked ? `${d.real_name_masked}(尾号 ${d.id_no_tail})` : '—') },
+          {
+            title: '统一社会信用代码 / 实名',
+            render: (_, d) => d.uscc || (d.real_name_masked ? (
+              <Space size={8}>
+                <span>{d.real_name_masked}(尾号 {d.id_no_tail})</span>
+                {/* 只有转人工审核的个人实名才给入口:机器核过的不用看证件,少一次解密少一个泄露面 */}
+                {d.identity_review && <a onClick={() => revealIdentity(d)}>查看实名信息</a>}
+              </Space>
+            ) : '—'),
+          },
           { title: '营业执照', render: (_, d) => (d.license_key ? <a href={d.license_key} target="_blank" rel="noreferrer">查看</a> : '—') },
           { title: '联系人', render: (_, d) => `${d.contact_name || '—'} ${d.contact_email || ''}` },
           { title: '提交', render: (_, d) => t(d.submitted_at) },

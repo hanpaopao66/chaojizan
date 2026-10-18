@@ -14,6 +14,8 @@ function err(e: unknown) {
  * 账号与认证(#329):开发者名、个人实名 / 企业认证、接受开发者规则,以及 AI 助手(MCP)令牌。
  *
  * 个人:姓名 + 身份证号(机器核验,须满 18 岁),**只存密文、页面只显示尾号**;
+ * 平台核验服务没接入时提交后转**人工审核**(和企业的营业执照走同一个待审队列),
+ * 不会出现「服务未配置,请稍后再试」那种连申请入口都没有的状态。
  * 公开页只显示你自取的开发者名 +「个人开发者 · 已实名」。企业:营业执照 + 统一社会信用代码,人工审核,企业名公开。
  */
 export default function AccountPage({ me, onChanged, reload }: { me: Me | null; onChanged: (m: Me) => void; reload: () => void }) {
@@ -25,11 +27,12 @@ export default function AccountPage({ me, onChanged, reload }: { me: Me | null; 
   useEffect(() => { api.rules().then(setRules).catch(() => undefined) }, [])
   if (!me) return null
 
-  const run = async (fn: () => Promise<Me>, ok: string) => {
+  const run = async (fn: () => Promise<Me>, ok: string | ((m: Me) => string)) => {
     setBusy(true)
     try {
-      onChanged(await fn())
-      message.success(ok)
+      const m = await fn()
+      onChanged(m)
+      message.success(typeof ok === 'string' ? ok : ok(m))
     } catch (e) {
       message.error(e instanceof ApiError ? e.message : String(e))
     } finally {
@@ -62,7 +65,11 @@ export default function AccountPage({ me, onChanged, reload }: { me: Me | null; 
             {me.kind === 'company' && <Descriptions.Item label="企业">{me.company_name}({me.uscc})</Descriptions.Item>}
           </Descriptions>
         )}
-        {me.status === 'pending' && <Alert type="info" showIcon message="企业认证审核中" description="审核结果会出现在「消息」里。平台不承诺具体时限,审核时长的中位数在透明中心公示。" />}
+        {me.status === 'pending' && (
+          <Alert type="info" showIcon
+            message={me.kind === 'individual' ? '实名认证审核中' : '企业认证审核中'}
+            description="审核结果会出现在「消息」里。平台不承诺具体时限,审核时长的中位数在透明中心公示。" />
+        )}
         {me.status === 'rejected' && <Alert type="error" showIcon style={{ marginBottom: 12 }} message="认证没有通过" description={me.reject_reason} />}
         {canVerify && (
           <>
@@ -74,10 +81,13 @@ export default function AccountPage({ me, onChanged, reload }: { me: Me | null; 
               <Radio.Button value="company">企业</Radio.Button>
             </Radio.Group>
             {kind === 'individual' ? (
-              <Form layout="vertical" disabled={busy} onFinish={(v) => run(() => api.verifyIndividual(v), '实名核验通过')}>
+              <Form layout="vertical" disabled={busy}
+                onFinish={(v) => run(() => api.verifyIndividual(v), (m) => m.status === 'pending'
+                  ? '已提交人工审核,审核结果会出现在「消息」里'
+                  : '实名核验通过')}>
                 <Form.Item name="real_name" label="真实姓名" rules={[{ required: true, min: 2 }]}><Input /></Form.Item>
                 <Form.Item name="id_no" label="身份证号" rules={[{ required: true, len: 18 }]}
-                  extra="须年满 18 周岁。只存密文,页面只显示尾号;真名不会公开。"><Input /></Form.Item>
+                  extra="须年满 18 周岁。只存密文,页面只显示尾号;真名不会公开。平台核验服务未接入时,提交后转人工审核。"><Input /></Form.Item>
                 <Button type="primary" htmlType="submit">提交核验</Button>
               </Form>
             ) : (

@@ -10,6 +10,7 @@ admin_action_logs(平台内部复盘)。note_internal 只在这里看得到。
 - 申诉成立 = 撤销原结论。这是唯一允许从「驳回」「移除」这类终态回来的路径,
   不走正常的状态迁移表,改判的每一步都写进记录。
 """
+import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
@@ -19,9 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..models import (Developer, DeveloperInvite, MiniApp, MiniAppCapability, MiniAppCuration,
                       MiniAppDecision, MiniAppReport, MiniAppVersion, PlatformFlag, User)
-from ..schemas_miniapp import (AppealResolveIn, CapabilityDecisionIn, CurationIn, InviteIn,
-                               LaunchIn, PunishIn, ReportHandleIn, VerifyDecisionIn,
-                               VersionDecisionIn)
+from ..schemas_miniapp import (AppealResolveIn, CapabilityDecisionIn, CurationIn,
+                               DeveloperIdentityRevealIn, InviteIn, LaunchIn, PunishIn,
+                               ReportHandleIn, VerifyDecisionIn, VersionDecisionIn)
 from ..security import require_role
 from ..services import miniapp_publish as pub
 from ..services.admin_audit import log_admin_action
@@ -38,6 +39,8 @@ from .dev_miniapps import ACTION_LABELS, sim_payload, version_dev
 
 router = APIRouter(prefix="/admin/mini-apps", tags=["小程序治理"])
 AppId = Path(pattern=APPID_PATTERN)
+
+logger = logging.getLogger("superz.miniapp.admin")
 
 
 def _transition(machine: str, cur: str, target: str) -> None:
@@ -149,12 +152,17 @@ def developer_admin(d: Developer) -> dict:
         "id": d.id, "user_id": d.user_id, "kind": d.kind, "display_name": d.display_name,
         "status": d.status, "status_label": LABELS.get(d.status, d.status),
         "public": developer_card(d),
-        # 审核也只看到遮住的真名和证号尾号:企业认证不需要个人证件,个人认证是机器核的
+        # 列表里只出现遮住的真名和证号尾号。完整实名信息是敏感数据,
+        # 要单独走 POST …/identity(必须是显式动作,每次留痕)。
         "real_name_masked": (real[0] + "*" * (len(real) - 1)) if real else "",
         "id_no_tail": d.id_no_tail, "company_name": d.company_name, "uscc": d.uscc,
         "license_key": d.license_key, "contact_name": d.contact_name,
         "contact_email": d.contact_email, "reject_reason": d.reject_reason,
         "is_official": d.is_official,
+        # 个人实名核验服务没接入时,提交会转人工审核(pending + 有密文实名信息)。
+        # 前端据此在列表里标出来,并给出「查看实名信息」的入口。
+        "identity_review": (d.status == "pending" and d.kind == "individual"
+                            and bool(d.real_name_enc)),
         "submitted_at": d.submitted_at.isoformat() if d.submitted_at else None,
         "verified_at": d.verified_at.isoformat() if d.verified_at else None,
     }
@@ -170,6 +178,53 @@ async def list_developers(status: str | None = Query(default=None, max_length=16
     return {"items": [developer_admin(d) for d in (await db.execute(stmt.limit(300))).scalars()]}
 
 
+@router.post("/developers/{developer_id}/identity")
+async def reveal_developer_identity(developer_id: int, body: DeveloperIdentityRevealIn,
+                                    admin: User = Depends(require_role("admin")),
+                                    db: AsyncSession = Depends(get_db)):
+    """人工审核个人实名:解密查看完整姓名与证号。**每次查看都留痕。**
+
+    和进件资料的 reveal 是同一条规矩(admin.py 的 applyment_reveal):
+
+    - 单独一个 POST,不是列表/详情顺手带出来 —— 一个后台列表不该批量吐出证件号;
+    - POST 而不是 GET:它有副作用(写审计),证件号也不该出现在 URL 里
+      (URL 会进 access log、浏览器历史和中间件埋点);
+    - **先落审计再返回**:哪怕响应在路上丢了,"有人看过"也已经记下了;
+    - 审计里只记尾号与理由,不记明文 —— 留痕不能变成第二个泄露点。
+
+    这个入口是给「核验服务没接入、个人实名转人工」用的;机器核验通过的
+    开发者不需要看证件。查看本身不影响审核状态。
+    """
+    from ..models import AppEvent
+
+    d = await db.get(Developer, developer_id)
+    if d is None:
+        raise HTTPException(404, "开发者不存在")
+    if not d.real_name_enc or not d.id_no_enc:
+        raise HTTPException(404, "这个开发者没有提交过个人实名信息")
+    reason = body.reason.strip()
+    real_name, id_no = decrypt(d.real_name_enc), decrypt(d.id_no_enc)
+    db.add(AppEvent(
+        user_id=admin.id, role="admin", event="developer_identity_reveal",
+        props={
+            "developer_id": d.id, "kind": d.kind,
+            # 只记尾号,审计记录本身不能变成第二个泄露点
+            "id_no_tail": d.id_no_tail, "reason": reason,
+            "decrypt_ok": bool(real_name and id_no),
+        },
+    ))
+    await db.commit()
+    logger.warning("开发者实名信息查看 admin=%s(%s) developer=%s reason=%s",
+                   admin.id, admin.phone, d.id, reason)
+
+    if not real_name or not id_no:
+        # 解不开 = 密钥换过或数据损坏(crypto.decrypt 明确返回空串)。
+        # 不要静默回空串让人以为「开发者没填」,说清楚是什么问题
+        raise HTTPException(409, "实名信息解密失败(加密密钥可能已变更),"
+                                 "请联系开发者重新提交认证")
+    return {"developer_id": d.id, "real_name": real_name, "id_no": id_no, "audited": True}
+
+
 @router.post("/developers/{developer_id}/verify")
 async def verify_developer(developer_id: int, body: VerifyDecisionIn,
                            admin: User = Depends(require_role("admin")),
@@ -180,6 +235,8 @@ async def verify_developer(developer_id: int, body: VerifyDecisionIn,
     target = "verified" if body.approve else "rejected"
     if not body.approve and len(body.reason.strip()) < 4:
         raise HTTPException(422, "驳回要写明原因(开发者看得到)")
+    if body.approve and d.kind == "individual" and not d.real_name_enc:
+        raise HTTPException(409, "这个开发者没有可核对的实名信息,不能直接通过")
     _transition("developer", d.status, target)
     d.status = target
     d.reviewed_by = admin.id

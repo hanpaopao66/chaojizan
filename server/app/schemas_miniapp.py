@@ -154,6 +154,13 @@ class VerifyDecisionIn(BaseModel):
     reason: str = Field(default="", max_length=300)
 
 
+class DeveloperIdentityRevealIn(BaseModel):
+    """人工审核个人实名时,解密查看完整姓名与证号。理由必填 ——
+    空理由的留痕等于没留(同 ApplymentRevealIn 的规矩)。"""
+
+    reason: str = Field(min_length=2, max_length=200)
+
+
 class VersionDecisionIn(BaseModel):
     approve: bool
     reason_code: str = Field(default="", pattern=r"^(R\d{3})?$")
