@@ -27,7 +27,7 @@ import { daylight, wrapTime } from './time'
 import { World } from './world'
 import { seedText } from './worldgen'
 
-const VERSION = '1.1.0'
+const VERSION = '1.1.1'
 const nextPaint = (): Promise<void> =>
   new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
 

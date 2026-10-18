@@ -23,7 +23,7 @@
 >
 > | 游戏 | appid | 当前版本 | 线上 SHA-256 |
 > |---|---|---|---|
-> | 方块原野 | `szb330306ad8f1a66e` | 1.1.1(build 3) | `293640d737b375ae849008c9067e3efdd519c067d8bfc4da8ed489c5119be914` |
+> | 方块原野 | `szb330306ad8f1a66e` | 1.1.1(build 4) | `c05b2ee590755fcd565fdab21db072005ec4f0ffd3435c281f468c89d0b4a149` |
 > | 星火牌局 | `sza3fca964d43cc0e9` | 1.1.1(build 3) | `664a1978ec933c9b2e818e517d379aa05072a6c102256162f8bc12ac5d739b94` |
 > | 突击时刻 | `szd03584f00c9cc310` | 1.1.1(build 3) | `31f5f2707e1a9b7703ec60bf335edc816598d3f790ee5cdce2b39af3fdb5c58a` |
 > | 瓜田防线 | `sze71c0f185ae2adc0` | 1.0.1(build 2) | `aed23cd797c6c8baca192ddd8c427f685a66c58fa7d6aaa9e69ea1ae9feef0c7` |
@@ -152,7 +152,7 @@ QA 记录(2026-10-18,Lead 独立复核):
 
 | 游戏 | 单测 | zip | SHA-256(两次构建一致) | Lead 无头浏览器 |
 |---|---|---|---|---|
-| 方块原野 | 83 / 83 | 51,785 B | `293640d737b375ae849008c9067e3efdd519c067d8bfc4da8ed489c5119be914` | 844×390 / 1280×800、亮暗、刷新续档:console error 0、外部请求 0、60fps |
+| 方块原野 | 83 / 83 | 51,785 B | `c05b2ee590755fcd565fdab21db072005ec4f0ffd3435c281f468c89d0b4a149` | 844×390 / 1280×800、亮暗、刷新续档:console error 0、外部请求 0、60fps |
 | 星火牌局 | 56 / 56 | 48,808 B | `664a1978ec933c9b2e818e517d379aa05072a6c102256162f8bc12ac5d739b94` | 390×844 / 1280×800、亮暗、减少动态:console error 0、外部请求 0、61fps |
 | 突击时刻 | 68 / 68 | 46,677 B | `31f5f2707e1a9b7703ec60bf335edc816598d3f790ee5cdce2b39af3fdb5c58a` | 844×390 / 1280×800、亮暗、触屏:console error 0、外部请求 0、60fps |
 | 瓜田防线 | 98 / 98 | 51,563 B | `aed23cd797c6c8baca192ddd8c427f685a66c58fa7d6aaa9e69ea1ae9feef0c7` | 390×844 / 1280×800、亮暗、返回键/焦点/360 宽:console error 0、外部请求 0、61fps |
