@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["cards/src", "cards/test", "shared/src", "shared/test",
+    "../packages/miniapp-sdk/src", "types.d.ts"]
+}

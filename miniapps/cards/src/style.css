@@ -1,0 +1,213 @@
+/* 星火牌局的界面:亮暗两套调色板。文字颜色走 base.css 的主题变量,牌桌自己的木头/烛火/宝石色
+   在这里定义 —— 亮色是羊皮纸牌桌,暗色是午夜的星火桌。牌面颜色按阵营分四组,都做过对比度调整。 */
+:root {
+  --p1: #F5EBD5;
+  --p2: #E4D0AC;
+  --table-a: #FBF4E3;
+  --table-b: #EFE1C3;
+  --cardbg: #FFFBF0;
+  --cardbg2: #F6ECd6;
+  --frame: #D6C098;
+  --ink2: #2A2318;
+  --muted2: #6E6250;
+  --gold: #C98A2E;
+  --gold-soft: rgba(201, 138, 46, .38);
+  --hp: #A92B22;
+  --heal: #2F7D4F;
+  --shieldc: #367FA8;
+  --energy-on: #E9A62C;
+  --energy-off: #D9CBB0;
+  --my-tint: #2F7D6E;
+  --foe-tint: #A8412F;
+  --my-haze: rgba(47, 125, 110, .12);
+  --foe-haze: rgba(168, 65, 47, .12);
+  --class-forge: #B94E2A;
+  --class-frost: #2F6F94;
+  --class-dusk: #6C4F9C;
+  --class-neutral: #7A705E;
+  --card-shadow: 0 2px 6px rgba(70, 50, 20, .16);
+  --pop-shadow: 0 10px 28px rgba(70, 50, 20, .2);
+}
+
+:root.dark {
+  --p1: #14111C;
+  --p2: #1E1830;
+  --table-a: #221C37;
+  --table-b: #161126;
+  --cardbg: #2B2442;
+  --cardbg2: #342B4E;
+  --frame: #3D3358;
+  --ink2: #F3EBDD;
+  --muted2: #A79DBD;
+  --gold: #E8B45C;
+  --gold-soft: rgba(232, 180, 92, .4);
+  --hp: #FF8A80;
+  --heal: #7BD8A4;
+  --shieldc: #7FC4E8;
+  --energy-on: #F0B95A;
+  --energy-off: #3D3358;
+  --my-tint: #6FC2B0;
+  --foe-tint: #E8825E;
+  --my-haze: rgba(111, 194, 176, .14);
+  --foe-haze: rgba(232, 130, 94, .14);
+  --class-forge: #E8825E;
+  --class-frost: #6FB2D6;
+  --class-dusk: #A98BD8;
+  --class-neutral: #B4A98F;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+  --pop-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+}
+
+body {
+  background: linear-gradient(180deg, var(--p1), var(--p2) 70%);
+  background-attachment: fixed;
+}
+
+.app { height: 100%; position: relative; }
+.art { display: inline-flex; align-items: center; justify-content: center; }
+.art svg { width: 100%; height: 100%; display: block; }
+
+/* 阵营配色:卡牌、随从、英雄头像都靠这个换颜色 */
+.cls-forge { --cc: var(--class-forge); }
+.cls-frost { --cc: var(--class-frost); }
+.cls-dusk { --cc: var(--class-dusk); }
+.cls-neutral { --cc: var(--class-neutral); }
+
+/* ---------------------------------------------------------------- 通用零件 */
+
+.ghost {
+  min-height: 2.2rem; padding: .3rem .6rem; border-radius: .55rem; font-size: .8rem; font-weight: 600;
+  color: var(--muted2); border: 1px solid var(--frame); background: var(--cardbg);
+  background: color-mix(in srgb, var(--cardbg) 70%, transparent);
+}
+.pill.small {
+  font-size: .72rem; padding: .18rem .5rem; border-radius: 999px; color: var(--muted2);
+  background: var(--cardbg); border: 1px solid var(--frame); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.spacer { flex: 1; }
+.fine { margin: .2rem 0; color: var(--muted2); font-size: .78rem; line-height: 1.45; }
+.sec { margin: .3rem 0 0; font-size: .95rem; color: var(--muted2); font-weight: 700; letter-spacing: .05em; }
+
+/* 背景里慢慢飘的星火(CSS 画的,纯装饰) */
+.sparks { position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow: hidden; pointer-events: none; }
+.sparkdot {
+  position: absolute; left: var(--x); top: var(--y); width: var(--s); height: var(--s); border-radius: 50%;
+  background: radial-gradient(circle, #FFE9B0 0 30%, rgba(255, 210, 120, .5) 60%, transparent 72%);
+  animation: spark-float var(--d) ease-in-out infinite alternate; animation-delay: var(--delay);
+}
+:root.dark .sparkdot { box-shadow: 0 0 6px rgba(255, 220, 150, .7); }
+
+.menus {
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.scr {
+  position: relative; width: 100%; max-width: 30rem; margin: 0 auto; min-height: 100%;
+  padding: calc(.5rem + var(--top)) var(--side) calc(1rem + var(--bottom));
+  display: flex; flex-direction: column; gap: .65rem;
+  animation: rise 260ms var(--std) both;
+}
+
+/* ---------------------------------------------------------------- 首页 */
+
+.topbar { display: flex; align-items: center; gap: .4rem; flex: none; }
+.brandmark {
+  font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+  font-weight: 700; font-size: .95rem; color: var(--gold); letter-spacing: .1em;
+}
+.hero-title { text-align: center; padding: 1.1rem 0 .3rem; position: relative; }
+.logo {
+  margin: 0; display: flex; justify-content: center; gap: .06em; line-height: 1.05;
+  font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+  font-size: clamp(2.7rem, 13vw, 3.7rem); font-weight: 900; letter-spacing: .06em;
+}
+.logo .l1 { color: var(--gold); text-shadow: 0 2px 0 rgba(120, 70, 10, .3), 0 0 26px var(--gold-soft); }
+.logo .l2 { color: var(--ink2); text-shadow: 0 2px 0 rgba(0, 0, 0, .16); }
+.tagline { margin: .5rem 0 0; text-align: center; color: var(--muted2); font-size: .88rem; letter-spacing: .12em; }
+.record { margin: 0; text-align: center; color: var(--muted2); font-size: .8rem; line-height: 1.5; }
+
+.savebox {
+  display: flex; flex-direction: column; gap: .45rem; align-items: center; padding: .7rem .8rem;
+  border-radius: .85rem; background: var(--cardbg); border: 1.5px solid var(--gold);
+  box-shadow: 0 0 0 3px var(--gold-soft), var(--card-shadow);
+}
+.savebox b { font-size: .92rem; color: var(--ink2); }
+.savebox .row { display: flex; gap: .5rem; justify-content: center; flex-wrap: wrap; }
+.savebox .row button { min-height: 2.6rem; padding: .4rem 1rem; border-radius: .6rem; font-weight: 700; border: 1px solid var(--frame); }
+.savebox .row button.primary { background: linear-gradient(180deg, #FFE9A8, var(--energy-on)); color: #2A1A00; border-color: transparent; }
+
+.decks { display: flex; flex-direction: column; gap: .45rem; }
+.deck-pick {
+  position: relative; display: flex; gap: .7rem; align-items: center; text-align: left; width: 100%;
+  padding: .55rem .65rem; border-radius: .85rem; border: 1.5px solid var(--frame);
+  background: var(--cardbg);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--cc) 8%, var(--cardbg)), var(--cardbg)); box-shadow: var(--card-shadow);
+}
+.deck-pick[aria-pressed="true"] {
+  border-color: var(--cc); box-shadow: 0 0 0 3px var(--gold-soft), var(--card-shadow);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cc) 28%, transparent), var(--card-shadow);
+}
+.deck-badge {
+  flex: none; width: 2.9rem; height: 2.9rem; border-radius: .7rem; display: grid; place-items: center;
+  color: var(--cc); border: 1.5px solid var(--cc);
+  background: var(--cardbg2);
+  background: radial-gradient(circle at 35% 28%, color-mix(in srgb, var(--cc) 30%, transparent), transparent 70%), var(--cardbg2);
+}
+.deck-badge .art { width: 1.7rem; height: 1.7rem; }
+.deck-meta { display: flex; flex-direction: column; min-width: 0; gap: .04rem; }
+.deck-name { font-size: 1rem; color: var(--ink2); line-height: 1.25; }
+.deck-title { font-style: normal; font-size: .74rem; color: var(--cc); font-weight: 700; }
+.deck-style { font-size: .72rem; color: var(--muted2); }
+.deck-desc { font-size: .72rem; color: var(--muted2); line-height: 1.35; }
+.deck-on {
+  position: absolute; top: .45rem; right: .5rem; padding: .06rem .35rem; border-radius: .35rem;
+  background: var(--cc); color: #fff; font-size: .66rem; font-weight: 700;
+}
+:root.dark .deck-on { color: #1B1626; }
+
+.levelbox { display: flex; flex-direction: column; gap: .15rem; }
+.levelbox .seg button { font-size: .82rem; }
+
+.cta-row { display: flex; flex-direction: column; gap: .3rem; margin-top: .2rem; }
+.cta {
+  min-height: 3.2rem; border-radius: .9rem; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: .05rem; width: 100%;
+  background: linear-gradient(180deg, #FFE9A8, var(--energy-on)); color: #2A1A00;
+  border: 1px solid rgba(90, 50, 0, .4);
+  box-shadow: 0 3px 0 rgba(90, 50, 0, .32), 0 10px 22px rgba(150, 90, 20, .22);
+  font-size: 1.15rem; font-weight: 800; letter-spacing: .12em;
+}
+.cta:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(90, 50, 0, .32); }
+.cta-sub { font-size: .68rem; font-weight: 600; letter-spacing: .04em; opacity: .8; }
+.foot { margin-top: .2rem; display: flex; justify-content: center; align-items: center; gap: .8rem; flex-wrap: wrap; }
+.foot button { color: var(--muted2); font-size: .8rem; padding: .3rem .5rem; min-height: 2rem; }
+
+/* ---------------------------------------------------------------- 结算 / 关于 / 提示 */
+
+.result-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .45rem; margin: .7rem 0 .3rem; }
+.result-cell { background: var(--cardbg2); border: 1px solid var(--frame); border-radius: .6rem; padding: .35rem .4rem; }
+.result-cell span { display: block; font-size: .68rem; color: var(--muted2); }
+.result-cell b { font-size: 1.02rem; font-variant-numeric: tabular-nums; }
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(1.4rem + var(--bottom)); transform: translateX(-50%); z-index: 30;
+  max-width: 88vw; padding: .45rem .95rem; border-radius: .6rem; text-align: center;
+  background: var(--cardbg); color: var(--ink2); border: 1px solid var(--frame);
+  font-size: .84rem; box-shadow: var(--pop-shadow); animation: fade 200ms var(--std) both;
+}
+.toast[hidden] { display: none; }
+/* 读屏播报用的 sr 元素绝对定位在原点,免得它的静态位置把页面撑出 17px */
+#live { top: 0; left: 0; }
+
+/* ---------------------------------------------------------------- 动效 */
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes spark-float {
+  from { transform: translate3d(0, 0, 0) scale(.8); opacity: .25; }
+  to { transform: translate3d(1.4rem, -2.2rem, 0) scale(1.15); opacity: .8; }
+}
+
+/* 减少动态效果:所有动画直接到位(base.css 里已经统一关掉动画,这里再兜一层) */
+@media (prefers-reduced-motion: reduce) {
+  .sparkdot { animation: none !important; }
+}

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>星火牌局</title>
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <main id="app" class="app">
+    <div id="screen" class="menus"></div>
+    <section id="table" class="table" hidden aria-label="对局">
+      <header class="foe-hud">
+        <button id="foe-hero" class="hero foe" type="button" aria-label="敌方英雄">
+          <span class="portrait" id="foe-portrait"></span>
+          <span class="hp" id="foe-hp">30</span>
+        </button>
+        <div class="meta">
+          <span class="meta-name" id="foe-name">电脑</span>
+          <span class="meta-line" id="foe-line">手牌 0 · 牌库 30</span>
+          <span class="energy-mini" id="foe-energy" aria-label="敌方能量"></span>
+        </div>
+        <button id="pause" class="icon-btn" type="button" aria-label="暂停">暂停</button>
+      </header>
+      <div class="board foe-board empty" id="foe-board" role="group" aria-label="敌方随从"></div>
+      <div class="middle">
+        <div class="banner" id="banner" hidden aria-hidden="true"></div>
+        <p class="logline" id="log" role="status"></p>
+      </div>
+      <div class="board my-board empty" id="my-board" role="group" aria-label="我的随从"></div>
+      <footer class="my-hud">
+        <button id="my-hero" class="hero me" type="button" aria-label="我的英雄">
+          <span class="portrait" id="my-portrait"></span>
+          <span class="hp" id="my-hp">30</span>
+        </button>
+        <div class="energy" id="energy" aria-label="能量"></div>
+        <button id="end-turn" class="end-turn" type="button">结束回合</button>
+      </footer>
+      <div class="hand-area">
+        <p class="hint" id="hint"></p>
+        <div class="hand" id="hand" role="group" aria-label="手牌"></div>
+      </div>
+      <div class="fx" id="fx" aria-hidden="true"></div>
+    </section>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <p id="live" class="sr" aria-live="polite"></p>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

@@ -131,4 +131,5 @@
 | [MINIAPP-SECURITY-AUDIT.md](MINIAPP-SECURITY-AUDIT.md) | #335 安全审计 16 项 + §3 八条不变量,每项都把保护弄坏一次确认检查会红。审计中补上了网页版的导航逃逸防护(ping/pong) |
 | [MINIAPP-ROLLOUT.md](MINIAPP-ROLLOUT.md) | #337 上线手册:先修空抽屉(要征得同意的 seed)、托管域名与 nginx、签名密钥离线备份、急停闸、回滚 |
 | [MINIAPP-COMPLIANCE.md](MINIAPP-COMPLIANCE.md) | #336 合规清单:备案、个人信息、小游戏版号、内容安全、日志留存……只列问题不下结论,等法务 |
+| [MINIAPP-GAMES.md](MINIAPP-GAMES.md) | 三款官方**原创**精品小游戏:方块原野(第一人称体素沙盒,Canvas 光线投射)、星火牌局(回合制卡牌对战,纯 DOM+SVG)、突击时刻(2D 俯视战术射击,Canvas)。选的是**品类不是作品**:不用任何商业游戏的名称/素材/界面;程序化美术 + WebAudio 合成音效、零外部素材、无广告/内购/排行榜。纯函数单测 + 可复现 zip + 无头浏览器验收;**已构建、未上架**,等版号结论与运营方拍板 |
 | [../SECURITY.md](../SECURITY.md) | 漏洞报告方式与威胁模型 |

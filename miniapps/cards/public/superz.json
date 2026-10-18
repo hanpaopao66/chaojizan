@@ -1,0 +1,7 @@
+{
+  "sdk": "2",
+  "kind": "game",
+  "orientation": "portrait",
+  "background_color": "#14111C",
+  "spa_fallback": false
+}

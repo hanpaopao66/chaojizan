@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>方块原野</title>
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <main id="app" class="app">
+    <!-- 第一人称画面:canvas 画 3D(内部低分辨率,再放大),上面浮一层 HUD -->
+    <section id="game" class="game-view" hidden>
+      <canvas id="view" class="view" role="img" aria-label="第一人称视野" tabindex="0"></canvas>
+      <div id="hud" class="hud">
+        <div class="hud-top">
+          <button id="btn-pause" class="round" type="button" aria-label="暂停">II</button>
+          <button id="btn-sound" class="round" type="button" aria-label="声音">声</button>
+          <p id="hud-time" class="chip"><span id="hud-sun" aria-hidden="true">☀</span><b id="hud-clock">06:00</b></p>
+          <p id="hud-pos" class="chip pos">0, 0, 0</p>
+        </div>
+        <div id="crosshair" class="crosshair" aria-hidden="true"><i></i></div>
+        <p id="target-name" class="target" aria-live="off"></p>
+        <div id="mine" class="minebar" hidden><i id="mine-fill"></i></div>
+        <div class="hud-bottom">
+          <div id="hotbar" class="hotbar" role="toolbar" aria-label="方块快捷栏"></div>
+          <p id="hud-hint" class="hud-hint">WASD 移动 · 空格跳 · 按住左键挖 · 右键放 · 1–9 切换</p>
+        </div>
+        <div id="touch" class="touch" hidden>
+          <div id="stick" class="stick" role="application" aria-label="移动摇杆"><i id="stick-knob"></i></div>
+          <div class="actions">
+            <button id="btn-mine" class="act mine" type="button" aria-label="挖方块">挖</button>
+            <button id="btn-place" class="act place" type="button" aria-label="放方块">放</button>
+            <button id="btn-jump" class="act jump" type="button" aria-label="跳">跳</button>
+          </div>
+        </div>
+        <p id="live" class="sr" aria-live="polite"></p>
+      </div>
+    </section>
+    <div id="menu" class="menu" hidden></div>
+    <p id="loading" class="loading" hidden aria-live="polite">正在生成小岛…</p>
+  </main>
+  <div id="overlay" class="overlay" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

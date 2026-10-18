@@ -2,7 +2,7 @@
   "name": "superz-official-miniapps",
   "private": true,
   "version": "1.0.0",
-  "description": "超级赞官方小程序:记事本、2048、贪吃蛇、方块消除、扫雷、五子棋、萌兽三路(也是开发者的参考实现)",
+  "description": "超级赞官方小程序:记事本、2048、贪吃蛇、方块消除、扫雷、五子棋、萌兽三路、方块原野、星火牌局、突击时刻(也是开发者的参考实现)",
   "type": "module",
   "scripts": {
     "dev:notepad": "vite --mode notepad",
@@ -12,6 +12,9 @@
     "dev:minesweeper": "vite --mode minesweeper",
     "dev:gomoku": "vite --mode gomoku",
     "dev:critters": "vite --mode critters",
+    "dev:sandbox": "vite --mode sandbox",
+    "dev:cards": "vite --mode cards",
+    "dev:tactical": "vite --mode tactical",
     "build:notepad": "vite build --mode notepad",
     "build:2048": "vite build --mode 2048",
     "build:snake": "vite build --mode snake",
@@ -19,8 +22,17 @@
     "build:minesweeper": "vite build --mode minesweeper",
     "build:gomoku": "vite build --mode gomoku",
     "build:critters": "vite build --mode critters",
+    "build:sandbox": "vite build --mode sandbox",
+    "build:cards": "vite build --mode cards",
+    "build:tactical": "vite build --mode tactical",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/test.mjs"
+    "typecheck:sandbox": "tsc --noEmit -p tsconfig.sandbox.json",
+    "typecheck:cards": "tsc --noEmit -p tsconfig.cards.json",
+    "typecheck:tactical": "tsc --noEmit -p tsconfig.tactical.json",
+    "test": "node scripts/test.mjs",
+    "test:sandbox": "node scripts/test.mjs sandbox",
+    "test:cards": "node scripts/test.mjs cards",
+    "test:tactical": "node scripts/test.mjs tactical"
   },
   "devDependencies": {
     "typescript": "5.9.3",

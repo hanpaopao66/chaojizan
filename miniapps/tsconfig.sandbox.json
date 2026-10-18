@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["sandbox/src", "sandbox/test", "shared/src", "shared/test",
+    "../packages/miniapp-sdk/src", "types.d.ts"]
+}
