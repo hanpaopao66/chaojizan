@@ -17,6 +17,12 @@ import { DAY, LIMITS } from './data'
 import { D, H, W, type Spawn } from './worldgen'
 import { decodeEdits } from './world'
 
+/** 1.0.0 存档里的挖/放统计(迁移用) */
+export interface LegacyStats {
+  mined: number
+  placed: number
+}
+
 export interface SavedPlayer {
   x: number
   y: number
@@ -34,7 +40,7 @@ export interface GameSave {
   inv: number[]
   hot: number
   /** 只在读旧 v1 存档时出现,用来把旧统计迁移进 profile;不会写回去 */
-  legacy?: { mined: number; placed: number }
+  legacy?: LegacyStats
 }
 
 /** 背包数量上限(和 data.ts 的 LIMITS.MAX_STACK 一致;保留这个导出给旧测试用) */

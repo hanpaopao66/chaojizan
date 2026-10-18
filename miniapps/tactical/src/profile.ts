@@ -6,8 +6,10 @@
 import { Difficulty } from './combat'
 import { DEFAULT_MAP_ID, MAP_IDS, MapId } from './map'
 
+export const PROFILE_VERSION = 2
+
 export interface Profile {
-  v: 1
+  v: 2
   games: number
   wins: number
   losses: number
@@ -27,10 +29,15 @@ export interface Profile {
   mapId: MapId
   /** 已解锁的成就 id */
   achievements: string[]
+  /**
+   * 存档是比当前客户端更新的版本写的:只读,不回写。
+   * 不写进存档本身(loadProfile 发现 v > PROFILE_VERSION 时才标上)。
+   */
+  future?: boolean
 }
 
 export const EMPTY_PROFILE: Profile = {
-  v: 1,
+  v: 2,
   games: 0,
   wins: 0,
   losses: 0,
@@ -53,13 +60,14 @@ function count(value: unknown, fallback = 0): number {
   return Math.min(MAX_COUNT, Math.max(0, n))
 }
 
-/** 存档里的一坨东西 → Profile;版本不对或者根本不是对象就返回 null(当作没有存档) */
+/** 存档里的一坨东西 → Profile;认 1.0 的 v1(补默认字段迁移到 v2);未知版本只读 */
 export function loadProfile(raw: unknown): Profile | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
-  if (r.v !== 1) return null
-  return {
-    v: 1,
+  const version = typeof r.v === 'number' && Number.isFinite(r.v) ? r.v : NaN
+  if (!Number.isFinite(version) || version < 1) return null
+  const parsed: Profile = {
+    v: PROFILE_VERSION,
     games: count(r.games),
     wins: count(r.wins),
     losses: count(r.losses),
@@ -69,6 +77,7 @@ export function loadProfile(raw: unknown): Profile | null {
     plants: count(r.plants),
     shots: count(r.shots),
     hits: count(r.hits),
+    // v1 没有 mapId / achievements:补默认值(迁移)
     difficulty: r.difficulty === 'hard' ? 'hard' : r.difficulty === 'casual' ? 'casual' : 'normal',
     sound: r.sound !== false,
     mapId: MAP_IDS.indexOf(r.mapId as MapId) >= 0 ? (r.mapId as MapId) : DEFAULT_MAP_ID,
@@ -76,12 +85,14 @@ export function loadProfile(raw: unknown): Profile | null {
       ? r.achievements.filter((a): a is string => typeof a === 'string').slice(0, 64)
       : [],
   }
+  if (version > PROFILE_VERSION) parsed.future = true
+  return parsed
 }
 
-/** Profile → 能 JSON 序列化的存档。字段写清楚,方便以后加版本号迁移 */
+/** Profile → 能 JSON 序列化的存档。现在的版本是 v2(v1 客户端读不动,由 v2 客户端迁移旧的) */
 export function saveProfile(p: Profile): unknown {
   return {
-    v: 1,
+    v: PROFILE_VERSION,
     games: p.games,
     wins: p.wins,
     losses: p.losses,
@@ -107,13 +118,16 @@ function bigger(a: number, b: number): number {
  * 当前连胜和设置跟这台设备(本地那份),本地还没打过就听云端的。
  */
 export function mergeProfile(local: Profile, cloud: Profile): Profile {
+  // 未来版本的存档:内容看不懂,原样保留、绝不合并出可回写的正常档
+  if (isFuture(local)) return local
+  if (isFuture(cloud)) return { ...cloud }
   const fresh = local.games === 0 && local.kills === 0
   // 两台设备上的胜负都只增不减,合并后「至少赢过 wins 场、至少输过 losses 场」;
   // 场次不能少于胜负之和,否则会出现「4 场 3 胜 4 负」这种自相矛盾的存档。
   const wins = bigger(local.wins, cloud.wins)
   const losses = bigger(local.losses, cloud.losses)
   return {
-    v: 1,
+    v: PROFILE_VERSION,
     games: Math.max(bigger(local.games, cloud.games), wins + losses),
     wins,
     losses,
@@ -129,6 +143,11 @@ export function mergeProfile(local: Profile, cloud: Profile): Profile {
     // 成就是「达成过就永久保留」:两台设备取并集
     achievements: Array.from(new Set([...local.achievements, ...cloud.achievements])).sort(),
   }
+}
+
+/** 比本客户端更新的存档:不要回写,只读展示 */
+export function isFuture(p: Profile): boolean {
+  return p.future === true
 }
 
 export interface MatchResult {

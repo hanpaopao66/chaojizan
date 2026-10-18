@@ -190,7 +190,11 @@ export function generateWorld(seed: number): GeneratedWorld {
   const sy = spot.h
 
   // 种树。用一条独立的随机流,顺序固定(x 从小到大、z 从小到大),同种子结果一致。
-  // 出生点周围一圈不种树:一睁眼先看到开阔的地方,而不是贴着脸的树干。
+  //
+  // ⚠️ 这里和 1.0.0 发布版的 RNG 流**必须逐次一致**:存档只存 seed + 玩家编辑,
+  // 同一 seed 的树位置一变,旧档里树屋/树旁的建筑就会悬空或卡进树里。
+  // 所以不要在树循环之前加任何「跳过某些列」的处理(会少消耗随机数、把后面整片树都挪位);
+  // 出生点选在种树之前算好,但选点本身不消耗 RNG。golden 回归测试见 test/golden.test.ts。
   let rnd = (s ^ 0x1234567) >>> 0
   const taken = new Uint8Array(W * D)
   const plant = (x: number, y: number, z: number, id: number): void => {
@@ -200,6 +204,7 @@ export function generateWorld(seed: number): GeneratedWorld {
   }
   for (let z = 1; z < D - 1; z++) {
     for (let x = 1; x < W - 1; x++) {
+      // 出生点附近不种树(半径平方 = 1.0.0 的原值;这一句会跳过 rand 消耗,改数值会挪动整条 RNG 流)
       const ddx = x - sx
       const ddz = z - sz
       if (ddx * ddx + ddz * ddz <= TREE.SPAWN_CLEAR_SQ) continue

@@ -497,3 +497,11 @@ button { -webkit-user-select: none; user-select: none; }
   .home { row-gap: .45rem; }
   .maprow { gap: .4rem; }
 }
+
+/* 未来版本存档:只读提示 */
+.home .notice {
+  grid-column: 1 / -1; margin: 0; padding: .5rem .8rem; border-radius: .6rem;
+  background: #FFF1B8; color: #5A4300; font-size: .8125rem; line-height: 1.55;
+  border: 1px solid #E8D58A; text-align: left;
+}
+:root.dark .home .notice { background: #3A3320; color: #F2E4B8; border-color: #5A4E2E; }

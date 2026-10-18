@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  EMPTY_PROFILE, Profile, accuracy, loadProfile, mergeProfile, recordMatch, saveProfile, withSettings,
+  EMPTY_PROFILE, Profile, accuracy, isFuture, loadProfile, mergeProfile, recordMatch, saveProfile, withSettings,
 } from '../src/profile'
 
 test('战绩存档:写出去再读回来,字段一个不少', () => {
@@ -17,8 +17,11 @@ test('战绩存档:写出去再读回来,字段一个不少', () => {
 test('坏存档:不是对象、版本不对就是 null;乱七八糟的字段当 0', () => {
   assert.equal(loadProfile(null), null)
   assert.equal(loadProfile('garbage'), null)
-  assert.equal(loadProfile({ v: 2 }), null)
+  // v2 是当前版本:空的也该解析成默认档;v3 是未来版本:只读
+  assert.ok(loadProfile({ v: 2 }))
+  assert.equal(loadProfile({ v: 3 })!.future, true)
   assert.equal(loadProfile({}), null)
+  assert.equal(loadProfile({ v: 0 }), null)
   const weird = loadProfile({ v: 1, games: 'x', wins: -5, bestStreak: Number.NaN, difficulty: 'god', sound: 'yes' })
   assert.ok(weird)
   assert.equal(weird.games, 0)
@@ -101,4 +104,49 @@ test('设置:难度和声音不会把战绩弄丢', () => {
 test('命中率', () => {
   assert.equal(accuracy({ hits: 0, shots: 0 }), 0)
   assert.equal(accuracy({ hits: 50, shots: 200 }), 0.25)
+})
+
+test('1.0 的 v1 存档迁移到 v2:战绩/难度保留,v1 没有的地图/成就补默认', () => {
+  const v1 = {
+    v: 1, games: 7, wins: 5, losses: 2, streak: 1, bestStreak: 3,
+    kills: 18, plants: 4, shots: 90, hits: 40, difficulty: 'hard', sound: false,
+  }
+  const p = loadProfile(v1)
+  assert.ok(p)
+  assert.equal(p.v, 2)
+  assert.equal(p.games, 7)
+  assert.equal(p.wins, 5)
+  assert.equal(p.losses, 2)
+  assert.equal(p.bestStreak, 3)
+  assert.equal(p.kills, 18)
+  assert.equal(p.difficulty, 'hard')
+  assert.equal(p.sound, false)
+  assert.equal(p.mapId, 'warehouse', 'v1 没有地图字段,补默认')
+  assert.deepEqual(p.achievements, [], 'v1 没有成就字段,补空')
+  assert.equal(p.future, undefined)
+  // 迁移后写出去的是 v2,字段都在
+  const saved = saveProfile(p) as Record<string, unknown>
+  assert.equal(saved.v, 2)
+  const back = loadProfile(saved)
+  assert.ok(back)
+  assert.equal(back.wins, 5)
+  assert.equal(back.mapId, 'warehouse')
+})
+
+test('比客户端更新的存档只读:能显示已知字段,但不合并、不回写', () => {
+  const futureRaw = {
+    v: 3, games: 12, wins: 9, losses: 3, mapId: 'market',
+    achievements: ['future-one'], futureField: 'x',
+  }
+  const p = loadProfile(futureRaw)
+  assert.ok(p)
+  assert.equal(isFuture(p), true)
+  assert.equal(p.games, 12)
+  assert.equal(p.mapId, 'market')
+  assert.deepEqual(p.achievements, ['future-one'])
+  assert.equal(isFuture(mergeProfile(EMPTY_PROFILE, p)), true, '云端未来版本不会和本地合并')
+  assert.equal(isFuture(mergeProfile(p, EMPTY_PROFILE)), true, '本地未来版本原样保留')
+  const saved = saveProfile(p) as Record<string, unknown>
+  assert.equal(saved.v, 2, '只读档就算被序列化也不会写成当前版本以外的样子')
+  assert.equal(saved.future, undefined, '只读标记不落盘')
 })

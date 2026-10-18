@@ -4,6 +4,8 @@
 // 生产构建里 main.ts 的 `if (import.meta.env.DEV)` 是 false,这个模块不会被包含进产物
 // (见 ASSETS/验收里的 grep:构建产物中搜不到 __tactical)。
 
+import WebApp from '../../../packages/miniapp-sdk/src/index'
+import { musicStatus } from './audio'
 import { GameMap, Vec, WORLD_H, WORLD_W, lineOfSight } from './map'
 import { MatchState, Round, canPlant } from './match'
 import { routeBetween } from './nav'
@@ -16,6 +18,8 @@ export interface DevEnv {
   coarse: () => boolean
   map: () => GameMap
   frames: () => number
+  /** 验收用:直接判一个回合结束(返回键/结算流程测试) */
+  forceRoundOver: (side: 'player' | 'guard') => void
 }
 
 /** 世界坐标 → 视口坐标(端到端脚本瞄准用) */
@@ -99,6 +103,11 @@ export function installDevHook(env: DevEnv): void {
     return true
   }
   dev.frames = (): number => env.frames()
+  // 模拟宿主返回键:走的是和宿主事件完全一样的路径(backButtonClicked → _fire)
+  dev.pressBack = (): void => WebApp.BackButton._fire()
+  // BGM/静音状态:用来验证「关声再开 BGM 恢复」
+  dev.audio = musicStatus
+  dev.forceRoundOver = (side: 'player' | 'guard'): void => env.forceRoundOver(side)
   dev.world = (): { w: number; h: number } => ({ w: WORLD_W, h: WORLD_H })
   dev.screenAt = screenAt
 

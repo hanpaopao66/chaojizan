@@ -65,15 +65,17 @@ export function endlessWave(n: number): WaveDef {
   const add = (kind: EnemyKind, count: number, gap: number, delay: number, i: number): void => {
     if (count > 0) groups.push({ kind, count, gap, delay, path: pathOf(i) })
   }
-  add('worm', 6 + Math.floor(w * 0.8), 0.6, 0, 0)
-  if (w >= 2) add('flea', 4 + Math.floor(w * 0.5), 0.4, 0.5, 1)
-  if (w >= 3) add('ant', 3 + Math.floor(w * 0.4), 0.9, 1.0, 2)
-  if (w >= 4) add('beetle', 2 + Math.floor(w * 0.35), 0.9, 1.5, 3)
-  if (w >= 5) add('moth', 3 + Math.floor(w * 0.3), 0.6, 2.0, 4)
-  if (w >= 6) add('wasp', 2 + Math.floor(w * 0.3), 0.6, 2.5, 5)
-  if (w >= 8) add('pupa', 1 + Math.floor(w / 5), 1.5, 3.0, 6)
+  // 地面波:数量随波次缓慢增长;空中虫第 9 波起才出现,而且每次只有一两只,
+  // 用来逼玩家带能打空中的塔,而不是靠海量飞行虫硬堆难度。
+  add('worm', 6 + Math.floor(w * 0.55), 0.7, 0, 0)
+  if (w >= 2) add('flea', 4 + Math.floor(w * 0.35), 0.5, 0.5, 1)
+  if (w >= 3) add('ant', 3 + Math.floor(w * 0.3), 1.0, 1.0, 2)
+  if (w >= 4) add('beetle', 2 + Math.floor(w * 0.28), 1.0, 1.5, 3)
+  if (w >= 5) add('pupa', 1 + Math.floor(w / 6), 1.6, 2.0, 4)
+  if (w >= 9) add('moth', 1 + Math.floor(w / 12), 1.4, 2.5, 5)
+  if (w >= 9) add('wasp', 1, 1.6, 3.0, 6)
   if (w % 5 === 0) {
-    groups.push({ kind: 'boss', count: 1 + Math.floor(w / 10), gap: 2, delay: 4, path: 0 })
+    groups.push({ kind: 'boss', count: 1, gap: 2, delay: 4, path: 0 })
     if (dual) groups.push({ kind: 'boss', count: Math.floor(w / 10), gap: 2, delay: 7, path: 1 })
   }
   return { groups, boss: w % 5 === 0 }

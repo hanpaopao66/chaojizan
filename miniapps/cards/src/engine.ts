@@ -474,7 +474,9 @@ function loadSide(raw: unknown): SideState | null {
   if (!heroOrNull(s.hero)) return null
   if (!isInt(s.hp) || s.hp < 0 || s.hp > START_HP) return null
   if (!isInt(s.maxEnergy) || s.maxEnergy < 0 || s.maxEnergy > MAX_ENERGY) return null
-  if (!isInt(s.coin) || s.coin < 0 || s.coin > 1) return null
+  // 「幸运币」是 1.1 才加的字段:1.0 的存档没有它,补 0 继续用 —— 不能因为新字段把整局判成坏档
+  const coin = s.coin === undefined ? 0 : s.coin
+  if (!isInt(coin) || coin < 0 || coin > 1) return null
   // 后手「幸运币」那一回合能量会比上限多 1(存档正好存在这一刻也要能读回来)
   if (!isInt(s.energy) || s.energy < 0 || s.energy > s.maxEnergy + 1) return null
   if (!isInt(s.fatigue) || s.fatigue < 0) return null
@@ -492,6 +494,7 @@ function loadSide(raw: unknown): SideState | null {
     if (!isBool(m.taunt) || !isBool(m.shield) || !isBool(m.sick)) return null
     if (!isInt(m.attacks) || m.attacks < 0 || m.attacks > 1) return null
   }
+  s.coin = coin
   return s
 }
 

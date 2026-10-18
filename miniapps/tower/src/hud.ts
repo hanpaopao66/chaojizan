@@ -3,7 +3,7 @@
 // 所有可点的东西都是真 <button>;金币不够的卡会灰掉并写明差多少。
 import { $ } from '../../shared/src/ui'
 import {
-  EARLY_BONUS, TOWERS, sellValue, themeOf, towerDef, towerStats, upgradeCost,
+  EARLY_BONUS, TOWERS, sellValue, themeOf, towerDef, towerStatText, upgradeCost,
 } from './data'
 import { unlockLevelOf, waveCount } from './levels'
 import type { GameState, LevelDef, Tower, TowerKind } from './types'
@@ -199,7 +199,7 @@ export class Hud {
       card.type = 'button'
       card.className = 'card locked'
       card.disabled = true
-      card.setAttribute('aria-label', `${def.name},第 ${unlockLevelOf(def.kind)} 关解锁`)
+      card.setAttribute('aria-label', `${def.name},第 ${unlockLevelOf(def.kind)} 关解锁,现在还不能造`)
       const glyph = document.createElement('span')
       glyph.className = 'glyph'
       const ink = glyphInk(def.kind)
@@ -209,12 +209,15 @@ export class Hud {
       const name = document.createElement('b')
       name.textContent = def.name
       const role = document.createElement('small')
-      role.textContent = `第${unlockLevelOf(def.kind)}关解锁`
+      role.textContent = '未解锁'
       card.append(glyph, name, role)
       grid.append(card)
     }
     this.build.append(grid)
     if (state) this.refreshBuildAffordability(state)
+    // 打开建造面板后聚焦第一张能造的卡;关闭时 main 会把焦点还给建造位
+    const firstCard = grid.querySelector<HTMLButtonElement>('.card:not(.locked)') || close
+    firstCard.focus()
   }
 
   /** 金币变化时刷新卡片的灰度和「还差多少」 */
@@ -237,7 +240,6 @@ export class Hud {
     this.closeBuild()
     this.panelTower = tower.id
     const def = towerDef(tower.kind)
-    const stats = towerStats(tower.kind, tower.level)
     this.panel.hidden = false
     this.panel.textContent = ''
     const head = document.createElement('div')
@@ -254,9 +256,7 @@ export class Hud {
     this.panel.append(head)
     const line = document.createElement('p')
     line.className = 'statline'
-    line.textContent = tower.kind === 'marigold'
-      ? `每波产出 ${stats.goldPerWave} 金币 · 不攻击`
-      : `伤害 ${stats.damage} · 攻速 ${stats.rate}/秒 · 射程 ${stats.range} 格${stats.splash ? ` · 溅射 ${stats.splash} 格` : ''}${stats.chain ? ` · 链电 ${stats.chain}` : ''}`
+    line.textContent = towerStatText(tower.kind, tower.level)
     const desc = document.createElement('p')
     desc.className = 'desc'
     desc.textContent = def.desc
@@ -277,6 +277,9 @@ export class Hud {
     this.panel.append(actions)
     const state = this.state
     if (state) this.refreshPanelAffordability(state)
+    // 打开面板后把焦点移到第一个可点的操作上,键盘/读屏用户不用从背景穿过来
+    const firstAction = actions.querySelector<HTMLButtonElement>('button:not([disabled])') || close
+    firstAction.focus()
   }
 
   /** 金币变化时刷新升级按钮 */

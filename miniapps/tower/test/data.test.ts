@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import {
   ACHIEVEMENTS, ACHIEVEMENT_BY_ID, COLS, ENEMIES, ROWS, STAR_RULE, TARGET, TARGET_CENTER, THEMES,
   TOWERS, TILE, WORLD_H, WORLD_W, bossHealthScale, cellCenter, computeSlots, enemyDef,
-  endlessHealthScale, healthScale, pathTiles, sellValue, themeOf, towerStats, upgradeCost,
+  endlessHealthScale, healthScale, pathTiles, sellValue, themeOf, towerDef, towerStatText, towerStats, upgradeCost,
 } from '../src/data'
 import {
   ENDLESS, LEVELS, levelById, levelByIdOrNull, levelsOfTheme, unlockLevelOf, waveCount,
@@ -77,6 +77,7 @@ test('虫子数据:七种普通虫 + 分裂小蚁 + 巨虫 Boss', () => {
   }
   assert.equal(enemyDef('worm').hp, 30)
   assert.equal(enemyDef('flea').speed, 2.0)
+  assert.ok(enemyDef('moth').speed < 1.5, '飞行虫速度按平衡测试调慢过')
   assert.equal(enemyDef('beetle').armor, 4)
   assert.equal(enemyDef('moth').flying, true)
   assert.equal(enemyDef('wasp').flying, true)
@@ -84,7 +85,7 @@ test('虫子数据:七种普通虫 + 分裂小蚁 + 巨虫 Boss', () => {
   assert.equal(enemyDef('ant').split, 2)
   assert.equal(enemyDef('antling').split, undefined, '小蚁不能再分裂')
   assert.equal(enemyDef('boss').armor, 6)
-  assert.equal(enemyDef('boss').hp, 900)
+  assert.equal(enemyDef('boss').hp, 650, 'Boss 基础血量(平衡微调后)')
   assert.equal(enemyDef('boss').leak, 5)
   assert.equal(enemyDef('boss').boss, true)
 })
@@ -222,6 +223,51 @@ test('关卡查询:levelById 正常、越界抛错;levelByIdOrNull 对坏输入�
   assert.equal(levelByIdOrNull('nope'), null)
   assert.equal(levelByIdOrNull(null), null)
   assert.equal(levelByIdOrNull(6)?.name, levelById(6).name)
+})
+
+test('对空规则:豆荚炮/火焰椒/毒蘑菇只打地面不假,但冰霜铃/闪电藤/瓜藤弓可打飞行', () => {
+  assert.equal(towerDef('pea').air, false)
+  assert.equal(towerDef('frost').air, true)
+  assert.equal(towerDef('pepper').air, true)
+  assert.equal(towerDef('vine').air, true)
+  assert.equal(towerDef('mushroom').air, false)
+  assert.equal(towerDef('bow').air, true)
+  assert.equal(towerDef('marigold').air, false)
+  // 画面/说明里也要写清楚
+  assert.ok(towerStatText('pea', 1).includes('只打地面'))
+  assert.ok(towerStatText('bow', 1).includes('可打飞行'))
+  // 有飞行虫的关卡都必须解锁至少一种能打空中的塔
+  for (const level of LEVELS) {
+    const hasAir = level.waves.some((w) => w.groups.some((g) => enemyDef(g.kind).flying))
+    if (hasAir) assert.ok(level.towers.some((k) => towerDef(k).air), `第 ${level.id} 关没有能打飞行虫的塔`)
+  }
+})
+
+test('塔面板数值文案:每种塔的关键机制都写出来', () => {
+  const text = (kind: Parameters<typeof towerStatText>[0], lv = 1): string => towerStatText(kind, lv)
+  assert.ok(text('pea', 3).includes('每轮 2 发'))
+  for (const lv of [1, 2, 3]) assert.ok(text('frost', lv).includes('减速'))
+  assert.ok(text('frost', 3).includes('冻结'))
+  assert.ok(text('pepper').includes('溅射'))
+  assert.ok(text('pepper', 3).includes('灼烧'))
+  assert.ok(text('vine').includes('链电'))
+  assert.ok(text('mushroom').includes('毒'))
+  assert.ok(text('mushroom', 3).includes('毒云'))
+  assert.ok(text('bow', 3).includes('穿甲'))
+  assert.ok(text('marigold', 1).includes('每波产出'))
+  // 文案和 GAME-TOWER 表里的数值一致
+  assert.ok(text('pea', 1).includes('伤害 12'))
+  assert.ok(text('pea', 1).includes('攻速 1.6/秒'))
+  assert.ok(text('pea', 1).includes('射程 2.6 格'))
+  assert.ok(text('bow', 1).includes('射程 4.2 格'))
+})
+
+test('飞行虫从第 7 关开始登场,前 6 关不出现(纯豆荚炮前期能三星)', () => {
+  for (const level of LEVELS) {
+    const hasAir = level.waves.some((w) => w.groups.some((g) => enemyDef(g.kind).flying))
+    if ((level.id as number) <= 6) assert.equal(hasAir, false, `第 ${level.id} 关不该有飞行虫`)
+    else assert.equal(hasAir, true, `第 ${level.id} 关应该有飞行虫(逼玩家混塔)`)
+  }
 })
 
 test('成就:12 个、id 唯一、文案齐全、判定表能查到', () => {

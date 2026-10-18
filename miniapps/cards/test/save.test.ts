@@ -192,3 +192,46 @@ test('后手幸运币那一回合的存档:能量比上限多 1 也能原样读�
   assert.ok(back, '后手幸运币当回合的存档不应该被判成坏档')
   assert.deepEqual(back, s)
 })
+
+test('1.0 旧档兼容:没有 coin 字段也能读回来,局面一点不丢', () => {
+  // 模拟 1.0(1.1 之前)的存档:整份 JSON 里没有 coin 字段
+  const cur = midGame(31)
+  const old = JSON.parse(JSON.stringify(saveGame(cur))) as Record<string, unknown>
+  for (const side of old.sides as Array<Record<string, unknown>>) delete side.coin
+  for (const side of (old.sides as Array<Record<string, unknown>>)) assert.equal('coin' in side, false)
+  const back = loadGame(old)
+  assert.ok(back, '1.0 形态的存档不应该被判成坏档')
+  // 局面完全一致:回合/先后手/双方英雄血量/手牌/牌库/场面/疲劳
+  assert.equal(back.turn, cur.turn)
+  assert.equal(back.active, cur.active)
+  assert.equal(back.nextUid, cur.nextUid)
+  for (const side of [0, 1] as const) {
+    const a = back.sides[side]
+    const b = cur.sides[side]
+    assert.equal(a.hp, b.hp)
+    assert.equal(a.energy, b.energy)
+    assert.equal(a.maxEnergy, b.maxEnergy)
+    assert.equal(a.coin, 0, '缺失的 coin 应该补成 0')
+    assert.deepEqual(a.hand, b.hand)
+    assert.deepEqual(a.deck, b.deck)
+    assert.deepEqual(a.board, b.board)
+    assert.equal(a.fatigue, b.fatigue)
+  }
+  // 读回来还能继续打,而且再存一次就是带 coin 的新格式
+  const play = applyAction(back, aiNext(setTurn(back, back.active), 'normal'))
+  assert.ok(play.ok)
+  const re = JSON.parse(JSON.stringify(saveGame(play.state))) as { sides: Array<Record<string, unknown>> }
+  assert.equal(typeof re.sides[0].coin, 'number')
+  assert.ok(loadGame(re))
+  // 旧版随从身材是当时快照(比如冰壳卫士 1.0 是 4/6、1.1 改成 4/5),读档不能被新数值推翻
+  const snap = clone(cur)
+  snap.sides[0].board.push({ uid: 9999, card: 'r_shell', attack: 4, health: 6, maxHealth: 6, taunt: false, shield: true, sick: false, attacks: 1 })
+  const oldBoard = JSON.parse(JSON.stringify(saveGame(snap))) as Record<string, unknown>
+  for (const side of oldBoard.sides as Array<Record<string, unknown>>) delete side.coin
+  const restored = loadGame(oldBoard)
+  assert.ok(restored)
+  const shell = restored.sides[0].board.find((m) => m.uid === 9999)
+  assert.ok(shell)
+  assert.equal(shell.health, 6)
+  assert.equal(shell.maxHealth, 6)
+})

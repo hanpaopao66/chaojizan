@@ -21,7 +21,7 @@ import {
   GameEvent, MatchState, PlayerInput, Round, advance, finishRound, newMatch, newRound, nextRound,
 } from './match'
 import {
-  EMPTY_PROFILE, Profile, loadProfile, mergeProfile, recordMatch, unlockAchievements, withMap, withSettings,
+  EMPTY_PROFILE, Profile, isFuture, loadProfile, mergeProfile, recordMatch, unlockAchievements, withMap, withSettings,
 } from './profile'
 import { Renderer, readPalette } from './render'
 import {
@@ -113,16 +113,12 @@ function renderHomeScreen(): void {
     onStart: () => startMatch(false),
     onTraining: () => startMatch(true),
     onDifficulty: (difficulty: Difficulty) => {
-      profile = withSettings(profile, difficulty, profile.sound)
-      slot.setBest(profile)
-      void slot.flush()
+      commitProfile(withSettings(profile, difficulty, profile.sound))
       sfx('click', { vol: 0.4 })
     },
     onMap: (mapId: MapId) => {
       if (profile.mapId === mapId) return
-      profile = withMap(profile, mapId)
-      slot.setBest(profile)
-      void slot.flush()
+      commitProfile(withMap(profile, mapId))
       sfx('click', { vol: 0.4 })
       renderHomeScreen()
     },
@@ -136,12 +132,18 @@ function renderHomeScreen(): void {
   })
 }
 
-function toggleSound(): void {
-  const on = !soundOn()
-  profile = withSettings(profile, profile.difficulty, on)
-  setSound(on)
+/** 改 Profile 的唯一入口:未来版本的存档只读,绝不回写覆盖 */
+function commitProfile(next: Profile): void {
+  profile = next
+  if (isFuture(profile)) return
   slot.setBest(profile)
   void slot.flush()
+}
+
+function toggleSound(): void {
+  const on = !soundOn()
+  setSound(on)
+  commitProfile(withSettings(profile, profile.difficulty, on))
   if (on) sfx('click', { vol: 0.4 })
 }
 
@@ -181,7 +183,7 @@ function pauseGame(): void {
 
 /** 整场比赛一结束就记战绩(不是等玩家点「查看战报」才记),matchSaved 保证只记一次 */
 function saveMatchResult(): void {
-  if (!match || !match.over || matchSaved || match.training) return
+  if (!match || !match.over || matchSaved || match.training || isFuture(profile)) return
   const m = match
   matchSaved = true
   profile = recordMatch(profile, {
@@ -203,8 +205,7 @@ function saveMatchResult(): void {
   } else {
     lastUnlocked = []
   }
-  slot.setBest(profile)
-  void slot.flush()
+  commitProfile(profile)
 }
 
 function showRoundOverFlow(): void {
@@ -621,10 +622,21 @@ WebApp.SettingsButton.show().onClick(() => {
   else showAbout(overlay, profile, () => undefined)
 })
 WebApp.BackButton.onClick(() => {
+  // 弹层打开时按语义处理,任何路径都不能把人困在已结束的一局
   if (overlay.open) {
+    if (round && round.phase === 'over') {
+      overlay.hide()
+      if (match && match.over) goHome() // 整场/战报 → 回首页
+      else showRoundOverFlow() // 回合结算 → 重新展示(还能点「下一回合」)
+      return
+    }
     const wasPaused = paused
     overlay.hide()
-    if (wasPaused && running) pauseGame()
+    if (wasPaused && running) {
+      // 暂停/说明弹层按返回 = 继续游戏
+      paused = false
+      audioResume()
+    }
     return
   }
   if (running) pauseGame()
@@ -691,6 +703,14 @@ if (import.meta.env.DEV) {
       coarse: () => coarse,
       map: () => map,
       frames: () => frameCount,
+      forceRoundOver: (side: 'player' | 'guard') => {
+        if (!round || !match || round.phase === 'over') return
+        round.phase = 'over'
+        round.over = { side, reason: side === 'player' ? 'exploded' : 'timeout' }
+        match = finishRound(match, round)
+        saveMatchResult()
+        showRoundOverFlow()
+      },
     })
   })
 }

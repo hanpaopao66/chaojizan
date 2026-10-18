@@ -272,6 +272,10 @@ window.addEventListener('keydown', () => { void unlock() }, { once: true, captur
 followTheme()
 
 WebApp.SettingsButton.show().onClick(() => {
+  // 有任何弹层开着(结算 / 暂停 / 关于 / 图鉴详情 / 成就)就忽略设置键:
+  // 尤其结算页,不能被「关于」盖掉之后再关掉,把玩家留在已结束的牌桌上。
+  // 对局刚结束、结算页还没出来的那一小段也忽略,避免「关于」盖住即将弹出的结算。
+  if (overlay.open || table.ending) return
   if (table.active) pauseMenu()
   else about(app)
 })
@@ -286,6 +290,7 @@ WebApp.BackButton.onClick(() => {
     if (table.active) table.resume()
     return
   }
+  if (table.ending) return // 结算页马上出来,等它接管返回键(再按一次就会回首页)
   if (table.active) pauseMenu()
   else if (screen !== 'home') app.goHome()
 })

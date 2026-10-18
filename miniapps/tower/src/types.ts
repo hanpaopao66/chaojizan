@@ -77,6 +77,8 @@ export interface TowerDef {
   color: string
   /** 一眼能认出的轮廓名(render.ts 用) */
   shape: string
+  /** 能不能打飞行虫(飞蛾/毒蜂)。豆荚炮、火焰椒、毒蘑菇只打地面 */
+  air: boolean
 }
 
 /** 一种虫子的定义 */

@@ -41,14 +41,15 @@ export function inRange(level: LevelDef, e: Enemy, from: Vec, radiusPx: number):
 
 /**
  * 射程内「走到最前面」的敌人;一样靠前的按 id 小的优先(结果可复现)。
- * skip 里的 id 跳过(链电用)。
+ * skip 里的 id 跳过(链电用);air=false 的塔打不到飞行虫。
  */
 export function pickTarget(level: LevelDef, enemies: readonly Enemy[], from: Vec, radiusPx: number,
-  skip?: ReadonlySet<number>): Enemy | null {
+  skip?: ReadonlySet<number>, air = true): Enemy | null {
   let best: Enemy | null = null
   let bestProgress = -1
   for (const e of enemies) {
     if (e.hp <= 0 || (skip && skip.has(e.id))) continue
+    if (!air && enemyDef(e.kind).flying) continue
     if (!inRange(level, e, from, radiusPx)) continue
     const p = progressOf(e)
     if (p > bestProgress || (p === bestProgress && best !== null && e.id < best.id)) {
@@ -79,12 +80,12 @@ export function enemiesInRadius(level: LevelDef, enemies: readonly Enemy[], cent
  * 返回 [first, 下一只, …](不含第一只时调用方自己处理),最多 count 只额外目标。
  */
 export function chainFrom(level: LevelDef, enemies: readonly Enemy[], first: Enemy, count: number,
-  radiusPx: number): Enemy[] {
+  radiusPx: number, air = true): Enemy[] {
   const hit = new Set<number>([first.id])
   const out: Enemy[] = []
   let last = first
   for (let i = 0; i < count; i++) {
-    const next = pickTarget(level, enemies, enemyPos(level, last), radiusPx, hit)
+    const next = pickTarget(level, enemies, enemyPos(level, last), radiusPx, hit, air)
     if (!next) break
     out.push(next)
     hit.add(next.id)

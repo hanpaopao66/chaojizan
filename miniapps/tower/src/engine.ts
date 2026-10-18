@@ -3,7 +3,7 @@
 // 界面只读状态和事件。存档读写在同目录的 save.ts。
 import { rand } from '../../shared/src/rand'
 import {
-  EARLY_BONUS, STEP, TILE, TARGET_CENTER, bossHealthScale, endlessHealthScale, enemyDef,
+  EARLY_BONUS, STEP, TILE, TARGET_CENTER, bossHealthScale, endlessHealthScale, enemyDef, towerDef,
   sellValue, towerDefOrNull, towerStats, upgradeCost,
 } from './data'
 import { levelById, unlockLevelOf, waveCount } from './levels'
@@ -230,7 +230,7 @@ function fireOnce(state: GameState, level: LevelDef, tower: Tower, stats: Return
     return
   }
   if (tower.kind === 'vine') {
-    const chained = chainFrom(level, state.enemies, target, stats.chain || 0, 2.0 * TILE)
+    const chained = chainFrom(level, state.enemies, target, stats.chain || 0, 2.0 * TILE, towerDef(tower.kind).air)
     const points: Vec[] = [from]
     let raw = stats.damage
     for (const e of [target, ...chained]) {
@@ -266,12 +266,13 @@ function updateTowers(state: GameState, level: LevelDef, dt: number, events: Gam
     tower.cd = Math.max(0, tower.cd - dt)
     if (tower.cd > 0) continue
     const from = slotPos(level, tower.slot)
-    const target = pickTarget(level, state.enemies, from, rangePx(stats.range))
+    const canAir = towerDef(tower.kind).air
+    const target = pickTarget(level, state.enemies, from, rangePx(stats.range), undefined, canAir)
     if (!target) continue
     tower.cd = 1 / stats.rate
     let current: Enemy | null = target
     for (let shot = 0; shot < (stats.shots || 1); shot++) {
-      if (!current || current.hp <= 0) current = pickTarget(level, state.enemies, from, rangePx(stats.range))
+      if (!current || current.hp <= 0) current = pickTarget(level, state.enemies, from, rangePx(stats.range), undefined, canAir)
       if (!current) break
       const to = enemyPos(level, current)
       tower.aim = Math.atan2(to.y - from.y, to.x - from.x)

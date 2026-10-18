@@ -124,6 +124,11 @@ export class FieldInput {
     this.press(best)
   }
 
+  /** 关掉面板后把焦点还给对应的建造位按钮(键盘用户不丢位置) */
+  focusSlot(slot: number): void {
+    this.buttons[slot]?.focus()
+  }
+
   private press(slot: number): void {
     const tower = this.state?.towers.find((t) => t.slot === slot) || null
     this.activate(slot, tower)

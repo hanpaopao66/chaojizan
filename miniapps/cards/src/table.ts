@@ -104,6 +104,7 @@ export class Table {
     this.view.hide()
     this.st = null
     this.paused = false
+    this.ended = false
     bgmStop()
     WebApp.BackButton.hide()
   }
@@ -115,6 +116,11 @@ export class Table {
   /** 对局还在进行(结束动画已经开始的也算「不在进行」,暂停菜单不再弹出) */
   get active(): boolean {
     return !!this.st && !this.ended
+  }
+
+  /** 对局刚结束、结算弹层还在等结束动画的那一小段(此时设置/返回键应该等结算页出来) */
+  get ending(): boolean {
+    return !!this.st && this.ended
   }
 
   pause(): void {

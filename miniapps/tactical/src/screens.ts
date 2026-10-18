@@ -63,6 +63,11 @@ export function renderHome(root: HTMLElement, opts: HomeHandlers): void {
   root.textContent = ''
   const home = el('div', '', 'home')
 
+  // 比本客户端更新的存档:只给看不给改(不把新版本的字段写丢)
+  if (profile.future) {
+    home.append(el('p', '这份存档是新版本的突击时刻写的,这里只能看、不能改。关掉小程序再打开就会更新到新版本;这一局不计入战绩/成就。', 'notice'))
+  }
+
   // 标题
   const title = el('div', '', 'home-title')
   title.append(el('p', '单机 · 2D 俯视 · 回合制拆弹', 'kicker'))

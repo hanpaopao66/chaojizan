@@ -44,6 +44,8 @@ const BGM: Record<ClassId, BgmDef> = {
 let bgmCls: ClassId | null = null
 let bgmGain: GainNode | null = null
 let bgmTimer: number | null = null
+/** BGM 是不是被「暂停 / 切后台」压着:压着的时候静音开关、上下文恢复都不许偷偷接着放 */
+let bgmPaused = false
 
 function readMuted(): boolean {
   try {
@@ -63,10 +65,12 @@ export function setSound(on: boolean): void {
     window.localStorage.setItem(KEY, on ? '1' : '0')
   } catch (_) { /* 存不了就只管这一次 */ }
   if (master) master.gain.value = on ? 0.55 : 0
-  if (!on) bgmSilence()
-  else {
+  if (!on) {
+    bgmPaused = true
+    bgmSilence()
+  } else {
     unlock()
-    bgmResume()
+    if (!bgmPaused) bgmResume()
   }
 }
 
@@ -314,6 +318,7 @@ export function bgmStart(cls: ClassId): void {
   const c = ac()
   if (!c || !master) return
   bgmCls = cls
+  bgmPaused = false
   bgmGain = c.createGain()
   bgmGain.gain.value = 0.11
   bgmGain.connect(master)
@@ -322,6 +327,7 @@ export function bgmStart(cls: ClassId): void {
 
 export function bgmStop(): void {
   bgmSilence()
+  bgmPaused = false
   bgmCls = null
   if (bgmGain) {
     try { bgmGain.disconnect() } catch (_) { /* 已经断开 */ }
@@ -329,12 +335,14 @@ export function bgmStop(): void {
   }
 }
 
-/** 暂停:BGM 先停;恢复时接着放同一套 */
+/** 暂停:BGM 先停;恢复时接着放同一套(什么时候恢复由对局逻辑决定,不由页面可见性决定) */
 export function bgmPause(): void {
+  bgmPaused = true
   bgmSilence()
 }
 
 export function bgmResume(): void {
+  bgmPaused = false
   if (!bgmCls || muted || bgmTimer !== null) return
   scheduleBgm()
 }
@@ -346,8 +354,9 @@ export function suspend(): void {
 }
 
 export function resume(): void {
+  // 只恢复 AudioContext:对局还停在暂停层时不能把 BGM 偷偷接着放,
+  // 要不要恢复 BGM 交给 Table.resume()(玩家点「继续」)决定。
   if (ctx && ctx.state === 'suspended' && !muted) void ctx.resume().catch(() => undefined)
-  bgmResume()
 }
 
 /** 引擎事件 → 音效(界面只调这一个;按卡牌关键字分流不同音色) */

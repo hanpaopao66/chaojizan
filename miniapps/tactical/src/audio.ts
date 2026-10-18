@@ -39,6 +39,8 @@ let musicTimer: number | null = null
 let musicNodes: AudioNode[] = []
 let musicPlaying = false
 let musicPaused = false
+/** 游戏状态「想要 BGM」:和 muted 分开,取消静音后据此恢复 */
+let musicWanted = false
 
 function readMuted(): boolean {
   try {
@@ -59,8 +61,8 @@ export function setSound(on: boolean): void {
     window.localStorage.setItem(KEY, on ? '1' : '0')
   } catch (_) { /* 存不了就只管这一次 */ }
   if (master) master.gain.value = on ? 1 : 0
-  if (!on) stopMusic()
-  else if (musicPlaying) startMusic()
+  if (!on) teardownMusic()
+  else if (musicWanted) startMusic()
 }
 
 /** 在用户点过之后调:建上下文、总线、白噪声。重复调没关系 */
@@ -184,6 +186,7 @@ function spatialOut(t: number, x: number, y: number, listener?: SpatialPoint): G
 
 /** 比赛内循环的轻量 BGM:低音持续音 + 心跳般的低频脉冲 + 偶尔的金属噪声 */
 export function startMusic(): void {
+  musicWanted = true
   if (muted) return
   unlock()
   if (!ctx || !musicBus || musicPlaying) return
@@ -244,6 +247,12 @@ function pulse(t: number, vol: number): void {
 }
 
 export function stopMusic(): void {
+  musicWanted = false
+  teardownMusic()
+}
+
+/** 只停声音、不清「想要 BGM」:静音时用,取消静音还能恢复 */
+function teardownMusic(): void {
   musicPlaying = false
   musicPaused = true
   if (musicTimer !== null) {
@@ -258,6 +267,11 @@ export function stopMusic(): void {
     } catch (_) { /* 已经停了 */ }
   }
   musicNodes = []
+}
+
+/** 给开发服务器的验收脚本看 BGM 状态(生产构建里只有本函数本身,没有调用者) */
+export function musicStatus(): { muted: boolean; wanted: boolean; playing: boolean; paused: boolean } {
+  return { muted, wanted: musicWanted, playing: musicPlaying, paused: musicPaused }
 }
 
 export function pauseMusic(paused: boolean): void {

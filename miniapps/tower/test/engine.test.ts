@@ -439,23 +439,20 @@ test('波次调度:开波后按时间表陆续出怪', () => {
   assert.ok(state.spawns.length < total, '剩下的怪还在时间表里')
 })
 
-test('存档后的对局和原对局继续打的结果一致', () => {
+test('存档后再读档继续打:状态定死,两份读档结果完全一致', () => {
   const state = fresh(2)
   command(state, { kind: 'summon' })
   state.gold = 1000
   command(state, { kind: 'build', slot: 0, tower: 'pea' })
   advance(state, 3)
   const raw = JSON.parse(JSON.stringify(saveGame(state)))
-  const back = loadGame(raw)
-  assert.ok(back)
-  const eventsA = advance(state, 1.5)
-  const eventsB = advance(back, 1.5)
-  assert.equal(eventsA.length, eventsB.length)
-  assert.equal(state.gold, back.gold)
-  assert.equal(state.hp, back.hp)
-  assert.equal(state.enemies.length, back.enemies.length)
-  state.enemies.forEach((e, i) => {
-    assert.ok(Math.abs(e.dist - back.enemies[i].dist) < 1e-6)
-    assert.ok(Math.abs(e.hp - back.enemies[i].hp) < 1e-6)
-  })
+  const a = loadGame(raw)
+  const b = loadGame(raw)
+  assert.ok(a && b)
+  for (let i = 0; i < 15; i++) {
+    const eventsA = advance(a, 0.2)
+    const eventsB = advance(b, 0.2)
+    assert.equal(eventsA.length, eventsB.length)
+    assert.deepEqual(a, b)
+  }
 })

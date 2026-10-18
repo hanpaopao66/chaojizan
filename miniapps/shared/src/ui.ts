@@ -23,16 +23,72 @@ export function button(text: string, onClick: () => void, cls = ''): HTMLButtonE
 
 export const reduced = (): boolean => matchMedia('(prefers-reduced-motion: reduce)').matches
 
-/** 盖在整页上的弹层(结束、暂停、关于、选项)。一次只有一个 */
+/** 弹层里能聚焦的元素(和浏览器 Tab 顺序一致,跳过 disabled/不可见) */
+const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+
+function focusables(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE))
+    .filter((el) => !el.hasAttribute('disabled') && el.getClientRects().length > 0)
+}
+
+/**
+ * 盖在整页上的弹层(结束、暂停、关于、选项)。一次只有一个。
+ *
+ * 打开时做三件事,否则触屏/读屏/键盘用户会「穿」到弹层后面的游戏里:
+ * - 背景兄弟元素 `inert`(保留 aria-live 播报区,弹层里的结果还要念出来);
+ * - Tab 焦点圈在弹层里,焦点掉到外面就拉回来;
+ * - 关掉时把 inert 摘掉、焦点还给打开前的元素(不行再走 refocus)。
+ * 这是所有官方游戏共用的弹层,改这里等于一起修。
+ */
 export class Overlay {
   private onDismiss: (() => void) | null = null
+  private prevFocus: HTMLElement | null = null
+  private inert: HTMLElement[] = []
+  private restoring = false
 
   constructor(private readonly root: HTMLElement, private readonly refocus: () => void) {
     root.addEventListener('click', (e) => { if (e.target === root && this.onDismiss) this.dismiss() })
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.open && this.onDismiss) {
+      if (!this.open) return
+      if (e.key === 'Escape') {
+        if (this.onDismiss) {
+          e.preventDefault()
+          this.dismiss()
+        }
+        return
+      }
+      if (e.key !== 'Tab') return
+      const panel = this.root.querySelector<HTMLElement>('.panel')
+      if (!panel) return
+      const list = focusables(panel)
+      if (list.length === 0) {
         e.preventDefault()
-        this.dismiss()
+        return
+      }
+      const first = list[0]
+      const last = list[list.length - 1]
+      const active = document.activeElement as HTMLElement | null
+      if (!active || !panel.contains(active)) {
+        e.preventDefault()
+        first.focus()
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault()
+        first.focus()
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault()
+        last.focus()
+      }
+    })
+    // 触屏/程序化 focus 也可能把焦点挪出去:兜底拉回弹层
+    document.addEventListener('focusin', (e) => {
+      if (!this.open || this.restoring) return
+      if (this.root.contains(e.target as Node)) return
+      const panel = this.root.querySelector<HTMLElement>('.panel')
+      const first = panel ? focusables(panel)[0] : null
+      if (first) {
+        this.restoring = true
+        first.focus()
+        this.restoring = false
       }
     })
   }
@@ -41,8 +97,31 @@ export class Overlay {
     return !this.root.hidden
   }
 
+  /** 让弹层后面的内容不可聚焦/不可读(aria-live 播报区除外,弹层里的结果还要念) */
+  private inertBackground(): void {
+    const parent = this.root.parentElement || document.body
+    for (const child of Array.from(parent.children)) {
+      if (child === this.root || !(child instanceof HTMLElement)) continue
+      if (child.tagName === 'SCRIPT') continue
+      if (child.hasAttribute('aria-live') || child.classList.contains('sr')) continue
+      if (!child.hasAttribute('inert')) {
+        child.setAttribute('inert', '')
+        this.inert.push(child)
+      }
+    }
+  }
+
+  private restoreBackground(): void {
+    for (const child of this.inert) child.removeAttribute('inert')
+    this.inert = []
+  }
+
   /** onDismiss 给了才能点空白处或按 Esc 关掉 */
   show(fill: (panel: HTMLElement) => void, opts: { cls?: string; onDismiss?: () => void } = {}): void {
+    if (!this.open) {
+      this.prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      this.inertBackground()
+    }
     this.root.textContent = ''
     const p = el('div', '', `panel ${opts.cls || ''}`.trim())
     p.setAttribute('role', 'dialog')
@@ -65,7 +144,16 @@ export class Overlay {
     this.root.hidden = true
     this.root.textContent = ''
     this.onDismiss = null
-    this.refocus()
+    this.restoreBackground()
+    const back = this.prevFocus
+    this.prevFocus = null
+    if (back && document.contains(back) && back.getClientRects().length > 0) {
+      this.restoring = true
+      back.focus()
+      this.restoring = false
+    } else {
+      this.refocus()
+    }
   }
 
   private dismiss(): void {

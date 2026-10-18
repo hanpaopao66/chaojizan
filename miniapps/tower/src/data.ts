@@ -1,5 +1,5 @@
-// 瓜田防线:全部内容数据 —— 地图尺寸、七种塔 × 三级、九种虫、三个主题、12 关 + 无尽、成就。
-// 只有数据和查表函数,和界面无关;规则在 engine.ts,数值的平衡性由 test/balance.test.ts 验证。
+// 瓜田防线:全部内容数据 —— 地图尺寸、七种塔 × 三级、九种虫、三个主题、成就。
+// 只有数据和查表函数,和界面无关;规则在 engine.ts,关卡在 levels.ts,数值的平衡性由 test/balance.test.ts 验证。
 //
 // 世界观、地名、塔名、虫名、数值和界面都是为超级赞原创的;没有使用任何商业塔防游戏的名字、
 // 角色、关卡、美术、数值或界面。
@@ -128,9 +128,12 @@ export function computeSlots(paths: readonly (readonly GridPoint[])[]): GridPoin
     for (let d = 0; d < info.lens[i]; d += TILE / 2) samples.push(pointAt(info.polys[i], d))
     const start = info.starts[i]
     const air = Math.hypot(info.target.x - start.x, info.target.y - start.y)
-    for (let d = 0; d < air; d += TILE / 2) {
-      const t = d / air
-      samples.push({ x: start.x + (info.target.x - start.x) * t, y: start.y + (info.target.y - start.y) * t })
+    // 空中走廊的采样点加两遍:塔位排序会优先照顾能打到飞行虫的位置
+    for (let k = 0; k < 2; k++) {
+      for (let d = 0; d < air; d += TILE / 2) {
+        const t = d / air
+        samples.push({ x: start.x + (info.target.x - start.x) * t, y: start.y + (info.target.y - start.y) * t })
+      }
     }
   }
   const cover = (slot: GridPoint, sample: Vec): boolean => {
@@ -190,17 +193,18 @@ export function themeOf(id: Theme): ThemeDef {
 
 // ---------------------------------------------------------------- 塔
 
-/** 全部塔的数值(基准值,平衡测试会验证「可赢」) */
+/** 全部塔的数值(基准值,平衡测试会验证「混塔可赢、纯炮后期不行」) */
 export const TOWERS: readonly TowerDef[] = [
   {
     kind: 'pea',
     name: '豆荚炮',
     role: '便宜单体',
-    desc: '青豆一颗一颗往外蹦,前期最稳的输出。3 级双发。',
+    desc: '青豆一颗一颗往外蹦,前期最稳的输出。3 级双发。只打地面。',
     cost: 60,
     upgrade: [70, 110],
     color: '#7FA650',
     shape: 'pod',
+    air: false,
     levels: [
       { damage: 12, rate: 1.6, range: 2.6 },
       { damage: 18, rate: 1.8, range: 2.8 },
@@ -211,11 +215,12 @@ export const TOWERS: readonly TowerDef[] = [
     kind: 'frost',
     name: '冰霜铃',
     role: '减速控场',
-    desc: '摇一摇铃铛,路过的虫子脚下结霜。3 级有概率冻住。',
-    cost: 80,
+    desc: '摇一摇铃铛,路过的虫子脚下结霜。3 级有概率冻住,能打飞行虫。',
+    cost: 70,
     upgrade: [90, 140],
     color: '#5E9CC4',
     shape: 'bell',
+    air: true,
     levels: [
       { damage: 6, rate: 1.3, range: 2.4, slowFactor: 0.3, slowDur: 1.2 },
       { damage: 9, rate: 1.4, range: 2.6, slowFactor: 0.38, slowDur: 1.4 },
@@ -226,11 +231,12 @@ export const TOWERS: readonly TowerDef[] = [
     kind: 'pepper',
     name: '火焰椒',
     role: '溅射清群',
-    desc: '一颗辣椒炸弹,落点周围一起烧。3 级还会点着虫子。',
-    cost: 100,
+    desc: '一颗辣椒炸弹,落点周围一起烧,也能在空中炸开。3 级还会点着虫子。',
+    cost: 90,
     upgrade: [110, 170],
     color: '#D8623A',
     shape: 'pepper',
+    air: true,
     levels: [
       { damage: 14, rate: 0.85, range: 2.2, splash: 0.8 },
       { damage: 22, rate: 0.9, range: 2.4, splash: 1.0 },
@@ -241,11 +247,12 @@ export const TOWERS: readonly TowerDef[] = [
     kind: 'vine',
     name: '闪电藤',
     role: '链电多目标',
-    desc: '藤蔓上攒一道电,顺着虫群跳过去,每跳弱一点。',
-    cost: 120,
+    desc: '藤蔓上攒一道电,顺着虫群跳过去,每跳弱一点。能打飞行虫。',
+    cost: 110,
     upgrade: [140, 210],
     color: '#C8A83C',
     shape: 'vine',
+    air: true,
     levels: [
       { damage: 20, rate: 0.7, range: 2.8, chain: 2 },
       { damage: 20, rate: 0.75, range: 3.0, chain: 3 },
@@ -256,11 +263,12 @@ export const TOWERS: readonly TowerDef[] = [
     kind: 'mushroom',
     name: '毒蘑菇',
     role: '持续毒伤',
-    desc: '孢子落在虫群里,毒无视护甲。3 级死后留一片毒云。',
-    cost: 90,
+    desc: '孢子落在虫群里,毒无视护甲。3 级死后留一片毒云。只打地面。',
+    cost: 80,
     upgrade: [100, 150],
     color: '#9C6BA8',
     shape: 'mushroom',
+    air: false,
     levels: [
       { damage: 3, rate: 1.1, range: 2.0, poisonDps: 6, poisonDur: 4, poisonRadius: 1.0 },
       { damage: 3, rate: 1.2, range: 2.2, poisonDps: 9, poisonDur: 4, poisonRadius: 1.2 },
@@ -271,11 +279,12 @@ export const TOWERS: readonly TowerDef[] = [
     kind: 'bow',
     name: '瓜藤弓',
     role: '远程穿甲',
-    desc: '一根瓜藤当弓弦,射得远、打得疼。3 级穿甲。',
-    cost: 140,
+    desc: '一根瓜藤当弓弦,射得远、打得疼。3 级穿甲,能打飞行虫。',
+    cost: 120,
     upgrade: [170, 260],
     color: '#8A6E4B',
     shape: 'bow',
+    air: true,
     levels: [
       { damage: 42, rate: 0.45, range: 4.2 },
       { damage: 56, rate: 0.5, range: 4.4 },
@@ -291,6 +300,7 @@ export const TOWERS: readonly TowerDef[] = [
     upgrade: [120, 180],
     color: '#E0A93C',
     shape: 'flower',
+    air: false,
     levels: [
       { damage: 0, rate: 0, range: 0, goldPerWave: 30 },
       { damage: 0, rate: 0, range: 0, goldPerWave: 45 },
@@ -330,6 +340,27 @@ export function sellValue(invested: number): number {
   return Math.floor(invested * SELL_RATE)
 }
 
+/**
+ * 塔面板上那一行数值:伤害/攻速/射程 + 减速、冻结、毒、灼烧、溅射、链电、穿甲、双发、产金,
+ * 再标清能不能打飞行。每个塔的差别都写清楚,玩家不用猜冰/毒/火/弓有什么不同。
+ */
+export function towerStatText(kind: TowerKind, level: number): string {
+  const s = towerStats(kind, level)
+  if (kind === 'marigold') return `每波产出 ${s.goldPerWave} 金币 · 不攻击`
+  const parts = [`伤害 ${s.damage}`, `攻速 ${s.rate}/秒`, `射程 ${s.range} 格`]
+  if (s.shots && s.shots > 1) parts.push(`每轮 ${s.shots} 发`)
+  if (s.pierce) parts.push('穿甲')
+  if (s.splash) parts.push(`溅射 ${s.splash} 格`)
+  if (s.chain) parts.push(`链电 ${s.chain} 跳`)
+  if (s.slowFactor) parts.push(`减速 ${Math.round(s.slowFactor * 100)}% ${s.slowDur} 秒`)
+  if (s.freezeChance) parts.push(`命中 ${Math.round(s.freezeChance * 100)}% 冻结 ${s.freezeDur} 秒`)
+  if (s.poisonDps) parts.push(`毒 ${s.poisonDps}/秒 ${s.poisonDur} 秒${s.poisonRadius ? `(半径 ${s.poisonRadius} 格)` : ''}`)
+  if (s.burnDps) parts.push(`灼烧 ${s.burnDps}/秒 ${s.burnDur} 秒`)
+  if (s.deathCloud) parts.push('击杀留毒云')
+  parts.push(towerDef(kind).air ? '可打飞行' : '只打地面')
+  return parts.join(' · ')
+}
+
 // ---------------------------------------------------------------- 虫
 
 export const ENEMIES: readonly EnemyDef[] = [
@@ -346,11 +377,11 @@ export const ENEMIES: readonly EnemyDef[] = [
     size: 13, color: '#6E7A8A',
   },
   {
-    kind: 'moth', name: '飞蛾', hp: 35, speed: 1.5, bounty: 7, armor: 0, flying: true, leak: 1,
+    kind: 'moth', name: '飞蛾', hp: 16, speed: 0.8, bounty: 7, armor: 0, flying: true, leak: 1,
     size: 9, color: '#D8C48A',
   },
   {
-    kind: 'wasp', name: '毒蜂', hp: 60, speed: 1.6, bounty: 9, armor: 0, flying: true, leak: 1,
+    kind: 'wasp', name: '毒蜂', hp: 26, speed: 0.9, bounty: 9, armor: 0, flying: true, leak: 1,
     size: 9, color: '#D8A03C',
   },
   {
@@ -366,7 +397,7 @@ export const ENEMIES: readonly EnemyDef[] = [
     size: 7, color: '#BC8062',
   },
   {
-    kind: 'boss', name: '巨虫', hp: 900, speed: 0.6, bounty: 150, armor: 6, flying: false, leak: 5,
+    kind: 'boss', name: '巨虫', hp: 650, speed: 0.32, bounty: 150, armor: 6, flying: false, leak: 5,
     boss: true, size: 22, color: '#5A4A3E',
   },
 ]

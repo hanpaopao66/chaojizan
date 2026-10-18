@@ -38,7 +38,7 @@ export function home(app: App, root: HTMLElement): void {
   root.textContent = ''
   const wrap = el('div', '', 'home')
   const head = el('div', '', 'home-head')
-  head.append(el('p', '单机塔防 · 原创 · 不联网', 'kicker'))
+  head.append(el('p', '单机塔防 · 原创 · 无广告', 'kicker'))
   const h1 = el('h1', '', 'logo')
   h1.append(document.createTextNode('瓜田'), el('em', '防线'))
   head.append(h1)
@@ -132,7 +132,7 @@ export function home(app: App, root: HTMLElement): void {
   )
   extra.append(el('div'), extra2)
   wrap.append(extra)
-  wrap.append(el('p', '没有广告、没有内购、没有排行榜。进度自动存在超级赞云存储里,关掉再开、换设备都能接着守。', 'fine'))
+  wrap.append(el('p', '没有广告、没有内购、没有排行榜。玩法单机,不请求任何第三方服务;进度存在超级赞云存储里,关掉再开、换设备都能接着守。', 'fine'))
   root.append(wrap)
 }
 
@@ -145,8 +145,8 @@ export function about(app: App, back: () => void): void {
     for (const line of [
       '12 关三主题(菜园 / 果园 / 虫巢)+ 无尽模式;7 种塔 × 3 级、9 种虫(含护甲甲虫、飞行虫、治疗蛹、分裂蚁和 3 只巨虫 Boss)。',
       '一局 3–7 分钟;每波前 3 秒准备,可以点「提前召唤」拿 5 金币;支持 1 倍 / 2 倍速、暂停、静音。',
-      '没有广告、没有内购、没有排行榜、没有签到和体力;不需要联网,电脑和你的设备都不联网。',
-      '美术全部用 Canvas 2D 程序化绘制,音效和 BGM 由 WebAudio 现场合成:没有外部图片、字体、音频,也不发任何网络请求。',
+      '没有广告、没有内购、没有排行榜、没有签到和体力;玩法单机、不联网对战,进度同步走超级赞自带的云存储。',
+      '美术全部用 Canvas 2D 程序化绘制,音效和 BGM 由 WebAudio 现场合成:没有外部图片、字体、音频,也不请求任何第三方服务。',
       '所有数值、塔、虫、关卡和界面都是为超级赞原创的;没有使用任何商业塔防游戏(包括《保卫萝卜》)的名字、角色、关卡、美术、数值、音效或界面。',
       '游戏里没有真实货币、抽奖、开箱和社交功能,也没有会让人一直想着回来的机制。',
     ]) ul.append(el('li', line))

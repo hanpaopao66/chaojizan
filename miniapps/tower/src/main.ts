@@ -5,6 +5,7 @@ import './style.css'
 import { freshSeed } from '../../shared/src/rand'
 import { SaveSlot } from '../../shared/src/save'
 import { $, Overlay, WebApp, cacheKey, cloud, followTheme, hostGame, local, reduced } from '../../shared/src/ui'
+import { towerDef } from './data'
 import { ENDLESS, levelById } from './levels'
 import { advance, command, newGame } from './engine'
 import { loadGame, resultOf, saveGame } from './save'
@@ -72,6 +73,8 @@ let selectedSlot = -1
 let selectedTower = 0
 let tutorialStep = 0
 let announcedWave = 0
+/** 关掉建造/塔面板后焦点回哪个建造位 */
+let lastSlot = -1
 
 function syncSize(): void {
   if (!level || gameEl.hidden) return
@@ -114,7 +117,13 @@ function startGame(id: number | 'endless', resumed?: GameState): void {
   tutorialStep = !resumed && id === 1 && showTutorial(best) ? 1 : 0
   if (!resumed) slot.change({ v: 1, game: state })
   bgm(lv.theme)
-  hud.announce(id === 'endless' ? '无尽模式开始,守住西瓜' : `第 ${id} 关 ${lv.name} 开始`)
+  const recommend = [...new Set(lv.recommend.filter((k) => lv.towers.includes(k)))].slice(0, 3)
+    .map((k) => towerDef(k).name).join('、')
+  if (recommend) hud.showBanner(`推荐:${recommend}`, 'good', 3600)
+  hud.announce(id === 'endless'
+    ? `无尽模式开始,守住西瓜。推荐先造:${recommend}`
+    : `第 ${id} 关 ${lv.name} 开始。推荐先造:${recommend}`)
+  WebApp.BackButton.show()
   syncSize()
   runLoop()
   window.setTimeout(syncSize, 120)
@@ -244,6 +253,7 @@ function selectSlot(slotIndex: number): void {
   }
   selectedSlot = slotIndex
   selectedTower = 0
+  lastSlot = slotIndex
   hud.openBuild(slotIndex, level)
   play('tap', { vol: 0.6 })
 }
@@ -254,14 +264,18 @@ function selectTower(id: number): void {
   if (!tower) return
   selectedSlot = -1
   selectedTower = id
+  lastSlot = tower.slot
   hud.openTower(tower, level)
   play('tap', { vol: 0.5 })
 }
 
 function clearSelection(): void {
+  const hadSheet = hud.sheetOpen
   selectedSlot = -1
   selectedTower = 0
   hud.closeSheets()
+  // 用键盘打开面板再关掉时,焦点回到原来那个建造位,不要飘到页面顶部
+  if (hadSheet && lastSlot >= 0) input.focusSlot(lastSlot)
 }
 
 /** 执行一条命令:失败给原因,成功播事件、写一次本机存档 */
@@ -478,6 +492,11 @@ WebApp.BackButton.onClick(() => {
     }
     return
   }
+  // 局内:先关建造/塔面板,再暂停;首页的返回交给宿主
+  if (hud.sheetOpen) {
+    clearSelection()
+    return
+  }
   if (state && running) openPause()
 })
 hostGame(() => {
@@ -533,5 +552,10 @@ if (import.meta.env.DEV) {
     startLevel: (id: number | 'endless') => startGame(id),
     goHome,
     speed: () => toggleSpeed(),
+    /** 开发服务器上的测试用:直接发一条引擎命令 / 快进模拟(生产构建里没有这段) */
+    command: (cmd: Parameters<typeof command>[1]) => (state ? command(state, cmd) : { ok: false }),
+    advance: (dt: number) => (state ? advance(state, dt).length : 0),
+    flush: () => slot.flush(),
+    slotOpen: () => overlay.open,
   }
 }

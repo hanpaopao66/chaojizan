@@ -19,6 +19,8 @@
 html, body { height: 100%; }
 body { overscroll-behavior: none; }
 #app, .app { height: 100%; }
+/* hidden 属性必须真的不渲染:.game 自己写了 display:flex,不补这一条的话首页下 Tab 会穿到对局控件 */
+.game[hidden], .screens[hidden], .sheet[hidden] { display: none; }
 
 /* ---------------------------------------------------------------- 首页 */
 
@@ -153,6 +155,7 @@ body.in-game { overflow: hidden; }
   box-shadow: 0 6px 18px rgba(24, 26, 18, 0.2);
 }
 .banner.show { animation: banner-in 260ms var(--spring) both; }
+.banner.good { background: #2F6B3A; color: #F3FBEF; }
 .banner.warn { background: #8A5312; color: #FFF8E8; }
 .banner.bad { background: var(--danger); color: #FFF6F4; }
 
@@ -193,7 +196,7 @@ body.in-game { overflow: hidden; }
 .sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.45rem; }
 .sheet-head b { font-size: 0.95rem; }
 .x {
-  width: 2.25rem; height: 2.25rem; border-radius: 0.6rem; font-size: 1.2rem;
+  width: 2.75rem; height: 2.75rem; flex: none; border-radius: 0.6rem; font-size: 1.2rem;
   background: var(--bg); border: 1px solid var(--line); line-height: 1;
 }
 .cards {
@@ -211,7 +214,7 @@ body.in-game { overflow: hidden; }
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 .card b { font-size: 0.82rem; }
-.card small { font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
+.card small { font-size: 0.6rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card .cost { grid-column: 2; font-size: 0.68rem; color: var(--tower-green); font-weight: 700; }
 .card.poor { opacity: 0.55; }
 .card.poor .cost { color: var(--danger); }
@@ -288,6 +291,15 @@ body.in-game { overflow: hidden; }
 @media (min-width: 700px) {
   .game { max-width: 30rem; padding-top: calc(0.75rem + var(--top)); padding-bottom: calc(0.75rem + var(--bottom)); }
   .field { box-shadow: 0 14px 40px rgba(24, 26, 18, 0.22), 0 0 0 1px var(--line); }
+}
+
+/* 360px 窄屏:顶栏只留数值;关卡卡片名字略小一点 */
+@media (max-width: 380px) {
+  .stat span { display: none; }
+  .hud-stats { gap: 0.25rem; }
+  .hud-top { gap: 0.3rem; }
+  .lv-name { font-size: 0.95rem; }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); }
 }
 
 /* 矮屏(比如横放的手机开着桌面版):保证面板不把画面顶没 */

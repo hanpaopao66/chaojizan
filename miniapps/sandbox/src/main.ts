@@ -21,7 +21,8 @@ import { Hud, type HudState } from './hud'
 import { Input } from './input'
 import { copyProfile, loadProfile, mergeProfile, unlockedCount, type Profile } from './profile'
 import { Renderer, type Camera } from './render'
-import { loadSave, newSave, saveOf, type GameSave } from './save'
+import { loadSave, newSave, saveOf, type GameSave, type LegacyStats } from './save'
+import { legacyOf, mergeLegacy, migrateLegacy, profileForWrite } from './sync'
 import { daylight, wrapTime } from './time'
 import { World } from './world'
 import { seedText } from './worldgen'
@@ -67,6 +68,10 @@ let frameMsSum = 0
 let profilePending = false
 let pendingCleanup = false
 let bobPhase = 0
+/** 旧 v1 存档里待迁移的挖/放统计 */
+let pendingLegacy: LegacyStats | null = null
+/** 云端对账完成(进世界前必须等它,免得拿云对账前的旧档案开局) */
+let cloudReady: Promise<unknown> = Promise.resolve()
 
 const hud = new Hud((index) => selectSlot(index))
 const game = new Game({
@@ -93,8 +98,7 @@ function onAchievement(def: AchievementDef): void {
   hud.achievement(def)
   sound('achieve')
   hud.announce(`成就解锁:${def.name}`)
-  if (game.world) slot.setBest(game.profile)
-  profilePending = false
+  writeProfileSafe()
 }
 
 // ---------------------------------------------------------------- 存档动作
@@ -106,27 +110,52 @@ function countEdits(text: string | undefined): number {
   return text.endsWith(',') ? n : n + 1
 }
 
+/**
+ * 把本机档案写回 SaveSlot:一律先和已经和云端对过账的 slot.best 合并。
+ * SaveSlot.setBest 是替换语义;如果拿云对账前拷出来的旧档案直接写回,
+ * 会把云端较新的统计/成就盖掉,所以这里统一走 merge(统计取大、成就并集)。
+ */
+function writeProfileSafe(): void {
+  const merged = profileForWrite(slot.best, game.profile)
+  slot.setBest(merged)
+  game.profile = copyProfile(merged)
+  profilePending = false
+}
+
+/** 云端对账返回后,把它合并进来的档案同步给正在进行的游戏 */
+function syncProfileFromSlot(): void {
+  if (screen !== 'game' || !game.world) return
+  const merged = profileForWrite(slot.best, game.profile)
+  slot.setBest(merged)
+  game.profile = copyProfile(merged)
+  profilePending = false
+}
+
+/** 记下旧 v1 存档里的挖/放统计(本机缓存和云端 v1 档都可能带) */
+function captureLegacy(): void {
+  pendingLegacy = mergeLegacy(pendingLegacy, legacyOf(slot.state))
+}
+
+/**
+ * v1→v2 迁移:把旧档的挖/放统计并进档案。
+ * - 只在云对账完成之后调用(否则「迁移」会让旧本机档看起来更新,盖掉另一台设备较新的云档);
+ * - 迁移本身不调用 slot.change,不动存档的时间戳 at。
+ */
+function applyLegacyProfile(): void {
+  if (!pendingLegacy) return
+  const legacy = pendingLegacy
+  pendingLegacy = null
+  const migrated = migrateLegacy(slot.best, legacy)
+  if (migrated.changed) slot.setBest(migrated.profile)
+  const state = slot.state
+  if (state) delete state.legacy
+}
+
 /** 立刻把世界和档案写进 SaveSlot(云端由 SaveSlot 节流) */
 function saveNow(): void {
   if (!game.world) return
   slot.change(game.snapshot())
-  slot.setBest(game.profile)
-  profilePending = false
-}
-
-/** 旧 1.0 存档把挖/放存在 state 里;档案还是空的话迁移一次,然后从存档里抹掉 legacy */
-function applyLegacyProfile(): void {
-  const state = slot.state
-  const legacy = state?.legacy
-  if (!state || !legacy) return
-  const profile = slot.best
-  if (profile.mined === 0 && profile.placed === 0) {
-    profile.mined = legacy.mined
-    profile.placed = legacy.placed
-    slot.setBest(profile)
-  }
-  delete state.legacy
-  slot.change(state)
+  writeProfileSafe()
 }
 
 // ---------------------------------------------------------------- 菜单
@@ -264,6 +293,8 @@ async function enterGame(save: GameSave, prebuilt: World | null = null): Promise
   overlay.hide()
   menuEl.hidden = true
   loadingEl.hidden = false
+  // 等云端对账完成:否则可能拿「云对账前」的旧档案开局,再写回去盖掉云端较新的统计/成就
+  await cloudReady
   await nextPaint()
   try {
     const world = prebuilt ?? new World(save.seed)
@@ -437,10 +468,7 @@ function stepGame(dt: number): void {
   if (saveTimer >= LIMITS.SAVE_EVERY) {
     saveTimer = 0
     if (game.world) slot.change(game.snapshot())
-    if (profilePending) {
-      slot.setBest(game.profile)
-      profilePending = false
-    }
+    if (profilePending) writeProfileSafe()
   }
 
   hudTimer += dt
@@ -559,12 +587,20 @@ WebApp.BackButton.onClick(() => {
 
 renderMenu()
 slot.restoreLocal()
-applyLegacyProfile()
+captureLegacy()
 if (slot.state) renderMenu()
-void slot.restoreCloud().then(() => {
-  applyLegacyProfile()
+// 云对账:完成后再迁移 v1 统计/同步档案;'cleared'(用户在宿主里清空过数据)时丢弃待迁移统计
+cloudReady = slot.restoreCloud().then((restored) => {
+  if (restored === 'cleared') {
+    pendingLegacy = null
+  } else {
+    captureLegacy()
+    applyLegacyProfile()
+  }
+  syncProfileFromSlot()
   if (screen === 'menu') renderMenu()
-})
+  return restored
+}).catch(() => undefined)
 let readied = false
 const ready = (): void => {
   if (readied) return
