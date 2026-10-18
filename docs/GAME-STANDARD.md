@@ -88,10 +88,22 @@
 1. 改 `listing.json` 的 `version` 与 `changelog`(用户看得到);同步 `docs/MINIAPP-GAMES.md`;
 2. `bash scripts/build_miniapp.sh <app>` → 记下 SHA-256,连续两次一致;
 3. `node scripts/check_miniapp_meta.mjs <app>`、`node scripts/qa_miniapps.mjs <app>` 全绿;
-4. 在部署机 api 容器里跑 `server/scripts/publish_official_miniapp.py`(**先不带 `--apply` 看计划**);
-5. 新 appid → 部署机 `bash ~/super-z/deploy/mp-cert.sh`;老应用发新版本不需要动证书;
-6. 线上复核:目录、详情页、托管页 200 + CSP、TLS、无头 Chrome 从线上域名打开;
-7. 回滚:发布新版本/回滚到上一版本;单个版本有问题用「紧急隔离」。
+4. **先看计划**(不写库、不传对象):
+
+   ```sh
+   scripts/publish_miniapps.sh <app>            # 自动走部署机/容器,跑的是同一个发布脚本
+   ```
+
+   确认后加 `--apply` 真发布(新应用会自动建 appid;已有应用发新版本并自动发布):
+
+   ```sh
+   scripts/publish_miniapps.sh --apply <app>
+   ```
+
+   脚本在 api 容器里用 `server/scripts/publish_official_miniapps_batch.py` 批量发布,审核人 =
+   第一个管理员,发布完自动跑 `deploy/mp-cert.sh` 把新 appid 签进托管证书(没变化就跳过);
+5. 线上复核:目录、详情页、托管页 200 + CSP、TLS、无头 Chrome 从线上域名打开;
+6. 回滚:发布新版本/回滚到上一版本;单个版本有问题用「紧急隔离」。
 
 ## 9. 自动化入口
 
@@ -100,6 +112,7 @@ cd miniapps
 node scripts/check_miniapp_meta.mjs          # 静态:结构/metadata/无外部素材/无内联脚本/大小
 npm run typecheck && npm test                # 全量类型检查 + 纯函数单测
 node scripts/qa_miniapps.mjs                 # 无头浏览器:全部应用(需先 build 或 dev)
+scripts/publish_miniapps.sh <app>            # 发布:先看计划;加 --apply 真发布(需部署机可达)
 ```
 
 `check_miniapp_meta.mjs` 接入 `make analyze` 与 CI;`qa_miniapps.mjs` 因为依赖本机 Chrome,
