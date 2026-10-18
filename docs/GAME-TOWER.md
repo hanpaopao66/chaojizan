@@ -7,7 +7,9 @@
 - 名称:**瓜田防线**;图标:**瓜**;`kind=game`,`category=casual`,`orientation=portrait`;
 - 主题色:菜园绿 + 黏土橙 + 夜深蓝;三套场景(菜园白天 / 果园黄昏 / 虫巢月夜);
 - 一关 3–7 分钟;单机;无广告、内购、排行榜、多人;不申请敏感能力;
-- 目录位置:`miniapps/tower/`;发布后 appid 由发布脚本生成。
+- 目录位置:`miniapps/tower/`;已上架:appid `sze71c0f185ae2adc0`,1.0.0(build 1),
+  线上 SHA-256 `80864d7284dfd942513206c3e729a4f346d38df5b540c28ff989019220ab0550`
+  (2026-10-18,运营方确认);详见 [MINIAPP-GAMES.md](MINIAPP-GAMES.md)。
 
 ## 1. 核心玩法
 
