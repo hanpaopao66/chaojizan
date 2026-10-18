@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   COLS, CRATE, FLOOR, MAP_ROWS, ROWS, TILE, WALL, WORLD_H, WORLD_W, circleBlocked, lineOfSight, moveCircle,
-  parseMap, rayCircle, siteAt, siteCenter, solidAt, tileAt, tileCenter, tileCol, tileRow, wallDistance,
+  parseMap, parseMapRows, rayCircle, siteAt, siteCenter, solidAt, tileAt, tileCenter, tileCol, tileRow, wallDistance,
 } from '../src/map'
 
 const map = parseMap()
@@ -37,13 +37,13 @@ test('地图解析:44×26、外圈是墙、出生点和两个炸弹点都在地�
 })
 
 test('地图解析会拒绝坏图(行数、字符、边界)', () => {
-  assert.throws(() => parseMap(MAP_ROWS.slice(1)), /地图不合法/)
+  assert.throws(() => parseMapRows(MAP_ROWS.slice(1)), /地图不合法/)
   const badChar = MAP_ROWS.slice()
   badChar[1] = '#' + '?'.repeat(COLS - 1) + '#'
-  assert.throws(() => parseMap(badChar), /不认识的字符/)
+  assert.throws(() => parseMapRows(badChar), /不认识的字符/)
   const short = MAP_ROWS.slice()
   short[1] = short[1].slice(0, 20)
-  assert.throws(() => parseMap(short), /地图不合法/)
+  assert.throws(() => parseMapRows(short), /地图不合法/)
 })
 
 test('视线:墙会挡、门不挡', () => {

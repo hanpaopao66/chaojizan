@@ -202,3 +202,23 @@ test('困难档斩杀搜索有硬上限:大场面也在 2 秒内返回,不会把
   assert.ok(took < 2000, `AI 决策用了 ${took}ms,超过预算`)
   assert.ok(legalActions(s).some((x) => same(x, a)), 'AI 还是得返回一个合法动作')
 })
+
+test('休闲档:合法、可复现,也能自己打完一局;比困难档弱', async () => {
+  const { simulateGame } = await import('../src/sim')
+  // 同一个局面,休闲档两次给出同一个动作(靠局面哈希,不用 Math.random)
+  const s = aiState(901)
+  assert.deepEqual(aiNext(s, 'easy'), aiNext(clone(s), 'easy'))
+  // 休闲档自己打一整局也不会出非法状态
+  const base = { playerHero: 'forge', aiHero: 'dusk', playerLevel: 'easy' as Level, aiLevel: 'easy' as Level, first: 0 as const }
+  let winsEasy = 0
+  let winsHard = 0
+  for (let i = 0; i < 80; i++) {
+    const game = { ...base, seed: 5000 + i * 37 }
+    const easy = simulateGame(game)
+    assert.ok(easy.winner === 0 || easy.winner === 1 || easy.winner === -1)
+    if (easy.winner === 0) winsEasy++
+    const hard = simulateGame({ ...game, aiLevel: 'hard' })
+    if (hard.winner === 0) winsHard++
+  }
+  assert.ok(winsEasy > winsHard + 6, `休闲档应该明显比困难档好打(玩家胜 ${winsEasy} vs ${winsHard})`)
+})

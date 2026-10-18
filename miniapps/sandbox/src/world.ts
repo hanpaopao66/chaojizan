@@ -3,15 +3,17 @@
 // 存档只记「和生成结果不一样」的格子(edits),所以：
 // - 4000 条编辑封顶,序列化后远小于 64 KB(每条约 2–6 个字符);
 // - 把一格改回生成时的样子会自动把这条编辑删掉,玩家来回挖/放不会把容量耗光;
+// - 到上限时可以「撤销最近 N 处改动」或「全部恢复成原始小岛」(revertRecent / resetAll);
 // - 渲染要用的「每列哪些高度是实心的、水在哪儿、最高实心格」在这里增量维护,
 //   光栅化时每格只要两三次位运算。
-import { AIR, BEDROCK, HOTBAR, WATER, isOpaque } from './blocks'
+import { AIR, BEDROCK, WATER, isOpaque } from './blocks'
+import { LIMITS, WORLD } from './data'
 import { D, H, W, colIndex, generateWorld, type Spawn, voxelIndex } from './worldgen'
 
-/** 稀疏编辑上限:按最长的编码估算约 24 KB,给存档留足余量 */
-export const MAX_EDITS = 4000
+/** 稀疏编辑上限 */
+export const MAX_EDITS = LIMITS.MAX_EDITS
 /** 编辑串的长度上限(序列化后写进云存储前的硬闸,和 MAX_EDITS 双保险) */
-export const MAX_EDITS_TEXT = 60000
+export const MAX_EDITS_TEXT = LIMITS.MAX_EDITS_TEXT
 
 export interface BlockSource {
   /** 越界当成基岩(撞不出去)、世界上面当成空气 */
@@ -53,18 +55,26 @@ export function decodeEdits(text: string): Array<[number, number]> | null {
     const index = prev + delta
     if (index >= W * D * H) return null
     const y = Math.floor(index / (W * D))
-    if (y < 2) return null
+    if (y < WORLD.BEDROCK_LAYERS) return null
     out.push([index, id])
     prev = index
   }
   return out
 }
 
+/** 体素编号 → 坐标(撤销/测试用) */
+export function indexPosition(index: number): { x: number; y: number; z: number } {
+  const y = Math.floor(index / (W * D))
+  const rem = index - y * W * D
+  const z = Math.floor(rem / W)
+  return { x: rem - z * W, y, z }
+}
+
 export class World implements BlockSource {
   readonly seed: number
   readonly spawn: Spawn
   readonly yaw: number
-  /** 生成出来的原始世界,用来判断一次编辑是不是改回了原样 */
+  /** 生成出来的原始世界,用来判断一次编辑是不是改回了原样、以及清理时恢复 */
   readonly base: Uint8Array
   /** 当前世界(底座 + 编辑) */
   readonly blocks: Uint8Array
@@ -101,6 +111,15 @@ export class World implements BlockSource {
     return this.edits.size
   }
 
+  /** 改动占上限的比例 0..1(HUD 在 FULL_WARN_RATIO 以上显示提醒) */
+  get editRatio(): number {
+    return this.edits.size / MAX_EDITS
+  }
+
+  get editsFull(): boolean {
+    return this.edits.size >= MAX_EDITS
+  }
+
   blockAt(x: number, y: number, z: number): number {
     if (x < 0 || x >= W || z < 0 || z >= D || y < 0) return BEDROCK
     if (y >= H) return AIR
@@ -123,7 +142,7 @@ export class World implements BlockSource {
    */
   setBlock(x: number, y: number, z: number, id: number): EditResult {
     if (x < 0 || x >= W || z < 0 || z >= D || y < 0 || y >= H) return 'outside'
-    if (y <= 1) return 'bedrock'
+    if (y < WORLD.BEDROCK_LAYERS) return 'bedrock'
     const index = voxelIndex(x, y, z)
     const base = this.base[index]
     const had = this.edits.has(index)
@@ -187,6 +206,34 @@ export class World implements BlockSource {
     return true
   }
 
+  /**
+   * 撤销「最近添加/改动」的 n 处编辑(按编辑表里的插入顺序倒序)。
+   * 返回实际撤销了多少处;被撤销的格子恢复成生成时的方块。
+   */
+  revertRecent(n: number): number {
+    const count = Math.max(0, Math.floor(n))
+    if (!count || !this.edits.size) return 0
+    const indices = Array.from(this.edits.keys())
+    const take = indices.slice(Math.max(0, indices.length - count))
+    const cols = new Set<number>()
+    for (const index of take) {
+      const { x, z } = indexPosition(index)
+      this.blocks[index] = this.base[index]
+      this.edits.delete(index)
+      cols.add(colIndex(x, z))
+    }
+    for (const col of cols) this.refreshColumn(col % W, Math.floor(col / W))
+    return take.length
+  }
+
+  /** 把整座岛恢复成刚生成的样子;返回清掉了多少处改动 */
+  resetAll(): number {
+    const count = this.edits.size
+    if (!count) return 0
+    this.loadEdits('')
+    return count
+  }
+
   /** 找到一个可以站的地面高度(从 fromY 往下找),给掉出世界后重生用 */
   groundBelow(x: number, z: number, fromY: number): number {
     const gx = Math.max(0, Math.min(W - 1, Math.floor(x)))
@@ -199,6 +246,3 @@ export class World implements BlockSource {
     return Math.floor(this.spawn.y)
   }
 }
-
-/** 快捷栏里有哪些方块(界面和测试共用) */
-export const HOTBAR_IDS: readonly number[] = HOTBAR

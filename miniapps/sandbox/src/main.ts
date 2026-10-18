@@ -1,5 +1,7 @@
-// 方块原野的入口:菜单 / 进世界 / 主循环 / 挖和放 / 存档 / HUD / 宿主生命周期。
-// 纯逻辑在 worldgen / world / raycast / player / time / save,画面在 render,菜单在 menus,输入在 input。
+// 方块原野的装配层:菜单 / 进世界 / 主循环 / 存档 / HUD / 音效 / 宿主生命周期。
+//
+// 玩法在 gameplay.ts(Game 类,可单测),画面在 render.ts,菜单在 menus.ts,输入在 input.ts;
+// 这里只做「把设备输入翻译成 GameInput、把副作用接到 HUD/音效/存档/弹层、每帧推进」。
 import '../../shared/src/base.css'
 import './style.css'
 import { freshSeed } from '../../shared/src/rand'
@@ -7,91 +9,95 @@ import { SaveSlot } from '../../shared/src/save'
 import {
   $, Overlay, WebApp, cacheKey, cloud, confirmBox, followTheme, hostGame, local, reduced,
 } from '../../shared/src/ui'
-import { AIR, HOTBAR, WATER, blockName, breakTime } from './blocks'
-import { addBlock, newInventory, takeBlock } from './inventory'
-import { Input } from './input'
-import { isMuted, setMuted, sfx, suspend as audioSuspend, unlock as audioUnlock } from './audio'
-import { Hud } from './hud'
 import {
-  aboutPanel, helpPanel, mainMenu, newWorldPanel, pausePanel, type MenuApp, type MenuStats,
-} from './menus'
-import { cameraEye, clampPitch, newPlayer, placePlayer, stepPlayer, type PlayerState } from './player'
-import { placePosition, rayFromEye, type RayHit } from './raycast'
+  isMuted, resumeAudio, setAmbience, setMuted, setUnderwater, sound, suspendAudio, unlockAudio,
+} from './audio'
+import { HOTBAR, WATER, blockName } from './blocks'
+import { ACHIEVEMENTS, FEEL, LIMITS, type AchievementDef, type SoundName, type SoundOptions } from './data'
+import { achievementsPanel, aboutPanel, cleanupPanel, helpPanel, mainMenu, newWorldPanel, pausePanel,
+  type MenuApp, type MenuStats } from './menus'
+import { Game, type GameInput } from './gameplay'
+import { Hud, type HudState } from './hud'
+import { Input } from './input'
+import { copyProfile, loadProfile, mergeProfile, unlockedCount, type Profile } from './profile'
 import { Renderer, type Camera } from './render'
 import { loadSave, newSave, saveOf, type GameSave } from './save'
-import { DAY_SECONDS, wrapTime } from './time'
-import { MAX_EDITS, World } from './world'
-import { SEA_LEVEL, seedText } from './worldgen'
+import { daylight, wrapTime } from './time'
+import { World } from './world'
+import { seedText } from './worldgen'
 
-const VERSION = '1.0.0'
-/** 准星最多能够到几格 */
-const REACH = 5
-/** 走动时多久存一次(编辑是立刻存的) */
-const SAVE_EVERY = 2.5
-/** 一轮昼夜多少秒 */
-const DAY_LENGTH = DAY_SECONDS
+const VERSION = '1.1.0'
+const nextPaint = (): Promise<void> =>
+  new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
 
-/** 云端 best 键用不到,但 SaveSlot 需要:放一个空对象就行 */
-interface EmptyBest {
-  v: 1
-}
+// ---------------------------------------------------------------- 存档
 
-const slot = new SaveSlot<GameSave, EmptyBest>({
+const slot = new SaveSlot<GameSave, Profile>({
   cacheKey: cacheKey('sandbox'),
   cloud,
   local,
   loadState: loadSave,
   saveState: (s) => saveOf(s),
-  loadBest: (raw) => (raw && typeof raw === 'object' && (raw as { v?: unknown }).v === 1 ? { v: 1 } : null),
-  mergeBest: (a) => a,
-  emptyBest: { v: 1 },
-  // 编辑后 1 秒内写一次,云端两次写至少隔 2.5 秒(走动存档也走同一条节流)
+  loadBest: (raw) => loadProfile(raw),
+  mergeBest: (a, b) => mergeProfile(a, b),
+  emptyBest: copyProfile({ v: 2, mined: 0, placed: 0, walked: 0, seconds: 0, achievements: {} }),
   delay: 900,
   minGap: 2500,
 })
 
-// ---------------------------------------------------------------- DOM
+// ---------------------------------------------------------------- DOM / 状态
 
 const gameEl = $('game')
 const canvas = $<HTMLCanvasElement>('view')
 const menuEl = $('menu')
 const loadingEl = $('loading')
 const overlay = new Overlay($('overlay'), () => undefined)
-const hud = new Hud((index) => selectSlot(index))
 
-let renderer: Renderer
-const input = new Input()
 let screen: 'menu' | 'game' = 'menu'
-let world: World | null = null
-let player: PlayerState = newPlayer(64.5, SEA_LEVEL + 4, 64.5, 0)
-let inv = newInventory()
-let hot = 0
-let dayTime = 0.06
-let currentSeed = 0
-let mined = 0
-let placed = 0
 let paused = true
 let entering = false
-let target: RayHit | null = null
-let miningProgress = 0
-let miningKey = ''
-let mineTick = 0
-let bedrockWarned = false
-let bobPhase = 0
 let saveTimer = 0
 let hudTimer = 0
+let ambientTimer = 0
 let raf = 0
 let lastFrame = 0
 let quality = 1
 let frameSamples = 0
 let frameMsSum = 0
-let editsDirty = false
-let editsCache = ''
+let profilePending = false
+let pendingCleanup = false
+let bobPhase = 0
 
-const nextPaint = (): Promise<void> =>
-  new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+const hud = new Hud((index) => selectSlot(index))
+const game = new Game({
+  sound: (name, opts) => soundByName(name, opts),
+  toast: (text) => hud.toast(text),
+  announce: (text) => hud.announce(text),
+  achievement: (def) => onAchievement(def),
+  cleanupNeeded: () => { pendingCleanup = true },
+  markDirty: (kind) => { if (kind === 'profile') profilePending = true },
+})
+const renderer = new Renderer(canvas)
+const input = new Input()
 
-// ---------------------------------------------------------------- 存档快照
+function soundByName(name: SoundName, opts?: SoundOptions): void {
+  sound(name, opts)
+}
+
+function selectSlot(i: number): void {
+  if (screen !== 'game' || paused) return
+  if (game.selectSlot(i)) hud.itemName(blockName(HOTBAR[i]))
+}
+
+function onAchievement(def: AchievementDef): void {
+  hud.achievement(def)
+  sound('achieve')
+  hud.announce(`成就解锁:${def.name}`)
+  if (game.world) slot.setBest(game.profile)
+  profilePending = false
+}
+
+// ---------------------------------------------------------------- 存档动作
 
 function countEdits(text: string | undefined): number {
   if (!text) return 0
@@ -100,64 +106,107 @@ function countEdits(text: string | undefined): number {
   return text.endsWith(',') ? n : n + 1
 }
 
-/** 世界有改动时把稀疏编辑表重新编码一次(4000 条排序约几毫秒,只在改动后做) */
-function editsText(): string {
-  if (world && editsDirty) {
-    editsCache = world.serializeEdits()
-    editsDirty = false
-  }
-  return editsCache
+/** 立刻把世界和档案写进 SaveSlot(云端由 SaveSlot 节流) */
+function saveNow(): void {
+  if (!game.world) return
+  slot.change(game.snapshot())
+  slot.setBest(game.profile)
+  profilePending = false
 }
 
-function snapshot(): GameSave {
-  return {
-    v: 1,
-    seed: currentSeed >>> 0,
-    edits: editsText(),
-    player: { x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch },
-    time: wrapTime(dayTime),
-    inv: inv.slice(),
-    hot,
-    mined,
-    placed,
+/** 旧 1.0 存档把挖/放存在 state 里;档案还是空的话迁移一次,然后从存档里抹掉 legacy */
+function applyLegacyProfile(): void {
+  const state = slot.state
+  const legacy = state?.legacy
+  if (!state || !legacy) return
+  const profile = slot.best
+  if (profile.mined === 0 && profile.placed === 0) {
+    profile.mined = legacy.mined
+    profile.placed = legacy.placed
+    slot.setBest(profile)
   }
-}
-
-function commitNow(): void {
-  if (!world) return
-  slot.change(snapshot())
-}
-
-/** 当前状态(菜单和「关于」显示用):在游戏里就用内存里的实时数字 */
-function currentStats(): MenuStats {
-  if (screen === 'game' && world) {
-    return {
-      hasSave: true, seed: currentSeed, mined, placed, edits: countEdits(editsText()),
-      muted: isMuted(), version: VERSION,
-    }
-  }
-  const s = slot.state
-  return {
-    hasSave: !!s, seed: s ? s.seed : 0, mined: s ? s.mined : 0, placed: s ? s.placed : 0,
-    edits: s ? countEdits(s.edits) : 0, muted: isMuted(), version: VERSION,
-  }
+  delete state.legacy
+  slot.change(state)
 }
 
 // ---------------------------------------------------------------- 菜单
 
+function currentStats(): MenuStats {
+  if (screen === 'game' && game.world) {
+    return {
+      hasSave: true,
+      seed: game.world.seed,
+      mined: game.profile.mined,
+      placed: game.profile.placed,
+      walked: game.profile.walked,
+      seconds: game.profile.seconds,
+      achievements: unlockedCount(game.profile),
+      achievementsTotal: ACHIEVEMENTS.length,
+      edits: game.world.editCount,
+      muted: isMuted(),
+      version: VERSION,
+    }
+  }
+  const s = slot.state
+  const p = slot.best
+  return {
+    hasSave: !!s,
+    seed: s ? s.seed : 0,
+    mined: p.mined,
+    placed: p.placed,
+    walked: p.walked,
+    seconds: p.seconds,
+    achievements: unlockedCount(p),
+    achievementsTotal: ACHIEVEMENTS.length,
+    edits: s ? countEdits(s.edits) : 0,
+    muted: isMuted(),
+    version: VERSION,
+  }
+}
+
 function renderMenu(): void {
-  mainMenu(menuEl, app)
+  if (screen !== 'menu') return
+  mainMenu(menuEl, menuApp)
   hud.sound(isMuted())
   WebApp.BackButton.hide()
 }
 
 function toggleSound(): void {
-  audioUnlock()
+  unlockAudio()
   setMuted(!isMuted())
-  if (!isMuted()) sfx('click')
+  if (!isMuted()) sound('click')
   hud.sound(isMuted())
   if (screen === 'menu') renderMenu()
   else if (paused && overlay.open) pausePanel(overlay, pauseApp)
+}
+
+const menuApp: MenuApp = {
+  stats: currentStats,
+  resume: () => {
+    const s = slot.state
+    if (s) void enterGame(s)
+    else openNewWorld()
+  },
+  newWorld: () => openNewWorld(),
+  help: () => helpPanel(overlay),
+  about: () => aboutPanel(overlay, currentStats()),
+  achievements: () => achievementsPanel(overlay, currentStats(), slot.best, game.achievementContext()),
+  toggleSound,
+  quitToMenu: () => { void requestQuit() },
+  cleanup: () => undefined,
+}
+
+const pauseApp: MenuApp = {
+  stats: currentStats,
+  resume: () => resumeGame(),
+  newWorld: () => openNewWorld(),
+  help: () => helpPanel(overlay, () => pausePanel(overlay, pauseApp)),
+  about: () => aboutPanel(overlay, currentStats(), () => pausePanel(overlay, pauseApp)),
+  achievements: () => achievementsPanel(overlay, currentStats(), game.profile, game.achievementContext(),
+    () => pausePanel(overlay, pauseApp)),
+  toggleSound,
+  quitToMenu: () => { void requestQuit() },
+  cleanup: () => openCleanup(),
 }
 
 function openNewWorld(): void {
@@ -182,34 +231,10 @@ async function startNewWorld(seedOrNull: number | null): Promise<void> {
   await enterGame(save, fresh)
 }
 
-const app: MenuApp = {
-  stats: currentStats,
-  resume: () => {
-    const s = slot.state
-    if (s) void enterGame(s)
-    else openNewWorld()
-  },
-  newWorld: openNewWorld,
-  help: () => helpPanel(overlay),
-  about: () => aboutPanel(overlay, currentStats()),
-  toggleSound,
-  quitToMenu: () => { void requestQuit() },
-}
-
-const pauseApp: MenuApp = {
-  stats: currentStats,
-  resume: () => resumeGame(),
-  newWorld: openNewWorld,
-  help: () => helpPanel(overlay, () => pausePanel(overlay, pauseApp)),
-  about: () => aboutPanel(overlay, currentStats(), () => pausePanel(overlay, pauseApp)),
-  toggleSound,
-  quitToMenu: () => { void requestQuit() },
-}
-
 async function requestQuit(): Promise<void> {
   const ok = await confirmBox('回到主菜单?进度已经自动存档。')
   if (!ok) {
-    if (paused) pausePanel(overlay, pauseApp)
+    if (screen === 'game' && paused) pausePanel(overlay, pauseApp)
     return
   }
   overlay.hide()
@@ -218,20 +243,15 @@ async function requestQuit(): Promise<void> {
 
 function exitToMenu(): void {
   if (screen !== 'game') return
-  paused = true
-  input.enabled = false
-  input.releaseAll()
-  input.exitLock()
-  commitNow()
+  pauseGame(false)
+  saveNow()
   void slot.flush()
   stopLoop()
   screen = 'menu'
+  game.world = null
   gameEl.hidden = true
   menuEl.hidden = false
-  world = null
-  target = null
-  miningProgress = 0
-  miningKey = ''
+  setAmbience(0.6, false)
   renderMenu()
 }
 
@@ -240,65 +260,48 @@ function exitToMenu(): void {
 async function enterGame(save: GameSave, prebuilt: World | null = null): Promise<void> {
   if (entering) return
   entering = true
-  audioUnlock()
+  unlockAudio()
   overlay.hide()
   menuEl.hidden = true
   loadingEl.hidden = false
   await nextPaint()
   try {
-    let w = prebuilt
-    if (!w) {
-      w = new World(save.seed)
-      // 存档里的编辑串在 loadSave 里验过格式,这里再对一遍方块底座;失败就当新世界
-      if (!w.loadEdits(save.edits)) w.loadEdits('')
-    }
-    world = w
-    currentSeed = save.seed >>> 0
-    inv = save.inv.slice()
-    hot = Math.max(0, Math.min(HOTBAR.length - 1, Math.floor(save.hot)))
-    dayTime = wrapTime(save.time)
-    mined = save.mined
-    placed = save.placed
-    editsCache = save.edits
-    editsDirty = false
-    player = newPlayer(save.player.x, save.player.y, save.player.z, save.player.yaw)
-    player.pitch = clampPitch(save.player.pitch)
-    placePlayer(w, player, save.player.x, save.player.y, save.player.z)
-    target = null
-    miningProgress = 0
-    miningKey = ''
-    bedrockWarned = false
-    bobPhase = 0
-    saveTimer = 0
-    hudTimer = 0
+    const world = prebuilt ?? new World(save.seed)
+    if (!prebuilt && !world.loadEdits(save.edits)) world.loadEdits('')
+    game.load(save, copyProfile(slot.best), world)
     hud.buildHotbar()
     hud.sound(isMuted())
+    hud.itemName(blockName(HOTBAR[game.hot]))
     screen = 'game'
     gameEl.hidden = false
     loadingEl.hidden = true
     renderer.setQuality(quality)
     renderer.resize()
-    hud.refresh({ time: dayTime, x: player.x, y: player.y, z: player.z, target, inv, hot })
+    hud.refresh(hudState())
     paused = false
     input.enabled = true
     lastFrame = performance.now()
+    saveTimer = 0
+    hudTimer = 0
+    ambientTimer = 99
+    bobPhase = 0
     render()
     startLoop()
     WebApp.requestFullscreen().catch(() => undefined)
     WebApp.lockOrientation().catch(() => undefined)
     WebApp.BackButton.show()
+    sound('click')
     if (prebuilt) {
-      // 新世界:马上把种子和位置写进存档,不然关掉就丢了
-      commitNow()
+      saveNow()
       void slot.flush()
     }
-    hud.announce(`进入世界,种子 ${seedText(currentSeed)}`)
+    hud.announce(`进入世界,种子 ${seedText(world.seed)}`)
   } catch (err) {
     loadingEl.hidden = true
     menuEl.hidden = false
     gameEl.hidden = true
     screen = 'menu'
-    world = null
+    game.world = null
     renderMenu()
     throw err
   } finally {
@@ -306,19 +309,17 @@ async function enterGame(save: GameSave, prebuilt: World | null = null): Promise
   }
 }
 
-function pauseGame(): void {
-  if (screen !== 'game' || paused || !world) return
+function pauseGame(openPanel = true): void {
+  if (screen !== 'game' || paused || !game.world) return
   paused = true
   input.enabled = false
   input.releaseAll()
   input.exitLock()
-  miningProgress = 0
-  miningKey = ''
-  hud.mine(0)
-  commitNow()
+  saveNow()
   void slot.flush()
+  setAmbience(daylight(game.time), false)
   render()
-  pausePanel(overlay, pauseApp)
+  if (openPanel) pausePanel(overlay, pauseApp)
 }
 
 function resumeGame(): void {
@@ -327,18 +328,32 @@ function resumeGame(): void {
   paused = false
   input.enabled = true
   lastFrame = performance.now()
+  ambientTimer = 99
+  setAmbience(daylight(game.time), true)
   render()
 }
 
-function respawnPlayer(): void {
-  const w = world
-  if (!w) return
-  placePlayer(w, player, w.spawn.x, w.spawn.y, w.spawn.z)
-  player.yaw = w.yaw
-  player.pitch = 0
-  sfx('respawn')
-  hud.announce('掉出世界了,回到出生点')
-  commitNow()
+// ---------------------------------------------------------------- 改动容量清理
+
+function openCleanup(): void {
+  if (screen !== 'game' || !game.world) return
+  if (!paused) pauseGame(false)
+  render()
+  const back = (): void => {
+    overlay.hide()
+    resumeGame()
+  }
+  cleanupPanel(overlay, game.world.editCount, back, () => {
+    game.cleanupRecent()
+    saveNow()
+    render()
+    resumeGame()
+  }, () => {
+    game.cleanupAll()
+    saveNow()
+    render()
+    resumeGame()
+  })
 }
 
 // ---------------------------------------------------------------- 主循环
@@ -357,18 +372,18 @@ function stopLoop(): void {
 function frame(now: number): void {
   raf = requestAnimationFrame(frame)
   const raw = now - lastFrame
-  const dt = Math.min(0.05, Math.max(0, raw / 1000))
+  const dt = Math.min(FEEL.MAX_DT, Math.max(0, raw / 1000))
   lastFrame = now
-  if (screen !== 'game' || !world || paused) return
-  update(dt)
-  render()
+  if (screen !== 'game' || !game.world || paused) return
+  stepGame(dt)
+  if (!paused) render()
   // 自适应画质:每 90 帧看一次平均帧时间,跟不上就降内部渲染分辨率
   if (raw > 0 && raw < 250) frameMsSum += raw
   frameSamples++
   if (frameSamples >= 90) {
     const avg = frameMsSum / frameSamples
-    if (avg > 24 && quality > 0.5) {
-      quality = Math.max(0.5, quality - 0.15)
+    if (avg > 24 && quality > FEEL_QUALITY_MIN) {
+      quality = Math.max(FEEL_QUALITY_MIN, quality - 0.15)
       renderer.setQuality(quality)
     } else if (avg < 13 && quality < 1) {
       quality = Math.min(1, quality + 0.1)
@@ -379,214 +394,120 @@ function frame(now: number): void {
   }
 }
 
-function update(dt: number): void {
-  const w = world
-  if (!w) return
-  dayTime = wrapTime(dayTime + dt / DAY_LENGTH)
+const FEEL_QUALITY_MIN = 0.5
 
-  // 视角:鼠标/触屏的增量 + 方向键
+function buildInput(): GameInput {
   const look = input.consumeLook()
-  player.yaw += look.x
-  player.pitch = clampPitch(player.pitch - look.y)
   const keys = input.lookKeys
-  if (keys.x || keys.y) {
-    player.yaw += keys.x * 1.9 * dt
-    player.pitch = clampPitch(player.pitch + keys.y * 1.35 * dt)
-  }
-  const tau = Math.PI * 2
-  player.yaw = ((player.yaw % tau) + tau) % tau
-
-  const wasInWater = player.inWater
-  const res = stepPlayer(w, player, {
+  return {
     forward: input.forwardAxis,
     strafe: input.strafeAxis,
     jump: input.jump,
-  }, dt)
-  if (res.jumped && !player.inWater) sfx('jump', 0.8)
-  if (res.landed && !player.inWater) sfx('land', 0.7)
-  if (!wasInWater && player.inWater) sfx('splash', 0.8)
-  if (res.fellOut) respawnPlayer()
+    jumpPressed: input.consumeJumpPress(),
+    mine: input.mining,
+    placePressed: input.consumePlace(),
+    lookDX: look.x,
+    lookDY: look.y,
+    lookKeyX: keys.x,
+    lookKeyY: keys.y,
+  }
+}
 
-  const moving = Math.hypot(player.vx, player.vz) > 0.8
-  if (moving && player.onGround && !reduced()) bobPhase += dt * 8.5
+function stepGame(dt: number): void {
+  game.update(dt, buildInput())
+  const dirty = game.takeDirty()
+  if (dirty.world) slot.change(game.snapshot())
+  if (dirty.profile) profilePending = true
+
+  // 视角晃动(减少动态效果时不做)
+  const moving = Math.hypot(game.player.vx, game.player.vz) > 0.8
+  if (!reduced() && moving && game.player.onGround) bobPhase += dt * 8.5
   else if (!moving) bobPhase *= Math.max(0, 1 - dt * 8)
 
-  const eye = cameraEye(player)
-  target = rayFromEye(w, eye.x, eye.y, eye.z, player.yaw, player.pitch, REACH)
-  updateMining(dt)
-  if (input.consumePlace()) tryPlace()
-
-  saveTimer += dt
-  if (saveTimer >= SAVE_EVERY) {
-    saveTimer = 0
-    commitNow()
+  // 环境声 / 水下音效:每 2 秒更新一次状态
+  ambientTimer += dt
+  if (ambientTimer >= 2) {
+    ambientTimer = 0
+    setAmbience(daylight(game.time), true)
+    setUnderwater(game.eyeBlock() === WATER)
   }
+
+  // 走动/时间的存档节流 + 档案写回
+  saveTimer += dt
+  if (saveTimer >= LIMITS.SAVE_EVERY) {
+    saveTimer = 0
+    if (game.world) slot.change(game.snapshot())
+    if (profilePending) {
+      slot.setBest(game.profile)
+      profilePending = false
+    }
+  }
+
   hudTimer += dt
-  if (hudTimer >= 0.12) {
+  if (hudTimer >= LIMITS.HUD_EVERY) {
     hudTimer = 0
-    hud.refresh({ time: dayTime, x: player.x, y: player.y, z: player.z, target, inv, hot })
+    hud.refresh(hudState())
+    hud.mine(game.miningProgress)
+  }
+
+  if (pendingCleanup) {
+    pendingCleanup = false
+    openCleanup()
+  }
+}
+
+function hudState(): HudState {
+  return {
+    time: game.time,
+    x: game.player.x,
+    y: game.player.y,
+    z: game.player.z,
+    target: game.target,
+    inv: game.inv,
+    hot: game.hot,
+    edits: game.world ? game.world.editCount : 0,
   }
 }
 
 function render(): void {
+  const world = game.world
   if (!world) return
   renderer.resize()
-  const eye = cameraEye(player)
-  const moving = Math.hypot(player.vx, player.vz) > 0.8
-  const bob = !reduced() && moving && player.onGround ? Math.sin(bobPhase) * 0.045 : 0
-  const cam: Camera = { x: eye.x, y: eye.y + bob, z: eye.z, yaw: player.yaw, pitch: player.pitch }
-  renderer.render(world, { cam, time: dayTime, target, mining: miningProgress })
+  const eye = game.eye
+  const moving = Math.hypot(game.player.vx, game.player.vz) > 0.8
+  const bob = !reduced() && moving && game.player.onGround ? Math.sin(bobPhase) * 0.045 : 0
+  const cam: Camera = {
+    x: eye.x,
+    y: eye.y + bob,
+    z: eye.z,
+    yaw: game.player.yaw,
+    pitch: game.player.pitch,
+  }
+  renderer.render(world, {
+    cam,
+    time: game.time,
+    target: game.target,
+    mining: game.miningProgress,
+    particles: game.particles,
+  })
 }
 
-// ---------------------------------------------------------------- 挖 / 放
-
-function targetKey(hit: RayHit): string {
-  return `${hit.x},${hit.y},${hit.z}`
-}
-
-function updateMining(dt: number): void {
-  const w = world
-  if (!w) return
-  if (!input.mining || !target) {
-    if (miningProgress !== 0) {
-      miningProgress = 0
-      miningKey = ''
-      hud.mine(0)
-    }
-    return
-  }
-  const key = targetKey(target)
-  if (key !== miningKey) {
-    miningKey = key
-    miningProgress = 0
-  }
-  const total = breakTime(target.block, player.inWater)
-  if (!Number.isFinite(total)) {
-    if (!bedrockWarned) {
-      bedrockWarned = true
-      sfx('deny')
-      hud.toast('基岩挖不动:世界最底下两层是基岩')
-      hud.announce('基岩挖不动')
-    }
-    return
-  }
-  miningProgress += dt / total
-  mineTick -= dt
-  if (mineTick <= 0) {
-    mineTick = 0.2
-    sfx('mine', 0.5)
-  }
-  if (miningProgress >= 1) {
-    miningProgress = 0
-    miningKey = ''
-    breakBlock(target)
-  }
-  hud.mine(miningProgress)
-}
-
-function breakBlock(hit: RayHit): void {
-  const w = world
-  if (!w) return
-  const result = w.setBlock(hit.x, hit.y, hit.z, AIR)
-  if (result === 'ok') {
-    editsDirty = true
-    mined++
-    addBlock(inv, hit.block)
-    sfx('break')
-    hud.announce(`挖掉了${blockName(hit.block)}`)
-    commitNow()
-    hud.counts(inv)
-    target = null
-    } else if (result === 'full') {
-    sfx('full')
-    hud.toast(`改动已经到 ${MAX_EDITS} 格上限:把方块改回去,或者开一个新世界`)
-    hud.announce('改动到上限了')
-  } else if (result === 'bedrock') {
-    sfx('deny')
-  }
-}
-
-/** 放方块要检查的格子会不会卡住玩家自己 */
-function intersectsPlayer(x: number, y: number, z: number): boolean {
-  const minX = player.x - 0.3
-  const maxX = player.x + 0.3
-  const minY = player.y
-  const maxY = player.y + 1.8
-  const minZ = player.z - 0.3
-  const maxZ = player.z + 0.3
-  return x + 1 > minX + 1e-4 && x < maxX - 1e-4 && y + 1 > minY + 1e-4 && y < maxY - 1e-4
-    && z + 1 > minZ + 1e-4 && z < maxZ - 1e-4
-}
-
-function tryPlace(): void {
-  const w = world
-  if (!w || !target) return
-  const pos = placePosition(target)
-  if (pos.y <= 1 || pos.y >= 48 || pos.x < 0 || pos.x >= 128 || pos.z < 0 || pos.z >= 128) {
-    sfx('deny')
-    return
-  }
-  const blockId = HOTBAR[hot]
-  if (inv[hot] <= 0) {
-    sfx('deny')
-    hud.toast(`没有${blockName(blockId)}了:先去挖一点`)
-    hud.announce(`没有${blockName(blockId)}了`)
-    return
-  }
-  const existing = w.blockAt(pos.x, pos.y, pos.z)
-  if (existing !== AIR && existing !== WATER) {
-    sfx('deny')
-    return
-  }
-  if (intersectsPlayer(pos.x, pos.y, pos.z)) {
-    sfx('deny')
-    hud.toast('这里放不下:会卡住自己')
-    return
-  }
-  const result = w.setBlock(pos.x, pos.y, pos.z, blockId)
-  if (result === 'ok') {
-    editsDirty = true
-    placed++
-    if (takeBlock(inv, hot)) hud.counts(inv)
-    sfx('place')
-    hud.announce(`放了${blockName(blockId)}`)
-    commitNow()
-  } else if (result === 'full') {
-    sfx('full')
-    hud.toast(`改动已经到 ${MAX_EDITS} 格上限:把方块改回去,或者开一个新世界`)
-  } else if (result === 'bedrock') {
-    sfx('deny')
-  }
-}
-
-// ---------------------------------------------------------------- HUD
-
-function selectSlot(i: number): void {
-  if (i < 0 || i >= HOTBAR.length || i === hot) return
-  hot = i
-  hud.selection(hot)
-  audioUnlock()
-  sfx('click', 0.5)
-  hud.announce(blockName(HOTBAR[hot]))
-}
-
-function cycleSlot(dir: number): void {
-  selectSlot((hot + (dir > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length)
-}
-
-// ---------------------------------------------------------------- 宿主生命周期
+// ---------------------------------------------------------------- 宿主生命周期 / 设备
 
 hostGame(() => {
   if (screen === 'game') {
     if (!paused) pauseGame()
-    commitNow()
+    saveNow()
     void slot.flush()
   }
-  audioSuspend()
+  suspendAudio()
 })
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') audioUnlock()
+  if (document.visibilityState === 'visible') {
+    resumeAudio()
+    unlockAudio()
+  }
 })
 
 window.addEventListener('resize', () => {
@@ -595,19 +516,22 @@ window.addEventListener('resize', () => {
   if (paused) render()
 })
 
-window.addEventListener('pointerdown', () => audioUnlock(), { once: true, capture: true })
-window.addEventListener('keydown', () => audioUnlock(), { once: true, capture: true })
+window.addEventListener('pointerdown', () => unlockAudio(), { once: true, capture: true })
+window.addEventListener('keydown', () => unlockAudio(), { once: true, capture: true })
 
 followTheme()
-renderer = new Renderer(canvas)
 input.attach(canvas, $('stick'), $('stick-knob'), {
   jump: $('btn-jump'),
   mine: $('btn-mine'),
   place: $('btn-place'),
 }, {
-  onHotbar: selectSlot,
-  onCycle: cycleSlot,
-  onPause: pauseGame,
+  onHotbar: (index) => selectSlot(index),
+  onCycle: (dir) => {
+    if (screen !== 'game' || paused) return
+    game.cycleSlot(dir)
+    hud.itemName(blockName(HOTBAR[game.hot]))
+  },
+  onPause: () => pauseGame(),
 })
 
 const touch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window
@@ -616,7 +540,7 @@ if (touch) {
   $('hud-hint').hidden = true
 }
 
-$('btn-pause').addEventListener('click', pauseGame)
+$('btn-pause').addEventListener('click', () => pauseGame())
 $('btn-sound').addEventListener('click', toggleSound)
 WebApp.SettingsButton.show().onClick(() => {
   if (screen === 'game') pauseGame()
@@ -635,8 +559,10 @@ WebApp.BackButton.onClick(() => {
 
 renderMenu()
 slot.restoreLocal()
-if (slot.state) renderMenu() // 本机有存档:主菜单出现「继续游戏」
+applyLegacyProfile()
+if (slot.state) renderMenu()
 void slot.restoreCloud().then(() => {
+  applyLegacyProfile()
   if (screen === 'menu') renderMenu()
 })
 let readied = false
@@ -647,19 +573,49 @@ const ready = (): void => {
 }
 setTimeout(ready, 900)
 
-// 开发时的测试钩子:浏览器冒烟脚本用它确认世界真的在跑(生产构建里这段会被去掉)
+// 开发时的测试钩子:浏览器冒烟脚本用它确认世界真的在跑/拨时间看昼夜。
+// 生产构建里 import.meta.env.DEV 是 false,整段会被去掉(check_miniapp_meta 会扫构建产物里的 __sandbox)。
 if (import.meta.env.DEV) {
   (window as unknown as Record<string, unknown>).__sandbox = {
     screen: () => screen,
     paused: () => paused,
-    seed: () => currentSeed,
-    player: () => ({ x: player.x, y: player.y, z: player.z, yaw: player.yaw, pitch: player.pitch }),
-    edits: () => (world ? world.editCount : 0),
-    target: () => target,
-    /** 开发时把时间拨到指定的 0..1(截图检查昼夜光照用) */
+    version: () => VERSION,
+    seed: () => (game.world ? game.world.seed : 0),
+    player: () => ({ x: game.player.x, y: game.player.y, z: game.player.z, yaw: game.player.yaw, pitch: game.player.pitch }),
+    edits: () => (game.world ? game.world.editCount : 0),
+    target: () => game.target,
+    stats: () => currentStats(),
+    achievements: () => game.profile.achievements,
+    time: () => game.time,
     setTime(t: number) {
-      dayTime = wrapTime(t)
-      if (world) render()
+      game.time = wrapTime(t)
+      if (game.world) render()
+    },
+    give(slotIndex: number, n: number) {
+      game.inv[slotIndex] = Math.max(0, Math.min(LIMITS.MAX_STACK, n))
+      hud.refresh(hudState())
+    },
+    /** 只给 QA 用:直接把视角转到指定朝向(0..2π, -1.3..1.3) */
+    look(yaw: number, pitch: number) {
+      game.player.yaw = yaw
+      game.player.pitch = Math.max(-FEEL.PITCH_LIMIT, Math.min(FEEL.PITCH_LIMIT, pitch))
+      if (game.world) render()
+    },
+    /** 只给 QA 用:在空中造 n 处编辑,模拟接近/到达 4000 格上限 */
+    fillEdits(n: number) {
+      const world = game.world
+      if (!world) return 0
+      let made = 0
+      for (let y = 47; y >= 30 && made < n; y--) {
+        for (let z = 5; z < 120 && made < n; z++) {
+          for (let x = 5; x < 120 && made < n; x++) {
+            if (world.blockAt(x, y, z) !== 0) continue
+            if (world.setBlock(x, y, z, 3) === 'ok') made++
+          }
+        }
+      }
+      hud.refresh(hudState())
+      return made
     },
   }
 }

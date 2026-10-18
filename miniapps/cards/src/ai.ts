@@ -1,41 +1,26 @@
-// 电脑怎么打。和界面无关:传进一个对局,返回下一步做什么 —— 一定是 legalActions 里的一个合法动作。
+// 电脑怎么打。三档难度只差在 data.ts 的 AI_TUNING(局面分权重 / 斩杀搜索深度 / 手滑比例),
+// 规则与卡牌数值在三个难度下完全一样。和界面无关:传进一个对局,返回下一步做什么 ——
+// 一定是 legalActions 里的一个合法动作;纯函数、无随机数(休闲档的「手滑」也由局面哈希决定)。
 //
 // 顺序:
-// 1. 斩杀:困难档会往后算一串动作(攻击、伤害法术、冲锋),找到能这回合把对面英雄打死的走法就直接走;
-//    标准档只看一步。
-// 2. 打分:把每个能做的动作都试一遍,用局面分(双方英雄血量、场面攻防、手牌、嘲讽保护)挑涨分最多的;
-//    涨得不够多就结束回合,不乱出牌。
-// 判分是纯函数、没有随机数:同一个局面永远做同一个决定,单测能复现。
-import { card } from './data'
+// 1. 休闲档按局面的确定性哈希偶尔「手滑」,直接挑一个合法动作(不评估、不算斩杀);
+// 2. 斩杀:按难度往后算几步,找到能这回合把对面英雄打死的走法就执行(有节点/毫秒硬预算);
+// 3. 打分:每个合法动作试一遍,用局面分挑涨分最多的;涨得不够多就结束回合,不乱出牌。
+import { AI_TUNING, card } from './data'
 import { applyAction, attackTargets, canPlayCard, legalActions, playTargets } from './engine'
-import { Action, GameState, Level, Side, START_HP, TargetRef, foe } from './types'
-
-interface Weights {
-  /** 对面英雄掉 1 点血值多少 */
-  face: number
-  /** 对面每个随从的威胁系数 */
-  enemyBoard: number
-  /** 自己随从的攻击 / 生命值多少 */
-  ownAtk: number
-  ownHp: number
-  /** 自己低血量时嘲讽的额外价值(困难档才用) */
-  taunt: number
-  hand: number
-}
-
-const NORMAL: Weights = { face: 1.4, enemyBoard: 0.9, ownAtk: 1.7, ownHp: 1.2, taunt: 0, hand: 0.5 }
-const HARD: Weights = { face: 1.0, enemyBoard: 1.15, ownAtk: 2.1, ownHp: 1.7, taunt: 0.8, hand: 1.0 }
+import type { Action, AiTuning, AiWeights, GameState, Level, Side, TargetRef } from './types'
+import { START_HP, foe } from './types'
 
 /** 局面分(站在 side 的立场)。终局给极大的正负值 */
-function evaluate(s: GameState, side: Side, w: Weights): number {
+function evaluate(s: GameState, side: Side, w: AiWeights, lowHp: number): number {
   if (s.over) return s.over.winner === side ? 1e6 : s.over.winner === foe(side) ? -1e6 : 0
   const me = s.sides[side]
   const them = s.sides[foe(side)]
   let v = (START_HP - them.hp) * w.face - (START_HP - me.hp) * 0.9 * w.face
-  const lowHp = me.hp <= 12
+  const soft = me.hp <= lowHp
   for (const m of me.board) {
     v += (m.attack * w.ownAtk + m.health * w.ownHp) / 2.6
-    if (m.taunt) v += w.taunt * (lowHp ? 2.2 : 1)
+    if (m.taunt) v += w.taunt * (soft ? 2.2 : 1)
     if (m.shield) v += 1.2
   }
   for (const m of them.board) {
@@ -43,6 +28,7 @@ function evaluate(s: GameState, side: Side, w: Weights): number {
     if (m.shield) v -= 1.2
   }
   v += me.hand.length * w.hand
+  v += me.energy * w.energy
   return v
 }
 
@@ -63,7 +49,7 @@ function maxBurst(s: GameState, side: Side): number {
   return dmg
 }
 
-/** 斩杀搜索里只列「能打脸 / 能清掉挡路嘲讽」的动作,并按先打脸的顺序排 */
+/** 斩杀搜索里只列「能打脸 / 能清掉挡路嘲讽」的动作,先打脸、再清嘲讽、最后出伤害牌 */
 function lethalCandidates(s: GameState, side: Side): Action[] {
   const me = s.sides[side]
   const them = s.sides[foe(side)]
@@ -104,19 +90,15 @@ function lethalCandidates(s: GameState, side: Side): Action[] {
 
 /**
  * 斩杀搜索的预算。分支会随场面和手牌指数涨:大场面下不设上限会把手机算到卡死
- * (审查时构造过一个局面,搜索跑了 59 秒)。节点数或毫秒数一到就放弃这份搜索,
- * 调用方(findLethal)返回 null,aiNext 退回普通的启发式评分 —— 只是这回合不找斩杀,不会卡住。
+ * (审查抓到过一次 59 秒)。节点数或毫秒数一到就放弃这份搜索,aiNext 退回普通启发式评分。
  */
 interface SearchBudget {
   nodes: number
-  /** 到这个时间点必须收手(Date.now 毫秒) */
   deadline: number
   aborted: boolean
 }
 
 const MAX_NODES = 2500
-const HARD_MS = 120
-const NORMAL_MS = 30
 
 function searchLethal(s: GameState, side: Side, depth: number, budget: SearchBudget): Action[] | null {
   if (budget.aborted || budget.nodes++ > MAX_NODES || Date.now() > budget.deadline) {
@@ -142,38 +124,60 @@ function searchLethal(s: GameState, side: Side, depth: number, budget: SearchBud
 
 /** 找到这回合就能赢的第一步;找不到(或搜索超预算)返回 null */
 export function findLethal(s: GameState, side: Side, level: Level): Action | null {
-  const depth = level === 'hard' ? 12 : 1
-  const budget: SearchBudget = {
-    nodes: 0, deadline: Date.now() + (level === 'hard' ? HARD_MS : NORMAL_MS), aborted: false,
-  }
-  const seq = searchLethal(s, side, depth, budget)
+  const tuning: AiTuning = AI_TUNING[level]
+  if (tuning.lethalDepth <= 0) return null
+  const budget: SearchBudget = { nodes: 0, deadline: Date.now() + tuning.msBudget, aborted: false }
+  const seq = searchLethal(s, side, tuning.lethalDepth, budget)
   return seq && seq.length > 0 ? seq[0] : null
+}
+
+/**
+ * 休闲档的「手滑」:用对局里的固定字段算一个 0–1 的哈希,同一个局面永远滑同一手(可复现),
+ * 但会偶尔不选最优解 —— 这是休闲档比标准档弱的主要来源。
+ */
+function stateNoise(s: GameState): number {
+  let h = (s.seed ^ Math.imul(s.turn, 0x9e3779b9) ^ Math.imul(s.nextUid, 0x85ebca6b)) >>> 0
+  h ^= h >>> 15
+  h = Math.imul(h, 0x2c1b3c6d) >>> 0
+  h ^= h >>> 12
+  return (h >>> 0) / 4294967296
+}
+
+function slipPick(s: GameState, tuning: AiTuning, options: Action[]): Action | null {
+  if (tuning.slip <= 0) return null
+  const noise = stateNoise(s)
+  if (noise >= tuning.slip) return null
+  return options[Math.floor(noise * 9973) % options.length]
 }
 
 /** 电脑的下一步。对局结束或没动作可做时返回结束回合 */
 export function aiNext(s: GameState, level: Level): Action {
   if (s.over) return { kind: 'end' }
   const side = s.active
+  const tuning = AI_TUNING[level]
   const legal = legalActions(s)
   const options = legal.filter((a): a is Exclude<Action, { kind: 'end' }> => a.kind !== 'end')
   if (options.length === 0) return { kind: 'end' }
+  // 1. 休闲档的确定性手滑(不评估、不算斩杀)
+  const slip = slipPick(s, tuning, options)
+  if (slip) return slip
+  // 2. 斩杀
   const lethal = findLethal(s, side, level)
   if (lethal && lethal.kind !== 'end') return lethal
-  const w = level === 'hard' ? HARD : NORMAL
-  const base = evaluate(s, side, w)
+  // 3. 打分
+  const base = evaluate(s, side, tuning.weights, tuning.lowHp)
   let best: Action | null = null
   let bestGain = 0
   for (const a of options) {
     const r = applyAction(s, a)
     if (!r.ok) continue
-    const gain = evaluate(r.state, side, w) - base
+    const gain = evaluate(r.state, side, tuning.weights, tuning.lowHp) - base
     if (gain > bestGain) {
       bestGain = gain
       best = a
     }
   }
-  const threshold = level === 'hard' ? 0.6 : 0.45
-  if (best && bestGain > threshold) return best
+  if (best && bestGain > tuning.threshold) return best
   return { kind: 'end' }
 }
 

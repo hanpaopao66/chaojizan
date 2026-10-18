@@ -20,7 +20,15 @@ export const DIFFICULTY_LABELS: Record<Difficulty, string> = {
 
 export const DEG = Math.PI / 180
 
+export type WeaponId = 'rifle' | 'pistol'
+
 export interface Rifle {
+  /** 武器 id(切换武器用) */
+  id: WeaponId
+  /** 界面上显示的名字 */
+  name: string
+  /** 切到这把枪要多久(秒) */
+  switchTime: number
   /** 弹匣容量 */
   magazine: number
   /** 备弹 */
@@ -43,18 +51,45 @@ export interface Rifle {
   recover: number
 }
 
-/** 突击步枪:30 发弹匣、90 发备弹、7 发/秒、换弹 2 秒、伤害 24(四枪一个) */
+/** 突击步枪:30 发弹匣、90 发备弹、7 发/秒、换弹 2 秒、伤害 26(四枪一个) */
 export const RIFLE: Rifle = {
+  id: 'rifle',
+  name: '突击步枪',
+  switchTime: 0.35,
   magazine: 30,
   reserve: 90,
   fireInterval: 1 / 7,
   reloadTime: 2,
-  damage: 24,
+  damage: 26,
   range: TILE * 38,
   baseSpread: 1.1,
   spreadPerShot: 0.95,
   maxSpread: 8,
   recover: 7,
+}
+
+/** 副武器手枪:弹匣小、射速慢,但单发伤害高(3 枪一个),弹匣独立 */
+export const PISTOL: Rifle = {
+  id: 'pistol',
+  name: '手枪',
+  switchTime: 0.3,
+  magazine: 12,
+  reserve: 48,
+  fireInterval: 0.26,
+  reloadTime: 1.5,
+  damage: 34,
+  range: TILE * 30,
+  baseSpread: 1.6,
+  spreadPerShot: 1.7,
+  maxSpread: 9,
+  recover: 9,
+}
+
+/** 玩家能带的两把枪(顺序就是数字键/Q 切换的顺序) */
+export const WEAPONS: readonly Rifle[] = [RIFLE, PISTOL]
+
+export function weaponById(id: WeaponId): Rifle {
+  return id === 'pistol' ? PISTOL : RIFLE
 }
 
 export interface GunState {
@@ -224,7 +259,7 @@ export const SKILLS: Record<Difficulty, GuardSkill> = {
     viewRange: TILE * 12, fov: 2.3, speed: TILE * 3.2,
   },
   hard: {
-    id: 'hard', reaction: 0.38, aimError: 3.0, turnSpeed: 7, burst: 4, pause: 0.8,
-    viewRange: TILE * 16, fov: 2.7, speed: TILE * 3.8,
+    id: 'hard', reaction: 0.32, aimError: 2.5, turnSpeed: 7.5, burst: 4, pause: 0.7,
+    viewRange: TILE * 17, fov: 2.8, speed: TILE * 4,
   },
 }

@@ -1,7 +1,7 @@
-// 对局 HUD:顶部比分/计时、血量、弹药、炸弹状态、击杀播报。只读对局状态,不碰规则。
+// 对局 HUD:顶部地图/回合/比分/计时、血量、双武器弹药、炸弹状态、击杀播报。
 //
-// 文本更新按帧节流(约 60ms):每一帧都改 DOM 会让弱一点的手机掉帧,
-// 但事件类的东西(击杀、炸弹、胜负)走 flashBanner / flashHit / announce,该立刻出现就立刻出现。
+// 只读对局状态,不碰规则。文本更新按帧节流(约 60ms),事件类的东西(击杀、炸弹、胜负)
+// 走 flashBanner / flashHit / announce,该立刻出现就立刻出现。
 
 import { $ } from '../../shared/src/ui'
 import { BOMB_TIME, MatchState, Round, canPlant } from './match'
@@ -9,20 +9,37 @@ import { BOMB_TIME, MatchState, Round, canPlant } from './match'
 const hudRound = $('hud-round')
 const scoreMe = $('score-me')
 const scoreThem = $('score-them')
+const pipsMe = $('pips-me')
+const pipsThem = $('pips-them')
 const hudTimer = $('hud-timer')
 const hpEl = $('hp')
 const hpFill = $('hp-fill')
 const hpNum = $('hp-num')
 const bombStatus = $('bomb-status')
 const hudAmmo = $('hud-ammo')
+const hudWeapon = $('hud-weapon')
 const ammoMag = $('ammo-mag')
 const ammoRes = $('ammo-res')
+const hudSecond = $('hud-second')
 const reloadTip = $('reload-tip')
 const hudHint = $('hud-hint')
 const bannerEl = $('hud-banner')
 const hitEl = $('hud-hit')
 const live = $('live')
 const btnPlant = $<HTMLButtonElement>('btn-plant')
+const btnSwap = $<HTMLButtonElement>('btn-swap')
+
+/** 比分小圆点:赢几回合亮几个(最多 2 个,三局两胜) */
+const pips = new Map<HTMLElement, HTMLElement[]>()
+for (const [box, count] of [[pipsMe, 2], [pipsThem, 2]] as Array<[HTMLElement, number]>) {
+  const dots: HTMLElement[] = []
+  for (let i = 0; i < count; i++) {
+    const dot = document.createElement('i')
+    box.append(dot)
+    dots.push(dot)
+  }
+  pips.set(box, dots)
+}
 
 let lastHudAt = 0
 let bannerTimer = 0
@@ -44,7 +61,6 @@ export function flashBanner(text: string, cls: string, ms: number): void {
   bannerEl.textContent = text
   bannerEl.className = `hud-banner ${cls}`
   bannerEl.hidden = false
-  // 重新触发 CSS 动画(和 critters 里 toast 的写法一样)
   void bannerEl.offsetWidth
   window.clearTimeout(bannerTimer)
   bannerTimer = window.setTimeout(() => { bannerEl.hidden = true }, ms)
@@ -62,7 +78,7 @@ export function flashHit(color: string): void {
 }
 
 export interface HudInfo {
-  /** 触屏:安放提示写「按住安放按钮」而不是 E;底部键位提示隐藏 */
+  /** 触屏:显示切枪/安放按钮,底部键位提示隐藏 */
   coarse: boolean
   /** 对局界面是不是还显示着(回首页之后别再改 DOM) */
   active: boolean
@@ -75,24 +91,40 @@ export function updateHud(round: Round, match: MatchState, info: HudInfo, force 
   if (!force && now - lastHudAt < 60) return
   lastHudAt = now
   const p = round.player
+  const weapon = p.weapons[p.active]
+  const gun = p.guns[p.active]
+  const other = p.weapons[p.active === 0 ? 1 : 0]
+  const otherGun = p.guns[p.active === 0 ? 1 : 0]
 
   const hp = Math.max(0, Math.round(p.hp))
   hpFill.style.transform = `scaleX(${hp / 100})`
   hpNum.textContent = String(hp)
   hpEl.classList.toggle('low', hp <= 35)
 
-  ammoMag.textContent = String(p.gun.mag)
-  ammoRes.textContent = String(p.gun.reserve)
-  hudAmmo.classList.toggle('reloading', p.gun.reloadLeft > 0)
-  reloadTip.textContent = p.gun.reloadLeft > 0 ? '换弹中…' : p.gun.mag === 0 ? '按 R 换弹' : ''
+  hudWeapon.textContent = weapon.name
+  ammoMag.textContent = String(gun.mag)
+  ammoRes.textContent = String(gun.reserve)
+  hudSecond.textContent = `${other.name} ${otherGun.mag}/${otherGun.reserve}`
+  hudAmmo.classList.toggle('reloading', gun.reloadLeft > 0)
+  hudAmmo.classList.toggle('pistol', weapon.id === 'pistol')
+  hudAmmo.classList.toggle('switching', p.switchLeft > 0)
+  reloadTip.textContent = p.switchLeft > 0 ? '切枪…' : gun.reloadLeft > 0 ? '换弹中…' : gun.mag === 0 ? '按 R 换弹' : ''
 
-  hudRound.textContent = `第 ${match.round} 回合`
+  hudRound.textContent = round.training
+    ? `${round.map.name} · 训练场`
+    : `${round.map.name} · 第 ${match.round} 回合`
   scoreMe.textContent = String(match.scorePlayer)
   scoreThem.textContent = String(match.scoreGuard)
+  for (const [box, score] of [[pipsMe, match.scorePlayer], [pipsThem, match.scoreGuard]] as Array<[HTMLElement, number]>) {
+    const dots = pips.get(box) ?? []
+    dots.forEach((dot, i) => dot.classList.toggle('on', i < score))
+  }
 
-  // 计时器:准备 / 回合剩余 / 炸弹倒计时
+  // 计时器:准备 / 回合剩余 / 炸弹倒计时 / 训练计时
   hudTimer.classList.remove('low', 'bomb')
-  if (round.phase === 'freeze') {
+  if (round.training) {
+    hudTimer.textContent = `训练 ${formatClock(round.elapsed)}`
+  } else if (round.phase === 'freeze') {
     hudTimer.textContent = `准备 ${Math.ceil(round.clock)}`
   } else if (round.bomb.state === 'planted') {
     hudTimer.textContent = formatClock(round.bomb.timer)
@@ -106,7 +138,11 @@ export function updateHud(round: Round, match: MatchState, info: HudInfo, force 
   // 炸弹状态
   const b = round.bomb
   bombStatus.classList.remove('danger', 'planting')
-  if (b.state === 'carried' && p.site) {
+  if (round.training) {
+    bombStatus.hidden = false
+    bombStatus.classList.add('planting')
+    bombStatus.textContent = '训练场 · 守卫会不断复活,练到满意为止'
+  } else if (b.state === 'carried' && p.site) {
     bombStatus.hidden = false
     bombStatus.textContent = `在 ${p.site} 点按住 ${info.coarse ? '「安放」' : ' E '} 2.5 秒安放炸弹`
   } else if (b.state === 'planting') {
@@ -125,17 +161,19 @@ export function updateHud(round: Round, match: MatchState, info: HudInfo, force 
     bombStatus.hidden = true
   }
 
-  // 手机上的「安放」按钮:站到 A/B 点上才出现;按住不放等于按住 E
+  // 手机上的「安放」「切枪」按钮
   if (info.coarse) {
     const planting = b.state === 'planting'
     const plantable = !planting && canPlant(round)
     btnPlant.hidden = !(planting || plantable)
     if (planting) btnPlant.textContent = `安放中 ${Math.round(b.plant * 100)}%`
     else if (plantable && p.site) btnPlant.textContent = `安放 ${p.site}`
+    btnSwap.hidden = false
+    btnSwap.textContent = p.switchLeft > 0 ? '切换…' : `切到${other.name.replace('突击', '')}`
   }
 
-  hudHint.hidden = info.coarse || round.phase === 'over'
-  hudHint.textContent = 'WASD 移动 · 鼠标瞄准 · 左键开火 · R 换弹 · E 安放 · Esc 暂停'
+  hudHint.hidden = info.coarse || round.phase === 'over' || round.training
+  hudHint.textContent = 'WASD 移动 · 鼠标瞄准 · 左键开火 · R 换弹 · Q 切枪 · E 安放 · Esc 暂停'
 }
 
 /** 新开一局:把上一局残留的红字/弹层文字清掉(元素还在同一个页面上) */
@@ -146,7 +184,6 @@ export function resetHud(): void {
   hitEl.hidden = true
   bombStatus.hidden = true
   btnPlant.hidden = true
-  // 触屏时上面的 updateHud 会按 canPlant 重新显隐;这里只清掉上一局残留
 }
 
 // 炸弹计时的进度(0..1),给音效决定「滴」得多急

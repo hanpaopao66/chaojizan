@@ -5,16 +5,29 @@
 // 每次操作(clone → 改副本)返回新的一份,不改传进来的那一份(纯函数,方便单测和「关了再开」)。
 
 export type Side = 0 | 1 // 0 = 玩家(下方),1 = 电脑(上方)
-export type Level = 'normal' | 'hard'
+/** 玩家视角的难度:只影响电脑怎么打,玩家规则完全一样 */
+export type Level = 'easy' | 'normal' | 'hard'
 export type ClassId = 'neutral' | 'forge' | 'frost' | 'dusk'
 export type CardType = 'minion' | 'spell'
+/** 稀有度:只影响卡面视觉和图鉴分组,不影响数值(没有开包,不做收集) */
+export type Rarity = 'common' | 'rare' | 'epic'
 
-/** 卡面图案的键:art.ts 用程序化 SVG 画出来(没有任何外部图片) */
+/**
+ * 卡面图案的键:每张卡一个独立键,art.ts 里都是手写的程序化 SVG(没有任何外部图片)。
+ * 中立 15 + 三套牌各 7 + 召唤物 1 = 37 个图案。
+ */
 export type ArtKey =
-  | 'flame' | 'ember' | 'hammer' | 'giant' | 'orb' // 熔火工坊
-  | 'snow' | 'feather' | 'shield' | 'ring' | 'winter' | 'leaf' // 霜林哨站
-  | 'dagger' | 'lantern' | 'coin' | 'crown' | 'swirl' | 'moon' // 暮影集市
-  | 'spark' | 'rock' | 'wind' | 'bird' | 'vial' | 'wall' | 'horn' | 'twins' | 'cart' | 'owl' | 'star' | 'swap' // 中立
+  // 中立
+  | 'firefly' | 'peddler' | 'pebble' | 'scout' | 'starling' | 'apothecary' | 'nightwatch' | 'herald'
+  | 'twinlamp' | 'shellguard' | 'hammer' | 'owl' | 'wagon' | 'lamplighter' | 'colossus'
+  // 熔火工坊
+  | 'emberInitiate' | 'ashPuppet' | 'flameThrower' | 'heartGuard' | 'flint' | 'emberRain' | 'magmaGiant'
+  // 霜林哨站
+  | 'frostSentry' | 'snowHealer' | 'iceShell' | 'frostRing' | 'winterBless' | 'snowSpring' | 'everWatch'
+  // 暮影集市
+  | 'alleyThief' | 'lampBearer' | 'merchant' | 'shadowDancer' | 'ambush' | 'stardust' | 'shadowLord'
+  // 召唤物 + 三位英雄的头像
+  | 'wisp' | 'heroForge' | 'heroFrost' | 'heroDusk'
 
 /** 卡牌效果。和界面无关;engine 里一个 applyEffect 按 kind 分发 */
 export type Effect =
@@ -30,6 +43,8 @@ export type Effect =
   | { kind: 'buff'; attack: number; health: number }
   /** 自己获得 +攻击/+生命(随从的战吼用,不用选目标) */
   | { kind: 'buffSelf'; attack: number; health: number }
+  /** 所有友方随从(包括自己)获得 +攻击/+生命 */
+  | { kind: 'buffAll'; attack: number; health: number }
   /** 召唤随从到己方场上(场上满了就少召唤几只) */
   | { kind: 'summon'; card: string; count: number }
   /** 对敌方英雄造成伤害(亡语/战吼用,不用选目标) */
@@ -38,6 +53,8 @@ export type Effect =
 export interface CardDef {
   id: string
   name: string
+  /** 稀有度(视觉分级,没有收集玩法) */
+  rarity: Rarity
   /** 职业:中立卡三套卡组都能带;职业卡只能进对应英雄的卡组 */
   cls: ClassId
   cost: number
@@ -116,6 +133,8 @@ export interface SideState {
   board: Minion[]
   /** 下一次疲劳伤害(抽空牌库后 1、2、3… 递增) */
   fatigue: number
+  /** 后手「幸运币」:下一回合开始额外 +1 点能量(一次性,用了就归零) */
+  coin: number
   /** 这一局出了几张牌 */
   played: number
   /** 对敌方造成的总伤害(结算页用) */
@@ -179,6 +198,36 @@ export type ActionResult = { ok: true; state: GameState; events: Ev[] } | { ok: 
 export interface Check {
   ok: boolean
   why: string
+}
+
+/** AI 的数值调参:三档难度只改这里(数据在 data.ts 的 AI_TUNING),规则不分难度 */
+export interface AiWeights {
+  /** 对面英雄掉 1 点血值多少 */
+  face: number
+  /** 对面每个随从的威胁系数 */
+  enemyBoard: number
+  /** 自己随从的攻击 / 生命值多少 */
+  ownAtk: number
+  ownHp: number
+  /** 自己低血量时嘲讽的额外价值 */
+  taunt: number
+  hand: number
+  /** 手里留着 1 点能量值多少(不把能量全倒进抽牌里) */
+  energy: number
+}
+
+export interface AiTuning {
+  weights: AiWeights
+  /** 斩杀搜索最多往后算几个动作;0 = 不找斩杀,1 = 只看一步 */
+  lethalDepth: number
+  /** 斩杀搜索的毫秒预算(超过就退回启发式评分) */
+  msBudget: number
+  /** 低于这个局面分就不出牌,直接结束回合 */
+  threshold: number
+  /** 休闲档「手滑」比例:按局面哈希确定性地跳过最优解(0–1,其它档 0) */
+  slip: number
+  /** 血量低于等于这个值时嘲讽更值钱 */
+  lowHp: number
 }
 
 export const START_HP = 30

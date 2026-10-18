@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="color-scheme" content="light dark">
+  <title>瓜田防线</title>
+  <link rel="icon" href="data:,">
+</head>
+<body>
+  <main id="app" class="app">
+    <!-- 首页 / 关卡 / 成就 / 说明:内容由 src/menus.ts 生成 -->
+    <div id="screen" class="screens"></div>
+
+    <section id="game" class="game" hidden aria-label="瓜田防线对局">
+      <header id="hud-top" class="hud-top">
+        <button id="pause" class="hud-btn" type="button" aria-label="暂停">Ⅱ</button>
+        <div class="hud-stats">
+          <div class="stat"><span>西瓜</span><b id="hp">20</b></div>
+          <div class="stat"><span>金币</span><b id="gold">200</b></div>
+          <div class="stat"><span>波次</span><b id="wave">0/6</b></div>
+        </div>
+        <button id="speed" class="hud-btn" type="button" aria-label="切换倍速">1×</button>
+      </header>
+
+      <div id="field-wrap" class="field-wrap">
+        <canvas id="field" class="field" role="img" tabindex="-1" aria-label="塔防战场"></canvas>
+        <div id="sites" class="sites"></div>
+        <p id="banner" class="banner" hidden aria-hidden="true"></p>
+        <div id="boss" class="boss-bar" hidden>
+          <span class="boss-name">巨虫</span>
+          <i><b id="boss-fill"></b></i>
+        </div>
+        <div id="build" class="sheet build" hidden aria-label="选择要造的塔"></div>
+        <div id="panel" class="sheet tower-panel" hidden aria-label="塔的面板"></div>
+      </div>
+
+      <footer id="hud-bottom" class="hud-bottom">
+        <p id="tip" class="tip">点木桩放塔</p>
+        <div class="bottom-row">
+          <button id="summon" class="summon" type="button">提前召唤 +5</button>
+          <span id="theme-tag" class="theme-tag">菜园</span>
+        </div>
+      </footer>
+    </section>
+  </main>
+
+  <div id="overlay" class="overlay" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <p id="live" class="sr" aria-live="polite"></p>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

@@ -4,6 +4,7 @@
 // 不存进行中的比赛 —— 回合制,关掉就从首页开新局(「关于」里写清楚了)。
 
 import { Difficulty } from './combat'
+import { DEFAULT_MAP_ID, MAP_IDS, MapId } from './map'
 
 export interface Profile {
   v: 1
@@ -22,6 +23,10 @@ export interface Profile {
   difficulty: Difficulty
   /** 声音开关 */
   sound: boolean
+  /** 上次选的地图 */
+  mapId: MapId
+  /** 已解锁的成就 id */
+  achievements: string[]
 }
 
 export const EMPTY_PROFILE: Profile = {
@@ -37,6 +42,8 @@ export const EMPTY_PROFILE: Profile = {
   hits: 0,
   difficulty: 'normal',
   sound: true,
+  mapId: DEFAULT_MAP_ID,
+  achievements: [],
 }
 
 const MAX_COUNT = 999999
@@ -64,6 +71,10 @@ export function loadProfile(raw: unknown): Profile | null {
     hits: count(r.hits),
     difficulty: r.difficulty === 'hard' ? 'hard' : r.difficulty === 'casual' ? 'casual' : 'normal',
     sound: r.sound !== false,
+    mapId: MAP_IDS.indexOf(r.mapId as MapId) >= 0 ? (r.mapId as MapId) : DEFAULT_MAP_ID,
+    achievements: Array.isArray(r.achievements)
+      ? r.achievements.filter((a): a is string => typeof a === 'string').slice(0, 64)
+      : [],
   }
 }
 
@@ -82,6 +93,8 @@ export function saveProfile(p: Profile): unknown {
     hits: p.hits,
     difficulty: p.difficulty,
     sound: p.sound,
+    mapId: p.mapId,
+    achievements: p.achievements,
   }
 }
 
@@ -112,6 +125,9 @@ export function mergeProfile(local: Profile, cloud: Profile): Profile {
     hits: bigger(local.hits, cloud.hits),
     difficulty: fresh ? cloud.difficulty : local.difficulty,
     sound: fresh ? cloud.sound : local.sound,
+    mapId: fresh ? cloud.mapId : local.mapId,
+    // 成就是「达成过就永久保留」:两台设备取并集
+    achievements: Array.from(new Set([...local.achievements, ...cloud.achievements])).sort(),
   }
 }
 
@@ -149,4 +165,16 @@ export function accuracy(p: Pick<Profile, 'hits' | 'shots'>): number {
 export function withSettings(p: Profile, difficulty: Difficulty, sound: boolean): Profile {
   if (p.difficulty === difficulty && p.sound === sound) return p
   return { ...p, difficulty, sound }
+}
+
+/** 解锁一批成就;返回新 Profile(已经全都有了就返回原对象) */
+export function unlockAchievements(p: Profile, ids: readonly string[]): Profile {
+  const merged = Array.from(new Set([...p.achievements, ...ids])).sort()
+  if (merged.length === p.achievements.length) return p
+  return { ...p, achievements: merged }
+}
+
+/** 换地图;地图没变就返回原对象 */
+export function withMap(p: Profile, mapId: MapId): Profile {
+  return p.mapId === mapId ? p : { ...p, mapId }
 }

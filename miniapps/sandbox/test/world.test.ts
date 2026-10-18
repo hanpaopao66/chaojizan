@@ -170,3 +170,51 @@ test('loadEdits:合法数据能灌进去,坏数据返回 false 且不破坏当�
   assert.equal(w.blockAt(x, y, z), STONE, '坏档不该清掉已有编辑')
   assert.ok(w.blockAt(5, 0, 5) === BEDROCK)
 })
+
+test('清理出口:撤销最近 N 处改动、全部恢复成原始小岛', () => {
+  const w = fresh()
+  const made: Array<[number, number, number]> = []
+  outer:
+  for (let y = 47; y >= 40; y--) {
+    for (let z = 10; z < 20; z++) {
+      for (let x = 10; x < 20; x++) {
+        if (w.blockAt(x, y, z) !== AIR) continue
+        if (w.setBlock(x, y, z, STONE) !== 'ok') break outer
+        made.push([x, y, z])
+        if (made.length >= 150) break outer
+      }
+    }
+  }
+  assert.equal(w.editCount, 150)
+  assert.equal(w.revertRecent(100), 100)
+  assert.equal(w.editCount, 50)
+  // 撤销的格子恢复成生成时(这里是空气)
+  for (const [x, y, z] of made.slice(-100)) assert.equal(w.blockAt(x, y, z), AIR)
+  // 还剩的 50 处仍然是石头
+  for (const [x, y, z] of made.slice(0, 50)) assert.equal(w.blockAt(x, y, z), STONE)
+  assert.equal(w.resetAll(), 50)
+  assert.equal(w.editCount, 0)
+  for (const [x, y, z] of made.slice(0, 50)) assert.equal(w.blockAt(x, y, z), AIR)
+  // 空表时清理是安全的
+  assert.equal(w.revertRecent(100), 0)
+  assert.equal(w.resetAll(), 0)
+})
+
+test('改动比例:快到上限时界面用来提示', () => {
+  const w = fresh()
+  assert.equal(w.editRatio, 0)
+  let made = 0
+  outer:
+  for (let y = 47; y >= 40; y--) {
+    for (let z = 10; z < 30; z++) {
+      for (let x = 10; x < 30; x++) {
+        if (w.blockAt(x, y, z) !== AIR) continue
+        if (w.setBlock(x, y, z, STONE) !== 'ok') break outer
+        if (++made >= 3200) break outer
+      }
+    }
+  }
+  assert.equal(made, 3200)
+  assert.ok(w.editRatio >= 0.8 && w.editRatio < 1)
+  assert.equal(w.editsFull, false)
+})

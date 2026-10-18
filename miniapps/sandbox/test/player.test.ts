@@ -68,7 +68,7 @@ test('跳跃:跳起超过一格,落回原高度', () => {
   const p = newPlayer(10.5, 4, 10.5, 0)
   run(p, flat, still, 10)
   assert.equal(p.onGround, true)
-  assert.equal(stepPlayer(flat, p, { ...still, jump: true }, 1 / 60).jumped, true)
+  assert.equal(stepPlayer(flat, p, { ...still, jump: true, jumpPressed: true }, 1 / 60).jumped, true)
   let peak = p.y
   for (let i = 0; i < 120; i++) {
     stepPlayer(flat, p, still, 1 / 60)
@@ -84,7 +84,7 @@ test('头顶有方块:跳起来会被挡住,不会穿模', () => {
   const ceiling = source((_x, y) => (y < 4 || y === 6 ? STONE : AIR))
   const p = newPlayer(10.5, 4, 10.5, 0)
   stepPlayer(ceiling, p, still, 1 / 60)
-  stepPlayer(ceiling, p, { ...still, jump: true }, 1 / 60)
+  stepPlayer(ceiling, p, { ...still, jump: true, jumpPressed: true }, 1 / 60)
   for (let i = 0; i < 60; i++) stepPlayer(ceiling, p, { ...still, jump: true }, 1 / 60)
   assert.ok(p.y + PLAYER_HEIGHT <= 6 + 1e-3, `头顶穿进天花板:y=${p.y}`)
   assert.ok(p.y >= 4 - 1e-3)
@@ -124,9 +124,62 @@ test('放回地面:卡在方块里会被抬到空位;俯仰有上限;眼睛高�
   const q = newPlayer(0.5, 4, 0.5, 0)
   placePlayer(flat, q, 5.5, 1, 5.5)
   assert.ok(q.y >= 4 - 1e-6)
-  assert.equal(clampPitch(3), 1.45)
-  assert.equal(clampPitch(-3), -1.45)
+  assert.equal(clampPitch(3), 1.3)
+  assert.equal(clampPitch(-3), -1.3)
   assert.equal(clampPitch(0.3), 0.3)
   q.pitch = 0
   assert.equal(cameraEye(q).y, q.y + 1.62)
+})
+
+test('土狼时间:刚走下落差 0.1 秒内还能跳', () => {
+  // x < 6 有地面(y<4),x >= 6 是空的
+  const ledge = source((x, y) => (y < 4 && x < 6 ? STONE : AIR))
+  const p = newPlayer(5.2, 4, 0.5, 0)
+  let jumped = false
+  // 先走两步站稳
+  for (let i = 0; i < 10; i++) stepPlayer(ledge, p, walk, 1 / 60)
+  // 走到边缘外
+  let guard = 0
+  while (p.x < 6.45 && guard++ < 120) stepPlayer(ledge, p, walk, 1 / 60)
+  assert.ok(p.x >= 6.45 && !p.onGround, `应该已经走出去了:x=${p.x}`)
+  jumped = stepPlayer(ledge, p, { ...still, jump: true, jumpPressed: true }, 1 / 60).jumped
+  assert.equal(jumped, true, '离开地面后 0.1 秒内应该还能跳')
+  // 超过宽限时间再按就没用了
+  const q = newPlayer(5.2, 4, 0.5, 0)
+  for (let i = 0; i < 10; i++) stepPlayer(ledge, q, walk, 1 / 60)
+  guard = 0
+  while (q.x < 6.45 && guard++ < 120) stepPlayer(ledge, q, walk, 1 / 60)
+  for (let i = 0; i < 12; i++) stepPlayer(ledge, q, still, 1 / 60) // 掉 0.2 秒
+  assert.equal(q.onGround, false)
+  assert.equal(stepPlayer(ledge, q, { ...still, jump: true, jumpPressed: true }, 1 / 60).jumped, false)
+})
+
+test('跳跃缓冲:落地前 0.1 秒内按跳,落地马上起跳', () => {
+  const p = newPlayer(10.5, 8, 10.5, 0)
+  let guard = 0
+  while (p.y > 4.5 && guard++ < 300) stepPlayer(flat, p, still, 1 / 60)
+  assert.ok(!p.onGround && p.y > 4, `还在空中:y=${p.y}`)
+  // 落地前按下跳
+  assert.equal(stepPlayer(flat, p, { ...still, jump: true, jumpPressed: true }, 1 / 60).jumped, false)
+  let landedThenJumped = false
+  for (let i = 0; i < 20; i++) {
+    const r = stepPlayer(flat, p, still, 1 / 60)
+    if (r.jumped) landedThenJumped = true
+    if (landedThenJumped) break
+  }
+  assert.equal(landedThenJumped, true, '缓冲的跳应该在落地后生效')
+  assert.ok(p.y > 4.1)
+})
+
+test('移动距离与帧率无关:30fps 和 144fps 走一秒差不多远', () => {
+  const runFps = (fps: number): number => {
+    const p = newPlayer(10.5, 4, 10.5, 0)
+    const frames = Math.round(fps)
+    for (let i = 0; i < frames; i++) stepPlayer(flat, p, walk, 1 / fps)
+    return p.x - 10.5
+  }
+  const slow = runFps(30)
+  const fast = runFps(144)
+  assert.ok(slow > 2 && fast > 2)
+  assert.ok(Math.abs(slow - fast) / Math.max(slow, fast) < 0.05, `30fps ${slow.toFixed(2)} vs 144fps ${fast.toFixed(2)}`)
 })

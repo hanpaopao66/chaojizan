@@ -9,7 +9,7 @@ import {
 
 const map = parseMap()
 
-const idle: PlayerInput = { moveX: 0, moveY: 0, aim: null, fire: false, reload: false, interact: false }
+const idle: PlayerInput = { moveX: 0, moveY: 0, aim: null, fire: false, reload: false, swap: false, interact: false }
 const planting: PlayerInput = { ...idle, interact: true }
 
 function run(round: Round, seconds: number, input: PlayerInput = idle, dt = 1 / 60): { round: Round; events: GameEvent[] } {
@@ -187,7 +187,9 @@ test('比分:先赢 2 回合者获胜,数据累计;输了记 loss', () => {
   assert.equal(match.scorePlayer, 1)
   assert.equal(match.scoreGuard, 0)
   assert.equal(match.over, null)
-  assert.deepEqual(match.stats, { kills: 2, shots: 8, hits: 4, plants: 1, seconds: 20 })
+  assert.deepEqual(match.stats, {
+    kills: 2, shots: 8, hits: 4, plants: 1, seconds: 20, deaths: 0, pistolKills: 0, explodedWins: 1,
+  })
   assert.deepEqual(match.lastRound, { side: 'player', reason: 'exploded', kills: 2, seconds: 20, planted: true })
 
   match = nextRound(match)
@@ -226,6 +228,7 @@ test('AI 合法性:推演 20 秒,人和守卫都不穿墙、不出界,而且同�
     aim: (i % 97) / 97 * Math.PI * 2,
     fire: i % 25 < 5,
     reload: i === 500,
+    swap: i === 700,
     interact: false,
   })
   const simulate = (): Round => {
@@ -275,6 +278,6 @@ test('三档难度:同一个站着不动、不开枪的假玩家,休闲档明显
 })
 
 test('命中率:没开枪是 0,否则命中/开枪', () => {
-  assert.equal(accuracyOf({ kills: 0, shots: 0, hits: 0, plants: 0, seconds: 0 }), 0)
-  assert.equal(accuracyOf({ kills: 0, shots: 10, hits: 4, plants: 0, seconds: 0 }), 0.4)
+  assert.equal(accuracyOf({ kills: 0, shots: 0, hits: 0, plants: 0, seconds: 0, deaths: 0, pistolKills: 0, explodedWins: 0 }), 0)
+  assert.equal(accuracyOf({ kills: 0, shots: 10, hits: 4, plants: 0, seconds: 0, deaths: 0, pistolKills: 0, explodedWins: 0 }), 0.4)
 })

@@ -2,9 +2,14 @@
 //
 // t = 0 是日出(06:00),0.25 正午,0.5 日落(18:00),0.75 午夜。
 // 存档里存的是 0..1 的进度,换设备、关了再开时间接着走。
+// 亮度/暖色的平滑参数在 data.ts 的 DAY 里。
+import { DAY, VIEW } from './data'
 
 /** 一轮多少秒(8 分钟) */
-export const DAY_SECONDS = 480
+export const DAY_SECONDS = DAY.SECONDS
+
+/** 太阳/月亮在天空里的角半径(弧度),投影到屏幕时用 */
+export const SUN_RADIUS = VIEW.SUN_RADIUS
 
 /** 把任意数折回 [0,1) */
 export function wrapTime(t: number): number {
@@ -26,21 +31,21 @@ export function sunDirection(t: number): { x: number; y: number; z: number } {
 /** 0 = 全黑(深夜),1 = 大白天;日出日落前后平滑过渡 */
 export function daylight(t: number): number {
   const s = sunDirection(t)
-  const x = Math.min(1, Math.max(0, (s.y + 0.14) / 0.42))
+  const x = Math.min(1, Math.max(0, (s.y - DAY.LIGHT_LO) / DAY.LIGHT_SPAN))
   return x * x * (3 - 2 * x)
 }
 
 /** 天边暖色强度:太阳贴着地平线时最大(日出/日落),用来给天空和地面染色 */
 export function warmth(t: number): number {
   const y = sunDirection(t).y
-  const v = 1 - Math.min(1, Math.abs(y) / 0.3)
+  const v = 1 - Math.min(1, Math.abs(y) / DAY.WARM_SPAN)
   return v * v
 }
 
 /** 一天的时段名,给 ARIA 播报和图标用 */
 export function phaseOf(t: number): 'dawn' | 'day' | 'dusk' | 'night' {
   const d = daylight(t)
-  if (d < 0.12) return 'night'
+  if (d < DAY.NIGHT_LIGHT) return 'night'
   if (warmth(t) > 0.6) return wrapTime(t) < 0.5 ? 'dawn' : 'dusk'
   return 'day'
 }
@@ -55,8 +60,5 @@ export function clockText(t: number): string {
 
 /** HUD 上的时间图标:白天太阳、夜里月亮、日出日落也是太阳 */
 export function phaseIcon(t: number): string {
-  return daylight(t) < 0.12 ? '☾' : '☀'
+  return daylight(t) < DAY.NIGHT_LIGHT ? '☾' : '☀'
 }
-
-/** 太阳/月亮在天空里的角半径(弧度),投影到屏幕时用 */
-export const SUN_RADIUS = 0.055

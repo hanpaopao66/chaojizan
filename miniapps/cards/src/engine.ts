@@ -53,13 +53,16 @@ export function newGame(o: NewGameOptions): { state: GameState; events: Ev[] } {
   ;[deck1, seed] = shuffle(h1.deck, seed)
   const side = (id: string, deck: string[], handN: number): SideState => ({
     hero: id, hp: START_HP, energy: 0, maxEnergy: 0, deck: deck.slice(handN), hand: deck.slice(0, handN),
-    board: [], fatigue: 0, played: 0, dealt: 0, lost: 0,
+    board: [], fatigue: 0, coin: 0, played: 0, dealt: 0, lost: 0,
   })
   // 先手 3 张、后手 4 张;开局的第一回合会再各抽 1 张(和一般卡牌对战的手牌数对得上)
   const first = o.first ?? 0
   const s0 = side(h0.id, deck0, first === 0 ? 3 : 4)
   const s1 = side(h1.id, deck1, first === 1 ? 3 : 4)
   const state: GameState = { v: 1, seed, turn: 1, active: first, sides: [s0, s1], nextUid: 1, over: null }
+  // 后手补偿(约等于别家卡牌的「幸运币」):后手的第一回合额外多 1 点能量,只多这一回合。
+  // 先手天然占主动(先下随从、先攻击),不补一点会滚雪球;补成永久 +1 又太强,所以做成一次性的。
+  state.sides[foe(first)].coin = 1
   const events: Ev[] = []
   beginTurn(state, events)
   return { state, events }
@@ -194,6 +197,15 @@ function applyEffect(n: GameState, side: Side, effect: Effect, target: TargetRef
     }
     case 'buffSelf':
       break // 由 playCard 处理(它知道刚上场的是哪一只)
+    case 'buffAll':
+      for (const m of n.sides[side].board) {
+        if (m.health <= 0) continue
+        m.attack += effect.attack
+        m.maxHealth += effect.health
+        m.health += effect.health
+        ev.push({ e: 'buff', target: targetFor(side, m.uid), attack: effect.attack, health: effect.health })
+      }
+      break
     case 'summon':
       for (let i = 0; i < effect.count; i++) addMinion(n, side, effect.card, false, ev)
       break
@@ -243,7 +255,8 @@ function checkOver(n: GameState, ev: Ev[], reason: OverReason): void {
 function beginTurn(n: GameState, ev: Ev[]): void {
   const s = n.sides[n.active]
   s.maxEnergy = Math.min(MAX_ENERGY, s.maxEnergy + 1)
-  s.energy = s.maxEnergy
+  s.energy = Math.min(MAX_ENERGY, s.maxEnergy + s.coin)
+  s.coin = 0
   for (const m of s.board) {
     m.sick = false
     m.attacks = 1
@@ -461,7 +474,9 @@ function loadSide(raw: unknown): SideState | null {
   if (!heroOrNull(s.hero)) return null
   if (!isInt(s.hp) || s.hp < 0 || s.hp > START_HP) return null
   if (!isInt(s.maxEnergy) || s.maxEnergy < 0 || s.maxEnergy > MAX_ENERGY) return null
-  if (!isInt(s.energy) || s.energy < 0 || s.energy > s.maxEnergy) return null
+  if (!isInt(s.coin) || s.coin < 0 || s.coin > 1) return null
+  // 后手「幸运币」那一回合能量会比上限多 1(存档正好存在这一刻也要能读回来)
+  if (!isInt(s.energy) || s.energy < 0 || s.energy > s.maxEnergy + 1) return null
   if (!isInt(s.fatigue) || s.fatigue < 0) return null
   if (!isInt(s.played) || s.played < 0 || !isInt(s.dealt) || s.dealt < 0 || !isInt(s.lost) || s.lost < 0) return null
   if (!Array.isArray(s.deck) || s.deck.length > DECK_SIZE || !s.deck.every(isCardId)) return null

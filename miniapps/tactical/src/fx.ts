@@ -6,7 +6,7 @@ import { Vec } from './map'
 import { rand } from '../../shared/src/rand'
 
 export type Side = 'player' | 'guard'
-export type FxKind = 'flash' | 'spark' | 'smoke'
+export type FxKind = 'flash' | 'spark' | 'smoke' | 'shell'
 
 export interface Fx {
   pos: Vec
@@ -56,6 +56,24 @@ export function addFlash(world: FxWorld, pos: Vec, angle: number, team: Side): v
       angle,
     })
   }
+}
+
+/** 抛壳:向枪的侧后方弹出的小弹壳,落地前带一点旋转位移 */
+export function addShell(world: FxWorld, pos: Vec, angle: number, team: Side): void {
+  const [u, next] = rand(world.rng)
+  world.rng = next
+  const side = u > 0.5 ? 1 : -1
+  const a = angle + side * (Math.PI / 2) - 0.35
+  const speed = 60 + u * 50
+  world.fx.push({
+    pos: { x: pos.x + Math.cos(angle) * 10, y: pos.y + Math.sin(angle) * 10 },
+    vel: { x: Math.cos(a) * speed, y: Math.sin(a) * speed },
+    life: 0.55 + u * 0.25,
+    max: 0.8,
+    kind: 'shell',
+    team,
+    angle: a,
+  })
 }
 
 /** 命中/撞墙的小火花:几颗小点朝四周溅开 */

@@ -155,7 +155,7 @@ button { -webkit-user-select: none; user-select: none; }
 }
 
 .toast {
-  position: fixed; z-index: 40; left: 50%; top: calc(0.8rem + var(--top)); transform: translateX(-50%);
+  position: fixed; z-index: 9; left: 50%; top: calc(0.8rem + var(--top)); transform: translateX(-50%);
   max-width: 88vw; padding: 0.55rem 1rem; border-radius: 999px;
   background: rgba(16, 26, 18, 0.9); color: #fff; font-size: 0.875rem; font-weight: 700;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); pointer-events: none;
@@ -267,8 +267,17 @@ button { -webkit-user-select: none; user-select: none; }
 .panel .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .panel .field input[aria-invalid="true"] { border-color: var(--danger); }
 .panel .field-error { margin: 0.3rem 0 0; text-align: left; color: var(--danger); font-size: 0.8125rem; }
-.panel .pause-tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; margin-top: 0.6rem; }
-.panel .pause-tools button { min-height: 2.5rem; border: 1px solid var(--line); border-radius: 0.6rem; font-size: 0.8125rem; font-weight: 600; }
+.panel .pause-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.35rem; margin-top: 0.5rem; }
+.panel .pause-tools button {
+  min-height: 2.3rem; padding: 0 0.2rem; border: 1px solid var(--line); border-radius: 0.55rem;
+  font-size: 0.75rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 暂停面板在横屏手机上要一屏放下:收紧留白和行高 */
+.panel.pause { padding: 1rem 1rem 0.85rem; }
+.panel.pause h2 { margin-bottom: 0.15rem; font-size: 1.35rem; }
+.panel.pause p { margin: 0.2rem 0; }
+.panel.pause .row { margin-top: 0.45rem; }
+.panel.pause .pause-stats { margin-top: 0.45rem; }
 
 @keyframes drift {
   from { transform: translateX(0); }
@@ -311,4 +320,106 @@ button { -webkit-user-select: none; user-select: none; }
   .hud-hint { font-size: 0.75rem; }
   .slot { width: 2.7rem; height: 2.7rem; }
   .slot img { width: 1.85rem; height: 1.85rem; }
+}
+
+/* ---------------------------------------------------------------- 1.1 新增:容量提醒 / 物品名 / 成就 */
+
+.chip.edits {
+  color: #FFE7A8; border-color: rgba(255, 207, 92, 0.62);
+  background: rgba(64, 44, 8, 0.55);
+}
+.chip.edits b { color: #FFF4CC; font-variant-numeric: tabular-nums; }
+.chip.edits.full { color: #FFF; border-color: rgba(255, 120, 100, 0.85); background: rgba(120, 30, 20, 0.7); }
+
+.item-name {
+  margin: 0 0 0.2rem; padding: 0.18rem 0.7rem; border-radius: 999px;
+  font-size: 0.8125rem; font-weight: 800; color: #fff;
+  background: rgba(10, 18, 14, 0.55); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+}
+.item-name.show { animation: itemName 1.4s var(--std) both; }
+
+.ach-toast {
+  position: fixed; z-index: 9; left: 50%; top: calc(3.4rem + var(--top)); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 0.55rem; max-width: 86vw;
+  padding: 0.5rem 0.95rem 0.5rem 0.55rem; border-radius: 0.9rem;
+  background: linear-gradient(135deg, #2F5B18, #1E3D10); color: #FFF6D8;
+  border: 1px solid rgba(255, 224, 138, 0.55);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  font-size: 0.875rem; font-weight: 800; pointer-events: none;
+}
+.ach-toast .ach-icon {
+  width: 2rem; height: 2rem; border-radius: 0.55rem; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, #FFE7A8, #E7B25A); color: #5A3A08;
+  font-style: normal; font-size: 1rem;
+}
+.ach-toast.show { animation: achPop 2.8s var(--spring) both; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; margin: 0.5rem 0 0.2rem; }
+.stat-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem; padding: 0.45rem 0.3rem;
+  border-radius: 0.65rem; background: var(--bg); border: 1px solid var(--line);
+}
+.stat-card b { font-size: 1.0625rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+.stat-card span { font-size: 0.6875rem; color: var(--muted); }
+
+.ach-list { list-style: none; margin: 0.3rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.ach-list li {
+  display: flex; align-items: center; gap: 0.55rem; padding: 0.4rem 0.5rem;
+  border-radius: 0.6rem; border: 1px solid var(--line); background: var(--bg);
+}
+.ach-list li.done { border-color: rgba(201, 143, 30, 0.55); background: #FFF8E2; }
+:root.dark .ach-list li.done { background: #3A3320; }
+.ach-list .ach-icon {
+  flex: none; width: 1.9rem; height: 1.9rem; border-radius: 50%; display: grid; place-items: center;
+  font-style: normal; font-weight: 800; font-size: 0.875rem;
+  background: var(--card); border: 1px solid var(--line); color: var(--muted);
+}
+.ach-list li.done .ach-icon { background: radial-gradient(circle at 35% 30%, #FFE7A8, #E7B25A); color: #5A3A08; border-color: transparent; }
+.ach-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ach-mid b { font-size: 0.875rem; }
+.ach-mid span { font-size: 0.75rem; color: var(--muted); line-height: 1.4; }
+.ach-right { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; min-width: 4.2rem; }
+.ach-right small { font-size: 0.6875rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ach-done { font-style: normal; font-size: 0.75rem; font-weight: 800; color: #8A5A00; }
+:root.dark .ach-done { color: #FFCF5C; }
+.ach-right .prog { width: 4.2rem; height: 0.3rem; border-radius: 999px; background: var(--line); overflow: hidden; }
+.ach-right .prog i { display: block; height: 100%; transform-origin: left; background: linear-gradient(90deg, #7ED957, #4E9A36); }
+
+.panel.achievements { width: min(94vw, 470px); text-align: left; }
+.panel.achievements h2 { text-align: center; }
+.panel.achievements .note { text-align: center; }
+.panel.achievements .ach-list { max-height: none; }
+
+.pause-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.3rem; margin-top: 0.5rem; }
+.pause-stats span {
+  padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.6875rem; color: var(--muted);
+  background: var(--bg); border: 1px solid var(--line);
+}
+
+.panel .row button.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+.menu-version { margin: 0; text-align: center; font-size: 0.625rem; color: var(--muted); letter-spacing: 0.08em; }
+.menu-tools { grid-template-columns: repeat(2, 1fr); }
+
+@keyframes itemName {
+  0% { opacity: 0; transform: translateY(4px); }
+  12%, 70% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(-2px); }
+}
+@keyframes achPop {
+  0% { opacity: 0; transform: translate(-50%, -14px) scale(0.9); }
+  8% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  12% { transform: translate(-50%, 0) scale(1.03); }
+  18%, 84% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -8px) scale(0.98); }
+}
+
+/* 小屏:成就列表紧凑一点 */
+@media (max-height: 430px) {
+  .ach-list li { padding: 0.3rem 0.4rem; }
+  .ach-mid span { display: none; }
+  .ach-icon { width: 1.6rem !important; height: 1.6rem !important; font-size: 0.75rem !important; }
+  .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  .stat-card { padding: 0.3rem 0.2rem; }
+  .ach-toast { top: calc(2.9rem + var(--top)); }
 }

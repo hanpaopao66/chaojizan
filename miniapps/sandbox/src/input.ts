@@ -37,6 +37,7 @@ export class Input {
   private lookDY = 0
   private mineHeld = false
   private jumpHeld = false
+  private jumpPressQueued = false
   private placeQueued = false
   private canvas: HTMLCanvasElement | null = null
   private hooks: InputHooks | null = null
@@ -77,7 +78,11 @@ export class Input {
     stick.addEventListener('pointerup', this.onStickUp)
     stick.addEventListener('pointercancel', this.onStickUp)
     this.bindHold(buttons.mine, () => { this.mineHeld = true; this.touched = true }, () => { this.mineHeld = false })
-    this.bindHold(buttons.jump, () => { this.jumpHeld = true; this.touched = true }, () => { this.jumpHeld = false })
+    this.bindHold(buttons.jump, () => {
+      this.jumpHeld = true
+      this.jumpPressQueued = true
+      this.touched = true
+    }, () => { this.jumpHeld = false })
     buttons.place.addEventListener('pointerdown', (e) => {
       e.preventDefault()
       this.touched = true
@@ -95,6 +100,7 @@ export class Input {
     this.lookDY = 0
     this.mineHeld = false
     this.jumpHeld = false
+    this.jumpPressQueued = false
     this.placeQueued = false
     this.stickPointer = -1
     this.lookPointer = -1
@@ -176,6 +182,13 @@ export class Input {
     return out
   }
 
+  /** 跳跃键「刚按下」的那一帧(给落地前跳跃缓冲用) */
+  consumeJumpPress(): boolean {
+    const out = this.jumpPressQueued
+    this.jumpPressQueued = false
+    return out
+  }
+
   // ---------------------------------------------------------------- 事件
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -193,6 +206,7 @@ export class Input {
       this.touched = false
       return
     }
+    if (e.code === 'Space' && !e.repeat) this.jumpPressQueued = true
     if (MOVE_KEYS.indexOf(e.code) >= 0 || LOOK_KEYS.indexOf(e.code) >= 0) {
       this.keys.add(e.code)
       e.preventDefault()

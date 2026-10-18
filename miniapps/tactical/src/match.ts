@@ -8,12 +8,16 @@ import {
 } from './map'
 import { NavGrid, navFromMap, routeBetween } from './nav'
 import {
-  Difficulty, GunState, GuardSkill, RIFLE, Rifle, ShotTarget, SKILLS, aimWithSpread, canFire, fireGun, hitscan,
-  newGun, reloading, spreadOf, startReload, tickGun,
+  Difficulty, GunState, GuardSkill, RIFLE, Rifle, ShotTarget, SKILLS, WEAPONS, aimWithSpread, canFire, fireGun,
+  hitscan, newGun, reloading, spreadOf, startReload, tickGun,
 } from './combat'
 import { BombInfo, GuardBrain, Noise, decideGuard, guardSeesPlayer, newBrain } from './ai'
+import type { MatchState } from './matchstate'
+
+export { SCORE_TO_WIN, accuracyOf, finishRound, newMatch, nextRound } from './matchstate'
+export type { MatchStats, MatchState, RoundSummary } from './matchstate'
 import type { Fx, Side, Tracer } from './fx'
-import { addFlash, addSpark, addTracer, burstFx, decayFx } from './fx'
+import { addFlash, addShell, addSpark, addTracer, burstFx, decayFx } from './fx'
 
 export type { Fx, FxKind, Side, Tracer } from './fx'
 
@@ -29,8 +33,6 @@ export const PLANT_TIME = 2.5
 export const BOMB_TIME = 30
 /** 守卫按住拆弹要多久(秒) */
 export const DEFUSE_TIME = 5
-/** 先赢几个回合获胜(三局两胜) */
-export const SCORE_TO_WIN = 2
 export const PLAYER_HP = 100
 export const GUARD_HP = 100
 export const PLAYER_RADIUS = 8
@@ -70,13 +72,22 @@ export interface PlayerState {
   angle: number
   hp: number
   alive: boolean
-  gun: GunState
-  rifle: Rifle
+  /** 主武器 + 副武器,两把枪的弹匣和备弹各自独立 */
+  guns: GunState[]
+  weapons: readonly Rifle[]
+  /** 当前拿的是哪一把:0 步枪、1 手枪 */
+  active: number
+  /** 切换武器剩余时间;>0 时不能开枪 */
+  switchLeft: number
   hitFlash: number
-  /** 本回合击杀 / 命中 / 开枪 */
+  /** 本回合击杀 / 命中 / 开枪 / 手枪击杀 / 阵亡 */
   kills: number
   hits: number
   shots: number
+  pistolKills: number
+  deaths: number
+  /** 训练模式:倒下后到这一刻复活(普通模式不用) */
+  respawnAt: number
   /** 当前站的炸弹点 */
   site: 'A' | 'B' | null
 }
@@ -104,12 +115,16 @@ export interface GuardState {
   /** 最近被谁打、什么时候(挨打了一定去查) */
   hurtAt: number
   hurtFrom: Vec | null
+  /** 训练模式:这面守卫什么时候复活(普通模式不用) */
+  respawnAt: number
 }
 
 export interface Round {
   map: GameMap
   nav: NavGrid
   difficulty: Difficulty
+  /** 训练模式:没有回合倒计时/胜负,守卫会复活 */
+  training: boolean
   phase: RoundPhase
   /** 当前阶段剩余秒数:冻结倒计时 / 回合剩余 */
   clock: number
@@ -134,17 +149,21 @@ export interface PlayerInput {
   aim: number | null
   fire: boolean
   reload: boolean
+  /** 切枪(Q / 触屏切换按钮) */
+  swap: boolean
   /** 按住安放(E 键 / 屏幕上的安放按钮) */
   interact: boolean
 }
 
 export type GameEvent =
   | { type: 'live' }
-  | { type: 'shot'; team: Side; angle: number }
+  | { type: 'shot'; team: Side; angle: number; x: number; y: number }
   | { type: 'hit'; target: 'player' | 'guard'; id: number; damage: number }
   | { type: 'kill'; guard: number }
   | { type: 'death' }
   | { type: 'reload'; team: Side }
+  | { type: 'swap'; weapon: 'rifle' | 'pistol' }
+  | { type: 'respawn'; side: Side }
   | { type: 'empty' }
   | { type: 'planting' }
   | { type: 'plant'; pos: Vec }
@@ -160,45 +179,6 @@ export interface RoundStep {
 }
 
 // ---------------------------------------------------------------- 开一局
-
-export interface MatchStats {
-  kills: number
-  shots: number
-  hits: number
-  plants: number
-  seconds: number
-}
-export interface RoundSummary {
-  side: Side
-  reason: OverReason
-  kills: number
-  seconds: number
-  planted: boolean
-}
-export interface MatchState {
-  difficulty: Difficulty
-  /** 第几回合(从 1 开始) */
-  round: number
-  scorePlayer: number
-  scoreGuard: number
-  seed: number
-  over: 'win' | 'loss' | null
-  stats: MatchStats
-  lastRound: RoundSummary | null
-}
-
-export function newMatch(difficulty: Difficulty, seed: number): MatchState {
-  return {
-    difficulty,
-    round: 1,
-    scorePlayer: 0,
-    scoreGuard: 0,
-    seed: seed >>> 0,
-    over: null,
-    stats: { kills: 0, shots: 0, hits: 0, plants: 0, seconds: 0 },
-    lastRound: null,
-  }
-}
 
 /** 不同回合用不同的随机数种子,但整场可复现 */
 function roundSeed(seed: number, round: number): number {
@@ -217,12 +197,17 @@ function newPlayer(map: GameMap): PlayerState {
     angle: 0,
     hp: PLAYER_HP,
     alive: true,
-    gun: newGun(RIFLE),
-    rifle: RIFLE,
+    guns: WEAPONS.map((weapon) => newGun(weapon)),
+    weapons: WEAPONS,
+    active: 0,
+    switchLeft: 0,
     hitFlash: 0,
     kills: 0,
     hits: 0,
     shots: 0,
+    pistolKills: 0,
+    deaths: 0,
+    respawnAt: 0,
     site: null,
   }
 }
@@ -248,6 +233,7 @@ function newGuard(map: GameMap, id: number, skill: GuardSkill, seed: number): Gu
     hitFlash: 0,
     hurtAt: -99,
     hurtFrom: null,
+    respawnAt: 0,
   }
 }
 
@@ -258,8 +244,10 @@ export function newRound(match: MatchState, map: GameMap): Round {
     map,
     nav: navFromMap(map),
     difficulty: match.difficulty,
-    phase: 'freeze',
-    clock: FREEZE_TIME,
+    training: match.training,
+    // 训练模式没有开场冻结,直接开打
+    phase: match.training ? 'live' : 'freeze',
+    clock: match.training ? 0 : FREEZE_TIME,
     elapsed: 0,
     player: newPlayer(map),
     guards: [0, 1, 2].map((id) => newGuard(map, id, skill, (seed + id * 7919) >>> 0)),
@@ -279,6 +267,7 @@ export function newRound(match: MatchState, map: GameMap): Round {
  */
 export function canPlant(round: Round): boolean {
   return round.phase === 'live'
+    && !round.training
     && round.player.alive
     && round.player.site !== null
     && (round.bomb.state === 'carried' || round.bomb.state === 'planting')
@@ -293,6 +282,14 @@ export function advance(round: Round, dt: number, input: PlayerInput): RoundStep
   const r = cloneRound(round)
   r.elapsed += step
   decayStep(r, step)
+
+  // 训练模式:没有倒计时/胜负,玩家和守卫倒下后都会复活
+  if (r.training) {
+    stepPlayer(r, step, input, events)
+    stepGuards(r, step, events)
+    trainingRespawn(r, events)
+    return { round: r, events }
+  }
 
   if (r.phase === 'freeze') {
     r.clock -= step
@@ -350,7 +347,7 @@ export function advance(round: Round, dt: number, input: PlayerInput): RoundStep
 function cloneRound(round: Round): Round {
   return {
     ...round,
-    player: { ...round.player, pos: { ...round.player.pos }, gun: { ...round.player.gun } },
+    player: { ...round.player, pos: { ...round.player.pos }, guns: round.player.guns.map((g) => ({ ...g })) },
     guards: round.guards.map((g) => ({
       ...g,
       pos: { ...g.pos },
@@ -392,11 +389,21 @@ function stepPlayer(r: Round, dt: number, input: PlayerInput, events: GameEvent[
   p.site = siteAt(r.map, p.pos)
   if (input.aim !== null) p.angle = input.aim
 
-  p.gun = tickGun(p.gun, dt, p.rifle)
+  // 切枪(Q / 触屏按钮):切换过程中不能开枪,换一半的弹匣会被打断
+  if (p.switchLeft > 0) p.switchLeft = Math.max(0, p.switchLeft - dt)
+  if (input.swap && p.switchLeft <= 0) {
+    p.active = p.active === 0 ? 1 : 0
+    const next = p.weapons[p.active]
+    p.switchLeft = next.switchTime
+    if (p.guns[p.active].reloadLeft > 0) p.guns[p.active] = { ...p.guns[p.active], reloadLeft: 0 }
+    events.push({ type: 'swap', weapon: next.id })
+  }
+  const weapon = p.weapons[p.active]
+  p.guns[p.active] = tickGun(p.guns[p.active], dt, weapon)
   if (input.reload) {
-    const g = startReload(p.gun, p.rifle)
-    if (g !== p.gun) {
-      p.gun = g
+    const reloaded = startReload(p.guns[p.active], weapon)
+    if (reloaded !== p.guns[p.active]) {
+      p.guns[p.active] = reloaded
       events.push({ type: 'reload', team: 'player' })
     }
   }
@@ -431,44 +438,116 @@ function stepPlayer(r: Round, dt: number, input: PlayerInput, events: GameEvent[
 
 function firePlayer(r: Round, events: GameEvent[]): void {
   const p = r.player
-  if (!canFire(p.gun)) {
-    if (p.gun.mag === 0 && !reloading(p.gun) && p.gun.reserve > 0) {
-      p.gun = startReload(p.gun, p.rifle)
+  const weapon = p.weapons[p.active]
+  if (p.switchLeft > 0) return
+  const gun = p.guns[p.active]
+  if (!canFire(gun)) {
+    if (gun.mag === 0 && !reloading(gun) && gun.reserve > 0) {
+      p.guns[p.active] = startReload(gun, weapon)
       events.push({ type: 'empty' })
       events.push({ type: 'reload', team: 'player' })
     }
     return
   }
-  const aimed = aimWithSpread(p.angle, spreadOf(p.gun, p.rifle), r.rng)
+  const aimed = aimWithSpread(p.angle, spreadOf(gun, weapon), r.rng)
   r.rng = aimed.rng
   const targets: ShotTarget[] = r.guards
     .filter((g) => g.alive)
     .map((g) => ({ id: g.id, pos: g.pos, radius: GUARD_RADIUS }))
-  const hit = hitscan(r.map, p.pos, aimed.angle, targets, p.rifle.range)
-  p.gun = fireGun(p.gun, p.rifle)
+  const hit = hitscan(r.map, p.pos, aimed.angle, targets, weapon.range)
+  p.guns[p.active] = fireGun(gun, weapon)
   p.shots++
   addTracer(r, p.pos, hit.point, 'player')
   addFlash(r, p.pos, aimed.angle, 'player')
-  events.push({ type: 'shot', team: 'player', angle: aimed.angle })
+  addShell(r, p.pos, aimed.angle, 'player')
+  events.push({ type: 'shot', team: 'player', angle: aimed.angle, x: p.pos.x, y: p.pos.y })
   r.noises.push({ pos: { ...p.pos }, kind: 'shot', team: 'player', at: r.elapsed })
   if (hit.kind === 'target') {
     const guard = r.guards[hit.id]
-    guard.hp -= p.rifle.damage
+    guard.hp -= weapon.damage
     guard.hitFlash = 0.25
     guard.hurtAt = r.elapsed
     guard.hurtFrom = { ...p.pos }
     p.hits++
     addSpark(r, hit.point, 'spark')
-    events.push({ type: 'hit', target: 'guard', id: hit.id, damage: p.rifle.damage })
+    events.push({ type: 'hit', target: 'guard', id: hit.id, damage: weapon.damage })
     if (guard.hp <= 0) {
       guard.hp = 0
       guard.alive = false
       p.kills++
+      if (weapon.id === 'pistol') p.pistolKills++
+      // 训练模式:守卫过一会儿复活
+      if (r.training) guard.respawnAt = r.elapsed + 2.5
       addSpark(r, hit.point, 'smoke')
       events.push({ type: 'kill', guard: guard.id })
     }
   } else if (hit.kind === 'wall') {
     addSpark(r, hit.point, 'spark')
+  }
+}
+
+// ---------------------------------------------------------------- 训练模式复活
+
+/** 玩家在出生点满血满弹复活 */
+function respawnPlayer(r: Round): void {
+  const p = r.player
+  const fresh = newPlayer(r.map)
+  p.pos = { ...r.map.playerSpawn }
+  p.angle = 0
+  p.hp = PLAYER_HP
+  p.alive = true
+  p.guns = fresh.guns
+  p.active = 0
+  p.switchLeft = 0
+  p.hitFlash = 0
+  p.respawnAt = 0
+  p.site = null
+}
+
+/** 守卫在自己出生点满血复活,脑子/枪都重置 */
+function respawnGuard(r: Round, g: GuardState): void {
+  const spawn = { ...r.map.guardSpawns[g.id] }
+  g.pos = spawn
+  g.angle = Math.PI
+  g.hp = GUARD_HP
+  g.alive = true
+  g.gun = newGun(RIFLE)
+  g.brain = newBrain(spawn, Math.PI, (Math.floor(r.elapsed * 1000) + g.id * 7919) >>> 0, r.elapsed)
+  g.path = []
+  g.pathAt = 0
+  g.pathGoal = null
+  g.burstLeft = 0
+  g.burstAt = 0
+  g.defusing = false
+  g.hitFlash = 0
+  g.hurtAt = -99
+  g.hurtFrom = null
+  g.respawnAt = 0
+}
+
+/** 训练模式每帧:倒下的玩家/守卫到点复活 */
+function trainingRespawn(r: Round, events: GameEvent[]): void {
+  const now = r.elapsed
+  const p = r.player
+  if (p.alive && p.hp <= 0) {
+    p.hp = 0
+    p.alive = false
+    p.deaths++
+    p.respawnAt = now + 1.8
+    events.push({ type: 'death' })
+    return
+  }
+  if (!p.alive && p.respawnAt > 0 && now >= p.respawnAt) {
+    respawnPlayer(r)
+    events.push({ type: 'respawn', side: 'player' })
+  }
+  for (const g of r.guards) {
+    if (g.alive) continue
+    if (g.respawnAt === 0) g.respawnAt = now + 2.5
+    else if (now >= g.respawnAt) {
+      respawnGuard(r, g)
+      events.push({ type: 'respawn', side: 'guard' })
+    }
   }
 }
 
@@ -550,7 +629,8 @@ function fireGuard(r: Round, g: GuardState, events: GameEvent[]): void {
   if (g.burstLeft <= 0) g.burstAt = now + g.skill.pause
   addTracer(r, g.pos, hit.point, 'guard')
   addFlash(r, g.pos, aimed.angle, 'guard')
-  events.push({ type: 'shot', team: 'guard', angle: aimed.angle })
+  addShell(r, g.pos, aimed.angle, 'guard')
+  events.push({ type: 'shot', team: 'guard', angle: aimed.angle, x: g.pos.x, y: g.pos.y })
   if (hit.kind === 'target') {
     r.player.hp -= RIFLE.damage
     r.player.hitFlash = 0.3
@@ -629,48 +709,10 @@ function decayStep(r: Round, dt: number): void {
 
 // ---------------------------------------------------------------- 胜负与统计
 
-/** 回合结束后记账:比分、累计数据、整场是否结束 */
-export function finishRound(match: MatchState, round: Round): MatchState {
-  if (!round.over || match.over) return match
-  const scorePlayer = match.scorePlayer + (round.over.side === 'player' ? 1 : 0)
-  const scoreGuard = match.scoreGuard + (round.over.side === 'guard' ? 1 : 0)
-  const stats: MatchStats = {
-    kills: match.stats.kills + round.player.kills,
-    shots: match.stats.shots + round.player.shots,
-    hits: match.stats.hits + round.player.hits,
-    plants: match.stats.plants + round.plants,
-    seconds: match.stats.seconds + round.elapsed,
-  }
-  const over = scorePlayer >= SCORE_TO_WIN ? 'win' as const : scoreGuard >= SCORE_TO_WIN ? 'loss' as const : null
-  return {
-    ...match,
-    scorePlayer,
-    scoreGuard,
-    stats,
-    over,
-    lastRound: {
-      side: round.over.side,
-      reason: round.over.reason,
-      kills: round.player.kills,
-      seconds: round.elapsed,
-      planted: round.plants > 0,
-    },
-  }
-}
-
-/** 下一回合(比分先记过) */
-export function nextRound(match: MatchState): MatchState {
-  return { ...match, round: match.round + 1 }
-}
-
 /** 玩家看不看得见某个守卫(渲染层用;超出视距或者被墙挡住就不画) */
 export function playerSeesGuard(map: GameMap, playerPos: Vec, guardPos: Vec): boolean {
   if (dist(playerPos, guardPos) > PLAYER_VIEW_RANGE) return false
   return lineOfSight(map, playerPos, guardPos)
 }
 
-/** 命中率(0..1;没开枪是 0) */
-export function accuracyOf(stats: MatchStats): number {
-  return stats.shots === 0 ? 0 : stats.hits / stats.shots
-}
 

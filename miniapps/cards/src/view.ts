@@ -1,9 +1,9 @@
-// 对局部件的「画」:DOM 缓存、英雄 / 随从 / 手牌渲染、目标高亮、飘字动画、横幅、读屏播报。
+// 对局部件的「画」:DOM 缓存、英雄 / 随从 / 手牌渲染、目标高亮、飘字与粒子动画、横幅、读屏播报。
 // 规则和流程在 table.ts;这里不碰电脑、也不改对局状态,只把状态画出来、把事件放成动画。
 import { card, hero } from './data'
 import { attackTargets, findMinion, playTargets } from './engine'
 import type { Ev, GameState, Minion, Side, TargetRef } from './types'
-import { MAX_ENERGY } from './types'
+import { MAX_ENERGY, START_HP } from './types'
 import { artEl } from './art'
 import { play as sfx } from './audio'
 import { $, el, reduced } from '../../shared/src/ui'
@@ -26,6 +26,8 @@ export interface ViewHandlers {
   onPause(): void
   /** 点牌桌空白处(不是按钮的地方) */
   onBlank(): void
+  /** 新手提示点「知道了」 */
+  onTipClose(): void
 }
 
 /** 手牌张数 → 卡面宽度(rem):牌越多越窄,尽量都看得见 */
@@ -54,12 +56,15 @@ export class TableView {
     foeHero: $<HTMLButtonElement>('foe-hero'),
     foePortrait: $('foe-portrait'),
     foeHp: $('foe-hp'),
+    foeHpBar: $('foe-hpbar'),
     foeName: $('foe-name'),
     foeLine: $('foe-line'),
     foeEnergy: $('foe-energy'),
     myHero: $<HTMLButtonElement>('my-hero'),
     myPortrait: $('my-portrait'),
     myHp: $('my-hp'),
+    myHpBar: $('my-hpbar'),
+    myHname: $('my-hname'),
     foeBoard: $('foe-board'),
     myBoard: $('my-board'),
     banner: $('banner'),
@@ -70,6 +75,9 @@ export class TableView {
     hand: $('hand'),
     fx: $('fx'),
     pause: $<HTMLButtonElement>('pause'),
+    tip: $('tip'),
+    tipText: $('tip-text'),
+    tipClose: $<HTMLButtonElement>('tip-close'),
   }
 
   private readonly boardEls: [Map<number, HTMLElement>, Map<number, HTMLElement>] = [new Map(), new Map()]
@@ -91,6 +99,10 @@ export class TableView {
     this.els.foeBoard.addEventListener('click', (e) => this.boardClick(e, 1))
     this.els.endTurn.addEventListener('click', () => cb.onEndTurn())
     this.els.pause.addEventListener('click', () => cb.onPause())
+    this.els.tipClose.addEventListener('click', () => {
+      this.hideTip()
+      cb.onTipClose()
+    })
     // 点牌桌空白处取消选牌:手牌、随从、英雄和按钮都是 <button>,只把非按钮的空白交给外面判断
     this.root.addEventListener('pointerdown', (e) => {
       if (this.root.hidden) return
@@ -98,6 +110,18 @@ export class TableView {
       if (!target || !this.root.contains(target) || target.closest('button')) return
       this.cb.onBlank()
     })
+  }
+
+  // ---------------------------------------------------------------- 新手提示
+
+  /** 首局内联新手提示 */
+  showTip(text: string): void {
+    this.els.tipText.textContent = text
+    this.els.tip.hidden = false
+  }
+
+  hideTip(): void {
+    this.els.tip.hidden = true
   }
 
   // ---------------------------------------------------------------- 开局 / 清空
@@ -114,6 +138,7 @@ export class TableView {
     this.heroKey = ''
     this.hintMsg = ''
     this.hintAt = -1e9
+    this.hideTip()
     window.clearTimeout(this.bannerTimer)
     window.clearTimeout(this.hintTimer)
     this.els.banner.hidden = true
@@ -160,13 +185,21 @@ export class TableView {
       this.els.foePortrait.append(artEl(foeHero.art))
       this.els.myPortrait.className = `portrait cls-${myHero.cls}`
       this.els.foePortrait.className = `portrait cls-${foeHero.cls}`
+      this.els.myHname.textContent = myHero.name
       this.put('foe-name', `${foeHero.name} · ${foeHero.title}`)
+      // 战场背景按双方阵营换主题(亮暗两套里各有对应渐变)
+      this.root.dataset.my = myHero.cls
+      this.root.dataset.foe = foeHero.cls
     }
     this.put('my-hp', String(me.hp))
     this.put('foe-hp', String(foe.hp))
     this.put('foe-line', `手牌 ${foe.hand.length} · 牌库 ${foe.deck.length}`)
+    this.els.myHpBar.style.transform = `scaleX(${Math.max(0, me.hp / START_HP)})`
+    this.els.foeHpBar.style.transform = `scaleX(${Math.max(0, foe.hp / START_HP)})`
     this.els.myHp.classList.toggle('low', me.hp <= 10)
     this.els.foeHp.classList.toggle('low', foe.hp <= 10)
+    this.els.myHpBar.classList.toggle('low', me.hp <= 10)
+    this.els.foeHpBar.classList.toggle('low', foe.hp <= 10)
     this.els.foeHero.setAttribute('aria-label', `敌方英雄 ${foeHero.name},${foe.hp} 点生命`)
     this.els.myHero.setAttribute('aria-label', `我的英雄 ${myHero.name},${me.hp} 点生命`)
     this.renderEnergy(me.energy, me.maxEnergy)
@@ -219,7 +252,7 @@ export class TableView {
     b.type = 'button'
     b.dataset.uid = String(m.uid)
     const c = card(m.card)
-    b.classList.add(`cls-${c.cls}`)
+    b.classList.add(`cls-${c.cls}`, `rarity-${c.rarity}`)
     const art = artEl(c.art)
     art.classList.add('m-art')
     b.append(art, el('span', c.name, 'm-name'))
@@ -277,7 +310,7 @@ export class TableView {
 
   private cardButton(id: string, index: number): HTMLButtonElement {
     const c = card(id)
-    const b = el('button', '', `hand-card cls-${c.cls}`) as HTMLButtonElement
+    const b = el('button', '', `hand-card cls-${c.cls} rarity-${c.rarity}`) as HTMLButtonElement
     b.type = 'button'
     b.dataset.index = String(index)
     b.append(el('span', String(c.cost), 'cost'))
@@ -289,7 +322,8 @@ export class TableView {
       stats.append(el('b', String(c.attack), 'atk'), el('b', String(c.health), 'hp'))
       b.append(stats)
     }
-    b.setAttribute('aria-label', `${c.name},${c.cost} 点能量,${c.type === 'minion' ? `${c.attack} 攻击 ${c.health} 生命,` : ''}${c.text || '没有特殊效果'}`)
+    b.append(el('span', '', 'rarity-gem'))
+    b.setAttribute('aria-label', `${c.name},${c.rarity === 'common' ? '' : c.rarity === 'rare' ? '稀有,' : '史诗,'}${c.cost} 点能量,${c.type === 'minion' ? `${c.attack} 攻击 ${c.health} 生命,` : ''}${c.text || '没有特殊效果'}`)
     b.addEventListener('click', () => this.cb.onCard(index))
     return b
   }
@@ -404,7 +438,7 @@ export class TableView {
     if (!keep) this.bannerTimer = window.setTimeout(() => { b.hidden = true }, 1250)
   }
 
-  // ---------------------------------------------------------------- 动画 / 飘字
+  // ---------------------------------------------------------------- 动画 / 飘字 / 粒子
 
   private float(t: TargetRef, text: string, kind: string): void {
     const node = this.nodeOf(t)
@@ -431,10 +465,47 @@ export class TableView {
     window.setTimeout(() => node.classList.remove(cls), 340)
   }
 
-  /** 事件 → 画面上的小动作(攻击前冲、受伤、飘字、死亡淡出、圣盾) */
+  /**
+   * 程序化粒子:在某个元素中心撒一把 CSS 小方块/圆点,按事件类型换颜色和运动方向。
+   * 减少动态效果时直接不生成(不占 DOM,也不动)。
+   */
+  private burst(node: HTMLElement | null | undefined, kind: string, count = 8): void {
+    if (!node || reduced()) return
+    const r = node.getBoundingClientRect()
+    const box = this.root.getBoundingClientRect()
+    const cx = r.left - box.left + r.width / 2
+    const cy = r.top - box.top + r.height / 2
+    for (let i = 0; i < count; i++) {
+      const p = el('i', '', `particle p-${kind}`)
+      const ang = (i / count) * Math.PI * 2 + (kind === 'death' ? 0.4 : 0)
+      const dist = kind === 'death' ? 26 + (i % 3) * 8 : 16 + (i % 4) * 5
+      p.style.left = `${cx}px`
+      p.style.top = `${cy}px`
+      p.style.setProperty('--dx', `${Math.cos(ang) * dist}px`)
+      p.style.setProperty('--dy', `${Math.sin(ang) * dist - (kind === 'heal' ? 14 : 0)}px`)
+      p.style.setProperty('--d', `${0.42 + ((i * 7) % 5) / 20}s`)
+      this.els.fx.append(p)
+      window.setTimeout(() => p.remove(), 900)
+    }
+  }
+
+  /** 事件 → 画面上的小动作(攻击前冲、受伤、飘字、死亡淡出、圣盾、粒子) */
   animate(events: Ev[]): void {
     for (const e of events) {
       switch (e.e) {
+        case 'play': {
+          const def = card(e.card)
+          const from = e.side === 0 ? this.els.myHero : this.els.foeHero
+          this.burst(from, def.type === 'spell' ? 'spell' : 'play', 9)
+          if (def.battlecry) this.burst(from, 'battlecry', 12)
+          if (e.side === 1) this.log(`对手打出「${card(e.card).name}」`)
+          break
+        }
+        case 'summon': {
+          const node = this.boardEls[e.side].get(e.uid)
+          this.burst(node, 'summon', 7)
+          break
+        }
         case 'attack': {
           const from = this.boardEls[e.side].get(e.uid)
           if (from) {
@@ -449,14 +520,17 @@ export class TableView {
           if (e.shielded || e.amount <= 0) break
           this.float(e.target, `-${e.amount}`, 'dmg')
           this.shake(this.nodeOf(e.target))
+          this.burst(this.nodeOf(e.target), 'hit', 5)
           if (e.target.kind === 'hero') this.shake(e.target.side === 0 ? this.els.myHero : this.els.foeHero, 'hurt')
           break
         case 'heal':
           this.float(e.target, `+${e.amount}`, 'heal')
+          this.burst(this.nodeOf(e.target), 'heal', 6)
           break
         case 'shield':
           this.float(e.target, '圣盾', 'shield')
           this.shake(this.nodeOf(e.target), 'shield-pop')
+          this.burst(this.nodeOf(e.target), 'shield', 10)
           break
         case 'buff':
           this.float(e.target, `+${e.attack}/+${e.health}`, 'buff')
@@ -467,21 +541,21 @@ export class TableView {
           break
         case 'burn':
           this.floatOn(this.els.hand, '手牌满了,烧掉一张', 'dmg')
+          this.burst(this.els.hand, 'burn', 6)
           break
         case 'death': {
           const node = this.boardEls[e.side].get(e.uid)
           if (node) {
+            this.burst(node, 'death', 10)
             node.classList.add('dying')
             this.boardEls[e.side].delete(e.uid)
             window.setTimeout(() => node.remove(), reduced() ? 120 : 380)
           }
+          if (card(e.card).deathrattle) this.burst(node, 'rattle', 8)
           break
         }
         case 'turn':
           this.banner(e.side === 0 ? '你的回合' : '对手回合', 'turn')
-          break
-        case 'play':
-          if (e.side === 1) this.log(`对手打出「${card(e.card).name}」`)
           break
         default:
           break

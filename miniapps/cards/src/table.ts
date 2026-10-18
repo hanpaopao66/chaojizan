@@ -1,11 +1,11 @@
 // 对局流程:开始 / 暂停 / 结束、玩家点击 → 合法动作、电脑回合的调度、每一步之后的存档快照。
 // 画的部分在 view.ts,规则在 engine.ts(纯函数),电脑在 ai.ts。这里只做「输入 → 动作 → 重画」。
 import { aiNext } from './ai'
-import { card } from './data'
+import { card, hero } from './data'
 import { applyAction, attackTargets, canAttackWith, canPlayCard, findMinion, playTargets, surrender } from './engine'
 import { targetKindOf } from './data'
-import type { Action, Ev, GameState, Level, Side, TargetRef } from './types'
-import { play as sfx, sfxForEvent } from './audio'
+import type { Action, Ev, GameState, Level, OverReason, Side, TargetRef } from './types'
+import { bgmPause, bgmResume, bgmStart, bgmStop, play as sfx, sfxEvent } from './audio'
 import { WebApp, reduced } from '../../shared/src/ui'
 import { TableView, type Mode, type ViewFlags } from './view'
 
@@ -18,6 +18,10 @@ export interface MatchResult {
   lost: number
   hero: string
   level: Level
+  /** 结束原因(结算页和成就用) */
+  reason: OverReason
+  /** 结束时我方英雄剩多少血(星级 / 满血成就要用) */
+  myHp: number
 }
 
 export interface TableHooks {
@@ -27,6 +31,8 @@ export interface TableHooks {
   onSnapshot(s: GameState): void
   /** 暂停键 / 宿主返回键 */
   onPause(): void
+  /** 首局新手提示被玩家收起了 */
+  onTutorialSeen(): void
 }
 
 const TARGET_HINT: Record<string, string> = {
@@ -44,6 +50,7 @@ export class Table {
     onEndTurn: () => this.onEndTurn(),
     onPause: () => this.hooks.onPause(),
     onBlank: () => this.onBlank(),
+    onTipClose: () => this.hooks.onTutorialSeen(),
   })
 
   private st: GameState | null = null
@@ -64,7 +71,7 @@ export class Table {
 
   // ---------------------------------------------------------------- 开始 / 暂停 / 结束
 
-  start(s: GameState, level: Level, resumed: boolean): void {
+  start(s: GameState, level: Level, resumed: boolean, opts: { tutorial?: boolean } = {}): void {
     this.gen++
     this.st = s
     this.level = level
@@ -79,6 +86,10 @@ export class Table {
     this.view.show()
     this.render()
     this.view.log(resumed ? '接着上一局,继续。' : '对局开始:你先手。')
+    if (opts.tutorial) {
+      this.view.showTip('新手提示:点手牌出牌;要选目标的牌再点目标;点自己的随从再点敌方目标攻击。点「知道了」收起。')
+    }
+    bgmStart(hero(s.sides[0].hero).cls)
     this.view.banner(resumed ? '接着打' : s.active === 0 ? '你的回合' : '对手回合', 'turn')
     if (s.active === 1) this.scheduleAi(520)
     WebApp.BackButton.show()
@@ -93,6 +104,7 @@ export class Table {
     this.view.hide()
     this.st = null
     this.paused = false
+    bgmStop()
     WebApp.BackButton.hide()
   }
 
@@ -112,6 +124,7 @@ export class Table {
     window.clearTimeout(this.endTurnTimer)
     this.turnEnding = false
     this.cancelSelection()
+    bgmPause()
     if (!this.st.over) this.hooks.onSnapshot(this.st)
     this.render()
   }
@@ -120,6 +133,7 @@ export class Table {
     if (!this.st || this.ended) return
     this.paused = false
     this.render()
+    bgmResume()
     if (this.st.over) return
     if (this.st.active === 1) this.scheduleAi(420)
   }
@@ -141,6 +155,7 @@ export class Table {
     const win = s.over.winner === 0
     this.view.banner(win ? '胜利!' : s.over.winner === -1 ? '平局' : '失败', win ? 'win' : 'lose', true)
     this.view.say(win ? '你赢了,对局结束' : s.over.winner === -1 ? '平局' : '你输了,对局结束')
+    bgmPause()
     WebApp.HapticFeedback.notificationOccurred(win ? 'success' : 'error')
     const later = reduced() ? 320 : 1100
     window.setTimeout(() => {
@@ -154,6 +169,7 @@ export class Table {
     return {
       won: s.over?.winner === 0, draw: s.over?.winner === -1, turns: s.turn,
       played: me.played, dealt: me.dealt, lost: me.lost, hero: me.hero, level: this.level,
+      reason: s.over?.reason ?? 'hp', myHp: me.hp,
     }
   }
 
@@ -186,7 +202,7 @@ export class Table {
     this.selectedHand = -1
     this.attackerUid = -1
     this.view.animate(events)
-    for (const e of events) sfxForEvent(e)
+    for (const e of events) sfxEvent(e)
     this.render()
     this.view.announce(prev, next, events)
     this.hooks.onSnapshot(next)

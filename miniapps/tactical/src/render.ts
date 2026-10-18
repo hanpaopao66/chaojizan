@@ -3,92 +3,15 @@
 // 只有玩家看得见(LOS + 视距)的守卫才画出来;失去视线后留 1 秒「最后已知位置」的虚影。
 // 地图是静态的,预渲染成一张离屏画布缓存起来,只有换尺寸/换主题才重画,每帧只画人和特效。
 
-import {
-  CRATE, FLOOR, GameMap, TILE, Vec, WALL, WORLD_H, WORLD_W, dist, lineOfSight, siteCenter, tileAt,
-} from './map'
+import { TILE, Vec, WORLD_H, WORLD_W, dist, lineOfSight, siteCenter } from './map'
 import {
   BOMB_TIME, GuardState, PLAYER_RADIUS, PLAYER_VIEW_RANGE, PlayerState, Round,
 } from './match'
 
-/** 画布用的一套颜色,来自 style.css 里的 --tac-* 变量(亮暗各一套) */
-export interface Palette {
-  bg: string
-  floor: string
-  floorAlt: string
-  grid: string
-  wall: string
-  wallTop: string
-  wallEdge: string
-  crate: string
-  crateTop: string
-  crateEdge: string
-  siteA: string
-  siteA2: string
-  siteB: string
-  siteB2: string
-  siteInk: string
-  player: string
-  playerInk: string
-  guard: string
-  guardInk: string
-  bomb: string
-  bombInk: string
-  ghost: string
-  mapInk: string
-  tracerPlayer: string
-  tracerGuard: string
-  shadow: string
-  vignette: string
-}
+import { DEFAULT_PALETTE, Palette, buildMapLayer, mapLayerKey } from './paint'
 
-const FALLBACK: Palette = {
-  bg: '#141A21', floor: '#2C333D', floorAlt: '#273039', grid: '#343D48',
-  wall: '#4C5665', wallTop: '#636F81', wallEdge: '#1B2129',
-  crate: '#7C5837', crateTop: '#966C43', crateEdge: '#4A301A',
-  siteA: '#B98A3E', siteA2: '#9A7130', siteB: '#4F7FA0', siteB2: '#3E6885', siteInk: '#F2E8D0',
-  player: '#4FC3F7', playerInk: '#08222E', guard: '#FF7A55', guardInk: '#2A0F08',
-  bomb: '#FF5A4D', bombInk: '#2A0B08', ghost: '#CFD8E3', mapInk: '#E8DFC8',
-  tracerPlayer: '#9BE1FF', tracerGuard: '#FFB598', shadow: 'rgba(0, 0, 0, .35)',
-  vignette: 'rgba(6, 10, 14, .55)',
-}
-
-function cssVar(name: string, fallback: string): string {
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return value || fallback
-}
-
-/** 从 CSS 变量读一套画布配色。主题切换后重新读一次(和界面文字一起换亮暗) */
-export function readPalette(): Palette {
-  return {
-    bg: cssVar('--tac-bg', FALLBACK.bg),
-    floor: cssVar('--tac-floor', FALLBACK.floor),
-    floorAlt: cssVar('--tac-floor-alt', FALLBACK.floorAlt),
-    grid: cssVar('--tac-grid', FALLBACK.grid),
-    wall: cssVar('--tac-wall', FALLBACK.wall),
-    wallTop: cssVar('--tac-wall-top', FALLBACK.wallTop),
-    wallEdge: cssVar('--tac-wall-edge', FALLBACK.wallEdge),
-    crate: cssVar('--tac-crate', FALLBACK.crate),
-    crateTop: cssVar('--tac-crate-top', FALLBACK.crateTop),
-    crateEdge: cssVar('--tac-crate-edge', FALLBACK.crateEdge),
-    siteA: cssVar('--tac-site-a', FALLBACK.siteA),
-    siteA2: cssVar('--tac-site-a-2', FALLBACK.siteA2),
-    siteB: cssVar('--tac-site-b', FALLBACK.siteB),
-    siteB2: cssVar('--tac-site-b-2', FALLBACK.siteB2),
-    siteInk: cssVar('--tac-site-ink', FALLBACK.siteInk),
-    player: cssVar('--tac-player', FALLBACK.player),
-    playerInk: cssVar('--tac-player-ink', FALLBACK.playerInk),
-    guard: cssVar('--tac-guard', FALLBACK.guard),
-    guardInk: cssVar('--tac-guard-ink', FALLBACK.guardInk),
-    bomb: cssVar('--tac-bomb', FALLBACK.bomb),
-    bombInk: cssVar('--tac-bomb-ink', FALLBACK.bombInk),
-    ghost: cssVar('--tac-ghost', FALLBACK.ghost),
-    mapInk: cssVar('--tac-map-ink', FALLBACK.mapInk),
-    tracerPlayer: cssVar('--tac-tracer-player', FALLBACK.tracerPlayer),
-    tracerGuard: cssVar('--tac-tracer-guard', FALLBACK.tracerGuard),
-    shadow: cssVar('--tac-shadow', FALLBACK.shadow),
-    vignette: cssVar('--tac-vignette', FALLBACK.vignette),
-  }
-}
+export { readPalette } from './paint'
+export type { Palette } from './paint'
 
 export interface DrawOptions {
   /** 鼠标在世界坐标里的位置(桌面准星);触屏是 null */
@@ -103,7 +26,7 @@ export interface DrawOptions {
 
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D
-  private palette: Palette = FALLBACK
+  private palette: Palette = DEFAULT_PALETTE
   private width = 0
   private height = 0
   private dpr = 1
@@ -116,6 +39,8 @@ export class Renderer {
   private readonly ghosts = new Map<number, { pos: Vec; at: number }>()
   /** 已经画过「装备掉落」标记的守卫 */
   private readonly dead = new Map<number, Vec>()
+  /** 每个角色上一帧的位置:拿来算走路摆动(纯画面,不参与判定) */
+  private readonly motion = new Map<string, { x: number; y: number; phase: number }>()
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d')
@@ -162,8 +87,11 @@ export class Renderer {
   }
 
   draw(round: Round, opts: DrawOptions): void {
-    const key = `${this.palette.floor}|${this.palette.wall}|${this.palette.siteA}|${this.palette.siteB}|${round.map.tiles.length}`
-    if (key !== this.layerKey) this.buildLayer(round.map)
+    const key = mapLayerKey(round.map, this.palette)
+    if (key !== this.layerKey) {
+      this.layer = buildMapLayer(round.map, this.palette)
+      this.layerKey = key
+    }
     const ctx = this.ctx
     const dt = Math.min(0.1, Math.max(0, (opts.now - this.lastNow) / 1000))
     this.lastNow = opts.now
@@ -189,8 +117,8 @@ export class Renderer {
     if (this.layer) ctx.drawImage(this.layer, 0, 0, WORLD_W, WORLD_H)
     this.drawSites(round, opts)
     this.drawBomb(round, opts)
-    this.drawGuards(round, opts)
-    this.drawPlayer(round)
+    this.drawGuards(round, opts, dt)
+    this.drawPlayer(round, dt, opts.reduced)
     this.drawAimLine(round, opts)
     this.drawDeadMarks(round)
     this.drawFx(round, opts)
@@ -210,118 +138,6 @@ export class Renderer {
 
   // ---------------------------------------------------------------- 静态地图
 
-  private buildLayer(map: GameMap): void {
-    if (!this.layer) this.layer = document.createElement('canvas')
-    const ratio = 2
-    this.layer.width = WORLD_W * ratio
-    this.layer.height = WORLD_H * ratio
-    const ctx = this.layer.getContext('2d')
-    if (!ctx) return
-    this.layerKey = `${this.palette.floor}|${this.palette.wall}|${this.palette.siteA}|${this.palette.siteB}|${map.tiles.length}`
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
-    const p = this.palette
-
-    // 地面:两三种深浅交错,像水泥地
-    for (let row = 0; row < WORLD_H / TILE; row++) {
-      for (let col = 0; col < WORLD_W / TILE; col++) {
-        ctx.fillStyle = (col * 7 + row * 13) % 3 === 0 ? p.floorAlt : p.floor
-        ctx.fillRect(col * TILE, row * TILE, TILE, TILE)
-      }
-    }
-    // 砖缝
-    ctx.strokeStyle = p.grid
-    ctx.globalAlpha = 0.45
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    for (let x = 0; x <= WORLD_W; x += TILE) {
-      ctx.moveTo(x + 0.5, 0)
-      ctx.lineTo(x + 0.5, WORLD_H)
-    }
-    for (let y = 0; y <= WORLD_H; y += TILE) {
-      ctx.moveTo(0, y + 0.5)
-      ctx.lineTo(WORLD_W, y + 0.5)
-    }
-    ctx.stroke()
-    ctx.globalAlpha = 1
-
-    this.paintSite(ctx, map.siteA, p.siteA, p.siteA2, 'A')
-    this.paintSite(ctx, map.siteB, p.siteB, p.siteB2, 'B')
-
-    // 墙和箱子
-    for (let row = 0; row < WORLD_H / TILE; row++) {
-      for (let col = 0; col < WORLD_W / TILE; col++) {
-        const tile = tileAt(map, col, row)
-        if (tile === FLOOR) continue
-        const x = col * TILE
-        const y = row * TILE
-        ctx.fillStyle = p.shadow
-        ctx.fillRect(x + 2, y + 4, TILE, TILE)
-        if (tile === WALL) {
-          ctx.fillStyle = p.wall
-          ctx.fillRect(x, y, TILE, TILE)
-          ctx.fillStyle = p.wallTop
-          ctx.fillRect(x, y, TILE, 5)
-          ctx.strokeStyle = p.wallEdge
-          ctx.lineWidth = 1
-          ctx.strokeRect(x + 0.5, y + 0.5, TILE - 1, TILE - 1)
-        } else if (tile === CRATE) {
-          ctx.fillStyle = p.crate
-          ctx.fillRect(x + 2, y + 2, TILE - 4, TILE - 4)
-          ctx.fillStyle = p.crateTop
-          ctx.fillRect(x + 2, y + 2, TILE - 4, 5)
-          ctx.strokeStyle = p.crateEdge
-          ctx.lineWidth = 1.5
-          ctx.strokeRect(x + 2.5, y + 2.5, TILE - 5, TILE - 5)
-          ctx.beginPath()
-          ctx.moveTo(x + 4, y + TILE - 6)
-          ctx.lineTo(x + TILE - 6, y + 5)
-          ctx.stroke()
-        }
-      }
-    }
-    // 地图最外圈压一道深色边
-    ctx.strokeStyle = p.wallEdge
-    ctx.lineWidth = 6
-    ctx.strokeRect(3, 3, WORLD_W - 6, WORLD_H - 6)
-  }
-
-  private paintSite(
-    ctx: CanvasRenderingContext2D,
-    rect: { x0: number; y0: number; x1: number; y1: number },
-    base: string,
-    alt: string,
-    letter: string,
-  ): void {
-    const x = rect.x0 * TILE
-    const y = rect.y0 * TILE
-    const w = (rect.x1 - rect.x0 + 1) * TILE
-    const h = (rect.y1 - rect.y0 + 1) * TILE
-    const p = this.palette
-    ctx.save()
-    ctx.fillStyle = base
-    ctx.globalAlpha = 0.5
-    ctx.fillRect(x, y, w, h)
-    ctx.globalAlpha = 0.9
-    ctx.strokeStyle = alt
-    ctx.lineWidth = 3
-    ctx.strokeRect(x + 2, y + 2, w - 4, h - 4)
-    // 斜纹
-    ctx.globalAlpha = 0.22
-    ctx.beginPath()
-    for (let k = -h; k < w; k += 18) {
-      ctx.moveTo(x + k, y + h)
-      ctx.lineTo(x + k + h, y)
-    }
-    ctx.stroke()
-    ctx.globalAlpha = 1
-    ctx.fillStyle = p.siteInk
-    ctx.font = 'bold 58px system-ui, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(letter, x + w / 2, y + h / 2)
-    ctx.restore()
-  }
-
   // ---------------------------------------------------------------- 炸弹点 / 炸弹
 
   private drawSites(round: Round, opts: DrawOptions): void {
@@ -335,6 +151,13 @@ export class Renderer {
       ctx.beginPath()
       ctx.arc(c.x, c.y, TILE * 1.7 + pulse * 8, 0, Math.PI * 2)
       ctx.stroke()
+      if (round.map.theme === 'market') {
+        ctx.globalAlpha = 0.14 + pulse * 0.16
+        ctx.lineWidth = 1.2
+        ctx.beginPath()
+        ctx.arc(c.x, c.y, TILE * 2.4 + pulse * 12, 0, Math.PI * 2)
+        ctx.stroke()
+      }
       ctx.globalAlpha = 1
     }
   }
@@ -406,9 +229,28 @@ export class Renderer {
     ctx.stroke()
   }
 
+  /**
+   * 走路摆动:按这一帧移动的距离推进相位,原地站着就慢慢归零。
+   * 只改画面(身体上下/左右晃一点),碰撞和命中都不受影响。
+   */
+  private walkBob(key: string, pos: Vec, dt: number): number {
+    const last = this.motion.get(key)
+    const prev = last ? last.phase : 0
+    let phase = prev
+    let speed = 0
+    if (last) {
+      const moved = Math.hypot(pos.x - last.x, pos.y - last.y)
+      speed = dt > 0 ? moved / dt : 0
+      phase += moved / 14
+    }
+    this.motion.set(key, { x: pos.x, y: pos.y, phase })
+    if (speed < 8) return 0
+    return Math.sin(phase * Math.PI) * 1.7
+  }
+
   // ---------------------------------------------------------------- 守卫
 
-  private drawGuards(round: Round, opts: DrawOptions): void {
+  private drawGuards(round: Round, opts: DrawOptions, dt: number): void {
     const visibleIds = new Set<number>()
     for (const guard of round.guards) {
       if (!guard.alive) continue
@@ -417,7 +259,7 @@ export class Renderer {
       if (visible) {
         visibleIds.add(guard.id)
         this.ghosts.set(guard.id, { pos: { ...guard.pos }, at: opts.now })
-        this.drawGuard(guard)
+        this.drawGuard(guard, dt, opts.reduced)
       }
     }
     // 刚失去视线的「最后已知位置」:1 秒内淡出
@@ -447,18 +289,19 @@ export class Renderer {
     }
   }
 
-  private drawGuard(guard: GuardState): void {
+  private drawGuard(guard: GuardState, dt: number, reducedMotion: boolean): void {
     const ctx = this.ctx
     const p = this.palette
     const pos = guard.pos
+    const bob = dt > 0 && !reducedMotion ? this.walkBob(`guard:${guard.id}`, pos, dt) : 0
     ctx.fillStyle = p.shadow
     ctx.beginPath()
     ctx.ellipse(pos.x, pos.y + 6, 12, 5, 0, 0, Math.PI * 2)
     ctx.fill()
     // 身体:菱形 → 和玩家的圆区分开(不看颜色也分得清敌我)
     ctx.save()
-    ctx.translate(pos.x, pos.y)
-    ctx.rotate(guard.angle)
+    ctx.translate(pos.x, pos.y + bob * 0.7)
+    ctx.rotate(guard.angle + bob * 0.02)
     ctx.fillStyle = guard.hitFlash > 0 ? '#FFFFFF' : p.guard
     ctx.strokeStyle = p.guardInk
     ctx.lineWidth = 2
@@ -481,9 +324,9 @@ export class Renderer {
     // 头顶小三角:一眼看出这是敌人
     ctx.fillStyle = p.guard
     ctx.beginPath()
-    ctx.moveTo(pos.x, pos.y - 19)
-    ctx.lineTo(pos.x + 6, pos.y - 11)
-    ctx.lineTo(pos.x - 6, pos.y - 11)
+    ctx.moveTo(pos.x, pos.y - 19 + bob * 0.7)
+    ctx.lineTo(pos.x + 6, pos.y - 11 + bob * 0.7)
+    ctx.lineTo(pos.x - 6, pos.y - 11 + bob * 0.7)
     ctx.closePath()
     ctx.fill()
     // 受伤后显示一条很短的血条
@@ -526,7 +369,7 @@ export class Renderer {
 
   // ---------------------------------------------------------------- 玩家与准星
 
-  private drawPlayer(round: Round): void {
+  private drawPlayer(round: Round, dt: number, reducedMotion: boolean): void {
     const ctx = this.ctx
     const p = this.palette
     const player: PlayerState = round.player
@@ -549,13 +392,14 @@ export class Renderer {
       ctx.restore()
       return
     }
+    const bob = dt > 0 && !reducedMotion ? this.walkBob('player', pos, dt) : 0
     ctx.fillStyle = p.shadow
     ctx.beginPath()
     ctx.ellipse(pos.x, pos.y + 6, 12, 5, 0, 0, Math.PI * 2)
     ctx.fill()
     ctx.save()
-    ctx.translate(pos.x, pos.y)
-    ctx.rotate(player.angle)
+    ctx.translate(pos.x, pos.y + bob * 0.65)
+    ctx.rotate(player.angle + bob * 0.025)
     ctx.fillStyle = player.hitFlash > 0 ? '#FFFFFF' : p.player
     ctx.strokeStyle = p.playerInk
     ctx.lineWidth = 2
@@ -581,9 +425,9 @@ export class Renderer {
     // 头顶箭头标记
     ctx.fillStyle = p.player
     ctx.beginPath()
-    ctx.moveTo(pos.x, pos.y - 20)
-    ctx.lineTo(pos.x + 5, pos.y - 28)
-    ctx.lineTo(pos.x - 5, pos.y - 28)
+    ctx.moveTo(pos.x, pos.y - 20 + bob * 0.65)
+    ctx.lineTo(pos.x + 5, pos.y - 28 + bob * 0.65)
+    ctx.lineTo(pos.x - 5, pos.y - 28 + bob * 0.65)
     ctx.closePath()
     ctx.fill()
   }
@@ -643,11 +487,16 @@ export class Renderer {
   private drawFx(round: Round, opts: DrawOptions): void {
     const ctx = this.ctx
     const p = this.palette
+    // 曳光:一道带辉光的短亮线,两头淡
     for (const tracer of round.tracers) {
       const alpha = Math.max(0, tracer.life / tracer.max)
-      ctx.strokeStyle = tracer.team === 'player' ? p.tracerPlayer : p.tracerGuard
-      ctx.globalAlpha = alpha * 0.9
-      ctx.lineWidth = 2.2
+      const grad = ctx.createLinearGradient(tracer.from.x, tracer.from.y, tracer.to.x, tracer.to.y)
+      grad.addColorStop(0, 'rgba(255,255,255,0)')
+      grad.addColorStop(0.25, tracer.team === 'player' ? p.tracerPlayer : p.tracerGuard)
+      grad.addColorStop(1, 'rgba(255,255,255,0.1)')
+      ctx.globalAlpha = alpha
+      ctx.strokeStyle = grad
+      ctx.lineWidth = 2.6
       ctx.beginPath()
       ctx.moveTo(tracer.from.x, tracer.from.y)
       ctx.lineTo(tracer.to.x, tracer.to.y)
@@ -657,28 +506,51 @@ export class Renderer {
     for (const fx of round.fx) {
       const alpha = Math.max(0, fx.life / fx.max)
       if (fx.kind === 'flash') {
+        // 枪口火光:外圈辉光 + 内侧星形
         ctx.save()
         ctx.globalAlpha = alpha
         ctx.translate(fx.pos.x, fx.pos.y)
+        const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 30)
+        glow.addColorStop(0, 'rgba(255,240,190,.95)')
+        glow.addColorStop(0.4, 'rgba(255,200,90,.55)')
+        glow.addColorStop(1, 'rgba(255,170,60,0)')
+        ctx.fillStyle = glow
+        ctx.beginPath()
+        ctx.arc(0, 0, 30, 0, Math.PI * 2)
+        ctx.fill()
         ctx.rotate(fx.angle)
-        ctx.fillStyle = '#FFE9A8'
+        ctx.fillStyle = '#FFF6D0'
         ctx.beginPath()
         ctx.moveTo(0, 0)
-        ctx.lineTo(11, -5)
-        ctx.lineTo(16, 0)
-        ctx.lineTo(11, 5)
+        ctx.lineTo(14, -4)
+        ctx.lineTo(22, 0)
+        ctx.lineTo(14, 4)
         ctx.closePath()
         ctx.fill()
         ctx.restore()
       } else if (fx.kind === 'spark') {
+        // 命中火花:一小段沿速度方向的亮线
         ctx.globalAlpha = alpha
-        ctx.fillStyle = fx.team === 'player' ? p.tracerPlayer : p.tracerGuard
-        ctx.fillRect(fx.pos.x - 1.5, fx.pos.y - 1.5, 3, 3)
+        ctx.strokeStyle = fx.team === 'player' ? p.tracerPlayer : p.tracerGuard
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(fx.pos.x, fx.pos.y)
+        ctx.lineTo(fx.pos.x - fx.vel.x * 0.025, fx.pos.y - fx.vel.y * 0.025)
+        ctx.stroke()
+      } else if (fx.kind === 'shell' && !opts.reduced) {
+        // 弹壳:落地前转着的小铜块
+        ctx.save()
+        ctx.globalAlpha = alpha
+        ctx.translate(fx.pos.x, fx.pos.y)
+        ctx.rotate(fx.angle + (1 - alpha) * 6)
+        ctx.fillStyle = '#E8B45A'
+        ctx.fillRect(-2.4, -1.1, 4.8, 2.2)
+        ctx.restore()
       } else if (fx.kind === 'smoke' && !opts.reduced) {
-        ctx.globalAlpha = alpha * 0.22
+        ctx.globalAlpha = alpha * 0.2
         ctx.fillStyle = p.ghost
         ctx.beginPath()
-        ctx.arc(fx.pos.x, fx.pos.y, 3 + (1 - alpha) * 8, 0, Math.PI * 2)
+        ctx.arc(fx.pos.x, fx.pos.y, 3 + (1 - alpha) * 10, 0, Math.PI * 2)
         ctx.fill()
       }
     }

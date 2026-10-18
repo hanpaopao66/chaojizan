@@ -13,7 +13,10 @@
       <header class="foe-hud">
         <button id="foe-hero" class="hero foe" type="button" aria-label="敌方英雄">
           <span class="portrait" id="foe-portrait"></span>
-          <span class="hp" id="foe-hp">30</span>
+          <span class="hero-info">
+            <span class="hp" id="foe-hp">30</span>
+            <span class="hpbar" aria-hidden="true"><i id="foe-hpbar"></i></span>
+          </span>
         </button>
         <div class="meta">
           <span class="meta-name" id="foe-name">电脑</span>
@@ -31,11 +34,19 @@
       <footer class="my-hud">
         <button id="my-hero" class="hero me" type="button" aria-label="我的英雄">
           <span class="portrait" id="my-portrait"></span>
-          <span class="hp" id="my-hp">30</span>
+          <span class="hero-info">
+            <span class="hname" id="my-hname"></span>
+            <span class="hp" id="my-hp">30</span>
+            <span class="hpbar" aria-hidden="true"><i id="my-hpbar"></i></span>
+          </span>
         </button>
         <div class="energy" id="energy" aria-label="能量"></div>
         <button id="end-turn" class="end-turn" type="button">结束回合</button>
       </footer>
+      <div class="tip" id="tip" hidden>
+        <span id="tip-text"></span>
+        <button id="tip-close" type="button">知道了</button>
+      </div>
       <div class="hand-area">
         <p class="hint" id="hint"></p>
         <div class="hand" id="hand" role="group" aria-label="手牌"></div>

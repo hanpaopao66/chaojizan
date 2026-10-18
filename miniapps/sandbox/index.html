@@ -17,13 +17,15 @@
           <button id="btn-sound" class="round" type="button" aria-label="声音">声</button>
           <p id="hud-time" class="chip"><span id="hud-sun" aria-hidden="true">☀</span><b id="hud-clock">06:00</b></p>
           <p id="hud-pos" class="chip pos">0, 0, 0</p>
+          <p id="hud-edits" class="chip edits" hidden>改动 <b id="hud-edits-n">0</b>/4000</p>
         </div>
         <div id="crosshair" class="crosshair" aria-hidden="true"><i></i></div>
         <p id="target-name" class="target" aria-live="off"></p>
         <div id="mine" class="minebar" hidden><i id="mine-fill"></i></div>
         <div class="hud-bottom">
+          <p id="item-name" class="item-name" hidden aria-hidden="true"></p>
           <div id="hotbar" class="hotbar" role="toolbar" aria-label="方块快捷栏"></div>
-          <p id="hud-hint" class="hud-hint">WASD 移动 · 空格跳 · 按住左键挖 · 右键放 · 1–9 切换</p>
+          <p id="hud-hint" class="hud-hint">WASD 移动 · 空格跳 · 按住左键挖 · 右键放 · 1–9 切换 · 成就见菜单</p>
         </div>
         <div id="touch" class="touch" hidden>
           <div id="stick" class="stick" role="application" aria-label="移动摇杆"><i id="stick-knob"></i></div>
@@ -41,6 +43,10 @@
   </main>
   <div id="overlay" class="overlay" hidden></div>
   <div id="toast" class="toast" role="status" hidden></div>
+  <div id="ach-toast" class="ach-toast" role="status" hidden>
+    <i id="ach-icon" class="ach-icon" aria-hidden="true"></i>
+    <span id="ach-text"></span>
+  </div>
   <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

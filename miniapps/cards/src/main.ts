@@ -1,16 +1,21 @@
-// 星火牌局的入口:存档(本机 + 超级赞云存储)、首页 / 对局 / 结算的切换、暂停菜单、宿主能力、主题、音效解锁。
+// 星火牌局的入口:存档(本机 + 超级赞云存储)、首页 / 卡牌图鉴 / 对局 / 结算的切换、暂停菜单、
+// 新手提示、成就解锁、宿主能力、主题、音效解锁。
 //
 // 存档两类:
 // - state:打到一半的那一局(整份对局状态 + 难度),每一步都存;关了再开、换设备能接着打;
-// - best:战绩(场次、胜场、连胜、最佳连胜)和上次选的卡组 / 难度。
-// 规则在 engine.ts / ai.ts(纯函数),界面在 table.ts / menus.ts,这里只做串起来。
+// - best:战绩 / 成就累计数 / 已解锁成就 / 上次选的卡组和难度。
+// 规则在 engine.ts / ai.ts(纯函数),界面在 table.ts / view.ts / menus.ts,这里只做串起来。
 import '../../shared/src/base.css'
 import './style.css'
 import './table.css'
 import { HEROES, hero } from './data'
 import { loadGame, newGame, saveGame } from './engine'
-import { loadProfile, mergeProfile, newProfile, recordResult, rememberChoice, type Profile } from './profile'
-import { about, home, result, type App, type Choice, type ResultView } from './menus'
+import {
+  loadProfile, markTutorialSeen, mergeProfile, newProfile, recordResult, rememberChoice, withAchievements,
+  type Outcome, type Profile,
+} from './profile'
+import { newlyUnlocked } from './achievements'
+import { about, gallery, home, result, type App, type Choice, type ResultView, type Screen } from './menus'
 import { Table, type MatchResult } from './table'
 import { freshSeed } from '../../shared/src/rand'
 import { SaveSlot } from '../../shared/src/save'
@@ -29,7 +34,7 @@ interface Match {
   level: Level
 }
 
-const LEVELS: Level[] = ['normal', 'hard']
+const LEVELS: Level[] = ['easy', 'normal', 'hard']
 
 function loadMatch(raw: unknown): Match | null {
   const m = raw as Match
@@ -59,6 +64,7 @@ const overlay = new Overlay($('overlay'), () => {
 
 let profile: Profile = newProfile()
 let choice: Choice = { hero: 'forge', level: 'normal' }
+let screen: Screen = 'home'
 /** 结算弹层开着:宿主返回键要回首页,而不是只把弹层藏起来(否则会卡在已结束的牌桌) */
 let resultShown = false
 
@@ -66,6 +72,11 @@ const table = new Table({
   onEnd: (r) => finishMatch(r),
   onSnapshot: (game) => { slot.change({ v: 1, game, level: choice.level }) },
   onPause: () => pauseMenu(),
+  onTutorialSeen: () => {
+    profile = markTutorialSeen(profile)
+    slot.setBest(profile)
+    void slot.flush()
+  },
 })
 
 const app: App = {
@@ -78,7 +89,16 @@ const app: App = {
     resultShown = false
     overlay.hide()
     table.stop()
-    renderHome()
+    screen = 'home'
+    render()
+  },
+  goGallery: () => {
+    if (table.active) return
+    overlay.hide()
+    screen = 'gallery'
+    sfx('tap')
+    render()
+    menuRoot.scrollTop = 0
   },
   pickHero: (id) => {
     if (!HEROES.some((h) => h.id === id)) return
@@ -113,17 +133,19 @@ function toast(text: string): void {
   void toastEl.offsetWidth
   toastEl.classList.add('show')
   window.clearTimeout(Number(toastEl.dataset.t || 0))
-  toastEl.dataset.t = String(window.setTimeout(() => { toastEl.hidden = true }, 2800))
+  toastEl.dataset.t = String(window.setTimeout(() => { toastEl.hidden = true }, 3000))
 }
 
-// ---------------------------------------------------------------- 首页 / 对局
+// ---------------------------------------------------------------- 页面 / 对局
 
-function renderHome(): void {
+function render(): void {
   if (table.active) return
   menuRoot.textContent = ''
   menuRoot.hidden = false
-  home(app, menuRoot)
-  WebApp.BackButton.hide()
+  if (screen === 'gallery') gallery(app, menuRoot)
+  else home(app, menuRoot)
+  if (screen === 'home') WebApp.BackButton.hide()
+  else WebApp.BackButton.show()
 }
 
 async function startMatch(): Promise<void> {
@@ -136,14 +158,15 @@ async function startMatch(): Promise<void> {
   // 电脑从另外两套卡组里挑一套,按种子选,同一局可复现
   const others = HEROES.filter((h) => h.id !== playerHero.id)
   const aiHero = others[(seed >>> 8) % others.length]
+  const level = LEVELS.indexOf(choice.level) >= 0 ? choice.level : 'normal'
   const game = newGame({ seed, hero0: playerHero.id, hero1: aiHero.id }).state
-  profile = rememberChoice(profile, playerHero.id, choice.level)
+  profile = rememberChoice(profile, playerHero.id, level)
   slot.setBest(profile)
-  choice = { hero: playerHero.id, level: choice.level }
+  choice = { hero: playerHero.id, level }
   menuRoot.hidden = true
   table.stop()
-  table.start(game, choice.level, false)
-  slot.change({ v: 1, game, level: choice.level })
+  table.start(game, level, false, { tutorial: !profile.tutorialSeen })
+  slot.change({ v: 1, game, level })
   void slot.flush()
 }
 
@@ -151,7 +174,8 @@ function resumeMatch(): void {
   const m = slot.state
   if (!m || !m.game || m.game.over) {
     toast('没有可以继续的对局')
-    renderHome()
+    screen = 'home'
+    render()
     return
   }
   void unlock()
@@ -168,18 +192,32 @@ async function discardSave(): Promise<void> {
   table.stop()
   slot.change({ v: 1, game: null, level: choice.level })
   await slot.flush()
-  renderHome()
+  screen = 'home'
+  render()
 }
 
+/** 一局结束:记战绩/成就 → 弹结算(星级 + 统计 + 新成就) */
 function finishMatch(r: MatchResult): void {
-  profile = recordResult(profile, r.won, r.hero, r.level)
+  const outcome: Outcome = {
+    won: r.won, draw: r.draw, hero: r.hero, level: r.level, reason: r.reason,
+    myHp: r.myHp, dealt: r.dealt, played: r.played,
+  }
+  profile = recordResult(profile, outcome)
+  const unlocked = newlyUnlocked(profile)
+  profile = withAchievements(profile, unlocked.map((a) => a.id))
   slot.setBest(profile)
   choice = { hero: r.hero, level: r.level }
   slot.change({ v: 1, game: null, level: r.level })
   void slot.flush()
-  const view: ResultView = { ...r, streak: profile.streak, bestStreak: profile.bestStreak }
+  // 星级:赢局按剩余血量 1–3 颗星,平局 1 颗,输 0 颗(结算页展示用)
+  const stars = r.won ? (r.myHp >= 20 ? 3 : r.myHp >= 10 ? 2 : 1) : r.draw ? 1 : 0
+  const view: ResultView = {
+    ...r, streak: profile.streak, bestStreak: profile.bestStreak, stars,
+    unlocked: unlocked.map((a) => ({ name: a.name, badge: a.badge })),
+  }
   resultShown = true
   result(app, view)
+  if (unlocked.length > 0) toast(`解锁成就:${unlocked.map((a) => a.name).join('、')}`)
 }
 
 // ---------------------------------------------------------------- 暂停
@@ -218,7 +256,8 @@ function pauseMenu(): void {
       button('回首页', () => {
         overlay.hide()
         table.stop()
-        renderHome()
+        screen = 'home'
+        render()
       }),
     ))
   }, { cls: 'pause', onDismiss: () => table.resume() })
@@ -248,6 +287,7 @@ WebApp.BackButton.onClick(() => {
     return
   }
   if (table.active) pauseMenu()
+  else if (screen !== 'home') app.goHome()
 })
 hostGame(() => {
   if (table.active) {
@@ -265,7 +305,7 @@ document.addEventListener('visibilitychange', () => {
 slot.restoreLocal()
 profile = slot.best
 choice = { hero: profile.lastHero, level: profile.lastLevel }
-renderHome()
+render()
 
 let readied = false
 const ready = (): void => {
@@ -277,7 +317,7 @@ setTimeout(ready, 1500)
 slot.restoreCloud().then((r) => {
   profile = slot.best
   choice = { hero: profile.lastHero, level: profile.lastLevel }
-  if (!table.active) renderHome()
+  if (!table.active) render()
   if (r === 'cloud' && slot.state?.game && !slot.state.game.over) toast('云端有一局还没打完,点「继续对局」接着打')
-  else if (r === 'cleared' && !table.active) renderHome()
+  else if (r === 'cleared' && !table.active) render()
 }).catch(() => undefined).finally(ready)

@@ -1,20 +1,24 @@
-// 世界生成:用种子生成一座 128×128、48 格高的海岛。纯函数,没有 DOM。
+// 世界生成:用种子生成一座小岛。纯函数,没有 DOM。
 //
 // 形状:离岛心越远越低,边缘沉到海面以下;再叠几层噪声让海岸线不规则,
 // 内陆低处是草原、近水是沙滩、高处是石丘;草地上随机长树(树干 + 树冠)。
+// 出生点在种树之前选好,周围留一圈空地,朝向岛心。
 // 世界最底下两层是基岩,永远挖不动 —— 这样无论怎么挖都不会掉出世界。
+//
+// 所有可调数值在 data.ts 的 WORLD / TERRAIN / TREE / SPAWN 里。
 import { rand } from '../../shared/src/rand'
 import { AIR, BEDROCK, DIRT, GRASS, LEAVES, LOG, SAND, STONE, WATER } from './blocks'
+import { SPAWN, TERRAIN, TREE, WORLD } from './data'
 import { detailNoise, smoothstep, terrainNoise } from './noise'
 
 /** 世界宽(x 方向,格) */
-export const W = 128
+export const W = WORLD.W
 /** 世界深(z 方向,格) */
-export const D = 128
-/** 世界高(y 方向,格)。最上面留够空间种树、搭塔 */
-export const H = 48
+export const D = WORLD.D
+/** 世界高(y 方向,格) */
+export const H = WORLD.H
 /** 海平面:y < SEA_LEVEL 的格子才可能装水,水面在这个高度 */
-export const SEA_LEVEL = 10
+export const SEA_LEVEL = WORLD.SEA_LEVEL
 
 /** 列编号(只看 x/z) */
 export const colIndex = (x: number, z: number): number => x + W * z
@@ -39,58 +43,37 @@ export interface GeneratedWorld {
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
-/** 单列的地形高度(实心方块数)。地形生成和测试都用这个函数,保证一致。 */
-export function terrainHeight(seed: number, x: number, z: number): number {
-  const terrain = terrainNoise(seed)
-  const detail = detailNoise(seed)
-  return heightOf(terrain, detail, x, z)
-}
-
 function heightOf(terrain: ReturnType<typeof terrainNoise>, detail: ReturnType<typeof detailNoise>,
   x: number, z: number): number {
   const cx = (W - 1) / 2
   const cz = (D - 1) / 2
-  // 椭圆形的岛,横向略宽:归一化距离 1 附近就是海岸
-  const dx = (x - cx) / 60
-  const dz = (z - cz) / 64
+  // 椭圆形的岛:归一化距离 1 附近就是海岸
+  const dx = (x - cx) / TERRAIN.ISLAND_RX
+  const dz = (z - cz) / TERRAIN.ISLAND_RZ
   const big = terrain(x, z)
   // 噪声扰动海岸线,避免出现一个正圆
-  const edge = Math.sqrt(dx * dx + dz * dz) + (big - 0.5) * 0.55
-  const land = 1 - smoothstep(0.45, 1.02, edge)
+  const edge = Math.sqrt(dx * dx + dz * dz) + (big - 0.5) * TERRAIN.EDGE_WARP
+  const land = 1 - smoothstep(TERRAIN.LAND_LO, TERRAIN.LAND_HI, edge)
   const roll = detail(x, z)
   // 海岸切得陡一点:沙滩窄、内陆高,草原面积才够走
-  let h = SEA_LEVEL - 6 + land * 11 + land * land * (big * 9 + roll * 5)
-  // 内陆的石丘:只在内陆、且细节噪声够高的地方隆起
-  const ridge = Math.max(0, detail(x + 37, z + 17) - 0.54)
-  h += ridge * 24 * smoothstep(0.55, 0.95, land)
-  return clamp(Math.round(h), 2, H - 12)
+  let h = SEA_LEVEL - TERRAIN.BASE_DROP + land * TERRAIN.LAND_HEIGHT
+    + land * land * (big * TERRAIN.BIG_AMP + roll * TERRAIN.DETAIL_AMP)
+  // 内陆的石丘:细节噪声够高的地方隆起
+  const ridge = Math.max(0, detail(x + 37, z + 17) - TERRAIN.RIDGE_START)
+  h += ridge * TERRAIN.RIDGE_AMP * smoothstep(TERRAIN.RIDGE_LO, TERRAIN.RIDGE_HI, land)
+  return clamp(Math.round(h), TERRAIN.MIN_HEIGHT, H - TERRAIN.MAX_HEIGHT_MARGIN)
 }
 
 /** 某列地表方块用哪种:水下和岸边是沙,高山上是石头,其余是草 */
 function surfaceBlock(h: number, rock: number): number {
-  if (h <= SEA_LEVEL + 1) return SAND
-  if (h >= 21 && rock > 0.45) return STONE
+  if (h <= SEA_LEVEL + TERRAIN.BEACH_TOP) return SAND
+  if (h >= TERRAIN.ROCK_TOP_HEIGHT && rock > TERRAIN.ROCK_NOISE) return STONE
   return GRASS
 }
 
-/**
- * 出生朝向:先朝着岛心看(能看到岛,不是一睁眼一片海);这个方向近处被树/石头挡住的话,
- * 左右各转 45° 找一个不挡视线、又能看到岛里的方向。眼睛在脚底上方一格。
- */
-function openYaw(blockAt: (x: number, y: number, z: number) => number, x: number, z: number, feetY: number): number {
-  const center = Math.atan2((D - 1) / 2 - z, (W - 1) / 2 - x)
-  const offsets = [0, 1, -1, 2, -2, 3, -3, 4]
-  for (const step of offsets) {
-    const a = center + (step * Math.PI) / 4
-    let blocked = false
-    for (let d = 1; d <= 4 && !blocked; d++) {
-      const bx = Math.floor(x + Math.cos(a) * d)
-      const bz = Math.floor(z + Math.sin(a) * d)
-      if (blockAt(bx, feetY + 1, bz) !== AIR) blocked = true
-    }
-    if (!blocked) return a
-  }
-  return center
+/** 单列的地形高度(实心方块数)。地形生成和测试都用这个函数,保证一致。 */
+export function terrainHeight(seed: number, x: number, z: number): number {
+  return heightOf(terrainNoise(seed), detailNoise(seed), x, z)
 }
 
 interface SpawnChoice {
@@ -101,14 +84,13 @@ interface SpawnChoice {
 
 /**
  * 选出生点(在种树之前,所以只看地形):优先低处的海岸草原,其次任意高度的草地,
- * 都要求身边 5×5 高差不超过一格;再不行就放宽。世界中心作为最后兜底。
+ * 都要求身边平缓;再不行就放宽。世界中心作为最后兜底。
  */
 function chooseSpawn(heights: Uint8Array, blocks: Uint8Array): SpawnChoice {
   const flat = (x: number, z: number, h: number): boolean => {
     for (let dz = -2; dz <= 2; dz++) {
       for (let dx = -2; dx <= 2; dx++) {
-        const dh = heights[colIndex(x + dx, z + dz)] - h
-        if (dh < -1 || dh > 1) return false
+        if (Math.abs(heights[colIndex(x + dx, z + dz)] - h) > SPAWN.FLAT_DIFF) return false
       }
     }
     return true
@@ -117,8 +99,8 @@ function chooseSpawn(heights: Uint8Array, blocks: Uint8Array): SpawnChoice {
   const cz = Math.round((D - 1) / 2)
   let fallback: SpawnChoice = { x: cx, z: cz, h: Math.max(SEA_LEVEL + 3, heights[colIndex(cx, cz)]) }
   let haveFallback = false
-  for (let pass = 0; pass < 4; pass++) {
-    for (let r = 0; r <= 52; r++) {
+  for (let pass = 0; pass < SPAWN.PASSES; pass++) {
+    for (let r = 0; r <= SPAWN.MAX_RADIUS; r++) {
       for (let dz = -r; dz <= r; dz++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue
@@ -126,14 +108,14 @@ function chooseSpawn(heights: Uint8Array, blocks: Uint8Array): SpawnChoice {
           const z = cz + dz
           if (x < 2 || x >= W - 2 || z < 2 || z >= D - 2) continue
           const h = heights[colIndex(x, z)]
-          if (h <= SEA_LEVEL + 2) continue
+          if (h <= SEA_LEVEL + TREE.MIN_ABOVE_SEA) continue
           if (!haveFallback) {
             fallback = { x, z, h }
             haveFallback = true
           }
           const grass = blocks[colIndex(x, z) + W * D * (h - 1)] === GRASS
           if (pass < 3 && !grass) continue
-          if (pass === 0 && h > SEA_LEVEL + 7) continue
+          if (pass === 0 && h > SEA_LEVEL + SPAWN.LOW_ALTITUDE) continue
           if (pass <= 1 && !flat(x, z, h)) continue
           return { x, z, h }
         }
@@ -141,6 +123,34 @@ function chooseSpawn(heights: Uint8Array, blocks: Uint8Array): SpawnChoice {
     }
   }
   return fallback
+}
+
+/**
+ * 出生朝向:先朝着岛心看(能看到岛,不是一睁眼一片海);这个方向近处被地形挡住的话,
+ * 左右各转 45° 找一个不挡视线、又能看到岛里的方向。眼睛在脚底上方一格。
+ */
+function openYaw(blockAt: (x: number, y: number, z: number) => number, x: number, z: number, feetY: number): number {
+  const center = Math.atan2((D - 1) / 2 - z, (W - 1) / 2 - x)
+  const offsets = [0, 1, -1, 2, -2, 3, -3, 4]
+  let best = center
+  let bestScore = -1
+  for (const step of offsets) {
+    const a = center + (step * Math.PI) / 4
+    // 往这个方向看 6 格,数几格会被树干/树叶/山挡住;取最开阔的那条
+    let blocked = 0
+    for (let d = 1; d <= 6; d++) {
+      const bx = Math.floor(x + Math.cos(a) * d)
+      const bz = Math.floor(z + Math.sin(a) * d)
+      if (blockAt(bx, feetY + 1, bz) !== AIR) blocked++
+    }
+    const score = 6 - blocked
+    if (score > bestScore) {
+      bestScore = score
+      best = a
+    }
+    if (score === 6) return a
+  }
+  return best
 }
 
 /** 生成整个世界。同一个 seed 永远返回同一份方块(测试里有确定性用例)。 */
@@ -157,10 +167,10 @@ export function generateWorld(seed: number): GeneratedWorld {
       const col = colIndex(x, z)
       heights[col] = h
       const surface = surfaceBlock(h, detail(x + 91, z + 13))
-      const sandy = h <= SEA_LEVEL + 2
+      const sandy = h <= SEA_LEVEL + TERRAIN.SAND_DEPTH
       for (let y = 0; y < H; y++) {
         let id = AIR
-        if (y <= 1) id = BEDROCK
+        if (y < WORLD.BEDROCK_LAYERS) id = BEDROCK
         else if (y < h) {
           if (y === h - 1) id = surface
           else if (y >= h - 3) id = sandy ? SAND : DIRT
@@ -192,25 +202,24 @@ export function generateWorld(seed: number): GeneratedWorld {
     for (let x = 1; x < W - 1; x++) {
       const ddx = x - sx
       const ddz = z - sz
-      if (ddx * ddx + ddz * ddz <= 18) continue
+      if (ddx * ddx + ddz * ddz <= TREE.SPAWN_CLEAR_SQ) continue
       const col = colIndex(x, z)
       if (taken[col]) continue
       const h = heights[col]
-      if (h <= SEA_LEVEL + 2) continue
+      if (h <= SEA_LEVEL + TREE.MIN_ABOVE_SEA) continue
       if (blocks[col + W * D * (h - 1)] !== GRASS) continue
       // 坡太陡的地方不长树
       const slope = Math.abs(heights[colIndex(x + 1, z)] - h) + Math.abs(heights[colIndex(x - 1, z)] - h)
         + Math.abs(heights[colIndex(x, z + 1)] - h) + Math.abs(heights[colIndex(x, z - 1)] - h)
-      if (slope > 3) continue
+      if (slope > TREE.SLOPE_MAX) continue
       let r: number
       ;[r, rnd] = rand(rnd)
-      if (r > 0.05) continue
-      let trunk: number
+      if (r > TREE.DENSITY) continue
       ;[r, rnd] = rand(rnd)
-      trunk = 4 + Math.floor(r * 3)
-      // 占住 2 格半径,树和树之间不会挤在一起
-      for (let dz2 = -2; dz2 <= 2; dz2++) {
-        for (let dx2 = -2; dx2 <= 2; dx2++) {
+      const trunk = TREE.TRUNK_MIN + Math.floor(r * (TREE.TRUNK_MAX - TREE.TRUNK_MIN + 1))
+      // 占住几格半径,树和树之间不会挤在一起
+      for (let dz2 = -TREE.SPACING_RADIUS; dz2 <= TREE.SPACING_RADIUS; dz2++) {
+        for (let dx2 = -TREE.SPACING_RADIUS; dx2 <= TREE.SPACING_RADIUS; dx2++) {
           const tx = x + dx2
           const tz = z + dz2
           if (tx >= 0 && tx < W && tz >= 0 && tz < D) taken[colIndex(tx, tz)] = 1
@@ -218,16 +227,16 @@ export function generateWorld(seed: number): GeneratedWorld {
       }
       const top = h + trunk - 1
       for (let y = h; y <= top && y < H; y++) plant(x, y, z, LOG)
-      // 树冠:下面两层半径 1,上面三层半径 2,四角随机削掉
+      // 树冠:下面两层半径 1,上面几层半径 2,四角随机削掉
       for (let ly = top - 2; ly <= top + 1; ly++) {
-        const radius = ly >= top ? 2 : 1
+        const radius = ly >= top ? TREE.CANOPY_HIGH_RADIUS : TREE.CANOPY_LOW_RADIUS
         for (let dz2 = -radius; dz2 <= radius; dz2++) {
           for (let dx2 = -radius; dx2 <= radius; dx2++) {
             if (dx2 === 0 && dz2 === 0 && ly <= top) continue
-            if (radius === 2 && Math.abs(dx2) === 2 && Math.abs(dz2) === 2) {
+            if (Math.abs(dx2) === TREE.CANOPY_HIGH_RADIUS && Math.abs(dz2) === TREE.CANOPY_HIGH_RADIUS) {
               let corner: number
               ;[corner, rnd] = rand(rnd)
-              if (corner < 0.55) continue
+              if (corner < TREE.CANOPY_CORNER_SKIP) continue
             }
             plant(x + dx2, ly, z + dz2, LEAVES)
           }

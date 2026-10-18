@@ -2,8 +2,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  CARDS, HEROES, card, copiesIn, hero, keywordsOf, targetKindOf,
+  AI_TUNING, CARDS, DEFAULT_LEVEL, HEROES, LEVELS, card, copiesIn, hero, keywordsOf, targetKindOf,
 } from '../src/data'
+import type { Level } from '../src/types'
 import { DECK_SIZE, MAX_COPIES, type CardDef, type Effect } from '../src/types'
 
 const collectible = CARDS.filter((c) => !c.token)
@@ -58,6 +59,7 @@ function checkEffect(e: Effect, where: string): void {
       break
     case 'buff':
     case 'buffSelf':
+    case 'buffAll':
       assert.ok(e.attack > 0 && e.health > 0, `${where}:buff 数值不合法`)
       break
     case 'summon': {
@@ -141,4 +143,59 @@ test('原创性:名字和文案里没有别家卡牌游戏的名字', () => {
   for (const word of ['麦当劳', '可口可乐', '马斯克', '特朗普', '米老鼠', '宝可梦', 'pokemon']) {
     assert.equal(text.includes(word), false, `文案里出现了 ${word}`)
   }
+})
+
+test('卡面:每张卡一个独立图案,三位英雄的头像也互不重复', () => {
+  const cardArts = CARDS.map((c) => c.art)
+  assert.equal(new Set(cardArts).size, CARDS.length, '有卡牌共用了同一个卡面图案')
+  const heroArts = HEROES.map((h) => h.art)
+  assert.equal(new Set(heroArts).size, HEROES.length, '英雄头像有重复')
+  for (const a of heroArts) assert.equal(cardArts.includes(a), false, `英雄头像用了卡牌的图案:${a}`)
+  // 稀有度只影响视觉:每张可收集卡都有合法稀有度,三档都有人用
+  const rarities = CARDS.filter((c) => !c.token).map((c) => c.rarity)
+  for (const r of rarities) assert.ok(['common', 'rare', 'epic'].includes(r), `稀有度不合法:${r}`)
+  const count = (r: string) => rarities.filter((x) => x === r).length
+  assert.ok(count('common') >= 12 && count('rare') >= 8 && count('epic') >= 2,
+    `稀有度分布不合理:普通 ${count('common')} / 稀有 ${count('rare')} / 史诗 ${count('epic')}`)
+  assert.equal(count('common') + count('rare') + count('epic'), 36)
+})
+
+test('图鉴数据:36 张卡都能分类浏览,名字 / 文本 / 风味 / 卡面齐全', () => {
+  const classes = ['neutral', 'forge', 'frost', 'dusk'] as const
+  let total = 0
+  for (const cls of classes) {
+    const list = CARDS.filter((c) => c.cls === cls && !c.token)
+    total += list.length
+    assert.ok(list.length > 0, `${cls} 分组是空的`)
+  }
+  assert.equal(total, 36)
+  assert.equal(CARDS.filter((c) => c.cls === 'neutral' && !c.token).length, 15)
+  for (const cls of ['forge', 'frost', 'dusk'] as const) {
+    assert.equal(CARDS.filter((c) => c.cls === cls && !c.token).length, 7)
+  }
+  for (const c of CARDS) {
+    assert.ok(c.name.length > 0 && c.text.length >= 0 && c.flavor.length > 0, `${c.id} 图鉴字段不全`)
+    assert.ok(c.art.length > 0 && c.rarity.length > 0)
+    // 图鉴只展示规则文本和风味;数值是否合法由前面的数据自检兜底
+  }
+})
+
+test('AI 调参表:三档难度齐全,休闲手滑、困难算得更深,数值都在合理范围', () => {
+  const levels: Level[] = ['easy', 'normal', 'hard']
+  for (const lv of levels) {
+    const t = AI_TUNING[lv]
+    assert.ok(t, `${lv} 缺少调参`)
+    for (const v of Object.values(t.weights)) assert.ok(Number.isFinite(v) && v >= 0, `${lv} 权重不合法`)
+    assert.ok(t.threshold >= 0)
+    assert.ok(t.lethalDepth >= 0)
+    assert.ok(t.msBudget >= 0 && t.msBudget <= 500)
+    assert.ok(t.slip >= 0 && t.slip <= 1)
+  }
+  assert.equal(AI_TUNING.easy.lethalDepth, 0, '休闲档不应该算斩杀')
+  assert.ok(AI_TUNING.easy.slip > 0, '休闲档应该有「手滑」')
+  assert.equal(AI_TUNING.normal.slip, 0)
+  assert.equal(AI_TUNING.hard.slip, 0)
+  assert.ok(AI_TUNING.hard.lethalDepth > AI_TUNING.normal.lethalDepth, '困难档应该比标准档算得深')
+  assert.equal(DEFAULT_LEVEL, 'normal')
+  assert.deepEqual([...LEVELS], ['easy', 'normal', 'hard'])
 })

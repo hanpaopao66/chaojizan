@@ -18,9 +18,11 @@
       <header id="hud-top" class="hud-top">
         <button id="pause" class="hud-btn" type="button" aria-label="暂停">Ⅱ</button>
         <div class="hud-mid">
-          <p id="hud-round" class="hud-round">第 1 回合</p>
+          <p id="hud-round" class="hud-round">旧仓库 · 第 1 回合</p>
           <p class="hud-score" aria-label="比分">
+            <span id="pips-me" class="pips" aria-hidden="true"></span>
             <b id="score-me">0</b><i>:</i><b id="score-them">0</b>
+            <span id="pips-them" class="pips" aria-hidden="true"></span>
           </p>
         </div>
         <div id="hud-timer" class="hud-timer" aria-label="剩余时间">1:15</div>
@@ -37,7 +39,9 @@
       <p id="bomb-status" class="bomb-status" hidden></p>
 
       <div id="hud-ammo" class="hud-ammo">
-        <b id="ammo-mag">30</b><span class="slash">/</span><i id="ammo-res">90</i>
+        <span id="hud-weapon" class="weapon-name">突击步枪</span>
+        <span class="ammo-line"><b id="ammo-mag">30</b><span class="slash">/</span><i id="ammo-res">90</i></span>
+        <span id="hud-second" class="hud-second">手枪 12/48</span>
         <span id="reload-tip" class="reload-tip"></span>
       </div>
 
@@ -48,6 +52,7 @@
         <div id="zone-aim" class="zone zone-aim"><div id="stick-aim" class="stick" hidden><i class="knob"></i></div></div>
         <div class="touch-btns">
           <button id="btn-plant" class="tbtn plant" type="button" hidden>安放</button>
+          <button id="btn-swap" class="tbtn swap" type="button">切枪</button>
           <button id="btn-reload" class="tbtn" type="button">换弹</button>
         </div>
       </div>

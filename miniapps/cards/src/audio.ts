@@ -1,13 +1,19 @@
-// 音效:全部用 WebAudio 现场合成(振荡器 + 包络 + 程序生成的白噪声),不加载任何音频文件。
+// 音效与 BGM:全部用 WebAudio 现场合成(振荡器 + 包络 + 程序生成的白噪声),不加载任何音频文件。
 // 浏览器规定没被用户点过不许出声:第一次 pointerdown / keydown 时 unlock() 建 AudioContext。
-// 静音开关存在这台设备上(localStorage),关掉时连 AudioContext 都不建。
+// 静音开关存在这台设备上(localStorage),关掉时连 AudioContext 和 BGM 都不建。
+//
+// 音色分层:按钮 / 出牌(随从和法术不同音色)/ 攻击 / 受伤 / 治疗 / 圣盾碎 / 死亡 / 亡语 / 战吼 /
+// 嘲讽落地 / 冲锋 / 抽牌 / 烧牌 / 疲劳 / 胜利 / 失败;三套卡组各一段很轻的循环 BGM。
+import { card } from './data'
+import type { ClassId } from './types'
 import type { Ev } from './types'
 
 const KEY = 'cards:sound'
 
 export type SoundName =
-  | 'tap' | 'play' | 'summon' | 'attack' | 'hit' | 'heal' | 'shield' | 'death' | 'draw'
-  | 'turn' | 'victory' | 'defeat' | 'error' | 'fatigue' | 'burn' | 'buff'
+  | 'tap' | 'play' | 'spell' | 'summon' | 'taunt' | 'charge' | 'battlecry' | 'rattle'
+  | 'attack' | 'hit' | 'heal' | 'shield' | 'death' | 'draw' | 'burn' | 'fatigue'
+  | 'turn' | 'victory' | 'defeat' | 'error' | 'buff'
 
 let ctx: AudioContext | null = null
 let master: GainNode | null = null
@@ -15,6 +21,29 @@ let muted = readMuted()
 let noiseBuf: AudioBuffer | null = null
 let voices = 0
 const lastAt = new Map<SoundName, number>()
+
+// ---------------------------------------------------------------- BGM(每套卡组一段很轻的循环)
+
+interface BgmDef {
+  root: number
+  /** 五声音阶(半音偏移) */
+  scale: number[]
+  /** 一小节的音符索引序列 */
+  pattern: number[]
+  /** 一小节多少秒 */
+  bar: number
+  wave: OscillatorType
+}
+
+const BGM: Record<ClassId, BgmDef> = {
+  forge: { root: 196, scale: [0, 3, 5, 7, 10], pattern: [0, 2, 4, 3, 2, 0, 3, 4], bar: 1.8, wave: 'triangle' },
+  frost: { root: 174.6, scale: [0, 2, 3, 7, 8], pattern: [0, 2, 3, 4, 3, 2, 1, 0], bar: 2.2, wave: 'sine' },
+  dusk: { root: 146.8, scale: [0, 3, 5, 6, 10], pattern: [0, 1, 3, 2, 4, 3, 1, 0], bar: 2.0, wave: 'sine' },
+  neutral: { root: 164.8, scale: [0, 2, 4, 7, 9], pattern: [0, 1, 2, 3, 4, 3, 2, 1], bar: 2.4, wave: 'sine' },
+}
+let bgmCls: ClassId | null = null
+let bgmGain: GainNode | null = null
+let bgmTimer: number | null = null
 
 function readMuted(): boolean {
   try {
@@ -34,7 +63,11 @@ export function setSound(on: boolean): void {
     window.localStorage.setItem(KEY, on ? '1' : '0')
   } catch (_) { /* 存不了就只管这一次 */ }
   if (master) master.gain.value = on ? 0.55 : 0
-  if (on) unlock()
+  if (!on) bgmSilence()
+  else {
+    unlock()
+    bgmResume()
+  }
 }
 
 /** 用户点过页面之后调:建 AudioContext(静音时什么都不做) */
@@ -57,7 +90,6 @@ export function unlock(): void {
   if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined)
 }
 
-/** 拿上下文;静音、没解锁、浏览器不支持都返回 null(调用处不用判断) */
 function ac(): AudioContext | null {
   if (muted) return null
   if (!ctx) unlock()
@@ -66,19 +98,21 @@ function ac(): AudioContext | null {
   return ctx
 }
 
+// ---------------------------------------------------------------- 合成器
+
 interface ToneOpts {
   type?: OscillatorType
   vol?: number
-  /** 频率滑到哪儿 */
   to?: number
   delay?: number
   attack?: number
+  /** 连到 BGM 总线的音量(不传就连主总线) */
+  bus?: GainNode
 }
 
-/** 一个带包络的振荡器 */
 function tone(freq: number, dur: number, o: ToneOpts = {}): void {
   const c = ac()
-  if (!c || !master || voices > 18) return
+  if (!c || !master || voices > 20) return
   const t = c.currentTime + (o.delay ?? 0)
   const osc = c.createOscillator()
   osc.type = o.type ?? 'triangle'
@@ -90,7 +124,7 @@ function tone(freq: number, dur: number, o: ToneOpts = {}): void {
   g.gain.exponentialRampToValueAtTime(v, t + (o.attack ?? 0.008))
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur)
   osc.connect(g)
-  g.connect(master)
+  g.connect(o.bus ?? master)
   osc.start(t)
   osc.stop(t + dur + 0.03)
   voices++
@@ -109,10 +143,9 @@ interface NoiseOpts {
   type?: BiquadFilterType
 }
 
-/** 程序生成的白噪声(只建一次),过一道滤波器做出打击 / 风声的感觉 */
 function noise(dur: number, o: NoiseOpts = {}): void {
   const c = ac()
-  if (!c || !master || voices > 18) return
+  if (!c || !master || voices > 20) return
   if (!noiseBuf) {
     const len = Math.floor(c.sampleRate * 0.5)
     noiseBuf = c.createBuffer(1, len, c.sampleRate)
@@ -145,7 +178,7 @@ function noise(dur: number, o: NoiseOpts = {}): void {
   }
 }
 
-/** 同一类音效 55 毫秒内只响一次(群体伤害一下打好几只也不炸耳朵) */
+/** 同一类音效短时间内只响一次(群体伤害一下打好几只也不炸耳朵) */
 function throttle(name: SoundName): boolean {
   const now = performance.now()
   if (now - (lastAt.get(name) ?? -1e9) < 55) return false
@@ -153,22 +186,44 @@ function throttle(name: SoundName): boolean {
   return true
 }
 
+// ---------------------------------------------------------------- 短音效
+
 export function play(name: SoundName): void {
   if (muted) return
   if (!ctx) unlock()
   if (!ctx || !master) return
-  if (voices > 18 || !throttle(name)) return
+  if (voices > 20 || !throttle(name)) return
   switch (name) {
     case 'tap':
       tone(760, 0.06, { type: 'sine', vol: 0.1, to: 640 })
       break
     case 'play':
-      tone(300, 0.12, { vol: 0.16, to: 520 })
-      noise(0.1, { vol: 0.07, freq: 1600 })
+      tone(320, 0.12, { vol: 0.16, to: 520 })
+      noise(0.1, { vol: 0.06, freq: 1400 })
+      break
+    case 'spell':
+      tone(620, 0.18, { type: 'sine', vol: 0.11, to: 930 })
+      tone(1240, 0.14, { type: 'sine', vol: 0.05, delay: 0.05 })
       break
     case 'summon':
       tone(420, 0.13, { vol: 0.12, to: 640 })
       tone(840, 0.1, { type: 'sine', vol: 0.06, delay: 0.05 })
+      break
+    case 'taunt':
+      tone(120, 0.16, { type: 'square', vol: 0.11, to: 90 })
+      noise(0.14, { vol: 0.12, freq: 260, type: 'lowpass' })
+      break
+    case 'charge':
+      noise(0.18, { vol: 0.1, freq: 1800, q: 0.6 })
+      tone(260, 0.16, { type: 'sawtooth', vol: 0.08, to: 620 })
+      break
+    case 'battlecry':
+      tone(520, 0.12, { type: 'triangle', vol: 0.1 })
+      tone(780, 0.16, { type: 'triangle', vol: 0.1, delay: 0.08 })
+      break
+    case 'rattle':
+      tone(160, 0.3, { type: 'sawtooth', vol: 0.08, to: 70 })
+      noise(0.26, { vol: 0.07, freq: 900, q: 0.5 })
       break
     case 'attack':
       noise(0.15, { vol: 0.2, freq: 620, q: 0.6, type: 'lowpass' })
@@ -186,6 +241,7 @@ export function play(name: SoundName): void {
     case 'shield':
       tone(1200, 0.2, { type: 'sine', vol: 0.11 })
       tone(1800, 0.14, { type: 'sine', vol: 0.07, delay: 0.02 })
+      noise(0.16, { vol: 0.08, freq: 2600, q: 1.2 })
       break
     case 'death':
       tone(220, 0.28, { type: 'sawtooth', vol: 0.12, to: 60 })
@@ -199,14 +255,10 @@ export function play(name: SoundName): void {
       tone(784, 0.22, { type: 'sine', vol: 0.1, delay: 0.1 })
       break
     case 'victory':
-      for (const [i, f] of [523, 659, 784, 1046].entries()) {
-        tone(f, 0.26, { delay: i * 0.11, vol: 0.14 })
-      }
+      for (const [i, f] of [523, 659, 784, 1046].entries()) tone(f, 0.26, { delay: i * 0.11, vol: 0.14 })
       break
     case 'defeat':
-      for (const [i, f] of [392, 330, 262, 196].entries()) {
-        tone(f, 0.3, { delay: i * 0.13, vol: 0.12, type: 'sawtooth' })
-      }
+      for (const [i, f] of [392, 330, 262, 196].entries()) tone(f, 0.3, { delay: i * 0.13, vol: 0.12, type: 'sawtooth' })
       break
     case 'error':
       tone(160, 0.09, { type: 'square', vol: 0.1 })
@@ -226,30 +278,106 @@ export function play(name: SoundName): void {
   }
 }
 
-/** 切到后台时停掉,回来再恢复 */
+// ---------------------------------------------------------------- BGM
+
+function bgmBar(def: BgmDef, gain: GainNode): void {
+  const c = ac()
+  if (!c) return
+  const beat = def.bar / def.pattern.length
+  for (let i = 0; i < def.pattern.length; i++) {
+    const step = def.scale[def.pattern[i] % def.scale.length]
+    const octave = i % 4 === 0 ? 2 : i % 2 === 0 ? 1.5 : 1
+    const freq = def.root * Math.pow(2, step / 12) * (i === 4 ? 1.5 : 1) * octave
+    tone(freq, beat * 1.6, { type: def.wave, vol: 0.16, delay: i * beat, attack: 0.03, bus: gain })
+  }
+  // 低音打底:每小节一下
+  tone(def.root * 0.5, def.bar * 0.9, { type: 'sine', vol: 0.22, attack: 0.08, bus: gain })
+}
+
+function scheduleBgm(): void {
+  if (!bgmCls || muted || !ctx || !bgmGain) return
+  const def = BGM[bgmCls]
+  bgmBar(def, bgmGain)
+  bgmTimer = window.setTimeout(scheduleBgm, def.bar * 1000)
+}
+
+function bgmSilence(): void {
+  if (bgmTimer !== null) window.clearTimeout(bgmTimer)
+  bgmTimer = null
+}
+
+/** 开一段按阵营的 BGM(同一时间只有一段) */
+export function bgmStart(cls: ClassId): void {
+  if (bgmCls === cls && bgmTimer !== null) return
+  bgmStop()
+  if (muted) return
+  const c = ac()
+  if (!c || !master) return
+  bgmCls = cls
+  bgmGain = c.createGain()
+  bgmGain.gain.value = 0.11
+  bgmGain.connect(master)
+  scheduleBgm()
+}
+
+export function bgmStop(): void {
+  bgmSilence()
+  bgmCls = null
+  if (bgmGain) {
+    try { bgmGain.disconnect() } catch (_) { /* 已经断开 */ }
+    bgmGain = null
+  }
+}
+
+/** 暂停:BGM 先停;恢复时接着放同一套 */
+export function bgmPause(): void {
+  bgmSilence()
+}
+
+export function bgmResume(): void {
+  if (!bgmCls || muted || bgmTimer !== null) return
+  scheduleBgm()
+}
+
+/** 切到后台时停掉(短音效和 BGM 都停),回来再恢复 */
 export function suspend(): void {
+  bgmPause()
   if (ctx && ctx.state === 'running') void ctx.suspend().catch(() => undefined)
 }
 
 export function resume(): void {
   if (ctx && ctx.state === 'suspended' && !muted) void ctx.resume().catch(() => undefined)
+  bgmResume()
 }
 
-/** 引擎事件 → 音效(界面只调这一个,免得每个动作都写一遍声音) */
-export function sfxForEvent(e: Ev): void {
+/** 引擎事件 → 音效(界面只调这一个;按卡牌关键字分流不同音色) */
+export function sfxEvent(e: Ev): void {
   switch (e.e) {
-    case 'play': play('play'); break
-    case 'summon': play('summon'); break
+    case 'play': {
+      const def = card(e.card)
+      play(def.type === 'spell' ? 'spell' : 'play')
+      if (def.battlecry) play('battlecry')
+      if (def.taunt) play('taunt')
+      if (def.charge) play('charge')
+      break
+    }
+    case 'summon': {
+      const def = card(e.card)
+      play(def.taunt ? 'taunt' : 'summon')
+      break
+    }
     case 'attack': play('attack'); break
     case 'damage': if (e.amount > 0) play('hit'); break
     case 'shield': play('shield'); break
-    case 'death': play('death'); break
+    case 'death':
+      play(card(e.card).deathrattle ? 'rattle' : 'death')
+      break
     case 'heal': play('heal'); break
     case 'buff': play('buff'); break
     case 'draw': play('draw'); break
     case 'fatigue': play('fatigue'); break
     case 'burn': play('burn'); break
     case 'turn': play('turn'); break
-    case 'over': play(e.winner === 0 ? 'victory' : 'defeat'); break
+    case 'over': play(e.winner === 0 ? 'victory' : e.winner === -1 ? 'turn' : 'defeat'); break
   }
 }

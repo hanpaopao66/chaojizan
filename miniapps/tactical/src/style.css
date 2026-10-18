@@ -390,3 +390,110 @@ button { -webkit-user-select: none; user-select: none; }
   .fine { font-size: .6875rem; }
   .hud-hint { display: none; }
 }
+
+/* ================================================================ 1.1:第二张地图的主题配色 */
+
+:root[data-map="market"] {
+  --tac-bg: #232A2E;
+  --tac-floor: #C3C8BE;
+  --tac-floor-alt: #B8BFB4;
+  --tac-grid: #A9B0A4;
+  --tac-wall: #616E72;
+  --tac-wall-top: #7E8C90;
+  --tac-wall-edge: #384247;
+  --tac-crate: #A9743F;
+  --tac-crate-top: #C08B4D;
+  --tac-crate-edge: #6B431F;
+  --tac-site-a: #E7C15A;
+  --tac-site-a-2: #B98A25;
+  --tac-site-b: #74C7C1;
+  --tac-site-b-2: #3E948F;
+  --tac-site-ink: #3B2F1A;
+  --tac-ghost: #4D5A50;
+  --tac-map-ink: #46391F;
+  --tac-tracer-player: #0E6FA8;
+  --tac-tracer-guard: #C0392B;
+}
+:root.dark[data-map="market"] {
+  --tac-bg: #0B1216;
+  --tac-floor: #1B242A;
+  --tac-floor-alt: #182127;
+  --tac-grid: #26343C;
+  --tac-wall: #3E4C58;
+  --tac-wall-top: #556877;
+  --tac-wall-edge: #121A20;
+  --tac-crate: #6B4A2A;
+  --tac-crate-top: #825B35;
+  --tac-crate-edge: #3D2812;
+  --tac-site-a: #D9A63C;
+  --tac-site-a-2: #9C6F1C;
+  --tac-site-b: #3FB8C9;
+  --tac-site-b-2: #2A7F8E;
+  --tac-site-ink: #F5EED6;
+  --tac-ghost: #C7D6DE;
+  --tac-map-ink: #EFE4C8;
+  --tac-tracer-player: #A8EFFF;
+  --tac-tracer-guard: #FFB08C;
+  --tac-vignette: rgba(5, 10, 14, .62);
+}
+
+/* ================================================================ 1.1:首页选图 / 成就 */
+
+.maprow {
+  grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; gap: .5rem;
+}
+.mapcard {
+  display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; text-align: left;
+  border-radius: .8rem; border: 1.5px solid var(--line); background: color-mix(in srgb, var(--card) 82%, transparent);
+  color: var(--ink); min-height: 4.4rem;
+}
+@supports not (color: color-mix(in srgb, red 10%, white)) { .mapcard { background: var(--card); } }
+.mapcard.sel { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.mapcard .map-preview { flex: none; border-radius: .35rem; border: 1px solid var(--line); display: block; }
+.map-text { display: flex; flex-direction: column; min-width: 0; gap: .1rem; }
+.map-text b { font-size: .9375rem; }
+.map-text small { font-size: .6875rem; color: var(--muted); line-height: 1.4; }
+.ach-btn { cursor: pointer; text-align: center; }
+.ach-btn b { color: var(--accent); }
+.ach-list { list-style: none; margin: .4rem 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; text-align: left; }
+.ach-list li { display: flex; align-items: center; gap: .55rem; padding: .4rem .5rem; border-radius: .6rem; border: 1px solid var(--line); opacity: .5; }
+.ach-list li.got { opacity: 1; border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+.ach-badge {
+  flex: none; width: 1.9rem; height: 1.9rem; display: grid; place-items: center; border-radius: 50%;
+  font-style: normal; font-size: .875rem; font-weight: 800; background: var(--line); color: var(--muted);
+}
+.ach-list li.got .ach-badge { background: var(--button); color: var(--button-ink); }
+.ach-text { display: flex; flex-direction: column; gap: .05rem; }
+.ach-text b { font-size: .875rem; }
+.ach-text small { font-size: .75rem; color: var(--muted); }
+.unlocked { margin: .7rem 0 .1rem; padding: .45rem .6rem; border-radius: .6rem; background: color-mix(in srgb, var(--accent) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: center; justify-content: center; }
+.unlocked b { font-size: .8125rem; }
+.unlocked span { font-size: .8125rem; font-weight: 700; }
+
+/* ================================================================ 1.1:HUD 武器 / 比分点 / 切枪 */
+
+.pips { display: inline-flex; gap: 3px; align-items: center; margin: 0 .15rem; }
+.pips i { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, .65); display: block; }
+#pips-me i.on { background: var(--tac-player); border-color: var(--tac-player); }
+#pips-them i.on { background: var(--tac-guard); border-color: var(--tac-guard); }
+.hud-ammo { flex-wrap: wrap; max-width: 12rem; align-items: baseline; row-gap: 0; }
+.weapon-name { flex-basis: 100%; font-size: .625rem; font-weight: 800; letter-spacing: .16em; color: #FFD9A8; opacity: .95; }
+.ammo-line { display: inline-flex; align-items: baseline; gap: .15rem; }
+.hud-second { flex-basis: 100%; font-size: .625rem; opacity: .7; font-variant-numeric: tabular-nums; }
+.hud-ammo.pistol .weapon-name { color: #BFE8FF; }
+.hud-ammo.switching .ammo-line { animation: tac-pulse .7s ease-in-out infinite; }
+.tbtn.swap { background: rgba(38, 70, 96, .86); border-color: #9ED8FF; }
+
+/* 4 个按钮的一排:窄一点、允许折行,但每个仍 ≥ 44px 高 */
+.side-actions { min-width: 17rem; }
+.side-actions .row2 { flex-wrap: wrap; }
+.side-actions .row2 button { min-height: 2.5rem; min-width: 3.4rem; }
+
+@media (max-height: 26rem) and (orientation: landscape) {
+  .mapcard { min-height: 3.6rem; padding: .3rem .45rem; }
+  .mapcard .map-preview { width: 84px !important; height: 50px !important; }
+  .map-text small { display: none; }
+  .home .fine { display: none; }
+  .home { row-gap: .45rem; }
+  .maprow { gap: .4rem; }
+}

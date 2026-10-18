@@ -30,6 +30,9 @@ test('开局:双方 30 血,玩家先手,先手 4 张牌、后手 4 张牌,各剩
   assert.equal(s.sides[0].energy, 1)
   assert.equal(s.sides[0].maxEnergy, 1)
   assert.equal(s.sides[1].energy, 0)
+  // 后手有一枚一次性的「幸运币」,下个自己的回合额外 +1 能量
+  assert.equal(s.sides[0].coin, 0)
+  assert.equal(s.sides[1].coin, 1)
   // 同一个种子开局完全一样
   assert.deepEqual(fresh(1), fresh(1))
 })
@@ -41,8 +44,10 @@ test('回合:结束回合换边,对方能量 +1 并回满,新回合抽一张', (
   s = r.state
   assert.equal(s.active, 1)
   assert.equal(s.turn, 2)
-  assert.equal(s.sides[1].energy, 1)
+  // 后手第一回合:1 点水晶 + 幸运币 = 2 点能量,幸运币用掉
+  assert.equal(s.sides[1].energy, 2)
   assert.equal(s.sides[1].maxEnergy, 1)
+  assert.equal(s.sides[1].coin, 0)
   assert.equal(s.sides[1].hand.length, 5) // 4 张开局 + 第 1 次抽牌
   assert.ok(r.events.some((e) => e.e === 'turn' && e.side === 1 && e.turn === 2))
   s = pass(s)
@@ -372,10 +377,43 @@ test('legalActions:当前能做的每个动作执行起来都合法(若干局面
       assert.ok(r.state.sides.every((side) => side.board.length <= 7 && side.hand.length <= 10))
       for (const side of r.state.sides) {
         assert.ok(side.hp >= 0 && side.hp <= 30)
-        assert.ok(side.energy >= 0 && side.energy <= side.maxEnergy)
+        assert.ok(side.energy >= 0 && side.energy <= side.maxEnergy + 1)
         assert.ok(side.energy <= 10)
       }
       assert.ok(r.state.nextUid > 0)
     }
   }
+})
+
+test('后手幸运币:只在后手的第一回合多 1 点能量,用掉就归零', () => {
+  let s = fresh(70)
+  // 先手第一回合结束 → 后手第一回合:2 能量
+  const r = applyAction(s, { kind: 'end' })
+  assert.ok(r.ok)
+  s = r.state
+  assert.equal(s.sides[1].maxEnergy, 1)
+  assert.equal(s.sides[1].energy, 2)
+  assert.equal(s.sides[1].coin, 0)
+  // 一局里只有一次:再轮一圈后手第二回合 2 点水晶回满 2 点,没有额外的 1 点
+  s = pass(s)
+  const again = applyAction(s, { kind: 'end' })
+  assert.ok(again.ok)
+  assert.equal(again.state.sides[1].maxEnergy, 2)
+  assert.equal(again.state.sides[1].energy, 2)
+})
+
+test('buffAll:所有友方随从(包括刚上场的自己)都加身材', () => {
+  let s = fresh(72)
+  s = board(s, 0, ['scout'])
+  s = hand(s, 0, ['s_lord'], 10)
+  const r = applyAction(s, { kind: 'play', hand: 0, target: null })
+  assert.ok(r.ok)
+  const after = r.state.sides[0].board
+  assert.equal(after.length, 2)
+  const lord = after.find((m) => m.card === 's_lord')
+  const scout = after.find((m) => m.card === 'scout')
+  assert.ok(lord && scout)
+  assert.deepEqual([lord.attack, lord.health, lord.maxHealth], [7, 7, 7])
+  assert.deepEqual([scout.attack, scout.health, scout.maxHealth], [4, 3, 3])
+  assert.equal(r.events.filter((e) => e.e === 'buff').length, 2)
 })

@@ -22,7 +22,28 @@ export type Site = 'A' | 'B'
 /** 炸弹点区域(格子坐标,两端都含) */
 export interface TileRect { x0: number; y0: number; x1: number; y1: number }
 
+/** 地图 id。仓库是第一张,夜市是 1.1 加的第二章 */
+export type MapId = 'warehouse' | 'market'
+
+/** 地图主题,决定 canvas 配色和地面/摊位画法 */
+export type MapTheme = 'warehouse' | 'market'
+
+export interface MapDef {
+  readonly id: MapId
+  readonly name: string
+  /** 一句话介绍,首页选图用 */
+  readonly tagline: string
+  readonly theme: MapTheme
+  /** ASCII 图:# 外墙/内墙、c 箱子/摊位、A/B 炸弹点、P 玩家出生点、G 守卫出生点、. 地面 */
+  readonly rows: readonly string[]
+  readonly siteA: TileRect
+  readonly siteB: TileRect
+}
+
 export interface GameMap {
+  readonly id: MapId
+  readonly name: string
+  readonly theme: MapTheme
   /** COLS×ROWS 的格子类型,行优先 */
   readonly tiles: Uint8Array
   readonly siteA: TileRect
@@ -31,11 +52,9 @@ export interface GameMap {
   readonly guardSpawns: readonly Vec[]
 }
 
-// 关卡图:# 外墙/内墙、c 箱子、A/B 炸弹点、P 玩家出生点、G 守卫出生点、. 地面。
-//
-// 结构:左边是进攻方出生区(三条竖着的走廊各有上/中/下三道门),中间是三间房,
-// 右边是一整条长厅,A 点在北头、B 点在南头。三条路都能绕到,没有一条是死路。
-export const MAP_ROWS: readonly string[] = [
+// 第一张图「旧仓库」:左边进攻方出生区(三条竖走廊各有上/中/下三道门),中间三间房,
+// 右边一整条长厅,A 点在北头、B 点在南头。三条路都能绕到,没有死路。
+const WAREHOUSE_ROWS: readonly string[] = [
   '############################################',
   '#..........#...................#...........#',
   '#..........#.............c.....#..AAAAAAAc.#',
@@ -64,8 +83,72 @@ export const MAP_ROWS: readonly string[] = [
   '############################################',
 ]
 
-const SITE_A: TileRect = { x0: 34, y0: 2, x1: 40, y1: 7 }
-const SITE_B: TileRect = { x0: 34, y0: 18, x1: 40, y1: 22 }
+// 第二张图「霓虹夜市」:北边是 A/B 两间夜市档口(中间隔着仓库),南边是主街 + 两排摊位,
+// 出生点在西南角的巷口。和旧仓库反过来:南北对称改成东西开口,掩体更密、巷战更多。
+const MARKET_ROWS: readonly string[] = [
+  '############################################',
+  '#...........#...................#..........#',
+  '#.cAAAAAAA..#.c...............c.#cBBBBBBBc.#',
+  '#..AAAAAAA..#.........c.........#.BBBBBBB..#',
+  '#..AAAGAAA..#...................#.BBBGBBB..#',
+  '#..AAAAAAA..#.....c.............#.BBBBBBB..#',
+  '#..AAAAAAAc.#.............c.....#.BBBBBBBc.#',
+  '#...........#...................#..........#',
+  '######..############....############..######',
+  '#..........................................#',
+  '#..........c........c.......c............c.#',
+  '#..c............c.......c........c.........#',
+  '#......c.............................c.....#',
+  '#.....................G....................#',
+  '#....c........c....c......c...c....c.......#',
+  '#........c...#######..#########........c...#',
+  '#...........#..................#...........#',
+  '#...........#..................#...........#',
+  '#...c.......#c.......c.......c.#......c....#',
+  '#.......c........c.......c........c........#',
+  '#..........................................#',
+  '#...P.......#..................#...........#',
+  '#.....c.....#..c.......c.......#c.......c..#',
+  '#..........c#......c.......c...#....c......#',
+  '#..........................................#',
+  '############################################',
+]
+
+const WAREHOUSE_SITE_A: TileRect = { x0: 34, y0: 2, x1: 40, y1: 7 }
+const WAREHOUSE_SITE_B: TileRect = { x0: 34, y0: 18, x1: 40, y1: 22 }
+const MARKET_SITE_A: TileRect = { x0: 3, y0: 2, x1: 9, y1: 6 }
+const MARKET_SITE_B: TileRect = { x0: 34, y0: 2, x1: 40, y1: 6 }
+
+export const MAPS: readonly MapDef[] = [
+  {
+    id: 'warehouse',
+    name: '旧仓库',
+    tagline: '三路长厅 · 南北双点 · 适合正面推进',
+    theme: 'warehouse',
+    rows: WAREHOUSE_ROWS,
+    siteA: WAREHOUSE_SITE_A,
+    siteB: WAREHOUSE_SITE_B,
+  },
+  {
+    id: 'market',
+    name: '霓虹夜市',
+    tagline: '南北对开 · 摊位密布 · 适合巷战绕后',
+    theme: 'market',
+    rows: MARKET_ROWS,
+    siteA: MARKET_SITE_A,
+    siteB: MARKET_SITE_B,
+  },
+]
+
+export const MAP_IDS: readonly MapId[] = MAPS.map((m) => m.id)
+export const DEFAULT_MAP_ID: MapId = 'warehouse'
+
+export function mapById(id: MapId): MapDef {
+  return MAPS.find((m) => m.id === id) ?? MAPS[0]
+}
+
+/** 兼容旧代码/测试:第一张图的 ASCII */
+export const MAP_ROWS: readonly string[] = WAREHOUSE_ROWS
 
 /** 世界坐标 → 格子下标(向下取整;越界坐标也会给出越界的下标,查格子时统一按墙算) */
 export function tileCol(x: number): number { return Math.floor(x / TILE) }
@@ -88,7 +171,8 @@ export function inBounds(col: number, row: number): boolean {
  * 把 ASCII 地图解析成格子网格和关键点。图长什么样就是什么样,格式不对直接抛错 ——
  * 与其上线后「人卡在墙里」,不如单测里就红。可达性由 nav.ts 的寻路单测负责(这里不引寻路,免得循环依赖)。
  */
-export function parseMap(rows: readonly string[] = MAP_ROWS): GameMap {
+export function parseMap(def: MapDef = MAPS[0]): GameMap {
+  const rows = def.rows
   const problems: string[] = []
   if (rows.length !== ROWS) problems.push(`地图应有 ${ROWS} 行,实际 ${rows.length} 行`)
 
@@ -127,12 +211,12 @@ export function parseMap(rows: readonly string[] = MAP_ROWS): GameMap {
   if (!playerSpawn) problems.push('地图里没有玩家出生点 P(出生点必须落在地面上)')
   if (guardSpawns.length !== 3) problems.push(`地图里应有 3 个守卫出生点 G,实际 ${guardSpawns.length} 个`)
 
-  for (const [name, rect] of [['A', SITE_A], ['B', SITE_B]] as Array<[string, TileRect]>) {
+  for (const [name, rect] of [['A', def.siteA], ['B', def.siteB]] as Array<[string, TileRect]>) {
     if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 >= COLS || rect.y1 >= ROWS) problems.push(`${name} 点区域越界`)
     if (siteTileCount(tiles, rect) < 10) problems.push(`${name} 点区域太小或者被墙占满`)
   }
   // A/B 必须真的在 ASCII 图里标出来,免得改了图忘了改区域
-  for (const [name, rect] of [['A', SITE_A], ['B', SITE_B]] as Array<[string, TileRect]>) {
+  for (const [name, rect] of [['A', def.siteA], ['B', def.siteB]] as Array<[string, TileRect]>) {
     let marked = 0
     for (let row = rect.y0; row <= rect.y1; row++) {
       for (let col = rect.x0; col <= rect.x1; col++) {
@@ -144,7 +228,32 @@ export function parseMap(rows: readonly string[] = MAP_ROWS): GameMap {
   }
 
   if (problems.length) throw new Error(`地图不合法:${problems.join(';')}`)
-  return { tiles, siteA: SITE_A, siteB: SITE_B, playerSpawn: playerSpawn!, guardSpawns }
+  return {
+    id: def.id,
+    name: def.name,
+    theme: def.theme,
+    tiles,
+    siteA: def.siteA,
+    siteB: def.siteB,
+    playerSpawn: playerSpawn!,
+    guardSpawns,
+  }
+}
+
+/** 给测试用的入口:只看 ASCII 行,关键点用第一张图的区域(坏图测试用) */
+export function parseMapRows(
+  rows: readonly string[],
+  meta: Partial<Omit<MapDef, 'rows'>> = {},
+): GameMap {
+  return parseMap({
+    id: meta.id ?? 'warehouse',
+    name: meta.name ?? '测试地图',
+    tagline: meta.tagline ?? '',
+    theme: meta.theme ?? 'warehouse',
+    rows,
+    siteA: meta.siteA ?? WAREHOUSE_SITE_A,
+    siteB: meta.siteB ?? WAREHOUSE_SITE_B,
+  })
 }
 
 function siteTileCount(tiles: Uint8Array, rect: TileRect): number {

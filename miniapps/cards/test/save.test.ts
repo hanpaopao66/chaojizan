@@ -1,13 +1,14 @@
 // 存档单测:对局状态能整份来回、坏档当作没有、召唤物不能混进牌库、
-// 战绩档案的胜负/连胜/两台设备合并、以及存档大小不超过云端的 64 KB。
+// 战绩档案 v2(含成就累计数)的统计/合并/v1 升级、以及存档大小不超过云端的 64 KB。
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { aiNext } from '../src/ai'
 import { applyAction, loadGame, newGame, placeMinion, saveGame } from '../src/engine'
 import {
-  loadProfile, mergeProfile, newProfile, recordResult, rememberChoice,
+  loadProfile, mergeProfile, newProfile, recordResult, rememberChoice, withAchievements, markTutorialSeen,
+  type Outcome,
 } from '../src/profile'
-import type { GameState } from '../src/types'
+import type { GameState, Level } from '../src/types'
 import { clone, fresh, hand, setTurn } from './helpers'
 
 /** 用 AI 把对局往前推几步,得到一份「打到一半」的真实存档 */
@@ -22,6 +23,11 @@ function midGame(seed: number): GameState {
   }
   return s
 }
+
+const outcome = (over: Partial<Outcome> = {}): Outcome => ({
+  won: true, draw: false, hero: 'forge', level: 'normal', reason: 'hp', myHp: 30, dealt: 12, played: 6,
+  ...over,
+})
 
 test('对局存档往返:写进去、读回来一模一样,接着打的结果也一致', () => {
   const s = midGame(11)
@@ -56,10 +62,14 @@ test('坏档:结构不对、版本不对、数值越界的存档当作没有', (
     boardBad.sides[0].board.push({ ...spare, uid: 900 + boardBad.sides[0].board.length })
   }
   bads.push(boardBad)
-  // 能量超过上限
+  // 能量超过上限(后手幸运币那回合允许 +1,所以这里 +2 才是坏档)
   const energyBad = clone(good)
-  energyBad.sides[0].energy = energyBad.sides[0].maxEnergy + 1
+  energyBad.sides[0].energy = energyBad.sides[0].maxEnergy + 2
   bads.push(energyBad)
+  // 幸运币字段不合法
+  const coinBad = clone(good)
+  coinBad.sides[0].coin = 3
+  bads.push(coinBad)
   for (const raw of bads) assert.equal(loadGame(raw), null, `这个存档应该被拒绝:${JSON.stringify(raw)?.slice(0, 60)}`)
   // 正常档仍然读得出来
   assert.ok(loadGame(clone(good)))
@@ -96,49 +106,89 @@ test('存档大小:打到中后期也远小于云端每键 64 KB', () => {
   assert.ok(loadGame(JSON.parse(json)), '压满的状态也要能读回来')
 })
 
-test('战绩档案:记录胜负和连胜、最佳连胜;坏档当作全新;两设备合并取大的', () => {
+test('战绩档案 v2:胜负/连胜/每套牌胜场/斩杀/疲劳/满血/困难/单局纪录都记对', () => {
   let p = newProfile()
   assert.deepEqual([p.games, p.wins, p.streak, p.bestStreak], [0, 0, 0, 0])
-  p = recordResult(p, true, 'forge', 'normal')
-  p = recordResult(p, true, 'forge', 'normal')
-  p = recordResult(p, true, 'forge', 'hard')
+  p = recordResult(p, outcome())
+  p = recordResult(p, outcome({ hero: 'frost', level: 'hard', myHp: 30, dealt: 31, played: 15 }))
+  p = recordResult(p, outcome({ hero: 'dusk', reason: 'fatigue', myHp: 8, dealt: 20 }))
   assert.deepEqual([p.games, p.wins, p.streak, p.bestStreak], [3, 3, 3, 3])
-  p = recordResult(p, false, 'frost', 'hard')
+  assert.deepEqual(p.winsByHero, { forge: 1, frost: 1, dusk: 1 })
+  assert.equal(p.lethals, 2) // 两局 hp 收尾,疲劳那局不算
+  assert.equal(p.fatigueWins, 1)
+  assert.equal(p.flawlessWins, 2) // 前两局都是满血
+  assert.equal(p.hardWins, 1)
+  assert.equal(p.maxDealt, 31)
+  assert.equal(p.maxPlayed, 15)
+  // 输一局:连胜清零,但累计纪录保留
+  p = recordResult(p, outcome({ won: false, myHp: 0, dealt: 5, played: 2 }))
   assert.deepEqual([p.games, p.wins, p.streak, p.bestStreak], [4, 3, 0, 3])
-  assert.equal(p.lastHero, 'frost')
-  assert.equal(p.lastLevel, 'hard')
-  // 上次的选择记得住
-  assert.equal(rememberChoice(p, 'frost', 'hard'), p)
-  const q = rememberChoice(p, 'dusk', 'normal')
-  assert.equal(q.lastHero, 'dusk')
-  // 读档:全新的、坏的都当作没有
+  assert.equal(p.lethals, 2)
+  assert.equal(p.lastHero, 'forge')
+  // 上次的选择记得住;新手提示看过就记住
+  assert.equal(rememberChoice(p, 'forge', 'normal'), p)
+  assert.equal(rememberChoice(p, 'dusk', 'easy').lastHero, 'dusk')
+  const seen = markTutorialSeen(p)
+  assert.equal(seen.tutorialSeen, true)
+  assert.equal(markTutorialSeen(seen), seen)
+  // 成就写进档案不重复
+  const withAch = withAchievements(p, ['first_win', 'first_win'])
+  assert.deepEqual(withAch.achievements, ['first_win'])
+  assert.equal(withAchievements(withAch, []), withAch)
+})
+
+test('读档:坏档当作全新;v1 旧档升级到 v2(不丢场次);两设备合并取大的、成就取并集', () => {
   assert.equal(loadProfile(null), null)
-  assert.equal(loadProfile({ ...p, v: 2 }), null)
+  assert.equal(loadProfile({}), null)
+  const p = recordResult(newProfile(), outcome())
+  assert.equal(loadProfile({ ...p, v: 3 }), null)
   assert.equal(loadProfile({ ...p, wins: 99 }), null)
   assert.equal(loadProfile({ ...p, lastHero: 'nobody' }), null)
-  assert.deepEqual(loadProfile(JSON.parse(JSON.stringify(p))), p)
-  // 两台设备:各打了 3 局 / 5 局,取大的 5 局;连胜取大的;上次选择跟局数多的
-  const a = recordResult(newProfile(), true, 'forge', 'normal')
-  const b = { ...recordResult({ ...newProfile(), games: 4, wins: 1 }, false, 'dusk', 'hard') }
+  assert.equal(loadProfile({ ...p, lastLevel: 'nightmare' as Level }), null)
+  // v1 旧档(只有基础字段)能读,成就累计数补 0
+  const v1 = { v: 1, games: 7, wins: 4, streak: 1, bestStreak: 3, lastHero: 'frost', lastLevel: 'hard' }
+  const upgraded = loadProfile(v1)
+  assert.ok(upgraded)
+  assert.deepEqual([upgraded.games, upgraded.wins, upgraded.bestStreak], [7, 4, 3])
+  assert.equal(upgraded.lethals, 0)
+  assert.deepEqual(upgraded.achievements, [])
+  assert.equal(loadProfile(JSON.parse(JSON.stringify(p)))?.wins, p.wins)
+  // 两台设备:场次/胜场/累计取大的,成就并集,新手提示看过就算看过
+  const a = withAchievements({ ...recordResult(newProfile(), outcome()), games: 5, wins: 3 }, ['first_win'])
+  const b = withAchievements({ ...recordResult(newProfile(), outcome({ hero: 'frost' })), games: 9, wins: 2 }, ['streak3'])
   const m = mergeProfile(a, b)
-  assert.equal(m.games, b.games)
+  assert.equal(m.games, 9)
   assert.equal(m.wins, Math.max(a.wins, b.wins))
-  assert.equal(m.bestStreak, Math.max(a.bestStreak, b.bestStreak))
+  assert.deepEqual(m.achievements.slice().sort(), ['first_win', 'streak3'])
   assert.equal(m.lastHero, b.lastHero)
+  // 合并后的档案仍然能读
+  assert.ok(loadProfile(m))
 })
 
 test('读档后还能继续操作(存档与引擎对同一个状态达成一致)', () => {
   const s = midGame(21)
   const back = loadGame(JSON.parse(JSON.stringify(saveGame(s)))) as GameState
   assert.ok(back)
-  // 换到电脑行动,读回来的档也能让 AI 接着算
   const t = setTurn(back, 1)
   const a = aiNext(t, 'hard')
   const r = applyAction(t, a)
   assert.ok(r.ok)
   assert.ok(loadGame(JSON.parse(JSON.stringify(r.state))), '打完之后仍然是一份合法存档')
-  // 手里有牌时能正常出牌(存档没有破坏手牌结构)
   const u = hand(back, 1, ['spark'], 10)
   const play = applyAction(setTurn(u, 1), { kind: 'play', hand: 0, target: null })
   assert.ok(play.ok)
+})
+
+test('后手幸运币那一回合的存档:能量比上限多 1 也能原样读回来', () => {
+  let s = newGame({ seed: 88, hero0: 'forge', hero1: 'frost' }).state
+  const r1 = applyAction(s, { kind: 'end' })
+  assert.ok(r1.ok)
+  s = r1.state
+  // 后手第一回合开始:1 点水晶 + 幸运币,能量 2(比上限多 1),coin 已用掉
+  assert.equal(s.sides[1].maxEnergy, 1)
+  assert.equal(s.sides[1].energy, 2)
+  assert.equal(s.sides[1].coin, 0)
+  const back = loadGame(JSON.parse(JSON.stringify(saveGame(s))))
+  assert.ok(back, '后手幸运币当回合的存档不应该被判成坏档')
+  assert.deepEqual(back, s)
 })

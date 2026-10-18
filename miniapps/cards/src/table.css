@@ -17,12 +17,18 @@
 
 .foe-hud { flex: none; display: flex; align-items: center; gap: .45rem; padding: .1rem .1rem 0; }
 .hero {
-  position: relative; flex: none; display: flex; align-items: center; gap: .4rem;
-  min-height: 2.9rem; padding: .12rem .5rem .12rem .12rem; border-radius: .8rem;
+  position: relative; flex: none; display: flex; align-items: center; gap: .42rem;
+  min-height: 3rem; padding: .14rem .55rem .14rem .14rem; border-radius: .8rem;
   background: var(--cardbg); border: 1.5px solid var(--frame);
-  background: color-mix(in srgb, var(--cardbg) 88%, transparent);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--cc) 12%, var(--cardbg)), color-mix(in srgb, var(--cardbg) 92%, transparent));
   box-shadow: var(--card-shadow);
 }
+.hero .hero-info { display: flex; flex-direction: column; align-items: flex-start; gap: .08rem; min-width: 2.6rem; }
+.hero .hname { font-size: .56rem; color: var(--muted2); white-space: nowrap; max-width: 5rem; overflow: hidden; text-overflow: ellipsis; }
+.hero .hpbar { display: block; width: 3.4rem; height: .32rem; border-radius: 999px; background: var(--energy-off); overflow: hidden; }
+.hero .hpbar i { display: block; height: 100%; width: 100%; transform-origin: left center; background: linear-gradient(90deg, #7BD8A4, #3FA96E); transition: transform 220ms var(--std); }
+.hero .hpbar i.low { background: linear-gradient(90deg, #FFB3AB, var(--hp)); }
 .hero .portrait {
   width: 2.25rem; height: 2.25rem; border-radius: .55rem; display: grid; place-items: center;
   color: var(--cc); border: 1.5px solid var(--cc);
@@ -46,10 +52,15 @@
 .energy-mini .energy-num { font-size: .62rem; margin-left: .12rem; }
 
 .pip {
-  display: inline-block; width: .5rem; height: .88rem; border-radius: 2px; transform: skewX(-8deg);
-  background: var(--energy-off); flex: none;
+  display: inline-block; width: .5rem; height: .9rem; border-radius: .16rem .16rem .3rem .3rem;
+  transform: skewX(-8deg); background: var(--energy-off); flex: none;
+  border: 1px solid color-mix(in srgb, var(--energy-off) 60%, transparent);
 }
-.pip.on { background: linear-gradient(180deg, #FFE9A8, var(--energy-on)); box-shadow: 0 0 5px var(--gold-soft); }
+.pip.on {
+  background: linear-gradient(180deg, #FFF0BE, var(--energy-on) 55%, #C97F16);
+  border-color: rgba(120, 70, 0, .35);
+  box-shadow: 0 0 6px var(--gold-soft), inset 0 1px 0 rgba(255, 255, 255, .55);
+}
 .pip.off { opacity: .35; }
 
 .icon-btn {
@@ -75,6 +86,29 @@
     radial-gradient(circle, color-mix(in srgb, var(--gold) 5%, transparent) 0 22%, transparent 23%);
 }
 .table > * { position: relative; z-index: 1; }
+/* 战场按双方阵营换主题(亮暗两套各一组,haze 是双方的呼应色) */
+.table[data-foe='forge'] { --foe-haze: rgba(216, 98, 58, .16); }
+.table[data-foe='frost'] { --foe-haze: rgba(78, 143, 184, .16); }
+.table[data-foe='dusk'] { --foe-haze: rgba(122, 95, 168, .18); }
+.table[data-foe='neutral'] { --foe-haze: rgba(160, 150, 130, .14); }
+.table[data-my='forge'] { --my-haze: rgba(216, 98, 58, .14); }
+.table[data-my='frost'] { --my-haze: rgba(78, 143, 184, .14); }
+.table[data-my='dusk'] { --my-haze: rgba(122, 95, 168, .16); }
+.table[data-my='neutral'] { --my-haze: rgba(160, 150, 130, .12); }
+:root.dark .table[data-foe='forge'] { --foe-haze: rgba(232, 130, 94, .2); }
+:root.dark .table[data-foe='frost'] { --foe-haze: rgba(111, 178, 214, .2); }
+:root.dark .table[data-foe='dusk'] { --foe-haze: rgba(169, 139, 216, .22); }
+:root.dark .table[data-my='forge'] { --my-haze: rgba(232, 130, 94, .16); }
+:root.dark .table[data-my='frost'] { --my-haze: rgba(111, 178, 214, .16); }
+:root.dark .table[data-my='dusk'] { --my-haze: rgba(169, 139, 216, .18); }
+/* 随从稀有度:稀有/史诗加一颗小宝石,史诗再带一点光 */
+.minion.rarity-rare::after, .minion.rarity-epic::after {
+  content: ''; position: absolute; top: -.16rem; right: -.14rem; width: .5rem; height: .5rem;
+  border-radius: .12rem; transform: rotate(45deg); border: 1px solid rgba(0, 0, 0, .25);
+}
+.minion.rarity-rare::after { background: linear-gradient(135deg, #9CCDF0, var(--rar-rare)); }
+.minion.rarity-epic::after { background: linear-gradient(135deg, #FFE9A8, var(--rar-epic)); box-shadow: 0 0 7px var(--rar-epic-glow); }
+.minion.rarity-epic { box-shadow: 0 0 8px var(--rar-epic-glow), var(--card-shadow); }
 .board.empty::after { font-size: .68rem; color: var(--muted2); opacity: .5; }
 .my-board.empty::after { content: '你的随从会站在这里'; }
 .foe-board.empty::after { content: '对面还没有随从'; }
@@ -162,7 +196,7 @@
   background: var(--cardbg); border: 1px solid var(--frame);
   background: color-mix(in srgb, var(--cardbg) 72%, transparent);
 }
-.energy .pip { width: .46rem; height: .9rem; }
+.energy .pip { width: .46rem; height: .92rem; }
 .energy .energy-num { margin-left: auto; padding-left: .25rem; font-size: .68rem; font-weight: 800; color: var(--muted2); font-variant-numeric: tabular-nums; }
 .end-turn {
   flex: none; min-width: 5rem; min-height: 2.85rem; padding: 0 .55rem; border-radius: .7rem;
@@ -176,6 +210,18 @@
 
 /* ---------------------------------------------------------------- 手牌 */
 
+.tip {
+  flex: none; display: flex; align-items: center; gap: .5rem; padding: .35rem .55rem;
+  border-radius: .55rem; background: color-mix(in srgb, var(--gold) 14%, var(--cardbg));
+  border: 1px solid var(--gold); font-size: .72rem; line-height: 1.4; color: var(--ink2);
+  animation: rise 220ms var(--std) both;
+}
+.tip[hidden] { display: none; }
+.tip span { flex: 1; }
+.tip button {
+  flex: none; min-height: 1.9rem; padding: 0 .6rem; border-radius: .45rem; font-size: .72rem; font-weight: 700;
+  background: var(--button); color: var(--button-ink);
+}
 .hand-area { flex: none; display: flex; flex-direction: column; gap: .18rem; padding-bottom: .1rem; }
 .hint {
   margin: 0; min-height: 1.3rem; padding: 0 .3rem; text-align: center;
@@ -281,4 +327,41 @@
   .table { max-width: 35rem; }
   .minion { flex-basis: 3.15rem; width: 3.15rem; height: 3.75rem; }
   .hand-card { height: 7rem; }
+}
+
+
+/* ================================================================ 1.1 新增:粒子 / 收尾动效 */
+
+.fx .particle {
+  position: absolute; width: 5px; height: 5px; border-radius: 2px; pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: particle-fly var(--d, .55s) cubic-bezier(.2, .7, .3, 1) both;
+}
+.fx .p-play { background: #FFD86B; box-shadow: 0 0 6px rgba(255, 216, 107, .8); }
+.fx .p-spell { background: #9FD8F2; box-shadow: 0 0 6px rgba(159, 216, 242, .8); border-radius: 50%; }
+.fx .p-summon { background: #FFE9A8; border-radius: 50%; }
+.fx .p-battlecry { background: #FFC46B; box-shadow: 0 0 8px rgba(255, 196, 107, .9); }
+.fx .p-hit { background: #FF9E86; }
+.fx .p-heal { background: #8FE3B0; border-radius: 50%; }
+.fx .p-shield { background: #BFE6FA; border-radius: 50%; box-shadow: 0 0 8px rgba(191, 230, 250, .9); }
+.fx .p-death { background: #B9A9D8; }
+.fx .p-burn { background: #FFB26B; border-radius: 50%; }
+.fx .p-rattle { background: #C9B6E8; }
+@keyframes particle-fly {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(.4) rotate(120deg); }
+}
+/* 结算弹层入场 */
+.overlay .panel { animation: panel-in 240ms var(--spring) both; }
+@keyframes panel-in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+
+@media (max-width: 380px) {
+  .hero .hpbar { width: 2.7rem; }
+  .hero .hname { max-width: 3.6rem; }
+  .hero .portrait { width: 2rem; height: 2rem; }
+  .tip { font-size: .68rem; }
+}
+@media (max-height: 720px) {
+  .hero { min-height: 2.7rem; }
+  .tip { padding: .25rem .45rem; }
 }

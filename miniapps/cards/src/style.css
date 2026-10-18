@@ -212,3 +212,123 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .sparkdot { animation: none !important; }
 }
+
+/* ================================================================ 1.1 新增:稀有度 / 图鉴 / 成就 / 结算星级 / 转场 */
+
+/* 稀有度:边框宝石 + 史诗光晕(亮暗两套都够对比) */
+:root {
+  --rar-common: #8A8070;
+  --rar-rare: #3577B4;
+  --rar-epic: #A86A16;
+  --rar-epic-glow: rgba(196, 138, 32, .35);
+}
+:root.dark {
+  --rar-common: #9C917E;
+  --rar-rare: #6FB2D6;
+  --rar-epic: #E8B45C;
+  --rar-epic-glow: rgba(232, 180, 92, .4);
+}
+.rarity-gem {
+  position: absolute; top: -.18rem; right: -.14rem; width: .78rem; height: .78rem; border-radius: .18rem;
+  transform: rotate(45deg); border: 1px solid rgba(0, 0, 0, .25);
+}
+.rarity-common .rarity-gem { background: var(--rar-common); }
+.rarity-rare .rarity-gem { background: linear-gradient(135deg, #9CCDF0, var(--rar-rare)); }
+.rarity-epic .rarity-gem { background: linear-gradient(135deg, #FFE9A8, var(--rar-epic)); box-shadow: 0 0 8px var(--rar-epic-glow); }
+.rarity-epic { box-shadow: 0 0 0 1px var(--rar-epic-glow), var(--card-shadow); }
+.gal-card.rarity-epic, .hand-card.rarity-epic { box-shadow: 0 0 10px var(--rar-epic-glow), var(--card-shadow); }
+
+/* 首页快捷入口 + 三档难度 */
+.quick { display: flex; gap: .45rem; flex-wrap: wrap; }
+.quick .ghost { flex: 1 1 auto; min-height: 2.4rem; }
+.seg.three button { font-size: .86rem; padding: 0 .3rem; }
+
+/* 图鉴 */
+.bar { display: flex; align-items: center; gap: .6rem; }
+.bar h2 { margin: 0; flex: 1; font-size: 1.4rem; font-weight: 800; color: var(--ink2); }
+.gallery .bar h2 { margin: 0; }
+.gal-sec { display: flex; flex-direction: column; gap: .45rem; }
+.gal-title {
+  margin: .5rem 0 0; display: flex; align-items: baseline; gap: .5rem;
+  font-size: 1rem; color: var(--ink2); font-weight: 800;
+}
+.gal-title .fine { font-weight: 500; }
+.gal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem; }
+.gal-card {
+  position: relative; display: flex; flex-direction: column; align-items: stretch; gap: .1rem;
+  padding: .3rem .22rem .26rem; border-radius: .55rem; border: 2px solid var(--cc);
+  background: linear-gradient(180deg, var(--cardbg), var(--cardbg2));
+  box-shadow: var(--card-shadow); text-align: left; min-height: 4.8rem;
+}
+.gal-card .cost {
+  position: absolute; top: -.28rem; left: -.22rem; width: 1.1rem; height: 1.1rem; border-radius: 50%;
+  display: grid; place-items: center; font-size: .66rem; font-weight: 800; color: #2A1A00;
+  background: radial-gradient(circle at 35% 28%, #FFF6CE, var(--energy-on)); border: 1px solid rgba(90, 50, 0, .4);
+}
+.gal-art { width: 1.5rem; height: 1.5rem; margin: .12rem auto 0; color: var(--cc); }
+.gal-name {
+  font-size: .56rem; font-weight: 800; color: var(--ink2); text-align: center; line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gal-stats { display: flex; justify-content: space-between; padding: 0 .1rem; }
+.gal-stats b { font-size: .56rem; font-weight: 800; min-width: .9rem; text-align: center; border-radius: .25rem; padding: 0 .1rem; }
+.gal-stats .atk { background: var(--energy-on); color: #2A1A00; }
+.gal-stats .hp { background: var(--hp); color: #fff; }
+.gal-card:active { transform: translateY(1px); }
+
+/* 图鉴详情 */
+.panel.sheet-wrap { width: min(84vw, 320px); }
+.panel.sheet-wrap h2 { margin: .6rem 0 .15rem; }
+.sheet {
+  width: 7.5rem; height: 7.5rem; margin: 0 auto; border-radius: 1.1rem; border: 3px solid var(--cc);
+  display: grid; place-items: center; color: var(--cc);
+  background:
+    radial-gradient(circle at 35% 26%, color-mix(in srgb, var(--cc) 30%, transparent), transparent 68%),
+    var(--cardbg2);
+  box-shadow: 0 0 20px color-mix(in srgb, var(--cc) 24%, transparent);
+}
+.sheet-art { width: 4.4rem; height: 4.4rem; }
+.sheet-text { color: var(--ink2) !important; font-size: 1rem !important; }
+.sheet-flavor { color: var(--muted2) !important; font-size: .875rem !important; font-style: italic; }
+
+/* 成就 */
+.panel.achievements { text-align: left; }
+.ach-list { display: flex; flex-direction: column; gap: .4rem; margin: .6rem 0 .2rem; }
+.ach-item {
+  display: grid; grid-template-columns: 2rem 1fr; grid-template-rows: auto auto; gap: .1rem .55rem;
+  align-items: center; padding: .4rem .5rem; border-radius: .6rem;
+  background: var(--cardbg2); border: 1px solid var(--frame); opacity: .78;
+}
+.ach-item.done { opacity: 1; border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold-soft); }
+.ach-badge {
+  grid-row: span 2; width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 800; font-size: .9rem; color: var(--muted2); background: var(--cardbg); border: 1px solid var(--frame);
+}
+.ach-item.done .ach-badge { background: linear-gradient(180deg, #FFE9A8, var(--energy-on)); color: #2A1A00; border-color: transparent; }
+.ach-info { display: flex; flex-direction: column; min-width: 0; }
+.ach-info b { font-size: .875rem; color: var(--ink2); }
+.ach-desc { font-size: .72rem; color: var(--muted2); line-height: 1.35; }
+.ach-num { font-size: .7rem; color: var(--muted2); font-variant-numeric: tabular-nums; }
+.ach-bar { grid-column: 2; height: .34rem; border-radius: 999px; background: var(--energy-off); overflow: hidden; }
+.ach-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold), var(--energy-on)); }
+
+/* 结算星级 / 新成就 */
+.stars { display: flex; justify-content: center; gap: .3rem; margin: .1rem 0 .2rem; }
+.star { font-size: 1.7rem; line-height: 1; }
+.star.on { color: var(--gold); text-shadow: 0 0 12px var(--gold-soft); }
+.star.off { color: var(--frame); }
+.unlocked {
+  margin: .5rem 0 .2rem; padding: .5rem .6rem; border-radius: .6rem;
+  background: color-mix(in srgb, var(--gold) 12%, var(--cardbg2)); border: 1px solid var(--gold);
+}
+.unlocked b { font-size: .78rem; color: var(--gold); display: block; margin-bottom: .2rem; }
+.unlocked-list { display: flex; flex-wrap: wrap; gap: .3rem; justify-content: center; }
+.unlocked-item { font-size: .74rem; padding: .1rem .4rem; border-radius: .35rem; background: var(--cardbg); border: 1px solid var(--frame); }
+
+/* 页面转场 */
+.scr { animation: rise 260ms var(--std) both; }
+.gallery { animation: rise 260ms var(--std) both; }
+@media (max-width: 375px) {
+  .gal-grid { grid-template-columns: repeat(3, 1fr); }
+  .gal-card { min-height: 4.4rem; }
+}

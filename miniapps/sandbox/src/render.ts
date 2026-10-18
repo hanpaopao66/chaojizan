@@ -1,54 +1,31 @@
-// Canvas 2D 第一人称体素渲染:DDA 光线投射 + 程序化纹理 + 天空/太阳/月亮 + 距离雾 + 水面半透明。
+// Canvas 2D 第一人称体素渲染:DDA 光线投射 + 程序化纹理(3 个变体)+ 天空/云/星 + 距离雾 +
+// 水面波纹反光 + 挖掘裂纹 + 目标描边 + 碎屑粒子。
 //
 // 每帧流程:
-// 1) 在内部低分辨率(约 40 万像素里取 9 万)缓冲里逐行铺天空色,再画太阳/月亮;
-// 2) 每一列只做一次 2D DDA,记下射线经过的格子(格子里的实心/水的位图、最高点都在 World 里维护好);
-// 3) 逐像素沿这一列向前走格子,在格子里找到射线遇到的第一个实心方块,从 16×16 纹理采样、按面给明暗、
-//    叠雾和水色,写进缓冲;这一列里比「地形最高轮廓」还高的像素直接留天空;
-// 4) 把低分辨率缓冲放大到整屏(最近邻,像素风),再在 CSS 像素空间画目标方块的白色描边。
+// 1) 计算每列的朝向 → sky.ts 铺天空(渐变、太阳/月亮、云、星星);
+// 2) 每一列只做一次 2D DDA,记下射线经过的格子(实心/水的位图、最高点都在 World 里维护好);
+// 3) 逐像素沿这一列向前走格子,找到第一个实心方块,从 16×16×3 变体的纹理采样、按面给明暗、
+//    叠雾和水面,写进缓冲;比「地形最高轮廓」还高的像素直接留天空;
+// 4) 低分辨率缓冲放大到整屏(最近邻,像素风),再在 CSS 像素空间画目标描边和碎屑粒子。
 //
 // 这样躲开了逐像素做 3D DDA 的开销:一列的格子表只算一次,每个像素只做几次位运算。
 import { WATER } from './blocks'
+import {
+  FACE_BOTTOM, FACE_NEG_X, FACE_NEG_Z, FACE_NORMAL, FACE_POS_X, FACE_POS_Z, FACE_SHADE, FACE_TOP,
+  LIGHT_MAX, SUN_FACE_GAIN, VIEW,
+} from './data'
+import { drawParticles, type Particle } from './particles'
 import type { RayHit } from './raycast'
-import { TEX_BOTTOM, TEX_SIDE, TEX_TOP, buildTextures, type BlockTex } from './textures'
-import { SUN_RADIUS, daylight, sunDirection, warmth } from './time'
+import {
+  computeSky, fillSky, makeCloudTexture, makeStarTexture, type SkyBuffers,
+} from './sky'
+import { buildCrackTextures, buildTextures, sampleFace, TEX_BOTTOM, TEX_SIDE, TEX_TOP, TEX_VARIANTS, type BlockTex } from './textures'
+import { sunDirection } from './time'
 import type { World } from './world'
 import { D, H, SEA_LEVEL, W } from './worldgen'
 
-/** 水平视场角(度) */
-const HFOV = 78
-/** 最远看多少格;更远的用雾吃掉 */
-const RENDER_DIST = 46
-/** 一列最多经过多少格(横向 46 格 + 斜着 1.5 倍,留足余量) */
-const MAX_CELLS = 80
-/** 内部缓冲目标像素数(乘以自适应画质系数) */
-const TARGET_PIXELS = 96000
-
-const FACE_TOP = 0
-const FACE_BOTTOM = 1
-const FACE_NEG_X = 2
-const FACE_POS_X = 3
-const FACE_NEG_Z = 4
-const FACE_POS_Z = 5
-
-/** 六个面的基础明暗(顶最亮、底最暗)。阳光最多再加 0.16,总亮度压在 1.06 以内,沙子才不会曝成白色 */
-const FACE_SHADE: readonly number[] = [0.92, 0.4, 0.7, 0.74, 0.82, 0.78]
-/** 六个面的法线 */
-const FACE_NORMAL: ReadonlyArray<readonly [number, number, number]> = [
-  [0, 1, 0], [0, -1, 0], [-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1],
-]
-
-type RGB = readonly [number, number, number]
-
-const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
-const mix = (a: RGB, b: RGB, t: number): RGB => [
-  a[0] + (b[0] - a[0]) * t,
-  a[1] + (b[1] - a[1]) * t,
-  a[2] + (b[2] - a[2]) * t,
-]
-const pack = (r: number, g: number, b: number): number =>
-  ((255 << 24) | ((b > 255 ? 255 : b < 0 ? 0 : b | 0) << 16) | ((g > 255 ? 255 : g < 0 ? 0 : g | 0) << 8)
-    | (r > 255 ? 255 : r < 0 ? 0 : r | 0)) >>> 0
+/** 六个面的基础明暗之外,太阳方向最多再加多少亮度 */
+const MAX_CELLS = VIEW.MAX_CELLS
 
 export interface Camera {
   /** 眼睛位置 */
@@ -63,30 +40,52 @@ export interface RenderScene {
   cam: Camera
   /** 世界时间 0..1 */
   time: number
-  /** 准星选中的方块(画描边);null = 没选中 */
+  /** 准星选中的方块(画描边和裂纹);null = 没选中 */
   target: RayHit | null
-  /** 挖掘进度 0..1(描边变暖色) */
+  /** 挖掘进度 0..1 */
   mining: number
+  /** 碎屑粒子 */
+  particles: readonly Particle[]
 }
 
-// 天空/昼夜的颜色
-const DAY_HORIZON: RGB = [196, 224, 242]
-const DAY_ZENITH: RGB = [70, 132, 202]
-const DAY_HAZE: RGB = [164, 192, 212]
-const DAY_FOG: RGB = [176, 204, 222]
-const NIGHT_HORIZON: RGB = [22, 32, 52]
-const NIGHT_ZENITH: RGB = [6, 9, 20]
-const NIGHT_HAZE: RGB = [16, 24, 40]
-const NIGHT_FOG: RGB = [20, 28, 44]
-const WARM: RGB = [255, 158, 100]
-const UNDER_FOG: RGB = [24, 62, 108]
-const UNDER_DEEP: RGB = [10, 34, 66]
+const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
+const mix = (a: readonly number[], b: readonly number[], t: number): number[] => [
+  a[0] + (b[0] - a[0]) * t,
+  a[1] + (b[1] - a[1]) * t,
+  a[2] + (b[2] - a[2]) * t,
+]
+const pack = (r: number, g: number, b: number): number =>
+  ((255 << 24) | ((b > 255 ? 255 : b < 0 ? 0 : b | 0) << 16) | ((g > 255 ? 255 : g < 0 ? 0 : g | 0) << 8)
+    | (r > 255 ? 255 : r < 0 ? 0 : r | 0)) >>> 0
+
+const TEX_W = 16
+
+/** 目标的面 → 内部面编号 */
+function faceIndexOf(face: RayHit['face']): number {
+  switch (face) {
+    case 'y+': return FACE_TOP
+    case 'y-': return FACE_BOTTOM
+    case 'x-': return FACE_NEG_X
+    case 'x+': return FACE_POS_X
+    case 'z-': return FACE_NEG_Z
+    default: return FACE_POS_Z
+  }
+}
+
+/** 目标的面 → 用哪张纹理(顶/侧/底) */
+function texFaceOf(face: number): number {
+  if (face === FACE_TOP) return TEX_TOP
+  if (face === FACE_BOTTOM) return TEX_BOTTOM
+  return TEX_SIDE
+}
 
 export class Renderer {
   private readonly ctx: CanvasRenderingContext2D
   private readonly small: HTMLCanvasElement
   private readonly sctx: CanvasRenderingContext2D
   private readonly textures: BlockTex[]
+  private readonly cracks: Uint8Array[]
+  private readonly skyBuf: SkyBuffers = { cloud: makeCloudTexture(), star: makeStarTexture() }
   private cssW = 0
   private cssH = 0
   private dpr = 1
@@ -96,24 +95,16 @@ export class Renderer {
   private quality = 1
   private img: ImageData | null = null
   private img32 = new Uint32Array(0)
-  private skyRow = new Uint32Array(0)
   // 每列 DDA 的结果缓冲(固定长度,复用以避免每帧分配)
   private colN = new Int32Array(0)
+  private colDirX = new Float32Array(0)
+  private colDirZ = new Float32Array(0)
   private t0 = new Float32Array(MAX_CELLS)
   private t1 = new Float32Array(MAX_CELLS)
   private cx = new Int32Array(MAX_CELLS)
   private cz = new Int32Array(MAX_CELLS)
   private axis = new Int8Array(MAX_CELLS)
-  // 每帧算一次的调色板
-  private ambR = 1
-  private ambG = 1
-  private ambB = 1
-  private fogR = 176
-  private fogG = 204
-  private fogB = 222
-  private waterR = 40
-  private waterG = 94
-  private waterB = 150
+  // 每帧算一次的光照
   private faceLight = new Float32Array(6)
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -125,11 +116,12 @@ export class Renderer {
     if (!sctx) throw new Error('浏览器不支持 Canvas 2D')
     this.sctx = sctx
     this.textures = buildTextures()
+    this.cracks = buildCrackTextures()
   }
 
   /** 自适应画质:帧率跟不上时把内部渲染分辨率降一档 */
   setQuality(q: number): void {
-    const next = clamp(q, 0.45, 1)
+    const next = clamp(q, VIEW.QUALITY_MIN, 1)
     if (Math.abs(next - this.quality) < 0.01) return
     this.quality = next
     this.prepareInternal()
@@ -159,9 +151,9 @@ export class Renderer {
 
   private prepareInternal(): void {
     const aspect = this.cssW / this.cssH
-    let wi = Math.round(Math.sqrt(TARGET_PIXELS * this.quality * aspect))
-    wi = clamp(Math.min(wi, this.cssW, 640), 200, 640)
-    const hi = Math.max(120, Math.round(wi / aspect))
+    let wi = Math.round(Math.sqrt(VIEW.TARGET_PIXELS * this.quality * aspect))
+    wi = clamp(Math.min(wi, this.cssW, VIEW.MAX_INTERNAL_W), VIEW.MIN_INTERNAL_W, VIEW.MAX_INTERNAL_W)
+    const hi = Math.max(VIEW.MIN_INTERNAL_H, Math.round(wi / aspect))
     if (wi === this.wi && hi === this.hi) return
     this.wi = wi
     this.hi = hi
@@ -169,9 +161,10 @@ export class Renderer {
     this.small.height = hi
     this.img = new ImageData(wi, hi)
     this.img32 = new Uint32Array(this.img.data.buffer)
-    this.skyRow = new Uint32Array(hi)
     this.colN = new Int32Array(wi)
-    this.focal = wi / 2 / Math.tan((HFOV * Math.PI) / 360)
+    this.colDirX = new Float32Array(wi)
+    this.colDirZ = new Float32Array(wi)
+    this.focal = wi / 2 / Math.tan((VIEW.HFOV * Math.PI) / 360)
   }
 
   render(world: World, scene: RenderScene): void {
@@ -192,70 +185,44 @@ export class Renderer {
     const fwdZ = sinYaw
     const rightX = -sinYaw
     const rightZ = cosYaw
-    const tanPitch = Math.tan(cam.pitch)
-    const horizon = hi / 2 + focal * tanPitch
-
-    // ---- 昼夜调色板
-    const day = daylight(time)
-    const warm = warmth(time) * (1 - day * 0.55)
+    const horizon = hi / 2 + focal * Math.tan(cam.pitch)
     const under = world.blockAt(Math.floor(eyeX), Math.floor(eyeY), Math.floor(eyeZ)) === WATER
-    const horizonCol = under ? UNDER_DEEP : mix(mix(NIGHT_HORIZON, DAY_HORIZON, day), WARM, warm * 0.62)
-    const zenithCol = under ? UNDER_DEEP : mix(mix(NIGHT_ZENITH, DAY_ZENITH, day), [120, 96, 150], warm * 0.22)
-    const hazeCol = under ? UNDER_FOG : mix(mix(NIGHT_HAZE, DAY_HAZE, day), WARM, warm * 0.3)
-    const fogCol = under ? UNDER_FOG : mix(mix(NIGHT_FOG, DAY_FOG, day), WARM, warm * 0.28)
-    const amb = mix(under ? [0.62, 0.8, 0.95] : [0.42, 0.47, 0.6], [1, 1, 1], under ? 0.25 : day)
-    this.ambR = Math.min(1.02, amb[0] * (1 + 0.04 * warm))
-    this.ambG = Math.min(1.02, amb[1] * (1 + 0.01 * warm))
-    this.ambB = Math.min(1.02, amb[2] * (1 - 0.03 * warm))
-    this.fogR = fogCol[0]
-    this.fogG = fogCol[1]
-    this.fogB = fogCol[2]
-    const waterCol = mix([10, 24, 52], [40, 94, 150], day)
-    this.waterR = waterCol[0]
-    this.waterG = waterCol[1]
-    this.waterB = waterCol[2]
 
-    // ---- 天空逐行颜色(每行只算一次)
-    const skyRow = this.skyRow
-    for (let y = 0; y < hi; y++) {
-      const k = (horizon - (y + 0.5)) / focal
-      let c: RGB
-      if (under) {
-        c = mix(UNDER_DEEP, UNDER_FOG, clamp(0.5 - k * 0.8, 0, 1))
-      } else if (k >= 0) {
-        const a = Math.atan(k) / (Math.PI / 2)
-        const f = Math.pow(a, 0.72)
-        c = mix(horizonCol, zenithCol, f)
-        if (warm > 0.03) c = mix(c, WARM, warm * 0.3 * (1 - f))
-      } else {
-        const a = Math.atan(-k) / (Math.PI / 2)
-        c = mix(horizonCol, hazeCol, clamp(a * 2.4, 0, 1))
-      }
-      skyRow[y] = pack(c[0], c[1], c[2])
+    // ---- 天空(渐变 + 太阳/月亮 + 云 + 星),顺带算好这一帧的光照和雾色
+    const colors = computeSky(time, under)
+    for (let x = 0; x < wi; x++) {
+      const px = (x + 0.5 - wi / 2) / focal
+      let dx = fwdX + rightX * px
+      let dz = fwdZ + rightZ * px
+      const inv = 1 / Math.sqrt(dx * dx + dz * dz)
+      dx *= inv
+      dz *= inv
+      this.colDirX[x] = dx
+      this.colDirZ[x] = dz
     }
-    for (let y = 0; y < hi; y++) img32.fill(skyRow[y], y * wi, (y + 1) * wi)
+    fillSky(img32, wi, hi, horizon, focal, colors, time, this.colDirX, this.colDirZ, fwdX, fwdZ, rightX, rightZ, this.skyBuf)
 
-    // ---- 太阳和月亮(先画进缓冲,地形会盖住它们)
-    if (!under) {
-      const sun = sunDirection(time)
-      const sx = sun.x * fwdX + sun.z * fwdZ
-      const sl = sun.x * rightX + sun.z * rightZ
-      this.drawDisc(img32, wi, hi, horizon, focal, sx, sl, sun.y, focal * SUN_RADIUS,
-        mix([255, 232, 170], [255, 250, 235], day), [255, 196, 120], clamp(day + warm, 0, 1))
-      const moon: RGB = [-sun.x, -sun.y, -sun.z]
-      this.drawDisc(img32, wi, hi, horizon, focal, moon[0] * fwdX + moon[2] * fwdZ,
-        moon[0] * rightX + moon[2] * rightZ, moon[1], focal * SUN_RADIUS * 0.72,
-        [226, 233, 246], [170, 196, 236], clamp(1 - day + 0.15, 0, 1))
-    }
-
-    // ---- 光照:每个面的明暗 + 太阳方向的额外亮度
-    const sunDir = sunDirection(time)
+    // ---- 光照:面的基础明暗 + 太阳方向的额外亮度;环境色按昼夜调
+    const sun = sunDirection(time)
     for (let f = 0; f < 6; f++) {
       const n = FACE_NORMAL[f]
-      const dot = n[0] * sunDir.x + n[1] * sunDir.y + n[2] * sunDir.z
-      const light = FACE_SHADE[f] + (dot > 0 ? dot * 0.16 * day : 0)
-      this.faceLight[f] = light > 1.06 ? 1.06 : light
+      const dot = n[0] * sun.x + n[1] * sun.y + n[2] * sun.z
+      const light = FACE_SHADE[f] + (dot > 0 ? dot * SUN_FACE_GAIN * colors.day : 0)
+      this.faceLight[f] = light > LIGHT_MAX ? LIGHT_MAX : light
     }
+    const ambR = colors.ambient[0]
+    const ambG = colors.ambient[1]
+    const ambB = colors.ambient[2]
+    const fogR = colors.fog[0]
+    const fogG = colors.fog[1]
+    const fogB = colors.fog[2]
+
+    // ---- 目标方块:裂纹只画在它身上
+    const target = scene.target
+    const targetFace = target ? faceIndexOf(target.face) : -1
+    const crackStage = target && scene.mining > 0
+      ? Math.min(3, Math.floor(scene.mining * 4)) : -1
+    const crackTex = crackStage >= 0 ? this.cracks[crackStage] : null
 
     // ---- 逐列:一次 2D DDA 得到格子表 + 地形轮廓线
     const colN = this.colN
@@ -264,26 +231,18 @@ export class Renderer {
     const cxA = this.cx
     const czA = this.cz
     const axisA = this.axis
-    const fogStart = under ? 1.5 : RENDER_DIST * 0.62
-    const fogEnd = under ? 15 : RENDER_DIST * 1.05
-    const fogK = 1 / (fogEnd - fogStart)
-    const ambR = this.ambR
-    const ambG = this.ambG
-    const ambB = this.ambB
-    const faceLight = this.faceLight
-    const waterR = this.waterR
-    const waterG = this.waterG
-    const waterB = this.waterB
     const textures = this.textures
+    const faceLight = this.faceLight
     const layer = W * D
+    const fogStart = under ? VIEW.UNDER_FOG_START : VIEW.RENDER_DIST * VIEW.FOG_START_RATIO
+    const fogEnd = under ? VIEW.UNDER_FOG_END : VIEW.RENDER_DIST * VIEW.FOG_END_RATIO
+    const fogK = 1 / (fogEnd - fogStart)
+    const waterCol = colors.water
+    const horizonCol = colors.horizon
 
     for (let x = 0; x < wi; x++) {
-      const px = (x + 0.5 - wi / 2) / focal
-      let dx = fwdX + rightX * px
-      let dz = fwdZ + rightZ * px
-      const invLen = 1 / Math.sqrt(dx * dx + dz * dz)
-      dx *= invLen
-      dz *= invLen
+      const dx = this.colDirX[x]
+      const dz = this.colDirZ[x]
       const stx = dx > 0 ? 1 : -1
       const stz = dz > 0 ? 1 : -1
       let ix = Math.floor(eyeX)
@@ -304,7 +263,7 @@ export class Renderer {
       let skyline = hi + 2
       while (n < MAX_CELLS) {
         let tNext = tMaxX < tMaxZ ? tMaxX : tMaxZ
-        if (!(tNext < RENDER_DIST)) tNext = RENDER_DIST
+        if (!(tNext < VIEW.RENDER_DIST)) tNext = VIEW.RENDER_DIST
         t0[n] = t
         t1[n] = tNext
         cxA[n] = ix
@@ -321,7 +280,7 @@ export class Renderer {
           if (projY < skyline) skyline = projY
         }
         n++
-        if (tNext >= RENDER_DIST) break
+        if (tNext >= VIEW.RENDER_DIST) break
         t = tNext
         if (tMaxX < tMaxZ) {
           ix += stx
@@ -344,7 +303,7 @@ export class Renderer {
         let r = 0
         let g = 0
         let b = 0
-        let tHit = RENDER_DIST
+        let tHit: number = VIEW.RENDER_DIST
         let found = false
         for (let c = 0; c < n; c++) {
           const tA = t0[c]
@@ -433,22 +392,36 @@ export class Renderer {
             v = 1 - (hy - Math.floor(hy))
           }
           const bid = world.blocks[col + layer * hitY]
-          const tex = textures[bid][face === FACE_TOP ? TEX_TOP : face === FACE_BOTTOM ? TEX_BOTTOM : TEX_SIDE]
-          const tx = clamp((u * 16) | 0, 0, 15)
-          const ty = clamp((v * 16) | 0, 0, 15)
-          const texel = tex[(ty << 4) + tx]
-          const light = faceLight[face]
-          r = (texel & 255) * light * ambR
-          g = ((texel >>> 8) & 255) * light * ambG
-          b = ((texel >>> 16) & 255) * light * ambB
+          const texVariant = (cxA[c] * 7 + hitY * 13 + czA[c] * 23) % TEX_VARIANTS
+          const tex = textures[bid][texFaceOf(face)]
+          const tx = clamp((u * TEX_W) | 0, 0, TEX_W - 1)
+          const ty = clamp((v * TEX_W) | 0, 0, TEX_W - 1)
+          const texel = sampleFace(tex, texVariant, tx, ty)
+          let tr = (texel & 255) * faceLight[face] * ambR
+          let tg = ((texel >>> 8) & 255) * faceLight[face] * ambG
+          let tb = ((texel >>> 16) & 255) * faceLight[face] * ambB
+          // 挖掘裂纹:只盖在准星对着的那个方块的那个面上
+          if (crackTex && target && targetFace === face
+            && cxA[c] === target.x && czA[c] === target.z && hitY === target.y) {
+            const dark = crackTex[ty * TEX_W + tx]
+            if (dark > 0) {
+              const f = 1 - (dark / 255) * 0.62
+              tr *= f
+              tg *= f
+              tb *= f
+            }
+          }
           // 距离雾
           const fog = (tHit - fogStart) * fogK
           if (fog > 0) {
             const ff = fog > 1 ? 1 : fog
-            r += (this.fogR - r) * ff
-            g += (this.fogG - g) * ff
-            b += (this.fogB - b) * ff
+            tr += (fogR - tr) * ff
+            tg += (fogG - tg) * ff
+            tb += (fogB - tb) * ff
           }
+          r = tr
+          g = tg
+          b = tb
           found = true
           break
         }
@@ -458,28 +431,32 @@ export class Renderer {
           r = base & 255
           g = (base >>> 8) & 255
           b = (base >>> 16) & 255
-          tHit = RENDER_DIST
+          tHit = VIEW.RENDER_DIST
         }
-        // ---- 水面:眼睛在海面之上、射线向下穿过海平面时,把水面当成一层半透明的平面,
-        //      底下的东西(沙子、深海雾)按距离和水深透出来。
+        // ---- 水面:眼睛在海面之上、射线向下穿过海平面时,把水面当成一层会反光的半透明平面。
         if (!under && k < -1e-6) {
           const tSea = (SEA_LEVEL - eyeY) / k
-          if (tSea > 0.2 && tSea < tHit && tSea < RENDER_DIST + 4) {
+          if (tSea > 0.2 && tSea < tHit && tSea < VIEW.RENDER_DIST + 4) {
             const wx = eyeX + dx * tSea
             const wz = eyeZ + dz * tSea
-            // 轻微波光:让大水面有细节,不是一块死色
-            const sparkle = Math.sin(wx * 1.9 + time * 1.6) * Math.sin(wz * 1.5 - time * 1.2)
+            // 两道不同频率的波纹叠起来,不让水面像一块死玻璃
+            const wave = Math.sin(wx * VIEW.WATER_WAVE_FREQ + time * VIEW.WATER_WAVE_SPEED)
+              * Math.sin(wz * VIEW.WATER_WAVE_FREQ * 0.77 - time * VIEW.WATER_WAVE_SPEED * 0.8)
+            const grazing = clamp(1 - -k * 1.4, 0, 1)
+            const reflect = clamp(grazing * VIEW.WATER_REFLECT + wave * 0.06, 0, 0.78)
+            const wm = mix(waterCol, horizonCol, reflect)
             const fogSea = clamp((tSea - fogStart) * fogK, 0, 1)
-            const wr = waterR + (this.fogR - waterR) * fogSea
-            const wg = waterG + (this.fogG - waterG) * fogSea
-            const wb = waterB + (this.fogB - waterB) * fogSea
+            const wr = wm[0] + (fogR - wm[0]) * fogSea
+            const wg = wm[1] + (fogG - wm[1]) * fogSea
+            const wb = wm[2] + (fogB - wm[2]) * fogSea
             const depth = tHit - tSea
-            let alpha = 0.46 + 0.2 * Math.min(1, depth / 14) + sparkle * 0.06
-            if (alpha < 0.3) alpha = 0.3
-            else if (alpha > 0.82) alpha = 0.82
-            r += (wr - r) * alpha
-            g += (wg - g) * alpha
-            b += (wb - b) * alpha
+            let alpha = VIEW.WATER_ALPHA_BASE + VIEW.WATER_ALPHA_DEPTH * Math.min(1, depth / 14) + wave * 0.04
+            alpha = clamp(alpha, VIEW.WATER_ALPHA_MIN, VIEW.WATER_ALPHA_MAX)
+            // 太阳在水面上的高光:太阳方向在水平面上的投影和视线越接近,越亮一点
+            const glint = Math.max(0, 1 - Math.abs(wave)) * colors.day * 0.06
+            r += (wr - r) * alpha + glint * 255
+            g += (wg - g) * alpha + glint * 230
+            b += (wb - b) * alpha + glint * 170
           }
         }
         img32[y * wi + x] = pack(r, g, b)
@@ -491,50 +468,29 @@ export class Renderer {
     const ctx = this.ctx
     ctx.imageSmoothingEnabled = false
     ctx.drawImage(this.small, 0, 0, this.cssW, this.cssH)
+    if (scene.particles.length) {
+      const f = this.focal * (this.cssW / this.wi)
+      const hz = this.cssH / 2 + f * Math.tan(cam.pitch)
+      const fwdX2 = fwdX
+      const fwdZ2 = fwdZ
+      const rightX2 = rightX
+      const rightZ2 = rightZ
+      const project = (wx: number, wy: number, wz: number): [number, number, number] | null => {
+        const relX = wx - cam.x
+        const relY = wy - cam.y
+        const relZ = wz - cam.z
+        const depth = relX * fwdX2 + relZ * fwdZ2
+        if (depth < 0.25) return null
+        const lateral = relX * rightX2 + relZ * rightZ2
+        return [this.cssW / 2 + (f * lateral) / depth, hz - (f * relY) / depth, depth]
+      }
+      drawParticles(ctx, scene.particles, project, f)
+    }
     // ---- 目标方块的描边
     if (scene.target) this.drawTarget(ctx, scene.target, cam, focal, scene.mining)
   }
 
-  /** 把太阳/月亮画进低分辨率缓冲:圆盘 + 外圈光晕 */
-  private drawDisc(img32: Uint32Array, wi: number, hi: number, horizon: number, focal: number,
-    depth: number, lateral: number, up: number, radius: number, core: RGB, glow: RGB, strength: number): void {
-    if (depth < 0.08 || radius < 1) return
-    const sx = wi / 2 + (focal * lateral) / depth
-    const sy = horizon - (focal * up) / depth
-    const glowR = radius * 3.2
-    const x0 = Math.max(0, Math.floor(sx - glowR))
-    const x1 = Math.min(wi - 1, Math.ceil(sx + glowR))
-    const y0 = Math.max(0, Math.floor(sy - glowR))
-    const y1 = Math.min(hi - 1, Math.ceil(sy + glowR))
-    if (x1 < x0 || y1 < y0) return
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) {
-        const dx = x + 0.5 - sx
-        const dy = y + 0.5 - sy
-        const d = Math.sqrt(dx * dx + dy * dy)
-        if (d > glowR) continue
-        const idx = y * wi + x
-        let r = img32[idx] & 255
-        let g = (img32[idx] >>> 8) & 255
-        let b = (img32[idx] >>> 16) & 255
-        if (d <= radius) {
-          const edge = d > radius - 1.5 ? (radius - d) / 1.5 : 1
-          r += (core[0] - r) * edge
-          g += (core[1] - g) * edge
-          b += (core[2] - b) * edge
-        } else {
-          const t = 1 - (d - radius) / (glowR - radius)
-          const a = t * t * 0.5 * strength
-          r += glow[0] * a
-          g += glow[1] * a
-          b += glow[2] * a
-        }
-        img32[idx] = pack(r, g, b)
-      }
-    }
-  }
-
-  /** 目标方块:把可见面的轮廓投影到屏幕上,画成白色描边(挖到一半变暖色) */
+  /** 目标方块:只画准星真正命中的那个面,挖到一半变暖色 */
   private drawTarget(ctx: CanvasRenderingContext2D, target: RayHit, cam: Camera,
     focal: number, mining: number): void {
     const s = this.cssW / this.wi
@@ -556,7 +512,6 @@ export class Renderer {
       return [this.cssW / 2 + (f * lateral) / depth, hz - (f * relY) / depth]
     }
     const b = target
-    // 只画准星真正命中的那个面:贴着方块看时不会从视角后面拉出奇怪的斜线
     let corners: Array<[number, number, number]>
     switch (target.face) {
       case 'y+':
@@ -598,10 +553,10 @@ export class Renderer {
     const color = warm > 0
       ? `rgba(255, ${Math.round(230 - 90 * warm)}, ${Math.round(140 - 90 * warm)}, 0.95)`
       : 'rgba(255, 255, 255, 0.92)'
-    ctx.lineWidth = 4
+    ctx.lineWidth = VIEW.OUTLINE_GLOW_WIDTH
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)'
     ctx.stroke(path)
-    ctx.lineWidth = 2
+    ctx.lineWidth = VIEW.OUTLINE_WIDTH
     ctx.strokeStyle = color
     ctx.stroke(path)
     ctx.restore()

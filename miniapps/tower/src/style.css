@@ -1,0 +1,298 @@
+/* 瓜田防线的界面样式。颜色走 shared/base.css 的宿主主题变量(亮暗两套),这里只加游戏自己的形状和节奏。
+   布局目标:360–430px 竖屏一屏放下;桌面网页限宽居中,不出现横向滚动。 */
+
+:root {
+  --bg: var(--sz-theme-bg-color, #EAF2D7);
+  --tower-green: #4F6B28;
+  --tower-green-soft: rgba(110, 143, 60, 0.14);
+  --tower-gold: #8A6200;
+  --tower-gold-soft: rgba(184, 134, 11, 0.16);
+  --sheet-shadow: 0 -10px 34px rgba(24, 26, 18, 0.18);
+}
+:root.dark {
+  --tower-green: #A8C878;
+  --tower-gold: #E8C25A;
+  --tower-green-soft: rgba(168, 200, 120, 0.16);
+  --tower-gold-soft: rgba(232, 194, 90, 0.16);
+}
+
+html, body { height: 100%; }
+body { overscroll-behavior: none; }
+#app, .app { height: 100%; }
+
+/* ---------------------------------------------------------------- 首页 */
+
+.screens {
+  height: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: calc(0.9rem + var(--top)) var(--side) calc(1.1rem + var(--bottom));
+}
+.home {
+  width: 100%; max-width: 30rem; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 0.8rem;
+}
+.home-head { display: flex; flex-direction: column; gap: 0.15rem; }
+.kicker { margin: 0; color: var(--muted); font-size: 0.75rem; letter-spacing: 0.12em; }
+.logo {
+  margin: 0; font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
+  font-size: 2.35rem; font-weight: 800; letter-spacing: 0.04em; line-height: 1.15;
+  color: var(--ink);
+}
+.logo em { font-style: normal; color: var(--accent); }
+.tagline { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.875rem; line-height: 1.55; }
+.home-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+.hstat {
+  display: grid; gap: 0.1rem; padding: 0.45rem 0.55rem; border-radius: 0.75rem;
+  background: var(--card); border: 1px solid var(--line); text-align: center;
+}
+.hstat b { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.hstat span { font-size: 0.6875rem; color: var(--muted); letter-spacing: 0.06em; }
+
+.start-box { display: flex; flex-direction: column; gap: 0.35rem; }
+.start {
+  width: 100%; min-height: 3.1rem; font-size: 1.0625rem; border-radius: 0.85rem;
+  background: var(--button); color: var(--button-ink); border: 0; font-weight: 700;
+  box-shadow: 0 8px 20px rgba(193, 95, 60, 0.25);
+}
+.start:active { transform: scale(0.99); }
+.save-note { margin: 0; text-align: center; font-size: 0.75rem; color: var(--muted); }
+
+.seg.tabs { padding: 0.22rem; }
+.seg.tabs button { min-height: 2.5rem; font-size: 0.9rem; }
+.seg.tabs button[aria-selected="true"] { background: var(--button); color: var(--button-ink); }
+.page-line { margin: 0; font-size: 0.78rem; color: var(--muted); text-align: center; }
+
+.level-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.55rem; }
+.level-card {
+  position: relative; display: flex; flex-direction: column; gap: 0.1rem; align-items: flex-start;
+  min-height: 4.6rem; padding: 0.6rem 0.65rem; border-radius: 0.85rem;
+  background: var(--card); border: 1px solid var(--line); text-align: left;
+  transition: transform 160ms var(--std), border-color 160ms var(--std);
+}
+.level-card:not(:disabled):active { transform: scale(0.98); }
+.level-card:not(:disabled):hover { border-color: var(--button); }
+.level-card.perfect { border-color: var(--tower-gold); background: linear-gradient(180deg, var(--tower-gold-soft), var(--card)); }
+.level-card.locked { opacity: 0.55; }
+.lv-no { font-size: 0.6875rem; color: var(--muted); letter-spacing: 0.06em; }
+.lv-name { font-size: 1rem; font-weight: 700; }
+.lv-stars { font-size: 0.8rem; letter-spacing: 0.12em; color: var(--muted); }
+.lv-stars.full { color: var(--tower-gold); }
+.lv-lock {
+  position: absolute; right: 0.5rem; top: 0.5rem; font-size: 0.6rem;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 0.4rem; padding: 0.05rem 0.25rem;
+}
+
+.home-extra { display: grid; grid-template-columns: 1fr; gap: 0.45rem; }
+.home-extra.two { display: grid; grid-template-columns: 1fr; gap: 0.45rem; }
+.home-extra .wide, .home-extra.two .wide {
+  min-height: 2.6rem; border-radius: 0.7rem; font-size: 0.875rem;
+  background: var(--card); border: 1px solid var(--line);
+}
+.home-extra .wide:disabled { opacity: 0.55; }
+.fine { margin: 0.2rem 0 0; font-size: 0.72rem; color: var(--muted); line-height: 1.6; }
+
+/* 桌面:首页宽一点,关卡卡片一行四个 */
+@media (min-width: 700px) {
+  .screens { padding-left: max(1.5rem, var(--side)); padding-right: max(1.5rem, var(--side)); }
+  .home { max-width: 34rem; gap: 0.95rem; }
+  .level-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .home-extra.two { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ---------------------------------------------------------------- 对局 */
+
+.game {
+  max-width: 30rem; margin: 0 auto; height: 100%;
+  padding: calc(0.4rem + var(--top)) calc(0.5rem + var(--side)) calc(0.45rem + var(--bottom));
+  display: flex; flex-direction: column; gap: 0.35rem;
+}
+body.in-game { overflow: hidden; }
+
+.hud-top { display: flex; align-items: center; gap: 0.4rem; flex: none; }
+.hud-stats { flex: 1; display: flex; gap: 0.35rem; justify-content: center; }
+.stat {
+  display: flex; align-items: baseline; gap: 0.25rem; white-space: nowrap;
+  padding: 0.18rem 0.42rem; border-radius: 0.55rem; background: var(--card);
+  border: 1px solid var(--line); font-size: 0.66rem; color: var(--muted);
+}
+.stat b { font-size: 0.92rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.hud-btn {
+  width: 2.75rem; height: 2.75rem; flex: none; border-radius: 0.7rem;
+  background: var(--card); border: 1px solid var(--line); font-weight: 700;
+}
+.hud-btn:active { transform: scale(0.96); }
+.hud-btn[aria-pressed="true"] { background: var(--button); color: var(--button-ink); border-color: transparent; }
+
+.field-wrap {
+  position: relative; flex: 1; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.field {
+  display: block; border-radius: 0.9rem; touch-action: none;
+  box-shadow: 0 10px 26px rgba(24, 26, 18, 0.18), 0 0 0 1px var(--line);
+  background: #EAF2D7;
+  outline: none;
+}
+.field:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
+
+.sites { position: absolute; inset: 0; pointer-events: none; }
+.site {
+  position: absolute; pointer-events: auto; background: transparent; border: 0; border-radius: 50%;
+  padding: 0; margin: 0; opacity: 0;
+}
+.site:focus-visible {
+  opacity: 1; outline: 3px solid var(--accent); outline-offset: 0;
+  background: rgba(255, 255, 255, 0.12);
+}
+.site.selected { opacity: 0; }
+
+.banner {
+  position: absolute; left: 50%; top: 8%; transform: translateX(-50%);
+  margin: 0; padding: 0.4rem 0.9rem; border-radius: 0.7rem; white-space: nowrap;
+  font-weight: 700; font-size: 0.95rem; pointer-events: none;
+  background: #A8502F; color: #FFF8F2;
+  box-shadow: 0 6px 18px rgba(24, 26, 18, 0.2);
+}
+.banner.show { animation: banner-in 260ms var(--spring) both; }
+.banner.warn { background: #8A5312; color: #FFF8E8; }
+.banner.bad { background: var(--danger); color: #FFF6F4; }
+
+.boss-bar {
+  position: absolute; left: 0.75rem; right: 0.75rem; top: 0.45rem;
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.28rem 0.5rem;
+  border-radius: 0.6rem; background: rgba(20, 24, 16, 0.72); color: #FFF2E0;
+  font-size: 0.72rem; letter-spacing: 0.08em; pointer-events: none;
+}
+.boss-bar[hidden] { display: none; }
+.boss-bar i { flex: 1; height: 0.45rem; border-radius: 0.3rem; background: rgba(255, 255, 255, 0.2); overflow: hidden; }
+.boss-bar b { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #E05A3A, #F2B25A); transition: width 120ms linear; }
+
+/* 底部 */
+.hud-bottom { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 2.9rem; }
+.tip { margin: 0; flex: 1; color: var(--muted); font-size: 0.8rem; }
+.bottom-row { display: flex; align-items: center; gap: 0.45rem; }
+.summon {
+  min-height: 2.75rem; padding: 0 0.9rem; border-radius: 0.75rem; font-weight: 700;
+  background: var(--button); color: var(--button-ink); border: 0;
+  box-shadow: 0 6px 16px rgba(193, 95, 60, 0.22);
+}
+.summon:disabled { background: var(--card); color: var(--muted); box-shadow: none; border: 1px solid var(--line); }
+.theme-tag {
+  white-space: nowrap; padding: 0.2rem 0.45rem; border-radius: 0.5rem; font-size: 0.66rem; color: var(--muted);
+  background: var(--card); border: 1px solid var(--line);
+}
+
+/* 底部面板:建造卡片 / 塔的面板 */
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
+  max-height: 66%; overflow-y: auto; padding: 0.55rem 0.65rem calc(0.6rem + var(--bottom));
+  border-radius: 1rem 1rem 0 0; background: var(--card);
+  border: 1px solid var(--line); border-bottom: 0; box-shadow: var(--sheet-shadow);
+  animation: sheet-in 200ms var(--std) both;
+}
+.sheet[hidden] { display: none; }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.45rem; }
+.sheet-head b { font-size: 0.95rem; }
+.x {
+  width: 2.25rem; height: 2.25rem; border-radius: 0.6rem; font-size: 1.2rem;
+  background: var(--bg); border: 1px solid var(--line); line-height: 1;
+}
+.cards {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(4.9rem, 1fr)); gap: 0.4rem;
+}
+.card {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto auto;
+  align-items: center; gap: 0.05rem 0.4rem; text-align: left;
+  padding: 0.4rem 0.45rem; border-radius: 0.7rem; min-height: 3.4rem;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.card .glyph {
+  grid-row: span 2; width: 1.7rem; height: 1.7rem; border-radius: 50%;
+  display: grid; place-items: center; color: #FFF; font-weight: 800; font-size: 0.85rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.card b { font-size: 0.82rem; }
+.card small { font-size: 0.6rem; color: var(--muted); white-space: nowrap; }
+.card .cost { grid-column: 2; font-size: 0.68rem; color: var(--tower-green); font-weight: 700; }
+.card.poor { opacity: 0.55; }
+.card.poor .cost { color: var(--danger); }
+.card.locked { opacity: 0.45; }
+.card:not(:disabled):active { transform: scale(0.98); }
+.card:not(:disabled):hover { border-color: var(--button); }
+
+.tower-panel .statline { margin: 0.1rem 0; font-size: 0.8rem; font-weight: 600; }
+.tower-panel .desc { margin: 0.15rem 0 0.5rem; font-size: 0.78rem; color: var(--muted); }
+.sheet-actions { display: flex; gap: 0.5rem; }
+.sheet-actions button {
+  flex: 1; min-height: 2.75rem; border-radius: 0.7rem; font-weight: 700;
+  border: 1px solid var(--line); background: var(--bg);
+}
+.sheet-actions button.primary { background: var(--button); color: var(--button-ink); border-color: transparent; }
+.overlay .panel button.primary { background: var(--button); color: var(--button-ink); border-color: transparent; }
+.sheet-actions button:disabled { opacity: 0.55; }
+.sheet-actions .sell { color: var(--danger); }
+
+/* ---------------------------------------------------------------- 弹层里的结算 / 成就 */
+
+.result-stars { font-size: 2.1rem; letter-spacing: 0.22em; color: var(--line); margin: 0.1rem 0 0.2rem; }
+.result-stars .on { color: var(--tower-gold); }
+.result-win h2 { color: var(--tower-green); }
+.result-lose h2 { color: var(--danger); }
+.statgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.45rem; margin: 0.65rem 0 0.15rem; }
+.statgrid > div { background: var(--bg); border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.35rem 0.5rem; }
+.statgrid b { display: block; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.statgrid small { color: var(--muted); font-size: 0.68rem; }
+.ach-note { color: var(--tower-gold) !important; font-weight: 700; }
+.ach-list { list-style: none; padding: 0; margin: 0.4rem 0; display: grid; gap: 0.4rem; text-align: left; }
+.ach-list li {
+  display: grid; gap: 0.1rem; padding: 0.4rem 0.55rem; border-radius: 0.6rem;
+  background: var(--bg); border: 1px solid var(--line); opacity: 0.6;
+}
+.ach-list li.got { opacity: 1; border-color: var(--tower-gold); background: var(--tower-gold-soft); }
+.ach-list b { font-size: 0.85rem; }
+.ach-list span { font-size: 0.72rem; color: var(--muted); }
+.keys { list-style: none; padding: 0; margin: 0.3rem 0; display: grid; gap: 0.45rem; text-align: left; }
+.keys li { font-size: 0.84rem; color: var(--muted); }
+.kbd {
+  display: inline-block; min-width: 1.6rem; padding: 0.06rem 0.35rem; margin-right: 0.35rem;
+  border-radius: 0.4rem; background: var(--bg); border: 1px solid var(--line);
+  color: var(--ink); font-weight: 700; font-size: 0.72rem; text-align: center;
+}
+.overlay .panel h3 { margin-top: 0.9rem; }
+.overlay .panel ul { padding-left: 1.1rem; }
+
+/* ---------------------------------------------------------------- 提示条 / toast */
+
+.toast {
+  position: fixed; left: 50%; bottom: calc(1.2rem + var(--bottom)); transform: translateX(-50%);
+  z-index: 20; max-width: min(88vw, 22rem); padding: 0.5rem 0.9rem; border-radius: 0.7rem;
+  background: var(--ink); color: var(--bg); font-size: 0.82rem; text-align: center;
+  box-shadow: 0 8px 24px rgba(20, 20, 19, 0.25); opacity: 0; pointer-events: none;
+}
+.toast.show { animation: toast-in 200ms var(--std) both; }
+.toast[hidden] { display: none; }
+
+@keyframes banner-in {
+  from { opacity: 0; transform: translate(-50%, -8px) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* 桌面:游戏区仍然竖着,但给它一点边距,不贴着浏览器边 */
+@media (min-width: 700px) {
+  .game { max-width: 30rem; padding-top: calc(0.75rem + var(--top)); padding-bottom: calc(0.75rem + var(--bottom)); }
+  .field { box-shadow: 0 14px 40px rgba(24, 26, 18, 0.22), 0 0 0 1px var(--line); }
+}
+
+/* 矮屏(比如横放的手机开着桌面版):保证面板不把画面顶没 */
+@media (max-height: 620px) {
+  .hud-bottom { min-height: 2.4rem; }
+  .sheet { max-height: 78%; }
+  .field-wrap { min-height: 0; }
+}
