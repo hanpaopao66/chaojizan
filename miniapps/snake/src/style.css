@@ -53,3 +53,18 @@
 .key.left::before { transform: translateX(20%) rotate(-45deg); }
 .key.right::before { transform: translateX(-20%) rotate(135deg); }
 .key.hit { transform: scale(.94); background: var(--line); }
+
+/* 页脚:声音开关。命中区做到 44px,视觉上仍是小字 */
+.foot { display: flex; justify-content: center; }
+.foot button {
+  min-width: 2.75rem; min-height: 2.75rem; padding: .4rem .9rem; border-radius: .6rem;
+  color: var(--muted); font-size: .8125rem; transition: transform 120ms var(--std);
+}
+.foot button:active { transform: scale(.96); }
+.foot button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 减少动态:只关掉新增的按压缩放,保留必要的状态反馈 */
+@media (prefers-reduced-motion: reduce) {
+  .foot button { transition: none; }
+  .foot button:active { transform: none; }
+}

@@ -54,3 +54,21 @@
 .key.down::before { transform: translateY(-20%) rotate(225deg); }
 .key.hit { transform: scale(.94); background: var(--line); }
 .key.main.hit { background: var(--button); opacity: .85; }
+
+/* 页脚:声音开关。命中区做到 44px,视觉上仍是小字 */
+.foot { flex: none; display: flex; justify-content: center; }
+.foot button {
+  min-width: 2.75rem; min-height: 2.75rem; padding: .4rem .9rem; border-radius: .6rem;
+  color: var(--muted); font-size: .8125rem; transition: transform 120ms var(--std);
+}
+.foot button:active { transform: scale(.96); }
+.foot button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 头部的小按钮命中区补到 44px(视觉高度变化很小) */
+.head-btns .btn { min-height: 2.75rem; }
+
+/* 减少动态:只关掉新增的按压缩放 */
+@media (prefers-reduced-motion: reduce) {
+  .foot button { transition: none; }
+  .foot button:active { transform: none; }
+}

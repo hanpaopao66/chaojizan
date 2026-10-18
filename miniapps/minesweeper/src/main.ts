@@ -5,6 +5,9 @@ import './style.css'
 import { freshSeed } from '../../shared/src/rand'
 import { SaveSlot } from '../../shared/src/save'
 import {
+  haptic, installSfxUnlock, playSfx, sfxMuted, toggleSfxMuted,
+} from '../../shared/src/sfx'
+import {
   $, Overlay, WebApp, bullets, button, cacheKey, cloud, confirmBox, el, followTheme, hostGame, local, row,
 } from '../../shared/src/ui'
 import {
@@ -22,6 +25,7 @@ const leftEl = $('left')
 const timeEl = $('time')
 const zoomBtn = $<HTMLButtonElement>('zoom')
 const live = $('live')
+const soundBtn = $<HTMLButtonElement>('sound')
 const overlay = new Overlay($('overlay'), () => board.focus())
 
 const slot = new SaveSlot<State, Best>({
@@ -37,6 +41,23 @@ let zoom = false
 let cursor = -1
 let cells: HTMLElement[] = []
 let shown: string[] = []
+
+// ---------------------------------------------------------------- 声音
+
+/** 静音按钮:状态存在设备级 localStorage(shared 统一键),跨应用共用 */
+function syncSound(): void {
+  const muted = sfxMuted()
+  soundBtn.textContent = muted ? '声音:关' : '声音:开'
+  soundBtn.setAttribute('aria-label', muted ? '声音已关,点击打开声音' : '声音已开,点击静音')
+}
+
+soundBtn.addEventListener('click', () => {
+  const muted = toggleSfxMuted()
+  if (!muted) playSfx('ok')
+  haptic('light')
+  syncSound()
+  live.textContent = muted ? '声音已关' : '声音已开'
+})
 
 // ---------------------------------------------------------------- 画
 
@@ -178,7 +199,13 @@ function apply(next: State, opened: number[]): void {
   if (state.status === 'playing') startTiming()
   render()
   slot.change(state)
-  if (opened.length > 8) WebApp.HapticFeedback.impactOccurred('light')
+  if (opened.length > 8) {
+    playSfx('ok', { gain: 0.8 })
+    haptic('light')
+    live.textContent = `翻开 ${opened.length} 格,剩余 ${remaining(state)} 颗雷`
+  } else if (opened.length) {
+    playSfx('pick', { gain: 0.7 })
+  }
   if (state.status === 'lost' && before !== 'lost') lost()
   else if (state.status === 'won' && before !== 'won') won()
 }
@@ -191,10 +218,15 @@ function revealAt(i: number): void {
 
 function flagAt(i: number): void {
   if (!playable()) return
+  const before = state.flag[i]
   const next = toggleFlag(state, i)
   if (next === state) return
-  WebApp.HapticFeedback.selectionChanged()
+  playSfx(before ? 'tap' : 'place', { gain: 0.8 })
+  haptic('light')
   apply(next, [])
+  if (state.status === 'ready' || state.status === 'playing') {
+    live.textContent = `${before ? '取消插旗' : '插旗'},剩余 ${remaining(state)} 颗雷`
+  }
 }
 
 /** 数字上快速翻开;旗不够就让周围没翻开的格子亮一下,告诉你它在看哪几格 */
@@ -202,6 +234,7 @@ function chordAt(i: number): void {
   if (!playable()) return
   const r = chord(state, i)
   if (r.state === state) {
+    playSfx('error', { gain: 0.7 })
     peek(i)
     return
   }
@@ -220,7 +253,8 @@ function won(): void {
   best = updateBest(best, state)
   slot.setBest(best)
   void slot.flush()
-  WebApp.HapticFeedback.notificationOccurred('success')
+  playSfx('win')
+  haptic('success')
   live.textContent = `扫完了,用时 ${fmt(state.elapsed)}`
   const record = !prev || state.elapsed < prev
   setTimeout(() => showEnd(record), 300)
@@ -231,7 +265,8 @@ function lost(): void {
   best = updateBest(best, state)
   slot.setBest(best)
   void slot.flush()
-  WebApp.HapticFeedback.notificationOccurred('error')
+  playSfx('lose')
+  haptic('error')
   live.textContent = '踩到雷了'
   // 先让人看一眼雷都在哪,再弹结果
   setTimeout(() => showEnd(false), 800)
@@ -253,6 +288,9 @@ function startNew(level: Level): void {
   scroller.scrollTo?.(0, 0)
   build()
   board.focus()
+  playSfx('start')
+  haptic('medium')
+  live.textContent = `新的一局:${LEVELS[level].name}`
 }
 
 async function askNew(level: Level): Promise<void> {
@@ -385,24 +423,34 @@ board.addEventListener('blur', () => {
 
 document.querySelectorAll<HTMLButtonElement>('#levels button').forEach((b) => {
   b.addEventListener('click', () => {
+    playSfx('tap')
     const level = b.dataset.level as Level
     if (level !== state.level) void askNew(level)
   })
 })
 document.querySelectorAll<HTMLButtonElement>('#mode button').forEach((b) => {
   b.addEventListener('click', () => {
+    playSfx('tap')
     flagMode = b.dataset.mode === 'flag'
     $('hint').textContent = flagMode ? '点一下插旗 · 长按翻开' : '长按插旗 · 双击数字翻开周围'
+    live.textContent = flagMode ? '点一下插旗,长按翻开' : '点一下翻开,长按插旗'
     drawInfo()
   })
 })
 zoomBtn.addEventListener('click', () => {
+  playSfx('tap')
   zoom = !zoom
   layout()
 })
-$('new').addEventListener('click', () => { void askNew(state.level) })
-$('about-btn').addEventListener('click', showAbout)
-WebApp.SettingsButton.show().onClick(showAbout)
+$('new').addEventListener('click', () => { playSfx('tap'); void askNew(state.level) })
+$('about-btn').addEventListener('click', () => { playSfx('tap'); showAbout() })
+WebApp.SettingsButton.show().onClick(() => { playSfx('tap'); showAbout() })
+
+// 弹层里的按钮(新游戏 / 继续玩 / 知道了…)都补一声轻反馈;游戏动作有自己的音
+document.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement | null)?.closest?.('#overlay button')) playSfx('tap', { gain: 0.8 })
+}, true)
+
 
 // ---------------------------------------------------------------- 弹层
 
@@ -453,6 +501,8 @@ function adopt(s: State): void {
 }
 
 followTheme(applyPalette)
+installSfxUnlock()
+syncSound()
 if (slot.restoreLocal() && slot.state) state = slot.state
 best = slot.best
 build()

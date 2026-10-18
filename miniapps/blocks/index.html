@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>方块消除</title>
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <main id="game" class="game blocks">
@@ -36,9 +37,12 @@
       <button class="key word" type="button" data-act="drop">落底</button>
       <button class="key word main" type="button" data-act="rotate">旋转</button>
     </div>
-    <p id="live" class="sr" aria-live="polite"></p>
+      <footer class="foot">
+      <button id="sound" type="button" aria-label="声音已开,点击静音">声音:开</button>
+    </footer>
   </main>
   <div id="overlay" class="overlay" hidden></div>
+  <p id="live" class="sr" aria-live="polite"></p>
   <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>扫雷</title>
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <main id="game" class="game minesweeper">
@@ -32,11 +33,12 @@
         <button type="button" data-mode="open">翻开</button>
         <button type="button" data-mode="flag">插旗</button>
       </div>
+      <button id="sound" class="btn" type="button" aria-label="声音已开,点击静音">声音:开</button>
       <button id="zoom" class="btn" type="button" hidden>放大</button>
     </div>
-    <p id="live" class="sr" aria-live="polite"></p>
-  </main>
+    </main>
   <div id="overlay" class="overlay" hidden></div>
+  <p id="live" class="sr" aria-live="polite"></p>
   <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

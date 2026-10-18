@@ -268,3 +268,19 @@ test('战绩:每档分开记赢、输、和;两台设备合并取大', () => {
   assert.equal(loadBest({ v: 9 }), null)
   assert.deepEqual(loadBest({ v: 1 }), EMPTY_BEST)
 })
+
+test('save() 字段稳定:1.1 与 1.0 是同一套存档(升级不丢档)', () => {
+  const s = play(newGame(1, 'medium', 3), 7 * N + 7)
+  assert.deepEqual(Object.keys(save(s)).sort(), ['human', 'level', 'moves', 'seed', 'undone', 'v'])
+  const back = load(JSON.parse(JSON.stringify(save(s))))
+  assert.ok(back)
+  assert.deepEqual(back.moves, s.moves)
+})
+
+test('play/undo 是纯函数:不修改传进来的状态(界面能先画再替换)', () => {
+  const s = play(newGame(1, 'easy', 4), 7 * N + 7)
+  const before = JSON.stringify(s)
+  play(s, 6 * N + 6)
+  undo(s)
+  assert.equal(JSON.stringify(s), before)
+})

@@ -189,3 +189,22 @@ test('最好成绩:每档分开记最快、赢的局数、玩的局数;两台设
   assert.equal(loadBest({ v: 2 }), null)
   assert.deepEqual(loadBest({ v: 1 }), EMPTY_BEST)
 })
+
+test('save() 字段稳定:1.1 与 1.0 是同一套存档(升级不丢档)', () => {
+  const start = newGame('easy', 17)
+  const playing = reveal(start, 40).state
+  assert.deepEqual(Object.keys(save(playing)).sort(),
+    ['boom', 'cells', 'elapsed', 'level', 'mine', 'seed', 'status', 'v'])
+  const back = load(JSON.parse(JSON.stringify(save(playing))))
+  assert.ok(back)
+  assert.equal(String(back.elapsed), String(playing.elapsed))
+})
+
+test('reveal/toggleFlag 是纯函数:不修改传进来的状态(界面能先画再替换)', () => {
+  const s = newGame('easy', 5)
+  const before = JSON.stringify(s)
+  reveal(s, 30)
+  toggleFlag(s, 20)
+  tickTime(s, 500)
+  assert.equal(JSON.stringify(s), before)
+})

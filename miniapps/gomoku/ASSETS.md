@@ -3,7 +3,8 @@
 **没有任何外部素材。** 仓库里没有图片、字体、音频文件,构建产物里也没有:
 
 - 棋盘与棋子是 Canvas 2D 程序化绘制(木纹、棋子高光、最后一手标记),没有图片;
-- 音效:没有音效文件;落子反馈用 WebAudio 合成(如有关)。
+- 音效:全部由浏览器 WebAudio 现场合成(振荡器 + 包络,共用 `miniapps/shared/src/sfx.ts`),没有任何音频文件;BGM 为 0;
+- 触感:走宿主提供的 HapticFeedback 触感 API,不在宿主里时静默;
 - 字体:系统字体栈(苹方 / Noto Sans CJK / system-ui),不下载、不打包任何字体;
 - 网络:运行时没有任何 `fetch` / `XMLHttpRequest` / 外部 CDN 请求;规则与存档都在本地算。
 

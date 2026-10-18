@@ -5,6 +5,9 @@ import './style.css'
 import { freshSeed } from '../../shared/src/rand'
 import { SaveSlot } from '../../shared/src/save'
 import {
+  haptic, installSfxUnlock, playSfx, sfxMuted, toggleSfxMuted,
+} from '../../shared/src/sfx'
+import {
   $, Overlay, WebApp, bullets, button, cacheKey, cloud, confirmBox, el, followTheme, hostGame, local, reduced, row,
 } from '../../shared/src/ui'
 import {
@@ -31,6 +34,7 @@ const levelEl = $('level')
 const bestEl = $('best')
 const pauseBtn = $<HTMLButtonElement>('pause')
 const live = $('live')
+const soundBtn = $<HTMLButtonElement>('sound')
 const overlay = new Overlay($('overlay'), () => canvas.focus())
 
 const slot = new SaveSlot<State, Best>({
@@ -50,6 +54,23 @@ let nextCell = 12
 let flash: { rows: number[]; board: number[]; until: number } | null = null
 
 const started = (s: State) => s.score > 0 || s.lines > 0 || s.cells.some((v) => v)
+
+// ---------------------------------------------------------------- 声音
+
+/** 静音按钮:状态存在设备级 localStorage(shared 统一键),跨应用共用 */
+function syncSound(): void {
+  const muted = sfxMuted()
+  soundBtn.textContent = muted ? '声音:关' : '声音:开'
+  soundBtn.setAttribute('aria-label', muted ? '声音已关,点击打开声音' : '声音已开,点击静音')
+}
+
+soundBtn.addEventListener('click', () => {
+  const muted = toggleSfxMuted()
+  if (!muted) playSfx('ok')
+  haptic('light')
+  syncSound()
+  live.textContent = muted ? '声音已关' : '声音已开'
+})
 
 // ---------------------------------------------------------------- 画
 
@@ -217,9 +238,13 @@ function handle(r: Result): void {
   if (r.locked) {
     slot.change(state)
     if (r.cleared.length) {
-      WebApp.HapticFeedback.impactOccurred(r.cleared.length >= 4 ? 'heavy' : 'medium')
+      playSfx('merge')
+      haptic(r.cleared.length >= 4 ? 'heavy' : 'medium')
       live.textContent = `消了 ${r.cleared.length} 行,得 ${r.gained} 分`
       if (r.board && !reduced()) flash = { rows: r.cleared, board: r.board, until: performance.now() + 200 }
+    } else {
+      playSfx('place')
+      haptic('light')
     }
     if (state.over) finish()
   }
@@ -234,7 +259,8 @@ function finish(): void {
   slot.setBest(best)
   void slot.flush()
   syncUi()
-  WebApp.HapticFeedback.notificationOccurred('warning')
+  playSfx('lose')
+  haptic('warning')
   live.textContent = `到顶了,${state.score} 分,消了 ${state.lines} 行`
   setTimeout(() => {
     flash = null
@@ -254,7 +280,6 @@ function act(a: Act): boolean {
   }
   if (flash) return false
   if (a === 'drop') {
-    WebApp.HapticFeedback.impactOccurred('light')
     handle(hardDrop(state))
     return true
   }
@@ -262,6 +287,7 @@ function act(a: Act): boolean {
     : rotate(state, a === 'rotate' ? 1 : -1)
   if (next === state) return false
   state = next
+  if (a === 'rotate' || a === 'ccw') playSfx('pick', { gain: 0.7 })
   draw()
   if (a === 'down') drawStats()
   return true
@@ -273,11 +299,23 @@ function pause(): void {
   releaseAll()
   slot.change(state)
   void slot.flush()
+  playSfx('tap')
+  haptic('light')
+  live.textContent = `已暂停,${state.score} 分`
   syncUi()
 }
 
 function resume(): void {
   if ((mode !== 'paused' && mode !== 'ready') || overlay.open) return
+  if (mode === 'ready') {
+    playSfx('start')
+    haptic('medium')
+    live.textContent = '开始了'
+  } else {
+    playSfx('tap')
+    haptic('light')
+    live.textContent = '继续'
+  }
   mode = 'running'
   syncUi()
   startLoop()
@@ -302,6 +340,9 @@ function restart(): void {
   syncUi()
   draw()
   drawStats()
+  playSfx('start')
+  haptic('medium')
+  live.textContent = '新游戏开始'
   canvas.focus()
 }
 
@@ -436,13 +477,20 @@ frame.addEventListener('pointerup', (e) => {
 frame.addEventListener('pointercancel', () => { g = null })
 
 pauseBtn.addEventListener('click', () => {
+  playSfx('tap')
   togglePause()
   canvas.focus()
 })
-$('new').addEventListener('click', () => { void askRestart() })
-$('about-btn').addEventListener('click', showAbout)
-WebApp.SettingsButton.show().onClick(showAbout)
+$('new').addEventListener('click', () => { playSfx('tap'); void askRestart() })
+$('about-btn').addEventListener('click', () => { playSfx('tap'); showAbout() })
+WebApp.SettingsButton.show().onClick(() => { playSfx('tap'); showAbout() })
 WebApp.BackButton.onClick(pause)
+
+// 弹层里的按钮(新游戏 / 继续玩 / 知道了…)都补一声轻反馈;游戏动作有自己的音
+document.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement | null)?.closest?.('#overlay button')) playSfx('tap', { gain: 0.8 })
+}, true)
+
 
 // ---------------------------------------------------------------- 弹层
 
@@ -485,6 +533,8 @@ function applyTheme(): void {
 }
 
 followTheme(applyTheme)
+installSfxUnlock()
+syncSound()
 if (slot.restoreLocal() && slot.state) adopt(slot.state)
 best = slot.best
 layout()

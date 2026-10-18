@@ -58,3 +58,18 @@
 .bottom .mode button { min-height: 3rem; font-size: 1rem; }
 .bottom #zoom { min-width: 4.5rem; }
 .bottom #zoom[hidden] { display: none; }
+
+/* 头部/难度/底部的按钮命中区补到 44px(视觉上只高一点) */
+.head-btns .btn { min-height: 2.75rem; }
+#levels button { min-height: 2.75rem; }
+.bottom #sound { flex: none; padding: .3rem .7rem; font-size: .875rem; }
+.bottom #sound:active { transform: scale(.97); }
+.bottom #zoom:active { transform: scale(.97); }
+.btn:active { transform: scale(.97); }
+.btn { transition: transform 120ms var(--std); }
+
+/* 减少动态:只关掉新增的按压缩放 */
+@media (prefers-reduced-motion: reduce) {
+  .btn, .bottom #sound, .bottom #zoom { transition: none; }
+  .btn:active, .bottom #sound:active, .bottom #zoom:active { transform: none; }
+}

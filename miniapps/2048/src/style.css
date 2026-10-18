@@ -1,45 +1,22 @@
+/* 2048 的界面样式。颜色、按钮、弹层、亮暗用 shared/base.css 的宿主主题变量;
+   这里只放 2048 自己的棋盘/方块布局和几点轻反馈。 */
+
 :root {
-  --bg: var(--sz-theme-bg-color, #F0EEE6);
-  --card: var(--sz-theme-secondary-bg-color, #FBFAF6);
-  --ink: var(--sz-theme-text-color, #141413);
-  --muted: var(--sz-theme-hint-color, #6B6862);
-  --line: var(--sz-theme-line-color, #E2DED2);
-  --accent: var(--sz-theme-accent-text-color, #C15F3C);
-  --button: var(--sz-theme-button-color, #C15F3C);
-  --button-ink: var(--sz-theme-button-text-color, #FFFFFF);
   --board: color-mix(in srgb, var(--line) 70%, var(--ink) 8%);
   --cell-bg: color-mix(in srgb, var(--bg) 55%, var(--line));
   --gap: 3%;
   --slide: 120ms;
-  --std: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --spring: cubic-bezier(0.34, 1.3, 0.64, 1);
-  --top: max(var(--sz-safe-area-inset-top, 0px), var(--sz-content-safe-area-inset-top, 0px));
-  --bottom: var(--sz-safe-area-inset-bottom, 0px);
-}
-:root.dark-fallback {
-  --bg: #1B1A17; --card: #24231F; --ink: #F2F0E8; --muted: #A8A49A; --line: #37342D;
-  --accent: #E08A6B; --button: #E08A6B; --button-ink: #1B1A17;
 }
 @supports not (color: color-mix(in srgb, red 10%, white)) {
   :root { --board: #D9D3C4; --cell-bg: #E6E1D5; }
 }
-
-* { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; }
-body {
-  background: var(--bg); color: var(--ink);
-  font: 1rem/1.5 system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif;
-  -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
-}
-button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-button:focus-visible, .board:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 #game {
   width: min(92vw, 420px); margin: 0 auto;
   padding: calc(1rem + var(--top)) 0 calc(1rem + var(--bottom));
   display: flex; flex-direction: column; gap: .9rem; height: 100%; justify-content: center;
 }
+
 .head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .head h1 {
   margin: 0; font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
@@ -57,9 +34,10 @@ button:focus-visible, .board:focus-visible { outline: 2px solid var(--accent); o
 .actions { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .hint { margin: 0; font-size: .8125rem; color: var(--muted); }
 #new {
-  flex: none; background: var(--button); color: var(--button-ink); font-weight: 600;
-  padding: .5rem 1rem; border-radius: .6rem;
+  flex: none; min-height: 2.75rem; background: var(--button); color: var(--button-ink); font-weight: 600;
+  padding: .5rem 1rem; border-radius: .6rem; transition: transform 120ms var(--std);
 }
+#new:active { transform: scale(.97); }
 
 .board {
   position: relative; width: 100%; aspect-ratio: 1 / 1; border-radius: .9rem;
@@ -90,36 +68,23 @@ button:focus-visible, .board:focus-visible { outline: 2px solid var(--accent); o
 .tile.pop b { animation: pop 220ms var(--spring) both; }
 .tile.v2048 b { box-shadow: 0 0 0 3px var(--accent) inset; }
 
-.foot { text-align: center; }
-.foot button { color: var(--muted); font-size: .8125rem; padding: .25rem .5rem; }
-
-.overlay {
-  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
-  display: flex; align-items: center; justify-content: center; padding: 1.5rem;
-  animation: fade 220ms var(--std) both;
+/* 页脚:关于 / 声音。命中区做到 44px 高,视觉上仍是小字 */
+.foot { display: flex; justify-content: center; gap: .5rem; }
+.foot button {
+  min-height: 2.75rem; padding: .4rem .9rem; border-radius: .6rem; color: var(--muted); font-size: .8125rem;
+  transition: transform 120ms var(--std), color 120ms var(--std);
 }
-@supports not (color: color-mix(in srgb, red 10%, white)) { .overlay { background: rgba(240, 238, 230, .88); } }
-.overlay[hidden] { display: none; }
-.panel {
-  width: min(88vw, 380px); background: var(--card); border: 1px solid var(--line); border-radius: 1rem;
-  padding: 1.5rem 1.25rem 1.25rem; text-align: center; box-shadow: 0 12px 40px rgba(20, 20, 19, .16);
-}
-.panel h2 { margin: 0 0 .5rem; font-family: "Songti SC", "Noto Serif CJK SC", serif; font-size: 1.5rem; }
-.panel p { margin: .35rem 0; color: var(--muted); font-size: .9375rem; }
-.panel .big { font-size: 2.25rem; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
-.panel .row { display: flex; gap: .5rem; justify-content: center; margin-top: 1.1rem; }
-.panel .row button { padding: .6rem 1.1rem; border-radius: .6rem; font-weight: 600; border: 1px solid var(--line); }
-.panel .row button.primary { background: var(--button); color: var(--button-ink); border-color: transparent; }
-.panel.about { text-align: left; }
-.panel.about li { color: var(--ink); font-size: .9375rem; margin: .3rem 0; }
+.foot button:active { transform: scale(.96); }
+.foot button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @keyframes appear { from { transform: scale(.6); opacity: .4; } to { transform: none; opacity: 1; } }
 @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.12); } 100% { transform: scale(1); } }
 @keyframes bump { 50% { transform: scale(1.15); } }
-@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
+/* 减少动态:只关掉落位移/缩放/闪烁,保留弹层淡入这种不晃人的反馈 */
 @media (prefers-reduced-motion: reduce) {
   .tile { transition: none; }
-  *, *::before, *::after { animation: none !important; }
+  .score.bump b, .tile.new b, .tile.pop b { animation: none; }
+  #new, .foot button { transition: none; }
+  #new:active, .foot button:active { transform: none; }
 }

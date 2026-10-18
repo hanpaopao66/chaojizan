@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>2048</title>
-  <link rel="stylesheet" href="./src/style.css">
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <main id="game">
@@ -23,10 +23,13 @@
       <div class="cells" aria-hidden="true"></div>
       <div class="tiles"></div>
     </div>
-    <p id="live" class="sr" aria-live="polite"></p>
-    <footer class="foot"><button id="about-btn" type="button">关于</button></footer>
+      <footer class="foot">
+      <button id="about-btn" type="button">关于</button>
+      <button id="sound" type="button" aria-label="声音已开,点击静音">声音:开</button>
+    </footer>
   </main>
   <div id="overlay" class="overlay" hidden></div>
+  <p id="live" class="sr" aria-live="polite"></p>
   <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

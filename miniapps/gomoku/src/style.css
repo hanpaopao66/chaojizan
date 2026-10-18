@@ -27,3 +27,22 @@
 .panel .choice { margin: .75rem 0 .25rem; text-align: left; }
 .panel .choice h3 { margin: 0 0 .35rem; }
 .panel .note { font-size: .8125rem; }
+
+/* 头部/底部的按钮命中区补到 44px(视觉上只高一点) */
+.head-btns .btn { min-height: 2.75rem; }
+.panel .choice .seg button { min-height: 2.75rem; }
+
+/* 页脚:关于 / 声音。命中区 44px,视觉上仍是小字 */
+.foot { flex: none; display: flex; justify-content: center; gap: .5rem; }
+.foot button {
+  min-width: 2.75rem; min-height: 2.75rem; padding: .4rem .9rem; border-radius: .6rem;
+  color: var(--muted); font-size: .8125rem; transition: transform 120ms var(--std);
+}
+.foot button:active { transform: scale(.96); }
+.foot button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 减少动态:只关掉新增的按压缩放 */
+@media (prefers-reduced-motion: reduce) {
+  .foot button { transition: none; }
+  .foot button:active { transform: none; }
+}

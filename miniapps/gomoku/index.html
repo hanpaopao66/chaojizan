@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
   <title>五子棋</title>
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <main id="game" class="game gomoku">
@@ -11,7 +12,6 @@
       <h1>五子棋</h1>
       <div class="head-btns">
         <button id="new" class="btn" type="button">新游戏</button>
-        <button id="about-btn" class="btn" type="button">关于</button>
       </div>
     </header>
     <div class="info">
@@ -25,9 +25,13 @@
       <button id="undo" class="btn" type="button">悔棋</button>
       <p id="hint" class="hint"></p>
     </div>
-    <p id="live" class="sr" aria-live="polite"></p>
+      <footer class="foot">
+      <button id="about-btn" type="button">关于</button>
+      <button id="sound" type="button" aria-label="声音已开,点击静音">声音:开</button>
+    </footer>
   </main>
   <div id="overlay" class="overlay" hidden></div>
+  <p id="live" class="sr" aria-live="polite"></p>
   <script type="module" src="./src/main.ts"></script>
 </body>
 </html>

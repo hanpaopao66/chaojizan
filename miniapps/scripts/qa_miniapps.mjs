@@ -112,7 +112,7 @@ async function clickStart(page) {
   for (const text of START_TEXTS) {
     const ok = await page.evaluate((t) => {
       const b = [...document.querySelectorAll('button')].find((x) =>
-        (x.textContent || '').replace(/\s+/g, '').includes(t) && !x.disabled && x.offsetParent !== null)
+        (x.textContent || '').replace(/\s+/g, '').includes(t) && !x.disabled && x.getClientRects().length > 0)
       if (!b) return false
       b.click()
       return true

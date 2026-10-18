@@ -5,6 +5,9 @@ import './style.css'
 import { freshSeed } from '../../shared/src/rand'
 import { SaveSlot } from '../../shared/src/save'
 import {
+  haptic, installSfxUnlock, playSfx, sfxMuted, toggleSfxMuted,
+} from '../../shared/src/sfx'
+import {
   $, Overlay, WebApp, bullets, button, cacheKey, cloud, confirmBox, el, followTheme, hostGame, local, reduced, row,
 } from '../../shared/src/ui'
 import {
@@ -23,6 +26,7 @@ const scoreEl = $('score')
 const bestEl = $('best')
 const pauseBtn = $<HTMLButtonElement>('pause')
 const live = $('live')
+const soundBtn = $<HTMLButtonElement>('sound')
 const overlay = new Overlay($('overlay'), () => canvas.focus())
 
 const slot = new SaveSlot<State, Best>({
@@ -37,6 +41,23 @@ let best: Best = EMPTY_BEST
 let mode: Mode = 'ready'
 let pal: Palette = LIGHT
 let cell = 16
+
+// ---------------------------------------------------------------- 声音
+
+/** 静音按钮:状态存在设备级 localStorage(shared 统一键),跨应用共用 */
+function syncSound(): void {
+  const muted = sfxMuted()
+  soundBtn.textContent = muted ? '声音:关' : '声音:开'
+  soundBtn.setAttribute('aria-label', muted ? '声音已关,点击打开声音' : '声音已开,点击静音')
+}
+
+soundBtn.addEventListener('click', () => {
+  const muted = toggleSfxMuted()
+  if (!muted) playSfx('ok')
+  haptic('light')
+  syncSound()
+  live.textContent = muted ? '声音已关' : '声音已开'
+})
 
 // ---------------------------------------------------------------- 画
 
@@ -173,8 +194,10 @@ function tick(): void {
   const r = step(state)
   state = r.state
   if (r.ate) {
-    WebApp.HapticFeedback.impactOccurred('light')
+    playSfx('pick')
+    haptic('light')
     drawScores(true)
+    live.textContent = `吃到食物,长度 ${state.snake.length},${state.score} 分`
   }
   slot.change(state)
   if (state.over) finish()
@@ -188,7 +211,13 @@ function finish(): void {
   syncUi()
   draw()
   drawScores()
-  WebApp.HapticFeedback.notificationOccurred(state.won ? 'success' : 'warning')
+  if (state.won) {
+    playSfx('win')
+    haptic('success')
+  } else {
+    playSfx('lose')
+    haptic('warning')
+  }
   const why = state.won ? '格子都占满了' : state.cause === 'wall' ? '撞墙了' : '咬到自己了'
   live.textContent = `${why},得 ${state.score} 分`
   // 先让人看一眼撞在哪,再弹结果
@@ -200,6 +229,7 @@ function finish(): void {
 function steer(d: Dir): void {
   if (overlay.open || mode === 'over') return
   const next = turn(state, d)
+  if (next !== state && d !== state.dir) playSfx('move', { gain: 0.7 })
   if (mode === 'running') {
     state = next
     return
@@ -212,6 +242,8 @@ function steer(d: Dir): void {
 function pause(): void {
   if (mode !== 'running') return
   mode = 'paused'
+  playSfx('tap')
+  live.textContent = `已暂停,${state.score} 分`
   syncUi()
   void slot.flush()
 }
@@ -219,6 +251,15 @@ function pause(): void {
 function resume(): void {
   if (mode !== 'paused' && mode !== 'ready') return
   if (overlay.open) return
+  if (mode === 'ready') {
+    playSfx('start')
+    haptic('medium')
+    live.textContent = '开始了,滑动或按方向键'
+  } else {
+    playSfx('tap')
+    haptic('light')
+    live.textContent = '继续'
+  }
   mode = 'running'
   syncUi()
   startLoop()
@@ -242,6 +283,9 @@ function restart(): void {
   syncUi()
   draw()
   drawScores()
+  playSfx('start')
+  haptic('medium')
+  live.textContent = '新游戏开始'
   // 焦点别留在「新游戏」上:不然接着按空格想暂停,按到的是它
   canvas.focus()
 }
@@ -317,11 +361,20 @@ document.querySelectorAll<HTMLButtonElement>('.key[data-dir]').forEach((b) => {
   b.addEventListener('pointerleave', up)
   b.addEventListener('click', (e) => { if (e.detail === 0) steer(d) })
 })
-pauseBtn.addEventListener('click', togglePause)
-$('new').addEventListener('click', () => { void askRestart() })
-$('about-btn').addEventListener('click', showAbout)
-WebApp.SettingsButton.show().onClick(showAbout)
+pauseBtn.addEventListener('click', () => {
+  playSfx('tap')
+  togglePause()
+})
+$('new').addEventListener('click', () => { playSfx('tap'); void askRestart() })
+$('about-btn').addEventListener('click', () => { playSfx('tap'); showAbout() })
+WebApp.SettingsButton.show().onClick(() => { playSfx('tap'); showAbout() })
 WebApp.BackButton.onClick(pause)
+
+// 弹层里的按钮(新游戏 / 继续玩 / 知道了…)都补一声轻反馈;游戏动作有自己的音
+document.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement | null)?.closest?.('#overlay button')) playSfx('tap', { gain: 0.8 })
+}, true)
+
 
 // ---------------------------------------------------------------- 弹层
 
@@ -363,6 +416,8 @@ function applyTheme(): void {
 }
 
 followTheme(applyTheme)
+installSfxUnlock()
+syncSound()
 if (slot.restoreLocal() && slot.state) adopt(slot.state)
 best = slot.best
 layout()

@@ -119,3 +119,25 @@ test('合并时被吃掉的块记录它滑到的位置(界面先滑过去再消�
   assert.equal(r.merged[0].value, 4)
   assert.equal(emptyCells(r.state.tiles).length, 14)
 })
+
+test('move 是纯函数:不修改传进来的状态(界面能安全地先画动画再替换)', () => {
+  const s = newGame(11)
+  const before = JSON.stringify(s)
+  move(s, 'left')
+  move(s, 'up')
+  move(s, 'right')
+  assert.equal(JSON.stringify(s), before)
+})
+
+test('存档格式稳定:save() 只写 v/board/score/seed/moves/won,load() 只读这些', () => {
+  const saved = save(newGame(3))
+  assert.deepEqual(Object.keys(saved).sort(), ['board', 'moves', 'score', 'seed', 'v', 'won'])
+  // 旧的 1.0 存档(同样的六个字段)升级后必须还能读回来
+  const legacy = JSON.stringify({ v: 1, board: [[2, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    score: 12, seed: 7, moves: 3, won: false })
+  const back = load(legacy)
+  assert.ok(back)
+  assert.equal(back.score, 12)
+  assert.equal(back.seed, 7)
+  assert.equal(back.moves, 3)
+})

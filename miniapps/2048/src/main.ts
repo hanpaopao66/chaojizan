@@ -1,27 +1,32 @@
 // 2048 的界面:DOM 方块 + CSS transform(16 个方块用不着 canvas,还便于读屏)。
-// 规则全在 engine.ts;这里只管输入、动画、存档和宿主能力(全屏、锁方向、触感)。
-import WebApp from '../../../packages/miniapp-sdk/src/index'
+// 规则全在 engine.ts;这里只管输入、动画、声音、存档和宿主能力(全屏、锁方向、触感)。
+// 声音/触感走 shared/src/sfx.ts 的统一合成音;弹层、主题、宿主能力走 shared/src/ui.ts。
+import '../../shared/src/base.css'
+import './style.css'
+import {
+  haptic, installSfxUnlock, playSfx, sfxMuted, toggleSfxMuted,
+} from '../../shared/src/sfx'
 import {
   Best, Dir, MoveResult, SIZE, State, Tile, load, maxTile, move, newGame, save, updateBest,
 } from './engine'
 import { tileColor } from './palette'
-import './style.css'
+import {
+  $, Overlay, WebApp, button, cacheKey, cloud, el, followTheme, hostGame, local, reduced, row,
+} from '../../shared/src/ui'
 
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 const board = $('board')
 const tilesEl = board.querySelector('.tiles') as HTMLElement
 const cellsEl = board.querySelector('.cells') as HTMLElement
 const scoreEl = $('score')
 const bestEl = $('best')
-const overlay = $('overlay')
 const live = $('live')
+const soundBtn = $<HTMLButtonElement>('sound')
+const overlay = new Overlay($('overlay'), () => board.focus())
 const SLIDE_MS = 120
 const SAVE_DELAY = 500
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
-// 本机缓存按 open_id 分开(同一台设备换账号,接不上上一个人的棋局)
-const who = WebApp.initDataUnsafe.user?.open_id || 'anon'
-const cacheKey = `2048:v1:${who}`
+// 本机缓存的键按 open_id 分开(同一台设备换账号,接不上上一个人的棋局)
+const cacheKeyName = cacheKey('2048')
 
 let state: State = newGame((Math.random() * 2 ** 32) >>> 0)
 let best: Best = { v: 1, score: 0, max_tile: 0, games: 0 }
@@ -30,6 +35,23 @@ let pending: Dir | null = null
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let savedAt = 0
 const els = new Map<number, HTMLElement>()
+
+// ---------------------------------------------------------------- 声音
+
+/** 静音按钮:状态存在设备级 localStorage(shared 统一键),跨应用共用 */
+function syncSound(): void {
+  const muted = sfxMuted()
+  soundBtn.textContent = muted ? '声音:关' : '声音:开'
+  soundBtn.setAttribute('aria-label', muted ? '声音已关,点击打开声音' : '声音已开,点击静音')
+}
+
+soundBtn.addEventListener('click', () => {
+  const muted = toggleSfxMuted()
+  if (!muted) playSfx('ok')
+  haptic('light')
+  syncSound()
+  live.textContent = muted ? '声音已关' : '声音已开'
+})
 
 // ---------------------------------------------------------------- 画
 
@@ -126,7 +148,7 @@ function animate(r: MoveResult): void {
 // ---------------------------------------------------------------- 走一步
 
 function step(dir: Dir): void {
-  if (!overlay.hidden) return
+  if (overlay.open) return
   if (animating) {
     pending = dir // 动画期间最多缓存 1 步
     return
@@ -137,15 +159,19 @@ function step(dir: Dir): void {
   state = r.state
   animate(r)
   drawScores(r.gained > 0)
-  if (r.merged.some((t) => t.value >= 128)) WebApp.HapticFeedback.impactOccurred('light')
-  live.textContent = r.gained ? `合并得 ${r.gained} 分,共 ${state.score} 分` : ''
+  if (r.gained) playSfx('merge')
+  else playSfx('move')
+  if (r.merged.some((t) => t.value >= 128)) haptic('light')
+  live.textContent = r.gained ? `合并得 ${r.gained} 分,共 ${state.score} 分` : `得分 ${state.score}`
   if (state.score > best.score || maxTile(state.tiles) > best.max_tile) best = updateBest(best, state, false)
   scheduleSave()
   if (r.justWon) {
-    WebApp.HapticFeedback.notificationOccurred('success')
+    playSfx('win')
+    haptic('success')
     setTimeout(showWin, SLIDE_MS + 60)
   } else if (state.over) {
-    WebApp.HapticFeedback.notificationOccurred('warning')
+    playSfx('lose')
+    haptic('warning')
     best = updateBest(best, state, true)
     saveNow()
     setTimeout(showOver, SLIDE_MS + 60)
@@ -187,60 +213,24 @@ board.addEventListener('pointercancel', () => { start = null })
 
 // ---------------------------------------------------------------- 弹层
 
-function panel(html: (root: HTMLElement) => void, cls = ''): void {
-  overlay.textContent = ''
-  const p = document.createElement('div')
-  p.className = `panel ${cls}`
-  p.setAttribute('role', 'dialog')
-  html(p)
-  overlay.append(p)
-  overlay.hidden = false
-  ;(p.querySelector('button.primary') as HTMLElement | null)?.focus()
-}
-
-function button(text: string, onClick: () => void, primary = false): HTMLButtonElement {
-  const b = document.createElement('button')
-  b.type = 'button'
-  b.textContent = text
-  if (primary) b.className = 'primary'
-  b.addEventListener('click', onClick)
-  return b
-}
-
-function el(tag: string, text: string, cls = ''): HTMLElement {
-  const e = document.createElement(tag)
-  e.textContent = text
-  if (cls) e.className = cls
-  return e
-}
-
-function closePanel(): void {
-  overlay.hidden = true
-  overlay.textContent = ''
-  board.focus()
-}
-
 function showWin(): void {
-  panel((p) => {
+  overlay.show((p) => {
     p.append(el('h2', '你拼出了 2048'), el('p', `${state.moves} 步,${state.score} 分`))
-    const row = el('div', '', 'row')
-    row.append(button('新游戏', restart), button('继续玩', closePanel, true))
-    p.append(row)
-  })
+    p.append(row(button('新游戏', restart), button('继续玩', () => overlay.hide(), 'primary')))
+  }, { onDismiss: () => overlay.hide() })
 }
 
 function showOver(): void {
-  panel((p) => {
+  overlay.show((p) => {
     p.append(el('h2', '没有路可走了'), el('div', String(state.score), 'big'),
       el('p', `最大方块 ${maxTile(state.tiles)} · 最好成绩 ${best.score}`))
-    const row = el('div', '', 'row')
-    row.append(button('再来一局', restart, true))
-    p.append(row)
+    p.append(row(button('再来一局', restart, 'primary')))
   })
+  live.textContent = `没有路可走了,得分 ${state.score}`
 }
 
 function showAbout(): void {
-  panel((p) => {
+  overlay.show((p) => {
     p.append(el('h2', '关于 2048'))
     const ul = document.createElement('ul')
     for (const t of [
@@ -249,37 +239,46 @@ function showAbout(): void {
       '前端游戏的分数没法由服务器验证,所以成绩只存在你自己这里,不给别人看。',
       '每一步自动存档到超级赞云存储,关了再开、换设备都能接着玩。',
       `玩过 ${best.games} 局,最好 ${best.score} 分,最大方块 ${best.max_tile || '—'}。`,
+      '音效由浏览器现场合成(WebAudio),不加载任何音频文件;声音开关只记在这台设备上。',
     ]) ul.append(el('li', t))
     p.append(ul)
-    const row = el('div', '', 'row')
-    row.append(button('知道了', closePanel, true))
-    p.append(row)
-  }, 'about')
+    p.append(row(button('知道了', () => overlay.hide(), 'primary')))
+  }, { cls: 'about', onDismiss: () => overlay.hide() })
 }
 
 function restart(): void {
-  closePanel()
+  overlay.hide()
   if (state.moves > 0 && !state.over) best = updateBest(best, state, true)
   state = newGame((Math.random() * 2 ** 32) >>> 0)
   drawAll()
   saveNow()
+  playSfx('start')
+  haptic('medium')
+  live.textContent = '新游戏开始'
+  board.focus()
 }
 
 $('new').addEventListener('click', async () => {
+  playSfx('tap')
   if (state.moves > 0 && !state.over) {
     const ok = await WebApp.showConfirm('放弃这一局,开始新游戏?').catch(() => window.confirm('放弃这一局,开始新游戏?'))
     if (!ok) return
   }
   restart()
 })
-$('about-btn').addEventListener('click', showAbout)
-overlay.addEventListener('click', (e) => { if (e.target === overlay && !state.over) closePanel() })
-WebApp.SettingsButton.show().onClick(showAbout)
+$('about-btn').addEventListener('click', () => { playSfx('tap'); showAbout() })
+WebApp.SettingsButton.show().onClick(() => { playSfx('tap'); showAbout() })
 
-// ---------------------------------------------------------------- 存档
+// 弹层里的按钮(新游戏 / 继续玩 / 知道了…)都补一声轻反馈;游戏动作有自己的音
+document.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement | null)?.closest?.('#overlay button')) playSfx('tap', { gain: 0.8 })
+}, true)
+
+
+// ---------------------------------------------------------------- 存档(沿用 1.0 的云/本机格式,升级不丢档)
 
 function writeLocal(): void {
-  try { localStorage.setItem(cacheKey, JSON.stringify({ state: save(state), best, at: savedAt })) } catch (_) { /* 满了 */ }
+  local.setItem(cacheKeyName, JSON.stringify({ state: save(state), best, at: savedAt }))
 }
 
 function scheduleSave(): void {
@@ -295,24 +294,24 @@ function saveNow(): void {
   writeLocal()
   // 棋局按「最后一次写的赢」:同一局在两台设备上交替玩,以最近那一步为准
   const payload = JSON.stringify({ ...save(state), at: savedAt })
-  WebApp.CloudStorage.setItem('state', payload).catch(() => undefined)
-  WebApp.CloudStorage.setItem('best', JSON.stringify(best)).catch(() => undefined)
+  cloud.setItem('state', payload).catch(() => undefined)
+  cloud.setItem('best', JSON.stringify(best)).catch(() => undefined)
 }
 
 async function restore(): Promise<void> {
   // ① 本机缓存秒开
   try {
-    const local = JSON.parse(localStorage.getItem(cacheKey) || 'null')
-    if (local) {
-      const s = load(JSON.stringify(local.state))
-      if (s) { state = s; savedAt = Number(local.at) || 0 }
-      if (local.best?.v === 1) best = local.best
+    const cached = JSON.parse(local.getItem(cacheKeyName) || 'null')
+    if (cached) {
+      const s = load(JSON.stringify(cached.state))
+      if (s) { state = s; savedAt = Number(cached.at) || 0 }
+      if (cached.best?.v === 1) best = cached.best
     }
   } catch (_) { /* 没有缓存 */ }
   drawAll()
   // ② 云端更新的话(别的设备上接着玩过),换成云端的
   try {
-    const r = await WebApp.CloudStorage.getItems(['state', 'best'])
+    const r = await cloud.getItems(['state', 'best'])
     const cloudBest = r.best ? JSON.parse(r.best) as Best : null
     if (cloudBest?.v === 1) {
       best = { v: 1, score: Math.max(best.score, cloudBest.score), max_tile: Math.max(best.max_tile, cloudBest.max_tile),
@@ -335,22 +334,15 @@ async function restore(): Promise<void> {
 
 // ---------------------------------------------------------------- 启动
 
-function applyFallbackTheme(): void {
-  const hasHostTheme = Object.keys(WebApp.themeParams).length > 0
-  document.documentElement.classList.toggle('dark-fallback',
-    !hasHostTheme && matchMedia('(prefers-color-scheme: dark)').matches)
-}
-
 for (let i = 0; i < SIZE * SIZE; i++) cellsEl.append(document.createElement('i'))
-applyFallbackTheme()
-WebApp.onEvent('themeChanged', applyFallbackTheme)
+installSfxUnlock()
+syncSound()
+followTheme()
 layout()
 new ResizeObserver(layout).observe(tilesEl)
 restore().finally(() => {
   WebApp.ready().catch(() => undefined)
   board.focus()
 })
-// 小游戏:全屏、锁竖屏(superz.json 里 orientation 也写了 portrait,宿主打开时就锁)
-WebApp.requestFullscreen().catch(() => undefined)
-WebApp.lockOrientation().catch(() => undefined)
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow() })
+// 小游戏:全屏、锁竖屏、切后台立刻存档(superz.json 里 orientation 也写了 portrait)
+hostGame(saveNow)

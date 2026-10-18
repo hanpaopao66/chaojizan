@@ -4,6 +4,9 @@ import '../../shared/src/base.css'
 import './style.css'
 import { freshSeed } from '../../shared/src/rand'
 import { SaveSlot } from '../../shared/src/save'
+import {
+  haptic, installSfxUnlock, playSfx, sfxMuted, toggleSfxMuted,
+} from '../../shared/src/sfx'
 import { $, Overlay, WebApp, bullets, button, cacheKey, cloud, el, followTheme, hostGame, local, row } from '../../shared/src/ui'
 import {
   Best, Color, EMPTY_BEST, LEVELS, LEVEL_KEYS, Level, N, State, aiMove, canUndo, load, loadBest, mergeBest, newGame,
@@ -22,6 +25,7 @@ const whoText = $('who-text')
 const undoBtn = $<HTMLButtonElement>('undo')
 const hintEl = $('hint')
 const live = $('live')
+const soundBtn = $<HTMLButtonElement>('sound')
 const overlay = new Overlay($('overlay'), () => canvas.focus())
 
 const slot = new SaveSlot<State, Best>({
@@ -40,6 +44,23 @@ let thinking = false
 let generation = 0
 let lastPointer = 'mouse'
 let hadSave = false
+
+// ---------------------------------------------------------------- 声音
+
+/** 静音按钮:状态存在设备级 localStorage(shared 统一键),跨应用共用 */
+function syncSound(): void {
+  const muted = sfxMuted()
+  soundBtn.textContent = muted ? '声音:关' : '声音:开'
+  soundBtn.setAttribute('aria-label', muted ? '声音已关,点击打开声音' : '声音已开,点击静音')
+}
+
+soundBtn.addEventListener('click', () => {
+  const muted = toggleSfxMuted()
+  if (!muted) playSfx('ok')
+  haptic('light')
+  syncSound()
+  live.textContent = muted ? '声音已关' : '声音已开'
+})
 
 /** 交叉点间距;最外一圈线离棋盘边 0.8 格,边上的棋子不贴边 */
 const gap = () => size / (N - 1 + 1.6)
@@ -172,7 +193,8 @@ function place(i: number): void {
   if (next === state) return
   state = next
   preview = -1
-  WebApp.HapticFeedback.selectionChanged()
+  playSfx('place')
+  haptic('light')
   say(state.human, i)
   slot.change(state)
   draw()
@@ -196,6 +218,7 @@ function runAi(): void {
     thinking = false
     if (next !== state) {
       state = next
+      playSfx('pick', { gain: 0.7 })
       say((3 - state.human) as Color, state.moves[state.moves.length - 1])
       slot.change(state)
     }
@@ -210,7 +233,16 @@ function finish(): void {
   slot.setBest(best)
   void slot.flush()
   const won = state.winner === state.human
-  WebApp.HapticFeedback.notificationOccurred(won ? 'success' : state.winner === 3 ? 'warning' : 'error')
+  if (won) {
+    playSfx('win')
+    haptic('success')
+  } else if (state.winner === 3) {
+    playSfx('toast')
+    haptic('warning')
+  } else {
+    playSfx('lose')
+    haptic('error')
+  }
   live.textContent = won ? '你赢了' : state.winner === 3 ? '下满了,和棋' : '电脑赢了'
   setTimeout(showEnd, 700)
 }
@@ -222,6 +254,8 @@ function doUndo(): void {
   state = undo(state)
   overlay.hide()
   preview = -1
+  playSfx('move')
+  haptic('light')
   live.textContent = '悔了一步'
   slot.change(state)
   draw()
@@ -238,6 +272,9 @@ function startGame(human: Color, level: Level): void {
   void slot.flush()
   draw()
   syncUi()
+  playSfx('start')
+  haptic('medium')
+  live.textContent = `新的一局:你执${colorName(human)},${LEVELS[level]}`
   runAi() // 执白的话电脑先下
   canvas.focus()
 }
@@ -278,7 +315,8 @@ canvas.addEventListener('pointerup', (e) => {
   else if (preview === i && was !== 'mouse') place(i) // 触屏:点同一个点第二次才落子
   else {
     preview = i
-    WebApp.HapticFeedback.selectionChanged()
+    playSfx('pick', { gain: 0.6 })
+    haptic('light')
     draw()
     syncUi()
   }
@@ -311,6 +349,12 @@ undoBtn.addEventListener('click', doUndo)
 $('new').addEventListener('click', () => showSetup())
 $('about-btn').addEventListener('click', showAbout)
 WebApp.SettingsButton.show().onClick(showAbout)
+
+// 所有真 <button> 的点击给一声轻反馈;棋盘上的落子/选点有自己的音
+document.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement | null)?.closest?.('button') as HTMLButtonElement | null
+  if (b && !b.disabled) playSfx('tap', { gain: 0.8 })
+}, true)
 
 // ---------------------------------------------------------------- 弹层
 
@@ -396,6 +440,8 @@ function applyTheme(): void {
 }
 
 followTheme(applyTheme)
+installSfxUnlock()
+syncSound()
 hadSave = slot.restoreLocal() && !!slot.state
 if (hadSave && slot.state) state = slot.state
 best = slot.best

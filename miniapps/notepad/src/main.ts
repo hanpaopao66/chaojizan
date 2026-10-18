@@ -5,17 +5,47 @@
 // - 有没同步的改动就开「关闭确认」,同步完就关;
 // - 所有用户写的字都用 textContent 放进页面,不拼 HTML。
 import WebApp from '../../../packages/miniapp-sdk/src/index'
+import '../../shared/src/base.css'
 import {
   MAX_CHARS, Note, charCount, daysLeft, highlight, search, snippetOf, timeLabel, titleOf,
   tooLong, trashNotes,
 } from './notes'
 import { NoteStore, Remote } from './sync'
 import './style.css'
+import {
+  haptic, installSfxUnlock, playSfx, sfxMuted, toggleSfxMuted, type Cue,
+} from '../../shared/src/sfx'
+import { followTheme } from '../../shared/src/ui'
 
 const app = document.getElementById('app') as HTMLElement
 const toastEl = document.getElementById('toast') as HTMLElement
+const liveEl = document.getElementById('live') as HTMLElement
 const SAVE_DELAY = 800
 const QUOTA = 5 * 1024 * 1024
+
+/** 读屏播报关键状态(保存、复制、删除、同步);视觉上不出现 */
+function say(msg: string): void {
+  liveEl.textContent = msg
+}
+
+// ---------------------------------------------------------------- 声音
+
+/** 静音按钮:状态存在设备级 localStorage(shared 统一键),跨应用共用 */
+function syncSound(): void {
+  const muted = sfxMuted()
+  for (const b of document.querySelectorAll<HTMLButtonElement>('[data-sound]')) {
+    b.textContent = muted ? '声音:关' : '声音:开'
+    b.setAttribute('aria-label', muted ? '声音已关,点击打开声音' : '声音已开,点击静音')
+  }
+}
+
+function toggleSound(): void {
+  const muted = toggleSfxMuted()
+  if (!muted) playSfx('ok')
+  haptic('light')
+  syncSound()
+  say(muted ? '声音已关' : '声音已开')
+}
 
 // ---------------------------------------------------------------- 存储
 
@@ -62,9 +92,11 @@ function marked(text: string, q: string): DocumentFragment {
   return f
 }
 
-function toast(msg: string, ms = 2400): void {
+function toast(msg: string, ms = 2400, cue: Cue = 'toast'): void {
   toastEl.textContent = msg
   toastEl.hidden = false
+  say(msg)
+  playSfx(cue, { gain: 0.9 })
   clearTimeout((toast as any).t)
   ;(toast as any).t = setTimeout(() => { toastEl.hidden = true }, ms)
 }
@@ -84,16 +116,12 @@ async function copy(text: string): Promise<void> {
     document.execCommand('copy')
     ta.remove()
   }
+  playSfx('ok')
+  haptic('light')
   toast('已复制全文')
 }
 
-function applyFallbackTheme(): void {
-  // 不在宿主里(本地 ?sz_mock=1 调试)时没有主题变量,跟着系统深浅色走
-  const hasHostTheme = Object.keys(WebApp.themeParams).length > 0
-  const dark = !hasHostTheme && matchMedia('(prefers-color-scheme: dark)').matches
-  document.documentElement.classList.toggle('dark-fallback', dark)
-}
-
+/** 亮暗:和别的应用一样跟宿主/系统走(followTheme 在 <html> 上切 .dark) */
 // ---------------------------------------------------------------- 同步
 
 function scheduleSync(delay = SAVE_DELAY): void {
@@ -102,18 +130,25 @@ function scheduleSync(delay = SAVE_DELAY): void {
 }
 
 async function runSync(): Promise<void> {
+  const prevError = syncError
   try {
     const r = await store.sync()
     syncError = ''
     online = true
     if (r.conflicts.length) {
       toast('有笔记在另一台设备上也改过 —— 两份都留下了,标着「冲突副本」', 4000)
-      WebApp.HapticFeedback.notificationOccurred('warning')
+      haptic('warning')
     }
   } catch (e: any) {
     if (e?.code === 4006) syncError = '云存储满了(5 MB):删掉一些笔记或清空回收站'
     else if (e?.code === 4009) syncError = '这个小程序已被暂停'
     else { online = false; syncError = '' }
+  }
+  // 新出现的错误才响/念一次,免得每分钟同步失败都打断人
+  if (syncError && syncError !== prevError) {
+    playSfx('error')
+    haptic('error')
+    say(syncError)
   }
   closingGuard()
   // 列表页只刷新列表本身,不重建搜索框 —— 同步是后台的事,不能把正在打字的人的光标弄丢
@@ -134,7 +169,7 @@ function closingGuard(): void {
 
 function go(next: View): void {
   if (view.name === 'edit') {
-    flushEdit()
+    flushEdit(true)
     // 新建了又一个字没写就离开:不留空笔记
     const cur = store.get(view.id)
     if (cur && !cur.text.trim()) store.purge(cur.id)
@@ -163,7 +198,10 @@ function render(): void {
 }
 
 function newNoteAction(): void {
+  playSfx('tap')
+  haptic('medium')
   const n = store.create('')
+  say('新建了笔记,第一行就是标题')
   go({ name: 'edit', id: n.id })
 }
 
@@ -215,7 +253,9 @@ function renderList(): void {
       h('span', {}, `已用 ${kb(used)} / 5 MB`),
       h('button', { onclick: () => go({ name: 'trash' }) }, `回收站${trashed ? `(${trashed})` : ''}`),
       h('button', { onclick: () => go({ name: 'about' }) }, '关于'),
+      h('button', { 'data-sound': '', onclick: toggleSound, 'aria-label': '声音已开,点击静音' }, '声音:开'),
     ))
+    syncSound()
     if (used > QUOTA * 0.9) toast(`云存储快满了:已用 ${kb(used)} / 5 MB`)
     // 本地调试时没有宿主画主按钮,页面自己补一个
     if (WebApp.isMock) body.append(h('button', { class: 'fab', onclick: newNoteAction }, '新建笔记'))
@@ -227,7 +267,7 @@ function noteRow(n: Note, now: number): HTMLElement {
   let pressTimer: ReturnType<typeof setTimeout> | undefined
   const btn = h('button', {
     class: 'note', type: 'button',
-    onclick: () => go({ name: 'edit', id: n.id }),
+    onclick: () => { playSfx('tap', { gain: 0.8 }); go({ name: 'edit', id: n.id }) },
     oncontextmenu: (e: Event) => { e.preventDefault(); actions(n) },
     ontouchstart: () => { pressTimer = setTimeout(() => actions(n), 520) },
     ontouchend: () => clearTimeout(pressTimer),
@@ -241,17 +281,20 @@ function noteRow(n: Note, now: number): HTMLElement {
 }
 
 function actions(n: Note): void {
-  WebApp.HapticFeedback.selectionChanged()
+  playSfx('tap')
+  haptic('light')
   const close = () => { mask.remove(); sheet.remove() }
-  const mask = h('div', { class: 'sheet-mask', onclick: close })
+  const mask = h('div', { class: 'sheet-mask reduce-ok', onclick: close })
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': '笔记操作' },
     h('div', { class: 'cap' }, titleOf(n)),
-    h('button', { onclick: () => { close(); store.update(n.id, { pinned: !n.pinned }); scheduleSync(); render() } },
-      n.pinned ? '取消置顶' : '置顶'),
-    h('button', { onclick: () => { close(); share(n) } }, '分享'),
+    h('button', { onclick: () => {
+      close(); store.update(n.id, { pinned: !n.pinned }); scheduleSync(); render()
+      playSfx('ok'); haptic('light'); say(n.pinned ? '已取消置顶' : '已置顶')
+    } }, n.pinned ? '取消置顶' : '置顶'),
+    h('button', { onclick: () => { close(); playSfx('tap'); share(n) } }, '分享'),
     h('button', { onclick: () => { close(); copy(n.text) } }, '复制全文'),
     h('button', { class: 'danger', onclick: () => { close(); softDelete(n) } }, '删除'),
-    h('button', { onclick: close }, '取消'),
+    h('button', { onclick: () => { playSfx('tap'); close() } }, '取消'),
   )
   document.body.append(mask, sheet)
 }
@@ -265,6 +308,7 @@ function share(n: Note): void {
 function softDelete(n: Note): void {
   store.update(n.id, { deleted_at: Date.now() })
   scheduleSync()
+  haptic('warning')
   toast('已移到回收站,30 天内可以恢复')
   if (view.name === 'edit') go({ name: 'list' })
   else render()
@@ -288,13 +332,15 @@ function renderEdit(id: string): void {
     store.update(id, { pinned: !cur.pinned })
     pinBtn.classList.toggle('on', !cur.pinned)
     pinBtn.textContent = cur.pinned ? '置顶' : '已置顶'
-    WebApp.HapticFeedback.selectionChanged()
+    playSfx('ok'); haptic('light'); say(cur.pinned ? '已取消置顶' : '已置顶')
     scheduleSync()
   } }, n.pinned ? '已置顶' : '置顶')
   const tools = h('div', { class: 'tools' },
-    WebApp.isMock || !WebApp.inHost ? h('button', { class: 'back', onclick: () => go({ name: 'list' }) }, '‹ 笔记') : h('span', { class: 'back' }),
+    WebApp.isMock || !WebApp.inHost
+      ? h('button', { class: 'back', onclick: () => { playSfx('tap'); go({ name: 'list' }) } }, '‹ 笔记')
+      : h('span', { class: 'back' }),
     pinBtn,
-    h('button', { onclick: () => { flushEdit(); const cur = store.get(id); if (cur) share(cur) } }, '分享'),
+    h('button', { onclick: () => { playSfx('tap'); flushEdit(); const cur = store.get(id); if (cur) share(cur) } }, '分享'),
     h('button', { onclick: () => copy(area.value) }, '复制'),
     h('button', { class: 'danger', onclick: () => { flushEdit(); const cur = store.get(id); if (cur) softDelete(cur) } }, '删除'),
   )
@@ -309,19 +355,30 @@ function renderEdit(id: string): void {
   if (!n.text) setTimeout(() => area.focus(), 50)
 }
 
-/** 停笔 800ms 存一次;离开编辑页、切到后台时再存一次 */
-function flushEdit(): void {
+/** 停笔 800ms 存一次;离开编辑页、切到后台时再存一次。announce 时给保存反馈 */
+function flushEdit(announce = false): void {
   clearTimeout(saveTimer)
   if (!editing) return
   const text = editing.area.value
   if (text === editing.saved) return
   const err = tooLong(text)
-  if (err) { toast(err, 3200); renderStatus(); return }
+  if (err) {
+    playSfx('error')
+    haptic('error')
+    toast(err, 3200, 'error')
+    renderStatus()
+    return
+  }
   store.update(editing.id, { text })
   editing.saved = text
   closingGuard()
   scheduleSync()
   renderStatus()
+  if (announce) {
+    playSfx('ok')
+    haptic('light')
+    say('已保存')
+  }
 }
 
 function renderStatus(): void {
@@ -347,20 +404,28 @@ function renderTrash(): void {
   for (const n of items) {
     list.append(h('div', { class: 'trash-item' },
       h('span', {}, h('span', { class: 't' }, titleOf(n)), h('span', { class: 'left' }, `${daysLeft(n)} 天后彻底删除`)),
-      h('button', { onclick: () => { store.update(n.id, { deleted_at: null }); scheduleSync(); toast('已恢复'); render() } }, '恢复'),
+      h('button', { onclick: () => {
+        store.update(n.id, { deleted_at: null }); scheduleSync(); toast('已恢复', 2400, 'ok'); render()
+        haptic('light')
+      } }, '恢复'),
       h('button', { class: 'danger', onclick: async () => {
-        if (await confirmAsk('彻底删除这条笔记?删了就找不回来了')) { store.purge(n.id); scheduleSync(); render() }
+        if (await confirmAsk('彻底删除这条笔记?删了就找不回来了')) {
+          store.purge(n.id); scheduleSync(); toast('已彻底删除', 2000, 'error'); haptic('error'); render()
+        }
       } }, '彻底删除'),
     ))
   }
   app.append(h('div', { class: 'page' },
-    WebApp.isMock || !WebApp.inHost ? h('button', { class: 'back', onclick: () => go({ name: 'list' }) }, '‹ 笔记') : null,
+    WebApp.isMock || !WebApp.inHost
+      ? h('button', { class: 'back', onclick: () => { playSfx('tap'); go({ name: 'list' }) } }, '‹ 笔记')
+      : null,
     h('h1', {}, '回收站'),
     h('p', { class: 'muted' }, '删除的笔记在这里保留 30 天,过期自动彻底删除。'),
     items.length ? list : h('p', { class: 'muted' }, '回收站是空的。'),
     items.length ? h('p', {}, h('button', { class: 'linkish', onclick: async () => {
       if (await confirmAsk(`彻底删除回收站里的 ${items.length} 条笔记?`)) {
-        items.forEach((n) => store.purge(n.id)); scheduleSync(); render()
+        items.forEach((n) => store.purge(n.id)); scheduleSync(); toast('回收站已清空', 2400, 'error')
+        haptic('error'); render()
       }
     } }, '清空回收站')) : null,
   ))
@@ -374,9 +439,12 @@ async function confirmAsk(msg: string): Promise<boolean> {
 
 function renderAbout(): void {
   app.append(h('div', { class: 'page' },
-    WebApp.isMock || !WebApp.inHost ? h('button', { class: 'back', onclick: () => go({ name: 'list' }) }, '‹ 笔记') : null,
+    WebApp.isMock || !WebApp.inHost
+      ? h('button', { class: 'back', onclick: () => { playSfx('tap'); go({ name: 'list' }) } }, '‹ 笔记')
+      : null,
     h('h1', {}, '关于记事本'),
     h('p', {}, '超级赞官方小程序。代码在开源仓 miniapps/notepad,也是开发者文档里的参考实现。'),
+    h('p', { class: 'muted' }, '新建、保存、复制、删除、恢复都有轻提示音,由浏览器现场合成(WebAudio),不加载任何音频文件;声音开关只记在这台设备上,在列表页页脚可以切换。'),
     h('h2', { style: 'font-size:1rem;margin-top:1.5rem' }, '你的笔记存在哪'),
     h('ul', {},
       h('li', {}, '存在超级赞云存储里,按「应用 + 你的账号」隔离。别的小程序读不到。'),
@@ -393,16 +461,22 @@ function renderAbout(): void {
 
 // ---------------------------------------------------------------- 启动
 
-applyFallbackTheme()
-WebApp.onEvent('themeChanged', applyFallbackTheme)
+installSfxUnlock()
+followTheme() // 亮暗跟宿主/系统,统一在 <html> 上切 .dark
 store.load()
 store.purgeExpired()
 render()
+syncSound()
 WebApp.ready().catch(() => undefined)
 runSync()
 
 window.addEventListener('online', () => { online = true; runSync() })
-window.addEventListener('offline', () => { online = false; if (view.name !== 'edit') render(); else renderStatus() })
+window.addEventListener('offline', () => {
+  online = false
+  say('离线了,改动先存在本机')
+  if (view.name !== 'edit') render()
+  else renderStatus()
+})
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushEdit()
   else runSync()

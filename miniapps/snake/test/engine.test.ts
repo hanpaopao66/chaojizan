@@ -165,3 +165,20 @@ test('配色:蛇、蛇头、食物、撞到的标记和两种底色的对比度 
     assert.ok(contrast(p.eye, p.head) >= 3, `${name}色 眼睛对蛇头`)
   }
 })
+
+test('save() 字段稳定:1.1 与 1.0 是同一套存档(升级不丢档)', () => {
+  const s = step(newGame(9)).state
+  assert.deepEqual(Object.keys(save(s)).sort(),
+    ['cause', 'cols', 'dir', 'food', 'over', 'rows', 'score', 'seed', 'snake', 'steps', 'v', 'won'])
+  const back = load(JSON.parse(JSON.stringify(save(s))))
+  assert.ok(back)
+  assert.equal(back.steps, s.steps)
+})
+
+test('turn/step 是纯函数:不修改传进来的状态(界面能先画再替换)', () => {
+  const s = newGame(5)
+  const before = JSON.stringify(s)
+  turn(s, 'left')
+  step(s)
+  assert.equal(JSON.stringify(s), before)
+})

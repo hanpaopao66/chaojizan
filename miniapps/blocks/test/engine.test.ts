@@ -230,3 +230,21 @@ test('最好成绩:分数、行数、等级取大,局数累加,两台设备合�
     { v: 1, score: 7, lines: 50, level: 6, games: 9 })
   assert.equal(loadBest({ v: 3 }), null)
 })
+
+test('save() 字段稳定:1.1 与 1.0 是同一套存档(升级不丢档)', () => {
+  const s = newGame(21)
+  assert.deepEqual(Object.keys(save(s)).sort(),
+    ['bag', 'cells', 'lines', 'next', 'over', 'piece', 'score', 'seed', 'v'])
+  const back = load(JSON.parse(JSON.stringify(save(structuredClone(s)))))
+  assert.ok(back)
+  assert.equal(back.score, s.score)
+})
+
+test('tick/hardDrop 是纯函数:不修改传进来的状态(界面能先画再替换)', () => {
+  const s = newGame(8)
+  const before = JSON.stringify(s)
+  tick(s, 16)
+  hardDrop(s)
+  move(s, -1)
+  assert.equal(JSON.stringify(s), before)
+})
