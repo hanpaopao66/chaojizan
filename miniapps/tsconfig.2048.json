@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "2048/src",
+    "2048/test",
+    "shared/src",
+    "shared/test",
+    "../packages/miniapp-sdk/src",
+    "types.d.ts"
+  ]
+}

@@ -38,7 +38,19 @@
     "typecheck:tower": "tsc --noEmit -p tsconfig.tower.json",
     "test:tower": "node scripts/test.mjs tower",
     "meta": "node scripts/check_miniapp_meta.mjs",
-    "qa": "node scripts/qa_miniapps.mjs"
+    "qa": "node scripts/qa_miniapps.mjs",
+    "typecheck:notepad": "tsc --noEmit -p tsconfig.notepad.json",
+    "test:notepad": "node scripts/test.mjs notepad",
+    "typecheck:2048": "tsc --noEmit -p tsconfig.2048.json",
+    "test:2048": "node scripts/test.mjs 2048",
+    "typecheck:snake": "tsc --noEmit -p tsconfig.snake.json",
+    "test:snake": "node scripts/test.mjs snake",
+    "typecheck:blocks": "tsc --noEmit -p tsconfig.blocks.json",
+    "test:blocks": "node scripts/test.mjs blocks",
+    "typecheck:minesweeper": "tsc --noEmit -p tsconfig.minesweeper.json",
+    "test:minesweeper": "node scripts/test.mjs minesweeper",
+    "typecheck:gomoku": "tsc --noEmit -p tsconfig.gomoku.json",
+    "test:gomoku": "node scripts/test.mjs gomoku"
   },
   "devDependencies": {
     "typescript": "5.9.3",
