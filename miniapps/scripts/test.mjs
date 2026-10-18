@@ -14,7 +14,7 @@ import { buildSync } from 'esbuild'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const apps = ['shared', 'notepad', '2048', 'snake', 'blocks', 'minesweeper', 'gomoku', 'critters',
-  'sandbox', 'cards', 'tactical']
+  'sandbox', 'cards', 'tactical', 'tower']
 const only = process.argv.slice(2)
 const unknown = only.filter((a) => !apps.includes(a))
 if (unknown.length) {

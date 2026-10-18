@@ -11,10 +11,11 @@
 #   bash scripts/build_miniapp.sh sandbox     # → miniapps/sandbox/dist/sandbox.zip(方块原野)
 #   bash scripts/build_miniapp.sh cards       # → miniapps/cards/dist/cards.zip(星火牌局)
 #   bash scripts/build_miniapp.sh tactical    # → miniapps/tactical/dist/tactical.zip(突击时刻)
+#   bash scripts/build_miniapp.sh tower       # → miniapps/tower/dist/tower.zip(瓜田防线:塔防)
 #
 # 打印的 SHA-256 应该和线上详情页公示的一致。上传用 server/scripts/publish_official_miniapp.py。
 set -euo pipefail
-app="${1:?用法:build_miniapp.sh <notepad|2048|snake|blocks|minesweeper|gomoku|critters|sandbox|cards|tactical>}"
+app="${1:?用法:build_miniapp.sh <notepad|2048|snake|blocks|minesweeper|gomoku|critters|sandbox|cards|tactical|tower>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dir="$root/miniapps"
 [ -d "$dir/$app" ] || { echo "没有 miniapps/$app"; exit 1; }

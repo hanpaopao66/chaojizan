@@ -15,5 +15,6 @@
     "snake/src", "snake/test", "blocks/src", "blocks/test", "minesweeper/src", "minesweeper/test",
     "gomoku/src", "gomoku/test", "critters/src", "critters/test",
     "sandbox/src", "sandbox/test", "cards/src", "cards/test", "tactical/src", "tactical/test",
+    "tower/src", "tower/test",
     "../packages/miniapp-sdk/src", "types.d.ts"]
 }

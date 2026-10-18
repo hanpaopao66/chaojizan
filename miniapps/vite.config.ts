@@ -1,5 +1,5 @@
 // 官方小程序共用一份构建配置:vite build --mode <名字>
-// (notepad / 2048 / snake / blocks / minesweeper / gomoku / critters / sandbox / cards / tactical)
+// (notepad / 2048 / snake / blocks / minesweeper / gomoku / critters / sandbox / cards / tactical / tower)
 // 产物在 <app>/dist/pkg,再由 scripts/build_miniapp.sh 打成可复现的 zip。
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
@@ -12,6 +12,8 @@ const APPS: Record<string, number> = {
   notepad: 5190, '2048': 5191, snake: 5192, blocks: 5193, minesweeper: 5194, gomoku: 5195, critters: 5196,
   // 三个「精品」游戏:方块原野(沙盒)、星火牌局(卡牌对战)、突击时刻(战术射击)
   sandbox: 5197, cards: 5198, tactical: 5199,
+  // 瓜田防线:塔防
+  tower: 5200,
 }
 
 export default defineConfig(({ mode }) => {

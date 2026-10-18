@@ -103,6 +103,7 @@ analyze:
 # 小程序:SDK(假宿主)、官方小程序的纯函数、文档参考页与 SDK 导出一致(DEV-PROMPTS-39 #338)
 	@cd packages/miniapp-sdk && npm test >/dev/null && echo "== miniapp-sdk 测试 ✓"
 	@cd miniapps && npx tsc -p . && node scripts/test.mjs >/dev/null && echo "== 官方小程序 tsc + 测试 ✓"
+	@cd miniapps && node scripts/check_miniapp_meta.mjs && echo "== 官方小程序标准化检查 ✓"
 	@node scripts/check_sdk_docs.mjs
 
 # 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)

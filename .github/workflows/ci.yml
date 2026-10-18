@@ -259,7 +259,8 @@ jobs:
       - name: 小程序 SDK 与官方小程序
         run: |
           (cd packages/miniapp-sdk && npm ci --no-audit --no-fund >/dev/null && npm test)
-          (cd miniapps && npm ci --no-audit --no-fund >/dev/null && npx tsc -p . && npm test)
+          (cd miniapps && npm ci --no-audit --no-fund >/dev/null && npx tsc -p . && npm test
+            && node scripts/check_miniapp_meta.mjs)
           node scripts/check_sdk_docs.mjs
       # 频道色是功能不是装饰:首页一排图标,用户要一眼找到"打车"。
       # 「能不能一眼分开」是可以量的,而且**只能靠量** ——
