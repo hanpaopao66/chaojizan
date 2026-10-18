@@ -4,7 +4,7 @@
 // 但事件类的东西(击杀、炸弹、胜负)走 flashBanner / flashHit / announce,该立刻出现就立刻出现。
 
 import { $ } from '../../shared/src/ui'
-import { BOMB_TIME, MatchState, Round } from './match'
+import { BOMB_TIME, MatchState, Round, canPlant } from './match'
 
 const hudRound = $('hud-round')
 const scoreMe = $('score-me')
@@ -22,6 +22,7 @@ const hudHint = $('hud-hint')
 const bannerEl = $('hud-banner')
 const hitEl = $('hud-hit')
 const live = $('live')
+const btnPlant = $<HTMLButtonElement>('btn-plant')
 
 let lastHudAt = 0
 let bannerTimer = 0
@@ -124,6 +125,15 @@ export function updateHud(round: Round, match: MatchState, info: HudInfo, force 
     bombStatus.hidden = true
   }
 
+  // 手机上的「安放」按钮:站到 A/B 点上才出现;按住不放等于按住 E
+  if (info.coarse) {
+    const planting = b.state === 'planting'
+    const plantable = !planting && canPlant(round)
+    btnPlant.hidden = !(planting || plantable)
+    if (planting) btnPlant.textContent = `安放中 ${Math.round(b.plant * 100)}%`
+    else if (plantable && p.site) btnPlant.textContent = `安放 ${p.site}`
+  }
+
   hudHint.hidden = info.coarse || round.phase === 'over'
   hudHint.textContent = 'WASD 移动 · 鼠标瞄准 · 左键开火 · R 换弹 · E 安放 · Esc 暂停'
 }
@@ -135,6 +145,8 @@ export function resetHud(): void {
   bannerEl.hidden = true
   hitEl.hidden = true
   bombStatus.hidden = true
+  btnPlant.hidden = true
+  // 触屏时上面的 updateHud 会按 canPlant 重新显隐;这里只清掉上一局残留
 }
 
 // 炸弹计时的进度(0..1),给音效决定「滴」得多急

@@ -43,6 +43,7 @@ export class Table {
     onHero: (side) => this.onHero(side),
     onEndTurn: () => this.onEndTurn(),
     onPause: () => this.hooks.onPause(),
+    onBlank: () => this.onBlank(),
   })
 
   private st: GameState | null = null
@@ -381,6 +382,8 @@ export class Table {
   }
 
   private onKey(e: KeyboardEvent): void {
+    // Overlay 的 Esc 处理在窗口上先跑:它已经关掉弹层时不要再把暂停菜单打开一次
+    if (e.defaultPrevented) return
     const s = this.st
     if (!s || this.view.root.hidden || e.metaKey || e.ctrlKey || e.altKey) return
     const overlayEl = document.getElementById('overlay')
@@ -408,6 +411,12 @@ export class Table {
       e.preventDefault()
       this.onCard(9)
     }
+  }
+
+  /** 点空白:取消当前选中的牌 / 攻击者 */
+  private onBlank(): void {
+    if (this.paused || this.ended) return
+    if (this.mode !== 'idle') this.cancelSelection()
   }
 
   private cancelSelection(): void {

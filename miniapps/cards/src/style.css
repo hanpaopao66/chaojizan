@@ -110,8 +110,9 @@ body {
 
 /* ---------------------------------------------------------------- 首页 */
 
-.topbar { display: flex; align-items: center; gap: .4rem; flex: none; }
+.topbar { display: flex; align-items: center; gap: .4rem; row-gap: .3rem; flex: none; flex-wrap: wrap; }
 .brandmark {
+  flex: none; white-space: nowrap;
   font-family: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", serif;
   font-weight: 700; font-size: .95rem; color: var(--gold); letter-spacing: .1em;
 }

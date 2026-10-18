@@ -59,6 +59,8 @@ const overlay = new Overlay($('overlay'), () => {
 
 let profile: Profile = newProfile()
 let choice: Choice = { hero: 'forge', level: 'normal' }
+/** 结算弹层开着:宿主返回键要回首页,而不是只把弹层藏起来(否则会卡在已结束的牌桌) */
+let resultShown = false
 
 const table = new Table({
   onEnd: (r) => finishMatch(r),
@@ -73,6 +75,7 @@ const app: App = {
   saveSummary,
   overlay,
   goHome: () => {
+    resultShown = false
     overlay.hide()
     table.stop()
     renderHome()
@@ -83,6 +86,7 @@ const app: App = {
   },
   pickLevel: (level) => { choice = { ...choice, level } },
   start: () => {
+    resultShown = false
     overlay.hide()
     void startMatch()
   },
@@ -174,6 +178,7 @@ function finishMatch(r: MatchResult): void {
   slot.change({ v: 1, game: null, level: r.level })
   void slot.flush()
   const view: ResultView = { ...r, streak: profile.streak, bestStreak: profile.bestStreak }
+  resultShown = true
   result(app, view)
 }
 
@@ -233,6 +238,11 @@ WebApp.SettingsButton.show().onClick(() => {
 })
 WebApp.BackButton.onClick(() => {
   if (overlay.open) {
+    // 结算页:返回 = 回首页(结算弹层的 onDismiss 也是回首页,这里走同一条路)
+    if (resultShown) {
+      app.goHome()
+      return
+    }
     overlay.hide()
     if (table.active) table.resume()
     return

@@ -24,6 +24,8 @@ export interface ViewHandlers {
   onHero(side: Side): void
   onEndTurn(): void
   onPause(): void
+  /** 点牌桌空白处(不是按钮的地方) */
+  onBlank(): void
 }
 
 /** 手牌张数 → 卡面宽度(rem):牌越多越窄,尽量都看得见 */
@@ -89,6 +91,13 @@ export class TableView {
     this.els.foeBoard.addEventListener('click', (e) => this.boardClick(e, 1))
     this.els.endTurn.addEventListener('click', () => cb.onEndTurn())
     this.els.pause.addEventListener('click', () => cb.onPause())
+    // 点牌桌空白处取消选牌:手牌、随从、英雄和按钮都是 <button>,只把非按钮的空白交给外面判断
+    this.root.addEventListener('pointerdown', (e) => {
+      if (this.root.hidden) return
+      const target = e.target as HTMLElement | null
+      if (!target || !this.root.contains(target) || target.closest('button')) return
+      this.cb.onBlank()
+    })
   }
 
   // ---------------------------------------------------------------- 开局 / 清空

@@ -14,10 +14,12 @@ import {
 import { play as sfx, resume as audioResume, setSound, soundOn, suspend as audioSuspend, unlock as audioUnlock } from './audio'
 import { DIFFICULTY_LABELS, Difficulty } from './combat'
 import { announce, bombUrgency, flashBanner, flashHit, formatClock, resetHud, updateHud } from './hud'
-import { GameMap, Vec, angleTo, parseMap } from './map'
+import { GameMap, Vec, WORLD_H, WORLD_W, angleTo, lineOfSight, parseMap, siteCenter } from './map'
 import {
-  GameEvent, MatchState, OverReason, PlayerInput, Round, accuracyOf, advance, finishRound, newMatch, newRound, nextRound,
+  GameEvent, MatchState, OverReason, PlayerInput, Round, accuracyOf, advance, canPlant, finishRound, newMatch, newRound,
+  nextRound,
 } from './match'
+import { navFromMap, routeBetween } from './nav'
 import { EMPTY_PROFILE, Profile, loadProfile, mergeProfile, recordMatch, withSettings } from './profile'
 import { Renderer, readPalette } from './render'
 import { renderHome, showAbout, showControls } from './screens'
@@ -68,6 +70,10 @@ let paused = false
 let matchSaved = false
 let lastTs = 0
 let roundOverTimer = 0
+/** 当前这一个 rAF 的 id:重开前一局要先停掉旧循环,不然会叠加 */
+let rafId = 0
+/** 只给开发服务器上的测试钩子看:一直在涨说明只有一层循环 */
+let frameCount = 0
 
 // ---------------------------------------------------------------- 输入
 
@@ -198,22 +204,27 @@ function showRoundOver(): void {
   }, { cls: won ? 'result-win' : 'result-lose' })
 }
 
+/** 整场比赛一结束就记战绩(不是等玩家点「查看战报」才记),matchSaved 保证只记一次 */
+function saveMatchResult(): void {
+  if (!match || !match.over || matchSaved) return
+  const m = match
+  matchSaved = true
+  profile = recordMatch(profile, {
+    won: m.over === 'win',
+    kills: m.stats.kills,
+    plants: m.stats.plants,
+    shots: m.stats.shots,
+    hits: m.stats.hits,
+  })
+  slot.setBest(profile)
+  void slot.flush()
+}
+
 function showMatchOver(): void {
   if (!match || !match.over) return
   const m = match
   const won = m.over === 'win'
-  if (!matchSaved) {
-    matchSaved = true
-    profile = recordMatch(profile, {
-      won,
-      kills: m.stats.kills,
-      plants: m.stats.plants,
-      shots: m.stats.shots,
-      hits: m.stats.hits,
-    })
-    slot.setBest(profile)
-    void slot.flush()
-  }
+  saveMatchResult()
   sfx(won ? 'win' : 'lose')
   WebApp.HapticFeedback.notificationOccurred(won ? 'success' : 'error')
   announce(won ? '比赛胜利' : '比赛失败')
@@ -247,6 +258,8 @@ function statGrid(items: Array<[string, string]>): HTMLElement {
 // ---------------------------------------------------------------- 一局比赛
 
 function startMatch(): void {
+  // 重开/再来一局:先把上一局的渲染循环停掉,否则每开一局多叠一层 rAF
+  stopLoop()
   audioUnlock()
   sfx('click', { vol: 0.4 })
   overlay.hide()
@@ -265,7 +278,7 @@ function startMatch(): void {
   // 点开始才进全屏、锁横屏(网页版宿主没有这两项时会失败,失败就算了)
   void WebApp.requestFullscreen().catch(() => undefined)
   void WebApp.lockOrientation().catch(() => undefined)
-  window.requestAnimationFrame(loop)
+  rafId = window.requestAnimationFrame(loop)
   canvas.focus()
 }
 
@@ -289,6 +302,7 @@ function goHome(): void {
   window.clearTimeout(roundOverTimer)
   overlay.hide()
   running = false
+  stopLoop()
   paused = false
   match = null
   round = null
@@ -314,9 +328,17 @@ function refreshHud(force = false): void {
   updateHud(round, match, { coarse, active: running && !gameEl.hidden }, force)
 }
 
+/** 停掉当前渲染循环;startMatch / goHome 都从这里过,保证整个页面只有一层循环 */
+function stopLoop(): void {
+  if (rafId) window.cancelAnimationFrame(rafId)
+  rafId = 0
+}
+
 function loop(ts: number): void {
+  rafId = 0
   if (!running) return
-  window.requestAnimationFrame(loop)
+  rafId = window.requestAnimationFrame(loop)
+  frameCount++
   const dt = lastTs === 0 ? 0 : Math.min(0.05, Math.max(0, (ts - lastTs) / 1000))
   lastTs = ts
   renderer.resize()
@@ -419,6 +441,7 @@ function handleEvents(events: GameEvent[]): void {
         break
       case 'roundOver':
         if (round && match) match = finishRound(match, round)
+        saveMatchResult()
         if (ev.side === 'player') {
           sfx('win')
           announce(ev.reason === 'exploded' ? '回合胜利:炸弹爆炸' : '回合胜利')
@@ -467,6 +490,8 @@ function readInput(): PlayerInput {
 // ---------------------------------------------------------------- 键盘鼠标
 
 window.addEventListener('keydown', (e) => {
+  // Overlay 的 Esc 处理已经 preventDefault 了(它自己 hide + onDismiss),这里别再补一刀 pauseGame
+  if (e.defaultPrevented) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
   const code = e.code
   if (MOVE_KEYS.has(code)) {
@@ -477,6 +502,7 @@ window.addEventListener('keydown', (e) => {
     reloadQueued = true
     e.preventDefault()
   } else if (code === 'KeyE') {
+    keys.add('KeyE')
     e.preventDefault()
   } else if (code === 'KeyM') {
     toggleSound()
@@ -574,11 +600,17 @@ if (coarse) {
     reloadQueued = true
     audioUnlock()
   })
-  btnPlant.addEventListener('pointerdown', (e) => { e.preventDefault(); plantButtonHeld = true; audioUnlock() })
+  btnPlant.addEventListener('pointerdown', (e) => {
+    e.preventDefault()
+    plantButtonHeld = true
+    audioUnlock()
+    // 手指按住 2.5 秒不能中途丢:把指针捕获到按钮上,滑出一点也还算按住
+    try { btnPlant.setPointerCapture(e.pointerId) } catch (_) { /* 老浏览器 */ }
+  })
   const endPlant = (): void => { plantButtonHeld = false }
   btnPlant.addEventListener('pointerup', endPlant)
   btnPlant.addEventListener('pointercancel', endPlant)
-  btnPlant.addEventListener('pointerleave', endPlant)
+  btnPlant.addEventListener('lostpointercapture', endPlant)
 } else {
   touchEl.remove()
 }
@@ -650,3 +682,66 @@ slot.restoreCloud().then((restored) => {
   if (restored === 'cleared') profile = EMPTY_PROFILE
   if (!running) renderHomeScreen()
 }).finally(ready)
+
+// 只在开发服务器上有的测试钩子:浏览器端到端(自动走位/开枪/安放)需要读对局状态,只读、不改任何游戏数据。
+// 生产构建里 import.meta.env.DEV 是 false,整段会被去掉 —— 打包产物里搜不到 __tactical。
+if (import.meta.env.DEV) {
+  const nav = navFromMap(map)
+  const dev: Record<string, unknown> = {}
+  dev.state = () => {
+    if (!round || !match) return null
+    return {
+      running,
+      paused,
+      coarse,
+      phase: round.phase,
+      clock: round.clock,
+      elapsed: round.elapsed,
+      roundNo: match.round,
+      score: [match.scorePlayer, match.scoreGuard],
+      matchOver: match.over,
+      player: {
+        x: round.player.pos.x,
+        y: round.player.pos.y,
+        hp: round.player.hp,
+        alive: round.player.alive,
+        site: round.player.site,
+        mag: round.player.gun.mag,
+        reserve: round.player.gun.reserve,
+      },
+      guards: round.guards.map((g) => ({
+        id: g.id, x: g.pos.x, y: g.pos.y, hp: g.hp, alive: g.alive, mode: g.brain.mode,
+      })),
+      bomb: {
+        state: round.bomb.state,
+        x: round.bomb.pos ? round.bomb.pos.x : null,
+        y: round.bomb.pos ? round.bomb.pos.y : null,
+        plant: round.bomb.plant,
+        timer: round.bomb.timer,
+        defuse: round.bomb.defuse,
+      },
+    }
+  }
+  dev.route = (from: Vec, to: Vec): Vec[] => routeBetween(nav, from, to)
+  dev.site = (id: 'A' | 'B'): Vec => siteCenter(id === 'A' ? map.siteA : map.siteB)
+  dev.los = (a: Vec, b: Vec): boolean => lineOfSight(map, a, b)
+  dev.canPlant = (): boolean => (round ? canPlant(round) : false)
+  dev.placeAtSite = (id: 'A' | 'B'): boolean => {
+    if (!round || round.phase === 'over') return false
+    const center = siteCenter(id === 'A' ? map.siteA : map.siteB)
+    round.player.pos = { x: center.x, y: center.y }
+    round.player.site = id
+    return true
+  }
+  dev.frames = (): number => frameCount
+  dev.screenAt = (p: Vec): Vec => {
+    const canvasEl = document.getElementById('field') as HTMLCanvasElement
+    const rect = canvasEl.getBoundingClientRect()
+    const scale = Math.min(rect.width / WORLD_W, rect.height / WORLD_H)
+    const ox = (rect.width - WORLD_W * scale) / 2
+    const oy = (rect.height - WORLD_H * scale) / 2
+    return { x: rect.left + ox + p.x * scale, y: rect.top + oy + p.y * scale }
+  }
+  dev.world = (): { w: number; h: number } => ({ w: WORLD_W, h: WORLD_H })
+  ;(window as unknown as { __tactical?: Record<string, unknown> }).__tactical = dev
+}

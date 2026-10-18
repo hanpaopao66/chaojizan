@@ -293,6 +293,8 @@ button { -webkit-user-select: none; user-select: none; }
   pointer-events: auto; width: 3.6rem; height: 3.6rem; border-radius: 50%; font-size: .8125rem; font-weight: 800;
   color: #F4F8F4; background: var(--hud-panel); border: 2px solid var(--hud-line);
   box-shadow: 0 3px 10px rgba(0, 0, 0, .3);
+  /* 按住安放要 2.5 秒:不能让它被浏览器的滚动/长按手势取消 */
+  touch-action: none; -webkit-touch-callout: none;
 }
 .tbtn[hidden] { display: none; }
 .tbtn.plant { background: rgba(190, 74, 40, .88); border-color: #FFD2C4; }

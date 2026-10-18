@@ -181,3 +181,24 @@ test('斩杀里会先处理挡路的嘲讽:困难档能找到「先打嘲讽、�
   }
   assert.equal(now.over?.winner, 1)
 })
+
+test('困难档斩杀搜索有硬上限:大场面也在 2 秒内返回,不会把设备算卡死', () => {
+  // 双方各 7 个 8/8 嘲讽巨像 + 电脑手里 10 张伤害牌:分支极多、这回合又杀不死,
+  // 正是审查里把 DFS 撑到 59 秒的那种局面。加了节点数 / 毫秒预算后必须很快收手。
+  let s = fresh(901)
+  s = board(s, 1, ['giant', 'giant', 'giant', 'giant', 'giant', 'giant', 'giant'])
+  s = board(s, 0, ['giant', 'giant', 'giant', 'giant', 'giant', 'giant', 'giant'])
+  s = hand(s, 1, ['f_bolt', 'f_bolt', 'f_bolt', 'f_bolt', 'f_bolt', 'f_bolt', 'f_bolt', 'f_bolt', 'f_bolt', 'f_bolt'], 10)
+  s = setHp(s, 0, 30)
+  s = setTurn(s, 1)
+  const t0 = Date.now()
+  const lethal = findLethal(s, 1, 'hard')
+  const searchMs = Date.now() - t0
+  assert.equal(lethal, null, '这个局面这回合杀不死,搜索应该返回 null(被预算截断也一样)')
+  assert.ok(searchMs < 2000, `斩杀搜索用了 ${searchMs}ms,超过预算`)
+  const t1 = Date.now()
+  const a = aiNext(s, 'hard')
+  const took = Date.now() - t1
+  assert.ok(took < 2000, `AI 决策用了 ${took}ms,超过预算`)
+  assert.ok(legalActions(s).some((x) => same(x, a)), 'AI 还是得返回一个合法动作')
+})

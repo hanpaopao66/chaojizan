@@ -48,6 +48,26 @@ test('两台设备合并:累计数据取大的;本机没打过就听云端的设
   assert.equal(fresh.sound, false)
 })
 
+test('合并战绩不会自相矛盾:wins + losses 永远不超过 games', () => {
+  const mk = (games: number, wins: number, losses: number): Profile => ({ ...EMPTY_PROFILE, games, wins, losses })
+  const pairs: Array<[Profile, Profile]> = [
+    [mk(4, 3, 1), mk(4, 1, 3)], // 两台设备各赢 3/1 场:并集是 3 胜 3 负,至少 6 场
+    [mk(10, 8, 2), mk(2, 0, 2)],
+    [mk(0, 0, 0), mk(7, 4, 3)],
+    [mk(1, 0, 1), mk(1, 1, 0)],
+  ]
+  for (const [a, b] of pairs) {
+    const m = mergeProfile(a, b)
+    assert.ok(m.wins + m.losses <= m.games, `合并出 ${m.games} 场 ${m.wins} 胜 ${m.losses} 负`)
+    assert.ok(m.wins >= Math.max(a.wins, b.wins), '胜场不会比任何一台设备少')
+    assert.ok(m.losses >= Math.max(a.losses, b.losses), '负场不会比任何一台设备少')
+    assert.ok(m.games >= Math.max(a.games, b.games), '场次不会比任何一台设备少')
+  }
+  const pairsA = mk(4, 3, 1)
+  const pairsB = mk(4, 1, 3)
+  assert.equal(mergeProfile(pairsA, pairsB).games, 6, '4 场 3 胜 + 4 场 3 负 至少是 6 场')
+})
+
 test('一场比赛:赢了加连胜、输了清零、最佳连胜取最大', () => {
   let p = EMPTY_PROFILE
   const win = { won: true, kills: 3, plants: 1, shots: 10, hits: 5 }

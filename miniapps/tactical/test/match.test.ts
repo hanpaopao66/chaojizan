@@ -4,7 +4,7 @@ import { WORLD_H, WORLD_W, circleBlocked, parseMap, tileCenter, tileCol, tileRow
 import { Difficulty } from '../src/combat'
 import {
   BOMB_TIME, DEFUSE_TIME, FREEZE_TIME, GameEvent, PLAYER_HP, PlayerInput, ROUND_TIME, Round, accuracyOf, advance,
-  finishRound, newMatch, newRound, nextRound, playerSeesGuard,
+  canPlant, finishRound, newMatch, newRound, nextRound, playerSeesGuard,
 } from '../src/match'
 
 const map = parseMap()
@@ -104,6 +104,19 @@ test('安放炸弹:不在炸弹点安不了;在 A 点按住 2.5 秒才成;中途
   const reset = run(mid, 0.2, planting).round
   assert.equal(reset.bomb.state, 'carried')
   assert.equal(reset.bomb.plant, 0)
+})
+
+test('能不能安放(canPlant):界面按钮和引擎共用同一个判断', () => {
+  const round = liveRound()
+  assert.equal(canPlant(round), false, '出生点不在炸弹点上')
+  round.player.pos = tileCenter(37, 4)
+  const onSite = run(round, 0.05).round
+  assert.equal(onSite.player.site, 'A')
+  assert.equal(canPlant(onSite), true)
+  assert.equal(canPlant({ ...onSite, phase: 'freeze' }), false, '冻结阶段不能安')
+  assert.equal(canPlant({ ...onSite, player: { ...onSite.player, alive: false } }), false, '死了不能安')
+  assert.equal(canPlant({ ...onSite, bomb: { ...onSite.bomb, state: 'planting' } }), true, '正在安放时还成立')
+  assert.equal(canPlant(plantedAtA()), false, '已经安好就不能再安')
 })
 
 test('炸弹 30 秒后爆炸:进攻方赢下这一回合', () => {

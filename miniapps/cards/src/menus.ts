@@ -45,12 +45,6 @@ function topbar(app: App): HTMLElement {
   const mark = el('span', '单机 · 卡牌对战', 'brandmark')
   mark.setAttribute('aria-hidden', 'true')
   bar.append(mark, el('span', '', 'spacer'))
-  const p = app.profile()
-  if (p.games > 0) {
-    const stats = el('span', `对局 ${p.games} · 胜 ${p.wins}`, 'pill small')
-    stats.title = `胜率 ${pct(p.wins, p.games)}%,当前连胜 ${p.streak},最佳连胜 ${p.bestStreak}`
-    bar.append(stats)
-  }
   const snd = button(soundOn() ? '音效开' : '音效关', () => {
     setSound(!soundOn())
     if (soundOn()) sfx('tap')

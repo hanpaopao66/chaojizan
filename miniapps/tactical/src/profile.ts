@@ -95,11 +95,15 @@ function bigger(a: number, b: number): number {
  */
 export function mergeProfile(local: Profile, cloud: Profile): Profile {
   const fresh = local.games === 0 && local.kills === 0
+  // 两台设备上的胜负都只增不减,合并后「至少赢过 wins 场、至少输过 losses 场」;
+  // 场次不能少于胜负之和,否则会出现「4 场 3 胜 4 负」这种自相矛盾的存档。
+  const wins = bigger(local.wins, cloud.wins)
+  const losses = bigger(local.losses, cloud.losses)
   return {
     v: 1,
-    games: bigger(local.games, cloud.games),
-    wins: bigger(local.wins, cloud.wins),
-    losses: bigger(local.losses, cloud.losses),
+    games: Math.max(bigger(local.games, cloud.games), wins + losses),
+    wins,
+    losses,
     streak: fresh ? cloud.streak : local.streak,
     bestStreak: bigger(local.bestStreak, cloud.bestStreak),
     kills: bigger(local.kills, cloud.kills),

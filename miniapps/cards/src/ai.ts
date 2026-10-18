@@ -102,7 +102,27 @@ function lethalCandidates(s: GameState, side: Side): Action[] {
   return out.slice(0, 14)
 }
 
-function searchLethal(s: GameState, side: Side, depth: number): Action[] | null {
+/**
+ * 斩杀搜索的预算。分支会随场面和手牌指数涨:大场面下不设上限会把手机算到卡死
+ * (审查时构造过一个局面,搜索跑了 59 秒)。节点数或毫秒数一到就放弃这份搜索,
+ * 调用方(findLethal)返回 null,aiNext 退回普通的启发式评分 —— 只是这回合不找斩杀,不会卡住。
+ */
+interface SearchBudget {
+  nodes: number
+  /** 到这个时间点必须收手(Date.now 毫秒) */
+  deadline: number
+  aborted: boolean
+}
+
+const MAX_NODES = 2500
+const HARD_MS = 120
+const NORMAL_MS = 30
+
+function searchLethal(s: GameState, side: Side, depth: number, budget: SearchBudget): Action[] | null {
+  if (budget.aborted || budget.nodes++ > MAX_NODES || Date.now() > budget.deadline) {
+    budget.aborted = true
+    return null
+  }
   if (s.over) return s.over.winner === side ? [] : null
   const them = s.sides[foe(side)]
   if (them.hp <= 0) return []
@@ -110,18 +130,23 @@ function searchLethal(s: GameState, side: Side, depth: number): Action[] | null 
   // 现在手里所有能打出去的东西加起来都打不死:剪掉
   if (them.hp > maxBurst(s, side)) return null
   for (const a of lethalCandidates(s, side)) {
+    if (budget.aborted) return null
     const r = applyAction(s, a)
     if (!r.ok) continue
-    const rest = searchLethal(r.state, side, depth - 1)
+    const rest = searchLethal(r.state, side, depth - 1, budget)
     if (rest) return [a, ...rest]
+    if (budget.aborted) return null
   }
   return null
 }
 
-/** 找到这回合就能赢的第一步;找不到返回 null */
+/** 找到这回合就能赢的第一步;找不到(或搜索超预算)返回 null */
 export function findLethal(s: GameState, side: Side, level: Level): Action | null {
   const depth = level === 'hard' ? 12 : 1
-  const seq = searchLethal(s, side, depth)
+  const budget: SearchBudget = {
+    nodes: 0, deadline: Date.now() + (level === 'hard' ? HARD_MS : NORMAL_MS), aborted: false,
+  }
+  const seq = searchLethal(s, side, depth, budget)
   return seq && seq.length > 0 ? seq[0] : null
 }
 

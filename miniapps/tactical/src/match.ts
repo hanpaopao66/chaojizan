@@ -273,6 +273,17 @@ export function newRound(match: MatchState, map: GameMap): Round {
   }
 }
 
+/**
+ * 现在能不能安放炸弹:活着、在回合里、站在 A/B 炸弹点上、炸弹还没安。
+ * 界面(手机上的「安放」按钮)和引擎(按住 2.5 秒的进度)共用这一个判断,免得两边说不一样。
+ */
+export function canPlant(round: Round): boolean {
+  return round.phase === 'live'
+    && round.player.alive
+    && round.player.site !== null
+    && (round.bomb.state === 'carried' || round.bomb.state === 'planting')
+}
+
 // ---------------------------------------------------------------- 每帧推进
 
 /** 推一帧。dt 会被夹到 MAX_DT,暂停/切后台时不调用就行 */
@@ -391,8 +402,7 @@ function stepPlayer(r: Round, dt: number, input: PlayerInput, events: GameEvent[
   }
 
   // 安放:要在炸弹点上按住 2.5 秒;松手或者走开就从头来
-  const canPlant = p.site !== null && (r.bomb.state === 'carried' || r.bomb.state === 'planting')
-  if (input.interact && canPlant) {
+  if (input.interact && canPlant(r)) {
     if (r.bomb.state === 'carried') {
       r.bomb.state = 'planting'
       r.bomb.plant = 0
