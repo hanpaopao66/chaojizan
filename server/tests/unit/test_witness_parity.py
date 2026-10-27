@@ -116,5 +116,9 @@ def test_另外三个实现的测试都在_都接在make和CI上():
     unit_job = ci.split("\n  unit:\n", 1)[1].split("\n  flutter:\n", 1)[0]
     assert "actions/setup-go" in unit_job and "make unit" in unit_job, \
         "CI 的单测 job 没装 Go(make unit 要跑 go test)"
-    # Dart 那份:packages/shared 的单测在 make analyze 和 CI「dart 单测」里本来就全跑
-    assert "packages/shared" in make.split("\nanalyze:", 1)[1].split("\nunit:", 1)[0]
+    # Dart 那份:packages/shared 的单测在 make analyze 和 CI「dart 单测」里本来就全跑。
+    # make analyze 的重活挪进了并行脚本(scripts/analyze_parallel.sh),要看它确实被调、确实跑 shared 的单测
+    analyze = make.split("\nanalyze:", 1)[1].split("\nunit:", 1)[0]
+    assert "scripts/analyze_parallel.sh" in analyze, "make analyze 没调并行脚本"
+    par = (REPO / "scripts/analyze_parallel.sh").read_text(encoding="utf-8")
+    assert "packages/shared" in par and "flutter test --no-pub" in par, "make analyze 没跑 packages/shared 的单测"
