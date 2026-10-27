@@ -5,7 +5,7 @@
          代替 src/store/AndroidManifest.xml 并入 release 清单(一个构建类型只能挂一份清单,
          所以商店包那一条也抄在这里)。说明见 packages/shared/lib/src/edition.dart。
 
-         单门店版只有一家店的点餐:没有聊天(按住说话、拍照、通话)、扫一扫、小程序。
+         单门店版只有一家店的点餐:没有聊天(按住说话、拍照、通话、系统分享接收)、扫一扫、小程序。
          这些功能的权限留在清单里,检测报告就是「申请与业务无关的权限」;
          它的隐私政策附录也写了「不申请相机、麦克风、通讯录权限」——两边要对得上。
          插件(flutter_webrtc、record、mobile_scanner)经清单合并夹带的同名权限一并摘掉:
@@ -38,6 +38,23 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="https" android:host="chaojizan.cc" android:pathPrefix="/m/"/>
+            </intent-filter>
+            <!-- 系统分享面板的接收入口(ACTION_SEND,收到后弹聊天会话选择)。单门店版没有聊天,
+                 留着的话超级赞会出现在系统分享面板里,点进来什么也做不了。三条和 main 清单里一字不差 -->
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
+            <intent-filter tools:node="remove">
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
             </intent-filter>
         </activity>
     </application>

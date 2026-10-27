@@ -213,15 +213,20 @@ void _singleStore() {
         home: Scaffold(body: ProfileView(api: api)),
       ));
       await t.pumpAndSettle();
-      for (final gone in ['团购券', '我的收藏', '小程序', '我的信用分', '实名认证', 'AI 助手',
-          '我的 AI 机器人', '钱去哪了', '平台账本', '平台体检', '我的视频', '我的音乐', '我的论坛']) {
-        expect(find.text(gone), findsNothing, reason: '「$gone」不该出现在单门店版里');
-      }
-      await t.scrollUntilVisible(find.text('用户协议与隐私政策'), 200);
-      for (final kept in ['优惠券', '收货地址', '帮助中心', '意见反馈', '开发票', '用户协议与隐私政策']) {
+      // 按页面从上到下的顺序滚着找:保留的一个个都要找得到。
+      // 板块卡在最后 —— 生产的频道配置里有团购、视频音乐论坛的开关也开着(这里 features 为空 = 都开),
+      // 单门店版照样只能有「点餐」那一张
+      for (final kept in ['帮助中心', '意见反馈', '用户协议与隐私政策', '优惠券', '收货地址', '我的食安投诉']) {
+        await t.scrollUntilVisible(find.text(kept), 200);
         expect(find.text(kept), findsOneWidget, reason: '「$kept」要留着');
       }
-      expect(find.text('暂未开放'), findsNothing, reason: '审核员眼里「暂未开放」是没做完的入口');
+      expect(find.text('开发票'), findsWidgets);
+      for (final gone in ['团购券', '我的收藏', '小程序', '我的信用分', '实名认证', 'AI 助手',
+          '我的 AI 机器人', '钱去哪了', '平台账本', '平台体检', '我的视频', '我的音乐', '我的论坛',
+          '超值团购', '住宿', '去点外卖', '去逛团购']) {
+        expect(find.text(gone), findsNothing, reason: '「$gone」不该出现在单门店版里');
+      }
+      expect(find.textContaining('暂未开放'), findsNothing, reason: '审核员眼里「暂未开放」是没做完的入口');
       // 订单只数这一家店的;信用分、住宿、小程序目录都不拉
       expect(requests.where((u) => u.path == '/orders/counts').every(
           (u) => u.queryParameters['merchant_id'] == '7'), isTrue);

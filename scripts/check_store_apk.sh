@@ -34,6 +34,12 @@ if "$AAPT" dump xmltree --file AndroidManifest.xml "$APK" | grep -q '"/m/"'; the
 fi
 echo "  不认领小程序直达链接 ✓"
 
+# 系统分享接收(收到后弹聊天会话选择):单门店版没有聊天,不该出现在系统分享面板里
+if "$AAPT" dump xmltree --file AndroidManifest.xml "$APK" | grep -q 'android.intent.action.SEND'; then
+  echo "✗ 还声明着接收系统分享(ACTION_SEND)"; exit 1
+fi
+echo "  不接收系统分享 ✓"
+
 # 签名:必须是正式证书。没有 android/key.properties 的机器会悄悄回落 debug 签名(build.gradle.kts),
 # 那个包装得上、跑得起来,提交商店却和 App 备案登记的证书指纹对不上(docs/STORE-REVIEW.md 第一节)
 WANT_SHA256=e61ec79bae6b28fca8563bfd93bdea832b46e7214fa7412bf6c0dd581cd63249

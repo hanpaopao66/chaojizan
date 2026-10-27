@@ -112,9 +112,9 @@ class _SingleStoreHomeState extends State<SingleStoreHome> {
     }
   }
 
-  void _openOrders(OrderFilter filter) {
+  void _openOrders(OrderFilter filter, {String? channel}) {
     Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => OrdersPage(api: widget.api, filter: filter)));
+        builder: (_) => OrdersPage(api: widget.api, filter: filter, channel: channel)));
   }
 
   Widget _menuTab() {
