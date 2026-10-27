@@ -66,50 +66,10 @@ analyze:
 	@python3 scripts/check_sticky_error.py && echo "== 出错页拉成功了能回来 ✓"
 	@python3 scripts/check_location_manager.py && echo "== 安卓取位置走系统 LocationManager,不走 Google 融合定位 ✓"
 	@python3 scripts/gen_store_legal.py --check && echo "== 单门店版协议网页版和 App 内一致 ✓"
-# 先 pub get 再 analyze。只写 --no-pub 的话,包解析一过期
-# (在别的 app 里跑过 flutter test 就会)analyze 会喷出几千条
-# "package:flutter/material.dart 不存在" —— 全是假的。
-# 一次这种噪音就够让人以后不再看 analyze 的输出了
-	@for d in packages/shared apps/user_app apps/merchant_app apps/rider_app; do \
-	  echo "== $$d =="; \
-	  (cd $$d && flutter pub get >/dev/null && flutter analyze --no-pub) \
-	    || exit 1; \
-	done
-# **Dart 单测也在这儿跑。**
-#
-# CI 的「三端静态检查」里有独立的一步 `dart 单测`,而本地 make analyze
-# 原来只跑 analyze —— 于是「本地全绿」和「CI 通过」之间一直差着 541 条
-# 测试。实际撞过一次:改了商家端订单卡的「⋯」菜单,analyze 干净、
-# 全套 e2e 干净、推上去被 CI 里的 order_tab_test 顶回来。
-#
-# analyze 只看类型,测试才看行为。少这一层,本地的绿是假的。
-	@for d in packages/shared apps/user_app apps/merchant_app apps/rider_app; do \
-	  if [ -n "$$(find $$d/test -name '*_test.dart' 2>/dev/null)" ]; then \
-	    echo "== $$d 单测 =="; \
-	    (cd $$d && flutter test) || exit 1; \
-	  fi; \
-	done
-# 用户端单门店版(应用商店包,packages/shared/lib/src/edition.dart)靠编译期常量收起入口,
-# 它的测试要带着那个常量跑;上面那一轮不带参数的 flutter test 里这组是跳过的
-	@echo "== apps/user_app 单门店版单测 =="
-	@cd apps/user_app && flutter test --dart-define=SUPERZ_EDITION=single test/single_store_test.dart
-	@echo "== 扫 Dart 字符串里的转义美元符 =="
-# 模式必须是「字面反斜杠 + 字面美元」= BRE 的 \\\$。
-# 原来写的是 '\\$$'(传给 shell 是 \\$),BRE 里 $ 在模式末尾是**行尾锚点**,
-# 于是它只找得到"行尾的反斜杠",行中间的 '\$e' 一个都扫不出来 ——
-# 守卫写错的下场比没有守卫更糟:它一直返回绿灯,让人以为这类问题已经绝迹。
-# 后来 rider_app 跑腿那段又混进三个,就是这么进来的。
-	@! grep -rn '\\\$$' --include="*.dart" packages/ apps/ \
-	  || { echo "✗ 上面这些 '\\$$x' 是字面量,不是插值"; exit 1; }
-	@echo "  没有转义美元符 ✓"
-	@cd merchant-web && npx tsc --noEmit && echo "== merchant-web tsc ✓"
-	@cd admin-web && npx tsc --noEmit && echo "== admin-web tsc ✓"
-	@cd developer-web && npx tsc --noEmit && echo "== developer-web tsc ✓"
-# 小程序:SDK(假宿主)、官方小程序的纯函数、文档参考页与 SDK 导出一致(DEV-PROMPTS-39 #338)
-	@cd packages/miniapp-sdk && npm test >/dev/null && echo "== miniapp-sdk 测试 ✓"
-	@cd miniapps && npx tsc -p . && node scripts/test.mjs >/dev/null && echo "== 官方小程序 tsc + 测试 ✓"
-	@cd miniapps && node scripts/check_miniapp_meta.mjs && echo "== 官方小程序标准化检查 ✓"
-	@node scripts/check_sdk_docs.mjs
+# 重活并行跑:四个 Dart 包的 analyze + 单测(含用户端单门店版)、扫转义美元符、
+# 三个网页项目的 tsc、小程序测试与文档检查。原来一项接一项串着跑,整轮两分多钟。
+# 检查项和原来一项不少;为什么先统一 pub get、之后一律 --no-pub,见脚本开头
+	@bash scripts/analyze_parallel.sh
 
 # 单元测试:纯函数,不起服务不连库,秒级跑完(慢了就没人跑)
 unit:
