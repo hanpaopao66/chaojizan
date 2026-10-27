@@ -92,7 +92,7 @@ class _SettingsPageState extends State<SettingsPage> {
         // 在 store 渠道本来就直接短路,入口留着只会弹一句"已是最新版本"——
         // 那是假话,版本新不新它根本没去查。
         // 网页版同理:打开的永远是线上那一版,没有东西可查
-        if (kChannel != 'store' && !kIsWeb) ...[
+        if (!kStoreBuild && !kIsWeb) ...[
           const Divider(height: 1),
           SzEntryTile(
             icon: Icons.system_update_outlined,
@@ -106,7 +106,8 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: _checking ? null : _checkUpdate,
           ),
         ],
-        if (widget.api.isLoggedIn) ...[
+        // 单门店版没有聊天和小程序(edition.dart)
+        if (widget.api.isLoggedIn && !kSingleStore) ...[
           const Divider(height: 1),
           // 「消息」的资料、隐私、通知、拉黑名单(DEV-PROMPTS-40 #340)。
           // 「消息」tab 的新建菜单里也有一份 —— 聊着天想改隐私的人不用绕回「我的」
@@ -152,13 +153,15 @@ class _SettingsPageState extends State<SettingsPage> {
           SzEntryGroup(
             title: '账号',
             children: [
-              // 扫码登录过的网页版、电脑版:看得见、随时能移除(移除 = 那台马上退出)
-              SzEntryTile(
-                icon: Icons.devices_outlined,
-                title: '已登录的网页和电脑',
-                onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-                    builder: (_) => LoginDevicesPage(api: widget.api))),
-              ),
+              // 扫码登录过的网页版、电脑版:看得见、随时能移除(移除 = 那台马上退出)。
+              // 单门店版没有网页版、电脑版的扫码登录
+              if (!kSingleStore)
+                SzEntryTile(
+                  icon: Icons.devices_outlined,
+                  title: '已登录的网页和电脑',
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                      builder: (_) => LoginDevicesPage(api: widget.api))),
+                ),
               SzEntryTile(
                 icon: Icons.logout,
                 title: '退出登录',
@@ -240,7 +243,13 @@ class _AboutPageState extends State<AboutPage> {
         Text(_version.isEmpty ? '' : _version,
             textAlign: TextAlign.center, style: theme.textTheme.bodySmall),
         // 这一段后台能改字、也能整个藏起来(about.tagline)
-        if (RemoteCopy.shown('about.tagline')) ...[
+        // 单门店版不读后台那一句(它写的是平台的立场),写死一句门店点餐的(edition.dart)
+        if (kSingleStore) ...[
+          const SizedBox(height: 8),
+          Text('门店线上点餐 · 外卖配送 · 到店自取',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(height: 1.6)),
+        ] else if (RemoteCopy.shown('about.tagline')) ...[
           const SizedBox(height: 8),
           Text(
               RemoteCopy.text('about.tagline',
@@ -275,6 +284,8 @@ class _AboutPageState extends State<AboutPage> {
               value: 'support@chaojizan.cc',
               onTap: () => _open(Uri.parse('mailto:support@chaojizan.cc')),
             ),
+            // 官网讲的是平台(招商、骑手招募),单门店版不链过去
+            if (!kSingleStore) ...[
             const Divider(height: 1),
             SzEntryTile(
               icon: Icons.language_outlined,
@@ -282,6 +293,7 @@ class _AboutPageState extends State<AboutPage> {
               value: 'chaojizan.cc',
               onTap: () => _open(Uri.parse('https://chaojizan.cc')),
             ),
+            ],
             const Divider(height: 1),
             SzEntryTile(
               icon: Icons.verified_outlined,
@@ -290,7 +302,7 @@ class _AboutPageState extends State<AboutPage> {
               onTap: () => _open(Uri.parse('https://beian.miit.gov.cn')),
             ),
             // 视听许可证编号从服务端来(后台「平台开关」里填),没填就不显示这一行
-            if (RemoteCopy.avLicense.isNotEmpty) ...[
+            if (RemoteCopy.avLicense.isNotEmpty && !kSingleStore) ...[
               const Divider(height: 1),
               SzEntryTile(
                 icon: Icons.live_tv_outlined,

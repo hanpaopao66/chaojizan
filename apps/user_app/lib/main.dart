@@ -53,6 +53,7 @@ import 'reviews_page.dart';
 import 'search_page.dart';
 import 'session.dart';
 import 'settings_page.dart';
+import 'single_store_home.dart';
 import 'stay_order_pages.dart';
 import 'transparency_page.dart';
 import 'trust_page.dart';
@@ -182,7 +183,7 @@ class UserApp extends StatelessWidget {
     return ValueListenableBuilder<bool>(
       valueListenable: elderMode,
       builder: (context, elder, _) => MaterialApp(
-        title: '超级赞 · 点外卖',
+        title: kSingleStore ? '超级赞 · 门店点餐' : '超级赞 · 点外卖',
         // 深浅两套令牌都在 brand.dart 里定义(第八辑 #101),
         // #111 三端逐屏走查通过后放开跟随系统
         theme: superZTheme(Brightness.light),
@@ -208,6 +209,8 @@ class UserApp extends StatelessWidget {
         // 直达链接 https://…/m/<appid>(安卓 App Links 拉起)。落地页自己检查隐私门,
         // 没同意之前什么都不做 —— 直达链接不能绕过隐私弹窗
         onGenerateRoute: (settings) {
+          // 单门店版没有小程序(edition.dart):直达链接一律落首页
+          if (kSingleStore) return null;
           final uri = Uri.tryParse(settings.name ?? '');
           if (uri != null && MiniAppLinkPage.parse(uri) != null) {
             return MaterialPageRoute(builder: (_) => MiniAppLinkPage(api: rootApi, uri: uri));
@@ -233,20 +236,26 @@ class UserApp extends StatelessWidget {
             },
             child: SplashGate(
                 app: 'user',
-                tagline: '点外卖,每一单分账可查',
-                subLines: const [
-                  '5% 佣金封顶,账本向所有人公开',
-                  '配送费一分不截留,全部归骑手',
-                  '让利于民 · 取之有道 · 账目为证',
-                ],
+                // 单门店版是一家店的点餐 App,不讲平台的佣金和骑手(edition.dart)
+                tagline: kSingleStore ? '在线点餐,外卖到家' : '点外卖,每一单分账可查',
+                subLines: kSingleStore
+                    ? const ['外卖配送或到店自取,订单进度随时看']
+                    : const [
+                        '5% 佣金封顶,账本向所有人公开',
+                        '配送费一分不截留,全部归骑手',
+                        '让利于民 · 取之有道 · 账目为证',
+                      ],
                 child: AuthGate(
                     api: rootApi,
-                    title: '用户端 · 点外卖',
+                    title: kSingleStore ? '门店点餐' : '用户端 · 点外卖',
                     role: 'customer',
                     // 游客模式(苹果审核要求):未登录直接进首页浏览,
                     // 下单/收藏/我的等动作触发时再引导登录
                     allowGuest: true,
-                    homeBuilder: (_, api) => HomePage(api: api)))),
+                    // 单门店版换一个外壳:点餐 / 订单 / 我的(single_store_home.dart)
+                    homeBuilder: (_, api) => kSingleStore
+                        ? SingleStoreHome(api: api)
+                        : HomePage(api: api)))),
       ),
     );
   }
@@ -822,6 +831,8 @@ class _OrdersPageState extends State<OrdersPage> {
       appBar: AppBar(
         title: const Text('我的订单'),
         actions: [
+          // 单门店版没有团购券(edition.dart)
+          if (!kSingleStore)
           TextButton(
             onPressed: () async {
               if (!await ensureLoggedIn(context)) return;
@@ -2442,7 +2453,8 @@ class _MenuPageState extends State<MenuPage>
       ).wait;
       _serverCats = [for (final c in cats) c.name];
       bool fav = _isFavorite;
-      if (widget.api.isLoggedIn) {
+      // 单门店版只有这一家,收藏无从谈起(收藏按钮也不出)
+      if (widget.api.isLoggedIn && !kSingleStore) {
         try {
           fav = (await widget.api.favoriteIds()).contains(widget.merchant.id);
         } catch (_) {}
@@ -2483,7 +2495,8 @@ class _MenuPageState extends State<MenuPage>
       }).catchError((_) {});
       // 可领店铺券(失败静默)
       _loadClaimable();
-      _loadQueue();
+      // 单门店版首版不放到店排队(edition.dart):接口都不调,卡片自然不出
+      if (!kSingleStore) _loadQueue();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -2584,7 +2597,8 @@ class _MenuPageState extends State<MenuPage>
         shop: _detail ?? widget.merchant,
         dish: dish,
         inCart: _qtyOf(dish),
-        onShare: () => _shareShop(lead: dish),
+        // 分享卡上印的是平台的口号和分账(share_card.dart),单门店版不给分享
+        onShare: kSingleStore ? null : () => _shareShop(lead: dish),
       ),
     ));
     if (pick == null || !mounted) return;
@@ -2809,9 +2823,11 @@ class _MenuPageState extends State<MenuPage>
                     color: shop.dineInStatus == 'yes' ? sz.earn : sz.inkMuted)),
           ]),
           // 把平台主张落到这一家店:抽象的「5% 封顶」在这里变成
-          // 「你这一单便宜在哪」——这是店铺页唯一该讲平台的地方
-          const SizedBox(height: 11),
+          // 「你这一单便宜在哪」——这是店铺页唯一该讲平台的地方。
+          // 单门店版没有平台,这张卡不出(edition.dart)
+          if (!kSingleStore) const SizedBox(height: 11),
           // 通栏:宽屏上一行写得下,不撑的话卡片按字宽收窄,和下面几条提示对不齐
+          if (!kSingleStore)
           SizedBox(
             width: double.infinity,
             child: SzCard(
@@ -2839,8 +2855,11 @@ class _MenuPageState extends State<MenuPage>
                 Icon(Icons.verified_user_outlined, size: 15, color: sz.earn),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: Text('商家声明:打包使用一次性食安封签,拆封即留痕'
-                      '(商家自述,非平台核验)',
+                  child: Text(
+                      kSingleStore
+                          ? '门店声明:打包使用一次性食安封签,拆封即留痕'
+                          : '商家声明:打包使用一次性食安封签,拆封即留痕'
+                              '(商家自述,非平台核验)',
                       style: TextStyle(
                           fontSize: kFontNote, height: 1.5, color: sz.inkMuted)),
                 ),
@@ -3004,9 +3023,11 @@ class _MenuPageState extends State<MenuPage>
     final shop = _detail ?? widget.merchant;
     // 商家自配送的单,配送费归商家(settlement.py:商家出运力),
     // 这时候再写「100% 归骑手」就是错的
-    final fee = shop.selfDelivery
-        ? '配送费按距离结算 · 这家店自己送'
-        : '配送费按距离结算 · 100% 归骑手';
+    final fee = kSingleStore
+        ? '配送费按距离结算'
+        : shop.selfDelivery
+            ? '配送费按距离结算 · 这家店自己送'
+            : '配送费按距离结算 · 100% 归骑手';
     if (_cart.isEmpty) return fee;
     final rules = List.of(shop.promoRules)
       ..sort((a, b) => a.thresholdCents.compareTo(b.thresholdCents));
@@ -4059,7 +4080,8 @@ class _MenuPageState extends State<MenuPage>
       extendBody: true,
       appBar: AppBar(
         title: Text(widget.merchant.name),
-        actions: [
+        // 单门店版:拼单要发码给别人、分享卡印着平台的分账、收藏只有一家店无从谈起 —— 三个都不出
+        actions: kSingleStore ? null : [
           IconButton(
             tooltip: '拼单(和朋友一起点)',
             icon: const Icon(Icons.person_add_alt_outlined),
@@ -4335,7 +4357,8 @@ class _OrdersTabState extends State<OrdersTab> {
     if (_countsAt != null && now.difference(_countsAt!).inSeconds < 5) return;
     _countsAt = now;
     try {
-      final c = OrderCounts.fromJson(await widget.api.myOrderCounts());
+      final c = OrderCounts.fromJson(
+          await widget.api.myOrderCounts(merchantId: kSingleStore ? SingleStore.id : null));
       if (!mounted) return;
       setState(() => _counts = c);
       widget.onCounts?.call(c);
@@ -4838,13 +4861,19 @@ class _OrderListViewState extends State<OrderListView> {
   /// 住宿单:另一条竖井,接口不分页(服务端最多回 100 条),一次拉全
   List<StayOrder> _stays = const [];
 
+  /// 单门店版只列那一家店的单(edition.dart),完整版不过滤
+  int? get _shopOnly => kSingleStore ? SingleStore.id : null;
+
   Future<void> _loadFirst() async {
-    final ordersF = widget.api.myOrders(limit: _kPage);
+    final ordersF = widget.api.myOrders(limit: _kPage, merchantId: _shopOnly);
     // 错误要**当场接住**:外卖那个请求还没回来时住宿先失败的话,
     // 这个 Future 在没人监听的时候报错,会被当成未处理的异常
-    final staysF = widget.api
-        .myStayOrders()
-        .onError((_, __) => const <StayOrder>[]); // 住宿拉不到不拖累外卖列表
+    // 单门店版没有住宿,也没有订单群(聊天),这两样都不拉
+    final staysF = kSingleStore
+        ? Future.value(const <StayOrder>[])
+        : widget.api
+            .myStayOrders()
+            .onError((_, __) => const <StayOrder>[]); // 住宿拉不到不拖累外卖列表
     final orders = await ordersF;
     final stays = await staysF;
     // 只查进行中的单:已完成/已取消的单不会再有人说话,
@@ -4855,8 +4884,10 @@ class _OrderListViewState extends State<OrderListView> {
             o.status != OrderStatus.cancelled)
         .take(6)
         .toList();
-    final counts = await Future.wait(active
-        .map((o) => widget.api.orderUnread(o.orderNo).onError((_, __) => 0)));
+    final counts = kSingleStore
+        ? [for (final _ in active) 0]
+        : await Future.wait(active
+            .map((o) => widget.api.orderUnread(o.orderNo).onError((_, __) => 0)));
     if (!mounted) return;
     _unread
       ..clear()
@@ -4884,8 +4915,8 @@ class _OrderListViewState extends State<OrderListView> {
     if (_loadingMore || _noMore || _loaded.isEmpty) return;
     setState(() => _loadingMore = true);
     try {
-      final more = await widget.api
-          .myOrders(before: _loaded.last.createdAt, limit: _kPage);
+      final more = await widget.api.myOrders(
+          before: _loaded.last.createdAt, limit: _kPage, merchantId: _shopOnly);
       if (!mounted) return;
       setState(() {
         _loaded.addAll(more);
@@ -5083,7 +5114,10 @@ class _OrderListViewState extends State<OrderListView> {
 
   /// 完成单画一行分账。退过款的单不画:退款从哪一方扣回在账本里,
   /// 光看订单上的数,几份加起来对不上实付
+  ///
+  /// 单门店版不画(edition.dart):「商家 / 骑手 / 平台」三份分账是平台的账,一家店的 App 里没有平台
   bool _splitShown(Order o) =>
+      !kSingleStore &&
       o.status == OrderStatus.completed &&
       o.refundCents == 0 &&
       o.totalCents > 0;
@@ -5169,7 +5203,7 @@ class _OrderListViewState extends State<OrderListView> {
     // 下单时间后面跟一句这单特殊在哪:商家自己送的单没有骑手
     final when = [
       _timeLabel(order),
-      if (order.selfDelivery) '商家自送',
+      if (order.selfDelivery) kSingleStore ? '门店配送' : '商家自送',
     ].join(' · ');
     final line = _cardLine(order);
 
@@ -5587,7 +5621,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
               title: Text('食品安全问题',
                   style: TextStyle(
                       color: Theme.of(context).sz.danger, fontWeight: FontWeight.bold)),
-              subtitle: const Text('异物、变质、食用后不适——不经商家,平台加急处理'),
+              // 单门店版没有「平台和商家」两方,是同一家在处理,不说「不经商家」
+              subtitle: const Text(kSingleStore
+                  ? '异物、变质、食用后不适——客服加急处理'
+                  : '异物、变质、食用后不适——不经商家,平台加急处理'),
               onTap: () => Navigator.pop(sheetContext, 'food_safety'),
             ),
           ],
@@ -5652,7 +5689,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                           fontSize: 16)),
                   // 2026-09-15 起食安投诉成立:全额退(含配送费和小费),钱由商家出 ——
                   // 骑手那份配送费和小费照归骑手、商家另出(服务端 services/merchant_fault)
-                  Text('不经商家、直达平台加急处理;核实成立全额退款(含配送费),由商家承担',
+                  Text(
+                      kSingleStore
+                          ? '客服加急处理;核实成立全额退款(含配送费)'
+                          : '不经商家、直达平台加急处理;核实成立全额退款(含配送费),由商家承担',
                       style: Theme.of(sheetContext).textTheme.bodySmall),
                   const SizedBox(height: 8),
                   RadioGroup<String>(
@@ -5749,7 +5789,9 @@ class _OrderDetailPageState extends State<OrderDetailPage>
           desc.text.trim(), images, medicalUrls: medical);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('食安投诉已提交,平台加急处理;核实成立全额退款(含配送费)')));
+          content: Text(kSingleStore
+              ? '食安投诉已提交,客服加急处理;核实成立全额退款(含配送费)'
+              : '食安投诉已提交,平台加急处理;核实成立全额退款(含配送费)')));
       _refresh();
     } catch (e) {
       if (!mounted) return;
@@ -6053,9 +6095,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
     final theme = Theme.of(context);
     final status = report['status'] as String? ?? 'open';
     final (label, color) = switch (status) {
-      'confirmed' => ('投诉成立,平台已处理', theme.sz.earn),
+      // 单门店版没有「平台」这一方,是客服在处理(edition.dart)
+      'confirmed' => (kSingleStore ? '投诉成立,已处理' : '投诉成立,平台已处理', theme.sz.earn),
       'dismissed' => ('调查后未认定', theme.colorScheme.outline),
-      _ => ('平台受理中', theme.colorScheme.primary),
+      _ => (kSingleStore ? '客服受理中' : '平台受理中', theme.colorScheme.primary),
     };
     final actions = (report['actions'] as List?) ?? const [];
     final latest = actions.isEmpty ? null : actions.last as Map;
@@ -6079,7 +6122,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
           ],
           if (status == 'open') ...[
             const SizedBox(height: 6),
-            Text('食安投诉不经商家,由平台直接处理。处理完会推送通知你。',
+            Text(
+                kSingleStore
+                    ? '食安投诉由客服加急处理,处理完会推送通知你。'
+                    : '食安投诉不经商家,由平台直接处理。处理完会推送通知你。',
                 style: theme.textTheme.bodySmall),
           ],
         ]),
@@ -6328,8 +6374,9 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                 if (order.status != OrderStatus.cancelled &&
                     order.status != OrderStatus.completed)
                   _OrderTimeline(events: _events, order: order),
-                // 晒一晒:带「钱去哪了」分账条的分享图,金额默认打码可开关
-                if (order.status == OrderStatus.completed)
+                // 晒一晒:带「钱去哪了」分账条的分享图,金额默认打码可开关。
+                // 单门店版不出:分享图印的是平台的三方分账(edition.dart)
+                if (order.status == OrderStatus.completed && !kSingleStore)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: SizedBox(
@@ -6443,7 +6490,8 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                       // 交易对方的信用分:商家接单之后看得到商家的,骑手接到这一单之后看得到
                       // 骑手的(服务端只在那之后带,小签按订单状态再兜一道)。只有分数和等级,
                       // 点开是公式说明;店铺页、搜索、排序里都没有它 —— 下单之前挑店用不上它
-                      if (merchantCreditVisible(order) || riderCreditVisible(order))
+                      if (!kSingleStore &&
+                          (merchantCreditVisible(order) || riderCreditVisible(order)))
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: Align(
@@ -6458,7 +6506,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                         ),
                       // 未读提醒。以前骑手/商家发消息用户这边一点动静都没有,
                       // 只能靠自己想起来点进去看
-                      if (_unread > 0)
+                      if (_unread > 0 && !kSingleStore)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Row(children: [
@@ -6474,6 +6522,19 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                                         Theme.of(context).colorScheme.primary)),
                           ]),
                         ),
+                      // 单门店版没有聊天(edition.dart):联系门店就是打电话
+                      if (kSingleStore)
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.call, size: 18),
+                            label: const Text('联系门店'),
+                            onPressed: order.merchantPhone.isEmpty
+                                ? null
+                                : () => _call(order.merchantPhone),
+                          ),
+                        )
+                      else
                       Row(
                       children: [
                         // 一单一个群:你、商家、骑手都在里面(以前是「骑手」「商家」两个按钮、两条私聊)。
@@ -6543,7 +6604,8 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                 ),
                 if (order.refundCents > 0)
                   _RefundProgressCard(order: order, refunds: _refunds),
-                if (order.commissionCents > 0) ...[
+                // 单门店版不出分账卡和平台承诺(edition.dart)
+                if (order.commissionCents > 0 && !kSingleStore) ...[
                   _MoneyFlowCard(order: order, api: widget.api),
                   const SizedBox(height: 10),
                   // 承诺卡:品牌渐变唯一允许出现处(风格系统规则⑦)
@@ -6683,7 +6745,10 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                                                   api: widget.api,
                                                   prefill:
                                                       '售后申诉,订单号 ${order.orderNo}:'))),
-                                      child: Text('如有异议,点此联系平台客服申诉 >',
+                                      child: Text(
+                                          kSingleStore
+                                              ? '如有异议,点此联系客服复核 >'
+                                              : '如有异议,点此联系平台客服申诉 >',
                                           style: Theme.of(context)
                                               .textTheme
                                               .bodySmall
@@ -6707,7 +6772,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                     label: const Text('催一下'),
                   ),
                 // 账目透明是一级入口:与「催一下」平级摆着,不藏在页尾
-                if (order.commissionCents > 0)
+                if (order.commissionCents > 0 && !kSingleStore)
                   OutlinedButton.icon(
                     icon: const Icon(Icons.pie_chart_outline, size: 18),
                     onPressed: () => Navigator.of(context).push(
@@ -6718,7 +6783,8 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                   ),
                 // 无人接单告警中:加急小费(100% 归骑手),更快有人接。
                 // 补收款没接上之前服务端关着(/config 的 features.boost_tip),关着就不摆按钮
-                if (RemoteCopy.feature('boost_tip') &&
+                if (!kSingleStore &&
+                    RemoteCopy.feature('boost_tip') &&
                     order.noRiderAlerted &&
                     order.riderId == null &&
                     !order.pickup &&
@@ -6753,7 +6819,7 @@ class _OrderDetailPageState extends State<OrderDetailPage>
                     icon: const Icon(Icons.edit_location_alt_outlined,
                         size: 18),
                     onPressed: () => _changeAddress(order),
-                    label: const Text('改地址(骑手取餐前)'),
+                    label: Text(kSingleStore ? '改地址(配送前)' : '改地址(骑手取餐前)'),
                   ),
                 if (order.status == OrderStatus.paid ||
                     order.status == OrderStatus.accepted)
@@ -6997,10 +7063,16 @@ class _CancelBillSheet extends StatelessWidget {
 
   final Map<String, dynamic> quote;
 
-  static const _toLabel = {
-    'customer': '退回你', 'merchant': '归商家',
-    'rider': '归骑手', 'platform': '平台',
-  };
+  /// 单门店版:店和运营方是同一家,商家那份和服务费那份都是「归门店」(edition.dart)
+  static const _toLabel = kSingleStore
+      ? {
+          'customer': '退回你', 'merchant': '归门店',
+          'rider': '归配送员', 'platform': '归门店',
+        }
+      : {
+          'customer': '退回你', 'merchant': '归商家',
+          'rider': '归骑手', 'platform': '平台',
+        };
 
   @override
   Widget build(BuildContext context) {
@@ -7602,25 +7674,28 @@ class _ProfileViewState extends State<ProfileView> {
     final loggedIn = widget.api.isLoggedIn;
     final profileF = loggedIn ? widget.api.me() : null;
     final configF = widget.api.platformConfig();
-    final ordersF = loggedIn ? widget.api.myOrders() : null;
+    final ordersF = loggedIn
+        ? widget.api.myOrders(merchantId: kSingleStore ? SingleStore.id : null)
+        : null;
     // 住宿单单独一个接口(和外卖是两套平行的竖井)。多这一个来回是为了
     // 待支付角标能把住宿算进去 —— 住宿的待支付单 15 分钟不付就自动关闭,
     // 角标漏数它是用户真金白银的损失
-    final staysF = loggedIn ? widget.api.myStayOrders() : null;
+    // 单门店版(edition.dart):没有住宿、信用分、小程序,这几样不拉;订单只数这一家店的
+    final staysF = loggedIn && !kSingleStore ? widget.api.myStayOrders() : null;
     final countsF = loggedIn
         ? widget.api
-            .myOrderCounts()
+            .myOrderCounts(merchantId: kSingleStore ? SingleStore.id : null)
             .then<OrderCounts?>(OrderCounts.fromJson)
             .onError((_, __) => null)
         : null;
     // 信用分那一行的状态值。错误当场接住(同下面 appsF 的理由),拉不到就只是不挂数字
-    final creditF = loggedIn
+    final creditF = loggedIn && !kSingleStore
         ? widget.api.myCreditBrief().onError((_, __) => null)
         : null;
 
     // 桌面端没有小程序容器,清单都不拉(同首页 _loadMiniApps)。
     // 错误当场接住:前面几个请求还没回来时它先失败,就是一个没人接的异常
-    final appsF = loggedIn && miniAppSupported
+    final appsF = loggedIn && miniAppSupported && !kSingleStore
         ? widget.api
             .miniAppCatalog(limit: 24)
             .then((c) => c.items)
@@ -7819,9 +7894,12 @@ class _ProfileViewState extends State<ProfileView> {
       builder: (context) => SzDialog(
         title: const Text('开发票'),
         content: const Text(
-            '电子发票功能将在接入微信支付后开放。\n\n'
-            '现阶段如需发票,请直接联系商家或平台客服,'
-            '我们会协助你完成开票。',
+            kSingleStore
+                ? '电子发票功能将在接入微信支付后开放。\n\n'
+                    '现阶段如需发票,请联系客服,我们会协助你完成开票。'
+                : '电子发票功能将在接入微信支付后开放。\n\n'
+                    '现阶段如需发票,请直接联系商家或平台客服,'
+                    '我们会协助你完成开票。',
             style: TextStyle(height: 1.6)),
         actions: [
           TextButton(
@@ -7869,7 +7947,8 @@ class _ProfileViewState extends State<ProfileView> {
         const SizedBox(height: 12),
         // 关掉之后连同它的间距一起消失 —— 留一个 12px 的空档
         // 就是"关了但还占着位"
-        if (!_ledgerHidden) ...[
+        // 单门店版没有平台账本(edition.dart)
+        if (!_ledgerHidden && !kSingleStore) ...[
           _ledgerCard(context),
           const SizedBox(height: 12),
         ],
@@ -7884,7 +7963,7 @@ class _ProfileViewState extends State<ProfileView> {
         _entryList(context, marketing: marketing),
         // 板块入口放在最后:往上放会把「长辈版」挤出首屏(找它的人正是看不清这一页的人)。
         // 各板块自己的 tab / 金刚区那一格是主入口,这里是第二个
-        if (!guest) ...[
+        if (!guest && !kSingleStore) ...[
           const SizedBox(height: 12),
           _sectionsCard(context),
         ],
@@ -8335,10 +8414,13 @@ class _ProfileViewState extends State<ProfileView> {
           for (final (icon, label, badge, page) in [
             (Icons.local_activity_outlined, '优惠券', _usableCoupons,
                 () => CouponsPage(api: widget.api) as Widget),
-            (Icons.confirmation_number_outlined, '团购券', _usableTickets,
-                () => MyVouchersPage(api: widget.api) as Widget),
-            (Icons.favorite_outline, '我的收藏', 0,
-                () => FavoritesPage(api: widget.api) as Widget),
+            // 单门店版:没有团购券;只有一家店,收藏无从谈起(edition.dart)
+            if (!kSingleStore) ...[
+              (Icons.confirmation_number_outlined, '团购券', _usableTickets,
+                  () => MyVouchersPage(api: widget.api) as Widget),
+              (Icons.favorite_outline, '我的收藏', 0,
+                  () => FavoritesPage(api: widget.api) as Widget),
+            ],
             (Icons.place_outlined, '收货地址', 0,
                 () => AddressBookPage(api: widget.api) as Widget),
           ])
@@ -8385,7 +8467,7 @@ class _ProfileViewState extends State<ProfileView> {
         // 只有分账页里一个入口,平台体检更是只有平台账本里一个,
         // 而分账页要么从首页那条(也能关)进、要么得先有一笔带佣金的订单。
         // 少了这一段,关卡片 = 删功能
-        if (_ledgerHidden) ...[
+        if (_ledgerHidden && !kSingleStore) ...[
           divider,
           SzIconGrid(columns: 4, items: [
             SzIconGridItem(
@@ -8447,7 +8529,7 @@ class _ProfileViewState extends State<ProfileView> {
         const Divider(height: 1),
         // 我的信用分:分数和等级是**状态值**(value 槽,零额外高度);
         // 点进去是每一项加减分、对应的记录、申诉入口和公式。游客没有
-        if (widget.api.isLoggedIn) ...[
+        if (widget.api.isLoggedIn && !kSingleStore) ...[
           SzEntryTile(
             icon: Icons.verified_outlined,
             title: '我的信用分',
@@ -8484,7 +8566,18 @@ class _ProfileViewState extends State<ProfileView> {
         //   不划算。
         //
         // 三条 63+63+46=172px → 网格 82px + 脚注两行 28px。
-        if (marketing) ...[
+        // 单门店版不收集身份证信息(没有酒类、公开群组、投稿),实名入口不出(edition.dart)
+        if (kSingleStore) ...[
+          if (marketing) ...[
+            SzEntryTile(
+              icon: Icons.cake_outlined,
+              title: '生日与推送',
+              hint: '生日当天送券,营销推送可随时关掉',
+              onTap: _editBirthdayAndPush,
+            ),
+            const Divider(height: 1),
+          ],
+        ] else if (marketing) ...[
           SzIconGrid(items: [
             SzIconGridItem(
               icon: Icons.verified_user_outlined,
@@ -8517,7 +8610,7 @@ class _ProfileViewState extends State<ProfileView> {
             hint: '买酒、投稿视频、公开群组前需要',
             onTap: _openIdentity,
           ),
-        const Divider(height: 1),
+        if (!kSingleStore) const Divider(height: 1),
         // 旧版的 hint 是「配送范围 / 退款规则 / 常见问题」—— 那是一份目录,
         // 目的页自己会答。入口列表回答「这是什么」就够了
         // 点进去只会说「接入微信支付后开放」—— 那就把答案摆在行上,
@@ -8526,12 +8619,15 @@ class _ProfileViewState extends State<ProfileView> {
         SzEntryTile(
           icon: Icons.receipt_outlined,
           title: '开发票',
-          value: '暂未开放',
+          // 单门店版写「联系客服」:「暂未开放」在审核员眼里是一个没做完的入口,而这里点进去确实能办
+          value: kSingleStore ? '联系客服' : '暂未开放',
           onTap: _showInvoiceInfo,
         ),
         const Divider(height: 1),
         // 副标题是**立场表达**,不是状态值:用户看到「AI 助手」第一个念头
-        // 就是「它会不会乱花我的钱」,那句答案值得占这一行
+        // 就是「它会不会乱花我的钱」,那句答案值得占这一行。
+        // 单门店版没有 AI 助手和机器人(edition.dart)
+        if (!kSingleStore) ...[
         SzEntryTile(
           icon: Icons.smart_toy_outlined,
           title: 'AI 助手',
@@ -8550,6 +8646,7 @@ class _ProfileViewState extends State<ProfileView> {
               builder: (_) => MyAiBotsPage(api: widget.api))),
         ),
         const Divider(height: 1),
+        ],
         // 商店审核要求:我的页可达协议全文。
         // 设置页里也有一份,但合规项上「2 跳可达算不算可达」是拿被打回
         // 赌的,46px 不值这个风险 —— 留着
@@ -8698,7 +8795,20 @@ class _OrderTimeline extends StatelessWidget {
     ('ready', '出餐完成,凭取餐码到店取餐'),
   ];
 
-  List<(String, String)> get _mySteps => order.pickup ? _pickupSteps : _steps;
+  /// 商家自己送的单没有骑手取餐这回事;单门店版没有平台骑手,也这样说(edition.dart)
+  static const _selfSteps = [
+    ('paid', '已下单,等商家接单'),
+    ('accepted', '商家已接单,备餐中'),
+    ('ready', '出餐完成'),
+    ('picked_up', '已出发,配送中'),
+    ('delivered', '已送达'),
+  ];
+
+  List<(String, String)> get _mySteps => order.pickup
+      ? _pickupSteps
+      : (order.selfDelivery || kSingleStore)
+          ? _selfSteps
+          : _steps;
 
   /// 最近一条商家催单回复(没有就 null)。放在时间轴顶部:
   /// 催单的人正盯着这一页等回音,商家点了「回复安抚」而这里不显示,
@@ -9102,7 +9212,7 @@ class _ShopInfoTab extends StatelessWidget {
               Icon(Icons.verified_user_outlined, size: 18, color: sz.inkMuted),
               const SizedBox(width: 10),
               Expanded(
-                child: Text('证照信息(平台人工审核)',
+                child: Text(kSingleStore ? '证照信息' : '证照信息(平台人工审核)',
                     style: TextStyle(fontSize: kFontBodyLg, color: sz.ink)),
               ),
               Icon(Icons.chevron_right, size: 18, color: sz.inkFaint),
@@ -9146,9 +9256,11 @@ class _ShopInfoTab extends StatelessWidget {
             ],
           ),
         ],
-        const SizedBox(height: 14),
         // 承诺是背景信息不是行动点:用品牌的 claySoft 淡底(PledgeCard),
-        // 不再是 Material 的 tertiaryContainer
+        // 不再是 Material 的 tertiaryContainer。
+        // 单门店版没有平台抽成和骑手,这张卡不出(edition.dart)
+        if (!kSingleStore) ...[
+        const SizedBox(height: 14),
         PledgeCard(
           title: '超级赞平台承诺',
           body: [
@@ -9161,6 +9273,7 @@ class _ShopInfoTab extends StatelessWidget {
             '· 每笔订单的资金流向对你公开可查',
           ].join('\n'),
         ),
+        ],
         // 评价入口收在页尾
         InkWell(
           onTap: onOpenReviews,

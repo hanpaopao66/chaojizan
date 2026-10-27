@@ -451,7 +451,7 @@ async def public_config(db: AsyncSession = Depends(get_db)):
     import json
 
     from ..services.flags import (bots_on, forum_flag_on, marketing_on, music_flag_on,
-                                  social_flag_on, video_flag_on)
+                                  single_store_merchant_id, social_flag_on, video_flag_on)
 
     from ..services.copy_registry import COPY_KEYS
     from .orders import mock_pay_allowed
@@ -489,6 +489,8 @@ async def public_config(db: AsyncSession = Depends(get_db)):
                      "boost_tip": mock_pay_allowed()},
         # 要公示的许可证编号(后台「平台开关」里填,空 = 不显示):官网页脚、App「关于我们」读它
         "licenses": {"av": av.value if av is not None else ""},
+        # 用户端单门店版(应用商店包)显示哪家店;没配是 null。完整版不读它
+        "single_store": {"merchant_id": await single_store_merchant_id(db)},
         "copy": copy,
         "hidden": hidden,
         "faq": [{"audience": f.audience, "q": f.question, "a": f.answer}

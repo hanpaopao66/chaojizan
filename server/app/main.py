@@ -956,3 +956,16 @@ async def legal_terms():
 async def legal_privacy():
     """隐私政策(网页版)。"""
     return FileResponse(STATIC_DIR / "legal-privacy.html")
+
+
+@app.get("/legal/store-terms", include_in_schema=False)
+async def legal_store_terms():
+    """用户协议·门店点餐版(应用商店里的用户端是单门店版,商店后台填这个链接)。
+    由 scripts/gen_store_legal.py 从 App 内的正文生成,两边逐字一致。"""
+    return FileResponse(STATIC_DIR / "legal-store-terms.html")
+
+
+@app.get("/legal/store-privacy", include_in_schema=False)
+async def legal_store_privacy():
+    """隐私政策·门店点餐版(同上)。"""
+    return FileResponse(STATIC_DIR / "legal-store-privacy.html")

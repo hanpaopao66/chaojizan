@@ -11,6 +11,7 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'edition.dart';
 import 'sz_widgets.dart';
 
 enum AppPermissionKind { location, locationRider, camera, microphone, photos, bluetooth, notification }
@@ -24,7 +25,10 @@ class PermissionRationale {
   static (String, String) _copy(AppPermissionKind kind) => switch (kind) {
         AppPermissionKind.location => (
             '需要使用定位权限',
-            '用于展示附近商家、计算配送费。\n拒绝后将展示演示区域内容,你仍可手动选择收货地址。'
+            // 单门店版只有一家店,定位只用来判断送不送得到(和它的隐私政策附录一字不差)
+            kSingleStore
+                ? '用于判断收货地址是否在门店配送范围内、计算配送费。\n拒绝后你仍可手动选择收货地址。'
+                : '用于展示附近商家、计算配送费。\n拒绝后将展示演示区域内容,你仍可手动选择收货地址。'
           ),
         AppPermissionKind.locationRider => (
             '需要使用定位权限',

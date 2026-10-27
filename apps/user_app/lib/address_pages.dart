@@ -546,8 +546,11 @@ class _AddressEditPageState extends State<AddressEditPage> {
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 6),
             child: Text(
-              '填了楼层,预计送达会更准;无电梯的高楼层下单时可以选'
-              '「送上门」,那笔钱全额归骑手,也可以选送到楼下不加钱。',
+              kSingleStore
+                  ? '填了楼层,预计送达会更准;无电梯的高楼层下单时可以选'
+                      '「送上门」(按楼层加收上门费),也可以选送到楼下不加钱。'
+                  : '填了楼层,预计送达会更准;无电梯的高楼层下单时可以选'
+                      '「送上门」,那笔钱全额归骑手,也可以选送到楼下不加钱。',
               style: TextStyle(
                   fontSize: 11.5,
                   color: Theme.of(context).colorScheme.onSurfaceVariant),

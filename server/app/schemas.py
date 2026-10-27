@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 # 而它参与运算就是 `OverflowError: cannot convert float infinity to integer`
 # —— 一个裸 500(实测过下单 `{"lat": Infinity}` → HTTP 500)。
 #
-# 越界但有限的值(纬度 999)不会 500,但会走到「超出配送范围,换家近点的店吧」:
+# 越界但有限的值(纬度 999)不会 500,但会走到「超出配送范围」:
 # 坐标是坏的,却建议用户换家店,这个提示是误导。
 #
 # 影响面按入口差很多:下单/地址只影响这一单这个人;骑手上报影响他看到的跑程;

@@ -70,8 +70,49 @@ class HelpCenterPage extends StatelessWidget {
     ),
   ];
 
-  static List<FaqItem> get _localFaq =>
-      [for (final (q, a) in _faqs) FaqItem(q, a)];
+  /// 单门店版的问答(edition.dart)。**不读服务端下发的那份** —— 后台那份是给整个平台写的
+  /// (商家入驻、骑手、团购、住宿、5%),放进一家店的点餐 App 里就是在说它没有的功能
+  static const _singleStoreFaqs = [
+    (
+      '配送范围是多少?送不到怎么办?',
+      '门店按直线距离配送。收货地址超出配送范围时,下单会提示,'
+          '你可以在结算页改选「到店自取」。'
+    ),
+    (
+      '下单后多久送达?',
+      '门店承诺的出餐时长在门店页可见,配送时长按距离预估;订单页可以随时查看订单进度。'
+    ),
+    (
+      '到店自取怎么取餐?',
+      '结算时选择「到店自取」,下单后订单详情会显示取餐码,到店出示取餐码即可取餐。'
+    ),
+    (
+      '怎么申请退款/售后?',
+      '送达或取餐后 7 天内,可在订单详情页申请售后,说明原因并上传凭证;同意后原路退回。'
+          '门店接单前可以自助取消,已支付金额原路退回。'
+    ),
+    (
+      '吃出问题(异物/变质)怎么办?',
+      '订单详情页有「食品安全投诉」通道,拍照举证后客服加急处理;核实成立全额退款(含配送费)。'
+    ),
+    (
+      '配送费是怎么算的?',
+      '配送费按距离计价,结算页会逐项列出;到店自取不收配送费。'
+    ),
+    (
+      '怎么开发票?',
+      '现阶段请通过「我的 → 开发票」联系客服,我们会协助你完成开票。'
+    ),
+    (
+      '怎么注销账号?',
+      '「我的 → 设置 → 注销账号」可以自助办理。注销后账号信息匿名化处理,无法恢复;'
+          '有进行中的订单时需要先完结。'
+    ),
+  ];
+
+  static List<FaqItem> get _localFaq => [
+        for (final (q, a) in kSingleStore ? _singleStoreFaqs : _faqs) FaqItem(q, a)
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -80,7 +121,7 @@ class HelpCenterPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          for (final item in RemoteCopy.faq(_localFaq))
+          for (final item in kSingleStore ? _localFaq : RemoteCopy.faq(_localFaq))
             ExpansionTile(
               title:
                   Text(item.question, style: const TextStyle(fontSize: 14.5)),
@@ -98,7 +139,7 @@ class HelpCenterPage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: OutlinedButton.icon(
               icon: const Icon(Icons.support_agent_outlined),
-              label: const Text('仍未解决?联系平台客服'),
+              label: Text(kSingleStore ? '仍未解决?联系客服' : '仍未解决?联系平台客服'),
               onPressed: () async {
                 if (!await ensureLoggedIn(context)) return;
                 if (!context.mounted) return;
@@ -125,7 +166,9 @@ class FeedbackPage extends StatefulWidget {
 }
 
 class _FeedbackPageState extends State<FeedbackPage> {
-  static const _kinds = ['功能建议', '体验问题', '商家相关', '配送相关', '其他'];
+  static const _kinds = kSingleStore
+      ? ['功能建议', '体验问题', '菜品相关', '配送相关', '其他']
+      : ['功能建议', '体验问题', '商家相关', '配送相关', '其他'];
   String _kind = _kinds.first;
   final _content = TextEditingController();
   bool _busy = false;
@@ -142,7 +185,10 @@ class _FeedbackPageState extends State<FeedbackPage> {
       await widget.api.submitTicket('【意见反馈·$_kind】$text');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已收到,感谢你的反馈!可在「联系平台客服」查看回复')));
+          SnackBar(
+              content: Text(kSingleStore
+                  ? '已收到,感谢你的反馈!可在「我的 → 联系客服」查看回复'
+                  : '已收到,感谢你的反馈!可在「联系平台客服」查看回复')));
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;

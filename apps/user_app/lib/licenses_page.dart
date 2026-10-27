@@ -69,7 +69,10 @@ class _ShopLicensesPageState extends State<ShopLicensesPage> {
                     Text(widget.shopName,
                         style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(height: 4),
-                    Text('以下证照已由平台人工审核;公示图带水印,仅供查验',
+                    Text(
+                        kSingleStore
+                            ? '依法公示的门店证照;公示图带水印,仅供查验'
+                            : '以下证照已由平台人工审核;公示图带水印,仅供查验',
                         style:
                             TextStyle(fontSize: 12, color: sz.inkMuted)),
                     const SizedBox(height: 12),

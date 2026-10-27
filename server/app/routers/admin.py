@@ -1486,6 +1486,9 @@ _KNOWN_FLAGS = {
     # 论坛(DEV-PROMPTS-41 #380):缺省同视频(开发开、生产关),合规结论见 #374 清单第 18 条
     "forum_enabled",        # 整个论坛:关了 /forum/v1 全部回 503「论坛暂未开放」
     "forum_post_enabled",   # 论坛发帖:关了发帖、回复、引用、编辑回 503,看还是能看
+    # 单门店版(应用商店包)显示哪家店:商家 id,空 = 没配(services/flags.single_store_merchant_id)。
+    # ICP / EDI 证下来之前用户端以「一家店的点餐 App」上架,换店不用重新打包
+    "single_store_merchant_id",
     # 《信息网络传播视听节目许可证》编号(空 = 不公示):官网每一页页脚、用户端「关于我们」照原样显示。
     # 放成开关而不是写死:拿证、换证、变更都不用发版
     "av_license_no",
@@ -1759,6 +1762,7 @@ async def _flags_out(db: AsyncSession) -> dict:
                 # **从 services.flags 读,不另写一份** —— 抄一份就会有一天
                 # 后台显示的默认值和用户端实际看到的不一样
                 "channels_enabled": ",".join(CHANNELS_FALLBACK),
+                "single_store_merchant_id": "",
                 "av_license_no": ""}
     out = {k: current.get(k, defaults.get(k, "off")) for k in _KNOWN_FLAGS}
     # 密钥类只说设没设。**不回明文**:后台页面会把它显示在输入框里,
@@ -1855,6 +1859,20 @@ async def set_flag(
                 _date.fromisoformat(value)
             except ValueError:
                 raise HTTPException(422, "宽限截止日要写成 YYYY-MM-DD,或留空表示立即生效")
+    elif key == "single_store_merchant_id":
+        # 空 = 清掉。填了就必须是一家真实存在、审核通过的外卖店 —— 填错的后果是商店包首页
+        # 「门店信息加载失败」,而审核员正好在看;在入口拦下比上线后再查便宜
+        if value:
+            if not value.isdigit():
+                raise HTTPException(422, "填商家 id(数字),留空表示不指定")
+            from ..models import Merchant, MerchantStatus
+            shop = await db.get(Merchant, int(value))
+            if shop is None:
+                raise HTTPException(422, f"没有 id 为 {value} 的商家")
+            if shop.biz_type != "food":
+                raise HTTPException(422, "单门店版只做外卖点餐,要选一家外卖店(biz_type=food)")
+            if shop.status != MerchantStatus.approved:
+                raise HTTPException(422, "这家店还没审核通过,顾客下不了单")
     elif key == "av_license_no":
         # 只做清洗(一行、60 字以内),不猜编号格式 —— 格式以证书为准,
         # 拦错一次真编号比漏掉一次格式检查更糟

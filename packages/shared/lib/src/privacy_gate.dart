@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'brand.dart';
+import 'edition.dart';
 import 'legal.dart';
 import 'sz_widgets.dart';
 
@@ -68,9 +69,14 @@ class _PrivacyGateState extends State<PrivacyGate> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  '超级赞(Super-Z)是劳动者互助外卖平台。我们只收集提供服务所必需的'
-                  '最少信息(手机号、收货位置等),不出售你的任何个人信息。\n\n'
-                  '请阅读并同意以下文件后开始使用:',
+                  // 单门店版只有一家店的点餐,不是「平台」(见 edition.dart)
+                  kSingleStore
+                      ? '超级赞为门店顾客提供线上点餐、外卖配送和到店自取服务。我们只收集'
+                          '提供服务所必需的最少信息(手机号、收货地址等),不出售你的任何个人信息。\n\n'
+                          '请阅读并同意以下文件后开始使用:'
+                      : '超级赞(Super-Z)是劳动者互助外卖平台。我们只收集提供服务所必需的'
+                          '最少信息(手机号、收货位置等),不出售你的任何个人信息。\n\n'
+                          '请阅读并同意以下文件后开始使用:',
                   style: TextStyle(height: 1.6),
                 ),
                 const SizedBox(height: 8),

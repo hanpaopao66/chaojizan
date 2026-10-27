@@ -23,7 +23,8 @@ HARMONY = ("apps/merchant_app_harmony/entry/src/main/ets/pages/Index.ets",
 
 
 def _version() -> str:
-    return re.search(r"const String kLegalVersion = '(\d{4}-\d{2}-\d{2})';", DART).group(1)
+    # 完整版的版本号(单门店版另有一个,见 test_store_legal.py)
+    return re.search(r"const String _kLegalVersionFull = '(\d{4}-\d{2}-\d{2})';", DART).group(1)
 
 
 def test_版本号五处一致():
@@ -55,7 +56,7 @@ def _numbered_html() -> list[str]:
 
 
 def _numbered_dart() -> list[str]:
-    body = DART.split("const String kPrivacyText = '''", 1)[1].split("''';", 1)[0]
+    body = DART.split("const String _kPrivacyFull = '''", 1)[1].split("''';", 1)[0]
     return [line for line in body.splitlines() if re.match(r"^\d+\. ", line)]
 
 
@@ -79,7 +80,7 @@ def _terms_html() -> list[str]:
 
 
 def _terms_dart() -> list[str]:
-    body = DART.split("const String kTermsText = '''", 1)[1].split("''';", 1)[0]
+    body = DART.split("const String _kTermsFull = '''", 1)[1].split("''';", 1)[0]
     return [line for line in body.splitlines() if re.match(r"^\d+\. ", line)]
 
 

@@ -37,6 +37,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
   ({int distanceM, int? minutes, String source})? _walk;
   bool _walkLoading = false;
   int _tipCents = 0; // 小费:100% 归骑手,平台不抽不计佣
+
+  /// 小费那块出不出:自取没有配送;商家自送的店不收小费(服务端 422);单门店版没有平台骑手
+  bool get _tipShown => !_pickup && !widget.merchant.selfDelivery && !kSingleStore;
   Address? _address;
   bool _loadingAddress = true;
   int _tableware = 1;
@@ -386,7 +389,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 style: TextStyle(fontSize: kFontMicro, color: theme.sz.inkMuted)),
           ));
         }
-        if (samples > 0) {
+        // 单门店版没有平台骑手,「全归骑手」那句不说(edition.dart)
+        if (samples > 0 && !kSingleStore) {
           rows.add(Padding(
             padding: const EdgeInsets.only(left: 24, bottom: 2),
             child: Text('（$samples 位骑手实地反馈，这笔钱全归骑手）',
@@ -415,8 +419,11 @@ class _CheckoutPageState extends State<CheckoutPage> {
             Text('${a?.floor} 楼无电梯,要送上门吗?',
                 style: theme.textTheme.titleSmall),
             const SizedBox(height: 2),
-            Text('这笔钱**全额归骑手** —— 背着餐爬 ${a?.floor} 层楼,'
-                '不该由他自己承担。选送到楼下则不收。',
+            Text(
+                kSingleStore
+                    ? '上门费按楼层计算,选送到楼下则不收。'
+                    : '这笔钱**全额归骑手** —— 背着餐爬 ${a?.floor} 层楼,'
+                        '不该由他自己承担。选送到楼下则不收。',
                 style: TextStyle(fontSize: 12, color: theme.sz.inkMuted)),
             const SizedBox(height: 8),
             SegmentedButton<bool>(
@@ -497,8 +504,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
     } catch (e) {
       if (!mounted) return;
       final msg = e.toString();
-      // 酒类需实名:直接给去认证的入口,别让用户自己找
-      if (msg.contains('实名认证')) {
+      // 酒类需实名:直接给去认证的入口,别让用户自己找。
+      // 单门店版不收集身份证信息(它的隐私政策里没有这一项),不给这个入口,只把原话说出来
+      if (msg.contains('实名认证') && !kSingleStore) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(msg),
           duration: const Duration(seconds: 6),
@@ -710,8 +718,10 @@ class _CheckoutPageState extends State<CheckoutPage> {
               ),
             ),
           if (_toDoorCard(theme) != null) _toDoorCard(theme)!,
-          // 小费:可选,全归骑手(自取单无配送环节不显示)
-          if (!_pickup)
+          // 小费:可选,全归骑手(自取单无配送环节不显示)。
+          // 商家自送的店也不显示:小费是给骑手的,服务端对自送店直接 422(orders.py);
+          // 单门店版没有平台骑手,整块不出(edition.dart)
+          if (_tipShown)
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -733,7 +743,7 @@ class _CheckoutPageState extends State<CheckoutPage> {
                 ),
               ),
             ),
-          if (!_pickup) const SizedBox(height: 8),
+          if (_tipShown) const SizedBox(height: 8),
 
           // 商品明细。每一行都写清"谁承担"——结算页最容易被质疑,
           // 在这里把话讲透,比事后解释便宜
@@ -783,7 +793,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   )
                 else ...[
                   SzFeeRow(
-                      label: '配送费', note: '全额归骑手', amountCents: fee),
+                      label: '配送费',
+                      note: kSingleStore || widget.merchant.selfDelivery ? null : '全额归骑手',
+                      amountCents: fee),
                   // 拆分逐行列出:夜间、恶劣天气、上门难度此前都是
                   // "悄悄加上去的",顾客只看到总数变了
                   ..._feeBreakdownRows(theme),
@@ -792,8 +804,8 @@ class _CheckoutPageState extends State<CheckoutPage> {
                   SzFeeRow(label: '小费', note: '全额归骑手', amountCents: tip),
                 if (platformOff > 0)
                   SzFeeRow(
-                      label: '平台券抵扣',
-                      note: '平台承担',
+                      label: kSingleStore ? '优惠券抵扣' : '平台券抵扣',
+                      note: kSingleStore ? null : '平台承担',
                       amountCents: platformOff,
                       negative: true),
                 Divider(color: theme.sz.line, height: 17),
@@ -857,8 +869,9 @@ class _CheckoutPageState extends State<CheckoutPage> {
           const SizedBox(height: 8),
 
           // 透明分账预览。占比按用户实付算,平台留存那行同时写商家侧口径——
-          // 只写一个数会被当成玩数字(见 docs/DEV-PROMPTS-8.md 拍板)
-          if (total != null && total > 0) ...[
+          // 只写一个数会被当成玩数字(见 docs/DEV-PROMPTS-8.md 拍板)。
+          // 单门店版不出:商家 / 骑手 / 平台三份是平台的账,一家店的 App 里没有平台(edition.dart)
+          if (!kSingleStore && total != null && total > 0) ...[
             const SzSectionTitle('这一单的钱会去哪'),
             const SizedBox(height: 8),
             SzCard(

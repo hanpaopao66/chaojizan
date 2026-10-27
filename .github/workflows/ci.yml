@@ -308,6 +308,9 @@ jobs:
       # 那条路没列在隐私政策的第三方 SDK 表里。国内手机大多没有 Google Play 服务,平时测不出来
       - name: 安卓取位置走系统 LocationManager
         run: python3 scripts/check_location_manager.py
+      # 单门店版(应用商店里的用户端)的协议、隐私政策:网页版由 legal.dart 生成,两边逐字一致
+      - name: 单门店版协议网页版和 App 内一致
+        run: python3 scripts/gen_store_legal.py --check
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.44.6"
@@ -339,6 +342,9 @@ jobs:
               echo "── $d(没有测试,跳过)"
             fi
           done
+          # 用户端单门店版:编译期常量收起入口,测试要带着它跑(见 apps/user_app/test/single_store_test.dart,不带参数时整组跳过)
+          echo "── apps/user_app 单门店版"
+          (cd apps/user_app && flutter test --dart-define=SUPERZ_EDITION=single test/single_store_test.dart) || fail=1
           exit $fail
 
   security:

@@ -65,6 +65,7 @@ analyze:
 	@python3 scripts/check_setstate_future.py && echo "== 没有把 Future 交给 setState ✓"
 	@python3 scripts/check_sticky_error.py && echo "== 出错页拉成功了能回来 ✓"
 	@python3 scripts/check_location_manager.py && echo "== 安卓取位置走系统 LocationManager,不走 Google 融合定位 ✓"
+	@python3 scripts/gen_store_legal.py --check && echo "== 单门店版协议网页版和 App 内一致 ✓"
 # 先 pub get 再 analyze。只写 --no-pub 的话,包解析一过期
 # (在别的 app 里跑过 flutter test 就会)analyze 会喷出几千条
 # "package:flutter/material.dart 不存在" —— 全是假的。
@@ -88,6 +89,10 @@ analyze:
 	    (cd $$d && flutter test) || exit 1; \
 	  fi; \
 	done
+# 用户端单门店版(应用商店包,packages/shared/lib/src/edition.dart)靠编译期常量收起入口,
+# 它的测试要带着那个常量跑;上面那一轮不带参数的 flutter test 里这组是跳过的
+	@echo "== apps/user_app 单门店版单测 =="
+	@cd apps/user_app && flutter test --dart-define=SUPERZ_EDITION=single test/single_store_test.dart
 	@echo "== 扫 Dart 字符串里的转义美元符 =="
 # 模式必须是「字面反斜杠 + 字面美元」= BRE 的 \\\$。
 # 原来写的是 '\\$$'(传给 shell 是 \\$),BRE 里 $ 在模式末尾是**行尾锚点**,
@@ -147,3 +152,9 @@ test-special:
 
 logs:
 	docker compose logs -f api
+
+# 用户端应用商店包(单门店版):打包 + 核对最终 APK 的权限和签名。产物在 build/store-apks/
+#   make store-user VERSION=0.25.0 BUILD=2068
+store-user:
+	@test -n "$(VERSION)" -a -n "$(BUILD)" || { echo "用法:make store-user VERSION=x.y.z BUILD=n"; exit 1; }
+	scripts/build_store_user.sh $(VERSION) $(BUILD)

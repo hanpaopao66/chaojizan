@@ -21,6 +21,8 @@
 #   商店包     build/store-apks/chaojizan-<端>-store-v<版本>+<build>-arm64.apk
 #       —— 清单里摘掉 REQUEST_INSTALL_PACKAGES、App 内更新检查关闭,
 #          只留在本地等人工提交各应用商店,**绝不上传 appdist**。
+#          用户端的商店包是**单门店版**(packages/shared/lib/src/edition.dart,ICP / EDI 证下来之前);
+#          拿到证之后 USER_STORE_EDITION=full 出完整版。只出用户端商店包用 scripts/build_store_user.sh
 set -e
 cd "$(dirname "$0")/.."
 
@@ -48,12 +50,20 @@ STORE_DIR=build/store-apks
 rm -rf "$SELF_DIR" "$STORE_DIR"
 mkdir -p "$SELF_DIR"
 
+# 用户端商店包的形态:single(单门店版,缺省)/ full
+USER_STORE_EDITION=${USER_STORE_EDITION:-single}
+
 # $1 = 端(user/merchant/rider),$2 = 渠道(self/store)
 build_apk() {
-  local app=$1 channel=$2 GRADLE_ARG=
+  local app=$1 channel=$2 GRADLE_ARG= EDITION=full
   # store 渠道要两边一起传:-P 给 Gradle(摘权限),--dart-define 给 Dart
   # (关更新检查,见 shared/update_checker.dart)。少传一边就是个半成品
   [ "$channel" = store ] && GRADLE_ARG=-PSUPERZ_CHANNEL=store
+  # 单门店版同理两边都传:-P 摘相机麦克风和直达链接,--dart-define 收起入口
+  if [ "$app" = user ] && [ "$channel" = store ] && [ "$USER_STORE_EDITION" = single ]; then
+    EDITION=single
+    GRADLE_ARG="$GRADLE_ARG -PSUPERZ_EDITION=single"
+  fi
   # obfuscate+split-debug-info:Dart 代码混淆并剥离符号(瘦 ~2MB/端);
   # 崩溃堆栈用 build/symbols/<渠道>-<version> 里的符号表还原(flutter symbolize)。
   # 符号表按渠道分目录:两次构建的混淆映射不一样,共用一个目录会被后一次覆盖,
@@ -68,6 +78,7 @@ build_apk() {
       --obfuscate --split-debug-info=build/symbols/$channel-$VERSION+$BUILD \
       $GRADLE_ARG \
       --dart-define=SUPERZ_CHANNEL=$channel \
+      --dart-define=SUPERZ_EDITION=$EDITION \
       --dart-define=SUPERZ_API=$API \
       --dart-define=SUPERZ_ICP=陕ICP备2025064101号-5 \
       --dart-define=TENCENT_MAP_KEY=${TENCENT_MAP_KEY:-} | grep -E "apk|Built")
@@ -118,6 +129,10 @@ if [ -n "$AAPT" ]; then
     fi
   done
   echo "  直链包带安装权限、商店包已摘除 ✓"
+  if [ -z "${SKIP_STORE:-}" ] && [ "$USER_STORE_EDITION" = single ]; then
+    echo "== 校验用户端单门店版商店包 =="
+    scripts/check_store_apk.sh "$STORE_DIR/chaojizan-user-store-v$VERSION+$BUILD-arm64.apk"
+  fi
 else
   echo "  ⚠️ 找不到 aapt2,跳过权限核对 —— 提交商店前务必手工确认"
 fi

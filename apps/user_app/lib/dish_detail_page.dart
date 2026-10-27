@@ -216,7 +216,7 @@ class _DishDetailPageState extends State<DishDetailPage> {
                 color: sz.ledger.withValues(alpha: .72),
                 borderRadius: BorderRadius.circular(999),
               ),
-              child: Text('商家上传 · 平台不修图',
+              child: Text(kSingleStore ? '门店实拍上传' : '商家上传 · 平台不修图',
                   style: TextStyle(fontSize: kFontMicro, color: sz.paper)),
             ),
           ),

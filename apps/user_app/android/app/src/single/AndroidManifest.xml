@@ -1,0 +1,44 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- 单门店版(应用商店包)的清单增量:-PSUPERZ_CHANNEL=store -PSUPERZ_EDITION=single 时
+         代替 src/store/AndroidManifest.xml 并入 release 清单(一个构建类型只能挂一份清单,
+         所以商店包那一条也抄在这里)。说明见 packages/shared/lib/src/edition.dart。
+
+         单门店版只有一家店的点餐:没有聊天(按住说话、拍照、通话)、扫一扫、小程序。
+         这些功能的权限留在清单里,检测报告就是「申请与业务无关的权限」;
+         它的隐私政策附录也写了「不申请相机、麦克风、通讯录权限」——两边要对得上。
+         插件(flutter_webrtc、record、mobile_scanner)经清单合并夹带的同名权限一并摘掉:
+         tools:node="remove" 对合并进来的同名条目都生效。打完包用 aapt2 dump permissions 核对
+         (scripts/release_apks.sh 里有这一步)。 -->
+
+    <!-- 商店包(#192):商店禁止绕过审核的应用内自更新 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove"/>
+
+    <!-- 聊天、通话、扫一扫 -->
+    <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" tools:node="remove"/>
+    <!-- flutter_webrtc 为通话里的蓝牙耳机带进来的 -->
+    <uses-permission android:name="android.permission.BLUETOOTH" tools:node="remove"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" tools:node="remove"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:node="remove"/>
+    <uses-feature android:name="android.hardware.camera" tools:node="remove"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" tools:node="remove"/>
+    <uses-feature android:name="android.hardware.microphone" tools:node="remove"/>
+
+    <application>
+        <activity android:name=".MainActivity">
+            <!-- 小程序直达链接(https://chaojizan.cc/m/<appid>)。单门店版没有小程序,
+                 不认领这个域名的链接 —— 认领了的话点官网链接会拉起一个打不开小程序的 App。
+                 写法要和 main 清单里那一条完全一样,合并器才认得是同一条 -->
+            <intent-filter android:autoVerify="true" tools:node="remove">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="chaojizan.cc" android:pathPrefix="/m/"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

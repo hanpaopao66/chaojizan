@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'api_client.dart';
+import 'edition.dart';
 import 'models.dart';
 import 'push_service.dart';
 import 'ui_bits.dart';
@@ -161,7 +162,7 @@ class _SupportPageState extends State<SupportPage> {
           .submitTicket(content, contact: contactCtrl.text.trim());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已提交,平台会尽快回复')));
+          const SnackBar(content: Text(kSingleStore ? '已提交,客服会尽快回复' : '已提交,平台会尽快回复')));
       _load();
     } catch (e) {
       if (!mounted) return;
@@ -221,7 +222,8 @@ class _SupportPageState extends State<SupportPage> {
     final scheme = Theme.of(context).colorScheme;
     return SzPageScaffold(
       appBar: AppBar(
-        title: const Text('联系平台客服'),
+        // 单门店版只有一家店,没有「平台」这一方(edition.dart)
+        title: const Text(kSingleStore ? '联系客服' : '联系平台客服'),
         actions: [
           // 注销入口按商店审核要求必须可达;放工单页菜单里,避免误触
           PopupMenuButton<String>(
@@ -260,7 +262,9 @@ class _SupportPageState extends State<SupportPage> {
                       onRefresh: _load,
                       child: const EmptyState(
                           icon: Icons.support_agent,
-                          text: '有任何问题都可以找平台\n我们承诺账目透明、有问必答'))
+                          text: kSingleStore
+                              ? '有任何问题都可以找我们\n有问必答'
+                              : '有任何问题都可以找平台\n我们承诺账目透明、有问必答'))
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView.separated(
@@ -334,7 +338,7 @@ class _TicketCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('平台回复',
+                    Text(kSingleStore ? '客服回复' : '平台回复',
                         style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,

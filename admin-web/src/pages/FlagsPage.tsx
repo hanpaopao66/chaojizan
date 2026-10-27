@@ -93,6 +93,12 @@ const METAS: FlagMeta[] = [
     effect: '截止日之前未完成培训的存量骑手照常上线但带提醒;过期或写错都硬卡',
   },
   {
+    key: 'single_store_merchant_id', title: '单门店版显示的店', kind: 'text', danger: true,
+    placeholder: '商家 id(留空 = 不指定)',
+    effect: '应用商店里的用户端是单门店版(ICP / EDI 证下来之前):打开就是这家店的点菜页。'
+      + '要填一家审核通过的外卖店;留空的话商店包首页显示「门店信息加载失败」',
+  },
+  {
     key: 'marketing', title: '营销总开关', kind: 'switch',
     effect: '新客券、邀请、生日、复购、上新一起开关',
   },

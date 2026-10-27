@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_client.dart';
+import 'edition.dart';
 
 /// 三端共用开屏:运营位(后台可配图文)优先,没配置回落品牌开屏。
 ///
@@ -57,6 +58,9 @@ class _SplashGateState extends State<SplashGate>
 
   /// 读缓存 → 有效则切运营位模式;随后后台拉新配置存给下次启动
   Future<void> _loadCachedThenRefresh() async {
+    // 单门店版只放品牌开屏:运营位是后台给整个平台配的图文(新业务、活动),
+    // 放进一家店的点餐 App 里就是在审核包里露出平台功能。请求也不发 —— 拉了也不用
+    if (kSingleStore) return;
     try {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(_kCfg);
@@ -336,7 +340,7 @@ class _BrandSplash extends StatelessWidget {
               const Spacer(flex: 4),
               const Padding(
                 padding: EdgeInsets.only(bottom: 26),
-                child: Text('群众帮群众 · 账目为证',
+                child: Text(kSingleStore ? '门店点餐 · 外卖配送 · 到店自取' : '群众帮群众 · 账目为证',
                     style: TextStyle(color: Color(0xFF5A6478), fontSize: 12)),
               ),
             ],

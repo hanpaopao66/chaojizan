@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'api_client.dart';
 import 'brand.dart' show kFontNote;
+import 'edition.dart';
 import 'platform_caps.dart';
 import 'sz_widgets.dart';
 
@@ -22,7 +23,11 @@ import 'sz_widgets.dart';
 ///   商店明确禁止绕过审核自更新,商店包的更新只能由商店自己推。
 const kChannel = String.fromEnvironment('SUPERZ_CHANNEL', defaultValue: 'self');
 
-bool get _selfChannel => kChannel != 'store';
+/// 这一包是不是商店包:渠道写了 store,或者是单门店版(edition.dart)——单门店版只出商店包,
+/// 要是漏传了渠道,应用内更新会拿官网的完整版把它覆盖掉,所以单门店版自己也算商店包
+const bool kStoreBuild = kChannel == 'store' || kSingleStore;
+
+bool get _selfChannel => !kStoreBuild;
 
 /// 应用内更新检查:启动时调用,服务端有更高 build 号就弹升级框。
 ///

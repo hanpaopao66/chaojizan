@@ -604,7 +604,8 @@ async def create_order(
         if not in_delivery_range(straight_m):
             await db.rollback()
             raise HTTPException(
-                409, f"超出配送范围({settings.delivery_max_km:g}km),换家近点的店吧")
+                # 不说「换家近点的店」:到店自取对每家店都开着,而单门店版(用户端应用商店包)只有这一家
+                409, f"超出配送范围({settings.delivery_max_km:g}km),可以改选到店自取")
         # 计价距离走**腾讯骑行路网**(#300)。配送费一分不少全归骑手,
         # 所以这个数直接就是他的收入。直线永远 ≤ 实际要骑的路
         # (几何决定的,不是估算误差),实测成都样本差 19–42% ——
@@ -2102,6 +2103,9 @@ async def my_orders(
     limit: int = 20,
     status: str | None = None,
     q: str | None = None,  # 商家搜单:订单号片段/取餐码/顾客手机尾号
+    # 顾客只看某一家店的单:用户端单门店版(packages/shared/lib/src/edition.dart)只列那家店的,
+    # 同一个账号在完整版里点过别家的单不该出现在一家店的 App 里。其他角色忽略
+    merchant_id: int | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2128,6 +2132,8 @@ async def my_orders(
     role = user.role.value
     if role == "customer":
         query = query.where(Order.customer_id == user.id)
+        if merchant_id is not None:
+            query = query.where(Order.merchant_id == merchant_id)
     elif role == "rider":
         query = query.where(Order.rider_id == user.id)
     else:
@@ -2212,6 +2218,8 @@ _ACTIVE_STAY = ("paid", "confirmed", "checked_in")
 # 同上,排在 `/{order_no}` 之前
 @router.get("/counts")
 async def my_order_counts(
+    # 只数某一家店的单(单门店版,同上面的订单列表);传了它住宿单就不算 —— 一家外卖店没有住宿单
+    merchant_id: int | None = None,
     user: User = Depends(require_role("customer")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2236,16 +2244,20 @@ async def my_order_counts(
                                      WHERE r.order_id = o.id)) AS to_review
         FROM orders o LEFT JOIN merchants m ON m.id = o.merchant_id
         WHERE o.customer_id = :uid
+          AND (CAST(:mid AS integer) IS NULL OR o.merchant_id = :mid)
         GROUP BY 1
     """).bindparams(bindparam("active", expanding=True)),
-        {"uid": user.id, "active": list(_ACTIVE_FOOD)})
-    stay = (await db.execute(text("""
-        SELECT count(*),
-               count(*) FILTER (WHERE status = 'created'),
-               count(*) FILTER (WHERE status::text IN :active)
-        FROM stay_orders WHERE customer_id = :uid
-    """).bindparams(bindparam("active", expanding=True)),
-        {"uid": user.id, "active": list(_ACTIVE_STAY)})).one()
+        {"uid": user.id, "active": list(_ACTIVE_FOOD), "mid": merchant_id})
+    if merchant_id is not None:
+        stay = (0, 0, 0)
+    else:
+        stay = (await db.execute(text("""
+            SELECT count(*),
+                   count(*) FILTER (WHERE status = 'created'),
+                   count(*) FILTER (WHERE status::text IN :active)
+            FROM stay_orders WHERE customer_id = :uid
+        """).bindparams(bindparam("active", expanding=True)),
+            {"uid": user.id, "active": list(_ACTIVE_STAY)})).one()
     # 「我的」页网格上的两张券(设计稿 3e「优惠券 3」「团购券 2」)也在这里数:
     # 券包接口只回近 30 张,拿它数「还有几张能用」,满 30 就是错的。
     # 能用 = 没用掉、没过期;团购券的过期是查询时判的(同 vouchers._purchase_out)

@@ -29,9 +29,10 @@ class _FoodSafetyRecordsPageState extends State<FoodSafetyRecordsPage> {
   /// 这一页的可信度全靠它敢显示对用户不利的结果
   (String, Color) _statusStyle(String status, ThemeData theme) =>
       switch (status) {
-        'confirmed' => ('投诉成立,平台已处理', theme.sz.earn),
+        // 单门店版没有「平台」这一方,是客服在处理(edition.dart)
+        'confirmed' => (kSingleStore ? '投诉成立,已处理' : '投诉成立,平台已处理', theme.sz.earn),
         'dismissed' => ('调查后未认定', theme.colorScheme.outline),
-        _ => ('平台受理中', theme.colorScheme.primary),
+        _ => (kSingleStore ? '客服受理中' : '平台受理中', theme.colorScheme.primary),
       };
 
   @override
@@ -110,7 +111,7 @@ class _FoodSafetyRecordsPageState extends State<FoodSafetyRecordsPage> {
                             style: theme.textTheme.bodySmall),
                         if (note.isNotEmpty) ...[
                           const SizedBox(height: 6),
-                          Text('平台回复:$note',
+                          Text(kSingleStore ? '客服回复:$note' : '平台回复:$note',
                               style: theme.textTheme.bodySmall
                                   ?.copyWith(color: color)),
                         ],

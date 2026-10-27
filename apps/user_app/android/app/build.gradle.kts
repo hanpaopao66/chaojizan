@@ -23,6 +23,19 @@ if (storeChannel) {
     logger.lifecycle("== 渠道 store:release 清单将移除 REQUEST_INSTALL_PACKAGES ==")
 }
 
+// 单门店版(packages/shared/lib/src/edition.dart):ICP / EDI 证下来之前上应用商店的那一版,
+// 只有一家店的点餐。传法:-PSUPERZ_EDITION=single(Dart 侧同时 --dart-define=SUPERZ_EDITION=single)。
+// release 清单换成 src/single/AndroidManifest.xml:除了商店包那一条,再摘掉相机、麦克风、蓝牙
+// 和小程序直达链接。**只出商店包** —— 官网直链包有应用内更新,一更新就被完整版覆盖了
+val singleEdition = ((project.findProperty("SUPERZ_EDITION") as String?)
+    ?: System.getenv("SUPERZ_EDITION")) == "single"
+if (singleEdition) {
+    if (!storeChannel) {
+        throw GradleException("单门店版只出应用商店包:要和 -PSUPERZ_CHANNEL=store 一起传")
+    }
+    logger.lifecycle("== 单门店版:release 清单再摘掉相机、麦克风、蓝牙与小程序直达链接 ==")
+}
+
 android {
     namespace = "com.chaojizan.user"
     compileSdk = 36
@@ -37,7 +50,8 @@ android {
         // 只挂在 release 上:商店包必然是 release 构建;debug 的清单另有正事
         // (放行本地明文,见 src/debug/AndroidManifest.xml),不能被顶掉
         if (storeChannel) {
-            getByName("release").manifest.srcFile("src/store/AndroidManifest.xml")
+            getByName("release").manifest.srcFile(
+                if (singleEdition) "src/single/AndroidManifest.xml" else "src/store/AndroidManifest.xml")
         }
     }
 

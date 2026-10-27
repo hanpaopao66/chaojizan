@@ -286,3 +286,18 @@ async def enabled_channels(db: AsyncSession) -> list[str]:
     if flag is None:
         return list(CHANNELS_FALLBACK)
     return [k.strip() for k in flag.value.split(",") if k.strip()]
+
+
+#: 单门店版(应用商店包)显示哪家店:值是商家 id 的十进制字符串,空 = 没配。
+#: 用户端单门店版(--dart-define=SUPERZ_EDITION=single,见 packages/shared/lib/src/edition.dart)
+#: 只认这一家:首页就是它的点菜页。放在开关里而不是编译进安装包,是为了换店不用重新打包、重新提审
+SINGLE_STORE_FLAG = "single_store_merchant_id"
+
+
+async def single_store_merchant_id(db: AsyncSession) -> int | None:
+    """单门店版显示的那家店。没配、配错(不是数字)一律 None —— 客户端拿到 None 就说「门店信息加载失败」,
+    不猜一家顶上:猜错一家就是把别人的店当成这个 App 的店给审核员看。"""
+    flag = await db.get(PlatformFlag, SINGLE_STORE_FLAG)
+    if flag is None or not flag.value.strip().isdigit():
+        return None
+    return int(flag.value.strip())
