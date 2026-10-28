@@ -190,16 +190,25 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "本次更新说明:"; printf '%s\n' "$NOTES"
 
+  # 三端各起一个 job 并行打。原来是一个 job 里一个接一个打,光这一步 832 秒,整轮发版的墙钟
+  # 时间全卡在它身上(网页版和三个桌面版并行,最慢的 macOS 也就 8 分钟)。拆开之后是单个包的时间。
+  # release job 照旧要求 android 成功 —— matrix 的 job 要三端都成功才算成功,不会发出半套
   android:
-    name: 公开构建三端 APK
+    name: 公开构建 APK(${{ matrix.app }})
     needs: meta
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      # 一端挂了就停掉另外两端:release 本来就要三端齐全,接着跑只是白烧时间
+      fail-fast: true
+      matrix:
+        app: [user, merchant, rider]
     permissions:
       contents: read
     env:
       VERSION: ${{ needs.meta.outputs.version }}
       BUILD: ${{ needs.meta.outputs.build }}
+      APP: ${{ matrix.app }}
     steps:
       - uses: actions/checkout@v4
 
@@ -216,64 +225,66 @@ jobs:
           fi
           echo "$KS_B64" | base64 -d > /tmp/release.jks
           # 三端 2026-07-28 起共用同一正式签名(docs/STORE-REVIEW.md)
-          for app in user_app merchant_app rider_app; do
-            cat > apps/$app/android/key.properties <<EOF
+          cat > apps/${APP}_app/android/key.properties <<EOF
           storeFile=/tmp/release.jks
           storePassword=$KS_PASS
           keyAlias=$KS_ALIAS
           keyPassword=${KS_KEYPASS:-$KS_PASS}
           EOF
-          done
 
+      # Gradle 依赖缓存:原来每次发版都从头下载整套 Android 依赖。按这一端的 gradle 文件算缓存键,
+      # 三端各一份,改了依赖自动换新
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
+          cache-dependency-path: |
+            apps/${{ matrix.app }}_app/android/**/*.gradle*
+            apps/${{ matrix.app }}_app/android/gradle/wrapper/gradle-wrapper.properties
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
 
-      - name: 打三端直链包(口径同 release_apks.sh)
+      - name: 打直链包(口径同 release_apks.sh)
         env:
           TENCENT_MAP_KEY: ${{ secrets.TENCENT_MAP_KEY }}
         run: |
           mkdir -p build/release-apks
-          for app in user merchant rider; do
-            echo "== ${app}_app v$VERSION+$BUILD =="
-            ( cd apps/${app}_app && flutter build apk --release \
-                --target-platform android-arm64 \
-                --build-name="$VERSION" --build-number="$BUILD" \
-                --obfuscate --split-debug-info=build/symbols/self-$VERSION+$BUILD \
-                --dart-define=SUPERZ_CHANNEL=self \
-                --dart-define=SUPERZ_API=$PUBLIC_BASE \
-                --dart-define=SUPERZ_ICP=$SUPERZ_ICP \
-                --dart-define=TENCENT_MAP_KEY=${TENCENT_MAP_KEY:-} )
-            cp apps/${app}_app/build/app/outputs/flutter-apk/app-release.apk \
-               build/release-apks/chaojizan-${app}-arm64.apk
-          done
+          echo "== ${APP}_app v$VERSION+$BUILD =="
+          ( cd apps/${APP}_app && flutter build apk --release \
+              --target-platform android-arm64 \
+              --build-name="$VERSION" --build-number="$BUILD" \
+              --obfuscate --split-debug-info=build/symbols/self-$VERSION+$BUILD \
+              --dart-define=SUPERZ_CHANNEL=self \
+              --dart-define=SUPERZ_API=$PUBLIC_BASE \
+              --dart-define=SUPERZ_ICP=$SUPERZ_ICP \
+              --dart-define=TENCENT_MAP_KEY=${TENCENT_MAP_KEY:-} )
+          cp apps/${APP}_app/build/app/outputs/flutter-apk/app-release.apk \
+             build/release-apks/chaojizan-${APP}-arm64.apk
 
       - name: 校验 versionCode 平码与安装权限(同 release_apks.sh 两道闸)
         run: |
           AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt2 | tail -1)
-          for app in user merchant rider; do
-            APK=build/release-apks/chaojizan-${app}-arm64.apk
-            CODE=$("$AAPT" dump badging "$APK" | head -1 | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
-            [ "$CODE" = "$BUILD" ] || { echo "::error::${app} versionCode=$CODE ≠ build=$BUILD"; exit 1; }
-            "$AAPT" dump permissions "$APK" | grep -q REQUEST_INSTALL_PACKAGES \
-              || { echo "::error::${app} 直链包缺 REQUEST_INSTALL_PACKAGES,应用内安装会失败"; exit 1; }
-          done
+          APK=build/release-apks/chaojizan-${APP}-arm64.apk
+          CODE=$("$AAPT" dump badging "$APK" | head -1 | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p")
+          [ "$CODE" = "$BUILD" ] || { echo "::error::${APP} versionCode=$CODE ≠ build=$BUILD"; exit 1; }
+          "$AAPT" dump permissions "$APK" | grep -q REQUEST_INSTALL_PACKAGES \
+            || { echo "::error::${APP} 直链包缺 REQUEST_INSTALL_PACKAGES,应用内安装会失败"; exit 1; }
           echo "versionCode 平码 ✓ 安装权限 ✓"
 
+      # 哈希清单按端起名:release job 用 merge-multiple 把各 job 的产物合进一个目录,
+      # 三端都叫 SHA256SUMS.android.txt 的话会互相覆盖,只核得到最后落下的那一端
       - name: 计算 SHA-256(写进本 job 日志,release job 会逐个核对)
         run: |
           cd build/release-apks
-          sha256sum *.apk | tee SHA256SUMS.android.txt
+          sha256sum *.apk | tee SHA256SUMS.android-${APP}.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-android
+          name: dist-android-${{ matrix.app }}
           path: build/release-apks/
           if-no-files-found: error
           retention-days: 7
