@@ -76,6 +76,25 @@ class Test中间件顺序:
             "而三端每个请求都要穿过这一层")
 
 
+def _receiver():
+    """假的 ASGI receive,照真服务器的样子:第一次交出请求体,之后没有新消息就挂起等。
+
+    不能每次都立刻返回一条 http.request:新版 Starlette 的 FileResponse(spec 2.4 以下)发文件时,
+    一边发一边 `await receive()` 等客户端断开,而一个每次立刻返回的 receive 从不让出事件循环,
+    发文件的那个任务永远轮不到 —— 单测就卡死在这儿,CI 单测 job 撞 10 分钟超时(2026-10-27,
+    Starlette 1.3 → 1.10)。真服务器的 receive 没消息时是挂起的,线上没有这个问题"""
+    first = True
+
+    async def receive():
+        nonlocal first
+        if first:
+            first = False
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.Event().wait()  # 挂起,直到响应发完把它取消
+
+    return receive
+
+
 def _drive(mw_cls, headers=None, inner=None):
     """把一个纯 ASGI 中间件单独跑起来,不经过整个应用。"""
     seen = {}
@@ -90,10 +109,9 @@ def _drive(mw_cls, headers=None, inner=None):
              "headers": [(k.lower().encode(), v.encode())
                          for k, v in (headers or {}).items()]}
 
-    async def receive(): return {"type": "http.request", "body": b""}
     async def send(msg): seen.setdefault("sent", []).append(msg)
 
-    asyncio.run(mw_cls(inner or default_inner)(scope, receive, send))
+    asyncio.run(mw_cls(inner or default_inner)(scope, _receiver(), send))
     return seen
 
 
@@ -259,10 +277,9 @@ class Test后台页面不进浏览器缓存:
         scope = {"type": "http", "method": "GET", "path": "/admin/flags", "query_string": b"",
                  "headers": [(b"sec-fetch-dest", dest.encode())]}
 
-        async def receive(): return {"type": "http.request", "body": b""}
         async def send(msg): seen.setdefault("sent", []).append(msg)
 
-        asyncio.run(AdminConsoleMiddleware(inner)(scope, receive, send))
+        asyncio.run(AdminConsoleMiddleware(inner)(scope, _receiver(), send))
         start = next(m for m in seen["sent"] if m["type"] == "http.response.start")
         return seen, {k.decode().lower(): v.decode() for k, v in start["headers"]}
 
