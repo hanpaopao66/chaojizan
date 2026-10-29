@@ -963,13 +963,21 @@ _LEGAL_PAGES = {
 }
 
 
+# 应用商店后台填的是根路径的短地址(https://chaojizan.cc/privacy/):商店的规范示例是
+# https://www.example.com/privacy/,运营方要求照这个样子来。应用商店里只有门店点餐版,
+# 所以这两个短地址给门店点餐版;完整版仍在 /legal/privacy、/legal/terms
+_SHORT_PATHS = {"store-privacy": "privacy", "store-terms": "terms"}
+
+
 def _legal_route(name: str, filename: str) -> None:
     async def page():
         return FileResponse(STATIC_DIR / filename, media_type="text/html; charset=utf-8")
 
-    for path in (f"/legal/{name}", f"/legal/{name}/"):
-        app.add_api_route(path, page, methods=["GET", "HEAD"], include_in_schema=False,
-                          name=f"legal_{name.replace('-', '_')}{'_slash' if path.endswith('/') else ''}")
+    bases = [f"/legal/{name}"] + ([f"/{_SHORT_PATHS[name]}"] if name in _SHORT_PATHS else [])
+    for base in bases:
+        for path in (base, base + "/"):
+            app.add_api_route(path, page, methods=["GET", "HEAD"], include_in_schema=False,
+                              name="legal" + path.replace("/", "_").replace("-", "_"))
 
 
 for _name, _file in _LEGAL_PAGES.items():

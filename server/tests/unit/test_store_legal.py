@@ -42,14 +42,14 @@ def test_不写单门店版没有的功能():
     gen = _gen()
     text = gen.dart_text("_kTermsSingle") + gen.dart_text("_kPrivacySingle")
     for word in ("骑手", "聊天", "视频", "论坛", "音乐", "小程序", "机器人", "信用分", "团购", "住宿",
-                 "实名", "透明中心", "公开账本", "扫一扫", "麦克风权限:", "5%"):
+                 "实名", "透明中心", "公开账本", "扫一扫", "麦克风权限：", "5%"):
         assert word not in text, word
     assert "不为其他商家提供入驻、展示或交易服务" in text
 
 
 def test_权限附录只有四项():
-    body = _gen().dart_text("_kPrivacySingle").split("附录:应用权限申请与使用说明", 1)[1]
-    perms = [line[2:].split(":", 1)[0] for line in body.splitlines() if line.startswith("· ")]
+    body = _gen().dart_text("_kPrivacySingle").split("附录：应用权限申请与使用说明", 1)[1]
+    perms = [line[2:].split("：", 1)[0] for line in body.splitlines() if line.startswith("· ")]
     assert perms == ["网络", "通知", "位置", "相册"], perms
     assert "不申请相机、麦克风、通讯录权限" in body
 
@@ -62,9 +62,27 @@ def test_协议页给自动检测抓得到_HEAD和带斜杠都直接200():
     from app.main import app
 
     c = TestClient(app)
-    for name in ("terms", "privacy", "store-terms", "store-privacy"):
-        for path in (f"/legal/{name}", f"/legal/{name}/"):
-            for method in ("GET", "HEAD"):
-                r = c.request(method, path, follow_redirects=False)
-                assert r.status_code == 200, (method, path, r.status_code)
-                assert r.headers["content-type"].startswith("text/html"), (method, path)
+    paths = [p for name in ("terms", "privacy", "store-terms", "store-privacy")
+             for p in (f"/legal/{name}", f"/legal/{name}/")]
+    # 商店后台填的短地址(照商店规范示例 https://www.example.com/privacy/ 的样子)
+    paths += ["/privacy", "/privacy/", "/terms", "/terms/"]
+    for path in paths:
+        for method in ("GET", "HEAD"):
+            r = c.request(method, path, follow_redirects=False)
+            assert r.status_code == 200, (method, path, r.status_code)
+            assert r.headers["content-type"].startswith("text/html"), (method, path)
+    # 短地址给的是门店点餐版
+    assert "门店点餐版" in c.get("/privacy/").text and "门店点餐版" in c.get("/terms/").text
+
+
+def test_门店点餐版正文用全角标点_网页只用一种字体():
+    """商店规范:中文显示、统一一种字体、无乱用符号。中文里夹半角逗号冒号括号算乱用符号;网址不算"""
+    import re
+
+    gen = _gen()
+    for const in ("_kTermsSingle", "_kPrivacySingle"):
+        text = re.sub(r"https?://\S+", "", gen.dart_text(const))
+        assert not re.search(r'[,;:()"]', text), (const, re.findall(r'.{6}[,;:()"].{6}', text)[:5])
+    page = (REPO / "server/static/legal-store-privacy.html").read_text(encoding="utf-8")
+    assert re.findall(r"font-family:([^;]+);", page) == [" sans-serif"]
+    assert '<meta charset="utf-8">' in page

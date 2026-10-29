@@ -64,8 +64,8 @@
 | 项目 | 填什么 |
 |---|---|
 | 应用分类 | 美食 / 餐饮外卖一类,**不选**「生活服务平台」「电商平台」 |
-| 用户协议 | https://chaojizan.cc/legal/store-terms |
-| 隐私政策 | https://chaojizan.cc/legal/store-privacy |
+| 用户协议 | https://chaojizan.cc/terms/ |
+| 隐私政策 | https://chaojizan.cc/privacy/ |
 | 应用简介 | 见下面模板,按店名改 |
 | 截图 | 按单门店版重拍:点餐页、菜品详情、结算、订单详情、我的 |
 | 资质 | 开发者主体的营业执照;这家店的食品经营许可证(主体和开发者不一致时附店方授权书) |
@@ -112,7 +112,8 @@ iOS 提审单门店版之前要另做一份去掉这两条的配置 —— 目�
 ### 0.8 提审前检查清单(单门店版)
 
 - [ ] 生产服务端已更新到含单门店版改动的版本;`curl https://chaojizan.cc/config` 里 `single_store.merchant_id` 是那家店
-- [ ] https://chaojizan.cc/legal/store-terms 、/legal/store-privacy 打得开,和 App 内一致
+- [ ] https://chaojizan.cc/terms/ 、/privacy/ 打得开,和 App 内一致(静态页、GET/HEAD 都直接 200、不跳转;
+      OPPO 2026-10 打回过一次:要写明身份鉴别/加密/访问控制/恶意代码防范/安全审计,SDK 名称照全国 SDK 管理服务平台登记写)
 - [ ] 那家店:证照审核通过、营业中、菜品有图有价、配送范围和营业时间配好;
       店铺公告、简介、菜品描述里不写「平台只抽 5%」「入驻超级赞」这类平台口吻(这些是商家自己填的字,代码收不掉)
 - [ ] 测试账号在这家店有历史订单和地址;`SMS_REVIEW_ACCOUNTS` 与审核备注逐位一致

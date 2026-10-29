@@ -21,7 +21,7 @@ OUT = {
 }
 
 _URL = re.compile(r"https?://[^\s;,、。)）]+")
-_H2 = re.compile(r"^([一二三四五六七八九十]+、|附录:)")
+_H2 = re.compile(r"^([一二三四五六七八九十]+、|附录[:：])")
 _H3 = re.compile(r"^[(（][一二三四五六七八九十]+[)）]")
 
 HEAD = """<!DOCTYPE html>
@@ -31,7 +31,8 @@ HEAD = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <style>
-  body {{ font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 商店的隐私政策规范要求「统一一种字体」:只写一种,不排一串备选 */
+  body {{ font-family: sans-serif;
          max-width: 720px; margin: 0 auto; padding: 24px 20px 48px; line-height: 1.8; color: #222; }}
   h1 {{ font-size: 1.4rem; }} h2 {{ font-size: 1.05rem; margin-top: 1.6em; }}
   h3 {{ font-size: .98rem; margin-top: 1.2em; }}
