@@ -52,3 +52,19 @@ def test_权限附录只有四项():
     perms = [line[2:].split(":", 1)[0] for line in body.splitlines() if line.startswith("· ")]
     assert perms == ["网络", "通知", "位置", "相册"], perms
     assert "不申请相机、麦克风、通讯录权限" in body
+
+
+def test_协议页给自动检测抓得到_HEAD和带斜杠都直接200():
+    """商店的隐私政策自动检测要求静态页、不再跳转(2026-10 OPPO 打回过):原来 HEAD 回 405 + JSON,
+    带斜杠的地址 307 跳转。四个协议页带不带斜杠、GET 和 HEAD 都要直接给 HTML"""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    c = TestClient(app)
+    for name in ("terms", "privacy", "store-terms", "store-privacy"):
+        for path in (f"/legal/{name}", f"/legal/{name}/"):
+            for method in ("GET", "HEAD"):
+                r = c.request(method, path, follow_redirects=False)
+                assert r.status_code == 200, (method, path, r.status_code)
+                assert r.headers["content-type"].startswith("text/html"), (method, path)

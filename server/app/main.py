@@ -946,26 +946,31 @@ async def android_asset_links():
                         headers={"Cache-Control": "public, max-age=3600"})
 
 
-@app.get("/legal/terms", include_in_schema=False)
-async def legal_terms():
-    """用户协议(网页版,应用商店审核和备案材料引用)。"""
-    return FileResponse(STATIC_DIR / "legal-terms.html")
+# 协议页(网页版):应用商店审核、备案材料、App 内「协议」都引用这几个地址。
+#
+# 商店的隐私政策自动检测要求「静态 html、不需再跳转、允许自动化分析」(2026-10 OPPO 打回过一次):
+# - 只挂 GET 的话 HEAD 回 405 + 一段 JSON,先用 HEAD 探一下的抓取器直接判失败;
+# - 带斜杠的写法(/legal/store-privacy/)原来会 307 跳到不带斜杠的,规范写了「不需再跳转」。
+# 所以每个地址都同时认 GET 和 HEAD、带不带斜杠都直接给页面
+_LEGAL_PAGES = {
+    # 用户协议、隐私政策(完整版)
+    "terms": "legal-terms.html",
+    "privacy": "legal-privacy.html",
+    # 门店点餐版(应用商店里的用户端是单门店版,商店后台填这两个链接)。
+    # 由 scripts/gen_store_legal.py 从 App 内的正文生成,两边逐字一致
+    "store-terms": "legal-store-terms.html",
+    "store-privacy": "legal-store-privacy.html",
+}
 
 
-@app.get("/legal/privacy", include_in_schema=False)
-async def legal_privacy():
-    """隐私政策(网页版)。"""
-    return FileResponse(STATIC_DIR / "legal-privacy.html")
+def _legal_route(name: str, filename: str) -> None:
+    async def page():
+        return FileResponse(STATIC_DIR / filename, media_type="text/html; charset=utf-8")
+
+    for path in (f"/legal/{name}", f"/legal/{name}/"):
+        app.add_api_route(path, page, methods=["GET", "HEAD"], include_in_schema=False,
+                          name=f"legal_{name.replace('-', '_')}{'_slash' if path.endswith('/') else ''}")
 
 
-@app.get("/legal/store-terms", include_in_schema=False)
-async def legal_store_terms():
-    """用户协议·门店点餐版(应用商店里的用户端是单门店版,商店后台填这个链接)。
-    由 scripts/gen_store_legal.py 从 App 内的正文生成,两边逐字一致。"""
-    return FileResponse(STATIC_DIR / "legal-store-terms.html")
-
-
-@app.get("/legal/store-privacy", include_in_schema=False)
-async def legal_store_privacy():
-    """隐私政策·门店点餐版(同上)。"""
-    return FileResponse(STATIC_DIR / "legal-store-privacy.html")
+for _name, _file in _LEGAL_PAGES.items():
+    _legal_route(_name, _file)
